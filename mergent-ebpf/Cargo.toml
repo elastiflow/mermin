@@ -1,0 +1,18 @@
+[package]
+name = "mergent-ebpf"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+mergent-common = { path = "../mergent-common" }
+
+aya-ebpf = { workspace = true }
+aya-log-ebpf = { workspace = true }
+network-types = "0.0.8"
+
+[build-dependencies]
+which = { workspace = true }
+
+[[bin]]
+name = "mergent"
+path = "src/main.rs"
