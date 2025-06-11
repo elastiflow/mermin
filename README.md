@@ -1,4 +1,4 @@
-<h1 align="center"><a href="https://www.elastiflow.com" target="_blank"><img src="https://private-user-images.githubusercontent.com/8366524/440065134-13ba8509-8fc5-42ca-84c1-5ecc73b0b8be.png?jwt=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NDYyMjMxMjksIm5iZiI6MTc0NjIyMjgyOSwicGF0aCI6Ii84MzY2NTI0LzQ0MDA2NTEzNC0xM2JhODUwOS04ZmM1LTQyY2EtODRjMS01ZWNjNzNiMGI4YmUucG5nP1gtQW16LUFsZ29yaXRobT1BV1M0LUhNQUMtU0hBMjU2JlgtQW16LUNyZWRlbnRpYWw9QUtJQVZDT0RZTFNBNTNQUUs0WkElMkYyMDI1MDUwMiUyRnVzLWVhc3QtMSUyRnMzJTJGYXdzNF9yZXF1ZXN0JlgtQW16LURhdGU9MjAyNTA1MDJUMjE1MzQ5WiZYLUFtei1FeHBpcmVzPTMwMCZYLUFtei1TaWduYXR1cmU9OGY1MmM0YjIwMmQ0ZmFmZDYxNjhkOTgxYzJlMzI4YzgwODBkM2ZkMGE2NDBjNDE5ZWYzOTNjODg0Y2QyYTMwMiZYLUFtei1TaWduZWRIZWFkZXJzPWhvc3QifQ.9mm7FFLkGhtajXZa2Bnyip_Qk_NYxbvrHrsyGF_v7JY" width="400" alt="Mermin Logo"></a></p>
+<h1 align="center"><a href="https://www.elastiflow.com" target="_blank"><img src="https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1746227898/mermin-horizontal_kxhvzo.png" width="400" alt="Mermin Logo"></a></p>
 
 ## About Mermin
 

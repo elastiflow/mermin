@@ -8,7 +8,6 @@ pub const IPV6_TAG: u8 = 6;
 /// Represents a standard Rust IP address, either IPv4 or IPv6.
 /// This enum provides a safe way to work with IP addresses after reading
 /// them from potentially unsafe contexts like `CReprIpAddr`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IpAddr {
     /// An IPv4 address represented as a `u32`.
     V4(u32),
@@ -25,7 +24,6 @@ pub enum IpAddr {
 /// intended to be used within the `CReprIpAddr` struct, which provides a
 /// discriminant `tag` to safely determine the active variant.
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub union IpAddrUnion {
     /// Storage for an IPv4 address (4 bytes).
     pub v4: u32,
@@ -39,7 +37,6 @@ pub union IpAddrUnion {
 /// interfacing with C code or eBPF programs. It uses a `tag` field to
 /// discriminate which address type is currently stored in the `addr` union.
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct CReprIpAddr {
     /// Discriminant tag indicating the type of IP address stored.
     /// Use `IPV4_TAG` for IPv4 or `IPV6_TAG` for IPv6.
@@ -60,8 +57,12 @@ pub struct CReprIpAddr {
 /// Fields are ordered from largest alignment (8 bytes) to smallest (1 byte)
 /// to minimize internal padding.
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct FlowRecord {
+    /// Source IPv6 address.
+    pub src_ipv6_addr: [u8; 16],
+    /// Destination IPv6 address.
+    pub dst_ipv6_addr: [u8; 16],
+
     /// Total number of packets observed for this flow since its start.
     pub packet_total_count: u64,
     /// Total number of bytes (octets) observed for this flow since its start.
@@ -76,10 +77,10 @@ pub struct FlowRecord {
     pub flow_start_seconds: u32,
     /// Timestamp (seconds since epoch) when the flow was last observed or ended.
     pub flow_end_seconds: u32,
-    /// Source IP address (IPv4 or IPv6). See `CReprIpAddr`.
-    pub src_ip: CReprIpAddr,
-    /// Destination IP address (IPv4 or IPv6). See `CReprIpAddr`.
-    pub dst_ip: CReprIpAddr,
+    /// Source IPv4 address.
+    pub src_ipv4_addr: u32,
+    /// Destination IPv4 address.
+    pub dst_ipv4_addr: u32,
 
     // Fields with 2-byte alignment
     /// Source transport layer port number.
