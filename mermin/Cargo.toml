@@ -1,12 +1,12 @@
 [package]
-name = "mergent"
+name = "mermin"
 version = "0.1.0"
 edition = "2021"
 
 license.workspace = true
 
 [dependencies]
-mergent-common = { path = "../mergent-common", features = ["user"] }
+mermin-common = { path = "../mermin-common", features = ["user"] }
 
 anyhow = { workspace = true, default-features = true }
 aya = { workspace = true }
@@ -37,8 +37,8 @@ aya-build = { workspace = true }
 # Finally note that *any* usage of `artifact = ...` in *any* Cargo.toml in the workspace breaks
 # workflows with stable cargo; stable cargo outright refuses to load manifests that use unstable
 # features.
-mergent-ebpf = { path = "../mergent-ebpf" }
+mermin-ebpf = { path = "../mermin-ebpf" }
 
 [[bin]]
-name = "mergent"
+name = "mermin"
 path = "src/main.rs"
