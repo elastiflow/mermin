@@ -1,0 +1,32 @@
+[package]
+name = "eth-ebpf-test"
+version = "0.1.0"
+edition = "2021"
+
+license.workspace = true
+
+[dependencies]
+socket2 = { version = "0.5", features = ["all"] }
+eth-ebpf-test-common = { path = "../eth-ebpf-test-common", features = ["user"] }
+network-types = { path = "../network-types-test" }
+anyhow = { workspace = true, default-features = true }
+aya = { workspace = true }
+aya-ebpf = { workspace = true }
+aya-log = { workspace = true }
+env_logger = { workspace = true }
+libc = { version = "0.2", features = ["extra_traits"] }
+log = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "net", "signal", "time"] }
+clap = { workspace = true, features = ["derive"] }
+bincode = "2.0.1"
+
+[build-dependencies]
+anyhow = { workspace = true }
+aya-build = { workspace = true }
+
+[dev-dependencies]
+bincode       = { version = "2.0.0-rc.3", default-features = false, features = ["serde", "alloc"] }
+
+[[bin]]
+name = "eth-ebpf-test"
+path = "src/main.rs"

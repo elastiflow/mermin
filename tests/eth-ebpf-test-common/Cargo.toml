@@ -1,0 +1,17 @@
+[package]
+name = "eth-ebpf-test-common"
+version = "0.1.0"
+edition = "2021"
+
+license.workspace = true
+
+[features]
+default = []
+user = ["aya"]
+
+[dependencies]
+aya = { workspace = true, optional = true }
+network-types = { path = "../network-types-test" }
+
+[lib]
+path = "src/lib.rs"

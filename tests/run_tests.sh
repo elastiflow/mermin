@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+################################################################################
+# Build the eBPF object
+################################################################################
+echo "=== Building eBPF object (nightly toolchain) ==="
+rustup run nightly \
+  cargo -Z build-std=core \
+        build -p eth-ebpf-test-ebpf \
+        --release --target bpfel-unknown-none
+
+# The veth setup and cleanup logic has been removed from this script.
+# The Rust test code will now manage the environment exclusively.
+
+################################################################################
+# Run all integration tests
+################################################################################
+echo "=== Running integration tests with eBPF logs ==="
+
+CARGO_BIN="$(command -v cargo)"
+CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+
+sudo --preserve-env=PATH \
+     env CARGO_HOME="$CARGO_HOME" \
+         RUSTUP_HOME="$RUSTUP_HOME" \
+         RUSTUP_TOOLCHAIN=nightly \
+         RUST_LOG=info,eth_ebpf_test=debug \
+         "$CARGO_BIN" test -p eth-ebpf-test \
+         -- --test-threads=1 --nocapture

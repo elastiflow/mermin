@@ -1,0 +1,22 @@
+[package]
+name = "eth-ebpf-test-ebpf"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aya-ebpf = { workspace = true }
+aya-log-ebpf = { workspace = true  }
+network-types = { path = "../network-types-test", default-features = false }
+
+[build-dependencies]
+which = { workspace = true }
+
+[[bin]]
+name = "eth-ebpf-test"
+path = "src/main.rs"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
