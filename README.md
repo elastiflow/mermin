@@ -2,9 +2,9 @@
 
 ## About Mermin
 
-Mermin is a suite of Kubernetes native network traffic observability tools. It includes mergent, an eBPF agent for generating flows, and mercoll, an Open Telemetry collector.
+Mermin is a suite of Kubernetes native network traffic observability tools. It includes mermin, an eBPF agent for generating flows, and mercoll, an Open Telemetry collector.
 
-## mergent
+## mermin
 
 ### Prerequisites
 
@@ -31,17 +31,17 @@ program.
 Cross compilation should work on both Intel and Apple Silicon Macs.
 
 ```shell
-CC=${ARCH}-linux-musl-gcc cargo build --package mergent --release \
+CC=${ARCH}-linux-musl-gcc cargo build --package mermin --release \
   --target=${ARCH}-unknown-linux-musl \
   --config=target.${ARCH}-unknown-linux-musl.linker=\"${ARCH}-linux-musl-gcc\"
 ```
 
-The cross-compiled program `target/${ARCH}-unknown-linux-musl/release/mergent` can be
+The cross-compiled program `target/${ARCH}-unknown-linux-musl/release/mermin` can be
 copied to a Linux server or VM and run there.
 
 ### License
 
-With the exception of eBPF code, mergent is distributed under the terms
+With the exception of eBPF code, mermin is distributed under the terms
 of the [Apache License] (version 2.0).
 
 #### eBPF

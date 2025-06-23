@@ -6,7 +6,7 @@ use aya_ebpf::EbpfContext;
 use aya_ebpf::macros::classifier;
 use aya_ebpf::programs::TcContext;
 use aya_log_ebpf::{debug, info};
-use mergent_common::{CReprIpAddr, FlowRecord};
+use mermin_common::{CReprIpAddr, FlowRecord};
 use network_types::eth::{EthHdr, EtherType};
 use network_types::ip::{IpProto, Ipv4Hdr, Ipv6Hdr};
 
@@ -70,11 +70,11 @@ impl Parser {
 const MAX_HEADER_PARSE_DEPTH: usize = 16;
 
 #[classifier]
-pub fn mergent(ctx: TcContext) -> i32 {
-    try_mergent(ctx).unwrap_or_else(|_| TC_ACT_PIPE)
+pub fn mermin(ctx: TcContext) -> i32 {
+    try_mermin(ctx).unwrap_or_else(|_| TC_ACT_PIPE)
 }
 
-fn try_mergent(ctx: TcContext) -> Result<i32, ()> {
+fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
     let mut parser = Parser::new();
 
     for i in 0..MAX_HEADER_PARSE_DEPTH {

@@ -9,7 +9,7 @@ use aya_ebpf::{
     programs::TcContext,
 };
 use aya_log_ebpf::info;
-use mergent_common::{CReprIpAddr, FlowRecord, IPV4_TAG, IPV6_TAG};
+use mermin_common::{CReprIpAddr, FlowRecord, IPV4_TAG, IPV6_TAG};
 use network_types::{
     eth::{EthHdr, EtherType},
     icmp::IcmpHdr,
@@ -46,14 +46,14 @@ static mut FLOWS: HashMap<FlowKey, FlowRecord> =
 static mut EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0); // 256 KB ring buffer
 
 #[classifier]
-pub fn mergent(ctx: TcContext) -> i32 {
-    match try_mergent(ctx) {
+pub fn mermin(ctx: TcContext) -> i32 {
+    match try_mermin(ctx) {
         Ok(ret) => ret,
         Err(_) => TC_ACT_PIPE,
     }
 }
 
-fn try_mergent(ctx: TcContext) -> Result<i32, ()> {
+fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
     let ethhdr: EthHdr = ctx.load(0).map_err(|_| ())?;
 
     let eth_type = ethhdr.ether_type;
@@ -124,7 +124,7 @@ fn parse_eth(ctx: TcContext) -> (Result<i32, ()>, EthHdr, IpHdr) {
     (Ok(TC_ACT_PIPE), ethhdr, IpHdr::default())
 }
 
-// fn try_mergent(ctx: TcContext) -> Result<i32, ()> {
+// fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
 //     info!(&ctx, "received a packet");
 
 //     // Parse Ethernet Header
