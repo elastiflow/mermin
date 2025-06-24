@@ -15,6 +15,8 @@ use network_types::{
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
     quic::QuicHdr,
     udp::UdpHdr,
+    ospf::{OspfV2Hdr, OspfV3Hdr},
+    geneve::GeneveHdr,
 };
 
 /// IPv6 Fragment‑header – RFC 8200 §4.5 (8 bytes)
@@ -151,55 +153,104 @@ fn try_quic_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<i32,
         debug!(&ctx, "EXIT: UDP length is too small.");
         return Ok(TC_ACT_PIPE);
     }
-    off += UdpHdr::LEN;
-    debug!(
-        &ctx,
-        "UDP processing done. Advancing to QUIC payload at offset {}.", off
-    );
 
-    // Load the raw QUIC header data directly into the wire-format struct.
-    // ctx.load will ensure there are at least QuicHdr::LEN bytes available.
-    let mut quic_hdr: QuicHdr = match ctx.load(off) {
-        Ok(hdr) => hdr,
-        Err(err) => {
-            debug!(
+    let payload_len = udp_len - UdpHdr::LEN;
+    off += UdpHdr::LEN;
+    debug!(&ctx, "UDP processing done. Advancing to payload at offset {}. Payload len: {}", off, payload_len);
+
+    match payload_len {
+        len if len == OspfV2Hdr::LEN => {
+            let mut ospfv2_hdr: OspfV2Hdr = match ctx.load(off) {
+                Ok(hdr) => hdr,
+                Err(err) => {
+                    debug!(
+                &ctx,
+                "EXIT: Failed to load OspfV2Hdr (packet too short). {}", err
+            );
+                    return Err(TC_ACT_PIPE);
+                }
+            };
+
+            debug!(&ctx, "OSPF V2 SUCCESS. ver={} router_id={} area_id={}", ospfv2_hdr.version(),ospfv2_hdr.router_id(), ospfv2_hdr.area_id());
+
+            unsafe { store_result(map, ospfv2_hdr.version() as u32, ospfv2_hdr.router_id(), ospfv2_hdr.area_id()) };
+            Ok(TC_ACT_PIPE)
+        }
+        len if len == OspfV3Hdr::LEN => {
+            let mut ospfv3_hdr: OspfV3Hdr = match ctx.load(off) {
+                Ok(hdr) => hdr,
+                Err(err) => {
+                    debug!(
+                &ctx,
+                "EXIT: Failed to load OspfV3Hdr (packet too short). {}", err
+            );
+                    return Err(TC_ACT_PIPE);
+                }
+            };
+
+            debug!(&ctx, "OSPF V3 SUCCESS. ver={} router_id={} area_id={}", ospfv3_hdr.version(),ospfv3_hdr.router_id(), ospfv3_hdr.area_id());
+
+            unsafe { store_result(map, ospfv3_hdr.version() as u32, ospfv3_hdr.router_id(), ospfv3_hdr.area_id()) };
+            Ok(TC_ACT_PIPE)
+        }
+        len if len == GeneveHdr::LEN => {
+            let mut geneve_hdr: GeneveHdr = match ctx.load(off) {
+                Ok(hdr) => hdr,
+                Err(err) => {
+                    debug!(
+                &ctx,
+                "EXIT: Failed to load GeneveHdr (packet too short). {}", err
+            );
+                    return Err(TC_ACT_PIPE);
+                }
+            };
+
+            debug!(&ctx, "GENEVE SUCCESS. ver={} vni={}", geneve_hdr.ver(),geneve_hdr.vni());
+
+            unsafe { store_result(map, geneve_hdr.ver() as u32, geneve_hdr.vni(), 0) };
+            Ok(TC_ACT_PIPE)
+        }
+        _ => {
+            // Load the raw QUIC header data directly into the wire-format struct.
+            // ctx.load will ensure there are at least QuicHdr::LEN bytes available.
+            let mut quic_hdr: QuicHdr = match ctx.load(off) {
+                Ok(hdr) => hdr,
+                Err(err) => {
+                    debug!(
                 &ctx,
                 "EXIT: Failed to load QuicHdr (packet too short). {}", err
             );
-            return Err(TC_ACT_PIPE);
-        }
-    };
+                    return Err(TC_ACT_PIPE);
+                }
+            };
 
-    debug!(
-        &ctx,
-        "Reached QUIC parser block. Attempting to parse header."
-    );
-    // Provide the contextual DCID length for short headers.
-    const SHORT_DCID_LEN: u8 = 8;
-
-    // Parse the raw data into a safe, logical view.
-    match quic_hdr.parse(SHORT_DCID_LEN) {
-        Ok(parsed_hdr) if parsed_hdr.is_long_header() => {
-            let ver = parsed_hdr.version().unwrap_or(u32::MAX);
-            let dcil = parsed_hdr.dc_id().len() as u32;
-            let scil = parsed_hdr.sc_id().unwrap_or(&[]).len() as u32;
-            debug!(
+            debug!(&ctx, "Reached QUIC parser block. Attempting to parse header.");
+            // Provide the contextual DCID length for short headers.
+            const SHORT_DCID_LEN: u8 = 8;
+            match quic_hdr.parse(SHORT_DCID_LEN) {
+                Ok(parsed_hdr) if parsed_hdr.is_long_header() => {
+                    let ver = parsed_hdr.version().unwrap_or(u32::MAX);
+                    let dcil = parsed_hdr.dc_id().len() as u32;
+                    let scil = parsed_hdr.sc_id().unwrap_or(&[]).len() as u32;
+                    debug!(
                 &ctx,
                 "QUIC SUCCESS (Long): v={} dcil={} scil={}", ver, dcil, scil
             );
-            unsafe { store_result(map, ver, dcil, scil) };
-        }
-        Ok(parsed_hdr) => {
-            let dcil = parsed_hdr.dc_id().len() as u32;
-            debug!(&ctx, "QUIC SUCCESS (Short): dcil={}", dcil);
-            unsafe { store_result(map, SHORT_HEADER_MARKER, dcil, 0) };
-        }
-        Err(err) => {
-            debug!(&ctx, "EXIT: QUIC PARSE FAILED: {}", err as u32);
-            unsafe { store_result(map, 0, 0, 0) };
-            return Ok(TC_ACT_PIPE);
+                    unsafe { store_result(map, ver, dcil, scil) };
+                }
+                Ok(parsed_hdr) => {
+                    let dcil = parsed_hdr.dc_id().len() as u32;
+                    debug!(&ctx, "QUIC SUCCESS (Short): dcil={}", dcil);
+                    unsafe { store_result(map, SHORT_HEADER_MARKER, dcil, 0) };
+                }
+                Err(err) => {
+                    debug!(&ctx, "EXIT: QUIC PARSE FAILED: {}", err as u32);
+                    unsafe { store_result(map, 0, 0, 0) };
+                    return Ok(TC_ACT_PIPE);
+                }
+            }
+
+            Ok(TC_ACT_PIPE)
         }
     }
-
-    Ok(TC_ACT_PIPE)
 }

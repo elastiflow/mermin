@@ -226,3 +226,118 @@ async fn short_header_ipv6_sets_expected_values() -> Result<()> {
     destroy_veth();
     Ok(())
 }
+
+
+
+#[tokio::test]
+async fn ospfv2_sets_expected_values() -> Result<()> {
+    setup_logging();
+    info!("--- ospfv2_sets_expected_values ---");
+    create_veth().await?;
+    let mut bpf = load_and_attach()?;
+    let _log = EbpfLogger::init(&mut bpf).context("eBPF logger")?;
+
+    // OSPF Header (24 bytes)
+    let mut payload = Vec::new();
+    payload.push(2);                    // Version 2
+    payload.push(1);                    // Hello packet type
+    payload.extend_from_slice(&[0, 44]); // Packet length (BE)
+    payload.extend_from_slice(&[192, 168, 1, 1]); // Router ID
+    payload.extend_from_slice(&[0, 0, 0, 0]);     // Area ID
+    payload.extend_from_slice(&[0, 0]);           // Checksum
+    payload.extend_from_slice(&[0, 0]);           // AuType
+    payload.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0]); // Authentication
+
+    let sender_addr: SocketAddr = format!("[{IP1_V6}]:23456").parse()?;
+    let sock = create_socket_for_sender(sender_addr)?;
+
+    info!(
+        "Sending {}-byte ospfv2 header to [{IP0_V6}]:443",
+        payload.len()
+    );
+    sock.send_to(&payload, format!("[{IP0_V6}]:443"))?;
+    sleep(Duration::from_millis(200)).await;
+
+    let (marker, router_id, area_id) = get_map_result(&mut bpf).await?;
+    info!("Map result: version={} router={} area={}", marker, router_id, area_id);
+    assert_eq!(marker, 2, "OSPF version");
+    assert_eq!(router_id.to_be_bytes(), [192, 168, 1, 1], "Router ID");
+    assert_eq!(area_id.to_be_bytes(), [0, 0, 0, 0], "Area ID");
+
+    destroy_veth();
+    Ok(())
+}
+
+#[tokio::test]
+async fn ospfv3_sets_expected_values() -> Result<()> {
+    setup_logging();
+    info!("--- ospfv3_sets_expected_values ---");
+    create_veth().await?;
+    let mut bpf = load_and_attach()?;
+    let _log = EbpfLogger::init(&mut bpf).context("eBPF logger")?;
+
+    // OSPF Header (16 bytes)
+    let mut payload = Vec::new();
+    payload.push(3);                    // Version 3
+    payload.push(1);                    // Hello packet type
+    payload.extend_from_slice(&[0, 24]); // Packet length (BE)
+    payload.extend_from_slice(&[1, 1, 1, 1]); // Router ID
+    payload.extend_from_slice(&[0, 0, 0, 1]);     // Area ID
+    payload.extend_from_slice(&[0xFB, 0x86]);           // Checksum
+    payload.extend_from_slice(&[0]);           // Instance ID
+    payload.extend_from_slice(&[0]); // Reserved
+
+    let sender_addr: SocketAddr = format!("[{IP1_V6}]:23456").parse()?;
+    let sock = create_socket_for_sender(sender_addr)?;
+
+    info!(
+        "Sending {}-byte ospfV3 header to [{IP0_V6}]:443",
+        payload.len()
+    );
+    sock.send_to(&payload, format!("[{IP0_V6}]:443"))?;
+    sleep(Duration::from_millis(200)).await;
+
+    let (marker, router_id, area_id) = get_map_result(&mut bpf).await?;
+    info!("Map result: version={} router={} area={}", marker, router_id, area_id);
+    assert_eq!(marker, 3, "OSPF version");
+    assert_eq!(router_id.to_be_bytes(), [1, 1, 1, 1], "Router ID");
+    assert_eq!(area_id.to_be_bytes(), [0, 0, 0, 1], "Area ID");
+
+    destroy_veth();
+    Ok(())
+}
+
+#[tokio::test]
+async fn geneve_sets_expected_values() -> Result<()> {
+    setup_logging();
+    info!("--- geneve_sets_expected_values ---");
+    create_veth().await?;
+    let mut bpf = load_and_attach()?;
+    let _log = EbpfLogger::init(&mut bpf).context("eBPF logger")?;
+
+    // Geneve Header (8 bytes)
+    let mut payload = Vec::new();
+    payload.push(0x40);                    // Version (2 bits) + Option Length (6 bits)
+    payload.push(0);                    // Control bits + Reserved
+    payload.extend_from_slice(&[0x65, 0x58]); // Protocol Type (0x6558 for IPv4)
+    payload.extend_from_slice(&[0x12, 0x34, 0x56]); // VNI (24 bits)
+    payload.push(0); // Reserved (8 bits)
+
+    let sender_addr: SocketAddr = format!("[{IP1_V6}]:23456").parse()?;
+    let sock = create_socket_for_sender(sender_addr)?;
+
+    info!(
+        "Sending {}-byte Geneve header to [{IP0_V6}]:443",
+        payload.len()
+    );
+    sock.send_to(&payload, format!("[{IP0_V6}]:443"))?;
+    sleep(Duration::from_millis(200)).await;
+
+    let (version, vni, _) = get_map_result(&mut bpf).await?;
+    info!("Map result: version={} vni={}", version, vni);
+    assert_eq!(version, 1, "Geneve version");
+    assert_eq!(vni.to_be_bytes(), [0, 0x12, 0x34, 0x56], "VNI");
+
+    destroy_veth();
+    Ok(())
+}
