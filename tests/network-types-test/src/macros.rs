@@ -15,19 +15,18 @@
 /// * `$max_len`: The maximum number of bytes to read, cannot exceed 32.
 ///
 /// # Returns
-/// `Ok(())` on success. On failure to load a byte from the context,
-/// it returns an `Err` with a TC action code, likely `TC_ACT_PIPE`.
+/// `Ok(())` on success. On failure to load a byte from the context returns an `Err`.
 #[macro_export]
 macro_rules! read_var_buf_32 {
     ($tc_ctx:expr, $off:ident, $buf:expr, $len:expr, $max_len:expr) => {
-        (|| -> Result<(), i32> {
+        (|| -> Result<(), ()> {
             // This will cause a compile-time error if $max_len is greater than 32.
             const _: () = assert!($max_len <= 32, "$max_len cannot be greater than 32");
             for i in 0..core::cmp::min(16, $max_len) {
                 if i as u8 >= $len {
                     return Ok(());
                 }
-                let byte: u8 = $tc_ctx.load($off).map_err(|_| TC_ACT_PIPE)?;
+                let byte: u8 = $tc_ctx.load($off).map_err(|_| ())?;
                 $buf[i] = byte;
                 $off += 1;
             }
@@ -36,7 +35,7 @@ macro_rules! read_var_buf_32 {
                     if i as u8 >= $len {
                         return Ok(());
                     }
-                    let byte: u8 = $tc_ctx.load($off).map_err(|_| TC_ACT_PIPE)?;
+                    let byte: u8 = $tc_ctx.load($off).map_err(|_| ())?;
                     $buf[i] = byte;
                     $off += 1;
                 }

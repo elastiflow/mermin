@@ -16,69 +16,14 @@ const PN_LENGTH_BITS_MASK: u8 = 0x03;
 pub const QUIC_MAX_CID_LEN: usize = 20;
 pub const QUIC_SHORT_DEFAULT_DC_ID_LEN: u8 = 0x08;
 
-/// QUIC Long Header Packet Types, as per RFC 9000 Section 17.2.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-#[repr(u8)]
-pub enum QuicPacketType {
-    /// Initial packet.
-    Initial = 0x00,
-    /// 0-RTT packet.
-    ZeroRTT = 0x01,
-    /// Handshake packet.
-    Handshake = 0x02,
-    /// Retry packet.
-    Retry = 0x03,
-}
-
-/// QUIC Transport Error Codes, as per RFC 9000 Section 20.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-#[repr(u16)]
-#[allow(non_camel_case_types)]
-pub enum QuicTransportError {
-    /// No error. This is used when the connection is closed gracefully.
-    NoError = 0x0,
-    /// An internal error occurred in the endpoint.
-    InternalError = 0x1,
-    /// The server refused the connection.
-    ConnectionRefused = 0x2,
-    /// A flow control limit was violated.
-    FlowControlError = 0x3,
-    /// The number of streams exceeded the negotiated limit.
-    StreamLimitError = 0x4,
-    /// An operation was attempted on a stream in an invalid state.
-    StreamStateError = 0x5,
-    /// The final size of a stream is incorrect.
-    FinalSizeError = 0x6,
-    /// A frame was malformed.
-    FrameFormatError = 0x7,
-    /// A transport parameter was invalid.
-    TransportParameterError = 0x8,
-    /// The number of connection IDs exceeded the negotiated limit.
-    ConnectionIdLimitError = 0x9,
-    /// A general protocol violation was detected.
-    ProtocolViolation = 0xA,
-    /// A token (e.g., for retry or new token) was invalid.
-    InvalidToken = 0xB,
-    /// An application-specific error occurred.
-    ApplicationError = 0xC,
-    /// The crypto buffer was exceeded.
-    CryptoBufferExceeded = 0xD,
-    /// An error occurred during a key update.
-    KeyUpdateError = 0xE,
-    /// The AEAD confidentiality or integrity limit was reached.
-    AeadLimitReached = 0xF,
-    /// The endpoint has no viable network path.
-    NoViablePath = 0x10,
-}
-
 #[macro_export]
 macro_rules! parse_quic_hdr {
     ($ctx:expr, $off:ident, $short_dc_id_len:expr) => {
-        (|| -> Result<QuicHdr, ()> {
-            use network_types::read_var_buf_32;
-            use network_types::quic;
-            let quic_fixed_hdr: quic::QuicFixedHdr = $ctx.load($off).map_err(|_| ())?;
-            $off += quic::QuicFixedHdr::LEN;
+        (|| -> Result<$crate::quic::QuicHdr, ()> {
+            use $crate::read_var_buf_32;
+            use $crate::quic;
+            let quic_fixed_hdr: quic::QuicFirstByteHdr = $ctx.load($off).map_err(|_| ())?;
+            $off += quic::QuicFirstByteHdr::LEN;
             match quic_fixed_hdr.is_long_header() {
                 true => {
                     let quic_fixed_long_hdr: quic::QuicFixedLongHdr = $ctx.load($off).map_err(|_| ())?;
@@ -140,16 +85,17 @@ macro_rules! parse_quic_hdr {
 
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[derive(Debug, PartialEq)]
 pub enum QuicHdr {
     Long(QuicLongHdr),
     Short(QuicShortHdr),
 }
 
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[repr(C, packed)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 pub struct QuicLongHdr {
-    pub first_byte: QuicFixedHdr,
+    pub first_byte: QuicFirstByteHdr,
     pub fixed_hdr: QuicFixedLongHdr,
     pub dc_id: [u8; QUIC_MAX_CID_LEN],
     pub sc_id_len: u8,
@@ -158,16 +104,15 @@ pub struct QuicLongHdr {
 }
 
 impl QuicLongHdr {
-    /// Length of the `QuicHdr` struct, relevant for Long Headers.
     pub const LEN: usize = mem::size_of::<QuicLongHdr>();
 
     pub fn new(
-        fixed: QuicFixedHdr,
-        fixed_long: QuicFixedLongHdr,
+        first_byte: QuicFirstByteHdr,
+        fixed_hdr: QuicFixedLongHdr,
     ) -> Self {
         Self {
-            first_byte: fixed,
-            fixed_hdr: fixed_long,
+            first_byte,
+            fixed_hdr,
             dc_id: [0; QUIC_MAX_CID_LEN],
             sc_id_len: 0,
             sc_id: [0; QUIC_MAX_CID_LEN],
@@ -176,23 +121,22 @@ impl QuicLongHdr {
     }
 }
 
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[repr(C,packed)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 pub struct QuicShortHdr {
     pub dc_id_len: u8,
-    pub first_byte: QuicFixedHdr,
+    pub first_byte: QuicFirstByteHdr,
     pub dc_id: [u8; QUIC_MAX_CID_LEN],
     pub pn: [u8; 4],
 }
 
 impl QuicShortHdr {
-    /// Length of the `QuicHdr` struct, relevant for Long Headers.
     pub const LEN: usize = mem::size_of::<QuicShortHdr>();
 
     pub fn new(
         dc_id_len: u8,
-        first_byte: QuicFixedHdr,
+        first_byte: QuicFirstByteHdr,
     ) -> Self {
         Self {
             dc_id_len,
@@ -204,71 +148,37 @@ impl QuicShortHdr {
 }
 
 #[repr(C, packed)]
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 pub struct QuicFixedLongHdr {
-    /// QUIC version (e.g., 0x00000001 for QUIC v1). Network byte order. Only in Long Headers.
     pub version: [u8; 4],
-    /// Destination Connection ID Length. Only in Long Headers (explicitly). For Short Headers,
-    /// this field might be used by application logic to store the known DCID length.
     pub dc_id_len: u8,
 }
 
 impl QuicFixedLongHdr {
-    /// Length of the `QuicHdr` struct, relevant for Long Headers.
     pub const LEN: usize = mem::size_of::<QuicFixedLongHdr>();
 
-    /// Creates a `QuicHdr` for a Long Header, configured as an Initial packet.
-    ///
-    /// The first byte is set for Long Header (form bit = 1), Fixed Bit = 1,
-    /// Long Packet Type = Initial (0b00), and Reserved Bits = 0.
-    ///
-    /// # Parameters
-    /// - `version` - QUIC version (e.g., `0x00000001` for v1), host byte order.
-    /// - `dc_id_len` - Destination Connection ID length.
-    /// - `sc_id_len` - Source Connection ID length.
-    /// - `pn_len_bits` - Encoded Packet Number Length (actual length - 1, value 0-3).
-    ///
-    /// # Returns
-    /// A new `QuicHdr` instance.
     pub fn new(version: u32, dc_id_len: u8) -> Self {
         Self {
             version: version.to_be_bytes(),
             dc_id_len,
         }
     }
-    /// Returns the QUIC version from the header (host byte order). Long Headers only.
-    ///
-    /// # Returns
-    /// The QUIC version. Panics or returns garbage if called on a Short Header's `QuicHdr`.
     #[inline]
     pub fn version(&self) -> u32 {
         u32::from_be_bytes(self.version)
     }
 
-    /// Sets the QUIC version in the header. `version` should be host byte order. Long Headers only.
-    ///
-    /// # Parameters
-    /// - `version` - The QUIC version (host byte order).
     #[inline]
     pub fn set_version(&mut self, version: u32) {
         self.version = version.to_be_bytes();
     }
 
-    /// Returns Destination Connection ID Length. For Long Headers, this is from the header.
-    /// For Short Headers, this field in the struct is not from the wire's first byte.
-    ///
-    /// # Returns
-    /// The DCID length.
     #[inline]
     pub fn dc_id_len(&self) -> u8 {
         self.dc_id_len
     }
 
-    /// Sets Destination Connection ID Length.
-    ///
-    /// # Parameters
-    /// - `len` - The new DCID length.
     #[inline]
     pub fn set_dc_id_len(&mut self, len: u8) {
         self.dc_id_len = len;
@@ -276,54 +186,26 @@ impl QuicFixedLongHdr {
 }
 
 #[repr(C, packed)]
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-pub struct QuicFixedHdr {
-    /// The first byte of the QUIC header. Its interpretation depends on the Header Form bit.
-    /// - Bit 7: Header Form (1 for Long, 0 for Short)
-    /// - Bit 6: Fixed Bit (usually 1)
-    /// - Bits 5-0: Type/Flag specific bits.
+pub struct QuicFirstByteHdr {
     pub first_byte: u8,
 }
 
-impl QuicFixedHdr {
-    /// Length of the `QuicHdr` struct, relevant for Long Headers.
-    pub const LEN: usize = mem::size_of::<QuicFixedHdr>();
+impl QuicFirstByteHdr {
+    pub const LEN: usize = mem::size_of::<QuicFirstByteHdr>();
 
-    /// Creates a `QuicHdr` for a Long Header, configured as an Initial packet.
-    ///
-    /// The first byte is set for Long Header (form bit = 1), Fixed Bit = 1,
-    /// Long Packet Type = Initial (0b00), and Reserved Bits = 0.
-    ///
-    /// # Parameters
-    /// - `version` - QUIC version (e.g., `0x00000001` for v1), host byte order.
-    /// - `dc_id_len` - Destination Connection ID length.
-    /// - `sc_id_len` - Source Connection ID length.
-    /// - `pn_len_bits` - Encoded Packet Number Length (actual length - 1, value 0-3).
-    ///
-    /// # Returns
-    /// A new `QuicHdr` instance.
-    pub fn new(pn_len_bits: u8) -> Self {
+    pub fn new(packet_type: u8, reserved_bits: u8, pn_len_bits: u8) -> Self {
         let first_byte = HEADER_FORM_BIT
             | FIXED_BIT_MASK
-            | (0b00 << LONG_PACKET_TYPE_SHIFT)
-            | (0b00 << RESERVED_BITS_LONG_SHIFT)
+            | ((packet_type & 0b11) << LONG_PACKET_TYPE_SHIFT)
+            | ((reserved_bits & 0b11) << RESERVED_BITS_LONG_SHIFT)
             | (pn_len_bits & PN_LENGTH_BITS_MASK);
-        Self { first_byte }
+        Self {
+            first_byte,
+        }
     }
 
-    /// Creates the first byte for a QUIC Short Header.
-    ///
-    /// Sets Header Form to 0, Fixed Bit to 1, and specified Short Header flags.
-    /// Reserved bits (4-3) are set to 0.
-    ///
-    /// # Parameters
-    /// - `spin_bit` - The value of the Spin bit (0 or 1).
-    /// - `key_phase` - The value of the Key Phase bit (0 or 1).
-    /// - `pn_len_bits` - The encoded Packet Number Length (actual length - 1, value 0-3).
-    ///
-    /// # Returns
-    /// The constructed `first_byte` for a Short Header.
     pub fn new_short_header_first_byte(spin_bit: bool, key_phase: bool, pn_len_bits: u8) -> u8 {
         let spin_val = if spin_bit { 1 } else { 0 };
         let key_phase_val = if key_phase { 1 } else { 0 };
@@ -333,37 +215,21 @@ impl QuicFixedHdr {
             | (pn_len_bits & PN_LENGTH_BITS_MASK)
     }
 
-    /// Returns the raw first byte of the header.
-    ///
-    /// # Returns
-    /// The `first_byte` field.
     #[inline]
     pub fn first_byte(&self) -> u8 {
         self.first_byte
     }
 
-    /// Sets the raw first byte of the header.
-    ///
-    /// # Parameters
-    /// - `first_byte` - The new value for the first byte.
     #[inline]
     pub fn set_first_byte(&mut self, first_byte: u8) {
         self.first_byte = first_byte;
     }
 
-    /// Checks if the Header Form bit (bit 7 of `first_byte`) indicates a Long Header.
-    ///
-    /// # Returns
-    /// `true` if it's a Long Header (bit 7 is 1), `false` otherwise (Short Header).
     #[inline]
     pub fn is_long_header(&self) -> bool {
         (self.first_byte & HEADER_FORM_BIT) == HEADER_FORM_BIT
     }
 
-    /// Sets the Header Form bit (bit 7 of `first_byte`).
-    ///
-    /// # Parameters
-    /// - `is_long` - If `true`, sets for Long Header (bit 7 = 1); if `false`, sets for Short Header (bit 7 = 0).
     #[inline]
     pub fn set_header_form(&mut self, is_long: bool) {
         if is_long {
@@ -373,102 +239,53 @@ impl QuicFixedHdr {
         }
     }
 
-    /// Gets the Fixed Bit (bit 6 of `first_byte`).
-    ///
-    /// In QUIC v1 (RFC 9000):
-    /// - For Long Headers: `1` for Initial, 0-RTT, Handshake, Retry. `0` for Version Negotiation.
-    /// - For Short Headers: Must be `1`.
-    ///
-    /// # Returns
-    /// The value of the Fixed Bit (0 or 1).
     #[inline]
     pub fn fixed_bit(&self) -> u8 {
         (self.first_byte & FIXED_BIT_MASK) >> 6
     }
 
-    /// Sets the Fixed Bit (bit 6 of `first_byte`).
-    ///
-    /// # Parameters
-    /// - `val` - The new value for the Fixed Bit (0 or 1). Input is masked to 1 bit.
     #[inline]
     pub fn set_fixed_bit(&mut self, val: u8) {
         self.first_byte = (self.first_byte & !FIXED_BIT_MASK) | ((val & 0x01) << 6);
     }
 
-    /// Gets the Long Packet Type (bits 5-4 of `first_byte`). Assumes Long Header.
-    /// Common QUIC v1 types (RFC 9000): 00 (Initial), 01 (0-RTT), 10 (Handshake), 11 (Retry).
-    ///
-    /// # Returns
-    /// The Long Packet Type value (0-3). Only valid if `is_long_header()` is `true` and `fixed_bit()` is `1`.
     #[inline]
     pub fn long_packet_type(&self) -> u8 {
         (self.first_byte & LONG_PACKET_TYPE_MASK) >> LONG_PACKET_TYPE_SHIFT
     }
 
-    /// Sets the Long Packet Type (bits 5-4 of `first_byte`). Assumes Long Header.
-    ///
-    /// # Parameters
-    /// - `lptype` - The Long Packet Type (0-3). Input is masked to 2 bits.
     #[inline]
     pub fn set_long_packet_type(&mut self, lptype: u8) {
         self.first_byte = (self.first_byte & !LONG_PACKET_TYPE_MASK)
             | ((lptype << LONG_PACKET_TYPE_SHIFT) & LONG_PACKET_TYPE_MASK);
     }
 
-    /// Gets the Reserved Bits (bits 3-2 of `first_byte`) for common Long Headers.
-    /// Must be 0 for Initial, 0-RTT, Handshake packets in QUIC v1.
-    ///
-    /// # Returns
-    /// The Reserved Bits value (0-3). Only valid for certain Long Header types.
     #[inline]
     pub fn reserved_bits_long(&self) -> u8 {
         (self.first_byte & RESERVED_BITS_LONG_MASK) >> RESERVED_BITS_LONG_SHIFT
     }
 
-    /// Sets the Reserved Bits (bits 3-2 of `first_byte`) for common Long Headers.
-    /// `val` MUST be 0 for Initial, 0-RTT, Handshake packets in QUIC v1.
-    ///
-    /// # Parameters
-    /// - `val` - The Reserved Bits value (0-3). Input is masked to 2 bits.
     #[inline]
     pub fn set_reserved_bits_long(&mut self, val: u8) {
         self.first_byte = (self.first_byte & !RESERVED_BITS_LONG_MASK)
             | ((val << RESERVED_BITS_LONG_SHIFT) & RESERVED_BITS_LONG_MASK);
     }
 
-    /// Gets the Packet Number Length bits (bits 1-0 of `first_byte`) for common Long Headers.
-    /// Encoded length (actual length - 1).
-    ///
-    /// # Returns
-    /// The encoded Packet Number Length value (0-3). Valid for certain Long Header types.
     #[inline]
     pub fn pn_length_bits_long(&self) -> u8 {
         self.first_byte & PN_LENGTH_BITS_MASK
     }
 
-    /// Sets the Packet Number Length bits (bits 1-0 of `first_byte`) for common Long Headers.
-    ///
-    /// # Parameters
-    /// - `val` - Encoded 2-bit value (0-3, for actual lengths 1-4 bytes). Masked to 2 bits.
     #[inline]
     pub fn set_pn_length_bits_long(&mut self, val: u8) {
         self.first_byte = (self.first_byte & !PN_LENGTH_BITS_MASK) | (val & PN_LENGTH_BITS_MASK);
     }
 
-    /// Gets actual Packet Number Length (bytes) for common Long Headers. (`pn_length_bits_long() + 1`).
-    ///
-    /// # Returns
-    /// Actual Packet Number Length (1 to 4 bytes).
     #[inline]
     pub fn packet_number_length_long(&self) -> usize {
         (self.pn_length_bits_long() + 1) as usize
     }
 
-    /// Sets Packet Number Length for common Long Headers, using actual length (1-4 bytes).
-    /// Clamped if `len` is out of range.
-    ///
-    /// # Parameters
-    /// - `len` - Actual length in bytes (1-4).
     #[inline]
     pub fn set_packet_number_length_long(&mut self, len: usize) {
         let encoded_val = match len {
@@ -482,19 +299,11 @@ impl QuicFixedHdr {
         self.set_pn_length_bits_long(encoded_val);
     }
 
-    /// Gets the Spin Bit (bit 5 of `first_byte`). Assumes Short Header.
-    ///
-    /// # Returns
-    /// `true` if Spin Bit is 1, `false` if 0. Only valid if `!is_long_header()`.
     #[inline]
     pub fn short_spin_bit(&self) -> bool {
         (self.first_byte & SHORT_SPIN_BIT_MASK) != 0
     }
 
-    /// Sets the Spin Bit (bit 5 of `first_byte`). Assumes Short Header.
-    ///
-    /// # Parameters
-    /// - `spin` - Value for the Spin Bit (`true` for 1, `false` for 0).
     #[inline]
     pub fn set_short_spin_bit(&mut self, spin: bool) {
         if spin {
@@ -504,39 +313,21 @@ impl QuicFixedHdr {
         }
     }
 
-    /// Gets the Reserved Bits (bits 4-3 of `first_byte`). Assumes Short Header.
-    /// These bits MUST be 0 in QUIC v1.
-    ///
-    /// # Returns
-    /// The value of the Reserved Bits (0-3). Only valid if `!is_long_header()`.
     #[inline]
     pub fn short_reserved_bits(&self) -> u8 {
         (self.first_byte & SHORT_RESERVED_BITS_MASK) >> SHORT_RESERVED_BITS_SHIFT
     }
 
-    /// Sets the Reserved Bits (bits 4-3 of `first_byte`). Assumes Short Header.
-    /// These bits MUST be set to 0 (0b00) in QUIC v1. This method enforces this.
-    ///
-    /// # Parameters
-    /// - `reserved` - The value for the Reserved Bits. If not 0, they will be set to 0.
     #[inline]
     pub fn set_short_reserved_bits(&mut self, _reserved: u8) {
         self.first_byte &= !SHORT_RESERVED_BITS_MASK;
     }
 
-    /// Gets the Key Phase Bit (bit 2 of `first_byte`). Assumes Short Header.
-    ///
-    /// # Returns
-    /// `true` if Key Phase Bit is 1, `false` if 0. Only valid if `!is_long_header()`.
     #[inline]
     pub fn short_key_phase(&self) -> bool {
         (self.first_byte & SHORT_KEY_PHASE_BIT_MASK) != 0
     }
 
-    /// Sets the Key Phase Bit (bit 2 of `first_byte`). Assumes Short Header.
-    ///
-    /// # Parameters
-    /// - `key_phase` - Value for the Key Phase Bit (`true` for 1, `false` for 0).
     #[inline]
     pub fn set_short_key_phase(&mut self, key_phase: bool) {
         if key_phase {
@@ -546,39 +337,21 @@ impl QuicFixedHdr {
         }
     }
 
-    /// Gets the Packet Number Length bits (bits 1-0 of `first_byte`). Assumes Short Header.
-    /// Encoded length (actual length - 1).
-    ///
-    /// # Returns
-    /// The encoded Packet Number Length value (0-3). Only valid if `!is_long_header()`.
     #[inline]
     pub fn short_pn_length_bits(&self) -> u8 {
         self.first_byte & PN_LENGTH_BITS_MASK
     }
 
-    /// Sets the Packet Number Length bits (bits 1-0 of `first_byte`). Assumes Short Header.
-    ///
-    /// # Parameters
-    /// - `val` - Encoded 2-bit value (0-3, for actual lengths 1-4 bytes). Masked to 2 bits.
     #[inline]
     pub fn set_short_pn_length_bits(&mut self, val: u8) {
         self.first_byte = (self.first_byte & !PN_LENGTH_BITS_MASK) | (val & PN_LENGTH_BITS_MASK);
     }
 
-    /// Gets actual Packet Number Length (bytes) for Short Headers. (`short_pn_length_bits() + 1`).
-    ///
-    /// # Returns
-    /// Actual Packet Number Length (1 to 4 bytes).
     #[inline]
     pub fn short_packet_number_length(&self) -> usize {
         (self.short_pn_length_bits() + 1) as usize
     }
 
-    /// Sets Packet Number Length for Short Headers, using actual length (1-4 bytes).
-    /// Clamped if `len` is out of range.
-    ///
-    /// # Parameters
-    /// - `len` - Actual length in bytes (1-4).
     #[inline]
     pub fn set_short_packet_number_length(&mut self, len: usize) {
         let encoded_val = match len {
@@ -590,5 +363,281 @@ impl QuicFixedHdr {
             _ => 0b11,
         };
         self.set_short_pn_length_bits(encoded_val);
+    }
+}
+
+impl TryFrom<u8> for QuicFirstByteHdr {
+    type Error = u8;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        if (value & FIXED_BIT_MASK) == 0 {
+            return Err(value);
+        }
+
+        if (value & HEADER_FORM_BIT) != 0 {
+            // Long Header
+            if (value & RESERVED_BITS_LONG_MASK) != 0 {
+                return Err(value);
+            }
+        } else {
+            // Short Header
+            if (value & SHORT_RESERVED_BITS_MASK) != 0 {
+                return Err(value);
+            }
+        }
+
+        Ok(QuicFirstByteHdr { first_byte: value })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::mem;
+
+    #[test]
+    fn test_first_byte_new() {
+        let packet_type = 0b01;
+        let reserved_bits = 0b10;
+        let pn_len_bits = 0b11;
+        let hdr = QuicFirstByteHdr::new(packet_type, reserved_bits, pn_len_bits);
+        assert_eq!(
+            hdr.first_byte,
+            HEADER_FORM_BIT
+                | FIXED_BIT_MASK
+                | (packet_type << LONG_PACKET_TYPE_SHIFT)
+                | (reserved_bits << RESERVED_BITS_LONG_SHIFT)
+                | pn_len_bits
+        );
+        assert!(hdr.is_long_header());
+        assert_eq!(hdr.long_packet_type(), packet_type);
+        assert_eq!(hdr.reserved_bits_long(), reserved_bits);
+        assert_eq!(hdr.pn_length_bits_long(), pn_len_bits);
+        assert_eq!(hdr.packet_number_length_long(), (pn_len_bits + 1) as usize);
+    }
+
+    #[test]
+    fn test_first_byte_new_short_header() {
+        let first_byte = QuicFirstByteHdr::new_short_header_first_byte(true, true, 0b11);
+        let hdr = QuicFirstByteHdr { first_byte };
+
+        assert!(!hdr.is_long_header());
+        assert!(hdr.short_spin_bit());
+        assert!(hdr.short_key_phase());
+        assert_eq!(hdr.short_pn_length_bits(), 0b11);
+        assert_eq!(hdr.short_packet_number_length(), 4);
+    }
+
+    #[test]
+    fn test_first_byte_accessors() {
+        let mut hdr = QuicFirstByteHdr::new(0, 0, 0);
+        assert!(hdr.is_long_header());
+
+        hdr.set_header_form(false);
+        assert!(!hdr.is_long_header());
+
+        hdr.set_header_form(true);
+        assert!(hdr.is_long_header());
+
+        hdr.set_first_byte(42);
+        assert_eq!(hdr.first_byte(), 42);
+    }
+
+    #[test]
+    fn test_first_byte_long_header_accessors() {
+        let mut hdr = QuicFirstByteHdr::new(0, 0, 0);
+        assert!(hdr.is_long_header());
+
+        hdr.set_long_packet_type(0b11);
+        assert_eq!(hdr.long_packet_type(), 0b11);
+
+        hdr.set_reserved_bits_long(0b01);
+        assert_eq!(hdr.reserved_bits_long(), 0b01);
+
+        hdr.set_pn_length_bits_long(0b01);
+        assert_eq!(hdr.pn_length_bits_long(), 0b01);
+        assert_eq!(hdr.packet_number_length_long(), 2);
+    }
+
+    #[test]
+    fn test_first_byte_short_header_accessors() {
+        let mut hdr = QuicFirstByteHdr {
+            first_byte: FIXED_BIT_MASK,
+        };
+        assert!(!hdr.is_long_header());
+
+        hdr.set_short_spin_bit(true);
+        assert!(hdr.short_spin_bit());
+        hdr.set_short_spin_bit(false);
+        assert!(!hdr.short_spin_bit());
+
+        hdr.set_short_key_phase(true);
+        assert!(hdr.short_key_phase());
+        hdr.set_short_key_phase(false);
+        assert!(!hdr.short_key_phase());
+
+        hdr.set_short_pn_length_bits(0b01);
+        assert_eq!(hdr.short_pn_length_bits(), 0b01);
+        assert_eq!(hdr.short_packet_number_length(), 2);
+    }
+
+    #[test]
+    fn test_fixed_long_hdr_accessors() {
+        let mut hdr = QuicFixedLongHdr::new(0xaaaaaaaa, 8);
+        assert_eq!(hdr.version(), 0xaaaaaaaa);
+        assert_eq!(hdr.dc_id_len(), 8);
+
+        hdr.set_version(0xbbbbbbbb);
+        assert_eq!(hdr.version(), 0xbbbbbbbb);
+
+        hdr.set_dc_id_len(4);
+        assert_eq!(hdr.dc_id_len(), 4);
+    }
+
+    #[test]
+    fn test_long_hdr_new() {
+        let first_byte = QuicFirstByteHdr::new(0, 0, 0);
+        let fixed_hdr = QuicFixedLongHdr::new(1, 8);
+        let long_hdr = QuicLongHdr::new(first_byte, fixed_hdr);
+
+        assert_eq!(long_hdr.first_byte, first_byte);
+        assert_eq!(long_hdr.fixed_hdr, fixed_hdr);
+        assert_eq!(long_hdr.dc_id, [0; QUIC_MAX_CID_LEN]);
+        assert_eq!(long_hdr.sc_id_len, 0);
+        assert_eq!(long_hdr.sc_id, [0; QUIC_MAX_CID_LEN]);
+        assert_eq!(long_hdr.pn, [0; 4]);
+    }
+
+    #[test]
+    fn test_short_hdr_new() {
+        let first_byte = QuicFirstByteHdr {
+            first_byte: QuicFirstByteHdr::new_short_header_first_byte(false, false, 0),
+        };
+        let dc_id_len = 8;
+        let short_hdr = QuicShortHdr::new(dc_id_len, first_byte);
+
+        assert_eq!(short_hdr.dc_id_len, dc_id_len);
+        assert_eq!(short_hdr.first_byte, first_byte);
+        assert_eq!(short_hdr.dc_id, [0; QUIC_MAX_CID_LEN]);
+        assert_eq!(short_hdr.pn, [0; 4]);
+    }
+
+    struct MockCtx<'a> {
+        buf: &'a [u8],
+    }
+
+    impl<'a> MockCtx<'a> {
+        fn load<T: Sized + Copy>(&self, offset: usize) -> Result<T, ()> {
+            if offset + mem::size_of::<T>() > self.buf.len() {
+                return Err(());
+            }
+            let ptr = self.buf.as_ptr();
+            Ok(unsafe { core::ptr::read_unaligned(ptr.add(offset) as *const T) })
+        }
+    }
+
+    #[test]
+    fn test_parse_long_header() {
+        let first_byte = QuicFirstByteHdr::new(0b01, 0, 0b11); // type 1, pn_len=4
+        let version = 0x01020304u32;
+        let dc_id_len = 8;
+        let sc_id_len = 4;
+        let dc_id = [1, 2, 3, 4, 5, 6, 7, 8];
+        let sc_id = [9, 10, 11, 12];
+        let pn = [0xAA, 0xBB, 0xCC, 0xDD];
+
+        let mut buf = [0u8; 1 + 4 + 1 + 8 + 1 + 4 + 4];
+        let mut current_offset = 0;
+        buf[current_offset] = first_byte.first_byte;
+        current_offset += 1;
+        buf[current_offset..current_offset + 4].copy_from_slice(&version.to_be_bytes());
+        current_offset += 4;
+        buf[current_offset] = dc_id_len;
+        current_offset += 1;
+        buf[current_offset..current_offset + dc_id_len as usize].copy_from_slice(&dc_id);
+        current_offset += dc_id_len as usize;
+        buf[current_offset] = sc_id_len;
+        current_offset += 1;
+        buf[current_offset..current_offset + sc_id_len as usize].copy_from_slice(&sc_id);
+        current_offset += sc_id_len as usize;
+        buf[current_offset..current_offset + 4].copy_from_slice(&pn);
+
+        let ctx = MockCtx { buf: &buf };
+        let mut off = 0;
+
+        let hdr = parse_quic_hdr!(&ctx, off, QUIC_SHORT_DEFAULT_DC_ID_LEN).unwrap();
+        if let QuicHdr::Long(long_hdr) = hdr {
+            assert_eq!(long_hdr.first_byte, first_byte);
+            assert_eq!(long_hdr.fixed_hdr.version(), version);
+            assert_eq!(long_hdr.fixed_hdr.dc_id_len(), dc_id_len);
+            assert_eq!(&long_hdr.dc_id[..dc_id_len as usize], &dc_id);
+            assert_eq!(long_hdr.sc_id_len, sc_id_len);
+            assert_eq!(&long_hdr.sc_id[..sc_id_len as usize], &sc_id);
+            assert_eq!(long_hdr.pn, pn);
+        } else {
+            panic!("Expected Long Header");
+        }
+    }
+
+    #[test]
+    fn test_parse_short_header() {
+        let first_byte_val = QuicFirstByteHdr::new_short_header_first_byte(true, true, 0b01); // spin, key_phase, pn_len=2
+        let first_byte = QuicFirstByteHdr {
+            first_byte: first_byte_val,
+        };
+        let dc_id_len = QUIC_SHORT_DEFAULT_DC_ID_LEN;
+        let dc_id = [1, 2, 3, 4, 5, 6, 7, 8];
+        let pn = [0xAA, 0xBB];
+
+        let mut buf = [0u8; 1 + 8 + 2];
+        buf[0] = first_byte.first_byte;
+        buf[1..1 + dc_id_len as usize].copy_from_slice(&dc_id);
+        buf[1 + dc_id_len as usize..].copy_from_slice(&pn);
+
+        let ctx = MockCtx { buf: &buf };
+        let mut off = 0;
+
+        let hdr = parse_quic_hdr!(&ctx, off, dc_id_len).unwrap();
+        if let QuicHdr::Short(short_hdr) = hdr {
+            assert_eq!(short_hdr.first_byte, first_byte);
+            assert_eq!(short_hdr.dc_id_len, dc_id_len);
+            assert_eq!(&short_hdr.dc_id[..dc_id_len as usize], &dc_id);
+            assert_eq!(&short_hdr.pn[..2], &pn);
+        } else {
+            panic!("Expected Short Header");
+        }
+    }
+
+    #[test]
+    fn test_parse_header_too_short() {
+        let ctx = MockCtx { buf: &[] };
+        let mut off = 0;
+        assert!(parse_quic_hdr!(&ctx, off, QUIC_SHORT_DEFAULT_DC_ID_LEN).is_err());
+
+        let ctx = MockCtx { buf: &[0xc3] };
+        let mut off = 0;
+        assert!(parse_quic_hdr!(&ctx, off, QUIC_SHORT_DEFAULT_DC_ID_LEN).is_err());
+
+        let buf = {
+            let mut arr = [0u8; 1 + 4 + 1 + 7];
+            arr[0] = 0xc3; // Long header, pn_len=4
+            arr[1..5].copy_from_slice(&0x01020304u32.to_be_bytes());
+            arr[5] = 8; // dc_id_len = 8
+            arr[6..].copy_from_slice(&[1; 7]); // but only 7 bytes for dc_id
+            arr
+        };
+        let ctx = MockCtx { buf: &buf };
+        let mut off = 0;
+        assert!(parse_quic_hdr!(&ctx, off, QUIC_SHORT_DEFAULT_DC_ID_LEN).is_err());
+
+        let buf = {
+            let mut arr = [0u8; 1 + 7];
+            arr[0] = QuicFirstByteHdr::new_short_header_first_byte(false, false, 0); // pn_len=1
+            arr[1..].copy_from_slice(&[1; 7]); // dc_id_len=8, but only 7 bytes
+            arr
+        };
+        let ctx = MockCtx { buf: &buf };
+        let mut off = 0;
+        assert!(parse_quic_hdr!(&ctx, off, 8).is_err());
     }
 }
