@@ -13,12 +13,7 @@ use aya_log_ebpf::debug;
 use network_types::eth::EthHdr;
 use network_types::ip::{IpProto, Ipv4Hdr, Ipv6Hdr};
 use network_types::quic::{
-    QuicFixedHdr,
-    QuicFixedLongHdr,
     QuicHdr,
-    QuicLongHdr,
-    QuicShortHdr,
-    QUIC_MAX_CID_LEN,
     QUIC_SHORT_DEFAULT_DC_ID_LEN,
 };
 use network_types::{parse_quic_hdr};
@@ -154,7 +149,7 @@ fn try_quic_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<i32,
         &ctx,
         "UDP processing done. Advancing to QUIC payload at offset {}.", off
     );
-    match parse_quic_hdr!(ctx, off, QUIC_SHORT_DEFAULT_DC_ID_LEN).map_err(|_| TC_ACT_PIPE) {
+    match parse_quic_hdr!(&ctx, off, QUIC_SHORT_DEFAULT_DC_ID_LEN).map_err(|_| TC_ACT_PIPE) {
         Ok(QuicHdr::Short(hdr)) => {
             debug!(
                 &ctx,

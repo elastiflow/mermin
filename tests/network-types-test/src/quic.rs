@@ -16,24 +16,80 @@ const PN_LENGTH_BITS_MASK: u8 = 0x03;
 pub const QUIC_MAX_CID_LEN: usize = 20;
 pub const QUIC_SHORT_DEFAULT_DC_ID_LEN: u8 = 0x08;
 
+/// QUIC Long Header Packet Types, as per RFC 9000 Section 17.2.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[repr(u8)]
+pub enum QuicPacketType {
+    /// Initial packet.
+    Initial = 0x00,
+    /// 0-RTT packet.
+    ZeroRTT = 0x01,
+    /// Handshake packet.
+    Handshake = 0x02,
+    /// Retry packet.
+    Retry = 0x03,
+}
+
+/// QUIC Transport Error Codes, as per RFC 9000 Section 20.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[repr(u16)]
+#[allow(non_camel_case_types)]
+pub enum QuicTransportError {
+    /// No error. This is used when the connection is closed gracefully.
+    NoError = 0x0,
+    /// An internal error occurred in the endpoint.
+    InternalError = 0x1,
+    /// The server refused the connection.
+    ConnectionRefused = 0x2,
+    /// A flow control limit was violated.
+    FlowControlError = 0x3,
+    /// The number of streams exceeded the negotiated limit.
+    StreamLimitError = 0x4,
+    /// An operation was attempted on a stream in an invalid state.
+    StreamStateError = 0x5,
+    /// The final size of a stream is incorrect.
+    FinalSizeError = 0x6,
+    /// A frame was malformed.
+    FrameFormatError = 0x7,
+    /// A transport parameter was invalid.
+    TransportParameterError = 0x8,
+    /// The number of connection IDs exceeded the negotiated limit.
+    ConnectionIdLimitError = 0x9,
+    /// A general protocol violation was detected.
+    ProtocolViolation = 0xA,
+    /// A token (e.g., for retry or new token) was invalid.
+    InvalidToken = 0xB,
+    /// An application-specific error occurred.
+    ApplicationError = 0xC,
+    /// The crypto buffer was exceeded.
+    CryptoBufferExceeded = 0xD,
+    /// An error occurred during a key update.
+    KeyUpdateError = 0xE,
+    /// The AEAD confidentiality or integrity limit was reached.
+    AeadLimitReached = 0xF,
+    /// The endpoint has no viable network path.
+    NoViablePath = 0x10,
+}
+
 #[macro_export]
 macro_rules! parse_quic_hdr {
     ($ctx:expr, $off:ident, $short_dc_id_len:expr) => {
         (|| -> Result<QuicHdr, ()> {
             use network_types::read_var_buf_32;
-            let quic_fixed_hdr: QuicFixedHdr = $ctx.load($off).map_err(|_| ())?;
-            $off += QuicFixedHdr::LEN;
+            use network_types::quic;
+            let quic_fixed_hdr: quic::QuicFixedHdr = $ctx.load($off).map_err(|_| ())?;
+            $off += quic::QuicFixedHdr::LEN;
             match quic_fixed_hdr.is_long_header() {
                 true => {
-                    let quic_fixed_long_hdr: QuicFixedLongHdr = $ctx.load($off).map_err(|_| ())?;
-                    $off += QuicFixedLongHdr::LEN;
-                    let mut quic_long_hdr = QuicLongHdr::new(quic_fixed_hdr, quic_fixed_long_hdr);
+                    let quic_fixed_long_hdr: quic::QuicFixedLongHdr = $ctx.load($off).map_err(|_| ())?;
+                    $off += quic::QuicFixedLongHdr::LEN;
+                    let mut quic_long_hdr = quic::QuicLongHdr::new(quic_fixed_hdr, quic_fixed_long_hdr);
                     read_var_buf_32!(
                         $ctx,
                         $off,
                         quic_long_hdr.dc_id,
                         quic_long_hdr.fixed_hdr.dc_id_len,
-                        QUIC_MAX_CID_LEN
+                        quic::QUIC_MAX_CID_LEN
                     )
                     .map_err(|_| ())?;
                     quic_long_hdr.sc_id_len = $ctx.load($off).map_err(|_| ())?;
@@ -43,23 +99,39 @@ macro_rules! parse_quic_hdr {
                         $off,
                         quic_long_hdr.sc_id,
                         quic_long_hdr.sc_id_len,
-                        QUIC_MAX_CID_LEN
+                        quic::QUIC_MAX_CID_LEN
                     )
                     .map_err(|_| ())?;
-                    Ok(QuicHdr::Long(quic_long_hdr))
+                    read_var_buf_32!(
+                        $ctx,
+                        $off,
+                        quic_long_hdr.pn,
+                        quic_long_hdr.first_byte.packet_number_length_long() as u8,
+                        4
+                    )
+                    .map_err(|_| ())?;
+                    Ok(quic::QuicHdr::Long(quic_long_hdr))
                 }
                 false => {
                     let mut quic_short_hdr =
-                        QuicShortHdr::new($short_dc_id_len, quic_fixed_hdr);
+                        quic::QuicShortHdr::new($short_dc_id_len, quic_fixed_hdr);
                     read_var_buf_32!(
                         $ctx,
                         $off,
                         quic_short_hdr.dc_id,
                         quic_short_hdr.dc_id_len,
-                        QUIC_MAX_CID_LEN
+                        quic::QUIC_MAX_CID_LEN
                     )
                     .map_err(|_| ())?;
-                    Ok(QuicHdr::Short(quic_short_hdr))
+                    read_var_buf_32!(
+                        $ctx,
+                        $off,
+                        quic_short_hdr.pn,
+                        quic_short_hdr.first_byte.short_packet_number_length() as u8,
+                        4
+                    )
+                    .map_err(|_| ())?;
+                    Ok(quic::QuicHdr::Short(quic_short_hdr))
                 }
             }
         })()

@@ -16,7 +16,6 @@ use aya::{
 };
 use aya_log::EbpfLogger;
 use log::{error, info};
-use network_types::quic::{QuicHdr, QUIC_MAX_CID_LEN};
 use socket2::{Domain, Socket, Type};
 use tokio::time::sleep;
 
@@ -211,6 +210,7 @@ async fn short_header_ipv6_sets_expected_values() -> Result<()> {
     const DCID: [u8; 8] = [0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04];
     let mut payload = vec![0x44];
     payload.extend_from_slice(&DCID);
+    payload.push(0x01); // Add a 1-byte packet number
     let sender_addr: SocketAddr = format!("[{IP1_V6}]:23456").parse()?;
     let sock = create_socket_for_sender(sender_addr)?;
     info!(
