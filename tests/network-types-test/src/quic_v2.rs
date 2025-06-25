@@ -88,7 +88,6 @@ impl QuicShortHdr {
             pn: [0; 4],
         }
     }
-    
 }
 
 #[repr(C, packed)]

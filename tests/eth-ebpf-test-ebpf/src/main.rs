@@ -187,6 +187,7 @@ fn try_quic_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<i32,
                 &ctx,
                 "QUIC CHECK: dc_len={} off_len={}", quic_long_hdr.fixed_hdr.dc_id_len, ctx.len() - off as u32
             );
+            
             // TODO: GET THIS WORKING START
             const BUF_LEN: usize = 100;
             let mut buf = [0u8; BUF_LEN];
@@ -221,8 +222,8 @@ fn try_quic_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<i32,
                     debug!(&ctx, "QUIC EXIT: Failed to load QuicHdr (dc_id). {}", err);
                     TC_ACT_PIPE
                 })?;
-
-
+            off += quic_long_hdr.fixed_hdr.dc_id_len as usize;
+            quic_long_hdr.sc_id_len = ctx.load(off).map_err(|_| TC_ACT_PIPE)?;
             off += 1;
             quic_long_hdr.sc_id = ctx.load(off).map_err(|_| TC_ACT_PIPE)?;
             off += quic_long_hdr.sc_id_len as usize;
