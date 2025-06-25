@@ -21,7 +21,7 @@ use network_types::quic::{
     QUIC_MAX_CID_LEN,
     QUIC_SHORT_DEFAULT_DC_ID_LEN,
 };
-use network_types::read_var_buf;
+use network_types::{parse_quic_hdr};
 use network_types::udp::UdpHdr;
 
 /// IPv6 Fragment‑header – RFC 8200 §4.5 (8 bytes)
@@ -154,68 +154,33 @@ fn try_quic_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<i32,
         &ctx,
         "UDP processing done. Advancing to QUIC payload at offset {}.", off
     );
-    // Load the raw QUIC header data directly into the wire-format struct.
-    // ctx.load will ensure there are at least QuicHdr::LEN bytes available.
-    let quic_fixed_hdr: QuicFixedHdr = match ctx.load(off) {
-        Ok(hdr) => hdr,
-        Err(err) => {
+    match parse_quic_hdr!(ctx, off, QUIC_SHORT_DEFAULT_DC_ID_LEN).map_err(|_| TC_ACT_PIPE) {
+        Ok(QuicHdr::Short(hdr)) => {
             debug!(
                 &ctx,
-                "QUIC EXIT: Failed to load QuicHdr (packet too short). {}", err
+                "BRANCH: QUIC short header detected. DCID: {:x}", hdr.dc_id.as_slice()
             );
-            return Err(TC_ACT_PIPE);
-        }
-    };
-    off += QuicFixedHdr::LEN;
-    let quic_hdr: QuicHdr = match quic_fixed_hdr.is_long_header() {
-        true => {
-            let quic_fixed_long_hdr: QuicFixedLongHdr = match ctx.load(off) {
-                Ok(hdr) => hdr,
-                Err(err) => {
-                    debug!(
-                        &ctx,
-                        "QUIC EXIT: Failed to load QuicHdr (packet too short). {}", err
-                    );
-                    return Err(TC_ACT_PIPE);
-                }
-            };
-            off += QuicFixedLongHdr::LEN;
-            let mut quic_long_hdr = QuicLongHdr::new(quic_fixed_hdr, quic_fixed_long_hdr);
-            debug!(
-                &ctx,
-                "QUIC CHECK: dc_len={} off_len={}", quic_long_hdr.fixed_hdr.dc_id_len, ctx.len() - off as u32
-            );
-            read_var_buf!(ctx, off, quic_long_hdr.dc_id, quic_long_hdr.fixed_hdr.dc_id_len, QUIC_MAX_CID_LEN);
-            debug!(
-                &ctx,
-                "QUIC CHECK: quic_long_hdr.dc_id={:x}", quic_long_hdr.dc_id.as_slice()
-            );
-            quic_long_hdr.sc_id_len = ctx.load(off).map_err(|_| TC_ACT_PIPE)?;
-            debug!(
-                &ctx,
-                "QUIC CHECK: Long Header SC ID Len. {}", quic_long_hdr.sc_id_len
-            );
-            off += 1;
-            read_var_buf!(ctx, off, quic_long_hdr.sc_id, quic_long_hdr.sc_id_len, QUIC_MAX_CID_LEN);
-            debug!(
-                &ctx,
-                "QUIC: Long Header SC ID. {:x}", quic_long_hdr.sc_id.as_slice()
-            );
-            QuicHdr::Long(quic_long_hdr)
-        }
-        false => {
-            let mut quic_short_hdr = QuicShortHdr::new(QUIC_SHORT_DEFAULT_DC_ID_LEN, quic_fixed_hdr);
-            read_var_buf!(ctx, off, quic_short_hdr.dc_id, quic_short_hdr.dc_id_len, QUIC_MAX_CID_LEN);
-            QuicHdr::Short(quic_short_hdr)
-        }
-    };
-    match quic_hdr {
-        QuicHdr::Short(hdr) => {
             unsafe { store_result(map, SHORT_HEADER_MARKER, hdr.dc_id_len as u32, 0) };
-        },
-        QuicHdr::Long(hdr) => {
-            unsafe { store_result(map, hdr.fixed_hdr.version(), hdr.fixed_hdr.dc_id_len as u32, hdr.sc_id_len as u32) };
+        }
+        Ok(QuicHdr::Long(hdr)) => {
+            debug!(
+                &ctx,
+                "BRANCH: QUIC long header detected. DCID={:x}, SCID={:x}", hdr.dc_id.as_slice(), hdr.sc_id.as_slice()
+            );
+            unsafe {
+                store_result(
+                    map,
+                    hdr.fixed_hdr.version(),
+                    hdr.fixed_hdr.dc_id_len as u32,
+                    hdr.sc_id_len as u32,
+                )
+            };
+        }
+        Err(err) => {
+            debug!(&ctx, "EXIT: QUIC parsing failed, err={}.", err);
+            return Ok(TC_ACT_SHOT);
         }
     }
     Ok(TC_ACT_PIPE)
+
 }

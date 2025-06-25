@@ -180,18 +180,10 @@ async fn long_header_ipv6_sets_expected_values() -> Result<()> {
     payload.push(scid.len() as u8); // SCID Len
     payload.extend_from_slice(&scid); // SCID
     payload.push(0); // Token Length (variable-length integer, 0)
-
-    // Length of the rest of the packet (Packet Number + Payload + Auth Tag).
-    // Let's assume a 1-byte packet number and a 1-byte payload (a minimal CRYPTO frame starts with 0x06).
-    // The AEAD auth tag for Initial packets is 16 bytes.
-    // Total length = 1 (PN) + 1 (Payload) + 16 (Tag) = 18.
     payload.push(18);
     payload.push(1); // Packet Number
     payload.push(0x06); // Dummy payload: A CRYPTO frame starts with the byte 0x06.
-
-    // Note: A real client Initial packet would be padded to at least 1200 bytes.
     info!("{:?}", payload);
-    //assert_eq!(payload.len(), QuicHdr::LEN);
     let sender_addr: SocketAddr = format!("[{IP1_V6}]:12345").parse()?;
     let sock = create_socket_for_sender(sender_addr)?;
     info!(
@@ -219,7 +211,6 @@ async fn short_header_ipv6_sets_expected_values() -> Result<()> {
     const DCID: [u8; 8] = [0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04];
     let mut payload = vec![0x44];
     payload.extend_from_slice(&DCID);
-    //assert_eq!(payload.len(), QuicHdr::LEN);
     let sender_addr: SocketAddr = format!("[{IP1_V6}]:23456").parse()?;
     let sock = create_socket_for_sender(sender_addr)?;
     info!(

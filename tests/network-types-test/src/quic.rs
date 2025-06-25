@@ -16,6 +16,57 @@ const PN_LENGTH_BITS_MASK: u8 = 0x03;
 pub const QUIC_MAX_CID_LEN: usize = 20;
 pub const QUIC_SHORT_DEFAULT_DC_ID_LEN: u8 = 0x08;
 
+#[macro_export]
+macro_rules! parse_quic_hdr {
+    ($ctx:expr, $off:ident, $short_dc_id_len:expr) => {
+        (|| -> Result<QuicHdr, ()> {
+            use network_types::read_var_buf_32;
+            let quic_fixed_hdr: QuicFixedHdr = $ctx.load($off).map_err(|_| ())?;
+            $off += QuicFixedHdr::LEN;
+            match quic_fixed_hdr.is_long_header() {
+                true => {
+                    let quic_fixed_long_hdr: QuicFixedLongHdr = $ctx.load($off).map_err(|_| ())?;
+                    $off += QuicFixedLongHdr::LEN;
+                    let mut quic_long_hdr = QuicLongHdr::new(quic_fixed_hdr, quic_fixed_long_hdr);
+                    read_var_buf_32!(
+                        $ctx,
+                        $off,
+                        quic_long_hdr.dc_id,
+                        quic_long_hdr.fixed_hdr.dc_id_len,
+                        QUIC_MAX_CID_LEN
+                    )
+                    .map_err(|_| ())?;
+                    quic_long_hdr.sc_id_len = $ctx.load($off).map_err(|_| ())?;
+                    $off += 1;
+                    read_var_buf_32!(
+                        $ctx,
+                        $off,
+                        quic_long_hdr.sc_id,
+                        quic_long_hdr.sc_id_len,
+                        QUIC_MAX_CID_LEN
+                    )
+                    .map_err(|_| ())?;
+                    Ok(QuicHdr::Long(quic_long_hdr))
+                }
+                false => {
+                    let mut quic_short_hdr =
+                        QuicShortHdr::new($short_dc_id_len, quic_fixed_hdr);
+                    read_var_buf_32!(
+                        $ctx,
+                        $off,
+                        quic_short_hdr.dc_id,
+                        quic_short_hdr.dc_id_len,
+                        QUIC_MAX_CID_LEN
+                    )
+                    .map_err(|_| ())?;
+                    Ok(QuicHdr::Short(quic_short_hdr))
+                }
+            }
+        })()
+    };
+}
+
+
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 pub enum QuicHdr {
     Long(QuicLongHdr),
