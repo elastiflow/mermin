@@ -10,9 +10,19 @@ use aya_ebpf::{
 };
 use aya_ebpf::bindings::{TC_ACT_SHOT};
 use aya_log_ebpf::debug;
-use network_types::{eth::EthHdr, ip::{IpProto, Ipv4Hdr, Ipv6Hdr}, quic_v2, quic_v2::{QuicFixedHdr, QuicFixedLongHdr}, udp::UdpHdr};
-use network_types::quic_v2::{QuicLongHdr, QuicShortHdr, QUIC_MAX_CID_LEN, QUIC_SHORT_DEFAULT_DC_ID_LEN};
+use network_types::eth::EthHdr;
+use network_types::ip::{IpProto, Ipv4Hdr, Ipv6Hdr};
+use network_types::quic::{
+    QuicFixedHdr,
+    QuicFixedLongHdr,
+    QuicHdr,
+    QuicLongHdr,
+    QuicShortHdr,
+    QUIC_MAX_CID_LEN,
+    QUIC_SHORT_DEFAULT_DC_ID_LEN,
+};
 use network_types::read_var_buf;
+use network_types::udp::UdpHdr;
 
 /// IPv6 Fragment‑header – RFC 8200 §4.5 (8 bytes)
 #[repr(C, packed)]
@@ -157,7 +167,7 @@ fn try_quic_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<i32,
         }
     };
     off += QuicFixedHdr::LEN;
-    let quic_hdr: quic_v2::QuicHdr = match quic_fixed_hdr.is_long_header() {
+    let quic_hdr: QuicHdr = match quic_fixed_hdr.is_long_header() {
         true => {
             let quic_fixed_long_hdr: QuicFixedLongHdr = match ctx.load(off) {
                 Ok(hdr) => hdr,
@@ -180,24 +190,6 @@ fn try_quic_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<i32,
                 &ctx,
                 "QUIC CHECK: quic_long_hdr.dc_id={:x}", quic_long_hdr.dc_id.as_slice()
             );
-            /*
-            // TODO: CHECK FOR OPTIMIZATION POTENTIAL
-            if (ctx.len() - off as u32) < QUIC_MAX_CID_LEN as u32 {
-                let mut idx = 0;
-                'outer: for _i in 0..5 {
-                    for _j in 0..4 {
-                        let bytes: u8 = ctx.load(off).map_err(|_| TC_ACT_PIPE)?;
-                        quic_long_hdr.dc_id[idx] = bytes;
-                        idx += 1;
-                        if quic_long_hdr.fixed_hdr.dc_id_len == idx as u8 {
-                            break 'outer;
-                        }
-                        off += 1;
-                    }
-                }
-            }
-            */
-            // off += quic_long_hdr.fixed_hdr.dc_id_len as usize;
             quic_long_hdr.sc_id_len = ctx.load(off).map_err(|_| TC_ACT_PIPE)?;
             debug!(
                 &ctx,
@@ -209,19 +201,19 @@ fn try_quic_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<i32,
                 &ctx,
                 "QUIC: Long Header SC ID. {:x}", quic_long_hdr.sc_id.as_slice()
             );
-            quic_v2::QuicHdr::Long(quic_long_hdr)
+            QuicHdr::Long(quic_long_hdr)
         }
         false => {
             let mut quic_short_hdr = QuicShortHdr::new(QUIC_SHORT_DEFAULT_DC_ID_LEN, quic_fixed_hdr);
             read_var_buf!(ctx, off, quic_short_hdr.dc_id, quic_short_hdr.dc_id_len, QUIC_MAX_CID_LEN);
-            quic_v2::QuicHdr::Short(quic_short_hdr)
+            QuicHdr::Short(quic_short_hdr)
         }
     };
     match quic_hdr {
-        quic_v2::QuicHdr::Short(hdr) => {
+        QuicHdr::Short(hdr) => {
             unsafe { store_result(map, SHORT_HEADER_MARKER, hdr.dc_id_len as u32, 0) };
         },
-        quic_v2::QuicHdr::Long(hdr) => {
+        QuicHdr::Long(hdr) => {
             unsafe { store_result(map, hdr.fixed_hdr.version(), hdr.fixed_hdr.dc_id_len as u32, hdr.sc_id_len as u32) };
         }
     }
