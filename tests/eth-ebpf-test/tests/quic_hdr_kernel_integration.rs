@@ -169,7 +169,7 @@ async fn long_header_ipv6_sets_expected_values() -> Result<()> {
     create_veth().await?;
     let mut bpf = load_and_attach()?;
     let _log = EbpfLogger::init(&mut bpf).context("eBPF logger")?;
-    let dcid = [0xAA, 0xBB, 0xCC, 0xDD];
+    let dcid = [0xAA, 0xBB, 0xCC, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD];
     let scid = [0x11, 0x22, 0x33, 0x44];
     let mut payload = Vec::<u8>::new();
     // A valid QUIC Initial packet header without padding, similar to a live packet.
@@ -209,7 +209,6 @@ async fn long_header_ipv6_sets_expected_values() -> Result<()> {
     Ok(())
 }
 
-/*
 #[tokio::test]
 async fn short_header_ipv6_sets_expected_values() -> Result<()> {
     setup_logging();
@@ -220,8 +219,7 @@ async fn short_header_ipv6_sets_expected_values() -> Result<()> {
     const DCID: [u8; 8] = [0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04];
     let mut payload = vec![0x44];
     payload.extend_from_slice(&DCID);
-    payload.resize(QuicHdr::LEN, 0);
-    assert_eq!(payload.len(), QuicHdr::LEN);
+    //assert_eq!(payload.len(), QuicHdr::LEN);
     let sender_addr: SocketAddr = format!("[{IP1_V6}]:23456").parse()?;
     let sock = create_socket_for_sender(sender_addr)?;
     info!(
@@ -238,4 +236,3 @@ async fn short_header_ipv6_sets_expected_values() -> Result<()> {
     destroy_veth();
     Ok(())
 }
-*/

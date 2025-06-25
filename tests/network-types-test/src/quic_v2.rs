@@ -44,15 +44,10 @@ impl QuicLongHdr {
     pub fn new(
         fixed: QuicFixedHdr, 
         fixed_long: QuicFixedLongHdr,
-        //dc_id: [u8; QUIC_MAX_CID_LEN],
-        //sc_id_len: u8,
-        //sc_id: [u8; QUIC_MAX_CID_LEN],
-        //pn: [u8; 4],
     ) -> Self {
         Self {
             first_byte: fixed,
             fixed_hdr: fixed_long,
-
             dc_id: [0; QUIC_MAX_CID_LEN],
             sc_id_len: 0,
             sc_id: [0; QUIC_MAX_CID_LEN],
@@ -78,8 +73,6 @@ impl QuicShortHdr {
     pub fn new(
         dc_id_len: u8,
         first_byte: QuicFixedHdr,
-        //dc_id: [u8; QUIC_MAX_CID_LEN],
-        //pn: [u8; 4],
     ) -> Self {
         Self {
             dc_id_len,
