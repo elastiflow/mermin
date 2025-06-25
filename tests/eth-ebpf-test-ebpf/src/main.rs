@@ -9,13 +9,11 @@ use aya_ebpf::{
     maps::HashMap,
     programs::TcContext,
 };
+use aya_ebpf::bindings::{TC_ACT_OK, TC_ACT_SHOT};
+use aya_ebpf::maps::PerCpuArray;
 use aya_log_ebpf::debug;
-use network_types::{
-    eth::EthHdr,
-    ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
-    quic::QuicHdr,
-    udp::UdpHdr,
-};
+use network_types::{eth::EthHdr, ip::{IpProto, Ipv4Hdr, Ipv6Hdr}, quic::QuicHdr, quic_v2, quic_v2::{QuicFixedHdr, QuicFixedLongHdr}, udp::UdpHdr};
+use network_types::quic_v2::{QuicLongHdr, QuicShortHdr, QUIC_MAX_CID_LEN, QUIC_SHORT_DEFAULT_DC_ID_LEN};
 
 /// IPv6 Fragment‑header – RFC 8200 §4.5 (8 bytes)
 #[repr(C, packed)]
@@ -159,47 +157,104 @@ fn try_quic_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<i32,
 
     // Load the raw QUIC header data directly into the wire-format struct.
     // ctx.load will ensure there are at least QuicHdr::LEN bytes available.
-    let mut quic_hdr: QuicHdr = match ctx.load(off) {
+    let quic_fixed_hdr: QuicFixedHdr = match ctx.load(off) {
         Ok(hdr) => hdr,
         Err(err) => {
             debug!(
                 &ctx,
-                "EXIT: Failed to load QuicHdr (packet too short). {}", err
+                "QUIC EXIT: Failed to load QuicHdr (packet too short). {}", err
             );
             return Err(TC_ACT_PIPE);
         }
     };
+    off += QuicFixedHdr::LEN;
 
-    debug!(
-        &ctx,
-        "Reached QUIC parser block. Attempting to parse header."
-    );
-    // Provide the contextual DCID length for short headers.
-    const SHORT_DCID_LEN: u8 = 8;
-
-    // Parse the raw data into a safe, logical view.
-    match quic_hdr.parse(SHORT_DCID_LEN) {
-        Ok(parsed_hdr) if parsed_hdr.is_long_header() => {
-            let ver = parsed_hdr.version().unwrap_or(u32::MAX);
-            let dcil = parsed_hdr.dc_id().len() as u32;
-            let scil = parsed_hdr.sc_id().unwrap_or(&[]).len() as u32;
+    let quic_hdr: quic_v2::QuicHdr = match quic_fixed_hdr.is_long_header() {
+        true => {
+            let quic_fixed_long_hdr: QuicFixedLongHdr = match ctx.load(off) {
+                Ok(hdr) => hdr,
+                Err(err) => {
+                    debug!(
+                        &ctx,
+                        "QUIC EXIT: Failed to load QuicHdr (packet too short). {}", err
+                    );
+                    return Err(TC_ACT_PIPE);
+                }
+            };
+            off += QuicFixedLongHdr::LEN;
+            let mut quic_long_hdr = QuicLongHdr::new(quic_fixed_hdr, quic_fixed_long_hdr);
             debug!(
                 &ctx,
-                "QUIC SUCCESS (Long): v={} dcil={} scil={}", ver, dcil, scil
+                "QUIC CHECK: dc_len={} off_len={}", quic_long_hdr.fixed_hdr.dc_id_len, ctx.len() - off as u32
             );
-            unsafe { store_result(map, ver, dcil, scil) };
+            // TODO: GET THIS WORKING START
+            const BUF_LEN: usize = 100;
+            let mut buf = [0u8; BUF_LEN];
+            let total = ctx.len() as usize;
+            if total <= off {
+                // Nothing left in the packet – never call helpers with len == 0
+                return Ok(TC_ACT_OK);
+            }
+            let mut avail = total - off;          // could still be 1‥=buf_len, but
+            if avail == 0 {                       // convince the verifier explicitly
+                return Ok(TC_ACT_OK);
+            }
+            if avail > BUF_LEN {
+                avail = BUF_LEN;
+            }
+            // 1. pull linear data
+            if ctx.pull_data((off + avail) as u32).is_err() {
+                return Err(TC_ACT_SHOT);
+            }
+            let copied = ctx
+                .load_bytes(off, &mut buf[..avail])  // `avail` is now 1‥BUF_LEN
+                .map_err(|_| TC_ACT_SHOT)?;
+            /* copied ≥1 from the verifier’s point of view */
+            let slice = &buf[..copied];
+            debug!(&ctx, "n_read = {}", slice.len());
+            debug!(&ctx, "QUIC CHECK 2: n_read={}", slice.len());
+            // TODO: GET THIS WORKING END
+
+            quic_long_hdr.dc_id = ctx
+                .load(off)                       // this is fine – len = sizeof(T)
+                .map_err(|err| {
+                    debug!(&ctx, "QUIC EXIT: Failed to load QuicHdr (dc_id). {}", err);
+                    TC_ACT_PIPE
+                })?;
+
+
+            off += 1;
+            quic_long_hdr.sc_id = ctx.load(off).map_err(|_| TC_ACT_PIPE)?;
+            off += quic_long_hdr.sc_id_len as usize;
+            debug!(
+                &ctx,
+                "QUIC: Long Header DC Len. {}", quic_fixed_long_hdr.dc_id_len
+            );
+            quic_v2::QuicHdr::Long(quic_long_hdr)
         }
-        Ok(parsed_hdr) => {
-            let dcil = parsed_hdr.dc_id().len() as u32;
-            debug!(&ctx, "QUIC SUCCESS (Short): dcil={}", dcil);
-            unsafe { store_result(map, SHORT_HEADER_MARKER, dcil, 0) };
+        false => {
+            /*
+            let mut quic_short_hdr = QuicShortHdr::new(QUIC_SHORT_DEFAULT_DC_ID_LEN, quic_fixed_hdr);
+            ctx.load_bytes(off, &mut quic_short_hdr.dc_id).map_err(|_| TC_ACT_PIPE)?;
+            off += quic_short_hdr.dc_id_len as usize;
+            quic_v2::QuicHdr::Short(quic_short_hdr)
+
+             */
+            quic_v2::QuicHdr::Short(QuicShortHdr {
+                dc_id_len: 0,
+                first_byte: Default::default(),
+                dc_id: [0; QUIC_MAX_CID_LEN],
+                pn: [0; 4],
+            })
         }
-        Err(err) => {
-            debug!(&ctx, "EXIT: QUIC PARSE FAILED: {}", err as u32);
-            unsafe { store_result(map, 0, 0, 0) };
-            return Ok(TC_ACT_PIPE);
+    };
+    match quic_hdr {
+        quic_v2::QuicHdr::Short(hdr) => {
+            unsafe { store_result(map, SHORT_HEADER_MARKER, hdr.dc_id_len as u32, 0) };
+        },
+        quic_v2::QuicHdr::Long(hdr) => {
+            unsafe { store_result(map, hdr.fixed_hdr.version(), hdr.fixed_hdr.dc_id_len as u32, hdr.sc_id_len as u32) };
         }
     }
-
     Ok(TC_ACT_PIPE)
 }

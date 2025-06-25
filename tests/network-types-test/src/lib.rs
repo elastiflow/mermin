@@ -5,6 +5,7 @@ pub mod arp;
 pub mod bitfield;
 pub mod eth;
 pub mod ip;
+pub mod quic_v2;
 pub mod quic;
 pub mod sctp;
 pub mod udp;
