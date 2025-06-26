@@ -178,8 +178,13 @@ async fn long_header_ipv6_sets_expected_values() -> Result<()> {
     payload.extend_from_slice(&dcid); // DCID
     payload.push(scid.len() as u8); // SCID Len
     payload.extend_from_slice(&scid); // SCID
-    payload.push(0); // Token Length (variable-length integer, 0)
-    payload.push(18);
+    let token = [0xde, 0xad, 0xbe, 0xef];
+    payload.push(token.len() as u8); // Token Length (variable-length integer)
+    payload.extend_from_slice(&token); // Token
+
+    // The length of the packet number and the payload.
+    // Packet number is 1 byte, payload is 1 byte, so length is 2.
+    payload.push(2); // Length
     payload.push(1); // Packet Number
     payload.push(0x06); // Dummy payload: A CRYPTO frame starts with the byte 0x06.
     info!("{:?}", payload);

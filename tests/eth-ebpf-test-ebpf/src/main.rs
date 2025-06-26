@@ -104,14 +104,20 @@ fn try_quic_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<i32,
         }
         et if et == ETHER_TYPE_IPV6.to_be() => {
             debug!(&ctx, "BRANCH: EtherType is IPv6. Reading Ipv6Hdr.");
-            let ipv6: Ipv6Hdr = ctx.load(off).map_err(|_| TC_ACT_PIPE)?;
-            let mut next_hdr = ipv6.next_hdr;
+            // The Ipv6Hdr is 40 bytes, but we only need the next_hdr field (1 byte).
+            // To save stack space, we can load only that field from its fixed offset of 6.
+            const IPV6_HDR_NEXT_HDR_OFFSET: usize = 6;
+            let next_hdr_val: u8 =
+                ctx.load(off + IPV6_HDR_NEXT_HDR_OFFSET).map_err(|_| TC_ACT_PIPE)?;
+            let mut next_hdr = to_ip_proto(next_hdr_val);
             let mut hdr_len = Ipv6Hdr::LEN;
             debug!(&ctx, "IPv6 Hdr: NextHdr: {}", next_hdr as u8);
             if next_hdr == IpProto::Ipv6Frag {
                 debug!(&ctx, "IPv6 frag header detected, parsing.");
-                let frag: Ipv6FragHdr = ctx.load(off + hdr_len).map_err(|_| TC_ACT_PIPE)?;
-                next_hdr = to_ip_proto(frag.next_hdr);
+                // The Ipv6FragHdr is 8 bytes, but we only need the next_hdr field (1 byte).
+                // To save stack space, we can load just that byte.
+                let next_hdr_val: u8 = ctx.load(off + hdr_len).map_err(|_| TC_ACT_PIPE)?;
+                next_hdr = to_ip_proto(next_hdr_val);
                 hdr_len += mem::size_of::<Ipv6FragHdr>();
                 debug!(&ctx, "IPv6 frag: next_hdr after frag: {}", next_hdr as u8);
             }
@@ -147,7 +153,7 @@ fn try_quic_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<i32,
     off += UdpHdr::LEN;
     debug!(
         &ctx,
-        "UDP processing done. Advancing to QUIC payload at offset {}.", off
+        "UDP processing done. Advancing to QUIC payload at offset {} len={}.", off, ctx.len()
     );
     match parse_quic_hdr!(&ctx, off, QUIC_SHORT_DEFAULT_DC_ID_LEN).map_err(|_| TC_ACT_PIPE) {
         Ok(QuicHdr::Short(hdr)) => {
