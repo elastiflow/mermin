@@ -2,20 +2,22 @@
 #![no_main]
 
 use core::mem;
-
 use aya_ebpf::{
     bindings::TC_ACT_PIPE,
     macros::{classifier, map},
     maps::HashMap,
     programs::TcContext,
 };
+use aya_ebpf::bindings::{TC_ACT_SHOT};
 use aya_log_ebpf::debug;
-use network_types::{
-    eth::EthHdr,
-    ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
-    quic::QuicHdr,
-    udp::UdpHdr,
+use network_types::eth::EthHdr;
+use network_types::ip::{IpProto, Ipv4Hdr, Ipv6Hdr};
+use network_types::quic::{
+    QuicHdr,
+    QUIC_SHORT_DEFAULT_DC_ID_LEN,
 };
+use network_types::{parse_quic_hdr};
+use network_types::udp::UdpHdr;
 
 /// IPv6 Fragment‑header – RFC 8200 §4.5 (8 bytes)
 #[repr(C, packed)]
@@ -77,12 +79,9 @@ fn try_quic_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<i32,
         "TC classifier triggered. Packet size: {}",
         ctx.data_end() - ctx.data()
     );
-
     let mut off = 0_usize;
-
     let eth: EthHdr = ctx.load(off).map_err(|_| TC_ACT_PIPE)?;
     off += EthHdr::LEN;
-
     debug!(
         &ctx,
         "ETH Hdr: DST: {:mac}, SRC: {:mac}, EtherType: {:x}",
@@ -90,7 +89,6 @@ fn try_quic_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<i32,
         eth.src_addr,
         u16::from_be(eth.ether_type)
     );
-
     let ether_type = eth.ether_type;
     let ip_hdr_len = match ether_type {
         et if et == ETHER_TYPE_IPV4.to_be() => {
@@ -106,19 +104,23 @@ fn try_quic_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<i32,
         }
         et if et == ETHER_TYPE_IPV6.to_be() => {
             debug!(&ctx, "BRANCH: EtherType is IPv6. Reading Ipv6Hdr.");
-            let ipv6: Ipv6Hdr = ctx.load(off).map_err(|_| TC_ACT_PIPE)?;
-            let mut next_hdr = ipv6.next_hdr;
+            // The Ipv6Hdr is 40 bytes, but we only need the next_hdr field (1 byte).
+            // To save stack space, we can load only that field from its fixed offset of 6.
+            const IPV6_HDR_NEXT_HDR_OFFSET: usize = 6;
+            let next_hdr_val: u8 =
+                ctx.load(off + IPV6_HDR_NEXT_HDR_OFFSET).map_err(|_| TC_ACT_PIPE)?;
+            let mut next_hdr = to_ip_proto(next_hdr_val);
             let mut hdr_len = Ipv6Hdr::LEN;
             debug!(&ctx, "IPv6 Hdr: NextHdr: {}", next_hdr as u8);
-
             if next_hdr == IpProto::Ipv6Frag {
                 debug!(&ctx, "IPv6 frag header detected, parsing.");
-                let frag: Ipv6FragHdr = ctx.load(off + hdr_len).map_err(|_| TC_ACT_PIPE)?;
-                next_hdr = to_ip_proto(frag.next_hdr);
+                // The Ipv6FragHdr is 8 bytes, but we only need the next_hdr field (1 byte).
+                // To save stack space, we can load just that byte.
+                let next_hdr_val: u8 = ctx.load(off + hdr_len).map_err(|_| TC_ACT_PIPE)?;
+                next_hdr = to_ip_proto(next_hdr_val);
                 hdr_len += mem::size_of::<Ipv6FragHdr>();
                 debug!(&ctx, "IPv6 frag: next_hdr after frag: {}", next_hdr as u8);
             }
-
             if next_hdr != IpProto::Udp {
                 debug!(&ctx, "EXIT: IPv6 next_hdr is not UDP.");
                 return Ok(TC_ACT_PIPE);
@@ -131,12 +133,10 @@ fn try_quic_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<i32,
         }
     };
     off += ip_hdr_len;
-
     debug!(
         &ctx,
         "IP processing done. Advancing to UDP at offset {}", off
     );
-
     let udp: UdpHdr = ctx.load(off).map_err(|_| TC_ACT_PIPE)?;
     let udp_len = udp.len() as usize;
     debug!(
@@ -146,7 +146,6 @@ fn try_quic_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<i32,
         udp.dst_port(),
         udp_len
     );
-
     if udp_len <= UdpHdr::LEN {
         debug!(&ctx, "EXIT: UDP length is too small.");
         return Ok(TC_ACT_PIPE);
@@ -154,52 +153,35 @@ fn try_quic_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<i32,
     off += UdpHdr::LEN;
     debug!(
         &ctx,
-        "UDP processing done. Advancing to QUIC payload at offset {}.", off
+        "UDP processing done. Advancing to QUIC payload at offset {} len={}.", off, ctx.len()
     );
-
-    // Load the raw QUIC header data directly into the wire-format struct.
-    // ctx.load will ensure there are at least QuicHdr::LEN bytes available.
-    let mut quic_hdr: QuicHdr = match ctx.load(off) {
-        Ok(hdr) => hdr,
-        Err(err) => {
+    match parse_quic_hdr!(&ctx, off, QUIC_SHORT_DEFAULT_DC_ID_LEN).map_err(|_| TC_ACT_PIPE) {
+        Ok(QuicHdr::Short(hdr)) => {
             debug!(
                 &ctx,
-                "EXIT: Failed to load QuicHdr (packet too short). {}", err
+                "BRANCH: QUIC short header detected. DCID: {:x}", hdr.dc_id.as_slice()
             );
-            return Err(TC_ACT_PIPE);
+            unsafe { store_result(map, SHORT_HEADER_MARKER, hdr.dc_id_len as u32, 0) };
         }
-    };
-
-    debug!(
-        &ctx,
-        "Reached QUIC parser block. Attempting to parse header."
-    );
-    // Provide the contextual DCID length for short headers.
-    const SHORT_DCID_LEN: u8 = 8;
-
-    // Parse the raw data into a safe, logical view.
-    match quic_hdr.parse(SHORT_DCID_LEN) {
-        Ok(parsed_hdr) if parsed_hdr.is_long_header() => {
-            let ver = parsed_hdr.version().unwrap_or(u32::MAX);
-            let dcil = parsed_hdr.dc_id().len() as u32;
-            let scil = parsed_hdr.sc_id().unwrap_or(&[]).len() as u32;
+        Ok(QuicHdr::Long(hdr)) => {
             debug!(
                 &ctx,
-                "QUIC SUCCESS (Long): v={} dcil={} scil={}", ver, dcil, scil
+                "BRANCH: QUIC long header detected. DCID={:x}, SCID={:x}", hdr.dc_id.as_slice(), hdr.sc_id.as_slice()
             );
-            unsafe { store_result(map, ver, dcil, scil) };
-        }
-        Ok(parsed_hdr) => {
-            let dcil = parsed_hdr.dc_id().len() as u32;
-            debug!(&ctx, "QUIC SUCCESS (Short): dcil={}", dcil);
-            unsafe { store_result(map, SHORT_HEADER_MARKER, dcil, 0) };
+            unsafe {
+                store_result(
+                    map,
+                    hdr.fixed_hdr.version(),
+                    hdr.fixed_hdr.dc_id_len as u32,
+                    hdr.sc_id_len as u32,
+                )
+            };
         }
         Err(err) => {
-            debug!(&ctx, "EXIT: QUIC PARSE FAILED: {}", err as u32);
-            unsafe { store_result(map, 0, 0, 0) };
-            return Ok(TC_ACT_PIPE);
+            debug!(&ctx, "EXIT: QUIC parsing failed, err={}.", err);
+            return Ok(TC_ACT_SHOT);
         }
     }
-
     Ok(TC_ACT_PIPE)
+
 }

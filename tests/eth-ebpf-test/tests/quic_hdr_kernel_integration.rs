@@ -16,7 +16,6 @@ use aya::{
 };
 use aya_log::EbpfLogger;
 use log::{error, info};
-use network_types::quic::{QuicHdr, QUIC_MAX_CID_LEN};
 use socket2::{Domain, Socket, Type};
 use tokio::time::sleep;
 
@@ -169,18 +168,26 @@ async fn long_header_ipv6_sets_expected_values() -> Result<()> {
     create_veth().await?;
     let mut bpf = load_and_attach()?;
     let _log = EbpfLogger::init(&mut bpf).context("eBPF logger")?;
-    let dcid = [0xAA, 0xBB, 0xCC, 0xDD];
+    let dcid = [0xAA, 0xBB, 0xCC, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD];
     let scid = [0x11, 0x22, 0x33, 0x44];
     let mut payload = Vec::<u8>::new();
-    payload.push(0b1100_0000);
-    payload.extend_from_slice(&1u32.to_be_bytes());
-    payload.push(dcid.len() as u8);
-    payload.extend_from_slice(&dcid);
-    payload.resize(payload.len() + QUIC_MAX_CID_LEN - dcid.len(), 0);
-    payload.push(scid.len() as u8);
-    payload.extend_from_slice(&scid);
-    payload.resize(payload.len() + QUIC_MAX_CID_LEN - scid.len(), 0);
-    assert_eq!(payload.len(), QuicHdr::LEN);
+    // A valid QUIC Initial packet header without padding, similar to a live packet.
+    payload.push(0b1100_0000); // Long Header: Initial Packet, Packet Number Length: 1 byte
+    payload.extend_from_slice(&1u32.to_be_bytes()); // Version: 1
+    payload.push(dcid.len() as u8); // DCID Len
+    payload.extend_from_slice(&dcid); // DCID
+    payload.push(scid.len() as u8); // SCID Len
+    payload.extend_from_slice(&scid); // SCID
+    let token = [0xde, 0xad, 0xbe, 0xef];
+    payload.push(token.len() as u8); // Token Length (variable-length integer)
+    payload.extend_from_slice(&token); // Token
+
+    // The length of the packet number and the payload.
+    // Packet number is 1 byte, payload is 1 byte, so length is 2.
+    payload.push(2); // Length
+    payload.push(1); // Packet Number
+    payload.push(0x06); // Dummy payload: A CRYPTO frame starts with the byte 0x06.
+    info!("{:?}", payload);
     let sender_addr: SocketAddr = format!("[{IP1_V6}]:12345").parse()?;
     let sock = create_socket_for_sender(sender_addr)?;
     info!(
@@ -208,8 +215,7 @@ async fn short_header_ipv6_sets_expected_values() -> Result<()> {
     const DCID: [u8; 8] = [0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04];
     let mut payload = vec![0x44];
     payload.extend_from_slice(&DCID);
-    payload.resize(QuicHdr::LEN, 0);
-    assert_eq!(payload.len(), QuicHdr::LEN);
+    payload.push(0x01); // Add a 1-byte packet number
     let sender_addr: SocketAddr = format!("[{IP1_V6}]:23456").parse()?;
     let sock = create_socket_for_sender(sender_addr)?;
     info!(
