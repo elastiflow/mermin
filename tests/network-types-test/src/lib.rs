@@ -10,3 +10,4 @@ pub mod quic;
 pub mod sctp;
 pub mod udp;
 pub mod vlan;
+pub mod gre;
