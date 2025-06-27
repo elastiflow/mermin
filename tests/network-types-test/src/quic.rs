@@ -1,4 +1,5 @@
 use core::mem;
+use crate::{read_var_u32_from_slice, write_var_u32_to_slice};
 
 /// The maximum supported length for a QUIC Connection ID (CID), as per RFC 9000.
 pub const QUIC_MAX_CID_LEN: usize = 20;
@@ -33,6 +34,7 @@ const PN_LENGTH_BITS_MASK: u8 = 0x03;
 #[derive(Debug)]
 pub enum QuicError {
     InvalidQuicType,
+    InvalidQuicFieldLength(usize),
 }
 
 /// Parses a QUIC header from a network buffer within an eBPF context.
@@ -133,15 +135,17 @@ pub enum QuicError {
 macro_rules! parse_quic_hdr {
     ($ctx:expr, $off:ident, $short_dc_id_len:expr) => {
         (|| -> Result<$crate::quic::QuicHdr, ()> {
-            use $crate::{read_var_buf_32, read_var_buf_from_len_byte_16};
             use $crate::quic;
-            let quic_fixed_hdr: quic::QuicFirstByteHdr = $ctx.load($off).map_err(|_| ())?;
+            use $crate::{read_var_buf_32, read_var_buf_from_len_byte_16};
+            let quic_first_byte: quic::QuicFirstByteHdr = $ctx.load($off).map_err(|_| ())?;
             $off += quic::QuicFirstByteHdr::LEN;
-            match quic_fixed_hdr.is_long_header() {
+            match quic_first_byte.is_long_header() {
                 true => {
-                    let quic_fixed_long_hdr: quic::QuicFixedLongHdr = $ctx.load($off).map_err(|_| ())?;
+                    let quic_fixed_long_hdr: quic::QuicFixedLongHdr =
+                        $ctx.load($off).map_err(|_| ())?;
                     $off += quic::QuicFixedLongHdr::LEN;
-                    let mut quic_long_hdr = quic::QuicLongHdr::new(quic_fixed_hdr, quic_fixed_long_hdr);
+                    let mut quic_long_hdr =
+                        quic::QuicLongHdr::new(quic_first_byte, quic_fixed_long_hdr);
                     read_var_buf_32!(
                         $ctx,
                         $off,
@@ -156,11 +160,11 @@ macro_rules! parse_quic_hdr {
                         $ctx,
                         $off,
                         quic_long_hdr.sc_id,
-                        quic_long_hdr.sc_id_len  as usize,
+                        quic_long_hdr.sc_id_len as usize,
                         quic::QUIC_MAX_CID_LEN
                     )
                     .map_err(|_| ())?;
-                     if quic_fixed_hdr.long_packet_type() == 0 {
+                    if quic_first_byte.long_packet_type() == 0 {
                         let token_len_byte: u8 = $ctx.load($off).map_err(|_| ())?;
                         $off += 1;
                         read_var_buf_from_len_byte_16!(
@@ -174,7 +178,7 @@ macro_rules! parse_quic_hdr {
                         let token_len_val = quic_long_hdr.token_len().map_err(|_| ())?;
                         $off += token_len_val;
                     }
-                    if quic_fixed_hdr.long_packet_type() < 3 {
+                    if quic_first_byte.long_packet_type() < 3 {
                         let len_byte: u8 = $ctx.load($off).map_err(|_| ())?;
                         $off += 1;
                         read_var_buf_from_len_byte_16!(
@@ -198,7 +202,7 @@ macro_rules! parse_quic_hdr {
                 }
                 false => {
                     let mut quic_short_hdr =
-                        quic::QuicShortHdr::new($short_dc_id_len, quic_fixed_hdr);
+                        quic::QuicShortHdr::new($short_dc_id_len, quic_first_byte);
                     read_var_buf_32!(
                         $ctx,
                         $off,
@@ -221,7 +225,6 @@ macro_rules! parse_quic_hdr {
         })()
     };
 }
-
 
 /// Represents a QUIC header, which can be either a Long Header or a Short Header.
 ///
@@ -279,10 +282,7 @@ impl QuicLongHdr {
     /// # Returns
     /// A new `QuicLongHdr` instance.
     #[inline]
-    pub fn new(
-        first_byte: QuicFirstByteHdr,
-        fixed_hdr: QuicFixedLongHdr,
-    ) -> Self {
+    pub fn new(first_byte: QuicFirstByteHdr, fixed_hdr: QuicFixedLongHdr) -> Self {
         Self {
             first_byte,
             fixed_hdr,
@@ -345,7 +345,7 @@ impl QuicLongHdr {
     /// # Returns
     /// A `[u8; QUIC_MAX_CID_LEN]` array containing the DCID. Use `dc_id_len()` to get the actual length.
     #[inline]
-    pub fn dc_id(&self) ->  [u8; QUIC_MAX_CID_LEN] {
+    pub fn dc_id(&self) -> [u8; QUIC_MAX_CID_LEN] {
         self.dc_id
     }
 
@@ -474,7 +474,8 @@ impl QuicLongHdr {
         if self.packet_type() == 3 {
             return Err(QuicError::InvalidQuicType);
         }
-        Ok(u32::from_be_bytes(self.pn))
+        read_var_u32_from_slice!(self.first_byte.packet_number_length_long(), self.pn)
+            .map_err(QuicError::InvalidQuicFieldLength)
     }
 
     /// Sets the Packet Number in the header.
@@ -490,8 +491,10 @@ impl QuicLongHdr {
         if self.packet_type() == 3 {
             return Err(QuicError::InvalidQuicType);
         }
-        self.pn = pn.to_be_bytes();
+        let len = write_var_u32_to_slice!(pn, &mut self.pn);
+        self.first_byte.set_packet_number_length_long(len);
         Ok(())
+
     }
 }
 
@@ -499,7 +502,7 @@ impl QuicLongHdr {
 ///
 /// Short Headers are used for 1-RTT packets after the connection handshake is complete.
 /// They are more compact than Long Headers and do not include version information.
-#[repr(C,packed)]
+#[repr(C, packed)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 pub struct QuicShortHdr {
@@ -527,10 +530,7 @@ impl QuicShortHdr {
     /// # Returns
     /// A new `QuicShortHdr` instance.
     #[inline]
-    pub fn new(
-        dc_id_len: u8,
-        first_byte: QuicFirstByteHdr,
-    ) -> Self {
+    pub fn new(dc_id_len: u8, first_byte: QuicFirstByteHdr) -> Self {
         Self {
             dc_id_len,
             first_byte,
@@ -581,8 +581,9 @@ impl QuicShortHdr {
     /// # Returns
     /// The 32-bit packet number.
     #[inline]
-    pub fn pn(&self) -> u32 {
-        u32::from_be_bytes(self.pn)
+    pub fn pn(&self) -> Result<u32, QuicError> {
+        read_var_u32_from_slice!(self.first_byte.packet_number_length_long(), self.pn)
+            .map_err(QuicError::InvalidQuicFieldLength)
     }
 
     /// Sets the Packet Number in the header.
@@ -591,7 +592,8 @@ impl QuicShortHdr {
     /// * `pn`: The 32-bit packet number to set.
     #[inline]
     pub fn set_pn(&mut self, pn: u32) {
-        self.pn = pn.to_be_bytes();
+        let len = write_var_u32_to_slice!(pn, &mut self.pn);
+        self.set_packet_number_length(len);
     }
 
     /// Gets the Spin Bit, used for passive RTT measurement.
@@ -647,7 +649,6 @@ impl QuicShortHdr {
     pub fn set_packet_number_length(&mut self, len: usize) {
         self.first_byte.set_short_packet_number_length(len);
     }
-
 }
 
 /// Represents the fixed portion of a QUIC Long Header that follows the first byte.
@@ -751,9 +752,7 @@ impl QuicFirstByteHdr {
             | ((packet_type & 0b11) << LONG_PACKET_TYPE_SHIFT)
             | ((reserved_bits & 0b11) << RESERVED_BITS_LONG_SHIFT)
             | (pn_len_bits & PN_LENGTH_BITS_MASK);
-        Self {
-            first_byte,
-        }
+        Self { first_byte }
     }
 
     /// Creates the `first_byte` value for a Short Header.
@@ -1088,7 +1087,7 @@ mod tests {
         hdr.set_dc_id(dc_id);
         assert_eq!(hdr.dc_id(), dc_id);
         hdr.set_pn(12345);
-        assert_eq!(hdr.pn(), 12345);
+        assert_eq!(hdr.pn().unwrap(), 12345);
         hdr.set_spin_bit(true);
         assert!(hdr.spin_bit());
         hdr.set_spin_bit(false);
@@ -1368,7 +1367,9 @@ mod tests {
         let pn = [0x1, 0x2];
         payload[len..len + pn.len()].copy_from_slice(&pn);
         len += pn.len();
-        let ctx = MockCtx { buf: &payload[..len] };
+        let ctx = MockCtx {
+            buf: &payload[..len],
+        };
         let mut offset = 0;
         let hdr = parse_quic_hdr!(&ctx, offset, 8).unwrap();
         if let QuicHdr::Short(short_hdr) = hdr {
