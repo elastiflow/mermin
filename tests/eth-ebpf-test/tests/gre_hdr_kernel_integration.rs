@@ -19,131 +19,17 @@ use log::{error, info};
 use socket2::{Domain, Socket, Type};
 use tokio::time::sleep;
 
-const BPF_ELF: &str = concat!(
-env!("CARGO_MANIFEST_DIR"),
-"/../target/bpfel-unknown-none/release/eth-ebpf-test"
-);
+mod common;
+use common::*;
+
 
 const GRE_MAP_NAME: &str = "GREHDR_RESULT";
-const RETRY_INTERVAL: Duration = Duration::from_millis(100);
-const MAX_RETRIES: u32 = 20;
+const PROGRAM_NAME: &str = "gre_hdr_test";
 
-const SHORT_HEADER_MARKER: u32 = 2;
-
-const IP0_V4: &str = "10.42.0.1";
-const IP1_V4: &str = "10.42.0.2";
-const IP0_V6: &str = "fc00:42::1";
-const IP1_V6: &str = "fc00:42::2";
-
-static LOG_INIT: Once = Once::new();
-
-fn setup_logging() {
-    LOG_INIT.call_once(|| {
-        env_logger::builder()
-            .filter_level(log::LevelFilter::Info)
-            .init();
-    });
-}
-
-fn run(cmd: &mut Command) -> Result<()> {
-    info!("Running command: {:?}", cmd);
-    let status = cmd.status().with_context(|| format!("failed: {:?}", cmd))?;
-    if !status.success() {
-        error!("Command failed with status {}: {:?}", status, cmd);
-        anyhow::bail!("command {:?} failed: {status}", cmd);
-    }
-    Ok(())
-}
-
-fn destroy_veth() {
-    info!("Destroying veth pair...");
-    let _ = Command::new("tc")
-        .args(["qdisc", "del", "dev", "veth0", "clsact"])
-        .status();
-    let _ = Command::new("tc")
-        .args(["qdisc", "del", "dev", "veth1", "clsact"])
-        .status();
-    let _ = Command::new("ip").args(["link", "del", "veth0"]).status();
-    std::thread::sleep(Duration::from_millis(50));
-    info!("Veth pair destroyed.");
-}
-
-async fn create_veth() -> Result<()> {
-    info!("Creating veth pair...");
-    destroy_veth();
-
-    run(Command::new("ip").args([
-        "link", "add", "veth0", "type", "veth", "peer", "name", "veth1",
-    ]))?;
-    run(Command::new("ip").args(["addr", "add", &format!("{IP0_V4}/24"), "dev", "veth0"]))?;
-    run(Command::new("ip").args(["addr", "add", &format!("{IP1_V4}/24"), "dev", "veth1"]))?;
-    run(Command::new("ip").args([
-        "-6",
-        "addr",
-        "add",
-        &format!("{IP0_V6}/64"),
-        "dev",
-        "veth0",
-        "nodad",
-    ]))?;
-    run(Command::new("ip").args([
-        "-6",
-        "addr",
-        "add",
-        &format!("{IP1_V6}/64"),
-        "dev",
-        "veth1",
-        "nodad",
-    ]))?;
-
-    run(Command::new("ip").args(["link", "set", "veth0", "up"]))?;
-    run(Command::new("ip").args(["link", "set", "veth1", "up"]))?;
-
-    run(Command::new("tc").args(["qdisc", "add", "dev", "veth0", "clsact"]))?;
-    run(Command::new("tc").args(["qdisc", "add", "dev", "veth1", "clsact"]))?;
-
-    info!("Priming neighbour caches…");
-    run(Command::new("ping").args(["-c", "1", "-W", "1", "-I", IP1_V4, IP0_V4]))?;
-    run(Command::new("ping").args(["-c", "1", "-W", "1", "-I", IP0_V4, IP1_V4]))?;
-    run(Command::new("ping6").args(["-c", "1", "-W", "1", "-I", IP1_V6, IP0_V6]))?;
-    run(Command::new("ping6").args(["-c", "1", "-W", "1", "-I", IP0_V6, IP1_V6]))?;
-
-    sleep(Duration::from_millis(200)).await;
-    info!("Veth setup complete.");
-    Ok(())
-}
-
-fn load_and_attach() -> Result<Ebpf> {
-    info!("Loading eBPF program from: {}", BPF_ELF);
-    let mut bpf = Ebpf::load_file(BPF_ELF).context("load BPF object")?;
-
-    let prog: &mut SchedClassifier = bpf
-        .program_mut("gre_hdr_test")
-        .context("program not found")?
-        .try_into()?;
-
-    prog.load()?;
-    prog.attach("veth0", TcAttachType::Ingress)?;
-    info!("eBPF program loaded and attached successfully.");
-    Ok(bpf)
-}
-
-/// Creates a socket bound to a specific interface (`veth1`).
-fn create_socket_for_sender(addr: SocketAddr) -> Result<UdpSocket> {
-    let socket = Socket::new(
-        if addr.is_ipv4() {
-            Domain::IPV4
-        } else {
-            Domain::IPV6
-        },
-        Type::DGRAM,
-        None,
-    )?;
-    socket.bind_device(Some(b"veth1\0"))?;
-    socket.bind(&addr.into())?;
-    Ok(socket.into())
-}
-
+/// Reads GRE header parsing results from the eBPF map.
+/// It waits for the map to be populated and then clears it.
+///
+/// Returns (flags, version, protocol, checksum, key, sequence)
 async fn get_gre_map_result(bpf: &mut Ebpf) -> Result<(u32, u32, u32, u32, u32, u32)> {
     // Return flags, version, protocol, checksum, key, sequence from kernel space map
     let mut map = UserHashMap::try_from(bpf.map_mut(GRE_MAP_NAME).context("gre map not present")?)?;
@@ -181,7 +67,7 @@ async fn gre_expected_values_all_flags_on() -> Result<()> {
     setup_logging();
     info!("--- gre_expected_values ---");
     create_veth().await?;
-    let mut bpf = load_and_attach()?;
+    let mut bpf = load_and_attach_bpf(PROGRAM_NAME)?;
     let _log = EbpfLogger::init(&mut bpf).context("eBPF logger")?;
 
     // Payload should be 4 total bytes
