@@ -11,6 +11,7 @@ mod common;
 mod quic;
 mod gre;
 mod ospf;
+mod bgp;
 
 
 /// IPv6 Fragment‑header – RFC 8200 §4.5 (8 bytes)
@@ -70,6 +71,23 @@ pub fn ospf_hdr_test(ctx: TcContext) -> i32 {
     }
 
     match ospf::try_ospf_hdr_test(ctx, map) {
+        Ok(ret) | Err(ret) => ret,
+    }
+}
+
+
+/// TC-ingress entry-point for BGP
+#[classifier]
+pub fn bgp_hdr_test(ctx: TcContext) -> i32 {
+    // Explicitly annotate the type of `map` as `&mut HashMap<u32, u32>`
+    let map: &mut HashMap<u32, u32> = unsafe { &mut *(&raw mut bgp::BGPHDR_RESULT as *mut _) };
+
+    // Initialize map entry if not present (for test setup)
+    if unsafe { map.get(&0).is_none() } {
+        unsafe { bgp::store_result(map, 0, 0, 0, 0, 0, 0, 0, 0) };
+    }
+
+    match bgp::try_bgp_hdr_test(ctx, map) {
         Ok(ret) | Err(ret) => ret,
     }
 }

@@ -82,17 +82,12 @@ env!("CARGO_MANIFEST_DIR"),
 "/../target/bpfel-unknown-none/release/eth-ebpf-test"
 );
 
-/// The name of the eBPF map used for GRE header results.
-pub const GRE_MAP_NAME: &str = "GREHDR_RESULT";
-
 /// Interval for retrying map reads.
 pub const RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Maximum number of retries for map reads.
 pub const MAX_RETRIES: u32 = 20;
 
-/// Marker for short headers, specific to certain protocols like QUIC, but kept here for general test context.
-pub const SHORT_HEADER_MARKER: u32 = 2;
 
 /// IPv4 address for veth0.
 pub const IP0_V4: &str = "10.42.0.1";

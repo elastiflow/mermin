@@ -1,5 +1,5 @@
 //! End‑to‑end tests that load the real eBPF program, inject packets over a
-//! veth pair, and confirm that the QUIC header was parsed in‑kernel.
+//! veth pair, and confirm that the OSPF header was parsed in‑kernel.
 
 use std::{
     net::{SocketAddr, UdpSocket},

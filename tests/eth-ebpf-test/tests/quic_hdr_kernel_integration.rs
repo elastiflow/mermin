@@ -24,6 +24,7 @@ use common::*;
 
 const MAP_NAME: &str = "QUICHDR_RESULT";
 const PROGRAM_NAME: &str = "quic_hdr_test";
+pub const SHORT_HEADER_MARKER: u32 = 2;
 
 async fn get_map_result(bpf: &mut Ebpf) -> Result<(u32, u32, u32)> {
     let mut map = UserHashMap::try_from(bpf.map_mut(MAP_NAME).context("map not present")?)?;
