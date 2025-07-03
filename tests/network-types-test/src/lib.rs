@@ -6,6 +6,7 @@ pub mod arp;
 pub mod bgp;
 pub mod bitfield;
 pub mod eth;
+pub mod geneve;
 pub mod gre;
 pub mod ip;
 pub mod ospf;

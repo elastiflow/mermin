@@ -38,7 +38,7 @@ pub unsafe fn store_result(
     let _ = map.insert(&7, &custom2, 0);
 }
 
-/// Tries to parse a OSPD header from the packet context.
+/// Tries to parse an OSPF header from the packet context.
 pub fn try_ospf_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<i32, i32> {
     let (mut off, _udp_hdr) = parse_ether_ip_udp(&ctx)?;
     let payload_len = _udp_hdr.len() as usize - UdpHdr::LEN;
@@ -68,7 +68,7 @@ pub fn try_ospf_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<
                 authentication.as_slice()
             );
 
-            /// Authentication param not sent back to user space as it is too long for logging as u32
+            // Authentication param not sent back to user space as it is too long for logging as u32
             unsafe { 
                 store_result(
                     map,

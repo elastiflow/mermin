@@ -54,7 +54,7 @@ sudo --preserve-env=PATH \
          "$CARGO_BIN" test -p eth-ebpf-test \
          --test ospf_hdr_kernel_integration \
          -- --test-threads=1 --nocapture
-         
+
 # Run BGP tests
 echo "=== Running BGP header tests ==="
 sudo --preserve-env=PATH \
