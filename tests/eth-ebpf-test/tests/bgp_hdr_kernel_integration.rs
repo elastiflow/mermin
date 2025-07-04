@@ -46,6 +46,7 @@ async fn get_map_result(bpf: &mut Ebpf) -> Result<(u32, u32, u32, u32, u32, u32,
                 let _ = map.remove(&4);
                 let _ = map.remove(&5);
                 let _ = map.remove(&6);
+                let _ = map.remove(&7);
 
                 return Ok((marker, length, msg_type, custom1, custom2, custom3, custom4, custom5));
             }

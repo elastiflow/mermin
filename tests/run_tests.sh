@@ -76,3 +76,14 @@ sudo --preserve-env=PATH \
          "$CARGO_BIN" test -p eth-ebpf-test \
          --test geneve_hdr_kernel_integration \
          -- --test-threads=1 --nocapture
+
+# Run SCTP tests
+echo "=== Running SCTP header tests ==="
+sudo --preserve-env=PATH \
+     env CARGO_HOME="$CARGO_HOME" \
+         RUSTUP_HOME="$RUSTUP_HOME" \
+         RUSTUP_TOOLCHAIN=nightly \
+         RUST_LOG=info,eth_ebpf_test=debug \
+         "$CARGO_BIN" test -p eth-ebpf-test \
+         --test sctp_hdr_kernel_integration \
+         -- --test-threads=1 --nocapture

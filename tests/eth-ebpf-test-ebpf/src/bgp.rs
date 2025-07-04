@@ -35,10 +35,10 @@ pub unsafe fn store_result(
     let _ = map.insert(&7, &custom5, 0);
 }
 
-/// Tries to parse a OSPD header from the packet context.
+/// Tries to parse a BGP header from the packet context.
 pub fn try_bgp_hdr_test(ctx: TcContext, map: &mut HashMap<u32, u32>) -> Result<i32, i32> {
     let (mut off, _udp_hdr) = parse_ether_ip_udp(&ctx)?;
-    debug!(&ctx, "UDP processing done. Advancing to OSPF payload at offset {}.", off );
+    debug!(&ctx, "UDP processing done. Advancing to BGP payload at offset {}.", off );
 
     match parse_bgp_hdr!(&ctx, off).map_err(|_| TC_ACT_PIPE) {
             Ok(BgpHdr::Open(hdr)) => {
