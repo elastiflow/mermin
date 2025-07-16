@@ -64,9 +64,9 @@ pub struct FlowRecord {
     pub dst_ipv6_addr: [u8; 16],
 
     // /// Total number of packets observed for this flow since its start.
-    // pub packet_total_count: u64,
+    pub packet_total_count: u64,
     // /// Total number of bytes (octets) observed for this flow since its start.
-    // pub octet_total_count: u64,
+    pub octet_total_count: u64,
     // /// Number of packets observed in the last measurement interval.
     // pub packet_delta_count: u64,
     // /// Number of bytes (octets) observed in the last measurement interval.
@@ -221,15 +221,17 @@ mod tests {
         // Calculate expected size:
         // src_ipv6_addr: [u8; 16] = 16 bytes
         // dst_ipv6_addr: [u8; 16] = 16 bytes
+        // packet_total_count: u64 = 8 bytes
+        // octet_total_count: u64 = 8 bytes
         // src_ipv4_addr: u32 = 4 bytes
         // dst_ipv4_addr: u32 = 4 bytes
         // src_port: u16 = 2 bytes
         // dst_port: u16 = 2 bytes
         // protocol: u8 = 1 byte
-        // + padding for alignment = 3 bytes (to make total a multiple of 4)
-        // Total = 48 bytes
+        // + padding for alignment = 3 bytes (to make total a multiple of 8)
+        // Total = 64 bytes
 
-        let expected_size = 48;
+        let expected_size = 64;
         let actual_size = size_of::<FlowRecord>();
 
         assert_eq!(
@@ -241,8 +243,8 @@ mod tests {
         );
 
         // Verify the alignment (should be the max alignment of members)
-        // For this struct, the largest alignment would be for u32 fields (4 bytes)
-        let expected_alignment = 4;
+        // For this struct, the largest alignment would be for u64 fields (8 bytes)
+        let expected_alignment = 8;
         let actual_alignment = align_of::<FlowRecord>();
 
         assert_eq!(
@@ -261,10 +263,14 @@ mod tests {
         let src_ipv6_val: [u8; 16] = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01];
         let dst_ipv4_val: u32 = 0xC0A80101; // 192.168.1.1
         let dst_ipv6_val: [u8; 16] = [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01];
+        let packet_count: u64 = 100;
+        let octet_count: u64 = 15000;
 
         let record = FlowRecord {
             src_ipv6_addr: src_ipv6_val,
             dst_ipv6_addr: dst_ipv6_val,
+            packet_total_count: packet_count,
+            octet_total_count: octet_count,
             src_ipv4_addr: src_ipv4_val,
             dst_ipv4_addr: dst_ipv4_val,
             src_port: 12345,
@@ -280,5 +286,9 @@ mod tests {
         assert_eq!(record.src_port, 12345);
         assert_eq!(record.dst_port, 80);
         assert_eq!(record.protocol, 6);
+
+        // Test packet and octet count fields
+        assert_eq!(record.packet_total_count, packet_count);
+        assert_eq!(record.octet_total_count, octet_count);
     }
 }
