@@ -1,0 +1,11 @@
+{
+  "name": "ays-devcontainer",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "privileged": true,
+  "runArgs": [
+    "--cap-add=CAP_BPF"
+  ],
+  "postCreateCommand": "sudo mount -t debugfs debugfs /sys/kernel/debug/"
+}
