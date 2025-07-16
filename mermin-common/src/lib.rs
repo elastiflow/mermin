@@ -188,8 +188,16 @@ mod tests {
 
         // Safe access using the helper function (still needs unsafe block)
         unsafe {
-            assert_eq!(c_repr_v4.ip_address(), Some(IpAddr::V4(ipv4_val)));
-            assert_eq!(c_repr_v6.ip_address(), Some(IpAddr::V6(ipv6_val)));
+            // Use match to compare Option values
+            match c_repr_v4.ip_address() {
+                Some(IpAddr::V4(addr)) => assert_eq!(addr, ipv4_val),
+                _ => panic!("Expected Some(IpAddr::V4)"),
+            }
+
+            match c_repr_v6.ip_address() {
+                Some(IpAddr::V6(addr)) => assert_eq!(addr, ipv6_val),
+                _ => panic!("Expected Some(IpAddr::V6)"),
+            }
         }
 
         // Test invalid tag case (manually construct - normally avoided)
@@ -199,60 +207,78 @@ mod tests {
             addr: IpAddrUnion { v4: 0 }, // Content doesn't matter here
         };
         unsafe {
-            assert_eq!(invalid_repr.ip_address(), None);
+            // Use match to check for None
+            match invalid_repr.ip_address() {
+                None => (), // This is what we expect
+                Some(_) => panic!("Expected None for invalid tag"),
+            }
         }
     }
 
     // Test FlowRecord size and alignment
     #[test]
     fn test_flow_record_layout() {
-        // Verify the size based on manual calculation (including padding)
+        // Calculate expected size:
+        // src_ipv6_addr: [u8; 16] = 16 bytes
+        // dst_ipv6_addr: [u8; 16] = 16 bytes
+        // src_ipv4_addr: u32 = 4 bytes
+        // dst_ipv4_addr: u32 = 4 bytes
+        // src_port: u16 = 2 bytes
+        // dst_port: u16 = 2 bytes
+        // protocol: u8 = 1 byte
+        // + padding for alignment = 3 bytes (to make total a multiple of 4)
+        // Total = 48 bytes
+
+        let expected_size = 48;
+        let actual_size = size_of::<FlowRecord>();
+
         assert_eq!(
-            size_of::<FlowRecord>(),
-            88,
-            "Size of FlowRecord should be 88 bytes"
+            actual_size,
+            expected_size,
+            "Size of FlowRecord should be {} bytes, but was {} bytes",
+            expected_size,
+            actual_size
         );
 
-        // Verify the alignment (should be max alignment of members, which is u64's 8 bytes)
+        // Verify the alignment (should be the max alignment of members)
+        // For this struct, the largest alignment would be for u32 fields (4 bytes)
+        let expected_alignment = 4;
+        let actual_alignment = align_of::<FlowRecord>();
+
         assert_eq!(
-            align_of::<FlowRecord>(),
-            8,
-            "Alignment of FlowRecord should be 8 bytes"
+            actual_alignment,
+            expected_alignment,
+            "Alignment of FlowRecord should be {} bytes, but was {} bytes",
+            expected_alignment,
+            actual_alignment
         );
     }
 
     // Test basic FlowRecord instantiation and field access
     #[test]
     fn test_flow_record_creation() {
-        let src_ip_val: u32 = 0x0A000001; // 10.0.0.1
-        let dst_ip_val: [u8; 16] = [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01];
-        let src_ip = CReprIpAddr::new_v4(src_ip_val);
-        let dst_ip = CReprIpAddr::new_v6(dst_ip_val);
+        let src_ipv4_val: u32 = 0x0A000001; // 10.0.0.1
+        let src_ipv6_val: [u8; 16] = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01];
+        let dst_ipv4_val: u32 = 0xC0A80101; // 192.168.1.1
+        let dst_ipv6_val: [u8; 16] = [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01];
 
         let record = FlowRecord {
-            packet_total_count: 100,
-            octet_total_count: 10000,
-            packet_delta_count: 10,
-            octet_delta_count: 1000,
-            flow_start_seconds: 1678886400,
-            flow_end_seconds: 1678886460,
-            src_ip,
-            dst_ip,
+            src_ipv6_addr: src_ipv6_val,
+            dst_ipv6_addr: dst_ipv6_val,
+            src_ipv4_addr: src_ipv4_val,
+            dst_ipv4_addr: dst_ipv4_val,
             src_port: 12345,
             dst_port: 80,
-            protocol: 6,        // TCP
-            flow_end_reason: 1, // Example reason
+            protocol: 6, // TCP
         };
 
-        assert_eq!(record.packet_total_count, 100);
-        assert_eq!(record.flow_start_seconds, 1678886400);
+        // Test field access
+        assert_eq!(record.src_ipv4_addr, src_ipv4_val);
+        assert_eq!(record.dst_ipv4_addr, dst_ipv4_val);
+        assert_eq!(record.src_ipv6_addr, src_ipv6_val);
+        assert_eq!(record.dst_ipv6_addr, dst_ipv6_val);
         assert_eq!(record.src_port, 12345);
+        assert_eq!(record.dst_port, 80);
         assert_eq!(record.protocol, 6);
-        assert_eq!(record.flow_end_reason, 1);
-        // Check IPs using the helper function
-        unsafe {
-            assert_eq!(record.src_ip.ip_address(), Some(IpAddr::V4(src_ip_val)));
-            assert_eq!(record.dst_ip.ip_address(), Some(IpAddr::V6(dst_ip_val)));
-        }
     }
 }
