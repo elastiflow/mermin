@@ -6,7 +6,7 @@ edition = "2021"
 license.workspace = true
 
 [dependencies]
-mermin-common = { path = "../mermin-common", features = ["user"] }
+mermin-common = { path = "../mermin-common", features = [] }
 
 anyhow = { workspace = true, default-features = true }
 aya = { workspace = true }
