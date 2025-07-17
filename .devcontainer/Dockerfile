@@ -1,23 +1,46 @@
+# Start from the official Rust dev container image
 FROM mcr.microsoft.com/devcontainers/rust:1-bookworm
 
-# Install llvm
-RUN apt-get update \
-  && apt install -y lsb-release wget software-properties-common gnupg \
-  && wget https://apt.llvm.org/llvm.sh \
-  && chmod a+x llvm.sh \
-  && ./llvm.sh 19 all \
-  && apt install -y libclang-19-dev libpolly-19-dev libzstd-dev bpftool \
-  && apt autoremove -y
+# Switch to root to install system dependencies
+USER root
 
-# Install Rust with nightly sources
-ENV RUST_VERSION=stable
+# Install LLVM 20 and the essential eBPF dependencies in a single layer
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    lsb-release wget software-properties-common gnupg \
+    && wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh \
+    && chmod +x /tmp/llvm.sh \
+    # Execute the script to install LLVM, Clang, and related tools version 20
+    && /tmp/llvm.sh 20 all \
+    # Install development headers and tools required for building and running Aya
+    && apt-get install -y --no-install-recommends \
+        libclang-20-dev \
+        llvm-20-dev \
+        libelf-dev \
+        zlib1g-dev \
+        libzstd-dev \
+        libbpf-tools \
+    # Clean up downloaded packages and lists to keep the image size down
+    && apt-get autoremove -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/llvm.sh
+
+# Set environment variables to help Rust's build scripts find LLVM 20.
+# The `llvm-sys` crate specifically looks for the `LLVM_SYS_..._PREFIX` variable format.
+ENV LLVM_SYS_201_PREFIX=/usr/lib/llvm-20
+# Also add LLVM's tools (like llvm-config) to the PATH
+ENV PATH="/usr/lib/llvm-20/bin:${PATH}"
+
+# Switch back to the non-root vscode user, which is the default user in the base image.
 USER vscode
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=$RUST_VERSION
-RUN rustup toolchain install nightly --component rust-src
-RUN export LLVM_SYS_191_PREFIX=/usr/include/llvm-19
-ENV PATH "$PATH:/usr/local/cargo/bin"
 
-# BPF and aya tools
-RUN cargo install --no-default-features bpf-linker
-RUN cargo install bindgen-cli cargo-generate
-RUN cargo install --git https://github.com/aya-rs/aya -- aya-tool
+# Install and set the nightly toolchain as the default.
+# This is required for eBPF development with Aya.
+RUN rustup toolchain install nightly && \
+    rustup component add rust-src --toolchain nightly && \
+    rustup default nightly
+
+# Install the latest PUBLISHED versions of the core Aya tools.
+# We chain the commands with '&&' to ensure they run sequentially.
+RUN cargo install bpf-linker --no-default-features && \
+    cargo install bindgen-cli && \
+    cargo install --git https://github.com/aya-rs/aya --locked aya-tool
