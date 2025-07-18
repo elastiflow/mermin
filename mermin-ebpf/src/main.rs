@@ -224,6 +224,12 @@ fn parse_proto_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
     Ok(())
 }
 
+#[cfg(not(test))]
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    loop {}
+}
+
 #[link_section = "license"]
 #[no_mangle]
 static LICENSE: [u8; 6] = *b"GPLv2\0"; // Corrected license string length and array size
