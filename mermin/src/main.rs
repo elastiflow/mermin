@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
     // reach for `Bpf::load_file` instead.
     let mut ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
         env!("OUT_DIR"),
-        "/mergent"
+        "/mermin"
     )))?;
     if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
         // This can happen if you remove all log statements from your eBPF program.
@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
     // error adding clsact to the interface if it is already added is harmless
     // the full cleanup can be done with 'sudo tc qdisc del dev eth0 clsact'.
     let _ = tc::qdisc_add_clsact(&iface);
-    let program: &mut SchedClassifier = ebpf.program_mut("mergent").unwrap().try_into()?;
+    let program: &mut SchedClassifier = ebpf.program_mut("mermin").unwrap().try_into()?;
     program.load()?;
     program.attach(&iface, TcAttachType::Egress)?;
 

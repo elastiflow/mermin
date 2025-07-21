@@ -1,5 +1,5 @@
 [package]
-name = "mergent-common"
+name = "mermin-common"
 version = "0.1.0"
 edition = "2021"
 

@@ -1,0 +1,26 @@
+{
+  "name": "aya-mermin",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "privileged": true,
+  "runArgs": [],
+  "customizations": {
+    "jetbrains": {
+      "plugins": [
+        "org.jetbrains.junie",
+        "org.intellij.plugins.hcl",
+        "com.intellij.kubernetes",
+        "org.jetbrains.completion.full.line",
+        "com.intellij.ml.llm"
+      ],
+      "settings": {
+        "Git4Idea:app:Git-Application-Settings.use_credential_helper": true,
+        "com.intellij:app:HttpConfigurable.use_proxy_pac": true
+      }
+    }
+  },
+  "remoteUser": "vscode",
+  "postCreateCommand": "sudo mount -t debugfs debugfs /sys/kernel/debug/"
+}
