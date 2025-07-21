@@ -1,11 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-    "mergent",
-    "mergent-common",
-    "mergent-ebpf",
+    "mermin",
+    "mermin-common",
+    "mermin-ebpf",
+    "network-types",
 ]
-default-members = ["mergent", "mergent-common"]
+default-members = ["mermin", "mermin-common"]
 
 [workspace.package]
 license = "MIT OR Apache-2.0"
@@ -28,6 +29,6 @@ log = { version = "0.4.22", default-features = false }
 tokio = { version = "1.40.0", default-features = false }
 which = { version = "6.0.0", default-features = false }
 
-[profile.release.package.mergent-ebpf]
+[profile.release.package.mermin-ebpf]
 debug = 2
 codegen-units = 1
