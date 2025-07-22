@@ -5,9 +5,11 @@ use aya_ebpf::bindings::TC_ACT_PIPE;
 use aya_ebpf::macros::classifier;
 use aya_ebpf::programs::TcContext;
 use aya_log_ebpf::{debug, error, warn};
-use mermin_common::{CReprIpAddr, FlowRecord};
+use mermin_common::{CReprIpAddr};
 use network_types::eth::{EthHdr, EtherType};
 use network_types::ip::{IpProto, Ipv4Hdr, Ipv6Hdr};
+use network_types::tcp::TcpHdr;
+use network_types::udp::UdpHdr;
 
 // Defines what kind of header we expect to process in the current iteration.
 #[derive(Debug)]
@@ -61,7 +63,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
 
     debug!(&ctx, "mermin: parsing packet");
 
-    for i in 0..MAX_HEADER_PARSE_DEPTH {
+    for _ in 0..MAX_HEADER_PARSE_DEPTH {
         let result: Result<(), ()> = match parser.next_hdr {
             HeaderType::Ethernet => parse_ethernet_header(&ctx, &mut parser),
             HeaderType::Ipv4 => parse_ipv4_header(&ctx, &mut parser),
@@ -105,11 +107,11 @@ fn parse_ethernet_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()>
     
     // todo: Extract eth_hdr.src_addr and eth_hdr.dst_addr into src_mac_addr and dst_mac_addr fields
 
-    match eth_hdr.ether_type {
-        EtherType::Ipv4 => parser.next_hdr = HeaderType::Ipv4,
-        EtherType::Ipv6 => parser.next_hdr = HeaderType::Ipv6,
+    match eth_hdr.ether_type() {
+        Ok(EtherType::Ipv4) => parser.next_hdr = HeaderType::Ipv4,
+        Ok(EtherType::Ipv6) => parser.next_hdr = HeaderType::Ipv6,
         _ => {
-            warn!(ctx, "ethernet header contains unsupported ether type: {}", eth_hdr.ether_type as u16);
+            warn!(ctx, "ethernet header contains unsupported ether type: {}", eth_hdr.ether_type);
             parser.next_hdr = HeaderType::StopProcessing;
             return Ok(());
         }
@@ -226,11 +228,65 @@ fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
     Ok(())
 }
 
+/// Parses the TCP header in the packet and updates the parser state accordingly.
+/// Returns an error if the header cannot be loaded.
+///
+///    0                   1                   2                   3
+///    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///   |          Source Port          |       Destination Port        |
+///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///   |                        Sequence Number                        |
+///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///   |                    Acknowledgment Number                      |
+///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///   |  Data |     |N|C|E|U|A|P|R|S|F|                               |
+///   | Offset| Rsrv|S|R|C|R|C|S|S|Y|I|            Window             |
+///   |       |     | |W|E|G|K|H|T|N|N|                               |
+///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///   |           Checksum            |         Urgent Pointer        |
+///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///   |                            Options                            |
+///   /                              ...                              /
+///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///   |                            Padding                            |
+///   /                              ...                              /
+///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///   |                             data                              |
+///   /                              ...                              /
+///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 fn parse_tcp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
+    let tcp_hdr: TcpHdr = ctx.load(parser.offset).map_err(|_| ())?;
+    parser.offset += TcpHdr::LEN;
+
+    parser.flow_src_port = Option::from(tcp_hdr.src_port());
+    parser.flow_dst_port = Option::from(tcp_hdr.dst_port());
+    // TODO: extract and assign additional tcp fields
+
     Ok(())
 }
 
+/// Parses the UDP header in the packet and updates the parser state accordingly.
+/// Returns an error if the header cannot be loaded.
+///
+///   0                   1                   2                   3
+///   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///  |          Source Port          |       Destination Port        |
+///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///  |          PDU Length           |           Checksum            |
+///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///  |                             data                              |
+///  /                              ...                              /
+///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 fn parse_udp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
+    let udp_hdr: UdpHdr = ctx.load(parser.offset).map_err(|_| ())?;
+    parser.offset += UdpHdr::LEN;
+
+    parser.flow_src_port = Option::from(udp_hdr.src_port());
+    parser.flow_dst_port = Option::from(udp_hdr.dst_port());
+    // TODO: extract and assign additional tcp fields
+
     Ok(())
 }
 
