@@ -1,0 +1,20 @@
+[package]
+name = "integration-ebpf"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[dependencies]
+aya-ebpf = { workspace = true, optional = true }
+integration-common = { path = "../integration-common" }
+network-types = { path = "../../network-types" }
+
+[lib]
+# This crate is a library that produces a static binary, not a normal Rust library.
+crate-type = ["staticlib"]
+
+[profile.release]
+# These settings are essential for eBPF programs.
+panic = "abort"
+lto = "fat"
+codegen-units = 1
