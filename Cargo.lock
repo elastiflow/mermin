@@ -460,7 +460,7 @@ dependencies = [
  "aya-ebpf",
  "aya-log-ebpf",
  "mermin-common",
- "network-types 0.0.8",
+ "network-types",
  "which",
 ]
 
@@ -483,12 +483,6 @@ dependencies = [
  "wasi",
  "windows-sys 0.59.0",
 ]
-
-[[package]]
-name = "network-types"
-version = "0.0.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2df15b1cb023b9d205ae287d5dbe74510ae4d62b5131ceec516f4913ed05230"
 
 [[package]]
 name = "network-types"
