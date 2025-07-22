@@ -1,7 +1,5 @@
 #![no_std]
 
-use core::net::Ipv4Addr;
-
 // Your existing shared data structure
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]

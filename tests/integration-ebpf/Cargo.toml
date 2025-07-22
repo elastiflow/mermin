@@ -5,9 +5,10 @@ edition = "2024"
 license.workspace = true
 
 [dependencies]
-aya-ebpf = { workspace = true, optional = true }
+aya-ebpf = { workspace = true }
 integration-common = { path = "../integration-common" }
 network-types = { path = "../../network-types" }
+log = { workspace = true }
 
 [lib]
 # This crate is a library that produces a static binary, not a normal Rust library.

@@ -6,7 +6,7 @@ use aya::{
 };
 use aya_log::BpfLogger;
 use bytes::BytesMut;
-use integration_common::{ParsedData, REQUEST_DATA_SIZE};
+use integration_common::{ParsedHeader, REQUEST_DATA_SIZE};
 use log::warn;
 use std::{mem::size_of, sync::Once};
 use tokio::sync::oneshot;
@@ -20,7 +20,7 @@ static LOG_INIT: Once = Once::new();
 pub struct TestHarness {
     pub bpf: Bpf,
     pub in_data: HashMap<std::os::fd::RawFd, u32, [u8; REQUEST_DATA_SIZE]>,
-    result_rx: oneshot::Receiver<ParsedData>,
+    result_rx: oneshot::Receiver<ParsedHeader>,
 }
 
 impl TestHarness {
@@ -31,7 +31,7 @@ impl TestHarness {
     pub async fn trigger_and_receive(
         &mut self,
         data_to_send: [u8; REQUEST_DATA_SIZE],
-    ) -> Result<ParsedData, anyhow::Error> {
+    ) -> Result<ParsedHeader, anyhow::Error> {
         // Get our process ID to use as the map key.
         let pid = unsafe { libc::getpid() } as u32;
 
@@ -77,21 +77,21 @@ pub async fn setup_test() -> Result<TestHarness, anyhow::Error> {
     program.attach("__x64_sys_getpid", 0)?;
 
     // Get handles to the BPF maps.
-    let in_data: HashMap<_, u32, _> = HashMap::try_from(bpf.map_mut("IN_DATA")?)?;
-    let mut out_data: AsyncPerfEventArray<_> = AsyncPerfEventArray::try_from(bpf.map_mut("OUT_DATA")?)?;
+    let in_data: HashMap<_, u32, _> = HashMap::try_from(bpf.map_mut("IN_DATA"))?;
+    let mut out_data: AsyncPerfEventArray<_> = AsyncPerfEventArray::try_from(bpf.map_mut("OUT_DATA"))?;
 
     // Create a channel to receive the result from the kernel.
-    let (tx, rx) = oneshot::channel::<ParsedData>();
+    let (tx, rx) = oneshot::channel::<ParsedHeader>();
 
     // Spawn a task to listen on the perf event array.
     tokio::spawn(async move {
         let mut perf_buf = out_data.open(0, None).unwrap();
-        let mut buffers = [BytesMut::with_capacity(size_of::<ParsedData>())];
+        let mut buffers = [BytesMut::with_capacity(size_of::<ParsedHeader>())];
         let events = perf_buf.read_events(&mut buffers).await.unwrap();
 
         // When an event is received, parse it and send it through the channel.
         if events.read > 0 {
-            let data = unsafe { (buffers[0].as_ptr() as *const ParsedData).read_unaligned() };
+            let data = unsafe { (buffers[0].as_ptr() as *const ParsedHeader).read_unaligned() };
             let _ = tx.send(data);
         }
     });
