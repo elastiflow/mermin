@@ -10,6 +10,7 @@ use network_types::eth::{EthHdr, EtherType};
 use network_types::ip::{IpProto, Ipv4Hdr, Ipv6Hdr};
 
 // Defines what kind of header we expect to process in the current iteration.
+#[derive(Debug)]
 enum HeaderType {
     Ethernet,
     Ipv4,
@@ -65,7 +66,12 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Ethernet => parse_ethernet_header(&ctx, &mut parser),
             HeaderType::Ipv4 => parse_ipv4_header(&ctx, &mut parser),
             HeaderType::Ipv6 => parse_ipv6_header(&ctx, &mut parser),
-            HeaderType::Proto(_) => parse_proto_header(&ctx, &mut parser),
+            HeaderType::Proto(IpProto::Tcp) => parse_tcp_header(&ctx, &mut parser),
+            HeaderType::Proto(IpProto::Udp) => parse_udp_header(&ctx, &mut parser),
+            HeaderType::Proto(proto) => {
+                debug!(&ctx, "mermin: skipped parsing of unsupported protocol {}", proto as u8);
+                break
+            },
             HeaderType::StopProcessing => break, // Graceful stop
             HeaderType::ErrorOccurred => return Ok(TC_ACT_PIPE), // Error, pass packet
         };
@@ -105,7 +111,7 @@ fn parse_ethernet_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()>
         _ => {
             warn!(ctx, "ethernet header contains unsupported ether type: {}", eth_hdr.ether_type as u16);
             parser.next_hdr = HeaderType::StopProcessing;
-            return Err(());
+            return Ok(());
         }
     }
     Ok(())
@@ -154,7 +160,7 @@ fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
         _ => {
             warn!(ctx, "ipv4 header contains unsupported protocol: {}", next_hdr as u8);
             parser.next_hdr = HeaderType::StopProcessing;
-            return Err(());
+            return Ok(());
         }
     }
     Ok(())
@@ -214,13 +220,17 @@ fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
         _ => {
             warn!(ctx, "ipv6 header contains unsupported next header type: {}", next_hdr as u8);
             parser.next_hdr = HeaderType::StopProcessing;
-            return Err(());
+            return Ok(());
         }
     }
     Ok(())
 }
 
-fn parse_proto_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
+fn parse_tcp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
+    Ok(())
+}
+
+fn parse_udp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
     Ok(())
 }
 
