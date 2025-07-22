@@ -5,10 +5,10 @@ edition = "2021"
 
 [dependencies]
 mermin-common = { path = "../mermin-common" }
+network-types = { path = "../network-types" }
 
 aya-ebpf = { workspace = true }
 aya-log-ebpf = { workspace = true }
-network-types = "0.0.8"
 
 [build-dependencies]
 which = { workspace = true }
