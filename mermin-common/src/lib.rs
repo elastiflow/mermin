@@ -144,7 +144,7 @@ impl CReprIpAddr {
 
 #[cfg(test)]
 mod tests {
-    use super::*; // Import items from the parent module (lib.rs)
+    use super::*; // Import items from the parent module (main)
     use core::mem::{align_of, size_of};
 
     // Test CReprIpAddr::new_v4 constructor
