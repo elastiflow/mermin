@@ -21,8 +21,6 @@ RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
 # 1. Clean previous build artifacts
 ################################################################################
 echo "=== Cleaning project (with sudo) ==="
-# We execute 'cargo clean' using its full path with sudo to ensure it has
-# permissions to remove files created by previous root-level test runs.
 sudo --preserve-env=PATH \
      env CARGO_HOME="$CARGO_HOME" \
          RUSTUP_HOME="$RUSTUP_HOME" \
@@ -32,7 +30,6 @@ sudo --preserve-env=PATH \
 # 2. Build the eBPF object file
 ################################################################################
 echo "=== Building eBPF object file ==="
-# This build step does not require sudo.
 rustup run nightly \
   "$CARGO_BIN" -Z build-std=core \
         build -p integration-ebpf \
@@ -42,8 +39,6 @@ rustup run nightly \
 # 3. Run the integration tests
 ################################################################################
 echo "=== Running integration tests ==="
-# We execute 'cargo test' using its full path with sudo.
-# We pass the necessary environment variables for the Rust toolchain to work correctly.
 sudo --preserve-env=PATH \
      env CARGO_HOME="$CARGO_HOME" \
          RUSTUP_HOME="$RUSTUP_HOME" \

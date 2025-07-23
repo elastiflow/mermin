@@ -9,7 +9,6 @@ use aya_ebpf::{
 };
 use aya_log_ebpf::{log, Level};
 use core::mem;
-// Import POD-safe wrappers from integration-common and network-types structs
 use integration_common::{EthHdr as PodEthHdr, EthHdr, HeaderUnion, Ipv4Hdr as PodIpv4Hdr, Ipv6Hdr as PodIpv6Hdr, PacketType, ParsedHeader, TcpHdr as PodTcpHdr, UdpHdr as PodUdpHdr};
 use integration_common::PacketType::Ipv4;
 use network_types::{
@@ -22,7 +21,6 @@ use network_types::{
 #[map(name = "OUT_DATA")]
 static mut OUT_DATA: PerfEventArray<ParsedHeader> = PerfEventArray::new(0);
 
-// Helper to safely convert a u8 to a PacketType, as from() is not available in eBPF
 fn u8_to_packet_type(val: u8) -> Option<PacketType> {
     match val {
         1 => Some(PacketType::Eth),
@@ -48,15 +46,10 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
     // In our specific test case (UDP packet on loopback), we can assume a fixed header size.
     // Ethernet Header (14 bytes) + IPv4 Header (20 bytes) + UDP Header (8 bytes) = 42 bytes.
     const PAYLOAD_OFFSET: usize = NetEthHdr::LEN + NetIpv4Hdr::LEN + NetUdpHdr::LEN;
-
-    // 1. Load the PacketType discriminator byte directly from the known payload offset.
+    
     let packet_type_byte: u8 = ctx.load(PAYLOAD_OFFSET).map_err(|_| TC_ACT_SHOT as i32)?;
-
-
-    // The actual header data in your payload starts *after* the type byte.
     let data_offset = PAYLOAD_OFFSET + 1;
-
-    // 2. Match on the packet type and parse accordingly.
+    
     let packet_type = match u8_to_packet_type(packet_type_byte) {
         Some(pt) => pt,
         None => {
@@ -102,8 +95,7 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
     };
-
-    // 3. Send the parsed data to user-space.
+    
     unsafe { OUT_DATA.output(&ctx, &response, 0) };
     log!(&ctx, Level::Info, "Successfully processed packet payload");
 

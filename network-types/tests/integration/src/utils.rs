@@ -14,18 +14,14 @@ use std::{mem::size_of, sync::Once};
 use aya::programs::SchedClassifier;
 use tokio::sync::mpsc;
 
-// This ensures env_logger is initialized only once for all tests.
 static LOG_INIT: Once = Once::new();
 
-/// The harness no longer needs the in_data map.
 pub struct TestHarness {
     pub ebpf: Ebpf,
     result_rx: mpsc::Receiver<ParsedHeader>,
 }
 
 impl TestHarness {
-    /// This method now simply waits for an event from the eBPF program.
-    /// The trigger (sending a packet) will happen in the test case itself.
     pub async fn receive_event(&mut self) -> Result<ParsedHeader, anyhow::Error> {
         let received = tokio::time::timeout(
             std::time::Duration::from_secs(5),
@@ -46,25 +42,18 @@ pub async fn setup_test() -> Result<TestHarness, anyhow::Error> {
             .filter_level(log::LevelFilter::Info)
             .init();
     });
-
-    // Load the eBPF object file.
+    
     let mut ebpf = Ebpf::load(include_bytes_aligned!(
         "../../target/bpfel-unknown-none/release/integration-ebpf-test"
     ))?;
-
-    // Initialize the BPF logger.
     if let Err(e) = EbpfLogger::init(&mut ebpf) {
         warn!("failed to initialize eBPF logger: {}", e);
     }
-
-    // Load the TC program instead of a KProbe.
+    
     let program: &mut SchedClassifier = ebpf.program_mut("integration_test").unwrap().try_into()?;
     program.load()?;
-    // Attach the program to the loopback interface's ingress hook.
-    // The returned link guard will detach the program when it goes out of scope.
     let _link = program.attach("lo", TcAttachType::Ingress)?;
-
-    // Get a handle to the OUT_DATA map.
+    
     let mut out_data: AsyncPerfEventArray<_> = ebpf
         .take_map("OUT_DATA")
         .context("OUT_DATA map not found")?
@@ -98,8 +87,7 @@ pub async fn setup_test() -> Result<TestHarness, anyhow::Error> {
             }
         });
     }
-
-    // Return the completed harness.
+    
     Ok(TestHarness {
         ebpf,
         result_rx: rx,

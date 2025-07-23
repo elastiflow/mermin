@@ -10,10 +10,6 @@ use network_types::{
     udp::UdpHdr as NetUdpHdr,
 };
 
-// --- Newtype Wrappers ---
-// We create newtypes around the network-types structs so we can implement
-// the foreign trait `aya::Pod` for them, satisfying the orphan rule.
-
 #[repr(transparent)]
 #[derive(Copy, Clone)]
 pub struct EthHdr(pub NetEthHdr);
@@ -52,14 +48,6 @@ unsafe impl Pod for ParsedRequest {}
 #[cfg(feature = "user")]
 unsafe impl Pod for ParsedHeader {}
 
-// Your existing shared data structure
-#[repr(C)]
-#[derive(Copy, Clone, Debug)]
-pub struct ParsedRequest {
-    pub user_id: u32,
-    pub request_id: u64,
-}
-
 
 /// An enum to tell the eBPF program which header to parse.
 #[repr(u8)]
@@ -92,9 +80,3 @@ pub struct ParsedHeader {
     pub ty: PacketType,
     pub data: HeaderUnion,
 }
-
-// --- CONSTANTS ---
-// The size of our input buffer must be large enough to hold the type byte
-// plus the largest possible header we might send. In this case, it's IPv6.
-const MAX_PAYLOAD_SIZE: usize = core::mem::size_of::<Ipv6Hdr>(); // 40 bytes
-pub const REQUEST_DATA_SIZE: usize = 1 + MAX_PAYLOAD_SIZE; // 1 + 40 = 41 bytes

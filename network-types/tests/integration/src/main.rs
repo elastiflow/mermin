@@ -6,12 +6,9 @@ use aya::{
     Pod,
 };
 use log::info;
-// Import the fixture and data structures
 use integration_common::{
     PacketType,
-    REQUEST_DATA_SIZE,
     ParsedHeader,
-    ParsedRequest,
 };
 use network_types::{
     eth::{EthHdr, EtherType},
@@ -29,14 +26,14 @@ fn main() {
 #[tokio::test]
 async fn test_parses_eth_header() -> Result<(), anyhow::Error> {
     info!("--- Running Test for Ethernet Header ---");
-    // Use the test harness for boilerplate setup.
+
     let mut harness = setup_test().await?;
 
     let client = UdpSocket::bind("127.0.0.1:0")?;
     let server_addr = "127.0.0.1:8080"; // The exact port doesn't matter.
     client.connect(server_addr)?;
 
-    let mut request_data = [0u8; REQUEST_DATA_SIZE];
+    let mut request_data = [0u8; EthHdr::LEN + 1];
 
     // Byte 0: The type discriminator for the eBPF program's `match` statement.
     request_data[0] = PacketType::Eth as u8;
@@ -57,7 +54,7 @@ async fn test_parses_eth_header() -> Result<(), anyhow::Error> {
     let received = harness.receive_event().await?;
 
     assert_eq!(received.ty, PacketType::Eth);
-    let parsed_header = unsafe { received.data.eth.0 }; // Unwrap the newtype here
+    let parsed_header = unsafe { received.data.eth.0 };
 
     let parsed_dst_addr = parsed_header.dst_addr;
     let expected_dst_addr = expected_header.dst_addr;
@@ -71,6 +68,6 @@ async fn test_parses_eth_header() -> Result<(), anyhow::Error> {
     let expected_ether_type = expected_header.ether_type;
     assert_eq!(parsed_ether_type, expected_ether_type, "EtherType mismatch");
 
-    info!("✅ Test for Ethernet Header from Raw Bytes Passed!");
+    info!("Test for Ethernet Header from Raw Bytes Passed!");
     Ok(())
 }

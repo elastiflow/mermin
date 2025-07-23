@@ -5,10 +5,10 @@ edition = "2024"
 license.workspace = true
 
 [dependencies]
-network-types = { path = "../../network-types" }
+network-types = { path = "../.." }
 aya = { workspace = true, optional = true }
 
 [features]
 default = []
-# Create a "user" feature that enables aya
+
 user = ["dep:aya"]

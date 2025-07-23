@@ -8,7 +8,7 @@ license.workspace = true
 aya-ebpf = { workspace = true }
 aya-log-ebpf = { workspace = true }
 integration-common = { path = "../integration-common", default-features = false }
-network-types = { path = "../../network-types" }
+network-types = { path = "../.." }
 
 [[bin]]
 name = "integration-ebpf-test"

@@ -5,9 +5,9 @@ members = [
     "mermin-common",
     "mermin-ebpf",
     "network-types",
-    "tests/integration",
-    "tests/integration-common",
-    "tests/integration-ebpf",
+    "network-types/tests/integration",
+    "network-types/tests/integration-common",
+    "network-types/tests/integration-ebpf",
 ]
 default-members = ["mermin", "mermin-common"]
 
