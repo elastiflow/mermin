@@ -2,85 +2,112 @@
 #![no_main]
 
 use aya_ebpf::{
-    helpers::bpf_get_current_pid_tgid,
-    macros::{kprobe, map},
-    maps::{HashMap, PerfEventArray},
-    programs::ProbeContext,
+    bindings::{TC_ACT_OK, TC_ACT_SHOT},
+    macros::{map, classifier},
+    maps::PerfEventArray,
+    programs::TcContext,
 };
 use aya_log_ebpf::{log, Level};
-
-use integration_common::{
-    EthHdr as PodEthHdr, HeaderUnion, PacketType, ParsedHeader, REQUEST_DATA_SIZE,
+use core::mem;
+// Import POD-safe wrappers from integration-common and network-types structs
+use integration_common::{EthHdr as PodEthHdr, EthHdr, HeaderUnion, Ipv4Hdr as PodIpv4Hdr, Ipv6Hdr as PodIpv6Hdr, PacketType, ParsedHeader, TcpHdr as PodTcpHdr, UdpHdr as PodUdpHdr};
+use integration_common::PacketType::Ipv4;
+use network_types::{
+    eth::{EthHdr as NetEthHdr, EtherType},
+    ip::{IpProto, Ipv4Hdr as NetIpv4Hdr, Ipv6Hdr as NetIpv6Hdr},
+    tcp::TcpHdr as NetTcpHdr,
+    udp::UdpHdr as NetUdpHdr,
 };
-use network_types::eth::{EthHdr, EtherType};
-
-#[map(name = "IN_DATA")]
-static mut IN_DATA: HashMap<u32, [u8; REQUEST_DATA_SIZE]> =
-    HashMap::<u32, [u8; REQUEST_DATA_SIZE]>::with_max_entries(1024, 0);
 
 #[map(name = "OUT_DATA")]
 static mut OUT_DATA: PerfEventArray<ParsedHeader> = PerfEventArray::new(0);
 
-#[kprobe]
-pub fn integration_test(ctx: ProbeContext) -> u32 {
+// Helper to safely convert a u8 to a PacketType, as from() is not available in eBPF
+fn u8_to_packet_type(val: u8) -> Option<PacketType> {
+    match val {
+        1 => Some(PacketType::Eth),
+        2 => Some(PacketType::Ipv4),
+        3 => Some(PacketType::Ipv6),
+        4 => Some(PacketType::Tcp),
+        5 => Some(PacketType::Udp),
+        _ => None,
+    }
+}
+
+#[classifier]
+pub fn integration_test(ctx: TcContext) -> i32 {
     match try_integration_test(ctx) {
         Ok(ret) => ret,
         Err(ret) => ret,
     }
 }
 
-fn try_integration_test(ctx: ProbeContext) -> Result<u32, u32> {
-    // Correctly get the Process ID (TGID) by shifting the 64-bit result.
-    let tgid = (bpf_get_current_pid_tgid() >> 32) as u32;
+fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
+    log!(&ctx, Level::Info, "TC program triggered");
 
-    // Use the correct TGID to look up the data. `get` returns a reference to the
-    // value in the map, wrapped in an Option.
-    let raw_data = match unsafe { (*(&raw mut IN_DATA)).get(&tgid) } {
-        Some(data) => data,
+    // In our specific test case (UDP packet on loopback), we can assume a fixed header size.
+    // Ethernet Header (14 bytes) + IPv4 Header (20 bytes) + UDP Header (8 bytes) = 42 bytes.
+    const PAYLOAD_OFFSET: usize = NetEthHdr::LEN + NetIpv4Hdr::LEN + NetUdpHdr::LEN;
+
+    // 1. Load the PacketType discriminator byte directly from the known payload offset.
+    let packet_type_byte: u8 = ctx.load(PAYLOAD_OFFSET).map_err(|_| TC_ACT_SHOT as i32)?;
+
+
+    // The actual header data in your payload starts *after* the type byte.
+    let data_offset = PAYLOAD_OFFSET + 1;
+
+    // 2. Match on the packet type and parse accordingly.
+    let packet_type = match u8_to_packet_type(packet_type_byte) {
+        Some(pt) => pt,
         None => {
-            // This is expected for other processes on the system calling getpid.
-            return Ok(0);
+            log!(&ctx, Level::Warn, "Unknown packet type in payload: {}", packet_type_byte);
+            return Ok(TC_ACT_OK as i32);
         }
     };
 
-    log!(&ctx, Level::Info, "Data found for tgid {}, processing...", tgid);
-
-    // Since raw_data is a reference, we can directly access its elements.
-    let packet_type = raw_data[0];
-    let payload_bytes = &raw_data[1..];
-
-    match packet_type {
-        t if t == PacketType::Eth as u8 => {
-            if payload_bytes.len() < core::mem::size_of::<EthHdr>() {
-                return Err(1);
-            }
-
-            let header: EthHdr = unsafe {
-                core::ptr::read_unaligned(payload_bytes.as_ptr() as *const EthHdr)
-            };
-
-            let response = ParsedHeader {
+    let response = match packet_type {
+        PacketType::Eth => {
+            let header: NetEthHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
+            ParsedHeader {
                 ty: PacketType::Eth,
-                data: HeaderUnion {
-                    eth: PodEthHdr(header),
-                },
-            };
-
-            unsafe { (*(&raw const OUT_DATA)).output(&ctx, &response, 0) };
-            log!(&ctx, Level::Info, "Successfully processed Eth packet for tgid {}", tgid);
+                data: HeaderUnion { eth: PodEthHdr(header) },
+            }
         }
-        _ => {
-            log!(&ctx, Level::Warn, "Unknown packet type: {}", packet_type);
+        PacketType::Ipv4 => {
+            let header: NetIpv4Hdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
+            ParsedHeader {
+                ty: PacketType::Ipv4,
+                data: HeaderUnion { ipv4: PodIpv4Hdr(header) },
+            }
         }
-    }
+        PacketType::Ipv6 => {
+            let header: NetIpv6Hdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
+            ParsedHeader {
+                ty: PacketType::Ipv6,
+                data: HeaderUnion { ipv6: PodIpv6Hdr(header) },
+            }
+        }
+        PacketType::Tcp => {
+            let header: NetTcpHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
+            ParsedHeader {
+                ty: PacketType::Tcp,
+                data: HeaderUnion { tcp: PodTcpHdr(header) },
+            }
+        }
+        PacketType::Udp => {
+            let header: NetUdpHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
+            ParsedHeader {
+                ty: PacketType::Udp,
+                data: HeaderUnion { udp: PodUdpHdr(header) },
+            }
+        }
+    };
 
-    // After processing, clean up the map to prevent processing stale data.
-    // We ignore the result of remove, as there's not much we can do if it fails.
-    unsafe {
-        let _ = (*(&raw mut IN_DATA)).remove(&tgid);
-    }
+    // 3. Send the parsed data to user-space.
+    unsafe { OUT_DATA.output(&ctx, &response, 0) };
+    log!(&ctx, Level::Info, "Successfully processed packet payload");
 
-    Ok(0)
+    Ok(TC_ACT_OK as i32)
 }
 
 #[cfg(not(test))]

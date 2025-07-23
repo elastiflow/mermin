@@ -1,3 +1,4 @@
+use std::net::UdpSocket;
 use aya::{
     include_bytes_aligned,
     maps::{AsyncPerfEventArray, HashMap},
@@ -31,6 +32,10 @@ async fn test_parses_eth_header() -> Result<(), anyhow::Error> {
     // Use the test harness for boilerplate setup.
     let mut harness = setup_test().await?;
 
+    let client = UdpSocket::bind("127.0.0.1:0")?;
+    let server_addr = "127.0.0.1:8080"; // The exact port doesn't matter.
+    client.connect(server_addr)?;
+
     let mut request_data = [0u8; REQUEST_DATA_SIZE];
 
     // Byte 0: The type discriminator for the eBPF program's `match` statement.
@@ -41,14 +46,15 @@ async fn test_parses_eth_header() -> Result<(), anyhow::Error> {
     request_data[7..13].copy_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
     // Bytes 13-14: EtherType (0x0800, big-endian for IPv4)
     request_data[13..15].copy_from_slice(&[0x08, 0x00]);
+    client.send(&request_data)?;
 
     let expected_header = EthHdr {
         dst_addr: [0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
         src_addr: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
-        ether_type: (EtherType::Ipv4 as u16).to_be(),
+        ether_type: EtherType::Ipv4.into(),
     };
 
-    let received = harness.trigger_and_receive(request_data).await?;
+    let received = harness.receive_event().await?;
 
     assert_eq!(received.ty, PacketType::Eth);
     let parsed_header = unsafe { received.data.eth.0 }; // Unwrap the newtype here
