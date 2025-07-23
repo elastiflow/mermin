@@ -1,33 +1,33 @@
 use aya::{
     include_bytes_aligned,
-    maps::{HashMap, AsyncPerfEventArray},
+    maps::{AsyncPerfEventArray, HashMap},
     programs::KProbe,
     Bpf,
 };
-use aya_log::BpfLogger;
-use bytes::BytesMut;
-use log::{info, warn};
-
+use log::info;
 // Import the fixture and data structures
 use integration_common::{
     PacketType,
-    ParsedRequest,
     REQUEST_DATA_SIZE,
 };
 use network_types::{
     eth::{EthHdr, EtherType},
-    ip::{Ipv4Hdr, IpProto},
+    ip::{IpProto, Ipv4Hdr},
     tcp::TcpHdr,
 };
 use crate::utils::setup_test;
 
 mod utils;
 
+fn main() {
+    // This main is required for linking during tests, even if unused.
+}
+
 #[tokio::test]
 async fn test_parses_eth_header() -> Result<(), anyhow::Error> {
     info!("--- Running Test for Ethernet Header ---");
     // Use the test harness for boilerplate setup.
-    let mut harness = setup_test();
+    let mut harness = setup_test().await?;
 
     let mut request_data = [0u8; REQUEST_DATA_SIZE];
 

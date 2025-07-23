@@ -4,7 +4,7 @@ use aya::{
     programs::KProbe,
     Bpf,
 };
-use aya_log::BpfLogger;
+use aya_log::EbpfLogger;
 use bytes::BytesMut;
 use integration_common::{ParsedHeader, REQUEST_DATA_SIZE};
 use log::warn;
@@ -63,11 +63,11 @@ pub async fn setup_test() -> Result<TestHarness, anyhow::Error> {
 
     // Load the eBPF object file.
     let mut bpf = Bpf::load(include_bytes_aligned!(
-        "../../../target/bpfel-unknown-none/release/integration-ebpf"
+        "../../target/bpfel-unknown-none/release/integration-ebpf"
     ))?;
 
     // Initialize the BPF logger.
-    if let Err(e) = BpfLogger::init(&mut bpf) {
+    if let Err(e) = EbpfLogger::init(&mut bpf) {
         warn!("failed to initialize eBPF logger: {}", e);
     }
 

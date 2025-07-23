@@ -1,11 +1,11 @@
 [package]
 name = "integration"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 license.workspace = true
 
 [dependencies]
-aya = { workspace = true, optional = true }
+aya = { workspace = true }
 aya-log = { workspace = true }
 env_logger = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "net", "signal", "time"] }
@@ -17,3 +17,10 @@ once_cell = "1.17"
 integration-common = { path = "../integration-common", features = ["user"] }
 network-types = { path = "../../network-types" }
 
+[build-dependencies]
+anyhow = { workspace = true }
+aya-build = { workspace = true }
+
+[[bin]]
+name = "integration"
+path = "src/main.rs"

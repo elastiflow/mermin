@@ -27,6 +27,6 @@ network-types = { path = "../network-types" }
 tokio = { version = "1.40.0", default-features = false }
 which = { version = "6.0.0", default-features = false }
 
-[profile.release.package.eth-ebpf-test-ebpf]
+[profile.release.package.integration-ebpf]
 debug = 2
 codegen-units = 1

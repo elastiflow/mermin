@@ -394,6 +394,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "aya",
+ "aya-build",
  "aya-log",
  "bytes",
  "env_logger",
@@ -417,9 +418,12 @@ dependencies = [
 name = "integration-ebpf"
 version = "0.1.0"
 dependencies = [
+ "aya-build",
  "aya-ebpf",
  "integration-common",
+ "log",
  "network-types",
+ "which",
 ]
 
 [[package]]
