@@ -54,3 +54,25 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+struct FlowRecord {
+    /// Total number of packets observed for this flow since its start.
+    pub packet_total_count: u64,
+    /// Total number of bytes (octets) observed for this flow since its start.
+    pub octet_total_count: u64,
+    /// Number of packets observed in the last measurement interval.
+    pub packet_delta_count: u64,
+    /// Number of bytes (octets) observed in the last measurement interval.
+    pub octet_delta_count: u64,
+
+    // Fields with 4-byte alignment
+    /// Timestamp (seconds since epoch) when the flow was first observed.
+    pub flow_start_seconds: u32,
+    /// Timestamp (seconds since epoch) when the flow was last observed or ended.
+    pub flow_end_seconds: u32,
+    /// Reason code indicating why the flow record was generated or ended.
+    /// (e.g., 1 = Active Timeout, 2 = End of Flow detected, etc. - specific values depend on the system).
+    pub flow_end_reason: u8,
+    // Implicit padding (2 bytes) is added here by the compiler to ensure
+    // the total struct size (88 bytes) is a multiple of the maximum alignment (8 bytes).
+}

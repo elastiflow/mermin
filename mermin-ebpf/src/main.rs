@@ -30,11 +30,12 @@ struct Parser {
 
     // Information for building the FlowKey (prioritizes innermost headers)
     // These fields will be updated as we parse deeper or encounter encapsulations.
-    flow_src_ip_addr: Option<CReprIpAddr>,
-    flow_dst_ip_addr: Option<CReprIpAddr>,
-    flow_src_port: Option<u16>,
-    flow_dst_port: Option<u16>,
-    flow_protocol: Option<u8>, // The innermost L4 protocol number (e.g., 6 for TCP)
+    src_ip_addr: Option<CReprIpAddr>,
+    dst_ip_addr: Option<CReprIpAddr>,
+    src_port: Option<u16>,
+    dst_port: Option<u16>,
+    proto: Option<u8>, // The innermost L4 protocol number (e.g., 6 for TCP)
+    l3_octet_count: usize,
 }
 
 impl Parser {
@@ -42,11 +43,12 @@ impl Parser {
         Parser {
             offset: 0,
             next_hdr: HeaderType::Ethernet,
-            flow_src_ip_addr: None,
-            flow_dst_ip_addr: None,
-            flow_src_port: None,
-            flow_dst_port: None,
-            flow_protocol: None,
+            src_ip_addr: None,
+            dst_ip_addr: None,
+            src_port: None,
+            dst_port: None,
+            proto: None,
+            l3_octet_count: 0,
         }
     }
 }
@@ -107,7 +109,9 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
 fn parse_ethernet_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
     let eth_hdr: EthHdr = ctx.load(parser.offset).map_err(|_| ())?;
     parser.offset += EthHdr::LEN;
-
+    // todo: double check that this is the right calculation
+    parser.l3_octet_count = ctx.len() as usize - EthHdr::LEN;
+    
     // todo: Extract eth_hdr.src_addr and eth_hdr.dst_addr into src_mac_addr and dst_mac_addr fields
 
     match eth_hdr.ether_type() {
@@ -160,11 +164,9 @@ fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
         IpProto::Tcp | IpProto::Udp => {
             // payload headers
             // policy: innermost IP header determines the flow IPs
-            parser.flow_src_ip_addr =
-                Some(CReprIpAddr::new_v4(u32::from_be_bytes(ipv4_hdr.src_addr)));
-            parser.flow_dst_ip_addr =
-                Some(CReprIpAddr::new_v4(u32::from_be_bytes(ipv4_hdr.dst_addr)));
-            parser.flow_protocol = Some(next_hdr as u8);
+            parser.src_ip_addr = Some(CReprIpAddr::new_v4(u32::from_be_bytes(ipv4_hdr.src_addr)));
+            parser.dst_ip_addr = Some(CReprIpAddr::new_v4(u32::from_be_bytes(ipv4_hdr.dst_addr)));
+            parser.proto = Some(next_hdr as u8);
             parser.next_hdr = HeaderType::Proto(next_hdr);
         }
         _ => {
@@ -214,9 +216,9 @@ fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
         IpProto::Tcp | IpProto::Udp => {
             // payload headers
             // policy: innermost IP header determines the flow IPs
-            parser.flow_src_ip_addr = Some(CReprIpAddr::new_v6(ipv6_hdr.src_addr));
-            parser.flow_dst_ip_addr = Some(CReprIpAddr::new_v6(ipv6_hdr.dst_addr));
-            parser.flow_protocol = Some(next_hdr as u8);
+            parser.src_ip_addr = Some(CReprIpAddr::new_v6(ipv6_hdr.src_addr));
+            parser.dst_ip_addr = Some(CReprIpAddr::new_v6(ipv6_hdr.dst_addr));
+            parser.proto = Some(next_hdr as u8);
             parser.next_hdr = HeaderType::Proto(next_hdr);
         }
         IpProto::HopOpt
@@ -227,14 +229,14 @@ fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
         | IpProto::Hip
         | IpProto::Shim6 => {
             // ipv6 extension headers
-            parser.flow_src_ip_addr = Some(CReprIpAddr::new_v6(ipv6_hdr.src_addr));
-            parser.flow_dst_ip_addr = Some(CReprIpAddr::new_v6(ipv6_hdr.dst_addr));
+            parser.src_ip_addr = Some(CReprIpAddr::new_v6(ipv6_hdr.src_addr));
+            parser.dst_ip_addr = Some(CReprIpAddr::new_v6(ipv6_hdr.dst_addr));
             parser.next_hdr = HeaderType::Proto(next_hdr);
         }
         IpProto::Ipv6NoNxt => {
             // ipv6 no next header
             parser.next_hdr = HeaderType::StopProcessing;
-            parser.flow_protocol = Some(next_hdr as u8);
+            parser.proto = Some(next_hdr as u8);
         }
         _ => {
             warn!(
@@ -279,8 +281,8 @@ fn parse_tcp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
     let tcp_hdr: TcpHdr = ctx.load(parser.offset).map_err(|_| ())?;
     parser.offset += TcpHdr::LEN;
 
-    parser.flow_src_port = Option::from(tcp_hdr.src_port());
-    parser.flow_dst_port = Option::from(tcp_hdr.dst_port());
+    parser.src_port = Option::from(tcp_hdr.src_port());
+    parser.dst_port = Option::from(tcp_hdr.dst_port());
     // TODO: extract and assign additional tcp fields
 
     Ok(())
@@ -303,8 +305,8 @@ fn parse_udp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
     let udp_hdr: UdpHdr = ctx.load(parser.offset).map_err(|_| ())?;
     parser.offset += UdpHdr::LEN;
 
-    parser.flow_src_port = Option::from(udp_hdr.src_port());
-    parser.flow_dst_port = Option::from(udp_hdr.dst_port());
+    parser.src_port = Option::from(udp_hdr.src_port());
+    parser.dst_port = Option::from(udp_hdr.dst_port());
     // TODO: extract and assign additional tcp fields
 
     Ok(())

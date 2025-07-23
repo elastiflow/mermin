@@ -49,55 +49,6 @@ pub struct CReprIpAddr {
     pub addr: IpAddrUnion,
 }
 
-/// Represents a record containing network flow metrics and identifiers.
-///
-/// This struct is designed with a specific memory layout (`#[repr(C)]`)
-/// and field ordering to ensure compatibility with eBPF programs, which
-/// require predictable structure layouts and proper memory alignment.
-/// Fields are ordered from largest alignment (8 bytes) to smallest (1 byte)
-/// to minimize internal padding.
-#[repr(C)]
-pub struct FlowRecord {
-    /// Source IPv6 address.
-    pub src_ipv6_addr: [u8; 16],
-    /// Destination IPv6 address.
-    pub dst_ipv6_addr: [u8; 16],
-
-    // /// Total number of packets observed for this flow since its start.
-    pub packet_total_count: u64,
-    // /// Total number of bytes (octets) observed for this flow since its start.
-    pub octet_total_count: u64,
-    // /// Number of packets observed in the last measurement interval.
-    // pub packet_delta_count: u64,
-    // /// Number of bytes (octets) observed in the last measurement interval.
-    // pub octet_delta_count: u64,
-
-    // // Fields with 4-byte alignment
-    // /// Timestamp (seconds since epoch) when the flow was first observed.
-    // pub flow_start_seconds: u32,
-    // /// Timestamp (seconds since epoch) when the flow was last observed or ended.
-    // pub flow_end_seconds: u32,
-    /// Source IPv4 address.
-    pub src_ipv4_addr: u32,
-    /// Destination IPv4 address.
-    pub dst_ipv4_addr: u32,
-
-    // Fields with 2-byte alignment
-    /// Source transport layer port number.
-    pub src_port: u16,
-    /// Destination transport layer port number.
-    pub dst_port: u16,
-
-    // Fields with 1-byte alignment
-    /// Network protocol identifier (e.g., TCP = 6, UDP = 17).
-    pub protocol: u8,
-    // /// Reason code indicating why the flow record was generated or ended.
-    // /// (e.g., 1 = Active Timeout, 2 = End of Flow detected, etc. - specific values depend on the system).
-    // pub flow_end_reason: u8,
-    // Implicit padding (2 bytes) is added here by the compiler to ensure
-    // the total struct size (88 bytes) is a multiple of the maximum alignment (8 bytes).
-}
-
 // Provide helper functions to safely create CReprIpAddr
 impl CReprIpAddr {
     /// Creates a new `CReprIpAddr` containing an IPv4 address.
@@ -140,6 +91,42 @@ impl CReprIpAddr {
             _ => None, // Invalid tag
         }
     }
+}
+
+/// Represents a record containing flow metrics and identifiers.
+///
+/// This struct is designed with a specific memory layout (`#[repr(C)]`)
+/// and field ordering to ensure compatibility with eBPF programs, which
+/// require predictable structure layouts and proper memory alignment.
+/// Fields are ordered from largest alignment (8 bytes) to smallest (1 byte)
+/// to minimize internal padding.
+#[repr(C, packed)]
+pub struct PacketMeta {
+    // Fields with 16-byte alignment
+    /// Source IPv6 address.
+    pub src_ipv6_addr: [u8; 16],
+    /// Destination IPv6 address.
+    pub dst_ipv6_addr: [u8; 16],
+
+    // Fields with 8-byte alignment
+    /// Total count of bytes in a packet
+    pub octet_count: u64,
+
+    // Fields with 4-byte alignment
+    /// Source IPv4 address.
+    pub src_ipv4_addr: u32,
+    /// Destination IPv4 address.
+    pub dst_ipv4_addr: u32,
+
+    // Fields with 2-byte alignment
+    /// Source transport layer port number.
+    pub src_port: u16,
+    /// Destination transport layer port number.
+    pub dst_port: u16,
+
+    // Fields with 1-byte alignment
+    /// Network protocol identifier (e.g., TCP = 6, UDP = 17).
+    pub protocol: u8,
 }
 
 #[cfg(test)]
@@ -232,7 +219,7 @@ mod tests {
         // Total = 64 bytes
 
         let expected_size = 64;
-        let actual_size = size_of::<FlowRecord>();
+        let actual_size = size_of::<PacketMeta>();
 
         assert_eq!(
             actual_size, expected_size,
@@ -243,7 +230,7 @@ mod tests {
         // Verify the alignment (should be the max alignment of members)
         // For this struct, the largest alignment would be for u64 fields (8 bytes)
         let expected_alignment = 8;
-        let actual_alignment = align_of::<FlowRecord>();
+        let actual_alignment = align_of::<PacketMeta>();
 
         assert_eq!(
             actual_alignment, expected_alignment,
@@ -264,7 +251,7 @@ mod tests {
         let packet_count: u64 = 100;
         let octet_count: u64 = 15000;
 
-        let record = FlowRecord {
+        let record = PacketMeta {
             src_ipv6_addr: src_ipv6_val,
             dst_ipv6_addr: dst_ipv6_val,
             packet_total_count: packet_count,
