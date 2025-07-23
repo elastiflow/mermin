@@ -1,5 +1,57 @@
 #![no_std]
 
+#[cfg(feature = "user")]
+use aya::Pod;
+
+use network_types::{
+    eth::EthHdr as NetEthHdr,
+    ip::{Ipv4Hdr as NetIpv4Hdr, Ipv6Hdr as NetIpv6Hdr},
+    tcp::TcpHdr as NetTcpHdr,
+    udp::UdpHdr as NetUdpHdr,
+};
+
+// --- Newtype Wrappers ---
+// We create newtypes around the network-types structs so we can implement
+// the foreign trait `aya::Pod` for them, satisfying the orphan rule.
+
+#[repr(transparent)]
+#[derive(Copy, Clone)]
+pub struct EthHdr(pub NetEthHdr);
+
+#[repr(transparent)]
+#[derive(Copy, Clone)]
+pub struct Ipv4Hdr(pub NetIpv4Hdr);
+
+#[repr(transparent)]
+#[derive(Copy, Clone)]
+pub struct Ipv6Hdr(pub NetIpv6Hdr);
+
+#[repr(transparent)]
+#[derive(Copy, Clone)]
+pub struct TcpHdr(pub NetTcpHdr);
+
+#[repr(transparent)]
+#[derive(Copy, Clone)]
+pub struct UdpHdr(pub NetUdpHdr);
+
+#[cfg(feature = "user")]
+unsafe impl Pod for EthHdr {}
+#[cfg(feature = "user")]
+unsafe impl Pod for Ipv4Hdr {}
+#[cfg(feature = "user")]
+unsafe impl Pod for Ipv6Hdr {}
+#[cfg(feature = "user")]
+unsafe impl Pod for TcpHdr {}
+#[cfg(feature = "user")]
+unsafe impl Pod for UdpHdr {}
+
+
+#[cfg(feature = "user")]
+unsafe impl Pod for ParsedRequest {}
+
+#[cfg(feature = "user")]
+unsafe impl Pod for ParsedHeader {}
+
 // Your existing shared data structure
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
@@ -8,18 +60,6 @@ pub struct ParsedRequest {
     pub request_id: u64,
 }
 
-#[cfg(feature = "user")]
-use aya::Pod;
-
-#[cfg(feature = "user")]
-unsafe impl Pod for ParsedRequest {}
-
-use network_types::{
-    eth::EthHdr,
-    ip::{Ipv4Hdr, Ipv6Hdr},
-    tcp::TcpHdr,
-    udp::UdpHdr,
-};
 
 /// An enum to tell the eBPF program which header to parse.
 #[repr(u8)]
@@ -53,15 +93,8 @@ pub struct ParsedHeader {
     pub data: HeaderUnion,
 }
 
-// Required for user-space to safely read this struct from a perf buffer.
-#[cfg(feature = "user")]
-unsafe impl aya::Pod for ParsedHeader {}
-
 // --- CONSTANTS ---
 // The size of our input buffer must be large enough to hold the type byte
 // plus the largest possible header we might send. In this case, it's IPv6.
-const MAX_PAYLOAD_SIZE: usize = size_of::<Ipv6Hdr>(); // 40 bytes
+const MAX_PAYLOAD_SIZE: usize = core::mem::size_of::<Ipv6Hdr>(); // 40 bytes
 pub const REQUEST_DATA_SIZE: usize = 1 + MAX_PAYLOAD_SIZE; // 1 + 40 = 41 bytes
-
-// --- VETH PAIR FIXTURE ---
-// This section is only compiled for the user-space test runner (`integration` crate)

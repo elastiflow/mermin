@@ -6,20 +6,15 @@ license.workspace = true
 
 [dependencies]
 aya-ebpf = { workspace = true }
-integration-common = { path = "../integration-common" }
+aya-log-ebpf = { workspace = true }
+integration-common = { path = "../integration-common", default-features = false }
 network-types = { path = "../../network-types" }
-log = { workspace = true }
 
 [[bin]]
-name = "integration"
+name = "integration-ebpf-test"
 path = "src/main.rs"
+test = false
 
 [build-dependencies]
 aya-build = "0.1"
 which = { workspace = true }
-
-[profile.dev]
-panic = "abort"
-
-[profile.release]
-panic = "abort"

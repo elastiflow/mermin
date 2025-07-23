@@ -8,7 +8,7 @@ license.workspace = true
 aya = { workspace = true }
 aya-log = { workspace = true }
 env_logger = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "net", "signal", "time"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "net", "signal", "sync", "time"] }
 anyhow = { workspace = true, default-features = true }
 log = { workspace = true }
 libc = "0.2"

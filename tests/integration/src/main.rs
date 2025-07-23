@@ -2,13 +2,15 @@ use aya::{
     include_bytes_aligned,
     maps::{AsyncPerfEventArray, HashMap},
     programs::KProbe,
-    Bpf,
+    Pod,
 };
 use log::info;
 // Import the fixture and data structures
 use integration_common::{
     PacketType,
     REQUEST_DATA_SIZE,
+    ParsedHeader,
+    ParsedRequest,
 };
 use network_types::{
     eth::{EthHdr, EtherType},
@@ -49,11 +51,19 @@ async fn test_parses_eth_header() -> Result<(), anyhow::Error> {
     let received = harness.trigger_and_receive(request_data).await?;
 
     assert_eq!(received.ty, PacketType::Eth);
-    let parsed_header = unsafe { received.data.eth };
+    let parsed_header = unsafe { received.data.eth.0 }; // Unwrap the newtype here
 
-    assert_eq!(parsed_header.dst_addr, expected_header.dst_addr, "Destination MAC mismatch");
-    assert_eq!(parsed_header.src_addr, expected_header.src_addr, "Source MAC mismatch");
-    assert_eq!(parsed_header.ether_type, expected_header.ether_type, "EtherType mismatch");
+    let parsed_dst_addr = parsed_header.dst_addr;
+    let expected_dst_addr = expected_header.dst_addr;
+    assert_eq!(parsed_dst_addr, expected_dst_addr, "Destination MAC mismatch");
+
+    let parsed_src_addr = parsed_header.src_addr;
+    let expected_src_addr = expected_header.src_addr;
+    assert_eq!(parsed_src_addr, expected_src_addr, "Source MAC mismatch");
+
+    let parsed_ether_type = parsed_header.ether_type;
+    let expected_ether_type = expected_header.ether_type;
+    assert_eq!(parsed_ether_type, expected_ether_type, "EtherType mismatch");
 
     info!("✅ Test for Ethernet Header from Raw Bytes Passed!");
     Ok(())
