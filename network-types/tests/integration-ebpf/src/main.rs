@@ -8,12 +8,10 @@ use aya_ebpf::{
     programs::TcContext,
 };
 use aya_log_ebpf::{log, Level};
-use core::mem;
 use integration_common::{HeaderUnion, PacketType, ParsedHeader};
-use integration_common::PacketType::Ipv4;
 use network_types::{
-    eth::{EthHdr, EtherType},
-    ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
+    eth::{EthHdr},
+    ip::{Ipv4Hdr, Ipv6Hdr},
     tcp::TcpHdr,
     udp::UdpHdr,
 };
@@ -95,7 +93,8 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
     };
-    
+
+    #[allow(static_mut_refs)]
     unsafe { OUT_DATA.output(&ctx, &response, 0) };
     log!(&ctx, Level::Info, "Successfully processed packet payload");
 
