@@ -9,13 +9,13 @@ use aya_ebpf::{
 };
 use aya_log_ebpf::{log, Level};
 use core::mem;
-use integration_common::{EthHdr as PodEthHdr, EthHdr, HeaderUnion, Ipv4Hdr as PodIpv4Hdr, Ipv6Hdr as PodIpv6Hdr, PacketType, ParsedHeader, TcpHdr as PodTcpHdr, UdpHdr as PodUdpHdr};
+use integration_common::{HeaderUnion, PacketType, ParsedHeader};
 use integration_common::PacketType::Ipv4;
 use network_types::{
-    eth::{EthHdr as NetEthHdr, EtherType},
-    ip::{IpProto, Ipv4Hdr as NetIpv4Hdr, Ipv6Hdr as NetIpv6Hdr},
-    tcp::TcpHdr as NetTcpHdr,
-    udp::UdpHdr as NetUdpHdr,
+    eth::{EthHdr, EtherType},
+    ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
+    tcp::TcpHdr,
+    udp::UdpHdr,
 };
 
 #[map(name = "OUT_DATA")]
@@ -45,7 +45,7 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
 
     // In our specific test case (UDP packet on loopback), we can assume a fixed header size.
     // Ethernet Header (14 bytes) + IPv4 Header (20 bytes) + UDP Header (8 bytes) = 42 bytes.
-    const PAYLOAD_OFFSET: usize = NetEthHdr::LEN + NetIpv4Hdr::LEN + NetUdpHdr::LEN;
+    const PAYLOAD_OFFSET: usize = EthHdr::LEN + Ipv4Hdr::LEN + UdpHdr::LEN;
     
     let packet_type_byte: u8 = ctx.load(PAYLOAD_OFFSET).map_err(|_| TC_ACT_SHOT as i32)?;
     let data_offset = PAYLOAD_OFFSET + 1;
@@ -60,38 +60,38 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
 
     let response = match packet_type {
         PacketType::Eth => {
-            let header: NetEthHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
+            let header: EthHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
             ParsedHeader {
                 ty: PacketType::Eth,
-                data: HeaderUnion { eth: PodEthHdr(header) },
+                data: HeaderUnion { eth: header },
             }
         }
         PacketType::Ipv4 => {
-            let header: NetIpv4Hdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
+            let header: Ipv4Hdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
             ParsedHeader {
                 ty: PacketType::Ipv4,
-                data: HeaderUnion { ipv4: PodIpv4Hdr(header) },
+                data: HeaderUnion { ipv4: header },
             }
         }
         PacketType::Ipv6 => {
-            let header: NetIpv6Hdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
+            let header: Ipv6Hdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
             ParsedHeader {
                 ty: PacketType::Ipv6,
-                data: HeaderUnion { ipv6: PodIpv6Hdr(header) },
+                data: HeaderUnion { ipv6: header },
             }
         }
         PacketType::Tcp => {
-            let header: NetTcpHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
+            let header: TcpHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
             ParsedHeader {
                 ty: PacketType::Tcp,
-                data: HeaderUnion { tcp: PodTcpHdr(header) },
+                data: HeaderUnion { tcp: header },
             }
         }
         PacketType::Udp => {
-            let header: NetUdpHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
+            let header: UdpHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
             ParsedHeader {
                 ty: PacketType::Udp,
-                data: HeaderUnion { udp: PodUdpHdr(header) },
+                data: HeaderUnion { udp: header },
             }
         }
     };

@@ -54,7 +54,7 @@ async fn test_parses_eth_header() -> Result<(), anyhow::Error> {
     let received = harness.receive_event().await?;
 
     assert_eq!(received.ty, PacketType::Eth);
-    let parsed_header = unsafe { received.data.eth.0 };
+    let parsed_header = unsafe { received.data.eth };
 
     let parsed_dst_addr = parsed_header.dst_addr;
     let expected_dst_addr = expected_header.dst_addr;

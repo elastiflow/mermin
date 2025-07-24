@@ -4,46 +4,14 @@
 use aya::Pod;
 
 use network_types::{
-    eth::EthHdr as NetEthHdr,
-    ip::{Ipv4Hdr as NetIpv4Hdr, Ipv6Hdr as NetIpv6Hdr},
-    tcp::TcpHdr as NetTcpHdr,
-    udp::UdpHdr as NetUdpHdr,
+    eth::EthHdr,
+    ip::{Ipv4Hdr, Ipv6Hdr},
+    tcp::TcpHdr,
+    udp::UdpHdr,
 };
-
-#[repr(transparent)]
-#[derive(Copy, Clone)]
-pub struct EthHdr(pub NetEthHdr);
-
-#[repr(transparent)]
-#[derive(Copy, Clone)]
-pub struct Ipv4Hdr(pub NetIpv4Hdr);
-
-#[repr(transparent)]
-#[derive(Copy, Clone)]
-pub struct Ipv6Hdr(pub NetIpv6Hdr);
-
-#[repr(transparent)]
-#[derive(Copy, Clone)]
-pub struct TcpHdr(pub NetTcpHdr);
-
-#[repr(transparent)]
-#[derive(Copy, Clone)]
-pub struct UdpHdr(pub NetUdpHdr);
-
-#[cfg(feature = "user")]
-unsafe impl Pod for EthHdr {}
-#[cfg(feature = "user")]
-unsafe impl Pod for Ipv4Hdr {}
-#[cfg(feature = "user")]
-unsafe impl Pod for Ipv6Hdr {}
-#[cfg(feature = "user")]
-unsafe impl Pod for TcpHdr {}
-#[cfg(feature = "user")]
-unsafe impl Pod for UdpHdr {}
 
 #[cfg(feature = "user")]
 unsafe impl Pod for ParsedHeader {}
-
 
 /// An enum to tell the eBPF program which header to parse.
 #[repr(u8)]
