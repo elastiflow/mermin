@@ -41,10 +41,6 @@ unsafe impl Pod for TcpHdr {}
 #[cfg(feature = "user")]
 unsafe impl Pod for UdpHdr {}
 
-
-#[cfg(feature = "user")]
-unsafe impl Pod for ParsedRequest {}
-
 #[cfg(feature = "user")]
 unsafe impl Pod for ParsedHeader {}
 
