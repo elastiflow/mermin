@@ -1,7 +1,5 @@
 use integration_common::{PacketType, ParsedHeader};
-use network_types::{
-    eth::{EthHdr, EtherType}
-};
+use network_types::eth::{EthHdr, EtherType};
 
 // Helper for constructing Ethernet header test packets
 pub fn create_eth_test_packet() -> ([u8; EthHdr::LEN + 1], EthHdr) {
@@ -21,7 +19,7 @@ pub fn create_eth_test_packet() -> ([u8; EthHdr::LEN + 1], EthHdr) {
         src_addr: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
         ether_type: EtherType::Ipv4.into(),
     };
-    
+
     (request_data, expected_header)
 }
 

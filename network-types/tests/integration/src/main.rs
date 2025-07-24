@@ -1,9 +1,10 @@
-mod utils;
 mod eth;
+mod utils;
 
 // Import the helper functions and macros
 use crate::eth::{
-    create_eth_test_packet, verify_eth_header,
+    create_eth_test_packet,
+    verify_eth_header,
     // Additional helper functions would be imported here
 };
 
