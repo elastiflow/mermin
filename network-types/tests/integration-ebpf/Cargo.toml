@@ -1,0 +1,20 @@
+[package]
+name = "integration-ebpf"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+
+[dependencies]
+aya-ebpf = { workspace = true }
+aya-log-ebpf = { workspace = true }
+integration-common = { path = "../integration-common", default-features = false }
+network-types = { path = "../.." }
+
+[[bin]]
+name = "integration-ebpf-test"
+path = "src/main.rs"
+test = false
+
+[build-dependencies]
+aya-build = "0.1"
+which = { workspace = true }
