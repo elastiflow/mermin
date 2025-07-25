@@ -1,9 +1,9 @@
 mod eth;
 mod ipv4;
-mod utils;
 mod ipv6;
 mod tcp;
 mod udp;
+mod utils;
 
 // Import the helper functions and macros
 use crate::{

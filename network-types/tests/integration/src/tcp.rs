@@ -1,5 +1,5 @@
 use integration_common::{PacketType, ParsedHeader};
-use network_types::tcp::{TcpHdr};
+use network_types::tcp::TcpHdr;
 
 // Helper for constructing Tcp header test packets
 pub fn create_tcp_test_packet() -> ([u8; TcpHdr::LEN + 1], TcpHdr) {
@@ -18,7 +18,7 @@ pub fn create_tcp_test_packet() -> ([u8; TcpHdr::LEN + 1], TcpHdr) {
         0, 0, // Data offset, reserved bits and flags
         0, 0, // Window size
         0, 0, // Checksum
-        0, 0 // Urgent Pointer
+        0, 0, // Urgent Pointer
     ]);
 
     let expected_header = TcpHdr {

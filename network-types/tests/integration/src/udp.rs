@@ -1,5 +1,5 @@
 use integration_common::{PacketType, ParsedHeader};
-use network_types::udp::{UdpHdr};
+use network_types::udp::UdpHdr;
 
 // Helper for constructing Udp header test packets
 pub fn create_udp_test_packet() -> ([u8; UdpHdr::LEN + 1], UdpHdr) {
@@ -14,7 +14,7 @@ pub fn create_udp_test_packet() -> ([u8; UdpHdr::LEN + 1], UdpHdr) {
     // Bytes 5-9: Remaining values
     request_data[5..9].copy_from_slice(&[
         0, 0, // Header Length
-        0, 0 // Checksum
+        0, 0, // Checksum
     ]);
 
     let expected_header = UdpHdr {
