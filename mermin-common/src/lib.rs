@@ -101,6 +101,7 @@ impl CReprIpAddr {
 /// Fields are ordered from largest alignment (8 bytes) to smallest (1 byte)
 /// to minimize internal padding.
 #[repr(C, packed)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct PacketMeta {
     // Fields with 16-byte alignment
     /// Source IPv6 address.
@@ -108,15 +109,13 @@ pub struct PacketMeta {
     /// Destination IPv6 address.
     pub dst_ipv6_addr: [u8; 16],
 
-    // Fields with 8-byte alignment
-    /// Total count of bytes in a packet
-    pub octet_count: u64,
-
     // Fields with 4-byte alignment
     /// Source IPv4 address.
     pub src_ipv4_addr: u32,
     /// Destination IPv4 address.
     pub dst_ipv4_addr: u32,
+    /// Total count of bytes in a packet
+    pub l3_octet_count: u32,
 
     // Fields with 2-byte alignment
     /// Source transport layer port number.
@@ -126,7 +125,7 @@ pub struct PacketMeta {
 
     // Fields with 1-byte alignment
     /// Network protocol identifier (e.g., TCP = 6, UDP = 17).
-    pub protocol: u8,
+    pub proto: u8,
 }
 
 #[cfg(test)]
@@ -248,19 +247,17 @@ mod tests {
         ];
         let dst_ipv4_val: u32 = 0xC0A80101; // 192.168.1.1
         let dst_ipv6_val: [u8; 16] = [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01];
-        let packet_count: u64 = 100;
-        let octet_count: u64 = 15000;
+        let octet_count: u32 = 15000;
 
         let record = PacketMeta {
             src_ipv6_addr: src_ipv6_val,
             dst_ipv6_addr: dst_ipv6_val,
-            packet_total_count: packet_count,
-            octet_total_count: octet_count,
             src_ipv4_addr: src_ipv4_val,
             dst_ipv4_addr: dst_ipv4_val,
             src_port: 12345,
             dst_port: 80,
-            protocol: 6, // TCP
+            proto: 6, // TCP
+            l3_octet_count: octet_count,
         };
 
         // Test field access
@@ -270,10 +267,9 @@ mod tests {
         assert_eq!(record.dst_ipv6_addr, dst_ipv6_val);
         assert_eq!(record.src_port, 12345);
         assert_eq!(record.dst_port, 80);
-        assert_eq!(record.protocol, 6);
+        assert_eq!(record.proto, 6);
 
         // Test packet and octet count fields
-        assert_eq!(record.packet_total_count, packet_count);
-        assert_eq!(record.octet_total_count, octet_count);
+        assert_eq!(record.l3_octet_count, octet_count);
     }
 }

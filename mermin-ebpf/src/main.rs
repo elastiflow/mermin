@@ -34,8 +34,8 @@ struct Parser {
     dst_ip_addr: Option<CReprIpAddr>,
     src_port: Option<u16>,
     dst_port: Option<u16>,
-    proto: Option<u8>, // The innermost L4 protocol number (e.g., 6 for TCP)
-    l3_octet_count: usize,
+    proto: Option<u8>,     // The innermost L4 protocol number (e.g., 6 for TCP)
+    l3_octet_count: u32, // Total number of octets from the start of the innermost L3 (IP) header to the end of the packet
 }
 
 impl Parser {
@@ -50,6 +50,12 @@ impl Parser {
             proto: None,
             l3_octet_count: 0,
         }
+    }
+
+    // Calculate the L3 octet count (from current offset to end of packet)
+    // This should be called at the start of L3 (IP) header parsing
+    fn calculate_l3_octet_count(&mut self, ctx: &TcContext) {
+        self.l3_octet_count = ctx.len() - self.offset as u32;
     }
 }
 
@@ -89,6 +95,9 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
         }
     }
 
+    let mut packet_meta = PacketMeta::default();
+    packet_meta.l3_octet_count = parser.l3_octet_count;
+
     Ok(TC_ACT_PIPE)
 }
 
@@ -109,9 +118,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
 fn parse_ethernet_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
     let eth_hdr: EthHdr = ctx.load(parser.offset).map_err(|_| ())?;
     parser.offset += EthHdr::LEN;
-    // todo: double check that this is the right calculation
-    parser.l3_octet_count = ctx.len() as usize - EthHdr::LEN;
-    
+
     // todo: Extract eth_hdr.src_addr and eth_hdr.dst_addr into src_mac_addr and dst_mac_addr fields
 
     match eth_hdr.ether_type() {
@@ -155,6 +162,7 @@ fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
         // basic sanity check
         return Err(());
     }
+    parser.calculate_l3_octet_count(ctx);
     parser.offset += h_len;
 
     // todo: Extract additional fields from ipv4_hdr
@@ -209,6 +217,7 @@ fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
     let ipv6_hdr: Ipv6Hdr = ctx.load(parser.offset).map_err(|_| ())?;
+    parser.calculate_l3_octet_count(ctx);
     parser.offset += Ipv6Hdr::LEN;
 
     let next_hdr = ipv6_hdr.next_hdr;
