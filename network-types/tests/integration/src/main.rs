@@ -1,16 +1,11 @@
 mod eth;
-mod utils;
 mod ipv4;
+mod utils;
 
 // Import the helper functions and macros
-use crate::eth::{
-    create_eth_test_packet,
-    verify_eth_header,
-};
-
-use crate::ipv4::{
-    create_ipv4_test_packet,
-    verify_ipv4_header,
+use crate::{
+    eth::{create_eth_test_packet, verify_eth_header},
+    ipv4::{create_ipv4_test_packet, verify_ipv4_header},
 };
 
 fn main() {

@@ -1,5 +1,5 @@
 use integration_common::{PacketType, ParsedHeader};
-use network_types::ip::{Ipv4Hdr, IpProto};
+use network_types::ip::{IpProto, Ipv4Hdr};
 
 // Helper for constructing Ipv4 header test packets
 pub fn create_ipv4_test_packet() -> ([u8; Ipv4Hdr::LEN + 1], Ipv4Hdr) {
@@ -37,7 +37,6 @@ pub fn create_ipv4_test_packet() -> ([u8; Ipv4Hdr::LEN + 1], Ipv4Hdr) {
         dst_addr: [192, 168, 1, 2],
     };
 
-
     (request_data, expected_header)
 }
 
@@ -48,7 +47,10 @@ pub fn verify_ipv4_header(received: ParsedHeader, expected: Ipv4Hdr) {
 
     let parsed_dst_addr = parsed_header.dst_addr;
     let expected_dst_addr = expected.dst_addr;
-    assert_eq!(parsed_dst_addr, expected_dst_addr, "Destination Addr mismatch");
+    assert_eq!(
+        parsed_dst_addr, expected_dst_addr,
+        "Destination Addr mismatch"
+    );
 
     let parsed_src_addr = parsed_header.src_addr;
     let expected_src_addr = expected.src_addr;
