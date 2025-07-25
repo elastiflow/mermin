@@ -235,11 +235,9 @@ mod tests {
         let actual_size = size_of::<FlowRecord>();
 
         assert_eq!(
-            actual_size,
-            expected_size,
+            actual_size, expected_size,
             "Size of FlowRecord should be {} bytes, but was {} bytes",
-            expected_size,
-            actual_size
+            expected_size, actual_size
         );
 
         // Verify the alignment (should be the max alignment of members)
@@ -248,11 +246,9 @@ mod tests {
         let actual_alignment = align_of::<FlowRecord>();
 
         assert_eq!(
-            actual_alignment,
-            expected_alignment,
+            actual_alignment, expected_alignment,
             "Alignment of FlowRecord should be {} bytes, but was {} bytes",
-            expected_alignment,
-            actual_alignment
+            expected_alignment, actual_alignment
         );
     }
 
@@ -260,7 +256,9 @@ mod tests {
     #[test]
     fn test_flow_record_creation() {
         let src_ipv4_val: u32 = 0x0A000001; // 10.0.0.1
-        let src_ipv6_val: [u8; 16] = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01];
+        let src_ipv6_val: [u8; 16] = [
+            0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
+        ];
         let dst_ipv4_val: u32 = 0xC0A80101; // 192.168.1.1
         let dst_ipv6_val: [u8; 16] = [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01];
         let packet_count: u64 = 100;
