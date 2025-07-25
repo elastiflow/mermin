@@ -1,11 +1,16 @@
 mod eth;
 mod utils;
+mod ipv4;
 
 // Import the helper functions and macros
 use crate::eth::{
     create_eth_test_packet,
     verify_eth_header,
-    // Additional helper functions would be imported here
+};
+
+use crate::ipv4::{
+    create_ipv4_test_packet,
+    verify_ipv4_header,
 };
 
 fn main() {
@@ -19,4 +24,12 @@ define_header_test!(
     PacketType::Eth,
     create_eth_test_packet,
     verify_eth_header
+);
+
+define_header_test!(
+    test_parses_ipv4_header,
+    Ipv4Hdr,
+    PacketType::Ipv4,
+    create_ipv4_test_packet,
+    verify_ipv4_header
 );
