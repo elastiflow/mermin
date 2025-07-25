@@ -3,17 +3,15 @@
 
 use aya_ebpf::{
     bindings::{TC_ACT_OK, TC_ACT_SHOT},
-    macros::{map, classifier},
+    macros::{classifier, map},
     maps::PerfEventArray,
     programs::TcContext,
 };
 use aya_log_ebpf::{log, Level};
-use core::mem;
 use integration_common::{HeaderUnion, PacketType, ParsedHeader};
-use integration_common::PacketType::Ipv4;
 use network_types::{
-    eth::{EthHdr, EtherType},
-    ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
+    eth::EthHdr,
+    ip::{Ipv4Hdr, Ipv6Hdr},
     tcp::TcpHdr,
     udp::UdpHdr,
 };
@@ -46,14 +44,19 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
     // In our specific test case (UDP packet on loopback), we can assume a fixed header size.
     // Ethernet Header (14 bytes) + IPv4 Header (20 bytes) + UDP Header (8 bytes) = 42 bytes.
     const PAYLOAD_OFFSET: usize = EthHdr::LEN + Ipv4Hdr::LEN + UdpHdr::LEN;
-    
+
     let packet_type_byte: u8 = ctx.load(PAYLOAD_OFFSET).map_err(|_| TC_ACT_SHOT as i32)?;
     let data_offset = PAYLOAD_OFFSET + 1;
-    
+
     let packet_type = match u8_to_packet_type(packet_type_byte) {
         Some(pt) => pt,
         None => {
-            log!(&ctx, Level::Warn, "Unknown packet type in payload: {}", packet_type_byte);
+            log!(
+                &ctx,
+                Level::Warn,
+                "Unknown packet type in payload: {}",
+                packet_type_byte
+            );
             return Ok(TC_ACT_OK as i32);
         }
     };
@@ -95,8 +98,11 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
     };
-    
-    unsafe { OUT_DATA.output(&ctx, &response, 0) };
+
+    #[allow(static_mut_refs)]
+    unsafe {
+        OUT_DATA.output(&ctx, &response, 0)
+    };
     log!(&ctx, Level::Info, "Successfully processed packet payload");
 
     Ok(TC_ACT_OK as i32)

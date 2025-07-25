@@ -5,7 +5,7 @@ use aya_ebpf::bindings::TC_ACT_PIPE;
 use aya_ebpf::macros::classifier;
 use aya_ebpf::programs::TcContext;
 use aya_log_ebpf::{debug, error, warn};
-use mermin_common::{CReprIpAddr};
+use mermin_common::CReprIpAddr;
 use network_types::eth::{EthHdr, EtherType};
 use network_types::ip::{IpProto, Ipv4Hdr, Ipv6Hdr};
 use network_types::tcp::TcpHdr;
@@ -71,9 +71,12 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Proto(IpProto::Tcp) => parse_tcp_header(&ctx, &mut parser),
             HeaderType::Proto(IpProto::Udp) => parse_udp_header(&ctx, &mut parser),
             HeaderType::Proto(proto) => {
-                debug!(&ctx, "mermin: skipped parsing of unsupported protocol {}", proto as u8);
-                break
-            },
+                debug!(
+                    &ctx,
+                    "mermin: skipped parsing of unsupported protocol {}", proto as u8
+                );
+                break;
+            }
             HeaderType::StopProcessing => break, // Graceful stop
             HeaderType::ErrorOccurred => return Ok(TC_ACT_PIPE), // Error, pass packet
         };
@@ -104,14 +107,17 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
 fn parse_ethernet_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
     let eth_hdr: EthHdr = ctx.load(parser.offset).map_err(|_| ())?;
     parser.offset += EthHdr::LEN;
-    
+
     // todo: Extract eth_hdr.src_addr and eth_hdr.dst_addr into src_mac_addr and dst_mac_addr fields
 
     match eth_hdr.ether_type() {
         Ok(EtherType::Ipv4) => parser.next_hdr = HeaderType::Ipv4,
         Ok(EtherType::Ipv6) => parser.next_hdr = HeaderType::Ipv6,
         _ => {
-            warn!(ctx, "ethernet header contains unsupported ether type: {}", eth_hdr.ether_type);
+            warn!(
+                ctx,
+                "ethernet header contains unsupported ether type: {}", eth_hdr.ether_type
+            );
             parser.next_hdr = HeaderType::StopProcessing;
             return Ok(());
         }
@@ -146,7 +152,7 @@ fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
         return Err(());
     }
     parser.offset += h_len;
-    
+
     // todo: Extract additional fields from ipv4_hdr
 
     let next_hdr = ipv4_hdr.proto;
@@ -154,13 +160,18 @@ fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
         IpProto::Tcp | IpProto::Udp => {
             // payload headers
             // policy: innermost IP header determines the flow IPs
-            parser.flow_src_ip_addr = Some(CReprIpAddr::new_v4(u32::from_be_bytes(ipv4_hdr.src_addr)));
-            parser.flow_dst_ip_addr = Some(CReprIpAddr::new_v4(u32::from_be_bytes(ipv4_hdr.dst_addr)));
+            parser.flow_src_ip_addr =
+                Some(CReprIpAddr::new_v4(u32::from_be_bytes(ipv4_hdr.src_addr)));
+            parser.flow_dst_ip_addr =
+                Some(CReprIpAddr::new_v4(u32::from_be_bytes(ipv4_hdr.dst_addr)));
             parser.flow_protocol = Some(next_hdr as u8);
             parser.next_hdr = HeaderType::Proto(next_hdr);
         }
         _ => {
-            warn!(ctx, "ipv4 header contains unsupported protocol: {}", next_hdr as u8);
+            warn!(
+                ctx,
+                "ipv4 header contains unsupported protocol: {}", next_hdr as u8
+            );
             parser.next_hdr = HeaderType::StopProcessing;
             return Ok(());
         }
@@ -208,7 +219,13 @@ fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
             parser.flow_protocol = Some(next_hdr as u8);
             parser.next_hdr = HeaderType::Proto(next_hdr);
         }
-        IpProto::HopOpt | IpProto::Ipv6Route | IpProto::Ipv6Frag | IpProto::Ipv6Opts | IpProto::MobilityHeader | IpProto::Hip | IpProto::Shim6 => {
+        IpProto::HopOpt
+        | IpProto::Ipv6Route
+        | IpProto::Ipv6Frag
+        | IpProto::Ipv6Opts
+        | IpProto::MobilityHeader
+        | IpProto::Hip
+        | IpProto::Shim6 => {
             // ipv6 extension headers
             parser.flow_src_ip_addr = Some(CReprIpAddr::new_v6(ipv6_hdr.src_addr));
             parser.flow_dst_ip_addr = Some(CReprIpAddr::new_v6(ipv6_hdr.dst_addr));
@@ -220,7 +237,10 @@ fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
             parser.flow_protocol = Some(next_hdr as u8);
         }
         _ => {
-            warn!(ctx, "ipv6 header contains unsupported next header type: {}", next_hdr as u8);
+            warn!(
+                ctx,
+                "ipv6 header contains unsupported next header type: {}", next_hdr as u8
+            );
             parser.next_hdr = HeaderType::StopProcessing;
             return Ok(());
         }
