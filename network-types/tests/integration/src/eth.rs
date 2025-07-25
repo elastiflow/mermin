@@ -25,7 +25,7 @@ pub fn create_eth_test_packet() -> ([u8; EthHdr::LEN + 1], EthHdr) {
 
 // Helper for verifying Ethernet header test results
 pub fn verify_eth_header(received: ParsedHeader, expected: EthHdr) {
-    assert_eq!(received.ty, PacketType::Eth);
+    assert_eq!(received.type_, PacketType::Eth);
     let parsed_header = unsafe { received.data.eth };
 
     let parsed_dst_addr = parsed_header.dst_addr;

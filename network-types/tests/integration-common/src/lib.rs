@@ -2,7 +2,6 @@
 
 #[cfg(feature = "user")]
 use aya::Pod;
-
 use network_types::{
     eth::EthHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
@@ -41,6 +40,6 @@ pub union HeaderUnion {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct ParsedHeader {
-    pub ty: PacketType,
+    pub type_: PacketType,
     pub data: HeaderUnion,
 }

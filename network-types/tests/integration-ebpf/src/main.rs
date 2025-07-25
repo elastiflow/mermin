@@ -45,7 +45,7 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
     // Ethernet Header (14 bytes) + IPv4 Header (20 bytes) + UDP Header (8 bytes) = 42 bytes.
     const PAYLOAD_OFFSET: usize = EthHdr::LEN + Ipv4Hdr::LEN + UdpHdr::LEN;
 
-    let packet_type_byte: u8 = ctx.load(PAYLOAD_OFFSET).map_err(|_| TC_ACT_SHOT as i32)?;
+    let packet_type_byte: u8 = ctx.load(PAYLOAD_OFFSET).map_err(|_| TC_ACT_SHOT)?;
     let data_offset = PAYLOAD_OFFSET + 1;
 
     let packet_type = match u8_to_packet_type(packet_type_byte) {
@@ -57,43 +57,43 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
                 "Unknown packet type in payload: {}",
                 packet_type_byte
             );
-            return Ok(TC_ACT_OK as i32);
+            return Ok(TC_ACT_OK);
         }
     };
 
     let response = match packet_type {
         PacketType::Eth => {
-            let header: EthHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
+            let header: EthHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             ParsedHeader {
-                ty: PacketType::Eth,
+                type_: PacketType::Eth,
                 data: HeaderUnion { eth: header },
             }
         }
         PacketType::Ipv4 => {
-            let header: Ipv4Hdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
+            let header: Ipv4Hdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             ParsedHeader {
-                ty: PacketType::Ipv4,
+                type_: PacketType::Ipv4,
                 data: HeaderUnion { ipv4: header },
             }
         }
         PacketType::Ipv6 => {
-            let header: Ipv6Hdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
+            let header: Ipv6Hdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             ParsedHeader {
-                ty: PacketType::Ipv6,
+                type_: PacketType::Ipv6,
                 data: HeaderUnion { ipv6: header },
             }
         }
         PacketType::Tcp => {
-            let header: TcpHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
+            let header: TcpHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             ParsedHeader {
-                ty: PacketType::Tcp,
+                type_: PacketType::Tcp,
                 data: HeaderUnion { tcp: header },
             }
         }
         PacketType::Udp => {
-            let header: UdpHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT as i32)?;
+            let header: UdpHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             ParsedHeader {
-                ty: PacketType::Udp,
+                type_: PacketType::Udp,
                 data: HeaderUnion { udp: header },
             }
         }
@@ -105,7 +105,7 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
     };
     log!(&ctx, Level::Info, "Successfully processed packet payload");
 
-    Ok(TC_ACT_OK as i32)
+    Ok(TC_ACT_OK)
 }
 
 #[cfg(not(test))]

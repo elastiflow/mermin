@@ -1,3 +1,5 @@
+use std::{mem::size_of, sync::Once, time::Duration};
+
 use anyhow::{anyhow, Context, Result};
 use aya::{
     include_bytes_aligned,
@@ -10,7 +12,6 @@ use aya_log::EbpfLogger;
 use bytes::BytesMut;
 use integration_common::ParsedHeader;
 use log::{debug, info, warn, LevelFilter};
-use std::{mem::size_of, sync::Once, time::Duration};
 use tokio::sync::mpsc;
 
 static LOG_INIT: Once = Once::new();
@@ -100,7 +101,7 @@ impl TestHarness {
             .context("Timeout waiting for event")?
             .ok_or_else(|| anyhow!("Channel closed unexpectedly"))?;
 
-        debug!("Received event: {:?}", received.ty);
+        debug!("Received event: {:?}", received.type_);
         Ok(received)
     }
 }
@@ -305,9 +306,10 @@ macro_rules! define_header_test {
     ($test_name:ident, $header_type:ty, $packet_type:expr, $setup_fn:expr, $verify_fn:expr, $config_expr:expr) => {
         #[tokio::test]
         async fn $test_name() -> Result<(), anyhow::Error> {
+            use std::net::UdpSocket;
+
             use anyhow::Context;
             use log::{debug, info};
-            use std::net::UdpSocket;
 
             info!("--- Running Test for {} ---", stringify!($header_type));
 
