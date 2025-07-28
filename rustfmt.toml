@@ -1,7 +1,7 @@
 # Consistent parsing between cargo fmt and rustfmt
-edition = "2018"
+edition = "2021"
 # Consistent formatting between cargo fmt and rustfmt
-style_edition = "2024"
+style_edition = "2021"
 group_imports = "StdExternalCrate"
 imports_granularity = "Crate"
 reorder_imports = true
