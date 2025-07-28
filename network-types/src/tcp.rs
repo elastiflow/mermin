@@ -434,8 +434,9 @@ impl TcpHdr {
 
 #[cfg(test)]
 mod test {
-    use super::TcpHdr;
     use core::mem;
+
+    use super::TcpHdr;
 
     #[test]
     fn test_tcp_hdr_size() {

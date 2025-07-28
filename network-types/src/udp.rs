@@ -155,8 +155,9 @@ impl UdpHdr {
 
 #[cfg(test)]
 mod test {
-    use super::UdpHdr;
     use core::mem;
+
+    use super::UdpHdr;
 
     #[test]
     fn test_udp_hdr_size() {

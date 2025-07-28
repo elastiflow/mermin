@@ -1,17 +1,16 @@
 use std::{mem::size_of, sync::Once, time::Duration};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use aya::{
-    include_bytes_aligned,
+    Ebpf, include_bytes_aligned,
     maps::AsyncPerfEventArray,
     programs::{SchedClassifier, TcAttachType},
     util::online_cpus,
-    Ebpf,
 };
 use aya_log::EbpfLogger;
 use bytes::BytesMut;
 use integration_common::ParsedHeader;
-use log::{debug, info, warn, LevelFilter};
+use log::{LevelFilter, debug, info, warn};
 use tokio::sync::mpsc;
 
 static LOG_INIT: Once = Once::new();

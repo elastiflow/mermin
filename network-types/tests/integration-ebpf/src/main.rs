@@ -7,7 +7,7 @@ use aya_ebpf::{
     maps::PerfEventArray,
     programs::TcContext,
 };
-use aya_log_ebpf::{log, Level};
+use aya_log_ebpf::{Level, log};
 use integration_common::{HeaderUnion, PacketType, ParsedHeader};
 use network_types::{
     eth::EthHdr,
