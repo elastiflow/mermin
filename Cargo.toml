@@ -35,3 +35,9 @@ which = { version = "6.0.0", default-features = false }
 [profile.release.package.mermin-ebpf]
 debug = 2
 codegen-units = 1
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

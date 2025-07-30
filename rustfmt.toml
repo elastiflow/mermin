@@ -1,3 +1,5 @@
+[toolchain]
+channel = "nightly"
 # Consistent parsing between cargo fmt and rustfmt
 edition = "2021"
 # Consistent formatting between cargo fmt and rustfmt
