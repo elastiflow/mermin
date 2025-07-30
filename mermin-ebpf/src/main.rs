@@ -63,7 +63,7 @@ const MAX_HEADER_PARSE_DEPTH: usize = 16;
 
 #[classifier]
 pub fn mermin(ctx: TcContext) -> i32 {
-    try_mermin(ctx).unwrap_or_else(|_| TC_ACT_PIPE)
+    try_mermin(ctx).unwrap_or(TC_ACT_PIPE)
 }
 
 fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
