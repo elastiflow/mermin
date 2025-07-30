@@ -5,3 +5,7 @@ edition = "2021"
 license.workspace = true
 
 [dependencies]
+serde = { version = "1", default-features = false, features = ["derive"], optional = true }
+
+[features]
+serde = ["dep:serde"]

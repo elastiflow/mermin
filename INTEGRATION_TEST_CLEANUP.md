@@ -46,7 +46,7 @@ After exploring the `./tests` directory, I've identified several opportunities t
    struct TestResultMap {
        map: UserHashMap<u32, u32>,
    }
-   
+
    impl TestResultMap {
        fn new(bpf: &mut Ebpf, name: &str) -> Result<Self> { /* ... */ }
        fn get_results(&mut self) -> Result<Vec<u32>> { /* ... */ }
@@ -62,8 +62,8 @@ After exploring the `./tests` directory, I've identified several opportunities t
    #[case("BGP", bgp_test_packet(), vec![0xFF, 23, 5, 1, 1])]
    #[case("OSPF", ospf_test_packet(), vec![2, 1, 44, 0xC0A80101, 0])]
    async fn test_protocol_parsing(
-       #[case] name: &str, 
-       #[case] packet: Vec<u8>, 
+       #[case] name: &str,
+       #[case] packet: Vec<u8>,
        #[case] expected: Vec<u32>
    ) -> Result<()> {
        // Shared test implementation

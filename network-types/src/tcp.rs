@@ -618,74 +618,74 @@ mod test {
         };
 
         // Test FIN flag
-        assert_eq!(tcp_hdr.fin(), false);
+        assert!(!tcp_hdr.fin());
         tcp_hdr.set_fin(true);
-        assert_eq!(tcp_hdr.fin(), true);
+        assert!(tcp_hdr.fin());
         assert_eq!(tcp_hdr.off_res_flags[1] & 0x01, 0x01);
         tcp_hdr.set_fin(false);
-        assert_eq!(tcp_hdr.fin(), false);
+        assert!(!tcp_hdr.fin());
 
         // Test SYN flag
-        assert_eq!(tcp_hdr.syn(), false);
+        assert!(tcp_hdr.syn());
         tcp_hdr.set_syn(true);
-        assert_eq!(tcp_hdr.syn(), true);
+        assert!(tcp_hdr.syn());
         assert_eq!(tcp_hdr.off_res_flags[1] & 0x02, 0x02);
         tcp_hdr.set_syn(false);
-        assert_eq!(tcp_hdr.syn(), false);
+        assert!(!tcp_hdr.syn());
 
         // Test RST flag
-        assert_eq!(tcp_hdr.rst(), false);
+        assert!(!tcp_hdr.rst());
         tcp_hdr.set_rst(true);
-        assert_eq!(tcp_hdr.rst(), true);
+        assert!(tcp_hdr.rst());
         assert_eq!(tcp_hdr.off_res_flags[1] & 0x04, 0x04);
         tcp_hdr.set_rst(false);
-        assert_eq!(tcp_hdr.rst(), false);
+        assert!(!tcp_hdr.rst());
 
         // Test PSH flag
-        assert_eq!(tcp_hdr.psh(), false);
+        assert!(!tcp_hdr.psh());
         tcp_hdr.set_psh(true);
-        assert_eq!(tcp_hdr.psh(), true);
+        assert!(tcp_hdr.psh());
         assert_eq!(tcp_hdr.off_res_flags[1] & 0x08, 0x08);
         tcp_hdr.set_psh(false);
-        assert_eq!(tcp_hdr.psh(), false);
+        assert!(tcp_hdr.psh());
 
         // Test ACK flag
-        assert_eq!(tcp_hdr.ack(), false);
+        assert!(!tcp_hdr.ack());
         tcp_hdr.set_ack(true);
-        assert_eq!(tcp_hdr.ack(), true);
+        assert!(tcp_hdr.ack());
         assert_eq!(tcp_hdr.off_res_flags[1] & 0x10, 0x10);
         tcp_hdr.set_ack(false);
-        assert_eq!(tcp_hdr.ack(), false);
+        assert!(!tcp_hdr.ack());
 
         // Test URG flag
-        assert_eq!(tcp_hdr.urg(), false);
+        assert!(!tcp_hdr.urg());
         tcp_hdr.set_urg(true);
-        assert_eq!(tcp_hdr.urg(), true);
+        assert!(tcp_hdr.urg());
         assert_eq!(tcp_hdr.off_res_flags[1] & 0x20, 0x20);
         tcp_hdr.set_urg(false);
-        assert_eq!(tcp_hdr.urg(), false);
+        assert!(!tcp_hdr.urg());
 
         // Test ECE flag
-        assert_eq!(tcp_hdr.ece(), false);
+        assert!(!tcp_hdr.ece());
         tcp_hdr.set_ece(true);
-        assert_eq!(tcp_hdr.ece(), true);
+        assert!(tcp_hdr.ece());
         assert_eq!(tcp_hdr.off_res_flags[1] & 0x40, 0x40);
         tcp_hdr.set_ece(false);
-        assert_eq!(tcp_hdr.ece(), false);
+        assert!(!tcp_hdr.ece());
 
         // Test CWR flag
-        assert_eq!(tcp_hdr.cwr(), false);
+        assert!(!tcp_hdr.cwr());
         tcp_hdr.set_cwr(true);
-        assert_eq!(tcp_hdr.cwr(), true);
+        assert!(tcp_hdr.cwr());
         assert_eq!(tcp_hdr.off_res_flags[1] & 0x80, 0x80);
         tcp_hdr.set_cwr(false);
-        assert_eq!(tcp_hdr.cwr(), false);
+        assert!(!tcp_hdr.cwr());
 
         // Test setting multiple flags
         tcp_hdr.set_syn(true);
         tcp_hdr.set_ack(true);
-        assert_eq!(tcp_hdr.syn(), true);
-        assert_eq!(tcp_hdr.ack(), true);
+        assert!(tcp_hdr.syn());
+        assert!(tcp_hdr.ack());
         assert_eq!(tcp_hdr.off_res_flags[1], 0x12);
     }
 

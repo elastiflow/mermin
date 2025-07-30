@@ -20,3 +20,18 @@ jobs:
       - name: cargo fmt --check
         run:
           cargo fmt -- --check
+  clippy:
+    runs-on: ubuntu-latest
+    env:
+      # Fail the build on every warning, including Clippy lints
+      RUSTFLAGS: "-D warnings"
+    steps:
+      - uses: actions/checkout@v4
+      # Install the toolchain (stable by default) with clippy
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy
+      # Run the linter
+      - name: cargo clippy
+        run:
+          cargo clippy --workspace --all-targets --all-features -- -D warnings

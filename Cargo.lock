@@ -525,6 +525,9 @@ dependencies = [
 [[package]]
 name = "network-types"
 version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "num_enum"
