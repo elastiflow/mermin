@@ -90,10 +90,5 @@ jobs:
 
       - name: Run integration tests
         run: |
-          CARGO_PATH=$(dirname $(which cargo))
           cd network-types/tests
-          sudo \
-            "PATH=$CARGO_PATH:$PATH" \
-            "RUSTUP_HOME=$RUSTUP_HOME" \
-            "CARGO_HOME=$CARGO_HOME" \
-            make clean_test
+          make clean_test
