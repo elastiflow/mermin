@@ -7,5 +7,8 @@ license.workspace = true
 [dependencies]
 serde = { version = "1", default-features = false, features = ["derive"], optional = true }
 
+[dev-dependencies]
+bincode       = { version = "2.0.0-rc.3", default-features = false, features = ["serde", "alloc"] }
+
 [features]
 serde = ["dep:serde"]
