@@ -84,8 +84,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang llvm libelf-dev libz-dev make
-      - name: Install bpf-linker
-        run: cargo install bpf-linker
 
       - name: Run unit tests
         run: cargo test-unit --release
