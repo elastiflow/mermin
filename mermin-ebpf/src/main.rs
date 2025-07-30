@@ -1,15 +1,22 @@
 #![no_std]
 #![no_main]
 
-use aya_ebpf::bindings::TC_ACT_PIPE;
-use aya_ebpf::macros::classifier;
-use aya_ebpf::programs::TcContext;
+use aya_ebpf::{
+    bindings::TC_ACT_PIPE,
+    macros::{classifier, map},
+    maps::RingBuf,
+    programs::TcContext,
+};
 use aya_log_ebpf::{debug, error, warn};
-use mermin_common::CReprIpAddr;
+use mermin_common::{PacketMeta};
 use network_types::eth::{EthHdr, EtherType};
 use network_types::ip::{IpProto, Ipv4Hdr, Ipv6Hdr};
 use network_types::tcp::TcpHdr;
 use network_types::udp::UdpHdr;
+
+// todo: verify buffer size
+#[map]
+static mut PACKETS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0); // 256 KB
 
 // Defines what kind of header we expect to process in the current iteration.
 #[derive(Debug)]
@@ -30,32 +37,23 @@ struct Parser {
 
     // Information for building the FlowKey (prioritizes innermost headers)
     // These fields will be updated as we parse deeper or encounter encapsulations.
-    src_ip_addr: Option<CReprIpAddr>,
-    dst_ip_addr: Option<CReprIpAddr>,
-    src_port: Option<u16>,
-    dst_port: Option<u16>,
-    proto: Option<u8>,     // The innermost L4 protocol number (e.g., 6 for TCP)
-    l3_octet_count: u32, // Total number of octets from the start of the innermost L3 (IP) header to the end of the packet
+    packet_meta: PacketMeta,
 }
 
 impl Parser {
+    // todo(eng-18): consider using default trait instead of new
     fn new() -> Self {
         Parser {
             offset: 0,
             next_hdr: HeaderType::Ethernet,
-            src_ip_addr: None,
-            dst_ip_addr: None,
-            src_port: None,
-            dst_port: None,
-            proto: None,
-            l3_octet_count: 0,
+            packet_meta: PacketMeta::default(),
         }
     }
 
     // Calculate the L3 octet count (from current offset to end of packet)
     // This should be called at the start of L3 (IP) header parsing
     fn calculate_l3_octet_count(&mut self, ctx: &TcContext) {
-        self.l3_octet_count = ctx.len() - self.offset as u32;
+        self.packet_meta.l3_octet_count = ctx.len() - self.offset as u32;
     }
 }
 
@@ -95,8 +93,13 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
         }
     }
 
-    let mut packet_meta = PacketMeta::default();
-    packet_meta.l3_octet_count = parser.l3_octet_count;
+    unsafe {
+        #[allow(static_mut_refs)]
+        let result = PACKETS.output(&parser.packet_meta, 0);
+        if result.is_err() {
+            error!(&ctx, "mermin: failed to write packet to ring buffer");
+        }
+    }
 
     Ok(TC_ACT_PIPE)
 }
@@ -172,9 +175,9 @@ fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
         IpProto::Tcp | IpProto::Udp => {
             // payload headers
             // policy: innermost IP header determines the flow IPs
-            parser.src_ip_addr = Some(CReprIpAddr::new_v4(u32::from_be_bytes(ipv4_hdr.src_addr)));
-            parser.dst_ip_addr = Some(CReprIpAddr::new_v4(u32::from_be_bytes(ipv4_hdr.dst_addr)));
-            parser.proto = Some(next_hdr as u8);
+            parser.packet_meta.src_ipv4_addr = ipv4_hdr.src_addr;
+            parser.packet_meta.dst_ipv4_addr = ipv4_hdr.dst_addr;
+            parser.packet_meta.proto = next_hdr as u8;
             parser.next_hdr = HeaderType::Proto(next_hdr);
         }
         _ => {
@@ -225,9 +228,9 @@ fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
         IpProto::Tcp | IpProto::Udp => {
             // payload headers
             // policy: innermost IP header determines the flow IPs
-            parser.src_ip_addr = Some(CReprIpAddr::new_v6(ipv6_hdr.src_addr));
-            parser.dst_ip_addr = Some(CReprIpAddr::new_v6(ipv6_hdr.dst_addr));
-            parser.proto = Some(next_hdr as u8);
+            parser.packet_meta.src_ipv6_addr = ipv6_hdr.src_addr;
+            parser.packet_meta.dst_ipv6_addr = ipv6_hdr.dst_addr;
+            parser.packet_meta.proto = next_hdr as u8;
             parser.next_hdr = HeaderType::Proto(next_hdr);
         }
         IpProto::HopOpt
@@ -238,14 +241,14 @@ fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
         | IpProto::Hip
         | IpProto::Shim6 => {
             // ipv6 extension headers
-            parser.src_ip_addr = Some(CReprIpAddr::new_v6(ipv6_hdr.src_addr));
-            parser.dst_ip_addr = Some(CReprIpAddr::new_v6(ipv6_hdr.dst_addr));
+            parser.packet_meta.src_ipv6_addr = ipv6_hdr.src_addr;
+            parser.packet_meta.dst_ipv6_addr = ipv6_hdr.dst_addr;
             parser.next_hdr = HeaderType::Proto(next_hdr);
         }
         IpProto::Ipv6NoNxt => {
             // ipv6 no next header
             parser.next_hdr = HeaderType::StopProcessing;
-            parser.proto = Some(next_hdr as u8);
+            parser.packet_meta.proto = next_hdr as u8;
         }
         _ => {
             warn!(
@@ -290,8 +293,8 @@ fn parse_tcp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
     let tcp_hdr: TcpHdr = ctx.load(parser.offset).map_err(|_| ())?;
     parser.offset += TcpHdr::LEN;
 
-    parser.src_port = Option::from(tcp_hdr.src_port());
-    parser.dst_port = Option::from(tcp_hdr.dst_port());
+    parser.packet_meta.src_port = tcp_hdr.src;
+    parser.packet_meta.dst_port = tcp_hdr.dst;
     // TODO: extract and assign additional tcp fields
 
     Ok(())
@@ -314,8 +317,8 @@ fn parse_udp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
     let udp_hdr: UdpHdr = ctx.load(parser.offset).map_err(|_| ())?;
     parser.offset += UdpHdr::LEN;
 
-    parser.src_port = Option::from(udp_hdr.src_port());
-    parser.dst_port = Option::from(udp_hdr.dst_port());
+    parser.packet_meta.src_port = udp_hdr.src;
+    parser.packet_meta.dst_port = udp_hdr.dst;
     // TODO: extract and assign additional tcp fields
 
     Ok(())
