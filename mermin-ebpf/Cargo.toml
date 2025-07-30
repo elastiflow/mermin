@@ -16,3 +16,5 @@ which = { workspace = true }
 [[bin]]
 name = "mermin-ebpf"
 path = "src/main.rs"
+test = false
+doctest = false

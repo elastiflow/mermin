@@ -60,3 +60,37 @@ jobs:
 
       - name: Lint userspace code
         run: cargo clippy --all-features -- -D warnings
+
+  test:
+    name: Run Tests
+    needs: check_and_build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rust-src
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install eBPF dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang llvm libelf-dev libz-dev make
+      - name: Install bpf-linker
+        run: cargo install bpf-linker
+
+      - name: Run unit tests
+        run: cargo test-unit --release
+
+      - name: Run integration tests
+        run: |
+          cd network-types/tests
+          sudo make clean_test

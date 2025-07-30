@@ -626,7 +626,7 @@ mod test {
         assert!(!tcp_hdr.fin());
 
         // Test SYN flag
-        assert!(tcp_hdr.syn());
+        assert!(!tcp_hdr.syn());
         tcp_hdr.set_syn(true);
         assert!(tcp_hdr.syn());
         assert_eq!(tcp_hdr.off_res_flags[1] & 0x02, 0x02);
@@ -647,7 +647,7 @@ mod test {
         assert!(tcp_hdr.psh());
         assert_eq!(tcp_hdr.off_res_flags[1] & 0x08, 0x08);
         tcp_hdr.set_psh(false);
-        assert!(tcp_hdr.psh());
+        assert!(!tcp_hdr.psh());
 
         // Test ACK flag
         assert!(!tcp_hdr.ack());
