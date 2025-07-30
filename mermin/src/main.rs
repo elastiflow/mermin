@@ -31,10 +31,9 @@ async fn main() -> anyhow::Result<()> {
     // runtime. This approach is recommended for most real-world use cases. If you would
     // like to specify the eBPF program at runtime rather than at compile-time, you can
     // reach for `Bpf::load_file` instead.
-    let mut ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
-        env!("OUT_DIR"),
-        "/mermin"
-    )))?;
+    let mut ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(
+        "../../target/bpfel-unknown-none/release/mermin-ebpf"
+    ))?;
     if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
         // This can happen if you remove all log statements from your eBPF program.
         warn!("failed to initialize eBPF logger: {e}");
@@ -55,6 +54,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 struct FlowRecord {
     /// Total number of packets observed for this flow since its start.
     pub packet_total_count: u64,

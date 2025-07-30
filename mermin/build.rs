@@ -1,14 +1,11 @@
-use anyhow::{anyhow, Context as _};
-use aya_build::cargo_metadata;
+use std::path::PathBuf;
 
-fn main() -> anyhow::Result<()> {
-    let cargo_metadata::Metadata { packages, .. } = cargo_metadata::MetadataCommand::new()
-        .no_deps()
-        .exec()
-        .context("MetadataCommand::exec")?;
-    let ebpf_package = packages
-        .into_iter()
-        .find(|cargo_metadata::Package { name, .. }| name == "mermin-ebpf")
-        .ok_or_else(|| anyhow!("mermin-ebpf package not found"))?;
-    aya_build::build_ebpf([ebpf_package])
+fn main() {
+    let target_dir = "target/release";
+    let elf_path = PathBuf::from(target_dir).join("mermin-ebpf");
+    println!(
+        "cargo:rustc-env=EBPF_PROGRAM_PATH={}",
+        elf_path.to_str().unwrap()
+    );
+    println!("cargo:rerun-if-changed={}", elf_path.to_str().unwrap());
 }
