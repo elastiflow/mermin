@@ -29,6 +29,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
+          toolchain: nightly
           components: clippy, rust-src
       - name: Cache dependencies
         uses: actions/cache@v4
@@ -46,13 +47,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang llvm libelf-dev libz-dev linux-headers-$(uname -r)
 
-      - name: Install bpf-linker
-        run: cargo install bpf-linker
-
-      - name: Build eBPF code
-        run: cargo build-bpf
-
-      - name: Build userspace code
+      - name: Build eBPF and userspace code
         run: cargo build --release
 
       - name: Lint eBPF code
@@ -87,7 +82,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends clang llvm libelf-dev libz-dev make
 
       - name: Run unit tests
-        run: cargo test-unit --release
+        run: cargo test --release
 
       - name: Run integration tests
         run: |

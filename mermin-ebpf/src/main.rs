@@ -332,6 +332,10 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
+#[unsafe(link_section = "license")]
+#[unsafe(no_mangle)]
+static LICENSE: [u8; 6] = *b"GPLv2\0"; // Corrected license string length and array size
+
 #[cfg(test)]
 mod tests {
     extern crate alloc;
@@ -626,7 +630,3 @@ mod tests {
         assert_eq!(parser.packet_meta.dst_port, [0x00, 0x35]); // 53
     }
 }
-
-#[unsafe(link_section = "license")]
-#[unsafe(no_mangle)]
-static LICENSE: [u8; 6] = *b"GPLv2\0"; // Corrected license string length and array size

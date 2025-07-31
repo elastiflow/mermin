@@ -14,7 +14,5 @@ aya-log-ebpf = { workspace = true }
 which = { workspace = true }
 
 [[bin]]
-name = "mermin-ebpf"
+name = "mermin"
 path = "src/main.rs"
-test = false
-doctest = false

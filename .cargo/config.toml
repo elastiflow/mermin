@@ -1,4 +1,2 @@
 [alias]
-build-bpf = "build --release -Z build-std=core,alloc -Z build-std-features=panic_immediate_abort --target bpfel-unknown-none --package mermin-ebpf"
 clippy-bpf = "clippy -Z build-std=core,alloc -Z build-std-features=panic_immediate_abort --target bpfel-unknown-none --package mermin-ebpf -- -D warnings"
-test-unit = "test -p mermin -p mermin-common -p network-types"
