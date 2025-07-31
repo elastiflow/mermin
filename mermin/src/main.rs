@@ -1,4 +1,4 @@
-use aya::programs::{tc, SchedClassifier, TcAttachType};
+use aya::programs::{SchedClassifier, TcAttachType, tc};
 use clap::Parser;
 #[rustfmt::skip]
 use log::{debug, warn};
