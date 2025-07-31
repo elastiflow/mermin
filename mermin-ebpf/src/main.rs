@@ -627,6 +627,6 @@ mod tests {
     }
 }
 
-#[link_section = "license"]
-#[no_mangle]
+#[unsafe(link_section = "license")]
+#[unsafe(no_mangle)]
 static LICENSE: [u8; 6] = *b"GPLv2\0"; // Corrected license string length and array size
