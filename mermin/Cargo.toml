@@ -9,7 +9,7 @@ license.workspace = true
 mermin-common = { path = "../mermin-common", features = [] }
 
 anyhow = { workspace = true, default-features = true }
-aya = { workspace = true }
+aya = { workspace = true, features = ["async_tokio"]}
 aya-log = { workspace = true }
 env_logger = { workspace = true }
 libc = { workspace = true }

@@ -12,7 +12,7 @@ repos:
       - id: cargo-fmt
         name: cargo fmt
         description: Format files with rustfmt.
-        entry: cargo fmt -- --check
+        entry: cargo fmt
         language: system
         types: [ rust ]
         pass_filenames: false

@@ -1,7 +1,12 @@
-use aya::programs::{SchedClassifier, TcAttachType, tc};
+use aya::{
+    maps::RingBuf,
+    programs::{SchedClassifier, TcAttachType, tc},
+};
 use clap::Parser;
 #[rustfmt::skip]
-use log::{debug, warn};
+use log::{debug, info, warn};
+use mermin_common::{IpAddrType, PacketMeta};
+use std::time::Duration;
 use tokio::signal;
 
 #[derive(Debug, Parser)]
@@ -47,9 +52,22 @@ async fn main() -> anyhow::Result<()> {
     program.load()?;
     program.attach(&iface, TcAttachType::Egress)?;
 
-    let ctrl_c = signal::ctrl_c();
+    info!("eBPF program attached. Waiting for events... Press Ctrl-C to exit.");
+
+    let map_ref_mut = ebpf.map_mut("PACKETS").unwrap();
+    let mut ring_buf = RingBuf::try_from(map_ref_mut)?;
+
+    // Start consuming events
+    tokio::spawn(async move {
+        while let Some(bytes) = ring_buf.next().await {
+            let event: PacketMeta =
+                unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const PacketMeta) };
+            println!("Received event: {:?}", event);
+        }
+    });
+
     println!("Waiting for Ctrl-C...");
-    ctrl_c.await?;
+    signal::ctrl_c().await?;
     println!("Exiting...");
 
     Ok(())
