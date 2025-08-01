@@ -563,8 +563,9 @@ pub enum IpProto {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use core::net::{Ipv4Addr, Ipv6Addr};
+
+    use super::*;
 
     // Helper to create a default Ipv4Hdr for tests
     fn default_ipv4_hdr() -> Ipv4Hdr {

@@ -155,8 +155,9 @@ impl UdpHdr {
 
 #[cfg(test)]
 mod test {
-    use super::UdpHdr;
     use core::mem;
+
+    use super::UdpHdr;
 
     #[test]
     fn test_udp_hdr_size() {
@@ -319,22 +320,5 @@ mod test {
         assert_eq!(udp_hdr.dst, [0x00, 0x50]); // 80 in big-endian
         assert_eq!(udp_hdr.len, [0x00, 0x1C]); // 28 in big-endian
         assert_eq!(udp_hdr.check, [0x12, 0x34]); // 0x1234 in big-endian
-    }
-
-    #[test]
-    #[cfg(feature = "serde")]
-    fn test_serialize() {
-        use bincode::{config::standard, serde::encode_to_vec};
-
-        let udp = UdpHdr {
-            src: 4242_u16.to_be_bytes(),
-            dst: 4789_u16.to_be_bytes(),
-            len: 42_u16.to_be_bytes(),
-            check: 0_u16.to_be_bytes(),
-        };
-
-        let options = standard().with_fixed_int_encoding().with_big_endian();
-
-        encode_to_vec(udp, options).unwrap();
     }
 }

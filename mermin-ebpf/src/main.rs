@@ -63,7 +63,7 @@ const MAX_HEADER_PARSE_DEPTH: usize = 16;
 
 #[classifier]
 pub fn mermin(ctx: TcContext) -> i32 {
-    try_mermin(ctx).unwrap_or_else(|_| TC_ACT_PIPE)
+    try_mermin(ctx).unwrap_or(TC_ACT_PIPE)
 }
 
 fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
@@ -331,6 +331,10 @@ fn parse_udp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
+
+#[unsafe(link_section = "license")]
+#[unsafe(no_mangle)]
+static LICENSE: [u8; 6] = *b"GPLv2\0"; // Corrected license string length and array size
 
 #[cfg(test)]
 mod tests {
@@ -626,7 +630,3 @@ mod tests {
         assert_eq!(parser.packet_meta.dst_port, [0x00, 0x35]); // 53
     }
 }
-
-#[link_section = "license"]
-#[no_mangle]
-static LICENSE: [u8; 6] = *b"GPLv2\0"; // Corrected license string length and array size
