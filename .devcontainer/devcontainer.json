@@ -1,5 +1,5 @@
 {
-  "name": "aya-mermin",
+  "name": "mermin-devcontainer",
   "build": {
     "dockerfile": "Dockerfile",
     "context": ".."
