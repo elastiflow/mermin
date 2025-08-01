@@ -96,7 +96,10 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
     }
 
     unsafe {
-        debug!(&ctx, "mermin: writing to packet output with proto {:x}", parser.packet_meta.proto);
+        debug!(
+            &ctx,
+            "mermin: writing to packet output with proto {:x}", parser.packet_meta.proto
+        );
         #[allow(static_mut_refs)]
         let result = PACKETS.output(&parser.packet_meta, 0);
         if result.is_err() {

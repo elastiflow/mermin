@@ -1,4 +1,4 @@
-use anyhow::{anyhow};
+use anyhow::anyhow;
 use aya::{
     maps::RingBuf,
     programs::{SchedClassifier, TcAttachType, tc},
