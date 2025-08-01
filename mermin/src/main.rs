@@ -1,4 +1,4 @@
-use aya::programs::{tc, SchedClassifier, TcAttachType};
+use aya::programs::{SchedClassifier, TcAttachType, tc};
 use clap::Parser;
 #[rustfmt::skip]
 use log::{debug, warn};
@@ -55,6 +55,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 struct FlowRecord {
     /// Total number of packets observed for this flow since its start.
     pub packet_total_count: u64,

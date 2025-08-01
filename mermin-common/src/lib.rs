@@ -53,14 +53,13 @@ impl PacketMeta {
     pub fn dst_port(&self) -> u16 {
         u16::from_be_bytes(self.dst_port)
     }
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::*; // Import items from the parent module (lib.rs)
-    use core::mem::{align_of, size_of};
     use crate::IpAddrType::Ipv4;
+    use core::mem::{align_of, size_of};
 
     // Test FlowRecord size and alignment
     #[test]

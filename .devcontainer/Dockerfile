@@ -37,6 +37,8 @@ USER vscode
 # This is required for eBPF development with Aya.
 RUN rustup toolchain install nightly && \
     rustup component add rust-src --toolchain nightly && \
+    rustup component add rustfmt && \
+    rustup component add clippy --toolchain nightly && \
     rustup default nightly
 
 # Install the latest PUBLISHED versions of the core Aya tools.
