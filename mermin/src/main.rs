@@ -1,3 +1,4 @@
+use anyhow::{anyhow};
 use aya::{
     maps::RingBuf,
     programs::{SchedClassifier, TcAttachType, tc},
@@ -5,8 +6,7 @@ use aya::{
 use clap::Parser;
 #[rustfmt::skip]
 use log::{debug, info, warn};
-use mermin_common::{IpAddrType, PacketMeta};
-use std::time::Duration;
+use mermin_common::PacketMeta;
 use tokio::signal;
 
 #[derive(Debug, Parser)]
@@ -54,15 +54,25 @@ async fn main() -> anyhow::Result<()> {
 
     info!("eBPF program attached. Waiting for events... Press Ctrl-C to exit.");
 
-    let map_ref_mut = ebpf.map_mut("PACKETS").unwrap();
-    let mut ring_buf = RingBuf::try_from(map_ref_mut)?;
+    let map = ebpf
+        .take_map("PACKETS")
+        .ok_or_else(|| anyhow!("PACKETS map not present in the object"))?;
+    let mut ring_buf = RingBuf::try_from(map)?;
 
-    // Start consuming events
     tokio::spawn(async move {
-        while let Some(bytes) = ring_buf.next().await {
-            let event: PacketMeta =
-                unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const PacketMeta) };
-            println!("Received event: {:?}", event);
+        info!("Userspace task started. Polling the ring buffer...");
+        loop {
+            match ring_buf.next() {
+                Some(bytes) => {
+                    let event: PacketMeta =
+                        unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const PacketMeta) };
+                    info!("Received event: {:?}", event);
+                }
+                None => {
+                    // Short sleep to prevent busy-looping.
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            }
         }
     });
 
