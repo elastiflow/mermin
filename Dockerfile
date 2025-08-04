@@ -1,5 +1,5 @@
 ARG APP_ROOT=/app
-ARG APP
+ARG APP=mermin
 
 # ---- Builder Stage ----
 # Use a Rust base image with build tools.
@@ -44,8 +44,8 @@ RUN cargo install bpf-linker
 RUN cargo install bindgen-cli
 RUN cargo install --git https://github.com/aya-rs/aya --locked aya-tool
 
-
-
+# ---- Builder Stage ----
+# Use a slim base image for the final container with shell support
 FROM base AS builder
 ARG APP_ROOT APP
 
@@ -57,22 +57,19 @@ COPY . .
 # Build the final application, leveraging the cached dependencies
 RUN cargo build --release
 
+# Use a slim base image for the final container without shell support
+FROM scratch AS runner
+ARG APP_ROOT APP
 
+# Copy the compiled binary from the builder stage
+COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
+ENTRYPOINT ["/usr/bin/${APP}"]
 
 # ---- Runtime Stage ----
 # Use a slim base image for the final container with shell support
-FROM alpine:3.22.1 AS runner
+FROM alpine:3.22.1 AS runner-alpine
 ARG APP_ROOT APP
 
 # Copy the compiled binary from the builder stage
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
-
-
-
-
-# Use a slim base image for the final container without shell support
-FROM gcr.io/distroless/static-debian12 AS runner-slim
-ARG APP_ROOT APP
-
-# Copy the compiled binary from the builder stage
-COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
+ENTRYPOINT ["/usr/bin/${APP}"]
