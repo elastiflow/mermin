@@ -16,6 +16,7 @@ RUN wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh && chmod +x /tmp/llvm.s
   && /tmp/llvm.sh 20 all
 # Install development headers and tools required for building and running Aya
 RUN apt-get install -y --no-install-recommends \
+    iputils-ping \
     libclang-20-dev \
     llvm-20-dev \
     libelf-dev \
