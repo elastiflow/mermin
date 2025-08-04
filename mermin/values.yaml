@@ -1,0 +1,27 @@
+image:
+  repository: mermin
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets: [ ]
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: { }
+  name: ""
+
+podAnnotations: { }
+
+podSecurityContext: { }
+
+securityContext: { }
+
+resources: { }
+
+nodeSelector: { }
+
+tolerations: [ ]
+
+affinity: { }
