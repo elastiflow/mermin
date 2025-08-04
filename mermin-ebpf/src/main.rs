@@ -96,6 +96,10 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
     }
 
     unsafe {
+        debug!(
+            &ctx,
+            "mermin: writing to packet output with proto {:x}", parser.packet_meta.proto
+        );
         #[allow(static_mut_refs)]
         let result = PACKETS.output(&parser.packet_meta, 0);
         if result.is_err() {
@@ -334,7 +338,7 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 
 #[unsafe(link_section = "license")]
 #[unsafe(no_mangle)]
-static LICENSE: [u8; 6] = *b"GPLv2\0"; // Corrected license string length and array size
+static LICENSE: [u8; 13] = *b"Dual MIT/GPL\0"; // Corrected license string length and array size
 
 #[cfg(test)]
 mod tests {
