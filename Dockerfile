@@ -55,7 +55,7 @@ WORKDIR ${APP_ROOT}
 COPY . .
 
 # Build the final application, leveraging the cached dependencies
-RUN cargo +stable build --release
+RUN cargo build --release
 
 
 
