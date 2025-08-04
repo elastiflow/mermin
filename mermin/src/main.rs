@@ -4,6 +4,7 @@ use aya::{
     programs::{SchedClassifier, TcAttachType, tc},
 };
 use clap::Parser;
+use std::net::{Ipv4Addr, Ipv6Addr};
 #[rustfmt::skip]
 use log::{debug, info, warn};
 use mermin_common::PacketMeta;
@@ -66,7 +67,16 @@ async fn main() -> anyhow::Result<()> {
                 Some(bytes) => {
                     let event: PacketMeta =
                         unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const PacketMeta) };
-                    info!("Received event: {:?}", event);
+                    info!(
+                        "Received event: Src IPV6: {}, Dst IPV6: {}, Src IPV4: {}, Dst IPV4: {}, L3 Octect Count: {}, Src Port: {}, Dst Port: {}",
+                        Ipv6Addr::from(event.src_ipv6_addr),
+                        Ipv6Addr::from(event.dst_ipv6_addr),
+                        Ipv4Addr::from(event.src_ipv4_addr),
+                        Ipv4Addr::from(event.dst_ipv4_addr),
+                        event.l3_octet_count,
+                        u16::from_be_bytes(event.src_port),
+                        u16::from_be_bytes(event.dst_port),
+                    );
                 }
                 None => {
                     // Short sleep to prevent busy-looping.

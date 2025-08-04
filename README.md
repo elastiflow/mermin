@@ -17,14 +17,24 @@ Mermin is a suite of Kubernetes native network traffic observability tools. It i
 
 ### Build & Run
 
-Use `cargo build`, `cargo check`, etc. as normal. Run your program with:
+It is recommended to run `cargo clean` previous to any build.
+
+Use `cargo build` from the root of the project to build mermin. Then run:
 
 ```shell
-cargo run --release --config 'target."cfg(all())".runner="sudo -E"'
+RUST_LOG=info cargo run --release --config 'target."cfg(all())".runner="sudo -E"'
 ```
+
+Once the program is running, open a secondary terminal to run a ping command such as `ping -c 5 localhost` to start seeing logs.
 
 Cargo build scripts are used to automatically build the eBPF correctly and include it in the
 program.
+
+### Test & Format
+
+Unit tests in the repo can be run with `cargo test`.
+
+For formatting ensure you have run `cargo fmt`. You can also run `cargo clippy --package mermin-ebpf -- -D warnings` for linting the mermin-ebpf folder and `cargo clippy --all-features -- -D warnings` for all other features.
 
 ### Cross-compiling on macOS
 
