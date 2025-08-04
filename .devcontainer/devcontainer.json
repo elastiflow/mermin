@@ -1,7 +1,8 @@
 {
   "name": "mermin-devcontainer",
   "build": {
-    "dockerfile": "Dockerfile",
+    "dockerfile": "../Dockerfile",
+    "target": "base",
     "context": ".."
   },
   "privileged": true,

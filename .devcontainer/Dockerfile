@@ -1,4 +1,3 @@
-# Start from the official Rust dev container image
 FROM mcr.microsoft.com/devcontainers/rust:1-bookworm
 
 # Switch to root to install system dependencies
