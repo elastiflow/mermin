@@ -46,10 +46,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang llvm libelf-dev libz-dev linux-headers-$(uname -r)
+          
+      - name: Install bpf-linker
+        run: cargo install bpf-linker
 
       - name: Build eBPF and userspace code
         run: cargo build --release
-
+        
       - name: Lint eBPF code
         run: cargo clippy --package mermin-ebpf -- -D warnings
 
