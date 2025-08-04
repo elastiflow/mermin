@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && /tmp/llvm.sh 20 all \
     # Install development headers and tools required for building and running Aya
     && apt-get install -y --no-install-recommends \
+        iputils-ping \
         libclang-20-dev \
         llvm-20-dev \
         libelf-dev \
