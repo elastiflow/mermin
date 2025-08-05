@@ -43,6 +43,26 @@ spec:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: POD_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: MERMIN_PLATFORM
+              value: "kubernetes"
+            - name: MERMIN_HOST_PID_ENRICHMENT
+              value: {{ .Values.config.hostPidEnrichment | quote }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           resources:
