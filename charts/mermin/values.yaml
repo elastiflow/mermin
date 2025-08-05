@@ -28,9 +28,16 @@ commonLabels: {}
 podAnnotations: {}
 podLabels: {}
 
-podSecurityContext: {}
+# Set to true to allow access to the host's process list (/proc) for mapping kernel events to specific processes.
+hostPID: true
 
-securityContext: {}
+# privileged mode is required for mermin to interact with the kernel and eBPF.
+podSecurityContext:
+  privileged: true
+
+# privileged mode is required for mermin to interact with the kernel and eBPF.
+securityContext:
+  privileged: true
 
 resources: {}
   # limits:
