@@ -4,6 +4,11 @@ image:
   # Overrides the image tag whose default is the chart appVersion.
   tag: ""
 
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 0
+
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
@@ -51,8 +56,8 @@ resources: {}
 #   initialDelaySeconds: 15
 #   periodSeconds: 5
 
-tolerations: []
+tolerations:
+  - effect: NoSchedule
+    operator: Exists
 
 affinity: {}
-
-topologySpreadConstraints: []

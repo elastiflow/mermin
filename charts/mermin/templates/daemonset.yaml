@@ -2,11 +2,11 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: {{ include "mermin.fullname" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "mermin.labels" . | nindent 4 }}
 spec:
-  updateStrategy:
-    type: RollingUpdate
+  updateStrategy: {{ .Values.updateStrategy | toYaml | nindent 4 }}
   selector:
     matchLabels:
       {{- include "mermin.selectorLabels" . | nindent 6 }}
@@ -23,15 +23,12 @@ spec:
         {{- end }}
     spec:
       tolerations:
-        {{- if .Values.tolerations }}
         {{- toYaml .Values.tolerations | nindent 8 }}
-        {{- end }}
-        - effect: NoSchedule
-          operator: Exists
       {{- with .Values.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      #
       hostPID: true
       {{- if .Values.serviceAccount.create -}}
       serviceAccountName: {{ include "mermin.serviceAccountName" . }}
@@ -42,6 +39,7 @@ spec:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # privileged mode is required for BPF
           securityContext:
             privileged: true
           resources:
