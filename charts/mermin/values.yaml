@@ -32,16 +32,16 @@ podLabels: {}
 # privileged mode is required for mermin to interact with the kernel and eBPF.
 podSecurityContext:
   privileged: true
+  runAsNonRoot: false
 
 # privileged mode is required for mermin to interact with the kernel and eBPF.
 securityContext:
   privileged: true
-  # capabilities:
-  #   drop:
-  #   - ALL
-  # readOnlyRootFilesystem: true
-  # runAsNonRoot: true
-  # runAsUser: 1000
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: false
 
 resources: {}
   # limits:
@@ -64,6 +64,12 @@ resources: {}
 #   exec:
 #     command:
 #     - /path/to/readiness
+#   initialDelaySeconds: 15
+#   periodSeconds: 5
+# startupProbe:
+#   exec:
+#     command:
+#     - /path/to/startup
 #   initialDelaySeconds: 15
 #   periodSeconds: 5
 
