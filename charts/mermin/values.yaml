@@ -72,3 +72,7 @@ tolerations:
     operator: Exists
 
 affinity: {}
+
+config:
+  # Set to true to allow enable host's process list (/proc) for mapping kernel events to specific processes.
+  hostPidEnrichment: true
