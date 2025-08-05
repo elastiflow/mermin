@@ -6,7 +6,8 @@ metadata:
   labels:
     {{- include "mermin.labels" . | nindent 4 }}
 spec:
-  updateStrategy: {{ .Values.updateStrategy | toYaml | nindent 4 }}
+  updateStrategy:
+    {{- .Values.updateStrategy | toYaml | nindent 4 }}
   selector:
     matchLabels:
       {{- include "mermin.selectorLabels" . | nindent 6 }}
