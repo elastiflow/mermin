@@ -38,6 +38,12 @@ podSecurityContext:
 # privileged mode is required for mermin to interact with the kernel and eBPF.
 securityContext:
   privileged: true
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
 
 resources: {}
   # limits:
