@@ -117,7 +117,8 @@ jobs:
           fi
       - name: Run chart-testing (lint)
         if: steps.list-changed.outputs.changed == 'true'
-        run: ct lint --target-branch ${{ github.event.repository.default_branch }} --validate-maintainers=false
+        # TODO(mack#ENG-53|2025-08-06): Remove --check-version-increment when ready to publish
+        run: ct lint --target-branch ${{ github.event.repository.default_branch }} --validate-maintainers=false --check-version-increment=false
       - name: Create kind cluster
         if: steps.list-changed.outputs.changed == 'true'
         uses: helm/kind-action@v1.12.0
