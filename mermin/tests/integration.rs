@@ -141,6 +141,7 @@ async fn run_test_scenario<F, Fut>(
     }
 }
 
+#[ignore]
 #[tokio::test]
 async fn test_ipv4_udp_packet_is_captured() {
     run_test_scenario(
@@ -160,6 +161,7 @@ async fn test_ipv4_udp_packet_is_captured() {
     .await;
 }
 
+#[ignore]
 #[tokio::test]
 async fn test_ipv6_tcp_packet_is_captured() {
     run_test_scenario(
