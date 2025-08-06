@@ -23,7 +23,6 @@ jobs:
 
   check_and_build:
     name: Check, Lint & Build
-    needs: fmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -61,7 +60,6 @@ jobs:
 
   test:
     name: Run Tests
-    needs: check_and_build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
