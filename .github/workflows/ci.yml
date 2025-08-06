@@ -46,13 +46,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang llvm libelf-dev libz-dev linux-headers-$(uname -r)
-          
+
       - name: Install bpf-linker
-        run: cargo install bpf-linker
+        run: command -v bpf-linker &> /dev/null || cargo install bpf-linker
 
       - name: Build eBPF and userspace code
         run: cargo build --release
-        
+
       - name: Lint eBPF code
         run: cargo clippy --package mermin-ebpf -- -D warnings
 
@@ -91,3 +91,37 @@ jobs:
         run: |
           cd network-types/tests
           make clean_test
+
+  helm_checks:
+    name: Run Helm sanity checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          check-latest: true
+      - name: Set up chart-testing
+        uses: helm/chart-testing-action@v2.7.0
+      - name: Run chart-testing (list-changed)
+        id: list-changed
+        run: |
+          changed=$(ct list-changed --target-branch ${{ github.event.repository.default_branch }})
+          if [[ -n "$changed" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Run chart-testing (lint)
+        if: steps.list-changed.outputs.changed == 'true'
+        run: ct lint --target-branch ${{ github.event.repository.default_branch }} --validate-maintainers=false
+      - name: Create kind cluster
+        if: steps.list-changed.outputs.changed == 'true'
+        uses: helm/kind-action@v1.12.0
+      # TODO: Enable this when the docker image is available on Docker Hub.
+      # - name: Run chart-testing (install)
+      #   if: steps.list-changed.outputs.changed == 'true'
+      #   run: ct install --target-branch ${{ github.event.repository.default_branch }}

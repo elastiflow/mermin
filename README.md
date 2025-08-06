@@ -76,3 +76,60 @@ dual licensed as above, without any additional terms or conditions.
 ## mercoll
 
 Placeholder
+
+## Running mermin on Kubernetes with kind
+
+[kind](https://kind.sigs.k8s.io/) is a tool for running local Kubernetes clusters using Docker container nodes. This section describes how to deploy mermin as a DaemonSet on a kind cluster using Helm.
+
+### Prerequisites
+
+1. [Docker](https://docs.docker.com/get-docker/) installed on your machine
+2. [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) installed on your machine
+3. [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/) installed on your machine
+4. [Helm](https://helm.sh/docs/intro/install/) installed on your machine
+
+### Creating a kind cluster
+
+A kind configuration file is provided in the repository. To create a cluster with one control-plane node and two worker nodes:
+
+```shell
+kind create cluster --config kind-config.yaml
+```
+
+### Building and loading the mermin image
+
+Build the Docker image for mermin:
+
+```shell
+docker build -t mermin:latest .
+```
+
+Load the image into the kind cluster:
+
+```shell
+kind load docker-image mermin:latest
+```
+
+### Deploying mermin using Helm
+
+Deploy mermin as a DaemonSet using the Helm chart:
+
+```shell
+helm install mermin ./mermin
+```
+
+### Verifying the deployment
+
+Check that the mermin pods are running:
+
+```shell
+kubectl get pods
+```
+
+You should see mermin pods running on each worker node in the cluster.
+
+To view the logs from a mermin pod:
+
+```shell
+kubectl logs -l app.kubernetes.io/name=mermin
+```

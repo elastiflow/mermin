@@ -1,0 +1,85 @@
+image:
+  repository: elastiflow/mermin
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 0
+    maxSurge: "10%"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+# global common labels, applied to all ressources
+commonLabels: {}
+
+podAnnotations: {}
+podLabels: {}
+
+
+# privileged mode is required for mermin to interact with the kernel and eBPF.
+podSecurityContext:
+  privileged: true
+  runAsNonRoot: false
+
+# privileged mode is required for mermin to interact with the kernel and eBPF.
+securityContext:
+  privileged: true
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: false
+
+resources: {}
+  # limits:
+  #   cpu: 1
+  #   memory: 256Mi
+  # requests:
+  #   cpu: 1
+  #   memory: 256Mi
+
+# TODO: Probes are not yet implemented in mermin.
+# The configuration is left here as a placeholder for future use.
+# livenessProbe:
+#   exec:
+#     command:
+#     - /path/to/liveness
+#   initialDelaySeconds: 30
+#   periodSeconds: 10
+#
+# readinessProbe:
+#   exec:
+#     command:
+#     - /path/to/readiness
+#   initialDelaySeconds: 15
+#   periodSeconds: 5
+# startupProbe:
+#   exec:
+#     command:
+#     - /path/to/startup
+#   initialDelaySeconds: 15
+#   periodSeconds: 5
+
+tolerations:
+  - effect: NoSchedule
+    operator: Exists
+
+affinity: {}
+
+config:
+  # Set to true to allow enable host's process list (/proc) for mapping kernel events to specific processes.
+  hostPidEnrichment: true
