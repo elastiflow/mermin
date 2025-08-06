@@ -85,7 +85,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends clang llvm libelf-dev libz-dev make
 
       - name: Run unit tests
-        run: cargo test --release
+        run: sudo -E $(which cargo) test --release
 
       - name: Run integration tests
         run: |
