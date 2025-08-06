@@ -22,6 +22,12 @@ serviceAccount:
   # The name of the service account to use.
   # If not set and create is true, a name is generated using the fullname template
   name: ""
+  automountToken: true
+
+rbac:
+  # If false, define the existingClusterRoleName
+  create: true
+  existingClusterRoleName: ""
 
 # global common labels, applied to all ressources
 commonLabels: {}
@@ -29,14 +35,11 @@ commonLabels: {}
 podAnnotations: {}
 podLabels: {}
 
-
-# privileged mode is required for mermin to interact with the kernel and eBPF.
 podSecurityContext:
-  privileged: true
   runAsNonRoot: false
 
-# privileged mode is required for mermin to interact with the kernel and eBPF.
 securityContext:
+  # privileged mode is required for mermin to interact with the kernel and eBPF.
   privileged: true
   capabilities:
     drop:

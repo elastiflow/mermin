@@ -93,7 +93,7 @@ Placeholder
 A kind configuration file is provided in the repository. To create a cluster with one control-plane node and two worker nodes:
 
 ```shell
-kind create cluster --config kind-config.yaml
+kind create cluster --config local/kind-config.yaml
 ```
 
 ### Building and loading the mermin image
@@ -101,7 +101,7 @@ kind create cluster --config kind-config.yaml
 Build the Docker image for mermin:
 
 ```shell
-docker build -t mermin:latest .
+docker build -t mermin:latest --target runner-alpine .
 ```
 
 Load the image into the kind cluster:
@@ -115,7 +115,9 @@ kind load docker-image mermin:latest
 Deploy mermin as a DaemonSet using the Helm chart:
 
 ```shell
-helm install mermin ./mermin
+make helm-upgrade
+# or
+helm upgrade -i mermin charts/mermin --values local/values.yaml
 ```
 
 ### Verifying the deployment
@@ -124,6 +126,16 @@ Check that the mermin pods are running:
 
 ```shell
 kubectl get pods
+# or get all mermin resources
+make make k8s-get
+```
+
+### Diff before deploying
+
+Get the difference between current K8s resources and new
+
+```shell
+make k8s-diff
 ```
 
 You should see mermin pods running on each worker node in the cluster.
