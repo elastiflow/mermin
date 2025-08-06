@@ -166,7 +166,7 @@ fn parse_ethernet_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()>
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
     let ipv4_hdr: Ipv4Hdr = ctx.load(parser.offset).map_err(|_| ())?;
-    let h_len = ipv4_hdr.ihl() as usize * 4;
+    let h_len = ipv4_hdr.ihl() as usize;
     if h_len < Ipv4Hdr::LEN {
         // basic sanity check
         return Err(());
@@ -302,7 +302,7 @@ fn parse_tcp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
     parser.packet_meta.src_port = tcp_hdr.src;
     parser.packet_meta.dst_port = tcp_hdr.dst;
     // TODO: extract and assign additional tcp fields
-
+    parser.next_hdr = HeaderType::StopProcessing;
     Ok(())
 }
 
@@ -326,7 +326,7 @@ fn parse_udp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
     parser.packet_meta.src_port = udp_hdr.src;
     parser.packet_meta.dst_port = udp_hdr.dst;
     // TODO: extract and assign additional tcp fields
-
+    parser.next_hdr = HeaderType::StopProcessing;
     Ok(())
 }
 
