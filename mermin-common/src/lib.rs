@@ -57,9 +57,10 @@ impl PacketMeta {
 
 #[cfg(test)]
 mod tests {
+    use core::mem::{align_of, size_of};
+
     use super::*; // Import items from the parent module (lib.rs)
     use crate::IpAddrType::Ipv4;
-    use core::mem::{align_of, size_of};
 
     // Test FlowRecord size and alignment
     #[test]

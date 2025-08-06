@@ -5,6 +5,9 @@ edition = "2024"
 
 license.workspace = true
 
+[dev-dependencies]
+socket2 = "0.5"
+
 [dependencies]
 mermin-common = { path = "../mermin-common", features = [] }
 
@@ -15,6 +18,7 @@ env_logger = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }
 tokio = { workspace = true, features = [
+    "full",
     "macros",
     "rt",
     "rt-multi-thread",
