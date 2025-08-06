@@ -1,10 +1,11 @@
+use std::net::{Ipv4Addr, Ipv6Addr};
+
 use anyhow::anyhow;
 use aya::{
     maps::RingBuf,
     programs::{SchedClassifier, TcAttachType, tc},
 };
 use clap::Parser;
-use std::net::{Ipv4Addr, Ipv6Addr};
 #[rustfmt::skip]
 use log::{debug, info, warn};
 use mermin_common::PacketMeta;
