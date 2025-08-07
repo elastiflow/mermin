@@ -2,7 +2,8 @@
 
 ## About Mermin
 
-Mermin is a suite of Kubernetes native network traffic observability tools. It includes mermin, an eBPF agent for generating flows, and mercoll, an Open Telemetry collector.
+Mermin is a suite of Kubernetes native network traffic observability tools. It includes mermin, an eBPF agent for
+generating flows, and mercoll, an Open Telemetry collector.
 
 ## mermin
 
@@ -12,7 +13,8 @@ Mermin is a suite of Kubernetes native network traffic observability tools. It i
 1. nightly rust toolchains: `rustup toolchain install nightly --component rust-src`
 1. (if cross-compiling) rustup target: `rustup target add ${ARCH}-unknown-linux-musl`
 1. (if cross-compiling) LLVM: (e.g.) `brew install llvm` (on macOS)
-1. (if cross-compiling) C toolchain: (e.g.) [`brew install filosottile/musl-cross/musl-cross`](https://github.com/FiloSottile/homebrew-musl-cross) (on macOS)
+1. (if cross-compiling) C toolchain: (e.g.) [
+   `brew install filosottile/musl-cross/musl-cross`](https://github.com/FiloSottile/homebrew-musl-cross) (on macOS)
 1. bpf-linker: `cargo install bpf-linker` (`--no-default-features` on macOS)
 
 ### Build & Run
@@ -25,7 +27,8 @@ Use `cargo build` from the root of the project to build mermin. Then run:
 RUST_LOG=info cargo run --release --config 'target."cfg(all())".runner="sudo -E"'
 ```
 
-Once the program is running, open a secondary terminal to run a ping command such as `ping -c 5 localhost` to start seeing logs.
+Once the program is running, open a secondary terminal to run a ping command such as `ping -c 5 localhost` to start
+seeing logs.
 
 Cargo build scripts are used to automatically build the eBPF correctly and include it in the
 program.
@@ -34,7 +37,8 @@ program.
 
 Unit tests in the repo can be run with `cargo test`.
 
-For formatting ensure you have run `cargo fmt`. You can also run `cargo clippy --package mermin-ebpf -- -D warnings` for linting the mermin-ebpf folder and `cargo clippy --all-features -- -D warnings` for all other features.
+For formatting ensure you have run `cargo fmt`. You can also run `cargo clippy --package mermin-ebpf -- -D warnings` for
+linting the mermin-ebpf folder and `cargo clippy --all-features -- -D warnings` for all other features.
 
 ### Cross-compiling on macOS
 
@@ -70,7 +74,9 @@ for inclusion in this project by you, as defined in the GPL-2 license, shall be
 dual licensed as above, without any additional terms or conditions.
 
 [Apache license]: LICENSE-APACHE
+
 [MIT license]: LICENSE-MIT
+
 [GNU General Public License, Version 2]: LICENSE-GPL2
 
 ## mercoll
@@ -79,7 +85,8 @@ Placeholder
 
 ## Running mermin on Kubernetes with kind
 
-[kind](https://kind.sigs.k8s.io/) is a tool for running local Kubernetes clusters using Docker container nodes. This section describes how to deploy mermin as a DaemonSet on a kind cluster using Helm.
+[kind](https://kind.sigs.k8s.io/) is a tool for running local Kubernetes clusters using Docker container nodes. This
+section describes how to deploy mermin as a DaemonSet on a kind cluster using Helm.
 
 ### Prerequisites
 
@@ -90,7 +97,8 @@ Placeholder
 
 ### Creating a kind cluster
 
-A kind configuration file is provided in the repository. To create a cluster with one control-plane node and two worker nodes:
+A kind configuration file is provided in the repository. To create a cluster with one control-plane node and two worker
+nodes:
 
 ```shell
 kind create cluster --config local/kind-config.yaml
@@ -101,7 +109,7 @@ kind create cluster --config local/kind-config.yaml
 Build the Docker image for mermin:
 
 ```shell
-docker build -t mermin:latest --target runner-alpine .
+docker build -t mermin:latest --target runner-slim .
 ```
 
 Load the image into the kind cluster:
@@ -127,7 +135,7 @@ Check that the mermin pods are running:
 ```shell
 kubectl get pods
 # or get all mermin resources
-make make k8s-get
+make k8s-get
 ```
 
 ### Diff before deploying
@@ -144,4 +152,19 @@ To view the logs from a mermin pod:
 
 ```shell
 kubectl logs -l app.kubernetes.io/name=mermin
+```
+
+### Between builds, reset helm
+
+```shell
+helm uninstall mermin
+```
+
+### Quickstart
+
+```shell
+docker build -t mermin:latest --target runner-debug .
+kind load docker-image mermin:latest
+helm uninstall mermin
+helm upgrade -i mermin charts/mermin --values local/values.yaml
 ```

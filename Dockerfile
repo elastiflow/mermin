@@ -1,20 +1,49 @@
 ARG APP_ROOT=/app
 ARG APP=mermin
+ARG RUST_VERSION=1.88.0
 
-# ---- Builder Stage ----
-# Use a Rust base image with build tools.
-FROM mcr.microsoft.com/devcontainers/rust:1-bookworm AS base
+# ---- Build Stage ----
+FROM rust:${RUST_VERSION}-bookworm AS base
+
+# Define build arguments - 2025-05-09 is the last nightly build of rust 1.88.0
+# TODO: Upgprade to rust 1.89 when image is made available with nightly-2025-06-23
+ARG NIGHTLY_VERSION=2025-06-23
 
 # Switch to root to install system dependencies
 USER root
 
-# Install LLVM 20 and the essential eBPF dependencies in a single layer
-# Install the essential eBPF dependencies in a single layer
-RUN apt-get update && apt-get install -y --no-install-recommends lsb-release wget software-properties-common gnupg
-# Install LLVM 20, Clang, and related tools version 20
+# Install Dev Container essentials
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    sudo \
+    git \
+    ca-certificates \
+    lsb-release \
+    wget \
+    software-properties-common \
+    gnupg \
+    # Jetbrains specific dependencies: https://www.jetbrains.com/help/idea/prerequisites-for-dev-containers.html#remote_container
+    default-jdk \
+    curl \
+    unzip \
+    libxext6 \
+    libxrender1 \
+    libxtst6 \
+    libxi6 \
+    libfreetype6 \
+    procps \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Configure passwordless sudo for the poseidon user
+# Create a non-root user 'poseidon' and grant sudo privileges
+RUN useradd --create-home --shell /bin/bash poseidon \
+    && echo "poseidon ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/poseidon
+
+# Install LLVM
 RUN wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh && chmod +x /tmp/llvm.sh \
-  && /tmp/llvm.sh 20 all
-# Install development headers and tools required for building and running Aya
+    && /tmp/llvm.sh 20 all
+
+# Install eBPF Dependencies
 RUN apt-get install -y --no-install-recommends \
     iputils-ping \
     libclang-20-dev \
@@ -30,15 +59,18 @@ RUN apt-get install -y --no-install-recommends \
 ENV LLVM_SYS_200_PREFIX=/usr/lib/llvm-20
 ENV PATH="/usr/lib/llvm-20/bin:${PATH}"
 
-# Switch back to the non-root vscode user, which is the default user in the base image.
-USER vscode
+# Define the toolchain to be used by Docker and mermin/build.rs
+ENV TOOLCHAIN_VERSION="nightly-${NIGHTLY_VERSION}"
+
+# Switch back to the non-root poseidon user, which is the default user in the base image.
+USER poseidon
 
 # Set the nightly toolchain as the default for eBPF development
-RUN rustup toolchain install nightly
-RUN rustup component add rust-src --toolchain nightly
-RUN rustup component add rustfmt --toolchain nightly
-RUN rustup component add clippy --toolchain nightly
-RUN rustup default nightly
+RUN rustup toolchain install ${TOOLCHAIN_VERSION}
+RUN rustup component add rust-src --toolchain ${TOOLCHAIN_VERSION}
+RUN rustup component add rustfmt --toolchain ${TOOLCHAIN_VERSION}
+RUN rustup component add clippy --toolchain ${TOOLCHAIN_VERSION}
+RUN rustup default ${TOOLCHAIN_VERSION}
 
 # Install the core Aya build tools
 RUN cargo install bpf-linker
@@ -46,7 +78,6 @@ RUN cargo install bindgen-cli
 RUN cargo install --git https://github.com/aya-rs/aya --locked aya-tool
 
 # ---- Builder Stage ----
-# Use a slim base image for the final container with shell support
 FROM base AS builder
 ARG APP_ROOT APP
 
@@ -58,19 +89,22 @@ COPY . .
 # Build the final application, leveraging the cached dependencies
 RUN cargo build --release
 
-# Use a slim base image for the final container without shell support
-FROM scratch AS runner
+# ---- Runtime Stage ----
+# Use a distroless base image for the final container without shell support
+FROM gcr.io/distroless/cc-debian12 AS runner
 ARG APP_ROOT APP
 
-# Copy the compiled binary from the builder stage
+ENV RUST_LOG=info
+
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
-ENTRYPOINT ["/usr/bin/${APP}"]
+ENTRYPOINT ["/usr/bin/mermin"]
 
 # ---- Runtime Stage ----
-# Use a slim base image for the final container with shell support
-FROM alpine:3.22.1 AS runner-alpine
+# Use a distroless base image for the final container with shell support
+FROM gcr.io/distroless/cc-debian12:debug AS runner-debug
 ARG APP_ROOT APP
 
-# Copy the compiled binary from the builder stage
+ENV RUST_LOG=info
+
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
-ENTRYPOINT ["/usr/bin/${APP}"]
+ENTRYPOINT ["/usr/bin/mermin"]

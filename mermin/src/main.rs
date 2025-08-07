@@ -21,7 +21,9 @@ struct Opt {
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
 
-    env_logger::init();
+    env_logger::Builder::from_default_env()
+        .target(env_logger::Target::Stdout)
+        .init();
 
     // Bump the memlock rlimit. This is needed for older kernels that don't use the
     // new memcg based accounting, see https://lwn.net/Articles/837122/
@@ -46,6 +48,7 @@ async fn main() -> anyhow::Result<()> {
         // This can happen if you remove all log statements from your eBPF program.
         warn!("failed to initialize eBPF logger: {e}");
     }
+
     let Opt { iface } = opt;
     // error adding clsact to the interface if it is already added is harmless
     // the full cleanup can be done with 'sudo tc qdisc del dev eth0 clsact'.
