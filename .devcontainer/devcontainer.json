@@ -22,6 +22,6 @@
       }
     }
   },
-  "remoteUser": "vscode",
+  "remoteUser": "poseidon",
   "postCreateCommand": "sudo mount -t debugfs debugfs /sys/kernel/debug/"
 }
