@@ -20,6 +20,3 @@ if [ -z "$CARGO_BIN" ]; then
    echo "Error: 'cargo' command not found. Make sure the Rust toolchain is installed and in your PATH."
    exit 1
 fi
-
-# Define toolchain
-TOOLCHAIN_VERSION="nightly-2025-06-23"
