@@ -1,7 +1,7 @@
 use std::{fs, path::Path};
 
-use anyhow::{anyhow, Context as _};
-use aya_build::{cargo_metadata, Toolchain};
+use anyhow::{Context as _, anyhow};
+use aya_build::{Toolchain, cargo_metadata};
 use toml::Value;
 
 const EBPF_PACKAGE_NAME: &str = "mermin-ebpf";

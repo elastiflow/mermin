@@ -9,12 +9,7 @@ const EBPF_PACKAGE_NAME: &str = "integration-ebpf";
 /// Reads the `rust-toolchain.toml` file from the workspace root and returns the
 /// value of the `channel` key.
 fn get_toolchain_channel(workspace_root: &Path) -> anyhow::Result<String> {
-    let toolchain_file = workspace_root
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("rust-toolchain.toml");
+    let toolchain_file = workspace_root.join("rust-toolchain.toml");
     let content = fs::read_to_string(&toolchain_file)
         .with_context(|| format!("failed to read {}", toolchain_file.display()))?;
 
