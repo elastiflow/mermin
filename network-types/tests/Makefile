@@ -1,14 +1,10 @@
-clean:
-	./run_clean.sh
-
 build:
-	./run_build.sh
+	sudo --preserve-env=PATH env CARGO_HOME="$$HOME/.cargo" RUSTUP_HOME="$$HOME/.rustup" $$(which cargo) -Z build-std=core build -p integration-ebpf --release --target bpfel-unknown-none
 
-clean_build:
-	./run_clean.sh && ./run_build.sh
+clean:
+	sudo --preserve-env=PATH env CARGO_HOME="$$HOME/.cargo" RUSTUP_HOME="$$HOME/.rustup" $$(which cargo) clean
 
 test:
-	./run_build.sh && ./run_test.sh
+	sudo --preserve-env=PATH env CARGO_HOME="$$HOME/.cargo" RUSTUP_HOME="$$HOME/.rustup" RUST_LOG=info,integration=debug $$(which cargo) test -p integration -- --test-threads=1 --nocapture
 
-clean_test:
-	./run_clean.sh && ./run_build.sh && ./run_test.sh
+test-ci: build test

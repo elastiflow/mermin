@@ -1,13 +1,15 @@
 use anyhow::{Context as _, anyhow};
-use aya_build::cargo_metadata;
+use aya_build::{Toolchain, cargo_metadata};
+use common_build::get_toolchain_channel;
 
 const EBPF_PACKAGE_NAME: &str = "mermin-ebpf";
 
 fn main() -> anyhow::Result<()> {
-    let toolchain = match option_env!("TOOLCHAIN_VERSION") {
-        Some(version) if !version.is_empty() => aya_build::Toolchain::Custom(version),
-        _ => aya_build::Toolchain::Nightly,
-    };
+    let meta = cargo_metadata::MetadataCommand::new().exec()?;
+    let workspace_root = &meta.workspace_root;
+
+    let channel = get_toolchain_channel(workspace_root.as_ref())?;
+    let toolchain = Toolchain::Custom(&channel);
 
     let cargo_metadata::Metadata { packages, .. } = cargo_metadata::MetadataCommand::new()
         .no_deps()

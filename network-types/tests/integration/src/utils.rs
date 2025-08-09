@@ -56,7 +56,7 @@ impl Default for TestConfig {
             channel_capacity: 10,
             buffer_count: 10,
             ebpf_program_path: include_bytes_aligned!(
-                "../../target/bpfel-unknown-none/release/integration-ebpf-test"
+                "../../../../target/bpfel-unknown-none/release/integration-ebpf-test"
             ),
             program_name: "integration_test".to_string(),
             map_name: "OUT_DATA".to_string(),
