@@ -1,13 +1,8 @@
 ARG APP_ROOT=/app
 ARG APP=mermin
-ARG RUST_VERSION=1.88.0
 
 # ---- Build Stage ----
-FROM rust:${RUST_VERSION}-bookworm AS base
-
-# Define build arguments - 2025-05-09 is the last nightly build of rust 1.88.0
-# TODO: Upgprade to rust 1.89 when image is made available with nightly-2025-06-23
-ARG NIGHTLY_VERSION=2025-06-23
+FROM rust:1.88.0-bookworm AS base
 
 # Switch to root to install system dependencies
 USER root
@@ -59,18 +54,8 @@ RUN apt-get install -y --no-install-recommends \
 ENV LLVM_SYS_200_PREFIX=/usr/lib/llvm-20
 ENV PATH="/usr/lib/llvm-20/bin:${PATH}"
 
-# Define the toolchain to be used by Docker and mermin/build.rs
-ENV TOOLCHAIN_VERSION="nightly-${NIGHTLY_VERSION}"
-
 # Switch back to the non-root poseidon user, which is the default user in the base image.
 USER poseidon
-
-# Set the nightly toolchain as the default for eBPF development
-RUN rustup toolchain install ${TOOLCHAIN_VERSION}
-RUN rustup component add rust-src --toolchain ${TOOLCHAIN_VERSION}
-RUN rustup component add rustfmt --toolchain ${TOOLCHAIN_VERSION}
-RUN rustup component add clippy --toolchain ${TOOLCHAIN_VERSION}
-RUN rustup default ${TOOLCHAIN_VERSION}
 
 # Install the core Aya build tools
 RUN cargo install bpf-linker
