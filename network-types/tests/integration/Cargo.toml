@@ -20,6 +20,7 @@ network-types = { path = "../.." }
 [build-dependencies]
 anyhow = { workspace = true }
 aya-build = { workspace = true }
+common-build = { path = "../../../common-build" }
 toml = { workspace = true }
 
 [[bin]]

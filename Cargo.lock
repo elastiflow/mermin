@@ -337,6 +337,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b94f61472cee1439c0b966b47e3aca9ae07e45d070759512cd390ea2bebc6675"
 
 [[package]]
+name = "common-build"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "toml 0.9.5",
+]
+
+[[package]]
 name = "core-error"
 version = "0.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -589,6 +597,7 @@ dependencies = [
  "aya-build 0.1.2 (git+https://github.com/aya-rs/aya?rev=a7e3e6d4d90767d40a015a473a7d0623031ff6ee)",
  "aya-log",
  "bytes",
+ "common-build",
  "env_logger",
  "integration-common",
  "libc",
@@ -685,6 +694,7 @@ dependencies = [
  "aya-build 0.1.2 (git+https://github.com/aya-rs/aya?rev=a7e3e6d4d90767d40a015a473a7d0623031ff6ee)",
  "aya-log",
  "clap",
+ "common-build",
  "env_logger",
  "libc",
  "log",
@@ -692,7 +702,6 @@ dependencies = [
  "mermin-ebpf",
  "socket2 0.5.10",
  "tokio",
- "toml 0.9.5",
 ]
 
 [[package]]
@@ -1173,10 +1182,12 @@ version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75129e1dc5000bfbaa9fee9d1b21f974f9fbad9daec557a521ee6e080825f6e8"
 dependencies = [
+ "indexmap",
  "serde",
  "serde_spanned 1.0.0",
  "toml_datetime 0.7.0",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 
@@ -1226,6 +1237,12 @@ name = "toml_write"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
+
+[[package]]
+name = "toml_writer"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcc842091f2def52017664b53082ecbbeb5c7731092bad69d2c63050401dfd64"
 
 [[package]]
 name = "typeid"
