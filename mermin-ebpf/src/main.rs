@@ -1,12 +1,14 @@
-#![no_std]
-#![no_main]
+#![cfg_attr(not(test), no_main)]
+#![cfg_attr(not(test), no_std)]
 
+#[cfg(not(test))]
 use aya_ebpf::{
     bindings::TC_ACT_PIPE,
     macros::{classifier, map},
     maps::RingBuf,
     programs::TcContext,
 };
+#[cfg(not(test))]
 use aya_log_ebpf::{debug, error, warn};
 use mermin_common::PacketMeta;
 use network_types::{
@@ -17,6 +19,7 @@ use network_types::{
 };
 
 // todo: verify buffer size
+#[cfg(not(test))]
 #[map]
 static mut PACKETS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0); // 256 KB
 
@@ -28,7 +31,8 @@ enum HeaderType {
     Ipv6,
     Proto(IpProto),
     StopProcessing, // Indicates parsing should terminate for flow key purposes
-    ErrorOccurred,  // Indicates an error stopped parsing
+    #[cfg(not(test))]
+    ErrorOccurred, // Indicates an error stopped parsing
 }
 
 struct Parser {
@@ -59,20 +63,30 @@ impl Parser {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Error {
+    OutOfBounds,
+    MalformedHeader,
+    Unsupported,
+}
+
+#[cfg(not(test))]
 const MAX_HEADER_PARSE_DEPTH: usize = 16;
 
+#[cfg(not(test))]
 #[classifier]
 pub fn mermin(ctx: TcContext) -> i32 {
     try_mermin(ctx).unwrap_or(TC_ACT_PIPE)
 }
 
+#[cfg(not(test))]
 fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
     let mut parser = Parser::new();
 
     debug!(&ctx, "mermin: parsing packet");
 
     for _ in 0..MAX_HEADER_PARSE_DEPTH {
-        let result: Result<(), ()> = match parser.next_hdr {
+        let result: Result<(), Error> = match parser.next_hdr {
             HeaderType::Ethernet => parse_ethernet_header(&ctx, &mut parser),
             HeaderType::Ipv4 => parse_ipv4_header(&ctx, &mut parser),
             HeaderType::Ipv6 => parse_ipv6_header(&ctx, &mut parser),
@@ -124,8 +138,8 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///  |           eth_type            |
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-fn parse_ethernet_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
-    let eth_hdr: EthHdr = ctx.load(parser.offset).map_err(|_| ())?;
+fn parse_ethernet_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), Error> {
+    let eth_hdr: EthHdr = ctx.load(parser.offset).map_err(|_| Error::OutOfBounds)?;
     parser.offset += EthHdr::LEN;
 
     // todo: Extract eth_hdr.src_addr and eth_hdr.dst_addr into src_mac_addr and dst_mac_addr fields
@@ -164,12 +178,12 @@ fn parse_ethernet_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()>
 /// |                          ip_options                           |
 /// /                              ...                              /
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
-    let ipv4_hdr: Ipv4Hdr = ctx.load(parser.offset).map_err(|_| ())?;
+fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), Error> {
+    let ipv4_hdr: Ipv4Hdr = ctx.load(parser.offset).map_err(|_| Error::OutOfBounds)?;
     let h_len = ipv4_hdr.ihl() as usize;
     if h_len < Ipv4Hdr::LEN {
         // basic sanity check
-        return Err(());
+        return Err(Error::MalformedHeader);
     }
     parser.calc_l3_octet_count(ctx.len());
     parser.offset += h_len;
@@ -224,8 +238,8 @@ fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///  |                  destination_ipaddr (con't)                   |
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
-    let ipv6_hdr: Ipv6Hdr = ctx.load(parser.offset).map_err(|_| ())?;
+fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), Error> {
+    let ipv6_hdr: Ipv6Hdr = ctx.load(parser.offset).map_err(|_| Error::OutOfBounds)?;
     parser.calc_l3_octet_count(ctx.len());
     parser.offset += Ipv6Hdr::LEN;
 
@@ -295,8 +309,8 @@ fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
 ///   |                             data                              |
 ///   /                              ...                              /
 ///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-fn parse_tcp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
-    let tcp_hdr: TcpHdr = ctx.load(parser.offset).map_err(|_| ())?;
+fn parse_tcp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), Error> {
+    let tcp_hdr: TcpHdr = ctx.load(parser.offset).map_err(|_| Error::OutOfBounds)?;
     parser.offset += TcpHdr::LEN;
 
     parser.packet_meta.src_port = tcp_hdr.src;
@@ -319,8 +333,8 @@ fn parse_tcp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
 ///  |                             data                              |
 ///  /                              ...                              /
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-fn parse_udp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
-    let udp_hdr: UdpHdr = ctx.load(parser.offset).map_err(|_| ())?;
+fn parse_udp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), Error> {
+    let udp_hdr: UdpHdr = ctx.load(parser.offset).map_err(|_| Error::OutOfBounds)?;
     parser.offset += UdpHdr::LEN;
 
     parser.packet_meta.src_port = udp_hdr.src;
@@ -336,48 +350,68 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
+#[cfg(not(test))]
 #[unsafe(link_section = "license")]
 #[unsafe(no_mangle)]
 static LICENSE: [u8; 13] = *b"Dual MIT/GPL\0"; // Corrected license string length and array size
+
+#[cfg(test)]
+mod host_test_shim {
+    extern crate alloc;
+    use alloc::vec::Vec;
+    use core::mem;
+
+    use crate::Error;
+
+    // A minimal stand-in for aya_ebpf::programs::TcContext used by parser functions
+    pub struct TcContext {
+        data: Vec<u8>,
+    }
+    impl TcContext {
+        pub fn new(data: Vec<u8>) -> Self {
+            Self { data }
+        }
+        pub fn len(&self) -> u32 {
+            self.data.len() as u32
+        }
+        pub fn is_empty(&self) -> bool {
+            self.data.is_empty()
+        }
+        pub fn load<T: Copy>(&self, offset: usize) -> Result<T, Error> {
+            if offset + mem::size_of::<T>() > self.data.len() {
+                return Err(Error::OutOfBounds);
+            }
+            let ptr = unsafe { self.data.as_ptr().add(offset) as *const T };
+            let value = unsafe { *ptr };
+            Ok(value)
+        }
+    }
+
+    // No-op logging macros to satisfy calls in parsing code
+    #[macro_export]
+    macro_rules! debug {
+        ($($tt:tt)*) => {};
+    }
+    #[macro_export]
+    macro_rules! error {
+        ($($tt:tt)*) => {};
+    }
+    #[macro_export]
+    macro_rules! warn {
+        ($($tt:tt)*) => {};
+    }
+}
+
+#[cfg(test)]
+pub use host_test_shim::TcContext;
 
 #[cfg(test)]
 mod tests {
     extern crate alloc;
 
     use alloc::vec::Vec;
-    use core::mem;
 
     use super::*;
-
-    // Mock TcContext for testing
-    struct MockTcContext {
-        data: Vec<u8>,
-    }
-
-    impl MockTcContext {
-        fn new(data: Vec<u8>) -> Self {
-            Self { data }
-        }
-
-        #[allow(unused)]
-        fn len(&self) -> u32 {
-            self.data.len() as u32
-        }
-
-        #[allow(unused)]
-        fn load<T>(&self, offset: usize) -> Result<T, ()>
-        where
-            T: Copy,
-        {
-            if offset + mem::size_of::<T>() > self.data.len() {
-                return Err(());
-            }
-
-            let ptr = unsafe { self.data.as_ptr().add(offset) as *const T };
-            let value = unsafe { *ptr };
-            Ok(value)
-        }
-    }
 
     // Helper function to create an Ethernet header test packet
     fn create_eth_test_packet() -> Vec<u8> {
@@ -530,9 +564,9 @@ mod tests {
     fn test_parse_ethernet_header() {
         let mut parser = Parser::new();
         let packet = create_eth_test_packet();
-        let ctx = MockTcContext::new(packet);
+        let ctx = TcContext::new(packet);
 
-        let result = parse_ethernet_header(unsafe { *(&ctx as *const _ as *mut _) }, &mut parser);
+        let result = parse_ethernet_header(&ctx, &mut parser);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, EthHdr::LEN);
@@ -545,9 +579,9 @@ mod tests {
         let mut parser = Parser::new();
         parser.next_hdr = HeaderType::Ipv4;
         let packet = create_ipv4_test_packet();
-        let ctx = MockTcContext::new(packet);
+        let ctx = TcContext::new(packet);
 
-        let result = parse_ipv4_header(unsafe { *(&ctx as *const _ as *mut _) }, &mut parser);
+        let result = parse_ipv4_header(&ctx, &mut parser);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 20); // IPv4 header length (5 * 4 bytes)
@@ -565,9 +599,9 @@ mod tests {
         let mut packet = create_ipv4_test_packet();
         // Change IHL to invalid value (0)
         packet[0] = 0x40; // Version 4, IHL 0
-        let ctx = MockTcContext::new(packet);
+        let ctx = TcContext::new(packet);
 
-        let result = parse_ipv4_header(unsafe { *(&ctx as *const _ as *mut _) }, &mut parser);
+        let result = parse_ipv4_header(&ctx, &mut parser);
 
         assert!(result.is_err());
     }
@@ -578,9 +612,9 @@ mod tests {
         let mut parser = Parser::new();
         parser.next_hdr = HeaderType::Ipv6;
         let packet = create_ipv6_test_packet();
-        let ctx = MockTcContext::new(packet);
+        let ctx = TcContext::new(packet);
 
-        let result = parse_ipv6_header(unsafe { *(&ctx as *const _ as *mut _) }, &mut parser);
+        let result = parse_ipv6_header(&ctx, &mut parser);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, Ipv6Hdr::LEN);
@@ -608,9 +642,9 @@ mod tests {
         let mut parser = Parser::new();
         parser.next_hdr = HeaderType::Proto(IpProto::Tcp);
         let packet = create_tcp_test_packet();
-        let ctx = MockTcContext::new(packet);
+        let ctx = TcContext::new(packet);
 
-        let result = parse_tcp_header(unsafe { *(&ctx as *const _ as *mut _) }, &mut parser);
+        let result = parse_tcp_header(&ctx, &mut parser);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, TcpHdr::LEN);
@@ -624,9 +658,9 @@ mod tests {
         let mut parser = Parser::new();
         parser.next_hdr = HeaderType::Proto(IpProto::Udp);
         let packet = create_udp_test_packet();
-        let ctx = MockTcContext::new(packet);
+        let ctx = TcContext::new(packet);
 
-        let result = parse_udp_header(unsafe { *(&ctx as *const _ as *mut _) }, &mut parser);
+        let result = parse_udp_header(&ctx, &mut parser);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, UdpHdr::LEN);
