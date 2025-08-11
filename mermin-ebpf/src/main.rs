@@ -10,7 +10,6 @@ use aya_ebpf::{
 };
 #[cfg(not(test))]
 use aya_log_ebpf::{debug, error, warn};
-
 use mermin_common::PacketMeta;
 use network_types::{
     eth::{EthHdr, EtherType},
@@ -19,7 +18,7 @@ use network_types::{
     udp::UdpHdr,
 };
 
-// eBPF-only packet ring buffer map (not needed in host tests)
+// todo: verify buffer size
 #[cfg(not(test))]
 #[map]
 static mut PACKETS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0); // 256 KB
@@ -33,7 +32,7 @@ enum HeaderType {
     Proto(IpProto),
     StopProcessing, // Indicates parsing should terminate for flow key purposes
     #[cfg(not(test))]
-    ErrorOccurred,  // Indicates an error stopped parsing
+    ErrorOccurred, // Indicates an error stopped parsing
 }
 
 struct Parser {
@@ -65,7 +64,7 @@ impl Parser {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ParseError {
+pub enum Error {
     OutOfBounds,
     MalformedHeader,
     Unsupported,
@@ -87,7 +86,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
     debug!(&ctx, "mermin: parsing packet");
 
     for _ in 0..MAX_HEADER_PARSE_DEPTH {
-        let result: Result<(), ParseError> = match parser.next_hdr {
+        let result: Result<(), Error> = match parser.next_hdr {
             HeaderType::Ethernet => parse_ethernet_header(&ctx, &mut parser),
             HeaderType::Ipv4 => parse_ipv4_header(&ctx, &mut parser),
             HeaderType::Ipv6 => parse_ipv6_header(&ctx, &mut parser),
@@ -139,10 +138,8 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///  |           eth_type            |
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-fn parse_ethernet_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
-    let eth_hdr: EthHdr = ctx
-        .load(parser.offset)
-        .map_err(|_| ParseError::OutOfBounds)?;
+fn parse_ethernet_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), Error> {
+    let eth_hdr: EthHdr = ctx.load(parser.offset).map_err(|_| Error::OutOfBounds)?;
     parser.offset += EthHdr::LEN;
 
     // todo: Extract eth_hdr.src_addr and eth_hdr.dst_addr into src_mac_addr and dst_mac_addr fields
@@ -181,14 +178,12 @@ fn parse_ethernet_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), Par
 /// |                          ip_options                           |
 /// /                              ...                              /
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
-    let ipv4_hdr: Ipv4Hdr = ctx
-        .load(parser.offset)
-        .map_err(|_| ParseError::OutOfBounds)?;
+fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), Error> {
+    let ipv4_hdr: Ipv4Hdr = ctx.load(parser.offset).map_err(|_| Error::OutOfBounds)?;
     let h_len = ipv4_hdr.ihl() as usize;
     if h_len < Ipv4Hdr::LEN {
         // basic sanity check
-        return Err(ParseError::MalformedHeader);
+        return Err(Error::MalformedHeader);
     }
     parser.calc_l3_octet_count(ctx.len());
     parser.offset += h_len;
@@ -243,10 +238,8 @@ fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseEr
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///  |                  destination_ipaddr (con't)                   |
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
-    let ipv6_hdr: Ipv6Hdr = ctx
-        .load(parser.offset)
-        .map_err(|_| ParseError::OutOfBounds)?;
+fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), Error> {
+    let ipv6_hdr: Ipv6Hdr = ctx.load(parser.offset).map_err(|_| Error::OutOfBounds)?;
     parser.calc_l3_octet_count(ctx.len());
     parser.offset += Ipv6Hdr::LEN;
 
@@ -316,10 +309,8 @@ fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseEr
 ///   |                             data                              |
 ///   /                              ...                              /
 ///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-fn parse_tcp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
-    let tcp_hdr: TcpHdr = ctx
-        .load(parser.offset)
-        .map_err(|_| ParseError::OutOfBounds)?;
+fn parse_tcp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), Error> {
+    let tcp_hdr: TcpHdr = ctx.load(parser.offset).map_err(|_| Error::OutOfBounds)?;
     parser.offset += TcpHdr::LEN;
 
     parser.packet_meta.src_port = tcp_hdr.src;
@@ -342,10 +333,8 @@ fn parse_tcp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseErr
 ///  |                             data                              |
 ///  /                              ...                              /
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-fn parse_udp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
-    let udp_hdr: UdpHdr = ctx
-        .load(parser.offset)
-        .map_err(|_| ParseError::OutOfBounds)?;
+fn parse_udp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), Error> {
+    let udp_hdr: UdpHdr = ctx.load(parser.offset).map_err(|_| Error::OutOfBounds)?;
     parser.offset += UdpHdr::LEN;
 
     parser.packet_meta.src_port = udp_hdr.src;
@@ -372,7 +361,7 @@ mod host_test_shim {
     use alloc::vec::Vec;
     use core::mem;
 
-    use crate::ParseError;
+    use crate::Error;
 
     // A minimal stand-in for aya_ebpf::programs::TcContext used by parser functions
     pub struct TcContext {
@@ -388,9 +377,9 @@ mod host_test_shim {
         pub fn is_empty(&self) -> bool {
             self.data.is_empty()
         }
-        pub fn load<T: Copy>(&self, offset: usize) -> Result<T, ParseError> {
+        pub fn load<T: Copy>(&self, offset: usize) -> Result<T, Error> {
             if offset + mem::size_of::<T>() > self.data.len() {
-                return Err(ParseError::OutOfBounds);
+                return Err(Error::OutOfBounds);
             }
             let ptr = unsafe { self.data.as_ptr().add(offset) as *const T };
             let value = unsafe { *ptr };
