@@ -1,3 +1,6 @@
+#![cfg_attr(not(test), no_main)]
+#![cfg_attr(not(test), no_std)]
+
 #[cfg(not(test))]
 use aya_ebpf::{
     bindings::TC_ACT_PIPE,
@@ -352,11 +355,11 @@ fn parse_udp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseErr
     Ok(())
 }
 
-// #[cfg(not(test))]
-// #[panic_handler]
-// fn panic(_info: &core::panic::PanicInfo) -> ! {
-//    loop {}
-// }
+#[cfg(not(test))]
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    loop {}
+}
 
 #[cfg(not(test))]
 #[unsafe(link_section = "license")]
