@@ -1,14 +1,19 @@
-
 // eBPF-only imports
 #[cfg(target_arch = "bpf")]
 use aya_ebpf::{
-    bindings::TC_ACT_PIPE,
-    macros::{classifier, map},
+    macros::{map},
     maps::RingBuf,
     programs::TcContext,
 };
 #[cfg(target_arch = "bpf")]
-use aya_log_ebpf::{debug, error, warn};
+use aya_log_ebpf::{warn};
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum ParseError {
+    LoadFailure = 1,
+    InvalidIpv4HeaderLen = 2,
+}
 
 // Host test shim: provide TcContext and no-op log macros when testing on host
 #[cfg(all(test, not(target_arch = "bpf")))]
@@ -21,8 +26,12 @@ mod host_shim {
         data: Vec<u8>,
     }
     impl TcContext {
-        pub fn new(data: Vec<u8>) -> Self { Self { data } }
-        pub fn len(&self) -> u32 { self.data.len() as u32 }
+        pub fn new(data: Vec<u8>) -> Self {
+            Self { data }
+        }
+        pub fn len(&self) -> u32 {
+            self.data.len() as u32
+        }
         pub fn load<T>(&self, offset: usize) -> Result<T, ()>
         where
             T: Copy,
@@ -48,8 +57,8 @@ macro_rules! error { ($($tt:tt)*) => { { let _ = ($($tt)*); } }; }
 
 #[cfg(all(test, not(target_arch = "bpf")))]
 use host_shim::TcContext;
-
 use mermin_common::PacketMeta;
+
 use crate::{
     eth::{EthHdr, EtherType},
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
@@ -84,6 +93,11 @@ pub struct Parser {
     pub packet_meta: PacketMeta,
 }
 
+impl Default for Parser {
+    fn default() -> Self {
+         Self::new()
+    }
+}
 impl Parser {
     // todo(eng-18): consider using default trait instead of new
     pub fn new() -> Self {
@@ -115,8 +129,8 @@ impl Parser {
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///  |           eth_type            |
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-pub fn parse_ethernet_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
-    let eth_hdr: EthHdr = ctx.load(parser.offset).map_err(|_| ())?;
+pub fn parse_ethernet_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
+    let eth_hdr: EthHdr = ctx.load(parser.offset).map_err(|_| ParseError::LoadFailure)?;
     parser.offset += EthHdr::LEN;
 
     // todo: Extract eth_hdr.src_addr and eth_hdr.dst_addr into src_mac_addr and dst_mac_addr fields
@@ -155,12 +169,12 @@ pub fn parse_ethernet_header(ctx: &TcContext, parser: &mut Parser) -> Result<(),
 /// |                          ip_options                           |
 /// /                              ...                              /
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-pub fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
-    let ipv4_hdr: Ipv4Hdr = ctx.load(parser.offset).map_err(|_| ())?;
+pub fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
+    let ipv4_hdr: Ipv4Hdr = ctx.load(parser.offset).map_err(|_| ParseError::LoadFailure)?;
     let h_len = ipv4_hdr.ihl() as usize;
     if h_len < Ipv4Hdr::LEN {
         // basic sanity check
-        return Err(());
+        return Err(ParseError::InvalidIpv4HeaderLen);
     }
     parser.calc_l3_octet_count(ctx.len());
     parser.offset += h_len;
@@ -215,8 +229,8 @@ pub fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()>
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///  |                  destination_ipaddr (con't)                   |
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-pub fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
-    let ipv6_hdr: Ipv6Hdr = ctx.load(parser.offset).map_err(|_| ())?;
+pub fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
+    let ipv6_hdr: Ipv6Hdr = ctx.load(parser.offset).map_err(|_| ParseError::LoadFailure)?;
     parser.calc_l3_octet_count(ctx.len());
     parser.offset += Ipv6Hdr::LEN;
 
@@ -286,8 +300,8 @@ pub fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()>
 ///   |                             data                              |
 ///   /                              ...                              /
 ///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-pub fn parse_tcp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
-    let tcp_hdr: TcpHdr = ctx.load(parser.offset).map_err(|_| ())?;
+pub fn parse_tcp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
+    let tcp_hdr: TcpHdr = ctx.load(parser.offset).map_err(|_| ParseError::LoadFailure)?;
     parser.offset += TcpHdr::LEN;
 
     parser.packet_meta.src_port = tcp_hdr.src;
@@ -310,8 +324,8 @@ pub fn parse_tcp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> 
 ///  |                             data                              |
 ///  /                              ...                              /
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-pub fn parse_udp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ()> {
-    let udp_hdr: UdpHdr = ctx.load(parser.offset).map_err(|_| ())?;
+pub fn parse_udp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
+    let udp_hdr: UdpHdr = ctx.load(parser.offset).map_err(|_| ParseError::LoadFailure)?;
     parser.offset += UdpHdr::LEN;
 
     parser.packet_meta.src_port = udp_hdr.src;
@@ -339,7 +353,6 @@ mod tests {
     use alloc::vec::Vec;
 
     use super::*;
-
 
     // Helper function to create an Ethernet header test packet
     fn create_eth_test_packet() -> Vec<u8> {

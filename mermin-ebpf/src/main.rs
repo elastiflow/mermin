@@ -3,17 +3,16 @@
 
 use aya_ebpf::{
     bindings::TC_ACT_PIPE,
-    macros::{classifier, map},
-    maps::RingBuf,
+    macros::{classifier},
     programs::TcContext,
 };
-use aya_log_ebpf::{debug, error, warn};
+use aya_log_ebpf::{debug, error};
 use network_types::{
-    parser::{HeaderType, Parser, parse_ethernet_header, parse_ipv4_header, parse_ipv6_header, parse_tcp_header, parse_udp_header, PACKETS},
-    eth::{EthHdr, EtherType},
-    ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
-    tcp::TcpHdr,
-    udp::UdpHdr,
+    ip::{IpProto},
+    parser::{
+        HeaderType, PACKETS, Parser, parse_ethernet_header, parse_ipv4_header, parse_ipv6_header,
+        parse_tcp_header, parse_udp_header,
+    },
 };
 
 const MAX_HEADER_PARSE_DEPTH: usize = 16;
@@ -29,7 +28,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
     debug!(&ctx, "mermin: parsing packet");
 
     for _ in 0..MAX_HEADER_PARSE_DEPTH {
-        let result: Result<(), ()> = match parser.next_hdr {
+        let result = match parser.next_hdr {
             HeaderType::Ethernet => parse_ethernet_header(&ctx, &mut parser),
             HeaderType::Ipv4 => parse_ipv4_header(&ctx, &mut parser),
             HeaderType::Ipv6 => parse_ipv6_header(&ctx, &mut parser),
@@ -66,5 +65,3 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
 
     Ok(TC_ACT_PIPE)
 }
-
-
