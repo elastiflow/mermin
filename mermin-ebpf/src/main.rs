@@ -1,75 +1,13 @@
-#![cfg_attr(target_arch = "bpf", no_std)]
-#![cfg_attr(target_arch = "bpf", no_main)]
-
-#[cfg(not(target_arch = "bpf"))]
-fn main() {}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ParseError {
-    OutOfBounds,
-    MalformedHeader,
-    Unsupported,
-}
-
-#[cfg(target_arch = "bpf")]
+#[cfg(not(test))]
 use aya_ebpf::{
     bindings::TC_ACT_PIPE,
     macros::{classifier, map},
     maps::RingBuf,
     programs::TcContext,
 };
-#[cfg(target_arch = "bpf")]
+#[cfg(not(test))]
 use aya_log_ebpf::{debug, error, warn};
 
-#[cfg(not(target_arch = "bpf"))]
-mod host_test_shim {
-    extern crate alloc;
-    use alloc::vec::Vec;
-    use core::mem;
-
-    use crate::ParseError;
-
-    // A minimal stand-in for aya_ebpf::programs::TcContext used by parser functions
-    pub struct TcContext {
-        data: Vec<u8>,
-    }
-    impl TcContext {
-        pub fn new(data: Vec<u8>) -> Self {
-            Self { data }
-        }
-        pub fn len(&self) -> u32 {
-            self.data.len() as u32
-        }
-        pub fn is_empty(&self) -> bool {
-            self.data.is_empty()
-        }
-        pub fn load<T: Copy>(&self, offset: usize) -> Result<T, ParseError> {
-            if offset + mem::size_of::<T>() > self.data.len() {
-                return Err(ParseError::OutOfBounds);
-            }
-            let ptr = unsafe { self.data.as_ptr().add(offset) as *const T };
-            let value = unsafe { *ptr };
-            Ok(value)
-        }
-    }
-
-    // No-op logging macros to satisfy calls in parsing code
-    #[macro_export]
-    macro_rules! debug {
-        ($($tt:tt)*) => {};
-    }
-    #[macro_export]
-    macro_rules! error {
-        ($($tt:tt)*) => {};
-    }
-    #[macro_export]
-    macro_rules! warn {
-        ($($tt:tt)*) => {};
-    }
-}
-
-#[cfg(not(target_arch = "bpf"))]
-pub use host_test_shim::TcContext;
 use mermin_common::PacketMeta;
 use network_types::{
     eth::{EthHdr, EtherType},
@@ -79,12 +17,11 @@ use network_types::{
 };
 
 // eBPF-only packet ring buffer map (not needed in host tests)
-#[cfg(target_arch = "bpf")]
+#[cfg(not(test))]
 #[map]
 static mut PACKETS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0); // 256 KB
 
 // Defines what kind of header we expect to process in the current iteration.
-#[cfg_attr(not(target_arch = "bpf"), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HeaderType {
     Ethernet,
@@ -92,10 +29,10 @@ enum HeaderType {
     Ipv6,
     Proto(IpProto),
     StopProcessing, // Indicates parsing should terminate for flow key purposes
+    #[cfg(not(test))]
     ErrorOccurred,  // Indicates an error stopped parsing
 }
 
-#[cfg_attr(not(target_arch = "bpf"), allow(dead_code))]
 struct Parser {
     // Current read offset from the start of the packet
     offset: usize,
@@ -107,7 +44,6 @@ struct Parser {
     packet_meta: PacketMeta,
 }
 
-#[cfg_attr(not(target_arch = "bpf"), allow(dead_code))]
 impl Parser {
     // todo(eng-18): consider using default trait instead of new
     fn new() -> Self {
@@ -125,16 +61,23 @@ impl Parser {
     }
 }
 
-#[cfg_attr(not(target_arch = "bpf"), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParseError {
+    OutOfBounds,
+    MalformedHeader,
+    Unsupported,
+}
+
+#[cfg(not(test))]
 const MAX_HEADER_PARSE_DEPTH: usize = 16;
 
-#[cfg(target_arch = "bpf")]
+#[cfg(not(test))]
 #[classifier]
 pub fn mermin(ctx: TcContext) -> i32 {
     try_mermin(ctx).unwrap_or(TC_ACT_PIPE)
 }
 
-#[cfg(target_arch = "bpf")]
+#[cfg(not(test))]
 fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
     let mut parser = Parser::new();
 
@@ -193,7 +136,6 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///  |           eth_type            |
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#[cfg_attr(not(target_arch = "bpf"), allow(dead_code))]
 fn parse_ethernet_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
     let eth_hdr: EthHdr = ctx
         .load(parser.offset)
@@ -236,7 +178,6 @@ fn parse_ethernet_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), Par
 /// |                          ip_options                           |
 /// /                              ...                              /
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#[cfg_attr(not(target_arch = "bpf"), allow(dead_code))]
 fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
     let ipv4_hdr: Ipv4Hdr = ctx
         .load(parser.offset)
@@ -299,7 +240,6 @@ fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseEr
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///  |                  destination_ipaddr (con't)                   |
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#[cfg_attr(not(target_arch = "bpf"), allow(dead_code))]
 fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
     let ipv6_hdr: Ipv6Hdr = ctx
         .load(parser.offset)
@@ -373,7 +313,6 @@ fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseEr
 ///   |                             data                              |
 ///   /                              ...                              /
 ///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#[cfg_attr(not(target_arch = "bpf"), allow(dead_code))]
 fn parse_tcp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
     let tcp_hdr: TcpHdr = ctx
         .load(parser.offset)
@@ -400,7 +339,6 @@ fn parse_tcp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseErr
 ///  |                             data                              |
 ///  /                              ...                              /
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#[cfg_attr(not(target_arch = "bpf"), allow(dead_code))]
 fn parse_udp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
     let udp_hdr: UdpHdr = ctx
         .load(parser.offset)
@@ -414,23 +352,72 @@ fn parse_udp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseErr
     Ok(())
 }
 
-#[cfg(all(target_arch = "bpf", not(test)))]
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop {}
-}
+// #[cfg(not(test))]
+// #[panic_handler]
+// fn panic(_info: &core::panic::PanicInfo) -> ! {
+//    loop {}
+// }
 
-#[cfg(target_arch = "bpf")]
+#[cfg(not(test))]
 #[unsafe(link_section = "license")]
 #[unsafe(no_mangle)]
 static LICENSE: [u8; 13] = *b"Dual MIT/GPL\0"; // Corrected license string length and array size
+
+#[cfg(test)]
+mod host_test_shim {
+    extern crate alloc;
+    use alloc::vec::Vec;
+    use core::mem;
+
+    use crate::ParseError;
+
+    // A minimal stand-in for aya_ebpf::programs::TcContext used by parser functions
+    pub struct TcContext {
+        data: Vec<u8>,
+    }
+    impl TcContext {
+        pub fn new(data: Vec<u8>) -> Self {
+            Self { data }
+        }
+        pub fn len(&self) -> u32 {
+            self.data.len() as u32
+        }
+        pub fn is_empty(&self) -> bool {
+            self.data.is_empty()
+        }
+        pub fn load<T: Copy>(&self, offset: usize) -> Result<T, ParseError> {
+            if offset + mem::size_of::<T>() > self.data.len() {
+                return Err(ParseError::OutOfBounds);
+            }
+            let ptr = unsafe { self.data.as_ptr().add(offset) as *const T };
+            let value = unsafe { *ptr };
+            Ok(value)
+        }
+    }
+
+    // No-op logging macros to satisfy calls in parsing code
+    #[macro_export]
+    macro_rules! debug {
+        ($($tt:tt)*) => {};
+    }
+    #[macro_export]
+    macro_rules! error {
+        ($($tt:tt)*) => {};
+    }
+    #[macro_export]
+    macro_rules! warn {
+        ($($tt:tt)*) => {};
+    }
+}
+
+#[cfg(test)]
+pub use host_test_shim::TcContext;
 
 #[cfg(test)]
 mod tests {
     extern crate alloc;
 
     use alloc::vec::Vec;
-    use core::mem;
 
     use super::*;
 
