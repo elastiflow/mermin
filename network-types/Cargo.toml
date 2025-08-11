@@ -3,3 +3,11 @@ name = "network-types"
 version = "0.1.0"
 edition = "2024"
 license.workspace = true
+
+[target.'cfg(target_arch = "bpf")'.dependencies]
+aya-ebpf = { workspace = true }
+aya-log-ebpf = { workspace = true }
+mermin-common = { path = "../mermin-common" }
+
+[dev-dependencies]
+mermin-common = { path = "../mermin-common" }

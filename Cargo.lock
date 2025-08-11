@@ -745,6 +745,11 @@ dependencies = [
 [[package]]
 name = "network-types"
 version = "0.1.0"
+dependencies = [
+ "aya-ebpf",
+ "aya-log-ebpf",
+ "mermin-common",
+]
 
 [[package]]
 name = "num-traits"
