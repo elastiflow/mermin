@@ -1,12 +1,8 @@
 // eBPF-only imports
 #[cfg(target_arch = "bpf")]
-use aya_ebpf::{
-    macros::{map},
-    maps::RingBuf,
-    programs::TcContext,
-};
+use aya_ebpf::{macros::map, maps::RingBuf, programs::TcContext};
 #[cfg(target_arch = "bpf")]
-use aya_log_ebpf::{warn};
+use aya_log_ebpf::warn;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u8)]
@@ -95,7 +91,7 @@ pub struct Parser {
 
 impl Default for Parser {
     fn default() -> Self {
-         Self::new()
+        Self::new()
     }
 }
 impl Parser {
@@ -130,7 +126,9 @@ impl Parser {
 ///  |           eth_type            |
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 pub fn parse_ethernet_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
-    let eth_hdr: EthHdr = ctx.load(parser.offset).map_err(|_| ParseError::LoadFailure)?;
+    let eth_hdr: EthHdr = ctx
+        .load(parser.offset)
+        .map_err(|_| ParseError::LoadFailure)?;
     parser.offset += EthHdr::LEN;
 
     // todo: Extract eth_hdr.src_addr and eth_hdr.dst_addr into src_mac_addr and dst_mac_addr fields
@@ -170,7 +168,9 @@ pub fn parse_ethernet_header(ctx: &TcContext, parser: &mut Parser) -> Result<(),
 /// /                              ...                              /
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 pub fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
-    let ipv4_hdr: Ipv4Hdr = ctx.load(parser.offset).map_err(|_| ParseError::LoadFailure)?;
+    let ipv4_hdr: Ipv4Hdr = ctx
+        .load(parser.offset)
+        .map_err(|_| ParseError::LoadFailure)?;
     let h_len = ipv4_hdr.ihl() as usize;
     if h_len < Ipv4Hdr::LEN {
         // basic sanity check
@@ -230,7 +230,9 @@ pub fn parse_ipv4_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), Par
 ///  |                  destination_ipaddr (con't)                   |
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 pub fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
-    let ipv6_hdr: Ipv6Hdr = ctx.load(parser.offset).map_err(|_| ParseError::LoadFailure)?;
+    let ipv6_hdr: Ipv6Hdr = ctx
+        .load(parser.offset)
+        .map_err(|_| ParseError::LoadFailure)?;
     parser.calc_l3_octet_count(ctx.len());
     parser.offset += Ipv6Hdr::LEN;
 
@@ -301,7 +303,9 @@ pub fn parse_ipv6_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), Par
 ///   /                              ...                              /
 ///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 pub fn parse_tcp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
-    let tcp_hdr: TcpHdr = ctx.load(parser.offset).map_err(|_| ParseError::LoadFailure)?;
+    let tcp_hdr: TcpHdr = ctx
+        .load(parser.offset)
+        .map_err(|_| ParseError::LoadFailure)?;
     parser.offset += TcpHdr::LEN;
 
     parser.packet_meta.src_port = tcp_hdr.src;
@@ -325,7 +329,9 @@ pub fn parse_tcp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), Pars
 ///  /                              ...                              /
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 pub fn parse_udp_header(ctx: &TcContext, parser: &mut Parser) -> Result<(), ParseError> {
-    let udp_hdr: UdpHdr = ctx.load(parser.offset).map_err(|_| ParseError::LoadFailure)?;
+    let udp_hdr: UdpHdr = ctx
+        .load(parser.offset)
+        .map_err(|_| ParseError::LoadFailure)?;
     parser.offset += UdpHdr::LEN;
 
     parser.packet_meta.src_port = udp_hdr.src;

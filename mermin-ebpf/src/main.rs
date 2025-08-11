@@ -1,14 +1,10 @@
 #![no_std]
 #![no_main]
 
-use aya_ebpf::{
-    bindings::TC_ACT_PIPE,
-    macros::{classifier},
-    programs::TcContext,
-};
+use aya_ebpf::{bindings::TC_ACT_PIPE, macros::classifier, programs::TcContext};
 use aya_log_ebpf::{debug, error};
 use network_types::{
-    ip::{IpProto},
+    ip::IpProto,
     parser::{
         HeaderType, PACKETS, Parser, parse_ethernet_header, parse_ipv4_header, parse_ipv6_header,
         parse_tcp_header, parse_udp_header,
