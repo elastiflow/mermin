@@ -157,16 +157,16 @@ pub mod reflector_builder {
 
         // The spawned task runs the reflector in the background.
         tokio::spawn(async move {
-            info!("Starting reflector for {}", resource_name);
+            info!("Starting reflector for {resource_name}");
             reflector
                 .applied_objects()
                 .try_for_each(|resource| {
                     let name = resource.meta().name.as_deref().unwrap_or("unknown");
-                    debug!("Applied {} '{}' to store", resource_name, name);
+                    debug!("Applied {resource_name} '{name}' to store");
                     async { Ok(()) }
                 })
                 .await
-                .unwrap_or_else(|e| warn!("Reflector error for {}: {}", resource_name, e));
+                .unwrap_or_else(|e| warn!("Reflector error for {resource_name}: {e}"));
         });
 
         Ok(Arc::new(reader))
@@ -240,19 +240,13 @@ impl AppStoreBuilder {
             Ok(store) => Ok(store),
             Err(e) => {
                 if is_critical {
-                    warn!(
-                        "Failed to create critical reflector for {}: {}",
-                        resource_name, e
-                    );
+                    warn!("Failed to create critical reflector for {resource_name}: {e}");
                     Err(anyhow::anyhow!(
-                        "Failed to create critical reflector for {}: {}",
-                        resource_name,
-                        e
+                        "Failed to create critical reflector for {resource_name}: {e}"
                     ))
                 } else {
                     warn!(
-                        "Failed to create reflector for {}: {}. Continuing with an empty store.",
-                        resource_name, e
+                        "Failed to create reflector for {resource_name}: {e}. Continuing with an empty store."
                     );
                     let (reader, _) = reflector::store();
                     Ok(Arc::new(reader))
@@ -264,6 +258,7 @@ impl AppStoreBuilder {
 
 /// A high-level client for interacting with Kubernetes resources via the cached AppStore.
 pub struct KubeClient {
+    #[allow(dead_code)]
     pub client: Client,
     pub app_store: AppStore,
 }
@@ -287,7 +282,7 @@ impl KubeClient {
                 pod.status
                     .as_ref()
                     .and_then(|status| status.pod_ip.as_deref())
-                    .map_or(false, |pod_ip| pod_ip == ip_str)
+                    .is_some_and(|pod_ip| pod_ip == ip_str)
             })
             .cloned()
     }
@@ -308,12 +303,11 @@ impl KubeClient {
                     .spec
                     .as_ref()
                     .and_then(|spec| spec.selector.as_ref())
-                    .map_or(false, |selector| {
+                    .is_some_and(|selector| {
                         selector.iter().all(|(key, value)| {
-                            // Simplified comparison
                             pod_labels
                                 .get(key)
-                                .map_or(false, |pod_val| pod_val.to_string() == value.to_string())
+                                .is_some_and(|pod_val| *pod_val == *value)
                         })
                     })
             })
@@ -322,6 +316,7 @@ impl KubeClient {
     }
 
     /// Finds all Pods owned by a specific controller (e.g., a Deployment or ReplicaSet).
+    #[allow(dead_code)]
     pub fn get_pods_by_owner_reference(
         &self,
         kind: &str,
@@ -334,20 +329,18 @@ impl KubeClient {
             .iter()
             .filter(|pod| pod.meta().namespace.as_deref() == Some(namespace))
             .filter(|pod| {
-                pod.meta()
-                    .owner_references
-                    .as_ref()
-                    .map_or(false, |owners| {
-                        owners
-                            .iter()
-                            .any(|owner| owner.kind == kind && owner.name == name)
-                    })
+                pod.meta().owner_references.as_ref().is_some_and(|owners| {
+                    owners
+                        .iter()
+                        .any(|owner| owner.kind == kind && owner.name == name)
+                })
             })
             .cloned()
             .collect()
     }
 
     /// Gathers the names of all discoverable resources within a given namespace.
+    #[allow(dead_code)]
     pub fn get_resources_by_namespace(
         &self,
         namespace: &str,

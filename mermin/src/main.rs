@@ -82,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
             Some(Arc::new(client))
         }
         Err(e) => {
-            warn!("Failed to initialize Kubernetes client: {}", e);
+            warn!("Failed to initialize Kubernetes client: {e}");
             warn!("Pod metadata lookup will not be available");
             None
         }
@@ -158,11 +158,11 @@ async fn parse_packet(event: PacketMeta, kube_client_clone: Option<Arc<KubeClien
     // Parse packet metadata
     let (connection_info, packet_size_info) = resource_parser::parse_packet_meta(&event);
 
-    info!("{}", connection_info);
-    info!("{}", packet_size_info);
+    info!("{connection_info}");
+    info!("{packet_size_info}");
 
-    println!("{}", connection_info);
-    println!("{}", packet_size_info);
+    println!("{connection_info}");
+    println!("{packet_size_info}");
 
     if let Some(client) = &kube_client_clone {
         info!("Kubernetes client is available, attempting to parse pod info");

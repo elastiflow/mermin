@@ -6,7 +6,6 @@ use k8s_openapi::api::{
     batch::v1::Job,
     discovery::v1::EndpointSlice,
     networking::v1::{Ingress, NetworkPolicy},
-    rbac::v1::PolicyRule,
 };
 use log::info;
 use mermin_common::PacketMeta;
@@ -17,6 +16,7 @@ use crate::k8s::KubeClient;
 #[derive(Debug, Default)]
 pub struct ResourceData {
     /// The kind of resource (e.g., "Pod", "Service")
+    #[allow(dead_code)]
     pub kind: String,
     /// The namespace of the resource
     pub namespace: String,
@@ -41,17 +41,17 @@ pub mod helpers {
 
     /// Check if an ingress is related to any of the given services
     pub fn is_ingress_related_to_services(ingress: &Ingress, services: &[Arc<Service>]) -> bool {
-        if let Some(spec) = &ingress.spec {
-            if let Some(rules) = &spec.rules {
-                for rule in rules {
-                    if let Some(http) = &rule.http {
-                        for path in &http.paths {
-                            let backend = &path.backend;
-                            if let Some(service) = &backend.service {
-                                for pod_service in services {
-                                    if pod_service.metadata.name.as_deref() == Some(&service.name) {
-                                        return true;
-                                    }
+        if let Some(spec) = &ingress.spec
+            && let Some(rules) = &spec.rules
+        {
+            for rule in rules {
+                if let Some(http) = &rule.http {
+                    for path in &http.paths {
+                        let backend = &path.backend;
+                        if let Some(service) = &backend.service {
+                            for pod_service in services {
+                                if pod_service.metadata.name.as_deref() == Some(&service.name) {
+                                    return true;
                                 }
                             }
                         }
@@ -63,20 +63,17 @@ pub mod helpers {
     }
 
     /// Add labels from metadata to a ResourceData object
-    pub fn add_labels<T>(resource_data: &mut ResourceData, metadata: &ObjectMeta)
-    where
-        T: Display + Clone,
-    {
-        if let Some(labels) = &metadata.labels {
-            if !labels.is_empty() {
-                let mut label_data = Vec::new();
-                for (key, value) in labels {
-                    let mut label = ResourceData::new("Label", "", key);
-                    label.add_attribute("value", value.to_string());
-                    label_data.push(label);
-                }
-                resource_data.add_section("Labels", label_data);
+    pub fn add_labels(resource_data: &mut ResourceData, metadata: &ObjectMeta) {
+        if let Some(labels) = &metadata.labels
+            && !labels.is_empty()
+        {
+            let mut label_data = Vec::new();
+            for (key, value) in labels {
+                let mut label = ResourceData::new("Label", "", key);
+                label.add_attribute("value", value.to_string());
+                label_data.push(label);
             }
+            resource_data.add_section("Labels", label_data);
         }
     }
 
@@ -92,13 +89,12 @@ pub mod helpers {
     }
 
     /// Add match labels from a selector to a ResourceData object
-    pub fn add_match_labels<T>(
+    #[allow(dead_code)]
+    pub fn add_match_labels(
         resource_data: &mut ResourceData,
         match_labels: &HashMap<String, String>,
         section_name: &str,
-    ) where
-        T: Display + Clone,
-    {
+    ) {
         if !match_labels.is_empty() {
             let mut label_data = Vec::new();
             for (key, value) in match_labels {
@@ -111,13 +107,11 @@ pub mod helpers {
     }
 
     /// Add match labels from a BTreeMap selector to a ResourceData object
-    pub fn add_match_labels_btree<T>(
+    pub fn add_match_labels_btree(
         resource_data: &mut ResourceData,
         match_labels: &BTreeMap<String, String>,
         section_name: &str,
-    ) where
-        T: Display + Clone,
-    {
+    ) {
         if !match_labels.is_empty() {
             let mut label_data = Vec::new();
             for (key, value) in match_labels {
@@ -167,17 +161,15 @@ impl ResourceData {
 
         // Print attributes
         for (key, value) in &self.attributes {
-            println!("  {}: {}", key, value);
+            println!("  {key}: {value}");
         }
 
         // Print sections
         for (section_name, items) in &self.sections {
             if !items.is_empty() {
-                println!("  {}:", section_name);
+                println!("  {section_name}:");
                 for (i, item) in items.iter().enumerate() {
-                    if section_name.to_string() == "Labels"
-                        || section_name.to_string() == "Annotations"
-                    {
+                    if *section_name == "Labels" || *section_name == "Annotations" {
                         println!(
                             "    {}: {}",
                             item.name,
@@ -186,7 +178,7 @@ impl ResourceData {
                     } else {
                         println!("    Item #{}:", i + 1);
                         for (key, value) in &item.attributes {
-                            println!("      {}: {}", key, value);
+                            println!("      {key}: {value}");
                         }
                     }
                 }
@@ -248,7 +240,7 @@ impl ResourceParser for PodParser {
             }
 
             // Add pod labels
-            helpers::add_labels::<String>(&mut pod_data, &pod.metadata);
+            helpers::add_labels(&mut pod_data, &pod.metadata);
 
             result.push(pod_data);
         }
@@ -286,39 +278,39 @@ impl ResourceParser for ServiceParser {
                     }
 
                     // Service ports
-                    if let Some(ports) = &spec.ports {
-                        if !ports.is_empty() {
-                            let mut port_data = Vec::new();
-                            for port in ports {
-                                let port_name = port.name.as_deref().unwrap_or("unnamed");
-                                let mut port_resource = ResourceData::new("Port", "", port_name);
+                    if let Some(ports) = &spec.ports
+                        && !ports.is_empty()
+                    {
+                        let mut port_data = Vec::new();
+                        for port in ports {
+                            let port_name = port.name.as_deref().unwrap_or("unnamed");
+                            let mut port_resource = ResourceData::new("Port", "", port_name);
 
-                                port_resource.add_attribute("Port", port.port);
-                                port_resource.add_attribute(
-                                    "Protocol",
-                                    port.protocol.as_deref().unwrap_or("TCP").to_string(),
-                                );
+                            port_resource.add_attribute("Port", port.port);
+                            port_resource.add_attribute(
+                                "Protocol",
+                                port.protocol.as_deref().unwrap_or("TCP").to_string(),
+                            );
 
-                                if let Some(target_port) = &port.target_port {
-                                    match target_port {
-                                        k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(i) => {
-                                            port_resource.add_attribute("Target Port", i.to_string());
-                                        },
-                                        k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::String(s) => {
-                                            port_resource.add_attribute("Target Port", s.to_string());
-                                        },
-                                    }
+                            if let Some(target_port) = &port.target_port {
+                                match target_port {
+                                    k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(i) => {
+                                        port_resource.add_attribute("Target Port", i.to_string());
+                                    },
+                                    k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::String(s) => {
+                                        port_resource.add_attribute("Target Port", s.to_string());
+                                    },
                                 }
-
-                                port_data.push(port_resource);
                             }
-                            service_data.add_section("Ports", port_data);
+
+                            port_data.push(port_resource);
                         }
+                        service_data.add_section("Ports", port_data);
                     }
                 }
 
                 // Add service labels
-                helpers::add_labels::<String>(&mut service_data, &service.metadata);
+                helpers::add_labels(&mut service_data, &service.metadata);
 
                 result.push(service_data);
             }
@@ -340,52 +332,48 @@ impl ResourceParser for NodeParser {
     async fn parse(&self, client: &KubeClient, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
         let mut result = Vec::new();
 
-        if let Some(pod) = client.get_pod_by_ip(src_ipv4).await {
-            if let Some(node_name) = pod.spec.as_ref().and_then(|s| s.node_name.as_ref()) {
-                // Find the node in the store
-                for node in client.app_store.nodes.state() {
-                    if let Some(name) = &node.metadata.name {
-                        if name.to_string() == node_name.to_string() {
-                            let mut node_data = ResourceData::new("Node", "", name);
+        if let Some(pod) = client.get_pod_by_ip(src_ipv4).await
+            && let Some(node_name) = pod.spec.as_ref().and_then(|s| s.node_name.as_ref())
+        {
+            // Find the node in the store
+            for node in client.app_store.nodes.state() {
+                if let Some(name) = &node.metadata.name {
+                    let mut node_data = ResourceData::new("Node", "", name);
 
-                            // Node addresses
-                            if let Some(addresses) =
-                                node.status.as_ref().and_then(|s| s.addresses.as_ref())
-                            {
-                                if !addresses.is_empty() {
-                                    let mut address_data = Vec::new();
-                                    for addr in addresses {
-                                        let mut address =
-                                            ResourceData::new("Address", "", &addr.type_);
-                                        address.add_attribute("value", &addr.address);
-                                        address_data.push(address);
-                                    }
-                                    node_data.add_section("Addresses", address_data);
-                                }
+                    if *name == *node_name {
+                        // Node addresses
+                        if let Some(addresses) =
+                            node.status.as_ref().and_then(|s| s.addresses.as_ref())
+                            && !addresses.is_empty()
+                        {
+                            let mut address_data = Vec::new();
+                            for addr in addresses {
+                                let mut address = ResourceData::new("Address", "", &addr.type_);
+                                address.add_attribute("value", &addr.address);
+                                address_data.push(address);
                             }
-
-                            // Node capacity
-                            if let Some(capacity) =
-                                node.status.as_ref().and_then(|s| s.capacity.as_ref())
-                            {
-                                if !capacity.is_empty() {
-                                    let mut capacity_data = Vec::new();
-                                    for (resource, quantity) in capacity {
-                                        let mut cap = ResourceData::new("Capacity", "", resource);
-                                        cap.add_attribute("value", format!("{:?}", quantity));
-                                        capacity_data.push(cap);
-                                    }
-                                    node_data.add_section("Capacity", capacity_data);
-                                }
-                            }
-
-                            // Node labels
-                            helpers::add_labels::<String>(&mut node_data, &node.metadata);
-
-                            result.push(node_data);
-                            break;
+                            node_data.add_section("Addresses", address_data);
                         }
                     }
+
+                    // Node capacity
+                    if let Some(capacity) = node.status.as_ref().and_then(|s| s.capacity.as_ref())
+                        && !capacity.is_empty()
+                    {
+                        let mut capacity_data = Vec::new();
+                        for (resource, quantity) in capacity {
+                            let mut cap = ResourceData::new("Capacity", "", resource);
+                            cap.add_attribute("value", format!("{quantity:?}"));
+                            capacity_data.push(cap);
+                        }
+                        node_data.add_section("Capacity", capacity_data);
+                    }
+
+                    // Node labels
+                    helpers::add_labels(&mut node_data, &node.metadata);
+
+                    result.push(node_data);
+                    break;
                 }
             }
         }
@@ -419,55 +407,46 @@ impl ResourceParser for DeploymentParser {
 
                         for deployment in deployments {
                             // Check if this deployment manages the ReplicaSet
-                            if let Some(name) = &deployment.metadata.name {
-                                if owner_ref.name.starts_with(name) {
-                                    let (_, deployment_name) =
-                                        helpers::extract_metadata(&deployment.metadata);
-                                    let mut deployment_data = ResourceData::new(
-                                        "Deployment",
-                                        namespace,
-                                        &deployment_name,
-                                    );
+                            if let Some(name) = &deployment.metadata.name
+                                && owner_ref.name.starts_with(name)
+                            {
+                                let (_, deployment_name) =
+                                    helpers::extract_metadata(&deployment.metadata);
+                                let mut deployment_data =
+                                    ResourceData::new("Deployment", namespace, &deployment_name);
 
-                                    // Deployment details
-                                    if let Some(spec) = &deployment.spec {
-                                        if let Some(replicas) = spec.replicas {
-                                            deployment_data.add_attribute("Replicas", replicas);
-                                        }
-                                        if let Some(strategy) = &spec.strategy {
-                                            if let Some(strategy_type) = &strategy.type_ {
-                                                deployment_data.add_attribute(
-                                                    "Strategy",
-                                                    strategy_type.to_string(),
-                                                );
-                                            }
-                                        }
+                                // Deployment details
+                                if let Some(spec) = &deployment.spec {
+                                    if let Some(replicas) = spec.replicas {
+                                        deployment_data.add_attribute("Replicas", replicas);
                                     }
-
-                                    // Deployment status
-                                    if let Some(status) = &deployment.status {
-                                        if let Some(available_replicas) = status.available_replicas
-                                        {
-                                            deployment_data.add_attribute(
-                                                "Available Replicas",
-                                                available_replicas,
-                                            );
-                                        }
-                                        if let Some(ready_replicas) = status.ready_replicas {
-                                            deployment_data
-                                                .add_attribute("Ready Replicas", ready_replicas);
-                                        }
+                                    if let Some(strategy) = &spec.strategy
+                                        && let Some(strategy_type) = &strategy.type_
+                                    {
+                                        deployment_data
+                                            .add_attribute("Strategy", strategy_type.to_string());
                                     }
-
-                                    // Add deployment labels
-                                    helpers::add_labels::<String>(
-                                        &mut deployment_data,
-                                        &deployment.metadata,
-                                    );
-
-                                    result.push(deployment_data);
-                                    break;
                                 }
+
+                                // Deployment status
+                                if let Some(status) = &deployment.status {
+                                    if let Some(available_replicas) = status.available_replicas {
+                                        deployment_data.add_attribute(
+                                            "Available Replicas",
+                                            available_replicas,
+                                        );
+                                    }
+                                    if let Some(ready_replicas) = status.ready_replicas {
+                                        deployment_data
+                                            .add_attribute("Ready Replicas", ready_replicas);
+                                    }
+                                }
+
+                                // Add deployment labels
+                                helpers::add_labels(&mut deployment_data, &deployment.metadata);
+
+                                result.push(deployment_data);
+                                break;
                             }
                         }
                         break;
@@ -519,7 +498,7 @@ impl ResourceParser for ReplicaSetParser {
                                 // Selector
                                 let selector = &spec.selector;
                                 if let Some(match_labels) = &selector.match_labels {
-                                    helpers::add_match_labels_btree::<String>(
+                                    helpers::add_match_labels_btree(
                                         &mut rs_data,
                                         match_labels,
                                         "Selector",
@@ -536,7 +515,7 @@ impl ResourceParser for ReplicaSetParser {
                             }
 
                             // Add ReplicaSet labels
-                            helpers::add_labels::<String>(&mut rs_data, &rs.metadata);
+                            helpers::add_labels(&mut rs_data, &rs.metadata);
 
                             result.push(rs_data);
                         }
@@ -608,7 +587,7 @@ impl ResourceParser for StatefulSetParser {
                             }
 
                             // Add StatefulSet labels
-                            helpers::add_labels::<String>(&mut sts_data, &sts.metadata);
+                            helpers::add_labels(&mut sts_data, &sts.metadata);
 
                             result.push(sts_data);
                         }
@@ -657,7 +636,7 @@ impl ResourceParser for DaemonSetParser {
                             if let Some(spec) = &ds.spec {
                                 let selector = &spec.selector;
                                 if let Some(match_labels) = &selector.match_labels {
-                                    helpers::add_match_labels_btree::<String>(
+                                    helpers::add_match_labels_btree(
                                         &mut ds_data,
                                         match_labels,
                                         "Selector",
@@ -679,7 +658,7 @@ impl ResourceParser for DaemonSetParser {
                             }
 
                             // Add DaemonSet labels
-                            helpers::add_labels::<String>(&mut ds_data, &ds.metadata);
+                            helpers::add_labels(&mut ds_data, &ds.metadata);
 
                             result.push(ds_data);
                         }
@@ -750,13 +729,13 @@ impl ResourceParser for JobParser {
                                 if let Some(completion_time) = &status.completion_time {
                                     job_data.add_attribute(
                                         "Completion Time",
-                                        format!("{:?}", completion_time),
+                                        format!("{completion_time:?}"),
                                     );
                                 }
                             }
 
                             // Add Job labels
-                            helpers::add_labels::<String>(&mut job_data, &job.metadata);
+                            helpers::add_labels(&mut job_data, &job.metadata);
 
                             result.push(job_data);
                         }
@@ -806,125 +785,116 @@ impl ResourceParser for IngressParser {
                             }
 
                             // TLS
-                            if let Some(tls) = &spec.tls {
-                                if !tls.is_empty() {
-                                    let mut tls_data = Vec::new();
-                                    for (i, tls_entry) in tls.iter().enumerate() {
-                                        let mut tls_item = ResourceData::new(
-                                            "TLS",
-                                            "",
-                                            &format!("Entry #{}", i + 1),
-                                        );
+                            if let Some(tls) = &spec.tls
+                                && !tls.is_empty()
+                            {
+                                let mut tls_data = Vec::new();
+                                for (i, tls_entry) in tls.iter().enumerate() {
+                                    let mut tls_item =
+                                        ResourceData::new("TLS", "", &format!("Entry #{}", i + 1));
 
-                                        if let Some(hosts) = &tls_entry.hosts {
-                                            tls_item.add_attribute("Hosts", hosts.join(", "));
-                                        }
-                                        if let Some(secret_name) = &tls_entry.secret_name {
-                                            tls_item
-                                                .add_attribute("Secret", secret_name.to_string());
-                                        }
-
-                                        tls_data.push(tls_item);
+                                    if let Some(hosts) = &tls_entry.hosts {
+                                        tls_item.add_attribute("Hosts", hosts.join(", "));
                                     }
-                                    ingress_data.add_section("TLS", tls_data);
+                                    if let Some(secret_name) = &tls_entry.secret_name {
+                                        tls_item.add_attribute("Secret", secret_name.to_string());
+                                    }
+
+                                    tls_data.push(tls_item);
                                 }
+                                ingress_data.add_section("TLS", tls_data);
                             }
 
                             // Rules
-                            if let Some(rules) = &spec.rules {
-                                if !rules.is_empty() {
-                                    let mut rules_data = Vec::new();
-                                    for (i, rule) in rules.iter().enumerate() {
-                                        let mut rule_item =
-                                            ResourceData::new("Rule", "", &format!("#{}", i + 1));
+                            if let Some(rules) = &spec.rules
+                                && !rules.is_empty()
+                            {
+                                let mut rules_data = Vec::new();
+                                for (i, rule) in rules.iter().enumerate() {
+                                    let mut rule_item =
+                                        ResourceData::new("Rule", "", &format!("#{}", i + 1));
 
-                                        if let Some(host) = &rule.host {
-                                            rule_item.add_attribute("Host", host.to_string());
-                                        }
+                                    if let Some(host) = &rule.host {
+                                        rule_item.add_attribute("Host", host.to_string());
+                                    }
 
-                                        if let Some(http) = &rule.http {
-                                            let mut paths_data = Vec::new();
-                                            for (j, path) in http.paths.iter().enumerate() {
-                                                let mut path_item = ResourceData::new(
-                                                    "Path",
-                                                    "",
-                                                    &format!("#{}", j + 1),
-                                                );
+                                    if let Some(http) = &rule.http {
+                                        let mut paths_data = Vec::new();
+                                        for (j, path) in http.paths.iter().enumerate() {
+                                            let mut path_item = ResourceData::new(
+                                                "Path",
+                                                "",
+                                                &format!("#{}", j + 1),
+                                            );
 
-                                                path_item.add_attribute(
-                                                    "Path",
-                                                    path.path.as_deref().unwrap_or("/"),
-                                                );
-                                                path_item
-                                                    .add_attribute("PathType", &path.path_type);
+                                            path_item.add_attribute(
+                                                "Path",
+                                                path.path.as_deref().unwrap_or("/"),
+                                            );
+                                            path_item.add_attribute("PathType", &path.path_type);
 
-                                                let backend = &path.backend;
-                                                if let Some(service) = &backend.service {
-                                                    path_item
-                                                        .add_attribute("Service", &service.name);
-                                                    if let Some(port) = &service.port {
-                                                        match &port.number {
-                                                            Some(num) => {
+                                            let backend = &path.backend;
+                                            if let Some(service) = &backend.service {
+                                                path_item.add_attribute("Service", &service.name);
+                                                if let Some(port) = &service.port {
+                                                    match &port.number {
+                                                        Some(num) => {
+                                                            path_item.add_attribute(
+                                                                "Port",
+                                                                num.to_string(),
+                                                            );
+                                                        }
+                                                        None => {
+                                                            if let Some(name) = &port.name {
                                                                 path_item.add_attribute(
-                                                                    "Port",
-                                                                    num.to_string(),
+                                                                    "Port Name",
+                                                                    name,
                                                                 );
-                                                            }
-                                                            None => {
-                                                                if let Some(name) = &port.name {
-                                                                    path_item.add_attribute(
-                                                                        "Port Name",
-                                                                        name,
-                                                                    );
-                                                                }
                                                             }
                                                         }
                                                     }
                                                 }
-
-                                                paths_data.push(path_item);
                                             }
-                                            rule_item.add_section("Paths", paths_data);
-                                        }
 
-                                        rules_data.push(rule_item);
+                                            paths_data.push(path_item);
+                                        }
+                                        rule_item.add_section("Paths", paths_data);
                                     }
-                                    ingress_data.add_section("Rules", rules_data);
+
+                                    rules_data.push(rule_item);
                                 }
+                                ingress_data.add_section("Rules", rules_data);
                             }
                         }
 
                         // Ingress status
-                        if let Some(status) = &ingress.status {
-                            if let Some(load_balancer) = &status.load_balancer {
-                                if let Some(ingress_points) = &load_balancer.ingress {
-                                    if !ingress_points.is_empty() {
-                                        let mut lb_data = Vec::new();
-                                        for (i, ingress_point) in ingress_points.iter().enumerate()
-                                        {
-                                            let mut point = ResourceData::new(
-                                                "LoadBalancer",
-                                                "",
-                                                &format!("Point #{}", i + 1),
-                                            );
+                        if let Some(status) = &ingress.status
+                            && let Some(load_balancer) = &status.load_balancer
+                            && let Some(ingress_points) = &load_balancer.ingress
+                            && !ingress_points.is_empty()
+                        {
+                            let mut lb_data = Vec::new();
+                            for (i, ingress_point) in ingress_points.iter().enumerate() {
+                                let mut point = ResourceData::new(
+                                    "LoadBalancer",
+                                    "",
+                                    &format!("Point #{}", i + 1),
+                                );
 
-                                            if let Some(ip) = &ingress_point.ip {
-                                                point.add_attribute("IP", ip);
-                                            }
-                                            if let Some(hostname) = &ingress_point.hostname {
-                                                point.add_attribute("Hostname", hostname);
-                                            }
-
-                                            lb_data.push(point);
-                                        }
-                                        ingress_data.add_section("Load Balancer", lb_data);
-                                    }
+                                if let Some(ip) = &ingress_point.ip {
+                                    point.add_attribute("IP", ip);
                                 }
+                                if let Some(hostname) = &ingress_point.hostname {
+                                    point.add_attribute("Hostname", hostname);
+                                }
+
+                                lb_data.push(point);
                             }
+                            ingress_data.add_section("Load Balancer", lb_data);
                         }
 
                         // Add Ingress labels
-                        helpers::add_labels::<String>(&mut ingress_data, &ingress.metadata);
+                        helpers::add_labels(&mut ingress_data, &ingress.metadata);
 
                         result.push(ingress_data);
                     }
@@ -997,28 +967,28 @@ impl ResourceParser for EndpointSliceParser {
                     slice_data.add_section("Endpoints", endpoints_data);
 
                     // Ports
-                    if let Some(ports) = &slice.ports {
-                        if !ports.is_empty() {
-                            let mut ports_data = Vec::new();
-                            for port in ports {
-                                let port_name = port.name.as_deref().unwrap_or("unnamed");
-                                let mut port_item = ResourceData::new("Port", "", port_name);
+                    if let Some(ports) = &slice.ports
+                        && !ports.is_empty()
+                    {
+                        let mut ports_data = Vec::new();
+                        for port in ports {
+                            let port_name = port.name.as_deref().unwrap_or("unnamed");
+                            let mut port_item = ResourceData::new("Port", "", port_name);
 
-                                if let Some(port_number) = port.port {
-                                    port_item.add_attribute("Port", port_number);
-                                }
-
-                                let protocol = port.protocol.as_deref().unwrap_or("TCP");
-                                port_item.add_attribute("Protocol", protocol);
-
-                                ports_data.push(port_item);
+                            if let Some(port_number) = port.port {
+                                port_item.add_attribute("Port", port_number);
                             }
-                            slice_data.add_section("Ports", ports_data);
+
+                            let protocol = port.protocol.as_deref().unwrap_or("TCP");
+                            port_item.add_attribute("Protocol", protocol);
+
+                            ports_data.push(port_item);
                         }
+                        slice_data.add_section("Ports", ports_data);
                     }
 
                     // Add EndpointSlice labels
-                    helpers::add_labels::<String>(&mut slice_data, &slice.metadata);
+                    helpers::add_labels(&mut slice_data, &slice.metadata);
 
                     result.push(slice_data);
                 }
@@ -1062,7 +1032,7 @@ impl ResourceParser for NetworkPolicyParser {
                     // Pod selector
                     let pod_selector = &spec.pod_selector;
                     if let Some(match_labels) = &pod_selector.match_labels {
-                        helpers::add_match_labels_btree::<String>(
+                        helpers::add_match_labels_btree(
                             &mut policy_data,
                             match_labels,
                             "Pod Selector",
@@ -1071,7 +1041,7 @@ impl ResourceParser for NetworkPolicyParser {
                 }
 
                 // Add NetworkPolicy labels
-                helpers::add_labels::<String>(&mut policy_data, &policy.metadata);
+                helpers::add_labels(&mut policy_data, &policy.metadata);
 
                 result.push(policy_data);
             }
@@ -1108,10 +1078,10 @@ impl ResourceParser for IngressControllerParser {
                     if helpers::is_ingress_related_to_services(&ingress, &services) {
                         // Try to identify the ingress controller
                         // First check for ingress class name
-                        if let Some(spec) = &ingress.spec {
-                            if let Some(ingress_class_name) = &spec.ingress_class_name {
-                                controllers.insert(format!("Class: {}", ingress_class_name));
-                            }
+                        if let Some(spec) = &ingress.spec
+                            && let Some(ingress_class_name) = &spec.ingress_class_name
+                        {
+                            controllers.insert(format!("Class: {ingress_class_name}"));
                         }
 
                         // Then check for annotations that might indicate the controller
@@ -1121,7 +1091,7 @@ impl ResourceParser for IngressControllerParser {
                                     || key.contains("ingress-controller")
                                     || key.contains("ingress.kubernetes.io")
                                 {
-                                    controllers.insert(format!("Annotation: {} = {}", key, value));
+                                    controllers.insert(format!("Annotation: {key} = {value}"));
                                 }
                             }
                         }
@@ -1157,6 +1127,7 @@ impl ResourceParser for IngressControllerParser {
 pub struct ResourceParserFactory;
 
 impl ResourceParserFactory {
+    #[allow(dead_code)]
     /// Create a parser for the specified resource type
     pub fn create(resource_type: &str) -> Box<dyn ResourceParser + Send + Sync> {
         match resource_type {
@@ -1172,7 +1143,7 @@ impl ResourceParserFactory {
             "EndpointSlice" => Box::new(EndpointSliceParser),
             "NetworkPolicy" => Box::new(NetworkPolicyParser),
             "IngressController" => Box::new(IngressControllerParser),
-            _ => panic!("Unsupported resource type: {}", resource_type),
+            _ => panic!("Unsupported resource type: {resource_type}"),
         }
     }
 
@@ -1213,10 +1184,8 @@ pub fn parse_packet_meta(event: &PacketMeta) -> (String, String) {
         _ => "Other",
     };
 
-    let connection_info = format!(
-        "Connection: {}:{} -> {}:{} ({})",
-        src_ipv4, src_port, dst_ipv4, dst_port, protocol
-    );
+    let connection_info =
+        format!("Connection: {src_ipv4}:{src_port} -> {dst_ipv4}:{dst_port} ({protocol})");
     let packet_size_info = format!("Packet size: {} bytes", event.l3_octet_count);
 
     (connection_info, packet_size_info)
