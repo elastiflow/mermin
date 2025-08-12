@@ -1,5 +1,6 @@
 #![cfg_attr(not(test), no_main)]
 #![cfg_attr(not(test), no_std)]
+extern crate alloc;
 
 #[cfg(not(test))]
 use aya_ebpf::{
@@ -30,33 +31,12 @@ enum HeaderType {
     Ethernet,
     Ipv4,
     Ipv6,
-    Ah,
-    Esp,
     Proto(IpProto),
     StopProcessing, // Indicates parsing should terminate for flow key purposes
     #[cfg(not(test))]
     ErrorOccurred, // Indicates an error stopped parsing
 }
 
-fn map_next_hdr(nh: u8) -> HeaderType {
-    match nh {
-        x if x == IpProto::Tcp as u8 => HeaderType::Proto(IpProto::Tcp),
-        x if x == IpProto::Udp as u8 => HeaderType::Proto(IpProto::Udp),
-        // Common IPv6 extension headers
-        x if x == IpProto::HopOpt as u8 => HeaderType::Proto(IpProto::HopOpt),
-        x if x == IpProto::Ipv6Route as u8 => HeaderType::Proto(IpProto::Ipv6Route),
-        x if x == IpProto::Ipv6Frag as u8 => HeaderType::Proto(IpProto::Ipv6Frag),
-        x if x == IpProto::Ipv6Opts as u8 => HeaderType::Proto(IpProto::Ipv6Opts),
-        x if x == IpProto::MobilityHeader as u8 => HeaderType::Proto(IpProto::MobilityHeader),
-        x if x == IpProto::Hip as u8 => HeaderType::Proto(IpProto::Hip),
-        x if x == IpProto::Shim6 as u8 => HeaderType::Proto(IpProto::Shim6),
-        x if x == IpProto::Ipv6NoNxt as u8 => HeaderType::StopProcessing,
-        x if x == IpProto::Ah as u8 => HeaderType::Ah,
-        x if x == IpProto::Esp as u8 => HeaderType::Esp,
-        // Fallback: stop processing for unknown next headers
-        _ => HeaderType::StopProcessing,
-    }
-}
 
 struct Parser {
     // Current read offset from the start of the packet
@@ -100,7 +80,7 @@ impl Parser {
         let ah_hdr: AuthHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += AuthHdr::LEN;
         // TODO: Extract and set other AH fields
-        self.next_hdr = map_next_hdr(ah_hdr.next_hdr());
+        self.next_hdr = HeaderType::Proto(ah_hdr.next_hdr());
         Ok(())
     }
 
@@ -350,19 +330,19 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
     for _ in 0..MAX_HEADER_PARSE_DEPTH {
         let result: Result<(), Error> = match parser.next_hdr {
             HeaderType::Ethernet => parser.parse_ethernet_header(&ctx),
-            HeaderType::Ah => parser.parse_ah_header(&ctx),
+            HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
             HeaderType::Ipv4 => parser.parse_ipv4_header(&ctx),
             HeaderType::Ipv6 => parser.parse_ipv6_header(&ctx),
             HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx),
             HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
             HeaderType::Proto(proto) => {
                 debug!(
                     &ctx,
                     "mermin: skipped parsing of unsupported protocol {}", proto as u8
                 );
                 break;
-            }
-            HeaderType::Esp => break,            //Temp break to allow build
+            } 
             HeaderType::StopProcessing => break, // Graceful stop
             HeaderType::ErrorOccurred => return Ok(TC_ACT_PIPE), // Error, pass packet
         };
@@ -453,6 +433,7 @@ pub use host_test_shim::TcContext;
 mod tests {
     extern crate alloc;
 
+    use alloc::vec;
     use alloc::vec::Vec;
 
     use super::*;
@@ -733,7 +714,7 @@ mod tests {
     #[test]
     fn test_parse_ah_header_tcp() {
         let mut parser = Parser::new();
-        parser.next_hdr = HeaderType::Ah;
+        parser.next_hdr = HeaderType::Proto(IpProto::Ah);
         let packet = create_ah_test_packet(IpProto::Tcp);
         let ctx = TcContext::new(packet);
 
@@ -748,7 +729,7 @@ mod tests {
     #[test]
     fn test_parse_ah_header_udp() {
         let mut parser = Parser::new();
-        parser.next_hdr = HeaderType::Ah;
+        parser.next_hdr = HeaderType::Proto(IpProto::Ah);
         let packet = create_ah_test_packet(IpProto::Udp);
         let ctx = TcContext::new(packet);
 
@@ -763,7 +744,7 @@ mod tests {
     #[test]
     fn test_parse_ah_header_out_of_bounds() {
         let mut parser = Parser::new();
-        parser.next_hdr = HeaderType::Ah;
+        parser.next_hdr = HeaderType::Proto(IpProto::Ah);
         // Provide fewer than 12 bytes
         let packet = vec![0x06, 0x01, 0x00, 0x00, 0x12, 0x34];
         let ctx = TcContext::new(packet);

@@ -1,4 +1,5 @@
 use core::mem;
+use crate::ip::IpProto;
 
 /// # Authentication Header Format
 ///
@@ -22,7 +23,7 @@ use core::mem;
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
 pub struct AuthHdr {
-    pub next_hdr: u8,
+    pub next_hdr: IpProto,
     pub payload_len: u8,
     pub reserved: [u8; 2],
     pub spi: [u8; 4],
@@ -41,7 +42,7 @@ impl AuthHdr {
     /// Creates a new AuthHdr with default values.
     pub fn new() -> Self {
         Self {
-            next_hdr: 0,
+            next_hdr: IpProto::HopOpt,
             payload_len: 0,
             reserved: [0; 2],
             spi: [0; 4],
@@ -50,12 +51,12 @@ impl AuthHdr {
     }
 
     /// Gets the Next Header value.
-    pub fn next_hdr(&self) -> u8 {
+    pub fn next_hdr(&self) -> IpProto {
         self.next_hdr
     }
 
     /// Sets the Next Header value.
-    pub fn set_next_hdr(&mut self, next_hdr: u8) {
+    pub fn set_next_hdr(&mut self, next_hdr: IpProto) {
         self.next_hdr = next_hdr;
     }
 
@@ -130,9 +131,9 @@ mod tests {
         let mut auth_hdr = create_auth_hdr_for_testing();
 
         // Test next_hdr
-        auth_hdr.set_next_hdr(6); // Example: TCP
-        assert_eq!(auth_hdr.next_hdr(), 6);
-        assert_eq!(auth_hdr.next_hdr, 6);
+        auth_hdr.set_next_hdr(IpProto::Stream); // Example: TCP
+        assert_eq!(auth_hdr.next_hdr(), IpProto::Stream);
+        assert_eq!(auth_hdr.next_hdr, IpProto::Stream);
 
         // Test payload_len
         auth_hdr.set_payload_len(4); // Example: Total length would be (4+2)*4 = 24 bytes
