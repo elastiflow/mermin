@@ -1317,6 +1317,7 @@ name = "mermin"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "aya",
  "aya-build 0.1.2 (git+https://github.com/aya-rs/aya?rev=a7e3e6d4d90767d40a015a473a7d0623031ff6ee)",
  "aya-log",
@@ -1331,6 +1332,7 @@ dependencies = [
  "log",
  "mermin-common",
  "mermin-ebpf",
+ "serde",
  "socket2 0.5.10",
  "tokio",
 ]

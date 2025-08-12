@@ -6,7 +6,28 @@ metadata:
     {{- include "mermin.labels" . | nindent 4 }}
   name: {{ include "mermin.fullname" . }}
 rules:
+  # Core API Group
   - apiGroups: [""]
-    resources: ["pods"]
+    resources: ["nodes", "pods", "services"]
+    verbs: ["get", "list", "watch"]
+
+  # Apps API Group
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+
+  # Batch API Group
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch"]
+
+  # Networking API Group
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list", "watch"]
+
+  # Discovery API Group
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
     verbs: ["get", "list", "watch"]
 {{- end }}
