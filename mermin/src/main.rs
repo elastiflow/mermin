@@ -1,3 +1,6 @@
+mod cli;
+mod config;
+
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use anyhow::anyhow;
