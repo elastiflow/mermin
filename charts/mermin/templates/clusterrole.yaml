@@ -5,5 +5,8 @@ metadata:
   labels:
     {{- include "mermin.labels" . | nindent 4 }}
   name: {{ include "mermin.fullname" . }}
-rules: []
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
 {{- end }}
