@@ -1,4 +1,5 @@
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use aya::{
@@ -10,6 +11,9 @@ use clap::Parser;
 use log::{debug, info, warn};
 use mermin_common::PacketMeta;
 use tokio::signal;
+use crate::k8s::KubeClient;
+
+mod k8s;
 
 #[derive(Debug, Parser)]
 struct Opt {
@@ -59,11 +63,26 @@ async fn main() -> anyhow::Result<()> {
 
     info!("eBPF program attached. Waiting for events... Press Ctrl-C to exit.");
 
+    // Initialize the Kubernetes client
+    info!("Initializing Kubernetes client...");
+    let kube_client = match k8s::KubeClient::new().await {
+        Ok(client) => {
+            info!("Kubernetes client initialized successfully");
+            Some(Arc::new(client))
+        }
+        Err(e) => {
+            warn!("Failed to initialize Kubernetes client: {}", e);
+            warn!("Pod metadata lookup will not be available");
+            None
+        }
+    };
+
     let map = ebpf
         .take_map("PACKETS")
         .ok_or_else(|| anyhow!("PACKETS map not present in the object"))?;
     let mut ring_buf = RingBuf::try_from(map)?;
 
+    let kube_client_clone = kube_client.clone();
     tokio::spawn(async move {
         info!("Userspace task started. Polling the ring buffer...");
         loop {
@@ -81,6 +100,7 @@ async fn main() -> anyhow::Result<()> {
                         u16::from_be_bytes(event.src_port),
                         u16::from_be_bytes(event.dst_port),
                     );
+                    parse_pod(event, kube_client_clone.clone()).await;
                 }
                 None => {
                     // Short sleep to prevent busy-looping.
@@ -118,4 +138,25 @@ struct FlowRecord {
     pub flow_end_reason: u8,
     // Implicit padding (2 bytes) is added here by the compiler to ensure
     // the total struct size (88 bytes) is a multiple of the maximum alignment (8 bytes).
+}
+
+async fn parse_pod(event: PacketMeta, kube_client_clone: Option<Arc<KubeClient>>) {
+    info!("Parsing pod info...");
+    // Get the source IPv4 address
+    let src_ipv4 = Ipv4Addr::from(event.src_ipv4_addr);
+
+    // Look up the Pod metadata using the source IPv4 address if KubeClient is available
+    let pod_info = if let Some(client) = &kube_client_clone {
+        match client.get_pod_by_ip(src_ipv4).await {
+            Some(pod) => {
+                let namespace = pod.metadata.namespace.as_deref().unwrap_or("unknown");
+                let name = pod.metadata.name.as_deref().unwrap_or("unknown");
+                format!("Pod: {}/{}", namespace, name)
+            }
+            None => "Pod: not found".to_string(),
+        }
+    } else {
+        "Pod lookup not available".to_string()
+    };
+    println!("{}", pod_info);
 }
