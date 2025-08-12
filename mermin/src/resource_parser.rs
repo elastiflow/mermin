@@ -1,6 +1,13 @@
 use std::{collections::HashMap, fmt::Display, net::Ipv4Addr};
 
 use async_trait::async_trait;
+use k8s_openapi::api::{
+    apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet},
+    batch::v1::Job,
+    discovery::v1::EndpointSlice,
+    networking::v1::{Ingress, NetworkPolicy},
+    rbac::v1::PolicyRule,
+};
 use log::info;
 use mermin_common::PacketMeta;
 
@@ -407,7 +414,8 @@ impl ResourceParser for DeploymentParser {
                 for owner_ref in owner_refs {
                     if owner_ref.kind == "ReplicaSet" {
                         // Get deployments in the namespace
-                        let deployments = client.get_deployments_by_namespace(namespace);
+                        let deployments =
+                            client.app_store.get_by_namespace::<Deployment>(namespace);
 
                         for deployment in deployments {
                             // Check if this deployment manages the ReplicaSet
@@ -493,45 +501,44 @@ impl ResourceParser for ReplicaSetParser {
                     if owner_ref.kind == "ReplicaSet" {
                         let rs_name = &owner_ref.name;
 
-                        // Find the ReplicaSet in the store
-                        for rs in client.app_store.replica_sets.state() {
-                            if rs.metadata.name.as_deref() == Some(rs_name)
-                                && rs.metadata.namespace.as_deref() == Some(namespace)
-                            {
-                                let mut rs_data =
-                                    ResourceData::new("ReplicaSet", namespace, rs_name);
+                        let replica_sets_in_ns =
+                            client.app_store.get_by_namespace::<ReplicaSet>(namespace);
 
-                                // ReplicaSet details
-                                if let Some(spec) = &rs.spec {
-                                    if let Some(replicas) = spec.replicas {
-                                        rs_data.add_attribute("Replicas", replicas);
-                                    }
+                        if let Some(rs) = replica_sets_in_ns
+                            .iter()
+                            .find(|rs| rs.metadata.name.as_deref() == Some(rs_name))
+                        {
+                            let mut rs_data = ResourceData::new("ReplicaSet", namespace, rs_name);
 
-                                    // Selector
-                                    let selector = &spec.selector;
-                                    if let Some(match_labels) = &selector.match_labels {
-                                        helpers::add_match_labels_btree::<String>(
-                                            &mut rs_data,
-                                            match_labels,
-                                            "Selector",
-                                        );
-                                    }
+                            // ReplicaSet details
+                            if let Some(spec) = &rs.spec {
+                                if let Some(replicas) = spec.replicas {
+                                    rs_data.add_attribute("Replicas", replicas);
                                 }
 
-                                // ReplicaSet status
-                                if let Some(status) = &rs.status {
-                                    rs_data.add_attribute("Current Replicas", status.replicas);
-                                    if let Some(ready_replicas) = status.ready_replicas {
-                                        rs_data.add_attribute("Ready Replicas", ready_replicas);
-                                    }
+                                // Selector
+                                let selector = &spec.selector;
+                                if let Some(match_labels) = &selector.match_labels {
+                                    helpers::add_match_labels_btree::<String>(
+                                        &mut rs_data,
+                                        match_labels,
+                                        "Selector",
+                                    );
                                 }
-
-                                // Add ReplicaSet labels
-                                helpers::add_labels::<String>(&mut rs_data, &rs.metadata);
-
-                                result.push(rs_data);
-                                break;
                             }
+
+                            // ReplicaSet status
+                            if let Some(status) = &rs.status {
+                                rs_data.add_attribute("Current Replicas", status.replicas);
+                                if let Some(ready_replicas) = status.ready_replicas {
+                                    rs_data.add_attribute("Ready Replicas", ready_replicas);
+                                }
+                            }
+
+                            // Add ReplicaSet labels
+                            helpers::add_labels::<String>(&mut rs_data, &rs.metadata);
+
+                            result.push(rs_data);
                         }
                         break;
                     }
@@ -564,47 +571,46 @@ impl ResourceParser for StatefulSetParser {
                     if owner_ref.kind == "StatefulSet" {
                         let sts_name = &owner_ref.name;
 
+                        let stateful_sets_in_ns =
+                            client.app_store.get_by_namespace::<StatefulSet>(namespace);
+
                         // Find the StatefulSet in the store
-                        for sts in client.app_store.stateful_sets.state() {
-                            if sts.metadata.name.as_deref() == Some(sts_name)
-                                && sts.metadata.namespace.as_deref() == Some(namespace)
-                            {
-                                let mut sts_data =
-                                    ResourceData::new("StatefulSet", namespace, sts_name);
+                        if let Some(sts) = stateful_sets_in_ns
+                            .iter()
+                            .find(|s| s.metadata.name.as_deref() == Some(sts_name))
+                        {
+                            let mut sts_data =
+                                ResourceData::new("StatefulSet", namespace, sts_name);
 
-                                // StatefulSet details
-                                if let Some(spec) = &sts.spec {
-                                    if let Some(replicas) = spec.replicas {
-                                        sts_data.add_attribute("Replicas", replicas);
-                                    }
-                                    sts_data.add_attribute("Service Name", &spec.service_name);
-                                    if let Some(pod_management_policy) = &spec.pod_management_policy
-                                    {
-                                        sts_data.add_attribute(
-                                            "Pod Management Policy",
-                                            pod_management_policy,
-                                        );
-                                    }
+                            // StatefulSet details
+                            if let Some(spec) = &sts.spec {
+                                if let Some(replicas) = spec.replicas {
+                                    sts_data.add_attribute("Replicas", replicas);
                                 }
-
-                                // StatefulSet status
-                                if let Some(status) = &sts.status {
-                                    sts_data.add_attribute("Current Replicas", status.replicas);
-                                    if let Some(ready_replicas) = status.ready_replicas {
-                                        sts_data.add_attribute("Ready Replicas", ready_replicas);
-                                    }
-                                    if let Some(current_revision) = &status.current_revision {
-                                        sts_data
-                                            .add_attribute("Current Revision", current_revision);
-                                    }
+                                sts_data.add_attribute("Service Name", &spec.service_name);
+                                if let Some(pod_management_policy) = &spec.pod_management_policy {
+                                    sts_data.add_attribute(
+                                        "Pod Management Policy",
+                                        pod_management_policy,
+                                    );
                                 }
-
-                                // Add StatefulSet labels
-                                helpers::add_labels::<String>(&mut sts_data, &sts.metadata);
-
-                                result.push(sts_data);
-                                break;
                             }
+
+                            // StatefulSet status
+                            if let Some(status) = &sts.status {
+                                sts_data.add_attribute("Current Replicas", status.replicas);
+                                if let Some(ready_replicas) = status.ready_replicas {
+                                    sts_data.add_attribute("Ready Replicas", ready_replicas);
+                                }
+                                if let Some(current_revision) = &status.current_revision {
+                                    sts_data.add_attribute("Current Revision", current_revision);
+                                }
+                            }
+
+                            // Add StatefulSet labels
+                            helpers::add_labels::<String>(&mut sts_data, &sts.metadata);
+
+                            result.push(sts_data);
                         }
                         break;
                     }
@@ -637,45 +643,45 @@ impl ResourceParser for DaemonSetParser {
                     if owner_ref.kind == "DaemonSet" {
                         let ds_name = &owner_ref.name;
 
+                        let daemon_sets_in_ns =
+                            client.app_store.get_by_namespace::<DaemonSet>(namespace);
+
                         // Find the DaemonSet in the store
-                        for ds in client.app_store.daemon_sets.state() {
-                            if ds.metadata.name.as_deref() == Some(ds_name)
-                                && ds.metadata.namespace.as_deref() == Some(namespace)
-                            {
-                                let mut ds_data =
-                                    ResourceData::new("DaemonSet", namespace, ds_name);
+                        if let Some(ds) = daemon_sets_in_ns
+                            .iter()
+                            .find(|d| d.metadata.name.as_deref() == Some(ds_name))
+                        {
+                            let mut ds_data = ResourceData::new("DaemonSet", namespace, ds_name);
 
-                                // DaemonSet details
-                                if let Some(spec) = &ds.spec {
-                                    let selector = &spec.selector;
-                                    if let Some(match_labels) = &selector.match_labels {
-                                        helpers::add_match_labels_btree::<String>(
-                                            &mut ds_data,
-                                            match_labels,
-                                            "Selector",
-                                        );
-                                    }
-                                }
-
-                                // DaemonSet status
-                                if let Some(status) = &ds.status {
-                                    ds_data.add_attribute(
-                                        "Current Number Scheduled",
-                                        status.current_number_scheduled,
+                            // DaemonSet details
+                            if let Some(spec) = &ds.spec {
+                                let selector = &spec.selector;
+                                if let Some(match_labels) = &selector.match_labels {
+                                    helpers::add_match_labels_btree::<String>(
+                                        &mut ds_data,
+                                        match_labels,
+                                        "Selector",
                                     );
-                                    ds_data.add_attribute(
-                                        "Desired Number Scheduled",
-                                        status.desired_number_scheduled,
-                                    );
-                                    ds_data.add_attribute("Number Ready", status.number_ready);
                                 }
-
-                                // Add DaemonSet labels
-                                helpers::add_labels::<String>(&mut ds_data, &ds.metadata);
-
-                                result.push(ds_data);
-                                break;
                             }
+
+                            // DaemonSet status
+                            if let Some(status) = &ds.status {
+                                ds_data.add_attribute(
+                                    "Current Number Scheduled",
+                                    status.current_number_scheduled,
+                                );
+                                ds_data.add_attribute(
+                                    "Desired Number Scheduled",
+                                    status.desired_number_scheduled,
+                                );
+                                ds_data.add_attribute("Number Ready", status.number_ready);
+                            }
+
+                            // Add DaemonSet labels
+                            helpers::add_labels::<String>(&mut ds_data, &ds.metadata);
+
+                            result.push(ds_data);
                         }
                         break;
                     }
@@ -708,51 +714,51 @@ impl ResourceParser for JobParser {
                     if owner_ref.kind == "Job" {
                         let job_name = &owner_ref.name;
 
+                        let jobs_in_ns = client.app_store.get_by_namespace::<Job>(namespace);
+
                         // Find the Job in the store
-                        for job in client.app_store.jobs.state() {
-                            if job.metadata.name.as_deref() == Some(job_name)
-                                && job.metadata.namespace.as_deref() == Some(namespace)
-                            {
-                                let mut job_data = ResourceData::new("Job", namespace, job_name);
+                        if let Some(job) = jobs_in_ns
+                            .iter()
+                            .find(|j| j.metadata.name.as_deref() == Some(job_name))
+                        {
+                            let mut job_data = ResourceData::new("Job", namespace, job_name);
 
-                                // Job details
-                                if let Some(spec) = &job.spec {
-                                    if let Some(parallelism) = spec.parallelism {
-                                        job_data.add_attribute("Parallelism", parallelism);
-                                    }
-                                    if let Some(completions) = spec.completions {
-                                        job_data.add_attribute("Completions", completions);
-                                    }
-                                    if let Some(backoff_limit) = spec.backoff_limit {
-                                        job_data.add_attribute("Backoff Limit", backoff_limit);
-                                    }
+                            // Job details
+                            if let Some(spec) = &job.spec {
+                                if let Some(parallelism) = spec.parallelism {
+                                    job_data.add_attribute("Parallelism", parallelism);
                                 }
-
-                                // Job status
-                                if let Some(status) = &job.status {
-                                    if let Some(active) = status.active {
-                                        job_data.add_attribute("Active", active);
-                                    }
-                                    if let Some(succeeded) = status.succeeded {
-                                        job_data.add_attribute("Succeeded", succeeded);
-                                    }
-                                    if let Some(failed) = status.failed {
-                                        job_data.add_attribute("Failed", failed);
-                                    }
-                                    if let Some(completion_time) = &status.completion_time {
-                                        job_data.add_attribute(
-                                            "Completion Time",
-                                            format!("{:?}", completion_time),
-                                        );
-                                    }
+                                if let Some(completions) = spec.completions {
+                                    job_data.add_attribute("Completions", completions);
                                 }
-
-                                // Add Job labels
-                                helpers::add_labels::<String>(&mut job_data, &job.metadata);
-
-                                result.push(job_data);
-                                break;
+                                if let Some(backoff_limit) = spec.backoff_limit {
+                                    job_data.add_attribute("Backoff Limit", backoff_limit);
+                                }
                             }
+
+                            // Job status
+                            if let Some(status) = &job.status {
+                                if let Some(active) = status.active {
+                                    job_data.add_attribute("Active", active);
+                                }
+                                if let Some(succeeded) = status.succeeded {
+                                    job_data.add_attribute("Succeeded", succeeded);
+                                }
+                                if let Some(failed) = status.failed {
+                                    job_data.add_attribute("Failed", failed);
+                                }
+                                if let Some(completion_time) = &status.completion_time {
+                                    job_data.add_attribute(
+                                        "Completion Time",
+                                        format!("{:?}", completion_time),
+                                    );
+                                }
+                            }
+
+                            // Add Job labels
+                            helpers::add_labels::<String>(&mut job_data, &job.metadata);
+
+                            result.push(job_data);
                         }
                         break;
                     }
@@ -784,14 +790,10 @@ impl ResourceParser for IngressParser {
 
             if !services.is_empty() {
                 // Check if any ingresses reference these services
-                for ingress in client.app_store.ingresses.state() {
-                    if ingress.metadata.namespace.as_deref() != Some(namespace) {
-                        continue;
-                    }
+                let ingresses_in_ns = client.app_store.get_by_namespace::<Ingress>(namespace);
 
-                    let is_related = helpers::is_ingress_related_to_services(&ingress, &services);
-
-                    if is_related {
+                for ingress in ingresses_in_ns {
+                    if helpers::is_ingress_related_to_services(&ingress, &services) {
                         let name = ingress.metadata.name.as_deref().unwrap_or("unknown");
                         let mut ingress_data = ResourceData::new("Ingress", namespace, name);
 
@@ -950,27 +952,14 @@ impl ResourceParser for EndpointSliceParser {
             let namespace = pod.metadata.namespace.as_deref().unwrap_or("default");
             let pod_ip = src_ipv4.to_string();
 
+            let slices_in_ns = client
+                .app_store
+                .get_by_namespace::<EndpointSlice>(namespace);
+
             // Check all endpoint slices for this pod's IP
-            for slice in client.app_store.endpoint_slices.state() {
-                if slice.metadata.namespace.as_deref() != Some(namespace) {
-                    continue;
-                }
-
-                let mut is_related = false;
-
+            for slice in slices_in_ns {
                 let endpoints = &slice.endpoints;
-                for endpoint in endpoints {
-                    let addresses = &endpoint.addresses;
-                    for address in addresses {
-                        if address.to_string() == pod_ip {
-                            is_related = true;
-                            break;
-                        }
-                    }
-                    if is_related {
-                        break;
-                    }
-                }
+                let is_related = endpoints.iter().any(|ep| ep.addresses.contains(&pod_ip));
 
                 if is_related {
                     let name = slice.metadata.name.as_deref().unwrap_or("unknown");
@@ -1056,7 +1045,9 @@ impl ResourceParser for NetworkPolicyParser {
             let namespace = pod.metadata.namespace.as_deref().unwrap_or("default");
 
             // Get all network policies in the pod's namespace
-            let relevant_policies = client.get_network_policies_by_namespace(namespace);
+            let relevant_policies = client
+                .app_store
+                .get_by_namespace::<NetworkPolicy>(namespace);
 
             for policy in relevant_policies {
                 let name = policy.metadata.name.as_deref().unwrap_or("unknown");
@@ -1111,15 +1102,10 @@ impl ResourceParser for IngressControllerParser {
             if !services.is_empty() {
                 // Check if any ingresses reference these services and extract controller information
                 let mut controllers = std::collections::HashSet::new();
+                let ingresses_in_ns = client.app_store.get_by_namespace::<Ingress>(namespace);
 
-                for ingress in client.app_store.ingresses.state() {
-                    if ingress.metadata.namespace.as_deref() != Some(namespace) {
-                        continue;
-                    }
-
-                    let is_related = helpers::is_ingress_related_to_services(&ingress, &services);
-
-                    if is_related {
+                for ingress in ingresses_in_ns {
+                    if helpers::is_ingress_related_to_services(&ingress, &services) {
                         // Try to identify the ingress controller
                         // First check for ingress class name
                         if let Some(spec) = &ingress.spec {
