@@ -1,6 +1,5 @@
 #![cfg_attr(not(test), no_main)]
 #![cfg_attr(not(test), no_std)]
-extern crate alloc;
 
 #[cfg(not(test))]
 use aya_ebpf::{
@@ -36,7 +35,6 @@ enum HeaderType {
     #[cfg(not(test))]
     ErrorOccurred, // Indicates an error stopped parsing
 }
-
 
 struct Parser {
     // Current read offset from the start of the packet
@@ -342,7 +340,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
                     "mermin: skipped parsing of unsupported protocol {}", proto as u8
                 );
                 break;
-            } 
+            }
             HeaderType::StopProcessing => break, // Graceful stop
             HeaderType::ErrorOccurred => return Ok(TC_ACT_PIPE), // Error, pass packet
         };
@@ -433,8 +431,7 @@ pub use host_test_shim::TcContext;
 mod tests {
     extern crate alloc;
 
-    use alloc::vec;
-    use alloc::vec::Vec;
+    use alloc::{vec, vec::Vec};
 
     use super::*;
 
