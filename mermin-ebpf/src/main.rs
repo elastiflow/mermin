@@ -65,37 +65,6 @@ impl Parser {
 
     /// Parses the next header in the packet and updates the parser state accordingly.
     /// Returns an error if the header is not supported.
-    /// ## Fields
-    ///
-    /// * **Next Header (8 bits)**: Identifies the type of the next header,
-    /// * **Payload Len (8 bits)**: The length of this Authentication Header in 4-octet units,
-    /// * **Reserved (16 bits)**: Reserved for future use and initialized to all zeroes.
-    /// * **Security Parameters Index (32 bits)**: Identifies the security association of the receiving party.
-    /// * **Sequence Number (32 bits)**: A monotonic, strictly increasing sequence number to prevent replay attacks.
-    /// * **Integrity Check Value (multiple of 32 bits)**: A variable-length check value.
-    ///   Authentication Header
-    fn parse_ah_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let ah_hdr: AuthHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += AuthHdr::LEN;
-        // TODO: Extract and set other AH fields
-        self.next_hdr = HeaderType::Proto(ah_hdr.next_hdr());
-        Ok(())
-    }
-
-    /// Parses the next header in the packet and updates the parser state accordingly.
-    /// Returns an error if the header is not supported.
-    ///
-    ///  0                   1                   2                   3
-    ///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///  |                     destination_mac_addr                      |
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///  | destination_mac_addr (con't)  |        source_mac_addr        |
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///  |                    source_mac_addr (con't)                    |
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///  |           eth_type            |
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     fn parse_ethernet_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         let eth_hdr: EthHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += EthHdr::LEN;
@@ -119,23 +88,6 @@ impl Parser {
 
     /// Parses the IPv4 header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    ///
-    ///  0                   1                   2                   3
-    ///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-    /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    /// |ip_ver | h_len |  ip_dscp  |ecn|        ip_total_length        |
-    /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    /// |       ip_identification       |flags|   ip_fragment_offset    |
-    /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    /// |    ip_ttl     |  ip_protocol  |          ip_checksum          |
-    /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    /// |                         source_ipaddr                         |
-    /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    /// |                      destination_ipaddr                       |
-    /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    /// |                          ip_options                           |
-    /// /                              ...                              /
-    /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     fn parse_ipv4_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         let ipv4_hdr: Ipv4Hdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let h_len = ipv4_hdr.ihl() as usize;
@@ -172,30 +124,6 @@ impl Parser {
 
     /// Parses the IPv6 header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    ///
-    ///   0                   1                   2                   3
-    ///   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///  |ip_ver |  ip_dscp  |ecn|             ip_flow_label             |
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///  |       ip_payload_length       |ip_next_header | ip_hop_limit  |
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///  |                         source_ipaddr                         |
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///  |                     source_ipaddr (con't)                     |
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///  |                     source_ipaddr (con't)                     |
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///  |                     source_ipaddr (con't)                     |
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///  |                      destination_ipaddr                       |
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///  |                  destination_ipaddr (con't)                   |
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///  |                  destination_ipaddr (con't)                   |
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///  |                  destination_ipaddr (con't)                   |
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     fn parse_ipv6_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         let ipv6_hdr: Ipv6Hdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.calc_l3_octet_count(ctx.len());
@@ -242,31 +170,6 @@ impl Parser {
 
     /// Parses the TCP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
-    ///
-    ///    0                   1                   2                   3
-    ///    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-    ///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///   |          Source Port          |       Destination Port        |
-    ///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///   |                        Sequence Number                        |
-    ///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///   |                    Acknowledgment Number                      |
-    ///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///   |  Data |     |N|C|E|U|A|P|R|S|F|                               |
-    ///   | Offset| Rsrv|S|R|C|R|C|S|S|Y|I|            Window             |
-    ///   |       |     | |W|E|G|K|H|T|N|N|                               |
-    ///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///   |           Checksum            |         Urgent Pointer        |
-    ///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///   |                            Options                            |
-    ///   /                              ...                              /
-    ///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///   |                            Padding                            |
-    ///   /                              ...                              /
-    ///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///   |                             data                              |
-    ///   /                              ...                              /
-    ///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     fn parse_tcp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         let tcp_hdr: TcpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += TcpHdr::LEN;
@@ -280,17 +183,6 @@ impl Parser {
 
     /// Parses the UDP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
-    ///
-    ///   0                   1                   2                   3
-    ///   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///  |          Source Port          |       Destination Port        |
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///  |          PDU Length           |           Checksum            |
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    ///  |                             data                              |
-    ///  /                              ...                              /
-    ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     fn parse_udp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         let udp_hdr: UdpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += UdpHdr::LEN;
@@ -299,6 +191,14 @@ impl Parser {
         self.packet_meta.dst_port = udp_hdr.dst;
         // TODO: extract and assign additional tcp fields
         self.next_hdr = HeaderType::StopProcessing;
+        Ok(())
+    }
+
+    fn parse_ah_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let ah_hdr: AuthHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += AuthHdr::LEN;
+        // TODO: Extract and set other AH fields
+        self.next_hdr = HeaderType::Proto(ah_hdr.next_hdr());
         Ok(())
     }
 }
@@ -328,11 +228,11 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
     for _ in 0..MAX_HEADER_PARSE_DEPTH {
         let result: Result<(), Error> = match parser.next_hdr {
             HeaderType::Ethernet => parser.parse_ethernet_header(&ctx),
-            HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
             HeaderType::Ipv4 => parser.parse_ipv4_header(&ctx),
             HeaderType::Ipv6 => parser.parse_ipv6_header(&ctx),
             HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx),
             HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx),
+            HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
             HeaderType::Proto(proto) => {
                 debug!(

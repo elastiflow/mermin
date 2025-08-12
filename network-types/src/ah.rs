@@ -4,13 +4,19 @@ use crate::ip::IpProto;
 
 /// # Authentication Header Format
 ///
-/// | Offset | Octet 0       | Octet 1       | Octet 2       | Octet 3       |
-/// |--------|---------------|---------------|---------------|---------------|
-/// | 0      | Next Header   | Payload Len   | Reserved (bits 0-7) | Reserved (bits 8-15) |
-/// | 4      | Security Parameters Index (bits 0-7) | Security Parameters Index (bits 8-15) | Security Parameters Index (bits 16-23) | Security Parameters Index (bits 24-31) |
-/// | 8      | Sequence Number (bits 0-7) | Sequence Number (bits 8-15) | Sequence Number (bits 16-23) | Sequence Number (bits 24-31) |
-/// | 12     | Integrity Check Value (variable length, multiple of 32 bits) |
-/// | ⋮      | ⋮             |
+///  0                   1                   2                   3
+/// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |    Next Header   |   Payload Len  |          Reserved         |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                Security Parameters Index                      |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                     Sequence Number                           |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                                                               |
+/// ~                Integrity Check Value (variable)               ~
+/// |                                                               |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///
 /// ## Fields
 ///
@@ -36,6 +42,7 @@ impl Default for AuthHdr {
         Self::new()
     }
 }
+
 impl AuthHdr {
     /// The total size in bytes of the fixed part of the Authentication Header
     pub const LEN: usize = mem::size_of::<AuthHdr>();
