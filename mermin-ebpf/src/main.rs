@@ -194,6 +194,8 @@ impl Parser {
         Ok(())
     }
 
+    /// Parses the AH IPv6-extension header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_ah_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         let ah_hdr: AuthHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += AuthHdr::LEN;

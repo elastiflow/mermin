@@ -37,26 +37,9 @@ pub struct AuthHdr {
     pub seq_num: [u8; 4],
 }
 
-impl Default for AuthHdr {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl AuthHdr {
     /// The total size in bytes of the fixed part of the Authentication Header
     pub const LEN: usize = mem::size_of::<AuthHdr>();
-
-    /// Creates a new AuthHdr with default values.
-    pub fn new() -> Self {
-        Self {
-            next_hdr: IpProto::HopOpt,
-            payload_len: 0,
-            reserved: [0; 2],
-            spi: [0; 4],
-            seq_num: [0; 4],
-        }
-    }
 
     /// Gets the Next Header value.
     pub fn next_hdr(&self) -> IpProto {
@@ -129,14 +112,15 @@ mod tests {
 
     use super::*;
 
-    // Helper to create a new AuthHdr instance for testing.
-    fn create_auth_hdr_for_testing() -> AuthHdr {
-        AuthHdr::new()
-    }
-
     #[test]
     fn test_ahhdr_getters_and_setters() {
-        let mut auth_hdr = create_auth_hdr_for_testing();
+        let mut auth_hdr = AuthHdr {
+            next_hdr: IpProto::HopOpt,
+            payload_len: 0,
+            reserved: [0; 2],
+            spi: [0; 4],
+            seq_num: [0; 4],
+        };
 
         // Test next_hdr
         auth_hdr.set_next_hdr(IpProto::Stream); // Example: TCP
@@ -173,7 +157,13 @@ mod tests {
 
     #[test]
     fn test_ahhdr_length_calculation_methods() {
-        let mut auth_hdr = create_auth_hdr_for_testing();
+        let mut auth_hdr = AuthHdr {
+            next_hdr: IpProto::HopOpt,
+            payload_len: 0,
+            reserved: [0; 2],
+            spi: [0; 4],
+            seq_num: [0; 4],
+        };
 
         // Test with payload_len = 0
         auth_hdr.set_payload_len(0);

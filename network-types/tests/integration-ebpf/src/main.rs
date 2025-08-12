@@ -10,6 +10,7 @@ use aya_ebpf::{
 use aya_log_ebpf::{Level, log};
 use integration_common::{HeaderUnion, PacketType, ParsedHeader};
 use network_types::{
+    ah::AuthHdr,
     eth::EthHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
     tcp::TcpHdr,
@@ -26,6 +27,7 @@ fn u8_to_packet_type(val: u8) -> Option<PacketType> {
         3 => Some(PacketType::Ipv6),
         4 => Some(PacketType::Tcp),
         5 => Some(PacketType::Udp),
+        6 => Some(PacketType::Ah),
         _ => None,
     }
 }
@@ -95,6 +97,13 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             ParsedHeader {
                 type_: PacketType::Udp,
                 data: HeaderUnion { udp: header },
+            }
+        }
+        PacketType::Ah => {
+            let header: AuthHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            ParsedHeader {
+                type_: PacketType::Ah,
+                data: HeaderUnion { ah: header },
             }
         }
     };
