@@ -70,6 +70,7 @@ impl Default for TestConfig {
 /// and receive events from it via a channel.
 pub struct TestHarness {
     /// The loaded eBPF program.
+    #[allow(dead_code)]
     pub ebpf: Ebpf,
 
     /// The receiver for events from the eBPF program.

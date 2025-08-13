@@ -2,6 +2,16 @@ use core::mem;
 
 /// UDP header, which is present after the IP header.
 ///
+///   0                   1                   2                   3
+///   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///  |          Source Port          |       Destination Port        |
+///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///  |          PDU Length           |           Checksum            |
+///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///  |                             data                              |
+///  /                              ...                              /
+///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// This struct represents the User Datagram Protocol (UDP) header as defined in RFC 768.
 /// The UDP header is 8 bytes long and contains source and destination ports, length, and checksum fields.
 /// All fields are stored in network byte order (big-endian).
