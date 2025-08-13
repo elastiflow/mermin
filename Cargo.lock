@@ -600,12 +600,9 @@ dependencies = [
  "common-build",
  "env_logger",
  "integration-common",
- "libc",
  "log",
  "network-types",
- "once_cell",
  "tokio",
- "toml 0.9.5",
 ]
 
 [[package]]
@@ -707,9 +704,6 @@ dependencies = [
 [[package]]
 name = "mermin-common"
 version = "0.1.0"
-dependencies = [
- "aya",
-]
 
 [[package]]
 name = "mermin-ebpf"
