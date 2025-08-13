@@ -1,7 +1,7 @@
 use core::mem;
-/// # Encapsulating Security Payload (ESP) 
+/// # Encapsulating Security Payload (ESP)
 ///
-/// 
+///
 /// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ ----
 /// |               Security Parameters Index (SPI)                 | ^Int.
@@ -24,7 +24,7 @@ use core::mem;
 ///
 /// * **Security Parameters Index (SPI) (32 bits)**: An arbitrary value used to uniquely identify the **security association** of the receiving party.
 /// * **Sequence Number (32 bits)**: A monotonically increasing counter for protecting against **replay attacks**.
-/// 
+///
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
 pub struct Esp {
