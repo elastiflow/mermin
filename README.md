@@ -167,7 +167,7 @@ docker build -t mermin-builder:latest --target builder .
 This mounts your local repository into the container at `/app`.
 
 ```shell
-docker run -it --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash
+docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash
 ```
 
 Inside the container's shell, you can now run any of the `cargo` build or test commands mentioned above.

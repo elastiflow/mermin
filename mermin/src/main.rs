@@ -1,3 +1,5 @@
+mod runtime;
+
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use anyhow::anyhow;
@@ -5,22 +7,24 @@ use aya::{
     maps::RingBuf,
     programs::{SchedClassifier, TcAttachType, tc},
 };
-use clap::Parser;
-#[rustfmt::skip]
 use log::{debug, info, warn};
 use mermin_common::PacketMeta;
 use tokio::signal;
 
-#[derive(Debug, Parser)]
-struct Opt {
-    #[clap(short, long, default_value = "eth0")]
-    iface: String,
-}
+use crate::runtime::config::Config;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let opt = Opt::parse();
+    // TODO: create `runtime` module to handle reloading of eBPF program and all configuration
+    // TODO: runtime should be aware of all threads and tasks spawned by the eBPF program so that they can be gracefully shutdown and restarted.
+    // TODO: listen for SIGUP `kill -HUP $(pidof mermin)` to reload the eBPF program and all configuration
+    // TODO: API will come once we have an API server
+    // TODO: listen for SIGTERM `kill -TERM $(pidof mermin)` to gracefully shutdown the eBPF program and all configuration.
+    // TODO: do not reload global configuration found in CLI
+    let runtime = runtime::Runtime::new()?;
+    let runtime::Runtime { config, .. } = runtime;
 
+    // TODO: switch to using tracing for logging and allow users to configure the log level via config
     env_logger::Builder::from_default_env()
         .target(env_logger::Target::Stdout)
         .init();
@@ -49,13 +53,14 @@ async fn main() -> anyhow::Result<()> {
         warn!("failed to initialize eBPF logger: {e}");
     }
 
-    let Opt { iface } = opt;
+    let Config { interface, .. } = config;
+    let iface = &interface[0];
     // error adding clsact to the interface if it is already added is harmless
     // the full cleanup can be done with 'sudo tc qdisc del dev eth0 clsact'.
-    let _ = tc::qdisc_add_clsact(&iface);
+    let _ = tc::qdisc_add_clsact(iface);
     let program: &mut SchedClassifier = ebpf.program_mut("mermin").unwrap().try_into()?;
     program.load()?;
-    program.attach(&iface, TcAttachType::Egress)?;
+    program.attach(iface, TcAttachType::Egress)?;
 
     info!("eBPF program attached. Waiting for events... Press Ctrl-C to exit.");
 
