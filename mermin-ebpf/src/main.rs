@@ -13,6 +13,7 @@ use aya_log_ebpf::{debug, error, warn};
 use mermin_common::PacketMeta;
 use network_types::{
     ah::AuthHdr,
+    esp::Esp,
     eth::{EthHdr, EtherType},
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
     tcp::TcpHdr,
@@ -198,9 +199,19 @@ impl Parser {
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_ah_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         let ah_hdr: AuthHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += AuthHdr::LEN;
+        self.offset += AuthHdr::total_hdr_len(&ah_hdr);
         // TODO: Extract and set other AH fields
         self.next_hdr = HeaderType::Proto(ah_hdr.next_hdr());
+        Ok(())
+    }
+
+    /// Parses the ESP IPv6-extension header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_esp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let _esp_hdr: Esp = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += Esp::LEN; // Move offset to start of encrypted ESP payload
+        // TODO: Extract and set SPI and Sequence number
+        self.next_hdr = HeaderType::StopProcessing; //ESP signals end of parsing headers
         Ok(())
     }
 }
@@ -235,6 +246,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx),
             HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx),
             HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
+            HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
             HeaderType::Proto(proto) => {
                 debug!(
@@ -462,6 +474,17 @@ mod tests {
         packet
     }
 
+    // Helper function to create an ESP (Encapsulating Security Payload) test packet
+    // The ESP header is 8 bytes (SPI + Sequence Number)
+    fn create_esp_test_packet() -> Vec<u8> {
+        let mut packet = Vec::with_capacity(Esp::LEN);
+        // SPI (4 bytes)
+        packet.extend_from_slice(&[0x12, 0x34, 0x56, 0x78]);
+        // Sequence Number (4 bytes)
+        packet.extend_from_slice(&[0x9a, 0xbc, 0xde, 0xf0]);
+        packet
+    }
+
     // #[test]
     // fn test_my_tc_program() {
     //     let mock_packet_data = vec![0xDE, 0xAD, 0xBE, 0xEF];
@@ -649,6 +672,34 @@ mod tests {
         let ctx = TcContext::new(packet);
 
         let result = parser.parse_ah_header(&ctx);
+        assert!(matches!(result, Err(Error::OutOfBounds)));
+    }
+
+    // Test parse_esp_header function
+    #[test]
+    fn test_parse_esp_header() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Esp);
+        let packet = create_esp_test_packet();
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_esp_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, Esp::LEN);
+        assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
+    }
+
+    // Test parse_esp_header with insufficient buffer (out of bounds)
+    #[test]
+    fn test_parse_esp_header_out_of_bounds() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Esp);
+        // Provide fewer than 8 bytes
+        let packet = vec![0x12, 0x34, 0x56, 0x78];
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_esp_header(&ctx);
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 }
