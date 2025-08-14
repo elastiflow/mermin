@@ -4,6 +4,7 @@
 use aya::Pod;
 use network_types::{
     ah::AuthHdr,
+    esp::Esp,
     eth::EthHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
     tcp::TcpHdr,
@@ -23,6 +24,7 @@ pub enum PacketType {
     Tcp = 4,
     Udp = 5,
     Ah = 6,
+    Esp = 7,
 }
 
 /// A union to hold any of the possible parsed network headers.
@@ -36,6 +38,7 @@ pub union HeaderUnion {
     pub tcp: TcpHdr,
     pub udp: UdpHdr,
     pub ah: AuthHdr,
+    pub esp: Esp,
 }
 
 /// The final struct sent back to user-space. It contains the type of

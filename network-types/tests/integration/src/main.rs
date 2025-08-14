@@ -1,4 +1,5 @@
 mod ah;
+mod esp;
 mod eth;
 mod ipv4;
 mod ipv6;
@@ -9,6 +10,7 @@ mod utils;
 // Import the helper functions and macros
 use crate::{
     ah::{create_ah_test_packet, verify_ah_header},
+    esp::{create_esp_test_packet, verify_esp_header},
     eth::{create_eth_test_packet, verify_eth_header},
     ipv4::{create_ipv4_test_packet, verify_ipv4_header},
     ipv6::{create_ipv6_test_packet, verify_ipv6_header},
@@ -67,4 +69,12 @@ define_header_test!(
     PacketType::Ah,
     create_ah_test_packet,
     verify_ah_header
+);
+
+define_header_test!(
+    test_parses_esp_header,
+    Esp,
+    PacketType::Esp,
+    create_esp_test_packet,
+    verify_esp_header
 );
