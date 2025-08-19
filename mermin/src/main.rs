@@ -1,13 +1,16 @@
 mod runtime;
 
-use std::net::{Ipv4Addr, Ipv6Addr};
-use std::sync::Arc;
+use std::{
+    net::{Ipv4Addr, Ipv6Addr},
+    sync::Arc,
+};
 
 use anyhow::anyhow;
 use aya::{
     maps::RingBuf,
     programs::{SchedClassifier, TcAttachType, tc},
 };
+use k8s::resource_parser;
 use log::{debug, info, warn};
 use mermin_common::PacketMeta;
 use tokio::signal;
@@ -15,7 +18,6 @@ use tokio::signal;
 use crate::k8s::KubeClient;
 
 mod k8s;
-mod resource_parser;
 
 use crate::runtime::config::Config;
 

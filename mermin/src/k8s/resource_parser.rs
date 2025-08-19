@@ -28,7 +28,6 @@ pub struct ResourceData {
     pub sections: HashMap<String, Vec<ResourceData>>,
 }
 
-/// Helper functions for working with Kubernetes resources
 pub mod helpers {
     use std::{collections::BTreeMap, sync::Arc};
 

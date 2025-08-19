@@ -23,7 +23,7 @@ use kube::{
 };
 use log::{debug, info, warn};
 
-// --- Core Data Structures & Type Aliases ---
+pub mod resource_parser;
 
 /// Type alias for a thread-safe, readable store of Kubernetes resources.
 pub type Store<T> = Arc<reflector::Store<T>>;
@@ -39,9 +39,9 @@ where
     fn store(&self) -> &Store<K>;
 }
 
-/// A central cache holding reflectors for all Kubernetes resources used by the application.
+/// A central cache holding reflectors for all Kubernetes resources.
 #[derive(Clone)]
-pub struct AppStore {
+pub struct ResourceStore {
     pub pods: Store<Pod>,
     pub nodes: Store<Node>,
     pub deployments: Store<Deployment>,
@@ -55,70 +55,66 @@ pub struct AppStore {
     pub network_policies: Store<NetworkPolicy>,
 }
 
-// --- Generic Implementations for AppStore ---
-
-// Implement `HasStore` for each resource type to enable generic access.
-impl HasStore<Pod> for AppStore {
+impl HasStore<Pod> for ResourceStore {
     fn store(&self) -> &Store<Pod> {
         &self.pods
     }
 }
-impl HasStore<Node> for AppStore {
+impl HasStore<Node> for ResourceStore {
     fn store(&self) -> &Store<Node> {
         &self.nodes
     }
 }
-impl HasStore<Deployment> for AppStore {
+impl HasStore<Deployment> for ResourceStore {
     fn store(&self) -> &Store<Deployment> {
         &self.deployments
     }
 }
-impl HasStore<ReplicaSet> for AppStore {
+impl HasStore<ReplicaSet> for ResourceStore {
     fn store(&self) -> &Store<ReplicaSet> {
         &self.replica_sets
     }
 }
-impl HasStore<StatefulSet> for AppStore {
+impl HasStore<StatefulSet> for ResourceStore {
     fn store(&self) -> &Store<StatefulSet> {
         &self.stateful_sets
     }
 }
-impl HasStore<DaemonSet> for AppStore {
+impl HasStore<DaemonSet> for ResourceStore {
     fn store(&self) -> &Store<DaemonSet> {
         &self.daemon_sets
     }
 }
-impl HasStore<Job> for AppStore {
+impl HasStore<Job> for ResourceStore {
     fn store(&self) -> &Store<Job> {
         &self.jobs
     }
 }
-impl HasStore<Service> for AppStore {
+impl HasStore<Service> for ResourceStore {
     fn store(&self) -> &Store<Service> {
         &self.services
     }
 }
-impl HasStore<Ingress> for AppStore {
+impl HasStore<Ingress> for ResourceStore {
     fn store(&self) -> &Store<Ingress> {
         &self.ingresses
     }
 }
-impl HasStore<EndpointSlice> for AppStore {
+impl HasStore<EndpointSlice> for ResourceStore {
     fn store(&self) -> &Store<EndpointSlice> {
         &self.endpoint_slices
     }
 }
-impl HasStore<NetworkPolicy> for AppStore {
+impl HasStore<NetworkPolicy> for ResourceStore {
     fn store(&self) -> &Store<NetworkPolicy> {
         &self.network_policies
     }
 }
 
-impl AppStore {
+impl ResourceStore {
     /// Generic method to find resources of a specific type by namespace.
     pub fn get_by_namespace<K>(&self, namespace: &str) -> Vec<Arc<K>>
     where
-        // The store for `K` must exist in `AppStore` (enforced by this trait bound).
         Self: HasStore<K>,
         K: Resource + Clone + 'static,
         K::DynamicType: Eq + std::hash::Hash + Clone,
@@ -138,7 +134,7 @@ pub mod reflector_builder {
     use kube::runtime::{watcher, watcher::Config as WatcherConfig};
     use kube_runtime::WatchStreamExt;
 
-    use super::*; // Use parent module's imports
+    use super::*;
 
     /// Creates a new reflector for a Kubernetes resource type.
     pub async fn create_store<K>(client: Client) -> Result<Store<K>>
@@ -155,7 +151,6 @@ pub mod reflector_builder {
         let (reader, writer) = reflector::store();
         let reflector = reflector(writer, watcher(api, WatcherConfig::default()));
 
-        // The spawned task runs the reflector in the background.
         tokio::spawn(async move {
             info!("Starting reflector for {resource_name}");
             reflector
@@ -184,7 +179,7 @@ impl AppStoreBuilder {
     }
 
     /// Initializes all resource reflectors concurrently and builds the AppStore.
-    pub async fn build(self) -> Result<AppStore> {
+    pub async fn build(self) -> Result<ResourceStore> {
         let all_stores_result = futures::try_join!(
             Self::create_resource_store::<Pod>(&self.client, true),
             Self::create_resource_store::<Node>(&self.client, false),
@@ -212,7 +207,7 @@ impl AppStoreBuilder {
                 ingresses,
                 endpoint_slices,
                 network_policies,
-            )) => Ok(AppStore {
+            )) => Ok(ResourceStore {
                 pods,
                 nodes,
                 deployments,
@@ -260,7 +255,7 @@ impl AppStoreBuilder {
 pub struct KubeClient {
     #[allow(dead_code)]
     pub client: Client,
-    pub app_store: AppStore,
+    pub app_store: ResourceStore,
 }
 
 impl KubeClient {
