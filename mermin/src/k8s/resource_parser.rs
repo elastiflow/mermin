@@ -10,7 +10,7 @@ use k8s_openapi::api::{
 use log::info;
 use mermin_common::PacketMeta;
 
-use crate::k8s::KubeClient;
+use crate::k8s::Attributor;
 
 /// Represents structured data extracted from a Kubernetes resource
 #[derive(Debug, Default)]
@@ -190,10 +190,10 @@ impl ResourceData {
 #[async_trait]
 pub trait ResourceParser {
     /// Parse a resource and return structured data
-    async fn parse(&self, client: &KubeClient, src_ipv4: Ipv4Addr) -> Vec<ResourceData>;
+    async fn parse(&self, client: &Attributor, src_ipv4: Ipv4Addr) -> Vec<ResourceData>;
 
     /// Parse and print resource information
-    async fn parse_and_print(&self, client: &KubeClient, src_ipv4: Ipv4Addr) {
+    async fn parse_and_print(&self, client: &Attributor, src_ipv4: Ipv4Addr) {
         info!("Parsing {} information", self.resource_type());
 
         let resources = self.parse(client, src_ipv4).await;
@@ -218,7 +218,7 @@ pub struct PodParser;
 
 #[async_trait]
 impl ResourceParser for PodParser {
-    async fn parse(&self, client: &KubeClient, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
+    async fn parse(&self, client: &Attributor, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
         let mut result = Vec::new();
 
         if let Some(pod) = client.get_pod_by_ip(src_ipv4).await {
@@ -257,7 +257,7 @@ pub struct ServiceParser;
 
 #[async_trait]
 impl ResourceParser for ServiceParser {
-    async fn parse(&self, client: &KubeClient, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
+    async fn parse(&self, client: &Attributor, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
         let mut result = Vec::new();
 
         if let Some(pod) = client.get_pod_by_ip(src_ipv4).await {
@@ -328,14 +328,14 @@ pub struct NodeParser;
 
 #[async_trait]
 impl ResourceParser for NodeParser {
-    async fn parse(&self, client: &KubeClient, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
+    async fn parse(&self, client: &Attributor, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
         let mut result = Vec::new();
 
         if let Some(pod) = client.get_pod_by_ip(src_ipv4).await
             && let Some(node_name) = pod.spec.as_ref().and_then(|s| s.node_name.as_ref())
         {
             // Find the node in the store
-            for node in client.app_store.nodes.state() {
+            for node in client.resource_store.nodes.state() {
                 if let Some(name) = &node.metadata.name {
                     let mut node_data = ResourceData::new("Node", "", name);
 
@@ -390,7 +390,7 @@ pub struct DeploymentParser;
 
 #[async_trait]
 impl ResourceParser for DeploymentParser {
-    async fn parse(&self, client: &KubeClient, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
+    async fn parse(&self, client: &Attributor, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
         let mut result = Vec::new();
 
         if let Some(pod) = client.get_pod_by_ip(src_ipv4).await {
@@ -401,8 +401,9 @@ impl ResourceParser for DeploymentParser {
                 for owner_ref in owner_refs {
                     if owner_ref.kind == "ReplicaSet" {
                         // Get deployments in the namespace
-                        let deployments =
-                            client.app_store.get_by_namespace::<Deployment>(namespace);
+                        let deployments = client
+                            .resource_store
+                            .get_by_namespace::<Deployment>(namespace);
 
                         for deployment in deployments {
                             // Check if this deployment manages the ReplicaSet
@@ -467,7 +468,7 @@ pub struct ReplicaSetParser;
 
 #[async_trait]
 impl ResourceParser for ReplicaSetParser {
-    async fn parse(&self, client: &KubeClient, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
+    async fn parse(&self, client: &Attributor, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
         let mut result = Vec::new();
 
         if let Some(pod) = client.get_pod_by_ip(src_ipv4).await {
@@ -479,8 +480,9 @@ impl ResourceParser for ReplicaSetParser {
                     if owner_ref.kind == "ReplicaSet" {
                         let rs_name = &owner_ref.name;
 
-                        let replica_sets_in_ns =
-                            client.app_store.get_by_namespace::<ReplicaSet>(namespace);
+                        let replica_sets_in_ns = client
+                            .resource_store
+                            .get_by_namespace::<ReplicaSet>(namespace);
 
                         if let Some(rs) = replica_sets_in_ns
                             .iter()
@@ -537,7 +539,7 @@ pub struct StatefulSetParser;
 
 #[async_trait]
 impl ResourceParser for StatefulSetParser {
-    async fn parse(&self, client: &KubeClient, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
+    async fn parse(&self, client: &Attributor, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
         let mut result = Vec::new();
 
         if let Some(pod) = client.get_pod_by_ip(src_ipv4).await {
@@ -549,8 +551,9 @@ impl ResourceParser for StatefulSetParser {
                     if owner_ref.kind == "StatefulSet" {
                         let sts_name = &owner_ref.name;
 
-                        let stateful_sets_in_ns =
-                            client.app_store.get_by_namespace::<StatefulSet>(namespace);
+                        let stateful_sets_in_ns = client
+                            .resource_store
+                            .get_by_namespace::<StatefulSet>(namespace);
 
                         // Find the StatefulSet in the store
                         if let Some(sts) = stateful_sets_in_ns
@@ -609,7 +612,7 @@ pub struct DaemonSetParser;
 
 #[async_trait]
 impl ResourceParser for DaemonSetParser {
-    async fn parse(&self, client: &KubeClient, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
+    async fn parse(&self, client: &Attributor, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
         let mut result = Vec::new();
 
         if let Some(pod) = client.get_pod_by_ip(src_ipv4).await {
@@ -621,8 +624,9 @@ impl ResourceParser for DaemonSetParser {
                     if owner_ref.kind == "DaemonSet" {
                         let ds_name = &owner_ref.name;
 
-                        let daemon_sets_in_ns =
-                            client.app_store.get_by_namespace::<DaemonSet>(namespace);
+                        let daemon_sets_in_ns = client
+                            .resource_store
+                            .get_by_namespace::<DaemonSet>(namespace);
 
                         // Find the DaemonSet in the store
                         if let Some(ds) = daemon_sets_in_ns
@@ -680,7 +684,7 @@ pub struct JobParser;
 
 #[async_trait]
 impl ResourceParser for JobParser {
-    async fn parse(&self, client: &KubeClient, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
+    async fn parse(&self, client: &Attributor, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
         let mut result = Vec::new();
 
         if let Some(pod) = client.get_pod_by_ip(src_ipv4).await {
@@ -692,7 +696,7 @@ impl ResourceParser for JobParser {
                     if owner_ref.kind == "Job" {
                         let job_name = &owner_ref.name;
 
-                        let jobs_in_ns = client.app_store.get_by_namespace::<Job>(namespace);
+                        let jobs_in_ns = client.resource_store.get_by_namespace::<Job>(namespace);
 
                         // Find the Job in the store
                         if let Some(job) = jobs_in_ns
@@ -757,7 +761,7 @@ pub struct IngressParser;
 
 #[async_trait]
 impl ResourceParser for IngressParser {
-    async fn parse(&self, client: &KubeClient, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
+    async fn parse(&self, client: &Attributor, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
         let mut result = Vec::new();
 
         if let Some(pod) = client.get_pod_by_ip(src_ipv4).await {
@@ -768,7 +772,7 @@ impl ResourceParser for IngressParser {
 
             if !services.is_empty() {
                 // Check if any ingresses reference these services
-                let ingresses_in_ns = client.app_store.get_by_namespace::<Ingress>(namespace);
+                let ingresses_in_ns = client.resource_store.get_by_namespace::<Ingress>(namespace);
 
                 for ingress in ingresses_in_ns {
                     if helpers::is_ingress_related_to_services(&ingress, &services) {
@@ -914,7 +918,7 @@ pub struct EndpointSliceParser;
 
 #[async_trait]
 impl ResourceParser for EndpointSliceParser {
-    async fn parse(&self, client: &KubeClient, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
+    async fn parse(&self, client: &Attributor, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
         let mut result = Vec::new();
 
         if let Some(pod) = client.get_pod_by_ip(src_ipv4).await {
@@ -922,7 +926,7 @@ impl ResourceParser for EndpointSliceParser {
             let pod_ip = src_ipv4.to_string();
 
             let slices_in_ns = client
-                .app_store
+                .resource_store
                 .get_by_namespace::<EndpointSlice>(namespace);
 
             // Check all endpoint slices for this pod's IP
@@ -1007,7 +1011,7 @@ pub struct NetworkPolicyParser;
 
 #[async_trait]
 impl ResourceParser for NetworkPolicyParser {
-    async fn parse(&self, client: &KubeClient, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
+    async fn parse(&self, client: &Attributor, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
         let mut result = Vec::new();
 
         if let Some(pod) = client.get_pod_by_ip(src_ipv4).await {
@@ -1015,7 +1019,7 @@ impl ResourceParser for NetworkPolicyParser {
 
             // Get all network policies in the pod's namespace
             let relevant_policies = client
-                .app_store
+                .resource_store
                 .get_by_namespace::<NetworkPolicy>(namespace);
 
             for policy in relevant_policies {
@@ -1059,7 +1063,7 @@ pub struct IngressControllerParser;
 
 #[async_trait]
 impl ResourceParser for IngressControllerParser {
-    async fn parse(&self, client: &KubeClient, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
+    async fn parse(&self, client: &Attributor, src_ipv4: Ipv4Addr) -> Vec<ResourceData> {
         let mut result = Vec::new();
 
         if let Some(pod) = client.get_pod_by_ip(src_ipv4).await {
@@ -1071,7 +1075,7 @@ impl ResourceParser for IngressControllerParser {
             if !services.is_empty() {
                 // Check if any ingresses reference these services and extract controller information
                 let mut controllers = std::collections::HashSet::new();
-                let ingresses_in_ns = client.app_store.get_by_namespace::<Ingress>(namespace);
+                let ingresses_in_ns = client.resource_store.get_by_namespace::<Ingress>(namespace);
 
                 for ingress in ingresses_in_ns {
                     if helpers::is_ingress_related_to_services(&ingress, &services) {

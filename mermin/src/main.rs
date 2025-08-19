@@ -15,8 +15,6 @@ use log::{debug, info, warn};
 use mermin_common::PacketMeta;
 use tokio::signal;
 
-use crate::k8s::KubeClient;
-
 mod k8s;
 
 use crate::runtime::config::Config;
@@ -74,10 +72,11 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize the Kubernetes client
     info!("Initializing Kubernetes client...");
-    let kube_client = match k8s::KubeClient::new().await {
+    let kube_client = match k8s::Attributor::new().await {
         Ok(client) => {
+            // TODO: we should implement an event based notifier
+            // that sends a signal when the kubeclient is ready with its stores instead of waiting for a fixed interval.
             info!("Kubernetes client initialized successfully");
-            // Give the reflectors some time to populate the stores
             info!("Waiting for reflectors to populate stores...");
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             info!("Reflectors should have populated stores by now");
@@ -154,7 +153,7 @@ struct FlowRecord {
 }
 
 /// Parse all available data from the packet metadata and Kubernetes resources
-async fn parse_packet(event: PacketMeta, kube_client_clone: Option<Arc<KubeClient>>) {
+async fn parse_packet(event: PacketMeta, kube_client_clone: Option<Arc<k8s::Attributor>>) {
     info!("Parsing packet data...");
 
     // Parse packet metadata
