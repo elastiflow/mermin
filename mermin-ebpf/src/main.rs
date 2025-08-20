@@ -241,7 +241,7 @@ impl Parser {
         if version != 0 {
             warn!(
                 ctx,
-                "geneve header contains unknown version: {}, dropping packet", version
+                "geneve header contains unknown version: {}, skipping packet", version
             );
             self.next_hdr = HeaderType::StopProcessing;
             return Ok(());
