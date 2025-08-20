@@ -15,6 +15,7 @@ use network_types::{
     ah::AuthHdr,
     esp::Esp,
     eth::{EthHdr, EtherType},
+    geneve::GeneveHdr,
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
     tcp::TcpHdr,
     udp::UdpHdr,
@@ -31,6 +32,7 @@ enum HeaderType {
     Ethernet,
     Ipv4,
     Ipv6,
+    Geneve,
     Proto(IpProto),
     StopProcessing, // Indicates parsing should terminate for flow key purposes
     #[cfg(not(test))]
@@ -190,8 +192,21 @@ impl Parser {
 
         self.packet_meta.src_port = udp_hdr.src;
         self.packet_meta.dst_port = udp_hdr.dst;
-        // TODO: extract and assign additional tcp fields
-        self.next_hdr = HeaderType::StopProcessing;
+
+        // IANA has assigned port 6081 as the fixed well-known destination port for Geneve.
+        // Although the well-known value should be used by default, it is RECOMMENDED that implementations make this configurable.
+        // TODO: include a configuration option read the Geneve port
+        if udp_hdr.dst_port() == 6081 {
+            debug!(
+                ctx,
+                "UDP packet with destination port 6081 (Geneve) detected"
+            );
+            self.next_hdr = HeaderType::Geneve;
+        } else {
+            // TODO: extract and assign additional udp fields
+            self.next_hdr = HeaderType::StopProcessing;
+        }
+
         Ok(())
     }
 
@@ -212,6 +227,42 @@ impl Parser {
         self.offset += Esp::LEN; // Move offset to start of encrypted ESP payload
         // TODO: Extract and set SPI and Sequence number
         self.next_hdr = HeaderType::StopProcessing; //ESP signals end of parsing headers
+        Ok(())
+    }
+
+    /// Parses the Geneve header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_geneve_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let geneve_hdr: GeneveHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+
+        // Current version is 0. Packets with unknown version must be skipped
+        let version = geneve_hdr.ver();
+        if version != 0 {
+            warn!(
+                ctx,
+                "geneve header contains unknown version: {}, skipping packet", version
+            );
+            self.next_hdr = HeaderType::StopProcessing;
+            return Ok(());
+        }
+
+        self.offset += geneve_hdr.total_hdr_len();
+
+        let protocol_type = geneve_hdr.protocol_type();
+        match protocol_type {
+            0x0800 => self.next_hdr = HeaderType::Ipv4,
+            0x86DD => self.next_hdr = HeaderType::Ipv6,
+            0x6558 => self.next_hdr = HeaderType::Ethernet,
+            _ => {
+                warn!(
+                    ctx,
+                    "geneve header contains unsupported protocol type: {}", protocol_type
+                );
+                self.next_hdr = HeaderType::StopProcessing;
+                return Ok(());
+            }
+        }
+
         Ok(())
     }
 }
@@ -243,6 +294,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Ethernet => parser.parse_ethernet_header(&ctx),
             HeaderType::Ipv4 => parser.parse_ipv4_header(&ctx),
             HeaderType::Ipv6 => parser.parse_ipv6_header(&ctx),
+            HeaderType::Geneve => parser.parse_geneve_header(&ctx),
             HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx),
             HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx),
             HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
@@ -457,6 +509,45 @@ mod tests {
         packet
     }
 
+    // Helper function to create a UDP header test packet with Geneve port (6081)
+    fn create_udp_geneve_test_packet() -> Vec<u8> {
+        let mut packet = Vec::new();
+
+        // Source Port (12345)
+        packet.extend_from_slice(&[0x30, 0x39]);
+        // Destination Port (6081 - Geneve)
+        packet.extend_from_slice(&[0x17, 0xC1]); // 6081 in big-endian
+        // Length (8 bytes for header)
+        packet.extend_from_slice(&[0x00, 0x08]);
+        // Checksum
+        packet.extend_from_slice(&[0x00, 0x00]);
+
+        packet
+    }
+
+    // Helper function to create a Geneve header test packet
+    fn create_geneve_test_packet(protocol_type: u16, opt_len: u8) -> Vec<u8> {
+        let mut packet = Vec::new();
+
+        // Version (0) and Option Length (opt_len)
+        packet.push(opt_len & 0x3F); // Version 0, Option Length as specified
+        // OAM (0), Critical (0), Reserved (0)
+        packet.push(0x00);
+        // Protocol Type (e.g., 0x0800 for IPv4, 0x86DD for IPv6, 0x6558 for Ethernet)
+        packet.extend_from_slice(&protocol_type.to_be_bytes());
+        // VNI (0x123456)
+        packet.extend_from_slice(&[0x12, 0x34, 0x56]);
+        // Reserved
+        packet.push(0x00);
+
+        // Add option bytes if opt_len > 0
+        for _ in 0..(opt_len as usize * 4) {
+            packet.push(0x00);
+        }
+
+        packet
+    }
+
     // Helper function to create an AH (Authentication Header) test packet
     // The AH fixed header is 12 bytes; to keep it minimal we set payload_len = 1, so total is 12 bytes
     fn create_ah_test_packet(next: IpProto) -> Vec<u8> {
@@ -630,6 +721,24 @@ mod tests {
         assert_eq!(parser.offset, UdpHdr::LEN);
         assert_eq!(parser.packet_meta.src_port, [0x30, 0x39]); // 12345
         assert_eq!(parser.packet_meta.dst_port, [0x00, 0x35]); // 53
+        assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
+    }
+
+    // Test parse_udp_header function with Geneve port
+    #[test]
+    fn test_parse_udp_header_geneve() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Udp);
+        let packet = create_udp_geneve_test_packet();
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_udp_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, UdpHdr::LEN);
+        assert_eq!(parser.packet_meta.src_port, [0x30, 0x39]); // 12345
+        assert_eq!(parser.packet_meta.dst_port, [0x17, 0xC1]); // 6081 (Geneve)
+        assert!(matches!(parser.next_hdr, HeaderType::Geneve));
     }
 
     // Test parse_ah_header function mapping to TCP
@@ -700,6 +809,94 @@ mod tests {
         let ctx = TcContext::new(packet);
 
         let result = parser.parse_esp_header(&ctx);
+        assert!(matches!(result, Err(Error::OutOfBounds)));
+    }
+
+    // Test parse_geneve_header function with IPv4 protocol type
+    #[test]
+    fn test_parse_geneve_header_ipv4() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Geneve;
+        let packet = create_geneve_test_packet(0x0800, 0); // IPv4 protocol type, no options
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_geneve_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, GeneveHdr::LEN); // No options, so offset is just the header length
+        assert!(matches!(parser.next_hdr, HeaderType::Ipv4));
+    }
+
+    // Test parse_geneve_header function with IPv6 protocol type
+    #[test]
+    fn test_parse_geneve_header_ipv6() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Geneve;
+        let packet = create_geneve_test_packet(0x86DD, 0); // IPv6 protocol type, no options
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_geneve_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, GeneveHdr::LEN); // No options, so offset is just the header length
+        assert!(matches!(parser.next_hdr, HeaderType::Ipv6));
+    }
+
+    // Test parse_geneve_header function with Ethernet protocol type
+    #[test]
+    fn test_parse_geneve_header_ethernet() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Geneve;
+        let packet = create_geneve_test_packet(0x6558, 0); // Ethernet protocol type, no options
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_geneve_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, GeneveHdr::LEN); // No options, so offset is just the header length
+        assert!(matches!(parser.next_hdr, HeaderType::Ethernet));
+    }
+
+    // Test parse_geneve_header function with options
+    #[test]
+    fn test_parse_geneve_header_with_options() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Geneve;
+        let packet = create_geneve_test_packet(0x0800, 2); // IPv4 protocol type, 2 option units (8 bytes)
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_geneve_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, GeneveHdr::LEN + 8); // Header length + 8 bytes of options
+        assert!(matches!(parser.next_hdr, HeaderType::Ipv4));
+    }
+
+    // Test parse_geneve_header function with unsupported protocol type
+    #[test]
+    fn test_parse_geneve_header_unsupported_protocol() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Geneve;
+        let packet = create_geneve_test_packet(0x1234, 0); // Unsupported protocol type, no options
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_geneve_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, GeneveHdr::LEN); // No options, so offset is just the header length
+        assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
+    }
+
+    // Test parse_geneve_header with insufficient buffer (out of bounds)
+    #[test]
+    fn test_parse_geneve_header_out_of_bounds() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Geneve;
+        // Provide fewer than 8 bytes (Geneve header length)
+        let packet = vec![0x00, 0x00, 0x08, 0x00, 0x12, 0x34];
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_geneve_header(&ctx);
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 }

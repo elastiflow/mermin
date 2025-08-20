@@ -13,6 +13,7 @@ use network_types::{
     ah::AuthHdr,
     esp::Esp,
     eth::EthHdr,
+    geneve::GeneveHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
     tcp::TcpHdr,
     udp::UdpHdr,
@@ -30,6 +31,7 @@ fn u8_to_packet_type(val: u8) -> Option<PacketType> {
         5 => Some(PacketType::Udp),
         6 => Some(PacketType::Ah),
         7 => Some(PacketType::Esp),
+        8 => Some(PacketType::Geneve),
         _ => None,
     }
 }
@@ -113,6 +115,13 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             ParsedHeader {
                 type_: PacketType::Esp,
                 data: HeaderUnion { esp: header },
+            }
+        }
+        PacketType::Geneve => {
+            let header: GeneveHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            ParsedHeader {
+                type_: PacketType::Geneve,
+                data: HeaderUnion { geneve: header },
             }
         }
     };
