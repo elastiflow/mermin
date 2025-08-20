@@ -236,7 +236,7 @@ impl Parser {
         let geneve_hdr: GeneveHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += GeneveHdr::LEN;
 
-        // Current version is 0. Packets with unknown version must be dropped
+        // Current version is 0. Packets with unknown version must be skipped
         let version = geneve_hdr.ver();
         if version != 0 {
             warn!(
