@@ -14,7 +14,7 @@
 /// * **Ver (2 bits)**: The current version number is 0. Packets with an unknown version must be dropped.
 /// * **Opt Len (6 bits)**: The length of the option fields in 4-byte multiples, not including the 8-byte fixed tunnel header.
 /// * **O (1 bit)**: Control packet. This packet contains a control message between tunnel endpoints.
-/// * **C (1 bit)**: Critical options present. One or more options has the critical bit set.
+/// * **C (1 bit)**: Critical options present. One or more options have the critical bit set.
 /// * **Rsvd. (6 bits)**: Reserved field, which must be zero on transmission and ignored on receipt.
 /// * **Protocol Type (16 bits)**: The type of protocol data unit appearing after the Geneve header, following the Ethertype convention.
 /// * **Virtual Network Identifier (VNI) (24 bits)**: An identifier for a unique element of a virtual network.
