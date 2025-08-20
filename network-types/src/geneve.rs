@@ -21,7 +21,7 @@
 /// * **Reserved (8 bits)**: Reserved field, which must be zero on transmission and ignored on receipt.
 
 #[repr(C, packed)]
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Debug, Copy, Clone)]
 pub struct GeneveHdr {
     /// Combined field: Version (2 bits) and Option Length (6 bits).
     pub ver_opt_len: u8,
@@ -151,8 +151,15 @@ mod tests {
     }
 
     #[test]
-    fn test_default() {
-        let hdr = GeneveHdr::default();
+    fn test_zero_initialization() {
+        let hdr = GeneveHdr {
+            ver_opt_len: 0,
+            o_c_rsvd: 0,
+            protocol_type: [0, 0],
+            vni: [0, 0, 0],
+            reserved2: 0,
+        };
+
         assert_eq!(hdr.ver_opt_len, 0);
         assert_eq!(hdr.o_c_rsvd, 0);
         assert_eq!(hdr.protocol_type, [0, 0]);
@@ -169,7 +176,13 @@ mod tests {
 
     #[test]
     fn test_ver() {
-        let mut hdr = GeneveHdr::default();
+        let mut hdr = GeneveHdr {
+            ver_opt_len: 0,
+            o_c_rsvd: 0,
+            protocol_type: [0, 0],
+            vni: [0, 0, 0],
+            reserved2: 0,
+        };
         hdr.set_ver(0b10); // Version 2
         assert_eq!(hdr.ver(), 0b10);
         assert_eq!(hdr.ver_opt_len, 0b10000000, "Raw byte for ver failed");
@@ -192,7 +205,13 @@ mod tests {
 
     #[test]
     fn test_opt_len() {
-        let mut hdr = GeneveHdr::default();
+        let mut hdr = GeneveHdr {
+            ver_opt_len: 0,
+            o_c_rsvd: 0,
+            protocol_type: [0, 0],
+            vni: [0, 0, 0],
+            reserved2: 0,
+        };
         hdr.set_opt_len(0x2A); // 42
         assert_eq!(hdr.opt_len(), 0x2A);
         assert_eq!(hdr.ver_opt_len, 0b00101010, "Raw byte for opt_len failed");
@@ -212,7 +231,13 @@ mod tests {
 
     #[test]
     fn test_o_flag() {
-        let mut hdr = GeneveHdr::default();
+        let mut hdr = GeneveHdr {
+            ver_opt_len: 0,
+            o_c_rsvd: 0,
+            protocol_type: [0, 0],
+            vni: [0, 0, 0],
+            reserved2: 0,
+        };
         hdr.set_o_flag(1);
         assert_eq!(hdr.o_flag(), 1);
         assert_eq!(hdr.o_c_rsvd, 0b10000000, "Raw byte for o_flag failed");
@@ -237,7 +262,13 @@ mod tests {
 
     #[test]
     fn test_c_flag() {
-        let mut hdr = GeneveHdr::default();
+        let mut hdr = GeneveHdr {
+            ver_opt_len: 0,
+            o_c_rsvd: 0,
+            protocol_type: [0, 0],
+            vni: [0, 0, 0],
+            reserved2: 0,
+        };
         hdr.set_c_flag(1);
         assert_eq!(hdr.c_flag(), 1);
         assert_eq!(hdr.o_c_rsvd, 0b01000000, "Raw byte for c_flag failed");
@@ -262,7 +293,13 @@ mod tests {
 
     #[test]
     fn test_protocol_type() {
-        let mut hdr = GeneveHdr::default();
+        let mut hdr = GeneveHdr {
+            ver_opt_len: 0,
+            o_c_rsvd: 0,
+            protocol_type: [0, 0],
+            vni: [0, 0, 0],
+            reserved2: 0,
+        };
         hdr.set_protocol_type(0xABCD);
         assert_eq!(hdr.protocol_type(), 0xABCD);
         assert_eq!(
@@ -274,7 +311,13 @@ mod tests {
 
     #[test]
     fn test_vni() {
-        let mut hdr = GeneveHdr::default();
+        let mut hdr = GeneveHdr {
+            ver_opt_len: 0,
+            o_c_rsvd: 0,
+            protocol_type: [0, 0],
+            vni: [0, 0, 0],
+            reserved2: 0,
+        };
         hdr.set_vni(0x00123456);
         assert_eq!(hdr.vni(), 0x00123456);
         assert_eq!(
