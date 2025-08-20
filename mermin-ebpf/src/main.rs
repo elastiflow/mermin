@@ -234,7 +234,6 @@ impl Parser {
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_geneve_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         let geneve_hdr: GeneveHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += GeneveHdr::LEN;
 
         // Current version is 0. Packets with unknown version must be skipped
         let version = geneve_hdr.ver();
@@ -247,8 +246,7 @@ impl Parser {
             return Ok(());
         }
 
-        let opt_len = geneve_hdr.opt_len() as usize * 4;
-        self.offset += opt_len;
+        self.offset += geneve_hdr.total_hdr_len();
 
         let protocol_type = geneve_hdr.protocol_type();
         match protocol_type {

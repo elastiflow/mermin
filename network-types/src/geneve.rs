@@ -138,6 +138,12 @@ impl GeneveHdr {
         self.vni[1] = bytes[2];
         self.vni[2] = bytes[3];
     }
+
+    /// Returns the total header length including variable options.
+    #[inline]
+    pub fn total_hdr_len(&self) -> usize {
+        GeneveHdr::LEN + self.opt_len() as usize * 4
+    }
 }
 
 #[cfg(test)]
