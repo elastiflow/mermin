@@ -1,13 +1,13 @@
 /// # Geneve (Generic Network Virtualization Encapsulation) Header Frame:
-///    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///    |Ver|  Opt Len  |O|C|    Rsvd.  |          Protocol Type        |
-///    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///    |        Virtual Network Identifier (VNI)       |    Reserved   |
-///    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///    |                                                               |
-///    ~                    Variable-Length Options                    ~
-///    |                                                               |
-///    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///   |Ver|  Opt Len  |O|C|    Rsvd.  |          Protocol Type        |
+///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///   |        Virtual Network Identifier (VNI)       |    Reserved   |
+///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///   |                                                               |
+///   ~                    Variable-Length Options                    ~
+///   |                                                               |
+///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///
 /// ## Fields
 ///
@@ -19,7 +19,6 @@
 /// * **Protocol Type (16 bits)**: The type of protocol data unit appearing after the Geneve header, following the Ethertype convention.
 /// * **Virtual Network Identifier (VNI) (24 bits)**: An identifier for a unique element of a virtual network.
 /// * **Reserved (8 bits)**: Reserved field, which must be zero on transmission and ignored on receipt.
-
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
 pub struct GeneveHdr {
