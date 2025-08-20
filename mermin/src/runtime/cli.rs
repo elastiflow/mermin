@@ -4,6 +4,8 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use tracing::Level;
 
+use crate::runtime::serde_level;
+
 #[derive(Parser, Debug, Serialize, Deserialize)]
 #[command(version, about, long_about = None)]
 pub struct Cli {
@@ -28,29 +30,9 @@ pub struct Cli {
         env = "MERMIN_LOG_LEVEL",
         default_value = "info"
     )]
-    #[serde(with = "level_serde")]
+    #[serde(with = "serde_level")]
     pub log_level: Level,
     // TODO: metrics port, API port, API TLS
-}
-
-mod level_serde {
-    use serde::{self, Deserialize, Deserializer, Serializer};
-    use tracing::Level;
-
-    pub fn serialize<S>(level: &Level, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(level.as_str())
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Level, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        s.parse::<Level>().map_err(serde::de::Error::custom)
-    }
 }
 
 #[cfg(test)]

@@ -9,14 +9,20 @@ use figment::{
     providers::{Format, Serialized, Yaml},
 };
 use serde::{Deserialize, Serialize};
+use tracing::Level;
 
-use crate::runtime::cli::Cli;
+use crate::runtime::{cli::Cli, serde_level};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
     pub interface: Vec<String>,
     #[serde(skip)]
     pub config_path: Option<PathBuf>,
+
+    pub auto_reload: bool,
+
+    #[serde(with = "serde_level")]
+    pub log_level: Level,
 }
 
 impl Default for Config {
@@ -24,6 +30,8 @@ impl Default for Config {
         Config {
             interface: Vec::from(["eth0".to_string()]),
             config_path: None,
+            auto_reload: false,
+            log_level: Level::INFO,
         }
     }
 }
@@ -239,6 +247,9 @@ mod tests {
     fn default_impl_has_eth0_interface() {
         let cfg = Config::default();
         assert_eq!(cfg.interface, Vec::from(["eth0".to_string()]));
+        assert_eq!(cfg.config_path, None);
+        assert_eq!(cfg.auto_reload, false);
+        assert_eq!(cfg.log_level, Level::INFO);
     }
 
     #[test]
@@ -355,6 +366,8 @@ interface:
                 path,
                 r#"
 interface: ["eth1"]
+auto_reload: true
+log_level: debug
                 "#,
             )?;
             jail.set_env("MERMIN_CONFIG_PATH", path);
@@ -362,6 +375,8 @@ interface: ["eth1"]
             let cli = Cli::parse_from(["mermin"]);
             let (cfg, _cli) = Config::new(cli).expect("config loads from env file");
             assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.auto_reload, true);
+            assert_eq!(cfg.log_level, Level::DEBUG);
 
             Ok(())
         });
