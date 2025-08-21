@@ -4,11 +4,11 @@ use clap::Parser;
 
 use crate::runtime::{
     cli::Cli,
-    config::{Config, ConfigError},
+    conf::{Config, ConfigError},
 };
 
 pub mod cli;
-pub mod config;
+pub mod conf;
 
 pub struct Runtime {
     #[allow(dead_code)]
