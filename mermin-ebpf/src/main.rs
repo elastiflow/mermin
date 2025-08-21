@@ -101,15 +101,14 @@ impl Parser {
         self.calc_l3_octet_count(ctx.len());
         self.offset += h_len;
 
+        // policy: innermost IP header determines the flow IPs
+        self.packet_meta.src_ipv4_addr = ipv4_hdr.src_addr;
+        self.packet_meta.dst_ipv4_addr = ipv4_hdr.dst_addr;
         // todo: Extract additional fields from ipv4_hdr
 
         let next_hdr = ipv4_hdr.proto;
         match next_hdr {
             IpProto::Tcp | IpProto::Udp => {
-                // payload headers
-                // policy: innermost IP header determines the flow IPs
-                self.packet_meta.src_ipv4_addr = ipv4_hdr.src_addr;
-                self.packet_meta.dst_ipv4_addr = ipv4_hdr.dst_addr;
                 self.packet_meta.proto = next_hdr as u8;
                 self.next_hdr = HeaderType::Proto(next_hdr);
             }
@@ -132,13 +131,14 @@ impl Parser {
         self.calc_l3_octet_count(ctx.len());
         self.offset += Ipv6Hdr::LEN;
 
+        // policy: innermost IP header determines the flow IPs
+        self.packet_meta.src_ipv6_addr = ipv6_hdr.src_addr;
+        self.packet_meta.dst_ipv6_addr = ipv6_hdr.dst_addr;
         let next_hdr = ipv6_hdr.next_hdr;
+        // todo: Extract additional fields from ipv6_hdr
+
         match next_hdr {
             IpProto::Tcp | IpProto::Udp => {
-                // payload headers
-                // policy: innermost IP header determines the flow IPs
-                self.packet_meta.src_ipv6_addr = ipv6_hdr.src_addr;
-                self.packet_meta.dst_ipv6_addr = ipv6_hdr.dst_addr;
                 self.packet_meta.proto = next_hdr as u8;
                 self.next_hdr = HeaderType::Proto(next_hdr);
             }
@@ -149,15 +149,10 @@ impl Parser {
             | IpProto::MobilityHeader
             | IpProto::Hip
             | IpProto::Shim6 => {
-                // ipv6 extension headers
-                self.packet_meta.src_ipv6_addr = ipv6_hdr.src_addr;
-                self.packet_meta.dst_ipv6_addr = ipv6_hdr.dst_addr;
                 self.next_hdr = HeaderType::Proto(next_hdr);
             }
             IpProto::Ipv6NoNxt => {
-                // ipv6 no next header
                 self.next_hdr = HeaderType::StopProcessing;
-                self.packet_meta.proto = next_hdr as u8;
             }
             _ => {
                 warn!(
