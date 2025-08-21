@@ -600,6 +600,70 @@ pub enum IpProto {
     Reserved = 255,
 }
 
+/// Generic IPv6 Extension Header structure
+/// Most IPv6 extension headers follow this format:
+/// - Next Header (8 bits): Identifies the type of header immediately following the extension header
+/// - Hdr Ext Len (8 bits): Length of the extension header in 8-octet units, not including the first 8 octets
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct Ipv6ExtHdr {
+    /// Next header protocol
+    pub next_hdr: IpProto,
+    /// Header extension length in 8-octet units (excluding first 8 octets)
+    pub hdr_ext_len: u8,
+}
+
+impl Ipv6ExtHdr {
+    pub const LEN: usize = mem::size_of::<Ipv6ExtHdr>();
+    
+    /// Returns the total length of this extension header in bytes
+    /// Formula: (hdr_ext_len + 1) * 8
+    #[inline]
+    pub fn total_len(&self) -> usize {
+        (self.hdr_ext_len as usize + 1) * 8
+    }
+}
+
+/// IPv6 Fragment Header structure
+/// The Fragment Header is used for fragmentation and reassembly of IPv6 packets
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct Ipv6FragHdr {
+    /// Next header protocol
+    pub next_hdr: IpProto,
+    /// Reserved field (must be zero)
+    pub reserved: u8,
+    /// Fragment offset and flags (16 bits total)
+    /// Bits 0-12: Fragment offset in 8-octet units
+    /// Bit 13-14: Reserved (must be zero)
+    /// Bit 15: More Fragments flag (M)
+    pub frag_off_and_flags: [u8; 2],
+    /// Identification field for fragmented packets
+    pub identification: [u8; 4],
+}
+
+impl Ipv6FragHdr {
+    pub const LEN: usize = mem::size_of::<Ipv6FragHdr>();
+    
+    /// Returns the fragment offset in bytes
+    #[inline]
+    pub fn frag_offset(&self) -> u16 {
+        (u16::from_be_bytes(self.frag_off_and_flags) & 0xFFF8) >> 3
+    }
+    
+    /// Returns true if this is not the last fragment (More Fragments flag is set)
+    #[inline]
+    pub fn more_fragments(&self) -> bool {
+        (u16::from_be_bytes(self.frag_off_and_flags) & 0x0001) != 0
+    }
+    
+    /// Returns the identification field
+    #[inline]
+    pub fn identification(&self) -> u32 {
+        u32::from_be_bytes(self.identification)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use core::net::{Ipv4Addr, Ipv6Addr};
@@ -787,6 +851,50 @@ mod tests {
         assert_eq!(IpProto::Udp as u8, 17);
         assert_eq!(IpProto::Icmp as u8, 1);
         assert_eq!(IpProto::Ipv6Icmp as u8, 58);
+        assert_eq!(IpProto::HopOpt as u8, 0);
+        assert_eq!(IpProto::Ipv6Route as u8, 43);
+        assert_eq!(IpProto::Ipv6Frag as u8, 44);
+        assert_eq!(IpProto::Ipv6Opts as u8, 60);
+    }
+
+    #[test]
+    fn test_ipv6_ext_hdr() {
+        let ext_hdr = Ipv6ExtHdr {
+            next_hdr: IpProto::Tcp,
+            hdr_ext_len: 0, // 8 bytes total
+        };
+        assert_eq!(ext_hdr.total_len(), 8);
+        
+        let ext_hdr_long = Ipv6ExtHdr {
+            next_hdr: IpProto::Udp,
+            hdr_ext_len: 2, // 24 bytes total (3 * 8)
+        };
+        assert_eq!(ext_hdr_long.total_len(), 24);
+    }
+
+    #[test]
+    fn test_ipv6_frag_hdr() {
+        let frag_hdr = Ipv6FragHdr {
+            next_hdr: IpProto::Tcp,
+            reserved: 0,
+            frag_off_and_flags: [0x00, 0x01], // More fragments flag set
+            identification: [0x12, 0x34, 0x56, 0x78],
+        };
+        
+        assert_eq!(frag_hdr.more_fragments(), true);
+        assert_eq!(frag_hdr.identification(), 0x12345678);
+        assert_eq!(Ipv6FragHdr::LEN, 8);
+        
+        let frag_hdr_no_more = Ipv6FragHdr {
+            next_hdr: IpProto::Udp,
+            reserved: 0,
+            frag_off_and_flags: [0x10, 0x00], // Fragment offset 0x1000, no more fragments
+            identification: [0xAB, 0xCD, 0xEF, 0x01],
+        };
+        
+        assert_eq!(frag_hdr_no_more.more_fragments(), false);
+        assert_eq!(frag_hdr_no_more.frag_offset(), 0x200); // 0x1000 >> 3 = 0x200
+        assert_eq!(frag_hdr_no_more.identification(), 0xABCDEF01);
     }
 
     #[test]

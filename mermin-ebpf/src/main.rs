@@ -16,7 +16,7 @@ use network_types::{
     esp::Esp,
     eth::{EthHdr, EtherType},
     geneve::GeneveHdr,
-    ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
+    ip::{IpProto, Ipv4Hdr, Ipv6Hdr, Ipv6ExtHdr, Ipv6FragHdr},
     tcp::TcpHdr,
     udp::UdpHdr,
 };
@@ -138,7 +138,8 @@ impl Parser {
         // todo: Extract additional fields from ipv6_hdr
 
         match next_hdr {
-            IpProto::Tcp | IpProto::Udp => {
+            IpProto::Tcp | IpProto::Udp | IpProto::Ipv6Icmp | IpProto::Sctp => {
+                // Direct L4 protocol (no extension headers)
                 self.packet_meta.proto = next_hdr as u8;
                 self.next_hdr = HeaderType::Proto(next_hdr);
             }
@@ -149,6 +150,7 @@ impl Parser {
             | IpProto::MobilityHeader
             | IpProto::Hip
             | IpProto::Shim6 => {
+                // Extension headers - continue parsing to find final L4 protocol
                 self.next_hdr = HeaderType::Proto(next_hdr);
             }
             IpProto::Ipv6NoNxt => {
@@ -260,6 +262,107 @@ impl Parser {
 
         Ok(())
     }
+
+    /// Parses IPv6 extension headers (Hop-by-Hop, Routing, Destination Options).
+    /// These headers follow the common format with Next Header and Header Extension Length fields.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_ipv6_ext_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let ext_hdr: Ipv6ExtHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        
+        // Calculate the total length of this extension header
+        let total_len = ext_hdr.total_len();
+        
+        // Safety checks for malformed headers
+        if total_len < 8 {
+            // Extension headers must be at least 8 bytes
+            return Err(Error::MalformedHeader);
+        }
+        
+        if total_len > 2048 {
+            // Prevent excessively large extension headers (safety limit)
+            return Err(Error::MalformedHeader);
+        }
+        
+        // Bounds check: ensure we don't read beyond the packet
+        if self.offset + total_len > ctx.len() as usize {
+            return Err(Error::OutOfBounds);
+        }
+        
+        // Move offset to the next header
+        self.offset += total_len;
+        
+        // Check if the next header is a final L4 protocol
+        match ext_hdr.next_hdr {
+            IpProto::Tcp | IpProto::Udp | IpProto::Ipv6Icmp | IpProto::Sctp => {
+                // Found final L4 protocol, set it in packet metadata
+                self.packet_meta.proto = ext_hdr.next_hdr as u8;
+                self.next_hdr = HeaderType::Proto(ext_hdr.next_hdr);
+            }
+            _ => {
+                // Continue processing the extension header chain
+                self.next_hdr = HeaderType::Proto(ext_hdr.next_hdr);
+            }
+        }
+        
+        debug!(
+            ctx,
+            "parsed IPv6 extension header, next_hdr: {}, total_len: {}", 
+            ext_hdr.next_hdr as u8, total_len
+        );
+        
+        Ok(())
+    }
+
+    /// Parses IPv6 Fragment header.
+    /// The Fragment header has a fixed 8-byte length and different structure from other extension headers.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_ipv6_frag_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let frag_hdr: Ipv6FragHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        
+        // Bounds check: ensure we don't read beyond the packet
+        if self.offset + Ipv6FragHdr::LEN > ctx.len() as usize {
+            return Err(Error::OutOfBounds);
+        }
+        
+        // Fragment header is always 8 bytes
+        self.offset += Ipv6FragHdr::LEN;
+        
+        // Check if the next header is a final L4 protocol
+        match frag_hdr.next_hdr {
+            IpProto::Tcp | IpProto::Udp | IpProto::Ipv6Icmp | IpProto::Sctp => {
+                // Found final L4 protocol, set it in packet metadata
+                self.packet_meta.proto = frag_hdr.next_hdr as u8;
+                self.next_hdr = HeaderType::Proto(frag_hdr.next_hdr);
+            }
+            _ => {
+                // Continue processing the extension header chain
+                self.next_hdr = HeaderType::Proto(frag_hdr.next_hdr);
+            }
+        }
+        
+        debug!(
+            ctx,
+            "parsed IPv6 fragment header, next_hdr: {}, frag_offset: {}, more_frags: {}", 
+            frag_hdr.next_hdr as u8, frag_hdr.frag_offset(), frag_hdr.more_fragments()
+        );
+        
+        Ok(())
+    }
+
+    /// Parses the ICMPv6 header in the packet and updates the parser state accordingly.
+    /// ICMPv6 doesn't have port numbers, so we just mark parsing as complete.
+    /// Returns an error if the header cannot be loaded.
+    fn parse_icmpv6_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        // ICMPv6 header is at least 4 bytes (type, code, checksum)
+        // We don't need to parse the full structure, just verify we can read the minimum
+        let _icmpv6_type: u8 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        
+        debug!(ctx, "parsed ICMPv6 header, stopping parsing");
+        
+        // ICMPv6 doesn't have ports, so we stop processing here
+        self.next_hdr = HeaderType::StopProcessing;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -292,9 +395,18 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Geneve => parser.parse_geneve_header(&ctx),
             HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx),
             HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmpv6_header(&ctx),
             HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
             HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
+            // IPv6 Extension Headers
+            HeaderType::Proto(IpProto::HopOpt) => parser.parse_ipv6_ext_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_ipv6_ext_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_ipv6_ext_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_ipv6_frag_header(&ctx),
+            HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_ipv6_ext_header(&ctx),
+            HeaderType::Proto(IpProto::Hip) => parser.parse_ipv6_ext_header(&ctx),
+            HeaderType::Proto(IpProto::Shim6) => parser.parse_ipv6_ext_header(&ctx),
             HeaderType::Proto(proto) => {
                 debug!(
                     &ctx,

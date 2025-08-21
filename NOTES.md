@@ -25,15 +25,24 @@ This is a markdown file to take notes about development that are relevant to sha
 | esp_pad_len    | ipv6-esp  | ?                     | u8      |  ❌  |
 | esp_next_hdr   | ipv6-esp  | nextHeaderIPv6 (?)    | u8      |  ❌  |
 
-## IPv6 Extension Headers to be Implemented
+## IPv6 Extension Headers Implementation Status
 
-| Rust Var        | Protocol         | IE Name | IE Type | Done |
-|-----------------|------------------|---------|---------|:----:|
-| hop_opts_data   | ipv6-hop-by-hop  |         |         |  ❌   |
-| route_data      | ipv6-route       |         |         |  ❌   |
-| dest_opts_data  | ipv6-dest-opts   |         |         |  ❌   |
-| mobility_opts   | ipv6-mobility    |         |         |  ❌   |
-| hip_params      | ipv6-hip         |         |         |  ❌   |
-| shim6_opts      | ipv6-shim6       |         |         |  ❌   |
+| Protocol         | Parsing Support | IE Name | IE Type | Done |
+|------------------|-----------------|---------|---------|:----:|
+| ipv6-hop-by-hop  | ✅ Implemented  |         |         |  ✅   |
+| ipv6-route       | ✅ Implemented  |         |         |  ✅   |
+| ipv6-fragment    | ✅ Implemented  |         |         |  ✅   |
+| ipv6-dest-opts   | ✅ Implemented  |         |         |  ✅   |
+| ipv6-mobility    | ✅ Implemented  |         |         |  ✅   |
+| ipv6-hip         | ✅ Implemented  |         |         |  ✅   |
+| ipv6-shim6       | ✅ Implemented  |         |         |  ✅   |
+
+**Implementation Details:**
+- Added `Ipv6ExtHdr` structure for standard extension headers (Hop-by-Hop, Routing, Destination Options, Mobility, HIP, Shim6)
+- Added `Ipv6FragHdr` structure for Fragment headers (which have a different format)
+- Implemented extension header traversal logic in eBPF parser
+- Added safety mechanisms: bounded loops (MAX_HEADER_PARSE_DEPTH=16), size limits, bounds checking
+- Parser correctly identifies final L4 protocols (TCP, UDP, ICMPv6, SCTP) after traversing extension header chain
+- Maintains compatibility with IPv6 packets without extension headers
 
 (Copy: ✅ | ❌)
