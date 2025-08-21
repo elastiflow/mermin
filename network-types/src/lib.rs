@@ -4,6 +4,7 @@ pub mod ah;
 pub mod esp;
 pub mod eth;
 pub mod geneve;
+pub mod icmp;
 pub mod ip;
 pub mod tcp;
 pub mod udp;

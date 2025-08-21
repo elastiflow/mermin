@@ -10,12 +10,13 @@ use aya_ebpf::{
 };
 #[cfg(not(test))]
 use aya_log_ebpf::{debug, error, warn};
-use mermin_common::PacketMeta;
+use mermin_common::{IpAddrType, PacketMeta};
 use network_types::{
     ah::AuthHdr,
     esp::Esp,
     eth::{EthHdr, EtherType},
     geneve::GeneveHdr,
+    icmp::IcmpHdr,
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
     tcp::TcpHdr,
     udp::UdpHdr,
@@ -104,11 +105,12 @@ impl Parser {
         // policy: innermost IP header determines the flow IPs
         self.packet_meta.src_ipv4_addr = ipv4_hdr.src_addr;
         self.packet_meta.dst_ipv4_addr = ipv4_hdr.dst_addr;
+        self.packet_meta.ip_addr_type = IpAddrType::Ipv4;
         // todo: Extract additional fields from ipv4_hdr
 
         let next_hdr = ipv4_hdr.proto;
         match next_hdr {
-            IpProto::Tcp | IpProto::Udp => {
+            IpProto::Tcp | IpProto::Udp | IpProto::Icmp => {
                 self.packet_meta.proto = next_hdr as u8;
                 self.next_hdr = HeaderType::Proto(next_hdr);
             }
@@ -134,11 +136,12 @@ impl Parser {
         // policy: innermost IP header determines the flow IPs
         self.packet_meta.src_ipv6_addr = ipv6_hdr.src_addr;
         self.packet_meta.dst_ipv6_addr = ipv6_hdr.dst_addr;
+        self.packet_meta.ip_addr_type = IpAddrType::Ipv6;
         let next_hdr = ipv6_hdr.next_hdr;
         // todo: Extract additional fields from ipv6_hdr
 
         match next_hdr {
-            IpProto::Tcp | IpProto::Udp => {
+            IpProto::Tcp | IpProto::Udp | IpProto::Ipv6Icmp => {
                 self.packet_meta.proto = next_hdr as u8;
                 self.next_hdr = HeaderType::Proto(next_hdr);
             }
@@ -202,6 +205,19 @@ impl Parser {
             self.next_hdr = HeaderType::StopProcessing;
         }
 
+        Ok(())
+    }
+
+    /// Parses the ICMP header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded.
+    /// Note: ICMP does not use ports, so src_port and dst_port remain zero.
+    fn parse_icmp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let _icmp_hdr: IcmpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += IcmpHdr::LEN;
+
+        // ICMP does not use ports, so we leave src_port and dst_port as zero
+        // TODO: extract and assign additional ICMP fields if needed (type, code, etc.)
+        self.next_hdr = HeaderType::StopProcessing;
         Ok(())
     }
 
@@ -292,6 +308,8 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Geneve => parser.parse_geneve_header(&ctx),
             HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx),
             HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx),
+            HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx),
             HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
             HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
@@ -568,6 +586,24 @@ mod tests {
         packet.extend_from_slice(&[0x12, 0x34, 0x56, 0x78]);
         // Sequence Number (4 bytes)
         packet.extend_from_slice(&[0x9a, 0xbc, 0xde, 0xf0]);
+        packet
+    }
+
+    // Helper function to create an ICMP header test packet (Echo Request)
+    fn create_icmp_test_packet() -> Vec<u8> {
+        let mut packet = Vec::new();
+
+        // Type (8 = Echo Request)
+        packet.push(0x08);
+        // Code (0)
+        packet.push(0x00);
+        // Checksum (2 bytes)
+        packet.extend_from_slice(&[0x12, 0x34]);
+        // Identifier (2 bytes)
+        packet.extend_from_slice(&[0x56, 0x78]);
+        // Sequence Number (2 bytes)
+        packet.extend_from_slice(&[0x9a, 0xbc]);
+
         packet
     }
 
@@ -893,5 +929,91 @@ mod tests {
 
         let result = parser.parse_geneve_header(&ctx);
         assert!(matches!(result, Err(Error::OutOfBounds)));
+    }
+
+    // Test parse_icmp_header function
+    #[test]
+    fn test_parse_icmp_header() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Icmp);
+        let packet = create_icmp_test_packet();
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_icmp_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, IcmpHdr::LEN);
+        // ICMP doesn't use ports, so they should remain zero
+        assert_eq!(parser.packet_meta.src_port, [0, 0]);
+        assert_eq!(parser.packet_meta.dst_port, [0, 0]);
+        assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
+    }
+
+    // Test parse_icmp_header with insufficient buffer (out of bounds)
+    #[test]
+    fn test_parse_icmp_header_out_of_bounds() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Icmp);
+        // Provide fewer than 8 bytes (ICMP header length)
+        let packet = vec![0x08, 0x00, 0x12, 0x34];
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_icmp_header(&ctx);
+        assert!(matches!(result, Err(Error::OutOfBounds)));
+    }
+
+    // Test IPv4 header parsing with ICMP protocol
+    #[test]
+    fn test_parse_ipv4_header_with_icmp() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Ipv4;
+        let mut packet = create_ipv4_test_packet();
+        // Change protocol from TCP (6) to ICMP (1)
+        packet[9] = 0x01; // Protocol field in IPv4 header
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_ipv4_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 20); // IPv4 header length (5 * 4 bytes)
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Icmp)));
+        assert_eq!(parser.packet_meta.src_ipv4_addr, [0xc0, 0xa8, 0x01, 0x01]); // 192.168.1.1
+        assert_eq!(parser.packet_meta.dst_ipv4_addr, [0xc0, 0xa8, 0x01, 0x02]); // 192.168.1.2
+        assert_eq!(parser.packet_meta.proto, 1); // ICMP
+    }
+
+    // Test IPv6 header parsing with ICMPv6 protocol
+    #[test]
+    fn test_parse_ipv6_header_with_icmpv6() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Ipv6;
+        let mut packet = create_ipv6_test_packet();
+        // Change next header from TCP (6) to ICMPv6 (58)
+        packet[6] = 58; // Next Header field in IPv6 header
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_ipv6_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, Ipv6Hdr::LEN);
+        assert!(matches!(
+            parser.next_hdr,
+            HeaderType::Proto(IpProto::Ipv6Icmp)
+        ));
+        assert_eq!(
+            parser.packet_meta.src_ipv6_addr,
+            [
+                0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x01
+            ]
+        ); // 2001:db8::1
+        assert_eq!(
+            parser.packet_meta.dst_ipv6_addr,
+            [
+                0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x02
+            ]
+        ); // 2001:db8::2
+        assert_eq!(parser.packet_meta.proto, 58); // ICMPv6
     }
 }

@@ -1,4 +1,8 @@
-use std::{collections::HashMap, fmt::Display, net::Ipv4Addr};
+use std::{
+    collections::HashMap,
+    fmt::Display,
+    net::{Ipv4Addr, Ipv6Addr},
+};
 
 use async_trait::async_trait;
 use k8s_openapi::api::{
@@ -8,7 +12,7 @@ use k8s_openapi::api::{
     networking::v1::{Ingress, NetworkPolicy},
 };
 use log::info;
-use mermin_common::PacketMeta;
+use mermin_common::{IpAddrType, PacketMeta};
 
 use crate::k8s::Attributor;
 
@@ -1171,24 +1175,54 @@ impl ResourceParserFactory {
 
 /// Parse packet metadata and extract connection information
 pub fn parse_packet_meta(event: &PacketMeta) -> (String, String) {
-    // Get the source and destination IPv4 addresses
-    let src_ipv4 = Ipv4Addr::from(event.src_ipv4_addr);
-    let dst_ipv4 = Ipv4Addr::from(event.dst_ipv4_addr);
-
-    // Get the source and destination ports
-    let src_port = event.src_port();
-    let dst_port = event.dst_port();
-
     // Protocol information
     let protocol = match event.proto {
+        1 => "ICMP",
         6 => "TCP",
         17 => "UDP",
-        1 => "ICMP",
+        58 => "ICMPv6",
         _ => "Other",
     };
 
-    let connection_info =
-        format!("Connection: {src_ipv4}:{src_port} -> {dst_ipv4}:{dst_port} ({protocol})");
+    let connection_info = match event.ip_addr_type {
+        IpAddrType::Ipv4 => {
+            // Get the source and destination IPv4 addresses
+            let src_ipv4 = Ipv4Addr::from(event.src_ipv4_addr);
+            let dst_ipv4 = Ipv4Addr::from(event.dst_ipv4_addr);
+
+            match event.proto {
+                // For ICMP and ICMPv6, don't show ports since they don't use them
+                1 | 58 => format!("Connection: {src_ipv4} -> {dst_ipv4} ({protocol})"),
+                // For TCP, UDP and other protocols, show ports
+                _ => {
+                    let src_port = event.src_port();
+                    let dst_port = event.dst_port();
+                    format!(
+                        "Connection: {src_ipv4}:{src_port} -> {dst_ipv4}:{dst_port} ({protocol})"
+                    )
+                }
+            }
+        }
+        IpAddrType::Ipv6 => {
+            // Get the source and destination IPv6 addresses
+            let src_ipv6 = Ipv6Addr::from(event.src_ipv6_addr);
+            let dst_ipv6 = Ipv6Addr::from(event.dst_ipv6_addr);
+
+            match event.proto {
+                // For ICMP and ICMPv6, don't show ports since they don't use them
+                1 | 58 => format!("Connection: [{src_ipv6}] -> [{dst_ipv6}] ({protocol})"),
+                // For TCP, UDP and other protocols, show ports
+                _ => {
+                    let src_port = event.src_port();
+                    let dst_port = event.dst_port();
+                    format!(
+                        "Connection: [{src_ipv6}]:{src_port} -> [{dst_ipv6}]:{dst_port} ({protocol})"
+                    )
+                }
+            }
+        }
+    };
+
     let packet_size_info = format!("Packet size: {} bytes", event.l3_octet_count);
 
     (connection_info, packet_size_info)

@@ -83,8 +83,7 @@ mod tests {
 
         assert_eq!(
             actual_size, expected_size,
-            "Size of FlowRecord should be {} bytes, but was {} bytes",
-            expected_size, actual_size
+            "Size of FlowRecord should be {expected_size} bytes, but was {actual_size} bytes"
         );
 
         // Verify the alignment (should be the max alignment of members)
@@ -94,8 +93,7 @@ mod tests {
 
         assert_eq!(
             actual_alignment, expected_alignment,
-            "Alignment of FlowRecord should be {} bytes, but was {} bytes",
-            expected_alignment, actual_alignment
+            "Alignment of FlowRecord should be {expected_alignment} bytes, but was {actual_alignment} bytes"
         );
     }
 
