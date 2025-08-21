@@ -12,12 +12,12 @@ use aya::{
     maps::RingBuf,
     programs::{SchedClassifier, TcAttachType, tc},
 };
-use k8s::resource_parser;
 use log::{debug, info, warn};
 use mermin_common::{IpAddrType, PacketMeta};
 use tokio::signal;
 
 use crate::{community_id::CommunityIdGenerator, runtime::conf::Config};
+use crate::k8s::resource_parser::parse_packet;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -146,7 +146,12 @@ async fn main() -> anyhow::Result<()> {
                             );
                         }
                     }
-                    parse_packet(event, kube_client_clone.clone()).await;
+                    if let Some(client) = &kube_client_clone {
+                        let enriched_packet = parse_packet(&event, client).await;
+                        info!("Enriched packet: {enriched_packet:?}");
+                    } else {
+                        info!("Skipping packet enrichment: Kubernetes client not available");
+                    }
                 }
                 None => {
                     // Short sleep to prevent busy-looping.
@@ -184,36 +189,4 @@ struct FlowRecord {
     pub flow_end_reason: u8,
     // Implicit padding (2 bytes) is added here by the compiler to ensure
     // the total struct size (88 bytes) is a multiple of the maximum alignment (8 bytes).
-}
-
-/// Parse all available data from the packet metadata and Kubernetes resources
-async fn parse_packet(event: PacketMeta, kube_client_clone: Option<Arc<k8s::Attributor>>) {
-    info!("Parsing packet data...");
-
-    // Parse packet metadata
-    let (connection_info, packet_size_info) = resource_parser::parse_packet_meta(&event);
-
-    info!("{connection_info}");
-    info!("{packet_size_info}");
-
-    println!("{connection_info}");
-    println!("{packet_size_info}");
-
-    if let Some(client) = &kube_client_clone {
-        info!("Kubernetes client is available, attempting to parse pod info");
-
-        // Get the source IPv4 address
-        let src_ipv4 = Ipv4Addr::from(event.src_ipv4_addr);
-
-        // Use the resource parsers to extract and display information
-        let parsers = resource_parser::ResourceParserFactory::all_parsers();
-        for parser in parsers {
-            parser.parse_and_print(client, src_ipv4).await;
-        }
-
-        info!("Completed parsing all Kubernetes resources");
-    } else {
-        warn!("Kubernetes client is not available, skipping pod info parsing");
-        println!("Kubernetes data lookup not available");
-    }
 }
