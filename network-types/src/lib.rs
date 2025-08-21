@@ -7,3 +7,4 @@ pub mod geneve;
 pub mod ip;
 pub mod tcp;
 pub mod udp;
+pub mod vxlan;

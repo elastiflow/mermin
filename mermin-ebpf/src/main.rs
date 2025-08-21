@@ -16,6 +16,7 @@ use network_types::{
     esp::Esp,
     eth::{EthHdr, EtherType},
     geneve::GeneveHdr,
+    vxlan::VxlanHdr,
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
     tcp::TcpHdr,
     udp::UdpHdr,
@@ -33,6 +34,7 @@ enum HeaderType {
     Ipv4,
     Ipv6,
     Geneve,
+    Vxlan,
     Proto(IpProto),
     StopProcessing, // Indicates parsing should terminate for flow key purposes
     #[cfg(not(test))]
@@ -188,17 +190,22 @@ impl Parser {
         self.packet_meta.src_port = udp_hdr.src;
         self.packet_meta.dst_port = udp_hdr.dst;
 
-        // IANA has assigned port 6081 as the fixed well-known destination port for Geneve.
-        // Although the well-known value should be used by default, it is RECOMMENDED that implementations make this configurable.
-        // TODO: include a configuration option read the Geneve port
+        // Check for known UDP-based tunneling protocols
+        // IANA has assigned port 6081 for Geneve and 4789 for VXLAN.
+        // NOTE: These should eventually be configurable.
         if udp_hdr.dst_port() == 6081 {
             debug!(
                 ctx,
                 "UDP packet with destination port 6081 (Geneve) detected"
             );
             self.next_hdr = HeaderType::Geneve;
+        } else if udp_hdr.dst_port() == 4789 {
+            debug!(
+                ctx,
+                "UDP packet with destination port 4789 (VXLAN) detected"
+            );
+            self.next_hdr = HeaderType::Vxlan;
         } else {
-            // TODO: extract and assign additional udp fields
             self.next_hdr = HeaderType::StopProcessing;
         }
 
@@ -260,6 +267,26 @@ impl Parser {
 
         Ok(())
     }
+
+    /// Parses the VXLAN header (RFC 7348) and updates the parser state.
+    /// After the 8-byte VXLAN header, an inner Ethernet frame begins.
+    fn parse_vxlan_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let vxlan_hdr: VxlanHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+
+        // Optional sanity check: ensure the "I" flag is set indicating VNI is valid.
+        if !vxlan_hdr.valid_vni() {
+            warn!(ctx, "vxlan header without I flag set – skipping packet");
+            self.next_hdr = HeaderType::StopProcessing;
+            return Ok(());
+        }
+
+        // TODO: capture vxlan_hdr.vni() into packet_meta once field exists
+
+        self.offset += VxlanHdr::LEN;
+        // Inner payload is always an Ethernet frame
+        self.next_hdr = HeaderType::Ethernet;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -290,6 +317,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Ipv4 => parser.parse_ipv4_header(&ctx),
             HeaderType::Ipv6 => parser.parse_ipv6_header(&ctx),
             HeaderType::Geneve => parser.parse_geneve_header(&ctx),
+            HeaderType::Vxlan => parser.parse_vxlan_header(&ctx),
             HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx),
             HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx),
             HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
@@ -893,5 +921,43 @@ mod tests {
 
         let result = parser.parse_geneve_header(&ctx);
         assert!(matches!(result, Err(Error::OutOfBounds)));
+    }
+
+    // Test parse_vxlan_header function
+    #[test]
+    fn test_parse_vxlan_header() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Vxlan; // Assuming VXLAN is the next header after UDP
+        let packet = create_udp_test_packet(); // Create a UDP packet
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_vxlan_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, UdpHdr::LEN); // After VXLAN, we expect the next header to be Ethernet
+        assert!(matches!(parser.next_hdr, HeaderType::Ethernet));
+    }
+
+    // Test parse_vxlan_header with invalid VXLAN header (I flag not set)
+    #[test]
+    fn test_parse_vxlan_header_invalid() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Vxlan;
+        let mut packet = create_udp_test_packet(); // Create a UDP packet
+        // Modify the VXLAN header to have I flag unset
+        let vxlan_hdr_offset = UdpHdr::LEN; // Offset of the start of the VXLAN header
+        let vxlan_hdr_data = ctx.load::<VxlanHdr>(vxlan_hdr_offset).unwrap();
+        let mut vxlan_hdr_bytes = vxlan_hdr_data.to_be_bytes();
+        vxlan_hdr_bytes[0] &= 0xFE; // Clear the I flag
+        let new_vxlan_hdr = VxlanHdr::from_be_bytes(vxlan_hdr_bytes);
+        let mut new_packet = packet;
+        new_packet[vxlan_hdr_offset..vxlan_hdr_offset + VxlanHdr::LEN].copy_from_slice(&new_vxlan_hdr.to_be_bytes());
+        let ctx = TcContext::new(new_packet);
+
+        let result = parser.parse_vxlan_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, UdpHdr::LEN); // After VXLAN, we expect the next header to be Ethernet
+        assert!(matches!(parser.next_hdr, HeaderType::Ethernet));
     }
 }
