@@ -16,6 +16,7 @@ use crate::k8s::Attributor;
 
 /// Holds metadata for a single Kubernetes object.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct K8sObjectMeta {
     pub kind: String,
     pub name: String,
@@ -43,6 +44,7 @@ where
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum EnrichedInfo {
     Pod {
         pod: K8sObjectMeta,
@@ -55,6 +57,7 @@ pub enum EnrichedInfo {
 }
 
 #[derive(Debug, Default)]
+#[allow(dead_code)]
 pub struct EnrichedFlowData {
     pub source: Option<EnrichedInfo>,
     pub destination: Option<EnrichedInfo>,
