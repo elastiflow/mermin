@@ -10,7 +10,7 @@ use aya_ebpf::{
 };
 #[cfg(not(test))]
 use aya_log_ebpf::{debug, error, warn};
-use mermin_common::PacketMeta;
+use mermin_common::{IpAddrType, PacketMeta};
 use network_types::{
     ah::AuthHdr,
     esp::Esp,
@@ -105,6 +105,7 @@ impl Parser {
         // policy: innermost IP header determines the flow IPs
         self.packet_meta.src_ipv4_addr = ipv4_hdr.src_addr;
         self.packet_meta.dst_ipv4_addr = ipv4_hdr.dst_addr;
+        self.packet_meta.ip_addr_type = IpAddrType::Ipv4;
         // todo: Extract additional fields from ipv4_hdr
 
         let next_hdr = ipv4_hdr.proto;
@@ -135,6 +136,7 @@ impl Parser {
         // policy: innermost IP header determines the flow IPs
         self.packet_meta.src_ipv6_addr = ipv6_hdr.src_addr;
         self.packet_meta.dst_ipv6_addr = ipv6_hdr.dst_addr;
+        self.packet_meta.ip_addr_type = IpAddrType::Ipv6;
         let next_hdr = ipv6_hdr.next_hdr;
         // todo: Extract additional fields from ipv6_hdr
 
@@ -994,7 +996,10 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, Ipv6Hdr::LEN);
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Ipv6Icmp)));
+        assert!(matches!(
+            parser.next_hdr,
+            HeaderType::Proto(IpProto::Ipv6Icmp)
+        ));
         assert_eq!(
             parser.packet_meta.src_ipv6_addr,
             [

@@ -103,9 +103,9 @@ async fn main() -> anyhow::Result<()> {
                     let event: PacketMeta =
                         unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const PacketMeta) };
                     let protocol_name = match event.proto {
-                        6 => "TCP",
-                        17 => "UDP", 
                         1 => "ICMP",
+                        6 => "TCP",
+                        17 => "UDP",
                         58 => "ICMPv6",
                         _ => "Other",
                     };
