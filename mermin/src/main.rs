@@ -102,16 +102,41 @@ async fn main() -> anyhow::Result<()> {
                 Some(bytes) => {
                     let event: PacketMeta =
                         unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const PacketMeta) };
-                    info!(
-                        "Received event: Src IPV6: {}, Dst IPV6: {}, Src IPV4: {}, Dst IPV4: {}, L3 Octect Count: {}, Src Port: {}, Dst Port: {}",
-                        Ipv6Addr::from(event.src_ipv6_addr),
-                        Ipv6Addr::from(event.dst_ipv6_addr),
-                        Ipv4Addr::from(event.src_ipv4_addr),
-                        Ipv4Addr::from(event.dst_ipv4_addr),
-                        event.l3_octet_count,
-                        u16::from_be_bytes(event.src_port),
-                        u16::from_be_bytes(event.dst_port),
-                    );
+                    let protocol_name = match event.proto {
+                        6 => "TCP",
+                        17 => "UDP", 
+                        1 => "ICMP",
+                        58 => "ICMPv6",
+                        _ => "Other",
+                    };
+
+                    // Log differently for ICMP vs port-based protocols
+                    match event.proto {
+                        1 | 58 => {
+                            info!(
+                                "Received {} event: Src IPV6: {}, Dst IPV6: {}, Src IPV4: {}, Dst IPV4: {}, L3 Octect Count: {}",
+                                protocol_name,
+                                Ipv6Addr::from(event.src_ipv6_addr),
+                                Ipv6Addr::from(event.dst_ipv6_addr),
+                                Ipv4Addr::from(event.src_ipv4_addr),
+                                Ipv4Addr::from(event.dst_ipv4_addr),
+                                event.l3_octet_count,
+                            );
+                        }
+                        _ => {
+                            info!(
+                                "Received {} event: Src IPV6: {}, Dst IPV6: {}, Src IPV4: {}, Dst IPV4: {}, L3 Octect Count: {}, Src Port: {}, Dst Port: {}",
+                                protocol_name,
+                                Ipv6Addr::from(event.src_ipv6_addr),
+                                Ipv6Addr::from(event.dst_ipv6_addr),
+                                Ipv4Addr::from(event.src_ipv4_addr),
+                                Ipv4Addr::from(event.dst_ipv4_addr),
+                                event.l3_octet_count,
+                                u16::from_be_bytes(event.src_port),
+                                u16::from_be_bytes(event.dst_port),
+                            );
+                        }
+                    }
                     parse_packet(event, kube_client_clone.clone()).await;
                 }
                 None => {

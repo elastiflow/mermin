@@ -1175,20 +1175,26 @@ pub fn parse_packet_meta(event: &PacketMeta) -> (String, String) {
     let src_ipv4 = Ipv4Addr::from(event.src_ipv4_addr);
     let dst_ipv4 = Ipv4Addr::from(event.dst_ipv4_addr);
 
-    // Get the source and destination ports
-    let src_port = event.src_port();
-    let dst_port = event.dst_port();
-
     // Protocol information
     let protocol = match event.proto {
         6 => "TCP",
         17 => "UDP",
         1 => "ICMP",
+        58 => "ICMPv6",
         _ => "Other",
     };
 
-    let connection_info =
-        format!("Connection: {src_ipv4}:{src_port} -> {dst_ipv4}:{dst_port} ({protocol})");
+    let connection_info = match event.proto {
+        // For ICMP and ICMPv6, don't show ports since they don't use them
+        1 | 58 => format!("Connection: {src_ipv4} -> {dst_ipv4} ({protocol})"),
+        // For TCP, UDP and other protocols, show ports
+        _ => {
+            let src_port = event.src_port();
+            let dst_port = event.dst_port();
+            format!("Connection: {src_ipv4}:{src_port} -> {dst_ipv4}:{dst_port} ({protocol})")
+        }
+    };
+
     let packet_size_info = format!("Packet size: {} bytes", event.l3_octet_count);
 
     (connection_info, packet_size_info)
