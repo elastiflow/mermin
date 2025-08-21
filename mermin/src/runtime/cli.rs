@@ -4,12 +4,12 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use tracing::Level;
 
-use crate::runtime::serde_level;
+use crate::runtime::conf::conf_serde::level;
 
 #[derive(Parser, Debug, Serialize, Deserialize)]
 #[command(version, about, long_about = None)]
 pub struct Cli {
-    /// Set the path to the configuration file (e.g., "config.yaml").
+    /// Set the path to the configuration file (e.g., "conf.yaml").
     #[arg(short, long, value_name = "FILE", env = "MERMIN_CONFIG_PATH")]
     pub config: Option<PathBuf>,
 
@@ -17,22 +17,21 @@ pub struct Cli {
     #[arg(
         short,
         long,
-        env = "MERMIN_CONFIG_AUTO_RELOAD",
-        default_value = "false"
+        action = clap::ArgAction::SetTrue,
+        env = "MERMIN_CONFIG_AUTO_RELOAD"
     )]
+    #[serde(skip_serializing_if = "is_false")]
     pub auto_reload: bool,
 
     /// Set the application's log level (e.g., "debug", "warn").
-    #[arg(
-        short,
-        long,
-        value_name = "LEVEL",
-        env = "MERMIN_LOG_LEVEL",
-        default_value = "info"
-    )]
-    #[serde(with = "serde_level")]
-    pub log_level: Level,
+    #[arg(short, long, value_name = "LEVEL", env = "MERMIN_LOG_LEVEL")]
+    #[serde(with = "level::option", skip_serializing_if = "Option::is_none")]
+    pub log_level: Option<Level>,
     // TODO: metrics port, API port, API TLS
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 #[cfg(test)]
@@ -63,7 +62,7 @@ mod tests {
             let cli = Cli::parse_from(args);
             assert_eq!(cli.config, Some(PathBuf::from("/path/to/conf.yaml")));
             assert_eq!(cli.auto_reload, true);
-            assert_eq!(cli.log_level, Level::WARN);
+            assert_eq!(cli.log_level, Some(Level::WARN));
 
             Ok(())
         });
@@ -79,7 +78,7 @@ mod tests {
             let cli = Cli::parse_from(["mermin"]);
             assert_eq!(cli.config, Some(PathBuf::from("/tmp/mermin.yaml")));
             assert_eq!(cli.auto_reload, true);
-            assert_eq!(cli.log_level, Level::DEBUG);
+            assert_eq!(cli.log_level, Some(Level::DEBUG));
 
             Ok(())
         });
@@ -89,7 +88,7 @@ mod tests {
     fn default_log_level_is_info() {
         Jail::expect_with(|_| {
             let cli = Cli::parse_from(["mermin"]);
-            assert_eq!(cli.log_level, Level::INFO);
+            assert_eq!(cli.log_level, None);
 
             Ok(())
         });

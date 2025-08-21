@@ -17,7 +17,7 @@ use tokio::signal;
 
 mod k8s;
 
-use crate::runtime::config::Config;
+use crate::runtime::conf::Config;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -30,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
     let runtime = runtime::Runtime::new()?;
     let runtime::Runtime { config, .. } = runtime;
 
-    // TODO: switch to using tracing for logging and allow users to configure the log level via config
+    // TODO: switch to using tracing for logging and allow users to configure the log level via conf
     env_logger::Builder::from_default_env()
         .target(env_logger::Target::Stdout)
         .init();
