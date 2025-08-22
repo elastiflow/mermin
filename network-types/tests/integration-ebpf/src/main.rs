@@ -13,8 +13,8 @@ use network_types::{
     ah::AuthHdr,
     esp::Esp,
     eth::EthHdr,
-    hop::HopOptHdr,
     geneve::GeneveHdr,
+    hop::HopOptHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
     tcp::TcpHdr,
     udp::UdpHdr,
@@ -124,8 +124,8 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             ParsedHeader {
                 type_: PacketType::Hop,
                 data: HeaderUnion { hop: header },
-          }
-      }
+            }
+        }
         PacketType::Geneve => {
             let header: GeneveHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             ParsedHeader {

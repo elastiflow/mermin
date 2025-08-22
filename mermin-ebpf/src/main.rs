@@ -15,8 +15,8 @@ use network_types::{
     ah::AuthHdr,
     esp::Esp,
     eth::{EthHdr, EtherType},
-    hop::HopOptHdr,
     geneve::GeneveHdr,
+    hop::HopOptHdr,
     icmp::IcmpHdr,
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
     tcp::TcpHdr,
@@ -250,8 +250,11 @@ impl Parser {
         self.next_hdr = HeaderType::Proto(hop_hdr.next_hdr);
 
         if hop_hdr.hdr_ext_len != 0 {
-            debug!(ctx, "Unsupported HOP extension: {}", hop_hdr.hdr_ext_len);
+            warn!(ctx, "Unsupported HOP extension: {}", hop_hdr.hdr_ext_len);
+            return Ok(());
         }
+        Ok(())
+    }
 
     /// Parses the Geneve header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
@@ -612,7 +615,7 @@ mod tests {
         packet.push(hdr_ext_len);
         // Options Data (6 bytes)
         packet.extend_from_slice(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
-              
+
         packet
     }
 
