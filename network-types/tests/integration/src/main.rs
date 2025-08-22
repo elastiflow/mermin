@@ -2,6 +2,7 @@ mod ah;
 mod esp;
 mod eth;
 mod geneve;
+mod hop;
 mod ipv4;
 mod ipv6;
 mod tcp;
@@ -14,6 +15,7 @@ use crate::{
     esp::{create_esp_test_packet, verify_esp_header},
     eth::{create_eth_test_packet, verify_eth_header},
     geneve::{create_geneve_test_packet, verify_geneve_header},
+    hop::{create_hop_test_packet, verify_hop_header},
     ipv4::{create_ipv4_test_packet, verify_ipv4_header},
     ipv6::{create_ipv6_test_packet, verify_ipv6_header},
     tcp::{create_tcp_test_packet, verify_tcp_header},
@@ -79,6 +81,14 @@ define_header_test!(
     PacketType::Esp,
     create_esp_test_packet,
     verify_esp_header
+);
+
+define_header_test!(
+    test_parses_hop_header,
+    HopOptHdr,
+    PacketType::Hop,
+    create_hop_test_packet,
+    verify_hop_header
 );
 
 define_header_test!(

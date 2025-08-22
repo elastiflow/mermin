@@ -16,6 +16,7 @@ use network_types::{
     esp::Esp,
     eth::{EthHdr, EtherType},
     geneve::GeneveHdr,
+    hop::HopOptHdr,
     icmp::IcmpHdr,
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
     tcp::TcpHdr,
@@ -241,6 +242,20 @@ impl Parser {
         Ok(())
     }
 
+    /// Parses the Hop-by-Hop IPv6-extension header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_hop_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let hop_hdr: HopOptHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += hop_hdr.total_hdr_len(); // Move offset to start of next header
+        self.next_hdr = HeaderType::Proto(hop_hdr.next_hdr);
+
+        if hop_hdr.hdr_ext_len != 0 {
+            warn!(ctx, "Unsupported HOP extension: {}", hop_hdr.hdr_ext_len);
+            return Ok(());
+        }
+        Ok(())
+    }
+
     /// Parses the Geneve header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_geneve_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
@@ -308,6 +323,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Geneve => parser.parse_geneve_header(&ctx),
             HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx),
             HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx),
+            HeaderType::Proto(IpProto::HopOpt) => parser.parse_hop_header(&ctx),
             HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx),
             HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
@@ -589,6 +605,20 @@ mod tests {
         packet
     }
 
+    // Helper function to create a Hop-by-Hop Options header test packet
+    // The HopOptHdr is 8 bytes (next_hdr, hdr_ext_len, and 6 bytes of opt_data)
+    fn create_hop_test_packet(next: IpProto, hdr_ext_len: u8) -> Vec<u8> {
+        let mut packet = Vec::with_capacity(HopOptHdr::LEN);
+        // Next Header
+        packet.push(next as u8);
+        // Header Extension Length
+        packet.push(hdr_ext_len);
+        // Options Data (6 bytes)
+        packet.extend_from_slice(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
+
+        packet
+    }
+
     // Helper function to create an ICMP header test packet (Echo Request)
     fn create_icmp_test_packet() -> Vec<u8> {
         let mut packet = Vec::new();
@@ -840,6 +870,64 @@ mod tests {
         let ctx = TcContext::new(packet);
 
         let result = parser.parse_esp_header(&ctx);
+        assert!(matches!(result, Err(Error::OutOfBounds)));
+    }
+
+    // Test parse_hop_header function mapping to TCP
+    #[test]
+    fn test_parse_hop_header_tcp() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::HopOpt);
+        let packet = create_hop_test_packet(IpProto::Tcp, 0);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_hop_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, HopOptHdr::LEN);
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    // Test parse_hop_header function mapping to UDP
+    #[test]
+    fn test_parse_hop_header_udp() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::HopOpt);
+        let packet = create_hop_test_packet(IpProto::Udp, 0);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_hop_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, HopOptHdr::LEN);
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
+    }
+
+    // Test parse_hop_header with non-zero hdr_ext_len
+    #[test]
+    fn test_parse_hop_header_with_extension() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::HopOpt);
+        let packet = create_hop_test_packet(IpProto::Tcp, 1);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_hop_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 16); // 8 bytes base + 8 bytes extension (1 * 8)
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    // Test parse_hop_header with insufficient buffer (out of bounds)
+    #[test]
+    fn test_parse_hop_header_out_of_bounds() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::HopOpt);
+        // Provide fewer than 8 bytes
+        let packet = vec![0x06, 0x00, 0x01, 0x02];
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_hop_header(&ctx);
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
