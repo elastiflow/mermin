@@ -42,52 +42,62 @@ impl AuthHdr {
     pub const LEN: usize = mem::size_of::<AuthHdr>();
 
     /// Gets the Next Header value.
+    #[inline]
     pub fn next_hdr(&self) -> IpProto {
         self.next_hdr
     }
 
     /// Sets the Next Header value.
+    #[inline]
     pub fn set_next_hdr(&mut self, next_hdr: IpProto) {
         self.next_hdr = next_hdr;
     }
 
     /// Gets the Payload Length value.
     /// This value is the length of the Authentication Header in 4-octet units, minus 2.
+    #[inline]
     pub fn payload_len(&self) -> u8 {
         self.payload_len
     }
 
     /// Sets the Payload Length value.
+    #[inline]
     pub fn set_payload_len(&mut self, payload_len: u8) {
         self.payload_len = payload_len;
     }
 
     /// Gets the Reserved field as a 16-bit value.
+    #[inline]
     pub fn reserved(&self) -> u16 {
         u16::from_be_bytes(self.reserved)
     }
 
     /// Sets the Reserved field from a 16-bit value.
+    #[inline]
     pub fn set_reserved(&mut self, reserved: u16) {
         self.reserved = reserved.to_be_bytes();
     }
 
     /// Gets the Security Parameters Index as a 32-bit value.
+    #[inline]
     pub fn spi(&self) -> u32 {
         u32::from_be_bytes(self.spi)
     }
 
     /// Sets the Security Parameters Index from a 32-bit value.
+    #[inline]
     pub fn set_spi(&mut self, spi: u32) {
         self.spi = spi.to_be_bytes();
     }
 
     /// Gets the Sequence Number as a 32-bit value.
+    #[inline]
     pub fn seq_num(&self) -> u32 {
         u32::from_be_bytes(self.seq_num)
     }
 
     /// Sets the Sequence Number from a 32-bit value.
+    #[inline]
     pub fn set_seq_num(&mut self, seq_num: u32) {
         self.seq_num = seq_num.to_be_bytes();
     }
@@ -95,12 +105,14 @@ impl AuthHdr {
     /// Calculates the total length of the Authentication Header in bytes.
     /// The Payload Length is in 4-octet units, minus 2.
     /// So, total length = (payload_len + 2) * 4.
+    #[inline]
     pub fn total_hdr_len(&self) -> usize {
         (self.payload_len as usize + 2) << 2
     }
 
     /// Calculates the length of the Integrity Check Value in bytes.
     /// ICV length = Total Header Length - Fixed Header Length.
+    #[inline]
     pub fn icv_len(&self) -> usize {
         self.total_hdr_len().saturating_sub(AuthHdr::LEN)
     }

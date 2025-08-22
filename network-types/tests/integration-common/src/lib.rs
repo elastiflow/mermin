@@ -7,6 +7,7 @@ use network_types::{
     esp::Esp,
     eth::EthHdr,
     geneve::GeneveHdr,
+    hop::HopOptHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
     tcp::TcpHdr,
     udp::UdpHdr,
@@ -26,7 +27,8 @@ pub enum PacketType {
     Udp = 5,
     Ah = 6,
     Esp = 7,
-    Geneve = 8,
+    Hop = 8,
+    Geneve = 9,
 }
 
 /// A union to hold any of the possible parsed network headers.
@@ -41,6 +43,7 @@ pub union HeaderUnion {
     pub udp: UdpHdr,
     pub ah: AuthHdr,
     pub esp: Esp,
+    pub hop: HopOptHdr,
     pub geneve: GeneveHdr,
 }
 
