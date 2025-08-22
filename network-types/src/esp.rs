@@ -35,21 +35,25 @@ impl Esp {
     pub const LEN: usize = mem::size_of::<Esp>();
 
     /// Gets the Security Parameters Index (SPI) value.
+    #[inline]
     pub fn spi(&self) -> u32 {
         u32::from_be_bytes(self.spi)
     }
 
     /// Sets the Security Parameters Index (SPI) value.
+    #[inline]
     pub fn set_spi(&mut self, spi: u32) {
         self.spi = spi.to_be_bytes();
     }
 
     /// Gets the Sequence Number value.
+    #[inline]
     pub fn seq_num(&self) -> u32 {
         u32::from_be_bytes(self.seq_num)
     }
 
     /// Sets the Sequence Number value.
+    #[inline]
     pub fn set_seq_num(&mut self, seq_num: u32) {
         self.seq_num = seq_num.to_be_bytes();
     }

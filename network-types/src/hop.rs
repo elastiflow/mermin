@@ -41,11 +41,13 @@ impl HopOptHdr {
     pub const LEN: usize = mem::size_of::<HopOptHdr>();
 
     /// Gets the Next Header value.
+    #[inline]
     pub fn next_hdr(&self) -> IpProto {
         self.next_hdr
     }
 
     /// Sets the Next Header value.
+    #[inline]
     pub fn set_next_hdr(&mut self, next_hdr: IpProto) {
         self.next_hdr = next_hdr;
     }
@@ -53,16 +55,19 @@ impl HopOptHdr {
     /// Gets the Header Extension Length value.
     /// This value is the length of the Hop-by-Hop Options header
     /// in 8-octet units, not including the first 8 octets.
+    #[inline]
     pub fn hdr_ext_len(&self) -> u8 {
         self.hdr_ext_len
     }
 
     /// Sets the Header Extension Length value.
+    #[inline]
     pub fn set_hdr_ext_len(&mut self, hdr_ext_len: u8) {
         self.hdr_ext_len = hdr_ext_len;
     }
 
     /// Gets a slice to the first 6 bytes of options data
+    #[inline]
     pub fn opt_data(&self) -> &[u8; 6] {
         &self.opt_data
     }
@@ -70,12 +75,14 @@ impl HopOptHdr {
     /// Calculates the total length of the Hop-by-Hop header in bytes.
     /// The Hdr Ext Len is in 8-octet units, *excluding* the first 8 octets.
     /// So, total length = (hdr_ext_len + 1) * 8.
+    #[inline]
     pub fn total_hdr_len(&self) -> usize {
         (self.hdr_ext_len as usize + 1) << 3
     }
 
     /// Calculates the total length of the options field in bytes.
     /// Options field = Total Header Length - 2 bytes (for next_hdr and hdr_ext_len).
+    #[inline]
     pub fn total_opts_len(&self) -> usize {
         self.total_hdr_len().saturating_sub(2)
     }
