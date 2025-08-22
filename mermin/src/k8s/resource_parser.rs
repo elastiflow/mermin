@@ -13,6 +13,7 @@ use k8s_openapi::api::{
 };
 use log::info;
 use mermin_common::{IpAddrType, PacketMeta};
+use network_types::ip::IpProto;
 
 use crate::k8s::Attributor;
 
@@ -1177,10 +1178,10 @@ impl ResourceParserFactory {
 pub fn parse_packet_meta(event: &PacketMeta) -> (String, String) {
     // Protocol information
     let protocol = match event.proto {
-        1 => "ICMP",
-        6 => "TCP",
-        17 => "UDP",
-        58 => "ICMPv6",
+        IpProto::Icmp => "ICMP",
+        IpProto::Tcp => "TCP",
+        IpProto::Udp => "UDP",
+        IpProto::Ipv6Icmp => "ICMPv6",
         _ => "Other",
     };
 
@@ -1192,7 +1193,9 @@ pub fn parse_packet_meta(event: &PacketMeta) -> (String, String) {
 
             match event.proto {
                 // For ICMP and ICMPv6, don't show ports since they don't use them
-                1 | 58 => format!("Connection: {src_ipv4} -> {dst_ipv4} ({protocol})"),
+                IpProto::Icmp | IpProto::Ipv6Icmp => {
+                    format!("Connection: {src_ipv4} -> {dst_ipv4} ({protocol})")
+                }
                 // For TCP, UDP and other protocols, show ports
                 _ => {
                     let src_port = event.src_port();
@@ -1210,7 +1213,9 @@ pub fn parse_packet_meta(event: &PacketMeta) -> (String, String) {
 
             match event.proto {
                 // For ICMP and ICMPv6, don't show ports since they don't use them
-                1 | 58 => format!("Connection: [{src_ipv6}] -> [{dst_ipv6}] ({protocol})"),
+                IpProto::Icmp | IpProto::Ipv6Icmp => {
+                    format!("Connection: [{src_ipv6}] -> [{dst_ipv6}] ({protocol})")
+                }
                 // For TCP, UDP and other protocols, show ports
                 _ => {
                     let src_port = event.src_port();

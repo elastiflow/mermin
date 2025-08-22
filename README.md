@@ -30,7 +30,7 @@ kind create cluster --config local/kind-config.yaml
 
 # 2. Build the mermin image and load it into the cluster
 docker build -t mermin:latest --target runner-debug .
-kind load docker-image mermin:latest
+kind load docker-image -n atlantis mermin:latest
 
 # 3a. (optional) if you already have a Helm release, uninstall it first
 helm uninstall mermin
@@ -90,7 +90,7 @@ Ensure you have the following installed:
 
 ### Build and Run Locally
 
-#### 1. Build the `mermin` agent:
+#### 1. Build the `mermin` agent
 
 ```shell
 cargo build --release
@@ -98,7 +98,7 @@ cargo build --release
 
 The build script automatically compiles the eBPF program and embeds it into the final binary.
 
-#### 2. Run the agent:
+#### 2. Run the agent
 
 Running the eBPF agent requires elevated privileges.
 
@@ -109,7 +109,7 @@ RUST_LOG=info cargo run --release --config 'target."cfg(all())".runner="sudo -E"
 > The `sudo -E` command runs the program as root while preserving the user's environment variables, which is
 > necessary for `cargo` to find the correct binary.
 
-#### 3. Generate Traffic:
+#### 3. Generate Traffic
 
 Once the program is running, open a new terminal and generate some network activity to see the logs.
 
@@ -121,7 +121,7 @@ ping -c 4 localhost
 
 ### Testing and Linting
 
-#### Run unit tests:
+#### Run unit tests
 
 Run the following commands to run the unit tests for the main application.
 
@@ -135,13 +135,13 @@ Run the following command to run the unit tests for the eBPF program only:
 cargo test -p mermin-ebpf
 ```
 
-#### Format your code:
+#### Format your code
 
 ```shell
 cargo fmt
 ```
 
-#### Run Clippy for lints:
+#### Run Clippy for lints
 
 ```shell
 # Lint the eBPF code
@@ -156,13 +156,13 @@ cargo clippy --all-features -- -D warnings
 To ensure a consistent and reproducible build environment that matches the CI/CD pipeline, you can use Docker. This is
 especially helpful on platforms like macOS.
 
-#### 1. Build the containerized environment:
+#### 1. Build the containerized environment
 
 ```shell
 docker build -t mermin-builder:latest --target builder .
 ```
 
-#### 2. Run commands inside the container:
+#### 2. Run commands inside the container
 
 This mounts your local repository into the container at `/app`.
 
@@ -200,9 +200,9 @@ analyzing the behavior of your eBPF programs.
 
 Before you begin, ensure you have the following tools installed and configured on your local machine:
 
-- kubectl: The Kubernetes command-line tool, configured to connect to your cluster.
-- Wireshark: The network protocol analyzer.
-- k9s (Optional): A terminal-based UI to manage Kubernetes clusters, which simplifies getting a shell into pods.
+* kubectl: The Kubernetes command-line tool, configured to connect to your cluster.
+* Wireshark: The network protocol analyzer.
+* k9s (Optional): A terminal-based UI to manage Kubernetes clusters, which simplifies getting a shell into pods.
 
 #### 1. Identify Your Target Pod
 
@@ -216,7 +216,7 @@ kubectl get pods -o wide
 You'll see output similar to this:
 
 | NAME         | READY | STATUS  | RESTARTS | AGE | IP          | NODE               | NOMINATED NODE | READINESS GATES |
-|--------------|-------|---------|----------|-----|-------------|--------------------|----------------|-----------------| 
+|--------------|-------|---------|----------|-----|-------------|--------------------|----------------|-----------------|
 | mermin-vrxd2 | 1/1   | Running | 0        | 42s | 10.244.0.11 | kind-control-plane | <none>         | <none>          |
 | mermin-8k9x7 | 1/1   | Running | 0        | 42s | 10.244.3.21 | kind-worker        | <none>         | <none>          |
 | mermin-pdsn7 | 1/1   | Running | 0        | 42s | 10.244.1.7  | kind-worker2       | <none>         | <none>          |
@@ -238,17 +238,17 @@ kubectl debug -i -q <pod-name> --image=nicolaka/netshoot --target=<container-nam
 
 Command Breakdown:
 
-- kubectl debug -i -q <pod-name>: Attaches an interactive, ephemeral debug container to the specified pod.
-- `--image=nicolaka/netshoot`: Uses the netshoot image, which is packed with useful networking utilities like tcpdump.
-- `--target=<container-name>`: Specifies which container in the pod to target for debugging.
-- `--profile=sysadmin`: Specifies the security context profile to use for the debug container. This is required to
+* kubectl debug -i -q <pod-name>: Attaches an interactive, ephemeral debug container to the specified pod.
+* `--image=nicolaka/netshoot`: Uses the netshoot image, which is packed with useful networking utilities like tcpdump.
+* `--target=<container-name>`: Specifies which container in the pod to target for debugging.
+* `--profile=sysadmin`: Specifies the security context profile to use for the debug container. This is required to
   run tcpdump.
-- `-- tcpdump -i eth0 -w -`: Executes tcpdump inside the debug container.
-    - `-i eth0`: Listens on the primary network interface, eth0.
-    - `-w -`: Writes the raw packet data to standard output (-) instead of a file.
-- `| wireshark -k -i -`: Pipes the standard output from tcpdump into Wireshark.
-- `-k`: Starts the capture session immediately.
-- `-i -`: Reads packet data from standard input (-).
+* `-- tcpdump -i eth0 -w -`: Executes tcpdump inside the debug container.
+  * `-i eth0`: Listens on the primary network interface, eth0.
+  * `-w -`: Writes the raw packet data to standard output (-) instead of a file.
+* `| wireshark -k -i -`: Pipes the standard output from tcpdump into Wireshark.
+* `-k`: Starts the capture session immediately.
+* `-i -`: Reads packet data from standard input (-).
 
 Example command:
 

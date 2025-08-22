@@ -112,7 +112,7 @@ impl Parser {
         let next_hdr = ipv4_hdr.proto;
         match next_hdr {
             IpProto::Tcp | IpProto::Udp | IpProto::Icmp => {
-                self.packet_meta.proto = next_hdr as u8;
+                self.packet_meta.proto = next_hdr;
                 self.next_hdr = HeaderType::Proto(next_hdr);
             }
             _ => {
@@ -143,7 +143,7 @@ impl Parser {
 
         match next_hdr {
             IpProto::Tcp | IpProto::Udp | IpProto::Ipv6Icmp => {
-                self.packet_meta.proto = next_hdr as u8;
+                self.packet_meta.proto = next_hdr;
                 self.next_hdr = HeaderType::Proto(next_hdr);
             }
             IpProto::HopOpt
@@ -349,7 +349,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
     unsafe {
         debug!(
             &ctx,
-            "mermin: writing to packet output with proto {:x}", parser.packet_meta.proto
+            "mermin: writing to packet output with proto {}", parser.packet_meta.proto as u8
         );
         #[allow(static_mut_refs)]
         let result = PACKETS.output(&parser.packet_meta, 0);
@@ -704,7 +704,7 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
         assert_eq!(parser.packet_meta.src_ipv4_addr, [0xc0, 0xa8, 0x01, 0x01]); // 192.168.1.1
         assert_eq!(parser.packet_meta.dst_ipv4_addr, [0xc0, 0xa8, 0x01, 0x02]); // 192.168.1.2
-        assert_eq!(parser.packet_meta.proto, 6); // TCP
+        assert_eq!(parser.packet_meta.proto, IpProto::Tcp); // TCP
     }
 
     // Test parse_ipv4_header function with invalid header length
@@ -749,7 +749,7 @@ mod tests {
                 0x00, 0x02
             ]
         ); // 2001:db8::2
-        assert_eq!(parser.packet_meta.proto, 6); // TCP
+        assert_eq!(parser.packet_meta.proto, IpProto::Tcp); // TCP
     }
 
     // Test parse_tcp_header function
@@ -1067,7 +1067,7 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Icmp)));
         assert_eq!(parser.packet_meta.src_ipv4_addr, [0xc0, 0xa8, 0x01, 0x01]); // 192.168.1.1
         assert_eq!(parser.packet_meta.dst_ipv4_addr, [0xc0, 0xa8, 0x01, 0x02]); // 192.168.1.2
-        assert_eq!(parser.packet_meta.proto, 1); // ICMP
+        assert_eq!(parser.packet_meta.proto, IpProto::Icmp); // ICMP
     }
 
     // Test IPv6 header parsing with ICMPv6 protocol
@@ -1102,6 +1102,6 @@ mod tests {
                 0x00, 0x02
             ]
         ); // 2001:db8::2
-        assert_eq!(parser.packet_meta.proto, 58); // ICMPv6
+        assert_eq!(parser.packet_meta.proto, IpProto::Ipv6Icmp); // ICMPv6
     }
 }
