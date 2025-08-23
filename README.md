@@ -289,6 +289,189 @@ programs are functioning as expected.
 
 -----
 
+## 🔍 Debugging eBPF Programs with bpftool
+
+This section covers how to use `bpftool` to inspect and debug your eBPF programs running in the cluster. This is essential for understanding program behavior, performance characteristics, and troubleshooting issues.
+
+### Prerequisites
+
+To use bpftool for debugging, you'll need access to a container with bpftool installed. The mermin-builder image includes bpftool, so you can use it directly.
+
+#### 1. Build the containerized environment (if not already built)
+
+```shell
+docker build -t mermin-builder:latest --target builder .
+```
+
+#### 2. Access the container with bpftool
+
+```shell
+docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash
+```
+
+### Basic eBPF Program Inspection
+
+#### List all loaded eBPF programs
+
+```shell
+bpftool prog list
+```
+
+This shows all eBPF programs currently loaded in the kernel, including their IDs, types, names, and tags.
+
+#### Find specific programs by name
+
+```shell
+bpftool prog list | grep mermin
+```
+
+This filters the list to show only programs with "mermin" in the name.
+
+#### Get detailed information about a specific program
+
+```shell
+# Replace 167 with the actual program ID from your system
+bpftool prog show id 167
+```
+
+This provides comprehensive information including:
+
+* Program type and name
+* Load time and user ID
+* Translated bytecode size (`xlated`)
+* JIT-compiled size (`jited`)
+* Memory lock size (`memlock`)
+* Associated map IDs
+* BTF (BPF Type Format) ID
+
+### Analyzing Program Instructions
+
+#### Count the number of instructions in an eBPF program
+
+One of the most useful metrics for eBPF programs is the instruction count, which affects performance and complexity limits.
+
+```shell
+# Get the instruction count for a specific program
+bpftool prog dump xlated id 167 | grep -E '^[0-9]+:' | wc -l
+```
+
+**What this command does:**
+
+* `bpftool prog dump xlated id 167`: Dumps the translated bytecode for program ID 167
+* `grep -E '^[0-9]+:'`: Filters to only show lines that start with numbers (the actual instructions)
+* `wc -l`: Counts the total number of instruction lines
+
+**Example output:**
+
+```shell
+root@container:/app# bpftool prog list | grep mermin
+167: sched_cls  name mermin  tag 53ad10d9eaf0e6f8  gpl
+168: sched_cls  name mermin  tag 53ad10d9eaf0e6f8  gpl
+169: sched_cls  name mermin  tag 53ad10d9eaf0e6f8  gpl
+
+root@container:/app# bpftool prog dump xlated id 169 | grep -E '^[0-9]+:' | wc -l
+2584
+```
+
+This shows that your mermin eBPF program contains **2,584 instructions**.
+
+#### Alternative methods for instruction counting
+
+**Method 1: Raw line count (includes comments and headers)**
+
+```shell
+bpftool prog dump xlated id 167 | wc -l
+```
+
+**Method 2: Size-based estimation**
+
+```shell
+bpftool prog show id 167 | grep xlated | awk '{print "Estimated instructions: " $2/8}'
+```
+
+**Method 3: View actual instructions (first 20 lines)**
+
+```shell
+bpftool prog dump xlated id 167 | head -20
+```
+
+### Advanced eBPF Analysis
+
+#### Inspect eBPF maps
+
+```shell
+# List all maps
+bpftool map list
+
+# Show details of a specific map
+bpftool map show id 162
+
+# Dump map contents (if readable)
+bpftool map dump id 162
+```
+
+#### Check program verification details
+
+```shell
+# Get verification log if available
+bpftool prog show id 167 | grep -A 10 "verification_log"
+```
+
+#### Monitor program performance
+
+```shell
+# Show program statistics
+bpftool prog show id 167 | grep -A 5 "run_time"
+```
+
+### Troubleshooting Common Issues
+
+#### Program loading failures
+
+If your eBPF program fails to load, check the verification log:
+
+```shell
+# Look for verification errors in dmesg
+dmesg | grep -i "bpf\|ebpf" | tail -20
+```
+
+#### Instruction limit exceeded
+
+eBPF programs have instruction limits (typically 1 million for complex programs). If you hit this limit:
+
+```shell
+# Check current instruction count
+bpftool prog dump xlated id 167 | grep -E '^[0-9]+:' | wc -l
+
+# Look for optimization opportunities in the disassembly
+bpftool prog dump xlated id 167 | grep -E '^[0-9]+:' | head -50
+```
+
+#### Memory issues
+
+Check memory usage and limits:
+
+```shell
+# View memory lock size
+bpftool prog show id 167 | grep memlock
+
+# Check system limits
+cat /proc/sys/kernel/bpf_jit_harden
+```
+
+### Integration with Development Workflow
+
+You can integrate bpftool analysis into your development process:
+
+```shell
+# Quick instruction count check during development
+docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "bpftool prog list | grep mermin && echo 'Instruction counts:' && for id in \$(bpftool prog list | grep mermin | awk '{print \$1}' | tr -d ':'); do echo -n \"Program \$id: \"; bpftool prog dump xlated id \$id | grep -E '^[0-9]+:' | wc -l; done"
+```
+
+This command provides a comprehensive overview of all mermin programs and their instruction counts in a single execution.
+
+-----
+
 ## 📜 License
 
 With the exception of eBPF code, mermin is distributed under the terms
