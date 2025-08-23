@@ -1,6 +1,32 @@
 ARG APP_ROOT=/app
 ARG APP=mermin
 
+# ---- Bpftool Build Stage ----
+FROM debian:bookworm-slim AS bpftool-build
+
+ARG SOURCE_REPO=https://github.com/libbpf/bpftool.git
+ARG SOURCE_REF=main
+
+# Install build dependencies and build bpftool in a single layer
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        gpg gpg-agent libelf-dev libmnl-dev libc-dev libgcc-12-dev libcap-dev \
+        bash-completion binutils binutils-dev ca-certificates make git \
+        xz-utils gcc pkg-config bison flex build-essential clang llvm llvm-dev && \
+    git clone --recurse-submodules --depth 1 -b $SOURCE_REF $SOURCE_REPO /tmp/bpftool && \
+    cd /tmp/bpftool && \
+    EXTRA_CFLAGS=--static OUTPUT=/usr/bin/ make -C src -j "$(nproc)" && \
+    strip /usr/bin/bpftool && \
+    ldd /usr/bin/bpftool 2>&1 | grep -q -e "Not a valid dynamic program" \
+        -e "not a dynamic executable" || \
+	    ( echo "Error: bpftool is not statically linked"; false ) && \
+    apt-get purge -y gpg gpg-agent libelf-dev libmnl-dev libc-dev libgcc-12-dev libcap-dev \
+        bash-completion binutils binutils-dev ca-certificates make git \
+        xz-utils gcc pkg-config bison flex build-essential clang llvm llvm-dev && \
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /tmp/bpftool /var/lib/apt/lists/*
+
 # ---- Build Stage ----
 FROM rust:1.88.0-bookworm AS base
 
@@ -48,6 +74,12 @@ RUN apt-get install -y --no-install-recommends \
     libzstd-dev \
     libbpf-tools
 
+# Copy bpftool from the build stage and make it available system-wide
+COPY --from=bpftool-build /usr/bin/bpftool /usr/bin/bpftool
+
+# Verify bpftool is working
+RUN bpftool --version
+
 # Set environment variables to help Rust's build scripts find LLVM 20.
 # The `llvm-sys` crate specifically looks for the `LLVM_SYS_..._PREFIX` variable format.
 # Also add LLVM's tools (like llvm-config) to the PATH
@@ -67,6 +99,7 @@ FROM base AS builder
 ARG APP_ROOT APP
 
 USER root
+
 WORKDIR ${APP_ROOT}
 # Copy source code
 COPY . .
