@@ -1380,6 +1380,7 @@ dependencies = [
  "aya",
  "aya-build 0.1.2 (git+https://github.com/aya-rs/aya?rev=a7e3e6d4d90767d40a015a473a7d0623031ff6ee)",
  "aya-log",
+ "base64 0.21.7",
  "clap",
  "common-build",
  "env_logger",
@@ -1392,7 +1393,9 @@ dependencies = [
  "libc",
  "log",
  "mermin-common",
+ "network-types",
  "serde",
+ "sha1",
  "socket2 0.5.10",
  "tokio",
  "tracing",
@@ -1402,6 +1405,9 @@ dependencies = [
 [[package]]
 name = "mermin-common"
 version = "0.1.0"
+dependencies = [
+ "network-types",
+]
 
 [[package]]
 name = "mermin-ebpf"
@@ -2092,6 +2098,17 @@ dependencies = [
  "ryu",
  "serde",
  "unsafe-libyaml",
+]
+
+[[package]]
+name = "sha1"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3bf829a2d51ab4a5ddf1352d8470c140cadc8301b2ae1789db023f01cedd6ba"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest",
 ]
 
 [[package]]

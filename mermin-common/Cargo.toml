@@ -9,6 +9,7 @@ license.workspace = true
 default = []
 
 [dependencies]
+network-types = { path = "../network-types" }
 
 [lib]
 path = "src/lib.rs"

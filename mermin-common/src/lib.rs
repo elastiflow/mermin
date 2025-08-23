@@ -1,5 +1,7 @@
 #![no_std]
 
+use network_types::ip::IpProto;
+
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum IpAddrType {
@@ -42,7 +44,7 @@ pub struct PacketMeta {
     /// Indicates whether the flow record uses IPv4 or IPv6 addressing.
     pub ip_addr_type: IpAddrType,
     /// Network protocol identifier (e.g., TCP = 6, UDP = 17).
-    pub proto: u8,
+    pub proto: IpProto,
 }
 
 impl PacketMeta {
@@ -119,7 +121,7 @@ mod tests {
             src_port: src_port.to_be_bytes(),
             dst_port: dst_port.to_be_bytes(),
             ip_addr_type: Ipv4,
-            proto: 6,
+            proto: IpProto::Tcp,
         };
 
         // Test field access
@@ -131,6 +133,6 @@ mod tests {
         assert_eq!(record.src_port(), 12345);
         assert_eq!(record.dst_port(), 80);
         assert_eq!(record.ip_addr_type, Ipv4);
-        assert_eq!(record.proto, 6);
+        assert_eq!(record.proto, IpProto::Tcp);
     }
 }

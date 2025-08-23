@@ -300,9 +300,10 @@ impl Ipv6Hdr {
 /// Protocol which is encapsulated in the IPv4 packet.
 /// <https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml>
 #[repr(u8)]
-#[derive(PartialEq, Eq, Debug, Copy, Clone)]
+#[derive(Default, PartialEq, Eq, Debug, Copy, Clone)]
 pub enum IpProto {
     /// IPv6 Hop-by-Hop Option
+    #[default]
     HopOpt = 0,
     /// Internet Control Message
     Icmp = 1,
@@ -600,6 +601,323 @@ pub enum IpProto {
     Reserved = 255,
 }
 
+impl IpProto {
+    /// Returns human-readable string representation of the protocol
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            IpProto::HopOpt => "HOPOPT",
+            IpProto::Icmp => "ICMP",
+            IpProto::Igmp => "IGMP",
+            IpProto::Ggp => "GGP",
+            IpProto::Ipv4 => "IPv4",
+            IpProto::Stream => "STREAM",
+            IpProto::Tcp => "TCP",
+            IpProto::Cbt => "CBT",
+            IpProto::Egp => "EGP",
+            IpProto::Igp => "IGP",
+            IpProto::BbnRccMon => "BBN-RCC-MON",
+            IpProto::NvpII => "NVP-II",
+            IpProto::Pup => "PUP",
+            IpProto::Argus => "ARGUS",
+            IpProto::Emcon => "EMCON",
+            IpProto::Xnet => "XNET",
+            IpProto::Chaos => "CHAOS",
+            IpProto::Udp => "UDP",
+            IpProto::Mux => "MUX",
+            IpProto::DcnMeas => "DCN-MEAS",
+            IpProto::Hmp => "HMP",
+            IpProto::Prm => "PRM",
+            IpProto::Idp => "IDP",
+            IpProto::Trunk1 => "TRUNK-1",
+            IpProto::Trunk2 => "TRUNK-2",
+            IpProto::Leaf1 => "LEAF-1",
+            IpProto::Leaf2 => "LEAF-2",
+            IpProto::Rdp => "RDP",
+            IpProto::Irtp => "IRTP",
+            IpProto::Tp4 => "TP4",
+            IpProto::Netblt => "NETBLT",
+            IpProto::MfeNsp => "MFE-NSP",
+            IpProto::MeritInp => "MERIT-INP",
+            IpProto::Dccp => "DCCP",
+            IpProto::ThirdPartyConnect => "3PC",
+            IpProto::Idpr => "IDPR",
+            IpProto::Xtp => "XTP",
+            IpProto::Ddp => "DDP",
+            IpProto::IdprCmtp => "IDPR-CMTP",
+            IpProto::TpPlusPlus => "TP++",
+            IpProto::Il => "IL",
+            IpProto::Ipv6 => "IPv6",
+            IpProto::Sdrp => "SDRP",
+            IpProto::Ipv6Route => "IPv6-Route",
+            IpProto::Ipv6Frag => "IPv6-Frag",
+            IpProto::Idrp => "IDRP",
+            IpProto::Rsvp => "RSVP",
+            IpProto::Gre => "GRE",
+            IpProto::Dsr => "DSR",
+            IpProto::Bna => "BNA",
+            IpProto::Esp => "ESP",
+            IpProto::Ah => "AH",
+            IpProto::Inlsp => "INLSP",
+            IpProto::Swipe => "SWIPE",
+            IpProto::Narp => "NARP",
+            IpProto::Mobile => "MOBILE",
+            IpProto::Tlsp => "TLSP",
+            IpProto::Skip => "SKIP",
+            IpProto::Ipv6Icmp => "ICMPv6",
+            IpProto::Ipv6NoNxt => "IPv6-NoNxt",
+            IpProto::Ipv6Opts => "IPv6-Opts",
+            IpProto::AnyHostInternal => "Any-Host-Internal",
+            IpProto::Cftp => "CFTP",
+            IpProto::AnyLocalNetwork => "Any-Local-Network",
+            IpProto::SatExpak => "SAT-EXPAK",
+            IpProto::Kryptolan => "KRYPTOLAN",
+            IpProto::Rvd => "RVD",
+            IpProto::Ippc => "IPPC",
+            IpProto::AnyDistributedFileSystem => "Any-Distributed-File-System",
+            IpProto::SatMon => "SAT-MON",
+            IpProto::Visa => "VISA",
+            IpProto::Ipcv => "IPCV",
+            IpProto::Cpnx => "CPNX",
+            IpProto::Cphb => "CPHB",
+            IpProto::Wsn => "WSN",
+            IpProto::Pvp => "PVP",
+            IpProto::BrSatMon => "BR-SAT-MON",
+            IpProto::SunNd => "SUN-ND",
+            IpProto::WbMon => "WB-MON",
+            IpProto::WbExpak => "WB-EXPAK",
+            IpProto::IsoIp => "ISO-IP",
+            IpProto::Vmtp => "VMTP",
+            IpProto::SecureVmtp => "SECURE-VMTP",
+            IpProto::Vines => "VINES",
+            IpProto::Ttp => "TTP",
+            IpProto::NsfnetIgp => "NSFNET-IGP",
+            IpProto::Dgp => "DGP",
+            IpProto::Tcf => "TCF",
+            IpProto::Eigrp => "EIGRP",
+            IpProto::Ospfigp => "OSPFIGP",
+            IpProto::SpriteRpc => "Sprite-RPC",
+            IpProto::Larp => "LARP",
+            IpProto::Mtp => "MTP",
+            IpProto::Ax25 => "AX.25",
+            IpProto::Ipip => "IPIP",
+            IpProto::Micp => "MICP",
+            IpProto::SccSp => "SCC-SP",
+            IpProto::Etherip => "ETHERIP",
+            IpProto::Encap => "ENCAP",
+            IpProto::AnyPrivateEncryptionScheme => "Any-Private-Encryption-Scheme",
+            IpProto::Gmtp => "GMTP",
+            IpProto::Ifmp => "IFMP",
+            IpProto::Pnni => "PNNI",
+            IpProto::Pim => "PIM",
+            IpProto::Aris => "ARIS",
+            IpProto::Scps => "SCPS",
+            IpProto::Qnx => "QNX",
+            IpProto::ActiveNetworks => "Active-Networks",
+            IpProto::IpComp => "IPComp",
+            IpProto::Snp => "SNP",
+            IpProto::CompaqPeer => "Compaq-Peer",
+            IpProto::IpxInIp => "IPX-in-IP",
+            IpProto::Vrrp => "VRRP",
+            IpProto::Pgm => "PGM",
+            IpProto::AnyZeroHopProtocol => "Any-0-hop-protocol",
+            IpProto::L2tp => "L2TP",
+            IpProto::Ddx => "DDX",
+            IpProto::Iatp => "IATP",
+            IpProto::Stp => "STP",
+            IpProto::Srp => "SRP",
+            IpProto::Uti => "UTI",
+            IpProto::Smp => "SMP",
+            IpProto::Sm => "SM",
+            IpProto::Ptp => "PTP",
+            IpProto::IsisOverIpv4 => "ISIS-over-IPv4",
+            IpProto::Fire => "FIRE",
+            IpProto::Crtp => "CRTP",
+            IpProto::Crudp => "CRUDP",
+            IpProto::Sscopmce => "SSCOPMCE",
+            IpProto::Iplt => "IPLT",
+            IpProto::Sps => "SPS",
+            IpProto::Pipe => "PIPE",
+            IpProto::Sctp => "SCTP",
+            IpProto::Fc => "FC",
+            IpProto::RsvpE2eIgnore => "RSVP-E2E-IGNORE",
+            IpProto::MobilityHeader => "Mobility-Header",
+            IpProto::UdpLite => "UDPLite",
+            IpProto::Mpls => "MPLS-in-IP",
+            IpProto::Manet => "MANET",
+            IpProto::Hip => "HIP",
+            IpProto::Shim6 => "Shim6",
+            IpProto::Wesp => "WESP",
+            IpProto::Rohc => "ROHC",
+            IpProto::EthernetInIpv4 => "Ethernet-in-IPv4",
+            IpProto::Aggfrag => "AGGFRAG",
+            IpProto::Test1 => "TEST1",
+            IpProto::Test2 => "TEST2",
+            IpProto::Reserved => "Reserved",
+        }
+    }
+
+    /// Try to create an IpProto from a u8 value
+    pub fn try_from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(IpProto::HopOpt),
+            1 => Some(IpProto::Icmp),
+            2 => Some(IpProto::Igmp),
+            3 => Some(IpProto::Ggp),
+            4 => Some(IpProto::Ipv4),
+            5 => Some(IpProto::Stream),
+            6 => Some(IpProto::Tcp),
+            7 => Some(IpProto::Cbt),
+            8 => Some(IpProto::Egp),
+            9 => Some(IpProto::Igp),
+            10 => Some(IpProto::BbnRccMon),
+            11 => Some(IpProto::NvpII),
+            12 => Some(IpProto::Pup),
+            13 => Some(IpProto::Argus),
+            14 => Some(IpProto::Emcon),
+            15 => Some(IpProto::Xnet),
+            16 => Some(IpProto::Chaos),
+            17 => Some(IpProto::Udp),
+            18 => Some(IpProto::Mux),
+            19 => Some(IpProto::DcnMeas),
+            20 => Some(IpProto::Hmp),
+            21 => Some(IpProto::Prm),
+            22 => Some(IpProto::Idp),
+            23 => Some(IpProto::Trunk1),
+            24 => Some(IpProto::Trunk2),
+            25 => Some(IpProto::Leaf1),
+            26 => Some(IpProto::Leaf2),
+            27 => Some(IpProto::Rdp),
+            28 => Some(IpProto::Irtp),
+            29 => Some(IpProto::Tp4),
+            30 => Some(IpProto::Netblt),
+            31 => Some(IpProto::MfeNsp),
+            32 => Some(IpProto::MeritInp),
+            33 => Some(IpProto::Dccp),
+            34 => Some(IpProto::ThirdPartyConnect),
+            35 => Some(IpProto::Idpr),
+            36 => Some(IpProto::Xtp),
+            37 => Some(IpProto::Ddp),
+            38 => Some(IpProto::IdprCmtp),
+            39 => Some(IpProto::TpPlusPlus),
+            40 => Some(IpProto::Il),
+            41 => Some(IpProto::Ipv6),
+            42 => Some(IpProto::Sdrp),
+            43 => Some(IpProto::Ipv6Route),
+            44 => Some(IpProto::Ipv6Frag),
+            45 => Some(IpProto::Idrp),
+            46 => Some(IpProto::Rsvp),
+            47 => Some(IpProto::Gre),
+            48 => Some(IpProto::Dsr),
+            49 => Some(IpProto::Bna),
+            50 => Some(IpProto::Esp),
+            51 => Some(IpProto::Ah),
+            52 => Some(IpProto::Inlsp),
+            53 => Some(IpProto::Swipe),
+            54 => Some(IpProto::Narp),
+            55 => Some(IpProto::Mobile),
+            56 => Some(IpProto::Tlsp),
+            57 => Some(IpProto::Skip),
+            58 => Some(IpProto::Ipv6Icmp),
+            59 => Some(IpProto::Ipv6NoNxt),
+            60 => Some(IpProto::Ipv6Opts),
+            61 => Some(IpProto::AnyHostInternal),
+            62 => Some(IpProto::Cftp),
+            63 => Some(IpProto::AnyLocalNetwork),
+            64 => Some(IpProto::SatExpak),
+            65 => Some(IpProto::Kryptolan),
+            66 => Some(IpProto::Rvd),
+            67 => Some(IpProto::Ippc),
+            68 => Some(IpProto::AnyDistributedFileSystem),
+            69 => Some(IpProto::SatMon),
+            70 => Some(IpProto::Visa),
+            71 => Some(IpProto::Ipcv),
+            72 => Some(IpProto::Cpnx),
+            73 => Some(IpProto::Cphb),
+            74 => Some(IpProto::Wsn),
+            75 => Some(IpProto::Pvp),
+            76 => Some(IpProto::BrSatMon),
+            77 => Some(IpProto::SunNd),
+            78 => Some(IpProto::WbMon),
+            79 => Some(IpProto::WbExpak),
+            80 => Some(IpProto::IsoIp),
+            81 => Some(IpProto::Vmtp),
+            82 => Some(IpProto::SecureVmtp),
+            83 => Some(IpProto::Vines),
+            84 => Some(IpProto::Ttp),
+            85 => Some(IpProto::NsfnetIgp),
+            86 => Some(IpProto::Dgp),
+            87 => Some(IpProto::Tcf),
+            88 => Some(IpProto::Eigrp),
+            89 => Some(IpProto::Ospfigp),
+            90 => Some(IpProto::SpriteRpc),
+            91 => Some(IpProto::Larp),
+            92 => Some(IpProto::Mtp),
+            93 => Some(IpProto::Ax25),
+            94 => Some(IpProto::Ipip),
+            95 => Some(IpProto::Micp),
+            96 => Some(IpProto::SccSp),
+            97 => Some(IpProto::Etherip),
+            98 => Some(IpProto::Encap),
+            99 => Some(IpProto::AnyPrivateEncryptionScheme),
+            100 => Some(IpProto::Gmtp),
+            101 => Some(IpProto::Ifmp),
+            102 => Some(IpProto::Pnni),
+            103 => Some(IpProto::Pim),
+            104 => Some(IpProto::Aris),
+            105 => Some(IpProto::Scps),
+            106 => Some(IpProto::Qnx),
+            107 => Some(IpProto::ActiveNetworks),
+            108 => Some(IpProto::IpComp),
+            109 => Some(IpProto::Snp),
+            110 => Some(IpProto::CompaqPeer),
+            111 => Some(IpProto::IpxInIp),
+            112 => Some(IpProto::Vrrp),
+            113 => Some(IpProto::Pgm),
+            114 => Some(IpProto::AnyZeroHopProtocol),
+            115 => Some(IpProto::L2tp),
+            116 => Some(IpProto::Ddx),
+            117 => Some(IpProto::Iatp),
+            118 => Some(IpProto::Stp),
+            119 => Some(IpProto::Srp),
+            120 => Some(IpProto::Uti),
+            121 => Some(IpProto::Smp),
+            122 => Some(IpProto::Sm),
+            123 => Some(IpProto::Ptp),
+            124 => Some(IpProto::IsisOverIpv4),
+            125 => Some(IpProto::Fire),
+            126 => Some(IpProto::Crtp),
+            127 => Some(IpProto::Crudp),
+            128 => Some(IpProto::Sscopmce),
+            129 => Some(IpProto::Iplt),
+            130 => Some(IpProto::Sps),
+            131 => Some(IpProto::Pipe),
+            132 => Some(IpProto::Sctp),
+            133 => Some(IpProto::Fc),
+            134 => Some(IpProto::RsvpE2eIgnore),
+            135 => Some(IpProto::MobilityHeader),
+            136 => Some(IpProto::UdpLite),
+            137 => Some(IpProto::Mpls),
+            138 => Some(IpProto::Manet),
+            139 => Some(IpProto::Hip),
+            140 => Some(IpProto::Shim6),
+            141 => Some(IpProto::Wesp),
+            142 => Some(IpProto::Rohc),
+            143 => Some(IpProto::EthernetInIpv4),
+            144 => Some(IpProto::Aggfrag),
+            253 => Some(IpProto::Test1),
+            254 => Some(IpProto::Test2),
+            255 => Some(IpProto::Reserved),
+            _ => None,
+        }
+    }
+}
+
+impl core::fmt::Display for IpProto {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use core::net::{Ipv4Addr, Ipv6Addr};
@@ -787,6 +1105,37 @@ mod tests {
         assert_eq!(IpProto::Udp as u8, 17);
         assert_eq!(IpProto::Icmp as u8, 1);
         assert_eq!(IpProto::Ipv6Icmp as u8, 58);
+    }
+
+    #[test]
+    fn test_ip_proto_as_str() {
+        assert_eq!(IpProto::Tcp.as_str(), "TCP");
+        assert_eq!(IpProto::Udp.as_str(), "UDP");
+        assert_eq!(IpProto::Icmp.as_str(), "ICMP");
+        assert_eq!(IpProto::Ipv6Icmp.as_str(), "ICMPv6");
+        assert_eq!(IpProto::HopOpt.as_str(), "HOPOPT");
+        assert_eq!(IpProto::Esp.as_str(), "ESP");
+        assert_eq!(IpProto::Ah.as_str(), "AH");
+        assert_eq!(IpProto::Gre.as_str(), "GRE");
+        assert_eq!(IpProto::Sctp.as_str(), "SCTP");
+        assert_eq!(IpProto::Reserved.as_str(), "Reserved");
+    }
+
+    #[test]
+    fn test_ip_proto_try_from_u8() {
+        assert_eq!(IpProto::try_from_u8(6), Some(IpProto::Tcp));
+        assert_eq!(IpProto::try_from_u8(17), Some(IpProto::Udp));
+        assert_eq!(IpProto::try_from_u8(1), Some(IpProto::Icmp));
+        assert_eq!(IpProto::try_from_u8(58), Some(IpProto::Ipv6Icmp));
+        assert_eq!(IpProto::try_from_u8(0), Some(IpProto::HopOpt));
+        assert_eq!(IpProto::try_from_u8(50), Some(IpProto::Esp));
+        assert_eq!(IpProto::try_from_u8(51), Some(IpProto::Ah));
+        assert_eq!(IpProto::try_from_u8(132), Some(IpProto::Sctp));
+        assert_eq!(IpProto::try_from_u8(255), Some(IpProto::Reserved));
+
+        // Test invalid values
+        assert_eq!(IpProto::try_from_u8(200), None);
+        assert_eq!(IpProto::try_from_u8(145), None);
     }
 
     #[test]

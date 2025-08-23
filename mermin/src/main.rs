@@ -1,7 +1,9 @@
+mod community_id;
+mod k8s;
 mod runtime;
 
 use std::{
-    net::{Ipv4Addr, Ipv6Addr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::Arc,
 };
 
@@ -12,12 +14,10 @@ use aya::{
 };
 use k8s::resource_parser;
 use log::{debug, info, warn};
-use mermin_common::PacketMeta;
+use mermin_common::{IpAddrType, PacketMeta};
 use tokio::signal;
 
-mod k8s;
-
-use crate::runtime::conf::Config;
+use crate::{community_id::CommunityIdGenerator, runtime::conf::Config};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -29,6 +29,7 @@ async fn main() -> anyhow::Result<()> {
     // TODO: do not reload global configuration found in CLI
     let runtime = runtime::Runtime::new()?;
     let runtime::Runtime { config, .. } = runtime;
+    let community_id_generator = CommunityIdGenerator::new(0);
 
     // TODO: switch to using tracing for logging and allow users to configure the log level via conf
     env_logger::Builder::from_default_env()
@@ -102,35 +103,43 @@ async fn main() -> anyhow::Result<()> {
                 Some(bytes) => {
                     let event: PacketMeta =
                         unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const PacketMeta) };
-                    let protocol_name = match event.proto {
-                        1 => "ICMP",
-                        6 => "TCP",
-                        17 => "UDP",
-                        58 => "ICMPv6",
-                        _ => "Other",
+                    let community_id = match event.ip_addr_type {
+                        IpAddrType::Ipv4 => community_id_generator.generate(
+                            IpAddr::V4(Ipv4Addr::from(event.src_ipv4_addr)),
+                            IpAddr::V4(Ipv4Addr::from(event.dst_ipv4_addr)),
+                            u16::from_be_bytes(event.src_port),
+                            u16::from_be_bytes(event.dst_port),
+                            event.proto,
+                        ),
+                        IpAddrType::Ipv6 => community_id_generator.generate(
+                            IpAddr::V6(Ipv6Addr::from(event.src_ipv6_addr)),
+                            IpAddr::V6(Ipv6Addr::from(event.dst_ipv6_addr)),
+                            u16::from_be_bytes(event.src_port),
+                            u16::from_be_bytes(event.dst_port),
+                            event.proto,
+                        ),
                     };
 
-                    // Log differently for ICMP vs port-based protocols
-                    match event.proto {
-                        1 | 58 => {
+                    match event.ip_addr_type {
+                        IpAddrType::Ipv4 => {
                             info!(
-                                "Received {} event: Src IPV6: {}, Dst IPV6: {}, Src IPV4: {}, Dst IPV4: {}, L3 Octect Count: {}",
-                                protocol_name,
-                                Ipv6Addr::from(event.src_ipv6_addr),
-                                Ipv6Addr::from(event.dst_ipv6_addr),
+                                "Received {} packet: Community ID: {}, Src IPv4: {}, Dst IPv4: {}, L3 Octet Count: {}, Src Port: {}, Dst Port: {}",
+                                event.proto,
+                                community_id,
                                 Ipv4Addr::from(event.src_ipv4_addr),
                                 Ipv4Addr::from(event.dst_ipv4_addr),
                                 event.l3_octet_count,
+                                u16::from_be_bytes(event.src_port),
+                                u16::from_be_bytes(event.dst_port),
                             );
                         }
-                        _ => {
+                        IpAddrType::Ipv6 => {
                             info!(
-                                "Received {} event: Src IPV6: {}, Dst IPV6: {}, Src IPV4: {}, Dst IPV4: {}, L3 Octect Count: {}, Src Port: {}, Dst Port: {}",
-                                protocol_name,
+                                "Received {} packet: Community ID: {}, Src IPv6: {}, Dst IPv6: {}, L3 Octet Count: {}, Src Port: {}, Dst Port: {}",
+                                event.proto,
+                                community_id,
                                 Ipv6Addr::from(event.src_ipv6_addr),
                                 Ipv6Addr::from(event.dst_ipv6_addr),
-                                Ipv4Addr::from(event.src_ipv4_addr),
-                                Ipv4Addr::from(event.dst_ipv4_addr),
                                 event.l3_octet_count,
                                 u16::from_be_bytes(event.src_port),
                                 u16::from_be_bytes(event.dst_port),
