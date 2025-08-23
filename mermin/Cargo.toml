@@ -11,6 +11,7 @@ socket2 = "0.5"
 
 [dependencies]
 mermin-common = { path = "../mermin-common", features = [] }
+network-types = { path = "../network-types" }
 
 anyhow = { workspace = true, default-features = true }
 aya = { workspace = true, features = ["async_tokio"] }
@@ -38,6 +39,8 @@ serde = { version = "1.0.219", features = ["derive"] }
 tracing-subscriber = "0.3.19"
 tracing = "0.1.41"
 humantime = "2.2.0"
+base64 = "0.21"
+sha1 = "0.10"
 [build-dependencies]
 anyhow = { workspace = true }
 aya-build = { workspace = true }
