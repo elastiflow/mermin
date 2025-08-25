@@ -19,6 +19,10 @@ use network_types::{
     hop::HopOptHdr,
     icmp::IcmpHdr,
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
+    route::{
+        Ipv6RoutingHeader, RplSourceFixedHeader,
+        Type2FixedHeader,
+    },
     tcp::TcpHdr,
     udp::UdpHdr,
 };
@@ -291,6 +295,44 @@ impl Parser {
 
         Ok(())
     }
+
+    //Taken from the RFC, should we implement any of this logic here?
+    //
+    // If, while processing a received packet, a node encounters a Routing
+    // header with an unrecognized Routing Type value, the required behavior
+    // of the node depends on the value of the Segments Left field, as
+    // follows:
+    //
+    // If Segments Left is zero, the node must ignore the Routing header
+    // and proceed to process the next header in the packet, whose type
+    // is identified by the Next Header field in the Routing header.
+    //
+    // If Segments Left is non-zero, the node must discard the packet and
+    // send an ICMP Parameter Problem, Code 0, message to the packet's
+    // Source Address, pointing to the unrecognized Routing Type.
+    /// Parses the IPv6 routing header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_routing_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        use network_types::parse_ipv6_routing_hdr;
+        let mut offset = self.offset;
+        let routing_header =
+            parse_ipv6_routing_hdr!(ctx, offset).map_err(|_| Error::OutOfBounds)?;
+
+        // Update the parser offset to the end of the routing header
+        self.offset = offset;
+
+        // Extract the next header from the routing header and set it for continued parsing
+        //TODO can parse out other type specific fields here
+        let next_hdr = match &routing_header {
+            Ipv6RoutingHeader::Type2(hdr) => hdr.gen_route.next_hdr(),
+            Ipv6RoutingHeader::RplSourceRoute(hdr) => hdr.gen_route.next_hdr(),
+            Ipv6RoutingHeader::Unknown(hdr) => hdr.next_hdr(),
+        };
+
+        // Set the next header type for continued parsing
+        self.next_hdr = HeaderType::Proto(next_hdr);
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -328,6 +370,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx),
             HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
             HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_routing_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
             HeaderType::Proto(proto) => {
                 debug!(
@@ -401,6 +444,17 @@ mod host_test_shim {
             let ptr = unsafe { self.data.as_ptr().add(offset) as *const T };
             let value = unsafe { *ptr };
             Ok(value)
+        }
+        pub fn load_bytes(&self, offset: usize, buf: &mut [u8]) -> Result<usize, ()> {
+            if offset >= self.data.len() {
+                return Ok(0);
+            }
+
+            let available = self.data.len() - offset;
+            let to_copy = core::cmp::min(available, buf.len());
+
+            buf[..to_copy].copy_from_slice(&self.data[offset..offset + to_copy]);
+            Ok(to_copy)
         }
     }
 
@@ -633,6 +687,60 @@ mod tests {
         packet.extend_from_slice(&[0x56, 0x78]);
         // Sequence Number (2 bytes)
         packet.extend_from_slice(&[0x9a, 0xbc]);
+
+        packet
+    }
+
+    // Helper function to create a Type2 routing header test packet
+    // Type2 routing header is 24 bytes total (4 bytes generic + 20 bytes fixed)
+    fn create_type2_routing_test_packet(next: IpProto) -> Vec<u8> {
+        let mut packet = Vec::with_capacity(24);
+
+        // Generic routing header (4 bytes)
+        packet.push(next as u8); // Next Header
+        packet.push(2); // Hdr Ext Len (2 * 8 = 16 bytes after first 8, total 24)
+        packet.push(2); // Routing Type (Type2)
+        packet.push(1); // Segments Left (always 1 for Type2)
+
+        // Type2 fixed header (20 bytes)
+        // Reserved (4 bytes)
+        packet.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+        // Home Address (16 bytes) - 2001:db8::dead:beef
+        packet.extend_from_slice(&[
+            0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xde, 0xad,
+            0xbe, 0xef,
+        ]);
+
+        packet
+    }
+
+    // Helper function to create an RPL Source Route header test packet
+    // This creates a minimal RPL header with 2 addresses
+    fn create_rpl_source_route_test_packet(next: IpProto) -> Vec<u8> {
+        let mut packet = Vec::new();
+
+        // Generic routing header (4 bytes)
+        packet.push(next as u8); // Next Header
+        packet.push(4); // Hdr Ext Len (4 * 8 = 32 bytes after first 8, total 40)
+        packet.push(3); // Routing Type (RplSourceRoute)
+        packet.push(2); // Segments Left
+
+        // RPL Source fixed header (4 bytes)
+        packet.push(0x24); // CmprI = 2, CmprE = 4 (0x24)
+        packet.push(0x60); // Pad = 6 (0x60), Reserved bits = 0
+        packet.extend_from_slice(&[0x00, 0x00]); // Reserved (remaining 2 bytes)
+
+        // Address data (32 bytes total to match hdr_ext_len)
+        // First address (14 bytes, compressed by CmprI=2)
+        packet.extend_from_slice(&[
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        ]);
+        // Last address (12 bytes, compressed by CmprE=4)
+        packet.extend_from_slice(&[
+            0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c,
+        ]);
+        // Padding (6 bytes)
+        packet.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
 
         packet
     }
@@ -1103,5 +1211,91 @@ mod tests {
             ]
         ); // 2001:db8::2
         assert_eq!(parser.packet_meta.proto, IpProto::Ipv6Icmp); // ICMPv6
+    }
+
+    // Test parse_routing_header function with Type2 routing header
+    #[test]
+    fn test_parse_routing_header_type2_tcp() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let packet = create_type2_routing_test_packet(IpProto::Tcp);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 24); // Type2 routing header length
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    // Test parse_routing_header function with Type2 routing header mapping to UDP
+    #[test]
+    fn test_parse_routing_header_type2_udp() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let packet = create_type2_routing_test_packet(IpProto::Udp);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 24); // Type2 routing header length
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
+    }
+
+    // Test parse_routing_header function with Type2 routing header with insufficient buffer
+    #[test]
+    fn test_parse_routing_header_type2_out_of_bounds() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        // Provide fewer than 24 bytes (incomplete Type2 header)
+        let packet = vec![0x06, 0x02, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00];
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+        assert!(matches!(result, Err(Error::OutOfBounds)));
+    }
+
+    // Test parse_routing_header function with RPL Source Route header
+    #[test]
+    fn test_parse_routing_header_rpl_source_route_tcp() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let packet = create_rpl_source_route_test_packet(IpProto::Tcp);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 40); // RPL Source Route header length (8 + 32)
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    // Test parse_routing_header function with RPL Source Route header mapping to UDP
+    #[test]
+    fn test_parse_routing_header_rpl_source_route_udp() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let packet = create_rpl_source_route_test_packet(IpProto::Udp);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 40); // RPL Source Route header length (8 + 32)
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
+    }
+
+    // Test parse_routing_header function with RPL Source Route header with insufficient buffer
+    #[test]
+    fn test_parse_routing_header_rpl_source_route_out_of_bounds() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        // Provide fewer bytes than required for RPL header
+        let packet = vec![0x06, 0x04, 0x03, 0x02, 0x24, 0x60];
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+        assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 }
