@@ -472,6 +472,172 @@ This command provides a comprehensive overview of all mermin programs and their 
 
 -----
 
+## 🔍 Inspecting eBPF Programs for Network-Types Integration Tests
+
+This section covers how to inspect and analyze the eBPF programs used in the network-types integration test suite. These programs are TC classifiers that parse various network protocol headers and are essential for testing network packet parsing functionality.
+
+### Prerequisites
+
+The network-types integration tests require the mermin-builder container environment due to eBPF compilation requirements:
+
+```shell
+# Build the containerized environment
+docker build -t mermin-builder:latest --target builder .
+```
+
+### Building the Integration Test eBPF Programs
+
+First, build the eBPF programs for the integration tests:
+
+```shell
+cd network-types/tests
+make build
+```
+
+This compiles the eBPF programs targeting the `bpfel-unknown-none` architecture.
+
+### Inspecting eBPF Programs Using bpftool
+
+#### Method 1: Direct Binary Analysis (Recommended)
+
+Since the integration test eBPF programs may not load directly due to libbpf version compatibility, you can analyze the compiled binary directly:
+
+```shell
+# Get the total instruction count
+docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump -d /app/target/debug/build/integration-*/out/integration-ebpf/bpfel-unknown-none/release/integration-ebpf-test | grep -E '^[[:space:]]*[0-9a-f]+:' | wc -l"
+
+# Get the last instruction to confirm the range
+docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump -d /app/target/debug/build/integration-*/out/integration-ebpf/bpfel-unknown-none/release/integration-ebpf-test | grep -E '^[[:space:]]*[0-9a-f]+:' | tail -1"
+```
+
+#### Method 2: Runtime Inspection (If Programs Load)
+
+If the eBPF programs get loaded during test execution, you can inspect them with bpftool:
+
+```shell
+# Run the test and capture the eBPF program
+cd network-types/tests
+timeout 20s cargo test -p integration -- --test-threads=1 --nocapture & sleep 8
+
+# List eBPF programs (excluding main mermin programs)
+docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "bpftool prog list | grep -v mermin | grep -E '(sched_cls|tc|integration|test)'"
+
+# Get detailed information about a specific program
+docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "bpftool prog show id <PROGRAM_ID>"
+```
+
+### Understanding the Integration Test eBPF Programs
+
+#### Program Structure
+
+The integration test eBPF programs are TC classifiers that:
+
+* **Function**: `integration_test` - Main entry point
+* **Type**: `sched_cls` (TC classifier)
+* **Purpose**: Parse network packet headers for various protocols
+* **Protocols Supported**: Ethernet, IPv4/IPv6, TCP/UDP, AH, ESP, Hop-by-Hop options, Geneve
+
+#### Key Components
+
+1. **Main Function**: Starts at instruction 0, handles packet type detection
+2. **Protocol Parsers**: Individual parsing logic for each supported protocol
+3. **PerfEventArray Map**: `OUT_DATA` map for outputting parsed headers
+4. **Error Handling**: Graceful fallbacks for unsupported packet types
+
+#### Instruction Count Analysis
+
+Based on the current implementation, the integration test eBPF program contains:
+
+* **Total Instructions**: 1,367 (0-1366)
+* **Main Function Range**: 0-1366
+* **Architecture**: eBPF (bpfel-unknown-none)
+* **Build Profile**: Release
+
+### Advanced Analysis Techniques
+
+#### Disassembly Analysis
+
+```shell
+# View the main function start
+docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump -d /app/target/debug/build/integration-*/out/integration-ebpf/bpfel-unknown-none/release/integration-ebpf-test | grep -A 10 -B 5 'integration_test'"
+
+# View the end of the function
+docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump -d /app/target/debug/build/integration-*/out/integration-ebpf/bpfel-unknown-none/release/integration-ebpf-test | tail -20"
+```
+
+#### Protocol-Specific Analysis
+
+```shell
+# Find protocol parsing sections
+docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump -d /app/target/debug/build/integration-*/out/integration-ebpf/bpfel-unknown-none/release/integration-ebpf-test | grep -A 5 -B 5 'PacketType'"
+```
+
+### Performance and Optimization
+
+#### Instruction Count Monitoring
+
+Track instruction count changes during development:
+
+```shell
+# Before optimization
+make build
+docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump -d /app/target/debug/build/integration-*/out/integration-ebpf/bpfel-unknown-none/release/integration-ebpf-test | grep -E '^[[:space:]]*[0-9a-f]+:' | wc -l"
+
+# After optimization - compare the counts
+```
+
+#### Memory Usage Analysis
+
+```shell
+# Check binary size
+docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "ls -lh /app/target/debug/build/integration-*/out/integration-ebpf/bpfel-unknown-none/release/integration-ebpf-test"
+
+# Analyze section sizes
+docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump -h /app/target/debug/build/integration-*/out/integration-ebpf/bpfel-unknown-none/release/integration-ebpf-test"
+```
+
+### Troubleshooting Integration Test eBPF Programs
+
+#### Common Issues
+
+1. **libbpf Compatibility**: Modern libbpf versions may not support legacy map definitions
+2. **Instruction Limits**: Ensure programs stay within eBPF instruction limits
+3. **Map Access**: Verify PerfEventArray map configuration
+
+#### Debugging Commands
+
+```shell
+# Check for compilation errors
+make build 2>&1 | grep -i error
+
+# Verify binary format
+docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "file /app/target/debug/build/integration-*/out/integration-ebpf/bpfel-unknown-none/release/integration-ebpf-test"
+
+# Analyze program structure
+docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump -d /app/target/debug/build/integration-*/out/integration-ebpf/bpfel-unknown-none/release/integration-ebpf-test | head -50"
+```
+
+### Integration with CI/CD
+
+You can integrate eBPF program analysis into your CI/CD pipeline:
+
+```yaml
+# Example GitHub Actions step
+- name: Analyze eBPF Programs
+  run: |
+    docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "
+      cd /app/network-types/tests
+      make build
+      echo '=== eBPF Program Analysis ==='
+      llvm-objdump -d /app/target/debug/build/integration-*/out/integration-ebpf/bpfel-unknown-none/release/integration-ebpf-test | grep -E '^[[:space:]]*[0-9a-f]+:' | wc -l
+      echo 'Instructions: $(llvm-objdump -d /app/target/debug/build/integration-*/out/integration-ebpf/bpfel-unknown-none/release/integration-ebpf-test | grep -E "^[[:space:]]*[0-9a-f]+:" | wc -l)'
+    "
+```
+
+This comprehensive approach ensures you can monitor and optimize your integration test eBPF programs throughout the development lifecycle.
+
+-----
+
 ## 📜 License
 
 With the exception of eBPF code, mermin is distributed under the terms

@@ -16,6 +16,6 @@ path = "src/main.rs"
 test = false
 
 [build-dependencies]
-aya-build = "0.1"
+aya-build = { workspace = true }
 which = { workspace = true }
 
