@@ -8,6 +8,8 @@ mod ipv6;
 mod tcp;
 mod udp;
 mod utils;
+mod rpl_source_route;
+mod type2;
 
 // Import the helper functions and macros
 use crate::{
@@ -18,7 +20,9 @@ use crate::{
     hop::{create_hop_test_packet, verify_hop_header},
     ipv4::{create_ipv4_test_packet, verify_ipv4_header},
     ipv6::{create_ipv6_test_packet, verify_ipv6_header},
+    rpl_source_route::{create_rpl_source_route_test_packet, verify_rpl_source_route_header},
     tcp::{create_tcp_test_packet, verify_tcp_header},
+    type2::{create_type2_test_packet, verify_type2_header},
     udp::{create_udp_test_packet, verify_udp_header},
 };
 
@@ -97,4 +101,20 @@ define_header_test!(
     PacketType::Geneve,
     create_geneve_test_packet,
     verify_geneve_header
+);
+
+define_header_test!(
+    test_parses_rpl_source_route_header,
+    RplSourceRouteHeader,
+    PacketType::RplSourceRoute,
+    create_rpl_source_route_test_packet,
+    verify_rpl_source_route_header
+);
+
+define_header_test!(
+    test_parses_type2_header,
+    Type2RoutingHeader,
+    PacketType::Type2,
+    create_type2_test_packet,
+    verify_type2_header
 );

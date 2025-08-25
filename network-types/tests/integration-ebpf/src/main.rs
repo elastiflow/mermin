@@ -16,6 +16,8 @@ use network_types::{
     geneve::GeneveHdr,
     hop::HopOptHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
+    route::{Ipv6RoutingHeader, RplSourceFixedHeader, Type2FixedHeader},
+    parse_ipv6_routing_hdr,
     tcp::TcpHdr,
     udp::UdpHdr,
 };
@@ -34,6 +36,8 @@ fn u8_to_packet_type(val: u8) -> Option<PacketType> {
         7 => Some(PacketType::Esp),
         8 => Some(PacketType::Hop),
         9 => Some(PacketType::Geneve),
+        10 => Some(PacketType::RplSourceRoute),
+        11 => Some(PacketType::Type2),
         _ => None,
     }
 }
@@ -131,6 +135,30 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             ParsedHeader {
                 type_: PacketType::Geneve,
                 data: HeaderUnion { geneve: header },
+            }
+        }
+        PacketType::RplSourceRoute => {
+            let mut offset = data_offset;
+            let routing_header = parse_ipv6_routing_hdr!(ctx, offset).map_err(|_| TC_ACT_SHOT)?;
+            match routing_header {
+                Ipv6RoutingHeader::RplSourceRoute(rpl_header) => ParsedHeader {
+                    type_: PacketType::RplSourceRoute,
+                    data: HeaderUnion { rpl: rpl_header },
+                },
+                _ => return Err(TC_ACT_SHOT), // Unexpected routing header type
+            }
+        }
+        PacketType::Type2 => {
+            let mut offset = data_offset;
+            let routing_header = parse_ipv6_routing_hdr!(ctx, offset).map_err(|_| TC_ACT_SHOT)?;
+            match routing_header {
+                Ipv6RoutingHeader::Type2(type2_header) => ParsedHeader {
+                    type_: PacketType::Type2,
+                    data: HeaderUnion {
+                        type2: type2_header,
+                    },
+                },
+                _ => return Err(TC_ACT_SHOT), // Unexpected routing header type
             }
         }
     };
