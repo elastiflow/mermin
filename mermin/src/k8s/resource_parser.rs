@@ -59,6 +59,7 @@ pub enum EnrichedInfo {
 #[derive(Debug, Default)]
 #[allow(dead_code)]
 pub struct EnrichedFlowData {
+    pub id: String,
     pub source: Option<EnrichedInfo>,
     pub destination: Option<EnrichedInfo>,
 }
@@ -142,6 +143,7 @@ async fn enrich_side(ip: IpAddr, attributor: &Attributor) -> Option<EnrichedInfo
 pub async fn parse_packet(
     packet: &PacketMeta,
     attributor: &Attributor,
+    community_id: String,
 ) -> Result<EnrichedFlowData> {
     let (src_ip, dst_ip) = match packet.ip_addr_type {
         IpAddrType::Ipv4 => (
@@ -160,6 +162,7 @@ pub async fn parse_packet(
     );
 
     Ok(EnrichedFlowData {
+        id: community_id,
         source: source_info,
         destination: destination_info,
     })

@@ -16,8 +16,9 @@ use log::{debug, info, warn};
 use mermin_common::{IpAddrType, PacketMeta};
 use tokio::signal;
 
-use crate::{community_id::CommunityIdGenerator, runtime::conf::Config};
-use crate::k8s::resource_parser::parse_packet;
+use crate::{
+    community_id::CommunityIdGenerator, k8s::resource_parser::parse_packet, runtime::conf::Config,
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -147,10 +148,12 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                     if let Some(client) = &kube_client_clone {
-                        let enriched_packet = parse_packet(&event, client).await;
+                        let enriched_packet = parse_packet(&event, client, community_id).await;
                         info!("Enriched packet: {enriched_packet:?}");
                     } else {
-                        info!("Skipping packet enrichment: Kubernetes client not available");
+                        info!(
+                            "Skipping packet enrichment for Community ID {community_id}: Kubernetes client not available"
+                        );
                     }
                 }
                 None => {
