@@ -7,7 +7,7 @@
 // - Support for Pods, Nodes, key workload types (Deployments, StatefulSets, etc.).
 // - Network-related resources like Services, Ingresses and NetworkPolicies.
 
-use std::{collections::HashMap, fmt::Debug, net::Ipv4Addr, sync::Arc};
+use std::{collections::HashMap, fmt::Debug, net::IpAddr, sync::Arc};
 
 use anyhow::Result;
 use futures::TryStreamExt;
@@ -19,7 +19,7 @@ use k8s_openapi::api::{
     networking::v1::{Ingress, NetworkPolicy},
 };
 use kube::{
-    Client,
+    Client, Discovery,
     api::{Api, ListParams, Resource},
     runtime::reflector,
 };
@@ -206,6 +206,7 @@ pub struct Attributor {
     #[allow(dead_code)]
     pub client: Client,
     pub resource_store: ResourceStore,
+    pub discovery: Discovery,
 }
 
 impl Attributor {
@@ -213,14 +214,16 @@ impl Attributor {
     pub async fn new() -> Result<Self> {
         let client = Client::try_default().await?;
         let resource_store = ResourceStore::new(client.clone()).await?;
+        let discovery = Discovery::new(client.clone()).run().await?;
         Ok(Self {
             client,
             resource_store,
+            discovery,
         })
     }
 
     /// Looks up a Pod by its IP address.
-    pub async fn get_pod_by_ip(&self, ip: Ipv4Addr) -> Option<Arc<Pod>> {
+    pub async fn get_pod_by_ip(&self, ip: IpAddr) -> Option<Arc<Pod>> {
         let ip_str = ip.to_string();
         self.resource_store
             .pods
@@ -235,6 +238,32 @@ impl Attributor {
             .cloned()
     }
 
+    pub async fn get_node_by_ip(&self, ip: IpAddr) -> Option<Arc<Node>> {
+        let ip_str = ip.to_string();
+        self.resource_store
+            .nodes
+            .state()
+            .iter()
+            .find(|node| {
+                node.status
+                    .as_ref()
+                    .and_then(|status| status.addresses.as_ref())
+                    .is_some_and(|addresses| addresses.iter().any(|addr| addr.address == ip_str))
+            })
+            .cloned()
+    }
+
+    /// Looks up a Node by its name (to find a Pod's host).
+    pub async fn get_node_by_name(&self, name: &str) -> Option<Arc<Node>> {
+        self.resource_store
+            .nodes
+            .state()
+            .iter()
+            .find(|node| node.metadata.name.as_deref() == Some(name))
+            .cloned()
+    }
+
+    #[allow(dead_code)]
     /// Finds all Services whose selectors match the labels of a given Pod.
     pub fn get_services_for_pod(&self, pod: &Pod) -> Vec<Arc<Service>> {
         let pod_labels = match &pod.metadata.labels {
