@@ -96,7 +96,24 @@ async fn main() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow!("PACKETS map not present in the object"))?;
     let mut ring_buf = RingBuf::try_from(map)?;
 
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(PacketMeta, String)>(1024);
+
     let kube_client_clone = kube_client.clone();
+
+    tokio::spawn(async move {
+        while let Some((event, community_id)) = rx.recv().await {
+            info!("Received packet to parse for Community ID {community_id}");
+            if let Some(client) = &kube_client_clone {
+                let enriched_packet = parse_packet(&event, client, community_id).await;
+                info!("Enriched packet: {enriched_packet:?}");
+            } else {
+                info!(
+                    "Skipping packet enrichment for Community ID {community_id}: Kubernetes client not available"
+                );
+            }
+        }
+    });
+
     tokio::spawn(async move {
         info!("Userspace task started. Polling the ring buffer...");
         loop {
@@ -147,13 +164,9 @@ async fn main() -> anyhow::Result<()> {
                             );
                         }
                     }
-                    if let Some(client) = &kube_client_clone {
-                        let enriched_packet = parse_packet(&event, client, community_id).await;
-                        info!("Enriched packet: {enriched_packet:?}");
-                    } else {
-                        info!(
-                            "Skipping packet enrichment for Community ID {community_id}: Kubernetes client not available"
-                        );
+
+                    if let Err(e) = tx.send((event, community_id)).await {
+                        warn!("Failed to send packet to enrichment channel: {e}");
                     }
                 }
                 None => {

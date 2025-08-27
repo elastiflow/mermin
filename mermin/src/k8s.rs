@@ -19,12 +19,13 @@ use k8s_openapi::api::{
     networking::v1::{Ingress, NetworkPolicy},
 };
 use kube::{
-    Client, Discovery,
+    Client,
     api::{Api, ListParams, Resource},
     runtime::reflector,
 };
 use kube_runtime::{WatchStreamExt, watcher};
 use log::{debug, info, warn};
+use network_types::ip::IpProto;
 
 pub mod resource_parser;
 
@@ -206,7 +207,6 @@ pub struct Attributor {
     #[allow(dead_code)]
     pub client: Client,
     pub resource_store: ResourceStore,
-    pub discovery: Discovery,
 }
 
 impl Attributor {
@@ -214,11 +214,9 @@ impl Attributor {
     pub async fn new() -> Result<Self> {
         let client = Client::try_default().await?;
         let resource_store = ResourceStore::new(client.clone()).await?;
-        let discovery = Discovery::new(client.clone()).run().await?;
         Ok(Self {
             client,
             resource_store,
-            discovery,
         })
     }
 
@@ -253,6 +251,7 @@ impl Attributor {
             .cloned()
     }
 
+    #[allow(dead_code)]
     /// Looks up a Node by its name (to find a Pod's host).
     pub async fn get_node_by_name(&self, name: &str) -> Option<Arc<Node>> {
         self.resource_store
@@ -263,54 +262,146 @@ impl Attributor {
             .cloned()
     }
 
-    #[allow(dead_code)]
-    /// Finds all Services whose selectors match the labels of a given Pod.
-    pub fn get_services_for_pod(&self, pod: &Pod) -> Vec<Arc<Service>> {
-        let pod_labels = match &pod.metadata.labels {
-            Some(labels) => labels,
-            None => return Vec::new(),
-        };
-
+    /// Looks up a Service by an IP address.
+    ///
+    /// This method checks against the following fields:
+    /// - `spec.cluster_ip` and `spec.cluster_ips`
+    /// - `spec.external_ips`
+    /// - `spec.load_balancer_ip` (a user-requested IP)
+    /// - `status.load_balancer.ingress` (the actual provisioned IPs)
+    pub async fn get_service_by_ip(&self, ip: IpAddr) -> Option<Arc<Service>> {
+        let ip_str = ip.to_string();
         self.resource_store
             .services
             .state()
             .iter()
-            .filter(|service| {
+            .find(|service| {
+                let spec_match = service.spec.as_ref().is_some_and(|spec| {
+                    spec.cluster_ip.as_deref() == Some(&ip_str)
+                        || spec
+                            .cluster_ips
+                            .as_ref()
+                            .is_some_and(|ips| ips.contains(&ip_str))
+                        || spec
+                            .external_ips
+                            .as_ref()
+                            .is_some_and(|ips| ips.contains(&ip_str))
+                        || spec.load_balancer_ip.as_deref() == Some(&ip_str)
+                });
+                if spec_match {
+                    return true;
+                }
+
+                // Check the status for provisioned LoadBalancer IPs
                 service
-                    .spec
+                    .status
                     .as_ref()
-                    .and_then(|spec| spec.selector.as_ref())
-                    .is_some_and(|selector| {
-                        selector.iter().all(|(key, value)| {
-                            pod_labels
-                                .get(key)
-                                .is_some_and(|pod_val| *pod_val == *value)
-                        })
-                    })
+                    .and_then(|status| status.load_balancer.as_ref())
+                    .and_then(|lb| lb.ingress.as_ref())
+                    .is_some_and(|ingress| ingress.iter().any(|i| i.ip.as_deref() == Some(&ip_str)))
             })
             .cloned()
-            .collect()
     }
 
-    /// Finds all Pods owned by a specific controller (e.g., a Deployment or ReplicaSet).
-    #[allow(dead_code)]
-    pub fn get_pods_by_owner_reference(
+    /// Finds a Service that matches a flow's destination details (IP, port, protocol).
+    pub async fn get_service_by_flow_details(
         &self,
-        kind: &str,
-        name: &str,
-        namespace: &str,
-    ) -> Vec<Arc<Pod>> {
+        dst_ip: IpAddr,
+        dst_port: u16,
+        protocol: IpProto,
+    ) -> Option<Arc<Service>> {
+        let proto_str = protocol.as_str();
+        // First, find a service that matches the IP address.
+        let service = self.get_service_by_ip(dst_ip).await?;
+        let service_spec = service.spec.as_ref()?;
+
+        // Second, verify that the IP family matches.
+        let ip_families = service_spec.ip_families.as_ref()?;
+        let flow_is_ipv4 = dst_ip.is_ipv4();
+        let family_match = ip_families.iter().any(|family| {
+            (family == "IPv4" && flow_is_ipv4) || (family == "IPv6" && !flow_is_ipv4)
+        });
+        if !family_match {
+            return None;
+        }
+
+        // Third, verify that the service exposes the destination port with the correct protocol.
+        let port_match = service_spec.ports.as_ref().is_some_and(|ports| {
+            ports.iter().any(|p| {
+                p.port as u16 == dst_port && p.protocol.as_deref().unwrap_or("TCP") == proto_str // Default is TCP
+            })
+        });
+
+        if port_match { Some(service) } else { None }
+    }
+
+    /// Takes a virtual IP (like a ClusterIP) and resolves it to the list of
+    /// real, ready backend IP addresses from the associated EndpointSlices.
+    ///
+    /// Returns `None` if the input IP does not belong to any Service.
+    /// Returns `Some(Vec<String>)` containing the backend IPs if resolution is successful.
+    pub async fn resolve_service_ip_to_backend_ips(
+        &self,
+        service_ip: IpAddr,
+    ) -> Option<Vec<String>> {
+        let service = self.get_service_by_ip(service_ip).await?;
+        let slices = self.get_endpointslices_for_service(&service);
+
+        let backend_ips = slices
+            .iter()
+            .flat_map(|slice| &slice.endpoints)
+            .filter(|endpoint| {
+                endpoint
+                    .conditions
+                    .as_ref()
+                    .and_then(|c| c.ready)
+                    .unwrap_or(false)
+            })
+            .flat_map(|endpoint| &endpoint.addresses)
+            .cloned()
+            .collect::<Vec<String>>();
+
+        Some(backend_ips)
+    }
+
+    /// Looks up an EndpointSlice directly by one of its endpoint IP addresses.
+    pub async fn get_endpointslice_by_ip(&self, ip: IpAddr) -> Option<Arc<EndpointSlice>> {
+        let ip_str = ip.to_string();
         self.resource_store
-            .pods
+            .endpoint_slices
             .state()
             .iter()
-            .filter(|pod| pod.meta().namespace.as_deref() == Some(namespace))
-            .filter(|pod| {
-                pod.meta().owner_references.as_ref().is_some_and(|owners| {
-                    owners
-                        .iter()
-                        .any(|owner| owner.kind == kind && owner.name == name)
+            .find(|slice| {
+                // An EndpointSlice contains a list of endpoints.
+                slice.endpoints.iter().any(|endpoint| {
+                    // Each endpoint has a list of IP addresses.
+                    endpoint.addresses.contains(&ip_str)
                 })
+            })
+            .cloned()
+    }
+
+    /// Finds all EndpointSlices associated with a given Service.
+    pub fn get_endpointslices_for_service(&self, service: &Service) -> Vec<Arc<EndpointSlice>> {
+        let service_name = service.metadata.name.as_deref().unwrap_or_default();
+        if service_name.is_empty() {
+            return Vec::new();
+        }
+
+        self.resource_store
+            .endpoint_slices
+            .state()
+            .iter()
+            .filter(|slice| {
+                // Ensure the slice is in the same namespace as the service
+                slice.metadata.namespace == service.metadata.namespace &&
+                    // Check for the controlling label
+                    slice
+                        .metadata
+                        .labels
+                        .as_ref()
+                        .and_then(|labels| labels.get("kubernetes.io/service-name"))
+                        .is_some_and(|name| name == service_name)
             })
             .cloned()
             .collect()
