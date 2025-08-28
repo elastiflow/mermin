@@ -53,7 +53,6 @@ pub fn integration_test(ctx: TcContext) -> i32 {
 
 fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
     log!(&ctx, Level::Info, "TC program triggered");
-    debug!(&ctx, Level::Info, "Inside try integration test");
 
     // In our specific test case (UDP packet on loopback), we can assume a fixed header size.
     // Ethernet Header (14 bytes) + IPv4 Header (20 bytes) + UDP Header (8 bytes) = 42 bytes.
@@ -151,12 +150,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
 
             // Calculate the total length of all addresses
             let total_addr_len = rpl_header.gen_route.total_hdr_len() - 8usize;
-            debug!(
-                &ctx,
-                Level::Info,
-                "Total address length: {}",
-                total_addr_len
-            );
 
             if total_addr_len > MAX_RPL_ADDR_STORAGE {
                 return Err(TC_ACT_SHOT);
