@@ -1,0 +1,44 @@
+# Build artifacts
+target/
+debug/
+
+# Generated eBPF objects
+*.o
+*.bpf.o
+
+# Temporary files
+/tmp
+
+# Docker artifacts
+.dockerignore
+
+# IDE and editor files
+.idea/
+.junie/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+
+# Backup files
+**/*.rs.bk
+*.bak
+
+# Dependencies and lock files that might be generated
+Cargo.lock
+
+# Test artifacts
+test-results/
+coverage/
+
+# Kubernetes and Helm artifacts
+charts/*/charts/
+charts/*/requirements.lock
+*.tgz
