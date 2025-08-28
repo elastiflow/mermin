@@ -19,7 +19,7 @@ use network_types::{
     hop::HopOptHdr,
     icmp::IcmpHdr,
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
-    route::GenericRoute,
+    route::{GenericRoute, RoutingHeaderType, RplSourceRouteHeader, Type2RoutingHeader},
     tcp::TcpHdr,
     udp::UdpHdr,
 };
@@ -76,8 +76,8 @@ impl Parser {
     /// by `len`.
     ///
     /// The implementation uses multiple bounded loops to comply with eBPF verifier requirements,
-    /// reading in decreasing chunk sizes (16, 8, 4, 2, and 1 bytes) to efficiently handle
-    /// different buffer sizes. Each chunk size has 16 iterations, allowing reading of up to 1268 bytes.
+    /// reading in decreasing chunk sizes to efficiently handle
+    /// different buffer sizes. Each chunk size has 16 iterations, allowing reading of up to 1024 bytes.
     ///
     /// # Arguments
     /// * `ctx`: The traffic control context to read from.
@@ -93,131 +93,75 @@ impl Parser {
         buf: &mut [u8; N],
         len: usize,
     ) -> Result<usize, Error> {
-        let mut bytes_read_total = 0; //start loading in from start of passed buf
+        let mut bytes_read_total = 0;
 
-        // Before we go to read 16 bytes at a time, we need to ensure the offset is alligned to a 16 byte interval
-        // Given we don't necessarily know where in offset we are before this, do modular math and read in individual bytes until we are alligned
-        let mut allignment = self.offset % 16;
+        // Helper function to read individual bytes for alignment
+        let read_single_byte = |ctx: &TcContext,
+                                buf: &mut [u8; N],
+                                len: usize,
+                                bytes_read_total: &mut usize,
+                                offset: &mut usize|
+         -> Result<bool, Error> {
+            if *bytes_read_total >= len || (*bytes_read_total + 1) > N {
+                return Ok(false);
+            }
+
+            let byte: u8 = ctx.load(*offset).map_err(|_| Error::OutOfBounds)?;
+            buf[*bytes_read_total] = byte;
+            *bytes_read_total += 1;
+            *offset += 1;
+            Ok(true)
+        };
+
+        // Helper function to read 16-byte chunks
+        let read_sixteen_byte_chunk = |ctx: &TcContext,
+                                       buf: &mut [u8; N],
+                                       len: usize,
+                                       bytes_read_total: &mut usize,
+                                       offset: &mut usize|
+         -> Result<bool, Error> {
+            if *bytes_read_total >= len
+                || (len.saturating_sub(*bytes_read_total)) < 16
+                || (*bytes_read_total + 16) > N
+            {
+                return Ok(false);
+            }
+
+            let bytes: u128 = ctx.load(*offset).map_err(|_| Error::OutOfBounds)?;
+            buf[*bytes_read_total..*bytes_read_total + 16].copy_from_slice(&bytes.to_ne_bytes());
+            *bytes_read_total += 16;
+            *offset += 16;
+            Ok(true)
+        };
+
+        // Align to 16-byte boundary by reading individual bytes
+        let mut alignment = self.offset % 16;
         for _ in 0..16 {
-            const CHUNK_SIZE: usize = 1;
-            if allignment == 16 {
+            if alignment == 16 {
                 break;
             }
-            //if we have read up to len or 1 is too much to read, finish reading bytes
-            if bytes_read_total >= len || (len - bytes_read_total) < CHUNK_SIZE {
+            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut self.offset)? {
                 break;
             }
-            if bytes_read_total + CHUNK_SIZE > N {
-                break;
-            }
-
-            let bytes: u8 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-
-            //copy bytes into buf at location bytes_read_total, take care to use big endian conversion
-            buf[bytes_read_total] = bytes;
-            //advance bytes_read_total by 1, and self.offset by 1
-            bytes_read_total += CHUNK_SIZE;
-            self.offset += CHUNK_SIZE;
-            allignment += CHUNK_SIZE;
+            alignment += 1;
         }
-        // Loop to read 16 bytes at a time => 16*16 = 256 bytes total
-        for _ in 0..16 {
-            const CHUNK_SIZE: usize = 16;
-            //if we have read up to len or 16 is too much to read, move onto reading u64
-            if bytes_read_total >= len || (len.saturating_sub(bytes_read_total)) < CHUNK_SIZE {
-                break;
-            }
-            if bytes_read_total + CHUNK_SIZE > N {
-                break;
-            }
 
-            let bytes: u128 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-
-            //copy bytes into buf at location bytes_read_total, take care to use big endian conversion
-            buf[bytes_read_total..bytes_read_total + CHUNK_SIZE]
-                .copy_from_slice(&bytes.to_ne_bytes());
-            //advance bytes_read_total by 16, and self.offset by 16
-            bytes_read_total += CHUNK_SIZE;
-            self.offset += CHUNK_SIZE;
+        // Read 16-byte chunks in batches (4 batches of 16 chunks = 1024 bytes total)
+        // The main idea is we can keep adding loops to read u128s until we reach our desired supported header size
+        for _ in 0..4 {
+            for _ in 0..16 {
+                if !read_sixteen_byte_chunk(ctx, buf, len, &mut bytes_read_total, &mut self.offset)?
+                {
+                    break;
+                }
+            }
         }
-        // Second loop to read 16 bytes at a time => 16*16 = 256 + 256 from prior loop = 512 bytes total
+
+        // Read remaining bytes as individual bytes
         for _ in 0..16 {
-            const CHUNK_SIZE: usize = 16;
-            //if we have read up to len or 16 is too much to read, move onto reading u64
-            if bytes_read_total >= len || (len - bytes_read_total) < CHUNK_SIZE {
+            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut self.offset)? {
                 break;
             }
-            if bytes_read_total + CHUNK_SIZE > N {
-                break;
-            }
-
-            let bytes: u128 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-
-            //copy bytes into buf at location bytes_read_total, take care to use big endian conversion
-            buf[bytes_read_total..bytes_read_total + CHUNK_SIZE]
-                .copy_from_slice(&bytes.to_ne_bytes());
-            //advance bytes_read_total by 16, and self.offset by 16
-            bytes_read_total += CHUNK_SIZE;
-            self.offset += CHUNK_SIZE;
-        }
-        // Third loop to read 16 bytes at a time => 16*16 = 256 + 512 from prior loops = 768 bytes total
-        for _ in 0..16 {
-            const CHUNK_SIZE: usize = 16;
-            //if we have read up to len or 16 is too much to read, move onto reading u64
-            if bytes_read_total >= len || (len - bytes_read_total) < CHUNK_SIZE {
-                break;
-            }
-            if bytes_read_total + CHUNK_SIZE > N {
-                break;
-            }
-
-            let bytes: u128 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-
-            //copy bytes into buf at location bytes_read_total, take care to use big endian conversion
-            buf[bytes_read_total..bytes_read_total + CHUNK_SIZE]
-                .copy_from_slice(&bytes.to_ne_bytes());
-            //advance bytes_read_total by 16, and self.offset by 16
-            bytes_read_total += CHUNK_SIZE;
-            self.offset += CHUNK_SIZE;
-        }
-        // Fourth loop to read 16 bytes at a time => 16*16 = 256 + 768 from prior loops = 1024 bytes total
-        for _ in 0..16 {
-            const CHUNK_SIZE: usize = 16;
-            //if we have read up to len or 16 is too much to read, move onto reading u64
-            if bytes_read_total >= len || (len - bytes_read_total) < CHUNK_SIZE {
-                break;
-            }
-            if bytes_read_total + CHUNK_SIZE > N {
-                break;
-            }
-
-            let bytes: u128 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-
-            //copy bytes into buf at location bytes_read_total, take care to use big endian conversion
-            buf[bytes_read_total..bytes_read_total + CHUNK_SIZE]
-                .copy_from_slice(&bytes.to_ne_bytes());
-            //advance bytes_read_total by 16, and self.offset by 16
-            bytes_read_total += CHUNK_SIZE;
-            self.offset += CHUNK_SIZE;
-        } // The main idea is we can keep adding loops to read u128s until we reach our desired supported header size
-        // Loop to read 1 byte at a time => 16 + 1024 from prior loops = 1040 bytes total
-        for _ in 0..16 {
-            const CHUNK_SIZE: usize = 1;
-            //if we have read up to len or 1 is too much to read, finish reading bytes
-            if bytes_read_total >= len || (len - bytes_read_total) < CHUNK_SIZE {
-                break;
-            }
-            if bytes_read_total + CHUNK_SIZE > N {
-                break;
-            }
-
-            let bytes: u8 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-
-            //copy bytes into buf at location bytes_read_total, take care to use big endian conversion
-            buf[bytes_read_total] = bytes;
-            //advance bytes_read_total by 1, and self.offset by 1
-            bytes_read_total += CHUNK_SIZE;
-            self.offset += CHUNK_SIZE;
         }
 
         Ok(bytes_read_total)
@@ -473,8 +417,9 @@ impl Parser {
                     ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
                 self.offset += RplSourceRouteHeader::LEN;
 
-                let addr_size = rpl_hdr.gen_route.total_hdr_len().saturating_sub(8); //Subtract 8 for fixed RPL header
-                const MAX_ADDR: usize = 1040; // There is a good chance this will break the stack size limit, this is more of a placeholder for the max we can read right now
+                // Consider adding Clamp to addr_size if we run into verification issues
+                let addr_size = rpl_hdr.gen_route.total_hdr_len().saturating_sub(8); // Subtract 8 for fixed RPL header
+                const MAX_ADDR: usize = 255;
                 let mut addresses = [0u8; MAX_ADDR];
 
                 let bytes_read = self
@@ -584,7 +529,7 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 static LICENSE: [u8; 13] = *b"Dual MIT/GPL\0"; // Corrected license string length and array size
 
 #[cfg(test)]
-pub mod host_test_shim {
+mod host_test_shim {
     extern crate alloc;
     use alloc::vec::Vec;
     use core::mem;
@@ -602,9 +547,6 @@ pub mod host_test_shim {
         pub fn len(&self) -> u32 {
             self.data.len() as u32
         }
-        pub fn is_empty(&self) -> bool {
-            self.data.is_empty()
-        }
         pub fn load<T: Copy>(&self, offset: usize) -> Result<T, Error> {
             if offset + mem::size_of::<T>() > self.data.len() {
                 return Err(Error::OutOfBounds);
@@ -612,17 +554,6 @@ pub mod host_test_shim {
             let ptr = unsafe { self.data.as_ptr().add(offset) as *const T };
             let value = unsafe { *ptr };
             Ok(value)
-        }
-        pub fn load_bytes(&self, offset: usize, buf: &mut [u8]) -> Result<usize, ()> {
-            if offset >= self.data.len() {
-                return Ok(0);
-            }
-
-            let available = self.data.len() - offset;
-            let to_copy = core::cmp::min(available, buf.len());
-
-            buf[..to_copy].copy_from_slice(&self.data[offset..offset + to_copy]);
-            Ok(to_copy)
         }
     }
 
@@ -642,8 +573,7 @@ pub mod host_test_shim {
 }
 
 #[cfg(test)]
-pub use host_test_shim::TcContext;
-use network_types::route::{RoutingHeaderType, RplSourceRouteHeader, Type2RoutingHeader};
+use host_test_shim::TcContext;
 
 #[cfg(test)]
 mod tests {

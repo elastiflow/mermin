@@ -11,18 +11,18 @@ pub enum RoutingHeaderType {
     Type2,
     /// RPL Source Route Header - [RFC6554]
     RplSourceRoute,
-    // /// Segment Routing Header (SRH) - [RFC8754]
-    // SegmentRoutingHeader,
-    // /// CRH-16 - [RFC9631]
-    // Crh16,
-    // /// CRH-32 - [RFC9631]
-    // Crh32,
-    // /// RFC3692-style Experiment 1 [2] - [RFC4727]
-    // Experiment1,
-    // /// RFC3692-style Experiment 2 [2] - [RFC4727]
-    // Experiment2,
-    // /// Reserved
-    // Reserved,
+    /// Segment Routing Header (SRH) - [RFC8754]
+    SegmentRoutingHeader,
+    /// CRH-16 - [RFC9631]
+    Crh16,
+    /// CRH-32 - [RFC9631]
+    Crh32,
+    /// RFC3692-style Experiment 1 [2] - [RFC4727]
+    Experiment1,
+    /// RFC3692-style Experiment 2 [2] - [RFC4727]
+    Experiment2,
+    /// Reserved
+    Reserved,
     /// Represents an unknown or unassigned routing header type
     #[doc(hidden)]
     Unknown(u8),
@@ -35,12 +35,12 @@ impl RoutingHeaderType {
         match value {
             2 => RoutingHeaderType::Type2,
             3 => RoutingHeaderType::RplSourceRoute,
-            // 4 => RoutingHeaderType::SegmentRoutingHeader,
-            // 5 => RoutingHeaderType::Crh16,
-            // 6 => RoutingHeaderType::Crh32,
-            // 253 => RoutingHeaderType::Experiment1,
-            // 254 => RoutingHeaderType::Experiment2,
-            // 255 => RoutingHeaderType::Reserved,
+            4 => RoutingHeaderType::SegmentRoutingHeader,
+            5 => RoutingHeaderType::Crh16,
+            6 => RoutingHeaderType::Crh32,
+            253 => RoutingHeaderType::Experiment1,
+            254 => RoutingHeaderType::Experiment2,
+            255 => RoutingHeaderType::Reserved,
             v => RoutingHeaderType::Unknown(v),
         }
     }
@@ -51,12 +51,12 @@ impl RoutingHeaderType {
         match self {
             RoutingHeaderType::Type2 => 2,
             RoutingHeaderType::RplSourceRoute => 3,
-            // RoutingHeaderType::SegmentRoutingHeader => 4,
-            // RoutingHeaderType::Crh16 => 5,
-            // RoutingHeaderType::Crh32 => 6,
-            // RoutingHeaderType::Experiment1 => 253,
-            // RoutingHeaderType::Experiment2 => 254,
-            // RoutingHeaderType::Reserved => 255,
+            RoutingHeaderType::SegmentRoutingHeader => 4,
+            RoutingHeaderType::Crh16 => 5,
+            RoutingHeaderType::Crh32 => 6,
+            RoutingHeaderType::Experiment1 => 253,
+            RoutingHeaderType::Experiment2 => 254,
+            RoutingHeaderType::Reserved => 255,
             RoutingHeaderType::Unknown(val) => *val,
         }
     }
@@ -68,23 +68,24 @@ pub enum Ipv6RoutingHeader {
     Type2(Type2RoutingHeader),
     /// RPL Source Route Header - [RFC6554]
     RplSourceRoute(RplSourceRouteHeader),
+    // To be implemented structs in future PRs
     // /// Segment Routing Header (SRH) - [RFC8754]
     // SegmentRouting(SegmentRoutingHeader),
     // /// CRH-16 - [RFC9631]
     // Crh16(Crh16Header),
     // /// CRH-32 - [RFC9631]
     // Crh32(Crh32Header),
-    // /// RFC3692-style Experiment 1 [2] - [RFC4727]
-    // Experiment1(GenericRoute),
-    // /// RFC3692-style Experiment 2 [2] - [RFC4727]
-    // Experiment2(GenericRoute),
-    // /// A reserved routing type was encountered.
-    // Reserved,
+    /// RFC3692-style Experiment 1 [2] - [RFC4727]
+    Experiment1(GenericRoute),
+    /// RFC3692-style Experiment 2 [2] - [RFC4727]
+    Experiment2(GenericRoute),
+    /// A reserved routing type was encountered.
+    Reserved,
     /// An unknown or unassigned routing type was encountered.
     Unknown(GenericRoute),
 }
 
-/// # IPv6 Routing Extension Header Format
+/// IPv6 Routing Extension Header Format
 ///
 ///  0                   1                   2                   3
 /// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -98,7 +99,7 @@ pub enum Ipv6RoutingHeader {
 /// |                                                               |
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///
-/// ## Fields
+/// Fields
 ///
 /// * **Next Header (8 bits)**: Identifies the type of the next header.
 /// * **Hdr Ext Len (8 bits)**: The length of the Routing header in 8-octet units, not including the first 8 octets.
@@ -184,7 +185,7 @@ impl GenericRoute {
     }
 }
 
-/// # Type 2 Routing Header (Mobile IPv6) - RFC 6275
+/// Type 2 Routing Header (Mobile IPv6) - RFC 6275
 ///
 /// This routing header is used in Mobile IPv6 to allow a packet to be routed from a
 /// mobile node's home address to its current location (care-of address).
@@ -205,7 +206,7 @@ impl GenericRoute {
 /// |                                                               |
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///
-/// ## Fields
+/// Fields
 ///
 /// * **Next Header (8 bits)**: Identifies the type of the next header.
 /// * **Hdr Ext Len (8 bits)**: The length of the Routing header in 8-octet units, not including the first 8 octets. For Type 2, this is always 2.
@@ -255,7 +256,7 @@ impl Type2RoutingHeader {
     pub const LEN: usize = mem::size_of::<Type2RoutingHeader>();
 }
 
-/// # Type 3 RPL Source Route Header - RFC 6554
+/// Type 3 RPL Source Route Header - RFC 6554
 ///
 /// This routing header is used in the Routing Protocol for Low-Power and Lossy Networks (RPL)
 /// for source routing in constrained environments like sensor networks.
@@ -274,7 +275,7 @@ impl Type2RoutingHeader {
 /// |                                                               |
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///
-/// ## Fields
+/// Fields
 ///
 /// * **Next Header (8 bits)**: Identifies the type of the next header.
 /// * **Hdr Ext Len (8 bits)**: The length of the Routing header in 8-octet units, not including the first 8 octets.
@@ -354,6 +355,7 @@ impl RplSourceFixedHeader {
         self.pad_reserved[2] = bytes[3];
     }
 }
+
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
 pub struct RplSourceRouteHeader {
@@ -381,8 +383,7 @@ impl RplSourceRouteHeader {
     /// This function relies on the immutable header fields (Hdr Ext Len, Pad,
     /// CmprI, CmprE) to derive the address count.
     ///
-    /// Taken from RFC 6554, please validate :)
-    /// compute n, the number of addresses in the Routing header:
+    /// Compute n, the number of addresses in the Routing header:
     /// n = (((Hdr Ext Len * 8) - Pad - (16 - CmprE)) / (16 - CmprI)) + 1
     #[inline]
     pub fn num_addresses(&self) -> usize {
