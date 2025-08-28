@@ -5,11 +5,11 @@ mod geneve;
 mod hop;
 mod ipv4;
 mod ipv6;
+mod rpl_source_route;
 mod tcp;
+mod type2;
 mod udp;
 mod utils;
-mod rpl_source_route;
-mod type2;
 
 // Import the helper functions and macros
 use crate::{
@@ -105,7 +105,7 @@ define_header_test!(
 
 define_header_test!(
     test_parses_rpl_source_route_header,
-    RplSourceRouteHeader,
+    RplSourceRouteParsed,
     PacketType::RplSourceRoute,
     create_rpl_source_route_test_packet,
     verify_rpl_source_route_header

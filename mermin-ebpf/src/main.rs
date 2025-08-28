@@ -19,10 +19,7 @@ use network_types::{
     hop::HopOptHdr,
     icmp::IcmpHdr,
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
-    route::{
-        Ipv6RoutingHeader, RplSourceFixedHeader,
-        Type2FixedHeader,
-    },
+    route::GenericRoute,
     tcp::TcpHdr,
     udp::UdpHdr,
 };
@@ -70,6 +67,160 @@ impl Parser {
     // This should be called at the start of L3 (IP) header parsing
     fn calc_l3_octet_count(&mut self, packet_len: u32) {
         self.packet_meta.l3_octet_count = packet_len - self.offset as u32;
+    }
+
+    /// Reads a variable-length buffer from a TC context.
+    ///
+    /// This function reads bytes from the given TC context `ctx` starting at the parser's current offset
+    /// and writes them into the provided buffer `buf`. The total number of bytes to read is determined
+    /// by `len`.
+    ///
+    /// The implementation uses multiple bounded loops to comply with eBPF verifier requirements,
+    /// reading in decreasing chunk sizes (16, 8, 4, 2, and 1 bytes) to efficiently handle
+    /// different buffer sizes. Each chunk size has 16 iterations, allowing reading of up to 1268 bytes.
+    ///
+    /// # Arguments
+    /// * `ctx`: The traffic control context to read from.
+    /// * `buf`: The destination buffer to write the bytes into.
+    /// * `len`: The number of bytes to read.
+    ///
+    /// # Returns
+    /// `Ok(bytes_read)` on success, where `bytes_read` is the number of bytes actually read.
+    /// `Err(Error)` if reading bytes from the context fails.
+    fn read_var_buf<const N: usize>(
+        &mut self,
+        ctx: &TcContext,
+        buf: &mut [u8; N],
+        len: usize,
+    ) -> Result<usize, Error> {
+        let mut bytes_read_total = 0; //start loading in from start of passed buf
+
+        // Before we go to read 16 bytes at a time, we need to ensure the offset is alligned to a 16 byte interval
+        // Given we don't necessarily know where in offset we are before this, do modular math and read in individual bytes until we are alligned
+        let mut allignment = self.offset % 16;
+        for _ in 0..16 {
+            const CHUNK_SIZE: usize = 1;
+            if allignment == 16 {
+                break;
+            }
+            //if we have read up to len or 1 is too much to read, finish reading bytes
+            if bytes_read_total >= len || (len - bytes_read_total) < CHUNK_SIZE {
+                break;
+            }
+            if bytes_read_total + CHUNK_SIZE > N {
+                break;
+            }
+
+            let bytes: u8 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+
+            //copy bytes into buf at location bytes_read_total, take care to use big endian conversion
+            buf[bytes_read_total] = bytes;
+            //advance bytes_read_total by 1, and self.offset by 1
+            bytes_read_total += CHUNK_SIZE;
+            self.offset += CHUNK_SIZE;
+            allignment += CHUNK_SIZE;
+        }
+        // Loop to read 16 bytes at a time => 16*16 = 256 bytes total
+        for _ in 0..16 {
+            const CHUNK_SIZE: usize = 16;
+            //if we have read up to len or 16 is too much to read, move onto reading u64
+            if bytes_read_total >= len || (len.saturating_sub(bytes_read_total)) < CHUNK_SIZE {
+                break;
+            }
+            if bytes_read_total + CHUNK_SIZE > N {
+                break;
+            }
+
+            let bytes: u128 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+
+            //copy bytes into buf at location bytes_read_total, take care to use big endian conversion
+            buf[bytes_read_total..bytes_read_total + CHUNK_SIZE]
+                .copy_from_slice(&bytes.to_ne_bytes());
+            //advance bytes_read_total by 16, and self.offset by 16
+            bytes_read_total += CHUNK_SIZE;
+            self.offset += CHUNK_SIZE;
+        }
+        // Second loop to read 16 bytes at a time => 16*16 = 256 + 256 from prior loop = 512 bytes total
+        for _ in 0..16 {
+            const CHUNK_SIZE: usize = 16;
+            //if we have read up to len or 16 is too much to read, move onto reading u64
+            if bytes_read_total >= len || (len - bytes_read_total) < CHUNK_SIZE {
+                break;
+            }
+            if bytes_read_total + CHUNK_SIZE > N {
+                break;
+            }
+
+            let bytes: u128 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+
+            //copy bytes into buf at location bytes_read_total, take care to use big endian conversion
+            buf[bytes_read_total..bytes_read_total + CHUNK_SIZE]
+                .copy_from_slice(&bytes.to_ne_bytes());
+            //advance bytes_read_total by 16, and self.offset by 16
+            bytes_read_total += CHUNK_SIZE;
+            self.offset += CHUNK_SIZE;
+        }
+        // Third loop to read 16 bytes at a time => 16*16 = 256 + 512 from prior loops = 768 bytes total
+        for _ in 0..16 {
+            const CHUNK_SIZE: usize = 16;
+            //if we have read up to len or 16 is too much to read, move onto reading u64
+            if bytes_read_total >= len || (len - bytes_read_total) < CHUNK_SIZE {
+                break;
+            }
+            if bytes_read_total + CHUNK_SIZE > N {
+                break;
+            }
+
+            let bytes: u128 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+
+            //copy bytes into buf at location bytes_read_total, take care to use big endian conversion
+            buf[bytes_read_total..bytes_read_total + CHUNK_SIZE]
+                .copy_from_slice(&bytes.to_ne_bytes());
+            //advance bytes_read_total by 16, and self.offset by 16
+            bytes_read_total += CHUNK_SIZE;
+            self.offset += CHUNK_SIZE;
+        }
+        // Fourth loop to read 16 bytes at a time => 16*16 = 256 + 768 from prior loops = 1024 bytes total
+        for _ in 0..16 {
+            const CHUNK_SIZE: usize = 16;
+            //if we have read up to len or 16 is too much to read, move onto reading u64
+            if bytes_read_total >= len || (len - bytes_read_total) < CHUNK_SIZE {
+                break;
+            }
+            if bytes_read_total + CHUNK_SIZE > N {
+                break;
+            }
+
+            let bytes: u128 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+
+            //copy bytes into buf at location bytes_read_total, take care to use big endian conversion
+            buf[bytes_read_total..bytes_read_total + CHUNK_SIZE]
+                .copy_from_slice(&bytes.to_ne_bytes());
+            //advance bytes_read_total by 16, and self.offset by 16
+            bytes_read_total += CHUNK_SIZE;
+            self.offset += CHUNK_SIZE;
+        } // The main idea is we can keep adding loops to read u128s until we reach our desired supported header size
+        // Loop to read 1 byte at a time => 16 + 1024 from prior loops = 1040 bytes total
+        for _ in 0..16 {
+            const CHUNK_SIZE: usize = 1;
+            //if we have read up to len or 1 is too much to read, finish reading bytes
+            if bytes_read_total >= len || (len - bytes_read_total) < CHUNK_SIZE {
+                break;
+            }
+            if bytes_read_total + CHUNK_SIZE > N {
+                break;
+            }
+
+            let bytes: u8 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+
+            //copy bytes into buf at location bytes_read_total, take care to use big endian conversion
+            buf[bytes_read_total] = bytes;
+            //advance bytes_read_total by 1, and self.offset by 1
+            bytes_read_total += CHUNK_SIZE;
+            self.offset += CHUNK_SIZE;
+        }
+
+        Ok(bytes_read_total)
     }
 
     /// Parses the next header in the packet and updates the parser state accordingly.
@@ -313,24 +464,41 @@ impl Parser {
     /// Parses the IPv6 routing header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_routing_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        use network_types::parse_ipv6_routing_hdr;
-        let mut offset = self.offset;
-        let routing_header =
-            parse_ipv6_routing_hdr!(ctx, offset).map_err(|_| Error::OutOfBounds)?;
+        let gen_hdr: GenericRoute = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        let routing_type: RoutingHeaderType = RoutingHeaderType::from_u8(gen_hdr.type_);
 
-        // Update the parser offset to the end of the routing header
-        self.offset = offset;
+        match routing_type {
+            RoutingHeaderType::RplSourceRoute => {
+                let rpl_hdr: RplSourceRouteHeader =
+                    ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+                self.offset += RplSourceRouteHeader::LEN;
 
-        // Extract the next header from the routing header and set it for continued parsing
-        //TODO can parse out other type specific fields here
-        let next_hdr = match &routing_header {
-            Ipv6RoutingHeader::Type2(hdr) => hdr.gen_route.next_hdr(),
-            Ipv6RoutingHeader::RplSourceRoute(hdr) => hdr.gen_route.next_hdr(),
-            Ipv6RoutingHeader::Unknown(hdr) => hdr.next_hdr(),
-        };
+                let addr_size = rpl_hdr.gen_route.total_hdr_len().saturating_sub(8); //Subtract 8 for fixed RPL header
+                const MAX_ADDR: usize = 1040; // There is a good chance this will break the stack size limit, this is more of a placeholder for the max we can read right now
+                let mut addresses = [0u8; MAX_ADDR];
 
-        // Set the next header type for continued parsing
-        self.next_hdr = HeaderType::Proto(next_hdr);
+                let bytes_read = self
+                    .read_var_buf(ctx, &mut addresses, addr_size)
+                    .map_err(|_| Error::OutOfBounds)?;
+                if bytes_read < addr_size {
+                    warn!(ctx, "Failed to read all of RPL Header");
+                    return Err(Error::MalformedHeader);
+                }
+
+                // TODO parse out and use addresses and other Rpl fields here
+                self.next_hdr = HeaderType::Proto(rpl_hdr.gen_route.next_hdr());
+            }
+            RoutingHeaderType::Type2 => {
+                let type2_hdr: Type2RoutingHeader =
+                    ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+                self.offset += Type2RoutingHeader::LEN;
+
+                // TODO parse out and use addresses an other type2 fields
+                self.next_hdr = HeaderType::Proto(type2_hdr.gen_route.next_hdr());
+            }
+            _ => {}
+        }
+
         Ok(())
     }
 }
@@ -416,7 +584,7 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 static LICENSE: [u8; 13] = *b"Dual MIT/GPL\0"; // Corrected license string length and array size
 
 #[cfg(test)]
-mod host_test_shim {
+pub mod host_test_shim {
     extern crate alloc;
     use alloc::vec::Vec;
     use core::mem;
@@ -475,6 +643,7 @@ mod host_test_shim {
 
 #[cfg(test)]
 pub use host_test_shim::TcContext;
+use network_types::route::{RoutingHeaderType, RplSourceRouteHeader, Type2RoutingHeader};
 
 #[cfg(test)]
 mod tests {
@@ -1297,5 +1466,230 @@ mod tests {
 
         let result = parser.parse_routing_header(&ctx);
         assert!(matches!(result, Err(Error::OutOfBounds)));
+    }
+
+    // Helper function to create network-like test data with big endian patterns
+    fn create_network_test_data(size: usize) -> Vec<u8> {
+        let mut data = Vec::new();
+        let mut value = 0x0102030405060708u64;
+
+        for i in (0..size).step_by(8) {
+            let bytes = value.to_be_bytes(); // Network byte order
+            let remaining = size - i;
+            let chunk_size = core::cmp::min(8, remaining);
+            data.extend_from_slice(&bytes[0..chunk_size]);
+            value = value.wrapping_add(0x0101010101010101); // Increment pattern
+        }
+        data
+    }
+
+    // Test read_var_buf with various odd lengths - comprehensive testing
+    #[test]
+    fn test_read_var_buf_odd_lengths() {
+        let test_lengths = [
+            1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 31, 33, 63, 65, 127, 129,
+        ];
+
+        for &len in &test_lengths {
+            let test_data = create_network_test_data(len + 10); // Extra data to ensure we can read
+            let ctx = TcContext::new(test_data.clone());
+            let mut parser = Parser::new();
+            let mut buf = [0u8; 256];
+
+            let result = parser.read_var_buf(&ctx, &mut buf, len);
+
+            assert!(result.is_ok(), "Failed for length {}", len);
+            assert_eq!(result.unwrap(), len, "Wrong bytes read for length {}", len);
+            assert_eq!(
+                &buf[0..len],
+                &test_data[0..len],
+                "Data mismatch for length {}",
+                len
+            );
+
+            // Verify rest of buffer is unchanged
+            for i in len..256 {
+                assert_eq!(
+                    buf[i], 0,
+                    "Buffer corruption at index {} for length {}",
+                    i, len
+                );
+            }
+        }
+    }
+
+    // Test big endian conversion correctness for network data
+    #[test]
+    fn test_read_var_buf_big_endian_validation() {
+        // Create test data with known big endian patterns
+        let original_values = [0x01020304u32, 0x05060708u32, 0x090a0b0cu32, 0x0d0e0f10u32];
+
+        let mut test_data = Vec::new();
+        for &val in &original_values {
+            test_data.extend_from_slice(&val.to_be_bytes());
+        }
+
+        let ctx = TcContext::new(test_data);
+        let mut parser = Parser::new();
+        let mut buf = [0u8; 16];
+
+        let result = parser.read_var_buf(&ctx, &mut buf, 16);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 16);
+
+        // Verify the data is correctly stored in big endian format
+        for (i, &expected_val) in original_values.iter().enumerate() {
+            let start_idx = i * 4;
+            let actual_bytes = [
+                buf[start_idx],
+                buf[start_idx + 1],
+                buf[start_idx + 2],
+                buf[start_idx + 3],
+            ];
+            let actual_val = u32::from_be_bytes(actual_bytes);
+            assert_eq!(
+                actual_val, expected_val,
+                "Big endian mismatch at position {}",
+                i
+            );
+        }
+    }
+
+    // Test network protocol headers with realistic data patterns
+    #[test]
+    fn test_read_var_buf_network_headers() {
+        // Simulate reading various network headers with odd sizes
+
+        // Test IPv4 header (20 bytes) + options (odd sizes)
+        let ipv4_base = 20;
+        let option_sizes = [1, 3, 7, 11]; // Common odd option sizes
+
+        for &opt_size in &option_sizes {
+            let total_size = ipv4_base + opt_size;
+            let test_data = create_network_test_data(total_size);
+            let ctx = TcContext::new(test_data.clone());
+            let mut parser = Parser::new();
+            let mut buf = [0u8; 64];
+
+            let result = parser.read_var_buf(&ctx, &mut buf, total_size);
+
+            assert!(
+                result.is_ok(),
+                "Failed for IPv4 with {} byte options",
+                opt_size
+            );
+            assert_eq!(result.unwrap(), total_size);
+            assert_eq!(&buf[0..total_size], &test_data[0..total_size]);
+        }
+
+        // Test TCP header with various option sizes (odd lengths)
+        let tcp_base = 20;
+        let tcp_option_sizes = [1, 3, 5, 9, 15];
+
+        for &opt_size in &tcp_option_sizes {
+            let total_size = tcp_base + opt_size;
+            let test_data = create_network_test_data(total_size);
+            let ctx = TcContext::new(test_data.clone());
+            let mut parser = Parser::new();
+            let mut buf = [0u8; 64];
+
+            let result = parser.read_var_buf(&ctx, &mut buf, total_size);
+
+            assert!(
+                result.is_ok(),
+                "Failed for TCP with {} byte options",
+                opt_size
+            );
+            assert_eq!(result.unwrap(), total_size);
+            assert_eq!(&buf[0..total_size], &test_data[0..total_size]);
+        }
+    }
+
+    // Test multi-byte value reading across chunk boundaries
+    #[test]
+    fn test_read_var_buf_chunk_boundary_values() {
+        // Test reading values that span chunk boundaries in the implementation
+        let test_cases = [
+            (15, 16), // Spans u128 chunk boundary
+            (17, 16), // Just over u128 boundary
+            (7, 8),   // Spans u64 boundary
+            (9, 8),   // Just over u64 boundary
+            (3, 4),   // Spans u32 boundary
+            (5, 4),   // Just over u32 boundary
+            (1, 2),   // Spans u16 boundary
+            (3, 2),   // Just over u16 boundary
+        ];
+
+        for &(len, chunk_aligned) in &test_cases {
+            // Create data with a recognizable pattern
+            let test_data = create_network_test_data(len + 8);
+            let ctx = TcContext::new(test_data.clone());
+            let mut parser = Parser::new();
+            let mut buf = [0u8; 32];
+
+            let result = parser.read_var_buf(&ctx, &mut buf, len);
+
+            assert!(
+                result.is_ok(),
+                "Failed for length {} (chunk aligned: {})",
+                len,
+                chunk_aligned
+            );
+            assert_eq!(result.unwrap(), len);
+            assert_eq!(
+                &buf[0..len],
+                &test_data[0..len],
+                "Data mismatch for length {}",
+                len
+            );
+        }
+    }
+
+    // Test parser offset advancement with odd lengths
+    #[test]
+    fn test_read_var_buf_offset_advancement() {
+        let test_data = create_network_test_data(100);
+        let ctx = TcContext::new(test_data.clone());
+
+        // Read odd-sized chunks and verify offset advances correctly
+        let read_sizes = [7, 11, 5, 13, 3];
+
+        for &size in &read_sizes {
+            // Reset parser offset before each iteration
+            let mut parser = Parser::new();
+            let mut buf = [0u8; 32];
+            let result = parser.read_var_buf(&ctx, &mut buf, size);
+
+            assert!(result.is_ok(), "Failed reading {} bytes", size);
+            assert_eq!(result.unwrap(), size);
+
+            // Verify offset advanced correctly for this single read
+            assert_eq!(
+                parser.offset, size,
+                "Offset mismatch after reading {} bytes",
+                size
+            );
+
+            // Verify we read from the start of the data
+            assert_eq!(&buf[0..size], &test_data[0..size]);
+        }
+    }
+
+    // Test reading with buffer smaller than requested length
+    #[test]
+    fn test_read_var_buf_buffer_constraints() {
+        let test_data = create_network_test_data(50);
+        let ctx = TcContext::new(test_data.clone());
+        let mut parser = Parser::new();
+
+        // Try to read more than buffer size
+        let mut small_buf = [0u8; 10];
+        let result = parser.read_var_buf(&ctx, &mut small_buf, 15);
+
+        assert!(result.is_ok());
+        // Should read only what fits in buffer
+        let bytes_read = result.unwrap();
+        assert!(bytes_read <= 10, "Read more bytes than buffer size");
+        assert_eq!(&small_buf[0..bytes_read], &test_data[0..bytes_read]);
     }
 }

@@ -7,8 +7,8 @@ use aya_ebpf::{
     maps::PerfEventArray,
     programs::TcContext,
 };
-use aya_log_ebpf::{Level, log};
-use integration_common::{HeaderUnion, PacketType, ParsedHeader};
+use aya_log_ebpf::{Level, debug, log};
+use integration_common::{HeaderUnion, PacketType, ParsedHeader, RplSourceRouteParsed};
 use network_types::{
     ah::AuthHdr,
     esp::Esp,
@@ -16,11 +16,12 @@ use network_types::{
     geneve::GeneveHdr,
     hop::HopOptHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
-    route::{Ipv6RoutingHeader, RplSourceFixedHeader, Type2FixedHeader},
-    parse_ipv6_routing_hdr,
+    route::{RoutingHeaderType, RplSourceRouteHeader, Type2RoutingHeader},
     tcp::TcpHdr,
     udp::UdpHdr,
 };
+
+pub const MAX_RPL_ADDR_STORAGE: usize = 128;
 
 #[map(name = "OUT_DATA")]
 static mut OUT_DATA: PerfEventArray<ParsedHeader> = PerfEventArray::new(0);
@@ -52,6 +53,7 @@ pub fn integration_test(ctx: TcContext) -> i32 {
 
 fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
     log!(&ctx, Level::Info, "TC program triggered");
+    debug!(&ctx, Level::Info, "Inside try integration test");
 
     // In our specific test case (UDP packet on loopback), we can assume a fixed header size.
     // Ethernet Header (14 bytes) + IPv4 Header (20 bytes) + UDP Header (8 bytes) = 42 bytes.
@@ -139,26 +141,122 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::RplSourceRoute => {
             let mut offset = data_offset;
-            let routing_header = parse_ipv6_routing_hdr!(ctx, offset).map_err(|_| TC_ACT_SHOT)?;
-            match routing_header {
-                Ipv6RoutingHeader::RplSourceRoute(rpl_header) => ParsedHeader {
-                    type_: PacketType::RplSourceRoute,
-                    data: HeaderUnion { rpl: rpl_header },
-                },
-                _ => return Err(TC_ACT_SHOT), // Unexpected routing header type
+            let rpl_header: RplSourceRouteHeader = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
+
+            if rpl_header.gen_route.type_ != RoutingHeaderType::RplSourceRoute.as_u8() {
+                return Err(TC_ACT_SHOT);
+            }
+
+            offset += RplSourceRouteHeader::LEN;
+
+            // Calculate the total length of all addresses
+            let total_addr_len = rpl_header.gen_route.total_hdr_len() - 8usize;
+            debug!(
+                &ctx,
+                Level::Info,
+                "Total address length: {}",
+                total_addr_len
+            );
+
+            if total_addr_len > MAX_RPL_ADDR_STORAGE {
+                return Err(TC_ACT_SHOT);
+            }
+
+            let mut addresses_buf = [0u8; MAX_RPL_ADDR_STORAGE];
+
+            // Prepare the parsed data to be sent back
+            let mut parsed_data = RplSourceRouteParsed {
+                header: rpl_header,
+                addresses: [0u8; MAX_RPL_ADDR_STORAGE],
+                addresses_len: total_addr_len as u8,
+            };
+
+            let mut bytes_read_total = 0;
+            // Before we go to read 16 bytes at a time, we need to ensure the offset is alligned to a 16 byte interval
+            // Given we don't necessarily know where in offset we are before this, do modular math and read in individual bytes until we are alligned
+            let mut allignment = offset % 16;
+            for _ in 0..16 {
+                const CHUNK_SIZE: usize = 1;
+                if allignment == 16 {
+                    break;
+                }
+                //if we have read up to len or 1 is too much to read, finish reading bytes
+                if bytes_read_total >= total_addr_len
+                    || (total_addr_len - bytes_read_total) < CHUNK_SIZE
+                {
+                    break;
+                }
+                if bytes_read_total + CHUNK_SIZE > MAX_RPL_ADDR_STORAGE {
+                    break;
+                }
+
+                let bytes: u8 = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
+
+                //copy bytes into buf at location bytes_read_total, take care to use big endian conversion
+                addresses_buf[bytes_read_total] = bytes;
+                //advance bytes_read_total by 1, and self.offset by 1
+                bytes_read_total += CHUNK_SIZE;
+                offset += CHUNK_SIZE;
+                allignment += CHUNK_SIZE;
+            }
+            // Loop to read 16 bytes at a time => 16*16 = 256 bytes total
+            for _ in 0..16 {
+                const CHUNK_SIZE: usize = 16;
+                //if we have read up to len or 16 is too much to read, move onto reading u64
+                if bytes_read_total >= total_addr_len
+                    || (total_addr_len.saturating_sub(bytes_read_total)) < CHUNK_SIZE
+                {
+                    break;
+                }
+                if bytes_read_total + CHUNK_SIZE > MAX_RPL_ADDR_STORAGE {
+                    break;
+                }
+
+                let bytes: u128 = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
+
+                //copy bytes into buf at location bytes_read_total, take care to use big endian conversion
+                addresses_buf[bytes_read_total..bytes_read_total + CHUNK_SIZE]
+                    .copy_from_slice(&bytes.to_ne_bytes());
+                //advance bytes_read_total by 16, and self.offset by 16
+                bytes_read_total += CHUNK_SIZE;
+                offset += CHUNK_SIZE;
+            }
+            // Loop to read 1 byte at a time => 16 + 1252 from prior loops = 1268 bytes total
+            for _ in 0..16 {
+                const CHUNK_SIZE: usize = 1;
+                //if we have read up to len or 1 is too much to read, finish reading bytes
+                if bytes_read_total >= total_addr_len
+                    || (total_addr_len - bytes_read_total) < CHUNK_SIZE
+                {
+                    break;
+                }
+                if bytes_read_total + CHUNK_SIZE > MAX_RPL_ADDR_STORAGE {
+                    break;
+                }
+
+                let bytes: u8 = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
+
+                //copy bytes into buf at location bytes_read_total, take care to use big endian conversion
+                addresses_buf[bytes_read_total] = bytes;
+                //advance bytes_read_total by 1, and self.offset by 1
+                bytes_read_total += CHUNK_SIZE;
+                offset += CHUNK_SIZE;
+            }
+
+            parsed_data.addresses[..total_addr_len]
+                .copy_from_slice(&addresses_buf[..total_addr_len]);
+
+            ParsedHeader {
+                type_: PacketType::RplSourceRoute,
+                data: HeaderUnion { rpl: parsed_data },
             }
         }
         PacketType::Type2 => {
-            let mut offset = data_offset;
-            let routing_header = parse_ipv6_routing_hdr!(ctx, offset).map_err(|_| TC_ACT_SHOT)?;
-            match routing_header {
-                Ipv6RoutingHeader::Type2(type2_header) => ParsedHeader {
-                    type_: PacketType::Type2,
-                    data: HeaderUnion {
-                        type2: type2_header,
-                    },
-                },
-                _ => return Err(TC_ACT_SHOT), // Unexpected routing header type
+            let type2_hdr: Type2RoutingHeader = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+
+            ParsedHeader {
+                type_: PacketType::Type2,
+                data: HeaderUnion { type2: type2_hdr },
             }
         }
     };

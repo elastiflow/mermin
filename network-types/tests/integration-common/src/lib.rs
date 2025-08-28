@@ -48,7 +48,7 @@ pub union HeaderUnion {
     pub esp: Esp,
     pub hop: HopOptHdr,
     pub geneve: GeneveHdr,
-    pub rpl: RplSourceRouteHeader,
+    pub rpl: RplSourceRouteParsed,
     pub type2: Type2RoutingHeader,
 }
 
@@ -59,4 +59,14 @@ pub union HeaderUnion {
 pub struct ParsedHeader {
     pub type_: PacketType,
     pub data: HeaderUnion,
+}
+
+pub const MAX_RPL_ADDR_STORAGE: usize = 128;
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct RplSourceRouteParsed {
+    pub header: RplSourceRouteHeader,
+    pub addresses: [u8; MAX_RPL_ADDR_STORAGE],
+    pub addresses_len: u8,
 }

@@ -374,7 +374,6 @@ impl RplSourceFixedHeader {
 pub struct RplSourceRouteHeader {
     pub gen_route: GenericRoute,
     pub fixed_hdr: RplSourceFixedHeader,
-    pub addresses: [u8; MAX_RPL_ADDRESSES],
 }
 
 impl RplSourceRouteHeader {
@@ -391,7 +390,6 @@ impl RplSourceRouteHeader {
         Self {
             gen_route,
             fixed_hdr,
-            addresses: [0; MAX_RPL_ADDRESSES],
         }
     }
 
@@ -465,65 +463,65 @@ impl RplSourceRouteHeader {
     }
 }
 
-/// Parses an IPv6 routing header from a buffer context using the provided offset.
-///
-/// On success, it returns `Ok(Ipv6RoutingHeader)` and advances the offset `$off`
-/// past the parsed header. On failure, it returns `Err(())`.
-#[macro_export]
-macro_rules! parse_ipv6_routing_hdr {
-    ($ctx:expr, $off:ident) => {
-        (|| -> Result<$crate::route::Ipv6RoutingHeader, ()> {
-            use $crate::route::{
-                Ipv6RoutingHeader, GenericRoute, RoutingHeaderType,
-                // Import the specific header data structs
-                Type2RoutingHeader, RplSourceRouteHeader,
-            };
-            use $crate::read_var_buf;
-
-            // Load the common part of the header to get the routing type.
-            let gen_hdr: GenericRoute = $ctx.load($off).map_err(|_| ())?;
-            $off += GenericRoute::LEN;
-            let total_header_len = gen_hdr.total_hdr_len();
-
-            // Convert the type and match to parse the rest of the header.
-            let routing_type: RoutingHeaderType = RoutingHeaderType::from_u8(gen_hdr.type_);
-            match routing_type {
-                RoutingHeaderType::Type2 => {
-                    //Type2 is static so parse remaining fixed portion and pass back
-                    let fixed_data: Type2FixedHeader = $ctx.load($off).map_err(|_| ())?;
-                    $off += Type2FixedHeader::LEN;
-                    let result = Type2RoutingHeader::new(gen_hdr,fixed_data);
-                    Ok(Ipv6RoutingHeader::Type2(result))
-                }
-                RoutingHeaderType::RplSourceRoute => {
-                    let fixed_data: RplSourceFixedHeader = $ctx.load($off).map_err(|_| ())?;
-                    $off += RplSourceFixedHeader::LEN;
-                    let mut result = RplSourceRouteHeader::new(gen_hdr,fixed_data);
-                    let num_int = result.num_addresses().saturating_sub(1);
-                    let mut len = result.address_size()*num_int;
-                    for _ in 0..16{
-                        if len == 0 {
-                            break;
-                        }
-                        let bytes_read = read_var_buf!($ctx, $off, result.addresses, result.last_address_size(), result.last_address_size())
-                        .map_err(|_| ())?;
-                        _ = len.saturating_sub(bytes_read);
-                    } // I'd say its pretty unlikely we receive a RPL header with more than 512 addresses,
-                    // But if we do we need to add some logic here, or just another loop to support up to 1024
-                    let bytes_read = read_var_buf!($ctx, $off,
-                    result.addresses, result.last_address_size(), result.last_address_size())
-                    .map_err(|_| ())?;
-                    Ok(Ipv6RoutingHeader::RplSourceRoute(result))
-                }
-                RoutingHeaderType::Unknown(type_val) => {
-                    // TODO: Handle the unknown header, e.g., by loading its payload
-                     Err(())
-                }
-            }
-
-        })()
-    };
-}
+// /// Parses an IPv6 routing header from a buffer context using the provided offset.
+// ///
+// /// On success, it returns `Ok(Ipv6RoutingHeader)` and advances the offset `$off`
+// /// past the parsed header. On failure, it returns `Err(())`.
+// #[macro_export]
+// macro_rules! parse_ipv6_routing_hdr {
+//     ($ctx:expr, $off:ident) => {
+//         (|| -> Result<$crate::route::Ipv6RoutingHeader, ()> {
+//             use $crate::route::{
+//                 Ipv6RoutingHeader, GenericRoute, RoutingHeaderType,
+//                 // Import the specific header data structs
+//                 Type2RoutingHeader, RplSourceRouteHeader,
+//             };
+//             use $crate::read_var_buf;
+//
+//             // Load the common part of the header to get the routing type.
+//             let gen_hdr: GenericRoute = $ctx.load($off).map_err(|_| ())?;
+//             $off += GenericRoute::LEN;
+//             let total_header_len = gen_hdr.total_hdr_len();
+//
+//             // Convert the type and match to parse the rest of the header.
+//             let routing_type: RoutingHeaderType = RoutingHeaderType::from_u8(gen_hdr.type_);
+//             match routing_type {
+//                 RoutingHeaderType::Type2 => {
+//                     //Type2 is static so parse remaining fixed portion and pass back
+//                     let fixed_data: Type2FixedHeader = $ctx.load($off).map_err(|_| ())?;
+//                     $off += Type2FixedHeader::LEN;
+//                     let result = Type2RoutingHeader::new(gen_hdr,fixed_data);
+//                     Ok(Ipv6RoutingHeader::Type2(result))
+//                 }
+//                 RoutingHeaderType::RplSourceRoute => {
+//                     let fixed_data: RplSourceFixedHeader = $ctx.load($off).map_err(|_| ())?;
+//                     $off += RplSourceFixedHeader::LEN;
+//                     let mut result = RplSourceRouteHeader::new(gen_hdr,fixed_data);
+//                     let num_int = result.num_addresses().saturating_sub(1);
+//                     let mut len = result.address_size()*num_int;
+//                     for _ in 0..16{
+//                         if len == 0 {
+//                             break;
+//                         }
+//                         let bytes_read = read_var_buf!($ctx, $off, result.addresses, result.last_address_size(), result.last_address_size())
+//                         .map_err(|_| ())?;
+//                         _ = len.saturating_sub(bytes_read);
+//                     } // I'd say its pretty unlikely we receive a RPL header with more than 512 addresses,
+//                     // But if we do we need to add some logic here, or just another loop to support up to 1024
+//                     let bytes_read = read_var_buf!($ctx, $off,
+//                     result.addresses, result.last_address_size(), result.last_address_size())
+//                     .map_err(|_| ())?;
+//                     Ok(Ipv6RoutingHeader::RplSourceRoute(result))
+//                 }
+//                 RoutingHeaderType::Unknown(type_val) => {
+//                     // TODO: Handle the unknown header, e.g., by loading its payload
+//                      Err(())
+//                 }
+//             }
+//
+//         })()
+//     };
+// }
 
 #[cfg(test)]
 mod tests {
