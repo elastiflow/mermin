@@ -11,16 +11,19 @@ use std::{collections::HashMap, fmt::Debug, net::IpAddr, sync::Arc};
 
 use anyhow::Result;
 use futures::TryStreamExt;
-use k8s_openapi::api::{
-    apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet},
-    batch::v1::Job,
-    core::v1::{Node, Pod, Service},
-    discovery::v1::EndpointSlice,
-    networking::v1::{Ingress, NetworkPolicy},
+use k8s_openapi::{
+    api::{
+        apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet},
+        batch::v1::Job,
+        core::v1::{Node, Pod, Service},
+        discovery::v1::EndpointSlice,
+        networking::v1::{Ingress, NetworkPolicy},
+    },
+    apimachinery::pkg::apis::meta::v1::OwnerReference,
 };
 use kube::{
     Client,
-    api::{Api, ListParams, Resource},
+    api::{Api, ListParams, Resource, ResourceExt},
     runtime::reflector,
 };
 use kube_runtime::{WatchStreamExt, watcher};
@@ -28,6 +31,66 @@ use log::{debug, info, warn};
 use network_types::ip::IpProto;
 
 pub mod resource_parser;
+
+/// Holds metadata for a single Kubernetes object.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct K8sObjectMeta {
+    pub kind: String,
+    pub name: String,
+    pub uid: Option<String>,
+    pub namespace: Option<String>,
+    pub labels: Option<HashMap<String, String>>,
+    pub annotations: Option<HashMap<String, String>>,
+}
+
+/// Generic implementation to convert any Kubernetes Resource into our K8sObjectMeta.
+impl<T> From<&T> for K8sObjectMeta
+where
+    T: Resource<DynamicType = ()>,
+{
+    fn from(resource: &T) -> Self {
+        Self {
+            kind: T::kind(&()).to_string(),
+            name: resource.name_any(),
+            uid: resource.uid(),
+            namespace: resource.namespace(),
+            labels: (!resource.labels().is_empty())
+                .then(|| resource.labels().clone().into_iter().collect()),
+            annotations: (!resource.annotations().is_empty())
+                .then(|| resource.annotations().clone().into_iter().collect()),
+        }
+    }
+}
+
+/// Represents the workload controllers that own other resources, like Pods.
+#[derive(Debug, Clone)]
+pub enum WorkloadOwner {
+    ReplicaSet(K8sObjectMeta),
+    Deployment(K8sObjectMeta),
+    StatefulSet(K8sObjectMeta),
+    DaemonSet(K8sObjectMeta),
+    Job(K8sObjectMeta),
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub enum EnrichedInfo {
+    Pod {
+        pod: K8sObjectMeta,
+        owner: Option<WorkloadOwner>,
+    },
+    Node {
+        node: K8sObjectMeta,
+    },
+    Service {
+        service: K8sObjectMeta,
+        backend_ips: Vec<String>,
+    },
+    EndpointSlice {
+        slice: K8sObjectMeta,
+    },
+}
 
 /// A trait for types that contain a reflector store for a specific Kubernetes resource.
 /// This enables generic, type-safe access to the stores.
@@ -220,18 +283,101 @@ impl Attributor {
         })
     }
 
+    /// Given a Pod object, traverses its ownerReferences to find its top-level managing controller.
+    pub fn get_top_level_controller(&self, pod: &Pod) -> Option<WorkloadOwner> {
+        let mut current_owners = pod.owner_references().to_vec();
+        let mut namespace = pod.namespace().unwrap_or_default();
+        let mut top_level_owner = None;
+
+        while let Some(owner_ref) = current_owners.pop() {
+            if let Some((owner, next_owners_opt)) = self.get_owner(&owner_ref, &namespace) {
+                top_level_owner = Some(owner);
+
+                if let Some(next_owners) = next_owners_opt {
+                    current_owners = next_owners;
+                    if let Some(Some(ns)) = top_level_owner.as_ref().map(|o| match o {
+                        WorkloadOwner::Deployment(m) => m.namespace.as_ref(),
+                        WorkloadOwner::ReplicaSet(m) => m.namespace.as_ref(),
+                        WorkloadOwner::StatefulSet(m) => m.namespace.as_ref(),
+                        WorkloadOwner::DaemonSet(m) => m.namespace.as_ref(),
+                        WorkloadOwner::Job(m) => m.namespace.as_ref(),
+                    }) {
+                        namespace = ns.clone();
+                    }
+                } else {
+                    break;
+                }
+            } else {
+                warn!(
+                    "Failed to find owner {} ({}) in store for namespace {}",
+                    owner_ref.name, owner_ref.kind, namespace
+                );
+                break;
+            }
+        }
+
+        top_level_owner
+    }
+
+    /// Looks up a single owner reference in the corresponding resource store.
+    fn get_owner(
+        &self,
+        owner_ref: &OwnerReference,
+        namespace: &str,
+    ) -> Option<(WorkloadOwner, Option<Vec<OwnerReference>>)> {
+        let name = &owner_ref.name;
+        macro_rules! find_in_store {
+            ($store_type:ty, $variant:ident) => {
+                self.resource_store
+                    .get_by_namespace::<$store_type>(namespace)
+                    .iter()
+                    .find(|obj| obj.name_any() == *name)
+                    .map(|obj| {
+                        let meta = K8sObjectMeta::from(obj.as_ref());
+                        let next_owners = obj.meta().owner_references.clone();
+                        (WorkloadOwner::$variant(meta), next_owners)
+                    })
+            };
+        }
+
+        match owner_ref.kind.as_str() {
+            "ReplicaSet" => find_in_store!(ReplicaSet, ReplicaSet),
+            "Deployment" => find_in_store!(Deployment, Deployment),
+            "StatefulSet" => find_in_store!(StatefulSet, StatefulSet),
+            "DaemonSet" => find_in_store!(DaemonSet, DaemonSet),
+            "Job" => find_in_store!(Job, Job),
+            _ => {
+                warn!(
+                    "Owner lookup for kind '{}' is not implemented.",
+                    owner_ref.kind
+                );
+                None
+            }
+        }
+    }
+
     /// Looks up a Pod by its IP address.
     pub async fn get_pod_by_ip(&self, ip: IpAddr) -> Option<Arc<Pod>> {
         let ip_str = ip.to_string();
+        let target_ip_slice = Some(ip_str.as_str());
+
         self.resource_store
             .pods
             .state()
             .iter()
             .find(|pod| {
-                pod.status
-                    .as_ref()
-                    .and_then(|status| status.pod_ip.as_deref())
-                    .is_some_and(|pod_ip| pod_ip == ip_str)
+                pod.status.as_ref().is_some_and(|status| {
+                    status.pod_ip.as_deref() == target_ip_slice
+                        || status.host_ip.as_deref() == target_ip_slice
+                        || status.pod_ips.as_ref().is_some_and(|ips| {
+                            ips.iter()
+                                .any(|pod_ip_info| pod_ip_info.ip.as_str() == ip_str)
+                        })
+                        || status.host_ips.as_ref().is_some_and(|ips| {
+                            ips.iter()
+                                .any(|host_ip_info| host_ip_info.ip.as_str() == ip_str)
+                        })
+                })
             })
             .cloned()
     }
