@@ -2,10 +2,11 @@ use std::{
     error::Error,
     fmt,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use figment::{
-    Figment, Provider,
+    Figment,
     providers::{Format, Serialized, Yaml},
 };
 use serde::{Deserialize, Serialize};
@@ -13,7 +14,10 @@ use tracing::Level;
 
 use crate::runtime::{
     cli::Cli,
-    conf::{conf_serde::level, flow::Flow},
+    conf::{
+        conf_serde::{duration, level},
+        flow::FlowConf,
+    },
 };
 
 pub mod conf_serde;
@@ -26,7 +30,7 @@ mod flow;
 /// it to be easily read from or written to configuration files in
 /// formats like YAML.
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Config {
+pub struct Conf {
     /// A vector of strings representing the network interfaces or endpoints
     /// that the application should operate on. These interfaces are read
     /// directly from the configuration file.
@@ -52,27 +56,64 @@ pub struct Config {
     #[serde(with = "level")]
     pub log_level: Level,
 
+    /// Capacity of the channel for packet events between the ring buffer reader and flow workers
+    /// - Default: 10000
+    /// - Example: Increase for high-traffic environments, decrease for memory-constrained systems
+    #[serde(default = "defaults::packet_channel_capacity")]
+    pub packet_channel_capacity: usize,
+
+    /// Number of worker tasks for flow processing
+    /// - Default: 2
+    /// - Example: Increase for high CPU systems, keep at 1-2 for most deployments
+    #[serde(default = "defaults::flow_workers")]
+    pub flow_workers: usize,
+
+    /// Maximum time to wait for graceful shutdown of pipeline components
+    /// Increase for environments with slow disk I/O or network operations
+    /// - Default: 5s
+    #[serde(default = "defaults::shutdown_timeout", with = "duration")]
+    pub shutdown_timeout: Duration,
+
     /// A `Flow` type (defined elsewhere in the codebase) which contains
     /// settings related to the application's runtime flow management.
     /// This field encapsulates additional configuration details specific
     /// to how the application's logic operates.
-    pub flow: Flow,
+    pub flow: FlowConf,
 }
 
-impl Default for Config {
-    fn default() -> Config {
-        Config {
+impl Default for Conf {
+    fn default() -> Self {
+        Self {
             interface: Vec::from(["eth0".to_string()]),
             config_path: None,
             auto_reload: false,
             log_level: Level::INFO,
-            flow: Flow::default(),
+            packet_channel_capacity: defaults::packet_channel_capacity(),
+            flow_workers: defaults::flow_workers(),
+            shutdown_timeout: defaults::shutdown_timeout(),
+            flow: FlowConf::default(),
         }
     }
 }
 
-impl Config {
-    /// Creates a new `Config` instance based on the provided CLI arguments, environment variables,
+mod defaults {
+    use std::time::Duration;
+
+    pub fn packet_channel_capacity() -> usize {
+        10000
+    }
+
+    pub fn flow_workers() -> usize {
+        2
+    }
+
+    pub fn shutdown_timeout() -> Duration {
+        Duration::from_secs(5)
+    }
+}
+
+impl Conf {
+    /// Creates a new `Conf` instance based on the provided CLI arguments, environment variables,
     /// and configuration file. The configuration is determined using the following priority order:
     /// Defaults < Configuration File < Environment Variables < CLI Arguments.
     ///
@@ -80,7 +121,7 @@ impl Config {
     /// * `cli` - An instance of `Cli` containing parsed CLI arguments.
     ///
     /// # Returns
-    /// * `Result<(Self, Cli), ConfigError>` - Returns an `Ok((Config, Cli))` if successful, or a `ConfigError`
+    /// * `Result<(Self, Cli), ConfigError>` - Returns an `Ok((Conf, Cli))` if successful, or a `ConfigError`
     ///   if there are issues during configuration extraction.
     ///
     /// # Errors
@@ -96,16 +137,16 @@ impl Config {
     ///    If no path is provided or found, the function returns a `ConfigError::NoConfigFile`.
     /// 3. If a configuration file is specified via CLI or environment variable, it is merged with
     ///    the existing `Figment` configuration.
-    /// 4. Extracts the final configuration into a `Config` struct, storing the path to the
+    /// 4. Extracts the final configuration into a `Conf` struct, storing the path to the
     ///    configuration file (if any).
     ///
     /// # Example
     /// ```
-    /// use my_crate::{ConfigError, Config};
+    /// use my_crate::{ConfigError, Conf};
     /// use my_crate::Cli;
     ///
     /// let cli = Cli::parse(); // Parse CLI arguments
-    /// match Config::new(cli) {
+    /// match Conf::new(cli) {
     ///     Ok((conf, _cli)) => {
     ///         println!("Configuration loaded successfully: {:?}", conf);
     ///     },
@@ -115,10 +156,7 @@ impl Config {
     /// }
     /// ```
     pub fn new(cli: Cli) -> Result<(Self, Cli), ConfigError> {
-        let mut figment = Figment::new().merge(Serialized::defaults(Config::default()));
-
-        println!("Figment: {:?}", figment.data()?);
-        println!("CLI Defaults: {:?}", Serialized::defaults(&cli).value);
+        let mut figment = Figment::new().merge(Serialized::defaults(Conf::default()));
 
         let config_path_to_store = if let Some(config_path) = &cli.config {
             validate_config_path(config_path)?;
@@ -128,17 +166,12 @@ impl Config {
             None
         };
 
-        println!("Figment: {:?}", figment.data()?);
-
         figment = figment.merge(Serialized::defaults(&cli));
 
-        println!("Figment: {:?}", figment.data()?);
+        let mut conf: Conf = figment.extract()?;
 
-        let mut config: Config = figment.extract()?;
-
-        println!("DEBUG");
-        config.config_path = config_path_to_store;
-        Ok((config, cli))
+        conf.config_path = config_path_to_store;
+        Ok((conf, cli))
     }
 
     /// Reloads the configuration from the config file and returns a new instance
@@ -170,9 +203,9 @@ impl Config {
     ///
     /// # Example
     /// ```rust
-    /// use conf::Config;
+    /// use conf::Conf;
     ///
-    /// let conf = Config::default();
+    /// let conf = Conf::default();
     /// match conf.reload() {
     ///     Ok(new_config) => {
     ///         println!("Configuration reloaded successfully.");
@@ -185,12 +218,12 @@ impl Config {
     #[allow(dead_code)]
     pub fn reload(&self) -> Result<Self, ConfigError> {
         if let Some(path) = &self.config_path {
-            let mut config: Config = Figment::from(Serialized::defaults(self))
+            let mut conf: Conf = Figment::from(Serialized::defaults(self))
                 .merge(Yaml::file(path))
                 .extract()?;
-            config.config_path = self.config_path.clone();
+            conf.config_path = self.config_path.clone();
 
-            Ok(config)
+            Ok(conf)
         } else {
             Err(ConfigError::NoConfigFile)
         }
@@ -284,23 +317,41 @@ mod tests {
     use figment::Jail;
     use tracing::Level;
 
-    use super::Config;
+    use super::Conf;
     use crate::runtime::cli::Cli;
 
     #[test]
     fn default_impl_has_eth0_interface() {
-        let cfg = Config::default();
+        let cfg = Conf::default();
         assert_eq!(cfg.interface, Vec::from(["eth0".to_string()]));
         assert_eq!(cfg.config_path, None);
         assert_eq!(cfg.auto_reload, false);
         assert_eq!(cfg.log_level, Level::INFO);
+        assert_eq!(cfg.packet_channel_capacity, 10000);
+        assert_eq!(cfg.flow_workers, 2);
+        assert_eq!(cfg.shutdown_timeout, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn test_pipeline_serialization() {
+        let cfg = Conf::default();
+
+        // Test that it can be serialized and deserialized
+        let serialized = serde_yaml::to_string(&cfg).expect("should serialize");
+        let deserialized: Conf = serde_yaml::from_str(&serialized).expect("should deserialize");
+
+        assert_eq!(
+            cfg.packet_channel_capacity,
+            deserialized.packet_channel_capacity
+        );
+        assert_eq!(cfg.flow_workers, deserialized.flow_workers);
     }
 
     #[test]
     fn new_succeeds_without_config_path() {
         Jail::expect_with(|_| {
             let cli = Cli::parse_from(["mermin"]);
-            let (cfg, _cli) = Config::new(cli).expect("config should load without path");
+            let (cfg, _cli) = Conf::new(cli).expect("config should load without path");
             assert_eq!(cfg.config_path, None);
 
             Ok(())
@@ -311,7 +362,7 @@ mod tests {
     fn new_errors_with_nonexistent_config_file() {
         Jail::expect_with(|_| {
             let cli = Cli::parse_from(["mermin", "--config", "nonexistent.yaml"]);
-            let err = Config::new(cli).expect_err("expected error with nonexistent file");
+            let err = Conf::new(cli).expect_err("expected error with nonexistent file");
             let msg = err.to_string();
             assert!(
                 msg.contains("no config file provided"),
@@ -330,7 +381,7 @@ mod tests {
             jail.create_dir(path)?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let err = Config::new(cli).expect_err("expected error with directory path");
+            let err = Conf::new(cli).expect_err("expected error with directory path");
             let msg = err.to_string();
             assert!(
                 msg.contains("is not a valid file"),
@@ -349,7 +400,7 @@ mod tests {
             jail.create_file(path, "")?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let err = Config::new(cli).expect_err("expected error with invalid extension");
+            let err = Conf::new(cli).expect_err("expected error with invalid extension");
             let msg = err.to_string();
             assert!(
                 msg.contains("invalid file extension '.toml'"),
@@ -383,7 +434,7 @@ log_level: warn
                 "--log-level",
                 "debug",
             ]);
-            let (cfg, _cli) = Config::new(cli).expect("config loads from cli file");
+            let (cfg, _cli) = Conf::new(cli).expect("config loads from cli file");
             assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.log_level, Level::DEBUG);
@@ -407,7 +458,7 @@ log_level: debug
             jail.set_env("MERMIN_CONFIG_PATH", path);
 
             let cli = Cli::parse_from(["mermin"]);
-            let (cfg, _cli) = Config::new(cli).expect("config loads from env file");
+            let (cfg, _cli) = Conf::new(cli).expect("config loads from env file");
             assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.log_level, Level::DEBUG);
@@ -428,7 +479,7 @@ interface: ["eth1"]
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Config::new(cli).expect("config loads from cli file");
+            let (cfg, _cli) = Conf::new(cli).expect("config loads from cli file");
             assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
 
@@ -453,7 +504,7 @@ interface: ["eth2", "eth3"]
 
     #[test]
     fn reload_fails_without_config_path() {
-        let cfg = Config::default();
+        let cfg = Conf::default();
         let err = cfg
             .reload()
             .expect_err("expected error when reloading without config path");

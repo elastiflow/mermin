@@ -20,7 +20,7 @@ use pnet::datalink;
 use tokio::signal;
 
 use crate::{
-    community_id::CommunityIdGenerator, k8s::resource_parser::parse_packet, runtime::conf::Config,
+    community_id::CommunityIdGenerator, k8s::resource_parser::parse_packet, runtime::conf::Conf,
 };
 
 #[tokio::main]
@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
     let program: &mut SchedClassifier = ebpf.program_mut("mermin").unwrap().try_into()?;
     program.load()?;
 
-    let Config { interface, .. } = config;
+    let Conf { interface, .. } = config;
 
     for iface in &interface {
         // error adding clsact to the interface if it is already added is harmless
