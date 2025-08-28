@@ -7,7 +7,7 @@ use aya_ebpf::{
     maps::PerfEventArray,
     programs::TcContext,
 };
-use aya_log_ebpf::{Level, debug, log};
+use aya_log_ebpf::{Level, log};
 use integration_common::{HeaderUnion, PacketType, ParsedHeader, RplSourceRouteParsed};
 use network_types::{
     ah::AuthHdr,
@@ -22,6 +22,7 @@ use network_types::{
 };
 
 pub const MAX_RPL_ADDR_STORAGE: usize = 128;
+pub const MAX_SIZE_MASK: usize = 255;
 
 #[map(name = "OUT_DATA")]
 static mut OUT_DATA: PerfEventArray<ParsedHeader> = PerfEventArray::new(0);
@@ -138,6 +139,14 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
                 data: HeaderUnion { geneve: header },
             }
         }
+        PacketType::Type2 => {
+            let type2_hdr: Type2RoutingHeader = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+
+            ParsedHeader {
+                type_: PacketType::Type2,
+                data: HeaderUnion { type2: type2_hdr },
+            }
+        }
         PacketType::RplSourceRoute => {
             let mut offset = data_offset;
             let rpl_header: RplSourceRouteHeader = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
@@ -149,7 +158,12 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             offset += RplSourceRouteHeader::LEN;
 
             // Calculate the total length of all addresses
-            let total_addr_len = rpl_header.gen_route.total_hdr_len() - 8usize;
+            let temp_total_addr_len = rpl_header.gen_route.total_hdr_len() - 8usize;
+
+            // Clamp the value using a bitwise AND.
+            // No matter what total_addr_len was before, after this operation,
+            // its maximum possible value is 255.
+            let total_addr_len = temp_total_addr_len & MAX_SIZE_MASK;
 
             if total_addr_len > MAX_RPL_ADDR_STORAGE {
                 return Err(TC_ACT_SHOT);
@@ -242,14 +256,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             ParsedHeader {
                 type_: PacketType::RplSourceRoute,
                 data: HeaderUnion { rpl: parsed_data },
-            }
-        }
-        PacketType::Type2 => {
-            let type2_hdr: Type2RoutingHeader = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
-
-            ParsedHeader {
-                type_: PacketType::Type2,
-                data: HeaderUnion { type2: type2_hdr },
             }
         }
     };
