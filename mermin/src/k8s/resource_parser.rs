@@ -4,13 +4,17 @@ use std::{
 };
 
 use anyhow::Result;
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
-use kube::{
-    Api, Client, Resource, ResourceExt,
-    api::{DynamicObject, GroupVersionKind},
-    discovery::{Discovery, Scope},
+use k8s_openapi::{
+    api::{
+        apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet},
+        batch::v1::Job,
+    },
+    apimachinery::pkg::apis::meta::v1::OwnerReference,
 };
+use kube::{Resource, ResourceExt};
+use log::warn;
 use mermin_common::{IpAddrType, PacketMeta};
+use network_types::ip::IpProto;
 
 use crate::k8s::Attributor;
 
@@ -20,6 +24,7 @@ use crate::k8s::Attributor;
 pub struct K8sObjectMeta {
     pub kind: String,
     pub name: String,
+    pub uid: Option<String>,
     pub namespace: Option<String>,
     pub labels: Option<HashMap<String, String>>,
     pub annotations: Option<HashMap<String, String>>,
@@ -34,6 +39,7 @@ where
         Self {
             kind: T::kind(&()).to_string(),
             name: resource.name_any(),
+            uid: resource.uid(),
             namespace: resource.namespace(),
             labels: (!resource.labels().is_empty())
                 .then(|| resource.labels().clone().into_iter().collect()),
@@ -43,16 +49,32 @@ where
     }
 }
 
-#[derive(Debug)]
+/// Represents the workload controllers that own other resources, like Pods.
+#[derive(Debug, Clone)]
+pub enum WorkloadOwner {
+    ReplicaSet(K8sObjectMeta),
+    Deployment(K8sObjectMeta),
+    StatefulSet(K8sObjectMeta),
+    DaemonSet(K8sObjectMeta),
+    Job(K8sObjectMeta),
+}
+
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum EnrichedInfo {
     Pod {
         pod: K8sObjectMeta,
-        node: Option<K8sObjectMeta>,
-        owners: Vec<K8sObjectMeta>,
+        owners: Vec<WorkloadOwner>,
     },
     Node {
         node: K8sObjectMeta,
+    },
+    Service {
+        service: K8sObjectMeta,
+        backend_ips: Vec<String>,
+    },
+    EndpointSlice {
+        slice: K8sObjectMeta,
     },
 }
 
@@ -64,33 +86,91 @@ pub struct EnrichedFlowData {
     pub destination: Option<EnrichedInfo>,
 }
 
+#[derive(Debug)]
+#[allow(dead_code)]
+pub struct FlowSide {
+    ip: IpAddr,
+    port: u16,
+    protocol: IpProto,
+}
+
+fn get_owner_from_store(
+    attributor: &Attributor,
+    owner_ref: &OwnerReference,
+    namespace: &str,
+) -> Option<(WorkloadOwner, Option<Vec<OwnerReference>>)> {
+    let name = &owner_ref.name;
+    macro_rules! find_in_store {
+        ($store_type:ty, $variant:ident) => {
+            attributor
+                .resource_store
+                .get_by_namespace::<$store_type>(namespace)
+                .iter()
+                .find(|obj| obj.name_any() == *name)
+                .map(|obj| {
+                    let meta = K8sObjectMeta::from(obj.as_ref());
+                    let next_owners = obj.meta().owner_references.clone();
+                    (WorkloadOwner::$variant(meta), next_owners)
+                })
+        };
+    }
+
+    match owner_ref.kind.as_str() {
+        "ReplicaSet" => find_in_store!(ReplicaSet, ReplicaSet),
+        "Deployment" => find_in_store!(Deployment, Deployment),
+        "StatefulSet" => find_in_store!(StatefulSet, StatefulSet),
+        "DaemonSet" => find_in_store!(DaemonSet, DaemonSet),
+        "Job" => find_in_store!(Job, Job),
+        _ => {
+            warn!(
+                "Owner lookup for kind '{}' is not implemented.",
+                owner_ref.kind
+            );
+            None
+        }
+    }
+}
+
 /// Recursively discovers the entire ownership chain for a given object.
-pub async fn find_owner_chain(
-    client: Client,
-    discovery: &Discovery,
+pub fn find_owner_chain(
+    attributor: &Attributor,
     initial_owners: Vec<OwnerReference>,
     initial_namespace: &str,
-) -> Vec<K8sObjectMeta> {
-    let chain = Vec::new();
-    let mut owners_to_process: VecDeque<(OwnerReference, String)> = initial_owners
+    max_depth: usize,
+) -> Vec<WorkloadOwner> {
+    let mut chain = Vec::new();
+    let mut owners_to_process: VecDeque<(OwnerReference, String, usize)> = initial_owners
         .into_iter()
-        .map(|owner| (owner, initial_namespace.to_string()))
+        .map(|owner| (owner, initial_namespace.to_string(), 1))
         .collect();
 
-    while let Some((owner_ref, namespace)) = owners_to_process.pop_front() {
-        let gvk = GroupVersionKind::from(owner_ref.clone());
-        if let Some((resource, capabilities)) = discovery.resolve_gvk(&gvk) {
-            let _api: Api<DynamicObject> = match capabilities.scope {
-                Scope::Cluster => Api::all_with(client.clone(), &resource),
-                Scope::Namespaced => Api::namespaced_with(client.clone(), &namespace, &resource),
-            };
+    while let Some((owner_ref, namespace, depth)) = owners_to_process.pop_front() {
+        if depth > max_depth {
+            continue;
+        }
 
-            // TODO: convert the api result to K8sObjectMeta and return it
-            // chain.push(...)
+        if let Some((owner_obj, next_owners_opt)) =
+            get_owner_from_store(attributor, &owner_ref, &namespace)
+        {
+            if let Some(next_owners) = next_owners_opt {
+                let owner_namespace = match &owner_obj {
+                    WorkloadOwner::ReplicaSet(m) => m.namespace.clone(),
+                    WorkloadOwner::Deployment(m) => m.namespace.clone(),
+                    WorkloadOwner::StatefulSet(m) => m.namespace.clone(),
+                    WorkloadOwner::DaemonSet(m) => m.namespace.clone(),
+                    WorkloadOwner::Job(m) => m.namespace.clone(),
+                }
+                .unwrap_or(namespace);
+
+                for next_owner in next_owners {
+                    owners_to_process.push_back((next_owner, owner_namespace.clone(), depth + 1));
+                }
+            }
+            chain.push(owner_obj);
         } else {
-            eprintln!(
-                "Could not discover ApiResource for GVK: {}/{} {}",
-                gvk.group, gvk.version, owner_ref.kind
+            warn!(
+                "Failed to find owner {} ({}) in store for namespace {}",
+                owner_ref.name, owner_ref.kind, namespace
             );
         }
     }
@@ -98,41 +178,47 @@ pub async fn find_owner_chain(
 }
 
 /// Enriches a single side of a flow (source or destination) based on its IP address.
-async fn enrich_side(ip: IpAddr, attributor: &Attributor) -> Option<EnrichedInfo> {
-    if let Some(pod) = attributor.get_pod_by_ip(ip).await {
+async fn enrich_side(side: &FlowSide, attributor: &Attributor) -> Option<EnrichedInfo> {
+    if let Some(pod) = attributor.get_pod_by_ip(side.ip).await {
         let pod_meta = K8sObjectMeta::from(pod.as_ref());
-
-        let node_meta = if let Some(node_name) = pod.spec.as_ref()?.node_name.as_deref() {
-            attributor
-                .get_node_by_name(node_name)
-                .await
-                .map(|node| K8sObjectMeta::from(node.as_ref()))
-        } else {
-            None
-        };
-
         let owners = if let Some(owner_refs) = &pod.metadata.owner_references {
             find_owner_chain(
-                attributor.client.clone(),
-                &attributor.discovery,
+                attributor,
                 owner_refs.clone(),
                 &pod.namespace().unwrap_or_default(),
+                10, // Replace with conf value when available
             )
-            .await
         } else {
             Vec::new()
         };
-
         return Some(EnrichedInfo::Pod {
             pod: pod_meta,
-            node: node_meta,
             owners,
         });
     }
 
-    if let Some(node) = attributor.get_node_by_ip(ip).await {
+    if let Some(node) = attributor.get_node_by_ip(side.ip).await {
         return Some(EnrichedInfo::Node {
             node: K8sObjectMeta::from(node.as_ref()),
+        });
+    }
+
+    if let Some(service) = attributor
+        .get_service_by_flow_details(side.ip, side.port, side.protocol)
+        .await
+    {
+        let service_meta = K8sObjectMeta::from(service.as_ref());
+        let backend_ips = attributor.resolve_service_ip_to_backend_ips(side.ip).await;
+
+        return Some(EnrichedInfo::Service {
+            service: service_meta,
+            backend_ips: backend_ips.unwrap(),
+        });
+    }
+
+    if let Some(slice) = attributor.get_endpointslice_by_ip(side.ip).await {
+        return Some(EnrichedInfo::EndpointSlice {
+            slice: K8sObjectMeta::from(slice.as_ref()),
         });
     }
 
@@ -145,20 +231,27 @@ pub async fn parse_packet(
     attributor: &Attributor,
     community_id: String,
 ) -> Result<EnrichedFlowData> {
-    let (src_ip, dst_ip) = match packet.ip_addr_type {
-        IpAddrType::Ipv4 => (
-            IpAddr::V4(Ipv4Addr::from(packet.src_ipv4_addr)),
-            IpAddr::V4(Ipv4Addr::from(packet.dst_ipv4_addr)),
-        ),
-        IpAddrType::Ipv6 => (
-            IpAddr::V6(Ipv6Addr::from(packet.src_ipv6_addr)),
-            IpAddr::V6(Ipv6Addr::from(packet.dst_ipv6_addr)),
-        ),
+    let source_side = FlowSide {
+        ip: match packet.ip_addr_type {
+            IpAddrType::Ipv4 => IpAddr::V4(Ipv4Addr::from(packet.src_ipv4_addr)),
+            IpAddrType::Ipv6 => IpAddr::V6(Ipv6Addr::from(packet.src_ipv6_addr)),
+        },
+        port: u16::from_be_bytes(packet.src_port),
+        protocol: packet.proto,
+    };
+
+    let destination_side = FlowSide {
+        ip: match packet.ip_addr_type {
+            IpAddrType::Ipv4 => IpAddr::V4(Ipv4Addr::from(packet.dst_ipv4_addr)),
+            IpAddrType::Ipv6 => IpAddr::V6(Ipv6Addr::from(packet.dst_ipv6_addr)),
+        },
+        port: u16::from_be_bytes(packet.dst_port),
+        protocol: packet.proto,
     };
 
     let (source_info, destination_info) = tokio::join!(
-        enrich_side(src_ip, attributor),
-        enrich_side(dst_ip, attributor)
+        enrich_side(&source_side, attributor),
+        enrich_side(&destination_side, attributor)
     );
 
     Ok(EnrichedFlowData {
