@@ -1,0 +1,937 @@
+---
+alwaysApply: true
+---
+
+# eBPF Fundamentals for Aya Development
+
+## What is eBPF?
+
+eBPF (extended Berkeley Packet Filter) is a revolutionary technology that allows you to run sandboxed programs in the kernel without changing kernel source code or loading kernel modules. It provides:
+
+- **Safety**: Programs are verified before execution to prevent kernel crashes
+- **Performance**: Runs in kernel space with minimal overhead
+- **Flexibility**: Can attach to various kernel events and tracepoints
+- **Observability**: Enables powerful monitoring and debugging capabilities
+
+## eBPF Architecture
+
+### Core Components
+
+1. **eBPF Program**: User-defined program written in restricted C or Rust
+2. **eBPF Verifier**: Kernel component that validates program safety
+3. **eBPF Runtime**: Kernel subsystem that executes verified programs
+4. **Maps**: Data structures for communication between kernel and userspace
+5. **Helpers**: Kernel functions that eBPF programs can call
+
+### Program Types
+
+- **XDP**: Early packet processing (before network stack)
+- **TC**: Traffic control (after network stack)
+- **Kprobes**: Kernel function entry/exit hooks
+- **Uprobes**: Userspace function entry/exit hooks
+- **Tracepoints**: Static kernel event hooks
+- **Sockets**: Network socket filtering
+
+## eBPF Program Lifecycle
+
+### 1. Development
+
+```rust
+// Write eBPF program in Rust using Aya
+#[aya_ebpf::main]
+fn main() -> Result<(), aya_ebpf::EbpfError> {
+    // Your eBPF logic here
+    Ok(())
+}
+```
+
+### 2. Compilation
+
+- Compile to eBPF bytecode using LLVM
+- Aya handles this automatically with build scripts
+
+### 3. Verification
+
+- Kernel verifier checks program safety
+- Ensures bounded loops, valid memory access, etc.
+
+### 4. Loading
+
+- Load verified bytecode into kernel
+- Attach to appropriate hook points
+
+### 5. Execution
+
+- Kernel executes program on events
+- Program can read data, make decisions, update maps
+
+## eBPF Verifier Requirements
+
+### Critical Constraints
+
+- **Bounded Loops**: All loops must have a provable upper bound
+- **Memory Access**: Must verify bounds before accessing memory
+- **Helper Functions**: Can only call approved kernel helpers
+- **Stack Size**: Limited stack space (512 bytes)
+- **Complexity**: Programs must complete verification in reasonable time
+
+### Common Verification Failures
+
+```rust
+// ❌ Unbounded loop - will fail verification
+let mut i = 0;
+while i < input.len() {  // Verifier can't prove termination
+    // process data
+    i += 1;
+}
+
+// ✅ Bounded loop - will pass verification
+for i in 0..16 {  // Fixed upper bound
+    if i < input.len() {
+        // process data
+    }
+}
+```
+
+## eBPF Maps
+
+### Purpose
+
+Maps provide communication between eBPF programs and userspace, and between different eBPF programs.
+
+### Common Map Types
+
+```rust
+// Hash map for key-value storage
+#[map]
+static mut COUNTERS: HashMap<u32, u64> = HashMap::with_max_entries(1024, 0);
+
+// Array map for indexed data
+#[map]
+static mut STATS: Array<u64> = Array::with_max_entries(100, 0);
+
+// Ring buffer for streaming data
+#[map]
+static mut EVENTS: RingBuf = RingBuf::with_byte_size(64 * 1024, 0);
+```
+
+### Map Operations
+
+```rust
+// Reading from maps
+let value = COUNTERS.get(&key, 0)?;
+
+// Writing to maps
+COUNTERS.insert(&key, &value, 0)?;
+
+// Output to ring buffer
+EVENTS.output(&data, 0)?;
+```
+
+## eBPF Helpers
+
+### Network Helpers
+
+```rust
+// Load packet data
+let data: u32 = ctx.load(offset)?;
+
+// Get packet length
+let len = ctx.len();
+
+// Get current time
+let time = bpf_ktime_get_ns();
+```
+
+### Map Helpers
+
+```rust
+// Map lookup
+let value = bpf_map_lookup_elem(&mut map, &key)?;
+
+// Map update
+bpf_map_update_elem(&mut map, &key, &value, 0)?;
+
+// Map delete
+bpf_map_delete_elem(&mut map, &key)?;
+```
+
+## Aya Framework Benefits
+
+### Why Use Aya?
+
+1. **Rust Safety**: Memory safety and thread safety guarantees
+2. **Type Safety**: Compile-time checking of eBPF operations
+3. **Modern Tooling**: Integration with Rust ecosystem
+4. **Cross-Compilation**: Easy targeting of different architectures
+5. **Testing**: Built-in testing framework for eBPF programs
+
+### Aya vs Raw eBPF
+
+```rust
+// Raw eBPF (C-style)
+unsafe {
+    let value = *(ptr as *const u32);
+}
+
+// Aya (safe)
+let value: u32 = ctx.load(offset)?;
+```
+
+## Development Best Practices
+
+### 1. Error Handling
+
+```rust
+// Always handle errors gracefully
+match ctx.load::<u32>(offset) {
+    Ok(value) => { /* process value */ }
+    Err(_) => return Ok(TC_ACT_PIPE), // Pass packet through
+}
+```
+
+### 2. Bounds Checking
+
+```rust
+// Verify bounds before access
+if offset + mem::size_of::<T>() > ctx.len() as usize {
+    return Err(Error::OutOfBounds);
+}
+let value: T = ctx.load(offset)?;
+```
+
+### 3. Loop Optimization
+
+```rust
+// Use bounded loops with known limits
+for i in 0..16 {  // Max 16 iterations
+    if i >= max_items {
+        break;
+    }
+    // process item
+}
+```
+
+### 4. Memory Management
+
+```rust
+// Avoid dynamic allocation
+// Use fixed-size arrays and stack allocation
+let mut buffer = [0u8; 64];
+```
+
+## Common Patterns
+
+### Packet Processing
+
+```rust
+#[classifier]
+pub fn process_packet(ctx: TcContext) -> i32 {
+    // 1. Parse headers
+    let eth = parse_ethernet(&ctx)?;
+    
+    // 2. Extract information
+    let src_mac = eth.src_addr;
+    let dst_mac = eth.dst_addr;
+    
+    // 3. Update statistics
+    update_stats(&src_mac, &dst_mac)?;
+    
+    // 4. Return action
+    Ok(TC_ACT_PIPE)
+}
+```
+
+### State Tracking
+
+```rust
+// Use maps to track connection state
+#[map]
+static mut CONNECTIONS: HashMap<ConnectionKey, ConnectionState> = 
+    HashMap::with_max_entries(10000, 0);
+
+fn track_connection(key: &ConnectionKey, state: &ConnectionState) -> Result<(), Error> {
+    CONNECTIONS.insert(key, state, 0)?;
+    Ok(())
+}
+```
+
+## Performance Considerations
+
+### 1. Minimize Instructions
+
+- Keep programs simple and focused
+- Avoid unnecessary computations
+- Use efficient data structures
+
+### 2. Memory Access Patterns
+
+- Access data sequentially when possible
+- Minimize random memory access
+- Use appropriate data alignment
+
+### 3. Map Operations
+
+- Batch operations when possible
+- Use appropriate map types for your use case
+- Consider map size limits
+
+## Debugging eBPF Programs
+
+### 1. Logging
+
+```rust
+use aya_log_ebpf::{debug, info, warn, error};
+
+debug!(&ctx, "Processing packet at offset {}", offset);
+info!(&ctx, "Packet length: {}", ctx.len());
+warn!(&ctx, "Unsupported protocol: {}", protocol);
+error!(&ctx, "Failed to parse header: {:?}", err);
+```
+
+### 2. Map Inspection
+
+```bash
+# List loaded maps
+bpftool map list
+
+# Show map contents
+bpftool map dump id <map_id>
+
+# Show map info
+bpftool map show id <map_id>
+```
+
+### 3. Program Inspection
+
+```bash
+# List loaded programs
+bpftool prog list
+
+# Show program details
+bpftool prog show id <prog_id>
+
+# Dump program bytecode
+bpftool prog dump xlated id <prog_id>
+```
+
+## Security Considerations
+
+### 1. Input Validation
+
+- Always validate packet data before processing
+- Check bounds and format of headers
+- Handle malformed packets gracefully
+
+### 2. Resource Limits
+
+- Respect map size limits
+- Avoid infinite loops
+- Monitor program complexity
+
+### 3. Data Privacy
+
+- Be careful with sensitive data in maps
+- Consider encryption for sensitive information
+- Follow data retention policies
+
+## Integration with Userspace
+
+### 1. Map Communication
+
+```rust
+// Userspace reads from maps
+let mut map = HashMap::<u32, u64>::try_from(
+    bpf.map("COUNTERS")?
+)?;
+
+// Read data
+let value = map.get(&key)?;
+```
+
+### 2. Event Streaming
+
+```rust
+// Userspace reads from ring buffer
+let mut buf = [0u8; 1024];
+while let Ok(events) = ring_buf.read(&mut buf) {
+    for event in events {
+        process_event(event)?;
+    }
+}
+```
+
+### 3. Program Management
+
+```rust
+// Load and attach program
+let mut bpf = Bpf::load(include_bytes_aligned!(
+    "../../target/bpfel-unknown-none/release/my-program"
+))?;
+
+let program: &mut Tc = bpf.program_mut("my_program")?.try_into()?;
+program.load()?;
+program.attach("eth0", TcAttachType::Ingress)?;
+```
+
+## Testing eBPF Programs
+
+### 1. Unit Tests
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_packet_parsing() {
+        let test_data = create_test_packet();
+        let ctx = TestContext::new(test_data);
+        
+        let result = parse_packet(&ctx);
+        assert!(result.is_ok());
+    }
+}
+```
+
+### 2. Integration Tests
+
+```rust
+// Test with real packet data
+#[test]
+fn test_real_packet() {
+    let packet = load_pcap_file("test.pcap")?;
+    let ctx = RealContext::new(packet);
+    
+    let result = process_packet(ctx);
+    assert_eq!(result, TC_ACT_PIPE);
+}
+```
+
+### 3. Performance Tests
+
+```rust
+// Measure instruction count
+#[test]
+fn test_instruction_count() {
+    let program = compile_program()?;
+    let instructions = count_instructions(&program);
+    
+    assert!(instructions < 1000, "Program too complex");
+}
+```
+
+## Common Pitfalls and Solutions
+
+### 1. Verification Failures
+
+- **Problem**: Program fails to verify
+- **Solution**: Simplify logic, add bounds checking, use bounded loops
+
+### 2. Performance Issues
+
+- **Problem**: Program runs slowly or uses too many instructions
+- **Solution**: Optimize algorithms, reduce memory access, simplify logic
+
+### 3. Memory Issues
+
+- **Problem**: Program runs out of stack space
+- **Solution**: Reduce local variables, use maps for large data
+
+### 4. Debugging Difficulties
+
+- **Problem**: Hard to debug eBPF programs
+- **Solution**: Use logging, test with simple data, verify step by step
+
+## Resources for Learning
+
+### Official Documentation
+
+- [eBPF Documentation](https://docs.ebpf.io/)
+- [Linux Kernel eBPF Documentation](https://docs.kernel.org/bpf/)
+- [Aya Framework Documentation](https://aya-rs.dev/)
+
+### Books
+
+- "Learning eBPF" by Liz Rice
+- "BPF Performance Tools" by Brendan Gregg
+
+### Community
+
+- eBPF Slack: [ebpf.slack.com](https://ebpf.slack.com)
+- Aya Discord: [discord.gg/aya-rs](https://discord.gg/aya-rs)
+- Linux Kernel Mailing List
+
+### Tools
+
+- bpftool: eBPF inspection and manipulation
+- llvm-objdump: Binary analysis
+- Wireshark: Packet analysis
+- perf: Performance analysis
+
+# eBPF Fundamentals for Aya Development
+
+## What is eBPF?
+
+eBPF (extended Berkeley Packet Filter) is a revolutionary technology that allows you to run sandboxed programs in the kernel without changing kernel source code or loading kernel modules. It provides:
+
+- **Safety**: Programs are verified before execution to prevent kernel crashes
+- **Performance**: Runs in kernel space with minimal overhead
+- **Flexibility**: Can attach to various kernel events and tracepoints
+- **Observability**: Enables powerful monitoring and debugging capabilities
+
+## eBPF Architecture
+
+### Core Components
+
+1. **eBPF Program**: User-defined program written in restricted C or Rust
+2. **eBPF Verifier**: Kernel component that validates program safety
+3. **eBPF Runtime**: Kernel subsystem that executes verified programs
+4. **Maps**: Data structures for communication between kernel and userspace
+5. **Helpers**: Kernel functions that eBPF programs can call
+
+### Program Types
+
+- **XDP**: Early packet processing (before network stack)
+- **TC**: Traffic control (after network stack)
+- **Kprobes**: Kernel function entry/exit hooks
+- **Uprobes**: Userspace function entry/exit hooks
+- **Tracepoints**: Static kernel event hooks
+- **Sockets**: Network socket filtering
+
+## eBPF Program Lifecycle
+
+### 1. Development
+
+```rust
+// Write eBPF program in Rust using Aya
+#[aya_ebpf::main]
+fn main() -> Result<(), aya_ebpf::EbpfError> {
+    // Your eBPF logic here
+    Ok(())
+}
+```
+
+### 2. Compilation
+
+- Compile to eBPF bytecode using LLVM
+- Aya handles this automatically with build scripts
+
+### 3. Verification
+
+- Kernel verifier checks program safety
+- Ensures bounded loops, valid memory access, etc.
+
+### 4. Loading
+
+- Load verified bytecode into kernel
+- Attach to appropriate hook points
+
+### 5. Execution
+
+- Kernel executes program on events
+- Program can read data, make decisions, update maps
+
+## eBPF Verifier Requirements
+
+### Critical Constraints
+
+- **Bounded Loops**: All loops must have a provable upper bound
+- **Memory Access**: Must verify bounds before accessing memory
+- **Helper Functions**: Can only call approved kernel helpers
+- **Stack Size**: Limited stack space (512 bytes)
+- **Complexity**: Programs must complete verification in reasonable time
+
+### Common Verification Failures
+
+```rust
+// ❌ Unbounded loop - will fail verification
+let mut i = 0;
+while i < input.len() {  // Verifier can't prove termination
+    // process data
+    i += 1;
+}
+
+// ✅ Bounded loop - will pass verification
+for i in 0..16 {  // Fixed upper bound
+    if i < input.len() {
+        // process data
+    }
+}
+```
+
+## eBPF Maps
+
+### Purpose
+
+Maps provide communication between eBPF programs and userspace, and between different eBPF programs.
+
+### Common Map Types
+
+```rust
+// Hash map for key-value storage
+#[map]
+static mut COUNTERS: HashMap<u32, u64> = HashMap::with_max_entries(1024, 0);
+
+// Array map for indexed data
+#[map]
+static mut STATS: Array<u64> = Array::with_max_entries(100, 0);
+
+// Ring buffer for streaming data
+#[map]
+static mut EVENTS: RingBuf = RingBuf::with_byte_size(64 * 1024, 0);
+```
+
+### Map Operations
+
+```rust
+// Reading from maps
+let value = COUNTERS.get(&key, 0)?;
+
+// Writing to maps
+COUNTERS.insert(&key, &value, 0)?;
+
+// Output to ring buffer
+EVENTS.output(&data, 0)?;
+```
+
+## eBPF Helpers
+
+### Network Helpers
+
+```rust
+// Load packet data
+let data: u32 = ctx.load(offset)?;
+
+// Get packet length
+let len = ctx.len();
+
+// Get current time
+let time = bpf_ktime_get_ns();
+```
+
+### Map Helpers
+
+```rust
+// Map lookup
+let value = bpf_map_lookup_elem(&mut map, &key)?;
+
+// Map update
+bpf_map_update_elem(&mut map, &key, &value, 0)?;
+
+// Map delete
+bpf_map_delete_elem(&mut map, &key)?;
+```
+
+## Aya Framework Benefits
+
+### Why Use Aya?
+
+1. **Rust Safety**: Memory safety and thread safety guarantees
+2. **Type Safety**: Compile-time checking of eBPF operations
+3. **Modern Tooling**: Integration with Rust ecosystem
+4. **Cross-Compilation**: Easy targeting of different architectures
+5. **Testing**: Built-in testing framework for eBPF programs
+
+### Aya vs Raw eBPF
+
+```rust
+// Raw eBPF (C-style)
+unsafe {
+    let value = *(ptr as *const u32);
+}
+
+// Aya (safe)
+let value: u32 = ctx.load(offset)?;
+```
+
+## Development Best Practices
+
+### 1. Error Handling
+
+```rust
+// Always handle errors gracefully
+match ctx.load::<u32>(offset) {
+    Ok(value) => { /* process value */ }
+    Err(_) => return Ok(TC_ACT_PIPE), // Pass packet through
+}
+```
+
+### 2. Bounds Checking
+
+```rust
+// Verify bounds before access
+if offset + mem::size_of::<T>() > ctx.len() as usize {
+    return Err(Error::OutOfBounds);
+}
+let value: T = ctx.load(offset)?;
+```
+
+### 3. Loop Optimization
+
+```rust
+// Use bounded loops with known limits
+for i in 0..16 {  // Max 16 iterations
+    if i >= max_items {
+        break;
+    }
+    // process item
+}
+```
+
+### 4. Memory Management
+
+```rust
+// Avoid dynamic allocation
+// Use fixed-size arrays and stack allocation
+let mut buffer = [0u8; 64];
+```
+
+## Common Patterns
+
+### Packet Processing
+
+```rust
+#[classifier]
+pub fn process_packet(ctx: TcContext) -> i32 {
+    // 1. Parse headers
+    let eth = parse_ethernet(&ctx)?;
+    
+    // 2. Extract information
+    let src_mac = eth.src_addr;
+    let dst_mac = eth.dst_addr;
+    
+    // 3. Update statistics
+    update_stats(&src_mac, &dst_mac)?;
+    
+    // 4. Return action
+    Ok(TC_ACT_PIPE)
+}
+```
+
+### State Tracking
+
+```rust
+// Use maps to track connection state
+#[map]
+static mut CONNECTIONS: HashMap<ConnectionKey, ConnectionState> = 
+    HashMap::with_max_entries(10000, 0);
+
+fn track_connection(key: &ConnectionKey, state: &ConnectionState) -> Result<(), Error> {
+    CONNECTIONS.insert(key, state, 0)?;
+    Ok(())
+}
+```
+
+## Performance Considerations
+
+### 1. Minimize Instructions
+
+- Keep programs simple and focused
+- Avoid unnecessary computations
+- Use efficient data structures
+
+### 2. Memory Access Patterns
+
+- Access data sequentially when possible
+- Minimize random memory access
+- Use appropriate data alignment
+
+### 3. Map Operations
+
+- Batch operations when possible
+- Use appropriate map types for your use case
+- Consider map size limits
+
+## Debugging eBPF Programs
+
+### 1. Logging
+
+```rust
+use aya_log_ebpf::{debug, info, warn, error};
+
+debug!(&ctx, "Processing packet at offset {}", offset);
+info!(&ctx, "Packet length: {}", ctx.len());
+warn!(&ctx, "Unsupported protocol: {}", protocol);
+error!(&ctx, "Failed to parse header: {:?}", err);
+```
+
+### 2. Map Inspection
+
+```bash
+# List loaded maps
+bpftool map list
+
+# Show map contents
+bpftool map dump id <map_id>
+
+# Show map info
+bpftool map show id <map_id>
+```
+
+### 3. Program Inspection
+
+```bash
+# List loaded programs
+bpftool prog list
+
+# Show program details
+bpftool prog show id <prog_id>
+
+# Dump program bytecode
+bpftool prog dump xlated id <prog_id>
+```
+
+## Security Considerations
+
+### 1. Input Validation
+
+- Always validate packet data before processing
+- Check bounds and format of headers
+- Handle malformed packets gracefully
+
+### 2. Resource Limits
+
+- Respect map size limits
+- Avoid infinite loops
+- Monitor program complexity
+
+### 3. Data Privacy
+
+- Be careful with sensitive data in maps
+- Consider encryption for sensitive information
+- Follow data retention policies
+
+## Integration with Userspace
+
+### 1. Map Communication
+
+```rust
+// Userspace reads from maps
+let mut map = HashMap::<u32, u64>::try_from(
+    bpf.map("COUNTERS")?
+)?;
+
+// Read data
+let value = map.get(&key)?;
+```
+
+### 2. Event Streaming
+
+```rust
+// Userspace reads from ring buffer
+let mut buf = [0u8; 1024];
+while let Ok(events) = ring_buf.read(&mut buf) {
+    for event in events {
+        process_event(event)?;
+    }
+}
+```
+
+### 3. Program Management
+
+```rust
+// Load and attach program
+let mut bpf = Bpf::load(include_bytes_aligned!(
+    "../../target/bpfel-unknown-none/release/my-program"
+))?;
+
+let program: &mut Tc = bpf.program_mut("my_program")?.try_into()?;
+program.load()?;
+program.attach("eth0", TcAttachType::Ingress)?;
+```
+
+## Testing eBPF Programs
+
+### 1. Unit Tests
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_packet_parsing() {
+        let test_data = create_test_packet();
+        let ctx = TestContext::new(test_data);
+        
+        let result = parse_packet(&ctx);
+        assert!(result.is_ok());
+    }
+}
+```
+
+### 2. Integration Tests
+
+```rust
+// Test with real packet data
+#[test]
+fn test_real_packet() {
+    let packet = load_pcap_file("test.pcap")?;
+    let ctx = RealContext::new(packet);
+    
+    let result = process_packet(ctx);
+    assert_eq!(result, TC_ACT_PIPE);
+}
+```
+
+### 3. Performance Tests
+
+```rust
+// Measure instruction count
+#[test]
+fn test_instruction_count() {
+    let program = compile_program()?;
+    let instructions = count_instructions(&program);
+    
+    assert!(instructions < 1000, "Program too complex");
+}
+```
+
+## Common Pitfalls and Solutions
+
+### 1. Verification Failures
+
+- **Problem**: Program fails to verify
+- **Solution**: Simplify logic, add bounds checking, use bounded loops
+
+### 2. Performance Issues
+
+- **Problem**: Program runs slowly or uses too many instructions
+- **Solution**: Optimize algorithms, reduce memory access, simplify logic
+
+### 3. Memory Issues
+
+- **Problem**: Program runs out of stack space
+- **Solution**: Reduce local variables, use maps for large data
+
+### 4. Debugging Difficulties
+
+- **Problem**: Hard to debug eBPF programs
+- **Solution**: Use logging, test with simple data, verify step by step
+
+## Resources for Learning
+
+### Official Documentation
+
+- [eBPF Documentation](https://docs.ebpf.io/)
+- [Linux Kernel eBPF Documentation](https://docs.kernel.org/bpf/)
+- [Aya Framework Documentation](https://aya-rs.dev/)
+
+### Books
+
+- "Learning eBPF" by Liz Rice
+- "BPF Performance Tools" by Brendan Gregg
+
+### Community
+
+- eBPF Slack: [ebpf.slack.com](https://ebpf.slack.com)
+- Aya Discord: [discord.gg/aya-rs](https://discord.gg/aya-rs)
+- Linux Kernel Mailing List
+
+### Tools
+
+- bpftool: eBPF inspection and manipulation
+- llvm-objdump: Binary analysis
+- Wireshark: Packet analysis
+- perf: Performance analysis

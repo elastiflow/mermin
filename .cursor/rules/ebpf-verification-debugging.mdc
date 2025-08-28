@@ -1,0 +1,775 @@
+---
+alwaysApply: true
+---
+
+
+# eBPF Verification and Debugging Guide
+
+This comprehensive guide covers eBPF verification and debugging techniques. Remember that successful verification is the first step to running eBPF programs, and proper debugging ensures they work correctly in production.
+
+## Overview
+
+eBPF programs must pass the kernel verifier before they can be loaded and executed. The verifier ensures:
+
+- **Safety**: Programs cannot crash the kernel
+- **Termination**: All loops have provable bounds
+- **Memory Access**: Valid memory access patterns
+- **Resource Limits**: Respects kernel constraints
+
+## eBPF Verifier Requirements
+
+### Critical Constraints
+
+1. **Bounded Loops**: All loops must have a provable upper bound
+2. **Memory Safety**: Must verify bounds before accessing memory
+3. **Helper Functions**: Can only call approved kernel helpers
+4. **Stack Size**: Limited to 512 bytes
+5. **Complexity**: Must complete verification in reasonable time
+6. **No Recursion**: Recursive functions are not allowed
+7. **No Dynamic Allocation**: All memory must be statically allocated
+
+### Verification Process
+
+```bash
+# Check verification logs
+dmesg | grep -i "bpf\|ebpf" | tail -20
+
+# Monitor verification attempts
+cat /sys/kernel/debug/bpf/verifier_log
+
+# Check program status
+bpftool prog list | grep my_program
+```
+
+## Common Verification Failures
+
+### 1. Unbounded Loops
+
+```rust
+// ❌ Bad: Unbounded loop - will fail verification
+fn parse_packet_bad(ctx: &TcContext) -> Result<(), Error> {
+    let mut offset = 0;
+    while offset < ctx.len() as usize {
+        let byte: u8 = ctx.load(offset)?;
+        if byte == 0 { // End marker
+            break;
+        }
+        offset += 1;
+    }
+    Ok(())
+}
+
+// ✅ Good: Bounded loop with known limit
+fn parse_packet_good(ctx: &TcContext) -> Result<(), Error> {
+    let mut offset = 0;
+    let max_bytes = 1500; // Maximum Ethernet frame size
+    
+    for _ in 0..max_bytes {
+        if offset >= ctx.len() as usize {
+            break;
+        }
+        
+        let byte: u8 = ctx.load(offset)?;
+        if byte == 0 { // End marker
+            break;
+        }
+        offset += 1;
+    }
+    Ok(())
+}
+```
+
+### 2. Missing Bounds Checks
+
+```rust
+// ❌ Bad: No bounds checking - will fail verification
+fn load_data_bad(ctx: &TcContext, offset: usize) -> Result<u32, Error> {
+    let data: u32 = ctx.load(offset)?; // May access invalid memory
+    Ok(data)
+}
+
+// ✅ Good: Proper bounds checking
+fn load_data_good(ctx: &TcContext, offset: usize) -> Result<u32, Error> {
+    if offset + mem::size_of::<u32>() > ctx.len() as usize {
+        return Err(Error::OutOfBounds);
+    }
+    
+    let data: u32 = ctx.load(offset)?;
+    Ok(data)
+}
+```
+
+### 3. Complex Control Flow
+
+```rust
+// ❌ Bad: Complex nested conditions - may confuse verifier
+fn process_packet_bad(ctx: &TcContext) -> Result<(), Error> {
+    let eth = parse_ethernet(ctx)?;
+    if eth.ether_type == 0x0800 {
+        let ip = parse_ipv4(ctx)?;
+        if ip.protocol == 6 {
+            if ip.ttl > 0 {
+                let tcp = parse_tcp(ctx)?;
+                if tcp.flags & 0x02 != 0 {
+                    // Complex nested logic
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+// ✅ Good: Early returns and guard clauses
+fn process_packet_good(ctx: &TcContext) -> Result<(), Error> {
+    let eth = parse_ethernet(ctx)?;
+    if eth.ether_type != 0x0800 {
+        return Ok(()); // Early return for non-IPv4
+    }
+    
+    let ip = parse_ipv4(ctx)?;
+    if ip.protocol != 6 {
+        return Ok(()); // Early return for non-TCP
+    }
+    
+    if ip.ttl == 0 {
+        return Ok(()); // Early return for expired packets
+    }
+    
+    let tcp = parse_tcp(ctx)?;
+    if tcp.flags & 0x02 == 0 {
+        return Ok(()); // Early return for non-SYN packets
+    }
+    
+    // Process SYN packets
+    process_syn_packet(ctx, &tcp)?;
+    Ok(())
+}
+```
+
+### 4. Stack Size Issues
+
+```rust
+// ❌ Bad: Large stack allocation - may exceed 512 bytes
+fn large_stack_bad() -> Result<(), Error> {
+    let mut large_buffer = [0u8; 1024]; // 1KB on stack
+    // Process buffer...
+    Ok(())
+}
+
+// ✅ Good: Use maps for large data
+#[map]
+static mut LARGE_BUFFER: Array<u8> = Array::with_max_entries(1024, 0);
+
+fn large_stack_good() -> Result<(), Error> {
+    // Use map instead of stack
+    unsafe {
+        let value = LARGE_BUFFER.get(0, 0)?;
+        // Process value...
+    }
+    Ok(())
+}
+```
+
+## Debugging Techniques
+
+### 1. Logging and Tracing
+
+```rust
+use aya_log_ebpf::{debug, info, warn, error};
+
+fn debug_function(ctx: &TcContext) -> Result<(), Error> {
+    let packet_len = ctx.len();
+    debug!(&ctx, "Processing packet of length {}", packet_len);
+    
+    // Add debug information at key points
+    if packet_len < MIN_PACKET_SIZE {
+        warn!(&ctx, "Packet too short: {} bytes", packet_len);
+        return Ok(());
+    }
+    
+    match parse_packet(ctx) {
+        Ok(parsed) => {
+            info!(&ctx, "Successfully parsed packet: {:?}", parsed);
+        }
+        Err(e) => {
+            error!(&ctx, "Failed to parse packet: {:?}", e);
+        }
+    }
+    
+    Ok(())
+}
+```
+
+### 2. Step-by-Step Verification
+
+```rust
+fn parse_packet_step_by_step(ctx: &TcContext) -> Result<(), Error> {
+    debug!(&ctx, "Step 1: Starting packet parsing");
+    
+    // Step 1: Parse Ethernet header
+    let eth = parse_ethernet(ctx)?;
+    debug!(&ctx, "Step 2: Ethernet parsed, type: 0x{:04x}", eth.ether_type);
+    
+    // Step 2: Parse IP header
+    let ip = parse_ipv4(ctx)?;
+    debug!(&ctx, "Step 3: IPv4 parsed, protocol: {}", ip.protocol as u8);
+    
+    // Step 3: Parse transport header
+    match ip.protocol {
+        IpProto::Tcp => {
+            let tcp = parse_tcp(ctx)?;
+            debug!(&ctx, "Step 4: TCP parsed, ports: {} -> {}", 
+                   tcp.src_port(), tcp.dst_port());
+        }
+        IpProto::Udp => {
+            let udp = parse_udp(ctx)?;
+            debug!(&ctx, "Step 4: UDP parsed, ports: {} -> {}", 
+                   udp.src_port(), udp.dst_port());
+        }
+        _ => {
+            debug!(&ctx, "Step 4: Unsupported protocol: {}", ip.protocol as u8);
+        }
+    }
+    
+    debug!(&ctx, "Step 5: Packet parsing completed");
+    Ok(())
+}
+```
+
+### 3. Map Inspection
+
+```rust
+#[map]
+static mut DEBUG_INFO: HashMap<u32, DebugInfo> = HashMap::with_max_entries(100, 0);
+
+#[derive(Debug, Clone, Copy)]
+struct DebugInfo {
+    packet_count: u64,
+    last_error: u32,
+    last_packet_len: u32,
+}
+
+fn update_debug_info(ctx: &TcContext, error_code: Option<u32>) -> Result<(), Error> {
+    unsafe {
+        let cpu_id = bpf_get_smp_processor_id();
+        let key = cpu_id as u32;
+        
+        let mut info = DEBUG_INFO.get(&key, 0).unwrap_or(DebugInfo {
+            packet_count: 0,
+            last_error: 0,
+            last_packet_len: 0,
+        });
+        
+        info.packet_count += 1;
+        info.last_packet_len = ctx.len();
+        
+        if let Some(err) = error_code {
+            info.last_error = err;
+        }
+        
+        DEBUG_INFO.insert(&key, &info, 0)?;
+    }
+    Ok(())
+}
+```
+
+## Verification Tools
+
+### 1. bpftool
+
+```bash
+# List loaded programs
+bpftool prog list
+
+# Show program details
+bpftool prog show id <prog_id>
+
+# Dump program bytecode
+bpftool prog dump xlated id <prog_id>
+
+# Dump JIT-compiled code
+bpftool prog dump jited id <prog_id>
+
+# Show program statistics
+bpftool prog show name my_program
+```
+
+### 2. Instruction Count Analysis
+
+```bash
+# Count instructions in program
+bpftool prog dump xlated id <prog_id> | grep -E '^[0-9]+:' | wc -l
+
+# Analyze instruction complexity
+bpftool prog dump xlated id <prog_id> | grep -E '^[0-9]+:' | head -20
+
+# Check for specific instruction patterns
+bpftool prog dump xlated id <prog_id> | grep -E "(call|jmp|ld|st)"
+```
+
+### 3. Map Inspection
+
+```bash
+# List all maps
+bpftool map list
+
+# Show map details
+bpftool map show id <map_id>
+
+# Dump map contents
+bpftool map dump id <map_id>
+
+# Show map statistics
+bpftool map show name my_map
+```
+
+## Performance Monitoring
+
+### 1. Runtime Statistics
+
+```rust
+#[map]
+static mut PERFORMANCE: PerCpuArray<PerformanceStats> = PerCpuArray::with_max_entries(1, 0);
+
+#[derive(Debug, Clone, Copy)]
+struct PerformanceStats {
+    packets_processed: u64,
+    total_processing_time: u64,
+    max_processing_time: u64,
+    min_processing_time: u64,
+    error_count: u64,
+}
+
+fn track_performance(ctx: &TcContext, start_time: u64) -> Result<(), Error> {
+    let processing_time = bpf_ktime_get_ns() - start_time;
+    
+    unsafe {
+        let cpu_id = bpf_get_smp_processor_id();
+        let mut stats = PERFORMANCE.get(cpu_id, 0).unwrap_or(PerformanceStats {
+            packets_processed: 0,
+            total_processing_time: 0,
+            max_processing_time: 0,
+            min_processing_time: u64::MAX,
+            error_count: 0,
+        });
+        
+        stats.packets_processed += 1;
+        stats.total_processing_time += processing_time;
+        
+        if processing_time > stats.max_processing_time {
+            stats.max_processing_time = processing_time;
+        }
+        
+        if processing_time < stats.min_processing_time {
+            stats.min_processing_time = processing_time;
+        }
+        
+        PERFORMANCE.set(cpu_id, &stats, 0)?;
+    }
+    
+    Ok(())
+}
+```
+
+### 2. Memory Usage Monitoring
+
+```rust
+#[map]
+static mut MEMORY_USAGE: PerCpuArray<MemoryStats> = PerCpuArray::with_max_entries(1, 0);
+
+#[derive(Debug, Clone, Copy)]
+struct MemoryStats {
+    map_access_count: u64,
+    map_miss_count: u64,
+    stack_usage: u32,
+}
+
+fn track_memory_usage(ctx: &TcContext) -> Result<(), Error> {
+    unsafe {
+        let cpu_id = bpf_get_smp_processor_id();
+        let mut stats = MEMORY_USAGE.get(cpu_id, 0).unwrap_or(MemoryStats {
+            map_access_count: 0,
+            map_miss_count: 0,
+            stack_usage: 0,
+        });
+        
+        // Track map access patterns
+        stats.map_access_count += 1;
+        
+        MEMORY_USAGE.set(cpu_id, &stats, 0)?;
+    }
+    
+    Ok(())
+}
+```
+
+## Common Debugging Patterns
+
+### 1. Packet Validation
+
+```rust
+fn validate_packet(ctx: &TcContext) -> Result<bool, Error> {
+    let packet_len = ctx.len();
+    
+    // Check minimum packet size
+    if packet_len < EthHdr::LEN as u32 {
+        debug!(&ctx, "Packet too short: {} bytes", packet_len);
+        return Ok(false);
+    }
+    
+    // Check maximum packet size
+    if packet_len > MAX_PACKET_SIZE {
+        debug!(&ctx, "Packet too long: {} bytes", packet_len);
+        return Ok(false);
+    }
+    
+    // Validate Ethernet header
+    let eth: EthHdr = ctx.load(0)?;
+    if eth.ether_type()? != EtherType::Ipv4 {
+        debug!(&ctx, "Unsupported EtherType: 0x{:04x}", eth.ether_type);
+        return Ok(false);
+    }
+    
+    Ok(true)
+}
+```
+
+### 2. Error Recovery
+
+```rust
+fn safe_parse_packet(ctx: &TcContext) -> Result<Option<PacketInfo>, Error> {
+    let start_time = bpf_ktime_get_ns();
+    
+    // Track performance
+    let _ = track_performance(ctx, start_time);
+    
+    // Validate packet
+    if !validate_packet(ctx)? {
+        return Ok(None);
+    }
+    
+    // Try to parse packet
+    match parse_packet(ctx) {
+        Ok(info) => {
+            debug!(&ctx, "Successfully parsed packet");
+            Ok(Some(info))
+        }
+        Err(Error::OutOfBounds) => {
+            debug!(&ctx, "Packet bounds error, skipping");
+            Ok(None)
+        }
+        Err(Error::MalformedHeader) => {
+            warn!(&ctx, "Malformed header, skipping");
+            Ok(None)
+        }
+        Err(e) => {
+            error!(&ctx, "Unexpected error: {:?}", e);
+            Ok(None)
+        }
+    }
+}
+```
+
+### 3. State Tracking
+
+```rust
+#[map]
+static mut FLOW_STATES: HashMap<FlowKey, FlowState> = HashMap::with_max_entries(10000, 0);
+
+#[derive(Debug, Clone, Copy)]
+struct FlowState {
+    packet_count: u64,
+    byte_count: u64,
+    first_seen: u64,
+    last_seen: u64,
+    tcp_state: TcpState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TcpState {
+    Unknown,
+    SynSent,
+    Established,
+    FinWait,
+    Closed,
+}
+
+fn track_flow_state(ctx: &TcContext, flow_key: &FlowKey, packet_len: u32) -> Result<(), Error> {
+    let current_time = bpf_ktime_get_ns();
+    
+    unsafe {
+        let mut state = FLOW_STATES.get(flow_key, 0).unwrap_or(FlowState {
+            packet_count: 0,
+            byte_count: 0,
+            first_seen: current_time,
+            last_seen: current_time,
+            tcp_state: TcpState::Unknown,
+        });
+        
+        state.packet_count += 1;
+        state.byte_count += packet_len as u64;
+        state.last_seen = current_time;
+        
+        // Update TCP state based on flags
+        if let Some(tcp_flags) = extract_tcp_flags(ctx) {
+            state.tcp_state = determine_tcp_state(tcp_flags, state.tcp_state);
+        }
+        
+        FLOW_STATES.insert(flow_key, &state, 0)?;
+    }
+    
+    Ok(())
+}
+```
+
+## Troubleshooting Common Issues
+
+### 1. Verification Timeout
+
+```bash
+# Check kernel logs for verification timeout
+dmesg | grep -i "bpf.*timeout\|verifier.*timeout"
+
+# Reduce program complexity
+# - Simplify control flow
+# - Reduce loop iterations
+# - Minimize map operations
+```
+
+### 2. Stack Size Exceeded
+
+```bash
+# Check stack usage
+bpftool prog dump xlated id <prog_id> | grep -i "stack"
+
+# Solutions:
+# - Use maps instead of large stack variables
+# - Reduce local variable count
+# - Simplify function calls
+```
+
+### 3. Map Access Issues
+
+```bash
+# Check map status
+bpftool map list | grep my_program
+
+# Verify map permissions
+ls -la /sys/fs/bpf/
+
+# Check map statistics
+bpftool map show name my_map
+```
+
+### 4. Performance Issues
+
+```bash
+# Profile program execution
+perf record -g -p <pid>
+perf report
+
+# Check instruction count
+bpftool prog show name my_program
+
+# Monitor system resources
+dmesg | grep -i bpf
+```
+
+## Best Practices for Verification
+
+### 1. Start Simple
+
+```rust
+// Start with minimal functionality
+#[classifier]
+pub fn simple_program(ctx: TcContext) -> i32 {
+    // Just log packet length
+    debug!(&ctx, "Packet length: {}", ctx.len());
+    TC_ACT_PIPE
+}
+
+// Gradually add features
+#[classifier]
+pub fn enhanced_program(ctx: TcContext) -> i32 {
+    let packet_len = ctx.len();
+    
+    // Basic validation
+    if packet_len < EthHdr::LEN as u32 {
+        return TC_ACT_PIPE;
+    }
+    
+    // Simple parsing
+    match parse_ethernet(&ctx) {
+        Ok(_) => debug!(&ctx, "Valid Ethernet packet"),
+        Err(_) => debug!(&ctx, "Invalid Ethernet packet"),
+    }
+    
+    TC_ACT_PIPE
+}
+```
+
+### 2. Use Bounded Constructs
+
+```rust
+// Always use bounded loops
+for i in 0..16 {  // Max 16 iterations
+    if i >= max_items {
+        break;
+    }
+    // Process item
+}
+
+// Use match statements instead of complex if-else chains
+match protocol {
+    IpProto::Tcp => process_tcp(ctx)?,
+    IpProto::Udp => process_udp(ctx)?,
+    IpProto::Icmp => process_icmp(ctx)?,
+    _ => debug!(ctx, "Unsupported protocol: {}", protocol as u8),
+}
+```
+
+### 3. Error Handling
+
+```rust
+// Always handle errors gracefully
+match operation() {
+    Ok(result) => {
+        // Process successful result
+        process_result(result)?;
+    }
+    Err(Error::OutOfBounds) => {
+        // Log and continue
+        debug!(ctx, "Bounds error, skipping");
+        return Ok(TC_ACT_PIPE);
+    }
+    Err(e) => {
+        // Log unexpected errors
+        warn!(ctx, "Unexpected error: {:?}", e);
+        return Ok(TC_ACT_PIPE);
+    }
+}
+```
+
+### 4. Testing and Validation
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_program_verification() {
+        // Test with minimal data
+        let test_data = vec![0u8; 64];
+        let ctx = TestContext::new(test_data);
+        
+        let result = simple_program(ctx);
+        assert_eq!(result, TC_ACT_PIPE);
+    }
+    
+    #[test]
+    fn test_bounds_checking() {
+        // Test with various packet sizes
+        for size in [14, 64, 128, 256, 512, 1024, 1500] {
+            let test_data = vec![0u8; size];
+            let ctx = TestContext::new(test_data);
+            
+            let result = enhanced_program(ctx);
+            assert_eq!(result, TC_ACT_PIPE);
+        }
+    }
+}
+```
+
+## Monitoring and Alerting
+
+### 1. Health Checks
+
+```rust
+#[map]
+static mut HEALTH_STATUS: PerCpuArray<HealthInfo> = PerCpuArray::with_max_entries(1, 0);
+
+#[derive(Debug, Clone, Copy)]
+struct HealthInfo {
+    last_heartbeat: u64,
+    error_rate: u32,
+    packet_rate: u32,
+    status: u8, // 0=healthy, 1=warning, 2=error
+}
+
+fn update_health_status(ctx: &TcContext, is_error: bool) -> Result<(), Error> {
+    let current_time = bpf_ktime_get_ns();
+    
+    unsafe {
+        let cpu_id = bpf_get_smp_processor_id();
+        let mut health = HEALTH_STATUS.get(cpu_id, 0).unwrap_or(HealthInfo {
+            last_heartbeat: current_time,
+            error_rate: 0,
+            packet_rate: 0,
+            status: 0,
+        });
+        
+        health.last_heartbeat = current_time;
+        health.packet_rate += 1;
+        
+        if is_error {
+            health.error_rate += 1;
+            if health.error_rate > 100 {
+                health.status = 2; // Error
+            } else if health.error_rate > 10 {
+                health.status = 1; // Warning
+            }
+        }
+        
+        HEALTH_STATUS.set(cpu_id, &health, 0)?;
+    }
+    
+    Ok(())
+}
+```
+
+### 2. Metrics Collection
+
+```rust
+#[map]
+static mut METRICS: HashMap<u32, MetricData> = HashMap::with_max_entries(100, 0);
+
+#[derive(Debug, Clone, Copy)]
+struct MetricData {
+    counter: u64,
+    last_update: u64,
+    min_value: u64,
+    max_value: u64,
+    sum: u64,
+}
+
+fn update_metric(metric_id: u32, value: u64) -> Result<(), Error> {
+    let current_time = bpf_ktime_get_ns();
+    
+    unsafe {
+        let mut metric = METRICS.get(&metric_id, 0).unwrap_or(MetricData {
+            counter: 0,
+            last_update: current_time,
+            min_value: u64::MAX,
+            max_value: 0,
+            sum: 0,
+        });
+        
+        metric.counter += 1;
+        metric.last_update = current_time;
+        metric.sum += value;
+        
+        if value < metric.min_value {
+            metric.min_value = value;
+        }
+        
+        if value > metric.max_value {
+            metric.max_value = value;
+        }
+        
+        METRICS.insert(&metric_id, &metric, 0)?;
+    }
+    
+    Ok(())
+}
+```

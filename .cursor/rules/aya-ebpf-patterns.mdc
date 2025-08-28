@@ -1,0 +1,817 @@
+---
+alwaysApply: true
+---
+# Aya eBPF Development Patterns and Best Practices
+
+This comprehensive guide covers the essential patterns and best practices for developing eBPF programs with the Aya framework. Remember to always test your programs thoroughly and monitor their performance in production environments.
+
+## Aya Framework Overview
+
+Aya is a Rust framework for writing eBPF programs that provides:
+
+- **Type Safety**: Compile-time verification of eBPF operations
+- **Memory Safety**: Rust's ownership system prevents common eBPF errors
+- **Modern Tooling**: Integration with Cargo, testing, and debugging tools
+- **Cross-Platform**: Support for multiple architectures and kernel versions
+
+## Project Structure
+
+### Standard Aya Project Layout
+
+```
+my-ebpf-program/
+├── Cargo.toml
+├── src/
+│   ├── main.rs          # eBPF program entry point
+│   └── lib.rs           # Library target for testing
+├── build.rs             # Build script for eBPF compilation
+└── aya-ebpf/           # eBPF-specific code
+    ├── Cargo.toml
+    └── src/
+        └── main.rs      # eBPF program
+```
+
+### Cargo.toml Configuration
+
+```toml
+[package]
+name = "my-ebpf-program"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+aya-ebpf = { git = "https://github.com/aya-rs/aya" }
+aya-log-ebpf = { git = "https://github.com/aya-rs/aya" }
+
+[build-dependencies]
+aya-build = { git = "https://github.com/aya-rs/aya" }
+
+[[bin]]
+name = "my-ebpf"
+path = "aya-ebpf/src/main.rs"
+```
+
+## eBPF Program Types
+
+### 1. Traffic Control (TC) Programs
+
+```rust
+use aya_ebpf::{
+    bindings::TC_ACT_PIPE,
+    macros::{classifier, map},
+    programs::TcContext,
+};
+
+#[classifier]
+pub fn my_tc_program(ctx: TcContext) -> i32 {
+    // Process packet
+    match process_packet(&ctx) {
+        Ok(_) => TC_ACT_PIPE,
+        Err(_) => TC_ACT_PIPE, // Pass packet through on error
+    }
+}
+```
+
+### 2. XDP Programs
+
+```rust
+use aya_ebpf::{
+    bindings::XDP_PASS,
+    macros::{main, map},
+    programs::XdpContext,
+};
+
+#[main]
+pub fn my_xdp_program(ctx: XdpContext) -> u32 {
+    // Process packet before network stack
+    match process_packet(&ctx) {
+        Ok(_) => XDP_PASS,
+        Err(_) => XDP_PASS, // Pass packet through on error
+    }
+}
+```
+
+### 3. Kprobe Programs
+
+```rust
+use aya_ebpf::{
+    macros::{kprobe, map},
+    programs::ProbeContext,
+};
+
+#[kprobe(name = "sys_execve")]
+pub fn my_kprobe(ctx: ProbeContext) -> u32 {
+    // Hook into kernel function execution
+    match process_syscall(&ctx) {
+        Ok(_) => 0,
+        Err(_) => 0,
+    }
+}
+```
+
+## Map Definitions and Usage
+
+### Map Types
+
+#### 1. Hash Maps
+
+```rust
+use aya_ebpf::maps::HashMap;
+
+#[map]
+static mut COUNTERS: HashMap<u32, u64> = HashMap::with_max_entries(1024, 0);
+
+// Usage
+unsafe {
+    let count = COUNTERS.get(&key, 0).unwrap_or(0);
+    COUNTERS.insert(&key, &(count + 1), 0)?;
+}
+```
+
+#### 2. Arrays
+
+```rust
+use aya_ebpf::maps::Array;
+
+#[map]
+static mut STATS: Array<u64> = Array::with_max_entries(100, 0);
+
+// Usage
+unsafe {
+    let value = STATS.get(0, 0).unwrap_or(0);
+    STATS.set(0, &(value + 1), 0)?;
+}
+```
+
+#### 3. Ring Buffers
+
+```rust
+use aya_ebpf::maps::RingBuf;
+
+#[map]
+static mut EVENTS: RingBuf = RingBuf::with_byte_size(64 * 1024, 0);
+
+// Usage
+unsafe {
+    EVENTS.output(&event_data, 0)?;
+}
+```
+
+#### 4. Per-CPU Arrays
+
+```rust
+use aya_ebpf::maps::PerCpuArray;
+
+#[map]
+static mut PER_CPU_STATS: PerCpuArray<u64> = PerCpuArray::with_max_entries(1, 0);
+
+// Usage
+unsafe {
+    let cpu_id = bpf_get_smp_processor_id();
+    let value = PER_CPU_STATS.get(cpu_id, 0).unwrap_or(0);
+    PER_CPU_STATS.set(cpu_id, &(value + 1), 0)?;
+}
+```
+
+### Map Operations Best Practices
+
+```rust
+// Always check return values
+match COUNTERS.insert(&key, &value, 0) {
+    Ok(_) => debug!(&ctx, "Updated counter for key {}", key),
+    Err(e) => warn!(&ctx, "Failed to update counter: {:?}", e),
+}
+
+// Use appropriate error handling
+let count = COUNTERS.get(&key, 0).unwrap_or(0);
+if count > MAX_COUNT {
+    return Err(Error::LimitExceeded);
+}
+```
+
+## Packet Processing Patterns
+
+### 1. Header Parsing
+
+```rust
+struct PacketParser {
+    offset: usize,
+    packet_len: u32,
+}
+
+impl PacketParser {
+    fn parse_ethernet(&mut self, ctx: &TcContext) -> Result<EthHdr, Error> {
+        if self.offset + EthHdr::LEN > ctx.len() as usize {
+            return Err(Error::OutOfBounds);
+        }
+        
+        let eth: EthHdr = ctx.load(self.offset)?;
+        self.offset += EthHdr::LEN;
+        Ok(eth)
+    }
+    
+    fn parse_ipv4(&mut self, ctx: &TcContext) -> Result<Ipv4Hdr, Error> {
+        if self.offset + Ipv4Hdr::LEN > ctx.len() as usize {
+            return Err(Error::OutOfBounds);
+        }
+        
+        let ip: Ipv4Hdr = ctx.load(self.offset)?;
+        self.offset += ip.ihl() as usize * 4; // Handle options
+        Ok(ip)
+    }
+}
+```
+
+### 2. Protocol Detection
+
+```rust
+enum Protocol {
+    Tcp,
+    Udp,
+    Icmp,
+    Unknown(u8),
+}
+
+impl From<u8> for Protocol {
+    fn from(proto: u8) -> Self {
+        match proto {
+            6 => Protocol::Tcp,
+            17 => Protocol::Udp,
+            1 => Protocol::Icmp,
+            _ => Protocol::Unknown(proto),
+        }
+    }
+}
+
+fn detect_protocol(ip_header: &Ipv4Hdr) -> Protocol {
+    ip_header.protocol.into()
+}
+```
+
+### 3. Flow Tracking
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct FlowKey {
+    src_ip: u32,
+    dst_ip: u32,
+    src_port: u16,
+    dst_port: u16,
+    protocol: u8,
+}
+
+#[map]
+static mut FLOWS: HashMap<FlowKey, FlowStats> = HashMap::with_max_entries(10000, 0);
+
+fn track_flow(ctx: &TcContext, key: &FlowKey, packet_len: u32) -> Result<(), Error> {
+    unsafe {
+        let mut stats = FLOWS.get(key, 0).unwrap_or(FlowStats::default());
+        stats.packet_count += 1;
+        stats.byte_count += packet_len as u64;
+        stats.last_seen = bpf_ktime_get_ns();
+        
+        FLOWS.insert(key, &stats, 0)?;
+    }
+    Ok(())
+}
+```
+
+## Error Handling Patterns
+
+### 1. Custom Error Types
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Error {
+    OutOfBounds,
+    MalformedHeader,
+    UnsupportedProtocol,
+    MapOperationFailed,
+}
+
+impl From<aya_ebpf::EbpfError> for Error {
+    fn from(_: aya_ebpf::EbpfError) -> Self {
+        Error::MapOperationFailed
+    }
+}
+```
+
+### 2. Graceful Degradation
+
+```rust
+fn process_packet(ctx: &TcContext) -> Result<(), Error> {
+    // Try to parse packet, but don't fail completely on errors
+    let result = parse_packet_headers(ctx);
+    
+    match result {
+        Ok(parsed_data) => {
+            // Process successfully parsed data
+            update_statistics(&parsed_data)?;
+        }
+        Err(Error::OutOfBounds) => {
+            // Log and continue
+            debug!(ctx, "Packet too short, skipping");
+        }
+        Err(Error::MalformedHeader) => {
+            // Log and continue
+            warn!(ctx, "Malformed packet header, skipping");
+        }
+        Err(e) => {
+            // Log unexpected errors
+            error!(ctx, "Unexpected error: {:?}", e);
+        }
+    }
+    
+    Ok(())
+}
+```
+
+### 3. Error Recovery
+
+```rust
+fn safe_parse<T>(ctx: &TcContext, offset: usize) -> Result<T, Error> {
+    // Multiple fallback strategies
+    if offset + mem::size_of::<T>() <= ctx.len() as usize {
+        return ctx.load(offset).map_err(|_| Error::OutOfBounds);
+    }
+    
+    // Try with alignment adjustment
+    let aligned_offset = (offset + 3) & !3; // 4-byte alignment
+    if aligned_offset + mem::size_of::<T>() <= ctx.len() as usize {
+        return ctx.load(aligned_offset).map_err(|_| Error::OutOfBounds);
+    }
+    
+    Err(Error::OutOfBounds)
+}
+```
+
+## Performance Optimization Patterns
+
+### 1. Bounded Loops
+
+```rust
+// ❌ Bad: Unbounded loop
+fn parse_options_bad(ctx: &TcContext, start_offset: usize) -> Result<usize, Error> {
+    let mut offset = start_offset;
+    while offset < ctx.len() as usize {
+        let option = ctx.load::<u8>(offset)?;
+        if option == 0 { // End of options
+            break;
+        }
+        offset += 1;
+    }
+    Ok(offset)
+}
+
+// ✅ Good: Bounded loop with known limit
+fn parse_options_good(ctx: &TcContext, start_offset: usize) -> Result<usize, Error> {
+    let mut offset = start_offset;
+    let max_options = 40; // IPv4 header max options
+    
+    for _ in 0..max_options {
+        if offset >= ctx.len() as usize {
+            break;
+        }
+        
+        let option = ctx.load::<u8>(offset)?;
+        if option == 0 { // End of options
+            break;
+        }
+        offset += 1;
+    }
+    Ok(offset)
+}
+```
+
+### 2. Memory Access Optimization
+
+```rust
+// ❌ Bad: Multiple small reads
+fn parse_ethernet_bad(ctx: &TcContext) -> Result<EthHdr, Error> {
+    let dst_mac = ctx.load::<[u8; 6]>(0)?;
+    let src_mac = ctx.load::<[u8; 6]>(6)?;
+    let ether_type = ctx.load::<u16>(12)?;
+    
+    Ok(EthHdr {
+        dst_addr: dst_mac,
+        src_addr: src_mac,
+        ether_type,
+    })
+}
+
+// ✅ Good: Single read of entire header
+fn parse_ethernet_good(ctx: &TcContext) -> Result<EthHdr, Error> {
+    let eth: EthHdr = ctx.load(0)?;
+    Ok(eth)
+}
+```
+
+### 3. Map Access Optimization
+
+```rust
+// ❌ Bad: Multiple map lookups
+fn update_stats_bad(ctx: &TcContext, key: &FlowKey) -> Result<(), Error> {
+    unsafe {
+        let mut stats = FLOWS.get(key, 0).unwrap_or(FlowStats::default());
+        stats.packet_count += 1;
+        FLOWS.insert(key, &stats, 0)?;
+        
+        let mut stats = FLOWS.get(key, 0).unwrap_or(FlowStats::default());
+        stats.byte_count += ctx.len() as u64;
+        FLOWS.insert(key, &stats, 0)?;
+    }
+    Ok(())
+}
+
+// ✅ Good: Single map update
+fn update_stats_good(ctx: &TcContext, key: &FlowKey) -> Result<(), Error> {
+    unsafe {
+        let mut stats = FLOWS.get(key, 0).unwrap_or(FlowStats::default());
+        stats.packet_count += 1;
+        stats.byte_count += ctx.len() as u64;
+        FLOWS.insert(key, &stats, 0)?;
+    }
+    Ok(())
+}
+```
+
+## Testing Patterns
+
+### 1. Mock Context for Testing
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    struct MockContext {
+        data: Vec<u8>,
+    }
+    
+    impl MockContext {
+        fn new(data: Vec<u8>) -> Self {
+            Self { data }
+        }
+        
+        fn len(&self) -> u32 {
+            self.data.len() as u32
+        }
+        
+        fn load<T: Copy>(&self, offset: usize) -> Result<T, Error> {
+            if offset + mem::size_of::<T>() > self.data.len() {
+                return Err(Error::OutOfBounds);
+            }
+            
+            let ptr = unsafe { self.data.as_ptr().add(offset) as *const T };
+            Ok(unsafe { *ptr })
+        }
+    }
+    
+    #[test]
+    fn test_ethernet_parsing() {
+        let packet_data = create_test_ethernet_packet();
+        let ctx = MockContext::new(packet_data);
+        
+        let result = parse_ethernet(&ctx);
+        assert!(result.is_ok());
+        
+        let eth = result.unwrap();
+        assert_eq!(eth.ether_type, 0x0800); // IPv4
+    }
+}
+```
+
+### 2. Test Data Generation
+
+```rust
+fn create_test_ethernet_packet() -> Vec<u8> {
+    let mut packet = Vec::new();
+    
+    // Destination MAC (ff:ff:ff:ff:ff:ff)
+    packet.extend_from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+    // Source MAC (00:11:22:33:44:55)
+    packet.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+    // EtherType (0x0800, big-endian for IPv4)
+    packet.extend_from_slice(&[0x08, 0x00]);
+    
+    packet
+}
+
+fn create_test_ipv4_packet() -> Vec<u8> {
+    let mut packet = Vec::new();
+    
+    // Version (4) and IHL (5) = 0x45
+    packet.push(0x45);
+    // DSCP and ECN
+    packet.push(0x00);
+    // Total Length (20 bytes for header)
+    packet.extend_from_slice(&[0x00, 0x14]);
+    // Identification
+    packet.extend_from_slice(&[0x00, 0x00]);
+    // Flags and Fragment Offset
+    packet.extend_from_slice(&[0x00, 0x00]);
+    // TTL
+    packet.push(0x40);
+    // Protocol (TCP = 6)
+    packet.push(0x06);
+    // Header Checksum
+    packet.extend_from_slice(&[0x00, 0x00]);
+    // Source IP (192.168.1.1)
+    packet.extend_from_slice(&[0xc0, 0xa8, 0x01, 0x01]);
+    // Destination IP (192.168.1.2)
+    packet.extend_from_slice(&[0xc0, 0xa8, 0x01, 0x02]);
+    
+    packet
+}
+```
+
+### 3. Integration Testing
+
+```rust
+#[test]
+fn test_full_packet_processing() {
+    let mut packet = create_test_ethernet_packet();
+    packet.extend_from_slice(&create_test_ipv4_packet());
+    packet.extend_from_slice(&create_test_tcp_packet());
+    
+    let ctx = MockContext::new(packet);
+    let mut parser = PacketParser::new();
+    
+    let result = parser.parse_packet(&ctx);
+    assert!(result.is_ok());
+    
+    let parsed = result.unwrap();
+    assert_eq!(parsed.protocol, Protocol::Tcp);
+    assert_eq!(parsed.src_port, 12345);
+    assert_eq!(parsed.dst_port, 80);
+}
+```
+
+## Debugging and Logging
+
+### 1. Structured Logging
+
+```rust
+use aya_log_ebpf::{debug, info, warn, error};
+
+fn process_packet(ctx: &TcContext) -> Result<(), Error> {
+    let packet_len = ctx.len();
+    debug!(&ctx, "Processing packet of length {}", packet_len);
+    
+    if packet_len < MIN_PACKET_SIZE {
+        warn!(&ctx, "Packet too short: {} bytes", packet_len);
+        return Ok(());
+    }
+    
+    match parse_packet(ctx) {
+        Ok(parsed) => {
+            info!(&ctx, "Successfully parsed {} protocol packet", parsed.protocol);
+        }
+        Err(e) => {
+            error!(&ctx, "Failed to parse packet: {:?}", e);
+        }
+    }
+    
+    Ok(())
+}
+```
+
+### 2. Performance Metrics
+
+```rust
+#[map]
+static mut PERFORMANCE: PerCpuArray<PerformanceStats> = PerCpuArray::with_max_entries(1, 0);
+
+#[derive(Debug, Clone, Copy)]
+struct PerformanceStats {
+    packets_processed: u64,
+    total_processing_time: u64,
+    max_processing_time: u64,
+}
+
+fn track_performance(ctx: &TcContext, start_time: u64) -> Result<(), Error> {
+    let processing_time = bpf_ktime_get_ns() - start_time;
+    
+    unsafe {
+        let cpu_id = bpf_get_smp_processor_id();
+        let mut stats = PERFORMANCE.get(cpu_id, 0).unwrap_or(PerformanceStats::default());
+        
+        stats.packets_processed += 1;
+        stats.total_processing_time += processing_time;
+        if processing_time > stats.max_processing_time {
+            stats.max_processing_time = processing_time;
+        }
+        
+        PERFORMANCE.set(cpu_id, &stats, 0)?;
+    }
+    
+    Ok(())
+}
+```
+
+## Common Anti-Patterns to Avoid
+
+### 1. Dynamic Memory Allocation
+
+```rust
+// ❌ Bad: Dynamic allocation (not supported in eBPF)
+let mut buffer = Vec::new();
+buffer.push(0x01);
+buffer.push(0x02);
+
+// ✅ Good: Fixed-size arrays
+let mut buffer = [0u8; 64];
+buffer[0] = 0x01;
+buffer[1] = 0x02;
+```
+
+### 2. Recursive Functions
+
+```rust
+// ❌ Bad: Recursion (not supported in eBPF)
+fn parse_nested_headers(ctx: &TcContext, depth: usize) -> Result<(), Error> {
+    if depth > MAX_DEPTH {
+        return Ok(());
+    }
+    parse_nested_headers(ctx, depth + 1)?; // Recursive call
+    Ok(())
+}
+
+// ✅ Good: Iterative approach
+fn parse_nested_headers(ctx: &TcContext) -> Result<(), Error> {
+    for depth in 0..MAX_DEPTH {
+        if !has_more_headers(ctx)? {
+            break;
+        }
+        parse_next_header(ctx)?;
+    }
+    Ok(())
+}
+```
+
+### 3. Complex Control Flow
+
+```rust
+// ❌ Bad: Complex nested conditions
+fn process_packet_bad(ctx: &TcContext) -> Result<(), Error> {
+    let eth = parse_ethernet(ctx)?;
+    if eth.ether_type == 0x0800 {
+        let ip = parse_ipv4(ctx)?;
+        if ip.protocol == 6 {
+            if ip.ttl > 0 {
+                let tcp = parse_tcp(ctx)?;
+                if tcp.flags & 0x02 != 0 {
+                    // Complex nested logic
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+// ✅ Good: Early returns and guard clauses
+fn process_packet_good(ctx: &TcContext) -> Result<(), Error> {
+    let eth = parse_ethernet(ctx)?;
+    if eth.ether_type != 0x0800 {
+        return Ok(()); // Early return for non-IPv4
+    }
+    
+    let ip = parse_ipv4(ctx)?;
+    if ip.protocol != 6 {
+        return Ok(()); // Early return for non-TCP
+    }
+    
+    if ip.ttl == 0 {
+        return Ok(()); // Early return for expired packets
+    }
+    
+    let tcp = parse_tcp(ctx)?;
+    if tcp.flags & 0x02 == 0 {
+        return Ok(()); // Early return for non-SYN packets
+    }
+    
+    // Process SYN packets
+    process_syn_packet(ctx, &tcp)?;
+    Ok(())
+}
+```
+
+## Build and Deployment
+
+### 1. Build Script
+
+```rust
+// build.rs
+use aya_build::EbpfBuilder;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    EbpfBuilder::new().build()?;
+    Ok(())
+}
+```
+
+### 2. Userspace Integration
+
+```rust
+// userspace/src/main.rs
+use aya::{Bpf, BpfLoader};
+use aya::programs::{Tc, TcAttachType};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut bpf = BpfLoader::new()
+        .load(include_bytes_aligned!(
+            "../../target/bpfel-unknown-none/release/my-ebpf"
+        ))?;
+    
+    let program: &mut Tc = bpf.program_mut("my_tc_program")?.try_into()?;
+    program.load()?;
+    program.attach("eth0", TcAttachType::Ingress)?;
+    
+    // Keep program running
+    tokio::signal::ctrl_c().await?;
+    Ok(())
+}
+```
+
+### 3. Systemd Service
+
+```ini
+[Unit]
+Description=My eBPF Program
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/my-ebpf-program
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+## Performance Monitoring
+
+### 1. Instruction Count Monitoring
+
+```bash
+# Check program complexity
+bpftool prog dump xlated id <prog_id> | grep -E '^[0-9]+:' | wc -l
+
+# Monitor runtime performance
+bpftool prog show id <prog_id>
+```
+
+### 2. Map Statistics
+
+```bash
+# Check map usage
+bpftool map show id <map_id>
+
+# Monitor map operations
+bpftool map dump id <map_id>
+```
+
+### 3. System Monitoring
+
+```bash
+# Check eBPF program status
+cat /sys/kernel/debug/bpf/prog_<prog_id>
+
+# Monitor system resources
+dmesg | grep -i bpf
+```
+
+## Troubleshooting Common Issues
+
+### 1. Verification Failures
+
+```bash
+# Check verification logs
+dmesg | grep -i "bpf\|ebpf" | tail -20
+
+# Verify program complexity
+bpftool prog dump xlated id <prog_id> | grep -E '^[0-9]+:' | wc -l
+```
+
+### 2. Map Issues
+
+```bash
+# Check map status
+bpftool map list | grep my_program
+
+# Verify map permissions
+ls -la /sys/fs/bpf/
+```
+
+### 3. Performance Issues
+
+```bash
+# Profile program execution
+perf record -g -p <pid>
+perf report
+
+# Check instruction count
+bpftool prog show id <prog_id>
+```

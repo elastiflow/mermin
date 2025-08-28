@@ -1,0 +1,83 @@
+# Mermin Configuration File
+# High-performance eBPF-based network flow monitoring and observability
+
+# Network interfaces to monitor (specify the interfaces where traffic should be captured)
+interface:
+  - eth0
+  # - eth1      # Uncomment to monitor additional interfaces
+  # - docker0   # Example: monitor Docker bridge
+  # - br-*      # Example: monitor all bridge interfaces
+
+# Whether to auto-reload configuration when this file changes
+auto_reload: false
+
+# Logging level: trace (very verbose) | debug | info | warn | error
+log_level: info
+
+# Flow management configuration
+flow:
+  # How often to check for expired flows
+  expiry_interval: 10s
+  
+  # Maximum time a flow can be active before being forced to expire
+  max_active_life: 300s    # 5 minutes - good for long-lived enterprise connections
+  
+  # Default idle timeout for flows (when no protocol-specific timeout applies)
+  flow_generic: 60s        # 1 minute - balanced for enterprise workloads
+  
+  # Protocol-specific idle timeouts
+  icmp: 30s      # ICMP flows (ping, etc.)
+  tcp: 120s      # TCP connections (2 minutes for enterprise)
+  tcp_fin: 10s   # After FIN flag (allow time for graceful close)
+  tcp_rst: 5s    # After RST flag (quick cleanup)
+  udp: 60s       # UDP flows (1 minute for enterprise)
+
+# Flow processing pipeline configuration
+# High-performance channel-based architecture for optimal throughput and scalability
+pipeline:
+  # Channel buffer sizes - tune based on traffic volume and available memory
+  packet_channel_capacity: 10000      # Buffer for packets from eBPF ring buffer
+  enrichment_channel_capacity: 1000   # Buffer for enriched flow events
+  
+  # Worker thread counts - tune based on CPU cores and workload characteristics
+  flow_workers: 2          # Flow processing workers (recommend: 1-2 per CPU core)
+  enrichment_workers: 1    # Kubernetes enrichment workers (usually 1 is sufficient)
+  
+  # Monitoring and observability settings
+  stats_interval: 30s      # How often to log pipeline performance statistics
+  enable_metrics: false    # Detailed metrics (enable for production monitoring)
+  
+  # Operational settings
+  shutdown_timeout: 5s     # Maximum time to wait for graceful shutdown
+  enable_backpressure: true # Handle channel overflow gracefully (recommended)
+
+# ========================================
+# PERFORMANCE TUNING GUIDES
+# ========================================
+
+# 🚀 High-traffic environments (>10K packets/sec):
+# pipeline:
+#   packet_channel_capacity: 50000
+#   flow_workers: 4
+#   enrichment_workers: 2
+#   enable_metrics: true
+
+# 💡 Low-traffic environments (<1K packets/sec):
+# pipeline:
+#   packet_channel_capacity: 5000
+#   enrichment_channel_capacity: 500
+#   flow_workers: 1
+
+# 💾 Memory-constrained environments:
+# pipeline:
+#   packet_channel_capacity: 2000
+#   enrichment_channel_capacity: 200
+#   flow_workers: 1
+#   enrichment_workers: 1
+#   enable_metrics: false
+
+# 🔧 Development/debugging environments:
+# log_level: debug
+# pipeline:
+#   stats_interval: 10s
+#   enable_metrics: true

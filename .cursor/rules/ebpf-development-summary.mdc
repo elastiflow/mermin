@@ -1,0 +1,270 @@
+---
+alwaysApply: true
+---
+
+# eBPF Development with Aya - Complete Guide Summary
+
+For specific questions or advanced topics, refer to the appropriate guide or consult the community resources listed above.
+
+## Overview
+
+This collection of `.mdc` files provides comprehensive guidance for developing eBPF programs using the Aya framework in Rust. These guides are designed to help Cursor IDE agents understand and implement eBPF programs effectively.
+
+## Available Guides
+
+### 1. **ebpf-fundamentals.mdc** - Core eBPF Concepts
+
+- **Purpose**: Understanding eBPF basics, architecture, and concepts
+- **Use When**: Starting a new eBPF project or learning eBPF fundamentals
+- **Key Topics**:
+  - What is eBPF and how it works
+  - eBPF architecture and components
+  - Program lifecycle and verification requirements
+  - Maps, helpers, and common patterns
+  - Aya framework benefits and advantages
+
+### 2. **aya-ebpf-patterns.mdc** - Aya-Specific Development
+
+- **Purpose**: Practical patterns and best practices for Aya development
+- **Use When**: Implementing eBPF programs with Aya
+- **Key Topics**:
+  - Project structure and configuration
+  - Program types (TC, XDP, Kprobes)
+  - Map definitions and operations
+  - Packet processing patterns
+  - Error handling and testing strategies
+
+### 3. **network-protocol-parsing.mdc** - Network Protocol Implementation
+
+- **Purpose**: Implementing network protocol parsing in eBPF
+- **Use When**: Building network monitoring or packet processing programs
+- **Key Topics**:
+  - Packet structure fundamentals
+  - Header definitions and parsing
+  - Protocol detection and flow tracking
+  - Performance optimization techniques
+  - Testing network parsing logic
+
+### 4. **ebpf-verification-debugging.mdc** - Verification and Troubleshooting
+
+- **Purpose**: Ensuring programs pass verification and debugging issues
+- **Use When**: Programs fail to load or have runtime issues
+- **Key Topics**:
+  - eBPF verifier requirements
+  - Common verification failures and solutions
+  - Debugging techniques and tools
+  - Performance monitoring and optimization
+  - Troubleshooting common issues
+
+## How to Use These Guides
+
+### For New Projects
+
+1. **Start with `ebpf-fundamentals.mdc`** to understand eBPF concepts
+2. **Review `aya-ebpf-patterns.mdc`** for project structure and best practices
+3. **Use `network-protocol-parsing.mdc`** if building network programs
+4. **Reference `ebpf-verification-debugging.mdc`** when troubleshooting
+
+### For Existing Projects
+
+1. **Use `aya-ebpf-patterns.mdc`** for code review and improvements
+2. **Reference `network-protocol-parsing.mdc`** for protocol-specific issues
+3. **Consult `ebpf-verification-debugging.mdc`** for debugging and optimization
+
+### For Code Reviews
+
+1. **Check `ebpf-fundamentals.mdc`** for architectural decisions
+2. **Verify against `aya-ebpf-patterns.mdc`** for best practices
+3. **Use `ebpf-verification-debugging.mdc`** for verification compliance
+
+## Key Development Principles
+
+### 1. **Always Use Docker Container**
+
+```bash
+# Build and use the mermin-builder container
+docker build -t mermin-builder:latest --target builder .
+docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "cargo build"
+```
+
+### 2. **Prioritize Verification**
+
+- Write simple, bounded loops
+- Always check bounds before memory access
+- Use early returns and guard clauses
+- Test with minimal data first
+
+### 3. **Focus on Safety**
+
+- Implement proper error handling
+- Validate all inputs
+- Use appropriate map types
+- Monitor program performance
+
+### 4. **Test Thoroughly**
+
+- Unit tests for parsing logic
+- Integration tests with real packet data
+- Performance tests for instruction counts
+- Error condition testing
+
+## Common Development Workflow
+
+### 1. **Project Setup**
+
+```bash
+# Create new Aya project
+cargo new my-ebpf-program
+cd my-ebpf-program
+
+# Add Aya dependencies to Cargo.toml
+# Configure build.rs for eBPF compilation
+```
+
+### 2. **Development Cycle**
+
+```bash
+# 1. Write code following patterns from guides
+# 2. Build in container
+docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "cargo build"
+
+# 3. Test locally
+docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "cargo test"
+
+# 4. Check verification
+docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "cargo clippy -- -D warnings"
+```
+
+### 3. **Debugging Process**
+
+```bash
+# 1. Check verification logs
+dmesg | grep -i "bpf\|ebpf" | tail -20
+
+# 2. Use bpftool for inspection
+bpftool prog list
+bpftool prog show name my_program
+
+# 3. Monitor program performance
+bpftool prog dump xlated id <prog_id> | grep -E '^[0-9]+:' | wc -l
+```
+
+## Integration with Mermin Project
+
+### Project-Specific Considerations
+
+1. **Network Protocol Support**: Mermin supports extensive protocol parsing
+2. **Kubernetes Integration**: Built for cloud-native deployment
+3. **Performance Requirements**: Optimized for high-throughput environments
+4. **Testing Infrastructure**: Comprehensive test suite available
+
+### Using Mermin's Network Types
+
+```rust
+// Leverage existing network type definitions
+use network_types::{
+    eth::{EthHdr, EtherType},
+    ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
+    tcp::TcpHdr,
+    udp::UdpHdr,
+};
+
+// Use established parsing patterns
+let eth: EthHdr = ctx.load(0)?;
+let ip: Ipv4Hdr = ctx.load(EthHdr::LEN)?;
+```
+
+## Best Practices Summary
+
+### 1. **Code Organization**
+
+- Keep programs simple and focused
+- Use clear, descriptive function names
+- Implement proper error handling
+- Add comprehensive logging
+
+### 2. **Performance**
+
+- Minimize instruction count
+- Use efficient data structures
+- Optimize map access patterns
+- Monitor runtime performance
+
+### 3. **Testing**
+
+- Write tests for all parsing logic
+- Test with edge cases and malformed data
+- Verify performance characteristics
+- Test error conditions
+
+### 4. **Deployment**
+
+- Use containerized builds
+- Test in staging environments
+- Monitor production performance
+- Have rollback procedures
+
+## Troubleshooting Quick Reference
+
+### Common Issues
+
+| Issue | Check | Solution |
+|-------|-------|----------|
+| Verification fails | `dmesg \| grep -i bpf` | Simplify logic, add bounds checking |
+| Program won't load | `bpftool prog list` | Check permissions, verify syntax |
+| Performance issues | `bpftool prog show` | Optimize loops, reduce map access |
+| Map access errors | `bpftool map list` | Verify map definitions and permissions |
+
+### Useful Commands
+
+```bash
+# Check program status
+bpftool prog list | grep my_program
+
+# Inspect program details
+bpftool prog show name my_program
+
+# Monitor system logs
+dmesg | grep -i bpf | tail -f
+
+# Check map contents
+bpftool map dump name my_map
+
+# Profile performance
+perf record -g -p <pid>
+```
+
+## Resources and References
+
+### Official Documentation
+
+- [eBPF Documentation](https://docs.ebpf.io/)
+- [Aya Framework](https://aya-rs.dev/)
+- [Linux Kernel eBPF](https://docs.kernel.org/bpf/)
+
+### Community Resources
+
+- [eBPF Slack](https://ebpf.slack.com)
+- [Aya Discord](https://discord.gg/aya-rs)
+- [Linux Kernel Mailing List](https://lkml.org/)
+
+### Books and Learning
+
+- "Learning eBPF" by Liz Rice
+- "BPF Performance Tools" by Brendan Gregg
+
+## Conclusion
+
+These guides provide comprehensive coverage of eBPF development with Aya. Remember to:
+
+1. **Always use the Docker container** for eBPF operations
+2. **Start simple** and gradually add complexity
+3. **Test thoroughly** at each development stage
+4. **Monitor performance** and optimize accordingly
+5. **Follow security best practices** for production deployments
+
+For specific questions or advanced topics, refer to the appropriate guide or consult the community resources listed above.
+description:
+globs:
+alwaysApply: false
+---

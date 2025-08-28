@@ -1,0 +1,196 @@
+---
+alwaysApply: true
+---
+
+# Network Protocol Parsing in eBPF Programs
+
+This comprehensive guide covers network protocol parsing in eBPF programs using Aya. Remember to always prioritize safety, performance, and verifier compliance when implementing packet parsing logic.
+
+## Overview
+
+Network protocol parsing in eBPF programs requires careful attention to:
+
+- **Memory Safety**: Bounds checking for all packet access
+- **Performance**: Efficient parsing with minimal instructions
+- **Verification**: Ensuring programs pass eBPF verifier
+- **Error Handling**: Graceful degradation on malformed packets
+
+## Performance Optimization
+
+### 1. Bounds Checking Optimization
+
+```rust
+// ❌ Bad: Multiple bounds checks
+fn parse_headers_bad(ctx: &TcContext) -> Result<(), Error> {
+    if offset + EthHdr::LEN > ctx.len() as usize {
+        return Err(Error::OutOfBounds);
+    }
+    let eth: EthHdr = ctx.load(offset)?;
+    offset += EthHdr::LEN;
+    
+    if offset + Ipv4Hdr::LEN > ctx.len() as usize {
+        return Err(Error::OutOfBounds);
+    }
+    let ip: Ipv4Hdr = ctx.load(offset)?;
+    offset += ip.ihl() as usize;
+    
+    if offset + TcpHdr::LEN > ctx.len() as usize {
+        return Err(Error::OutOfBounds);
+    }
+    let tcp: TcpHdr = ctx.load(offset)?;
+    
+    Ok(())
+}
+
+// ✅ Good: Single bounds check
+fn parse_headers_good(ctx: &TcContext) -> Result<(), Error> {
+    let total_header_size = EthHdr::LEN + Ipv4Hdr::LEN + TcpHdr::LEN;
+    if offset + total_header_size > ctx.len() as usize {
+        return Err(Error::OutOfBounds);
+    }
+    
+    let eth: EthHdr = ctx.load(offset)?;
+    offset += EthHdr::LEN;
+    
+    let ip: Ipv4Hdr = ctx.load(offset)?;
+    offset += ip.ihl() as usize;
+    
+    let tcp: TcpHdr = ctx.load(offset)?;
+    
+    Ok(())
+}
+```
+
+### 2. Loop Optimization
+
+```rust
+// ❌ Bad: Unbounded loop
+fn parse_options_bad(ctx: &TcContext, start_offset: usize) -> Result<usize, Error> {
+    let mut offset = start_offset;
+    while offset < ctx.len() as usize {
+        let option = ctx.load::<u8>(offset)?;
+        if option == 0 { // End of options
+            break;
+        }
+        offset += 1;
+    }
+    Ok(offset)
+}
+
+// ✅ Good: Bounded loop
+fn parse_options_good(ctx: &TcContext, start_offset: usize) -> Result<usize, Error> {
+    let mut offset = start_offset;
+    let max_options = 40; // IPv4 max options
+    
+    for _ in 0..max_options {
+        if offset >= ctx.len() as usize {
+            break;
+        }
+        
+        let option = ctx.load::<u8>(offset)?;
+        if option == 0 { // End of options
+            break;
+        }
+        offset += 1;
+    }
+    Ok(offset)
+}
+```
+
+## Testing Network Parsing
+
+### Test Data Generation
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    fn create_test_packet() -> Vec<u8> {
+        let mut packet = Vec::new();
+        
+        // Ethernet header
+        packet.extend_from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff]); // dst
+        packet.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]); // src
+        packet.extend_from_slice(&[0x08, 0x00]); // IPv4
+        
+        // IPv4 header
+        packet.push(0x45); // version=4, ihl=5
+        packet.push(0x00); // tos
+        packet.extend_from_slice(&[0x00, 0x28]); // total length = 40
+        packet.extend_from_slice(&[0x00, 0x00]); // id
+        packet.extend_from_slice(&[0x00, 0x00]); // flags + fragment
+        packet.push(0x40); // ttl = 64
+        packet.push(0x06); // protocol = TCP
+        packet.extend_from_slice(&[0x00, 0x00]); // checksum
+        packet.extend_from_slice(&[0xc0, 0xa8, 0x01, 0x01]); // src IP
+        packet.extend_from_slice(&[0xc0, 0xa8, 0x01, 0x02]); // dst IP
+        
+        // TCP header
+        packet.extend_from_slice(&[0x30, 0x39]); // src port = 12345
+        packet.extend_from_slice(&[0x00, 0x50]); // dst port = 80
+        packet.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // seq
+        packet.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // ack
+        packet.extend_from_slice(&[0x50, 0x02]); // flags (SYN)
+        packet.extend_from_slice(&[0x20, 0x00]); // window
+        packet.extend_from_slice(&[0x00, 0x00]); // checksum
+        packet.extend_from_slice(&[0x00, 0x00]); // urgent
+        
+        packet
+    }
+    
+    #[test]
+    fn test_packet_parsing() {
+        let packet_data = create_test_packet();
+        let ctx = MockContext::new(packet_data);
+        
+        let result = safe_parse_packet(&ctx);
+        assert!(result.is_ok());
+        
+        let flow_key = result.unwrap().unwrap();
+        assert_eq!(flow_key.src_port, 12345);
+        assert_eq!(flow_key.dst_port, 80);
+        assert_eq!(flow_key.protocol, IpProto::Tcp);
+        assert_eq!(flow_key.src_ip, 0xc0a80101);
+        assert_eq!(flow_key.dst_ip, 0xc0a80102);
+    }
+}
+```
+
+## Common Pitfalls and Solutions
+
+### 1. Endianness Issues
+
+```rust
+// ❌ Bad: Assuming host endianness
+let port = tcp.src; // This is network byte order!
+
+// ✅ Good: Convert from network byte order
+let port = u16::from_be(tcp.src);
+```
+
+### 2. Alignment Issues
+
+```rust
+// ❌ Bad: Unaligned access
+let value: u32 = ctx.load(1)?; // May fail on some architectures
+
+// ✅ Good: Ensure alignment
+let aligned_offset = (offset + 3) & !3; // 4-byte alignment
+let value: u32 = ctx.load(aligned_offset)?;
+```
+
+### 3. Bounds Checking
+
+```rust
+// ❌ Bad: Missing bounds check
+let header: TcpHdr = ctx.load(offset)?;
+offset += header.data_offset() as usize * 4; // May overflow!
+
+// ✅ Good: Bounds check before access
+let data_offset = header.data_offset() as usize * 4;
+if offset + data_offset > ctx.len() as usize {
+    return Err(Error::OutOfBounds);
+}
+offset += data_offset;
+```

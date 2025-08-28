@@ -13,11 +13,12 @@ use tracing::Level;
 
 use crate::runtime::{
     cli::Cli,
-    conf::{conf_serde::level, flow::Flow},
+    conf::{conf_serde::level, flow::FlowConf, pipeline::PipelineConf},
 };
 
 pub mod conf_serde;
 mod flow;
+mod pipeline;
 
 /// Represents the configuration for the application, containing settings
 /// related to interface, logging, reloading, and flow management.
@@ -56,7 +57,11 @@ pub struct Config {
     /// settings related to the application's runtime flow management.
     /// This field encapsulates additional configuration details specific
     /// to how the application's logic operates.
-    pub flow: Flow,
+    pub flow: FlowConf,
+
+    /// Pipeline configuration for the flow processing pipeline.
+    /// Controls whether to use channel-based processing and related settings.
+    pub pipeline: PipelineConf,
 }
 
 impl Default for Config {
@@ -66,7 +71,8 @@ impl Default for Config {
             config_path: None,
             auto_reload: false,
             log_level: Level::INFO,
-            flow: Flow::default(),
+            flow: FlowConf::default(),
+            pipeline: PipelineConf::default(),
         }
     }
 }

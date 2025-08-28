@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::runtime::conf::conf_serde::duration;
 
-/// The `Flow` struct represents the configuration parameters for managing flows in a system.
+/// The `FlowConf` struct represents the configuration parameters for managing flows in a system.
 /// Each field specifies configurable time-to-live (TTL) values or intervals for different types
 /// of network traffic flows. These configurations influence when flow records are generated and
 /// how long active or inactive flows are tracked.
@@ -20,7 +20,7 @@ use crate::runtime::conf::conf_serde::duration;
 /// tcp-rst: 5 - If we see an RST flag for a TCP flow, generate a record 5 secs after the flag.
 /// udp: 20 - If no activity has been observed for a UDP flow in the last 20 seconds, generate a record.
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Flow {
+pub struct FlowConf {
     /// The interval between checks for expired flows.
     /// Adjusting this parameter can group more flows into a single NetFlow packet
     /// or increase efficiency by reducing expiration checks.
@@ -79,9 +79,9 @@ pub struct Flow {
     pub udp: Duration,
 }
 
-impl Default for Flow {
-    fn default() -> Flow {
-        Flow {
+impl Default for FlowConf {
+    fn default() -> FlowConf {
+        FlowConf {
             expiry_interval: defaults::expiry_interval(),
             max_active_life: defaults::max_active_life(),
             flow_generic: defaults::flow_generic(),
@@ -101,24 +101,24 @@ mod defaults {
         Duration::from_secs(10)
     }
     pub fn max_active_life() -> Duration {
-        Duration::from_secs(60)
+        Duration::from_secs(300) // 5 minutes - better for long-lived connections
     }
     pub fn flow_generic() -> Duration {
-        Duration::from_secs(30)
+        Duration::from_secs(60) // 1 minute - more reasonable for enterprise
     }
     pub fn icmp() -> Duration {
-        Duration::from_secs(10)
+        Duration::from_secs(30) // 30 seconds - ICMP can have longer intervals
     }
     pub fn tcp() -> Duration {
-        Duration::from_secs(20)
+        Duration::from_secs(120) // 2 minutes - better for enterprise TCP connections
     }
     pub fn tcp_fin() -> Duration {
-        Duration::from_secs(5)
+        Duration::from_secs(10) // 10 seconds - allow time for FIN handshake
     }
     pub fn tcp_rst() -> Duration {
-        Duration::from_secs(5)
+        Duration::from_secs(5) // 5 seconds - RST should be quick
     }
     pub fn udp() -> Duration {
-        Duration::from_secs(20)
+        Duration::from_secs(60) // 1 minute - UDP flows can be longer in enterprise
     }
 }
