@@ -45,7 +45,10 @@ pub fn create_type2_test_packet() -> ([u8; Type2RoutingHeader::LEN + 1], Type2Ro
         ],
     };
 
-    let expected_header = Type2RoutingHeader::new(gen_route, fixed_hdr);
+    let expected_header = Type2RoutingHeader {
+        gen_route,
+        fixed_hdr,
+    };
 
     (request_data, expected_header)
 }

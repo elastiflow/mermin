@@ -52,7 +52,10 @@ pub fn create_rpl_source_route_test_packet() -> (Vec<u8>, RplSourceRouteParsed) 
     fixed_hdr.set_pad(0); // Pad=0
     fixed_hdr.set_reserved(0); // Reserved=0
 
-    let header = RplSourceRouteHeader::new(gen_route, fixed_hdr);
+    let header = RplSourceRouteHeader {
+        gen_route,
+        fixed_hdr,
+    };
 
     let mut addresses = [0u8; MAX_RPL_ADDR_STORAGE];
     // Copy the two compressed addresses (16 bytes total)
