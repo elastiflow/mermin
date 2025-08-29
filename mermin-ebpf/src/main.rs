@@ -391,20 +391,6 @@ impl Parser {
         Ok(())
     }
 
-    //Taken from the RFC, should we implement any of this logic here?
-    //
-    // If, while processing a received packet, a node encounters a Routing
-    // header with an unrecognized Routing Type value, the required behavior
-    // of the node depends on the value of the Segments Left field, as
-    // follows:
-    //
-    // If Segments Left is zero, the node must ignore the Routing header
-    // and proceed to process the next header in the packet, whose type
-    // is identified by the Next Header field in the Routing header.
-    //
-    // If Segments Left is non-zero, the node must discard the packet and
-    // send an ICMP Parameter Problem, Code 0, message to the packet's
-    // Source Address, pointing to the unrecognized Routing Type.
     /// Parses the IPv6 routing header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_routing_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
@@ -426,7 +412,7 @@ impl Parser {
                     .read_var_buf(ctx, &mut addresses, addr_size)
                     .map_err(|_| Error::OutOfBounds)?;
                 if bytes_read < addr_size {
-                    warn!(ctx, "Failed to read all of RPL Header");
+                    debug!(ctx, "failed to read all of rpl header");
                     return Err(Error::MalformedHeader);
                 }
 

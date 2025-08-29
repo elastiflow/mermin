@@ -225,21 +225,25 @@ impl Type2FixedHeader {
     /// The total size in bytes of the fixed part of the Type 2 Routing Header
     pub const LEN: usize = mem::size_of::<Type2FixedHeader>();
     /// Gets the Reserved field as a 32-bit value.
+    #[inline]
     pub fn reserved(&self) -> u32 {
         u32::from_be_bytes(self.reserved)
     }
 
     /// Sets the Reserved field from a 32-bit value.
+    #[inline]
     pub fn set_reserved(&mut self, reserved: u32) {
         self.reserved = reserved.to_be_bytes()
     }
 
     /// Gets the Home Address as a 16-byte array.
+    #[inline]
     pub fn home_address(&self) -> [u8; 16] {
         self.home_address
     }
 
     /// Sets the Home Address from a 16-byte array.
+    #[inline]
     pub fn set_home_address(&mut self, home_address: [u8; 16]) {
         self.home_address = home_address
     }
