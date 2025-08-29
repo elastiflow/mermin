@@ -9,6 +9,7 @@ use network_types::{
     geneve::GeneveHdr,
     hop::HopOptHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
+    route::{RplSourceRouteHeader, Type2RoutingHeader},
     tcp::TcpHdr,
     udp::UdpHdr,
 };
@@ -29,6 +30,8 @@ pub enum PacketType {
     Esp = 7,
     Hop = 8,
     Geneve = 9,
+    RplSourceRoute = 10,
+    Type2 = 11,
 }
 
 /// A union to hold any of the possible parsed network headers.
@@ -45,6 +48,8 @@ pub union HeaderUnion {
     pub esp: Esp,
     pub hop: HopOptHdr,
     pub geneve: GeneveHdr,
+    pub rpl: RplSourceRouteParsed,
+    pub type2: Type2RoutingHeader,
 }
 
 /// The final struct sent back to user-space. It contains the type of
@@ -54,4 +59,14 @@ pub union HeaderUnion {
 pub struct ParsedHeader {
     pub type_: PacketType,
     pub data: HeaderUnion,
+}
+
+pub const MAX_RPL_ADDR_STORAGE: usize = 128;
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct RplSourceRouteParsed {
+    pub header: RplSourceRouteHeader,
+    pub addresses: [u8; MAX_RPL_ADDR_STORAGE],
+    pub addresses_len: u8,
 }
