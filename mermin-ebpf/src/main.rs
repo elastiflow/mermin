@@ -19,6 +19,7 @@ use network_types::{
     hop::HopOptHdr,
     icmp::IcmpHdr,
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
+    route::{GenericRoute, RoutingHeaderType, RplSourceRouteHeader, Type2RoutingHeader},
     tcp::TcpHdr,
     udp::UdpHdr,
 };
@@ -291,6 +292,146 @@ impl Parser {
 
         Ok(())
     }
+
+    /// Parses the IPv6 routing header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_routing_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let gen_hdr: GenericRoute = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        let routing_type: RoutingHeaderType = RoutingHeaderType::from_u8(gen_hdr.type_);
+
+        match routing_type {
+            RoutingHeaderType::RplSourceRoute => {
+                let rpl_hdr: RplSourceRouteHeader =
+                    ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+                self.offset += RplSourceRouteHeader::LEN;
+
+                // Consider adding Clamp to addr_size if we run into verification issues
+                let addr_size = rpl_hdr.gen_route.total_hdr_len().saturating_sub(8); // Subtract 8 for fixed RPL header
+                const MAX_ADDR: usize = 256;
+                let mut addresses = [0u8; MAX_ADDR];
+
+                let bytes_read = self
+                    .read_var_buf(ctx, &mut addresses, addr_size)
+                    .map_err(|_| Error::OutOfBounds)?;
+                if bytes_read < addr_size {
+                    debug!(ctx, "failed to read all of rpl header");
+                    return Err(Error::MalformedHeader);
+                }
+
+                // TODO parse out and use addresses and other Rpl fields here
+                self.next_hdr = HeaderType::Proto(rpl_hdr.gen_route.next_hdr());
+            }
+            RoutingHeaderType::Type2 => {
+                let type2_hdr: Type2RoutingHeader =
+                    ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+                self.offset += Type2RoutingHeader::LEN;
+
+                // TODO parse out and use addresses an other type2 fields
+                self.next_hdr = HeaderType::Proto(type2_hdr.gen_route.next_hdr());
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    /// Reads a variable-length buffer from a TC context.
+    ///
+    /// This function reads bytes from the given TC context `ctx` starting at the parser's current offset
+    /// and writes them into the provided buffer `buf`. The total number of bytes to read is determined
+    /// by `len`.
+    ///
+    /// The implementation uses multiple bounded loops to comply with eBPF verifier requirements,
+    /// reading in decreasing chunk sizes to efficiently handle
+    /// different buffer sizes. Each chunk size has 16 iterations, allowing reading of up to 1024 bytes.
+    ///
+    /// # Arguments
+    /// * `ctx`: The traffic control context to read from.
+    /// * `buf`: The destination buffer to write the bytes into.
+    /// * `len`: The number of bytes to read.
+    ///
+    /// # Returns
+    /// `Ok(bytes_read)` on success, where `bytes_read` is the number of bytes actually read.
+    /// `Err(Error)` if reading bytes from the context fails.
+    fn read_var_buf<const N: usize>(
+        &mut self,
+        ctx: &TcContext,
+        buf: &mut [u8; N],
+        len: usize,
+    ) -> Result<usize, Error> {
+        let mut bytes_read_total = 0;
+
+        // Helper function to read individual bytes for alignment
+        let read_single_byte = |ctx: &TcContext,
+                                buf: &mut [u8; N],
+                                len: usize,
+                                bytes_read_total: &mut usize,
+                                offset: &mut usize|
+         -> Result<bool, Error> {
+            if *bytes_read_total >= len || (*bytes_read_total + 1) > N {
+                return Ok(false);
+            }
+
+            let byte: u8 = ctx.load(*offset).map_err(|_| Error::OutOfBounds)?;
+            buf[*bytes_read_total] = byte;
+            *bytes_read_total += 1;
+            *offset += 1;
+            Ok(true)
+        };
+
+        // Helper function to read 16-byte chunks
+        let read_sixteen_byte_chunk = |ctx: &TcContext,
+                                       buf: &mut [u8; N],
+                                       len: usize,
+                                       bytes_read_total: &mut usize,
+                                       offset: &mut usize|
+         -> Result<bool, Error> {
+            if *bytes_read_total >= len
+                || (len.saturating_sub(*bytes_read_total)) < 16
+                || (*bytes_read_total + 16) > N
+            {
+                return Ok(false);
+            }
+
+            let bytes: u128 = ctx.load(*offset).map_err(|_| Error::OutOfBounds)?;
+            buf[*bytes_read_total..*bytes_read_total + 16].copy_from_slice(&bytes.to_ne_bytes());
+            *bytes_read_total += 16;
+            *offset += 16;
+            Ok(true)
+        };
+
+        // Align to 16-byte boundary by reading individual bytes
+        let mut alignment = self.offset % 16;
+        for _ in 0..16 {
+            if alignment == 16 {
+                break;
+            }
+            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut self.offset)? {
+                break;
+            }
+            alignment += 1;
+        }
+
+        // Read 16-byte chunks in batches (4 batches of 16 chunks = 1024 bytes total)
+        // The main idea is we can keep adding loops to read u128s until we reach our desired supported header size
+        for _ in 0..4 {
+            for _ in 0..16 {
+                if !read_sixteen_byte_chunk(ctx, buf, len, &mut bytes_read_total, &mut self.offset)?
+                {
+                    break;
+                }
+            }
+        }
+
+        // Read remaining bytes as individual bytes
+        for _ in 0..16 {
+            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut self.offset)? {
+                break;
+            }
+        }
+
+        Ok(bytes_read_total)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -328,6 +469,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx),
             HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
             HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_routing_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
             HeaderType::Proto(proto) => {
                 debug!(
@@ -391,9 +533,6 @@ mod host_test_shim {
         pub fn len(&self) -> u32 {
             self.data.len() as u32
         }
-        pub fn is_empty(&self) -> bool {
-            self.data.is_empty()
-        }
         pub fn load<T: Copy>(&self, offset: usize) -> Result<T, Error> {
             if offset + mem::size_of::<T>() > self.data.len() {
                 return Err(Error::OutOfBounds);
@@ -420,7 +559,7 @@ mod host_test_shim {
 }
 
 #[cfg(test)]
-pub use host_test_shim::TcContext;
+use host_test_shim::TcContext;
 
 #[cfg(test)]
 mod tests {
@@ -633,6 +772,60 @@ mod tests {
         packet.extend_from_slice(&[0x56, 0x78]);
         // Sequence Number (2 bytes)
         packet.extend_from_slice(&[0x9a, 0xbc]);
+
+        packet
+    }
+
+    // Helper function to create a Type2 routing header test packet
+    // Type2 routing header is 24 bytes total (4 bytes generic + 20 bytes fixed)
+    fn create_type2_routing_test_packet(next: IpProto) -> Vec<u8> {
+        let mut packet = Vec::with_capacity(24);
+
+        // Generic routing header (4 bytes)
+        packet.push(next as u8); // Next Header
+        packet.push(2); // Hdr Ext Len (2 * 8 = 16 bytes after first 8, total 24)
+        packet.push(2); // Routing Type (Type2)
+        packet.push(1); // Segments Left (always 1 for Type2)
+
+        // Type2 fixed header (20 bytes)
+        // Reserved (4 bytes)
+        packet.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+        // Home Address (16 bytes) - 2001:db8::dead:beef
+        packet.extend_from_slice(&[
+            0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xde, 0xad,
+            0xbe, 0xef,
+        ]);
+
+        packet
+    }
+
+    // Helper function to create an RPL Source Route header test packet
+    // This creates a minimal RPL header with 2 addresses
+    fn create_rpl_source_route_test_packet(next: IpProto) -> Vec<u8> {
+        let mut packet = Vec::new();
+
+        // Generic routing header (4 bytes)
+        packet.push(next as u8); // Next Header
+        packet.push(4); // Hdr Ext Len (4 * 8 = 32 bytes after first 8, total 40)
+        packet.push(3); // Routing Type (RplSourceRoute)
+        packet.push(2); // Segments Left
+
+        // RPL Source fixed header (4 bytes)
+        packet.push(0x24); // CmprI = 2, CmprE = 4 (0x24)
+        packet.push(0x60); // Pad = 6 (0x60), Reserved bits = 0
+        packet.extend_from_slice(&[0x00, 0x00]); // Reserved (remaining 2 bytes)
+
+        // Address data (32 bytes total to match hdr_ext_len)
+        // First address (14 bytes, compressed by CmprI=2)
+        packet.extend_from_slice(&[
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        ]);
+        // Last address (12 bytes, compressed by CmprE=4)
+        packet.extend_from_slice(&[
+            0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c,
+        ]);
+        // Padding (6 bytes)
+        packet.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
 
         packet
     }
@@ -1103,5 +1296,316 @@ mod tests {
             ]
         ); // 2001:db8::2
         assert_eq!(parser.packet_meta.proto, IpProto::Ipv6Icmp); // ICMPv6
+    }
+
+    // Test parse_routing_header function with Type2 routing header
+    #[test]
+    fn test_parse_routing_header_type2_tcp() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let packet = create_type2_routing_test_packet(IpProto::Tcp);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 24); // Type2 routing header length
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    // Test parse_routing_header function with Type2 routing header mapping to UDP
+    #[test]
+    fn test_parse_routing_header_type2_udp() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let packet = create_type2_routing_test_packet(IpProto::Udp);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 24); // Type2 routing header length
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
+    }
+
+    // Test parse_routing_header function with Type2 routing header with insufficient buffer
+    #[test]
+    fn test_parse_routing_header_type2_out_of_bounds() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        // Provide fewer than 24 bytes (incomplete Type2 header)
+        let packet = vec![0x06, 0x02, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00];
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+        assert!(matches!(result, Err(Error::OutOfBounds)));
+    }
+
+    // Test parse_routing_header function with RPL Source Route header
+    #[test]
+    fn test_parse_routing_header_rpl_source_route_tcp() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let packet = create_rpl_source_route_test_packet(IpProto::Tcp);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 40); // RPL Source Route header length (8 + 32)
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    // Test parse_routing_header function with RPL Source Route header mapping to UDP
+    #[test]
+    fn test_parse_routing_header_rpl_source_route_udp() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let packet = create_rpl_source_route_test_packet(IpProto::Udp);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 40); // RPL Source Route header length (8 + 32)
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
+    }
+
+    // Test parse_routing_header function with RPL Source Route header with insufficient buffer
+    #[test]
+    fn test_parse_routing_header_rpl_source_route_out_of_bounds() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        // Provide fewer bytes than required for RPL header
+        let packet = vec![0x06, 0x04, 0x03, 0x02, 0x24, 0x60];
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+        assert!(matches!(result, Err(Error::OutOfBounds)));
+    }
+
+    // Helper function to create network-like test data with big endian patterns
+    fn create_network_test_data(size: usize) -> Vec<u8> {
+        let mut data = Vec::new();
+        let mut value = 0x0102030405060708u64;
+
+        for i in (0..size).step_by(8) {
+            let bytes = value.to_be_bytes(); // Network byte order
+            let remaining = size - i;
+            let chunk_size = core::cmp::min(8, remaining);
+            data.extend_from_slice(&bytes[0..chunk_size]);
+            value = value.wrapping_add(0x0101010101010101); // Increment pattern
+        }
+        data
+    }
+
+    // Test read_var_buf with various odd lengths - comprehensive testing
+    #[test]
+    fn test_read_var_buf_odd_lengths() {
+        let test_lengths = [
+            1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 31, 33, 63, 65, 127, 129,
+        ];
+
+        for &len in &test_lengths {
+            let test_data = create_network_test_data(len + 10); // Extra data to ensure we can read
+            let ctx = TcContext::new(test_data.clone());
+            let mut parser = Parser::new();
+            let mut buf = [0u8; 256];
+
+            let result = parser.read_var_buf(&ctx, &mut buf, len);
+
+            assert!(result.is_ok(), "Failed for length {}", len);
+            assert_eq!(result.unwrap(), len, "Wrong bytes read for length {}", len);
+            assert_eq!(
+                &buf[0..len],
+                &test_data[0..len],
+                "Data mismatch for length {}",
+                len
+            );
+
+            // Verify rest of buffer is unchanged
+            for i in len..256 {
+                assert_eq!(
+                    buf[i], 0,
+                    "Buffer corruption at index {} for length {}",
+                    i, len
+                );
+            }
+        }
+    }
+
+    // Test big endian conversion correctness for network data
+    #[test]
+    fn test_read_var_buf_big_endian_validation() {
+        // Create test data with known big endian patterns
+        let original_values = [0x01020304u32, 0x05060708u32, 0x090a0b0cu32, 0x0d0e0f10u32];
+
+        let mut test_data = Vec::new();
+        for &val in &original_values {
+            test_data.extend_from_slice(&val.to_be_bytes());
+        }
+
+        let ctx = TcContext::new(test_data);
+        let mut parser = Parser::new();
+        let mut buf = [0u8; 16];
+
+        let result = parser.read_var_buf(&ctx, &mut buf, 16);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 16);
+
+        // Verify the data is correctly stored in big endian format
+        for (i, &expected_val) in original_values.iter().enumerate() {
+            let start_idx = i * 4;
+            let actual_bytes = [
+                buf[start_idx],
+                buf[start_idx + 1],
+                buf[start_idx + 2],
+                buf[start_idx + 3],
+            ];
+            let actual_val = u32::from_be_bytes(actual_bytes);
+            assert_eq!(
+                actual_val, expected_val,
+                "Big endian mismatch at position {}",
+                i
+            );
+        }
+    }
+
+    // Test network protocol headers with realistic data patterns
+    #[test]
+    fn test_read_var_buf_network_headers() {
+        // Simulate reading various network headers with odd sizes
+
+        // Test IPv4 header (20 bytes) + options (odd sizes)
+        let ipv4_base = 20;
+        let option_sizes = [1, 3, 7, 11]; // Common odd option sizes
+
+        for &opt_size in &option_sizes {
+            let total_size = ipv4_base + opt_size;
+            let test_data = create_network_test_data(total_size);
+            let ctx = TcContext::new(test_data.clone());
+            let mut parser = Parser::new();
+            let mut buf = [0u8; 64];
+
+            let result = parser.read_var_buf(&ctx, &mut buf, total_size);
+
+            assert!(
+                result.is_ok(),
+                "Failed for IPv4 with {} byte options",
+                opt_size
+            );
+            assert_eq!(result.unwrap(), total_size);
+            assert_eq!(&buf[0..total_size], &test_data[0..total_size]);
+        }
+
+        // Test TCP header with various option sizes (odd lengths)
+        let tcp_base = 20;
+        let tcp_option_sizes = [1, 3, 5, 9, 15];
+
+        for &opt_size in &tcp_option_sizes {
+            let total_size = tcp_base + opt_size;
+            let test_data = create_network_test_data(total_size);
+            let ctx = TcContext::new(test_data.clone());
+            let mut parser = Parser::new();
+            let mut buf = [0u8; 64];
+
+            let result = parser.read_var_buf(&ctx, &mut buf, total_size);
+
+            assert!(
+                result.is_ok(),
+                "Failed for TCP with {} byte options",
+                opt_size
+            );
+            assert_eq!(result.unwrap(), total_size);
+            assert_eq!(&buf[0..total_size], &test_data[0..total_size]);
+        }
+    }
+
+    // Test multi-byte value reading across chunk boundaries
+    #[test]
+    fn test_read_var_buf_chunk_boundary_values() {
+        // Test reading values that span chunk boundaries in the implementation
+        let test_cases = [
+            (15, 16), // Spans u128 chunk boundary
+            (17, 16), // Just over u128 boundary
+            (7, 8),   // Spans u64 boundary
+            (9, 8),   // Just over u64 boundary
+            (3, 4),   // Spans u32 boundary
+            (5, 4),   // Just over u32 boundary
+            (1, 2),   // Spans u16 boundary
+            (3, 2),   // Just over u16 boundary
+        ];
+
+        for &(len, chunk_aligned) in &test_cases {
+            // Create data with a recognizable pattern
+            let test_data = create_network_test_data(len + 8);
+            let ctx = TcContext::new(test_data.clone());
+            let mut parser = Parser::new();
+            let mut buf = [0u8; 32];
+
+            let result = parser.read_var_buf(&ctx, &mut buf, len);
+
+            assert!(
+                result.is_ok(),
+                "Failed for length {} (chunk aligned: {})",
+                len,
+                chunk_aligned
+            );
+            assert_eq!(result.unwrap(), len);
+            assert_eq!(
+                &buf[0..len],
+                &test_data[0..len],
+                "Data mismatch for length {}",
+                len
+            );
+        }
+    }
+
+    // Test parser offset advancement with odd lengths
+    #[test]
+    fn test_read_var_buf_offset_advancement() {
+        let test_data = create_network_test_data(100);
+        let ctx = TcContext::new(test_data.clone());
+
+        // Read odd-sized chunks and verify offset advances correctly
+        let read_sizes = [7, 11, 5, 13, 3];
+
+        for &size in &read_sizes {
+            // Reset parser offset before each iteration
+            let mut parser = Parser::new();
+            let mut buf = [0u8; 32];
+            let result = parser.read_var_buf(&ctx, &mut buf, size);
+
+            assert!(result.is_ok(), "Failed reading {} bytes", size);
+            assert_eq!(result.unwrap(), size);
+
+            // Verify offset advanced correctly for this single read
+            assert_eq!(
+                parser.offset, size,
+                "Offset mismatch after reading {} bytes",
+                size
+            );
+
+            // Verify we read from the start of the data
+            assert_eq!(&buf[0..size], &test_data[0..size]);
+        }
+    }
+
+    // Test reading with buffer smaller than requested length
+    #[test]
+    fn test_read_var_buf_buffer_constraints() {
+        let test_data = create_network_test_data(50);
+        let ctx = TcContext::new(test_data.clone());
+        let mut parser = Parser::new();
+
+        // Try to read more than buffer size
+        let mut small_buf = [0u8; 10];
+        let result = parser.read_var_buf(&ctx, &mut small_buf, 15);
+
+        assert!(result.is_ok());
+        // Should read only what fits in buffer
+        let bytes_read = result.unwrap();
+        assert!(bytes_read <= 10, "Read more bytes than buffer size");
+        assert_eq!(&small_buf[0..bytes_read], &test_data[0..bytes_read]);
     }
 }

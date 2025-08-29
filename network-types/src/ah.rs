@@ -2,7 +2,7 @@ use core::mem;
 
 use crate::ip::IpProto;
 
-/// # Authentication Header Format
+/// Authentication Header Format
 ///
 ///  0                   1                   2                   3
 /// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -18,7 +18,7 @@ use crate::ip::IpProto;
 /// |                                                               |
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///
-/// ## Fields
+/// Fields
 ///
 /// * **Next Header (8 bits)**: Identifies the type of the next header,
 /// * **Payload Len (8 bits)**: The length of this Authentication Header in 4-octet units,

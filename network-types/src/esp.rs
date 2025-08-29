@@ -1,5 +1,5 @@
 use core::mem;
-/// # Encapsulating Security Payload (ESP)
+/// Encapsulating Security Payload (ESP)
 ///
 /// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ ----
@@ -19,7 +19,7 @@ use core::mem;
 /// ~                                                               ~
 /// |                                                               |
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// ## Fields
+/// Fields
 ///
 /// * **Security Parameters Index (SPI) (32 bits)**: An arbitrary value used to uniquely identify the **security association** of the receiving party.
 /// * **Sequence Number (32 bits)**: A monotonically increasing counter for protecting against **replay attacks**.
