@@ -69,104 +69,6 @@ impl Parser {
         self.packet_meta.l3_octet_count = packet_len - self.offset as u32;
     }
 
-    /// Reads a variable-length buffer from a TC context.
-    ///
-    /// This function reads bytes from the given TC context `ctx` starting at the parser's current offset
-    /// and writes them into the provided buffer `buf`. The total number of bytes to read is determined
-    /// by `len`.
-    ///
-    /// The implementation uses multiple bounded loops to comply with eBPF verifier requirements,
-    /// reading in decreasing chunk sizes to efficiently handle
-    /// different buffer sizes. Each chunk size has 16 iterations, allowing reading of up to 1024 bytes.
-    ///
-    /// # Arguments
-    /// * `ctx`: The traffic control context to read from.
-    /// * `buf`: The destination buffer to write the bytes into.
-    /// * `len`: The number of bytes to read.
-    ///
-    /// # Returns
-    /// `Ok(bytes_read)` on success, where `bytes_read` is the number of bytes actually read.
-    /// `Err(Error)` if reading bytes from the context fails.
-    fn read_var_buf<const N: usize>(
-        &mut self,
-        ctx: &TcContext,
-        buf: &mut [u8; N],
-        len: usize,
-    ) -> Result<usize, Error> {
-        let mut bytes_read_total = 0;
-
-        // Helper function to read individual bytes for alignment
-        let read_single_byte = |ctx: &TcContext,
-                                buf: &mut [u8; N],
-                                len: usize,
-                                bytes_read_total: &mut usize,
-                                offset: &mut usize|
-         -> Result<bool, Error> {
-            if *bytes_read_total >= len || (*bytes_read_total + 1) > N {
-                return Ok(false);
-            }
-
-            let byte: u8 = ctx.load(*offset).map_err(|_| Error::OutOfBounds)?;
-            buf[*bytes_read_total] = byte;
-            *bytes_read_total += 1;
-            *offset += 1;
-            Ok(true)
-        };
-
-        // Helper function to read 16-byte chunks
-        let read_sixteen_byte_chunk = |ctx: &TcContext,
-                                       buf: &mut [u8; N],
-                                       len: usize,
-                                       bytes_read_total: &mut usize,
-                                       offset: &mut usize|
-         -> Result<bool, Error> {
-            if *bytes_read_total >= len
-                || (len.saturating_sub(*bytes_read_total)) < 16
-                || (*bytes_read_total + 16) > N
-            {
-                return Ok(false);
-            }
-
-            let bytes: u128 = ctx.load(*offset).map_err(|_| Error::OutOfBounds)?;
-            buf[*bytes_read_total..*bytes_read_total + 16].copy_from_slice(&bytes.to_ne_bytes());
-            *bytes_read_total += 16;
-            *offset += 16;
-            Ok(true)
-        };
-
-        // Align to 16-byte boundary by reading individual bytes
-        let mut alignment = self.offset % 16;
-        for _ in 0..16 {
-            if alignment == 16 {
-                break;
-            }
-            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut self.offset)? {
-                break;
-            }
-            alignment += 1;
-        }
-
-        // Read 16-byte chunks in batches (4 batches of 16 chunks = 1024 bytes total)
-        // The main idea is we can keep adding loops to read u128s until we reach our desired supported header size
-        for _ in 0..4 {
-            for _ in 0..16 {
-                if !read_sixteen_byte_chunk(ctx, buf, len, &mut bytes_read_total, &mut self.offset)?
-                {
-                    break;
-                }
-            }
-        }
-
-        // Read remaining bytes as individual bytes
-        for _ in 0..16 {
-            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut self.offset)? {
-                break;
-            }
-        }
-
-        Ok(bytes_read_total)
-    }
-
     /// Parses the next header in the packet and updates the parser state accordingly.
     /// Returns an error if the header is not supported.
     fn parse_ethernet_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
@@ -431,6 +333,104 @@ impl Parser {
         }
 
         Ok(())
+    }
+
+    /// Reads a variable-length buffer from a TC context.
+    ///
+    /// This function reads bytes from the given TC context `ctx` starting at the parser's current offset
+    /// and writes them into the provided buffer `buf`. The total number of bytes to read is determined
+    /// by `len`.
+    ///
+    /// The implementation uses multiple bounded loops to comply with eBPF verifier requirements,
+    /// reading in decreasing chunk sizes to efficiently handle
+    /// different buffer sizes. Each chunk size has 16 iterations, allowing reading of up to 1024 bytes.
+    ///
+    /// # Arguments
+    /// * `ctx`: The traffic control context to read from.
+    /// * `buf`: The destination buffer to write the bytes into.
+    /// * `len`: The number of bytes to read.
+    ///
+    /// # Returns
+    /// `Ok(bytes_read)` on success, where `bytes_read` is the number of bytes actually read.
+    /// `Err(Error)` if reading bytes from the context fails.
+    fn read_var_buf<const N: usize>(
+        &mut self,
+        ctx: &TcContext,
+        buf: &mut [u8; N],
+        len: usize,
+    ) -> Result<usize, Error> {
+        let mut bytes_read_total = 0;
+
+        // Helper function to read individual bytes for alignment
+        let read_single_byte = |ctx: &TcContext,
+                                buf: &mut [u8; N],
+                                len: usize,
+                                bytes_read_total: &mut usize,
+                                offset: &mut usize|
+         -> Result<bool, Error> {
+            if *bytes_read_total >= len || (*bytes_read_total + 1) > N {
+                return Ok(false);
+            }
+
+            let byte: u8 = ctx.load(*offset).map_err(|_| Error::OutOfBounds)?;
+            buf[*bytes_read_total] = byte;
+            *bytes_read_total += 1;
+            *offset += 1;
+            Ok(true)
+        };
+
+        // Helper function to read 16-byte chunks
+        let read_sixteen_byte_chunk = |ctx: &TcContext,
+                                       buf: &mut [u8; N],
+                                       len: usize,
+                                       bytes_read_total: &mut usize,
+                                       offset: &mut usize|
+         -> Result<bool, Error> {
+            if *bytes_read_total >= len
+                || (len.saturating_sub(*bytes_read_total)) < 16
+                || (*bytes_read_total + 16) > N
+            {
+                return Ok(false);
+            }
+
+            let bytes: u128 = ctx.load(*offset).map_err(|_| Error::OutOfBounds)?;
+            buf[*bytes_read_total..*bytes_read_total + 16].copy_from_slice(&bytes.to_ne_bytes());
+            *bytes_read_total += 16;
+            *offset += 16;
+            Ok(true)
+        };
+
+        // Align to 16-byte boundary by reading individual bytes
+        let mut alignment = self.offset % 16;
+        for _ in 0..16 {
+            if alignment == 16 {
+                break;
+            }
+            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut self.offset)? {
+                break;
+            }
+            alignment += 1;
+        }
+
+        // Read 16-byte chunks in batches (4 batches of 16 chunks = 1024 bytes total)
+        // The main idea is we can keep adding loops to read u128s until we reach our desired supported header size
+        for _ in 0..4 {
+            for _ in 0..16 {
+                if !read_sixteen_byte_chunk(ctx, buf, len, &mut bytes_read_total, &mut self.offset)?
+                {
+                    break;
+                }
+            }
+        }
+
+        // Read remaining bytes as individual bytes
+        for _ in 0..16 {
+            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut self.offset)? {
+                break;
+            }
+        }
+
+        Ok(bytes_read_total)
     }
 }
 
