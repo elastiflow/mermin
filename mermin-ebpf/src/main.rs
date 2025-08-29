@@ -307,7 +307,7 @@ impl Parser {
 
                 // Consider adding Clamp to addr_size if we run into verification issues
                 let addr_size = rpl_hdr.gen_route.total_hdr_len().saturating_sub(8); // Subtract 8 for fixed RPL header
-                const MAX_ADDR: usize = 255;
+                const MAX_ADDR: usize = 256;
                 let mut addresses = [0u8; MAX_ADDR];
 
                 let bytes_read = self
