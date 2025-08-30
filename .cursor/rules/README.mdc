@@ -1,0 +1,74 @@
+---
+alwaysApply: false
+---
+
+# Cursor AI Agent Rules for Mermin Project - Index
+
+**Note: This is an index file. The actual rules are in `mermin-ebpf-guide.mdc` and `docker-commands.mdc` which have `alwaysApply: true`.**
+
+This directory contains guidance files for AI agents working with the Mermin eBPF project in Cursor IDE.
+
+## 📁 Available Guides
+
+### 1. **mermin-ebpf-guide.mdc** (Primary Reference)
+
+The main consolidated guide covering:
+
+- Critical development rules
+- eBPF programming patterns
+- Debugging and troubleshooting
+- Kubernetes deployment
+- Common pitfalls and solutions
+
+**Use this as your primary reference for all eBPF development tasks.**
+
+### 2. **docker-commands.mdc**
+
+Quick reference for Docker commands used in development:
+
+- Container setup
+- Common cargo operations
+- eBPF analysis tools
+- Why Docker is required
+
+**Reference this when you need specific command syntax.**
+
+## 🎯 For AI Agents
+
+### When to Apply These Rules
+
+1. **Always apply** when:
+   - Working with eBPF code (`mermin-ebpf/` directory)
+   - Running cargo commands
+   - Using bpftool or llvm-objdump
+   - Building or testing the project
+
+2. **Key principles to remember**:
+   - ✅ ALWAYS use Docker container for eBPF operations
+   - ✅ ALWAYS check bounds before memory access
+   - ✅ ALWAYS use bounded loops in eBPF programs
+   - ❌ NEVER compile eBPF directly on macOS
+   - ❌ NEVER use dynamic allocation in eBPF
+
+### Quick Decision Tree
+
+```
+Need to run a command?
+├─ Is it eBPF related? → Use Docker container (see docker-commands.mdc)
+├─ Writing eBPF code? → Follow patterns in mermin-ebpf-guide.mdc
+├─ Debugging issues? → Check troubleshooting in mermin-ebpf-guide.mdc
+└─ Deploying to K8s? → See deployment section in mermin-ebpf-guide.mdc
+```
+
+## 🚀 Getting Started
+
+1. First read `mermin-ebpf-guide.mdc` to understand the project
+2. Keep `docker-commands.mdc` open for command reference
+3. Always test changes in the Docker container
+4. Monitor eBPF program complexity and verification status
+
+## 📝 Notes
+
+- These guides are optimized for AI agents in Cursor IDE
+- They consolidate best practices from the Mermin project
+- Updates should maintain clarity and actionability for AI systems
