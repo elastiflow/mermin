@@ -5,6 +5,9 @@ use crate::ip::IpProto;
 /// Maximum number of addresses we can read at a time from a RPL Source Route Header
 pub const MAX_RPL_ADDRESSES: usize = 32;
 
+/// Maximum number of segments in a Type 4 Segment Routing Header
+pub const MAX_SRH_SEGMENTS: usize = 128;
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum RoutingHeaderType {
     /// Type 2 Routing Header - [RFC6275]
@@ -68,9 +71,8 @@ pub enum Ipv6RoutingHeader {
     Type2(Type2RoutingHeader),
     /// RPL Source Route Header - [RFC6554]
     RplSourceRoute(RplSourceRouteHeader),
-    // To be implemented structs in future PRs
-    // /// Segment Routing Header (SRH) - [RFC8754]
-    // SegmentRouting(SegmentRoutingHeader),
+    /// Segment Routing Header (SRH) - [RFC8754]
+    SegmentRouting(SegmentRoutingHeader),
     // /// CRH-16 - [RFC9631]
     // Crh16(Crh16Header),
     // /// CRH-32 - [RFC9631]
@@ -429,6 +431,201 @@ impl RplSourceRouteHeader {
     }
 }
 
+/// Type 4 Segment Routing Header (SRH) - RFC 8754
+///
+/// This routing header is used for Segment Routing over IPv6 (SRv6). It allows a source
+/// to specify a path for a packet to traverse by listing an ordered set of segments.
+///
+///  0                   1                   2                   3
+/// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |  Last Entry   |     Flags     |              Tag              |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                                                               |
+/// |            Segment List[0] (128 bits IPv6 address)            |
+/// |                                                               |
+/// |                                                               |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                                                               |
+/// |                                                               |
+/// ...                                                           ...
+/// |                                                               |
+/// |                                                               |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                                                               |
+/// |            Segment List[n] (128 bits IPv6 address)            |
+/// |                                                               |
+/// |                                                               |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// //                                                             //
+/// //         Optional Type Length Value objects (variable)       //
+/// //                                                             //
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///
+/// Fields
+///
+/// * **Next Header (8 bits)**: Identifies the type of the next header.
+/// * **Hdr Ext Len (8 bits)**: The length of the Routing header in 8-octet units, not including the first 8 octets.
+/// * **Routing Type (8 bits)**: Identifies the variant of the Routing header. For SRH, this is 4.
+/// * **Segments Left (8 bits)**: Index of the current active segment in the Segment List.
+/// * **Last Entry (8 bits)**: Index of the last entry in the Segment List.
+/// * **Flags (8 bits)**: 8 bits of flags.
+/// * **Tag (16 bits)**: Tag a packet as part of a class or group of packets.
+/// * **Segment List[0..n]**: List of 128-bit IPv6 addresses representing the segments.
+/// * **Optional TLVs**: Type-Length-Value objects for additional information.
+#[repr(C, packed)]
+#[derive(Debug, Copy, Clone)]
+pub struct SegmentFixedHeader {
+    pub last_entry: u8,
+    pub flags: u8,
+    pub tag: [u8; 2],
+}
+
+impl SegmentFixedHeader {
+    /// The total size in bytes of the fixed part of the Segment Routing Header
+    pub const LEN: usize = mem::size_of::<SegmentFixedHeader>();
+
+    /// Gets the Last Entry value.
+    #[inline]
+    pub fn last_entry(&self) -> u8 {
+        self.last_entry
+    }
+
+    /// Sets the Last Entry value.
+    #[inline]
+    pub fn set_last_entry(&mut self, last_entry: u8) {
+        self.last_entry = last_entry
+    }
+
+    /// Gets the Flags value.
+    #[inline]
+    pub fn flags(&self) -> u8 {
+        self.flags
+    }
+
+    /// Sets the Flags value.
+    #[inline]
+    pub fn set_flags(&mut self, flags: u8) {
+        self.flags = flags
+    }
+
+    /// Gets the Tag field as a 16-bit value.
+    #[inline]
+    pub fn tag(&self) -> u16 {
+        u16::from_be_bytes(self.tag)
+    }
+
+    /// Sets the Tag field from a 16-bit value.
+    #[inline]
+    pub fn set_tag(&mut self, tag: u16) {
+        self.tag = tag.to_be_bytes()
+    }
+}
+
+#[repr(C, packed)]
+#[derive(Debug, Copy, Clone)]
+pub struct SegmentRoutingHeader {
+    pub gen_route: GenericRoute,
+    pub fixed_hdr: SegmentFixedHeader,
+}
+
+impl SegmentRoutingHeader {
+    /// The total size in bytes of the fixed part of the Segment Routing Header
+    pub const LEN: usize = mem::size_of::<SegmentRoutingHeader>();
+
+    /// Size of each segment (IPv6 address) in bytes
+    pub const SEGMENT_SIZE: usize = 16;
+
+    /// Maximum number of segments that can be included in the header
+    pub const MAX_SEGMENTS: usize = MAX_SRH_SEGMENTS;
+
+    /// Gets the Next Header value.
+    #[inline]
+    pub fn next_hdr(&self) -> IpProto {
+        self.gen_route.next_hdr
+    }
+
+    /// Sets the Next Header value.
+    #[inline]
+    pub fn set_next_hdr(&mut self, next_hdr: IpProto) {
+        self.gen_route.next_hdr = next_hdr
+    }
+
+    /// Gets the Header Extension Length value.
+    #[inline]
+    pub fn hdr_ext_len(&self) -> u8 {
+        self.gen_route.hdr_ext_len
+    }
+
+    /// Sets the Header Extension Length value.
+    #[inline]
+    pub fn set_hdr_ext_len(&mut self, hdr_ext_len: u8) {
+        self.gen_route.hdr_ext_len = hdr_ext_len
+    }
+
+    /// Gets the Routing Type value.
+    #[inline]
+    pub fn type_(&self) -> RoutingHeaderType {
+        RoutingHeaderType::from_u8(self.gen_route.type_)
+    }
+
+    /// Sets the Routing Type value.
+    /// For Segment Routing Header, this should always be 4.
+    #[inline]
+    pub fn set_type(&mut self, type_: RoutingHeaderType) {
+        self.gen_route.type_ = type_.as_u8()
+    }
+
+    /// Gets the Segments Left value.
+    #[inline]
+    pub fn sgmt_left(&self) -> u8 {
+        self.gen_route.sgmt_left
+    }
+
+    /// Sets the Segments Left value.
+    #[inline]
+    pub fn set_sgmt_left(&mut self, sgmt_left: u8) {
+        self.gen_route.sgmt_left = sgmt_left
+    }
+
+    /// Calculates the total length of the Segment Routing Header in bytes.
+    /// The Hdr Ext Len is in 8-octet units, *excluding* the first 8 octets.
+    /// So, total length = (hdr_ext_len + 1) * 8.
+    #[inline]
+    pub fn total_hdr_len(&self) -> usize {
+        self.gen_route.total_hdr_len()
+    }
+
+    /// Calculates the total length available for the Segment List and TLVs in bytes.
+    /// Total Header Length - Fixed Header Length.
+    #[inline]
+    pub fn segments_and_tlvs_len(&self) -> usize {
+        self.total_hdr_len()
+            .saturating_sub(SegmentRoutingHeader::LEN)
+    }
+
+    /// Calculates the number of segments in the Segment List.
+    #[inline]
+    pub fn num_segments(&self) -> usize {
+        (self.fixed_hdr.last_entry as usize) + 1
+    }
+
+    /// Calculates the total length of the Segment List in bytes.
+    #[inline]
+    pub fn segment_list_len(&self) -> usize {
+        self.num_segments() * Self::SEGMENT_SIZE
+    } // Consider switching to bitshifting by 4
+
+    /// Calculates the total length available for TLVs in bytes.
+    #[inline]
+    pub fn tlvs_len(&self) -> usize {
+        self.segments_and_tlvs_len()
+            .saturating_sub(self.segment_list_len())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate alloc;
@@ -593,5 +790,225 @@ mod tests {
         assert_eq!(RoutingHeaderType::Type2.as_u8(), 2);
         assert_eq!(RoutingHeaderType::RplSourceRoute.as_u8(), 3);
         assert_eq!(RoutingHeaderType::Unknown(99).as_u8(), 99);
+    }
+
+    #[test]
+    fn test_segment_fixed_header_len_constant() {
+        assert_eq!(SegmentFixedHeader::LEN, 4); // last_entry (1) + flags (1) + tag (2)
+        assert_eq!(
+            SegmentFixedHeader::LEN,
+            mem::size_of::<SegmentFixedHeader>()
+        );
+    }
+
+    #[test]
+    fn test_segment_routing_header_len_constant() {
+        assert_eq!(SegmentRoutingHeader::LEN, 8); // GenericRoute (4) + SegmentFixedHeader (4)
+        assert_eq!(
+            SegmentRoutingHeader::LEN,
+            mem::size_of::<SegmentRoutingHeader>()
+        );
+    }
+
+    #[test]
+    fn test_segment_routing_header_constants() {
+        assert_eq!(SegmentRoutingHeader::SEGMENT_SIZE, 16); // IPv6 address size
+        assert_eq!(SegmentRoutingHeader::MAX_SEGMENTS, MAX_SRH_SEGMENTS);
+        assert_eq!(MAX_SRH_SEGMENTS, 128);
+    }
+
+    #[test]
+    fn test_segment_fixed_header_getters_setters() {
+        let mut header = SegmentFixedHeader {
+            last_entry: 0,
+            flags: 0,
+            tag: [0; 2],
+        };
+
+        // Test last_entry
+        header.set_last_entry(5);
+        assert_eq!(header.last_entry(), 5);
+        assert_eq!(header.last_entry, 5);
+
+        // Test flags
+        header.set_flags(0xAB);
+        assert_eq!(header.flags(), 0xAB);
+        assert_eq!(header.flags, 0xAB);
+
+        // Test tag field
+        header.set_tag(0x1234);
+        assert_eq!(header.tag(), 0x1234);
+        assert_eq!(header.tag, [0x12, 0x34]);
+    }
+
+    #[test]
+    fn test_segment_routing_header_basic_getters_setters() {
+        let gen_route = GenericRoute {
+            next_hdr: IpProto::Tcp,
+            hdr_ext_len: 0,
+            type_: 4, // Segment Routing Header type
+            sgmt_left: 0,
+        };
+
+        let fixed_hdr = SegmentFixedHeader {
+            last_entry: 0,
+            flags: 0,
+            tag: [0; 2],
+        };
+
+        let mut header = SegmentRoutingHeader {
+            gen_route,
+            fixed_hdr,
+        };
+
+        // Test next_hdr
+        header.set_next_hdr(IpProto::Udp);
+        assert_eq!(header.next_hdr(), IpProto::Udp);
+
+        // Test hdr_ext_len
+        header.set_hdr_ext_len(4);
+        assert_eq!(header.hdr_ext_len(), 4);
+
+        // Test type_
+        header.set_type(RoutingHeaderType::SegmentRoutingHeader);
+        assert_eq!(header.type_(), RoutingHeaderType::SegmentRoutingHeader);
+
+        // Test sgmt_left
+        header.set_sgmt_left(3);
+        assert_eq!(header.sgmt_left(), 3);
+    }
+
+    #[test]
+    fn test_segment_routing_header_length_calculations() {
+        let gen_route = GenericRoute {
+            next_hdr: IpProto::Ipv6,
+            hdr_ext_len: 6, // 7 * 8 = 56 bytes total
+            type_: 4,
+            sgmt_left: 2,
+        };
+
+        let fixed_hdr = SegmentFixedHeader {
+            last_entry: 2, // 3 segments (0, 1, 2)
+            flags: 0,
+            tag: [0; 2],
+        };
+
+        let header = SegmentRoutingHeader {
+            gen_route,
+            fixed_hdr,
+        };
+
+        // Test total header length
+        assert_eq!(header.total_hdr_len(), 56); // (6 + 1) * 8 = 56
+
+        // Test segments and TLVs length
+        assert_eq!(header.segments_and_tlvs_len(), 48); // 56 - 8 = 48
+
+        // Test number of segments
+        assert_eq!(header.num_segments(), 3); // last_entry + 1 = 2 + 1 = 3
+
+        // Test segment list length
+        assert_eq!(header.segment_list_len(), 48); // 3 * 16 = 48
+
+        // Test TLVs length
+        assert_eq!(header.tlvs_len(), 0); // 48 - 48 = 0
+    }
+
+    #[test]
+    fn test_segment_routing_header_with_tlvs() {
+        let gen_route = GenericRoute {
+            next_hdr: IpProto::Tcp,
+            hdr_ext_len: 8, // 9 * 8 = 72 bytes total
+            type_: 4,
+            sgmt_left: 1,
+        };
+
+        let fixed_hdr = SegmentFixedHeader {
+            last_entry: 1, // 2 segments (0, 1)
+            flags: 0,
+            tag: [0; 2],
+        };
+
+        let header = SegmentRoutingHeader {
+            gen_route,
+            fixed_hdr,
+        };
+
+        // Test total header length
+        assert_eq!(header.total_hdr_len(), 72); // (8 + 1) * 8 = 72
+
+        // Test segments and TLVs length
+        assert_eq!(header.segments_and_tlvs_len(), 64); // 72 - 8 = 64
+
+        // Test number of segments
+        assert_eq!(header.num_segments(), 2); // last_entry + 1 = 1 + 1 = 2
+
+        // Test segment list length
+        assert_eq!(header.segment_list_len(), 32); // 2 * 16 = 32
+
+        // Test TLVs length
+        assert_eq!(header.tlvs_len(), 32); // 64 - 32 = 32
+    }
+
+    #[test]
+    fn test_segment_routing_header_edge_cases() {
+        // Test with zero segments (should not happen in practice but test edge case)
+        let gen_route = GenericRoute {
+            next_hdr: IpProto::Tcp,
+            hdr_ext_len: 0,
+            type_: 4,
+            sgmt_left: 0,
+        };
+
+        // last_entry of 255 would mean 256 segments (edge case)
+        let fixed_hdr = SegmentFixedHeader {
+            last_entry: 255,
+            flags: 0xFF,
+            tag: [0xFF, 0xFF],
+        };
+
+        let header = SegmentRoutingHeader {
+            gen_route,
+            fixed_hdr,
+        };
+
+        // Test number of segments with maximum last_entry
+        assert_eq!(header.num_segments(), 256); // 255 + 1 = 256
+
+        // Test segment list length
+        assert_eq!(header.segment_list_len(), 4096); // 256 * 16 = 4096
+
+        // Test with zero hdr_ext_len
+        assert_eq!(header.total_hdr_len(), 8); // (0 + 1) * 8 = 8
+        assert_eq!(header.segments_and_tlvs_len(), 0); // 8 - 8 = 0 (saturating_sub)
+        assert_eq!(header.tlvs_len(), 0); // 0 - 4096 = 0 (saturating_sub)
+    }
+
+    #[test]
+    fn test_segment_routing_header_minimum_valid_header() {
+        // Test minimum valid header with 1 segment
+        let gen_route = GenericRoute {
+            next_hdr: IpProto::Tcp,
+            hdr_ext_len: 2, // Minimum for 1 segment: (8 + 16 - 8) / 8 = 2
+            type_: 4,
+            sgmt_left: 0,
+        };
+
+        let fixed_hdr = SegmentFixedHeader {
+            last_entry: 0, // 1 segment
+            flags: 0,
+            tag: [0; 2],
+        };
+
+        let header = SegmentRoutingHeader {
+            gen_route,
+            fixed_hdr,
+        };
+
+        assert_eq!(header.total_hdr_len(), 24); // (2 + 1) * 8 = 24
+        assert_eq!(header.segments_and_tlvs_len(), 16); // 24 - 8 = 16
+        assert_eq!(header.num_segments(), 1); // 0 + 1 = 1
+        assert_eq!(header.segment_list_len(), 16); // 1 * 16 = 16
+        assert_eq!(header.tlvs_len(), 0); // 16 - 16 = 0
     }
 }
