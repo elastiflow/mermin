@@ -20,7 +20,7 @@ use network_types::{
     icmp::IcmpHdr,
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
     route::{
-        GenericRoute, RoutingHeaderType, RplSourceRouteHeader, SegmentRoutingHeader,
+        CrhHeader, GenericRoute, RoutingHeaderType, RplSourceRouteHeader, SegmentRoutingHeader,
         Type2RoutingHeader,
     },
     tcp::TcpHdr,
@@ -351,6 +351,16 @@ impl Parser {
 
                 // TODO parse out and use addresses and other Segment fields here
                 self.next_hdr = HeaderType::Proto(segment_hdr.gen_route.next_hdr());
+            }
+            RoutingHeaderType::Crh16 | RoutingHeaderType::Crh32 => {
+                let crh_hdr: CrhHeader = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+                self.offset += crh_hdr.total_hdr_len();
+                
+                // TODO parse out and use SIDs from CRH header
+                // You can use sid_num (or the logic in num_sids) to determine size of sids
+                // and what to do with them as needed
+                let _sid_num = crh_hdr.num_sids();
+                self.next_hdr = HeaderType::Proto(crh_hdr.next_hdr());
             }
             _ => {}
         }
@@ -904,6 +914,78 @@ mod tests {
             0xfe, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x5e, 0xff, 0xfe, 0x00,
             0x53, 0xaf,
         ]);
+
+        packet
+    }
+
+    // Helper function to create a CRH-16 test packet with 16-bit SIDs
+    // This creates a CRH-16 header with 2 SIDs (total packet: 4 + 4 = 8 bytes)
+    fn create_crh16_test_packet(next: IpProto) -> Vec<u8> {
+        let mut packet = Vec::new();
+
+        // Generic routing header (4 bytes)
+        packet.push(next as u8); // Next Header
+        packet.push(0); // Hdr Ext Len (0 * 8 = 0 bytes after first 8, total 8 bytes - only fixed header)
+        packet.push(5); // Routing Type (Crh16)
+        packet.push(1); // Segments Left
+
+        // Reserved bytes to make the header 8 bytes long
+        packet.extend_from_slice(&[0; 4]);
+
+        packet
+    }
+
+    // Helper function to create a CRH-16 test packet with SIDs
+    // This creates a CRH-16 header with 2 SIDs (total packet: 4 + 4 = 8 bytes)
+    fn create_crh16_with_sids_test_packet(next: IpProto) -> Vec<u8> {
+        let mut packet = Vec::new();
+
+        // Generic routing header (4 bytes)
+        packet.push(next as u8); // Next Header
+        packet.push(1); // Hdr Ext Len (1 * 8 = 8 bytes after first 8, total 16 bytes)
+        packet.push(5); // Routing Type (Crh16)
+        packet.push(1); // Segments Left
+
+        // SID List: 4 16-bit SIDs (8 bytes total)
+        packet.extend_from_slice(&[0x12, 0x34]); // SID[0] = 0x1234
+        packet.extend_from_slice(&[0x56, 0x78]); // SID[1] = 0x5678
+        packet.extend_from_slice(&[0x9A, 0xBC]); // SID[2] = 0x9ABC
+        packet.extend_from_slice(&[0xDE, 0xF0]); // SID[3] = 0xDEF0
+
+        packet
+    }
+
+    // Helper function to create a CRH-32 test packet
+    // This creates a CRH-32 header with no SIDs (minimum size)
+    fn create_crh32_test_packet(next: IpProto) -> Vec<u8> {
+        let mut packet = Vec::new();
+
+        // Generic routing header (4 bytes)
+        packet.push(next as u8); // Next Header
+        packet.push(0); // Hdr Ext Len (0 * 8 = 0 bytes after first 8, total 8 bytes - only fixed header)
+        packet.push(6); // Routing Type (Crh32)
+        packet.push(0); // Segments Left
+
+        // Reserved bytes to make the header 8 bytes long (minimum IPv6 extension header size)
+        packet.extend_from_slice(&[0; 4]);
+
+        packet
+    }
+
+    // Helper function to create a CRH-32 test packet with SIDs
+    // This creates a CRH-32 header with 2 SIDs (total packet: 4 + 8 = 12 bytes)
+    fn create_crh32_with_sids_test_packet(next: IpProto) -> Vec<u8> {
+        let mut packet = Vec::new();
+
+        // Generic routing header (4 bytes)
+        packet.push(next as u8); // Next Header
+        packet.push(1); // Hdr Ext Len (1 * 8 = 8 bytes after first 8, total 16 bytes)
+        packet.push(6); // Routing Type (Crh32)
+        packet.push(1); // Segments Left
+
+        // SID List: 2 32-bit SIDs (8 bytes total)
+        packet.extend_from_slice(&[0x12, 0x34, 0x56, 0x78]); // SID[0] = 0x12345678
+        packet.extend_from_slice(&[0x9A, 0xBC, 0xDE, 0xF0]); // SID[1] = 0x9ABCDEF0
 
         packet
     }
@@ -1577,6 +1659,242 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(parser.offset, 8); // Only fixed header
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    // Test parse_routing_header function with CRH-16 header mapping to TCP
+    #[test]
+    fn test_parse_routing_header_crh16_tcp() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let packet = create_crh16_test_packet(IpProto::Tcp);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    // Test parse_routing_header function with CRH-16 header mapping to UDP
+    #[test]
+    fn test_parse_routing_header_crh16_udp() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let packet = create_crh16_test_packet(IpProto::Udp);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
+    }
+
+    // Test parse_routing_header function with CRH-16 header with SIDs
+    #[test]
+    fn test_parse_routing_header_crh16_with_sids() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let packet = create_crh16_with_sids_test_packet(IpProto::Tcp);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 12); // CRH header length (4 + 8 bytes SIDs)
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    // Test parse_routing_header function with CRH-16 header with insufficient buffer
+    #[test]
+    fn test_parse_routing_header_crh16_out_of_bounds() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        // Provide fewer bytes than required for CRH-16 header
+        let packet = vec![0x06, 0x01]; // Only 2 bytes
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+        assert!(matches!(result, Err(Error::OutOfBounds)));
+    }
+
+    // Test CRH-16 Header edge case with maximum segments left
+    #[test]
+    fn test_parse_routing_header_crh16_max_segments_left() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let mut packet = create_crh16_with_sids_test_packet(IpProto::Tcp);
+        // Set segments left to maximum value
+        packet[3] = 255;
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 12);
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    // Test parse_routing_header function with CRH-32 header mapping to TCP
+    #[test]
+    fn test_parse_routing_header_crh32_tcp() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let packet = create_crh32_test_packet(IpProto::Tcp);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    // Test parse_routing_header function with CRH-32 header mapping to UDP
+    #[test]
+    fn test_parse_routing_header_crh32_udp() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let packet = create_crh32_test_packet(IpProto::Udp);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
+    }
+
+    // Test parse_routing_header function with CRH-32 header with SIDs
+    #[test]
+    fn test_parse_routing_header_crh32_with_sids() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let packet = create_crh32_with_sids_test_packet(IpProto::Tcp);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 12); // CRH header length (4 + 8 bytes SIDs)
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    // Test parse_routing_header function with CRH-32 header with insufficient buffer
+    #[test]
+    fn test_parse_routing_header_crh32_out_of_bounds() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        // Provide fewer bytes than required for CRH-32 header
+        let packet = vec![0x06, 0x01]; // Only 2 bytes
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+        assert!(matches!(result, Err(Error::OutOfBounds)));
+    }
+
+    // Test CRH-32 Header edge case with maximum segments left
+    #[test]
+    fn test_parse_routing_header_crh32_max_segments_left() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let mut packet = create_crh32_with_sids_test_packet(IpProto::Udp);
+        // Set segments left to maximum value
+        packet[3] = 255;
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 12);
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
+    }
+
+    // Test CRH-16 with zero hdr_ext_len (minimum valid header)
+    #[test]
+    fn test_parse_routing_header_crh16_zero_hdr_ext_len() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+
+        // Create a packet with zero hdr_ext_len (only fixed header)
+        let mut packet = Vec::new();
+        packet.push(IpProto::Tcp as u8); // Next Header
+        packet.push(0); // Hdr Ext Len = 0 (total 4 bytes)
+        packet.push(5); // Routing Type (Crh16)
+        packet.push(0); // Segments Left
+
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 4); // Only fixed header
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    // Test CRH-32 with zero hdr_ext_len (minimum valid header)
+    #[test]
+    fn test_parse_routing_header_crh32_zero_hdr_ext_len() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+
+        // Create a packet with zero hdr_ext_len (only fixed header)
+        let mut packet = Vec::new();
+        packet.push(IpProto::Udp as u8); // Next Header
+        packet.push(0); // Hdr Ext Len = 0 (total 4 bytes)
+        packet.push(6); // Routing Type (Crh32)
+        packet.push(0); // Segments Left
+
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 4); // Only fixed header
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
+    }
+
+    // Test CRH-16 header with malformed SID data (insufficient SID buffer)
+    #[test]
+    fn test_parse_routing_header_crh16_malformed_sid_data() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        
+        // Create packet that claims to have SIDs but provides insufficient data
+        let mut packet = Vec::new();
+        packet.push(IpProto::Tcp as u8); // Next Header
+        packet.push(1); // Hdr Ext Len = 1 (claims 8 bytes of SID data)
+        packet.push(5); // Routing Type (Crh16)
+        packet.push(1); // Segments Left
+        // Only provide 2 bytes instead of required 8
+        packet.extend_from_slice(&[0x12, 0x34]);
+        
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+        assert!(matches!(result, Err(Error::MalformedHeader)));
+    }
+
+    // Test CRH-32 header with malformed SID data (insufficient SID buffer)
+    #[test]
+    fn test_parse_routing_header_crh32_malformed_sid_data() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        
+        // Create packet that claims to have SIDs but provides insufficient data
+        let mut packet = Vec::new();
+        packet.push(IpProto::Udp as u8); // Next Header
+        packet.push(1); // Hdr Ext Len = 1 (claims 8 bytes of SID data)
+        packet.push(6); // Routing Type (Crh32)
+        packet.push(1); // Segments Left
+        // Only provide 4 bytes instead of required 8
+        packet.extend_from_slice(&[0x12, 0x34, 0x56, 0x78]);
+        
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+        assert!(matches!(result, Err(Error::MalformedHeader)));
     }
 
     // Helper function to create network-like test data with big endian patterns

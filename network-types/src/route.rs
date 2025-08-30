@@ -8,6 +8,9 @@ pub const MAX_RPL_ADDRESSES: usize = 32;
 /// Maximum number of segments in a Type 4 Segment Routing Header
 pub const MAX_SRH_SEGMENTS: usize = 128;
 
+/// Maximum number of SIDs in a Type 5 or 6 CRH Header
+pub const MAX_CRH_SIDS: usize = 128;
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum RoutingHeaderType {
     /// Type 2 Routing Header - [RFC6275]
@@ -73,10 +76,10 @@ pub enum Ipv6RoutingHeader {
     RplSourceRoute(RplSourceRouteHeader),
     /// Segment Routing Header (SRH) - [RFC8754]
     SegmentRouting(SegmentRoutingHeader),
-    // /// CRH-16 - [RFC9631]
-    // Crh16(Crh16Header),
-    // /// CRH-32 - [RFC9631]
-    // Crh32(Crh32Header),
+    /// CRH-16 - [RFC9631] 
+    Crh16(CrhHeader),
+    /// CRH-32 - [RFC9631]
+    Crh32(CrhHeader),
     /// RFC3692-style Experiment 1 [2] - [RFC4727]
     Experiment1(GenericRoute),
     /// RFC3692-style Experiment 2 [2] - [RFC4727]
@@ -626,6 +629,145 @@ impl SegmentRoutingHeader {
     }
 }
 
+/// Type 5 Compact Routing Header with 16-bit SIDs (CRH-16) - RFC 9631
+///
+/// This routing header is an experimental alternative to SRH, designed to be more space-efficient
+/// by using 16-bit Segment Identifiers (SIDs) instead of full IPv6 addresses.
+///
+///  0                   1                   2                   3
+/// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |              SID[0]           |              SID[1]           |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |              ...              |              ...              |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |              ...              |              SID[n]           |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///
+/// Fields
+///
+/// * **Next Header (8 bits)**: Identifies the type of the next header.
+/// * **Hdr Ext Len (8 bits)**: The length of the Routing header in 8-octet units, not including the first 8 octets.
+/// * **Routing Type (8 bits)**: Identifies the variant of the Routing header. For CRH-16, this is 5.
+/// * **Segments Left (8 bits)**: Index of the current active segment in the SID List.
+/// * **SID List[0..n]**: List of 16-bit Segment Identifiers.
+///
+/// Type 6 Compact Routing Header with 32-bit SIDs (CRH-32) - RFC 9631
+///
+/// This routing header is an experimental alternative to SRH, designed to be more space-efficient
+/// by using 32-bit Segment Identifiers (SIDs) instead of full IPv6 addresses.
+///
+///  0                   1                   2                   3
+/// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                              SID[0]                           |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                              ...                              |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                              SID[n]                           |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///
+/// Fields
+///
+/// * **Next Header (8 bits)**: Identifies the type of the next header.
+/// * **Hdr Ext Len (8 bits)**: The length of the Routing header in 8-octet units, not including the first 8 octets.
+/// * **Routing Type (8 bits)**: Identifies the variant of the Routing header. For CRH-32, this is 6.
+/// * **Segments Left (8 bits)**: Index of the current active segment in the SID List.
+/// * **SID List[0..n]**: List of 32-bit Segment Identifiers.
+// This seems kind of redundant to have a wrapper around GenericRoute, but it does distinguish it.
+#[repr(C, packed)]
+#[derive(Debug, Copy, Clone)]
+pub struct CrhHeader {
+    pub generic_route: GenericRoute,
+}
+
+impl CrhHeader {
+    /// The total size in bytes of the fixed part of the CRH-16 Header
+    pub const LEN: usize = mem::size_of::<CrhHeader>();
+
+    /// Maximum number of SIDs that can be included in the header
+    pub const MAX_SIDS: usize = MAX_CRH_SIDS;
+
+    /// Gets the Next Header value.
+    #[inline]
+    pub fn next_hdr(&self) -> IpProto {
+        self.generic_route.next_hdr
+    }
+
+    /// Sets the Next Header value.
+    #[inline]
+    pub fn set_next_hdr(&mut self, next_hdr: IpProto) {
+        self.generic_route.next_hdr = next_hdr
+    }
+
+    /// Gets the Header Extension Length value.
+    #[inline]
+    pub fn hdr_ext_len(&self) -> u8 {
+        self.generic_route.hdr_ext_len
+    }
+
+    /// Sets the Header Extension Length value.
+    #[inline]
+    pub fn set_hdr_ext_len(&mut self, hdr_ext_len: u8) {
+        self.generic_route.hdr_ext_len = hdr_ext_len
+    }
+
+    /// Gets the Routing Type value.
+    #[inline]
+    pub fn type_(&self) -> RoutingHeaderType {
+        RoutingHeaderType::from_u8(self.generic_route.type_)
+    }
+
+    /// Sets the Routing Type value.
+    /// For CRH-16 Header, this should always be 5.
+    #[inline]
+    pub fn set_type(&mut self, type_: RoutingHeaderType) {
+        self.generic_route.type_ = type_.as_u8()
+    }
+
+    /// Gets the Segments Left value.
+    #[inline]
+    pub fn sgmt_left(&self) -> u8 {
+        self.generic_route.sgmt_left
+    }
+
+    /// Sets the Segments Left value.
+    #[inline]
+    pub fn set_sgmt_left(&mut self, sgmt_left: u8) {
+        self.generic_route.sgmt_left = sgmt_left
+    }
+
+    /// Calculates the total length of the CRH-16 Header in bytes.
+    /// The Hdr Ext Len is in 8-octet units, *excluding* the first 8 octets.
+    /// So, total length = (hdr_ext_len + 1) * 8.
+    #[inline]
+    pub fn total_hdr_len(&self) -> usize {
+        self.generic_route.total_hdr_len()
+    }
+
+    /// Calculates the total length available for the SID List in bytes.
+    /// Total Header Length - Fixed Header Length.
+    #[inline]
+    pub fn sid_list_len(&self) -> usize {
+        self.total_hdr_len().saturating_sub(CrhHeader::LEN)
+    }
+
+    /// Calculates the number of SIDs in the SID List.
+    #[inline]
+    pub fn num_sids(&self) -> usize {
+        let sid_size = match self.type_() {
+            RoutingHeaderType::Crh16 => 2,
+            RoutingHeaderType::Crh32 => 4,
+            _ => return 0,
+        };
+        self.sid_list_len() / sid_size
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate alloc;
@@ -1010,5 +1152,227 @@ mod tests {
         assert_eq!(header.num_segments(), 1); // 0 + 1 = 1
         assert_eq!(header.segment_list_len(), 16); // 1 * 16 = 16
         assert_eq!(header.tlvs_len(), 0); // 16 - 16 = 0
+    }
+
+    #[test]
+    fn test_crh_header_len_constant() {
+        assert_eq!(CrhHeader::LEN, 4); // GenericRoute (4)
+        assert_eq!(CrhHeader::LEN, mem::size_of::<CrhHeader>());
+    }
+
+    #[test]
+    fn test_crh_header_constants() {
+        assert_eq!(CrhHeader::MAX_SIDS, MAX_CRH_SIDS);
+        assert_eq!(MAX_CRH_SIDS, 128);
+    }
+
+    #[test]
+    fn test_crh_header_basic_getters_setters() {
+        let generic_route = GenericRoute {
+            next_hdr: IpProto::Tcp,
+            hdr_ext_len: 0,
+            type_: 5, // CRH-16 type
+            sgmt_left: 0,
+        };
+
+        let mut header = CrhHeader {
+            generic_route,
+        };
+
+        // Test next_hdr
+        header.set_next_hdr(IpProto::Udp);
+        assert_eq!(header.next_hdr(), IpProto::Udp);
+
+        // Test hdr_ext_len
+        header.set_hdr_ext_len(2);
+        assert_eq!(header.hdr_ext_len(), 2);
+
+        // Test type_
+        header.set_type(RoutingHeaderType::Crh16);
+        assert_eq!(header.type_(), RoutingHeaderType::Crh16);
+
+        // Test sgmt_left
+        header.set_sgmt_left(3);
+        assert_eq!(header.sgmt_left(), 3);
+    }
+
+    #[test]
+    fn test_crh16_header_calculations() {
+        // Test CRH-16 with 4 SIDs
+        let generic_route = GenericRoute {
+            next_hdr: IpProto::Ipv6,
+            hdr_ext_len: 1, // 2 * 8 = 16 bytes total, 16 - 4 = 12 bytes for SIDs
+            type_: 5, // CRH-16
+            sgmt_left: 2,
+        };
+
+        let header = CrhHeader {
+            generic_route,
+        };
+
+        // Test total header length
+        assert_eq!(header.total_hdr_len(), 16); // (1 + 1) * 8 = 16
+
+        // Test SID list length
+        assert_eq!(header.sid_list_len(), 12); // 16 - 4 = 12
+
+        // Test number of SIDs for CRH-16 (2 bytes per SID)
+        assert_eq!(header.num_sids(), 6); // 12 / 2 = 6
+    }
+
+    #[test]
+    fn test_crh32_header_calculations() {
+        // Test CRH-32 with 2 SIDs
+        let generic_route = GenericRoute {
+            next_hdr: IpProto::Tcp,
+            hdr_ext_len: 1, // 2 * 8 = 16 bytes total, 16 - 4 = 12 bytes for SIDs
+            type_: 6, // CRH-32
+            sgmt_left: 1,
+        };
+
+        let header = CrhHeader {
+            generic_route,
+        };
+
+        // Test total header length
+        assert_eq!(header.total_hdr_len(), 16); // (1 + 1) * 8 = 16
+
+        // Test SID list length
+        assert_eq!(header.sid_list_len(), 12); // 16 - 4 = 12
+
+        // Test number of SIDs for CRH-32 (4 bytes per SID)
+        assert_eq!(header.num_sids(), 3); // 12 / 4 = 3
+    }
+
+    #[test]
+    fn test_crh16_header_with_multiple_sids() {
+        // Test CRH-16 with more SIDs
+        let generic_route = GenericRoute {
+            next_hdr: IpProto::Udp,
+            hdr_ext_len: 4, // 5 * 8 = 40 bytes total, 40 - 4 = 36 bytes for SIDs
+            type_: 5, // CRH-16
+            sgmt_left: 15,
+        };
+
+        let header = CrhHeader {
+            generic_route,
+        };
+
+        // Test total header length
+        assert_eq!(header.total_hdr_len(), 40); // (4 + 1) * 8 = 40
+
+        // Test SID list length
+        assert_eq!(header.sid_list_len(), 36); // 40 - 4 = 36
+
+        // Test number of SIDs for CRH-16 (2 bytes per SID)
+        assert_eq!(header.num_sids(), 18); // 36 / 2 = 18
+    }
+
+    #[test]
+    fn test_crh32_header_with_multiple_sids() {
+        // Test CRH-32 with more SIDs
+        let generic_route = GenericRoute {
+            next_hdr: IpProto::Icmp,
+            hdr_ext_len: 7, // 8 * 8 = 64 bytes total, 64 - 4 = 60 bytes for SIDs
+            type_: 6, // CRH-32
+            sgmt_left: 10,
+        };
+
+        let header = CrhHeader {
+            generic_route,
+        };
+
+        // Test total header length
+        assert_eq!(header.total_hdr_len(), 64); // (7 + 1) * 8 = 64
+
+        // Test SID list length
+        assert_eq!(header.sid_list_len(), 60); // 64 - 4 = 60
+
+        // Test number of SIDs for CRH-32 (4 bytes per SID)
+        assert_eq!(header.num_sids(), 15); // 60 / 4 = 15
+    }
+
+    #[test]
+    fn test_crh_header_edge_cases() {
+        // Test with zero hdr_ext_len
+        let generic_route = GenericRoute {
+            next_hdr: IpProto::Tcp,
+            hdr_ext_len: 0,
+            type_: 5, // CRH-16
+            sgmt_left: 0,
+        };
+
+        let header = CrhHeader {
+            generic_route,
+        };
+
+        // Test with zero hdr_ext_len
+        assert_eq!(header.total_hdr_len(), 8); // (0 + 1) * 8 = 8
+        assert_eq!(header.sid_list_len(), 4); // 8 - 4 = 4
+        assert_eq!(header.num_sids(), 2); // 4 / 2 = 2 for CRH-16
+    }
+
+    #[test]
+    fn test_crh_header_invalid_type() {
+        // Test with invalid type (should return 0 SIDs)
+        let generic_route = GenericRoute {
+            next_hdr: IpProto::Tcp,
+            hdr_ext_len: 4,
+            type_: 99, // Invalid type
+            sgmt_left: 0,
+        };
+
+        let header = CrhHeader {
+            generic_route,
+        };
+
+        // Test with invalid type
+        assert_eq!(header.num_sids(), 0); // Invalid type should return 0
+    }
+
+    #[test]
+    fn test_crh_header_maximum_sids() {
+        // Test maximum possible SIDs for CRH-16
+        let generic_route = GenericRoute {
+            next_hdr: IpProto::Tcp,
+            hdr_ext_len: 31, // 32 * 8 = 256 bytes total, 256 - 4 = 252 bytes for SIDs
+            type_: 5, // CRH-16
+            sgmt_left: 0,
+        };
+
+        let header = CrhHeader {
+            generic_route,
+        };
+
+        assert_eq!(header.total_hdr_len(), 256); // (31 + 1) * 8 = 256
+        assert_eq!(header.sid_list_len(), 252); // 256 - 4 = 252
+        assert_eq!(header.num_sids(), 126); // 252 / 2 = 126 for CRH-16
+
+        // Test maximum possible SIDs for CRH-32
+        let generic_route_32 = GenericRoute {
+            next_hdr: IpProto::Tcp,
+            hdr_ext_len: 31, // 32 * 8 = 256 bytes total, 256 - 4 = 252 bytes for SIDs
+            type_: 6, // CRH-32
+            sgmt_left: 0,
+        };
+
+        let header_32 = CrhHeader {
+            generic_route: generic_route_32,
+        };
+
+        assert_eq!(header_32.total_hdr_len(), 256); // (31 + 1) * 8 = 256
+        assert_eq!(header_32.sid_list_len(), 252); // 256 - 4 = 252
+        assert_eq!(header_32.num_sids(), 63); // 252 / 4 = 63 for CRH-32
+    }
+
+    #[test]
+    fn test_crh_header_routing_type_conversion() {
+        // Test CRH-16 type conversion
+        assert_eq!(RoutingHeaderType::from_u8(5), RoutingHeaderType::Crh16);
+        assert_eq!(RoutingHeaderType::Crh16.as_u8(), 5);
+
+        // Test CRH-32 type conversion
+        assert_eq!(RoutingHeaderType::from_u8(6), RoutingHeaderType::Crh32);
+        assert_eq!(RoutingHeaderType::Crh32.as_u8(), 6);
     }
 }
