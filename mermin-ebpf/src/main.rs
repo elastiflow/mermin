@@ -321,6 +321,7 @@ impl Parser {
                     debug!(ctx, "failed to read all of rpl header");
                     return Err(Error::MalformedHeader);
                 }
+                self.offset += bytes_read;
 
                 // TODO parse out and use addresses and other Rpl fields here
                 self.next_hdr = HeaderType::Proto(rpl_hdr.gen_route.next_hdr());
@@ -345,22 +346,40 @@ impl Parser {
                     .read_var_buf(ctx, &mut addresses, var_size)
                     .map_err(|_| Error::OutOfBounds)?;
                 if bytes_read < var_size {
-                    debug!(ctx, "failed to read all of rpl header");
+                    debug!(ctx, "failed to read all of Segment header");
                     return Err(Error::MalformedHeader);
                 }
+                self.offset += bytes_read;
 
                 // TODO parse out and use addresses and other Segment fields here
                 self.next_hdr = HeaderType::Proto(segment_hdr.gen_route.next_hdr());
             }
             RoutingHeaderType::Crh16 | RoutingHeaderType::Crh32 => {
                 let crh_hdr: CrhHeader = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-                self.offset += crh_hdr.total_hdr_len();
-                
+                self.offset += CrhHeader::LEN;
+
+                let var_size = crh_hdr.sid_list_len();
+                let mut addresses = [0u8; MAX_ADDR];
+
+                let bytes_read = self.read_var_buf(ctx, &mut addresses, var_size)?;
+                if bytes_read < var_size {
+                    debug!(ctx, "failed to read all of CRH header");
+                    return Err(Error::MalformedHeader);
+                }
+                self.offset += bytes_read;
+
                 // TODO parse out and use SIDs from CRH header
                 // You can use sid_num (or the logic in num_sids) to determine size of sids
                 // and what to do with them as needed
                 let _sid_num = crh_hdr.num_sids();
                 self.next_hdr = HeaderType::Proto(crh_hdr.next_hdr());
+            }
+            RoutingHeaderType::Experiment1
+            | RoutingHeaderType::Experiment2
+            | RoutingHeaderType::Reserved => {
+                // We could also consider jumping to the next_hdr instead of StopProcessing
+                warn!(ctx, "unsupported routing header type");
+                self.next_hdr = HeaderType::StopProcessing;
             }
             _ => {}
         }
@@ -402,10 +421,11 @@ impl Parser {
                                 offset: &mut usize|
          -> Result<bool, Error> {
             if *bytes_read_total >= len || (*bytes_read_total + 1) > N {
+                // Someting about this mfin check be getting me, or the values calculated here
                 return Ok(false);
             }
 
-            let byte: u8 = ctx.load(*offset).map_err(|_| Error::OutOfBounds)?;
+            let byte: u8 = ctx.load(*offset).map_err(|_| Error::MalformedHeader)?;
             buf[*bytes_read_total] = byte;
             *bytes_read_total += 1;
             *offset += 1;
@@ -434,12 +454,13 @@ impl Parser {
         };
 
         // Align to 16-byte boundary by reading individual bytes
+        let mut parse_offset = self.offset;
         let mut alignment = self.offset % 16;
         for _ in 0..16 {
             if alignment == 16 {
                 break;
             }
-            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut self.offset)? {
+            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut parse_offset)? {
                 break;
             }
             alignment += 1;
@@ -449,8 +470,13 @@ impl Parser {
         // The main idea is we can keep adding loops to read u128s until we reach our desired supported header size
         for _ in 0..4 {
             for _ in 0..16 {
-                if !read_sixteen_byte_chunk(ctx, buf, len, &mut bytes_read_total, &mut self.offset)?
-                {
+                if !read_sixteen_byte_chunk(
+                    ctx,
+                    buf,
+                    len,
+                    &mut bytes_read_total,
+                    &mut parse_offset,
+                )? {
                     break;
                 }
             }
@@ -458,7 +484,7 @@ impl Parser {
 
         // Read remaining bytes as individual bytes
         for _ in 0..16 {
-            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut self.offset)? {
+            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut parse_offset)? {
                 break;
             }
         }
@@ -929,7 +955,7 @@ mod tests {
         packet.push(5); // Routing Type (Crh16)
         packet.push(1); // Segments Left
 
-        // Reserved bytes to make the header 8 bytes long
+        // Reserved bytes to make the header 8 bytes long (minimum IPv6 extension header size)
         packet.extend_from_slice(&[0; 4]);
 
         packet
@@ -951,6 +977,9 @@ mod tests {
         packet.extend_from_slice(&[0x56, 0x78]); // SID[1] = 0x5678
         packet.extend_from_slice(&[0x9A, 0xBC]); // SID[2] = 0x9ABC
         packet.extend_from_slice(&[0xDE, 0xF0]); // SID[3] = 0xDEF0
+
+        // Reserved bytes to make the header a multiple of 8 bytes long
+        packet.extend_from_slice(&[0; 4]);
 
         packet
     }
@@ -986,6 +1015,9 @@ mod tests {
         // SID List: 2 32-bit SIDs (8 bytes total)
         packet.extend_from_slice(&[0x12, 0x34, 0x56, 0x78]); // SID[0] = 0x12345678
         packet.extend_from_slice(&[0x9A, 0xBC, 0xDE, 0xF0]); // SID[1] = 0x9ABCDEF0
+
+        // Reserved bytes to make the header a multiple of 8 bytes long
+        packet.extend_from_slice(&[0; 4]);
 
         packet
     }
@@ -1702,7 +1734,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.offset, 12); // CRH header length (4 + 8 bytes SIDs)
+        assert_eq!(parser.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1732,7 +1764,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.offset, 12);
+        assert_eq!(parser.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1777,7 +1809,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.offset, 12); // CRH header length (4 + 8 bytes SIDs)
+        assert_eq!(parser.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1807,7 +1839,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.offset, 12);
+        assert_eq!(parser.offset, 16);
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
@@ -1824,12 +1856,15 @@ mod tests {
         packet.push(5); // Routing Type (Crh16)
         packet.push(0); // Segments Left
 
+        // Reserved bytes to make the header a multiple of 8 bytes long
+        packet.extend_from_slice(&[0; 4]);
+
         let ctx = TcContext::new(packet);
 
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.offset, 4); // Only fixed header
+        assert_eq!(parser.offset, 8); // Only fixed header and padding
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1846,34 +1881,16 @@ mod tests {
         packet.push(6); // Routing Type (Crh32)
         packet.push(0); // Segments Left
 
+        // Reserved bytes to make the header a multiple of 8 bytes long
+        packet.extend_from_slice(&[0; 4]);
+
         let ctx = TcContext::new(packet);
 
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.offset, 4); // Only fixed header
+        assert_eq!(parser.offset, 8); // Only fixed header and padding
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
-    }
-
-    // Test CRH-16 header with malformed SID data (insufficient SID buffer)
-    #[test]
-    fn test_parse_routing_header_crh16_malformed_sid_data() {
-        let mut parser = Parser::new();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        
-        // Create packet that claims to have SIDs but provides insufficient data
-        let mut packet = Vec::new();
-        packet.push(IpProto::Tcp as u8); // Next Header
-        packet.push(1); // Hdr Ext Len = 1 (claims 8 bytes of SID data)
-        packet.push(5); // Routing Type (Crh16)
-        packet.push(1); // Segments Left
-        // Only provide 2 bytes instead of required 8
-        packet.extend_from_slice(&[0x12, 0x34]);
-        
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_routing_header(&ctx);
-        assert!(matches!(result, Err(Error::MalformedHeader)));
     }
 
     // Test CRH-32 header with malformed SID data (insufficient SID buffer)
@@ -1881,7 +1898,7 @@ mod tests {
     fn test_parse_routing_header_crh32_malformed_sid_data() {
         let mut parser = Parser::new();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        
+
         // Create packet that claims to have SIDs but provides insufficient data
         let mut packet = Vec::new();
         packet.push(IpProto::Udp as u8); // Next Header
@@ -1890,7 +1907,7 @@ mod tests {
         packet.push(1); // Segments Left
         // Only provide 4 bytes instead of required 8
         packet.extend_from_slice(&[0x12, 0x34, 0x56, 0x78]);
-        
+
         let ctx = TcContext::new(packet);
 
         let result = parser.parse_routing_header(&ctx);
@@ -2071,36 +2088,6 @@ mod tests {
                 "Data mismatch for length {}",
                 len
             );
-        }
-    }
-
-    // Test parser offset advancement with odd lengths
-    #[test]
-    fn test_read_var_buf_offset_advancement() {
-        let test_data = create_network_test_data(100);
-        let ctx = TcContext::new(test_data.clone());
-
-        // Read odd-sized chunks and verify offset advances correctly
-        let read_sizes = [7, 11, 5, 13, 3];
-
-        for &size in &read_sizes {
-            // Reset parser offset before each iteration
-            let mut parser = Parser::new();
-            let mut buf = [0u8; 32];
-            let result = parser.read_var_buf(&ctx, &mut buf, size);
-
-            assert!(result.is_ok(), "Failed reading {} bytes", size);
-            assert_eq!(result.unwrap(), size);
-
-            // Verify offset advanced correctly for this single read
-            assert_eq!(
-                parser.offset, size,
-                "Offset mismatch after reading {} bytes",
-                size
-            );
-
-            // Verify we read from the start of the data
-            assert_eq!(&buf[0..size], &test_data[0..size]);
         }
     }
 

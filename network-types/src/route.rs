@@ -76,7 +76,7 @@ pub enum Ipv6RoutingHeader {
     RplSourceRoute(RplSourceRouteHeader),
     /// Segment Routing Header (SRH) - [RFC8754]
     SegmentRouting(SegmentRoutingHeader),
-    /// CRH-16 - [RFC9631] 
+    /// CRH-16 - [RFC9631]
     Crh16(CrhHeader),
     /// CRH-32 - [RFC9631]
     Crh32(CrhHeader),
@@ -1175,9 +1175,7 @@ mod tests {
             sgmt_left: 0,
         };
 
-        let mut header = CrhHeader {
-            generic_route,
-        };
+        let mut header = CrhHeader { generic_route };
 
         // Test next_hdr
         header.set_next_hdr(IpProto::Udp);
@@ -1202,13 +1200,11 @@ mod tests {
         let generic_route = GenericRoute {
             next_hdr: IpProto::Ipv6,
             hdr_ext_len: 1, // 2 * 8 = 16 bytes total, 16 - 4 = 12 bytes for SIDs
-            type_: 5, // CRH-16
+            type_: 5,       // CRH-16
             sgmt_left: 2,
         };
 
-        let header = CrhHeader {
-            generic_route,
-        };
+        let header = CrhHeader { generic_route };
 
         // Test total header length
         assert_eq!(header.total_hdr_len(), 16); // (1 + 1) * 8 = 16
@@ -1226,13 +1222,11 @@ mod tests {
         let generic_route = GenericRoute {
             next_hdr: IpProto::Tcp,
             hdr_ext_len: 1, // 2 * 8 = 16 bytes total, 16 - 4 = 12 bytes for SIDs
-            type_: 6, // CRH-32
+            type_: 6,       // CRH-32
             sgmt_left: 1,
         };
 
-        let header = CrhHeader {
-            generic_route,
-        };
+        let header = CrhHeader { generic_route };
 
         // Test total header length
         assert_eq!(header.total_hdr_len(), 16); // (1 + 1) * 8 = 16
@@ -1250,13 +1244,11 @@ mod tests {
         let generic_route = GenericRoute {
             next_hdr: IpProto::Udp,
             hdr_ext_len: 4, // 5 * 8 = 40 bytes total, 40 - 4 = 36 bytes for SIDs
-            type_: 5, // CRH-16
+            type_: 5,       // CRH-16
             sgmt_left: 15,
         };
 
-        let header = CrhHeader {
-            generic_route,
-        };
+        let header = CrhHeader { generic_route };
 
         // Test total header length
         assert_eq!(header.total_hdr_len(), 40); // (4 + 1) * 8 = 40
@@ -1274,13 +1266,11 @@ mod tests {
         let generic_route = GenericRoute {
             next_hdr: IpProto::Icmp,
             hdr_ext_len: 7, // 8 * 8 = 64 bytes total, 64 - 4 = 60 bytes for SIDs
-            type_: 6, // CRH-32
+            type_: 6,       // CRH-32
             sgmt_left: 10,
         };
 
-        let header = CrhHeader {
-            generic_route,
-        };
+        let header = CrhHeader { generic_route };
 
         // Test total header length
         assert_eq!(header.total_hdr_len(), 64); // (7 + 1) * 8 = 64
@@ -1302,9 +1292,7 @@ mod tests {
             sgmt_left: 0,
         };
 
-        let header = CrhHeader {
-            generic_route,
-        };
+        let header = CrhHeader { generic_route };
 
         // Test with zero hdr_ext_len
         assert_eq!(header.total_hdr_len(), 8); // (0 + 1) * 8 = 8
@@ -1322,9 +1310,7 @@ mod tests {
             sgmt_left: 0,
         };
 
-        let header = CrhHeader {
-            generic_route,
-        };
+        let header = CrhHeader { generic_route };
 
         // Test with invalid type
         assert_eq!(header.num_sids(), 0); // Invalid type should return 0
@@ -1336,13 +1322,11 @@ mod tests {
         let generic_route = GenericRoute {
             next_hdr: IpProto::Tcp,
             hdr_ext_len: 31, // 32 * 8 = 256 bytes total, 256 - 4 = 252 bytes for SIDs
-            type_: 5, // CRH-16
+            type_: 5,        // CRH-16
             sgmt_left: 0,
         };
 
-        let header = CrhHeader {
-            generic_route,
-        };
+        let header = CrhHeader { generic_route };
 
         assert_eq!(header.total_hdr_len(), 256); // (31 + 1) * 8 = 256
         assert_eq!(header.sid_list_len(), 252); // 256 - 4 = 252
@@ -1352,7 +1336,7 @@ mod tests {
         let generic_route_32 = GenericRoute {
             next_hdr: IpProto::Tcp,
             hdr_ext_len: 31, // 32 * 8 = 256 bytes total, 256 - 4 = 252 bytes for SIDs
-            type_: 6, // CRH-32
+            type_: 6,        // CRH-32
             sgmt_left: 0,
         };
 
