@@ -6,6 +6,7 @@ mod hop;
 mod ipv4;
 mod ipv6;
 mod rpl_source_route;
+mod segment_routing;
 mod tcp;
 mod type2;
 mod udp;
@@ -21,6 +22,10 @@ use crate::{
     ipv4::{create_ipv4_test_packet, verify_ipv4_header},
     ipv6::{create_ipv6_test_packet, verify_ipv6_header},
     rpl_source_route::{create_rpl_source_route_test_packet, verify_rpl_source_route_header},
+    segment_routing::{
+        create_segment_routing_test_packet, create_segment_routing_with_tlvs_test_packet,
+        verify_segment_routing_header,
+    },
     tcp::{create_tcp_test_packet, verify_tcp_header},
     type2::{create_type2_test_packet, verify_type2_header},
     udp::{create_udp_test_packet, verify_udp_header},
@@ -117,4 +122,20 @@ define_header_test!(
     PacketType::Type2,
     create_type2_test_packet,
     verify_type2_header
+);
+
+define_header_test!(
+    test_parses_segment_routing_header,
+    SegmentRoutingParsed,
+    PacketType::SegmentRouting,
+    create_segment_routing_test_packet,
+    verify_segment_routing_header
+);
+
+define_header_test!(
+    test_parses_segment_routing_with_tlvs_header,
+    SegmentRoutingParsed,
+    PacketType::SegmentRouting,
+    create_segment_routing_with_tlvs_test_packet,
+    verify_segment_routing_header
 );
