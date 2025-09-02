@@ -8,7 +8,9 @@ use aya_ebpf::{
     programs::TcContext,
 };
 use aya_log_ebpf::{Level, log};
-use integration_common::{HeaderUnion, PacketType, ParsedHeader, RplSourceRouteParsed};
+use integration_common::{
+    HeaderUnion, PacketType, ParsedHeader, RplSourceRouteParsed, SegmentRoutingParsed,
+};
 use network_types::{
     ah::AuthHdr,
     esp::Esp,
@@ -16,12 +18,13 @@ use network_types::{
     geneve::GeneveHdr,
     hop::HopOptHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
-    route::{RoutingHeaderType, RplSourceRouteHeader, Type2RoutingHeader},
+    route::{RoutingHeaderType, RplSourceRouteHeader, SegmentRoutingHeader, Type2RoutingHeader},
     tcp::TcpHdr,
     udp::UdpHdr,
 };
 
 pub const MAX_RPL_ADDR_STORAGE: usize = 128;
+pub const MAX_SEGMENT_STORAGE: usize = 128; // 256 Broke the stack :(
 pub const MAX_SIZE_MASK: usize = 255;
 
 #[map(name = "OUT_DATA")]
@@ -40,6 +43,7 @@ fn u8_to_packet_type(val: u8) -> Option<PacketType> {
         9 => Some(PacketType::Geneve),
         10 => Some(PacketType::RplSourceRoute),
         11 => Some(PacketType::Type2),
+        12 => Some(PacketType::SegmentRouting),
         _ => None,
     }
 }
@@ -52,6 +56,33 @@ pub fn integration_test(ctx: TcContext) -> i32 {
     }
 }
 
+// Helper function to read bytes inside the integration tests
+fn read_single_byte<const N: usize>(
+    ctx: &TcContext,
+    offset: &mut usize,
+    buf: &mut [u8; N],
+    bytes_read_total: &mut usize,
+) -> Result<u8, i32> {
+    let byte: u8 = ctx.load::<u8>(*offset).map_err(|_| TC_ACT_SHOT)?;
+    buf[*bytes_read_total] = byte;
+    *bytes_read_total += 1;
+    *offset += 1;
+    Ok(byte)
+}
+
+// Helper function to read 16-byte chunks
+fn read_sixteen_byte_chunk<const N: usize>(
+    ctx: &TcContext,
+    offset: &mut usize,
+    buf: &mut [u8; N],
+    bytes_read_total: &mut usize,
+) -> Result<u128, i32> {
+    let bytes: u128 = ctx.load(*offset).map_err(|_| TC_ACT_SHOT)?;
+    buf[*bytes_read_total..*bytes_read_total + 16].copy_from_slice(&bytes.to_ne_bytes());
+    *bytes_read_total += 16;
+    *offset += 16;
+    Ok(bytes)
+}
 fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
     log!(&ctx, Level::Info, "TC program triggered");
 
@@ -197,13 +228,8 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
                     break;
                 }
 
-                let bytes: u8 = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
-
-                //copy bytes into buf at location bytes_read_total, take care to use big endian conversion
-                addresses_buf[bytes_read_total] = bytes;
-                //advance bytes_read_total by 1, and self.offset by 1
-                bytes_read_total += CHUNK_SIZE;
-                offset += CHUNK_SIZE;
+                let _byte =
+                    read_single_byte(&ctx, &mut offset, &mut addresses_buf, &mut bytes_read_total)?;
                 allignment += CHUNK_SIZE;
             }
             // Loop to read 16 bytes at a time => 16*16 = 256 bytes total
@@ -219,14 +245,12 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
                     break;
                 }
 
-                let bytes: u128 = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
-
-                //copy bytes into buf at location bytes_read_total, take care to use big endian conversion
-                addresses_buf[bytes_read_total..bytes_read_total + CHUNK_SIZE]
-                    .copy_from_slice(&bytes.to_ne_bytes());
-                //advance bytes_read_total by 16, and self.offset by 16
-                bytes_read_total += CHUNK_SIZE;
-                offset += CHUNK_SIZE;
+                let _bytes = read_sixteen_byte_chunk(
+                    &ctx,
+                    &mut offset,
+                    &mut addresses_buf,
+                    &mut bytes_read_total,
+                )?;
             }
             // Loop to read 1 byte at a time => 16 + 1252 from prior loops = 1268 bytes total
             for _ in 0..16 {
@@ -241,13 +265,8 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
                     break;
                 }
 
-                let bytes: u8 = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
-
-                //copy bytes into buf at location bytes_read_total, take care to use big endian conversion
-                addresses_buf[bytes_read_total] = bytes;
-                //advance bytes_read_total by 1, and self.offset by 1
-                bytes_read_total += CHUNK_SIZE;
-                offset += CHUNK_SIZE;
+                let _byte =
+                    read_single_byte(&ctx, &mut offset, &mut addresses_buf, &mut bytes_read_total)?;
             }
 
             parsed_data.addresses[..total_addr_len]
@@ -256,6 +275,107 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             ParsedHeader {
                 type_: PacketType::RplSourceRoute,
                 data: HeaderUnion { rpl: parsed_data },
+            }
+        }
+        PacketType::SegmentRouting => {
+            let mut offset = data_offset;
+            let segment_hdr: SegmentRoutingHeader = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
+
+            if segment_hdr.gen_route.type_ != RoutingHeaderType::SegmentRoutingHeader.as_u8() {
+                return Err(TC_ACT_SHOT);
+            }
+
+            offset += SegmentRoutingHeader::LEN;
+
+            // Calculate the total length of all addresses + TLV
+            let temp_total_var_len = segment_hdr.segments_and_tlvs_len();
+
+            // Clamp the value using a bitwise AND.
+            // No matter what total_addr_len was before, after this operation,
+            // its maximum possible value is 255.
+            let total_addr_len = temp_total_var_len & MAX_SIZE_MASK;
+
+            if total_addr_len > MAX_SEGMENT_STORAGE {
+                return Err(TC_ACT_SHOT);
+            }
+
+            let mut addresses_buf = [0u8; MAX_SEGMENT_STORAGE];
+
+            // Prepare the parsed data to be sent back
+            let mut parsed_data = SegmentRoutingParsed {
+                header: segment_hdr,
+                segments_and_tlvs: [0u8; MAX_SEGMENT_STORAGE],
+                segments_and_tlvs_len: total_addr_len as u8,
+            };
+
+            let mut bytes_read_total = 0;
+            // Before we go to read 16 bytes at a time, we need to ensure the offset is alligned to a 16 byte interval
+            // Given we don't necessarily know where in offset we are before this, do modular math and read in individual bytes until we are alligned
+            let mut allignment = offset % 16;
+            for _ in 0..16 {
+                const CHUNK_SIZE: usize = 1;
+                if allignment == 16 {
+                    break;
+                }
+                //if we have read up to len or 1 is too much to read, finish reading bytes
+                if bytes_read_total >= total_addr_len
+                    || (total_addr_len - bytes_read_total) < CHUNK_SIZE
+                {
+                    break;
+                }
+                if bytes_read_total + CHUNK_SIZE > MAX_SEGMENT_STORAGE {
+                    break;
+                }
+
+                let _byte =
+                    read_single_byte(&ctx, &mut offset, &mut addresses_buf, &mut bytes_read_total)?;
+                allignment += CHUNK_SIZE;
+            }
+            // Loop to read 16 bytes at a time => 16*16 = 256 bytes total
+            for _ in 0..16 {
+                const CHUNK_SIZE: usize = 16;
+                //if we have read up to len or 16 is too much to read, move onto reading u64
+                if bytes_read_total >= total_addr_len
+                    || (total_addr_len.saturating_sub(bytes_read_total)) < CHUNK_SIZE
+                {
+                    break;
+                }
+                if bytes_read_total + CHUNK_SIZE > MAX_SEGMENT_STORAGE {
+                    break;
+                }
+
+                let _bytes = read_sixteen_byte_chunk(
+                    &ctx,
+                    &mut offset,
+                    &mut addresses_buf,
+                    &mut bytes_read_total,
+                )?;
+            }
+            // Loop to read 1 byte at a time => 16 + 1252 from prior loops = 1268 bytes total
+            for _ in 0..16 {
+                const CHUNK_SIZE: usize = 1;
+                //if we have read up to len or 1 is too much to read, finish reading bytes
+                if bytes_read_total >= total_addr_len
+                    || (total_addr_len - bytes_read_total) < CHUNK_SIZE
+                {
+                    break;
+                }
+                if bytes_read_total + CHUNK_SIZE > MAX_SEGMENT_STORAGE {
+                    break;
+                }
+
+                let _byte =
+                    read_single_byte(&ctx, &mut offset, &mut addresses_buf, &mut bytes_read_total)?;
+            }
+
+            parsed_data.segments_and_tlvs[..total_addr_len]
+                .copy_from_slice(&addresses_buf[..total_addr_len]);
+
+            ParsedHeader {
+                type_: PacketType::SegmentRouting,
+                data: HeaderUnion {
+                    segment_routing: parsed_data,
+                },
             }
         }
     };

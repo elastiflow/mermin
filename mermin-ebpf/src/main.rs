@@ -19,7 +19,10 @@ use network_types::{
     hop::HopOptHdr,
     icmp::IcmpHdr,
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
-    route::{GenericRoute, RoutingHeaderType, RplSourceRouteHeader, Type2RoutingHeader},
+    route::{
+        GenericRoute, RoutingHeaderType, RplSourceRouteHeader, SegmentRoutingHeader,
+        Type2RoutingHeader,
+    },
     tcp::TcpHdr,
     udp::UdpHdr,
 };
@@ -299,6 +302,8 @@ impl Parser {
         let gen_hdr: GenericRoute = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let routing_type: RoutingHeaderType = RoutingHeaderType::from_u8(gen_hdr.type_);
 
+        const MAX_ADDR: usize = 256;
+
         match routing_type {
             RoutingHeaderType::RplSourceRoute => {
                 let rpl_hdr: RplSourceRouteHeader =
@@ -307,7 +312,6 @@ impl Parser {
 
                 // Consider adding Clamp to addr_size if we run into verification issues
                 let addr_size = rpl_hdr.gen_route.total_hdr_len().saturating_sub(8); // Subtract 8 for fixed RPL header
-                const MAX_ADDR: usize = 256;
                 let mut addresses = [0u8; MAX_ADDR];
 
                 let bytes_read = self
@@ -317,6 +321,7 @@ impl Parser {
                     debug!(ctx, "failed to read all of rpl header");
                     return Err(Error::MalformedHeader);
                 }
+                self.offset += bytes_read;
 
                 // TODO parse out and use addresses and other Rpl fields here
                 self.next_hdr = HeaderType::Proto(rpl_hdr.gen_route.next_hdr());
@@ -328,6 +333,26 @@ impl Parser {
 
                 // TODO parse out and use addresses an other type2 fields
                 self.next_hdr = HeaderType::Proto(type2_hdr.gen_route.next_hdr());
+            }
+            RoutingHeaderType::SegmentRoutingHeader => {
+                let segment_hdr: SegmentRoutingHeader =
+                    ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+                self.offset += SegmentRoutingHeader::LEN;
+
+                let var_size = segment_hdr.segments_and_tlvs_len();
+                let mut addresses = [0u8; MAX_ADDR];
+
+                let bytes_read = self
+                    .read_var_buf(ctx, &mut addresses, var_size)
+                    .map_err(|_| Error::OutOfBounds)?;
+                if bytes_read < var_size {
+                    debug!(ctx, "failed to read all of rpl header");
+                    return Err(Error::MalformedHeader);
+                }
+                self.offset += bytes_read;
+
+                // TODO parse out and use addresses and other Segment fields here
+                self.next_hdr = HeaderType::Proto(segment_hdr.gen_route.next_hdr());
             }
             _ => {}
         }
@@ -401,12 +426,13 @@ impl Parser {
         };
 
         // Align to 16-byte boundary by reading individual bytes
+        let mut parse_offset = self.offset;
         let mut alignment = self.offset % 16;
         for _ in 0..16 {
             if alignment == 16 {
                 break;
             }
-            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut self.offset)? {
+            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut parse_offset)? {
                 break;
             }
             alignment += 1;
@@ -416,8 +442,13 @@ impl Parser {
         // The main idea is we can keep adding loops to read u128s until we reach our desired supported header size
         for _ in 0..4 {
             for _ in 0..16 {
-                if !read_sixteen_byte_chunk(ctx, buf, len, &mut bytes_read_total, &mut self.offset)?
-                {
+                if !read_sixteen_byte_chunk(
+                    ctx,
+                    buf,
+                    len,
+                    &mut bytes_read_total,
+                    &mut parse_offset,
+                )? {
                     break;
                 }
             }
@@ -425,7 +456,7 @@ impl Parser {
 
         // Read remaining bytes as individual bytes
         for _ in 0..16 {
-            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut self.offset)? {
+            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut parse_offset)? {
                 break;
             }
         }
@@ -826,6 +857,61 @@ mod tests {
         ]);
         // Padding (6 bytes)
         packet.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+
+        packet
+    }
+
+    // Helper function to create a Segment Routing Header test packet
+    // This creates a minimal SRH with 2 segments based on RFC 8754 structure
+    fn create_segment_routing_test_packet(next: IpProto) -> Vec<u8> {
+        let mut packet = Vec::new();
+
+        // Generic routing header (4 bytes)
+        packet.push(next as u8); // Next Header
+        packet.push(4); // Hdr Ext Len (4 * 8 = 32 bytes after first 8, total 40)
+        packet.push(4); // Routing Type (SegmentRoutingHeader)
+        packet.push(1); // Segments Left (index of current active segment)
+
+        // Segment Routing fixed header (4 bytes)
+        packet.push(1); // Last Entry (index of last entry, 0-based, so 1 means 2 segments)
+        packet.push(0x00); // Flags (8 bits)
+        packet.extend_from_slice(&[0x12, 0x34]); // Tag (16 bits)
+
+        // Segment List: 2 IPv6 addresses (16 bytes each = 32 bytes total)
+        // First segment (Segment List[0])
+        packet.extend_from_slice(&[
+            0x20, 0x01, 0x0d, 0xb8, 0x85, 0xa3, 0x00, 0x00, 0x00, 0x00, 0x8a, 0x2e, 0x03, 0x70,
+            0x73, 0x34,
+        ]);
+        // Second segment (Segment List[1])
+        packet.extend_from_slice(&[
+            0x20, 0x01, 0x0d, 0xb8, 0x85, 0xa3, 0x00, 0x01, 0x00, 0x00, 0x8a, 0x2e, 0x03, 0x70,
+            0x73, 0x35,
+        ]);
+
+        packet
+    }
+
+    // Helper function to create a minimal Segment Routing Header test packet (1 segment)
+    fn create_segment_routing_min_test_packet(next: IpProto) -> Vec<u8> {
+        let mut packet = Vec::new();
+
+        // Generic routing header (4 bytes)
+        packet.push(next as u8); // Next Header
+        packet.push(2); // Hdr Ext Len (2 * 8 = 16 bytes after first 8, total 24)
+        packet.push(4); // Routing Type (SegmentRoutingHeader)
+        packet.push(0); // Segments Left
+
+        // Segment Routing fixed header (4 bytes)
+        packet.push(0); // Last Entry (0 means 1 segment)
+        packet.push(0xFF); // Flags (all set)
+        packet.extend_from_slice(&[0xAB, 0xCD]); // Tag
+
+        // Single segment (16 bytes)
+        packet.extend_from_slice(&[
+            0xfe, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x5e, 0xff, 0xfe, 0x00,
+            0x53, 0xaf,
+        ]);
 
         packet
     }
@@ -1384,6 +1470,123 @@ mod tests {
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
+    // Test parse_routing_header function with Segment Routing Header mapping to TCP
+    #[test]
+    fn test_parse_routing_header_segment_routing_tcp() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let packet = create_segment_routing_test_packet(IpProto::Tcp);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 40); // Segment Routing header length (8 + 32)
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    // Test parse_routing_header function with Segment Routing Header mapping to UDP
+    #[test]
+    fn test_parse_routing_header_segment_routing_udp() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let packet = create_segment_routing_test_packet(IpProto::Udp);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 40); // Segment Routing header length (8 + 32)
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
+    }
+
+    // Test parse_routing_header function with minimum valid Segment Routing Header
+    #[test]
+    fn test_parse_routing_header_segment_routing_min() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let packet = create_segment_routing_min_test_packet(IpProto::Ipv6);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 24); // Minimum Segment Routing header length (8 + 16)
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Ipv6)));
+    }
+
+    // Test parse_routing_header function with Segment Routing Header with insufficient buffer
+    #[test]
+    fn test_parse_routing_header_segment_routing_out_of_bounds() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        // Provide fewer bytes than required for Segment Routing header
+        let packet = vec![0x06, 0x04, 0x04, 0x01, 0x01, 0x00]; // Only 6 bytes
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+        assert!(matches!(result, Err(Error::OutOfBounds)));
+    }
+
+    // Test Segment Routing Header edge case with maximum segments left
+    #[test]
+    fn test_parse_routing_header_segment_routing_max_segments_left() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let mut packet = create_segment_routing_test_packet(IpProto::Tcp);
+        // Set segments left to maximum value
+        packet[4] = 255;
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 40);
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    // Test Segment Routing Header with different flag values
+    #[test]
+    fn test_parse_routing_header_segment_routing_flags() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+        let mut packet = create_segment_routing_test_packet(IpProto::Udp);
+        // Set all flags
+        packet[6] = 0xFF;
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 40);
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
+    }
+
+    // Test Segment Routing Header with zero segments (edge case)
+    #[test]
+    fn test_parse_routing_header_segment_routing_zero_hdr_ext_len() {
+        let mut parser = Parser::new();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
+
+        // Create a packet with zero hdr_ext_len (only fixed header)
+        let mut packet = Vec::new();
+        packet.push(IpProto::Tcp as u8); // Next Header
+        packet.push(0); // Hdr Ext Len = 0 (total 8 bytes)
+        packet.push(4); // Routing Type (SegmentRoutingHeader)
+        packet.push(0); // Segments Left
+        packet.push(0); // Last Entry
+        packet.push(0x00); // Flags
+        packet.extend_from_slice(&[0x00, 0x00]); // Tag
+
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_routing_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 8); // Only fixed header
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
     // Helper function to create network-like test data with big endian patterns
     fn create_network_test_data(size: usize) -> Vec<u8> {
         let mut data = Vec::new();
@@ -1558,36 +1761,6 @@ mod tests {
                 "Data mismatch for length {}",
                 len
             );
-        }
-    }
-
-    // Test parser offset advancement with odd lengths
-    #[test]
-    fn test_read_var_buf_offset_advancement() {
-        let test_data = create_network_test_data(100);
-        let ctx = TcContext::new(test_data.clone());
-
-        // Read odd-sized chunks and verify offset advances correctly
-        let read_sizes = [7, 11, 5, 13, 3];
-
-        for &size in &read_sizes {
-            // Reset parser offset before each iteration
-            let mut parser = Parser::new();
-            let mut buf = [0u8; 32];
-            let result = parser.read_var_buf(&ctx, &mut buf, size);
-
-            assert!(result.is_ok(), "Failed reading {} bytes", size);
-            assert_eq!(result.unwrap(), size);
-
-            // Verify offset advanced correctly for this single read
-            assert_eq!(
-                parser.offset, size,
-                "Offset mismatch after reading {} bytes",
-                size
-            );
-
-            // Verify we read from the start of the data
-            assert_eq!(&buf[0..size], &test_data[0..size]);
         }
     }
 
