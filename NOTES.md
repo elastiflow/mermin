@@ -30,7 +30,7 @@ This is a markdown file to take notes about development that are relevant to sha
 | Rust Var        | Protocol         | IE Name | IE Type | Done |
 |-----------------|------------------|---------|---------|:----:|
 | hop_opts_data   | ipv6-hop-by-hop  |         |         |  ❌   |
-| route_data      | ipv6-route       |         |         |  ❌   |
+| route_data      | ipv6-route       |         |         |  ✅   |
 | dest_opts_data  | ipv6-dest-opts   |         |         |  ❌   |
 | mobility_opts   | ipv6-mobility    |         |         |  ❌   |
 | hip_params      | ipv6-hip         |         |         |  ❌   |

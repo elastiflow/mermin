@@ -634,7 +634,7 @@ impl SegmentRoutingHeader {
 /// This routing header is an experimental alternative to SRH, designed to be more space-efficient
 /// by using 16-bit Segment Identifiers (SIDs) instead of full IPv6 addresses.
 ///
-///  0                   1                   2                   3
+/// 0                   1                   2                   3
 /// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left |
@@ -659,7 +659,7 @@ impl SegmentRoutingHeader {
 /// This routing header is an experimental alternative to SRH, designed to be more space-efficient
 /// by using 32-bit Segment Identifiers (SIDs) instead of full IPv6 addresses.
 ///
-///  0                   1                   2                   3
+/// 0                   1                   2                   3
 /// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left |

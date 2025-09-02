@@ -45,11 +45,26 @@ enum HeaderType {
     ErrorOccurred, // Indicates an error stopped parsing
 }
 
+#[derive(Debug, Clone)]
+struct ParserOptions {
+    /// The port number to use for Geneve tunnel detection
+    /// Default is 6081 as per IANA assignment
+    geneve_port: u16,
+}
+
+impl Default for ParserOptions {
+    fn default() -> Self {
+        ParserOptions { geneve_port: 6081 }
+    }
+}
+
 struct Parser {
     // Current read offset from the start of the packet
     offset: usize,
     // The header-type to parse next at 'offset'
     next_hdr: HeaderType,
+    // Configuration options for the parser
+    options: ParserOptions,
 
     // Information for building flow records (prioritizes innermost headers).
     // These fields will be updated as we parse deeper or encounter encapsulations.
@@ -57,11 +72,21 @@ struct Parser {
 }
 
 impl Parser {
-    // todo(eng-18): consider using default trait instead of new
-    fn new() -> Self {
+    fn default() -> Self {
         Parser {
             offset: 0,
             next_hdr: HeaderType::Ethernet,
+            options: ParserOptions::default(),
+            packet_meta: PacketMeta::default(),
+        }
+    }
+
+    #[allow(dead_code)]
+    fn with_options(options: ParserOptions) -> Self {
+        Parser {
+            offset: 0,
+            next_hdr: HeaderType::Ethernet,
+            options,
             packet_meta: PacketMeta::default(),
         }
     }
@@ -198,11 +223,10 @@ impl Parser {
 
         // IANA has assigned port 6081 as the fixed well-known destination port for Geneve.
         // Although the well-known value should be used by default, it is RECOMMENDED that implementations make this configurable.
-        // TODO: include a configuration option read the Geneve port
-        if udp_hdr.dst_port() == 6081 {
+        if udp_hdr.dst_port() == self.options.geneve_port {
             debug!(
                 ctx,
-                "UDP packet with destination port 6081 (Geneve) detected"
+                "UDP packet with destination port {} (Geneve) detected", self.options.geneve_port
             );
             self.next_hdr = HeaderType::Geneve;
         } else {
@@ -331,7 +355,7 @@ impl Parser {
                     ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
                 self.offset += Type2RoutingHeader::LEN;
 
-                // TODO parse out and use addresses an other type2 fields
+                // TODO parse out and use addresses and other type2 fields
                 self.next_hdr = HeaderType::Proto(type2_hdr.gen_route.next_hdr());
             }
             RoutingHeaderType::SegmentRoutingHeader => {
@@ -379,7 +403,7 @@ impl Parser {
             | RoutingHeaderType::Reserved => {
                 // We could also consider jumping to the next_hdr instead of StopProcessing
                 warn!(ctx, "unsupported routing header type");
-                self.next_hdr = HeaderType::StopProcessing;
+                self.next_hdr = HeaderType::Proto(gen_hdr.next_hdr);
             }
             _ => {}
         }
@@ -421,7 +445,6 @@ impl Parser {
                                 offset: &mut usize|
          -> Result<bool, Error> {
             if *bytes_read_total >= len || (*bytes_read_total + 1) > N {
-                // Someting about this mfin check be getting me, or the values calculated here
                 return Ok(false);
             }
 
@@ -511,7 +534,7 @@ pub fn mermin(ctx: TcContext) -> i32 {
 
 #[cfg(not(test))]
 fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
-    let mut parser = Parser::new();
+    let mut parser = Parser::default();
 
     debug!(&ctx, "mermin: parsing packet");
 
@@ -1037,7 +1060,7 @@ mod tests {
     // Test Parser initialization
     #[test]
     fn test_parser_initialization() {
-        let parser = Parser::new();
+        let parser = Parser::default();
 
         assert_eq!(parser.offset, 0);
         assert!(matches!(parser.next_hdr, HeaderType::Ethernet));
@@ -1050,9 +1073,35 @@ mod tests {
         assert_eq!(packet_meta.dst_port, [0, 0]);
     }
 
+    // Test Parser with_options constructor
+    #[test]
+    fn test_parser_with_options() {
+        let custom_options = ParserOptions { geneve_port: 8080 };
+        let parser = Parser::with_options(custom_options.clone());
+
+        // Verify custom options are set
+        assert_eq!(parser.options.geneve_port, 8080);
+
+        // Verify other fields have default values
+        assert_eq!(parser.offset, 0);
+        assert!(matches!(parser.next_hdr, HeaderType::Ethernet));
+
+        // Check that packet_meta is initialized with default values
+        let packet_meta = parser.packet_meta;
+        assert_eq!(packet_meta.src_ipv4_addr, [0, 0, 0, 0]);
+        assert_eq!(packet_meta.dst_ipv4_addr, [0, 0, 0, 0]);
+        assert_eq!(packet_meta.src_port, [0, 0]);
+        assert_eq!(packet_meta.dst_port, [0, 0]);
+
+        // Test with default port as well
+        let default_options = ParserOptions::default();
+        let parser_default = Parser::with_options(default_options);
+        assert_eq!(parser_default.options.geneve_port, 6081);
+    }
+
     #[test]
     fn test_parser_calculate_l3_octet_count() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
 
         parser.offset = 32;
         parser.calc_l3_octet_count(256);
@@ -1063,7 +1112,7 @@ mod tests {
     // Test parse_ethernet_header function
     #[test]
     fn test_parse_ethernet_header() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         let packet = create_eth_test_packet();
         let ctx = TcContext::new(packet);
 
@@ -1077,7 +1126,7 @@ mod tests {
     // Test parse_ipv4_header function
     #[test]
     fn test_parse_ipv4_header() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Ipv4;
         let packet = create_ipv4_test_packet();
         let ctx = TcContext::new(packet);
@@ -1095,7 +1144,7 @@ mod tests {
     // Test parse_ipv4_header function with invalid header length
     #[test]
     fn test_parse_ipv4_header_invalid_length() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Ipv4;
         let mut packet = create_ipv4_test_packet();
         // Change IHL to invalid value (0)
@@ -1110,7 +1159,7 @@ mod tests {
     // Test parse_ipv6_header function
     #[test]
     fn test_parse_ipv6_header() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Ipv6;
         let packet = create_ipv6_test_packet();
         let ctx = TcContext::new(packet);
@@ -1140,7 +1189,7 @@ mod tests {
     // Test parse_tcp_header function
     #[test]
     fn test_parse_tcp_header() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Tcp);
         let packet = create_tcp_test_packet();
         let ctx = TcContext::new(packet);
@@ -1156,7 +1205,7 @@ mod tests {
     // Test parse_udp_header function
     #[test]
     fn test_parse_udp_header() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Udp);
         let packet = create_udp_test_packet();
         let ctx = TcContext::new(packet);
@@ -1173,7 +1222,7 @@ mod tests {
     // Test parse_udp_header function with Geneve port
     #[test]
     fn test_parse_udp_header_geneve() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Udp);
         let packet = create_udp_geneve_test_packet();
         let ctx = TcContext::new(packet);
@@ -1190,7 +1239,7 @@ mod tests {
     // Test parse_ah_header function mapping to TCP
     #[test]
     fn test_parse_ah_header_tcp() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ah);
         let packet = create_ah_test_packet(IpProto::Tcp);
         let ctx = TcContext::new(packet);
@@ -1205,7 +1254,7 @@ mod tests {
     // Test parse_ah_header function mapping to UDP
     #[test]
     fn test_parse_ah_header_udp() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ah);
         let packet = create_ah_test_packet(IpProto::Udp);
         let ctx = TcContext::new(packet);
@@ -1220,7 +1269,7 @@ mod tests {
     // Test parse_ah_header with insufficient buffer (out of bounds)
     #[test]
     fn test_parse_ah_header_out_of_bounds() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ah);
         // Provide fewer than 12 bytes
         let packet = vec![0x06, 0x01, 0x00, 0x00, 0x12, 0x34];
@@ -1233,7 +1282,7 @@ mod tests {
     // Test parse_esp_header function
     #[test]
     fn test_parse_esp_header() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Esp);
         let packet = create_esp_test_packet();
         let ctx = TcContext::new(packet);
@@ -1248,7 +1297,7 @@ mod tests {
     // Test parse_esp_header with insufficient buffer (out of bounds)
     #[test]
     fn test_parse_esp_header_out_of_bounds() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Esp);
         // Provide fewer than 8 bytes
         let packet = vec![0x12, 0x34, 0x56, 0x78];
@@ -1261,7 +1310,7 @@ mod tests {
     // Test parse_hop_header function mapping to TCP
     #[test]
     fn test_parse_hop_header_tcp() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::HopOpt);
         let packet = create_hop_test_packet(IpProto::Tcp, 0);
         let ctx = TcContext::new(packet);
@@ -1276,7 +1325,7 @@ mod tests {
     // Test parse_hop_header function mapping to UDP
     #[test]
     fn test_parse_hop_header_udp() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::HopOpt);
         let packet = create_hop_test_packet(IpProto::Udp, 0);
         let ctx = TcContext::new(packet);
@@ -1291,7 +1340,7 @@ mod tests {
     // Test parse_hop_header with non-zero hdr_ext_len
     #[test]
     fn test_parse_hop_header_with_extension() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::HopOpt);
         let packet = create_hop_test_packet(IpProto::Tcp, 1);
         let ctx = TcContext::new(packet);
@@ -1306,7 +1355,7 @@ mod tests {
     // Test parse_hop_header with insufficient buffer (out of bounds)
     #[test]
     fn test_parse_hop_header_out_of_bounds() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::HopOpt);
         // Provide fewer than 8 bytes
         let packet = vec![0x06, 0x00, 0x01, 0x02];
@@ -1319,7 +1368,7 @@ mod tests {
     // Test parse_geneve_header function with IPv4 protocol type
     #[test]
     fn test_parse_geneve_header_ipv4() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Geneve;
         let packet = create_geneve_test_packet(0x0800, 0); // IPv4 protocol type, no options
         let ctx = TcContext::new(packet);
@@ -1334,7 +1383,7 @@ mod tests {
     // Test parse_geneve_header function with IPv6 protocol type
     #[test]
     fn test_parse_geneve_header_ipv6() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Geneve;
         let packet = create_geneve_test_packet(0x86DD, 0); // IPv6 protocol type, no options
         let ctx = TcContext::new(packet);
@@ -1349,7 +1398,7 @@ mod tests {
     // Test parse_geneve_header function with Ethernet protocol type
     #[test]
     fn test_parse_geneve_header_ethernet() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Geneve;
         let packet = create_geneve_test_packet(0x6558, 0); // Ethernet protocol type, no options
         let ctx = TcContext::new(packet);
@@ -1364,7 +1413,7 @@ mod tests {
     // Test parse_geneve_header function with options
     #[test]
     fn test_parse_geneve_header_with_options() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Geneve;
         let packet = create_geneve_test_packet(0x0800, 2); // IPv4 protocol type, 2 option units (8 bytes)
         let ctx = TcContext::new(packet);
@@ -1379,7 +1428,7 @@ mod tests {
     // Test parse_geneve_header function with unsupported protocol type
     #[test]
     fn test_parse_geneve_header_unsupported_protocol() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Geneve;
         let packet = create_geneve_test_packet(0x1234, 0); // Unsupported protocol type, no options
         let ctx = TcContext::new(packet);
@@ -1394,7 +1443,7 @@ mod tests {
     // Test parse_geneve_header with insufficient buffer (out of bounds)
     #[test]
     fn test_parse_geneve_header_out_of_bounds() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Geneve;
         // Provide fewer than 8 bytes (Geneve header length)
         let packet = vec![0x00, 0x00, 0x08, 0x00, 0x12, 0x34];
@@ -1407,7 +1456,7 @@ mod tests {
     // Test parse_icmp_header function
     #[test]
     fn test_parse_icmp_header() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Icmp);
         let packet = create_icmp_test_packet();
         let ctx = TcContext::new(packet);
@@ -1425,7 +1474,7 @@ mod tests {
     // Test parse_icmp_header with insufficient buffer (out of bounds)
     #[test]
     fn test_parse_icmp_header_out_of_bounds() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Icmp);
         // Provide fewer than 8 bytes (ICMP header length)
         let packet = vec![0x08, 0x00, 0x12, 0x34];
@@ -1438,7 +1487,7 @@ mod tests {
     // Test IPv4 header parsing with ICMP protocol
     #[test]
     fn test_parse_ipv4_header_with_icmp() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Ipv4;
         let mut packet = create_ipv4_test_packet();
         // Change protocol from TCP (6) to ICMP (1)
@@ -1458,7 +1507,7 @@ mod tests {
     // Test IPv6 header parsing with ICMPv6 protocol
     #[test]
     fn test_parse_ipv6_header_with_icmpv6() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Ipv6;
         let mut packet = create_ipv6_test_packet();
         // Change next header from TCP (6) to ICMPv6 (58)
@@ -1493,7 +1542,7 @@ mod tests {
     // Test parse_routing_header function with Type2 routing header
     #[test]
     fn test_parse_routing_header_type2_tcp() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_type2_routing_test_packet(IpProto::Tcp);
         let ctx = TcContext::new(packet);
@@ -1508,7 +1557,7 @@ mod tests {
     // Test parse_routing_header function with Type2 routing header mapping to UDP
     #[test]
     fn test_parse_routing_header_type2_udp() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_type2_routing_test_packet(IpProto::Udp);
         let ctx = TcContext::new(packet);
@@ -1523,7 +1572,7 @@ mod tests {
     // Test parse_routing_header function with Type2 routing header with insufficient buffer
     #[test]
     fn test_parse_routing_header_type2_out_of_bounds() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         // Provide fewer than 24 bytes (incomplete Type2 header)
         let packet = vec![0x06, 0x02, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00];
@@ -1536,7 +1585,7 @@ mod tests {
     // Test parse_routing_header function with RPL Source Route header
     #[test]
     fn test_parse_routing_header_rpl_source_route_tcp() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_rpl_source_route_test_packet(IpProto::Tcp);
         let ctx = TcContext::new(packet);
@@ -1551,7 +1600,7 @@ mod tests {
     // Test parse_routing_header function with RPL Source Route header mapping to UDP
     #[test]
     fn test_parse_routing_header_rpl_source_route_udp() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_rpl_source_route_test_packet(IpProto::Udp);
         let ctx = TcContext::new(packet);
@@ -1566,7 +1615,7 @@ mod tests {
     // Test parse_routing_header function with RPL Source Route header with insufficient buffer
     #[test]
     fn test_parse_routing_header_rpl_source_route_out_of_bounds() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         // Provide fewer bytes than required for RPL header
         let packet = vec![0x06, 0x04, 0x03, 0x02, 0x24, 0x60];
@@ -1579,7 +1628,7 @@ mod tests {
     // Test parse_routing_header function with Segment Routing Header mapping to TCP
     #[test]
     fn test_parse_routing_header_segment_routing_tcp() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_segment_routing_test_packet(IpProto::Tcp);
         let ctx = TcContext::new(packet);
@@ -1594,7 +1643,7 @@ mod tests {
     // Test parse_routing_header function with Segment Routing Header mapping to UDP
     #[test]
     fn test_parse_routing_header_segment_routing_udp() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_segment_routing_test_packet(IpProto::Udp);
         let ctx = TcContext::new(packet);
@@ -1609,7 +1658,7 @@ mod tests {
     // Test parse_routing_header function with minimum valid Segment Routing Header
     #[test]
     fn test_parse_routing_header_segment_routing_min() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_segment_routing_min_test_packet(IpProto::Ipv6);
         let ctx = TcContext::new(packet);
@@ -1624,7 +1673,7 @@ mod tests {
     // Test parse_routing_header function with Segment Routing Header with insufficient buffer
     #[test]
     fn test_parse_routing_header_segment_routing_out_of_bounds() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         // Provide fewer bytes than required for Segment Routing header
         let packet = vec![0x06, 0x04, 0x04, 0x01, 0x01, 0x00]; // Only 6 bytes
@@ -1637,7 +1686,7 @@ mod tests {
     // Test Segment Routing Header edge case with maximum segments left
     #[test]
     fn test_parse_routing_header_segment_routing_max_segments_left() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let mut packet = create_segment_routing_test_packet(IpProto::Tcp);
         // Set segments left to maximum value
@@ -1654,7 +1703,7 @@ mod tests {
     // Test Segment Routing Header with different flag values
     #[test]
     fn test_parse_routing_header_segment_routing_flags() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let mut packet = create_segment_routing_test_packet(IpProto::Udp);
         // Set all flags
@@ -1671,7 +1720,7 @@ mod tests {
     // Test Segment Routing Header with zero segments (edge case)
     #[test]
     fn test_parse_routing_header_segment_routing_zero_hdr_ext_len() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
 
         // Create a packet with zero hdr_ext_len (only fixed header)
@@ -1696,7 +1745,7 @@ mod tests {
     // Test parse_routing_header function with CRH-16 header mapping to TCP
     #[test]
     fn test_parse_routing_header_crh16_tcp() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_crh16_test_packet(IpProto::Tcp);
         let ctx = TcContext::new(packet);
@@ -1711,7 +1760,7 @@ mod tests {
     // Test parse_routing_header function with CRH-16 header mapping to UDP
     #[test]
     fn test_parse_routing_header_crh16_udp() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_crh16_test_packet(IpProto::Udp);
         let ctx = TcContext::new(packet);
@@ -1726,7 +1775,7 @@ mod tests {
     // Test parse_routing_header function with CRH-16 header with SIDs
     #[test]
     fn test_parse_routing_header_crh16_with_sids() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_crh16_with_sids_test_packet(IpProto::Tcp);
         let ctx = TcContext::new(packet);
@@ -1741,7 +1790,7 @@ mod tests {
     // Test parse_routing_header function with CRH-16 header with insufficient buffer
     #[test]
     fn test_parse_routing_header_crh16_out_of_bounds() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         // Provide fewer bytes than required for CRH-16 header
         let packet = vec![0x06, 0x01]; // Only 2 bytes
@@ -1754,7 +1803,7 @@ mod tests {
     // Test CRH-16 Header edge case with maximum segments left
     #[test]
     fn test_parse_routing_header_crh16_max_segments_left() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let mut packet = create_crh16_with_sids_test_packet(IpProto::Tcp);
         // Set segments left to maximum value
@@ -1771,7 +1820,7 @@ mod tests {
     // Test parse_routing_header function with CRH-32 header mapping to TCP
     #[test]
     fn test_parse_routing_header_crh32_tcp() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_crh32_test_packet(IpProto::Tcp);
         let ctx = TcContext::new(packet);
@@ -1786,7 +1835,7 @@ mod tests {
     // Test parse_routing_header function with CRH-32 header mapping to UDP
     #[test]
     fn test_parse_routing_header_crh32_udp() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_crh32_test_packet(IpProto::Udp);
         let ctx = TcContext::new(packet);
@@ -1801,7 +1850,7 @@ mod tests {
     // Test parse_routing_header function with CRH-32 header with SIDs
     #[test]
     fn test_parse_routing_header_crh32_with_sids() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_crh32_with_sids_test_packet(IpProto::Tcp);
         let ctx = TcContext::new(packet);
@@ -1816,7 +1865,7 @@ mod tests {
     // Test parse_routing_header function with CRH-32 header with insufficient buffer
     #[test]
     fn test_parse_routing_header_crh32_out_of_bounds() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         // Provide fewer bytes than required for CRH-32 header
         let packet = vec![0x06, 0x01]; // Only 2 bytes
@@ -1829,7 +1878,7 @@ mod tests {
     // Test CRH-32 Header edge case with maximum segments left
     #[test]
     fn test_parse_routing_header_crh32_max_segments_left() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let mut packet = create_crh32_with_sids_test_packet(IpProto::Udp);
         // Set segments left to maximum value
@@ -1846,7 +1895,7 @@ mod tests {
     // Test CRH-16 with zero hdr_ext_len (minimum valid header)
     #[test]
     fn test_parse_routing_header_crh16_zero_hdr_ext_len() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
 
         // Create a packet with zero hdr_ext_len (only fixed header)
@@ -1871,7 +1920,7 @@ mod tests {
     // Test CRH-32 with zero hdr_ext_len (minimum valid header)
     #[test]
     fn test_parse_routing_header_crh32_zero_hdr_ext_len() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
 
         // Create a packet with zero hdr_ext_len (only fixed header)
@@ -1896,7 +1945,7 @@ mod tests {
     // Test CRH-32 header with malformed SID data (insufficient SID buffer)
     #[test]
     fn test_parse_routing_header_crh32_malformed_sid_data() {
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
 
         // Create packet that claims to have SIDs but provides insufficient data
@@ -1939,7 +1988,7 @@ mod tests {
         for &len in &test_lengths {
             let test_data = create_network_test_data(len + 10); // Extra data to ensure we can read
             let ctx = TcContext::new(test_data.clone());
-            let mut parser = Parser::new();
+            let mut parser = Parser::default();
             let mut buf = [0u8; 256];
 
             let result = parser.read_var_buf(&ctx, &mut buf, len);
@@ -1976,7 +2025,7 @@ mod tests {
         }
 
         let ctx = TcContext::new(test_data);
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
         let mut buf = [0u8; 16];
 
         let result = parser.read_var_buf(&ctx, &mut buf, 16);
@@ -2014,7 +2063,7 @@ mod tests {
             let total_size = ipv4_base + opt_size;
             let test_data = create_network_test_data(total_size);
             let ctx = TcContext::new(test_data.clone());
-            let mut parser = Parser::new();
+            let mut parser = Parser::default();
             let mut buf = [0u8; 64];
 
             let result = parser.read_var_buf(&ctx, &mut buf, total_size);
@@ -2036,7 +2085,7 @@ mod tests {
             let total_size = tcp_base + opt_size;
             let test_data = create_network_test_data(total_size);
             let ctx = TcContext::new(test_data.clone());
-            let mut parser = Parser::new();
+            let mut parser = Parser::default();
             let mut buf = [0u8; 64];
 
             let result = parser.read_var_buf(&ctx, &mut buf, total_size);
@@ -2070,7 +2119,7 @@ mod tests {
             // Create data with a recognizable pattern
             let test_data = create_network_test_data(len + 8);
             let ctx = TcContext::new(test_data.clone());
-            let mut parser = Parser::new();
+            let mut parser = Parser::default();
             let mut buf = [0u8; 32];
 
             let result = parser.read_var_buf(&ctx, &mut buf, len);
@@ -2096,7 +2145,7 @@ mod tests {
     fn test_read_var_buf_buffer_constraints() {
         let test_data = create_network_test_data(50);
         let ctx = TcContext::new(test_data.clone());
-        let mut parser = Parser::new();
+        let mut parser = Parser::default();
 
         // Try to read more than buffer size
         let mut small_buf = [0u8; 10];
