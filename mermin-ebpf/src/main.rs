@@ -326,29 +326,31 @@ impl Parser {
         let gen_hdr: GenericRoute = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let routing_type: RoutingHeaderType = RoutingHeaderType::from_u8(gen_hdr.type_);
 
-        const MAX_ADDR: usize = 256;
+        // const MAX_ADDR: usize = 256;
 
         match routing_type {
             RoutingHeaderType::RplSourceRoute => {
                 let rpl_hdr: RplSourceRouteHeader =
                     ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-                self.offset += RplSourceRouteHeader::LEN;
+                // self.offset += RplSourceRouteHeader::LEN;
 
                 // Consider adding Clamp to addr_size if we run into verification issues
-                let addr_size = rpl_hdr.gen_route.total_hdr_len().saturating_sub(8); // Subtract 8 for fixed RPL header
-                let mut addresses = [0u8; MAX_ADDR];
-
-                let bytes_read = self
-                    .read_var_buf(ctx, &mut addresses, addr_size)
-                    .map_err(|_| Error::OutOfBounds)?;
-                if bytes_read < addr_size {
-                    debug!(ctx, "failed to read all of rpl header");
-                    return Err(Error::MalformedHeader);
-                }
-                self.offset += bytes_read;
+                // let addr_size = rpl_hdr.gen_route.total_hdr_len().saturating_sub(8); // Subtract 8 for fixed RPL header
+                // let mut addresses = [0u8; MAX_ADDR];
+                //
+                // let bytes_read = self
+                //     .read_var_buf(ctx, &mut addresses, addr_size)
+                //     .map_err(|_| Error::OutOfBounds)?;
+                // if bytes_read < addr_size {
+                //     debug!(ctx, "failed to read all of rpl header");
+                //     return Err(Error::MalformedHeader);
+                // }
+                // self.offset += bytes_read;
 
                 // TODO parse out and use addresses and other Rpl fields here
                 self.next_hdr = HeaderType::Proto(rpl_hdr.gen_route.next_hdr());
+                // Temp generic advance
+                self.offset += rpl_hdr.gen_route.total_hdr_len();
             }
             RoutingHeaderType::Type2 => {
                 let type2_hdr: Type2RoutingHeader =
@@ -361,22 +363,25 @@ impl Parser {
             RoutingHeaderType::SegmentRoutingHeader => {
                 let segment_hdr: SegmentRoutingHeader =
                     ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-                self.offset += SegmentRoutingHeader::LEN;
 
-                let var_size = segment_hdr.segments_and_tlvs_len();
-                let mut addresses = [0u8; MAX_ADDR];
+                // self.offset += SegmentRoutingHeader::LEN;
 
-                let bytes_read = self
-                    .read_var_buf(ctx, &mut addresses, var_size)
-                    .map_err(|_| Error::OutOfBounds)?;
-                if bytes_read < var_size {
-                    debug!(ctx, "failed to read all of Segment header");
-                    return Err(Error::MalformedHeader);
-                }
-                self.offset += bytes_read;
+                // let var_size = segment_hdr.segments_and_tlvs_len();
+                // let mut addresses = [0u8; MAX_ADDR];
+                //
+                // let bytes_read = self
+                //     .read_var_buf(ctx, &mut addresses, var_size)
+                //     .map_err(|_| Error::OutOfBounds)?;
+                // if bytes_read < var_size {
+                //     debug!(ctx, "failed to read all of rpl header");
+                //     return Err(Error::MalformedHeader);
+                // }
+                // self.offset += bytes_read;
 
                 // TODO parse out and use addresses and other Segment fields here
                 self.next_hdr = HeaderType::Proto(segment_hdr.gen_route.next_hdr());
+                // Temp generic advance
+                self.offset += segment_hdr.gen_route.total_hdr_len();
             }
             RoutingHeaderType::Crh16 | RoutingHeaderType::Crh32 => {
                 let crh_hdr: CrhHeader = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
@@ -429,6 +434,7 @@ impl Parser {
     /// # Returns
     /// `Ok(bytes_read)` on success, where `bytes_read` is the number of bytes actually read.
     /// `Err(Error)` if reading bytes from the context fails.
+    #[allow(dead_code)] // Remove once we start using read_var_buf
     fn read_var_buf<const N: usize>(
         &mut self,
         ctx: &TcContext,
