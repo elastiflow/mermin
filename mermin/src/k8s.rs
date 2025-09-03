@@ -7,19 +7,28 @@
 // - Support for Pods, Nodes, key workload types (Deployments, StatefulSets, etc.).
 // - Network-related resources like Services, Ingresses and NetworkPolicies.
 
-use std::{collections::HashMap, fmt::Debug, net::IpAddr, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Debug,
+    net::IpAddr,
+    sync::Arc,
+};
 
 use anyhow::Result;
 use futures::TryStreamExt;
+use ipnetwork::IpNetwork;
 use k8s_openapi::{
     api::{
         apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet},
         batch::v1::Job,
-        core::v1::{Node, Pod, Service},
+        core::v1::{Namespace, Node, Pod, Service},
         discovery::v1::EndpointSlice,
-        networking::v1::{Ingress, NetworkPolicy},
+        networking::v1::{Ingress, NetworkPolicy, NetworkPolicyPeer, NetworkPolicyPort},
     },
-    apimachinery::pkg::apis::meta::v1::OwnerReference,
+    apimachinery::pkg::{
+        apis::meta::v1::{LabelSelector, LabelSelectorRequirement, OwnerReference},
+        util::intstr::IntOrString,
+    },
 };
 use kube::{
     Client,
@@ -29,6 +38,8 @@ use kube::{
 use kube_runtime::{WatchStreamExt, watcher};
 use log::{debug, info, warn};
 use network_types::ip::IpProto;
+
+use crate::k8s::resource_parser::{FlowSides, PodResolution};
 
 pub mod resource_parser;
 
@@ -108,6 +119,7 @@ where
 pub struct ResourceStore {
     pub pods: reflector::Store<Pod>,
     pub nodes: reflector::Store<Node>,
+    pub namespaces: reflector::Store<Namespace>,
     pub deployments: reflector::Store<Deployment>,
     pub replica_sets: reflector::Store<ReplicaSet>,
     pub stateful_sets: reflector::Store<StatefulSet>,
@@ -131,6 +143,7 @@ macro_rules! impl_has_store {
 
 impl_has_store!(Pod, pods);
 impl_has_store!(Node, nodes);
+impl_has_store!(Namespace, namespaces);
 impl_has_store!(Deployment, deployments);
 impl_has_store!(ReplicaSet, replica_sets);
 impl_has_store!(StatefulSet, stateful_sets);
@@ -147,6 +160,7 @@ impl ResourceStore {
         let all_stores_result = futures::try_join!(
             Self::create_resource_store::<Pod>(&client, true),
             Self::create_resource_store::<Node>(&client, false),
+            Self::create_resource_store::<Namespace>(&client, true),
             Self::create_resource_store::<Deployment>(&client, false),
             Self::create_resource_store::<ReplicaSet>(&client, false),
             Self::create_resource_store::<StatefulSet>(&client, false),
@@ -162,6 +176,7 @@ impl ResourceStore {
             |(
                 pods,
                 nodes,
+                namespaces,
                 deployments,
                 replica_sets,
                 stateful_sets,
@@ -175,6 +190,7 @@ impl ResourceStore {
                 Self {
                     pods,
                     nodes,
+                    namespaces,
                     deployments,
                     replica_sets,
                     stateful_sets,
@@ -263,6 +279,46 @@ where
     });
 
     Ok(reader)
+}
+
+/// Flow direction for policy evaluation
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FlowDirection {
+    Ingress,
+    Egress,
+}
+
+/// Represents the context of a network flow for policy evaluation
+#[derive(Debug, Clone)]
+pub struct FlowContext<'a> {
+    pub source_pod: Option<&'a Pod>,
+    pub source_ip: IpAddr,
+    pub dest_pod: Option<&'a Pod>,
+    pub dest_ip: IpAddr,
+    pub namespace: &'a str,
+    pub port: u16,
+    pub protocol: IpProto,
+    pub direction: FlowDirection,
+}
+
+impl<'a> FlowContext<'a> {
+    pub fn new(
+        pod_objects: &'a PodResolution,
+        flow_sides: &'a FlowSides,
+        namespace: &'a str,
+        direction: FlowDirection,
+    ) -> Self {
+        Self {
+            source_pod: pod_objects.source_pod.as_deref(),
+            source_ip: flow_sides.source.ip,
+            dest_pod: pod_objects.dest_pod.as_deref(),
+            dest_ip: flow_sides.destination.ip,
+            namespace,
+            port: flow_sides.destination.port,
+            protocol: flow_sides.destination.protocol,
+            direction,
+        }
+    }
 }
 
 /// A high-level client for querying Kubernetes resources.
@@ -553,6 +609,319 @@ impl Attributor {
             .collect()
     }
 
+    /// Main entry point: finds all NetworkPolicies that permit the specified traffic flow
+    pub fn get_matching_network_policies(
+        &self,
+        dest_pod: &Pod,
+        flow_ctx: &FlowContext,
+    ) -> Result<Vec<Arc<NetworkPolicy>>> {
+        let applicable_policies = self.get_network_policies_for_pod(dest_pod)?;
+
+        Ok(applicable_policies
+            .into_iter()
+            .filter(|policy| self.policy_permits_flow(policy, flow_ctx))
+            .collect())
+    }
+
+    /// Gets NetworkPolicies that apply to the given pod based on podSelector
+    fn get_network_policies_for_pod(&self, dest_pod: &Pod) -> Result<Vec<Arc<NetworkPolicy>>> {
+        let pod_namespace = dest_pod.clone().metadata.namespace.unwrap_or_default();
+        let pod_labels = dest_pod.labels();
+
+        let policies = self
+            .resource_store
+            .get_by_namespace::<NetworkPolicy>(&pod_namespace)
+            .into_iter()
+            .filter(|policy| {
+                // Check if the policy's podSelector matches the destination pod
+                policy
+                    .spec
+                    .as_ref()
+                    .map(|spec| spec.clone().pod_selector)
+                    .is_some_and(|selector| self.selector_matches(&selector, pod_labels))
+            })
+            .collect();
+
+        Ok(policies)
+    }
+
+    /// Checks if a label selector matches the given labels
+    fn selector_matches(
+        &self,
+        selector: &LabelSelector,
+        labels: &BTreeMap<String, String>,
+    ) -> bool {
+        // Check match_labels
+        if let Some(match_labels) = &selector.match_labels {
+            for (key, value) in match_labels {
+                if labels.get(key) != Some(value) {
+                    return false;
+                }
+            }
+        }
+
+        // Check match_expressions
+        if let Some(match_expressions) = &selector.match_expressions {
+            for expr in match_expressions {
+                if !self.expression_matches(expr, labels) {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
+    /// Checks if a label selector requirement matches the given labels
+    fn expression_matches(
+        &self,
+        expr: &LabelSelectorRequirement,
+        labels: &BTreeMap<String, String>,
+    ) -> bool {
+        let label_value = labels.get(&expr.key);
+        let binding = vec![];
+        let values = expr.values.as_ref().unwrap_or(&binding);
+
+        match expr.operator.as_str() {
+            "In" => {
+                if let Some(value) = label_value {
+                    values.contains(value)
+                } else {
+                    false
+                }
+            }
+            "NotIn" => {
+                if let Some(value) = label_value {
+                    !values.contains(value)
+                } else {
+                    true
+                }
+            }
+            "Exists" => label_value.is_some(),
+            "DoesNotExist" => label_value.is_none(),
+            _ => false,
+        }
+    }
+
+    /// Consolidated policy evaluation - supports both ingress and egress rules
+    fn policy_permits_flow(&self, policy: &NetworkPolicy, flow_ctx: &FlowContext) -> bool {
+        match flow_ctx.direction {
+            FlowDirection::Ingress => self.evaluate_ingress_rules(policy, flow_ctx),
+            FlowDirection::Egress => self.evaluate_egress_rules(policy, flow_ctx),
+        }
+    }
+
+    /// Evaluates ingress rules for a policy.
+    fn evaluate_ingress_rules(&self, policy: &NetworkPolicy, flow_ctx: &FlowContext) -> bool {
+        let Some(ingress_rules) = policy.spec.as_ref().and_then(|s| s.ingress.as_ref()) else {
+            return false;
+        };
+
+        ingress_rules.iter().any(|rule| {
+            let from_match = rule.from.as_ref().is_none_or(|from_peers| {
+                from_peers.is_empty()
+                    || from_peers
+                        .iter()
+                        .any(|peer| self.peer_matches_source(peer, flow_ctx))
+            });
+
+            from_match && self.check_ports_match(&rule.ports, flow_ctx)
+        })
+    }
+
+    /// Evaluates egress rules for a policy.
+    fn evaluate_egress_rules(&self, policy: &NetworkPolicy, flow_ctx: &FlowContext) -> bool {
+        let Some(egress_rules) = policy.spec.as_ref().and_then(|s| s.egress.as_ref()) else {
+            return false;
+        };
+
+        egress_rules.iter().any(|rule| {
+            let to_match = rule.to.as_ref().is_none_or(|to_peers| {
+                to_peers.is_empty()
+                    || to_peers
+                        .iter()
+                        .any(|peer| self.peer_matches_destination(peer, flow_ctx))
+            });
+
+            to_match && self.check_ports_match(&rule.ports, flow_ctx)
+        })
+    }
+
+    /// Checks if a flow's port and protocol match any of the specified NetworkPolicyPorts.
+    /// Returns true if there are no ports specified (allowing all ports).
+    fn check_ports_match(
+        &self,
+        ports: &Option<Vec<NetworkPolicyPort>>,
+        flow_ctx: &FlowContext,
+    ) -> bool {
+        ports.as_ref().is_none_or(|ports| {
+            ports.is_empty() || ports.iter().any(|p| self.port_matches(p, flow_ctx))
+        })
+    }
+
+    /// Enhanced port matching with support for ranges and named ports for a single port spec.
+    fn port_matches(&self, port_spec: &NetworkPolicyPort, flow_ctx: &FlowContext) -> bool {
+        // First, ensure the protocol matches. This is a good guard clause.
+        let proto_match = port_spec
+            .protocol
+            .as_deref()
+            .unwrap_or("TCP")
+            .eq_ignore_ascii_case(flow_ctx.protocol.as_str());
+
+        if !proto_match {
+            return false;
+        }
+
+        // Then, check the port number based on its type (Int, String, or None)
+        match &port_spec.port {
+            Some(IntOrString::Int(p_num)) => {
+                let start_port = *p_num as u16;
+                let end_port = port_spec.end_port.map(|ep| ep as u16).unwrap_or(start_port);
+                (start_port..=end_port).contains(&flow_ctx.port)
+            }
+            Some(IntOrString::String(port_name)) => self.resolve_named_port(port_name, flow_ctx),
+            None => true, // If `port` is not specified, it allows all ports for the given protocol.
+        }
+    }
+
+    /// Resolves named ports by searching through the containers of the relevant pod.
+    fn resolve_named_port(&self, port_name: &str, flow_ctx: &FlowContext) -> bool {
+        // Determine which pod to inspect based on traffic direction.
+        let target_pod = match flow_ctx.direction {
+            FlowDirection::Ingress => flow_ctx.dest_pod,
+            FlowDirection::Egress => flow_ctx.source_pod,
+        };
+
+        let Some(pod) = target_pod else {
+            return false;
+        };
+        let Some(spec) = pod.spec.as_ref() else {
+            return false;
+        };
+
+        spec.containers
+            .iter()
+            .flat_map(|container| container.ports.as_ref().into_iter().flatten())
+            .any(|port| {
+                port.name.as_deref() == Some(port_name)
+                    && port.container_port as u16 == flow_ctx.port
+            })
+    }
+
+    fn peer_matches(
+        &self,
+        peer: &NetworkPolicyPeer,
+        flow_ctx: &FlowContext,
+        is_source: bool,
+    ) -> bool {
+        let (target_ip, target_pod) = if is_source {
+            (flow_ctx.source_ip, flow_ctx.source_pod)
+        } else {
+            (flow_ctx.dest_ip, flow_ctx.dest_pod)
+        };
+
+        // If the peer has an ipBlock, a match on CIDR is sufficient.
+        if let Some(ip_block) = &peer.ip_block
+            && self.ip_matches_cidr(target_ip, &ip_block.cidr)
+        {
+            return true;
+        }
+
+        // If we didn't match an ipBlock and there's no pod, we can't match further.
+        let Some(pod) = target_pod else {
+            return false;
+        };
+
+        // Check for namespace selector match.
+        let namespace_matches = if is_source {
+            self.namespace_matches_selector_ingress(pod, peer, flow_ctx.namespace)
+        } else {
+            self.namespace_matches_selector_egress(pod, peer)
+        };
+
+        if !namespace_matches {
+            return false;
+        }
+
+        // If namespace matches, check for pod selector match.
+        // No pod selector means it matches all pods in the selected namespace(s).
+        peer.pod_selector
+            .as_ref()
+            .is_none_or(|ps| self.selector_matches(ps, pod.labels()))
+    }
+
+    /// Peer matching for source (ingress rules).
+    fn peer_matches_source(&self, peer: &NetworkPolicyPeer, flow_ctx: &FlowContext) -> bool {
+        self.peer_matches(peer, flow_ctx, true)
+    }
+
+    /// Peer matching for destination (egress rules).
+    fn peer_matches_destination(&self, peer: &NetworkPolicyPeer, flow_ctx: &FlowContext) -> bool {
+        self.peer_matches(peer, flow_ctx, false)
+    }
+
+    /// Checks if an IP address matches a CIDR block using the `ipnetwork` crate.
+    fn ip_matches_cidr(&self, ip: IpAddr, cidr: &str) -> bool {
+        // The `ipnetwork` crate handles parsing both single IPs and CIDR notations correctly.
+        match cidr.parse::<IpNetwork>() {
+            Ok(network) => network.contains(ip),
+            Err(_) => {
+                debug!("Failed to parse CIDR string: {cidr}");
+                false
+            }
+        }
+    }
+
+    /// Consolidated namespace matching for both ingress and egress rules
+    fn namespace_matches_selector_internal(
+        &self,
+        pod: &Pod,
+        peer: &NetworkPolicyPeer,
+        is_egress: bool,
+        policy_namespace: Option<&str>,
+    ) -> bool {
+        match &peer.namespace_selector {
+            Some(ns_selector) => {
+                // If namespace selector is present, evaluate it against the pod's namespace
+                let pod_namespace = pod.namespace().unwrap_or_default();
+                if let Some(ns) = self
+                    .resource_store
+                    .get_by_namespace::<Namespace>(&pod_namespace)
+                    .first()
+                {
+                    self.selector_matches(ns_selector, ns.labels())
+                } else {
+                    false
+                }
+            }
+            None => {
+                if is_egress {
+                    // No namespace selector means any namespace is allowed for egress
+                    true
+                } else {
+                    // No namespace selector means same namespace as the policy for ingress
+                    pod.namespace().as_deref().unwrap_or("default")
+                        == policy_namespace.unwrap_or("default")
+                }
+            }
+        }
+    }
+
+    /// Checks if the source pod's namespace matches the peer's namespace selector (for ingress)
+    fn namespace_matches_selector_ingress(
+        &self,
+        source_pod: &Pod,
+        peer: &NetworkPolicyPeer,
+        dest_namespace: &str,
+    ) -> bool {
+        self.namespace_matches_selector_internal(source_pod, peer, false, Some(dest_namespace))
+    }
+
+    /// Checks if the destination pod's namespace matches the peer's namespace selector (for egress)
+    fn namespace_matches_selector_egress(&self, dest_pod: &Pod, peer: &NetworkPolicyPeer) -> bool {
+        self.namespace_matches_selector_internal(dest_pod, peer, true, None)
+    }
+
     /// Gathers the names of all discoverable resources within a given namespace.
     #[allow(dead_code)]
     pub fn get_resources_by_namespace(
@@ -586,6 +955,15 @@ impl Attributor {
             .filter_map(|node| node.meta().name.clone())
             .collect();
         add("Node", node_names);
+
+        let namespace_names = self
+            .resource_store
+            .namespaces
+            .state()
+            .iter()
+            .filter_map(|ns| ns.meta().name.clone())
+            .collect();
+        add("Namespace", namespace_names);
 
         // Namespaced resources
         add("Pod", get_names!(Pod));

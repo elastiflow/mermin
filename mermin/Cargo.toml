@@ -30,6 +30,7 @@ tokio = { workspace = true, features = [
 ] }
 clap = { workspace = true, features = ["derive", "env", "help", "suggestions", "usage"] }
 figment = { version = "0.10", features = ["env", "test", "yaml"] }
+ipnetwork = "0.21.1"
 kube = { version = "1.1.0", features = ["runtime", "derive", "client"] }
 kube-runtime = "1.1.0"
 k8s-openapi = { version = "0.25.0", features = ["v1_30"] }
