@@ -9,7 +9,7 @@ use network_types::{
     geneve::GeneveHdr,
     hop::HopOptHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
-    route::{RplSourceRouteHeader, SegmentRoutingHeader, Type2RoutingHeader},
+    route::{CrhHeader, RplSourceRouteHeader, SegmentRoutingHeader, Type2RoutingHeader},
     tcp::TcpHdr,
     udp::UdpHdr,
 };
@@ -33,6 +33,8 @@ pub enum PacketType {
     RplSourceRoute = 10,
     Type2 = 11,
     SegmentRouting = 12,
+    Crh16 = 13,
+    Crh32 = 14,
 }
 
 /// A union to hold any of the possible parsed network headers.
@@ -52,6 +54,8 @@ pub union HeaderUnion {
     pub rpl: RplSourceRouteParsed,
     pub type2: Type2RoutingHeader,
     pub segment_routing: SegmentRoutingParsed,
+    pub crh16: CrhParsed,
+    pub crh32: CrhParsed,
 }
 
 /// The final struct sent back to user-space. It contains the type of
@@ -65,6 +69,7 @@ pub struct ParsedHeader {
 
 pub const MAX_RPL_ADDR_STORAGE: usize = 128;
 pub const MAX_SRH_SEGMENTS_STORAGE: usize = 128;
+pub const MAX_CRH_SID_STORAGE: usize = 128;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -80,4 +85,12 @@ pub struct SegmentRoutingParsed {
     pub header: SegmentRoutingHeader,
     pub segments_and_tlvs: [u8; MAX_SRH_SEGMENTS_STORAGE],
     pub segments_and_tlvs_len: u8,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct CrhParsed {
+    pub header: CrhHeader,
+    pub sids: [u8; MAX_CRH_SID_STORAGE],
+    pub sids_len: u8,
 }
