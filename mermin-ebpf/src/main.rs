@@ -580,22 +580,22 @@ impl Parser {
             // Breaks at 3 nested loops
             for _ in 0..2 {
                 for _ in 0..16 {
-                        match read_sixteen_byte_chunk(
-                            ctx,
-                            &mut state.buffer,
-                            read_len,
-                            &mut bytes_read_total,
-                            &mut offset,
-                        ) {
-                            Ok(true) => {}
-                            Ok(false) => break,
-                            Err(_) => {
-                                success = false;
-                                state.parser.next_hdr = HeaderType::ErrorOccurred;
-                                break;
-                            }
+                    match read_sixteen_byte_chunk(
+                        ctx,
+                        &mut state.buffer,
+                        read_len,
+                        &mut bytes_read_total,
+                        &mut offset,
+                    ) {
+                        Ok(true) => {}
+                        Ok(false) => break,
+                        Err(_) => {
+                            success = false;
+                            state.parser.next_hdr = HeaderType::ErrorOccurred;
+                            break;
                         }
                     }
+                }
             }
 
             // Comented out for now to test loop limits a bit easier
@@ -656,7 +656,6 @@ pub fn mermin(ctx: TcContext) -> i32 {
         // Jump to the main parser program.
         #[allow(static_mut_refs)]
         let _ = PROG_ARRAY.tail_call(&ctx, PROG_IDX_PARSER);
-
     }
 
     // This is the fallback if the tail call fails.
@@ -2329,4 +2328,3 @@ mod tests {
         assert_eq!(&small_buf[0..bytes_read], &test_data[0..bytes_read]);
     }
 }
-

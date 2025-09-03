@@ -70,7 +70,6 @@ async fn main() -> anyhow::Result<()> {
     program.load()?;
     program.attach(iface, TcAttachType::Egress)?;
 
-
     // Load tail-call targets (not attached) and capture their FDs in short scopes
     let parser_fd = {
         let prog: &mut SchedClassifier = ebpf.program_mut("parser").unwrap().try_into()?;
@@ -80,10 +79,8 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let read_var_fd = {
-        let prog: &mut SchedClassifier = ebpf
-            .program_mut("read_var_buf_prog")
-            .unwrap()
-            .try_into()?;
+        let prog: &mut SchedClassifier =
+            ebpf.program_mut("read_var_buf_prog").unwrap().try_into()?;
         prog.load()?;
         prog.fd()?.try_clone()?
     };
