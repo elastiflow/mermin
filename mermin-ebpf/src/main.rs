@@ -580,39 +580,19 @@ impl Parser {
             // Breaks at 3 nested loops
             for _ in 0..2 {
                 for _ in 0..16 {
-                        // match read_sixteen_byte_chunk(
-                        //     ctx,
-                        //     &mut state.buffer,
-                        //     read_len,
-                        //     &mut bytes_read_total,
-                        //     &mut offset,
-                        // ) {
-                        //     Ok(true) => {}
-                        //     Ok(false) => break,
-                        //     Err(_) => {
-                        //         success = false;
-                        //         state.parser.next_hdr = HeaderType::ErrorOccurred;
-                        //         break;
-                        //     }
-                        // }
-                        if bytes_read_total >= read_len
-                            || (read_len.saturating_sub(bytes_read_total)) < 16
-                            || (bytes_read_total + 16) > MAX_VAR_BUF_SIZE
-                        {
-                            break;
-                        }
-
-                        match ctx.load::<u128>(offset) {
-                            Ok(bytes) => {
-                                state.buffer[bytes_read_total..bytes_read_total + 16]
-                                    .copy_from_slice(&bytes.to_ne_bytes());
-                                bytes_read_total += 16;
-                                offset += 16;
-                            }
+                        match read_sixteen_byte_chunk(
+                            ctx,
+                            &mut state.buffer,
+                            read_len,
+                            &mut bytes_read_total,
+                            &mut offset,
+                        ) {
+                            Ok(true) => {}
+                            Ok(false) => break,
                             Err(_) => {
                                 success = false;
                                 state.parser.next_hdr = HeaderType::ErrorOccurred;
-                                break
+                                break;
                             }
                         }
                     }
