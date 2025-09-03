@@ -408,7 +408,6 @@ impl Parser {
             RoutingHeaderType::Experiment1
             | RoutingHeaderType::Experiment2
             | RoutingHeaderType::Reserved => {
-                warn!(ctx, "unsupported routing header type");
                 self.next_hdr = HeaderType::Proto(gen_hdr.next_hdr);
             }
             _ => {}
