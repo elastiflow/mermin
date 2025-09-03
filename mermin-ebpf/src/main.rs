@@ -387,26 +387,27 @@ impl Parser {
                 let crh_hdr: CrhHeader = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
                 self.offset += CrhHeader::LEN;
 
-                let var_size = crh_hdr.sid_list_len();
-                let mut addresses = [0u8; MAX_ADDR];
-
-                let bytes_read = self.read_var_buf(ctx, &mut addresses, var_size)?;
-                if bytes_read < var_size {
-                    debug!(ctx, "failed to read all of CRH header");
-                    return Err(Error::MalformedHeader);
-                }
-                self.offset += bytes_read;
+                // let var_size = crh_hdr.sid_list_len();
+                // let mut addresses = [0u8; MAX_ADDR];
+                //
+                // let bytes_read = self.read_var_buf(ctx, &mut addresses, var_size)?;
+                // if bytes_read < var_size {
+                //     debug!(ctx, "failed to read all of CRH header");
+                //     return Err(Error::MalformedHeader);
+                // }
+                // self.offset += bytes_read;
 
                 // TODO parse out and use SIDs from CRH header
                 // You can use sid_num (or the logic in num_sids) to determine size of sids
                 // and what to do with them as needed
                 let _sid_num = crh_hdr.num_sids();
                 self.next_hdr = HeaderType::Proto(crh_hdr.next_hdr());
+                // Temp generic advance
+                self.offset += crh_hdr.total_hdr_len();
             }
             RoutingHeaderType::Experiment1
             | RoutingHeaderType::Experiment2
             | RoutingHeaderType::Reserved => {
-                // We could also consider jumping to the next_hdr instead of StopProcessing
                 warn!(ctx, "unsupported routing header type");
                 self.next_hdr = HeaderType::Proto(gen_hdr.next_hdr);
             }
