@@ -1,4 +1,5 @@
 mod ah;
+mod crh;
 mod esp;
 mod eth;
 mod geneve;
@@ -15,6 +16,10 @@ mod utils;
 // Import the helper functions and macros
 use crate::{
     ah::{create_ah_test_packet, verify_ah_header},
+    crh::{
+        create_crh16_test_packet, create_crh32_test_packet, verify_crh16_header,
+        verify_crh32_header,
+    },
     esp::{create_esp_test_packet, verify_esp_header},
     eth::{create_eth_test_packet, verify_eth_header},
     geneve::{create_geneve_test_packet, verify_geneve_header},
@@ -138,4 +143,20 @@ define_header_test!(
     PacketType::SegmentRouting,
     create_segment_routing_with_tlvs_test_packet,
     verify_segment_routing_header
+);
+
+define_header_test!(
+    test_parses_crh16_header,
+    CrhParsed,
+    PacketType::Crh16,
+    create_crh16_test_packet,
+    verify_crh16_header
+);
+
+define_header_test!(
+    test_parses_crh32_header,
+    CrhParsed,
+    PacketType::Crh32,
+    create_crh32_test_packet,
+    verify_crh32_header
 );

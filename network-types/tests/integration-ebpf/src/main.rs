@@ -9,7 +9,7 @@ use aya_ebpf::{
 };
 use aya_log_ebpf::{Level, log};
 use integration_common::{
-    HeaderUnion, PacketType, ParsedHeader, RplSourceRouteParsed, SegmentRoutingParsed,
+    CrhParsed, HeaderUnion, PacketType, ParsedHeader, RplSourceRouteParsed, SegmentRoutingParsed,
 };
 use network_types::{
     ah::AuthHdr,
@@ -18,13 +18,17 @@ use network_types::{
     geneve::GeneveHdr,
     hop::HopOptHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
-    route::{RoutingHeaderType, RplSourceRouteHeader, SegmentRoutingHeader, Type2RoutingHeader},
+    route::{
+        CrhHeader, RoutingHeaderType, RplSourceRouteHeader, SegmentRoutingHeader,
+        Type2RoutingHeader,
+    },
     tcp::TcpHdr,
     udp::UdpHdr,
 };
 
 pub const MAX_RPL_ADDR_STORAGE: usize = 128;
 pub const MAX_SEGMENT_STORAGE: usize = 128; // 256 Broke the stack :(
+pub const MAX_CRH_SID_STORAGE: usize = 128;
 pub const MAX_SIZE_MASK: usize = 255;
 
 #[map(name = "OUT_DATA")]
@@ -44,6 +48,8 @@ fn u8_to_packet_type(val: u8) -> Option<PacketType> {
         10 => Some(PacketType::RplSourceRoute),
         11 => Some(PacketType::Type2),
         12 => Some(PacketType::SegmentRouting),
+        13 => Some(PacketType::Crh16),
+        14 => Some(PacketType::Crh32),
         _ => None,
     }
 }
@@ -376,6 +382,114 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
                 data: HeaderUnion {
                     segment_routing: parsed_data,
                 },
+            }
+        }
+        PacketType::Crh16 | PacketType::Crh32 => {
+            let mut offset = data_offset;
+            let crh_header: CrhHeader = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
+
+            // Verify routing type matches expected CRH type
+            let expected_type = match packet_type {
+                PacketType::Crh16 => RoutingHeaderType::Crh16.as_u8(),
+                PacketType::Crh32 => RoutingHeaderType::Crh32.as_u8(),
+                _ => return Err(TC_ACT_SHOT),
+            };
+
+            if crh_header.generic_route.type_ != expected_type {
+                return Err(TC_ACT_SHOT);
+            }
+
+            offset += CrhHeader::LEN;
+
+            // Calculate the total length of SIDs
+            let temp_total_sid_len = crh_header.sid_list_len();
+
+            // Clamp the value using a bitwise AND
+            let total_sid_len = temp_total_sid_len & MAX_SIZE_MASK;
+
+            if total_sid_len > MAX_CRH_SID_STORAGE {
+                return Err(TC_ACT_SHOT);
+            }
+
+            let mut sids_buf = [0u8; MAX_CRH_SID_STORAGE];
+
+            // Prepare the parsed data to be sent back
+            let mut parsed_data = CrhParsed {
+                header: crh_header,
+                sids: [0u8; MAX_CRH_SID_STORAGE],
+                sids_len: total_sid_len as u8,
+            };
+
+            let mut bytes_read_total = 0;
+            // Align to 16-byte boundary
+            let mut alignment = offset % 16;
+            for _ in 0..16 {
+                const CHUNK_SIZE: usize = 1;
+                if alignment == 16 {
+                    break;
+                }
+                if bytes_read_total >= total_sid_len
+                    || (total_sid_len - bytes_read_total) < CHUNK_SIZE
+                {
+                    break;
+                }
+                if bytes_read_total + CHUNK_SIZE > MAX_CRH_SID_STORAGE {
+                    break;
+                }
+
+                let _byte =
+                    read_single_byte(&ctx, &mut offset, &mut sids_buf, &mut bytes_read_total)?;
+                alignment += CHUNK_SIZE;
+            }
+
+            // Read 16 bytes at a time
+            for _ in 0..16 {
+                const CHUNK_SIZE: usize = 16;
+                if bytes_read_total >= total_sid_len
+                    || (total_sid_len.saturating_sub(bytes_read_total)) < CHUNK_SIZE
+                {
+                    break;
+                }
+                if bytes_read_total + CHUNK_SIZE > MAX_CRH_SID_STORAGE {
+                    break;
+                }
+
+                let _bytes = read_sixteen_byte_chunk(
+                    &ctx,
+                    &mut offset,
+                    &mut sids_buf,
+                    &mut bytes_read_total,
+                )?;
+            }
+
+            // Read remaining bytes one at a time
+            for _ in 0..16 {
+                const CHUNK_SIZE: usize = 1;
+                if bytes_read_total >= total_sid_len
+                    || (total_sid_len - bytes_read_total) < CHUNK_SIZE
+                {
+                    break;
+                }
+                if bytes_read_total + CHUNK_SIZE > MAX_CRH_SID_STORAGE {
+                    break;
+                }
+
+                let _byte =
+                    read_single_byte(&ctx, &mut offset, &mut sids_buf, &mut bytes_read_total)?;
+            }
+
+            parsed_data.sids[..total_sid_len].copy_from_slice(&sids_buf[..total_sid_len]);
+
+            match packet_type {
+                PacketType::Crh16 => ParsedHeader {
+                    type_: PacketType::Crh16,
+                    data: HeaderUnion { crh16: parsed_data },
+                },
+                PacketType::Crh32 => ParsedHeader {
+                    type_: PacketType::Crh32,
+                    data: HeaderUnion { crh32: parsed_data },
+                },
+                _ => return Err(TC_ACT_SHOT),
             }
         }
     };
