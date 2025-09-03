@@ -5,7 +5,7 @@
 use aya_ebpf::{
     bindings::TC_ACT_PIPE,
     macros::{classifier, map},
-    maps::RingBuf,
+    maps::{PerCpuArray, ProgramArray, RingBuf},
     programs::TcContext,
 };
 #[cfg(not(test))]
@@ -32,6 +32,42 @@ use network_types::{
 #[map]
 static mut PACKETS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0); // 256 KB
 
+const MAX_VAR_BUF_SIZE: usize = 256;
+const MAX_SIZE_MASK: usize = 255;
+
+// State struct that will be passed between tail call functions
+#[allow(private_interfaces)]
+#[derive(Clone, Copy)]
+pub struct TailCallState {
+    pub parser: Parser,
+    pub buffer: [u8; MAX_VAR_BUF_SIZE],
+    pub var_len_to_read: usize,
+}
+
+impl Default for TailCallState {
+    fn default() -> Self {
+        Self {
+            parser: Parser::default(),
+            buffer: [0; MAX_VAR_BUF_SIZE],
+            var_len_to_read: 0,
+        }
+    }
+}
+
+// Map to store state between tail calls
+#[cfg(not(test))]
+#[map]
+static mut TAIL_CALL_STATE: PerCpuArray<TailCallState> = PerCpuArray::with_max_entries(1, 0);
+
+// Program array for tail calls can be extended to hold up to 31 entries
+#[cfg(not(test))]
+#[map]
+static mut PROG_ARRAY: ProgramArray = ProgramArray::with_max_entries(2, 0);
+
+// Indexes for the program array
+const PROG_IDX_PARSER: u32 = 0;
+const PROG_IDX_READ_VAR_BUF: u32 = 1;
+
 // Defines what kind of header we expect to process in the current iteration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HeaderType {
@@ -45,7 +81,7 @@ enum HeaderType {
     ErrorOccurred, // Indicates an error stopped parsing
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct ParserOptions {
     /// The port number to use for Geneve tunnel detection
     /// Default is 6081 as per IANA assignment
@@ -58,11 +94,15 @@ impl Default for ParserOptions {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+
 struct Parser {
     // Current read offset from the start of the packet
     offset: usize,
     // The header-type to parse next at 'offset'
     next_hdr: HeaderType,
+    // Flag to indicate a two-step read for variable-length data
+    is_reading_var_buf: bool,
     // Configuration options for the parser
     options: ParserOptions,
 
@@ -76,6 +116,7 @@ impl Parser {
         Parser {
             offset: 0,
             next_hdr: HeaderType::Ethernet,
+            is_reading_var_buf: false,
             options: ParserOptions::default(),
             packet_meta: PacketMeta::default(),
         }
@@ -86,6 +127,7 @@ impl Parser {
         Parser {
             offset: 0,
             next_hdr: HeaderType::Ethernet,
+            is_reading_var_buf: false,
             options,
             packet_meta: PacketMeta::default(),
         }
@@ -322,35 +364,40 @@ impl Parser {
 
     /// Parses the IPv6 routing header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_routing_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+    fn parse_routing_header(
+        &mut self,
+        ctx: &TcContext,
+        buffer: &[u8; MAX_VAR_BUF_SIZE],
+    ) -> Result<Option<(usize, usize)>, Error> {
         let gen_hdr: GenericRoute = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let routing_type: RoutingHeaderType = RoutingHeaderType::from_u8(gen_hdr.type_);
-
-        // const MAX_ADDR: usize = 256;
 
         match routing_type {
             RoutingHeaderType::RplSourceRoute => {
                 let rpl_hdr: RplSourceRouteHeader =
                     ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-                // self.offset += RplSourceRouteHeader::LEN;
+                let var_size = rpl_hdr.gen_route.total_hdr_len().saturating_sub(8) & MAX_SIZE_MASK; // Subtract 8 for fixed RPL header
+                if self.is_reading_var_buf {
+                    debug!(ctx, "reading variable part of segment routing header");
 
-                // Consider adding Clamp to addr_size if we run into verification issues
-                // let addr_size = rpl_hdr.gen_route.total_hdr_len().saturating_sub(8); // Subtract 8 for fixed RPL header
-                // let mut addresses = [0u8; MAX_ADDR];
-                //
-                // let bytes_read = self
-                //     .read_var_buf(ctx, &mut addresses, addr_size)
-                //     .map_err(|_| Error::OutOfBounds)?;
-                // if bytes_read < addr_size {
-                //     debug!(ctx, "failed to read all of rpl header");
-                //     return Err(Error::MalformedHeader);
-                // }
-                // self.offset += bytes_read;
+                    let _segments = &buffer[..var_size];
+                    // TODO process variable length part of segment routing header
 
-                // TODO parse out and use addresses and other Rpl fields here
+                    // Advance the offset past the entire header
+                    self.offset += rpl_hdr.total_hdr_len();
+                    // Reset the flag and set next header type
+                    self.is_reading_var_buf = false;
+                    self.next_hdr = HeaderType::Proto(rpl_hdr.gen_route.next_hdr());
+                    return Ok(None);
+                } else if var_size > 0 {
+                    // Set flag and instruct caller to perform a tail call.
+                    self.is_reading_var_buf = true;
+                    // The offset passed to the reader program should be after the fixed header.
+                    return Ok(Some((self.offset + RplSourceRouteHeader::LEN, var_size)));
+                }
+                // No variable part, just advance offset and continue.
+                self.offset += rpl_hdr.total_hdr_len();
                 self.next_hdr = HeaderType::Proto(rpl_hdr.gen_route.next_hdr());
-                // Temp generic advance
-                self.offset += rpl_hdr.gen_route.total_hdr_len();
             }
             RoutingHeaderType::Type2 => {
                 let type2_hdr: Type2RoutingHeader =
@@ -363,47 +410,53 @@ impl Parser {
             RoutingHeaderType::SegmentRoutingHeader => {
                 let segment_hdr: SegmentRoutingHeader =
                     ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+                let var_size = segment_hdr.segments_and_tlvs_len() & MAX_SIZE_MASK;
+                if self.is_reading_var_buf {
+                    debug!(ctx, "reading variable part of segment routing header");
 
-                // self.offset += SegmentRoutingHeader::LEN;
+                    let _segments = &buffer[..var_size];
+                    // TODO process variable length part of segment routing header
 
-                // let var_size = segment_hdr.segments_and_tlvs_len();
-                // let mut addresses = [0u8; MAX_ADDR];
-                //
-                // let bytes_read = self
-                //     .read_var_buf(ctx, &mut addresses, var_size)
-                //     .map_err(|_| Error::OutOfBounds)?;
-                // if bytes_read < var_size {
-                //     debug!(ctx, "failed to read all of rpl header");
-                //     return Err(Error::MalformedHeader);
-                // }
-                // self.offset += bytes_read;
-
-                // TODO parse out and use addresses and other Segment fields here
+                    // Advance the offset past the entire header
+                    self.offset += segment_hdr.total_hdr_len();
+                    // Reset the flag and set next header type
+                    self.is_reading_var_buf = false;
+                    self.next_hdr = HeaderType::Proto(segment_hdr.gen_route.next_hdr());
+                    return Ok(None);
+                } else if var_size > 0 {
+                    // Set flag and instruct caller to perform a tail call.
+                    self.is_reading_var_buf = true;
+                    // The offset passed to the reader program should be after the fixed header.
+                    return Ok(Some((self.offset + SegmentRoutingHeader::LEN, var_size)));
+                }
+                // No variable part, just advance offset and continue.
+                self.offset += segment_hdr.total_hdr_len();
                 self.next_hdr = HeaderType::Proto(segment_hdr.gen_route.next_hdr());
-                // Temp generic advance
-                self.offset += segment_hdr.gen_route.total_hdr_len();
             }
             RoutingHeaderType::Crh16 | RoutingHeaderType::Crh32 => {
                 let crh_hdr: CrhHeader = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-                // self.offset += CrhHeader::LEN;
-                //
-                // let var_size = crh_hdr.sid_list_len();
-                // let mut addresses = [0u8; MAX_ADDR];
-                //
-                // let bytes_read = self.read_var_buf(ctx, &mut addresses, var_size)?;
-                // if bytes_read < var_size {
-                //     debug!(ctx, "failed to read all of CRH header");
-                //     return Err(Error::MalformedHeader);
-                // }
-                // self.offset += bytes_read;
+                let var_size = crh_hdr.sid_list_len() & MAX_SIZE_MASK;
+                if self.is_reading_var_buf {
+                    debug!(ctx, "reading variable part of segment routing header");
 
-                // TODO parse out and use SIDs from CRH header
-                // You can use sid_num (or the logic in num_sids) to determine size of sids
-                // and what to do with them as needed
-                let _sid_num = crh_hdr.num_sids();
-                self.next_hdr = HeaderType::Proto(crh_hdr.next_hdr());
-                // Temp generic advance
-                self.offset += crh_hdr.total_hdr_len();
+                    let _sids = &buffer[..var_size];
+                    // TODO process variable length part of segment routing header
+
+                    // Advance the offset past the entire header
+                    self.offset += crh_hdr.total_hdr_len();
+                    // Reset the flag and set next header type
+                    self.is_reading_var_buf = false;
+                    self.next_hdr = HeaderType::Proto(crh_hdr.gen_route.next_hdr());
+                    return Ok(None);
+                } else if var_size > 0 {
+                    // Set flag and instruct caller to perform a tail call.
+                    self.is_reading_var_buf = true;
+                    // The offset passed to the reader program should be after the fixed header.
+                    return Ok(Some((self.offset + CrhHeader::LEN, var_size)));
+                }
+                // No variable part, just advance offset and continue.
+                self.offset += crh_hdr.gen_route.total_hdr_len();
+                self.next_hdr = HeaderType::Proto(crh_hdr.gen_route.next_hdr());
             }
             RoutingHeaderType::Experiment1
             | RoutingHeaderType::Experiment2
@@ -413,7 +466,7 @@ impl Parser {
             _ => {}
         }
 
-        Ok(())
+        Ok(None)
     }
 
     /// Reads a variable-length buffer from a TC context.
@@ -434,91 +487,163 @@ impl Parser {
     /// # Returns
     /// `Ok(bytes_read)` on success, where `bytes_read` is the number of bytes actually read.
     /// `Err(Error)` if reading bytes from the context fails.
-    #[allow(dead_code)] // Remove once we start using read_var_buf
-    fn read_var_buf<const N: usize>(
-        &mut self,
-        ctx: &TcContext,
-        buf: &mut [u8; N],
-        len: usize,
-    ) -> Result<usize, Error> {
-        let mut bytes_read_total = 0;
-
+    #[cfg(not(test))]
+    pub fn read_var_buf(ctx: &TcContext) -> i32 {
         // Helper function to read individual bytes for alignment
         let read_single_byte = |ctx: &TcContext,
-                                buf: &mut [u8; N],
+                                buf: &mut [u8; MAX_VAR_BUF_SIZE],
                                 len: usize,
                                 bytes_read_total: &mut usize,
                                 offset: &mut usize|
          -> Result<bool, Error> {
-            if *bytes_read_total >= len || (*bytes_read_total + 1) > N {
+            if *bytes_read_total >= len || (*bytes_read_total + 1) > MAX_VAR_BUF_SIZE {
                 return Ok(false);
             }
 
-            let byte: u8 = ctx.load(*offset).map_err(|_| Error::MalformedHeader)?;
-            buf[*bytes_read_total] = byte;
-            *bytes_read_total += 1;
-            *offset += 1;
-            Ok(true)
+            match ctx.load::<u8>(*offset) {
+                Ok(byte) => {
+                    buf[*bytes_read_total] = byte;
+                    *bytes_read_total += 1;
+                    *offset += 1;
+                    Ok(true)
+                }
+                Err(_) => {
+                    return Err(Error::OutOfBounds);
+                }
+            }
         };
 
         // Helper function to read 16-byte chunks
         let read_sixteen_byte_chunk = |ctx: &TcContext,
-                                       buf: &mut [u8; N],
+                                       buf: &mut [u8; MAX_VAR_BUF_SIZE],
                                        len: usize,
                                        bytes_read_total: &mut usize,
                                        offset: &mut usize|
          -> Result<bool, Error> {
             if *bytes_read_total >= len
                 || (len.saturating_sub(*bytes_read_total)) < 16
-                || (*bytes_read_total + 16) > N
+                || (*bytes_read_total + 16) > MAX_VAR_BUF_SIZE
             {
                 return Ok(false);
             }
 
-            let bytes: u128 = ctx.load(*offset).map_err(|_| Error::OutOfBounds)?;
-            buf[*bytes_read_total..*bytes_read_total + 16].copy_from_slice(&bytes.to_ne_bytes());
-            *bytes_read_total += 16;
-            *offset += 16;
-            Ok(true)
-        };
-
-        // Align to 16-byte boundary by reading individual bytes
-        let mut parse_offset = self.offset;
-        let mut alignment = self.offset % 16;
-        for _ in 0..16 {
-            if alignment == 16 {
-                break;
-            }
-            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut parse_offset)? {
-                break;
-            }
-            alignment += 1;
-        }
-
-        // Read 16-byte chunks in batches (4 batches of 16 chunks = 1024 bytes total)
-        // The main idea is we can keep adding loops to read u128s until we reach our desired supported header size
-        for _ in 0..4 {
-            for _ in 0..16 {
-                if !read_sixteen_byte_chunk(
-                    ctx,
-                    buf,
-                    len,
-                    &mut bytes_read_total,
-                    &mut parse_offset,
-                )? {
-                    break;
+            match ctx.load::<u128>(*offset) {
+                Ok(bytes) => {
+                    buf[*bytes_read_total..*bytes_read_total + 16]
+                        .copy_from_slice(&bytes.to_ne_bytes());
+                    *bytes_read_total += 16;
+                    *offset += 16;
+                    Ok(true)
+                }
+                Err(_) => {
+                    return Err(Error::OutOfBounds);
                 }
             }
-        }
+        };
 
-        // Read remaining bytes as individual bytes
-        for _ in 0..16 {
-            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut parse_offset)? {
-                break;
+        let key: u32 = 0;
+        #[allow(static_mut_refs)]
+        let state_ptr = unsafe { TAIL_CALL_STATE.get_ptr_mut(key) };
+        let mut bytes_read_total = 0;
+
+        if let Some(state_ptr) = state_ptr {
+            let state = unsafe { &mut *state_ptr };
+
+            // The offset to start reading from is stored in var_len_to_read for simplicity
+            let mut offset = state.var_len_to_read;
+            let read_len = state.parser.offset; // Re-purposing this field to pass read_len
+
+            let mut success = true;
+            let mut alignment = offset % 16;
+            for _ in 0..16 {
+                if alignment == 16 {
+                    break;
+                }
+                match read_single_byte(
+                    ctx,
+                    &mut state.buffer,
+                    read_len,
+                    &mut bytes_read_total,
+                    &mut offset,
+                ) {
+                    Ok(true) => {
+                        alignment += 1;
+                    }
+                    Ok(false) => break,
+                    Err(_) => {
+                        success = false;
+                        state.parser.next_hdr = HeaderType::ErrorOccurred;
+                        break;
+                    }
+                }
+            }
+            // Breaks at 3 nested loops
+            for _ in 0..2 {
+                for _ in 0..16 {
+                        // match read_sixteen_byte_chunk(
+                        //     ctx,
+                        //     &mut state.buffer,
+                        //     read_len,
+                        //     &mut bytes_read_total,
+                        //     &mut offset,
+                        // ) {
+                        //     Ok(true) => {}
+                        //     Ok(false) => break,
+                        //     Err(_) => {
+                        //         success = false;
+                        //         state.parser.next_hdr = HeaderType::ErrorOccurred;
+                        //         break;
+                        //     }
+                        // }
+                        if bytes_read_total >= read_len
+                            || (read_len.saturating_sub(bytes_read_total)) < 16
+                            || (bytes_read_total + 16) > MAX_VAR_BUF_SIZE
+                        {
+                            break;
+                        }
+
+                        match ctx.load::<u128>(offset) {
+                            Ok(bytes) => {
+                                state.buffer[bytes_read_total..bytes_read_total + 16]
+                                    .copy_from_slice(&bytes.to_ne_bytes());
+                                bytes_read_total += 16;
+                                offset += 16;
+                            }
+                            Err(_) => {
+                                success = false;
+                                state.parser.next_hdr = HeaderType::ErrorOccurred;
+                                break
+                            }
+                        }
+                    }
+            }
+
+            // Comented out for now to test loop limits a bit easier
+            // for _ in 0..16 {
+            //     match read_single_byte(
+            //         ctx,
+            //         &mut state.buffer,
+            //         read_len,
+            //         &mut bytes_read_total,
+            //         &mut offset,
+            //     ) {
+            //         Ok(true) => {}
+            //         Ok(false) => break,
+            //         Err(_) => {}
+            //     }
+            // }
+            if success && read_len > MAX_VAR_BUF_SIZE {
+                state.parser.next_hdr = HeaderType::ErrorOccurred;
+            }
+
+            #[allow(static_mut_refs)]
+            unsafe {
+                // Tail call back to the main parser.
+                let _ = PROG_ARRAY.tail_call(ctx, PROG_IDX_PARSER);
             }
         }
 
-        Ok(bytes_read_total)
+        TC_ACT_PIPE
     }
 }
 
@@ -535,12 +660,41 @@ const MAX_HEADER_PARSE_DEPTH: usize = 16;
 #[cfg(not(test))]
 #[classifier]
 pub fn mermin(ctx: TcContext) -> i32 {
-    try_mermin(ctx).unwrap_or(TC_ACT_PIPE)
+    let key: u32 = 0;
+    let state = TailCallState::default();
+
+    unsafe {
+        // Initialize state for this packet using get_ptr_mut.
+        #[allow(static_mut_refs)]
+        let state_ptr = TAIL_CALL_STATE.get_ptr_mut(key);
+        if let Some(state_ptr) = state_ptr {
+            *state_ptr = state;
+        } else {
+            return TC_ACT_PIPE;
+        }
+
+        // Jump to the main parser program.
+        #[allow(static_mut_refs)]
+        let _ = PROG_ARRAY.tail_call(&ctx, PROG_IDX_PARSER);
+
+    }
+
+    // This is the fallback if the tail call fails.
+    TC_ACT_PIPE
 }
 
 #[cfg(not(test))]
-fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
-    let mut parser = Parser::default();
+fn try_mermin(ctx: TcContext) -> i32 {
+    let key: u32 = 0;
+    #[allow(static_mut_refs)]
+    let state_ptr = unsafe { TAIL_CALL_STATE.get_ptr_mut(key) };
+    if state_ptr.is_none() {
+        // Should not happen if mermin is the only entrypoint.
+        return TC_ACT_PIPE;
+    }
+
+    let state = unsafe { &mut *state_ptr.unwrap() };
+    let parser = &mut state.parser;
 
     debug!(&ctx, "mermin: parsing packet");
 
@@ -557,7 +711,25 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx),
             HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
             HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
-            HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_routing_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Route) => {
+                match parser.parse_routing_header(&ctx, &state.buffer) {
+                    Ok(Some((read_offset, read_len))) => {
+                        // Repurpose state fields to pass arguments to the reader program
+                        state.var_len_to_read = read_offset;
+                        state.parser.offset = read_len;
+
+                        #[allow(static_mut_refs)]
+                        unsafe {
+                            let _ = PROG_ARRAY.tail_call(&ctx, PROG_IDX_READ_VAR_BUF);
+                        }
+                        // This part is unreachable, but the compiler needs to know
+                        // the function exits. A tail call is effectively an exit.
+                        return TC_ACT_PIPE;
+                    }
+                    Ok(None) => Ok(()), // Continue parsing
+                    Err(e) => Err(e),
+                }
+            }
             HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
             HeaderType::Proto(proto) => {
                 debug!(
@@ -567,7 +739,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
                 break;
             }
             HeaderType::StopProcessing => break, // Graceful stop
-            HeaderType::ErrorOccurred => return Ok(TC_ACT_PIPE), // Error, pass packet
+            HeaderType::ErrorOccurred => return TC_ACT_PIPE, // Error, pass packet
         };
 
         if result.is_err() {
@@ -587,8 +759,21 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             error!(&ctx, "mermin: failed to write packet to ring buffer");
         }
     }
+    TC_ACT_PIPE
+}
 
-    Ok(TC_ACT_PIPE)
+#[cfg(not(test))]
+#[classifier]
+pub fn parser(ctx: TcContext) -> i32 {
+    // Tail-call entrypoint wrapper for try_mermin
+    try_mermin(ctx)
+}
+
+#[cfg(not(test))]
+#[classifier]
+pub fn read_var_buf_prog(ctx: TcContext) -> i32 {
+    // Tail-call entrypoint wrapper for Parser::read_var_buf
+    Parser::read_var_buf(&ctx)
 }
 
 #[cfg(not(test))]
@@ -2164,3 +2349,4 @@ mod tests {
         assert_eq!(&small_buf[0..bytes_read], &test_data[0..bytes_read]);
     }
 }
+

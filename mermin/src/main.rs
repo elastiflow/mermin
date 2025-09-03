@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::anyhow;
 use aya::{
-    maps::RingBuf,
+    maps::{ProgramArray, RingBuf},
     programs::{SchedClassifier, TcAttachType, tc},
 };
 use log::{debug, info, warn};
@@ -69,6 +69,37 @@ async fn main() -> anyhow::Result<()> {
     let program: &mut SchedClassifier = ebpf.program_mut("mermin").unwrap().try_into()?;
     program.load()?;
     program.attach(iface, TcAttachType::Egress)?;
+
+
+    // Load tail-call targets (not attached) and capture their FDs in short scopes
+    let parser_fd = {
+        let prog: &mut SchedClassifier = ebpf.program_mut("parser").unwrap().try_into()?;
+        prog.load()?;
+        // Get a cloned ProgramFd so we can use it after this mutable borrow ends
+        prog.fd()?.try_clone()?
+    };
+
+    let read_var_fd = {
+        let prog: &mut SchedClassifier = ebpf
+            .program_mut("read_var_buf_prog")
+            .unwrap()
+            .try_into()?;
+        prog.load()?;
+        prog.fd()?.try_clone()?
+    };
+
+    // Populate ProgramArray map with FDs of tail-call targets
+    {
+        let mut prog_array: ProgramArray<_> = ebpf
+            .map_mut("PROG_ARRAY")
+            .ok_or_else(|| anyhow!("PROG_ARRAY map not present in the object"))?
+            .try_into()?;
+        // Indices must match the eBPF constants
+        const PROG_IDX_PARSER: u32 = 0;
+        const PROG_IDX_READ_VAR_BUF: u32 = 1;
+        prog_array.set(PROG_IDX_PARSER, &parser_fd, 0)?;
+        prog_array.set(PROG_IDX_READ_VAR_BUF, &read_var_fd, 0)?;
+    }
 
     info!("eBPF program attached. Waiting for events... Press Ctrl-C to exit.");
 

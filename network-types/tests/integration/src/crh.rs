@@ -47,7 +47,9 @@ pub fn create_crh16_test_packet() -> (Vec<u8>, CrhParsed) {
         sgmt_left: 2,
     };
 
-    let header = CrhHeader { generic_route };
+    let header = CrhHeader {
+        gen_route: generic_route,
+    };
 
     let mut sids = [0u8; MAX_CRH_SID_STORAGE];
     // Copy the three SIDs (6 bytes total)
@@ -106,7 +108,9 @@ pub fn create_crh32_test_packet() -> (Vec<u8>, CrhParsed) {
         sgmt_left: 1,
     };
 
-    let header = CrhHeader { generic_route };
+    let header = CrhHeader {
+        gen_route: generic_route,
+    };
 
     let mut sids = [0u8; MAX_CRH_SID_STORAGE];
     // Copy the two SIDs (8 bytes total)
@@ -130,19 +134,19 @@ pub fn verify_crh16_header(received: ParsedHeader, expected: CrhParsed) {
 
     // Verify GenericRoute fields
     assert_eq!(
-        parsed_header.generic_route.next_hdr, expected_header.generic_route.next_hdr,
+        parsed_header.gen_route.next_hdr, expected_header.gen_route.next_hdr,
         "Next Header mismatch"
     );
     assert_eq!(
-        parsed_header.generic_route.hdr_ext_len, expected_header.generic_route.hdr_ext_len,
+        parsed_header.gen_route.hdr_ext_len, expected_header.gen_route.hdr_ext_len,
         "Header Extension Length mismatch"
     );
     assert_eq!(
-        parsed_header.generic_route.type_, expected_header.generic_route.type_,
+        parsed_header.gen_route.type_, expected_header.gen_route.type_,
         "Routing Type mismatch"
     );
     assert_eq!(
-        parsed_header.generic_route.sgmt_left, expected_header.generic_route.sgmt_left,
+        parsed_header.gen_route.sgmt_left, expected_header.gen_route.sgmt_left,
         "Segments Left mismatch"
     );
 
@@ -174,19 +178,19 @@ pub fn verify_crh32_header(received: ParsedHeader, expected: CrhParsed) {
 
     // Verify GenericRoute fields
     assert_eq!(
-        parsed_header.generic_route.next_hdr, expected_header.generic_route.next_hdr,
+        parsed_header.gen_route.next_hdr, expected_header.gen_route.next_hdr,
         "Next Header mismatch"
     );
     assert_eq!(
-        parsed_header.generic_route.hdr_ext_len, expected_header.generic_route.hdr_ext_len,
+        parsed_header.gen_route.hdr_ext_len, expected_header.gen_route.hdr_ext_len,
         "Header Extension Length mismatch"
     );
     assert_eq!(
-        parsed_header.generic_route.type_, expected_header.generic_route.type_,
+        parsed_header.gen_route.type_, expected_header.gen_route.type_,
         "Routing Type mismatch"
     );
     assert_eq!(
-        parsed_header.generic_route.sgmt_left, expected_header.generic_route.sgmt_left,
+        parsed_header.gen_route.sgmt_left, expected_header.gen_route.sgmt_left,
         "Segments Left mismatch"
     );
 
