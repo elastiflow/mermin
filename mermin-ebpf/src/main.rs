@@ -42,6 +42,8 @@ pub struct TailCallState {
     pub parser: Parser,
     pub buffer: [u8; MAX_VAR_BUF_SIZE],
     pub var_len_to_read: usize,
+    pub var_offset: usize,
+    pub var_bytes_read: usize,
 }
 
 impl Default for TailCallState {
@@ -50,6 +52,8 @@ impl Default for TailCallState {
             parser: Parser::default(),
             buffer: [0; MAX_VAR_BUF_SIZE],
             var_len_to_read: 0,
+            var_offset: 0,
+            var_bytes_read: 0,
         }
     }
 }
@@ -62,11 +66,13 @@ static mut TAIL_CALL_STATE: PerCpuArray<TailCallState> = PerCpuArray::with_max_e
 // Program array for tail calls can be extended to hold up to 31 entries
 #[cfg(not(test))]
 #[map]
-static mut PROG_ARRAY: ProgramArray = ProgramArray::with_max_entries(2, 0);
+static mut PROG_ARRAY: ProgramArray = ProgramArray::with_max_entries(4, 0);
 
 // Indexes for the program array
 const PROG_IDX_PARSER: u32 = 0;
-const PROG_IDX_READ_VAR_BUF: u32 = 1;
+const PROG_IDX_READ_VAR_BUF_ALIGN: u32 = 1;
+const PROG_IDX_READ_VAR_BUF_CHUNKED: u32 = 2;
+const PROG_IDX_READ_VAR_BUF_REMAINDER: u32 = 3;
 
 // Defines what kind of header we expect to process in the current iteration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -381,7 +387,8 @@ impl Parser {
                     debug!(ctx, "reading variable part of segment routing header");
 
                     let _segments = &buffer[..var_size];
-                    // TODO process variable length part of segment routing header
+                    // TODO process variable length part of segment routing header from segments buffer
+                    // Could also process directly from buffer
 
                     // Advance the offset past the entire header
                     self.offset += rpl_hdr.total_hdr_len();
@@ -396,7 +403,7 @@ impl Parser {
                     return Ok(Some((self.offset + RplSourceRouteHeader::LEN, var_size)));
                 }
                 // No variable part, just advance offset and continue.
-                self.offset += rpl_hdr.total_hdr_len();
+                self.offset += RplSourceRouteHeader::LEN;
                 self.next_hdr = HeaderType::Proto(rpl_hdr.gen_route.next_hdr());
             }
             RoutingHeaderType::Type2 => {
@@ -430,12 +437,15 @@ impl Parser {
                     return Ok(Some((self.offset + SegmentRoutingHeader::LEN, var_size)));
                 }
                 // No variable part, just advance offset and continue.
-                self.offset += segment_hdr.total_hdr_len();
+                self.offset += SegmentRoutingHeader::LEN;
                 self.next_hdr = HeaderType::Proto(segment_hdr.gen_route.next_hdr());
             }
             RoutingHeaderType::Crh16 | RoutingHeaderType::Crh32 => {
                 let crh_hdr: CrhHeader = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-                let var_size = crh_hdr.sid_list_len() & MAX_SIZE_MASK;
+                let mut var_size = crh_hdr.sid_list_len() & MAX_SIZE_MASK;
+                if crh_hdr.gen_route.hdr_ext_len == 0 {
+                    var_size = 0;
+                }
                 if self.is_reading_var_buf {
                     debug!(ctx, "reading variable part of segment routing header");
 
@@ -454,176 +464,280 @@ impl Parser {
                     // The offset passed to the reader program should be after the fixed header.
                     return Ok(Some((self.offset + CrhHeader::LEN, var_size)));
                 }
-                // No variable part, just advance offset and continue.
-                self.offset += crh_hdr.gen_route.total_hdr_len();
+                // No variable part, just advance by LEN and continue.
+                self.offset += CrhHeader::LEN + 4; // + 4 padding bytes to account for 8-byte boundary
                 self.next_hdr = HeaderType::Proto(crh_hdr.gen_route.next_hdr());
             }
             RoutingHeaderType::Experiment1
             | RoutingHeaderType::Experiment2
             | RoutingHeaderType::Reserved => {
                 self.next_hdr = HeaderType::Proto(gen_hdr.next_hdr);
+                self.offset += gen_hdr.total_hdr_len();
             }
-            _ => {}
+            _ => {
+                self.next_hdr = HeaderType::StopProcessing;
+            }
         }
 
         Ok(None)
     }
 
-    /// Reads a variable-length buffer from a TC context.
-    ///
-    /// This function reads bytes from the given TC context `ctx` starting at the parser's current offset
-    /// and writes them into the provided buffer `buf`. The total number of bytes to read is determined
-    /// by `len`.
-    ///
-    /// The implementation uses multiple bounded loops to comply with eBPF verifier requirements,
-    /// reading in decreasing chunk sizes to efficiently handle
-    /// different buffer sizes. Each chunk size has 16 iterations, allowing reading of up to 1024 bytes.
-    ///
-    /// # Arguments
-    /// * `ctx`: The traffic control context to read from.
-    /// * `buf`: The destination buffer to write the bytes into.
-    /// * `len`: The number of bytes to read.
-    ///
-    /// # Returns
-    /// `Ok(bytes_read)` on success, where `bytes_read` is the number of bytes actually read.
-    /// `Err(Error)` if reading bytes from the context fails.
+    fn read_single_byte(
+        ctx: &TcContext,
+        buf: &mut [u8; MAX_VAR_BUF_SIZE],
+        len: usize,
+        bytes_read_total: &mut usize,
+        offset: &mut usize,
+    ) -> Result<bool, Error> {
+        if *bytes_read_total >= len || (*bytes_read_total + 1) > MAX_VAR_BUF_SIZE {
+            return Ok(false);
+        }
+
+        match ctx.load::<u8>(*offset) {
+            Ok(byte) => {
+                buf[*bytes_read_total] = byte;
+                *bytes_read_total += 1;
+                *offset += 1;
+                Ok(true)
+            }
+            Err(_) => Err(Error::OutOfBounds),
+        }
+    }
+
+    fn read_sixteen_byte_chunk(
+        ctx: &TcContext,
+        buf: &mut [u8; MAX_VAR_BUF_SIZE],
+        len: usize,
+        bytes_read_total: &mut usize,
+        offset: &mut usize,
+    ) -> Result<bool, Error> {
+        if *bytes_read_total >= len
+            || (len.saturating_sub(*bytes_read_total)) < 16
+            || (*bytes_read_total + 16) > MAX_VAR_BUF_SIZE
+        {
+            return Ok(false);
+        }
+
+        match ctx.load::<u128>(*offset) {
+            Ok(bytes) => {
+                buf[*bytes_read_total..*bytes_read_total + 16]
+                    .copy_from_slice(&bytes.to_ne_bytes());
+                *bytes_read_total += 16;
+                *offset += 16;
+                Ok(true)
+            }
+            Err(_) => Err(Error::OutOfBounds),
+        }
+    }
     #[cfg(not(test))]
-    pub fn read_var_buf(ctx: &TcContext) -> i32 {
-        // Helper function to read individual bytes for alignment
-        let read_single_byte = |ctx: &TcContext,
-                                buf: &mut [u8; MAX_VAR_BUF_SIZE],
-                                len: usize,
-                                bytes_read_total: &mut usize,
-                                offset: &mut usize|
-         -> Result<bool, Error> {
-            if *bytes_read_total >= len || (*bytes_read_total + 1) > MAX_VAR_BUF_SIZE {
-                return Ok(false);
-            }
-
-            match ctx.load::<u8>(*offset) {
-                Ok(byte) => {
-                    buf[*bytes_read_total] = byte;
-                    *bytes_read_total += 1;
-                    *offset += 1;
-                    Ok(true)
-                }
-                Err(_) => {
-                    return Err(Error::OutOfBounds);
-                }
-            }
-        };
-
-        // Helper function to read 16-byte chunks
-        let read_sixteen_byte_chunk = |ctx: &TcContext,
-                                       buf: &mut [u8; MAX_VAR_BUF_SIZE],
-                                       len: usize,
-                                       bytes_read_total: &mut usize,
-                                       offset: &mut usize|
-         -> Result<bool, Error> {
-            if *bytes_read_total >= len
-                || (len.saturating_sub(*bytes_read_total)) < 16
-                || (*bytes_read_total + 16) > MAX_VAR_BUF_SIZE
-            {
-                return Ok(false);
-            }
-
-            match ctx.load::<u128>(*offset) {
-                Ok(bytes) => {
-                    buf[*bytes_read_total..*bytes_read_total + 16]
-                        .copy_from_slice(&bytes.to_ne_bytes());
-                    *bytes_read_total += 16;
-                    *offset += 16;
-                    Ok(true)
-                }
-                Err(_) => {
-                    return Err(Error::OutOfBounds);
-                }
-            }
-        };
-
+    pub fn read_var_buf_align(ctx: &TcContext) -> i32 {
         let key: u32 = 0;
         #[allow(static_mut_refs)]
         let state_ptr = unsafe { TAIL_CALL_STATE.get_ptr_mut(key) };
-        let mut bytes_read_total = 0;
 
         if let Some(state_ptr) = state_ptr {
             let state = unsafe { &mut *state_ptr };
 
-            // The offset to start reading from is stored in var_len_to_read for simplicity
-            let mut offset = state.var_len_to_read;
-            let read_len = state.parser.offset; // Re-purposing this field to pass read_len
+            //Clamp to help the verifier prove we won't go out of bounds
+            state.var_bytes_read &= MAX_SIZE_MASK;
 
-            let mut success = true;
-            let mut alignment = offset % 16;
-            for _ in 0..16 {
-                if alignment == 16 {
+            // Align to 16-byte boundary.
+            for _ in 0..15 {
+                if state.var_offset % 16 == 0 {
                     break;
                 }
-                match read_single_byte(
+                match Self::read_single_byte(
                     ctx,
                     &mut state.buffer,
-                    read_len,
-                    &mut bytes_read_total,
-                    &mut offset,
+                    state.var_len_to_read,
+                    &mut state.var_bytes_read,
+                    &mut state.var_offset,
                 ) {
-                    Ok(true) => {
-                        alignment += 1;
+                    Ok(true) => {}
+                    Ok(false) => {
+                        // Not enough data to read, break and go to next stage.
+                        break;
                     }
-                    Ok(false) => break,
                     Err(_) => {
-                        success = false;
+                        state.parser.next_hdr = HeaderType::ErrorOccurred;
+                        #[allow(static_mut_refs)]
+                        unsafe {
+                            let _ = PROG_ARRAY.tail_call(ctx, PROG_IDX_PARSER);
+                        };
+                        return TC_ACT_PIPE;
+                    }
+                }
+            }
+            #[allow(static_mut_refs)]
+            unsafe {
+                let _ = PROG_ARRAY.tail_call(ctx, PROG_IDX_READ_VAR_BUF_CHUNKED);
+            };
+        }
+
+        TC_ACT_PIPE
+    }
+
+    #[cfg(not(test))]
+    pub fn read_var_buf_chunked(ctx: &TcContext) -> i32 {
+        let key: u32 = 0;
+        #[allow(static_mut_refs)]
+        let state_ptr = unsafe { TAIL_CALL_STATE.get_ptr_mut(key) };
+
+        if let Some(state_ptr) = state_ptr {
+            let state = unsafe { &mut *state_ptr };
+
+            //Clamp to help the verifier prove we won't go out of bounds
+            state.var_bytes_read &= MAX_SIZE_MASK;
+
+            // Unroll a few reads to reduce tail call overhead.
+            // Breaks at 7 loops
+            for _ in 0..6 {
+                if state.var_len_to_read.saturating_sub(state.var_bytes_read) < 16 {
+                    #[allow(static_mut_refs)]
+                    unsafe {
+                        let _ = PROG_ARRAY.tail_call(ctx, PROG_IDX_READ_VAR_BUF_REMAINDER);
+                    };
+                    return TC_ACT_PIPE;
+                }
+
+                match Self::read_sixteen_byte_chunk(
+                    ctx,
+                    &mut state.buffer,
+                    state.var_len_to_read,
+                    &mut state.var_bytes_read,
+                    &mut state.var_offset,
+                ) {
+                    Ok(true) => {}
+                    Ok(false) => break, // Not enough data for a full chunk.
+                    Err(_) => {
+                        state.parser.next_hdr = HeaderType::ErrorOccurred;
+                        #[allow(static_mut_refs)]
+                        unsafe {
+                            let _ = PROG_ARRAY.tail_call(ctx, PROG_IDX_PARSER);
+                        };
+                        return TC_ACT_PIPE;
+                    }
+                }
+            }
+
+            if state.var_len_to_read.saturating_sub(state.var_bytes_read) > 0 {
+                // If there's more to read, tail call recursively to handle more chunks.
+                #[allow(static_mut_refs)]
+                unsafe {
+                    let _ = PROG_ARRAY.tail_call(ctx, PROG_IDX_READ_VAR_BUF_CHUNKED);
+                };
+            } else {
+                // Finished reading, go back to parser.
+                #[allow(static_mut_refs)]
+                unsafe {
+                    let _ = PROG_ARRAY.tail_call(ctx, PROG_IDX_PARSER);
+                };
+            }
+        }
+
+        TC_ACT_PIPE
+    }
+
+    #[cfg(not(test))]
+    pub fn read_var_buf_remainder(ctx: &TcContext) -> i32 {
+        let key: u32 = 0;
+        #[allow(static_mut_refs)]
+        let state_ptr = unsafe { TAIL_CALL_STATE.get_ptr_mut(key) };
+
+        if let Some(state_ptr) = state_ptr {
+            let state = unsafe { &mut *state_ptr };
+
+            //Clamp to help the verifier prove we won't go out of bounds
+            state.var_bytes_read &= MAX_SIZE_MASK;
+
+            // Read remaining bytes (at most 15).
+            for _ in 0..15 {
+                match Self::read_single_byte(
+                    ctx,
+                    &mut state.buffer,
+                    state.var_len_to_read,
+                    &mut state.var_bytes_read,
+                    &mut state.var_offset,
+                ) {
+                    Ok(true) => {}
+                    Ok(false) => break, // No more bytes to read.
+                    Err(_) => {
                         state.parser.next_hdr = HeaderType::ErrorOccurred;
                         break;
                     }
                 }
             }
-            // Breaks at 3 nested loops
-            for _ in 0..2 {
-                for _ in 0..16 {
-                    match read_sixteen_byte_chunk(
-                        ctx,
-                        &mut state.buffer,
-                        read_len,
-                        &mut bytes_read_total,
-                        &mut offset,
-                    ) {
-                        Ok(true) => {}
-                        Ok(false) => break,
-                        Err(_) => {
-                            success = false;
-                            state.parser.next_hdr = HeaderType::ErrorOccurred;
-                            break;
-                        }
-                    }
-                }
-            }
 
-            // Comented out for now to test loop limits a bit easier
-            // for _ in 0..16 {
-            //     match read_single_byte(
-            //         ctx,
-            //         &mut state.buffer,
-            //         read_len,
-            //         &mut bytes_read_total,
-            //         &mut offset,
-            //     ) {
-            //         Ok(true) => {}
-            //         Ok(false) => break,
-            //         Err(_) => {}
-            //     }
-            // }
-            if success && read_len > MAX_VAR_BUF_SIZE {
-                state.parser.next_hdr = HeaderType::ErrorOccurred;
-            }
-
+            // Reading is done, tail call back to the main parser.
             #[allow(static_mut_refs)]
             unsafe {
-                // Tail call back to the main parser.
                 let _ = PROG_ARRAY.tail_call(ctx, PROG_IDX_PARSER);
-            }
+            };
         }
 
         TC_ACT_PIPE
+    }
+
+    #[cfg(test)]
+    fn read_var_buf_harness(
+        ctx: &TcContext,
+        offset: usize,
+        len: usize,
+        buf: &mut [u8; MAX_VAR_BUF_SIZE],
+    ) -> Result<usize, Error> {
+        let mut var_offset = offset;
+        let mut var_bytes_read = 0;
+        let var_len_to_read = core::cmp::min(len, MAX_VAR_BUF_SIZE);
+
+        // 1. Align to 16-byte boundary (simulate read_var_buf_align)
+        for _ in 0..15 {
+            if var_offset % 16 == 0 {
+                break;
+            }
+            match Self::read_single_byte(
+                ctx,
+                buf,
+                var_len_to_read,
+                &mut var_bytes_read,
+                &mut var_offset,
+            ) {
+                Ok(true) => {}
+                Ok(false) => return Ok(var_bytes_read), // Finished reading
+                Err(e) => return Err(e),
+            }
+        }
+
+        // 2. Read 16-byte chunks (simulate read_var_buf_chunked)
+        while var_len_to_read.saturating_sub(var_bytes_read) >= 16 {
+            match Self::read_sixteen_byte_chunk(
+                ctx,
+                buf,
+                var_len_to_read,
+                &mut var_bytes_read,
+                &mut var_offset,
+            ) {
+                Ok(true) => {}
+                Ok(false) => break, // Not enough data for a full chunk
+                Err(e) => return Err(e),
+            }
+        }
+
+        // 3. Read the remainder (simulate read_var_buf_remainder)
+        for _ in 0..15 {
+            match Self::read_single_byte(
+                ctx,
+                buf,
+                var_len_to_read,
+                &mut var_bytes_read,
+                &mut var_offset,
+            ) {
+                Ok(true) => {}
+                Ok(false) => break, // Finished reading
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(var_bytes_read)
     }
 }
 
@@ -668,7 +782,6 @@ fn try_mermin(ctx: TcContext) -> i32 {
     #[allow(static_mut_refs)]
     let state_ptr = unsafe { TAIL_CALL_STATE.get_ptr_mut(key) };
     if state_ptr.is_none() {
-        // Should not happen if mermin is the only entrypoint.
         return TC_ACT_PIPE;
     }
 
@@ -694,17 +807,32 @@ fn try_mermin(ctx: TcContext) -> i32 {
                 match parser.parse_routing_header(&ctx, &state.buffer) {
                     Ok(Some((read_offset, read_len))) => {
                         // Repurpose state fields to pass arguments to the reader program
-                        state.var_len_to_read = read_offset;
-                        state.parser.offset = read_len;
+                        state.var_offset = read_offset;
+                        state.var_len_to_read = read_len;
+                        state.var_bytes_read = 0;
 
                         #[allow(static_mut_refs)]
                         unsafe {
-                            let _ = PROG_ARRAY.tail_call(&ctx, PROG_IDX_READ_VAR_BUF);
+                            let _ = PROG_ARRAY.tail_call(&ctx, PROG_IDX_READ_VAR_BUF_ALIGN);
                         }
                         // This part is unreachable, but the compiler needs to know
                         // the function exits. A tail call is effectively an exit.
                         return TC_ACT_PIPE;
                     }
+
+                    // Ok(Some((read_offset, read_len))) => {
+                    //     // Repurpose state fields to pass arguments to the reader program
+                    //     state.var_offset = read_offset;
+                    //     state.var_len_to_read = read_len;
+                    //
+                    //     #[allow(static_mut_refs)]
+                    //     unsafe {
+                    //         let _ = PROG_ARRAY.tail_call(&ctx, PROG_IDX_READ_VAR_BUF);
+                    //     }
+                    //     // This part is unreachable, but the compiler needs to know
+                    //     // the function exits. A tail call is effectively an exit.
+                    //     return TC_ACT_PIPE;
+                    // }
                     Ok(None) => Ok(()), // Continue parsing
                     Err(e) => Err(e),
                 }
@@ -750,9 +878,23 @@ pub fn parser(ctx: TcContext) -> i32 {
 
 #[cfg(not(test))]
 #[classifier]
-pub fn read_var_buf_prog(ctx: TcContext) -> i32 {
-    // Tail-call entrypoint wrapper for Parser::read_var_buf
-    Parser::read_var_buf(&ctx)
+pub fn read_var_buf_align_prog(ctx: TcContext) -> i32 {
+    // Tail-call entrypoint wrapper for Parser::read_var_buf_align
+    Parser::read_var_buf_align(&ctx)
+}
+
+#[cfg(not(test))]
+#[classifier]
+pub fn read_var_buf_chunked_prog(ctx: TcContext) -> i32 {
+    // Tail-call entrypoint wrapper for Parser::read_var_buf_chunked
+    Parser::read_var_buf_chunked(&ctx)
+}
+
+#[cfg(not(test))]
+#[classifier]
+pub fn read_var_buf_remainder_prog(ctx: TcContext) -> i32 {
+    // Tail-call entrypoint wrapper for Parser::read_var_buf_remainder
+    Parser::read_var_buf_remainder(&ctx)
 }
 
 #[cfg(not(test))]
@@ -1213,6 +1355,23 @@ mod tests {
         packet.extend_from_slice(&[0; 4]);
 
         packet
+    }
+
+    // Helper to call parse_routing_header possibly twice when variable-length data is present
+    fn parse_rh_with_tailcall(
+        parser: &mut Parser,
+        ctx: &TcContext,
+        packet: &Vec<u8>,
+    ) -> Result<(), Error> {
+        let mut buf = [0u8; MAX_VAR_BUF_SIZE];
+        let res = parser.parse_routing_header(ctx, &buf)?;
+        if let Some((start, len)) = res {
+            // Simulate ProgramArray var-buf read by filling buffer from packet
+            buf[..len].copy_from_slice(&packet[start..start + len]);
+            parser.is_reading_var_buf = true;
+            let _ = parser.parse_routing_header(ctx, &buf)?;
+        }
+        Ok(())
     }
 
     // #[test]
@@ -1715,9 +1874,9 @@ mod tests {
         let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_type2_routing_test_packet(IpProto::Tcp);
-        let ctx = TcContext::new(packet);
+        let ctx = TcContext::new(packet.clone());
 
-        let result = parser.parse_routing_header(&ctx);
+        let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 24); // Type2 routing header length
@@ -1732,7 +1891,8 @@ mod tests {
         let packet = create_type2_routing_test_packet(IpProto::Udp);
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_routing_header(&ctx);
+        let mut buf = [0u8; MAX_VAR_BUF_SIZE];
+        let result = parser.parse_routing_header(&ctx, &buf);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 24); // Type2 routing header length
@@ -1748,7 +1908,8 @@ mod tests {
         let packet = vec![0x06, 0x02, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00];
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_routing_header(&ctx);
+        let buf = [0u8; MAX_VAR_BUF_SIZE];
+        let result = parser.parse_routing_header(&ctx, &buf);
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
@@ -1758,11 +1919,15 @@ mod tests {
         let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_rpl_source_route_test_packet(IpProto::Tcp);
-        let ctx = TcContext::new(packet);
+        let ctx = TcContext::new(packet.clone());
 
-        let result = parser.parse_routing_header(&ctx);
-
+        let mut buf = [0u8; MAX_VAR_BUF_SIZE];
+        let result = parser.parse_routing_header(&ctx, &buf);
         assert!(result.is_ok());
+        let (start, len) = result.unwrap().expect("expected var read");
+        buf[..len].copy_from_slice(&packet[start..start + len]);
+        let result2 = parser.parse_routing_header(&ctx, &buf);
+        assert!(result2.is_ok());
         assert_eq!(parser.offset, 40); // RPL Source Route header length (8 + 32)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
@@ -1773,9 +1938,9 @@ mod tests {
         let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_rpl_source_route_test_packet(IpProto::Udp);
-        let ctx = TcContext::new(packet);
+        let ctx = TcContext::new(packet.clone());
 
-        let result = parser.parse_routing_header(&ctx);
+        let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 40); // RPL Source Route header length (8 + 32)
@@ -1791,7 +1956,8 @@ mod tests {
         let packet = vec![0x06, 0x04, 0x03, 0x02, 0x24, 0x60];
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_routing_header(&ctx);
+        let buf = [0u8; MAX_VAR_BUF_SIZE];
+        let result = parser.parse_routing_header(&ctx, &buf);
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
@@ -1801,9 +1967,9 @@ mod tests {
         let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_segment_routing_test_packet(IpProto::Tcp);
-        let ctx = TcContext::new(packet);
+        let ctx = TcContext::new(packet.clone());
 
-        let result = parser.parse_routing_header(&ctx);
+        let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 40); // Segment Routing header length (8 + 32)
@@ -1816,9 +1982,9 @@ mod tests {
         let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_segment_routing_test_packet(IpProto::Udp);
-        let ctx = TcContext::new(packet);
+        let ctx = TcContext::new(packet.clone());
 
-        let result = parser.parse_routing_header(&ctx);
+        let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 40); // Segment Routing header length (8 + 32)
@@ -1831,9 +1997,9 @@ mod tests {
         let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_segment_routing_min_test_packet(IpProto::Ipv6);
-        let ctx = TcContext::new(packet);
+        let ctx = TcContext::new(packet.clone());
 
-        let result = parser.parse_routing_header(&ctx);
+        let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 24); // Minimum Segment Routing header length (8 + 16)
@@ -1849,7 +2015,8 @@ mod tests {
         let packet = vec![0x06, 0x04, 0x04, 0x01, 0x01, 0x00]; // Only 6 bytes
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_routing_header(&ctx);
+        let buf = [0u8; MAX_VAR_BUF_SIZE];
+        let result = parser.parse_routing_header(&ctx, &buf);
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
@@ -1861,9 +2028,9 @@ mod tests {
         let mut packet = create_segment_routing_test_packet(IpProto::Tcp);
         // Set segments left to maximum value
         packet[4] = 255;
-        let ctx = TcContext::new(packet);
+        let ctx = TcContext::new(packet.clone());
 
-        let result = parser.parse_routing_header(&ctx);
+        let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 40);
@@ -1878,9 +2045,9 @@ mod tests {
         let mut packet = create_segment_routing_test_packet(IpProto::Udp);
         // Set all flags
         packet[6] = 0xFF;
-        let ctx = TcContext::new(packet);
+        let ctx = TcContext::new(packet.clone());
 
-        let result = parser.parse_routing_header(&ctx);
+        let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 40);
@@ -1905,7 +2072,8 @@ mod tests {
 
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_routing_header(&ctx);
+        let buf = [0u8; MAX_VAR_BUF_SIZE];
+        let result = parser.parse_routing_header(&ctx, &buf);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 8); // Only fixed header
@@ -1918,9 +2086,9 @@ mod tests {
         let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_crh16_test_packet(IpProto::Tcp);
-        let ctx = TcContext::new(packet);
+        let ctx = TcContext::new(packet.clone());
 
-        let result = parser.parse_routing_header(&ctx);
+        let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
@@ -1933,9 +2101,9 @@ mod tests {
         let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_crh16_test_packet(IpProto::Udp);
-        let ctx = TcContext::new(packet);
+        let ctx = TcContext::new(packet.clone());
 
-        let result = parser.parse_routing_header(&ctx);
+        let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
@@ -1948,9 +2116,9 @@ mod tests {
         let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_crh16_with_sids_test_packet(IpProto::Tcp);
-        let ctx = TcContext::new(packet);
+        let ctx = TcContext::new(packet.clone());
 
-        let result = parser.parse_routing_header(&ctx);
+        let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
@@ -1966,7 +2134,8 @@ mod tests {
         let packet = vec![0x06, 0x01]; // Only 2 bytes
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_routing_header(&ctx);
+        let buf = [0u8; MAX_VAR_BUF_SIZE];
+        let result = parser.parse_routing_header(&ctx, &buf);
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
@@ -1978,9 +2147,9 @@ mod tests {
         let mut packet = create_crh16_with_sids_test_packet(IpProto::Tcp);
         // Set segments left to maximum value
         packet[3] = 255;
-        let ctx = TcContext::new(packet);
+        let ctx = TcContext::new(packet.clone());
 
-        let result = parser.parse_routing_header(&ctx);
+        let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
@@ -1993,9 +2162,9 @@ mod tests {
         let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_crh32_test_packet(IpProto::Tcp);
-        let ctx = TcContext::new(packet);
+        let ctx = TcContext::new(packet.clone());
 
-        let result = parser.parse_routing_header(&ctx);
+        let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
@@ -2008,9 +2177,9 @@ mod tests {
         let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_crh32_test_packet(IpProto::Udp);
-        let ctx = TcContext::new(packet);
+        let ctx = TcContext::new(packet.clone());
 
-        let result = parser.parse_routing_header(&ctx);
+        let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
@@ -2023,9 +2192,9 @@ mod tests {
         let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
         let packet = create_crh32_with_sids_test_packet(IpProto::Tcp);
-        let ctx = TcContext::new(packet);
+        let ctx = TcContext::new(packet.clone());
 
-        let result = parser.parse_routing_header(&ctx);
+        let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
@@ -2041,7 +2210,8 @@ mod tests {
         let packet = vec![0x06, 0x01]; // Only 2 bytes
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_routing_header(&ctx);
+        let buf = [0u8; MAX_VAR_BUF_SIZE];
+        let result = parser.parse_routing_header(&ctx, &buf);
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
@@ -2053,9 +2223,9 @@ mod tests {
         let mut packet = create_crh32_with_sids_test_packet(IpProto::Udp);
         // Set segments left to maximum value
         packet[3] = 255;
-        let ctx = TcContext::new(packet);
+        let ctx = TcContext::new(packet.clone());
 
-        let result = parser.parse_routing_header(&ctx);
+        let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 16);
@@ -2080,7 +2250,8 @@ mod tests {
 
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_routing_header(&ctx);
+        let mut buf = [0u8; MAX_VAR_BUF_SIZE];
+        let result = parser.parse_routing_header(&ctx, &buf);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 8); // Only fixed header and padding
@@ -2105,33 +2276,13 @@ mod tests {
 
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_routing_header(&ctx);
+        let mut buf = [0u8; MAX_VAR_BUF_SIZE];
+        let result = parser.parse_routing_header(&ctx, &buf);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 8); // Only fixed header and padding
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
-
-    // Test CRH-32 header with malformed SID data (insufficient SID buffer)
-    // #[test]
-    // fn test_parse_routing_header_crh32_malformed_sid_data() {
-    //     let mut parser = Parser::default();
-    //     parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-    //
-    //     // Create packet that claims to have SIDs but provides insufficient data
-    //     let mut packet = Vec::new();
-    //     packet.push(IpProto::Udp as u8); // Next Header
-    //     packet.push(1); // Hdr Ext Len = 1 (claims 8 bytes of SID data)
-    //     packet.push(6); // Routing Type (Crh32)
-    //     packet.push(1); // Segments Left
-    //     // Only provide 4 bytes instead of required 8
-    //     packet.extend_from_slice(&[0x12, 0x34, 0x56, 0x78]);
-    //
-    //     let ctx = TcContext::new(packet);
-    //
-    //     let result = parser.parse_routing_header(&ctx);
-    //     assert!(matches!(result, Err(Error::MalformedHeader)));
-    // }
 
     // Helper function to create network-like test data with big endian patterns
     fn create_network_test_data(size: usize) -> Vec<u8> {
@@ -2148,7 +2299,7 @@ mod tests {
         data
     }
 
-    // Test read_var_buf with various odd lengths - comprehensive testing
+    // Test read_var_buf logic with various odd lengths
     #[test]
     fn test_read_var_buf_odd_lengths() {
         let test_lengths = [
@@ -2158,10 +2309,9 @@ mod tests {
         for &len in &test_lengths {
             let test_data = create_network_test_data(len + 10); // Extra data to ensure we can read
             let ctx = TcContext::new(test_data.clone());
-            let mut parser = Parser::default();
-            let mut buf = [0u8; 256];
+            let mut buf = [0u8; MAX_VAR_BUF_SIZE];
 
-            let result = parser.read_var_buf(&ctx, &mut buf, len);
+            let result = Parser::read_var_buf_harness(&ctx, 0, len, &mut buf);
 
             assert!(result.is_ok(), "Failed for length {}", len);
             assert_eq!(result.unwrap(), len, "Wrong bytes read for length {}", len);
@@ -2173,7 +2323,7 @@ mod tests {
             );
 
             // Verify rest of buffer is unchanged
-            for i in len..256 {
+            for i in len..MAX_VAR_BUF_SIZE {
                 assert_eq!(
                     buf[i], 0,
                     "Buffer corruption at index {} for length {}",
@@ -2195,12 +2345,12 @@ mod tests {
         }
 
         let ctx = TcContext::new(test_data);
-        let mut parser = Parser::default();
-        let mut buf = [0u8; 16];
+        let mut buf = [0u8; MAX_VAR_BUF_SIZE];
 
-        let result = parser.read_var_buf(&ctx, &mut buf, 16);
+        let read_len = 16;
+        let result = Parser::read_var_buf_harness(&ctx, 0, read_len, &mut buf);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 16);
+        assert_eq!(result.unwrap(), read_len);
 
         // Verify the data is correctly stored in big endian format
         for (i, &expected_val) in original_values.iter().enumerate() {
@@ -2224,47 +2374,18 @@ mod tests {
     #[test]
     fn test_read_var_buf_network_headers() {
         // Simulate reading various network headers with odd sizes
-
-        // Test IPv4 header (20 bytes) + options (odd sizes)
-        let ipv4_base = 20;
-        let option_sizes = [1, 3, 7, 11]; // Common odd option sizes
+        let base_size = 20;
+        let option_sizes = [1, 3, 7, 11, 15];
 
         for &opt_size in &option_sizes {
-            let total_size = ipv4_base + opt_size;
+            let total_size = base_size + opt_size;
             let test_data = create_network_test_data(total_size);
             let ctx = TcContext::new(test_data.clone());
-            let mut parser = Parser::default();
-            let mut buf = [0u8; 64];
+            let mut buf = [0u8; MAX_VAR_BUF_SIZE];
 
-            let result = parser.read_var_buf(&ctx, &mut buf, total_size);
+            let result = Parser::read_var_buf_harness(&ctx, 0, total_size, &mut buf);
 
-            assert!(
-                result.is_ok(),
-                "Failed for IPv4 with {} byte options",
-                opt_size
-            );
-            assert_eq!(result.unwrap(), total_size);
-            assert_eq!(&buf[0..total_size], &test_data[0..total_size]);
-        }
-
-        // Test TCP header with various option sizes (odd lengths)
-        let tcp_base = 20;
-        let tcp_option_sizes = [1, 3, 5, 9, 15];
-
-        for &opt_size in &tcp_option_sizes {
-            let total_size = tcp_base + opt_size;
-            let test_data = create_network_test_data(total_size);
-            let ctx = TcContext::new(test_data.clone());
-            let mut parser = Parser::default();
-            let mut buf = [0u8; 64];
-
-            let result = parser.read_var_buf(&ctx, &mut buf, total_size);
-
-            assert!(
-                result.is_ok(),
-                "Failed for TCP with {} byte options",
-                opt_size
-            );
+            assert!(result.is_ok(), "Failed for size {}", total_size);
             assert_eq!(result.unwrap(), total_size);
             assert_eq!(&buf[0..total_size], &test_data[0..total_size]);
         }
@@ -2273,58 +2394,53 @@ mod tests {
     // Test multi-byte value reading across chunk boundaries
     #[test]
     fn test_read_var_buf_chunk_boundary_values() {
-        // Test reading values that span chunk boundaries in the implementation
-        let test_cases = [
-            (15, 16), // Spans u128 chunk boundary
-            (17, 16), // Just over u128 boundary
-            (7, 8),   // Spans u64 boundary
-            (9, 8),   // Just over u64 boundary
-            (3, 4),   // Spans u32 boundary
-            (5, 4),   // Just over u32 boundary
-            (1, 2),   // Spans u16 boundary
-            (3, 2),   // Just over u16 boundary
-        ];
+        // Test reading values that span 16-byte chunk boundaries
+        let test_lengths = [15, 16, 17, 31, 32, 33];
+        let test_offsets = [0, 1, 7]; // Test aligned and unaligned starts
 
-        for &(len, chunk_aligned) in &test_cases {
-            // Create data with a recognizable pattern
-            let test_data = create_network_test_data(len + 8);
-            let ctx = TcContext::new(test_data.clone());
-            let mut parser = Parser::default();
-            let mut buf = [0u8; 32];
+        for &len in &test_lengths {
+            for &offset in &test_offsets {
+                let test_data = create_network_test_data(offset + len + 8); // Ensure enough data
+                let ctx = TcContext::new(test_data.clone());
+                let mut buf = [0u8; MAX_VAR_BUF_SIZE];
 
-            let result = parser.read_var_buf(&ctx, &mut buf, len);
+                let result = Parser::read_var_buf_harness(&ctx, offset, len, &mut buf);
 
-            assert!(
-                result.is_ok(),
-                "Failed for length {} (chunk aligned: {})",
-                len,
-                chunk_aligned
-            );
-            assert_eq!(result.unwrap(), len);
-            assert_eq!(
-                &buf[0..len],
-                &test_data[0..len],
-                "Data mismatch for length {}",
-                len
-            );
+                assert!(
+                    result.is_ok(),
+                    "Failed for length {} at offset {}",
+                    len,
+                    offset
+                );
+                assert_eq!(result.unwrap(), len);
+                assert_eq!(
+                    &buf[0..len],
+                    &test_data[offset..offset + len],
+                    "Data mismatch for length {} at offset {}",
+                    len,
+                    offset
+                );
+            }
         }
     }
 
-    // Test reading with buffer smaller than requested length
+    // Test reading with a length greater than the buffer size
     #[test]
     fn test_read_var_buf_buffer_constraints() {
-        let test_data = create_network_test_data(50);
+        let test_data = create_network_test_data(MAX_VAR_BUF_SIZE + 20);
         let ctx = TcContext::new(test_data.clone());
-        let mut parser = Parser::default();
 
-        // Try to read more than buffer size
-        let mut small_buf = [0u8; 10];
-        let result = parser.read_var_buf(&ctx, &mut small_buf, 15);
+        // Try to read more than MAX_VAR_BUF_SIZE
+        let mut buf = [0u8; MAX_VAR_BUF_SIZE];
+        let result = Parser::read_var_buf_harness(&ctx, 0, MAX_VAR_BUF_SIZE + 10, &mut buf);
 
         assert!(result.is_ok());
-        // Should read only what fits in buffer
+        // Should read only what fits in the buffer
         let bytes_read = result.unwrap();
-        assert!(bytes_read <= 10, "Read more bytes than buffer size");
-        assert_eq!(&small_buf[0..bytes_read], &test_data[0..bytes_read]);
+        assert_eq!(
+            bytes_read, MAX_VAR_BUF_SIZE,
+            "Should only read up to buffer size"
+        );
+        assert_eq!(&buf[0..bytes_read], &test_data[0..bytes_read]);
     }
 }

@@ -78,9 +78,29 @@ async fn main() -> anyhow::Result<()> {
         prog.fd()?.try_clone()?
     };
 
-    let read_var_fd = {
-        let prog: &mut SchedClassifier =
-            ebpf.program_mut("read_var_buf_prog").unwrap().try_into()?;
+    let read_var_align_fd = {
+        let prog: &mut SchedClassifier = ebpf
+            .program_mut("read_var_buf_align_prog")
+            .unwrap()
+            .try_into()?;
+        prog.load()?;
+        prog.fd()?.try_clone()?
+    };
+
+    let read_var_chunked_fd = {
+        let prog: &mut SchedClassifier = ebpf
+            .program_mut("read_var_buf_chunked_prog")
+            .unwrap()
+            .try_into()?;
+        prog.load()?;
+        prog.fd()?.try_clone()?
+    };
+
+    let read_var_remainder_fd = {
+        let prog: &mut SchedClassifier = ebpf
+            .program_mut("read_var_buf_remainder_prog")
+            .unwrap()
+            .try_into()?;
         prog.load()?;
         prog.fd()?.try_clone()?
     };
@@ -93,9 +113,13 @@ async fn main() -> anyhow::Result<()> {
             .try_into()?;
         // Indices must match the eBPF constants
         const PROG_IDX_PARSER: u32 = 0;
-        const PROG_IDX_READ_VAR_BUF: u32 = 1;
+        const PROG_IDX_READ_VAR_BUF_ALIGN: u32 = 1;
+        const PROG_IDX_READ_VAR_BUF_CHUNKED: u32 = 2;
+        const PROG_IDX_READ_VAR_BUF_REMAINDER: u32 = 3;
         prog_array.set(PROG_IDX_PARSER, &parser_fd, 0)?;
-        prog_array.set(PROG_IDX_READ_VAR_BUF, &read_var_fd, 0)?;
+        prog_array.set(PROG_IDX_READ_VAR_BUF_ALIGN, &read_var_align_fd, 0)?;
+        prog_array.set(PROG_IDX_READ_VAR_BUF_CHUNKED, &read_var_chunked_fd, 0)?;
+        prog_array.set(PROG_IDX_READ_VAR_BUF_REMAINDER, &read_var_remainder_fd, 0)?;
     }
 
     info!("eBPF program attached. Waiting for events... Press Ctrl-C to exit.");
