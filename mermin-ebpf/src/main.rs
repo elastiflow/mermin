@@ -96,17 +96,11 @@ struct ParserOptions {
     /// The port number to use for Geneve tunnel detection
     /// Default is 6081 as per IANA assignment
     geneve_port: u16,
-
-    /// Current read offset from the start of the packet
-    offset: usize,
 }
 
 impl Default for ParserOptions {
     fn default() -> Self {
-        ParserOptions {
-            geneve_port: 6081,
-            offset: 0,
-        }
+        ParserOptions { geneve_port: 6081 }
     }
 }
 
@@ -115,6 +109,8 @@ impl Default for ParserOptions {
 struct Parser {
     // The header-type to parse next at 'offset'
     next_hdr: HeaderType,
+    // Current read offset from the start of the packet
+    offset: usize,
     // Flag to indicate a two-step read for variable-length data
     is_reading_var_buf: bool,
     // Configuration options for the parser
@@ -128,6 +124,7 @@ impl Parser {
     fn default() -> Self {
         Parser {
             next_hdr: HeaderType::Ethernet,
+            offset: 0,
             is_reading_var_buf: false,
             options: ParserOptions::default(),
             packet_meta: PacketMeta::default(),
@@ -138,6 +135,7 @@ impl Parser {
     fn with_options(options: ParserOptions) -> Self {
         Parser {
             next_hdr: HeaderType::Ethernet,
+            offset: 0,
             is_reading_var_buf: false,
             options,
             packet_meta: PacketMeta::default(),
@@ -147,16 +145,14 @@ impl Parser {
     // Calculate the L3 octet count (from current offset to end of packet)
     // This should be called at the start of L3 (IP) header parsing
     fn calc_l3_octet_count(&mut self, packet_len: u32) {
-        self.packet_meta.l3_octet_count = packet_len - self.options.offset as u32;
+        self.packet_meta.l3_octet_count = packet_len - self.offset as u32;
     }
 
     /// Parses the next header in the packet and updates the parser state accordingly.
     /// Returns an error if the header is not supported.
     fn parse_ethernet_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let eth_hdr: EthHdr = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
-        self.options.offset += EthHdr::LEN;
+        let eth_hdr: EthHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += EthHdr::LEN;
 
         // todo: Extract eth_hdr.src_addr and eth_hdr.dst_addr into src_mac_addr and dst_mac_addr fields
 
@@ -178,16 +174,14 @@ impl Parser {
     /// Parses the IPv4 header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_ipv4_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let ipv4_hdr: Ipv4Hdr = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
+        let ipv4_hdr: Ipv4Hdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let h_len = ipv4_hdr.ihl() as usize;
         if h_len < Ipv4Hdr::LEN {
             // basic sanity check
             return Err(Error::MalformedHeader);
         }
         self.calc_l3_octet_count(ctx.len());
-        self.options.offset += h_len;
+        self.offset += h_len;
 
         // policy: innermost IP header determines the flow IPs
         self.packet_meta.src_ipv4_addr = ipv4_hdr.src_addr;
@@ -216,11 +210,9 @@ impl Parser {
     /// Parses the IPv6 header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_ipv6_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let ipv6_hdr: Ipv6Hdr = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
+        let ipv6_hdr: Ipv6Hdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.calc_l3_octet_count(ctx.len());
-        self.options.offset += Ipv6Hdr::LEN;
+        self.offset += Ipv6Hdr::LEN;
 
         // policy: innermost IP header determines the flow IPs
         self.packet_meta.src_ipv6_addr = ipv6_hdr.src_addr;
@@ -261,10 +253,8 @@ impl Parser {
     /// Parses the TCP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
     fn parse_tcp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let tcp_hdr: TcpHdr = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
-        self.options.offset += TcpHdr::LEN;
+        let tcp_hdr: TcpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += TcpHdr::LEN;
 
         self.packet_meta.src_port = tcp_hdr.src;
         self.packet_meta.dst_port = tcp_hdr.dst;
@@ -276,10 +266,8 @@ impl Parser {
     /// Parses the UDP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
     fn parse_udp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let udp_hdr: UdpHdr = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
-        self.options.offset += UdpHdr::LEN;
+        let udp_hdr: UdpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += UdpHdr::LEN;
 
         self.packet_meta.src_port = udp_hdr.src;
         self.packet_meta.dst_port = udp_hdr.dst;
@@ -304,10 +292,8 @@ impl Parser {
     /// Returns an error if the header cannot be loaded.
     /// Note: ICMP does not use ports, so src_port and dst_port remain zero.
     fn parse_icmp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let _icmp_hdr: IcmpHdr = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
-        self.options.offset += IcmpHdr::LEN;
+        let _icmp_hdr: IcmpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += IcmpHdr::LEN;
 
         // ICMP does not use ports, so we leave src_port and dst_port as zero
         // TODO: extract and assign additional ICMP fields if needed (type, code, etc.)
@@ -318,10 +304,8 @@ impl Parser {
     /// Parses the AH IPv6-extension header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_ah_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let ah_hdr: AuthHdr = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
-        self.options.offset += AuthHdr::total_hdr_len(&ah_hdr);
+        let ah_hdr: AuthHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += AuthHdr::total_hdr_len(&ah_hdr);
         // TODO: Extract and set other AH fields
         self.next_hdr = HeaderType::Proto(ah_hdr.next_hdr());
         Ok(())
@@ -330,10 +314,8 @@ impl Parser {
     /// Parses the ESP IPv6-extension header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_esp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let _esp_hdr: Esp = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
-        self.options.offset += Esp::LEN; // Move offset to start of encrypted ESP payload
+        let _esp_hdr: Esp = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += Esp::LEN; // Move offset to start of encrypted ESP payload
         // TODO: Extract and set SPI and Sequence number
         self.next_hdr = HeaderType::StopProcessing; //ESP signals end of parsing headers
         Ok(())
@@ -342,10 +324,8 @@ impl Parser {
     /// Parses the Hop-by-Hop IPv6-extension header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_hop_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let hop_hdr: HopOptHdr = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
-        self.options.offset += hop_hdr.total_hdr_len(); // Move offset to start of next header
+        let hop_hdr: HopOptHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += hop_hdr.total_hdr_len(); // Move offset to start of next header
         self.next_hdr = HeaderType::Proto(hop_hdr.next_hdr);
 
         if hop_hdr.hdr_ext_len != 0 {
@@ -358,9 +338,7 @@ impl Parser {
     /// Parses the Geneve header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_geneve_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let geneve_hdr: GeneveHdr = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
+        let geneve_hdr: GeneveHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
 
         // Current version is 0. Packets with unknown version must be skipped
         let version = geneve_hdr.ver();
@@ -373,7 +351,7 @@ impl Parser {
             return Ok(());
         }
 
-        self.options.offset += geneve_hdr.total_hdr_len();
+        self.offset += geneve_hdr.total_hdr_len();
 
         let protocol_type = geneve_hdr.protocol_type();
         match protocol_type {
@@ -400,16 +378,13 @@ impl Parser {
         ctx: &TcContext,
         buffer: &[u8; MAX_VAR_BUF_SIZE],
     ) -> Result<Option<(usize, usize)>, Error> {
-        let gen_hdr: GenericRoute = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
+        let gen_hdr: GenericRoute = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let routing_type: RoutingHeaderType = RoutingHeaderType::from_u8(gen_hdr.type_);
 
         match routing_type {
             RoutingHeaderType::RplSourceRoute => {
-                let rpl_hdr: RplSourceRouteHeader = ctx
-                    .load(self.options.offset)
-                    .map_err(|_| Error::OutOfBounds)?;
+                let rpl_hdr: RplSourceRouteHeader =
+                    ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
                 let var_size = rpl_hdr.gen_route.total_hdr_len().saturating_sub(8) & MAX_SIZE_MASK; // Subtract 8 for fixed RPL header
                 if self.is_reading_var_buf {
                     debug!(ctx, "reading variable part of RPL routing header");
@@ -419,7 +394,7 @@ impl Parser {
                     // Could also process directly from buffer
 
                     // Advance the offset past the entire header
-                    self.options.offset += rpl_hdr.total_hdr_len();
+                    self.offset += rpl_hdr.total_hdr_len();
                     // Reset the flag and set next header type
                     self.is_reading_var_buf = false;
                     self.next_hdr = HeaderType::Proto(rpl_hdr.gen_route.next_hdr());
@@ -428,28 +403,23 @@ impl Parser {
                     // Set flag and instruct caller to perform a tail call.
                     self.is_reading_var_buf = true;
                     // The offset passed to the reader program should be after the fixed header.
-                    return Ok(Some((
-                        self.options.offset + RplSourceRouteHeader::LEN,
-                        var_size,
-                    )));
+                    return Ok(Some((self.offset + RplSourceRouteHeader::LEN, var_size)));
                 }
                 // No variable part, just advance offset and continue.
-                self.options.offset += RplSourceRouteHeader::LEN;
+                self.offset += RplSourceRouteHeader::LEN;
                 self.next_hdr = HeaderType::Proto(rpl_hdr.gen_route.next_hdr());
             }
             RoutingHeaderType::Type2 => {
-                let type2_hdr: Type2RoutingHeader = ctx
-                    .load(self.options.offset)
-                    .map_err(|_| Error::OutOfBounds)?;
-                self.options.offset += Type2RoutingHeader::LEN;
+                let type2_hdr: Type2RoutingHeader =
+                    ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+                self.offset += Type2RoutingHeader::LEN;
 
                 // TODO parse out and use addresses and other type2 fields
                 self.next_hdr = HeaderType::Proto(type2_hdr.gen_route.next_hdr());
             }
             RoutingHeaderType::SegmentRoutingHeader => {
-                let segment_hdr: SegmentRoutingHeader = ctx
-                    .load(self.options.offset)
-                    .map_err(|_| Error::OutOfBounds)?;
+                let segment_hdr: SegmentRoutingHeader =
+                    ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
                 let var_size = segment_hdr.segments_and_tlvs_len() & MAX_SIZE_MASK;
                 if self.is_reading_var_buf {
                     debug!(ctx, "reading variable part of segment routing header");
@@ -458,7 +428,7 @@ impl Parser {
                     // TODO process variable length part of segment routing header
 
                     // Advance the offset past the entire header
-                    self.options.offset += segment_hdr.total_hdr_len();
+                    self.offset += segment_hdr.total_hdr_len();
                     // Reset the flag and set next header type
                     self.is_reading_var_buf = false;
                     self.next_hdr = HeaderType::Proto(segment_hdr.gen_route.next_hdr());
@@ -467,19 +437,14 @@ impl Parser {
                     // Set flag and instruct caller to perform a tail call.
                     self.is_reading_var_buf = true;
                     // The offset passed to the reader program should be after the fixed header.
-                    return Ok(Some((
-                        self.options.offset + SegmentRoutingHeader::LEN,
-                        var_size,
-                    )));
+                    return Ok(Some((self.offset + SegmentRoutingHeader::LEN, var_size)));
                 }
                 // No variable part, just advance offset and continue.
-                self.options.offset += SegmentRoutingHeader::LEN;
+                self.offset += SegmentRoutingHeader::LEN;
                 self.next_hdr = HeaderType::Proto(segment_hdr.gen_route.next_hdr());
             }
             RoutingHeaderType::Crh16 | RoutingHeaderType::Crh32 => {
-                let crh_hdr: CrhHeader = ctx
-                    .load(self.options.offset)
-                    .map_err(|_| Error::OutOfBounds)?;
+                let crh_hdr: CrhHeader = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
                 let mut var_size = crh_hdr.sid_list_len() & MAX_SIZE_MASK;
                 if crh_hdr.gen_route.hdr_ext_len == 0 {
                     var_size = 0;
@@ -491,7 +456,7 @@ impl Parser {
                     // TODO process variable length part of CRH routing header
 
                     // Advance the offset past the entire header
-                    self.options.offset += crh_hdr.total_hdr_len();
+                    self.offset += crh_hdr.total_hdr_len();
                     // Reset the flag and set next header type
                     self.is_reading_var_buf = false;
                     self.next_hdr = HeaderType::Proto(crh_hdr.gen_route.next_hdr());
@@ -500,17 +465,17 @@ impl Parser {
                     // Set flag and instruct caller to perform a tail call.
                     self.is_reading_var_buf = true;
                     // The offset passed to the reader program should be after the fixed header.
-                    return Ok(Some((self.options.offset + CrhHeader::LEN, var_size)));
+                    return Ok(Some((self.offset + CrhHeader::LEN, var_size)));
                 }
                 // No variable part, just advance by LEN and continue.
-                self.options.offset += CrhHeader::LEN + 4; // + 4 padding bytes to account for 8-byte boundary
+                self.offset += CrhHeader::LEN + 4; // + 4 padding bytes to account for 8-byte boundary
                 self.next_hdr = HeaderType::Proto(crh_hdr.gen_route.next_hdr());
             }
             RoutingHeaderType::Experiment1
             | RoutingHeaderType::Experiment2
             | RoutingHeaderType::Reserved => {
                 self.next_hdr = HeaderType::Proto(gen_hdr.next_hdr);
-                self.options.offset += gen_hdr.total_hdr_len();
+                self.offset += gen_hdr.total_hdr_len();
             }
             _ => {
                 self.next_hdr = HeaderType::StopProcessing;
@@ -888,10 +853,7 @@ fn try_mermin(ctx: TcContext) -> i32 {
         };
 
         if result.is_err() {
-            error!(
-                &ctx,
-                "mermin: parser failed at offset {}", parser.options.offset
-            );
+            error!(&ctx, "mermin: parser failed at offset {}", parser.offset);
             parser.next_hdr = HeaderType::ErrorOccurred; // Mark error
         }
     }
@@ -1432,7 +1394,7 @@ mod tests {
     fn test_parser_initialization() {
         let parser = Parser::default();
 
-        assert_eq!(parser.options.offset, 0);
+        assert_eq!(parser.offset, 0);
         assert!(matches!(parser.next_hdr, HeaderType::Ethernet));
 
         // Check that packet_meta is initialized with default values
@@ -1446,17 +1408,14 @@ mod tests {
     // Test Parser with_options constructor
     #[test]
     fn test_parser_with_options() {
-        let custom_options = ParserOptions {
-            geneve_port: 8080,
-            offset: 0,
-        };
+        let custom_options = ParserOptions { geneve_port: 8080 };
         let parser = Parser::with_options(custom_options.clone());
 
         // Verify custom options are set
         assert_eq!(parser.options.geneve_port, 8080);
 
         // Verify other fields have default values
-        assert_eq!(parser.options.offset, 0);
+        assert_eq!(parser.offset, 0);
         assert!(matches!(parser.next_hdr, HeaderType::Ethernet));
 
         // Check that packet_meta is initialized with default values
@@ -1476,7 +1435,7 @@ mod tests {
     fn test_parser_calculate_l3_octet_count() {
         let mut parser = Parser::default();
 
-        parser.options.offset = 32;
+        parser.offset = 32;
         parser.calc_l3_octet_count(256);
 
         assert_eq!(parser.packet_meta.l3_octet_count, 224);
@@ -1492,7 +1451,7 @@ mod tests {
         let result = parser.parse_ethernet_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, EthHdr::LEN);
+        assert_eq!(parser.offset, EthHdr::LEN);
         assert!(matches!(parser.next_hdr, HeaderType::Ipv4));
     }
 
@@ -1507,7 +1466,7 @@ mod tests {
         let result = parser.parse_ipv4_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 20); // IPv4 header length (5 * 4 bytes)
+        assert_eq!(parser.offset, 20); // IPv4 header length (5 * 4 bytes)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
         assert_eq!(parser.packet_meta.src_ipv4_addr, [0xc0, 0xa8, 0x01, 0x01]); // 192.168.1.1
         assert_eq!(parser.packet_meta.dst_ipv4_addr, [0xc0, 0xa8, 0x01, 0x02]); // 192.168.1.2
@@ -1540,7 +1499,7 @@ mod tests {
         let result = parser.parse_ipv6_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, Ipv6Hdr::LEN);
+        assert_eq!(parser.offset, Ipv6Hdr::LEN);
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
         assert_eq!(
             parser.packet_meta.src_ipv6_addr,
@@ -1570,7 +1529,7 @@ mod tests {
         let result = parser.parse_tcp_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, TcpHdr::LEN);
+        assert_eq!(parser.offset, TcpHdr::LEN);
         assert_eq!(parser.packet_meta.src_port, [0x30, 0x39]); // 12345
         assert_eq!(parser.packet_meta.dst_port, [0x00, 0x50]); // 80
     }
@@ -1586,7 +1545,7 @@ mod tests {
         let result = parser.parse_udp_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, UdpHdr::LEN);
+        assert_eq!(parser.offset, UdpHdr::LEN);
         assert_eq!(parser.packet_meta.src_port, [0x30, 0x39]); // 12345
         assert_eq!(parser.packet_meta.dst_port, [0x00, 0x35]); // 53
         assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
@@ -1603,7 +1562,7 @@ mod tests {
         let result = parser.parse_udp_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, UdpHdr::LEN);
+        assert_eq!(parser.offset, UdpHdr::LEN);
         assert_eq!(parser.packet_meta.src_port, [0x30, 0x39]); // 12345
         assert_eq!(parser.packet_meta.dst_port, [0x17, 0xC1]); // 6081 (Geneve)
         assert!(matches!(parser.next_hdr, HeaderType::Geneve));
@@ -1620,7 +1579,7 @@ mod tests {
         let result = parser.parse_ah_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, AuthHdr::LEN);
+        assert_eq!(parser.offset, AuthHdr::LEN);
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1635,7 +1594,7 @@ mod tests {
         let result = parser.parse_ah_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, AuthHdr::LEN);
+        assert_eq!(parser.offset, AuthHdr::LEN);
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
@@ -1663,7 +1622,7 @@ mod tests {
         let result = parser.parse_esp_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, Esp::LEN);
+        assert_eq!(parser.offset, Esp::LEN);
         assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
     }
 
@@ -1691,7 +1650,7 @@ mod tests {
         let result = parser.parse_hop_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, HopOptHdr::LEN);
+        assert_eq!(parser.offset, HopOptHdr::LEN);
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1706,7 +1665,7 @@ mod tests {
         let result = parser.parse_hop_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, HopOptHdr::LEN);
+        assert_eq!(parser.offset, HopOptHdr::LEN);
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
@@ -1721,7 +1680,7 @@ mod tests {
         let result = parser.parse_hop_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 16); // 8 bytes base + 8 bytes extension (1 * 8)
+        assert_eq!(parser.offset, 16); // 8 bytes base + 8 bytes extension (1 * 8)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1749,7 +1708,7 @@ mod tests {
         let result = parser.parse_geneve_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, GeneveHdr::LEN); // No options, so offset is just the header length
+        assert_eq!(parser.offset, GeneveHdr::LEN); // No options, so offset is just the header length
         assert!(matches!(parser.next_hdr, HeaderType::Ipv4));
     }
 
@@ -1764,7 +1723,7 @@ mod tests {
         let result = parser.parse_geneve_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, GeneveHdr::LEN); // No options, so offset is just the header length
+        assert_eq!(parser.offset, GeneveHdr::LEN); // No options, so offset is just the header length
         assert!(matches!(parser.next_hdr, HeaderType::Ipv6));
     }
 
@@ -1779,7 +1738,7 @@ mod tests {
         let result = parser.parse_geneve_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, GeneveHdr::LEN); // No options, so offset is just the header length
+        assert_eq!(parser.offset, GeneveHdr::LEN); // No options, so offset is just the header length
         assert!(matches!(parser.next_hdr, HeaderType::Ethernet));
     }
 
@@ -1794,7 +1753,7 @@ mod tests {
         let result = parser.parse_geneve_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, GeneveHdr::LEN + 8); // Header length + 8 bytes of options
+        assert_eq!(parser.offset, GeneveHdr::LEN + 8); // Header length + 8 bytes of options
         assert!(matches!(parser.next_hdr, HeaderType::Ipv4));
     }
 
@@ -1809,7 +1768,7 @@ mod tests {
         let result = parser.parse_geneve_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, GeneveHdr::LEN); // No options, so offset is just the header length
+        assert_eq!(parser.offset, GeneveHdr::LEN); // No options, so offset is just the header length
         assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
     }
 
@@ -1837,7 +1796,7 @@ mod tests {
         let result = parser.parse_icmp_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, IcmpHdr::LEN);
+        assert_eq!(parser.offset, IcmpHdr::LEN);
         // ICMP doesn't use ports, so they should remain zero
         assert_eq!(parser.packet_meta.src_port, [0, 0]);
         assert_eq!(parser.packet_meta.dst_port, [0, 0]);
@@ -1870,7 +1829,7 @@ mod tests {
         let result = parser.parse_ipv4_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 20); // IPv4 header length (5 * 4 bytes)
+        assert_eq!(parser.offset, 20); // IPv4 header length (5 * 4 bytes)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Icmp)));
         assert_eq!(parser.packet_meta.src_ipv4_addr, [0xc0, 0xa8, 0x01, 0x01]); // 192.168.1.1
         assert_eq!(parser.packet_meta.dst_ipv4_addr, [0xc0, 0xa8, 0x01, 0x02]); // 192.168.1.2
@@ -1890,7 +1849,7 @@ mod tests {
         let result = parser.parse_ipv6_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, Ipv6Hdr::LEN);
+        assert_eq!(parser.offset, Ipv6Hdr::LEN);
         assert!(matches!(
             parser.next_hdr,
             HeaderType::Proto(IpProto::Ipv6Icmp)
@@ -1923,7 +1882,7 @@ mod tests {
         let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 24); // Type2 routing header length
+        assert_eq!(parser.offset, 24); // Type2 routing header length
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1939,7 +1898,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx, &buf);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 24); // Type2 routing header length
+        assert_eq!(parser.offset, 24); // Type2 routing header length
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
@@ -1972,7 +1931,7 @@ mod tests {
         buf[..len].copy_from_slice(&packet[start..start + len]);
         let result2 = parser.parse_routing_header(&ctx, &buf);
         assert!(result2.is_ok());
-        assert_eq!(parser.options.offset, 40); // RPL Source Route header length (8 + 32)
+        assert_eq!(parser.offset, 40); // RPL Source Route header length (8 + 32)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1987,7 +1946,7 @@ mod tests {
         let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 40); // RPL Source Route header length (8 + 32)
+        assert_eq!(parser.offset, 40); // RPL Source Route header length (8 + 32)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
@@ -2016,7 +1975,7 @@ mod tests {
         let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 40); // Segment Routing header length (8 + 32)
+        assert_eq!(parser.offset, 40); // Segment Routing header length (8 + 32)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -2031,7 +1990,7 @@ mod tests {
         let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 40); // Segment Routing header length (8 + 32)
+        assert_eq!(parser.offset, 40); // Segment Routing header length (8 + 32)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
@@ -2046,7 +2005,7 @@ mod tests {
         let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 24); // Minimum Segment Routing header length (8 + 16)
+        assert_eq!(parser.offset, 24); // Minimum Segment Routing header length (8 + 16)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Ipv6)));
     }
 
@@ -2077,7 +2036,7 @@ mod tests {
         let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 40);
+        assert_eq!(parser.offset, 40);
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -2094,7 +2053,7 @@ mod tests {
         let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 40);
+        assert_eq!(parser.offset, 40);
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
@@ -2120,7 +2079,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx, &buf);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 8); // Only fixed header
+        assert_eq!(parser.offset, 8); // Only fixed header
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -2135,7 +2094,7 @@ mod tests {
         let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
+        assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -2150,7 +2109,7 @@ mod tests {
         let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
+        assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
@@ -2165,7 +2124,7 @@ mod tests {
         let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
+        assert_eq!(parser.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -2196,7 +2155,7 @@ mod tests {
         let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
+        assert_eq!(parser.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -2211,7 +2170,7 @@ mod tests {
         let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
+        assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -2226,7 +2185,7 @@ mod tests {
         let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
+        assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
@@ -2241,7 +2200,7 @@ mod tests {
         let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
+        assert_eq!(parser.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -2272,7 +2231,7 @@ mod tests {
         let result = parse_rh_with_tailcall(&mut parser, &ctx, &packet);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 16);
+        assert_eq!(parser.offset, 16);
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
@@ -2298,7 +2257,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx, &buf);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 8); // Only fixed header and padding
+        assert_eq!(parser.offset, 8); // Only fixed header and padding
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -2324,7 +2283,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx, &buf);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 8); // Only fixed header and padding
+        assert_eq!(parser.offset, 8); // Only fixed header and padding
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
