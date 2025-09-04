@@ -1,14 +1,14 @@
 #![cfg_attr(not(test), no_main)]
 #![cfg_attr(not(test), no_std)]
 
-#[cfg(not(test))]
+#[cfg(not(feature = "test"))]
 use aya_ebpf::{
     bindings::TC_ACT_PIPE,
     macros::{classifier, map},
     maps::RingBuf,
     programs::TcContext,
 };
-#[cfg(not(test))]
+#[cfg(not(feature = "test"))]
 use aya_log_ebpf::{debug, error, warn};
 use mermin_common::{IpAddrType, PacketMeta};
 use network_types::{
@@ -28,7 +28,7 @@ use network_types::{
 };
 
 // todo: verify buffer size
-#[cfg(not(test))]
+#[cfg(not(feature = "test"))]
 #[map]
 static mut PACKETS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0); // 256 KB
 
@@ -41,7 +41,7 @@ enum HeaderType {
     Geneve,
     Proto(IpProto),
     StopProcessing, // Indicates parsing should terminate for flow key purposes
-    #[cfg(not(test))]
+    #[cfg(not(feature = "test"))]
     ErrorOccurred, // Indicates an error stopped parsing
 }
 
@@ -557,17 +557,16 @@ pub enum Error {
     Unsupported,
 }
 
-#[cfg(not(test))]
-const MAX_HEADER_PARSE_DEPTH: usize = 16;
-
-#[cfg(not(test))]
+#[cfg(not(feature = "test"))]
 #[classifier]
 pub fn mermin(ctx: TcContext) -> i32 {
     try_mermin(ctx).unwrap_or(TC_ACT_PIPE)
 }
 
-#[cfg(not(test))]
+#[cfg(not(feature = "test"))]
 fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
+    const MAX_HEADER_PARSE_DEPTH: usize = 16;
+
     let mut parser = Parser::default();
 
     debug!(&ctx, "mermin: parsing packet");
@@ -1094,7 +1093,6 @@ mod tests {
     //     assert_eq!(result, 0); // Or whatever your program should return
     // }
 
-    // Test Parser initialization
     #[test]
     fn test_parser_initialization() {
         let parser = Parser::default();
@@ -1110,7 +1108,6 @@ mod tests {
         assert_eq!(packet_meta.dst_port, [0, 0]);
     }
 
-    // Test Parser with_options constructor
     #[test]
     fn test_parser_with_options() {
         let custom_options = ParserOptions {
@@ -1149,7 +1146,6 @@ mod tests {
         assert_eq!(parser.packet_meta.l3_octet_count, 224);
     }
 
-    // Test parse_ethernet_header function
     #[test]
     fn test_parse_ethernet_header() {
         let mut parser = Parser::default();
@@ -1163,7 +1159,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Ipv4));
     }
 
-    // Test parse_ipv4_header function
     #[test]
     fn test_parse_ipv4_header() {
         let mut parser = Parser::default();
@@ -1181,7 +1176,6 @@ mod tests {
         assert_eq!(parser.packet_meta.proto, IpProto::Tcp); // TCP
     }
 
-    // Test parse_ipv4_header function with invalid header length
     #[test]
     fn test_parse_ipv4_header_invalid_length() {
         let mut parser = Parser::default();
@@ -1196,7 +1190,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // Test parse_ipv6_header function
     #[test]
     fn test_parse_ipv6_header() {
         let mut parser = Parser::default();
@@ -1226,7 +1219,6 @@ mod tests {
         assert_eq!(parser.packet_meta.proto, IpProto::Tcp); // TCP
     }
 
-    // Test parse_tcp_header function
     #[test]
     fn test_parse_tcp_header() {
         let mut parser = Parser::default();
@@ -1242,7 +1234,6 @@ mod tests {
         assert_eq!(parser.packet_meta.dst_port, [0x00, 0x50]); // 80
     }
 
-    // Test parse_udp_header function
     #[test]
     fn test_parse_udp_header() {
         let mut parser = Parser::default();
@@ -1259,7 +1250,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
     }
 
-    // Test parse_udp_header function with Geneve port
     #[test]
     fn test_parse_udp_header_geneve() {
         let mut parser = Parser::default();
@@ -1276,7 +1266,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Geneve));
     }
 
-    // Test parse_ah_header function mapping to TCP
     #[test]
     fn test_parse_ah_header_tcp() {
         let mut parser = Parser::default();
@@ -1291,7 +1280,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
-    // Test parse_ah_header function mapping to UDP
     #[test]
     fn test_parse_ah_header_udp() {
         let mut parser = Parser::default();
@@ -1306,7 +1294,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
-    // Test parse_ah_header with insufficient buffer (out of bounds)
     #[test]
     fn test_parse_ah_header_out_of_bounds() {
         let mut parser = Parser::default();
@@ -1319,7 +1306,6 @@ mod tests {
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
-    // Test parse_esp_header function
     #[test]
     fn test_parse_esp_header() {
         let mut parser = Parser::default();
@@ -1334,7 +1320,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
     }
 
-    // Test parse_esp_header with insufficient buffer (out of bounds)
     #[test]
     fn test_parse_esp_header_out_of_bounds() {
         let mut parser = Parser::default();
@@ -1347,7 +1332,6 @@ mod tests {
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
-    // Test parse_hop_header function mapping to TCP
     #[test]
     fn test_parse_hop_header_tcp() {
         let mut parser = Parser::default();
@@ -1362,7 +1346,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
-    // Test parse_hop_header function mapping to UDP
     #[test]
     fn test_parse_hop_header_udp() {
         let mut parser = Parser::default();
@@ -1377,7 +1360,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
-    // Test parse_hop_header with non-zero hdr_ext_len
     #[test]
     fn test_parse_hop_header_with_extension() {
         let mut parser = Parser::default();
@@ -1392,7 +1374,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
-    // Test parse_hop_header with insufficient buffer (out of bounds)
     #[test]
     fn test_parse_hop_header_out_of_bounds() {
         let mut parser = Parser::default();
@@ -1405,7 +1386,6 @@ mod tests {
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
-    // Test parse_geneve_header function with IPv4 protocol type
     #[test]
     fn test_parse_geneve_header_ipv4() {
         let mut parser = Parser::default();
@@ -1420,7 +1400,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Ipv4));
     }
 
-    // Test parse_geneve_header function with IPv6 protocol type
     #[test]
     fn test_parse_geneve_header_ipv6() {
         let mut parser = Parser::default();
@@ -1435,7 +1414,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Ipv6));
     }
 
-    // Test parse_geneve_header function with Ethernet protocol type
     #[test]
     fn test_parse_geneve_header_ethernet() {
         let mut parser = Parser::default();
@@ -1450,7 +1428,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Ethernet));
     }
 
-    // Test parse_geneve_header function with options
     #[test]
     fn test_parse_geneve_header_with_options() {
         let mut parser = Parser::default();
@@ -1465,7 +1442,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Ipv4));
     }
 
-    // Test parse_geneve_header function with unsupported protocol type
     #[test]
     fn test_parse_geneve_header_unsupported_protocol() {
         let mut parser = Parser::default();
@@ -1480,7 +1456,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
     }
 
-    // Test parse_geneve_header with insufficient buffer (out of bounds)
     #[test]
     fn test_parse_geneve_header_out_of_bounds() {
         let mut parser = Parser::default();
@@ -1493,7 +1468,6 @@ mod tests {
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
-    // Test parse_icmp_header function
     #[test]
     fn test_parse_icmp_header() {
         let mut parser = Parser::default();
@@ -1511,7 +1485,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
     }
 
-    // Test parse_icmp_header with insufficient buffer (out of bounds)
     #[test]
     fn test_parse_icmp_header_out_of_bounds() {
         let mut parser = Parser::default();
@@ -1524,7 +1497,6 @@ mod tests {
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
-    // Test IPv4 header parsing with ICMP protocol
     #[test]
     fn test_parse_ipv4_header_with_icmp() {
         let mut parser = Parser::default();
@@ -1544,7 +1516,6 @@ mod tests {
         assert_eq!(parser.packet_meta.proto, IpProto::Icmp); // ICMP
     }
 
-    // Test IPv6 header parsing with ICMPv6 protocol
     #[test]
     fn test_parse_ipv6_header_with_icmpv6() {
         let mut parser = Parser::default();
@@ -1579,7 +1550,6 @@ mod tests {
         assert_eq!(parser.packet_meta.proto, IpProto::Ipv6Icmp); // ICMPv6
     }
 
-    // Test parse_routing_header function with Type2 routing header
     #[test]
     fn test_parse_routing_header_type2_tcp() {
         let mut parser = Parser::default();
@@ -1594,7 +1564,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
-    // Test parse_routing_header function with Type2 routing header mapping to UDP
     #[test]
     fn test_parse_routing_header_type2_udp() {
         let mut parser = Parser::default();
@@ -1609,7 +1578,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
-    // Test parse_routing_header function with Type2 routing header with insufficient buffer
     #[test]
     fn test_parse_routing_header_type2_out_of_bounds() {
         let mut parser = Parser::default();
@@ -1622,7 +1590,6 @@ mod tests {
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
-    // Test parse_routing_header function with RPL Source Route header
     #[test]
     fn test_parse_routing_header_rpl_source_route_tcp() {
         let mut parser = Parser::default();
@@ -1637,7 +1604,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
-    // Test parse_routing_header function with RPL Source Route header mapping to UDP
     #[test]
     fn test_parse_routing_header_rpl_source_route_udp() {
         let mut parser = Parser::default();
@@ -1652,7 +1618,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
-    // Test parse_routing_header function with RPL Source Route header with insufficient buffer
     #[test]
     fn test_parse_routing_header_rpl_source_route_out_of_bounds() {
         let mut parser = Parser::default();
@@ -1665,7 +1630,6 @@ mod tests {
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
-    // Test parse_routing_header function with Segment Routing Header mapping to TCP
     #[test]
     fn test_parse_routing_header_segment_routing_tcp() {
         let mut parser = Parser::default();
@@ -1680,7 +1644,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
-    // Test parse_routing_header function with Segment Routing Header mapping to UDP
     #[test]
     fn test_parse_routing_header_segment_routing_udp() {
         let mut parser = Parser::default();
@@ -1695,7 +1658,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
-    // Test parse_routing_header function with minimum valid Segment Routing Header
     #[test]
     fn test_parse_routing_header_segment_routing_min() {
         let mut parser = Parser::default();
@@ -1710,7 +1672,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Ipv6)));
     }
 
-    // Test parse_routing_header function with Segment Routing Header with insufficient buffer
     #[test]
     fn test_parse_routing_header_segment_routing_out_of_bounds() {
         let mut parser = Parser::default();
@@ -1723,7 +1684,6 @@ mod tests {
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
-    // Test Segment Routing Header edge case with maximum segments left
     #[test]
     fn test_parse_routing_header_segment_routing_max_segments_left() {
         let mut parser = Parser::default();
@@ -1740,7 +1700,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
-    // Test Segment Routing Header with different flag values
     #[test]
     fn test_parse_routing_header_segment_routing_flags() {
         let mut parser = Parser::default();
@@ -1757,7 +1716,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
-    // Test Segment Routing Header with zero segments (edge case)
     #[test]
     fn test_parse_routing_header_segment_routing_zero_hdr_ext_len() {
         let mut parser = Parser::default();
@@ -1782,7 +1740,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
-    // Test parse_routing_header function with CRH-16 header mapping to TCP
     #[test]
     fn test_parse_routing_header_crh16_tcp() {
         let mut parser = Parser::default();
@@ -1797,7 +1754,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
-    // Test parse_routing_header function with CRH-16 header mapping to UDP
     #[test]
     fn test_parse_routing_header_crh16_udp() {
         let mut parser = Parser::default();
@@ -1812,7 +1768,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
-    // Test parse_routing_header function with CRH-16 header with SIDs
     #[test]
     fn test_parse_routing_header_crh16_with_sids() {
         let mut parser = Parser::default();
@@ -1827,7 +1782,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
-    // Test parse_routing_header function with CRH-16 header with insufficient buffer
     #[test]
     fn test_parse_routing_header_crh16_out_of_bounds() {
         let mut parser = Parser::default();
@@ -1840,7 +1794,6 @@ mod tests {
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
-    // Test CRH-16 Header edge case with maximum segments left
     #[test]
     fn test_parse_routing_header_crh16_max_segments_left() {
         let mut parser = Parser::default();
@@ -1857,7 +1810,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
-    // Test parse_routing_header function with CRH-32 header mapping to TCP
     #[test]
     fn test_parse_routing_header_crh32_tcp() {
         let mut parser = Parser::default();
@@ -1872,7 +1824,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
-    // Test parse_routing_header function with CRH-32 header mapping to UDP
     #[test]
     fn test_parse_routing_header_crh32_udp() {
         let mut parser = Parser::default();
@@ -1887,7 +1838,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
-    // Test parse_routing_header function with CRH-32 header with SIDs
     #[test]
     fn test_parse_routing_header_crh32_with_sids() {
         let mut parser = Parser::default();
@@ -1902,7 +1852,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
-    // Test parse_routing_header function with CRH-32 header with insufficient buffer
     #[test]
     fn test_parse_routing_header_crh32_out_of_bounds() {
         let mut parser = Parser::default();
@@ -1915,7 +1864,6 @@ mod tests {
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
-    // Test CRH-32 Header edge case with maximum segments left
     #[test]
     fn test_parse_routing_header_crh32_max_segments_left() {
         let mut parser = Parser::default();
@@ -1932,7 +1880,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
-    // Test CRH-16 with zero hdr_ext_len (minimum valid header)
     #[test]
     fn test_parse_routing_header_crh16_zero_hdr_ext_len() {
         let mut parser = Parser::default();
@@ -1957,7 +1904,6 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
-    // Test CRH-32 with zero hdr_ext_len (minimum valid header)
     #[test]
     fn test_parse_routing_header_crh32_zero_hdr_ext_len() {
         let mut parser = Parser::default();
@@ -2018,7 +1964,6 @@ mod tests {
         data
     }
 
-    // Test read_var_buf with various odd lengths - comprehensive testing
     #[test]
     fn test_read_var_buf_odd_lengths() {
         let test_lengths = [
@@ -2053,7 +1998,6 @@ mod tests {
         }
     }
 
-    // Test big endian conversion correctness for network data
     #[test]
     fn test_read_var_buf_big_endian_validation() {
         // Create test data with known big endian patterns
@@ -2090,7 +2034,6 @@ mod tests {
         }
     }
 
-    // Test network protocol headers with realistic data patterns
     #[test]
     fn test_read_var_buf_network_headers() {
         // Simulate reading various network headers with odd sizes
@@ -2140,7 +2083,6 @@ mod tests {
         }
     }
 
-    // Test multi-byte value reading across chunk boundaries
     #[test]
     fn test_read_var_buf_chunk_boundary_values() {
         // Test reading values that span chunk boundaries in the implementation
@@ -2180,7 +2122,6 @@ mod tests {
         }
     }
 
-    // Test reading with buffer smaller than requested length
     #[test]
     fn test_read_var_buf_buffer_constraints() {
         let test_data = create_network_test_data(50);

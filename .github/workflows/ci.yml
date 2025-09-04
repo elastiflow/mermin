@@ -6,7 +6,7 @@ concurrency:
 on:
   pull_request:
   push:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   fmt:
@@ -89,7 +89,7 @@ jobs:
         run: cargo test -r
 
       - name: Run eBPF tests
-        run: cargo test -r -p mermin-ebpf
+        run: cargo test -r -p mermin-ebpf --features test
 
       - name: Run integration tests
         run: |
