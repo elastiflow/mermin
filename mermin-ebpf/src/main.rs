@@ -396,13 +396,16 @@ impl Parser {
         ctx: &TcContext,
         buffer: &[u8; MAX_VAR_BUF_SIZE],
     ) -> Result<Option<(usize, usize)>, Error> {
-        let gen_hdr: GenericRoute = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        let gen_hdr: GenericRoute = ctx
+            .load(self.options.offset)
+            .map_err(|_| Error::OutOfBounds)?;
         let routing_type: RoutingHeaderType = RoutingHeaderType::from_u8(gen_hdr.type_);
 
         match routing_type {
             RoutingHeaderType::RplSourceRoute => {
-                let rpl_hdr: RplSourceRouteHeader =
-                    ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+                let rpl_hdr: RplSourceRouteHeader = ctx
+                    .load(self.options.offset)
+                    .map_err(|_| Error::OutOfBounds)?;
                 let var_size = rpl_hdr.gen_route.total_hdr_len().saturating_sub(8) & MAX_SIZE_MASK; // Subtract 8 for fixed RPL header
                 if self.is_reading_var_buf {
                     debug!(ctx, "reading variable part of RPL routing header");
@@ -412,7 +415,7 @@ impl Parser {
                     // Could also process directly from buffer
 
                     // Advance the offset past the entire header
-                    self.offset += rpl_hdr.total_hdr_len();
+                    self.options.offset += rpl_hdr.total_hdr_len();
                     // Reset the flag and set next header type
                     self.is_reading_var_buf = false;
                     self.next_hdr = HeaderType::Proto(rpl_hdr.gen_route.next_hdr());
@@ -421,10 +424,13 @@ impl Parser {
                     // Set flag and instruct caller to perform a tail call.
                     self.is_reading_var_buf = true;
                     // The offset passed to the reader program should be after the fixed header.
-                    return Ok(Some((self.offset + RplSourceRouteHeader::LEN, var_size)));
+                    return Ok(Some((
+                        self.options.offset + RplSourceRouteHeader::LEN,
+                        var_size,
+                    )));
                 }
                 // No variable part, just advance offset and continue.
-                self.offset += RplSourceRouteHeader::LEN;
+                self.options.offset += RplSourceRouteHeader::LEN;
                 self.next_hdr = HeaderType::Proto(rpl_hdr.gen_route.next_hdr());
             }
             RoutingHeaderType::Type2 => {
@@ -437,8 +443,9 @@ impl Parser {
                 self.next_hdr = HeaderType::Proto(type2_hdr.gen_route.next_hdr());
             }
             RoutingHeaderType::SegmentRoutingHeader => {
-                let segment_hdr: SegmentRoutingHeader =
-                    ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+                let segment_hdr: SegmentRoutingHeader = ctx
+                    .load(self.options.offset)
+                    .map_err(|_| Error::OutOfBounds)?;
                 let var_size = segment_hdr.segments_and_tlvs_len() & MAX_SIZE_MASK;
                 if self.is_reading_var_buf {
                     debug!(ctx, "reading variable part of segment routing header");
@@ -447,7 +454,7 @@ impl Parser {
                     // TODO process variable length part of segment routing header
 
                     // Advance the offset past the entire header
-                    self.offset += segment_hdr.total_hdr_len();
+                    self.options.offset += segment_hdr.total_hdr_len();
                     // Reset the flag and set next header type
                     self.is_reading_var_buf = false;
                     self.next_hdr = HeaderType::Proto(segment_hdr.gen_route.next_hdr());
@@ -456,14 +463,19 @@ impl Parser {
                     // Set flag and instruct caller to perform a tail call.
                     self.is_reading_var_buf = true;
                     // The offset passed to the reader program should be after the fixed header.
-                    return Ok(Some((self.offset + SegmentRoutingHeader::LEN, var_size)));
+                    return Ok(Some((
+                        self.options.offset + SegmentRoutingHeader::LEN,
+                        var_size,
+                    )));
                 }
                 // No variable part, just advance offset and continue.
-                self.offset += SegmentRoutingHeader::LEN;
+                self.options.offset += SegmentRoutingHeader::LEN;
                 self.next_hdr = HeaderType::Proto(segment_hdr.gen_route.next_hdr());
             }
             RoutingHeaderType::Crh16 | RoutingHeaderType::Crh32 => {
-                let crh_hdr: CrhHeader = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+                let crh_hdr: CrhHeader = ctx
+                    .load(self.options.offset)
+                    .map_err(|_| Error::OutOfBounds)?;
                 let mut var_size = crh_hdr.sid_list_len() & MAX_SIZE_MASK;
                 if crh_hdr.gen_route.hdr_ext_len == 0 {
                     var_size = 0;
@@ -475,7 +487,7 @@ impl Parser {
                     // TODO process variable length part of CRH routing header
 
                     // Advance the offset past the entire header
-                    self.offset += crh_hdr.total_hdr_len();
+                    self.options.offset += crh_hdr.total_hdr_len();
                     // Reset the flag and set next header type
                     self.is_reading_var_buf = false;
                     self.next_hdr = HeaderType::Proto(crh_hdr.gen_route.next_hdr());
@@ -484,17 +496,17 @@ impl Parser {
                     // Set flag and instruct caller to perform a tail call.
                     self.is_reading_var_buf = true;
                     // The offset passed to the reader program should be after the fixed header.
-                    return Ok(Some((self.offset + CrhHeader::LEN, var_size)));
+                    return Ok(Some((self.options.offset + CrhHeader::LEN, var_size)));
                 }
                 // No variable part, just advance by LEN and continue.
-                self.offset += CrhHeader::LEN + 4; // + 4 padding bytes to account for 8-byte boundary
+                self.options.offset += CrhHeader::LEN + 4; // + 4 padding bytes to account for 8-byte boundary
                 self.next_hdr = HeaderType::Proto(crh_hdr.gen_route.next_hdr());
             }
             RoutingHeaderType::Experiment1
             | RoutingHeaderType::Experiment2
             | RoutingHeaderType::Reserved => {
                 self.next_hdr = HeaderType::Proto(gen_hdr.next_hdr);
-                self.offset += gen_hdr.total_hdr_len();
+                self.options.offset += gen_hdr.total_hdr_len();
             }
             _ => {
                 self.next_hdr = HeaderType::StopProcessing;
@@ -1956,7 +1968,7 @@ mod tests {
         buf[..len].copy_from_slice(&packet[start..start + len]);
         let result2 = parser.parse_routing_header(&ctx, &buf);
         assert!(result2.is_ok());
-        assert_eq!(parser.offset, 40); // RPL Source Route header length (8 + 32)
+        assert_eq!(parser.options.offset, 40); // RPL Source Route header length (8 + 32)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
