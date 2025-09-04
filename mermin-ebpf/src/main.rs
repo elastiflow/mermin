@@ -69,9 +69,13 @@ static mut TAIL_CALL_STATE: PerCpuArray<TailCallState> = PerCpuArray::with_max_e
 static mut PROG_ARRAY: ProgramArray = ProgramArray::with_max_entries(4, 0);
 
 // Indexes for the program array
+#[allow(dead_code)]
 const PROG_IDX_PARSER: u32 = 0;
+#[allow(dead_code)]
 const PROG_IDX_READ_VAR_BUF_ALIGN: u32 = 1;
+#[allow(dead_code)]
 const PROG_IDX_READ_VAR_BUF_CHUNKED: u32 = 2;
+#[allow(dead_code)]
 const PROG_IDX_READ_VAR_BUF_REMAINDER: u32 = 3;
 
 // Defines what kind of header we expect to process in the current iteration.
@@ -1931,7 +1935,7 @@ mod tests {
         let packet = create_type2_routing_test_packet(IpProto::Udp);
         let ctx = TcContext::new(packet);
 
-        let mut buf = [0u8; MAX_VAR_BUF_SIZE];
+        let buf = [0u8; MAX_VAR_BUF_SIZE];
         let result = parser.parse_routing_header(&ctx, &buf);
 
         assert!(result.is_ok());
@@ -2290,7 +2294,7 @@ mod tests {
 
         let ctx = TcContext::new(packet);
 
-        let mut buf = [0u8; MAX_VAR_BUF_SIZE];
+        let buf = [0u8; MAX_VAR_BUF_SIZE];
         let result = parser.parse_routing_header(&ctx, &buf);
 
         assert!(result.is_ok());
@@ -2316,7 +2320,7 @@ mod tests {
 
         let ctx = TcContext::new(packet);
 
-        let mut buf = [0u8; MAX_VAR_BUF_SIZE];
+        let buf = [0u8; MAX_VAR_BUF_SIZE];
         let result = parser.parse_routing_header(&ctx, &buf);
 
         assert!(result.is_ok());
