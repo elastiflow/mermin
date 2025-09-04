@@ -63,9 +63,6 @@ struct Parser {
     offset: usize,
     // The header-type to parse next at 'offset'
     next_hdr: HeaderType,
-    // Configuration options for the parser
-    options: ParserOptions,
-
     // Information for building flow records (prioritizes innermost headers).
     // These fields will be updated as we parse deeper or encounter encapsulations.
     packet_meta: PacketMeta,
@@ -76,17 +73,6 @@ impl Parser {
         Parser {
             offset: 0,
             next_hdr: HeaderType::Ethernet,
-            options: ParserOptions::default(),
-            packet_meta: PacketMeta::default(),
-        }
-    }
-
-    #[allow(dead_code)]
-    fn with_options(options: ParserOptions) -> Self {
-        Parser {
-            offset: 0,
-            next_hdr: HeaderType::Ethernet,
-            options,
             packet_meta: PacketMeta::default(),
         }
     }
@@ -214,7 +200,7 @@ impl Parser {
 
     /// Parses the UDP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
-    fn parse_udp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+    fn parse_udp_header(&mut self, ctx: &TcContext, geneve_port: u16) -> Result<(), Error> {
         let udp_hdr: UdpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += UdpHdr::LEN;
 
@@ -223,10 +209,10 @@ impl Parser {
 
         // IANA has assigned port 6081 as the fixed well-known destination port for Geneve.
         // Although the well-known value should be used by default, it is RECOMMENDED that implementations make this configurable.
-        if udp_hdr.dst_port() == self.options.geneve_port {
+        if udp_hdr.dst_port() == geneve_port {
             debug!(
                 ctx,
-                "UDP packet with destination port {} (Geneve) detected", self.options.geneve_port
+                "UDP packet with destination port {} (Geneve) detected", geneve_port
             );
             self.next_hdr = HeaderType::Geneve;
         } else {
@@ -541,6 +527,7 @@ pub fn mermin(ctx: TcContext) -> i32 {
 #[cfg(not(test))]
 fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
     let mut parser = Parser::default();
+    let options = ParserOptions::default();
 
     debug!(&ctx, "mermin: parsing packet");
 
@@ -551,7 +538,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Ipv6 => parser.parse_ipv6_header(&ctx),
             HeaderType::Geneve => parser.parse_geneve_header(&ctx),
             HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx),
-            HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx),
+            HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx, options.geneve_port),
             HeaderType::Proto(IpProto::HopOpt) => parser.parse_hop_header(&ctx),
             HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx),
@@ -654,6 +641,7 @@ mod tests {
     extern crate alloc;
 
     use alloc::{vec, vec::Vec};
+    use core::default;
 
     use super::*;
 
@@ -1083,10 +1071,10 @@ mod tests {
     #[test]
     fn test_parser_with_options() {
         let custom_options = ParserOptions { geneve_port: 8080 };
-        let parser = Parser::with_options(custom_options.clone());
+        let parser = Parser::default();
 
         // Verify custom options are set
-        assert_eq!(parser.options.geneve_port, 8080);
+        assert_eq!(custom_options.geneve_port, 8080);
 
         // Verify other fields have default values
         assert_eq!(parser.offset, 0);
@@ -1101,8 +1089,8 @@ mod tests {
 
         // Test with default port as well
         let default_options = ParserOptions::default();
-        let parser_default = Parser::with_options(default_options);
-        assert_eq!(parser_default.options.geneve_port, 6081);
+        let parser_default = Parser::default();
+        assert_eq!(default_options.geneve_port, 6081);
     }
 
     #[test]
@@ -1216,7 +1204,7 @@ mod tests {
         let packet = create_udp_test_packet();
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_udp_header(&ctx);
+        let result = parser.parse_udp_header(&ctx, 6081);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, UdpHdr::LEN);
@@ -1233,7 +1221,7 @@ mod tests {
         let packet = create_udp_geneve_test_packet();
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_udp_header(&ctx);
+        let result = parser.parse_udp_header(&ctx, 6081);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, UdpHdr::LEN);
