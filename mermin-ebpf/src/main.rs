@@ -384,10 +384,10 @@ impl Parser {
                     ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
                 let var_size = rpl_hdr.gen_route.total_hdr_len().saturating_sub(8) & MAX_SIZE_MASK; // Subtract 8 for fixed RPL header
                 if self.is_reading_var_buf {
-                    debug!(ctx, "reading variable part of segment routing header");
+                    debug!(ctx, "reading variable part of RPL routing header");
 
-                    let _segments = &buffer[..var_size];
-                    // TODO process variable length part of segment routing header from segments buffer
+                    let _addrs = &buffer[..var_size];
+                    // TODO process variable length part of RPL routing header from segments buffer
                     // Could also process directly from buffer
 
                     // Advance the offset past the entire header
@@ -447,10 +447,10 @@ impl Parser {
                     var_size = 0;
                 }
                 if self.is_reading_var_buf {
-                    debug!(ctx, "reading variable part of segment routing header");
+                    debug!(ctx, "reading variable part of CRH routing header");
 
                     let _sids = &buffer[..var_size];
-                    // TODO process variable length part of segment routing header
+                    // TODO process variable length part of CRH routing header
 
                     // Advance the offset past the entire header
                     self.offset += crh_hdr.total_hdr_len();
