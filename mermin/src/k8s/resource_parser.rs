@@ -4,11 +4,18 @@ use std::{
 };
 
 use anyhow::Result;
-use k8s_openapi::api::core::v1::Pod;
+use k8s_openapi::api::{core::v1::Pod, networking::v1::NetworkPolicySpec};
 use mermin_common::{IpAddrType, PacketMeta};
 use network_types::ip::IpProto;
 
 use crate::k8s::{Attributor, EnrichedInfo, FlowContext, FlowDirection, K8sObjectMeta};
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub struct NetworkPolicy {
+    pub policy: K8sObjectMeta,
+    pub spec: NetworkPolicySpec,
+}
 
 #[derive(Debug, Default)]
 #[allow(dead_code)]
@@ -16,7 +23,7 @@ pub struct EnrichedFlowData {
     pub id: String,
     pub source: Option<EnrichedInfo>,
     pub destination: Option<EnrichedInfo>,
-    pub network_policies: Option<Vec<K8sObjectMeta>>,
+    pub network_policies: Option<Vec<NetworkPolicy>>,
 }
 
 #[derive(Debug)]
@@ -130,7 +137,7 @@ impl<'a> PacketEnricher<'a> {
     ) -> Result<(
         Option<EnrichedInfo>,
         Option<EnrichedInfo>,
-        Option<Vec<K8sObjectMeta>>,
+        Option<Vec<NetworkPolicy>>,
     )> {
         let applicable_policies = self.evaluate_network_policies(flow_sides, pod_objects)?;
         let source_info = self
@@ -148,7 +155,7 @@ impl<'a> PacketEnricher<'a> {
         &self,
         flow_sides: &FlowSides,
         pod_objects: &PodResolution,
-    ) -> Result<Option<Vec<K8sObjectMeta>>> {
+    ) -> Result<Option<Vec<NetworkPolicy>>> {
         let mut all_matching_policies = Vec::new();
 
         // Evaluate ingress rules if a destination pod exists.
@@ -177,8 +184,9 @@ impl<'a> PacketEnricher<'a> {
             Ok(None)
         } else {
             let mut seen = std::collections::HashSet::new();
-            all_matching_policies
-                .retain(|policy| seen.insert((policy.name.clone(), policy.namespace.clone())));
+            all_matching_policies.retain(|policy| {
+                seen.insert((policy.policy.name.clone(), policy.policy.namespace.clone()))
+            });
             Ok(Some(all_matching_policies))
         }
     }
@@ -190,7 +198,7 @@ impl<'a> PacketEnricher<'a> {
         direction: FlowDirection,
         flow_sides: &FlowSides,
         pod_objects: &PodResolution,
-    ) -> Result<Vec<K8sObjectMeta>> {
+    ) -> Result<Vec<NetworkPolicy>> {
         let namespace = policy_pod
             .metadata
             .namespace
@@ -205,7 +213,10 @@ impl<'a> PacketEnricher<'a> {
 
         Ok(matching_policies
             .iter()
-            .map(|p| K8sObjectMeta::from(p.as_ref()))
+            .map(|p| NetworkPolicy {
+                policy: K8sObjectMeta::from(p.as_ref()),
+                spec: p.spec.clone().unwrap_or_default(),
+            })
             .collect())
     }
 
