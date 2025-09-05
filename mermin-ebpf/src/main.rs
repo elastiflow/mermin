@@ -462,91 +462,27 @@ impl Parser {
     /// # Returns
     /// `Ok(bytes_read)` on success, where `bytes_read` is the number of bytes actually read.
     /// `Err(Error)` if reading bytes from the context fails.
-    #[allow(dead_code)] // Remove once we start using read_var_buf
-    fn read_var_buf<const N: usize>(
+    #[allow(dead_code)]
+    #[inline(always)]
+    const fn read_var_buf<const N: usize>(
         &mut self,
         ctx: &TcContext,
         buf: &mut [u8; N],
         len: usize,
     ) -> Result<usize, Error> {
-        let mut bytes_read_total = 0;
-
-        // Helper function to read individual bytes for alignment
-        let read_single_byte = |ctx: &TcContext,
-                                buf: &mut [u8; N],
-                                len: usize,
-                                bytes_read_total: &mut usize,
-                                offset: &mut usize|
-         -> Result<bool, Error> {
-            if *bytes_read_total >= len || (*bytes_read_total + 1) > N {
-                return Ok(false);
-            }
-
-            let byte: u8 = ctx.load(*offset).map_err(|_| Error::MalformedHeader)?;
-            buf[*bytes_read_total] = byte;
-            *bytes_read_total += 1;
-            *offset += 1;
-            Ok(true)
-        };
-
-        // Helper function to read 16-byte chunks
-        let read_sixteen_byte_chunk = |ctx: &TcContext,
-                                       buf: &mut [u8; N],
-                                       len: usize,
-                                       bytes_read_total: &mut usize,
-                                       offset: &mut usize|
-         -> Result<bool, Error> {
-            if *bytes_read_total >= len
-                || (len.saturating_sub(*bytes_read_total)) < 16
-                || (*bytes_read_total + 16) > N
-            {
-                return Ok(false);
-            }
-
-            let bytes: u128 = ctx.load(*offset).map_err(|_| Error::OutOfBounds)?;
-            buf[*bytes_read_total..*bytes_read_total + 16].copy_from_slice(&bytes.to_ne_bytes());
-            *bytes_read_total += 16;
-            *offset += 16;
-            Ok(true)
-        };
-
-        // Align to 16-byte boundary by reading individual bytes
-        let mut parse_offset = self.options.offset;
-        let mut alignment = self.options.offset % 16;
-        for _ in 0..16 {
-            if alignment == 16 {
-                break;
-            }
-            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut parse_offset)? {
-                break;
-            }
-            alignment += 1;
+        let pkt_len = ctx.len() as usize;
+        if self.options.offset >= pkt_len {
+            return Ok(0);
         }
-
-        // Read 16-byte chunks in batches (4 batches of 16 chunks = 1024 bytes total)
-        // The main idea is we can keep adding loops to read u128s until we reach our desired supported header size
-        for _ in 0..4 {
-            for _ in 0..16 {
-                if !read_sixteen_byte_chunk(
-                    ctx,
-                    buf,
-                    len,
-                    &mut bytes_read_total,
-                    &mut parse_offset,
-                )? {
-                    break;
-                }
-            }
+        let remaining = pkt_len - self.options.offset;
+        let to_copy = core::cmp::min(len, core::cmp::min(N, remaining));
+        if to_copy == 0 {
+            return Ok(0);
         }
-
-        // Read remaining bytes as individual bytes
-        for _ in 0..16 {
-            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut parse_offset)? {
-                break;
-            }
+        match ctx.load_bytes(self.options.offset, &mut buf[..to_copy]) {
+            Ok(n) => Ok(n),
+            Err(_) => Err(Error::OutOfBounds),
         }
-
-        Ok(bytes_read_total)
     }
 }
 
@@ -658,6 +594,16 @@ mod host_test_shim {
             let ptr = unsafe { self.data.as_ptr().add(offset) as *const T };
             let value = unsafe { *ptr };
             Ok(value)
+        }
+
+        pub fn load_bytes(&self, offset: usize, buf: &mut [u8]) -> Result<usize, ()> {
+            if offset >= self.data.len() {
+                return Err(());
+            }
+            let end = core::cmp::min(self.data.len(), offset + buf.len());
+            let n = end - offset;
+            buf[..n].copy_from_slice(&self.data[offset..end]);
+            Ok(n)
         }
     }
 
