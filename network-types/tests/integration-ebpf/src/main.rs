@@ -395,7 +395,7 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
                 _ => return Err(TC_ACT_SHOT),
             };
 
-            if crh_header.generic_route.type_ != expected_type {
+            if crh_header.gen_route.type_ != expected_type {
                 return Err(TC_ACT_SHOT);
             }
 
