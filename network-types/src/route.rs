@@ -376,6 +376,14 @@ impl RplSourceRouteHeader {
     /// The total size in bytes of the RPL Source Route Header struct
     pub const LEN: usize = mem::size_of::<RplSourceRouteHeader>();
 
+    /// Calculates the total length of the Segment Routing Header in bytes.
+    /// The Hdr Ext Len is in 8-octet units, *excluding* the first 8 octets.
+    /// So, total length = (hdr_ext_len + 1) * 8.
+    #[inline]
+    pub fn total_hdr_len(&self) -> usize {
+        self.gen_route.total_hdr_len()
+    }
+
     /// Calculates the size of each address in the Addresses field based on CmprI.
     #[inline]
     pub fn address_size(&self) -> usize {
@@ -682,7 +690,7 @@ impl SegmentRoutingHeader {
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
 pub struct CrhHeader {
-    pub generic_route: GenericRoute,
+    pub gen_route: GenericRoute,
 }
 
 impl CrhHeader {
@@ -695,50 +703,50 @@ impl CrhHeader {
     /// Gets the Next Header value.
     #[inline]
     pub fn next_hdr(&self) -> IpProto {
-        self.generic_route.next_hdr
+        self.gen_route.next_hdr
     }
 
     /// Sets the Next Header value.
     #[inline]
     pub fn set_next_hdr(&mut self, next_hdr: IpProto) {
-        self.generic_route.next_hdr = next_hdr
+        self.gen_route.next_hdr = next_hdr
     }
 
     /// Gets the Header Extension Length value.
     #[inline]
     pub fn hdr_ext_len(&self) -> u8 {
-        self.generic_route.hdr_ext_len
+        self.gen_route.hdr_ext_len
     }
 
     /// Sets the Header Extension Length value.
     #[inline]
     pub fn set_hdr_ext_len(&mut self, hdr_ext_len: u8) {
-        self.generic_route.hdr_ext_len = hdr_ext_len
+        self.gen_route.hdr_ext_len = hdr_ext_len
     }
 
     /// Gets the Routing Type value.
     #[inline]
     pub fn type_(&self) -> RoutingHeaderType {
-        RoutingHeaderType::from_u8(self.generic_route.type_)
+        RoutingHeaderType::from_u8(self.gen_route.type_)
     }
 
     /// Sets the Routing Type value.
     /// For CRH-16 Header, this should always be 5.
     #[inline]
     pub fn set_type(&mut self, type_: RoutingHeaderType) {
-        self.generic_route.type_ = type_.as_u8()
+        self.gen_route.type_ = type_.as_u8()
     }
 
     /// Gets the Segments Left value.
     #[inline]
     pub fn sgmt_left(&self) -> u8 {
-        self.generic_route.sgmt_left
+        self.gen_route.sgmt_left
     }
 
     /// Sets the Segments Left value.
     #[inline]
     pub fn set_sgmt_left(&mut self, sgmt_left: u8) {
-        self.generic_route.sgmt_left = sgmt_left
+        self.gen_route.sgmt_left = sgmt_left
     }
 
     /// Calculates the total length of the CRH-16 Header in bytes.
@@ -746,7 +754,7 @@ impl CrhHeader {
     /// So, total length = (hdr_ext_len + 1) * 8.
     #[inline]
     pub fn total_hdr_len(&self) -> usize {
-        self.generic_route.total_hdr_len()
+        self.gen_route.total_hdr_len()
     }
 
     /// Calculates the total length available for the SID List in bytes.
@@ -1175,7 +1183,9 @@ mod tests {
             sgmt_left: 0,
         };
 
-        let mut header = CrhHeader { generic_route };
+        let mut header = CrhHeader {
+            gen_route: generic_route,
+        };
 
         // Test next_hdr
         header.set_next_hdr(IpProto::Udp);
@@ -1204,7 +1214,9 @@ mod tests {
             sgmt_left: 2,
         };
 
-        let header = CrhHeader { generic_route };
+        let header = CrhHeader {
+            gen_route: generic_route,
+        };
 
         // Test total header length
         assert_eq!(header.total_hdr_len(), 16); // (1 + 1) * 8 = 16
@@ -1226,7 +1238,9 @@ mod tests {
             sgmt_left: 1,
         };
 
-        let header = CrhHeader { generic_route };
+        let header = CrhHeader {
+            gen_route: generic_route,
+        };
 
         // Test total header length
         assert_eq!(header.total_hdr_len(), 16); // (1 + 1) * 8 = 16
@@ -1248,7 +1262,9 @@ mod tests {
             sgmt_left: 15,
         };
 
-        let header = CrhHeader { generic_route };
+        let header = CrhHeader {
+            gen_route: generic_route,
+        };
 
         // Test total header length
         assert_eq!(header.total_hdr_len(), 40); // (4 + 1) * 8 = 40
@@ -1270,7 +1286,9 @@ mod tests {
             sgmt_left: 10,
         };
 
-        let header = CrhHeader { generic_route };
+        let header = CrhHeader {
+            gen_route: generic_route,
+        };
 
         // Test total header length
         assert_eq!(header.total_hdr_len(), 64); // (7 + 1) * 8 = 64
@@ -1292,7 +1310,9 @@ mod tests {
             sgmt_left: 0,
         };
 
-        let header = CrhHeader { generic_route };
+        let header = CrhHeader {
+            gen_route: generic_route,
+        };
 
         // Test with zero hdr_ext_len
         assert_eq!(header.total_hdr_len(), 8); // (0 + 1) * 8 = 8
@@ -1310,7 +1330,9 @@ mod tests {
             sgmt_left: 0,
         };
 
-        let header = CrhHeader { generic_route };
+        let header = CrhHeader {
+            gen_route: generic_route,
+        };
 
         // Test with invalid type
         assert_eq!(header.num_sids(), 0); // Invalid type should return 0
@@ -1326,7 +1348,9 @@ mod tests {
             sgmt_left: 0,
         };
 
-        let header = CrhHeader { generic_route };
+        let header = CrhHeader {
+            gen_route: generic_route,
+        };
 
         assert_eq!(header.total_hdr_len(), 256); // (31 + 1) * 8 = 256
         assert_eq!(header.sid_list_len(), 252); // 256 - 4 = 252
@@ -1341,7 +1365,7 @@ mod tests {
         };
 
         let header_32 = CrhHeader {
-            generic_route: generic_route_32,
+            gen_route: generic_route_32,
         };
 
         assert_eq!(header_32.total_hdr_len(), 256); // (31 + 1) * 8 = 256
