@@ -50,25 +50,19 @@ struct ParserOptions {
     /// The port number to use for Geneve tunnel detection
     /// Default is 6081 as per IANA assignment
     geneve_port: u16,
-
-    /// Current read offset from the start of the packet
-    offset: usize,
 }
 
 impl Default for ParserOptions {
     fn default() -> Self {
-        ParserOptions {
-            geneve_port: 6081,
-            offset: 0,
-        }
+        ParserOptions { geneve_port: 6081 }
     }
 }
 
 struct Parser {
     // The header-type to parse next at 'offset'
     next_hdr: HeaderType,
-    // Configuration options for the parser
-    options: ParserOptions,
+    // Current read offset from the start of the packet
+    offset: usize,
     // Information for building flow records (prioritizes innermost headers).
     // These fields will be updated as we parse deeper or encounter encapsulations.
     packet_meta: PacketMeta,
@@ -78,16 +72,7 @@ impl Parser {
     fn default() -> Self {
         Parser {
             next_hdr: HeaderType::Ethernet,
-            options: ParserOptions::default(),
-            packet_meta: PacketMeta::default(),
-        }
-    }
-
-    #[allow(dead_code)]
-    fn with_options(options: ParserOptions) -> Self {
-        Parser {
-            next_hdr: HeaderType::Ethernet,
-            options,
+            offset: 0,
             packet_meta: PacketMeta::default(),
         }
     }
@@ -95,16 +80,14 @@ impl Parser {
     // Calculate the L3 octet count (from current offset to end of packet)
     // This should be called at the start of L3 (IP) header parsing
     fn calc_l3_octet_count(&mut self, packet_len: u32) {
-        self.packet_meta.l3_octet_count = packet_len - self.options.offset as u32;
+        self.packet_meta.l3_octet_count = packet_len - self.offset as u32;
     }
 
     /// Parses the next header in the packet and updates the parser state accordingly.
     /// Returns an error if the header is not supported.
     fn parse_ethernet_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let eth_hdr: EthHdr = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
-        self.options.offset += EthHdr::LEN;
+        let eth_hdr: EthHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += EthHdr::LEN;
 
         // todo: Extract eth_hdr.src_addr and eth_hdr.dst_addr into src_mac_addr and dst_mac_addr fields
 
@@ -126,16 +109,14 @@ impl Parser {
     /// Parses the IPv4 header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_ipv4_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let ipv4_hdr: Ipv4Hdr = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
+        let ipv4_hdr: Ipv4Hdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let h_len = ipv4_hdr.ihl() as usize;
         if h_len < Ipv4Hdr::LEN {
             // basic sanity check
             return Err(Error::MalformedHeader);
         }
         self.calc_l3_octet_count(ctx.len());
-        self.options.offset += h_len;
+        self.offset += h_len;
 
         // policy: innermost IP header determines the flow IPs
         self.packet_meta.src_ipv4_addr = ipv4_hdr.src_addr;
@@ -164,11 +145,9 @@ impl Parser {
     /// Parses the IPv6 header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_ipv6_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let ipv6_hdr: Ipv6Hdr = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
+        let ipv6_hdr: Ipv6Hdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.calc_l3_octet_count(ctx.len());
-        self.options.offset += Ipv6Hdr::LEN;
+        self.offset += Ipv6Hdr::LEN;
 
         // policy: innermost IP header determines the flow IPs
         self.packet_meta.src_ipv6_addr = ipv6_hdr.src_addr;
@@ -209,10 +188,8 @@ impl Parser {
     /// Parses the TCP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
     fn parse_tcp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let tcp_hdr: TcpHdr = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
-        self.options.offset += TcpHdr::LEN;
+        let tcp_hdr: TcpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += TcpHdr::LEN;
 
         self.packet_meta.src_port = tcp_hdr.src;
         self.packet_meta.dst_port = tcp_hdr.dst;
@@ -223,21 +200,19 @@ impl Parser {
 
     /// Parses the UDP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
-    fn parse_udp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let udp_hdr: UdpHdr = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
-        self.options.offset += UdpHdr::LEN;
+    fn parse_udp_header(&mut self, ctx: &TcContext, geneve_port: u16) -> Result<(), Error> {
+        let udp_hdr: UdpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += UdpHdr::LEN;
 
         self.packet_meta.src_port = udp_hdr.src;
         self.packet_meta.dst_port = udp_hdr.dst;
 
         // IANA has assigned port 6081 as the fixed well-known destination port for Geneve.
         // Although the well-known value should be used by default, it is RECOMMENDED that implementations make this configurable.
-        if udp_hdr.dst_port() == self.options.geneve_port {
+        if udp_hdr.dst_port() == geneve_port {
             debug!(
                 ctx,
-                "UDP packet with destination port {} (Geneve) detected", self.options.geneve_port
+                "UDP packet with destination port {} (Geneve) detected", geneve_port
             );
             self.next_hdr = HeaderType::Geneve;
         } else {
@@ -252,10 +227,8 @@ impl Parser {
     /// Returns an error if the header cannot be loaded.
     /// Note: ICMP does not use ports, so src_port and dst_port remain zero.
     fn parse_icmp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let _icmp_hdr: IcmpHdr = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
-        self.options.offset += IcmpHdr::LEN;
+        let _icmp_hdr: IcmpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += IcmpHdr::LEN;
 
         // ICMP does not use ports, so we leave src_port and dst_port as zero
         // TODO: extract and assign additional ICMP fields if needed (type, code, etc.)
@@ -266,10 +239,8 @@ impl Parser {
     /// Parses the AH IPv6-extension header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_ah_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let ah_hdr: AuthHdr = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
-        self.options.offset += AuthHdr::total_hdr_len(&ah_hdr);
+        let ah_hdr: AuthHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += AuthHdr::total_hdr_len(&ah_hdr);
         // TODO: Extract and set other AH fields
         self.next_hdr = HeaderType::Proto(ah_hdr.next_hdr());
         Ok(())
@@ -278,10 +249,8 @@ impl Parser {
     /// Parses the ESP IPv6-extension header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_esp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let _esp_hdr: Esp = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
-        self.options.offset += Esp::LEN; // Move offset to start of encrypted ESP payload
+        let _esp_hdr: Esp = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += Esp::LEN; // Move offset to start of encrypted ESP payload
         // TODO: Extract and set SPI and Sequence number
         self.next_hdr = HeaderType::StopProcessing; //ESP signals end of parsing headers
         Ok(())
@@ -290,10 +259,8 @@ impl Parser {
     /// Parses the Hop-by-Hop IPv6-extension header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_hop_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let hop_hdr: HopOptHdr = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
-        self.options.offset += hop_hdr.total_hdr_len(); // Move offset to start of next header
+        let hop_hdr: HopOptHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += hop_hdr.total_hdr_len(); // Move offset to start of next header
         self.next_hdr = HeaderType::Proto(hop_hdr.next_hdr);
 
         if hop_hdr.hdr_ext_len != 0 {
@@ -306,9 +273,7 @@ impl Parser {
     /// Parses the Geneve header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_geneve_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let geneve_hdr: GeneveHdr = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
+        let geneve_hdr: GeneveHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
 
         // Current version is 0. Packets with unknown version must be skipped
         let version = geneve_hdr.ver();
@@ -321,7 +286,7 @@ impl Parser {
             return Ok(());
         }
 
-        self.options.offset += geneve_hdr.total_hdr_len();
+        self.offset += geneve_hdr.total_hdr_len();
 
         let protocol_type = geneve_hdr.protocol_type();
         match protocol_type {
@@ -344,209 +309,56 @@ impl Parser {
     /// Parses the IPv6 routing header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_routing_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let gen_hdr: GenericRoute = ctx
-            .load(self.options.offset)
-            .map_err(|_| Error::OutOfBounds)?;
+        let gen_hdr: GenericRoute = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let routing_type: RoutingHeaderType = RoutingHeaderType::from_u8(gen_hdr.type_);
 
         // const MAX_ADDR: usize = 256;
 
         match routing_type {
             RoutingHeaderType::RplSourceRoute => {
-                let rpl_hdr: RplSourceRouteHeader = ctx
-                    .load(self.options.offset)
-                    .map_err(|_| Error::OutOfBounds)?;
-                // self.options.offset += RplSourceRouteHeader::LEN;
-
-                // Consider adding Clamp to addr_size if we run into verification issues
-                // let addr_size = rpl_hdr.gen_route.total_hdr_len().saturating_sub(8); // Subtract 8 for fixed RPL header
-                // let mut addresses = [0u8; MAX_ADDR];
-                //
-                // let bytes_read = self
-                //     .read_var_buf(ctx, &mut addresses, addr_size)
-                //     .map_err(|_| Error::OutOfBounds)?;
-                // if bytes_read < addr_size {
-                //     debug!(ctx, "failed to read all of rpl header");
-                //     return Err(Error::MalformedHeader);
-                // }
-                // self.options.offset += bytes_read;
+                let rpl_hdr: RplSourceRouteHeader =
+                    ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
 
                 // TODO parse out and use addresses and other Rpl fields here
                 self.next_hdr = HeaderType::Proto(rpl_hdr.gen_route.next_hdr());
-                // Temp generic advance
-                self.options.offset += rpl_hdr.gen_route.total_hdr_len();
+                // Advance to start of next header
+                self.offset += rpl_hdr.total_hdr_len();
             }
             RoutingHeaderType::Type2 => {
-                let type2_hdr: Type2RoutingHeader = ctx
-                    .load(self.options.offset)
-                    .map_err(|_| Error::OutOfBounds)?;
-                self.options.offset += Type2RoutingHeader::LEN;
+                let type2_hdr: Type2RoutingHeader =
+                    ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+                self.offset += Type2RoutingHeader::LEN;
 
                 // TODO parse out and use addresses and other type2 fields
                 self.next_hdr = HeaderType::Proto(type2_hdr.gen_route.next_hdr());
             }
             RoutingHeaderType::SegmentRoutingHeader => {
-                let segment_hdr: SegmentRoutingHeader = ctx
-                    .load(self.options.offset)
-                    .map_err(|_| Error::OutOfBounds)?;
-
-                // self.options.offset += SegmentRoutingHeader::LEN;
-
-                // let var_size = segment_hdr.segments_and_tlvs_len();
-                // let mut addresses = [0u8; MAX_ADDR];
-                //
-                // let bytes_read = self
-                //     .read_var_buf(ctx, &mut addresses, var_size)
-                //     .map_err(|_| Error::OutOfBounds)?;
-                // if bytes_read < var_size {
-                //     debug!(ctx, "failed to read all of rpl header");
-                //     return Err(Error::MalformedHeader);
-                // }
-                // self.options.offset += bytes_read;
+                let segment_hdr: SegmentRoutingHeader =
+                    ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
 
                 // TODO parse out and use addresses and other Segment fields here
                 self.next_hdr = HeaderType::Proto(segment_hdr.gen_route.next_hdr());
-                // Temp generic advance
-                self.options.offset += segment_hdr.gen_route.total_hdr_len();
+                // Advance to start of next header
+                self.offset += segment_hdr.total_hdr_len();
             }
             RoutingHeaderType::Crh16 | RoutingHeaderType::Crh32 => {
-                let crh_hdr: CrhHeader = ctx
-                    .load(self.options.offset)
-                    .map_err(|_| Error::OutOfBounds)?;
-                // self.options.offset += CrhHeader::LEN;
-                //
-                // let var_size = crh_hdr.sid_list_len();
-                // let mut addresses = [0u8; MAX_ADDR];
-                //
-                // let bytes_read = self.read_var_buf(ctx, &mut addresses, var_size)?;
-                // if bytes_read < var_size {
-                //     debug!(ctx, "failed to read all of CRH header");
-                //     return Err(Error::MalformedHeader);
-                // }
-                // self.options.offset += bytes_read;
+                let crh_hdr: CrhHeader = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
 
                 // TODO parse out and use SIDs from CRH header
-                // You can use sid_num (or the logic in num_sids) to determine size of sids
-                // and what to do with them as needed
-                let _sid_num = crh_hdr.num_sids();
                 self.next_hdr = HeaderType::Proto(crh_hdr.next_hdr());
-                // Temp generic advance
-                self.options.offset += crh_hdr.total_hdr_len();
+                // Advance to start of next header
+                self.offset += crh_hdr.total_hdr_len();
             }
             RoutingHeaderType::Experiment1
             | RoutingHeaderType::Experiment2
             | RoutingHeaderType::Reserved => {
                 self.next_hdr = HeaderType::Proto(gen_hdr.next_hdr);
+                self.offset += gen_hdr.total_hdr_len();
             }
             _ => {}
         }
 
         Ok(())
-    }
-
-    /// Reads a variable-length buffer from a TC context.
-    ///
-    /// This function reads bytes from the given TC context `ctx` starting at the parser's current offset
-    /// and writes them into the provided buffer `buf`. The total number of bytes to read is determined
-    /// by `len`.
-    ///
-    /// The implementation uses multiple bounded loops to comply with eBPF verifier requirements,
-    /// reading in decreasing chunk sizes to efficiently handle
-    /// different buffer sizes. Each chunk size has 16 iterations, allowing reading of up to 1024 bytes.
-    ///
-    /// # Arguments
-    /// * `ctx`: The traffic control context to read from.
-    /// * `buf`: The destination buffer to write the bytes into.
-    /// * `len`: The number of bytes to read.
-    ///
-    /// # Returns
-    /// `Ok(bytes_read)` on success, where `bytes_read` is the number of bytes actually read.
-    /// `Err(Error)` if reading bytes from the context fails.
-    #[allow(dead_code)] // Remove once we start using read_var_buf
-    fn read_var_buf<const N: usize>(
-        &mut self,
-        ctx: &TcContext,
-        buf: &mut [u8; N],
-        len: usize,
-    ) -> Result<usize, Error> {
-        let mut bytes_read_total = 0;
-
-        // Helper function to read individual bytes for alignment
-        let read_single_byte = |ctx: &TcContext,
-                                buf: &mut [u8; N],
-                                len: usize,
-                                bytes_read_total: &mut usize,
-                                offset: &mut usize|
-         -> Result<bool, Error> {
-            if *bytes_read_total >= len || (*bytes_read_total + 1) > N {
-                return Ok(false);
-            }
-
-            let byte: u8 = ctx.load(*offset).map_err(|_| Error::MalformedHeader)?;
-            buf[*bytes_read_total] = byte;
-            *bytes_read_total += 1;
-            *offset += 1;
-            Ok(true)
-        };
-
-        // Helper function to read 16-byte chunks
-        let read_sixteen_byte_chunk = |ctx: &TcContext,
-                                       buf: &mut [u8; N],
-                                       len: usize,
-                                       bytes_read_total: &mut usize,
-                                       offset: &mut usize|
-         -> Result<bool, Error> {
-            if *bytes_read_total >= len
-                || (len.saturating_sub(*bytes_read_total)) < 16
-                || (*bytes_read_total + 16) > N
-            {
-                return Ok(false);
-            }
-
-            let bytes: u128 = ctx.load(*offset).map_err(|_| Error::OutOfBounds)?;
-            buf[*bytes_read_total..*bytes_read_total + 16].copy_from_slice(&bytes.to_ne_bytes());
-            *bytes_read_total += 16;
-            *offset += 16;
-            Ok(true)
-        };
-
-        // Align to 16-byte boundary by reading individual bytes
-        let mut parse_offset = self.options.offset;
-        let mut alignment = self.options.offset % 16;
-        for _ in 0..16 {
-            if alignment == 16 {
-                break;
-            }
-            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut parse_offset)? {
-                break;
-            }
-            alignment += 1;
-        }
-
-        // Read 16-byte chunks in batches (4 batches of 16 chunks = 1024 bytes total)
-        // The main idea is we can keep adding loops to read u128s until we reach our desired supported header size
-        for _ in 0..4 {
-            for _ in 0..16 {
-                if !read_sixteen_byte_chunk(
-                    ctx,
-                    buf,
-                    len,
-                    &mut bytes_read_total,
-                    &mut parse_offset,
-                )? {
-                    break;
-                }
-            }
-        }
-
-        // Read remaining bytes as individual bytes
-        for _ in 0..16 {
-            if !read_single_byte(ctx, buf, len, &mut bytes_read_total, &mut parse_offset)? {
-                break;
-            }
-        }
-
-        Ok(bytes_read_total)
     }
 }
 
@@ -568,6 +380,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
     const MAX_HEADER_PARSE_DEPTH: usize = 16;
 
     let mut parser = Parser::default();
+    let options = ParserOptions::default();
 
     debug!(&ctx, "mermin: parsing packet");
 
@@ -578,7 +391,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Ipv6 => parser.parse_ipv6_header(&ctx),
             HeaderType::Geneve => parser.parse_geneve_header(&ctx),
             HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx),
-            HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx),
+            HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx, options.geneve_port),
             HeaderType::Proto(IpProto::HopOpt) => parser.parse_hop_header(&ctx),
             HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx),
@@ -598,10 +411,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
         };
 
         if result.is_err() {
-            error!(
-                &ctx,
-                "mermin: parser failed at offset {}", parser.options.offset
-            );
+            error!(&ctx, "mermin: parser failed at offset {}", parser.offset);
             parser.next_hdr = HeaderType::ErrorOccurred; // Mark error
         }
     }
@@ -1097,7 +907,7 @@ mod tests {
     fn test_parser_initialization() {
         let parser = Parser::default();
 
-        assert_eq!(parser.options.offset, 0);
+        assert_eq!(parser.offset, 0);
         assert!(matches!(parser.next_hdr, HeaderType::Ethernet));
 
         // Check that packet_meta is initialized with default values
@@ -1110,17 +920,14 @@ mod tests {
 
     #[test]
     fn test_parser_with_options() {
-        let custom_options = ParserOptions {
-            geneve_port: 8080,
-            offset: 0,
-        };
-        let parser = Parser::with_options(custom_options.clone());
+        let parser = Parser::default();
+        let options = ParserOptions { geneve_port: 8080 };
 
         // Verify custom options are set
-        assert_eq!(parser.options.geneve_port, 8080);
+        assert_eq!(options.geneve_port, 8080);
 
         // Verify other fields have default values
-        assert_eq!(parser.options.offset, 0);
+        assert_eq!(parser.offset, 0);
         assert!(matches!(parser.next_hdr, HeaderType::Ethernet));
 
         // Check that packet_meta is initialized with default values
@@ -1132,15 +939,14 @@ mod tests {
 
         // Test with default port as well
         let default_options = ParserOptions::default();
-        let parser_default = Parser::with_options(default_options);
-        assert_eq!(parser_default.options.geneve_port, 6081);
+        assert_eq!(default_options.geneve_port, 6081);
     }
 
     #[test]
     fn test_parser_calculate_l3_octet_count() {
         let mut parser = Parser::default();
 
-        parser.options.offset = 32;
+        parser.offset = 32;
         parser.calc_l3_octet_count(256);
 
         assert_eq!(parser.packet_meta.l3_octet_count, 224);
@@ -1155,7 +961,7 @@ mod tests {
         let result = parser.parse_ethernet_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, EthHdr::LEN);
+        assert_eq!(parser.offset, EthHdr::LEN);
         assert!(matches!(parser.next_hdr, HeaderType::Ipv4));
     }
 
@@ -1169,7 +975,7 @@ mod tests {
         let result = parser.parse_ipv4_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 20); // IPv4 header length (5 * 4 bytes)
+        assert_eq!(parser.offset, 20); // IPv4 header length (5 * 4 bytes)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
         assert_eq!(parser.packet_meta.src_ipv4_addr, [0xc0, 0xa8, 0x01, 0x01]); // 192.168.1.1
         assert_eq!(parser.packet_meta.dst_ipv4_addr, [0xc0, 0xa8, 0x01, 0x02]); // 192.168.1.2
@@ -1200,7 +1006,7 @@ mod tests {
         let result = parser.parse_ipv6_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, Ipv6Hdr::LEN);
+        assert_eq!(parser.offset, Ipv6Hdr::LEN);
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
         assert_eq!(
             parser.packet_meta.src_ipv6_addr,
@@ -1229,7 +1035,7 @@ mod tests {
         let result = parser.parse_tcp_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, TcpHdr::LEN);
+        assert_eq!(parser.offset, TcpHdr::LEN);
         assert_eq!(parser.packet_meta.src_port, [0x30, 0x39]); // 12345
         assert_eq!(parser.packet_meta.dst_port, [0x00, 0x50]); // 80
     }
@@ -1241,10 +1047,10 @@ mod tests {
         let packet = create_udp_test_packet();
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_udp_header(&ctx);
+        let result = parser.parse_udp_header(&ctx, 6081);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, UdpHdr::LEN);
+        assert_eq!(parser.offset, UdpHdr::LEN);
         assert_eq!(parser.packet_meta.src_port, [0x30, 0x39]); // 12345
         assert_eq!(parser.packet_meta.dst_port, [0x00, 0x35]); // 53
         assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
@@ -1257,10 +1063,10 @@ mod tests {
         let packet = create_udp_geneve_test_packet();
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_udp_header(&ctx);
+        let result = parser.parse_udp_header(&ctx, 6081);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, UdpHdr::LEN);
+        assert_eq!(parser.offset, UdpHdr::LEN);
         assert_eq!(parser.packet_meta.src_port, [0x30, 0x39]); // 12345
         assert_eq!(parser.packet_meta.dst_port, [0x17, 0xC1]); // 6081 (Geneve)
         assert!(matches!(parser.next_hdr, HeaderType::Geneve));
@@ -1276,7 +1082,7 @@ mod tests {
         let result = parser.parse_ah_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, AuthHdr::LEN);
+        assert_eq!(parser.offset, AuthHdr::LEN);
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1290,7 +1096,7 @@ mod tests {
         let result = parser.parse_ah_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, AuthHdr::LEN);
+        assert_eq!(parser.offset, AuthHdr::LEN);
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
@@ -1316,7 +1122,7 @@ mod tests {
         let result = parser.parse_esp_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, Esp::LEN);
+        assert_eq!(parser.offset, Esp::LEN);
         assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
     }
 
@@ -1342,7 +1148,7 @@ mod tests {
         let result = parser.parse_hop_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, HopOptHdr::LEN);
+        assert_eq!(parser.offset, HopOptHdr::LEN);
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1356,7 +1162,7 @@ mod tests {
         let result = parser.parse_hop_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, HopOptHdr::LEN);
+        assert_eq!(parser.offset, HopOptHdr::LEN);
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
@@ -1370,7 +1176,7 @@ mod tests {
         let result = parser.parse_hop_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 16); // 8 bytes base + 8 bytes extension (1 * 8)
+        assert_eq!(parser.offset, 16); // 8 bytes base + 8 bytes extension (1 * 8)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1396,7 +1202,7 @@ mod tests {
         let result = parser.parse_geneve_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, GeneveHdr::LEN); // No options, so offset is just the header length
+        assert_eq!(parser.offset, GeneveHdr::LEN); // No options, so offset is just the header length
         assert!(matches!(parser.next_hdr, HeaderType::Ipv4));
     }
 
@@ -1410,7 +1216,7 @@ mod tests {
         let result = parser.parse_geneve_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, GeneveHdr::LEN); // No options, so offset is just the header length
+        assert_eq!(parser.offset, GeneveHdr::LEN); // No options, so offset is just the header length
         assert!(matches!(parser.next_hdr, HeaderType::Ipv6));
     }
 
@@ -1424,7 +1230,7 @@ mod tests {
         let result = parser.parse_geneve_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, GeneveHdr::LEN); // No options, so offset is just the header length
+        assert_eq!(parser.offset, GeneveHdr::LEN); // No options, so offset is just the header length
         assert!(matches!(parser.next_hdr, HeaderType::Ethernet));
     }
 
@@ -1438,7 +1244,7 @@ mod tests {
         let result = parser.parse_geneve_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, GeneveHdr::LEN + 8); // Header length + 8 bytes of options
+        assert_eq!(parser.offset, GeneveHdr::LEN + 8); // Header length + 8 bytes of options
         assert!(matches!(parser.next_hdr, HeaderType::Ipv4));
     }
 
@@ -1452,7 +1258,7 @@ mod tests {
         let result = parser.parse_geneve_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, GeneveHdr::LEN); // No options, so offset is just the header length
+        assert_eq!(parser.offset, GeneveHdr::LEN); // No options, so offset is just the header length
         assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
     }
 
@@ -1478,7 +1284,7 @@ mod tests {
         let result = parser.parse_icmp_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, IcmpHdr::LEN);
+        assert_eq!(parser.offset, IcmpHdr::LEN);
         // ICMP doesn't use ports, so they should remain zero
         assert_eq!(parser.packet_meta.src_port, [0, 0]);
         assert_eq!(parser.packet_meta.dst_port, [0, 0]);
@@ -1509,7 +1315,7 @@ mod tests {
         let result = parser.parse_ipv4_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 20); // IPv4 header length (5 * 4 bytes)
+        assert_eq!(parser.offset, 20); // IPv4 header length (5 * 4 bytes)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Icmp)));
         assert_eq!(parser.packet_meta.src_ipv4_addr, [0xc0, 0xa8, 0x01, 0x01]); // 192.168.1.1
         assert_eq!(parser.packet_meta.dst_ipv4_addr, [0xc0, 0xa8, 0x01, 0x02]); // 192.168.1.2
@@ -1528,7 +1334,7 @@ mod tests {
         let result = parser.parse_ipv6_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, Ipv6Hdr::LEN);
+        assert_eq!(parser.offset, Ipv6Hdr::LEN);
         assert!(matches!(
             parser.next_hdr,
             HeaderType::Proto(IpProto::Ipv6Icmp)
@@ -1560,7 +1366,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 24); // Type2 routing header length
+        assert_eq!(parser.offset, 24); // Type2 routing header length
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1574,7 +1380,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 24); // Type2 routing header length
+        assert_eq!(parser.offset, 24); // Type2 routing header length
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
@@ -1600,7 +1406,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 40); // RPL Source Route header length (8 + 32)
+        assert_eq!(parser.offset, 40); // RPL Source Route header length (8 + 32)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1614,7 +1420,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 40); // RPL Source Route header length (8 + 32)
+        assert_eq!(parser.offset, 40); // RPL Source Route header length (8 + 32)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
@@ -1640,7 +1446,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 40); // Segment Routing header length (8 + 32)
+        assert_eq!(parser.offset, 40); // Segment Routing header length (8 + 32)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1654,7 +1460,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 40); // Segment Routing header length (8 + 32)
+        assert_eq!(parser.offset, 40); // Segment Routing header length (8 + 32)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
@@ -1668,7 +1474,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 24); // Minimum Segment Routing header length (8 + 16)
+        assert_eq!(parser.offset, 24); // Minimum Segment Routing header length (8 + 16)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Ipv6)));
     }
 
@@ -1696,7 +1502,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 40);
+        assert_eq!(parser.offset, 40);
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1712,7 +1518,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 40);
+        assert_eq!(parser.offset, 40);
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
@@ -1736,7 +1542,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 8); // Only fixed header
+        assert_eq!(parser.offset, 8); // Only fixed header
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1750,7 +1556,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
+        assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1764,7 +1570,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
+        assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
@@ -1778,7 +1584,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
+        assert_eq!(parser.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1806,7 +1612,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
+        assert_eq!(parser.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1820,7 +1626,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
+        assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1834,7 +1640,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
+        assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
@@ -1848,7 +1654,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
+        assert_eq!(parser.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1876,7 +1682,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 16);
+        assert_eq!(parser.offset, 16);
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
@@ -1900,7 +1706,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 8); // Only fixed header and padding
+        assert_eq!(parser.offset, 8); // Only fixed header and padding
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
     }
 
@@ -1924,218 +1730,7 @@ mod tests {
         let result = parser.parse_routing_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.options.offset, 8); // Only fixed header and padding
+        assert_eq!(parser.offset, 8); // Only fixed header and padding
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
-    }
-
-    // Test CRH-32 header with malformed SID data (insufficient SID buffer)
-    // #[test]
-    // fn test_parse_routing_header_crh32_malformed_sid_data() {
-    //     let mut parser = Parser::default();
-    //     parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-    //
-    //     // Create packet that claims to have SIDs but provides insufficient data
-    //     let mut packet = Vec::new();
-    //     packet.push(IpProto::Udp as u8); // Next Header
-    //     packet.push(1); // Hdr Ext Len = 1 (claims 8 bytes of SID data)
-    //     packet.push(6); // Routing Type (Crh32)
-    //     packet.push(1); // Segments Left
-    //     // Only provide 4 bytes instead of required 8
-    //     packet.extend_from_slice(&[0x12, 0x34, 0x56, 0x78]);
-    //
-    //     let ctx = TcContext::new(packet);
-    //
-    //     let result = parser.parse_routing_header(&ctx);
-    //     assert!(matches!(result, Err(Error::MalformedHeader)));
-    // }
-
-    // Helper function to create network-like test data with big endian patterns
-    fn create_network_test_data(size: usize) -> Vec<u8> {
-        let mut data = Vec::new();
-        let mut value = 0x0102030405060708u64;
-
-        for i in (0..size).step_by(8) {
-            let bytes = value.to_be_bytes(); // Network byte order
-            let remaining = size - i;
-            let chunk_size = core::cmp::min(8, remaining);
-            data.extend_from_slice(&bytes[0..chunk_size]);
-            value = value.wrapping_add(0x0101010101010101); // Increment pattern
-        }
-        data
-    }
-
-    #[test]
-    fn test_read_var_buf_odd_lengths() {
-        let test_lengths = [
-            1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 31, 33, 63, 65, 127, 129,
-        ];
-
-        for &len in &test_lengths {
-            let test_data = create_network_test_data(len + 10); // Extra data to ensure we can read
-            let ctx = TcContext::new(test_data.clone());
-            let mut parser = Parser::default();
-            let mut buf = [0u8; 256];
-
-            let result = parser.read_var_buf(&ctx, &mut buf, len);
-
-            assert!(result.is_ok(), "Failed for length {}", len);
-            assert_eq!(result.unwrap(), len, "Wrong bytes read for length {}", len);
-            assert_eq!(
-                &buf[0..len],
-                &test_data[0..len],
-                "Data mismatch for length {}",
-                len
-            );
-
-            // Verify rest of buffer is unchanged
-            for i in len..256 {
-                assert_eq!(
-                    buf[i], 0,
-                    "Buffer corruption at index {} for length {}",
-                    i, len
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_read_var_buf_big_endian_validation() {
-        // Create test data with known big endian patterns
-        let original_values = [0x01020304u32, 0x05060708u32, 0x090a0b0cu32, 0x0d0e0f10u32];
-
-        let mut test_data = Vec::new();
-        for &val in &original_values {
-            test_data.extend_from_slice(&val.to_be_bytes());
-        }
-
-        let ctx = TcContext::new(test_data);
-        let mut parser = Parser::default();
-        let mut buf = [0u8; 16];
-
-        let result = parser.read_var_buf(&ctx, &mut buf, 16);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 16);
-
-        // Verify the data is correctly stored in big endian format
-        for (i, &expected_val) in original_values.iter().enumerate() {
-            let start_idx = i * 4;
-            let actual_bytes = [
-                buf[start_idx],
-                buf[start_idx + 1],
-                buf[start_idx + 2],
-                buf[start_idx + 3],
-            ];
-            let actual_val = u32::from_be_bytes(actual_bytes);
-            assert_eq!(
-                actual_val, expected_val,
-                "Big endian mismatch at position {}",
-                i
-            );
-        }
-    }
-
-    #[test]
-    fn test_read_var_buf_network_headers() {
-        // Simulate reading various network headers with odd sizes
-
-        // Test IPv4 header (20 bytes) + options (odd sizes)
-        let ipv4_base = 20;
-        let option_sizes = [1, 3, 7, 11]; // Common odd option sizes
-
-        for &opt_size in &option_sizes {
-            let total_size = ipv4_base + opt_size;
-            let test_data = create_network_test_data(total_size);
-            let ctx = TcContext::new(test_data.clone());
-            let mut parser = Parser::default();
-            let mut buf = [0u8; 64];
-
-            let result = parser.read_var_buf(&ctx, &mut buf, total_size);
-
-            assert!(
-                result.is_ok(),
-                "Failed for IPv4 with {} byte options",
-                opt_size
-            );
-            assert_eq!(result.unwrap(), total_size);
-            assert_eq!(&buf[0..total_size], &test_data[0..total_size]);
-        }
-
-        // Test TCP header with various option sizes (odd lengths)
-        let tcp_base = 20;
-        let tcp_option_sizes = [1, 3, 5, 9, 15];
-
-        for &opt_size in &tcp_option_sizes {
-            let total_size = tcp_base + opt_size;
-            let test_data = create_network_test_data(total_size);
-            let ctx = TcContext::new(test_data.clone());
-            let mut parser = Parser::default();
-            let mut buf = [0u8; 64];
-
-            let result = parser.read_var_buf(&ctx, &mut buf, total_size);
-
-            assert!(
-                result.is_ok(),
-                "Failed for TCP with {} byte options",
-                opt_size
-            );
-            assert_eq!(result.unwrap(), total_size);
-            assert_eq!(&buf[0..total_size], &test_data[0..total_size]);
-        }
-    }
-
-    #[test]
-    fn test_read_var_buf_chunk_boundary_values() {
-        // Test reading values that span chunk boundaries in the implementation
-        let test_cases = [
-            (15, 16), // Spans u128 chunk boundary
-            (17, 16), // Just over u128 boundary
-            (7, 8),   // Spans u64 boundary
-            (9, 8),   // Just over u64 boundary
-            (3, 4),   // Spans u32 boundary
-            (5, 4),   // Just over u32 boundary
-            (1, 2),   // Spans u16 boundary
-            (3, 2),   // Just over u16 boundary
-        ];
-
-        for &(len, chunk_aligned) in &test_cases {
-            // Create data with a recognizable pattern
-            let test_data = create_network_test_data(len + 8);
-            let ctx = TcContext::new(test_data.clone());
-            let mut parser = Parser::default();
-            let mut buf = [0u8; 32];
-
-            let result = parser.read_var_buf(&ctx, &mut buf, len);
-
-            assert!(
-                result.is_ok(),
-                "Failed for length {} (chunk aligned: {})",
-                len,
-                chunk_aligned
-            );
-            assert_eq!(result.unwrap(), len);
-            assert_eq!(
-                &buf[0..len],
-                &test_data[0..len],
-                "Data mismatch for length {}",
-                len
-            );
-        }
-    }
-
-    #[test]
-    fn test_read_var_buf_buffer_constraints() {
-        let test_data = create_network_test_data(50);
-        let ctx = TcContext::new(test_data.clone());
-        let mut parser = Parser::default();
-
-        // Try to read more than buffer size
-        let mut small_buf = [0u8; 10];
-        let result = parser.read_var_buf(&ctx, &mut small_buf, 15);
-
-        assert!(result.is_ok());
-        // Should read only what fits in buffer
-        let bytes_read = result.unwrap();
-        assert!(bytes_read <= 10, "Read more bytes than buffer size");
-        assert_eq!(&small_buf[0..bytes_read], &test_data[0..bytes_read]);
     }
 }
