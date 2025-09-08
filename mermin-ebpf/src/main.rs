@@ -208,7 +208,12 @@ impl Parser {
 
     /// Parses the UDP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
-    fn parse_udp_header(&mut self, ctx: &TcContext, options: &ParserOptions) -> Result<(), Error> {
+    fn parse_udp_header(
+        &mut self,
+        ctx: &TcContext,
+        geneve_port: u16,
+        vxlan_port: u16,
+    ) -> Result<(), Error> {
         let udp_hdr: UdpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += UdpHdr::LEN;
 
@@ -217,16 +222,16 @@ impl Parser {
 
         // IANA has assigned port 6081 as the fixed well-known destination port for Geneve and port 4789 as the fixed well-known destination port for Vxlan.
         // Although the well-known value should be used by default, it is RECOMMENDED that implementations make these configurable.
-        if udp_hdr.dst_port() == options.geneve_port {
+        if udp_hdr.dst_port() == geneve_port {
             debug!(
                 ctx,
-                "UDP packet with destination port {} (Geneve) detected", options.geneve_port
+                "UDP packet with destination port {} (Geneve) detected", geneve_port
             );
             self.next_hdr = HeaderType::Geneve;
-        } else if udp_hdr.dst_port() == options.vxlan_port {
+        } else if udp_hdr.dst_port() == vxlan_port {
             debug!(
                 ctx,
-                "UDP packet with destination port {} (Vxlan) detected", options.vxlan_port
+                "UDP packet with destination port {} (Vxlan) detected", vxlan_port
             );
             self.next_hdr = HeaderType::Vxlan;
         } else {
@@ -445,7 +450,9 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Geneve => parser.parse_geneve_header(&ctx),
             HeaderType::Vxlan => parser.parse_vxlan_header(&ctx),
             HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx),
-            HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx, &options),
+            HeaderType::Proto(IpProto::Udp) => {
+                parser.parse_udp_header(&ctx, options.geneve_port, options.vxlan_port)
+            }
             HeaderType::Proto(IpProto::HopOpt) => parser.parse_hop_header(&ctx),
             HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx),
@@ -1185,7 +1192,7 @@ mod tests {
         let ctx = TcContext::new(packet);
         let options = ParserOptions::default();
 
-        let result = parser.parse_udp_header(&ctx, &options);
+        let result = parser.parse_udp_header(&ctx, options.geneve_port, options.vxlan_port);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, UdpHdr::LEN);
@@ -1202,7 +1209,7 @@ mod tests {
         let ctx = TcContext::new(packet);
         let options = ParserOptions::default();
 
-        let result = parser.parse_udp_header(&ctx, &options);
+        let result = parser.parse_udp_header(&ctx, options.geneve_port, options.vxlan_port);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, UdpHdr::LEN);
