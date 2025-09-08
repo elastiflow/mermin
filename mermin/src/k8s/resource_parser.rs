@@ -1,98 +1,156 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 
 use anyhow::Result;
-use mermin_common::{IpAddrType, PacketMeta};
-use network_types::ip::IpProto;
+use k8s_openapi::api::{core::v1::Pod, networking::v1::NetworkPolicySpec};
+use mermin_common::PacketMeta;
 
-use crate::k8s::{Attributor, EnrichedInfo, K8sObjectMeta};
-
-#[derive(Debug, Default)]
-#[allow(dead_code)]
-pub struct EnrichedFlowData {
-    pub id: String,
-    pub source: Option<EnrichedInfo>,
-    pub destination: Option<EnrichedInfo>,
-}
+use crate::{
+    flow::EnrichedFlowData,
+    k8s::{Attributor, EnrichedInfo, FlowContext, FlowDirection, K8sObjectMeta},
+};
 
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct FlowSide {
-    ip: IpAddr,
-    port: u16,
-    protocol: IpProto,
+pub struct NetworkPolicy {
+    pub policy: K8sObjectMeta,
+    pub spec: NetworkPolicySpec,
 }
 
-/// Enriches a single side of a flow (source or destination) based on its IP address.
-async fn enrich_side(side: &FlowSide, attributor: &Attributor) -> Option<EnrichedInfo> {
-    if let Some(pod) = attributor.get_pod_by_ip(side.ip).await {
-        let pod_meta = K8sObjectMeta::from(pod.as_ref());
-        let owner = attributor.get_top_level_controller(&pod);
-        return Some(EnrichedInfo::Pod {
-            pod: pod_meta,
-            owner,
-        });
-    }
-
-    if let Some(node) = attributor.get_node_by_ip(side.ip).await {
-        return Some(EnrichedInfo::Node {
-            node: K8sObjectMeta::from(node.as_ref()),
-        });
-    }
-
-    if let Some(service) = attributor
-        .get_service_by_flow_details(side.ip, side.port, side.protocol)
-        .await
-    {
-        let service_meta = K8sObjectMeta::from(service.as_ref());
-        let backend_ips = attributor.resolve_service_ip_to_backend_ips(side.ip).await;
-
-        return Some(EnrichedInfo::Service {
-            service: service_meta,
-            backend_ips: backend_ips.unwrap_or_default(),
-        });
-    }
-
-    if let Some(slice) = attributor.get_endpointslice_by_ip(side.ip).await {
-        return Some(EnrichedInfo::EndpointSlice {
-            slice: K8sObjectMeta::from(slice.as_ref()),
-        });
-    }
-
-    None
+/// Packet enrichment processor that handles the conversion of raw packet data
+/// into enriched flow information with Kubernetes metadata.
+struct PacketEnricher<'a> {
+    attributor: &'a Attributor,
 }
 
-/// Main function to parse a packet and enrich it with Kubernetes metadata.
+impl<'a> PacketEnricher<'a> {
+    fn new(attributor: &'a Attributor) -> Self {
+        Self { attributor }
+    }
+
+    /// Main function to parse a packet and enrich it with Kubernetes metadata.
+    async fn parse_packet(
+        &self,
+        packet: &PacketMeta,
+        community_id: String,
+    ) -> Result<EnrichedFlowData> {
+        // Create FlowContext directly for both directions
+        let namespace = "default"; // TODO: This should be configurable or derived from context
+        let ctx = FlowContext::from_packet(packet, self.attributor, namespace).await;
+
+        // Use contexts directly for enrichment and policy evaluation
+        let src: Option<EnrichedInfo> = self.enrich(&ctx.src_pod, ctx.src_ip).await;
+        let dst = self.enrich(&ctx.dst_pod, ctx.dst_ip).await;
+        let policies = self.evaluate_policies(&ctx).await?;
+
+        Ok(EnrichedFlowData {
+            id: community_id,
+            src,
+            dst,
+            network_policies: policies,
+        })
+    }
+
+    /// Enriches flow information from FlowContext
+    async fn enrich(&self, pod: &Option<Pod>, ip: IpAddr) -> Option<EnrichedInfo> {
+        if let Some(pod) = pod {
+            let pod_meta = K8sObjectMeta::from(pod);
+            let owner = self.attributor.get_top_level_controller(pod);
+            Some(EnrichedInfo::Pod {
+                pod: pod_meta,
+                owner,
+            })
+        } else {
+            self.enrich_ip_fallback(ip).await
+        }
+    }
+
+    /// Evaluates network policies from FlowContext directly
+    async fn evaluate_policies(&self, ctx: &FlowContext<'_>) -> Result<Option<Vec<NetworkPolicy>>> {
+        let mut all_matching_policies = Vec::new();
+
+        // Evaluate ingress rules if a destination pod exists
+        if let Some(dst_pod) = &ctx.dst_pod {
+            let ingress_policies =
+                self.get_policies_for_pod(ctx, dst_pod, FlowDirection::Ingress)?;
+            all_matching_policies.extend(ingress_policies);
+        }
+
+        // Evaluate egress rules if a source pod exists
+        if let Some(src_pod) = &ctx.src_pod {
+            let egress_policies = self.get_policies_for_pod(ctx, src_pod, FlowDirection::Egress)?;
+            all_matching_policies.extend(egress_policies);
+        }
+
+        if all_matching_policies.is_empty() {
+            Ok(None)
+        } else {
+            let mut seen = std::collections::HashSet::new();
+            all_matching_policies.retain(|policy| {
+                seen.insert((policy.policy.name.clone(), policy.policy.namespace.clone()))
+            });
+            Ok(Some(all_matching_policies))
+        }
+    }
+
+    fn get_policies_for_pod(
+        &self,
+        ctx: &FlowContext<'_>,
+        policy_pod: &Pod,
+        direction: FlowDirection,
+    ) -> Result<Vec<NetworkPolicy>> {
+        let matching_policies = self
+            .attributor
+            .get_matching_network_policies(ctx, policy_pod, direction)?;
+
+        Ok(matching_policies
+            .iter()
+            .map(|p| NetworkPolicy {
+                policy: K8sObjectMeta::from(p.as_ref()),
+                spec: p.spec.clone().unwrap_or_default(),
+            })
+            .collect())
+    }
+
+    /// Enriches IP address with fallback information (Node, Service, EndpointSlice)
+    async fn enrich_ip_fallback(&self, ip: IpAddr) -> Option<EnrichedInfo> {
+        // Try to match against a Node
+        if let Some(node) = self.attributor.get_node_by_ip(ip).await {
+            return Some(EnrichedInfo::Node {
+                node: K8sObjectMeta::from(node.as_ref()),
+            });
+        }
+
+        // Try to match against a Service
+        if let Some(service) = self.attributor.get_service_by_ip(ip).await {
+            let service_meta = K8sObjectMeta::from(service.as_ref());
+            let backend_ips = self
+                .attributor
+                .resolve_service_ip_to_backend_ips(ip)
+                .await
+                .unwrap_or_default();
+
+            return Some(EnrichedInfo::Service {
+                service: service_meta,
+                backend_ips,
+            });
+        }
+
+        // Try to match against an EndpointSlice
+        if let Some(slice) = self.attributor.get_endpointslice_by_ip(ip).await {
+            return Some(EnrichedInfo::EndpointSlice {
+                slice: K8sObjectMeta::from(slice.as_ref()),
+            });
+        }
+
+        None
+    }
+}
+
 pub async fn parse_packet(
     packet: &PacketMeta,
     attributor: &Attributor,
     community_id: String,
 ) -> Result<EnrichedFlowData> {
-    let source_side = FlowSide {
-        ip: match packet.ip_addr_type {
-            IpAddrType::Ipv4 => IpAddr::V4(Ipv4Addr::from(packet.src_ipv4_addr)),
-            IpAddrType::Ipv6 => IpAddr::V6(Ipv6Addr::from(packet.src_ipv6_addr)),
-        },
-        port: u16::from_be_bytes(packet.src_port),
-        protocol: packet.proto,
-    };
-
-    let destination_side = FlowSide {
-        ip: match packet.ip_addr_type {
-            IpAddrType::Ipv4 => IpAddr::V4(Ipv4Addr::from(packet.dst_ipv4_addr)),
-            IpAddrType::Ipv6 => IpAddr::V6(Ipv6Addr::from(packet.dst_ipv6_addr)),
-        },
-        port: u16::from_be_bytes(packet.dst_port),
-        protocol: packet.proto,
-    };
-
-    let (source_info, destination_info) = tokio::join!(
-        enrich_side(&source_side, attributor),
-        enrich_side(&destination_side, attributor)
-    );
-
-    Ok(EnrichedFlowData {
-        id: community_id,
-        source: source_info,
-        destination: destination_info,
-    })
+    let enricher = PacketEnricher::new(attributor);
+    enricher.parse_packet(packet, community_id).await
 }
