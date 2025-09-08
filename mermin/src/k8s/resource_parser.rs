@@ -1,12 +1,8 @@
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::Arc,
-};
+use std::net::IpAddr;
 
 use anyhow::Result;
 use k8s_openapi::api::{core::v1::Pod, networking::v1::NetworkPolicySpec};
-use mermin_common::{IpAddrType, PacketMeta};
-use network_types::ip::IpProto;
+use mermin_common::PacketMeta;
 
 use crate::k8s::{Attributor, EnrichedInfo, FlowContext, FlowDirection, K8sObjectMeta};
 
@@ -26,56 +22,6 @@ pub struct EnrichedFlowData {
     pub network_policies: Option<Vec<NetworkPolicy>>,
 }
 
-#[derive(Debug)]
-#[allow(dead_code)]
-pub struct FlowSide {
-    pub ip: IpAddr,
-    pub port: u16,
-    pub protocol: IpProto,
-}
-
-impl FlowSide {
-    /// Creates a FlowSide from packet metadata for the source.
-    fn from_packet_source(packet: &PacketMeta) -> Self {
-        Self {
-            ip: Self::extract_ip_addr(packet, true),
-            port: u16::from_be_bytes(packet.src_port),
-            protocol: packet.proto,
-        }
-    }
-
-    /// Creates a FlowSide from packet metadata for the destination.
-    fn from_packet_destination(packet: &PacketMeta) -> Self {
-        Self {
-            ip: Self::extract_ip_addr(packet, false),
-            port: u16::from_be_bytes(packet.dst_port),
-            protocol: packet.proto,
-        }
-    }
-
-    /// Extracts IP address from packet metadata.
-    fn extract_ip_addr(packet: &PacketMeta, is_source: bool) -> IpAddr {
-        match packet.ip_addr_type {
-            IpAddrType::Ipv4 => {
-                let addr = if is_source {
-                    packet.src_ipv4_addr
-                } else {
-                    packet.dst_ipv4_addr
-                };
-                IpAddr::V4(Ipv4Addr::from(addr))
-            }
-            IpAddrType::Ipv6 => {
-                let addr = if is_source {
-                    packet.src_ipv6_addr
-                } else {
-                    packet.dst_ipv6_addr
-                };
-                IpAddr::V6(Ipv6Addr::from(addr))
-            }
-        }
-    }
-}
-
 /// Packet enrichment processor that handles the conversion of raw packet data
 /// into enriched flow information with Kubernetes metadata.
 pub struct PacketEnricher<'a> {
@@ -93,90 +39,70 @@ impl<'a> PacketEnricher<'a> {
         packet: &PacketMeta,
         community_id: String,
     ) -> Result<EnrichedFlowData> {
-        let flow_sides = self.extract_flow_sides(packet);
-        let pod_objects = self.resolve_pods(&flow_sides).await;
-        let (source, destination, applicable_policies) = self
-            .build_enrichment_data(&flow_sides, &pod_objects)
+        // Create FlowContext directly for both directions
+        let namespace = "default"; // TODO: This should be configurable or derived from context
+        let ingress_context =
+            FlowContext::from_packet(packet, self.attributor, namespace, FlowDirection::Ingress)
+                .await;
+        let egress_context =
+            FlowContext::from_packet(packet, self.attributor, namespace, FlowDirection::Egress)
+                .await;
+
+        // Use contexts directly for enrichment and policy evaluation
+        let source = self
+            .enrich_from_context(&ingress_context.src_pod, ingress_context.src_ip)
+            .await;
+        let destination = self
+            .enrich_from_context(&egress_context.dst_pod, egress_context.dst_ip)
+            .await;
+        let policies = self
+            .evaluate_policies_from_context(&ingress_context, &egress_context)
             .await?;
 
         Ok(EnrichedFlowData {
             id: community_id,
             source,
             destination,
-            network_policies: applicable_policies,
+            network_policies: policies,
         })
     }
 
-    /// Extracts source and destination flow sides from packet metadata.
-    fn extract_flow_sides(&self, packet: &PacketMeta) -> FlowSides {
-        FlowSides {
-            source: FlowSide::from_packet_source(packet),
-            destination: FlowSide::from_packet_destination(packet),
+    /// Creates EnrichedInfo for a Pod.
+    fn enrich_pod_info(&self, pod: &Pod) -> EnrichedInfo {
+        let pod_meta = K8sObjectMeta::from(pod);
+        let owner = self.attributor.get_top_level_controller(pod);
+        EnrichedInfo::Pod {
+            pod: pod_meta,
+            owner,
         }
     }
 
-    /// Resolves both source and destination IPs to Pod objects if possible.
-    async fn resolve_pods(&self, flow_sides: &FlowSides) -> PodResolution {
-        let source_pod = self.attributor.get_pod_by_ip(flow_sides.source.ip).await;
-        let dest_pod = self
-            .attributor
-            .get_pod_by_ip(flow_sides.destination.ip)
-            .await;
-
-        PodResolution {
-            source_pod,
-            dest_pod,
+    /// Enriches flow information from FlowContext, eliminating intermediary structures
+    async fn enrich_from_context(&self, pod: &Option<&Pod>, ip: IpAddr) -> Option<EnrichedInfo> {
+        if let Some(pod) = pod {
+            Some(self.enrich_pod_info(pod))
+        } else {
+            self.enrich_ip_fallback(ip).await
         }
     }
 
-    /// Builds the complete enrichment data including policies and fallback enrichment.
-    async fn build_enrichment_data(
+    /// Evaluates network policies from FlowContext directly
+    async fn evaluate_policies_from_context(
         &self,
-        flow_sides: &FlowSides,
-        pod_objects: &PodResolution,
-    ) -> Result<(
-        Option<EnrichedInfo>,
-        Option<EnrichedInfo>,
-        Option<Vec<NetworkPolicy>>,
-    )> {
-        let applicable_policies = self.evaluate_network_policies(flow_sides, pod_objects)?;
-        let source_info = self
-            .enrich_single_side(&flow_sides.source, &pod_objects.source_pod)
-            .await;
-        let destination_info = self
-            .enrich_single_side(&flow_sides.destination, &pod_objects.dest_pod)
-            .await;
-
-        Ok((source_info, destination_info, applicable_policies))
-    }
-
-    /// Evaluates network policies for both ingress and egress directions of a flow.
-    fn evaluate_network_policies(
-        &self,
-        flow_sides: &FlowSides,
-        pod_objects: &PodResolution,
+        ingress_context: &FlowContext<'_>,
+        egress_context: &FlowContext<'_>,
     ) -> Result<Option<Vec<NetworkPolicy>>> {
         let mut all_matching_policies = Vec::new();
 
-        // Evaluate ingress rules if a destination pod exists.
-        if let Some(dest_pod) = &pod_objects.dest_pod {
-            let ingress_policies = self.get_policies_for_direction(
-                dest_pod,
-                FlowDirection::Ingress,
-                flow_sides,
-                pod_objects,
-            )?;
+        // Evaluate ingress rules if a destination pod exists
+        if let Some(dst_pod) = ingress_context.dst_pod {
+            let ingress_policies = self.get_policies_for_context(dst_pod, ingress_context)?;
             all_matching_policies.extend(ingress_policies);
         }
 
-        // Evaluate egress rules if a source pod exists.
-        if let Some(source_pod) = &pod_objects.source_pod {
-            let egress_policies = self.get_policies_for_direction(
-                source_pod,
-                FlowDirection::Egress,
-                flow_sides,
-                pod_objects,
-            )?;
+        // Evaluate egress rules if a source pod exists
+        if let Some(src_pod) = egress_context.src_pod {
+            let egress_policies = self.get_policies_for_context(src_pod, egress_context)?;
             all_matching_policies.extend(egress_policies);
         }
 
@@ -191,25 +117,14 @@ impl<'a> PacketEnricher<'a> {
         }
     }
 
-    /// Helper to evaluate policies for a single direction (Ingress or Egress).
-    fn get_policies_for_direction(
+    fn get_policies_for_context(
         &self,
-        policy_pod: &Pod, // The pod to which the policies apply (source for egress, dest for ingress)
-        direction: FlowDirection,
-        flow_sides: &FlowSides,
-        pod_objects: &PodResolution,
+        policy_pod: &Pod,
+        flow_context: &FlowContext<'_>,
     ) -> Result<Vec<NetworkPolicy>> {
-        let namespace = policy_pod
-            .metadata
-            .namespace
-            .as_deref()
-            .unwrap_or("default");
-
-        let context = FlowContext::new(pod_objects, flow_sides, namespace, direction);
-
         let matching_policies = self
             .attributor
-            .get_matching_network_policies(policy_pod, &context)?;
+            .get_matching_network_policies(policy_pod, flow_context)?;
 
         Ok(matching_policies
             .iter()
@@ -220,49 +135,21 @@ impl<'a> PacketEnricher<'a> {
             .collect())
     }
 
-    /// Enriches a single side of the flow, prioritizing Pod information over fallback enrichment.
-    async fn enrich_single_side(
-        &self,
-        side: &FlowSide,
-        pod: &Option<Arc<Pod>>,
-    ) -> Option<EnrichedInfo> {
-        if let Some(pod) = pod.as_ref() {
-            Some(self.enrich_pod_info(pod))
-        } else {
-            self.enrich_side_fallback(side).await
-        }
-    }
-
-    /// Creates EnrichedInfo for a Pod.
-    fn enrich_pod_info(&self, pod: &Pod) -> EnrichedInfo {
-        let pod_meta = K8sObjectMeta::from(pod);
-        let owner = self.attributor.get_top_level_controller(pod);
-        EnrichedInfo::Pod {
-            pod: pod_meta,
-            owner,
-        }
-    }
-
-    /// Enriches a single side of a flow based on its IP address.
-    /// This is used as a fallback if the IP does not resolve to a Pod.
-    async fn enrich_side_fallback(&self, side: &FlowSide) -> Option<EnrichedInfo> {
+    /// Enriches IP address with fallback information (Node, Service, EndpointSlice)
+    async fn enrich_ip_fallback(&self, ip: IpAddr) -> Option<EnrichedInfo> {
         // Try to match against a Node
-        if let Some(node) = self.attributor.get_node_by_ip(side.ip).await {
+        if let Some(node) = self.attributor.get_node_by_ip(ip).await {
             return Some(EnrichedInfo::Node {
                 node: K8sObjectMeta::from(node.as_ref()),
             });
         }
 
         // Try to match against a Service
-        if let Some(service) = self
-            .attributor
-            .get_service_by_flow_details(side.ip, side.port, side.protocol)
-            .await
-        {
+        if let Some(service) = self.attributor.get_service_by_ip(ip).await {
             let service_meta = K8sObjectMeta::from(service.as_ref());
             let backend_ips = self
                 .attributor
-                .resolve_service_ip_to_backend_ips(side.ip)
+                .resolve_service_ip_to_backend_ips(ip)
                 .await
                 .unwrap_or_default();
 
@@ -273,7 +160,7 @@ impl<'a> PacketEnricher<'a> {
         }
 
         // Try to match against an EndpointSlice
-        if let Some(slice) = self.attributor.get_endpointslice_by_ip(side.ip).await {
+        if let Some(slice) = self.attributor.get_endpointslice_by_ip(ip).await {
             return Some(EnrichedInfo::EndpointSlice {
                 slice: K8sObjectMeta::from(slice.as_ref()),
             });
@@ -281,18 +168,6 @@ impl<'a> PacketEnricher<'a> {
 
         None
     }
-}
-
-#[derive(Debug)]
-pub struct FlowSides {
-    pub src: FlowSide,
-    pub dst: FlowSide,
-}
-
-#[derive(Debug)]
-pub struct PodResolution {
-    pub src_pod: Option<Arc<Pod>>,
-    pub dst_pod: Option<Arc<Pod>>,
 }
 
 pub async fn parse_packet(

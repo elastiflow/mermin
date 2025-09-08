@@ -10,7 +10,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Debug,
-    net::IpAddr,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::Arc,
 };
 
@@ -37,9 +37,8 @@ use kube::{
 };
 use kube_runtime::{WatchStreamExt, watcher};
 use log::{debug, info, warn};
+use mermin_common::{IpAddrType, PacketMeta};
 use network_types::ip::IpProto;
-
-use crate::k8s::resource_parser::{FlowSides, PodResolution};
 
 pub mod resource_parser;
 
@@ -291,10 +290,10 @@ pub enum FlowDirection {
 /// Represents the context of a network flow for policy evaluation
 #[derive(Debug, Clone)]
 pub struct FlowContext<'a> {
-    pub source_pod: Option<&'a Pod>,
-    pub source_ip: IpAddr,
-    pub dest_pod: Option<&'a Pod>,
-    pub dest_ip: IpAddr,
+    pub src_pod: Option<&'a Pod>,
+    pub src_ip: IpAddr,
+    pub dst_pod: Option<&'a Pod>,
+    pub dst_ip: IpAddr,
     pub namespace: &'a str,
     pub port: u16,
     pub protocol: IpProto,
@@ -302,22 +301,58 @@ pub struct FlowContext<'a> {
 }
 
 impl<'a> FlowContext<'a> {
-    pub fn new(
-        pod_objects: &'a PodResolution,
-        flow_sides: &'a FlowSides,
-        namespace: &'a str,
+    pub async fn from_packet(
+        packet: &PacketMeta,
+        attributor: &Attributor,
+        namespace: &str,
         direction: FlowDirection,
     ) -> Self {
+        // Extract IPs and ports
+        let (src_ip, dst_ip) = Self::extract_ips(packet);
+        let port = Self::extract_dst_port(packet);
+        let protocol = packet.proto;
+
+        // Resolve pods
+        let src_pod = attributor.get_pod_by_ip(src_ip).await;
+        let dst_pod = attributor.get_pod_by_ip(dst_ip).await;
+
         Self {
-            source_pod: pod_objects.source_pod.as_deref(),
-            source_ip: flow_sides.source.ip,
-            dest_pod: pod_objects.dest_pod.as_deref(),
-            dest_ip: flow_sides.destination.ip,
+            src_pod: src_pod.as_deref(),
+            src_ip,
+            dst_pod: dst_pod.as_deref(),
+            dst_ip,
             namespace,
-            port: flow_sides.destination.port,
-            protocol: flow_sides.destination.protocol,
+            port,
+            protocol,
             direction,
         }
+    }
+
+    /// Extract source and destination IP address from packet metadata
+    fn extract_ips(packet: &PacketMeta) -> (IpAddr, IpAddr) {
+        match packet.ip_addr_type {
+            IpAddrType::Ipv4 => {
+                let src_ipv4_addr = packet.src_ipv4_addr;
+                let dst_ipv4_addr = packet.dst_ipv4_addr;
+                (
+                    IpAddr::V4(Ipv4Addr::from(src_ipv4_addr)),
+                    IpAddr::V4(Ipv4Addr::from(dst_ipv4_addr)),
+                )
+            }
+            IpAddrType::Ipv6 => {
+                let src_ipv6_addr = packet.src_ipv6_addr;
+                let dst_ipv6_addr = packet.dst_ipv6_addr;
+                (
+                    IpAddr::V6(Ipv6Addr::from(src_ipv6_addr)),
+                    IpAddr::V6(Ipv6Addr::from(dst_ipv6_addr)),
+                )
+            }
+        }
+    }
+
+    /// Extract destination port from packet metadata
+    fn extract_dst_port(packet: &PacketMeta) -> u16 {
+        u16::from_be_bytes(packet.dst_port)
     }
 }
 
