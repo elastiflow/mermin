@@ -6,6 +6,7 @@ use network_types::{
     ah::AuthHdr,
     esp::Esp,
     eth::EthHdr,
+    fragment::Fragment,
     geneve::GeneveHdr,
     hop::HopOptHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
@@ -35,6 +36,7 @@ pub enum PacketType {
     SegmentRouting = 12,
     Crh16 = 13,
     Crh32 = 14,
+    Fragment = 15,
 }
 
 /// A union to hold any of the possible parsed network headers.
@@ -56,6 +58,7 @@ pub union HeaderUnion {
     pub segment_routing: SegmentRoutingHeader,
     pub crh16: CrhHeader,
     pub crh32: CrhHeader,
+    pub fragment: Fragment,
 }
 
 /// The final struct sent back to user-space. It contains the type of
