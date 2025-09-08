@@ -13,6 +13,7 @@ use network_types::{
     ah::AuthHdr,
     esp::Esp,
     eth::EthHdr,
+    fragment::Fragment,
     geneve::GeneveHdr,
     hop::HopOptHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
@@ -48,6 +49,7 @@ fn u8_to_packet_type(val: u8) -> Option<PacketType> {
         12 => Some(PacketType::SegmentRouting),
         13 => Some(PacketType::Crh16),
         14 => Some(PacketType::Crh32),
+        15 => Some(PacketType::Fragment),
         _ => None,
     }
 }
@@ -145,6 +147,13 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             ParsedHeader {
                 type_: PacketType::Geneve,
                 data: HeaderUnion { geneve: header },
+            }
+        }
+        PacketType::Fragment => {
+            let header: Fragment = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            ParsedHeader {
+                type_: PacketType::Fragment,
+                data: HeaderUnion { fragment: header },
             }
         }
         PacketType::Type2 => {
