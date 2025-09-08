@@ -1,5 +1,6 @@
 mod ah;
 mod crh;
+mod destopts;
 mod esp;
 mod eth;
 mod fragment;
@@ -21,6 +22,7 @@ use crate::{
         create_crh16_test_packet, create_crh32_test_packet, verify_crh16_header,
         verify_crh32_header,
     },
+    destopts::{create_destopts_test_packet, verify_destopts_header},
     esp::{create_esp_test_packet, verify_esp_header},
     eth::{create_eth_test_packet, verify_eth_header},
     fragment::{create_fragment_test_packet, verify_fragment_header},
@@ -169,4 +171,12 @@ define_header_test!(
     PacketType::Fragment,
     create_fragment_test_packet,
     verify_fragment_header
+);
+
+define_header_test!(
+    test_parses_destopts_header,
+    DestOptsHdr,
+    PacketType::DestOpts,
+    create_destopts_test_packet,
+    verify_destopts_header
 );
