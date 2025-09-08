@@ -40,6 +40,8 @@ use log::{debug, info, warn};
 use mermin_common::{IpAddrType, PacketMeta};
 use network_types::ip::IpProto;
 
+use crate::flow::FlowDirection;
+
 pub mod resource_parser;
 
 /// Holds metadata for a single Kubernetes object.
@@ -280,13 +282,6 @@ where
     Ok(reader)
 }
 
-/// Flow direction for policy evaluation
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum FlowDirection {
-    Ingress,
-    Egress,
-}
-
 /// Represents the context of a network flow for policy evaluation
 #[derive(Debug, Clone)]
 pub struct FlowContext<'a> {
@@ -297,7 +292,6 @@ pub struct FlowContext<'a> {
     pub namespace: &'a str,
     pub port: u16,
     pub protocol: IpProto,
-    pub direction: FlowDirection,
 }
 
 impl<'a> FlowContext<'a> {
@@ -305,7 +299,6 @@ impl<'a> FlowContext<'a> {
         packet: &PacketMeta,
         attributor: &Attributor,
         namespace: &'a str,
-        direction: FlowDirection,
     ) -> Self {
         // Extract IPs and ports
         let (src_ip, dst_ip) = Self::extract_ips(packet);
@@ -324,7 +317,6 @@ impl<'a> FlowContext<'a> {
             namespace,
             port,
             protocol,
-            direction,
         }
     }
 
@@ -615,21 +607,22 @@ impl Attributor {
     /// Main entry point: finds all NetworkPolicies that permit the specified traffic flow
     pub fn get_matching_network_policies(
         &self,
-        dest_pod: &Pod,
-        flow_ctx: &FlowContext,
+        ctx: &FlowContext,
+        pod: &Pod,
+        direction: FlowDirection,
     ) -> Result<Vec<Arc<NetworkPolicy>>> {
-        let applicable_policies = self.get_network_policies_for_pod(dest_pod)?;
+        let applicable_policies = self.get_network_policies_for_pod(pod)?;
 
         Ok(applicable_policies
             .into_iter()
-            .filter(|policy| self.policy_permits_flow(policy, flow_ctx))
+            .filter(|policy| self.policy_permits_flow(ctx, policy, direction))
             .collect())
     }
 
     /// Gets NetworkPolicies that apply to the given pod based on podSelector
-    fn get_network_policies_for_pod(&self, dest_pod: &Pod) -> Result<Vec<Arc<NetworkPolicy>>> {
-        let pod_namespace = dest_pod.clone().metadata.namespace.unwrap_or_default();
-        let pod_labels = dest_pod.labels();
+    fn get_network_policies_for_pod(&self, pod: &Pod) -> Result<Vec<Arc<NetworkPolicy>>> {
+        let pod_namespace = pod.clone().metadata.namespace.unwrap_or_default();
+        let pod_labels = pod.labels();
 
         let policies = self
             .resource_store
@@ -707,15 +700,25 @@ impl Attributor {
     }
 
     /// Consolidated policy evaluation - supports both ingress and egress rules
-    fn policy_permits_flow(&self, policy: &NetworkPolicy, flow_ctx: &FlowContext) -> bool {
-        match flow_ctx.direction {
-            FlowDirection::Ingress => self.evaluate_ingress_rules(policy, flow_ctx),
-            FlowDirection::Egress => self.evaluate_egress_rules(policy, flow_ctx),
+    fn policy_permits_flow(
+        &self,
+        ctx: &FlowContext,
+        policy: &NetworkPolicy,
+        direction: FlowDirection,
+    ) -> bool {
+        match direction {
+            FlowDirection::Ingress => self.evaluate_ingress_rules(ctx, policy, direction),
+            FlowDirection::Egress => self.evaluate_egress_rules(ctx, policy, direction),
         }
     }
 
     /// Evaluates ingress rules for a policy.
-    fn evaluate_ingress_rules(&self, policy: &NetworkPolicy, flow_ctx: &FlowContext) -> bool {
+    fn evaluate_ingress_rules(
+        &self,
+        ctx: &FlowContext,
+        policy: &NetworkPolicy,
+        direction: FlowDirection,
+    ) -> bool {
         let Some(ingress_rules) = policy.spec.as_ref().and_then(|s| s.ingress.as_ref()) else {
             return false;
         };
@@ -725,15 +728,20 @@ impl Attributor {
                 from_peers.is_empty()
                     || from_peers
                         .iter()
-                        .any(|peer| self.peer_matches_source(peer, flow_ctx))
+                        .any(|peer| self.peer_matches(ctx, peer, true))
             });
 
-            from_match && self.check_ports_match(&rule.ports, flow_ctx)
+            from_match && self.check_ports_match(ctx, &rule.ports, direction)
         })
     }
 
     /// Evaluates egress rules for a policy.
-    fn evaluate_egress_rules(&self, policy: &NetworkPolicy, flow_ctx: &FlowContext) -> bool {
+    fn evaluate_egress_rules(
+        &self,
+        ctx: &FlowContext,
+        policy: &NetworkPolicy,
+        direction: FlowDirection,
+    ) -> bool {
         let Some(egress_rules) = policy.spec.as_ref().and_then(|s| s.egress.as_ref()) else {
             return false;
         };
@@ -743,10 +751,10 @@ impl Attributor {
                 to_peers.is_empty()
                     || to_peers
                         .iter()
-                        .any(|peer| self.peer_matches_destination(peer, flow_ctx))
+                        .any(|peer| self.peer_matches(ctx, peer, false))
             });
 
-            to_match && self.check_ports_match(&rule.ports, flow_ctx)
+            to_match && self.check_ports_match(ctx, &rule.ports, direction)
         })
     }
 
@@ -754,22 +762,28 @@ impl Attributor {
     /// Returns true if there are no ports specified (allowing all ports).
     fn check_ports_match(
         &self,
+        ctx: &FlowContext,
         ports: &Option<Vec<NetworkPolicyPort>>,
-        flow_ctx: &FlowContext,
+        direction: FlowDirection,
     ) -> bool {
         ports.as_ref().is_none_or(|ports| {
-            ports.is_empty() || ports.iter().any(|p| self.port_matches(p, flow_ctx))
+            ports.is_empty() || ports.iter().any(|p| self.port_matches(ctx, p, direction))
         })
     }
 
     /// Enhanced port matching with support for ranges and named ports for a single port spec.
-    fn port_matches(&self, port_spec: &NetworkPolicyPort, flow_ctx: &FlowContext) -> bool {
+    fn port_matches(
+        &self,
+        ctx: &FlowContext,
+        port_spec: &NetworkPolicyPort,
+        direction: FlowDirection,
+    ) -> bool {
         // First, ensure the protocol matches. This is a good guard clause.
         let proto_match = port_spec
             .protocol
             .as_deref()
             .unwrap_or("TCP")
-            .eq_ignore_ascii_case(flow_ctx.protocol.as_str());
+            .eq_ignore_ascii_case(ctx.protocol.as_str());
 
         if !proto_match {
             return false;
@@ -780,19 +794,26 @@ impl Attributor {
             Some(IntOrString::Int(p_num)) => {
                 let start_port = *p_num as u16;
                 let end_port = port_spec.end_port.map(|ep| ep as u16).unwrap_or(start_port);
-                (start_port..=end_port).contains(&flow_ctx.port)
+                (start_port..=end_port).contains(&ctx.port)
             }
-            Some(IntOrString::String(port_name)) => self.resolve_named_port(port_name, flow_ctx),
+            Some(IntOrString::String(port_name)) => {
+                self.resolve_named_port(ctx, port_name, direction)
+            }
             None => true, // If `port` is not specified, it allows all ports for the given protocol.
         }
     }
 
     /// Resolves named ports by searching through the containers of the relevant pod.
-    fn resolve_named_port(&self, port_name: &str, flow_ctx: &FlowContext) -> bool {
+    fn resolve_named_port(
+        &self,
+        ctx: &FlowContext,
+        port_name: &str,
+        direction: FlowDirection,
+    ) -> bool {
         // Determine which pod to inspect based on traffic direction.
-        let target_pod = match flow_ctx.direction {
-            FlowDirection::Ingress => &flow_ctx.dst_pod,
-            FlowDirection::Egress => &flow_ctx.src_pod,
+        let target_pod = match direction {
+            FlowDirection::Ingress => &ctx.dst_pod,
+            FlowDirection::Egress => &ctx.src_pod,
         };
 
         let Some(pod) = target_pod else {
@@ -806,21 +827,15 @@ impl Attributor {
             .iter()
             .flat_map(|container| container.ports.as_ref().into_iter().flatten())
             .any(|port| {
-                port.name.as_deref() == Some(port_name)
-                    && port.container_port as u16 == flow_ctx.port
+                port.name.as_deref() == Some(port_name) && port.container_port as u16 == ctx.port
             })
     }
 
-    fn peer_matches(
-        &self,
-        peer: &NetworkPolicyPeer,
-        flow_ctx: &FlowContext,
-        is_source: bool,
-    ) -> bool {
+    fn peer_matches(&self, ctx: &FlowContext, peer: &NetworkPolicyPeer, is_source: bool) -> bool {
         let (target_ip, target_pod) = if is_source {
-            (flow_ctx.src_ip, &flow_ctx.src_pod)
+            (ctx.src_ip, &ctx.src_pod)
         } else {
-            (flow_ctx.dst_ip, &flow_ctx.dst_pod)
+            (ctx.dst_ip, &ctx.dst_pod)
         };
 
         // If the peer has an ipBlock, a match on CIDR is sufficient.
@@ -837,9 +852,9 @@ impl Attributor {
 
         // Check for namespace selector match.
         let namespace_matches = if is_source {
-            self.namespace_matches_selector_ingress(pod, peer, flow_ctx.namespace)
+            self.namespace_matches_selector_internal(pod, peer, false, Some(ctx.namespace))
         } else {
-            self.namespace_matches_selector_egress(pod, peer)
+            self.namespace_matches_selector_internal(pod, peer, true, None)
         };
 
         if !namespace_matches {
@@ -851,16 +866,6 @@ impl Attributor {
         peer.pod_selector
             .as_ref()
             .is_none_or(|ps| self.selector_matches(ps, pod.labels()))
-    }
-
-    /// Peer matching for source (ingress rules).
-    fn peer_matches_source(&self, peer: &NetworkPolicyPeer, flow_ctx: &FlowContext) -> bool {
-        self.peer_matches(peer, flow_ctx, true)
-    }
-
-    /// Peer matching for destination (egress rules).
-    fn peer_matches_destination(&self, peer: &NetworkPolicyPeer, flow_ctx: &FlowContext) -> bool {
-        self.peer_matches(peer, flow_ctx, false)
     }
 
     /// Checks if an IP address matches a CIDR block using the `ipnetwork` crate.
@@ -908,21 +913,6 @@ impl Attributor {
                 }
             }
         }
-    }
-
-    /// Checks if the source pod's namespace matches the peer's namespace selector (for ingress)
-    fn namespace_matches_selector_ingress(
-        &self,
-        source_pod: &Pod,
-        peer: &NetworkPolicyPeer,
-        dest_namespace: &str,
-    ) -> bool {
-        self.namespace_matches_selector_internal(source_pod, peer, false, Some(dest_namespace))
-    }
-
-    /// Checks if the destination pod's namespace matches the peer's namespace selector (for egress)
-    fn namespace_matches_selector_egress(&self, dest_pod: &Pod, peer: &NetworkPolicyPeer) -> bool {
-        self.namespace_matches_selector_internal(dest_pod, peer, true, None)
     }
 
     /// Gathers the names of all discoverable resources within a given namespace.
