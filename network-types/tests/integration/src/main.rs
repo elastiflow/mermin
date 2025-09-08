@@ -115,7 +115,7 @@ define_header_test!(
 
 define_header_test!(
     test_parses_rpl_source_route_header,
-    RplSourceRouteParsed,
+    RplSourceRouteHeader,
     PacketType::RplSourceRoute,
     create_rpl_source_route_test_packet,
     verify_rpl_source_route_header
@@ -131,7 +131,7 @@ define_header_test!(
 
 define_header_test!(
     test_parses_segment_routing_header,
-    SegmentRoutingParsed,
+    SegmentRoutingHeader,
     PacketType::SegmentRouting,
     create_segment_routing_test_packet,
     verify_segment_routing_header
@@ -139,7 +139,7 @@ define_header_test!(
 
 define_header_test!(
     test_parses_segment_routing_with_tlvs_header,
-    SegmentRoutingParsed,
+    SegmentRoutingHeader,
     PacketType::SegmentRouting,
     create_segment_routing_with_tlvs_test_packet,
     verify_segment_routing_header
@@ -147,7 +147,7 @@ define_header_test!(
 
 define_header_test!(
     test_parses_crh16_header,
-    CrhParsed,
+    CrhHeader,
     PacketType::Crh16,
     create_crh16_test_packet,
     verify_crh16_header
@@ -155,7 +155,7 @@ define_header_test!(
 
 define_header_test!(
     test_parses_crh32_header,
-    CrhParsed,
+    CrhHeader,
     PacketType::Crh32,
     create_crh32_test_packet,
     verify_crh32_header

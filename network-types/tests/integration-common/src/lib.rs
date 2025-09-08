@@ -51,11 +51,11 @@ pub union HeaderUnion {
     pub esp: Esp,
     pub hop: HopOptHdr,
     pub geneve: GeneveHdr,
-    pub rpl: RplSourceRouteParsed,
+    pub rpl: RplSourceRouteHeader,
     pub type2: Type2RoutingHeader,
-    pub segment_routing: SegmentRoutingParsed,
-    pub crh16: CrhParsed,
-    pub crh32: CrhParsed,
+    pub segment_routing: SegmentRoutingHeader,
+    pub crh16: CrhHeader,
+    pub crh32: CrhHeader,
 }
 
 /// The final struct sent back to user-space. It contains the type of
@@ -65,32 +65,4 @@ pub union HeaderUnion {
 pub struct ParsedHeader {
     pub type_: PacketType,
     pub data: HeaderUnion,
-}
-
-pub const MAX_RPL_ADDR_STORAGE: usize = 128;
-pub const MAX_SRH_SEGMENTS_STORAGE: usize = 128;
-pub const MAX_CRH_SID_STORAGE: usize = 128;
-
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct RplSourceRouteParsed {
-    pub header: RplSourceRouteHeader,
-    pub addresses: [u8; MAX_RPL_ADDR_STORAGE],
-    pub addresses_len: u8,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct SegmentRoutingParsed {
-    pub header: SegmentRoutingHeader,
-    pub segments_and_tlvs: [u8; MAX_SRH_SEGMENTS_STORAGE],
-    pub segments_and_tlvs_len: u8,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct CrhParsed {
-    pub header: CrhHeader,
-    pub sids: [u8; MAX_CRH_SID_STORAGE],
-    pub sids_len: u8,
 }
