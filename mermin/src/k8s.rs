@@ -290,9 +290,9 @@ pub enum FlowDirection {
 /// Represents the context of a network flow for policy evaluation
 #[derive(Debug, Clone)]
 pub struct FlowContext<'a> {
-    pub src_pod: Option<&'a Pod>,
+    pub src_pod: Option<Pod>,
     pub src_ip: IpAddr,
-    pub dst_pod: Option<&'a Pod>,
+    pub dst_pod: Option<Pod>,
     pub dst_ip: IpAddr,
     pub namespace: &'a str,
     pub port: u16,
@@ -304,7 +304,7 @@ impl<'a> FlowContext<'a> {
     pub async fn from_packet(
         packet: &PacketMeta,
         attributor: &Attributor,
-        namespace: &str,
+        namespace: &'a str,
         direction: FlowDirection,
     ) -> Self {
         // Extract IPs and ports
@@ -317,9 +317,9 @@ impl<'a> FlowContext<'a> {
         let dst_pod = attributor.get_pod_by_ip(dst_ip).await;
 
         Self {
-            src_pod: src_pod.as_deref(),
+            src_pod: src_pod.as_deref().cloned(),
             src_ip,
-            dst_pod: dst_pod.as_deref(),
+            dst_pod: dst_pod.as_deref().cloned(),
             dst_ip,
             namespace,
             port,
@@ -538,38 +538,6 @@ impl Attributor {
                     .is_some_and(|ingress| ingress.iter().any(|i| i.ip.as_deref() == Some(&ip_str)))
             })
             .cloned()
-    }
-
-    /// Finds a Service that matches a flow's destination details (IP, port, protocol).
-    pub async fn get_service_by_flow_details(
-        &self,
-        dst_ip: IpAddr,
-        dst_port: u16,
-        protocol: IpProto,
-    ) -> Option<Arc<Service>> {
-        let proto_str = protocol.as_str();
-        // First, find a service that matches the IP address.
-        let service = self.get_service_by_ip(dst_ip).await?;
-        let service_spec = service.spec.as_ref()?;
-
-        // Second, verify that the IP family matches.
-        let ip_families = service_spec.ip_families.as_ref()?;
-        let flow_is_ipv4 = dst_ip.is_ipv4();
-        let family_match = ip_families.iter().any(|family| {
-            (family == "IPv4" && flow_is_ipv4) || (family == "IPv6" && !flow_is_ipv4)
-        });
-        if !family_match {
-            return None;
-        }
-
-        // Third, verify that the service exposes the destination port with the correct protocol.
-        let port_match = service_spec.ports.as_ref().is_some_and(|ports| {
-            ports.iter().any(|p| {
-                p.port as u16 == dst_port && p.protocol.as_deref().unwrap_or("TCP") == proto_str // Default is TCP
-            })
-        });
-
-        if port_match { Some(service) } else { None }
     }
 
     /// Takes a virtual IP (like a ClusterIP) and resolves it to the list of
@@ -823,8 +791,8 @@ impl Attributor {
     fn resolve_named_port(&self, port_name: &str, flow_ctx: &FlowContext) -> bool {
         // Determine which pod to inspect based on traffic direction.
         let target_pod = match flow_ctx.direction {
-            FlowDirection::Ingress => flow_ctx.dest_pod,
-            FlowDirection::Egress => flow_ctx.source_pod,
+            FlowDirection::Ingress => &flow_ctx.dst_pod,
+            FlowDirection::Egress => &flow_ctx.src_pod,
         };
 
         let Some(pod) = target_pod else {
@@ -850,9 +818,9 @@ impl Attributor {
         is_source: bool,
     ) -> bool {
         let (target_ip, target_pod) = if is_source {
-            (flow_ctx.source_ip, flow_ctx.source_pod)
+            (flow_ctx.src_ip, &flow_ctx.src_pod)
         } else {
-            (flow_ctx.dest_ip, flow_ctx.dest_pod)
+            (flow_ctx.dst_ip, &flow_ctx.dst_pod)
         };
 
         // If the peer has an ipBlock, a match on CIDR is sufficient.

@@ -78,7 +78,7 @@ impl<'a> PacketEnricher<'a> {
     }
 
     /// Enriches flow information from FlowContext, eliminating intermediary structures
-    async fn enrich_from_context(&self, pod: &Option<&Pod>, ip: IpAddr) -> Option<EnrichedInfo> {
+    async fn enrich_from_context(&self, pod: &Option<Pod>, ip: IpAddr) -> Option<EnrichedInfo> {
         if let Some(pod) = pod {
             Some(self.enrich_pod_info(pod))
         } else {
@@ -95,13 +95,13 @@ impl<'a> PacketEnricher<'a> {
         let mut all_matching_policies = Vec::new();
 
         // Evaluate ingress rules if a destination pod exists
-        if let Some(dst_pod) = ingress_context.dst_pod {
+        if let Some(dst_pod) = &ingress_context.dst_pod {
             let ingress_policies = self.get_policies_for_context(dst_pod, ingress_context)?;
             all_matching_policies.extend(ingress_policies);
         }
 
         // Evaluate egress rules if a source pod exists
-        if let Some(src_pod) = egress_context.src_pod {
+        if let Some(src_pod) = &egress_context.src_pod {
             let egress_policies = self.get_policies_for_context(src_pod, egress_context)?;
             all_matching_policies.extend(egress_policies);
         }
