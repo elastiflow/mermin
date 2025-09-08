@@ -13,6 +13,7 @@ use aya_log_ebpf::{debug, error, warn};
 use mermin_common::{IpAddrType, PacketMeta};
 use network_types::{
     ah::AuthHdr,
+    destopts::DestOptsHdr,
     esp::Esp,
     eth::{EthHdr, EtherType},
     fragment::Fragment,
@@ -271,6 +272,15 @@ impl Parser {
         Ok(())
     }
 
+    /// Parses the Destination Options IPv6-extension header and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_destopts_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let dest_hdr: DestOptsHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += dest_hdr.total_hdr_len();
+        self.next_hdr = HeaderType::Proto(dest_hdr.next_hdr());
+        Ok(())
+    }
+
     /// Parses the IPv6 Fragment header and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_fragment_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
@@ -410,6 +420,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
             HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_routing_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
             HeaderType::Proto(proto) => {
                 debug!(
@@ -681,6 +692,22 @@ mod tests {
         packet.extend_from_slice(&[0x12, 0x34, 0x56, 0x78]);
         // Sequence Number (4 bytes)
         packet.extend_from_slice(&[0x9a, 0xbc, 0xde, 0xf0]);
+        packet
+    }
+
+    // Helper function to create a Destination Options header test packet
+    fn create_destopts_test_packet(next: IpProto, hdr_ext_len: u8) -> Vec<u8> {
+        let mut packet = Vec::with_capacity(DestOptsHdr::LEN + (hdr_ext_len as usize) * 8);
+        packet.push(next as u8);
+        packet.push(hdr_ext_len);
+        // Minimum 6 bytes to complete the first 8-octet block
+        packet.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
+        // If hdr_ext_len > 0, add padding to reach total length (hdr_ext_len + 1) * 8
+        let total = (hdr_ext_len as usize + 1) * 8;
+        let current = packet.len();
+        if total > current {
+            packet.extend(core::iter::repeat(0u8).take(total - current));
+        }
         packet
     }
 
@@ -1269,6 +1296,60 @@ mod tests {
         let ctx = TcContext::new(packet);
 
         let result = parser.parse_hop_header(&ctx);
+        assert!(matches!(result, Err(Error::OutOfBounds)));
+    }
+
+    #[test]
+    fn test_parse_destopts_header_tcp() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Opts);
+        let packet = create_destopts_test_packet(IpProto::Tcp, 0);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_destopts_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, DestOptsHdr::LEN);
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    #[test]
+    fn test_parse_destopts_header_udp() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Opts);
+        let packet = create_destopts_test_packet(IpProto::Udp, 0);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_destopts_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, DestOptsHdr::LEN);
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
+    }
+
+    #[test]
+    fn test_parse_destopts_header_with_extension() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Opts);
+        let packet = create_destopts_test_packet(IpProto::Tcp, 1);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_destopts_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 16); // 8 + 8 for hdr_ext_len=1
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    #[test]
+    fn test_parse_destopts_header_out_of_bounds() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Opts);
+        // Provide fewer than 8 bytes
+        let packet = vec![0x06, 0x00, 0x01, 0x02];
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_destopts_header(&ctx);
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 

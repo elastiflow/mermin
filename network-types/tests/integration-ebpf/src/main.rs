@@ -11,6 +11,7 @@ use aya_log_ebpf::{Level, log};
 use integration_common::{HeaderUnion, PacketType, ParsedHeader};
 use network_types::{
     ah::AuthHdr,
+    destopts::DestOptsHdr,
     esp::Esp,
     eth::EthHdr,
     fragment::Fragment,
@@ -50,6 +51,7 @@ fn u8_to_packet_type(val: u8) -> Option<PacketType> {
         13 => Some(PacketType::Crh16),
         14 => Some(PacketType::Crh32),
         15 => Some(PacketType::Fragment),
+        16 => Some(PacketType::DestOpts),
         _ => None,
     }
 }
@@ -154,6 +156,13 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             ParsedHeader {
                 type_: PacketType::Fragment,
                 data: HeaderUnion { fragment: header },
+            }
+        }
+        PacketType::DestOpts => {
+            let header: DestOptsHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            ParsedHeader {
+                type_: PacketType::DestOpts,
+                data: HeaderUnion { destopts: header },
             }
         }
         PacketType::Type2 => {

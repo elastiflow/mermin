@@ -4,6 +4,7 @@
 use aya::Pod;
 use network_types::{
     ah::AuthHdr,
+    destopts::DestOptsHdr,
     esp::Esp,
     eth::EthHdr,
     fragment::Fragment,
@@ -37,6 +38,7 @@ pub enum PacketType {
     Crh16 = 13,
     Crh32 = 14,
     Fragment = 15,
+    DestOpts = 16,
 }
 
 /// A union to hold any of the possible parsed network headers.
@@ -59,6 +61,7 @@ pub union HeaderUnion {
     pub crh16: CrhHeader,
     pub crh32: CrhHeader,
     pub fragment: Fragment,
+    pub destopts: DestOptsHdr,
 }
 
 /// The final struct sent back to user-space. It contains the type of
