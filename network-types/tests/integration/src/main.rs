@@ -190,4 +190,3 @@ define_header_test!(
     create_vxlan_test_packet,
     verify_vxlan_header
 );
-

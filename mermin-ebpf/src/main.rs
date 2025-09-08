@@ -222,13 +222,14 @@ impl Parser {
 
         // IANA has assigned port 6081 as the fixed well-known destination port for Geneve and port 4789 as the fixed well-known destination port for Vxlan.
         // Although the well-known value should be used by default, it is RECOMMENDED that implementations make these configurable.
-        if udp_hdr.dst_port() == geneve_port {
+        let dst_port = udp_hdr.dst_port();
+        if dst_port == geneve_port {
             debug!(
                 ctx,
                 "UDP packet with destination port {} (Geneve) detected", geneve_port
             );
             self.next_hdr = HeaderType::Geneve;
-        } else if udp_hdr.dst_port() == vxlan_port {
+        } else if dst_port == vxlan_port {
             debug!(
                 ctx,
                 "UDP packet with destination port {} (Vxlan) detected", vxlan_port
@@ -399,6 +400,8 @@ impl Parser {
         Ok(())
     }
 
+    /// Parses the VXLAN header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_vxlan_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         let vxlan_hdr: VxlanHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
 
@@ -407,13 +410,13 @@ impl Parser {
 
         let has_vni = vxlan_hdr.vni() != 0;
 
+        self.offset += VxlanHdr::LEN;
+
         if (vni_flag && !has_vni) || (!vni_flag && has_vni) {
             warn!(ctx, "vxlan header contains invalid flag/VNI combination");
             self.next_hdr = HeaderType::StopProcessing;
             return Ok(());
         }
-
-        self.offset += VxlanHdr::LEN;
         self.next_hdr = HeaderType::Ethernet; // VXLAN always encapsulates Ethernet
 
         Ok(())
@@ -1974,6 +1977,7 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
     }
 
+    #[test]
     fn test_parse_vxlan_valid_header() {
         let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Vxlan;
@@ -1988,6 +1992,7 @@ mod tests {
         assert!(matches!(parser.next_hdr, HeaderType::Ethernet));
     }
 
+    #[test]
     fn test_parse_vxlan_invalid_header() {
         let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Vxlan;
@@ -1997,8 +2002,8 @@ mod tests {
 
         let result = parser.parse_vxlan_header(&ctx);
 
-        assert!(result.is_err());
+        assert!(result.is_ok());
         assert_eq!(parser.offset, VxlanHdr::LEN);
-        assert!(matches!(parser.next_hdr, HeaderType::Ethernet));
+        assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
     }
 }

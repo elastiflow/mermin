@@ -40,7 +40,7 @@ pub enum PacketType {
     Crh32 = 14,
     Fragment = 15,
     DestOpts = 16,
-	Vxlan = 17,
+    Vxlan = 17,
 }
 
 /// A union to hold any of the possible parsed network headers.
