@@ -15,6 +15,7 @@ use network_types::{
     ah::AuthHdr,
     esp::Esp,
     eth::{EthHdr, EtherType},
+    fragment::Fragment,
     geneve::GeneveHdr,
     hop::HopOptHdr,
     icmp::IcmpHdr,
@@ -270,6 +271,16 @@ impl Parser {
         Ok(())
     }
 
+    /// Parses the IPv6 Fragment header and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_fragment_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let frag_hdr: Fragment = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += Fragment::LEN;
+        // TODO: extract and assign additional fragment fields if necessary
+        self.next_hdr = HeaderType::Proto(frag_hdr.next_hdr());
+        Ok(())
+    }
+
     /// Parses the Geneve header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_geneve_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
@@ -396,6 +407,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx),
             HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
             HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_routing_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
@@ -701,6 +713,34 @@ mod tests {
         // Sequence Number (2 bytes)
         packet.extend_from_slice(&[0x9a, 0xbc]);
 
+        packet
+    }
+
+    // Helper to create an IPv6 Fragment header test packet (8 bytes)
+    fn create_fragment_test_packet(
+        next: IpProto,
+        offset_13bit: u16,
+        m_flag: bool,
+        id: u32,
+    ) -> Vec<u8> {
+        let mut packet = Vec::with_capacity(Fragment::LEN);
+        // Next Header
+        packet.push(next as u8);
+        // Reserved
+        packet.push(0);
+        // Fragment offset fields: 13-bit offset across two bytes (frag_offset byte and fo_res_m)
+        let masked = offset_13bit & 0x1FFF;
+        let frag_offset_byte = ((masked >> 5) & 0xFF) as u8;
+        let upper5 = (masked & 0x001F) as u8;
+        let mut fo_res_m = upper5 << 3; // place in bits 7..3
+        // reserved2 bits are zero
+        if m_flag {
+            fo_res_m |= 0x01;
+        }
+        packet.push(frag_offset_byte);
+        packet.push(fo_res_m);
+        // Identification (big-endian per our Fragment::identification())
+        packet.extend_from_slice(&id.to_be_bytes());
         packet
     }
 
@@ -1135,6 +1175,46 @@ mod tests {
         let ctx = TcContext::new(packet);
 
         let result = parser.parse_esp_header(&ctx);
+        assert!(matches!(result, Err(Error::OutOfBounds)));
+    }
+
+    #[test]
+    fn test_parse_fragment_header_tcp() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Frag);
+        let packet = create_fragment_test_packet(IpProto::Tcp, 0x1234, true, 0x89ABCDEF);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_fragment_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, Fragment::LEN);
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    #[test]
+    fn test_parse_fragment_header_udp() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Frag);
+        let packet = create_fragment_test_packet(IpProto::Udp, 0x0001, false, 0x10203040);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_fragment_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, Fragment::LEN);
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
+    }
+
+    #[test]
+    fn test_parse_fragment_header_out_of_bounds() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Frag);
+        // Provide fewer than 8 bytes
+        let packet = vec![0x00, 0x00, 0x00, 0x00];
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_fragment_header(&ctx);
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
