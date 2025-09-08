@@ -285,14 +285,14 @@ impl<'a> PacketEnricher<'a> {
 
 #[derive(Debug)]
 pub struct FlowSides {
-    pub source: FlowSide,
-    pub destination: FlowSide,
+    pub src: FlowSide,
+    pub dst: FlowSide,
 }
 
 #[derive(Debug)]
 pub struct PodResolution {
-    pub source_pod: Option<Arc<Pod>>,
-    pub dest_pod: Option<Arc<Pod>>,
+    pub src_pod: Option<Arc<Pod>>,
+    pub dst_pod: Option<Arc<Pod>>,
 }
 
 pub async fn parse_packet(
