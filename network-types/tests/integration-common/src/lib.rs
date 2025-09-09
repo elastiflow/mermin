@@ -14,6 +14,7 @@ use network_types::{
     route::{CrhHeader, RplSourceRouteHeader, SegmentRoutingHeader, Type2RoutingHeader},
     tcp::TcpHdr,
     udp::UdpHdr,
+    vxlan::VxlanHdr,
 };
 
 #[cfg(feature = "user")]
@@ -39,6 +40,7 @@ pub enum PacketType {
     Crh32 = 14,
     Fragment = 15,
     DestOpts = 16,
+    Vxlan = 17,
 }
 
 /// A union to hold any of the possible parsed network headers.
@@ -62,6 +64,7 @@ pub union HeaderUnion {
     pub crh32: CrhHeader,
     pub fragment: Fragment,
     pub destopts: DestOptsHdr,
+    pub vxlan: VxlanHdr,
 }
 
 /// The final struct sent back to user-space. It contains the type of

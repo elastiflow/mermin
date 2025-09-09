@@ -132,7 +132,7 @@ cargo test
 Run the following command to run the unit tests for the eBPF program only:
 
 ```shell
-cargo test -p mermin-ebpf
+cargo test -p mermin-ebpf --features test
 ```
 
 #### Format your code
