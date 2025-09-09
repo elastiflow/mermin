@@ -8,6 +8,7 @@ mod geneve;
 mod hop;
 mod ipv4;
 mod ipv6;
+mod mobility;
 mod rpl_source_route;
 mod segment_routing;
 mod tcp;
@@ -31,6 +32,7 @@ use crate::{
     hop::{create_hop_test_packet, verify_hop_header},
     ipv4::{create_ipv4_test_packet, verify_ipv4_header},
     ipv6::{create_ipv6_test_packet, verify_ipv6_header},
+    mobility::{create_mobility_test_packet, verify_mobility_header},
     rpl_source_route::{create_rpl_source_route_test_packet, verify_rpl_source_route_header},
     segment_routing::{
         create_segment_routing_test_packet, create_segment_routing_with_tlvs_test_packet,
@@ -181,6 +183,14 @@ define_header_test!(
     PacketType::DestOpts,
     create_destopts_test_packet,
     verify_destopts_header
+);
+
+define_header_test!(
+    test_parses_mobility_header,
+    MobilityHdr,
+    PacketType::Mobility,
+    create_mobility_test_packet,
+    verify_mobility_header
 );
 
 define_header_test!(
