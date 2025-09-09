@@ -46,13 +46,13 @@ impl MobilityHdr {
 
     /// Gets the Payload Proto value.
     #[inline]
-    pub fn nxt_hdr(&self) -> IpProto {
+    pub fn next_hdr(&self) -> IpProto {
         self.nxt_hdr
     }
 
     /// Sets the Payload Proto value.
     #[inline]
-    pub fn set_nxt_hdr(&mut self, payload_proto: IpProto) {
+    pub fn set_next_hdr(&mut self, payload_proto: IpProto) {
         self.nxt_hdr = payload_proto;
     }
 
@@ -155,8 +155,8 @@ mod tests {
         };
 
         // Test payload_proto
-        mobility_hdr.set_nxt_hdr(IpProto::Stream); // Example: TCP
-        assert_eq!(mobility_hdr.nxt_hdr(), IpProto::Stream);
+        mobility_hdr.set_next_hdr(IpProto::Stream); // Example: TCP
+        assert_eq!(mobility_hdr.next_hdr(), IpProto::Stream);
         assert_eq!(mobility_hdr.nxt_hdr, IpProto::Stream);
 
         // Test header_len

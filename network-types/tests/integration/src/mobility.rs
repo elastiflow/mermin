@@ -19,7 +19,7 @@ pub fn create_mobility_test_packet() -> ([u8; MobilityHdr::LEN + 1], MobilityHdr
     };
 
     // Use setters as available
-    expected.set_nxt_hdr(IpProto::Tcp);
+    expected.set_next_hdr(IpProto::Tcp);
     expected.set_hdr_ext_len(0);
     expected.set_mh_type(5);
     expected.set_reserved(0);
@@ -44,7 +44,11 @@ pub fn verify_mobility_header(received: ParsedHeader, expected: MobilityHdr) {
     assert_eq!(received.type_, PacketType::Mobility);
     let parsed = unsafe { received.data.mobility };
 
-    assert_eq!(parsed.nxt_hdr(), expected.nxt_hdr(), "Next Header mismatch");
+    assert_eq!(
+        parsed.next_hdr(),
+        expected.next_hdr(),
+        "Next Header mismatch"
+    );
     assert_eq!(
         parsed.hdr_ext_len(),
         expected.hdr_ext_len(),

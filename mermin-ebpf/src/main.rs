@@ -76,6 +76,8 @@ struct Parser {
     // Information for building flow records (prioritizes innermost headers).
     // These fields will be updated as we parse deeper or encounter encapsulations.
     packet_meta: PacketMeta,
+    // Track whether we've encountered a tunnel and captured outer headers
+    in_tunnel: bool,
 }
 
 impl Parser {
@@ -84,7 +86,37 @@ impl Parser {
             next_hdr: HeaderType::Ethernet,
             offset: 0,
             packet_meta: PacketMeta::default(),
+            in_tunnel: false,
         }
+    }
+
+    // Capture outer headers before entering a tunnel
+    fn capture_tunnel_hdr_fields(&mut self) {
+        if !self.in_tunnel {
+            // Copy current inner headers to outer headers before they get overwritten
+            self.packet_meta.tunnel_src_ipv4_addr = self.packet_meta.src_ipv4_addr;
+            self.packet_meta.tunnel_dst_ipv4_addr = self.packet_meta.dst_ipv4_addr;
+            self.packet_meta.tunnel_src_ipv6_addr = self.packet_meta.src_ipv6_addr;
+            self.packet_meta.tunnel_dst_ipv6_addr = self.packet_meta.dst_ipv6_addr;
+            self.packet_meta.tunnel_src_port = self.packet_meta.src_port;
+            self.packet_meta.tunnel_dst_port = self.packet_meta.dst_port;
+            self.packet_meta.tunnel_ip_addr_type = self.packet_meta.ip_addr_type;
+            self.packet_meta.tunnel_proto = self.packet_meta.proto;
+            self.in_tunnel = true;
+        }
+    }
+
+    // Reset inner headers to prepare for parsing encapsulated packet
+    fn reset_inner_hdr_fields(&mut self) {
+        // Reset inner header fields to defaults so they can be populated with innermost values
+        self.packet_meta.src_ipv4_addr = [0; 4];
+        self.packet_meta.dst_ipv4_addr = [0; 4];
+        self.packet_meta.src_ipv6_addr = [0; 16];
+        self.packet_meta.dst_ipv6_addr = [0; 16];
+        self.packet_meta.src_port = [0; 2];
+        self.packet_meta.dst_port = [0; 2];
+        self.packet_meta.ip_addr_type = IpAddrType::default();
+        self.packet_meta.proto = IpProto::default();
     }
 
     // Calculate the L3 octet count (from current offset to end of packet)
@@ -195,6 +227,97 @@ impl Parser {
         Ok(())
     }
 
+    /// Parses the Geneve header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_geneve_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let geneve_hdr: GeneveHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+
+        // Current version is 0. Packets with unknown version must be skipped
+        let version = geneve_hdr.ver();
+        if version != 0 {
+            warn!(
+                ctx,
+                "geneve header contains unknown version: {}, skipping packet", version
+            );
+            self.next_hdr = HeaderType::StopProcessing;
+            return Ok(());
+        }
+
+        self.offset += geneve_hdr.total_hdr_len();
+
+        // Reset inner headers to prepare for parsing encapsulated packet
+        self.reset_inner_hdr_fields();
+
+        let protocol_type = geneve_hdr.protocol_type();
+        match protocol_type {
+            0x6558 => self.next_hdr = HeaderType::Ethernet,
+            0x0800 => self.next_hdr = HeaderType::Ipv4,
+            0x86DD => self.next_hdr = HeaderType::Ipv6,
+            _ => {
+                warn!(
+                    ctx,
+                    "geneve header contains unsupported protocol type: {}", protocol_type
+                );
+                self.next_hdr = HeaderType::StopProcessing;
+                return Ok(());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Parses the VXLAN header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_vxlan_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let vxlan_hdr: VxlanHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+
+        let flag_byte = vxlan_hdr.flags();
+        let vni_flag = (flag_byte & 0x08) != 0;
+
+        let has_vni = vxlan_hdr.vni() != 0;
+
+        self.offset += VxlanHdr::LEN;
+
+        if (vni_flag && !has_vni) || (!vni_flag && has_vni) {
+            warn!(ctx, "vxlan header contains invalid flag/VNI combination");
+            self.next_hdr = HeaderType::StopProcessing;
+            return Ok(());
+        }
+
+        // Reset inner headers to prepare for parsing encapsulated packet
+        self.reset_inner_hdr_fields();
+        self.next_hdr = HeaderType::Ethernet; // VXLAN always encapsulates Ethernet
+
+        Ok(())
+    }
+
+    /// Parses the Hop-by-Hop IPv6-extension header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_hopopt_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let hop_hdr: HopOptHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += hop_hdr.total_hdr_len(); // Move offset to start of next header
+        self.next_hdr = HeaderType::Proto(hop_hdr.next_hdr);
+
+        if hop_hdr.hdr_ext_len != 0 {
+            warn!(ctx, "Unsupported HOP extension: {}", hop_hdr.hdr_ext_len);
+            return Ok(());
+        }
+        Ok(())
+    }
+
+    /// Parses the ICMP header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded.
+    /// Note: ICMP does not use ports, so src_port and dst_port remain zero.
+    fn parse_icmp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let _icmp_hdr: IcmpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += IcmpHdr::LEN;
+
+        // ICMP does not use ports, so we leave src_port and dst_port as zero
+        // TODO: extract and assign additional ICMP fields if needed (type, code, etc.)
+        self.next_hdr = HeaderType::StopProcessing;
+        Ok(())
+    }
+
     /// Parses the TCP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
     fn parse_tcp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
@@ -230,145 +353,22 @@ impl Parser {
                 ctx,
                 "UDP packet with destination port {} (Geneve) detected", geneve_port
             );
+            // Capture outer headers before entering Geneve tunnel
+            self.capture_tunnel_hdr_fields();
             self.next_hdr = HeaderType::Geneve;
         } else if dst_port == vxlan_port {
             debug!(
                 ctx,
                 "UDP packet with destination port {} (Vxlan) detected", vxlan_port
             );
+            // Capture outer headers before entering VXLAN tunnel
+            self.capture_tunnel_hdr_fields();
             self.next_hdr = HeaderType::Vxlan;
         } else {
             // TODO: extract and assign additional udp fields
             self.next_hdr = HeaderType::StopProcessing;
         }
 
-        Ok(())
-    }
-
-    /// Parses the ICMP header in the packet and updates the parser state accordingly.
-    /// Returns an error if the header cannot be loaded.
-    /// Note: ICMP does not use ports, so src_port and dst_port remain zero.
-    fn parse_icmp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let _icmp_hdr: IcmpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += IcmpHdr::LEN;
-
-        // ICMP does not use ports, so we leave src_port and dst_port as zero
-        // TODO: extract and assign additional ICMP fields if needed (type, code, etc.)
-        self.next_hdr = HeaderType::StopProcessing;
-        Ok(())
-    }
-
-    /// Parses the AH IPv6-extension header in the packet and updates the parser state accordingly.
-    /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_ah_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let ah_hdr: AuthHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += AuthHdr::total_hdr_len(&ah_hdr);
-        // TODO: Extract and set other AH fields
-        self.next_hdr = HeaderType::Proto(ah_hdr.next_hdr());
-        Ok(())
-    }
-
-    /// Parses the ESP IPv6-extension header in the packet and updates the parser state accordingly.
-    /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_esp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let _esp_hdr: Esp = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += Esp::LEN; // Move offset to start of encrypted ESP payload
-        // TODO: Extract and set SPI and Sequence number
-        self.next_hdr = HeaderType::StopProcessing; //ESP signals end of parsing headers
-        Ok(())
-    }
-
-    /// Parses the Hop-by-Hop IPv6-extension header in the packet and updates the parser state accordingly.
-    /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_hop_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let hop_hdr: HopOptHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += hop_hdr.total_hdr_len(); // Move offset to start of next header
-        self.next_hdr = HeaderType::Proto(hop_hdr.next_hdr);
-
-        if hop_hdr.hdr_ext_len != 0 {
-            warn!(ctx, "Unsupported HOP extension: {}", hop_hdr.hdr_ext_len);
-            return Ok(());
-        }
-        Ok(())
-    }
-
-    /// Parses the Destination Options IPv6-extension header and updates the parser state accordingly.
-    /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_destopts_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let dest_hdr: DestOptsHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += dest_hdr.total_hdr_len();
-        self.next_hdr = HeaderType::Proto(dest_hdr.next_hdr());
-        Ok(())
-    }
-
-    /// Parses the IPv6 Fragment header and updates the parser state accordingly.
-    /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_fragment_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let frag_hdr: Fragment = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += Fragment::LEN;
-        // TODO: extract and assign additional fragment fields if necessary
-        self.next_hdr = HeaderType::Proto(frag_hdr.next_hdr());
-        Ok(())
-    }
-
-    /// Parses the IPv6 Mobility header and updates the parser state accordingly.
-    /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_mobility_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let mob_hdr: MobilityHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += mob_hdr.total_hdr_len();
-        // Next is the payload proto stored in nxt_hdr
-        // TODO: extract and assign additional mobility fields if necessary
-        self.next_hdr = HeaderType::Proto(mob_hdr.nxt_hdr());
-
-        Ok(())
-    }
-
-    /// Parses the Geneve header in the packet and updates the parser state accordingly.
-    /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_geneve_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let geneve_hdr: GeneveHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-
-        // Current version is 0. Packets with unknown version must be skipped
-        let version = geneve_hdr.ver();
-        if version != 0 {
-            warn!(
-                ctx,
-                "geneve header contains unknown version: {}, skipping packet", version
-            );
-            self.next_hdr = HeaderType::StopProcessing;
-            return Ok(());
-        }
-
-        self.offset += geneve_hdr.total_hdr_len();
-
-        let protocol_type = geneve_hdr.protocol_type();
-        match protocol_type {
-            0x0800 => self.next_hdr = HeaderType::Ipv4,
-            0x86DD => self.next_hdr = HeaderType::Ipv6,
-            0x6558 => self.next_hdr = HeaderType::Ethernet,
-            _ => {
-                warn!(
-                    ctx,
-                    "geneve header contains unsupported protocol type: {}", protocol_type
-                );
-                self.next_hdr = HeaderType::StopProcessing;
-                return Ok(());
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Parses the Shim6 header in the packet and updates the parser state accordingly.
-    /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_shim6_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let shim_hdr: Shim6Hdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        // Advance by the full Shim6 header length (base 8 bytes + variable part)
-        self.offset += shim_hdr.total_hdr_len();
-        // Chain to the next header indicated by Shim6 (often Ipv6NoNxt)
-        self.next_hdr = HeaderType::Proto(shim_hdr.next_hdr());
-        // TODO: Consider adding logic to differentiate between Control or Payload Extension header
-        // TODO: Extract and set other Shim6 fields
         Ok(())
     }
 
@@ -426,25 +426,64 @@ impl Parser {
 
         Ok(())
     }
-    /// Parses the VXLAN header in the packet and updates the parser state accordingly.
+
+    /// Parses the IPv6 Fragment header and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_vxlan_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let vxlan_hdr: VxlanHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+    fn parse_fragment_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let frag_hdr: Fragment = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += Fragment::LEN;
+        // TODO: extract and assign additional fragment fields if necessary
+        self.next_hdr = HeaderType::Proto(frag_hdr.next_hdr());
+        Ok(())
+    }
 
-        let flag_byte = vxlan_hdr.flags();
-        let vni_flag = (flag_byte & 0x08) != 0;
+    /// Parses the ESP IPv6-extension header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_esp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let _esp_hdr: Esp = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += Esp::LEN; // Move offset to start of encrypted ESP payload
+        // TODO: Extract and set SPI and Sequence number
+        self.next_hdr = HeaderType::StopProcessing; // ESP signals end of parsing headers
+        Ok(())
+    }
 
-        let has_vni = vxlan_hdr.vni() != 0;
+    /// Parses the AH IPv6-extension header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_ah_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let ah_hdr: AuthHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += AuthHdr::total_hdr_len(&ah_hdr);
+        // TODO: Extract and set other AH fields
+        self.next_hdr = HeaderType::Proto(ah_hdr.next_hdr());
+        Ok(())
+    }
 
-        self.offset += VxlanHdr::LEN;
+    /// Parses the Destination Options IPv6-extension header and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_destopts_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let dest_hdr: DestOptsHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += dest_hdr.total_hdr_len();
+        self.next_hdr = HeaderType::Proto(dest_hdr.next_hdr());
+        Ok(())
+    }
 
-        if (vni_flag && !has_vni) || (!vni_flag && has_vni) {
-            warn!(ctx, "vxlan header contains invalid flag/VNI combination");
-            self.next_hdr = HeaderType::StopProcessing;
-            return Ok(());
-        }
-        self.next_hdr = HeaderType::Ethernet; // VXLAN always encapsulates Ethernet
+    /// Parses the IPv6 Mobility header and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_mobility_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let mob_hdr: MobilityHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += mob_hdr.total_hdr_len();
+        // TODO: extract and assign additional mobility fields if necessary
+        self.next_hdr = HeaderType::Proto(mob_hdr.next_hdr());
+        Ok(())
+    }
 
+    /// Parses the Shim6 header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_shim6_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let shim_hdr: Shim6Hdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += shim_hdr.total_hdr_len();
+        // TODO: Consider adding logic to differentiate between Control or Payload Extension header
+        // TODO: Extract and set other Shim6 fields
+        self.next_hdr = HeaderType::Proto(shim_hdr.next_hdr());
         Ok(())
     }
 }
@@ -478,21 +517,21 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Ipv6 => parser.parse_ipv6_header(&ctx),
             HeaderType::Geneve => parser.parse_geneve_header(&ctx),
             HeaderType::Vxlan => parser.parse_vxlan_header(&ctx),
+            HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(&ctx),
+            HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx),
             HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx),
             HeaderType::Proto(IpProto::Udp) => {
                 parser.parse_udp_header(&ctx, options.geneve_port, options.vxlan_port)
             }
-            HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx),
-            HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx),
-            HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
-            HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
-            HeaderType::Proto(IpProto::HopOpt) => parser.parse_hop_header(&ctx),
-            HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_routing_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
+            HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
+            HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
             HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx),
             HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx),
             HeaderType::Proto(IpProto::Shim6) => parser.parse_shim6_header(&ctx),
-            HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
             HeaderType::Proto(proto) => {
                 debug!(
                     &ctx,
@@ -1448,7 +1487,7 @@ mod tests {
         let packet = create_hop_test_packet(IpProto::Tcp, 0);
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_hop_header(&ctx);
+        let result = parser.parse_hopopt_header(&ctx);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, HopOptHdr::LEN);
@@ -1462,7 +1501,7 @@ mod tests {
         let packet = create_hop_test_packet(IpProto::Udp, 0);
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_hop_header(&ctx);
+        let result = parser.parse_hopopt_header(&ctx);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, HopOptHdr::LEN);
@@ -1476,7 +1515,7 @@ mod tests {
         let packet = create_hop_test_packet(IpProto::Tcp, 1);
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_hop_header(&ctx);
+        let result = parser.parse_hopopt_header(&ctx);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, 16); // 8 bytes base + 8 bytes extension (1 * 8)
@@ -1491,7 +1530,7 @@ mod tests {
         let packet = vec![0x06, 0x00, 0x01, 0x02];
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_hop_header(&ctx);
+        let result = parser.parse_hopopt_header(&ctx);
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
