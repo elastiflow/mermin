@@ -23,6 +23,7 @@ use network_types::{
         CrhHeader, RoutingHeaderType, RplSourceRouteHeader, SegmentRoutingHeader,
         Type2RoutingHeader,
     },
+    shim6::Shim6Hdr,
     tcp::TcpHdr,
     udp::UdpHdr,
     vxlan::VxlanHdr,
@@ -56,6 +57,7 @@ fn u8_to_packet_type(val: u8) -> Option<PacketType> {
         16 => Some(PacketType::DestOpts),
         17 => Some(PacketType::Vxlan),
         18 => Some(PacketType::Mobility),
+        19 => Some(PacketType::Shim6),
         _ => None,
     }
 }
@@ -210,6 +212,13 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
                 data: HeaderUnion {
                     segment_routing: segment_hdr,
                 },
+            }
+        }
+        PacketType::Shim6 => {
+            let header: Shim6Hdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            ParsedHeader {
+                type_: PacketType::Shim6,
+                data: HeaderUnion { shim6: header },
             }
         }
         PacketType::Crh16 | PacketType::Crh32 => {

@@ -26,6 +26,7 @@ use network_types::{
         CrhHeader, GenericRoute, RoutingHeaderType, RplSourceRouteHeader, SegmentRoutingHeader,
         Type2RoutingHeader,
     },
+    shim6::Shim6Hdr,
     tcp::TcpHdr,
     udp::UdpHdr,
     vxlan::VxlanHdr,
@@ -358,6 +359,19 @@ impl Parser {
         Ok(())
     }
 
+    /// Parses the Shim6 header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_shim6_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let shim_hdr: Shim6Hdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        // Advance by the full Shim6 header length (base 8 bytes + variable part)
+        self.offset += shim_hdr.total_hdr_len();
+        // Chain to the next header indicated by Shim6 (often Ipv6NoNxt)
+        self.next_hdr = HeaderType::Proto(shim_hdr.next_hdr());
+        // TODO: Consider adding logic to differentiate between Control or Payload Extension header
+        // TODO: Extract and set other Shim6 fields
+        Ok(())
+    }
+
     /// Parses the IPv6 routing header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_routing_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
@@ -477,6 +491,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_routing_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx),
             HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx),
+            HeaderType::Proto(IpProto::Shim6) => parser.parse_shim6_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
             HeaderType::Proto(proto) => {
                 debug!(
@@ -778,6 +793,30 @@ mod tests {
         // Options Data (6 bytes)
         packet.extend_from_slice(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
 
+        packet
+    }
+
+    // Helper function to create a Shim6 header test packet
+    fn create_shim6_test_packet(next: IpProto, hdr_ext_len: u8) -> Vec<u8> {
+        let total = (hdr_ext_len as usize + 1) * 8;
+        let mut packet = Vec::with_capacity(total);
+        // Next Header (usually NoNxt for control messages, but configurable for tests)
+        packet.push(next as u8);
+        // Hdr Ext Len (in 8-octet units after the first 8 bytes)
+        packet.push(hdr_ext_len);
+        // P (bit7)=0 and Type (7 bits)=1
+        packet.push(0x01);
+        // Type-specific (upper 7 bits)=0x3F, S bit (lsb)=0
+        packet.push(0x7E); // 0b0111_1110 => type-specific=0x3F, S=0
+        // Checksum (2 bytes) arbitrary
+        packet.extend_from_slice(&[0x12, 0x34]);
+        // First 2 bytes of type-specific data
+        packet.extend_from_slice(&[0x56, 0x78]);
+        // Pad to total length
+        let current = packet.len();
+        if total > current {
+            packet.extend(core::iter::repeat(0u8).take(total - current));
+        }
         packet
     }
 
@@ -1507,6 +1546,49 @@ mod tests {
         let ctx = TcContext::new(packet);
 
         let result = parser.parse_destopts_header(&ctx);
+        assert!(matches!(result, Err(Error::OutOfBounds)));
+    }
+
+    #[test]
+    fn test_parse_shim6_header_basic() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::Shim6);
+        let packet = create_shim6_test_packet(IpProto::Ipv6NoNxt, 0);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_shim6_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, Shim6Hdr::LEN);
+        assert!(matches!(
+            parser.next_hdr,
+            HeaderType::Proto(IpProto::Ipv6NoNxt)
+        ));
+    }
+
+    #[test]
+    fn test_parse_shim6_header_with_extension() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::Shim6);
+        let packet = create_shim6_test_packet(IpProto::Tcp, 2); // total 24 bytes
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_shim6_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 24);
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    #[test]
+    fn test_parse_shim6_header_out_of_bounds() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::Shim6);
+        // fewer than 8 bytes
+        let packet = vec![0x00, 0x00, 0x00, 0x00];
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_shim6_header(&ctx);
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 

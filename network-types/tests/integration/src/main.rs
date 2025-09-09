@@ -11,6 +11,7 @@ mod ipv6;
 mod mobility;
 mod rpl_source_route;
 mod segment_routing;
+mod shim6;
 mod tcp;
 mod type2;
 mod udp;
@@ -37,6 +38,9 @@ use crate::{
     segment_routing::{
         create_segment_routing_test_packet, create_segment_routing_with_tlvs_test_packet,
         verify_segment_routing_header,
+    },
+    shim6::{
+        create_shim6_test_packet, create_shim6_with_extension_test_packet, verify_shim6_header,
     },
     tcp::{create_tcp_test_packet, verify_tcp_header},
     type2::{create_type2_test_packet, verify_type2_header},
@@ -199,4 +203,20 @@ define_header_test!(
     PacketType::Vxlan,
     create_vxlan_test_packet,
     verify_vxlan_header
+);
+
+define_header_test!(
+    test_parses_shim6_header,
+    Shim6Hdr,
+    PacketType::Shim6,
+    create_shim6_test_packet,
+    verify_shim6_header
+);
+
+define_header_test!(
+    test_parses_shim6_with_extension_header,
+    Shim6Hdr,
+    PacketType::Shim6,
+    create_shim6_with_extension_test_packet,
+    verify_shim6_header
 );
