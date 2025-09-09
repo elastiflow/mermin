@@ -142,7 +142,7 @@ async fn main() -> anyhow::Result<()> {
                     match event.ip_addr_type {
                         IpAddrType::Ipv4 => {
                             info!(
-                                "Received {} packet: Community ID: {}, Src IPv4: {}, Dst IPv4: {}, L3 Octet Count: {}, Src Port: {}, Dst Port: {}",
+                                "Received {} packet: Community ID: {}, Src IPv4: {}, Dst IPv4: {}, L3 Octet Count: {}, Src Port: {}, Dst Port: {}, TCP Flags: outer=0x{:02x}, inner=0x{:02x}",
                                 event.proto,
                                 community_id,
                                 Ipv4Addr::from(event.src_ipv4_addr),
@@ -150,11 +150,13 @@ async fn main() -> anyhow::Result<()> {
                                 event.l3_octet_count,
                                 u16::from_be_bytes(event.src_port),
                                 u16::from_be_bytes(event.dst_port),
+                                event.outer_tcp_flags,
+                                event.inner_tcp_flags,
                             );
                         }
                         IpAddrType::Ipv6 => {
                             info!(
-                                "Received {} packet: Community ID: {}, Src IPv6: {}, Dst IPv6: {}, L3 Octet Count: {}, Src Port: {}, Dst Port: {}",
+                                "Received {} packet: Community ID: {}, Src IPv6: {}, Dst IPv6: {}, L3 Octet Count: {}, Src Port: {}, Dst Port: {}, TCP Flags: outer=0x{:02x}, inner=0x{:02x}",
                                 event.proto,
                                 community_id,
                                 Ipv6Addr::from(event.src_ipv6_addr),
@@ -162,6 +164,8 @@ async fn main() -> anyhow::Result<()> {
                                 event.l3_octet_count,
                                 u16::from_be_bytes(event.src_port),
                                 u16::from_be_bytes(event.dst_port),
+                                event.outer_tcp_flags,
+                                event.inner_tcp_flags,
                             );
                         }
                     }

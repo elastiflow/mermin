@@ -454,6 +454,26 @@ impl TcpHdr {
     pub fn set_cwr(&mut self, cwr: bool) {
         self.set_flag(TCP_FLAG_CWR, cwr)
     }
+
+    /// Returns the raw TCP flags byte.
+    ///
+    /// This method extracts the flags from the second byte of the `off_res_flags` field.
+    /// The flags byte contains all TCP control flags (FIN, SYN, RST, PSH, ACK, URG, ECE, CWR).
+    ///
+    /// # Returns
+    /// The raw flags byte with each bit representing a specific TCP flag:
+    /// - Bit 0: FIN
+    /// - Bit 1: SYN  
+    /// - Bit 2: RST
+    /// - Bit 3: PSH
+    /// - Bit 4: ACK
+    /// - Bit 5: URG
+    /// - Bit 6: ECE
+    /// - Bit 7: CWR
+    #[inline]
+    pub fn flags(&self) -> u8 {
+        self.off_res_flags[1]
+    }
 }
 
 #[cfg(test)]
@@ -711,6 +731,42 @@ mod test {
         assert!(tcp_hdr.syn());
         assert!(tcp_hdr.ack());
         assert_eq!(tcp_hdr.off_res_flags[1], 0x12);
+        
+        // Test flags() method returns the correct byte
+        assert_eq!(tcp_hdr.flags(), 0x12);
+    }
+    
+    #[test]
+    fn test_flags_method() {
+        let mut tcp_hdr = TcpHdr {
+            src: [0, 0],
+            dst: [0, 0],
+            seq: [0, 0, 0, 0],
+            ack_seq: [0, 0, 0, 0],
+            off_res_flags: [0, 0],
+            window: [0, 0],
+            check: [0, 0],
+            urg_ptr: [0, 0],
+        };
+
+        // Test all flags set
+        tcp_hdr.set_fin(true);
+        tcp_hdr.set_syn(true);
+        tcp_hdr.set_rst(true);
+        tcp_hdr.set_psh(true);
+        tcp_hdr.set_ack(true);
+        tcp_hdr.set_urg(true);
+        tcp_hdr.set_ece(true);
+        tcp_hdr.set_cwr(true);
+        
+        // All flags should be set (0xFF)
+        assert_eq!(tcp_hdr.flags(), 0xFF);
+        
+        // Test individual flag bits
+        tcp_hdr.off_res_flags[1] = 0x00;
+        tcp_hdr.set_syn(true); // Bit 1
+        tcp_hdr.set_ack(true); // Bit 4
+        assert_eq!(tcp_hdr.flags(), 0x12); // 0001 0010
     }
 
     #[test]

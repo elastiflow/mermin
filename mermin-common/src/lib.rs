@@ -45,6 +45,10 @@ pub struct PacketMeta {
     pub ip_addr_type: IpAddrType,
     /// Network protocol identifier (e.g., TCP = 6, UDP = 17).
     pub proto: IpProto,
+    /// TCP flags from the outermost TCP header (0 if not TCP or no outer TCP).
+    pub outer_tcp_flags: u8,
+    /// TCP flags from the innermost TCP header (0 if not TCP).
+    pub inner_tcp_flags: u8,
 }
 
 impl PacketMeta {
@@ -54,6 +58,55 @@ impl PacketMeta {
 
     pub fn dst_port(&self) -> u16 {
         u16::from_be_bytes(self.dst_port)
+    }
+    
+    /// Returns true if this packet has TCP flags (i.e., is a TCP packet).
+    pub fn has_tcp_flags(&self) -> bool {
+        self.outer_tcp_flags != 0 || self.inner_tcp_flags != 0
+    }
+    
+    /// Returns true if this is a tunneled packet with different outer and inner TCP flags.
+    pub fn is_tunneled_tcp(&self) -> bool {
+        self.outer_tcp_flags != 0 && self.inner_tcp_flags != 0 && self.outer_tcp_flags != self.inner_tcp_flags
+    }
+    
+    /// Formats TCP flags as a human-readable string (e.g., "SYN,ACK").
+    pub fn format_tcp_flags(flags: u8) -> &'static str {
+        match flags {
+            0x00 => "",
+            0x01 => "FIN",
+            0x02 => "SYN", 
+            0x03 => "SYN,FIN",
+            0x04 => "RST",
+            0x05 => "RST,FIN",
+            0x06 => "RST,SYN",
+            0x07 => "RST,SYN,FIN",
+            0x08 => "PSH",
+            0x09 => "PSH,FIN",
+            0x0A => "PSH,SYN",
+            0x0B => "PSH,SYN,FIN",
+            0x0C => "PSH,RST",
+            0x0D => "PSH,RST,FIN",
+            0x0E => "PSH,RST,SYN",
+            0x0F => "PSH,RST,SYN,FIN",
+            0x10 => "ACK",
+            0x11 => "ACK,FIN",
+            0x12 => "ACK,SYN",
+            0x13 => "ACK,SYN,FIN",
+            0x14 => "ACK,RST",
+            0x15 => "ACK,RST,FIN",
+            0x16 => "ACK,RST,SYN",
+            0x17 => "ACK,RST,SYN,FIN",
+            0x18 => "ACK,PSH",
+            0x19 => "ACK,PSH,FIN",
+            0x1A => "ACK,PSH,SYN",
+            0x1B => "ACK,PSH,SYN,FIN",
+            0x1C => "ACK,PSH,RST",
+            0x1D => "ACK,PSH,RST,FIN",
+            0x1E => "ACK,PSH,RST,SYN",
+            0x1F => "ACK,PSH,RST,SYN,FIN",
+            _ => "COMPLEX", // For flags with URG, ECE, CWR - less common
+        }
     }
 }
 
@@ -77,10 +130,12 @@ mod tests {
         // dst_port: u16 = 2 bytes
         // ip_addr_type: u8 = 1 byte
         // protocol: u8 = 1 byte
-        // + padding for alignment = 7 bytes (to make total a multiple of 8)
-        // Total = 64 bytes
+        // outer_tcp_flags: u8 = 1 byte
+        // inner_tcp_flags: u8 = 1 byte
+        // + padding for alignment = 4 bytes (to make total a multiple of 8)
+        // Total = 58 bytes
 
-        let expected_size = 56;
+        let expected_size = 58;
         let actual_size = size_of::<PacketMeta>();
 
         assert_eq!(
@@ -97,6 +152,30 @@ mod tests {
             actual_alignment, expected_alignment,
             "Alignment of FlowRecord should be {expected_alignment} bytes, but was {actual_alignment} bytes"
         );
+    }
+
+    #[test]
+    fn test_tcp_flags_methods() {
+        let mut packet_meta = PacketMeta::default();
+        
+        // Test has_tcp_flags
+        assert!(!packet_meta.has_tcp_flags());
+        
+        packet_meta.inner_tcp_flags = 0x12; // SYN,ACK
+        assert!(packet_meta.has_tcp_flags());
+        
+        // Test is_tunneled_tcp
+        assert!(!packet_meta.is_tunneled_tcp()); // Same flags
+        
+        packet_meta.outer_tcp_flags = 0x02; // SYN
+        assert!(packet_meta.is_tunneled_tcp()); // Different flags
+        
+        // Test format_tcp_flags
+        assert_eq!(PacketMeta::format_tcp_flags(0x00), "");
+        assert_eq!(PacketMeta::format_tcp_flags(0x02), "SYN");
+        assert_eq!(PacketMeta::format_tcp_flags(0x12), "ACK,SYN");
+        assert_eq!(PacketMeta::format_tcp_flags(0x18), "ACK,PSH");
+        assert_eq!(PacketMeta::format_tcp_flags(0xFF), "COMPLEX");
     }
 
     // Test basic FlowRecord instantiation and field access

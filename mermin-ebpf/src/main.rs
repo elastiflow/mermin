@@ -76,6 +76,8 @@ struct Parser {
     // Information for building flow records (prioritizes innermost headers).
     // These fields will be updated as we parse deeper or encounter encapsulations.
     packet_meta: PacketMeta,
+    // Track if we've encountered a tunnel to distinguish outer vs inner TCP
+    tunnel_depth: u8,
 }
 
 impl Parser {
@@ -84,6 +86,7 @@ impl Parser {
             next_hdr: HeaderType::Ethernet,
             offset: 0,
             packet_meta: PacketMeta::default(),
+            tunnel_depth: 0,
         }
     }
 
@@ -203,7 +206,20 @@ impl Parser {
 
         self.packet_meta.src_port = tcp_hdr.src;
         self.packet_meta.dst_port = tcp_hdr.dst;
-        // TODO: extract and assign additional tcp fields
+        
+        // Extract TCP flags
+        let tcp_flags = tcp_hdr.flags();
+        
+        if self.tunnel_depth == 0 {
+            // This is the outermost TCP header (or only TCP header)
+            self.packet_meta.outer_tcp_flags = tcp_flags;
+            // For non-tunneled packets, outer and inner are the same
+            self.packet_meta.inner_tcp_flags = tcp_flags;
+        } else {
+            // This is an inner TCP header in a tunneled packet
+            self.packet_meta.inner_tcp_flags = tcp_flags;
+        }
+        
         self.next_hdr = HeaderType::StopProcessing;
         Ok(())
     }
@@ -340,6 +356,9 @@ impl Parser {
         }
 
         self.offset += geneve_hdr.total_hdr_len();
+        
+        // Increment tunnel depth when entering Geneve tunnel
+        self.tunnel_depth += 1;
 
         let protocol_type = geneve_hdr.protocol_type();
         match protocol_type {
@@ -443,6 +462,9 @@ impl Parser {
             self.next_hdr = HeaderType::StopProcessing;
             return Ok(());
         }
+        
+        // Increment tunnel depth when entering VXLAN tunnel
+        self.tunnel_depth += 1;
         self.next_hdr = HeaderType::Ethernet; // VXLAN always encapsulates Ethernet
 
         Ok(())
