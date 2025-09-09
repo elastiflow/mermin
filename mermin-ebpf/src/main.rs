@@ -87,6 +87,32 @@ impl Parser {
         }
     }
 
+    // Capture outer headers before entering a tunnel
+    fn capture_tunnel_hdr_fields(&mut self) {
+        // Copy current inner headers to outer headers before they get overwritten
+        self.packet_meta.tunnel_src_ipv4_addr = self.packet_meta.src_ipv4_addr;
+        self.packet_meta.tunnel_dst_ipv4_addr = self.packet_meta.dst_ipv4_addr;
+        self.packet_meta.tunnel_src_ipv6_addr = self.packet_meta.src_ipv6_addr;
+        self.packet_meta.tunnel_dst_ipv6_addr = self.packet_meta.dst_ipv6_addr;
+        self.packet_meta.tunnel_src_port = self.packet_meta.src_port;
+        self.packet_meta.tunnel_dst_port = self.packet_meta.dst_port;
+        self.packet_meta.tunnel_ip_addr_type = self.packet_meta.ip_addr_type;
+        self.packet_meta.tunnel_proto = self.packet_meta.proto;
+    }
+
+    // Reset inner headers to prepare for parsing encapsulated packet
+    fn reset_inner_hdr_fields(&mut self) {
+        // Reset inner header fields to defaults so they can be populated with innermost values
+        self.packet_meta.src_ipv4_addr = [0; 4];
+        self.packet_meta.dst_ipv4_addr = [0; 4];
+        self.packet_meta.src_ipv6_addr = [0; 16];
+        self.packet_meta.dst_ipv6_addr = [0; 16];
+        self.packet_meta.src_port = [0; 2];
+        self.packet_meta.dst_port = [0; 2];
+        self.packet_meta.ip_addr_type = IpAddrType::default();
+        self.packet_meta.proto = IpProto::default();
+    }
+
     // Calculate the L3 octet count (from current offset to end of packet)
     // This should be called at the start of L3 (IP) header parsing
     fn calc_l3_octet_count(&mut self, packet_len: u32) {
@@ -213,6 +239,9 @@ impl Parser {
 
         self.offset += geneve_hdr.total_hdr_len();
 
+        // Reset inner headers to prepare for parsing encapsulated packet
+        self.reset_inner_hdr_fields();
+
         let protocol_type = geneve_hdr.protocol_type();
         match protocol_type {
             0x6558 => self.next_hdr = HeaderType::Ethernet,
@@ -249,7 +278,10 @@ impl Parser {
             return Ok(());
         }
 
+        // Reset inner headers to prepare for parsing encapsulated packet
+        self.reset_inner_hdr_fields();
         self.next_hdr = HeaderType::Ethernet; // VXLAN always encapsulates Ethernet
+
         Ok(())
     }
 
@@ -315,12 +347,16 @@ impl Parser {
                 ctx,
                 "UDP packet with destination port {} (Geneve) detected", geneve_port
             );
+            // Capture outer headers before entering Geneve tunnel
+            self.capture_tunnel_hdr_fields();
             self.next_hdr = HeaderType::Geneve;
         } else if dst_port == vxlan_port {
             debug!(
                 ctx,
                 "UDP packet with destination port {} (Vxlan) detected", vxlan_port
             );
+            // Capture outer headers before entering VXLAN tunnel
+            self.capture_tunnel_hdr_fields();
             self.next_hdr = HeaderType::Vxlan;
         } else {
             // TODO: extract and assign additional udp fields

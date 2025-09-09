@@ -139,30 +139,113 @@ async fn main() -> anyhow::Result<()> {
                         ),
                     };
 
-                    match event.ip_addr_type {
-                        IpAddrType::Ipv4 => {
-                            info!(
-                                "Received {} packet: Community ID: {}, Src IPv4: {}, Dst IPv4: {}, L3 Octet Count: {}, Src Port: {}, Dst Port: {}",
-                                event.proto,
-                                community_id,
-                                Ipv4Addr::from(event.src_ipv4_addr),
-                                Ipv4Addr::from(event.dst_ipv4_addr),
-                                event.l3_octet_count,
-                                u16::from_be_bytes(event.src_port),
-                                u16::from_be_bytes(event.dst_port),
-                            );
+                    // Check if this is tunneled traffic (tunnel headers present)
+                    let is_tunneled = event.tunnel_src_ipv4_addr != [0; 4]
+                        || event.tunnel_src_ipv6_addr != [0; 16];
+
+                    if is_tunneled {
+                        // Log tunneled traffic with both tunnel and inner headers
+                        match (event.tunnel_ip_addr_type, event.ip_addr_type) {
+                            (IpAddrType::Ipv4, IpAddrType::Ipv4) => {
+                                info!(
+                                    "Received {} packet (TUNNELED): Community ID: {}, Outer: {}:{} -> {}:{} ({}), Inner: {}:{} -> {}:{} ({}), L3 Octet Count: {}",
+                                    event.proto,
+                                    community_id,
+                                    Ipv4Addr::from(event.tunnel_src_ipv4_addr),
+                                    event.tunnel_src_port(),
+                                    Ipv4Addr::from(event.tunnel_dst_ipv4_addr),
+                                    event.tunnel_dst_port(),
+                                    event.tunnel_proto,
+                                    Ipv4Addr::from(event.src_ipv4_addr),
+                                    event.src_port(),
+                                    Ipv4Addr::from(event.dst_ipv4_addr),
+                                    event.dst_port(),
+                                    event.proto,
+                                    event.l3_octet_count,
+                                );
+                            }
+                            (IpAddrType::Ipv4, IpAddrType::Ipv6) => {
+                                info!(
+                                    "Received {} packet (TUNNELED): Community ID: {}, Outer: {}:{} -> {}:{} ({}), Inner: {}:{} -> {}:{} ({}), L3 Octet Count: {}",
+                                    event.proto,
+                                    community_id,
+                                    Ipv4Addr::from(event.tunnel_src_ipv4_addr),
+                                    event.tunnel_src_port(),
+                                    Ipv4Addr::from(event.tunnel_dst_ipv4_addr),
+                                    event.tunnel_dst_port(),
+                                    event.tunnel_proto,
+                                    Ipv6Addr::from(event.src_ipv6_addr),
+                                    event.src_port(),
+                                    Ipv6Addr::from(event.dst_ipv6_addr),
+                                    event.dst_port(),
+                                    event.proto,
+                                    event.l3_octet_count,
+                                );
+                            }
+                            (IpAddrType::Ipv6, IpAddrType::Ipv4) => {
+                                info!(
+                                    "Received {} packet (TUNNELED): Community ID: {}, Outer: {}:{} -> {}:{} ({}), Inner: {}:{} -> {}:{} ({}), L3 Octet Count: {}",
+                                    event.proto,
+                                    community_id,
+                                    Ipv6Addr::from(event.tunnel_src_ipv6_addr),
+                                    event.tunnel_src_port(),
+                                    Ipv6Addr::from(event.tunnel_dst_ipv6_addr),
+                                    event.tunnel_dst_port(),
+                                    event.tunnel_proto,
+                                    Ipv4Addr::from(event.src_ipv4_addr),
+                                    event.src_port(),
+                                    Ipv4Addr::from(event.dst_ipv4_addr),
+                                    event.dst_port(),
+                                    event.proto,
+                                    event.l3_octet_count,
+                                );
+                            }
+                            (IpAddrType::Ipv6, IpAddrType::Ipv6) => {
+                                info!(
+                                    "Received {} packet (TUNNELED): Community ID: {}, Outer: {}:{} -> {}:{} ({}), Inner: {}:{} -> {}:{} ({}), L3 Octet Count: {}",
+                                    event.proto,
+                                    community_id,
+                                    Ipv6Addr::from(event.tunnel_src_ipv6_addr),
+                                    event.tunnel_src_port(),
+                                    Ipv6Addr::from(event.tunnel_dst_ipv6_addr),
+                                    event.tunnel_dst_port(),
+                                    event.tunnel_proto,
+                                    Ipv6Addr::from(event.src_ipv6_addr),
+                                    event.src_port(),
+                                    Ipv6Addr::from(event.dst_ipv6_addr),
+                                    event.dst_port(),
+                                    event.proto,
+                                    event.l3_octet_count,
+                                );
+                            }
                         }
-                        IpAddrType::Ipv6 => {
-                            info!(
-                                "Received {} packet: Community ID: {}, Src IPv6: {}, Dst IPv6: {}, L3 Octet Count: {}, Src Port: {}, Dst Port: {}",
-                                event.proto,
-                                community_id,
-                                Ipv6Addr::from(event.src_ipv6_addr),
-                                Ipv6Addr::from(event.dst_ipv6_addr),
-                                event.l3_octet_count,
-                                u16::from_be_bytes(event.src_port),
-                                u16::from_be_bytes(event.dst_port),
-                            );
+                    } else {
+                        // Log non-tunneled traffic as before
+                        match event.ip_addr_type {
+                            IpAddrType::Ipv4 => {
+                                info!(
+                                    "Received {} packet: Community ID: {}, Src IPv4: {}, Dst IPv4: {}, L3 Octet Count: {}, Src Port: {}, Dst Port: {}",
+                                    event.proto,
+                                    community_id,
+                                    Ipv4Addr::from(event.src_ipv4_addr),
+                                    Ipv4Addr::from(event.dst_ipv4_addr),
+                                    event.l3_octet_count,
+                                    event.src_port(),
+                                    event.dst_port(),
+                                );
+                            }
+                            IpAddrType::Ipv6 => {
+                                info!(
+                                    "Received {} packet: Community ID: {}, Src IPv6: {}, Dst IPv6: {}, L3 Octet Count: {}, Src Port: {}, Dst Port: {}",
+                                    event.proto,
+                                    community_id,
+                                    Ipv6Addr::from(event.src_ipv6_addr),
+                                    Ipv6Addr::from(event.dst_ipv6_addr),
+                                    event.l3_octet_count,
+                                    event.src_port(),
+                                    event.dst_port(),
+                                );
+                            }
                         }
                     }
 
