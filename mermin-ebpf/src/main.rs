@@ -21,6 +21,7 @@ use network_types::{
     hop::HopOptHdr,
     icmp::IcmpHdr,
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
+    mobility::MobilityHdr,
     route::{
         CrhHeader, GenericRoute, RoutingHeaderType, RplSourceRouteHeader, SegmentRoutingHeader,
         Type2RoutingHeader,
@@ -309,6 +310,18 @@ impl Parser {
         Ok(())
     }
 
+    /// Parses the IPv6 Mobility header and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_mobility_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let mob_hdr: MobilityHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += mob_hdr.total_hdr_len();
+        // Next is the payload proto stored in nxt_hdr
+        // TODO: extract and assign additional mobility fields if necessary
+        self.next_hdr = HeaderType::Proto(mob_hdr.nxt_hdr());
+
+        Ok(())
+    }
+
     /// Parses the Geneve header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_geneve_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
@@ -399,7 +412,6 @@ impl Parser {
 
         Ok(())
     }
-
     /// Parses the VXLAN header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_vxlan_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
@@ -456,14 +468,15 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Proto(IpProto::Udp) => {
                 parser.parse_udp_header(&ctx, options.geneve_port, options.vxlan_port)
             }
-            HeaderType::Proto(IpProto::HopOpt) => parser.parse_hop_header(&ctx),
             HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx),
             HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
-            HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
             HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
+            HeaderType::Proto(IpProto::HopOpt) => parser.parse_hop_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_routing_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx),
+            HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
             HeaderType::Proto(proto) => {
                 debug!(
@@ -783,6 +796,26 @@ mod tests {
         // Sequence Number (2 bytes)
         packet.extend_from_slice(&[0x9a, 0xbc]);
 
+        packet
+    }
+
+    // Helper to create an IPv6 Mobility header test packet
+    fn create_mobility_test_packet(next: IpProto, hdr_ext_len: u8, mh_type: u8) -> Vec<u8> {
+        let total = (hdr_ext_len as usize + 1) * 8;
+        let mut packet = Vec::with_capacity(total);
+        // Fixed 8 bytes
+        packet.push(next as u8); // Payload Proto (next header)
+        packet.push(hdr_ext_len); // Hdr Ext Len (in 8-octet units excluding first 8)
+        packet.push(mh_type); // MH Type
+        packet.push(0x00); // Reserved
+        // Checksum (dummy)
+        packet.extend_from_slice(&[0x12, 0x34]);
+        // Reserved Message Data (2 bytes)
+        packet.extend_from_slice(&[0x00, 0x00]);
+        // Message Data padding to total length
+        while packet.len() < total {
+            packet.push(0);
+        }
         packet
     }
 
@@ -1324,6 +1357,48 @@ mod tests {
         let ctx = TcContext::new(packet);
 
         let result = parser.parse_fragment_header(&ctx);
+        assert!(matches!(result, Err(Error::OutOfBounds)));
+    }
+
+    #[test]
+    fn test_parse_mobility_header_tcp() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::MobilityHeader);
+        // Hdr Ext Len = 0 -> total 8 bytes
+        let packet = create_mobility_test_packet(IpProto::Tcp, 0, 5);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_mobility_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 8);
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    #[test]
+    fn test_parse_mobility_header_with_ext_udp() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::MobilityHeader);
+        // Hdr Ext Len = 2 -> total 24 bytes
+        let packet = create_mobility_test_packet(IpProto::Udp, 2, 1);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_mobility_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, 24);
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
+    }
+
+    #[test]
+    fn test_parse_mobility_header_out_of_bounds() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::MobilityHeader);
+        // Provide fewer than 8 bytes
+        let packet = vec![0x06, 0x00, 0x00, 0x00];
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_mobility_header(&ctx);
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 

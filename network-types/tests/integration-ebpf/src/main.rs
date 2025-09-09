@@ -18,6 +18,7 @@ use network_types::{
     geneve::GeneveHdr,
     hop::HopOptHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
+    mobility::MobilityHdr,
     route::{
         CrhHeader, RoutingHeaderType, RplSourceRouteHeader, SegmentRoutingHeader,
         Type2RoutingHeader,
@@ -54,6 +55,7 @@ fn u8_to_packet_type(val: u8) -> Option<PacketType> {
         15 => Some(PacketType::Fragment),
         16 => Some(PacketType::DestOpts),
         17 => Some(PacketType::Vxlan),
+        18 => Some(PacketType::Mobility),
         _ => None,
     }
 }
@@ -165,6 +167,13 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             ParsedHeader {
                 type_: PacketType::DestOpts,
                 data: HeaderUnion { destopts: header },
+            }
+        }
+        PacketType::Mobility => {
+            let header: MobilityHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            ParsedHeader {
+                type_: PacketType::Mobility,
+                data: HeaderUnion { mobility: header },
             }
         }
         PacketType::Type2 => {

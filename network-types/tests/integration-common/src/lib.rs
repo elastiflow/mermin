@@ -11,6 +11,7 @@ use network_types::{
     geneve::GeneveHdr,
     hop::HopOptHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
+    mobility::MobilityHdr,
     route::{CrhHeader, RplSourceRouteHeader, SegmentRoutingHeader, Type2RoutingHeader},
     tcp::TcpHdr,
     udp::UdpHdr,
@@ -41,6 +42,7 @@ pub enum PacketType {
     Fragment = 15,
     DestOpts = 16,
     Vxlan = 17,
+    Mobility = 18,
 }
 
 /// A union to hold any of the possible parsed network headers.
@@ -65,6 +67,7 @@ pub union HeaderUnion {
     pub fragment: Fragment,
     pub destopts: DestOptsHdr,
     pub vxlan: VxlanHdr,
+    pub mobility: MobilityHdr,
 }
 
 /// The final struct sent back to user-space. It contains the type of
