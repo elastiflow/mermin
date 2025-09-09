@@ -138,48 +138,8 @@ jobs:
     name: Docker build
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
-    strategy:
-      matrix:
-        runner: [ubuntu-latest, ubuntu-latest-arm]
-        target: [runner, runner-debug]
-    env:
-      RUNNER_PLATFORM: |
-        {
-            "ubuntu-latest": "linux/amd64",
-            "ubuntu-latest-arm": "linux/arm64"
-        }
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-      - uses: google-github-actions/auth@v2
-        id: gcr_auth
-        with:
-          token_format: "access_token"
-          project_id: "pub-artifacts-j8rjbu"
-          workload_identity_provider: "projects/701687754822/locations/global/workloadIdentityPools/github-actions/providers/github-actions"
-          service_account: "gha-registry-writer@pub-artifacts-j8rjbu.iam.gserviceaccount.com"
-      - name: Login to GCR
-        uses: docker/login-action@v3
-        with:
-          registry: us-docker.pkg.dev
-          username: oauth2accesstoken
-          password: ${{ steps.gcr_auth.outputs.access_token }}
-      - name: Build docker image
-        uses: ./.github/actions/docker-build-push
-        with:
-          platforms: ${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }}
-          target: ${{ matrix.target }}
-          cache-from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-build-cache/mermin
-          cache-to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-build-cache/mermin,mode=max
-
-  docker_build_push:
-    name: Docker build/push
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
     permissions:
       contents: read
-      packages: write
-      attestations: write
       id-token: write
     strategy:
       matrix:
@@ -191,11 +151,6 @@ jobs:
             "ubuntu-latest": "linux/amd64",
             "ubuntu-latest-arm": "linux/arm64"
         }
-      TARGET_IMAGE_TAG: |
-        {
-            "runner": "v0.1.0-rc",
-            "runner-debug": "v0.1.0-rc-debug"
-        }
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -213,19 +168,12 @@ jobs:
           username: oauth2accesstoken
           password: ${{ steps.gcr_auth.outputs.access_token }}
       - name: Build docker image
-        uses: ./.github/actions/docker-build-push
+        uses: elastiflow/gha-reusable/actions/docker-build-push@v0
         with:
-          registry: ghcr.io
-          image: ${{ github.repository }}
-          tag: ${{ fromJson(env.TARGET_IMAGE_TAG)[matrix.target] }}
           platforms: ${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }}
           target: ${{ matrix.target }}
-          push: true
-          cache-from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-build-cache/mermin
-          cache-to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-build-cache/mermin,mode=max
-          registry_username: ${{ github.actor }}
-          registry_password: ${{ secrets.GITHUB_TOKEN }}
-
+          cache_from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }}
+          cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }},mode=max
 
   all_checks:
     name: All Checks

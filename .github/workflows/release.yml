@@ -1,0 +1,137 @@
+---
+name: Release
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  # Detect if a commit was made from a release PR with title like '[release v0.1.1] (#49)'
+  release_or_pr:
+    name: Release or Release PR?
+    runs-on: ubuntu-latest
+    outputs:
+      is_release: ${{ steps.release_or_pr.outputs.is_release }}
+    steps:
+      - id: release_or_pr
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          cat > /tmp/commit_message <<- EOF
+          ${COMMIT_MESSAGE}
+          EOF
+          cat /tmp/commit_message
+          # https://regex101.com/r/1z85UX/1
+          echo $(grep -Pq '^\[release v(?:[0-9]{1,3}\.?){3}(?:-rc(?:\.[0-9]{1,3})?)?\] \(#[0-9]{1,5}\)$' /tmp/commit_message && echo true || echo false) > /tmp/is_release
+          echo "is_release=$(cat /tmp/is_release)" >> $GITHUB_OUTPUT
+
+  release_pr_create:
+    name: Release PR create
+    needs: [release_or_pr]
+    if: ${{ ! fromJson(needs.release_or_pr.outputs.is_release) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Prepare Release
+        id: prepare_release
+        uses: elastiflow/gha-reusable/actions/prepare-release@v0
+        with:
+          branch: "${{ github.ref_name }}"
+          changelog_update: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Pull Request
+        if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
+        uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e # v7.0.8
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: "${{ github.ref_name }}"
+          branch: release-from-${{ github.ref_name }}
+          title: '[release v${{ steps.prepare_release.outputs.new_release_version }}]'
+          body: |
+            # Description
+            Release the v${{ steps.prepare_release.outputs.new_release_version }} version
+
+            # Changelog
+            ${{ steps.prepare_release.outputs.new_release_notes }}
+
+  release:
+    name: Release
+    needs: [release_or_pr]
+    if: ${{ fromJson(needs.release_or_pr.outputs.is_release) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      new_release_version: ${{ steps.prepare_release.outputs.new_release_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Prepare Release
+        id: prepare_release
+        uses: elastiflow/gha-reusable/actions/prepare-release@v0
+        with:
+          branch: "${{ github.ref_name }}"
+          changelog_update: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+  docker_build_push:
+    name: Docker build/push
+    needs: [release]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    strategy:
+      matrix:
+        runner: [ubuntu-latest, ubuntu-latest-arm]
+        target: [runner, runner-debug]
+    env:
+      RUNNER_PLATFORM: |
+        {
+            "ubuntu-latest": "linux/amd64",
+            "ubuntu-latest-arm": "linux/arm64"
+        }
+      TARGET_IMAGE_TAG: |
+        {
+            "runner": "v${{ needs.release.outputs.new_release_version }}",
+            "runner-debug": "${{ needs.release.outputs.new_release_version }}-debug"
+        }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - uses: google-github-actions/auth@v2
+        id: gcr_auth
+        with:
+          token_format: "access_token"
+          project_id: "pub-artifacts-j8rjbu"
+          workload_identity_provider: "projects/701687754822/locations/global/workloadIdentityPools/github-actions/providers/github-actions"
+          service_account: "gha-registry-writer@pub-artifacts-j8rjbu.iam.gserviceaccount.com"
+      - name: Login to GCR
+        uses: docker/login-action@v3
+        with:
+          registry: us-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.gcr_auth.outputs.access_token }}
+      - name: Build docker image
+        uses: elastiflow/gha-reusable/actions/docker-build-push@v0
+        with:
+          registry: ghcr.io
+          image: ${{ github.repository }}
+          tag: ${{ fromJson(env.TARGET_IMAGE_TAG)[matrix.target] }}
+          platforms: ${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }}
+          target: ${{ matrix.target }}
+          push: true
+          cache_from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }}
+          cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }},mode=max
+          registry_username: ${{ github.actor }}
+          registry_password: ${{ secrets.GITHUB_TOKEN }}
