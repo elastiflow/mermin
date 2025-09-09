@@ -58,6 +58,7 @@ fn u8_to_packet_type(val: u8) -> Option<PacketType> {
         17 => Some(PacketType::Vxlan),
         18 => Some(PacketType::Mobility),
         19 => Some(PacketType::Shim6),
+        20 => Some(PacketType::Hip),
         _ => None,
     }
 }
@@ -253,6 +254,14 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             ParsedHeader {
                 type_: PacketType::Vxlan,
                 data: HeaderUnion { vxlan: header },
+            }
+        }
+        PacketType::Hip => {
+            let header: network_types::hip::HipHdr =
+                ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            ParsedHeader {
+                type_: PacketType::Hip,
+                data: HeaderUnion { hip: header },
             }
         }
     };

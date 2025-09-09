@@ -45,6 +45,7 @@ pub enum PacketType {
     Vxlan = 17,
     Mobility = 18,
     Shim6 = 19,
+    Hip = 20,
 }
 
 /// A union to hold any of the possible parsed network headers.
@@ -71,6 +72,7 @@ pub union HeaderUnion {
     pub vxlan: VxlanHdr,
     pub mobility: MobilityHdr,
     pub shim6: Shim6Hdr,
+    pub hip: network_types::hip::HipHdr,
 }
 
 /// The final struct sent back to user-space. It contains the type of

@@ -18,13 +18,13 @@ use network_types::{
     eth::{EthHdr, EtherType},
     fragment::FragmentHdr,
     geneve::GeneveHdr,
+    hip::HipHdr,
     hop::HopOptHdr,
     icmp::IcmpHdr,
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
     mobility::MobilityHdr,
     route::{GenericRoute, RoutingHeaderType},
     shim6::Shim6Hdr,
-    hip::HipHdr,
     tcp::TcpHdr,
     udp::UdpHdr,
     vxlan::VxlanHdr,
@@ -1692,7 +1692,10 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, HipHdr::LEN);
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Ipv6NoNxt)));
+        assert!(matches!(
+            parser.next_hdr,
+            HeaderType::Proto(IpProto::Ipv6NoNxt)
+        ));
     }
 
     #[test]

@@ -6,7 +6,7 @@ use crate::ip::IpProto;
 /// HIP is used to separate the identifier and locator roles of IP addresses.
 /// The HIP header is defined in RFC 7401.
 ///
-/// # Format
+/// Format
 ///
 ///  0                   1                   2                   3
 ///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -32,7 +32,7 @@ use crate::ip::IpProto;
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///
 ///
-/// # Fields
+/// Fields
 ///
 /// * **Next Header (8 bits)**: Identifies the type of header immediately following this one.
 /// * **Header Length (8 bits)**: The length of the HIP header and parameters in 8-octet units, excluding the first 8 octets.
@@ -43,7 +43,6 @@ use crate::ip::IpProto;
 /// * **Sender's Host Identity Tag (HIT) (128 bits)**: The HIT of the packet's sender.
 /// * **Receiver's Host Identity Tag (HIT) (128 bits)**: The HIT of the packet's intended receiver.
 /// * **HIP Parameters (variable)**: A variable-length field for additional data, such as cryptographic material.
-/// HIP version 2 protocol header structure
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
 pub struct HipHdr {
@@ -182,8 +181,9 @@ impl HipHdr {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use core::mem;
+
+    use super::*;
 
     #[test]
     fn test_hiphdr_size() {
@@ -273,4 +273,3 @@ mod tests {
         assert_eq!(hip_hdr.params_len(), (255 + 1) * 8 - HipHdr::LEN);
     }
 }
-
