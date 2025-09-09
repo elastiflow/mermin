@@ -14,6 +14,7 @@ mod tcp;
 mod type2;
 mod udp;
 mod utils;
+mod vxlan;
 
 // Import the helper functions and macros
 use crate::{
@@ -38,6 +39,7 @@ use crate::{
     tcp::{create_tcp_test_packet, verify_tcp_header},
     type2::{create_type2_test_packet, verify_type2_header},
     udp::{create_udp_test_packet, verify_udp_header},
+    vxlan::{create_vxlan_test_packet, verify_vxlan_header},
 };
 
 fn main() {
@@ -179,4 +181,12 @@ define_header_test!(
     PacketType::DestOpts,
     create_destopts_test_packet,
     verify_destopts_header
+);
+
+define_header_test!(
+    test_parses_vxlan_header,
+    VxlanHdr,
+    PacketType::Vxlan,
+    create_vxlan_test_packet,
+    verify_vxlan_header
 );

@@ -24,6 +24,7 @@ use network_types::{
     },
     tcp::TcpHdr,
     udp::UdpHdr,
+    vxlan::VxlanHdr,
 };
 
 pub const MAX_RPL_ADDR_STORAGE: usize = 128;
@@ -52,6 +53,7 @@ fn u8_to_packet_type(val: u8) -> Option<PacketType> {
         14 => Some(PacketType::Crh32),
         15 => Some(PacketType::Fragment),
         16 => Some(PacketType::DestOpts),
+        17 => Some(PacketType::Vxlan),
         _ => None,
     }
 }
@@ -226,6 +228,13 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
                     data: HeaderUnion { crh32: crh_header },
                 },
                 _ => return Err(TC_ACT_SHOT),
+            }
+        }
+        PacketType::Vxlan => {
+            let header: VxlanHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            ParsedHeader {
+                type_: PacketType::Vxlan,
+                data: HeaderUnion { vxlan: header },
             }
         }
     };
