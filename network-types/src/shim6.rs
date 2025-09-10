@@ -55,30 +55,6 @@ impl Shim6Hdr {
     /// The size of the fixed part of the Shim6 Header in bytes.
     pub const LEN: usize = mem::size_of::<Shim6Hdr>();
 
-    /// Gets the Next Header value.
-    #[inline]
-    pub fn next_hdr(&self) -> IpProto {
-        self.next_hdr
-    }
-
-    /// Sets the Next Header value.
-    #[inline]
-    pub fn set_next_hdr(&mut self, next_hdr: IpProto) {
-        self.next_hdr = next_hdr;
-    }
-
-    /// Gets the Hdr Ext Len value.
-    #[inline]
-    pub fn hdr_ext_len(&self) -> u8 {
-        self.hdr_ext_len
-    }
-
-    /// Sets the Hdr Ext Len value.
-    #[inline]
-    pub fn set_hdr_ext_len(&mut self, hdr_ext_len: u8) {
-        self.hdr_ext_len = hdr_ext_len;
-    }
-
     /// Gets the P (Payload Flag) bit.
     #[inline]
     pub fn p(&self) -> bool {
@@ -186,14 +162,6 @@ mod tests {
             type_specific_data: [0; 2],
         };
 
-        // Test next_hdr
-        shim_hdr.set_next_hdr(IpProto::Tcp);
-        assert_eq!(shim_hdr.next_hdr(), IpProto::Tcp);
-
-        // Test hdr_ext_len
-        shim_hdr.set_hdr_ext_len(4);
-        assert_eq!(shim_hdr.hdr_ext_len(), 4);
-
         // Test P and Type fields
         shim_hdr.set_p(true);
         assert!(shim_hdr.p());
@@ -241,22 +209,22 @@ mod tests {
         };
 
         // Test with hdr_ext_len = 0
-        shim_hdr.set_hdr_ext_len(0);
+        shim_hdr.hdr_ext_len = 0;
         assert_eq!(shim_hdr.total_hdr_len(), 8);
         assert_eq!(shim_hdr.variable_len(), 0);
 
         // Test with hdr_ext_len = 1
-        shim_hdr.set_hdr_ext_len(1);
+        shim_hdr.hdr_ext_len = 1;
         assert_eq!(shim_hdr.total_hdr_len(), 16);
         assert_eq!(shim_hdr.variable_len(), 8);
 
         // Test with hdr_ext_len = 3
-        shim_hdr.set_hdr_ext_len(3);
+        shim_hdr.hdr_ext_len = 3;
         assert_eq!(shim_hdr.total_hdr_len(), 32);
         assert_eq!(shim_hdr.variable_len(), 24);
 
         // Test with hdr_ext_len = 255 (max value)
-        shim_hdr.set_hdr_ext_len(255);
+        shim_hdr.hdr_ext_len = 255;
         assert_eq!(shim_hdr.total_hdr_len(), (255 + 1) * 8);
         assert_eq!(shim_hdr.variable_len(), 255 * 8);
     }

@@ -11,6 +11,7 @@ pub const MAX_SRH_SEGMENTS: usize = 128;
 /// Maximum number of SIDs in a Type 5 or 6 CRH Header
 pub const MAX_CRH_SIDS: usize = 128;
 
+#[repr(u8)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum RoutingHeaderType {
     /// Type 2 Routing Header - [RFC6275]
@@ -29,43 +30,6 @@ pub enum RoutingHeaderType {
     Experiment2,
     /// Reserved
     Reserved,
-    /// Represents an unknown or unassigned routing header type
-    #[doc(hidden)]
-    Unknown(u8),
-}
-
-impl RoutingHeaderType {
-    /// Converts a `u8` value into a `RoutingHeaderType`.
-    #[inline]
-    pub fn from_u8(value: u8) -> Self {
-        match value {
-            2 => RoutingHeaderType::Type2,
-            3 => RoutingHeaderType::RplSourceRoute,
-            4 => RoutingHeaderType::SegmentRoutingHeader,
-            5 => RoutingHeaderType::Crh16,
-            6 => RoutingHeaderType::Crh32,
-            253 => RoutingHeaderType::Experiment1,
-            254 => RoutingHeaderType::Experiment2,
-            255 => RoutingHeaderType::Reserved,
-            v => RoutingHeaderType::Unknown(v),
-        }
-    }
-
-    /// Returns the `u8` representation of the `RoutingHeaderType`.
-    #[inline]
-    pub fn as_u8(&self) -> u8 {
-        match self {
-            RoutingHeaderType::Type2 => 2,
-            RoutingHeaderType::RplSourceRoute => 3,
-            RoutingHeaderType::SegmentRoutingHeader => 4,
-            RoutingHeaderType::Crh16 => 5,
-            RoutingHeaderType::Crh32 => 6,
-            RoutingHeaderType::Experiment1 => 253,
-            RoutingHeaderType::Experiment2 => 254,
-            RoutingHeaderType::Reserved => 255,
-            RoutingHeaderType::Unknown(val) => *val,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -116,63 +80,13 @@ pub enum Ipv6RoutingHeader {
 pub struct GenericRoute {
     pub next_hdr: IpProto,
     pub hdr_ext_len: u8,
-    pub type_: u8,
+    pub type_: RoutingHeaderType,
     pub sgmt_left: u8,
 }
 
 impl GenericRoute {
     /// The total size in bytes of default length Routing header
     pub const LEN: usize = mem::size_of::<GenericRoute>();
-
-    /// Gets the Next Header value.
-    #[inline]
-    pub fn next_hdr(&self) -> IpProto {
-        self.next_hdr
-    }
-
-    /// Sets the Next Header value.
-    #[inline]
-    pub fn set_next_hdr(&mut self, next_hdr: IpProto) {
-        self.next_hdr = next_hdr
-    }
-
-    /// Gets the Header Extension Length value.
-    /// This value is the length of the Routing header
-    /// in 8-octet units, not including the first 8 octets.
-    #[inline]
-    pub fn hdr_ext_len(&self) -> u8 {
-        self.hdr_ext_len
-    }
-
-    /// Sets the Header Extension Length value.
-    #[inline]
-    pub fn set_hdr_ext_len(&mut self, hdr_ext_len: u8) {
-        self.hdr_ext_len = hdr_ext_len
-    }
-
-    /// Gets Rounting Header type casting value to RoutingHeaderType enum
-    #[inline]
-    pub fn type_(&self) -> RoutingHeaderType {
-        RoutingHeaderType::from_u8(self.type_)
-    }
-
-    /// Sets the Routing Header type converting value from RoutingHeaderType enum
-    #[inline]
-    pub fn set_type(&mut self, type_: RoutingHeaderType) {
-        self.type_ = type_.as_u8()
-    }
-
-    /// Gets the Segments Left value
-    #[inline]
-    pub fn sgmt_left(&self) -> u8 {
-        self.sgmt_left
-    }
-
-    /// Sets the Segments Left value
-    #[inline]
-    pub fn set_sgmt_left(&mut self, sgmt_left: u8) {
-        self.sgmt_left = sgmt_left
-    }
 
     /// Calculates the total length of the Routing header in bytes.
     /// The Hdr Ext Len is in 8-octet units, *excluding* the first 8 octets.
@@ -243,20 +157,21 @@ impl Type2FixedHeader {
 
     /// Gets the Home Address as a 16-byte array.
     #[inline]
-    pub fn home_address(&self) -> [u8; 16] {
-        self.home_address
+    pub fn home_address(&self) -> u128 {
+        u128::from_be_bytes(self.home_address)
     }
 
     /// Sets the Home Address from a 16-byte array.
     #[inline]
-    pub fn set_home_address(&mut self, home_address: [u8; 16]) {
-        self.home_address = home_address
+    pub fn set_home_address(&mut self, home_address: u128) {
+        self.home_address = home_address.to_be_bytes();
     }
 }
+
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
 pub struct Type2RoutingHeader {
-    pub gen_route: GenericRoute,
+    pub generic_route: GenericRoute,
     pub fixed_hdr: Type2FixedHeader,
 }
 
@@ -368,7 +283,7 @@ impl RplSourceFixedHeader {
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
 pub struct RplSourceRouteHeader {
-    pub gen_route: GenericRoute,
+    pub generic_route: GenericRoute,
     pub fixed_hdr: RplSourceFixedHeader,
 }
 
@@ -381,7 +296,7 @@ impl RplSourceRouteHeader {
     /// So, total length = (hdr_ext_len + 1) * 8.
     #[inline]
     pub fn total_hdr_len(&self) -> usize {
-        self.gen_route.total_hdr_len()
+        self.generic_route.total_hdr_len()
     }
 
     /// Calculates the size of each address in the Addresses field based on CmprI.
@@ -405,7 +320,7 @@ impl RplSourceRouteHeader {
     #[inline]
     pub fn num_addresses(&self) -> usize {
         // Get the total length of the variable part of the header.
-        let variable_len = (self.gen_route.hdr_ext_len() as usize) << 3;
+        let variable_len = (self.generic_route.hdr_ext_len as usize) << 3;
         let pad = self.fixed_hdr.pad() as usize;
 
         if variable_len < pad {
@@ -498,30 +413,6 @@ impl SegmentFixedHeader {
     /// The total size in bytes of the fixed part of the Segment Routing Header
     pub const LEN: usize = mem::size_of::<SegmentFixedHeader>();
 
-    /// Gets the Last Entry value.
-    #[inline]
-    pub fn last_entry(&self) -> u8 {
-        self.last_entry
-    }
-
-    /// Sets the Last Entry value.
-    #[inline]
-    pub fn set_last_entry(&mut self, last_entry: u8) {
-        self.last_entry = last_entry
-    }
-
-    /// Gets the Flags value.
-    #[inline]
-    pub fn flags(&self) -> u8 {
-        self.flags
-    }
-
-    /// Sets the Flags value.
-    #[inline]
-    pub fn set_flags(&mut self, flags: u8) {
-        self.flags = flags
-    }
-
     /// Gets the Tag field as a 16-bit value.
     #[inline]
     pub fn tag(&self) -> u16 {
@@ -538,7 +429,7 @@ impl SegmentFixedHeader {
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
 pub struct SegmentRoutingHeader {
-    pub gen_route: GenericRoute,
+    pub generic_route: GenericRoute,
     pub fixed_hdr: SegmentFixedHeader,
 }
 
@@ -552,68 +443,12 @@ impl SegmentRoutingHeader {
     /// Maximum number of segments that can be included in the header
     pub const MAX_SEGMENTS: usize = MAX_SRH_SEGMENTS;
 
-    /// Gets the Next Header value.
-    #[inline]
-    pub fn next_hdr(&self) -> IpProto {
-        self.gen_route.next_hdr
-    }
-
-    /// Sets the Next Header value.
-    #[inline]
-    pub fn set_next_hdr(&mut self, next_hdr: IpProto) {
-        self.gen_route.next_hdr = next_hdr
-    }
-
-    /// Gets the Header Extension Length value.
-    #[inline]
-    pub fn hdr_ext_len(&self) -> u8 {
-        self.gen_route.hdr_ext_len
-    }
-
-    /// Sets the Header Extension Length value.
-    #[inline]
-    pub fn set_hdr_ext_len(&mut self, hdr_ext_len: u8) {
-        self.gen_route.hdr_ext_len = hdr_ext_len
-    }
-
-    /// Gets the Routing Type value.
-    #[inline]
-    pub fn type_(&self) -> RoutingHeaderType {
-        RoutingHeaderType::from_u8(self.gen_route.type_)
-    }
-
-    /// Sets the Routing Type value.
-    /// For Segment Routing Header, this should always be 4.
-    #[inline]
-    pub fn set_type(&mut self, type_: RoutingHeaderType) {
-        self.gen_route.type_ = type_.as_u8()
-    }
-
-    /// Gets the Segments Left value.
-    #[inline]
-    pub fn sgmt_left(&self) -> u8 {
-        self.gen_route.sgmt_left
-    }
-
-    /// Sets the Segments Left value.
-    #[inline]
-    pub fn set_sgmt_left(&mut self, sgmt_left: u8) {
-        self.gen_route.sgmt_left = sgmt_left
-    }
-
-    /// Calculates the total length of the Segment Routing Header in bytes.
-    /// The Hdr Ext Len is in 8-octet units, *excluding* the first 8 octets.
-    /// So, total length = (hdr_ext_len + 1) * 8.
-    #[inline]
-    pub fn total_hdr_len(&self) -> usize {
-        self.gen_route.total_hdr_len()
-    }
-
     /// Calculates the total length available for the Segment List and TLVs in bytes.
     /// Total Header Length - Fixed Header Length.
     #[inline]
     pub fn segments_and_tlvs_len(&self) -> usize {
-        self.total_hdr_len()
+        self.generic_route
+            .total_hdr_len()
             .saturating_sub(SegmentRoutingHeader::LEN)
     }
 
@@ -690,7 +525,7 @@ impl SegmentRoutingHeader {
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
 pub struct CrhHeader {
-    pub gen_route: GenericRoute,
+    pub generic_route: GenericRoute,
 }
 
 impl CrhHeader {
@@ -700,74 +535,19 @@ impl CrhHeader {
     /// Maximum number of SIDs that can be included in the header
     pub const MAX_SIDS: usize = MAX_CRH_SIDS;
 
-    /// Gets the Next Header value.
-    #[inline]
-    pub fn next_hdr(&self) -> IpProto {
-        self.gen_route.next_hdr
-    }
-
-    /// Sets the Next Header value.
-    #[inline]
-    pub fn set_next_hdr(&mut self, next_hdr: IpProto) {
-        self.gen_route.next_hdr = next_hdr
-    }
-
-    /// Gets the Header Extension Length value.
-    #[inline]
-    pub fn hdr_ext_len(&self) -> u8 {
-        self.gen_route.hdr_ext_len
-    }
-
-    /// Sets the Header Extension Length value.
-    #[inline]
-    pub fn set_hdr_ext_len(&mut self, hdr_ext_len: u8) {
-        self.gen_route.hdr_ext_len = hdr_ext_len
-    }
-
-    /// Gets the Routing Type value.
-    #[inline]
-    pub fn type_(&self) -> RoutingHeaderType {
-        RoutingHeaderType::from_u8(self.gen_route.type_)
-    }
-
-    /// Sets the Routing Type value.
-    /// For CRH-16 Header, this should always be 5.
-    #[inline]
-    pub fn set_type(&mut self, type_: RoutingHeaderType) {
-        self.gen_route.type_ = type_.as_u8()
-    }
-
-    /// Gets the Segments Left value.
-    #[inline]
-    pub fn sgmt_left(&self) -> u8 {
-        self.gen_route.sgmt_left
-    }
-
-    /// Sets the Segments Left value.
-    #[inline]
-    pub fn set_sgmt_left(&mut self, sgmt_left: u8) {
-        self.gen_route.sgmt_left = sgmt_left
-    }
-
-    /// Calculates the total length of the CRH-16 Header in bytes.
-    /// The Hdr Ext Len is in 8-octet units, *excluding* the first 8 octets.
-    /// So, total length = (hdr_ext_len + 1) * 8.
-    #[inline]
-    pub fn total_hdr_len(&self) -> usize {
-        self.gen_route.total_hdr_len()
-    }
-
     /// Calculates the total length available for the SID List in bytes.
     /// Total Header Length - Fixed Header Length.
     #[inline]
     pub fn sid_list_len(&self) -> usize {
-        self.total_hdr_len().saturating_sub(CrhHeader::LEN)
+        self.generic_route
+            .total_hdr_len()
+            .saturating_sub(CrhHeader::LEN)
     }
 
     /// Calculates the number of SIDs in the SID List.
     #[inline]
     pub fn num_sids(&self) -> usize {
-        let sid_size = match self.type_() {
+        let sid_size = match self.generic_route.type_ {
             RoutingHeaderType::Crh16 => 2,
             RoutingHeaderType::Crh32 => 4,
             _ => return 0,
@@ -814,28 +594,12 @@ mod tests {
 
     #[test]
     fn test_generic_route_getters_setters() {
-        let mut header = GenericRoute {
-            next_hdr: IpProto::Tcp,
-            hdr_ext_len: 0,
-            type_: 0,
-            sgmt_left: 0,
+        let header = GenericRoute {
+            next_hdr: IpProto::Udp,
+            hdr_ext_len: 2,
+            type_: RoutingHeaderType::Type2,
+            sgmt_left: 1,
         };
-
-        // Test next_hdr
-        header.set_next_hdr(IpProto::Udp);
-        assert_eq!(header.next_hdr(), IpProto::Udp);
-
-        // Test hdr_ext_len
-        header.set_hdr_ext_len(2);
-        assert_eq!(header.hdr_ext_len(), 2);
-
-        // Test type_
-        header.set_type(RoutingHeaderType::Type2);
-        assert_eq!(header.type_(), RoutingHeaderType::Type2);
-
-        // Test sgmt_left
-        header.set_sgmt_left(1);
-        assert_eq!(header.sgmt_left(), 1);
 
         // Test total_hdr_len calculation
         assert_eq!(header.total_hdr_len(), 24); // (2 + 1) * 8 = 24
@@ -858,8 +622,8 @@ mod tests {
 
         // Test home_address field
         let test_address = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-        header.set_home_address(test_address);
-        assert_eq!(header.home_address(), test_address);
+        header.set_home_address(u128::from_be_bytes(test_address));
+        assert_eq!(header.home_address(), u128::from_be_bytes(test_address));
         assert_eq!(header.home_address, test_address);
     }
 
@@ -890,7 +654,7 @@ mod tests {
         let gen_route = GenericRoute {
             next_hdr: IpProto::Tcp,
             hdr_ext_len: 4, // 5 * 8 = 40 bytes total
-            type_: 3,
+            type_: RoutingHeaderType::RplSourceRoute,
             sgmt_left: 2,
         };
 
@@ -902,7 +666,7 @@ mod tests {
         fixed_hdr.set_pad(0x6); //two addresses, 6 bytes of compression = 6 padding bytyes
 
         let header = RplSourceRouteHeader {
-            gen_route,
+            generic_route: gen_route,
             fixed_hdr,
         };
 
@@ -911,35 +675,13 @@ mod tests {
         assert_eq!(header.last_address_size(), 12); // 16 - 4 = 12
 
         // Test total header length
-        assert_eq!(header.gen_route.total_hdr_len(), 40); // (4 + 1) * 8 = 40
+        assert_eq!(header.generic_route.total_hdr_len(), 40); // (4 + 1) * 8 = 40
 
         // Test num_addresses calculation
         // n = (((Hdr Ext Len * 8) - Pad - (16 - CmprE)) / (16 - CmprI)) + 1
         // n = (((4 * 8) - 0 - (16 - 4)) / (16 - 2)) + 1
         // n = ((32 - 0 - 12) / 14) + 1 = (20 / 14) + 1 = 1 + 1 = 2
         assert_eq!(header.num_addresses(), 2);
-    }
-
-    #[test]
-    fn test_routing_header_type_conversion() {
-        // Test from_u8
-        assert_eq!(RoutingHeaderType::from_u8(2), RoutingHeaderType::Type2);
-        assert_eq!(
-            RoutingHeaderType::from_u8(3),
-            RoutingHeaderType::RplSourceRoute
-        );
-
-        // Test unknown type
-        if let RoutingHeaderType::Unknown(val) = RoutingHeaderType::from_u8(99) {
-            assert_eq!(val, 99);
-        } else {
-            panic!("Expected Unknown variant");
-        }
-
-        // Test as_u8
-        assert_eq!(RoutingHeaderType::Type2.as_u8(), 2);
-        assert_eq!(RoutingHeaderType::RplSourceRoute.as_u8(), 3);
-        assert_eq!(RoutingHeaderType::Unknown(99).as_u8(), 99);
     }
 
     #[test]
@@ -975,16 +717,6 @@ mod tests {
             tag: [0; 2],
         };
 
-        // Test last_entry
-        header.set_last_entry(5);
-        assert_eq!(header.last_entry(), 5);
-        assert_eq!(header.last_entry, 5);
-
-        // Test flags
-        header.set_flags(0xAB);
-        assert_eq!(header.flags(), 0xAB);
-        assert_eq!(header.flags, 0xAB);
-
         // Test tag field
         header.set_tag(0x1234);
         assert_eq!(header.tag(), 0x1234);
@@ -992,48 +724,11 @@ mod tests {
     }
 
     #[test]
-    fn test_segment_routing_header_basic_getters_setters() {
-        let gen_route = GenericRoute {
-            next_hdr: IpProto::Tcp,
-            hdr_ext_len: 0,
-            type_: 4, // Segment Routing Header type
-            sgmt_left: 0,
-        };
-
-        let fixed_hdr = SegmentFixedHeader {
-            last_entry: 0,
-            flags: 0,
-            tag: [0; 2],
-        };
-
-        let mut header = SegmentRoutingHeader {
-            gen_route,
-            fixed_hdr,
-        };
-
-        // Test next_hdr
-        header.set_next_hdr(IpProto::Udp);
-        assert_eq!(header.next_hdr(), IpProto::Udp);
-
-        // Test hdr_ext_len
-        header.set_hdr_ext_len(4);
-        assert_eq!(header.hdr_ext_len(), 4);
-
-        // Test type_
-        header.set_type(RoutingHeaderType::SegmentRoutingHeader);
-        assert_eq!(header.type_(), RoutingHeaderType::SegmentRoutingHeader);
-
-        // Test sgmt_left
-        header.set_sgmt_left(3);
-        assert_eq!(header.sgmt_left(), 3);
-    }
-
-    #[test]
     fn test_segment_routing_header_length_calculations() {
         let gen_route = GenericRoute {
             next_hdr: IpProto::Ipv6,
             hdr_ext_len: 6, // 7 * 8 = 56 bytes total
-            type_: 4,
+            type_: RoutingHeaderType::SegmentRoutingHeader,
             sgmt_left: 2,
         };
 
@@ -1044,12 +739,12 @@ mod tests {
         };
 
         let header = SegmentRoutingHeader {
-            gen_route,
+            generic_route: gen_route,
             fixed_hdr,
         };
 
         // Test total header length
-        assert_eq!(header.total_hdr_len(), 56); // (6 + 1) * 8 = 56
+        assert_eq!(header.generic_route.total_hdr_len(), 56); // (6 + 1) * 8 = 56
 
         // Test segments and TLVs length
         assert_eq!(header.segments_and_tlvs_len(), 48); // 56 - 8 = 48
@@ -1069,7 +764,7 @@ mod tests {
         let gen_route = GenericRoute {
             next_hdr: IpProto::Tcp,
             hdr_ext_len: 8, // 9 * 8 = 72 bytes total
-            type_: 4,
+            type_: RoutingHeaderType::SegmentRoutingHeader,
             sgmt_left: 1,
         };
 
@@ -1080,12 +775,12 @@ mod tests {
         };
 
         let header = SegmentRoutingHeader {
-            gen_route,
+            generic_route: gen_route,
             fixed_hdr,
         };
 
         // Test total header length
-        assert_eq!(header.total_hdr_len(), 72); // (8 + 1) * 8 = 72
+        assert_eq!(header.generic_route.total_hdr_len(), 72); // (8 + 1) * 8 = 72
 
         // Test segments and TLVs length
         assert_eq!(header.segments_and_tlvs_len(), 64); // 72 - 8 = 64
@@ -1106,7 +801,7 @@ mod tests {
         let gen_route = GenericRoute {
             next_hdr: IpProto::Tcp,
             hdr_ext_len: 0,
-            type_: 4,
+            type_: RoutingHeaderType::SegmentRoutingHeader,
             sgmt_left: 0,
         };
 
@@ -1118,7 +813,7 @@ mod tests {
         };
 
         let header = SegmentRoutingHeader {
-            gen_route,
+            generic_route: gen_route,
             fixed_hdr,
         };
 
@@ -1129,7 +824,7 @@ mod tests {
         assert_eq!(header.segment_list_len(), 4096); // 256 * 16 = 4096
 
         // Test with zero hdr_ext_len
-        assert_eq!(header.total_hdr_len(), 8); // (0 + 1) * 8 = 8
+        assert_eq!(header.generic_route.total_hdr_len(), 8); // (0 + 1) * 8 = 8
         assert_eq!(header.segments_and_tlvs_len(), 0); // 8 - 8 = 0 (saturating_sub)
         assert_eq!(header.tlvs_len(), 0); // 0 - 4096 = 0 (saturating_sub)
     }
@@ -1140,7 +835,7 @@ mod tests {
         let gen_route = GenericRoute {
             next_hdr: IpProto::Tcp,
             hdr_ext_len: 2, // Minimum for 1 segment: (8 + 16 - 8) / 8 = 2
-            type_: 4,
+            type_: RoutingHeaderType::SegmentRoutingHeader,
             sgmt_left: 0,
         };
 
@@ -1151,11 +846,11 @@ mod tests {
         };
 
         let header = SegmentRoutingHeader {
-            gen_route,
+            generic_route: gen_route,
             fixed_hdr,
         };
 
-        assert_eq!(header.total_hdr_len(), 24); // (2 + 1) * 8 = 24
+        assert_eq!(header.generic_route.total_hdr_len(), 24); // (2 + 1) * 8 = 24
         assert_eq!(header.segments_and_tlvs_len(), 16); // 24 - 8 = 16
         assert_eq!(header.num_segments(), 1); // 0 + 1 = 1
         assert_eq!(header.segment_list_len(), 16); // 1 * 16 = 16
@@ -1175,51 +870,19 @@ mod tests {
     }
 
     #[test]
-    fn test_crh_header_basic_getters_setters() {
-        let generic_route = GenericRoute {
-            next_hdr: IpProto::Tcp,
-            hdr_ext_len: 0,
-            type_: 5, // CRH-16 type
-            sgmt_left: 0,
-        };
-
-        let mut header = CrhHeader {
-            gen_route: generic_route,
-        };
-
-        // Test next_hdr
-        header.set_next_hdr(IpProto::Udp);
-        assert_eq!(header.next_hdr(), IpProto::Udp);
-
-        // Test hdr_ext_len
-        header.set_hdr_ext_len(2);
-        assert_eq!(header.hdr_ext_len(), 2);
-
-        // Test type_
-        header.set_type(RoutingHeaderType::Crh16);
-        assert_eq!(header.type_(), RoutingHeaderType::Crh16);
-
-        // Test sgmt_left
-        header.set_sgmt_left(3);
-        assert_eq!(header.sgmt_left(), 3);
-    }
-
-    #[test]
     fn test_crh16_header_calculations() {
         // Test CRH-16 with 4 SIDs
         let generic_route = GenericRoute {
             next_hdr: IpProto::Ipv6,
             hdr_ext_len: 1, // 2 * 8 = 16 bytes total, 16 - 4 = 12 bytes for SIDs
-            type_: 5,       // CRH-16
+            type_: RoutingHeaderType::Crh16, // CRH-16
             sgmt_left: 2,
         };
 
-        let header = CrhHeader {
-            gen_route: generic_route,
-        };
+        let header = CrhHeader { generic_route };
 
         // Test total header length
-        assert_eq!(header.total_hdr_len(), 16); // (1 + 1) * 8 = 16
+        assert_eq!(header.generic_route.total_hdr_len(), 16); // (1 + 1) * 8 = 16
 
         // Test SID list length
         assert_eq!(header.sid_list_len(), 12); // 16 - 4 = 12
@@ -1234,16 +897,14 @@ mod tests {
         let generic_route = GenericRoute {
             next_hdr: IpProto::Tcp,
             hdr_ext_len: 1, // 2 * 8 = 16 bytes total, 16 - 4 = 12 bytes for SIDs
-            type_: 6,       // CRH-32
+            type_: RoutingHeaderType::Crh32, // CRH-32
             sgmt_left: 1,
         };
 
-        let header = CrhHeader {
-            gen_route: generic_route,
-        };
+        let header = CrhHeader { generic_route };
 
         // Test total header length
-        assert_eq!(header.total_hdr_len(), 16); // (1 + 1) * 8 = 16
+        assert_eq!(header.generic_route.total_hdr_len(), 16); // (1 + 1) * 8 = 16
 
         // Test SID list length
         assert_eq!(header.sid_list_len(), 12); // 16 - 4 = 12
@@ -1258,16 +919,14 @@ mod tests {
         let generic_route = GenericRoute {
             next_hdr: IpProto::Udp,
             hdr_ext_len: 4, // 5 * 8 = 40 bytes total, 40 - 4 = 36 bytes for SIDs
-            type_: 5,       // CRH-16
+            type_: RoutingHeaderType::Crh16, // CRH-16
             sgmt_left: 15,
         };
 
-        let header = CrhHeader {
-            gen_route: generic_route,
-        };
+        let header = CrhHeader { generic_route };
 
         // Test total header length
-        assert_eq!(header.total_hdr_len(), 40); // (4 + 1) * 8 = 40
+        assert_eq!(header.generic_route.total_hdr_len(), 40); // (4 + 1) * 8 = 40
 
         // Test SID list length
         assert_eq!(header.sid_list_len(), 36); // 40 - 4 = 36
@@ -1282,16 +941,14 @@ mod tests {
         let generic_route = GenericRoute {
             next_hdr: IpProto::Icmp,
             hdr_ext_len: 7, // 8 * 8 = 64 bytes total, 64 - 4 = 60 bytes for SIDs
-            type_: 6,       // CRH-32
+            type_: RoutingHeaderType::Crh32, // CRH-32
             sgmt_left: 10,
         };
 
-        let header = CrhHeader {
-            gen_route: generic_route,
-        };
+        let header = CrhHeader { generic_route };
 
         // Test total header length
-        assert_eq!(header.total_hdr_len(), 64); // (7 + 1) * 8 = 64
+        assert_eq!(header.generic_route.total_hdr_len(), 64); // (7 + 1) * 8 = 64
 
         // Test SID list length
         assert_eq!(header.sid_list_len(), 60); // 64 - 4 = 60
@@ -1306,36 +963,16 @@ mod tests {
         let generic_route = GenericRoute {
             next_hdr: IpProto::Tcp,
             hdr_ext_len: 0,
-            type_: 5, // CRH-16
+            type_: RoutingHeaderType::Crh16, // CRH-16
             sgmt_left: 0,
         };
 
-        let header = CrhHeader {
-            gen_route: generic_route,
-        };
+        let header = CrhHeader { generic_route };
 
         // Test with zero hdr_ext_len
-        assert_eq!(header.total_hdr_len(), 8); // (0 + 1) * 8 = 8
+        assert_eq!(header.generic_route.total_hdr_len(), 8); // (0 + 1) * 8 = 8
         assert_eq!(header.sid_list_len(), 4); // 8 - 4 = 4
         assert_eq!(header.num_sids(), 2); // 4 / 2 = 2 for CRH-16
-    }
-
-    #[test]
-    fn test_crh_header_invalid_type() {
-        // Test with invalid type (should return 0 SIDs)
-        let generic_route = GenericRoute {
-            next_hdr: IpProto::Tcp,
-            hdr_ext_len: 4,
-            type_: 99, // Invalid type
-            sgmt_left: 0,
-        };
-
-        let header = CrhHeader {
-            gen_route: generic_route,
-        };
-
-        // Test with invalid type
-        assert_eq!(header.num_sids(), 0); // Invalid type should return 0
     }
 
     #[test]
@@ -1344,15 +981,13 @@ mod tests {
         let generic_route = GenericRoute {
             next_hdr: IpProto::Tcp,
             hdr_ext_len: 31, // 32 * 8 = 256 bytes total, 256 - 4 = 252 bytes for SIDs
-            type_: 5,        // CRH-16
+            type_: RoutingHeaderType::Crh16, // CRH-16
             sgmt_left: 0,
         };
 
-        let header = CrhHeader {
-            gen_route: generic_route,
-        };
+        let header = CrhHeader { generic_route };
 
-        assert_eq!(header.total_hdr_len(), 256); // (31 + 1) * 8 = 256
+        assert_eq!(header.generic_route.total_hdr_len(), 256); // (31 + 1) * 8 = 256
         assert_eq!(header.sid_list_len(), 252); // 256 - 4 = 252
         assert_eq!(header.num_sids(), 126); // 252 / 2 = 126 for CRH-16
 
@@ -1360,27 +995,16 @@ mod tests {
         let generic_route_32 = GenericRoute {
             next_hdr: IpProto::Tcp,
             hdr_ext_len: 31, // 32 * 8 = 256 bytes total, 256 - 4 = 252 bytes for SIDs
-            type_: 6,        // CRH-32
+            type_: RoutingHeaderType::Crh32, // CRH-32
             sgmt_left: 0,
         };
 
         let header_32 = CrhHeader {
-            gen_route: generic_route_32,
+            generic_route: generic_route_32,
         };
 
-        assert_eq!(header_32.total_hdr_len(), 256); // (31 + 1) * 8 = 256
+        assert_eq!(header_32.generic_route.total_hdr_len(), 256); // (31 + 1) * 8 = 256
         assert_eq!(header_32.sid_list_len(), 252); // 256 - 4 = 252
         assert_eq!(header_32.num_sids(), 63); // 252 / 4 = 63 for CRH-32
-    }
-
-    #[test]
-    fn test_crh_header_routing_type_conversion() {
-        // Test CRH-16 type conversion
-        assert_eq!(RoutingHeaderType::from_u8(5), RoutingHeaderType::Crh16);
-        assert_eq!(RoutingHeaderType::Crh16.as_u8(), 5);
-
-        // Test CRH-32 type conversion
-        assert_eq!(RoutingHeaderType::from_u8(6), RoutingHeaderType::Crh32);
-        assert_eq!(RoutingHeaderType::Crh32.as_u8(), 6);
     }
 }

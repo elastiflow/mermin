@@ -110,6 +110,13 @@ unsafe {
 }
 ```
 
+### 5. **eBPF Logging Best Practices**
+
+- Minimize logging - Each log statement adds complexity
+- Avoid format parameters when possible - they can cause verifier issues
+- Use simple messages - complex formatting often fails verification
+- Test without logging first - get your core logic working, then add logging
+
 ## 🐛 Debugging and Troubleshooting
 
 ### Common Issues and Solutions

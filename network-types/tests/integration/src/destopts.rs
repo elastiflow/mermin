@@ -15,8 +15,8 @@ pub fn create_destopts_test_packet() -> ([u8; DestOptsHdr::LEN + 1], DestOptsHdr
         opt_data: [0u8; 6],
     };
 
-    expected.set_next_hdr(IpProto::Tcp);
-    expected.set_hdr_ext_len(0);
+    expected.next_hdr = IpProto::Tcp;
+    expected.hdr_ext_len = 0;
     // Fill some option padding bytes (for deterministic comparison)
     expected
         .opt_data
@@ -35,14 +35,9 @@ pub fn verify_destopts_header(received: ParsedHeader, expected: DestOptsHdr) {
     assert_eq!(received.type_, PacketType::DestOpts);
     let parsed = unsafe { received.data.destopts };
 
+    assert_eq!(parsed.next_hdr, expected.next_hdr, "Next Header mismatch");
     assert_eq!(
-        parsed.next_hdr(),
-        expected.next_hdr(),
-        "Next Header mismatch"
-    );
-    assert_eq!(
-        parsed.hdr_ext_len(),
-        expected.hdr_ext_len(),
+        parsed.hdr_ext_len, expected.hdr_ext_len,
         "Hdr Ext Len mismatch"
     );
     assert_eq!(parsed.opt_data, expected.opt_data, "Option data mismatch");

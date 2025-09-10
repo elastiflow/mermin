@@ -41,31 +41,6 @@ impl AuthHdr {
     /// The total size in bytes of the fixed part of the Authentication Header
     pub const LEN: usize = mem::size_of::<AuthHdr>();
 
-    /// Gets the Next Header value.
-    #[inline]
-    pub fn next_hdr(&self) -> IpProto {
-        self.next_hdr
-    }
-
-    /// Sets the Next Header value.
-    #[inline]
-    pub fn set_next_hdr(&mut self, next_hdr: IpProto) {
-        self.next_hdr = next_hdr;
-    }
-
-    /// Gets the Payload Length value.
-    /// This value is the length of the Authentication Header in 4-octet units, minus 2.
-    #[inline]
-    pub fn payload_len(&self) -> u8 {
-        self.payload_len
-    }
-
-    /// Sets the Payload Length value.
-    #[inline]
-    pub fn set_payload_len(&mut self, payload_len: u8) {
-        self.payload_len = payload_len;
-    }
-
     /// Gets the Reserved field as a 16-bit value.
     #[inline]
     pub fn reserved(&self) -> u16 {
@@ -134,16 +109,6 @@ mod tests {
             seq_num: [0; 4],
         };
 
-        // Test next_hdr
-        auth_hdr.set_next_hdr(IpProto::Stream); // Example: TCP
-        assert_eq!(auth_hdr.next_hdr(), IpProto::Stream);
-        assert_eq!(auth_hdr.next_hdr, IpProto::Stream);
-
-        // Test payload_len
-        auth_hdr.set_payload_len(4); // Example: Total length would be (4+2)*4 = 24 bytes
-        assert_eq!(auth_hdr.payload_len(), 4);
-        assert_eq!(auth_hdr.payload_len, 4);
-
         // Test reserved
         auth_hdr.set_reserved(0x1234);
         assert_eq!(auth_hdr.reserved(), 0x1234);
@@ -178,22 +143,22 @@ mod tests {
         };
 
         // Test with payload_len = 0
-        auth_hdr.set_payload_len(0);
+        auth_hdr.payload_len = 0;
         assert_eq!(auth_hdr.total_hdr_len(), 8);
         assert_eq!(auth_hdr.icv_len(), 0);
 
         // Test with payload_len = 1
-        auth_hdr.set_payload_len(1);
+        auth_hdr.payload_len = 1;
         assert_eq!(auth_hdr.total_hdr_len(), 12);
         assert_eq!(auth_hdr.icv_len(), 0);
 
         // Test with payload_len = 3
-        auth_hdr.set_payload_len(3);
+        auth_hdr.payload_len = 3;
         assert_eq!(auth_hdr.total_hdr_len(), 20);
         assert_eq!(auth_hdr.icv_len(), 8);
 
         // Test with payload_len = 255 (max value)
-        auth_hdr.set_payload_len(255);
+        auth_hdr.payload_len = 255;
         assert_eq!(auth_hdr.total_hdr_len(), (255 + 2) * 4);
         assert_eq!(auth_hdr.icv_len(), (255 + 2) * 4 - AuthHdr::LEN);
     }
