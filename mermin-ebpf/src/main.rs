@@ -1,6 +1,8 @@
 #![cfg_attr(not(test), no_main)]
 #![cfg_attr(not(test), no_std)]
 
+#[cfg(test)]
+use aya_ebpf::bindings::TC_ACT_PIPE;
 #[cfg(not(feature = "test"))]
 use aya_ebpf::{
     bindings::TC_ACT_PIPE,
@@ -46,7 +48,7 @@ enum HeaderType {
     Proto(IpProto),
     Route(RoutingHeaderType),
     StopProcessing, // Indicates parsing should terminate for flow key purposes
-    #[cfg(not(feature = "test"))]
+    // #[cfg(not(feature = "test"))]
     #[allow(dead_code)]
     ErrorOccurred, // Indicates an error stopped parsing
 }
@@ -61,11 +63,10 @@ pub enum Error {
 #[cfg(not(feature = "test"))]
 #[classifier]
 pub fn mermin(ctx: TcContext) -> i32 {
-    try_mermin(ctx).unwrap_or(TC_ACT_PIPE)
+    try_mermin(ctx).map(|(res, _)| res).unwrap_or(TC_ACT_PIPE)
 }
 
-#[cfg(not(feature = "test"))]
-fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
+fn try_mermin(ctx: TcContext) -> Result<(i32, PacketMeta), ()> {
     const MAX_HEADER_PARSE_DEPTH: usize = 12;
 
     // Information for building flow records (prioritizes innermost headers).
@@ -97,27 +98,53 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Ethernet => parser.parse_ethernet_header(&ctx),
             HeaderType::Ipv4 => match parser.parse_ipv4_header(&ctx) {
                 Ok(ipv4_hdr) => {
-                    // policy: innermost IP header determines the flow IPs
-                    src_ipv4_addr = ipv4_hdr.src_addr;
-                    dst_ipv4_addr = ipv4_hdr.dst_addr;
-                    l3_octet_count = parser.calc_l3_octet_count(ctx.len());
-                    ip_addr_type = IpAddrType::Ipv4;
-                    proto = ipv4_hdr.proto;
-                    // todo: Extract additional fields from ipv4_hdr
-
+                    // Check if proto is set to IP-in-IP and the tunnel hasn't been set yet
+                    if !found_tunnel
+                        && (ipv4_hdr.proto == IpProto::Ipv4 || ipv4_hdr.proto == IpProto::Ipv6)
+                    {
+                        tunnel_src_ipv4_addr = ipv4_hdr.src_addr;
+                        tunnel_dst_ipv4_addr = ipv4_hdr.dst_addr;
+                        tunnel_src_port = src_port;
+                        tunnel_dst_port = dst_port;
+                        tunnel_ip_addr_type = IpAddrType::Ipv4;
+                        tunnel_proto = proto;
+                        found_tunnel = true;
+                    } else {
+                        // policy: innermost IP header determines the flow IPs
+                        src_ipv4_addr = ipv4_hdr.src_addr;
+                        dst_ipv4_addr = ipv4_hdr.dst_addr;
+                        l3_octet_count = parser.calc_l3_octet_count(ctx.len());
+                        ip_addr_type = IpAddrType::Ipv4;
+                        proto = ipv4_hdr.proto;
+                        // todo: Extract additional fields from ipv4_hdr
+                    }
                     Ok(())
                 }
                 Err(e) => Err(e),
             },
             HeaderType::Ipv6 => match parser.parse_ipv6_header(&ctx) {
                 Ok(ipv6_hdr) => {
-                    // policy: innermost IP header determines the flow IPs
-                    src_ipv6_addr = ipv6_hdr.src_addr;
-                    dst_ipv6_addr = ipv6_hdr.dst_addr;
-                    l3_octet_count = parser.calc_l3_octet_count(ctx.len());
-                    ip_addr_type = IpAddrType::Ipv6;
-                    proto = ipv6_hdr.next_hdr;
-                    // todo: Extract additional fields from ipv6_hdr
+                    // Check if proto is set to IP-in-IP and the tunnel hasn't been set yet
+                    if !found_tunnel
+                        && (ipv6_hdr.next_hdr == IpProto::Ipv6
+                            || ipv6_hdr.next_hdr == IpProto::Ipv4)
+                    {
+                        tunnel_src_ipv6_addr = ipv6_hdr.src_addr;
+                        tunnel_dst_ipv6_addr = ipv6_hdr.dst_addr;
+                        tunnel_src_port = src_port;
+                        tunnel_dst_port = dst_port;
+                        tunnel_ip_addr_type = IpAddrType::Ipv6;
+                        tunnel_proto = proto;
+                        found_tunnel = true;
+                    } else {
+                        // policy: innermost IP header determines the flow IPs
+                        src_ipv6_addr = ipv6_hdr.src_addr;
+                        dst_ipv6_addr = ipv6_hdr.dst_addr;
+                        l3_octet_count = parser.calc_l3_octet_count(ctx.len());
+                        ip_addr_type = IpAddrType::Ipv6;
+                        proto = ipv6_hdr.next_hdr;
+                        // todo: Extract additional fields from ipv6_hdr
+                    }
 
                     Ok(())
                 }
@@ -212,7 +239,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
                 break;
             }
             HeaderType::StopProcessing => break, // Graceful stop
-            HeaderType::ErrorOccurred => return Ok(TC_ACT_PIPE), // Error, pass packet
+            HeaderType::ErrorOccurred => return Ok((TC_ACT_PIPE, PacketMeta::default())), // Error, pass packet
         };
 
         if result.is_err() {
@@ -240,6 +267,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
         tunnel_proto,
     };
 
+    #[cfg(not(feature = "test"))]
     unsafe {
         #[allow(static_mut_refs)]
         let result = PACKETS.output(&packet_meta, 0);
@@ -248,7 +276,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
         }
     }
 
-    Ok(TC_ACT_PIPE)
+    Ok((TC_ACT_PIPE, packet_meta))
 }
 
 struct Parser {
@@ -315,6 +343,10 @@ impl Parser {
             IpProto::Tcp | IpProto::Udp | IpProto::Icmp => {
                 self.next_hdr = HeaderType::Proto(next_hdr);
             }
+            IpProto::Ipv4 => {
+                self.next_hdr = HeaderType::Ipv4;
+            }
+            IpProto::Ipv6 => self.next_hdr = HeaderType::Ipv6,
             _ => {
                 self.next_hdr = HeaderType::StopProcessing;
             }
@@ -347,6 +379,10 @@ impl Parser {
             | IpProto::Hip
             | IpProto::Shim6 => {
                 self.next_hdr = HeaderType::Proto(next_hdr);
+            }
+            IpProto::Ipv6 => self.next_hdr = HeaderType::Ipv6,
+            IpProto::Ipv4 => {
+                self.next_hdr = HeaderType::Ipv4;
             }
             IpProto::Ipv6NoNxt => {
                 self.next_hdr = HeaderType::StopProcessing;
@@ -651,6 +687,7 @@ mod host_test_shim {
     use crate::Error;
 
     // A minimal stand-in for aya_ebpf::programs::TcContext used by parser functions
+    #[derive(Clone)]
     pub struct TcContext {
         data: Vec<u8>,
     }
@@ -1162,6 +1199,115 @@ mod tests {
         packet.push(0x00);
 
         packet
+    }
+
+    #[test]
+    fn test_try_mermin_ipv4_in_ipv4() {
+        // Build the packet: Eth -> IPv4 (outer) -> IPv4 (inner) -> TCP
+        let inner_ipv4_packet = create_ipv4_test_packet(); // protocol TCP, len 20
+        let tcp_packet = create_tcp_test_packet(); // len 20
+
+        // Create outer IPv4 header from the same helper
+        let mut outer_ipv4_packet = create_ipv4_test_packet();
+        // Set protocol to Ipv4 for IP-in-IP
+        outer_ipv4_packet[9] = IpProto::Ipv4 as u8;
+
+        // Update total length for the outer packet to be correct.
+        let total_len: u16 = (inner_ipv4_packet.len() + tcp_packet.len()) as u16; // 40 bytes
+        outer_ipv4_packet[2..4].copy_from_slice(&total_len.to_be_bytes());
+
+        // Use different IPs for outer header to distinguish from inner
+        outer_ipv4_packet[12..16].copy_from_slice(&[10, 0, 0, 1]); // src: 10.0.0.1
+        outer_ipv4_packet[16..20].copy_from_slice(&[10, 0, 0, 2]); // dst: 10.0.0.2
+
+        // Concatenate all parts to form the final packet
+        let eth_packet = create_eth_test_packet();
+        let packet: Vec<u8> = [
+            eth_packet,
+            outer_ipv4_packet,
+            inner_ipv4_packet.clone(),
+            tcp_packet,
+        ]
+        .concat();
+
+        let ctx = TcContext::new(packet);
+
+        // Call try_mermin and get the populated packet_meta
+        let result = try_mermin(ctx);
+        assert!(result.is_ok());
+        let (_code, packet_meta) = result.unwrap();
+
+        // Assert on the parsed metadata
+        // Outer IPv4 is the tunnel
+        assert_eq!(packet_meta.tunnel_ip_addr_type, IpAddrType::Ipv4);
+        assert_eq!(packet_meta.tunnel_src_ipv4_addr, [10, 0, 0, 1]);
+        assert_eq!(packet_meta.tunnel_dst_ipv4_addr, [10, 0, 0, 2]);
+
+        // Inner IPv4 is the main flow
+        assert_eq!(packet_meta.ip_addr_type, IpAddrType::Ipv4);
+        assert_eq!(packet_meta.src_ipv4_addr, [0xc0, 0xa8, 0x01, 0x01]);
+        assert_eq!(packet_meta.dst_ipv4_addr, [0xc0, 0xa8, 0x01, 0x02]);
+        assert_eq!(packet_meta.proto, IpProto::Tcp);
+
+        // TCP ports from inner packet
+        assert_eq!(packet_meta.src_port(), 12345);
+        assert_eq!(packet_meta.dst_port(), 80);
+
+        // Tunnel ports are captured before inner L4 header is parsed, so they are 0
+        assert_eq!(packet_meta.tunnel_src_port(), 0);
+        assert_eq!(packet_meta.tunnel_dst_port(), 0);
+    }
+
+    #[test]
+    fn test_try_mermin_ipv4_in_ipv6() {
+        // Build packet: Eth -> IPv6 (outer) -> IPv4 (inner) -> TCP
+        let mut eth_for_ipv6_packet = create_eth_test_packet();
+        eth_for_ipv6_packet[12..14].copy_from_slice(&[0x86, 0xDD]); // EtherType for IPv6
+
+        // Outer IPv6 header
+        let mut outer_ipv6_packet = create_ipv6_test_packet();
+        outer_ipv6_packet[6] = IpProto::Ipv4 as u8; // Next Header: IPv4
+
+        // Inner IPv4 and TCP packets
+        let inner_ipv4_packet = create_ipv4_test_packet();
+        let tcp_packet = create_tcp_test_packet();
+
+        // Update payload length in outer IPv6 header
+        let payload_len: u16 = (inner_ipv4_packet.len() + tcp_packet.len()) as u16; // 40 bytes
+        outer_ipv6_packet[4..6].copy_from_slice(&payload_len.to_be_bytes());
+
+        let packet: Vec<u8> = [
+            eth_for_ipv6_packet,
+            outer_ipv6_packet.clone(),
+            inner_ipv4_packet.clone(),
+            tcp_packet,
+        ]
+        .concat();
+
+        let ctx = TcContext::new(packet.clone());
+        let (_code, packet_meta) = try_mermin(ctx).unwrap();
+
+        // Assert on tunnel fields
+        assert_eq!(packet_meta.tunnel_ip_addr_type, IpAddrType::Ipv6);
+        let outer_ipv6_hdr: Ipv6Hdr = TcContext::new(packet)
+            .load(EthHdr::LEN)
+            .expect("failed to load outer ipv6 header");
+        assert_eq!(packet_meta.tunnel_src_ipv6_addr, outer_ipv6_hdr.src_addr);
+        assert_eq!(packet_meta.tunnel_dst_ipv6_addr, outer_ipv6_hdr.dst_addr);
+
+        // Assert on inner fields
+        assert_eq!(packet_meta.ip_addr_type, IpAddrType::Ipv4);
+        assert_eq!(packet_meta.src_ipv4_addr, [0xc0, 0xa8, 0x01, 0x01]);
+        assert_eq!(packet_meta.dst_ipv4_addr, [0xc0, 0xa8, 0x01, 0x02]);
+        assert_eq!(packet_meta.proto, IpProto::Tcp);
+
+        // TCP ports
+        assert_eq!(packet_meta.src_port(), 12345);
+        assert_eq!(packet_meta.dst_port(), 80);
+
+        // Tunnel ports are zero
+        assert_eq!(packet_meta.tunnel_src_port(), 0);
+        assert_eq!(packet_meta.tunnel_dst_port(), 0);
     }
 
     #[test]
