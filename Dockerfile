@@ -1,31 +1,6 @@
 ARG APP_ROOT=/app
 ARG APP=mermin
 
-# ---- Bpftool Build Stage ----
-FROM debian:bookworm-slim AS bpftool-build
-
-ARG SOURCE_REPO=https://github.com/libbpf/bpftool.git
-ARG SOURCE_REF=main
-
-# Install build dependencies and build bpftool in a single layer
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        gpg gpg-agent libelf-dev libmnl-dev libc-dev libgcc-12-dev libcap-dev \
-        bash-completion binutils binutils-dev ca-certificates make git \
-        xz-utils gcc pkg-config bison flex build-essential clang llvm llvm-dev && \
-    git clone --recurse-submodules --depth 1 -b $SOURCE_REF $SOURCE_REPO /tmp/bpftool && \
-    cd /tmp/bpftool && \
-    EXTRA_CFLAGS=--static OUTPUT=/usr/bin/ make -C src -j "$(nproc)" && \
-    strip /usr/bin/bpftool && \
-    ldd /usr/bin/bpftool 2>&1 | grep -q -e "Not a valid dynamic program" \
-        -e "not a dynamic executable" || \
-	    ( echo "Error: bpftool is not statically linked"; false ) && \
-    apt-get purge -y gpg gpg-agent libelf-dev libmnl-dev libc-dev libgcc-12-dev libcap-dev \
-        bash-completion binutils binutils-dev ca-certificates make git \
-        xz-utils gcc pkg-config bison flex build-essential clang llvm llvm-dev && \
-    apt-get autoremove -y && \
-    apt-get clean && \
-    rm -rf /tmp/bpftool /var/lib/apt/lists/*
 
 # ---- Build Stage ----
 FROM rust:1.88.0-bookworm AS base
@@ -34,6 +9,7 @@ FROM rust:1.88.0-bookworm AS base
 USER root
 
 # Install Dev Container essentials
+# hadolint ignore=DL3059,DL3008 # multi-stage build, more RUN -> better caching, not pinning versions for now
 RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo \
     git \
@@ -57,14 +33,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Configure passwordless sudo for the poseidon user
 # Create a non-root user 'poseidon' and grant sudo privileges
+# hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
 RUN useradd --create-home --shell /bin/bash poseidon \
     && echo "poseidon ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/poseidon
 
 # Install LLVM
+# hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
 RUN wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh && chmod +x /tmp/llvm.sh \
     && /tmp/llvm.sh 20 all
 
 # Install eBPF Dependencies
+# hadolint ignore=DL3059,DL3008 # multi-stage build, more RUN -> better caching, not pinning versions for now
 RUN apt-get install -y --no-install-recommends \
     iputils-ping \
     libclang-20-dev \
@@ -75,7 +54,10 @@ RUN apt-get install -y --no-install-recommends \
     libbpf-tools
 
 # Copy bpftool from the build stage and make it available system-wide
-COPY --from=bpftool-build /usr/bin/bpftool /usr/bin/bpftool
+# hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
+RUN wget -c --progress=dot:giga -O /tmp/bpftool.tar.gz https://github.com/libbpf/bpftool/releases/download/v7.6.0/bpftool-v7.6.0-"$(dpkg --print-architecture)".tar.gz && \
+  tar xfvpz /tmp/bpftool.tar.gz -C /usr/bin/ bpftool && \
+  chmod 0755 /usr/bin/bpftool
 
 # Verify bpftool is working
 RUN bpftool --version
@@ -90,25 +72,36 @@ ENV PATH="/usr/lib/llvm-20/bin:${PATH}"
 USER poseidon
 
 # Install the core Aya build tools
+# hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
 RUN cargo install bpf-linker
+# hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
 RUN cargo install bindgen-cli
+# hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
 RUN cargo install --git https://github.com/aya-rs/aya --locked aya-tool
 
 # ---- Builder Stage ----
 FROM base AS builder
 ARG APP_ROOT APP
 
+# hadolint ignore=DL3002 # root is needed due to eBPF
 USER root
 
 WORKDIR ${APP_ROOT}
 # Copy source code
-COPY . .
+COPY ./common-build ./common-build
+COPY ./mermin ./mermin
+COPY ./mermin-common ./mermin-common
+COPY ./mermin-ebpf ./mermin-ebpf
+COPY ./network-types ./network-types
+COPY Cargo.lock Cargo.toml ./
+COPY rust-toolchain.toml rustfmt.toml ./
 
 # Build the final application, leveraging the cached dependencies
 RUN cargo build --release
 
 # ---- Runtime Stage ----
 # Use a distroless base image for the final container without shell support
+# hadolint ignore=DL3006 # gcr.io/distroless/cc-debian12 don't have tags
 FROM gcr.io/distroless/cc-debian12 AS runner
 ARG APP_ROOT APP
 
@@ -125,4 +118,5 @@ ARG APP_ROOT APP
 ENV RUST_LOG=info
 
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
+COPY --from=builder /usr/bin/bpftool /usr/bin/bpftool
 ENTRYPOINT ["/usr/bin/mermin"]

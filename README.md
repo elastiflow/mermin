@@ -638,6 +638,10 @@ This comprehensive approach ensures you can monitor and optimize your integratio
 
 -----
 
+## Artifacts
+
+The image with the `-debug` prefix is built using the `gcr.io/distroless/cc-debian12:debug` base image and provides additional debugging tools compared to the standard image.
+
 ## 📜 License
 
 With the exception of eBPF code, mermin is distributed under the terms
