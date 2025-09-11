@@ -118,7 +118,7 @@ jobs:
       TARGET_IMAGE_TAG: |
         {
             "runner": "v${{ needs.release.outputs.new_release_version }}",
-            "runner-debug": "${{ needs.release.outputs.new_release_version }}-debug"
+            "runner-debug": "v${{ needs.release.outputs.new_release_version }}-debug"
         }
     steps:
       - name: Checkout
