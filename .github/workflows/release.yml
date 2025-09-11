@@ -97,9 +97,8 @@ jobs:
 
   docker_build_push:
     name: Docker build/push
-    needs: [release]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    runs-on: ubuntu-latest-8c
+    timeout-minutes: 90
     permissions:
       contents: read
       packages: write
@@ -107,14 +106,8 @@ jobs:
       id-token: write
     strategy:
       matrix:
-        runner: [ubuntu-latest, ubuntu-latest-arm]
         target: [runner, runner-debug]
     env:
-      RUNNER_PLATFORM: |
-        {
-            "ubuntu-latest": "linux/amd64",
-            "ubuntu-latest-arm": "linux/arm64"
-        }
       TARGET_IMAGE_TAG: |
         {
             "runner": "v${{ needs.release.outputs.new_release_version }}",
@@ -142,10 +135,10 @@ jobs:
           registry: ghcr.io
           image: ${{ github.repository }}
           tag: ${{ fromJson(env.TARGET_IMAGE_TAG)[matrix.target] }}
-          platforms: ${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }}
+          platforms: linux/amd64,linux/arm64
           target: ${{ matrix.target }}
           push: true
-          cache_from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }}
-          cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }},mode=max
+          cache_from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }}
+          cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }},mode=max
           registry_username: ${{ github.actor }}
           registry_password: ${{ secrets.GITHUB_TOKEN }}
