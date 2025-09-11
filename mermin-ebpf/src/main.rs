@@ -18,6 +18,7 @@ use network_types::{
     eth::{EthHdr, EtherType},
     fragment::FragmentHdr,
     geneve::GeneveHdr,
+    hip::HipHdr,
     hop::HopOptHdr,
     icmp::IcmpHdr,
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
@@ -205,6 +206,7 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
             HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx),
             HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx),
+            HeaderType::Proto(IpProto::Hip) => parser.parse_hip_header(&ctx),
             HeaderType::Proto(IpProto::Shim6) => parser.parse_shim6_header(&ctx),
             HeaderType::Proto(_) => {
                 break;
@@ -578,6 +580,23 @@ impl Parser {
         Ok(())
     }
 
+    /// Parses the HIP header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_hip_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        if self.offset + HipHdr::LEN > ctx.len() as usize {
+            return Err(Error::OutOfBounds);
+        }
+
+        let hip_hdr: HipHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        // Advance by the full HIP header length (base + parameters)
+        self.offset += hip_hdr.total_hdr_len();
+        // Chain to the next protocol indicated by HIP
+        self.next_hdr = HeaderType::Proto(hip_hdr.next_hdr);
+        // TODO parse out and use addresses and other Hip fields here
+
+        Ok(())
+    }
+
     /// Parses the Shim6 header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_shim6_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
@@ -892,6 +911,35 @@ mod tests {
         // First 2 bytes of type-specific data
         packet.extend_from_slice(&[0x56, 0x78]);
         // Pad to total length
+        let current = packet.len();
+        if total > current {
+            packet.extend(core::iter::repeat(0u8).take(total - current));
+        }
+        packet
+    }
+
+    // Helper function to create a HIP header test packet
+    // HipHdr LEN is 40 bytes for base; hdr_len is in 8-octet units excluding first 8 bytes
+    fn create_hip_test_packet(next: IpProto, hdr_len: u8) -> Vec<u8> {
+        let total = (hdr_len as usize + 1) * 8;
+        let mut packet = Vec::with_capacity(total);
+        // Next Header
+        packet.push(next as u8);
+        // Header Length
+        packet.push(hdr_len);
+        // Packet Type field (top bit fixed 0 per our simplified build) + 7-bit type
+        packet.push(0x01);
+        // Version field: version=2 (upper 4 bits), reserved=0, fixed bit=1 (lsb)
+        packet.push((2u8 << 4) | 0x01);
+        // Checksum
+        packet.extend_from_slice(&[0x12, 0x34]);
+        // Controls
+        packet.extend_from_slice(&[0xAB, 0xCD]);
+        // Sender HIT (16 bytes)
+        packet.extend_from_slice(&[0u8; 16]);
+        // Receiver HIT (16 bytes)
+        packet.extend_from_slice(&[0u8; 16]);
+        // Pad parameters to total length if needed
         let current = packet.len();
         if total > current {
             packet.extend(core::iter::repeat(0u8).take(total - current));
@@ -1646,6 +1694,51 @@ mod tests {
         let ctx = TcContext::new(packet);
 
         let result = parser.parse_geneve_header(&ctx);
+        assert!(matches!(result, Err(Error::OutOfBounds)));
+    }
+
+    #[test]
+    fn test_parse_hip_header_basic() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::Hip);
+        // Base HIP header is 40 bytes => hdr_len = 4
+        let packet = create_hip_test_packet(IpProto::Ipv6NoNxt, 4);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_hip_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, HipHdr::LEN);
+        assert!(matches!(
+            parser.next_hdr,
+            HeaderType::Proto(IpProto::Ipv6NoNxt)
+        ));
+    }
+
+    #[test]
+    fn test_parse_hip_header_with_params() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::Hip);
+        // Add 16 bytes of params => hdr_len = ((40+16)/8)-1 = 6
+        let packet = create_hip_test_packet(IpProto::Tcp, 6);
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_hip_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, (6 + 1) * 8);
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    #[test]
+    fn test_parse_hip_header_out_of_bounds() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::Hip);
+        // fewer than required to load HipHdr (40 bytes)
+        let packet = vec![0u8; 16];
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_hip_header(&ctx);
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
