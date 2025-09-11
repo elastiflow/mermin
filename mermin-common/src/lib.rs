@@ -20,6 +20,7 @@ pub enum IpAddrType {
 #[repr(C, align(8))]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PacketMeta {
+    pub ifindex: u32,
     // Fields with 16-byte alignment
     // ---
     /// Source IPv6 address (innermost)
@@ -95,7 +96,7 @@ mod tests {
     // Test FlowRecord size and alignment
     #[test]
     fn test_flow_record_layout() {
-        let expected_size = 96;
+        let expected_size = 104;
         let actual_size = size_of::<PacketMeta>();
 
         assert_eq!(
@@ -137,6 +138,7 @@ mod tests {
         let tunnel_dst_port: u16 = 81;
 
         let record = PacketMeta {
+            ifindex: 1,
             src_ipv6_addr: src_ipv6_val,
             dst_ipv6_addr: dst_ipv6_val,
             src_ipv4_addr: src_ipv4_val,
@@ -157,6 +159,7 @@ mod tests {
         };
 
         // Test field access
+        assert_eq!(record.ifindex, 1);
         assert_eq!(record.src_ipv4_addr, src_ipv4_val);
         assert_eq!(record.dst_ipv4_addr, dst_ipv4_val);
         assert_eq!(record.src_ipv6_addr, src_ipv6_val);
