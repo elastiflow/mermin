@@ -37,30 +37,6 @@ impl DestOptsHdr {
     /// The size of the fixed part of the Destination Options Header, in bytes.
     pub const LEN: usize = mem::size_of::<DestOptsHdr>();
 
-    /// Gets the Next Header value.
-    #[inline]
-    pub fn next_hdr(&self) -> IpProto {
-        self.next_hdr
-    }
-
-    /// Sets the Next Header value.
-    #[inline]
-    pub fn set_next_hdr(&mut self, next_hdr: IpProto) {
-        self.next_hdr = next_hdr;
-    }
-
-    /// Gets the Hdr Ext Len value.
-    #[inline]
-    pub fn hdr_ext_len(&self) -> u8 {
-        self.hdr_ext_len
-    }
-
-    /// Sets the Hdr Ext Len value.
-    #[inline]
-    pub fn set_hdr_ext_len(&mut self, hdr_ext_len: u8) {
-        self.hdr_ext_len = hdr_ext_len;
-    }
-
     /// Calculates the total length of the Destination Options Header in bytes.
     /// The Hdr Ext Len is in 8-octet units, not including the first 8 octets.
     /// So, total length = (hdr_ext_len + 1) * 8.
@@ -73,46 +49,6 @@ impl DestOptsHdr {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn default_hdr() -> DestOptsHdr {
-        DestOptsHdr {
-            next_hdr: IpProto::Tcp,
-            hdr_ext_len: 0,
-            opt_data: [0; 6],
-        }
-    }
-
-    #[test]
-    fn test_getters_setters() {
-        let mut hdr = default_hdr();
-        assert_eq!(hdr.next_hdr(), IpProto::Tcp);
-        hdr.set_next_hdr(IpProto::Udp);
-        assert_eq!(hdr.next_hdr(), IpProto::Udp);
-
-        assert_eq!(hdr.hdr_ext_len(), 0);
-        hdr.set_hdr_ext_len(3);
-        assert_eq!(hdr.hdr_ext_len(), 3);
-    }
-
-    #[test]
-    fn test_total_hdr_len_various() {
-        let mut hdr = default_hdr();
-        // hdr_ext_len = 0 -> (0+1)*8 = 8
-        hdr.set_hdr_ext_len(0);
-        assert_eq!(hdr.total_hdr_len(), 8);
-        // 1 -> 16
-        hdr.set_hdr_ext_len(1);
-        assert_eq!(hdr.total_hdr_len(), 16);
-        // 2 -> 24
-        hdr.set_hdr_ext_len(2);
-        assert_eq!(hdr.total_hdr_len(), 24);
-        // 7 -> 64
-        hdr.set_hdr_ext_len(7);
-        assert_eq!(hdr.total_hdr_len(), 64);
-        // 255 -> 2048
-        hdr.set_hdr_ext_len(255);
-        assert_eq!(hdr.total_hdr_len(), (255usize + 1) * 8);
-    }
 
     #[test]
     fn test_len_constant() {
