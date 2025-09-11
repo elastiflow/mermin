@@ -380,6 +380,10 @@ impl Parser {
             | IpProto::Shim6 => {
                 self.next_hdr = HeaderType::Proto(next_hdr);
             }
+            IpProto::Ipv6 => self.next_hdr = HeaderType::Ipv6,
+            IpProto::Ipv4 => {
+                self.next_hdr = HeaderType::Ipv4;
+            }
             IpProto::Ipv6NoNxt => {
                 self.next_hdr = HeaderType::StopProcessing;
             }
