@@ -172,8 +172,8 @@ jobs:
         with:
           platforms: ${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }}
           target: ${{ matrix.target }}
-          cache_from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }}
-          cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }},mode=max
+          cache_from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-ci-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }}
+          cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-ci-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }},mode=max
 
   all_checks:
     name: All Checks
