@@ -9,7 +9,7 @@ use aya_ebpf::{
     programs::TcContext,
 };
 #[cfg(not(feature = "test"))]
-use aya_log_ebpf::{debug, error};
+use aya_log_ebpf::error;
 use mermin_common::{IpAddrType, PacketMeta};
 use network_types::{
     ah::AuthHdr,
@@ -22,10 +22,7 @@ use network_types::{
     icmp::IcmpHdr,
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
     mobility::MobilityHdr,
-    route::{
-        CrhHeader, GenericRoute, RoutingHeaderType, RplSourceRouteHeader, SegmentRoutingHeader,
-        Type2RoutingHeader,
-    },
+    route::{GenericRoute, RoutingHeaderType},
     shim6::Shim6Hdr,
     tcp::TcpHdr,
     udp::UdpHdr,
@@ -68,7 +65,7 @@ pub fn mermin(ctx: TcContext) -> i32 {
 
 #[cfg(not(feature = "test"))]
 fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
-    const MAX_HEADER_PARSE_DEPTH: usize = 16;
+    const MAX_HEADER_PARSE_DEPTH: usize = 12;
 
     // Information for building flow records (prioritizes innermost headers).
     // These fields will be updated as we parse deeper or encounter encapsulations.
@@ -93,8 +90,6 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
     let mut proto: IpProto = IpProto::default();
     let mut tunnel_ip_addr_type: IpAddrType = IpAddrType::default();
     let mut tunnel_proto: IpProto = IpProto::default();
-
-    debug!(&ctx, "mermin: parsing packet");
 
     for _ in 0..MAX_HEADER_PARSE_DEPTH {
         let result: Result<(), Error> = match parser.next_hdr {
@@ -177,19 +172,20 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
                         // TODO: extract and assign additional udp fields
 
                         let udp_dst_port = udp_hdr.dst_port();
-                        if udp_dst_port == options.geneve_port || udp_dst_port == options.vxlan_port
+
+                        // Capture outer headers before entering Geneve or VXLAN tunnel
+                        if !found_tunnel
+                            && (udp_dst_port == options.geneve_port
+                                || udp_dst_port == options.vxlan_port)
                         {
-                            // Capture outer headers before entering Geneve or VXLAN tunnel
-                            if !found_tunnel {
-                                tunnel_src_ipv6_addr = src_ipv6_addr;
-                                tunnel_dst_ipv6_addr = dst_ipv6_addr;
-                                tunnel_src_ipv4_addr = src_ipv4_addr;
-                                tunnel_dst_ipv4_addr = dst_ipv4_addr;
-                                tunnel_src_port = src_port;
-                                tunnel_dst_port = dst_port;
-                                tunnel_ip_addr_type = ip_addr_type;
-                                tunnel_proto = proto;
-                            }
+                            tunnel_src_ipv6_addr = src_ipv6_addr;
+                            tunnel_dst_ipv6_addr = dst_ipv6_addr;
+                            tunnel_src_ipv4_addr = src_ipv4_addr;
+                            tunnel_dst_ipv4_addr = dst_ipv4_addr;
+                            tunnel_src_port = src_port;
+                            tunnel_dst_port = dst_port;
+                            tunnel_ip_addr_type = ip_addr_type;
+                            tunnel_proto = proto;
                             found_tunnel = true;
                         }
 
@@ -198,17 +194,10 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
                     Err(e) => Err(e),
                 }
             }
-            HeaderType::Route(RoutingHeaderType::RplSourceRoute) => parser.parse_rpl_routing(&ctx),
-            HeaderType::Route(RoutingHeaderType::Type2) => parser.parse_type2_routing(&ctx),
-            HeaderType::Route(RoutingHeaderType::SegmentRoutingHeader) => {
-                parser.parse_segment_routing(&ctx)
-            }
-            HeaderType::Route(RoutingHeaderType::Crh16) => parser.parse_crh_routing(&ctx),
-            HeaderType::Route(RoutingHeaderType::Crh32) => parser.parse_crh_routing(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_route_header(&ctx),
             HeaderType::Route(_) => {
                 break;
             }
-            HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
             HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
             HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
@@ -250,7 +239,6 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
     };
 
     unsafe {
-        debug!(&ctx, "mermin: writing to packet output with proto");
         #[allow(static_mut_refs)]
         let result = PACKETS.output(&packet_meta, 0);
         if result.is_err() {
@@ -492,94 +480,26 @@ impl Parser {
         // IANA has assigned port 6081 as the fixed well-known destination port for Geneve and port 4789 as the fixed well-known destination port for Vxlan.
         // Although the well-known value should be used by default, it is RECOMMENDED that implementations make these configurable.
         let udp_dst_port = udp_hdr.dst_port();
-        if udp_dst_port == geneve_port {
-            self.next_hdr = HeaderType::Geneve;
+        self.next_hdr = if udp_dst_port == geneve_port {
+            HeaderType::Geneve
         } else if udp_dst_port == vxlan_port {
-            self.next_hdr = HeaderType::Vxlan;
+            HeaderType::Vxlan
         } else {
-            self.next_hdr = HeaderType::StopProcessing;
-        }
+            HeaderType::StopProcessing
+        };
 
         Ok(udp_hdr)
     }
 
     /// Parses the IPv6 routing header in the packet and dispatches to the appropriate specific parser.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_generic_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+    fn parse_generic_route_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + GenericRoute::LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
         let gen_hdr: GenericRoute = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-
+        self.offset += gen_hdr.total_hdr_len();
         self.next_hdr = HeaderType::Route(gen_hdr.type_);
-        // Do not advance offset here, the specific parser will do that
-
-        Ok(())
-    }
-
-    /// Parses the RPL Source Route header specifically.
-    /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_rpl_routing(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        if self.offset + RplSourceRouteHeader::LEN > ctx.len() as usize {
-            return Err(Error::OutOfBounds);
-        }
-        let rpl_hdr: RplSourceRouteHeader =
-            ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-
-        // TODO parse out and use addresses and other Rpl fields here
-        self.next_hdr = HeaderType::Proto(rpl_hdr.generic_route.next_hdr);
-        // Advance to start of next header
-        self.offset += rpl_hdr.total_hdr_len();
-
-        Ok(())
-    }
-
-    /// Parses the Type2 routing header specifically.
-    /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_type2_routing(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        if self.offset + Type2RoutingHeader::LEN > ctx.len() as usize {
-            return Err(Error::OutOfBounds);
-        }
-        let type2_hdr: Type2RoutingHeader =
-            ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-
-        // TODO parse out and use addresses and other type2 fields
-        self.next_hdr = HeaderType::Proto(type2_hdr.generic_route.next_hdr);
-        // Advance to start of next header
-        self.offset += type2_hdr.generic_route.total_hdr_len();
-
-        Ok(())
-    }
-
-    /// Parses the Segment Routing header specifically.
-    /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_segment_routing(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        if self.offset + SegmentRoutingHeader::LEN > ctx.len() as usize {
-            return Err(Error::OutOfBounds);
-        }
-        let segment_hdr: SegmentRoutingHeader =
-            ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-
-        // TODO parse out and use addresses and other Segment fields here
-        self.next_hdr = HeaderType::Proto(segment_hdr.generic_route.next_hdr);
-        // Advance to start of next header
-        self.offset += segment_hdr.generic_route.total_hdr_len();
-
-        Ok(())
-    }
-
-    /// Parses the CRH (Compressed Routing Header) for both CRH-16 and CRH-32.
-    /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_crh_routing(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        if self.offset + CrhHeader::LEN > ctx.len() as usize {
-            return Err(Error::OutOfBounds);
-        }
-        let crh_hdr: CrhHeader = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-
-        // TODO parse out and use SIDs from CRH header
-        self.next_hdr = HeaderType::Proto(crh_hdr.generic_route.next_hdr);
-        // Advance to start of next header
-        self.offset += crh_hdr.generic_route.total_hdr_len();
 
         Ok(())
     }
@@ -733,10 +653,6 @@ mod host_test_shim {
     }
 
     // No-op logging macros to satisfy calls in parsing code
-    #[macro_export]
-    macro_rules! debug {
-        ($($tt:tt)*) => {};
-    }
     #[macro_export]
     macro_rules! error {
         ($($tt:tt)*) => {};
@@ -1134,30 +1050,6 @@ mod tests {
         packet
     }
 
-    // Helper function to create a minimal Segment Routing Header test packet (1 segment)
-    fn create_segment_routing_min_test_packet(next: IpProto) -> Vec<u8> {
-        let mut packet = Vec::new();
-
-        // Generic routing header (4 bytes)
-        packet.push(next as u8); // Next Header
-        packet.push(2); // Hdr Ext Len (2 * 8 = 16 bytes after first 8, total 24)
-        packet.push(2); // Routing Type (SegmentRoutingHeader) - enum variant index
-        packet.push(0); // Segments Left
-
-        // Segment Routing fixed header (4 bytes)
-        packet.push(0); // Last Entry (0 means 1 segment)
-        packet.push(0xFF); // Flags (all set)
-        packet.extend_from_slice(&[0xAB, 0xCD]); // Tag
-
-        // Single segment (16 bytes)
-        packet.extend_from_slice(&[
-            0xfe, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x5e, 0xff, 0xfe, 0x00,
-            0x53, 0xaf,
-        ]);
-
-        packet
-    }
-
     // Helper function to create a CRH-16 test packet with 16-bit SIDs
     // This creates a CRH-16 header with 2 SIDs (total packet: 4 + 4 = 8 bytes)
     fn create_crh16_test_packet(next: IpProto) -> Vec<u8> {
@@ -1175,29 +1067,6 @@ mod tests {
         packet
     }
 
-    // Helper function to create a CRH-16 test packet with SIDs
-    // This creates a CRH-16 header with 2 SIDs (total packet: 4 + 4 = 8 bytes)
-    fn create_crh16_with_sids_test_packet(next: IpProto) -> Vec<u8> {
-        let mut packet = Vec::new();
-
-        // Generic routing header (4 bytes)
-        packet.push(next as u8); // Next Header
-        packet.push(1); // Hdr Ext Len (1 * 8 = 8 bytes after first 8, total 16 bytes)
-        packet.push(3); // Routing Type (Crh16) - enum variant index
-        packet.push(1); // Segments Left
-
-        // SID List: 4 16-bit SIDs (8 bytes total)
-        packet.extend_from_slice(&[0x12, 0x34]); // SID[0] = 0x1234
-        packet.extend_from_slice(&[0x56, 0x78]); // SID[1] = 0x5678
-        packet.extend_from_slice(&[0x9A, 0xBC]); // SID[2] = 0x9ABC
-        packet.extend_from_slice(&[0xDE, 0xF0]); // SID[3] = 0xDEF0
-
-        // Reserved bytes to make the header a multiple of 8 bytes long
-        packet.extend_from_slice(&[0; 4]);
-
-        packet
-    }
-
     // Helper function to create a CRH-32 test packet
     // This creates a CRH-32 header with no SIDs (minimum size)
     fn create_crh32_test_packet(next: IpProto) -> Vec<u8> {
@@ -1210,27 +1079,6 @@ mod tests {
         packet.push(0); // Segments Left
 
         // Reserved bytes to make the header 8 bytes long (minimum IPv6 extension header size)
-        packet.extend_from_slice(&[0; 4]);
-
-        packet
-    }
-
-    // Helper function to create a CRH-32 test packet with SIDs
-    // This creates a CRH-32 header with 2 SIDs (total packet: 4 + 8 = 12 bytes)
-    fn create_crh32_with_sids_test_packet(next: IpProto) -> Vec<u8> {
-        let mut packet = Vec::new();
-
-        // Generic routing header (4 bytes)
-        packet.push(next as u8); // Next Header
-        packet.push(1); // Hdr Ext Len (1 * 8 = 8 bytes after first 8, total 16 bytes)
-        packet.push(4); // Routing Type (Crh32) - enum variant index
-        packet.push(1); // Segments Left
-
-        // SID List: 2 32-bit SIDs (8 bytes total)
-        packet.extend_from_slice(&[0x12, 0x34, 0x56, 0x78]); // SID[0] = 0x12345678
-        packet.extend_from_slice(&[0x9A, 0xBC, 0xDE, 0xF0]); // SID[1] = 0x9ABCDEF0
-
-        // Reserved bytes to make the header a multiple of 8 bytes long
         packet.extend_from_slice(&[0; 4]);
 
         packet
@@ -1267,18 +1115,6 @@ mod tests {
 
         packet
     }
-
-    // #[test]
-    // fn test_my_tc_program() {
-    //     let mock_packet_data = vec![0xDE, 0xAD, 0xBE, 0xEF];
-    //     let ctx = MockTcContext::new(mock_packet_data);
-    //
-    //     // Call your eBPF program's main function with the mock context
-    //     let result = mermin(&ctx as *const _ as *mut _);
-    //
-    //     // Assert on the expected outcome of the program
-    //     assert_eq!(result, 0); // Or whatever your program should return
-    // }
 
     #[test]
     fn test_parser_initialization() {
@@ -1879,384 +1715,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_routing_header_type2_tcp() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        let packet = create_type2_routing_test_packet(IpProto::Tcp);
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_type2_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 24); // Type2 routing header length
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_type2_udp() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        let packet = create_type2_routing_test_packet(IpProto::Udp);
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_type2_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 24); // Type2 routing header length
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_type2_out_of_bounds() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        // Provide fewer than 24 bytes (incomplete Type2 header)
-        let packet = vec![0x06, 0x02, 0x02, 0x01];
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_type2_routing(&ctx);
-        assert!(matches!(result, Err(Error::OutOfBounds)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_rpl_source_route_tcp() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        let packet = create_rpl_source_route_test_packet(IpProto::Tcp);
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_rpl_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 40); // RPL Source Route header length (8 + 32)
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_rpl_source_route_udp() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        let packet = create_rpl_source_route_test_packet(IpProto::Udp);
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_rpl_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 40); // RPL Source Route header length (8 + 32)
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_rpl_source_route_out_of_bounds() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        // Provide fewer bytes than required for RPL header
-        let packet = vec![0x06, 0x04, 0x03]; // Only 3 bytes, less than GenericRoute
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_rpl_routing(&ctx);
-        assert!(matches!(result, Err(Error::OutOfBounds)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_segment_routing_tcp() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        let packet = create_segment_routing_test_packet(IpProto::Tcp);
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_segment_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 40); // Segment Routing header length (8 + 32)
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_segment_routing_udp() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        let packet = create_segment_routing_test_packet(IpProto::Udp);
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_segment_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 40); // Segment Routing header length (8 + 32)
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_segment_routing_min() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        let packet = create_segment_routing_min_test_packet(IpProto::Ipv6);
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_segment_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 24); // Minimum Segment Routing header length (8 + 16)
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Ipv6)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_segment_routing_out_of_bounds() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        // Provide fewer bytes than required for Segment Routing header
-        let packet = vec![0x06, 0x04, 0x04]; // Only 3 bytes, less than GenericRoute
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_segment_routing(&ctx);
-        assert!(matches!(result, Err(Error::OutOfBounds)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_segment_routing_max_segments_left() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        let mut packet = create_segment_routing_test_packet(IpProto::Tcp);
-        // Set segments left to maximum value
-        packet[4] = 255;
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_segment_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 40);
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_segment_routing_flags() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        let mut packet = create_segment_routing_test_packet(IpProto::Udp);
-        // Set all flags
-        packet[6] = 0xFF;
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_segment_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 40);
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_segment_routing_zero_hdr_ext_len() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-
-        // Create a packet with zero hdr_ext_len (only fixed header)
-        let mut packet = Vec::new();
-        packet.push(IpProto::Tcp as u8); // Next Header
-        packet.push(0); // Hdr Ext Len = 0 (total 8 bytes)
-        packet.push(2); // Routing Type (SegmentRoutingHeader) - enum variant index
-        packet.push(0); // Segments Left
-        packet.push(0); // Last Entry
-        packet.push(0x00); // Flags
-        packet.extend_from_slice(&[0x00, 0x00]); // Tag
-
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_segment_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 8); // Only fixed header
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_crh16_tcp() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        let packet = create_crh16_test_packet(IpProto::Tcp);
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_crh_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_crh16_udp() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        let packet = create_crh16_test_packet(IpProto::Udp);
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_crh_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_crh16_with_sids() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        let packet = create_crh16_with_sids_test_packet(IpProto::Tcp);
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_crh_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_crh16_out_of_bounds() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        // Provide fewer bytes than required for CRH-16 header
-        let packet = vec![0x06, 0x01]; // Only 2 bytes
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_crh_routing(&ctx);
-        assert!(matches!(result, Err(Error::OutOfBounds)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_crh16_max_segments_left() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        let mut packet = create_crh16_with_sids_test_packet(IpProto::Tcp);
-        // Set segments left to maximum value
-        packet[3] = 255;
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_crh_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_crh32_tcp() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        let packet = create_crh32_test_packet(IpProto::Tcp);
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_crh_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_crh32_udp() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        let packet = create_crh32_test_packet(IpProto::Udp);
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_crh_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 8); // CRH header length (8 bytes minimum, no SIDs)
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_crh32_with_sids() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        let packet = create_crh32_with_sids_test_packet(IpProto::Tcp);
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_crh_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 16); // CRH header length (4 + 8 bytes SIDs + 4 bytes padding)
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_crh32_out_of_bounds() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        // Provide fewer bytes than required for CRH-32 header
-        let packet = vec![0x06, 0x01]; // Only 2 bytes
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_crh_routing(&ctx);
-        assert!(matches!(result, Err(Error::OutOfBounds)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_crh32_max_segments_left() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-        let mut packet = create_crh32_with_sids_test_packet(IpProto::Udp);
-        // Set segments left to maximum value
-        packet[3] = 255;
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_crh_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 16);
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_crh16_zero_hdr_ext_len() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-
-        // Create a packet with zero hdr_ext_len (only fixed header)
-        let mut packet = Vec::new();
-        packet.push(IpProto::Tcp as u8); // Next Header
-        packet.push(0); // Hdr Ext Len = 0 (total 4 bytes)
-        packet.push(3); // Routing Type (Crh16) - enum variant index
-        packet.push(0); // Segments Left
-
-        // Reserved bytes to make the header a multiple of 8 bytes long
-        packet.extend_from_slice(&[0; 4]);
-
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_crh_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 8); // Only fixed header and padding
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
-    }
-
-    #[test]
-    fn test_parse_routing_header_crh32_zero_hdr_ext_len() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6Route);
-
-        // Create a packet with zero hdr_ext_len (only fixed header)
-        let mut packet = Vec::new();
-        packet.push(IpProto::Udp as u8); // Next Header
-        packet.push(0); // Hdr Ext Len = 0 (total 4 bytes)
-        packet.push(4); // Routing Type (Crh32) - enum variant index
-        packet.push(0); // Segments Left
-
-        // Reserved bytes to make the header a multiple of 8 bytes long
-        packet.extend_from_slice(&[0; 4]);
-
-        let ctx = TcContext::new(packet);
-
-        let result = parser.parse_crh_routing(&ctx);
-
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, 8); // Only fixed header and padding
-        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Udp)));
-    }
-
-    #[test]
     fn test_parse_vxlan_valid_header() {
         let mut parser = Parser::default();
         parser.next_hdr = HeaderType::Vxlan;
@@ -2291,11 +1749,11 @@ mod tests {
         let packet = create_type2_routing_test_packet(IpProto::Tcp);
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_generic_header(&ctx);
+        let result = parser.parse_generic_route_header(&ctx);
 
         assert!(result.is_ok());
         // Offset should not advance - generic parser just identifies the routing type
-        assert_eq!(parser.offset, 0);
+        assert_eq!(parser.offset, 24);
         assert!(matches!(
             parser.next_hdr,
             HeaderType::Route(RoutingHeaderType::Type2)
@@ -2309,10 +1767,10 @@ mod tests {
         let packet = create_rpl_source_route_test_packet(IpProto::Udp);
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_generic_header(&ctx);
+        let result = parser.parse_generic_route_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.offset, 0);
+        assert_eq!(parser.offset, 40);
         assert!(matches!(
             parser.next_hdr,
             HeaderType::Route(RoutingHeaderType::RplSourceRoute)
@@ -2326,10 +1784,10 @@ mod tests {
         let packet = create_segment_routing_test_packet(IpProto::Tcp);
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_generic_header(&ctx);
+        let result = parser.parse_generic_route_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.offset, 0);
+        assert_eq!(parser.offset, 40);
         assert!(matches!(
             parser.next_hdr,
             HeaderType::Route(RoutingHeaderType::SegmentRoutingHeader)
@@ -2343,10 +1801,10 @@ mod tests {
         let packet = create_crh16_test_packet(IpProto::Tcp);
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_generic_header(&ctx);
+        let result = parser.parse_generic_route_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.offset, 0);
+        assert_eq!(parser.offset, 8);
         assert!(matches!(
             parser.next_hdr,
             HeaderType::Route(RoutingHeaderType::Crh16)
@@ -2360,10 +1818,10 @@ mod tests {
         let packet = create_crh32_test_packet(IpProto::Udp);
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_generic_header(&ctx);
+        let result = parser.parse_generic_route_header(&ctx);
 
         assert!(result.is_ok());
-        assert_eq!(parser.offset, 0);
+        assert_eq!(parser.offset, 8);
         assert!(matches!(
             parser.next_hdr,
             HeaderType::Route(RoutingHeaderType::Crh32)
@@ -2378,7 +1836,7 @@ mod tests {
         let packet = vec![0x06, 0x01];
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_generic_header(&ctx);
+        let result = parser.parse_generic_route_header(&ctx);
         assert!(matches!(result, Err(Error::OutOfBounds)));
     }
 
