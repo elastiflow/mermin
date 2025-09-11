@@ -2,7 +2,7 @@
 name: Release
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 on:
   push:
     branches:
