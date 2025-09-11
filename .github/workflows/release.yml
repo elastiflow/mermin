@@ -2,7 +2,7 @@
 name: Release
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 on:
   push:
     branches:
@@ -80,6 +80,20 @@ jobs:
           branch: "${{ github.ref_name }}"
           changelog_update: true
           github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create and push semver tag
+        if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
+        uses: anothrNick/github-tag-action@e528bc2b9628971ce0e6f823f3052d1dcd9d512c
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CUSTOM_TAG: v${{ steps.prepare_release.outputs.new_release_version }}
+      - name: Create GH release
+        if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
+        uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8
+        with:
+          tag_name: v${{ steps.prepare_release.outputs.new_release_version }}
+          body: ${{ steps.prepare_release.outputs.new_release_notes }}
+          preserve_order: true
+          make_latest: true
 
   docker_build_push:
     name: Docker build/push
