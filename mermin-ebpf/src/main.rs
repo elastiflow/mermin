@@ -206,8 +206,8 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
             HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
             HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx),
             HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx),
-            HeaderType::Proto(IpProto::Shim6) => parser.parse_shim6_header(&ctx),
             HeaderType::Proto(IpProto::Hip) => parser.parse_hip_header(&ctx),
+            HeaderType::Proto(IpProto::Shim6) => parser.parse_shim6_header(&ctx),
             HeaderType::Proto(_) => {
                 break;
             }
@@ -580,6 +580,23 @@ impl Parser {
         Ok(())
     }
 
+    /// Parses the HIP header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_hip_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        if self.offset + HipHdr::LEN > ctx.len() as usize {
+            return Err(Error::OutOfBounds);
+        }
+
+        let hip_hdr: HipHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        // Advance by the full HIP header length (base + parameters)
+        self.offset += hip_hdr.total_hdr_len();
+        // Chain to the next protocol indicated by HIP
+        self.next_hdr = HeaderType::Proto(hip_hdr.next_hdr);
+        // TODO parse out and use addresses and other Hip fields here
+
+        Ok(())
+    }
+
     /// Parses the Shim6 header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_shim6_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
@@ -592,19 +609,6 @@ impl Parser {
         // TODO: Consider adding logic to differentiate between Control or Payload Extension header
         // TODO: Extract and set other Shim6 fields
         self.next_hdr = HeaderType::Proto(shim_hdr.next_hdr);
-
-        Ok(())
-    }
-
-    /// Parses the HIP header in the packet and updates the parser state accordingly.
-    /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_hip_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let hip_hdr: HipHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        // Advance by the full HIP header length (base + parameters)
-        self.offset += hip_hdr.total_hdr_len();
-        // Chain to the next protocol indicated by HIP
-        self.next_hdr = HeaderType::Proto(hip_hdr.next_hdr);
-        // TODO parse out and use addresses and other Hip fields here
 
         Ok(())
     }
