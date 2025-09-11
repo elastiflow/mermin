@@ -68,31 +68,6 @@ impl HipHdr {
     /// The size of the fixed part of the HIP Header in bytes.
     pub const LEN: usize = mem::size_of::<HipHdr>();
 
-    /// Gets the Next Header value.
-    #[inline]
-    pub fn next_hdr(&self) -> IpProto {
-        self.next_hdr
-    }
-
-    /// Sets the Next Header value.
-    #[inline]
-    pub fn set_next_hdr(&mut self, next_hdr: IpProto) {
-        self.next_hdr = next_hdr;
-    }
-
-    /// Gets the Header Length value. This is the length of the HIP header
-    /// in 8-octet units, not including the first 8 octets.
-    #[inline]
-    pub fn hdr_len(&self) -> u8 {
-        self.hdr_len
-    }
-
-    /// Sets the Header Length value.
-    #[inline]
-    pub fn set_hdr_len(&mut self, hdr_len: u8) {
-        self.hdr_len = hdr_len;
-    }
-
     /// Gets the Packet Type value (7 bits).
     #[inline]
     pub fn packet_type(&self) -> u8 {
@@ -204,14 +179,6 @@ mod tests {
             receiver_hit: [0; 16],
         };
 
-        // Test next_hdr
-        hip_hdr.set_next_hdr(IpProto::Tcp);
-        assert_eq!(hip_hdr.next_hdr(), IpProto::Tcp);
-
-        // Test hdr_len
-        hip_hdr.set_hdr_len(5);
-        assert_eq!(hip_hdr.hdr_len(), 5);
-
         // Test packet_type
         hip_hdr.set_packet_type(4); // R2 packet
         assert_eq!(hip_hdr.packet_type(), 4);
@@ -258,17 +225,17 @@ mod tests {
         };
 
         // If total length is 40 (base header), hdr_len = (40/8)-1 = 4.
-        hip_hdr.set_hdr_len(4);
+        hip_hdr.hdr_len = 4;
         assert_eq!(hip_hdr.total_hdr_len(), 40);
         assert_eq!(hip_hdr.params_len(), 0);
 
         // Test with hdr_len = 5 (one 8-octet parameter)
-        hip_hdr.set_hdr_len(5);
+        hip_hdr.hdr_len = 5;
         assert_eq!(hip_hdr.total_hdr_len(), 48);
         assert_eq!(hip_hdr.params_len(), 8);
 
         // Test with hdr_len = 255 (max value)
-        hip_hdr.set_hdr_len(255);
+        hip_hdr.hdr_len = 255;
         assert_eq!(hip_hdr.total_hdr_len(), (255 + 1) * 8);
         assert_eq!(hip_hdr.params_len(), (255 + 1) * 8 - HipHdr::LEN);
     }

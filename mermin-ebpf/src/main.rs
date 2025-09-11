@@ -595,6 +595,19 @@ impl Parser {
 
         Ok(())
     }
+
+    /// Parses the HIP header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_hip_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let hip_hdr: HipHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        // Advance by the full HIP header length (base + parameters)
+        self.offset += hip_hdr.total_hdr_len();
+        // Chain to the next protocol indicated by HIP
+        self.next_hdr = HeaderType::Proto(hip_hdr.next_hdr);
+        // TODO parse out and use addresses and other Hip fields here
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
