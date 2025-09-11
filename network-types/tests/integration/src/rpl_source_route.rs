@@ -19,7 +19,7 @@ pub fn create_rpl_source_route_test_packet() -> (Vec<u8>, RplSourceRouteHeader) 
     // GenericRoute (4 bytes) - starting at byte 1
     packet_data[1] = IpProto::Tcp as u8; // Next Header
     packet_data[2] = 2; // Hdr Ext Len = 2 (16 bytes after first 8)
-    packet_data[3] = RoutingHeaderType::RplSourceRoute.as_u8(); // Routing Type (3)
+    packet_data[3] = RoutingHeaderType::RplSourceRoute as u8;
     packet_data[4] = 2; // Segments Left (2 addresses remaining)
 
     // RplSourceFixedHeader (4 bytes) - starting at byte 5
@@ -36,7 +36,7 @@ pub fn create_rpl_source_route_test_packet() -> (Vec<u8>, RplSourceRouteHeader) 
     let gen_route = GenericRoute {
         next_hdr: IpProto::Tcp,
         hdr_ext_len: 2,
-        type_: RoutingHeaderType::RplSourceRoute.as_u8(),
+        type_: RoutingHeaderType::RplSourceRoute,
         sgmt_left: 2,
     };
 
@@ -49,7 +49,7 @@ pub fn create_rpl_source_route_test_packet() -> (Vec<u8>, RplSourceRouteHeader) 
     fixed_hdr.set_reserved(0);
 
     let header = RplSourceRouteHeader {
-        gen_route,
+        generic_route: gen_route,
         fixed_hdr,
     };
 
@@ -65,15 +65,15 @@ pub fn verify_rpl_source_route_header(received: ParsedHeader, expected: RplSourc
     let expected_header: RplSourceRouteHeader = expected;
 
     assert_eq!(
-        parsed_header.gen_route.hdr_ext_len, expected_header.gen_route.hdr_ext_len,
+        parsed_header.generic_route.hdr_ext_len, expected_header.generic_route.hdr_ext_len,
         "Header Extension Length mismatch"
     );
     // Add other assertions for gen_route and fixed_hdr fields...
 
     // Verify total header length equals 24 (8 static + 16 variable)
-    let total_hdr_len_bytes = 8 + (parsed_header.gen_route.hdr_ext_len as usize) * 8;
+    let total_hdr_len_bytes = 8 + (parsed_header.generic_route.hdr_ext_len as usize) * 8;
     assert_eq!(
-        parsed_header.gen_route.hdr_ext_len, 2,
+        parsed_header.generic_route.hdr_ext_len, 2,
         "Expected hdr_ext_len=2 for RPL SRH test"
     );
     assert_eq!(

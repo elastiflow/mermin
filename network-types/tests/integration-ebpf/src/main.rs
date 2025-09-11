@@ -14,7 +14,7 @@ use network_types::{
     destopts::DestOptsHdr,
     esp::Esp,
     eth::EthHdr,
-    fragment::Fragment,
+    fragment::FragmentHdr,
     geneve::GeneveHdr,
     hop::HopOptHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
@@ -158,7 +158,7 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::Fragment => {
-            let header: Fragment = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            let header: FragmentHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             ParsedHeader {
                 type_: PacketType::Fragment,
                 data: HeaderUnion { fragment: header },
@@ -190,7 +190,7 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             let offset = data_offset;
             let rpl_header: RplSourceRouteHeader = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
 
-            if rpl_header.gen_route.type_ != RoutingHeaderType::RplSourceRoute.as_u8() {
+            if rpl_header.generic_route.type_ != RoutingHeaderType::RplSourceRoute {
                 return Err(TC_ACT_SHOT);
             }
 
@@ -203,7 +203,7 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             let offset = data_offset;
             let segment_hdr: SegmentRoutingHeader = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
 
-            if segment_hdr.gen_route.type_ != RoutingHeaderType::SegmentRoutingHeader.as_u8() {
+            if segment_hdr.generic_route.type_ != RoutingHeaderType::SegmentRoutingHeader {
                 return Err(TC_ACT_SHOT);
             }
 
@@ -227,12 +227,12 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
 
             // Verify routing type matches expected CRH type
             let expected_type = match packet_type {
-                PacketType::Crh16 => RoutingHeaderType::Crh16.as_u8(),
-                PacketType::Crh32 => RoutingHeaderType::Crh32.as_u8(),
+                PacketType::Crh16 => RoutingHeaderType::Crh16,
+                PacketType::Crh32 => RoutingHeaderType::Crh32,
                 _ => return Err(TC_ACT_SHOT),
             };
 
-            if crh_header.gen_route.type_ != expected_type {
+            if crh_header.generic_route.type_ != expected_type {
                 return Err(TC_ACT_SHOT);
             }
 

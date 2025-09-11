@@ -17,7 +17,7 @@ pub fn create_type2_test_packet() -> ([u8; Type2RoutingHeader::LEN + 1], Type2Ro
     // Byte 2: Hdr Ext Len (2 for Type2 - means 24 bytes total)
     request_data[2] = 2;
     // Byte 3: Routing Type (Type2 = 2)
-    request_data[3] = RoutingHeaderType::Type2.as_u8();
+    request_data[3] = RoutingHeaderType::Type2 as u8;
     // Byte 4: Segments Left (always 1 for Type2)
     request_data[4] = 1;
 
@@ -33,7 +33,7 @@ pub fn create_type2_test_packet() -> ([u8; Type2RoutingHeader::LEN + 1], Type2Ro
     let gen_route = GenericRoute {
         next_hdr: IpProto::Tcp,
         hdr_ext_len: 2,
-        type_: RoutingHeaderType::Type2.as_u8(),
+        type_: RoutingHeaderType::Type2,
         sgmt_left: 1,
     };
 
@@ -46,7 +46,7 @@ pub fn create_type2_test_packet() -> ([u8; Type2RoutingHeader::LEN + 1], Type2Ro
     };
 
     let expected_header = Type2RoutingHeader {
-        gen_route,
+        generic_route: gen_route,
         fixed_hdr,
     };
 
@@ -59,19 +59,19 @@ pub fn verify_type2_header(received: ParsedHeader, expected: Type2RoutingHeader)
     let parsed_header = unsafe { received.data.type2 };
 
     assert_eq!(
-        parsed_header.gen_route.next_hdr, expected.gen_route.next_hdr,
+        parsed_header.generic_route.next_hdr, expected.generic_route.next_hdr,
         "Next Header mismatch"
     );
     assert_eq!(
-        parsed_header.gen_route.hdr_ext_len, expected.gen_route.hdr_ext_len,
+        parsed_header.generic_route.hdr_ext_len, expected.generic_route.hdr_ext_len,
         "Header Extension Length mismatch"
     );
     assert_eq!(
-        parsed_header.gen_route.type_, expected.gen_route.type_,
+        parsed_header.generic_route.type_, expected.generic_route.type_,
         "Routing Type mismatch"
     );
     assert_eq!(
-        parsed_header.gen_route.sgmt_left, expected.gen_route.sgmt_left,
+        parsed_header.generic_route.sgmt_left, expected.generic_route.sgmt_left,
         "Segments Left mismatch"
     );
     assert_eq!(

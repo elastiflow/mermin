@@ -10,7 +10,7 @@ pub fn create_mobility_test_packet() -> ([u8; MobilityHdr::LEN + 1], MobilityHdr
 
     // Build expected header
     let mut expected = MobilityHdr {
-        nxt_hdr: IpProto::Tcp,
+        next_hdr: IpProto::Tcp,
         hdr_ext_len: 0, // minimal fixed 8 bytes (no additional 8-octet blocks)
         mh_type: 5,     // arbitrary MH type
         reserved: 0,
@@ -19,15 +19,15 @@ pub fn create_mobility_test_packet() -> ([u8; MobilityHdr::LEN + 1], MobilityHdr
     };
 
     // Use setters as available
-    expected.set_nxt_hdr(IpProto::Tcp);
-    expected.set_hdr_ext_len(0);
-    expected.set_mh_type(5);
-    expected.set_reserved(0);
+    expected.next_hdr = IpProto::Tcp;
+    expected.hdr_ext_len = 0;
+    expected.mh_type = 5;
+    expected.reserved = 0;
     expected.set_checksum(0x1234);
     expected.set_reserved_data(0);
 
     // Serialize into buffer according to repr(C, packed) layout
-    request_data[1] = expected.nxt_hdr as u8;
+    request_data[1] = expected.next_hdr as u8;
     request_data[2] = expected.hdr_ext_len;
     request_data[3] = expected.mh_type;
     request_data[4] = expected.reserved;
@@ -44,14 +44,13 @@ pub fn verify_mobility_header(received: ParsedHeader, expected: MobilityHdr) {
     assert_eq!(received.type_, PacketType::Mobility);
     let parsed = unsafe { received.data.mobility };
 
-    assert_eq!(parsed.nxt_hdr(), expected.nxt_hdr(), "Next Header mismatch");
+    assert_eq!(parsed.next_hdr, expected.next_hdr, "Next Header mismatch");
     assert_eq!(
-        parsed.hdr_ext_len(),
-        expected.hdr_ext_len(),
+        parsed.hdr_ext_len, expected.hdr_ext_len,
         "Hdr Ext Len mismatch"
     );
-    assert_eq!(parsed.mh_type(), expected.mh_type(), "MH Type mismatch");
-    assert_eq!(parsed.reserved(), expected.reserved(), "Reserved mismatch");
+    assert_eq!(parsed.mh_type, expected.mh_type, "MH Type mismatch");
+    assert_eq!(parsed.reserved, expected.reserved, "Reserved mismatch");
     assert_eq!(parsed.checksum(), expected.checksum(), "Checksum mismatch");
     assert_eq!(
         parsed.reserved_data(),

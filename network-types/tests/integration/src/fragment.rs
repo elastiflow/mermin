@@ -1,15 +1,15 @@
 use integration_common::{PacketType, ParsedHeader};
-use network_types::{fragment::Fragment, ip::IpProto};
+use network_types::{fragment::FragmentHdr, ip::IpProto};
 
 // Helper for constructing Fragment Header test packets
-pub fn create_fragment_test_packet() -> ([u8; Fragment::LEN + 1], Fragment) {
-    let mut request_data = [0u8; Fragment::LEN + 1];
+pub fn create_fragment_test_packet() -> ([u8; FragmentHdr::LEN + 1], FragmentHdr) {
+    let mut request_data = [0u8; FragmentHdr::LEN + 1];
 
     // Discriminator for eBPF match statement
     request_data[0] = PacketType::Fragment as u8;
 
     // Build expected header using setters to ensure correct bit packing
-    let mut expected_header = Fragment {
+    let mut expected_header = FragmentHdr {
         next_hdr: IpProto::Tcp,
         reserved: 0,
         frag_offset: 0,
@@ -17,8 +17,8 @@ pub fn create_fragment_test_packet() -> ([u8; Fragment::LEN + 1], Fragment) {
         id: [0; 4],
     };
 
-    expected_header.set_next_hdr(IpProto::Tcp);
-    expected_header.set_reserved(0);
+    expected_header.next_hdr = IpProto::Tcp;
+    expected_header.reserved = 0;
     // Choose an arbitrary 13-bit fragment offset
     expected_header.set_fragment_offset(0x1234 & 0x1FFF);
     // Set reserved2 to 0 and M flag to true
@@ -38,17 +38,13 @@ pub fn create_fragment_test_packet() -> ([u8; Fragment::LEN + 1], Fragment) {
 }
 
 // Helper for verifying Fragment Header test results
-pub fn verify_fragment_header(received: ParsedHeader, expected: Fragment) {
+pub fn verify_fragment_header(received: ParsedHeader, expected: FragmentHdr) {
     assert_eq!(received.type_, PacketType::Fragment);
     let parsed = unsafe { received.data.fragment };
 
     // Compare via accessors to validate bit-packed fields
-    assert_eq!(
-        parsed.next_hdr(),
-        expected.next_hdr(),
-        "Next Header mismatch"
-    );
-    assert_eq!(parsed.reserved(), expected.reserved(), "Reserved mismatch");
+    assert_eq!(parsed.next_hdr, expected.next_hdr, "Next Header mismatch");
+    assert_eq!(parsed.reserved, expected.reserved, "Reserved mismatch");
     assert_eq!(
         parsed.fragment_offset(),
         expected.fragment_offset(),

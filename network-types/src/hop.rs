@@ -40,32 +40,6 @@ impl HopOptHdr {
     /// The total size in bytes of default length HbH header
     pub const LEN: usize = mem::size_of::<HopOptHdr>();
 
-    /// Gets the Next Header value.
-    #[inline]
-    pub fn next_hdr(&self) -> IpProto {
-        self.next_hdr
-    }
-
-    /// Sets the Next Header value.
-    #[inline]
-    pub fn set_next_hdr(&mut self, next_hdr: IpProto) {
-        self.next_hdr = next_hdr;
-    }
-
-    /// Gets the Header Extension Length value.
-    /// This value is the length of the Hop-by-Hop Options header
-    /// in 8-octet units, not including the first 8 octets.
-    #[inline]
-    pub fn hdr_ext_len(&self) -> u8 {
-        self.hdr_ext_len
-    }
-
-    /// Sets the Header Extension Length value.
-    #[inline]
-    pub fn set_hdr_ext_len(&mut self, hdr_ext_len: u8) {
-        self.hdr_ext_len = hdr_ext_len;
-    }
-
     /// Gets a slice to the first 6 bytes of options data
     #[inline]
     pub fn opt_data(&self) -> &[u8; 6] {
@@ -102,16 +76,6 @@ mod tests {
             opt_data: [0; 6],
         };
 
-        // Test next_hdr
-        hop_hdr.set_next_hdr(IpProto::Stream);
-        assert_eq!(hop_hdr.next_hdr(), IpProto::Stream);
-        assert_eq!(hop_hdr.next_hdr, IpProto::Stream);
-
-        // Test hdr_ext_len
-        hop_hdr.set_hdr_ext_len(4);
-        assert_eq!(hop_hdr.hdr_ext_len(), 4);
-        assert_eq!(hop_hdr.hdr_ext_len, 4);
-
         // Test opt_data
         hop_hdr.opt_data = [0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC];
         assert_eq!(hop_hdr.opt_data(), &[0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC]);
@@ -133,22 +97,22 @@ mod tests {
         };
 
         // Test with hdr_ext_len = 0
-        hop_hdr.set_hdr_ext_len(0);
+        hop_hdr.hdr_ext_len = 0;
         assert_eq!(hop_hdr.total_hdr_len(), 8);
         assert_eq!(hop_hdr.total_opts_len(), 6);
 
         // Test with hdr_ext_len = 1
-        hop_hdr.set_hdr_ext_len(1);
+        hop_hdr.hdr_ext_len = 1;
         assert_eq!(hop_hdr.total_hdr_len(), 16);
         assert_eq!(hop_hdr.total_opts_len(), 14);
 
         // Test with hdr_ext_len = 3
-        hop_hdr.set_hdr_ext_len(3);
+        hop_hdr.hdr_ext_len = 3;
         assert_eq!(hop_hdr.total_hdr_len(), 32);
         assert_eq!(hop_hdr.total_opts_len(), 30);
 
         // Test with hdr_ext_len = 255 (max value)
-        hop_hdr.set_hdr_ext_len(255);
+        hop_hdr.hdr_ext_len = 255;
         assert_eq!(hop_hdr.total_hdr_len(), (255 + 1) * 8);
         assert_eq!(hop_hdr.total_opts_len(), (255 + 1) * 8 - 2);
     }
