@@ -23,8 +23,6 @@ use crate::ip::IpProto;
 ///
 /// Fields
 ///
-/// # Fields
-///
 /// * **Next Header (8 bits)**: Identifies the type of header immediately following this one.
 /// * **Hdr Ext Len (8 bits)**: The length of this header in 8-octet units, not including the first 8 octets.
 /// * **P (Payload Flag) (1 bit)**: Distinguishes between Shim6 Control and Payload Extension headers. Always 0.
