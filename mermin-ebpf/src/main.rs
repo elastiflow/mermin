@@ -60,7 +60,7 @@ pub enum Error {
 #[cfg(not(feature = "test"))]
 #[classifier]
 pub fn mermin(ctx: TcContext) -> i32 {
-    let (res, ctx) = try_mermin(ctx);
+    let (ctx, res) = try_mermin(ctx);
     match res {
         Ok((binding, packet_meta)) => {
             unsafe {
@@ -75,7 +75,7 @@ pub fn mermin(ctx: TcContext) -> i32 {
     }
 }
 
-fn try_mermin(ctx: TcContext) -> (Result<(i32, PacketMeta), ()>, TcContext) {
+fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
     const MAX_HEADER_PARSE_DEPTH: usize = 12;
 
     // Information for building flow records (prioritizes innermost headers).
@@ -248,7 +248,7 @@ fn try_mermin(ctx: TcContext) -> (Result<(i32, PacketMeta), ()>, TcContext) {
                 break;
             }
             HeaderType::StopProcessing => break, // Graceful stop
-            HeaderType::ErrorOccurred => return (Ok((TC_ACT_PIPE, PacketMeta::default())), ctx), // Error, pass packet
+            HeaderType::ErrorOccurred => return (ctx, Ok((TC_ACT_PIPE, PacketMeta::default()))), // Error, pass packet
         };
 
         if result.is_err() {
@@ -276,7 +276,7 @@ fn try_mermin(ctx: TcContext) -> (Result<(i32, PacketMeta), ()>, TcContext) {
         tunnel_proto,
     };
 
-    (Ok((TC_ACT_PIPE, packet_meta)), ctx)
+    (ctx, Ok((TC_ACT_PIPE, packet_meta)))
 }
 
 struct Parser {
@@ -1229,7 +1229,7 @@ mod tests {
         let ctx = TcContext::new(packet);
 
         // Call try_mermin and get the populated packet_meta
-        let (result, _ctx) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -1281,7 +1281,7 @@ mod tests {
         .concat();
 
         let ctx = TcContext::new(packet.clone());
-        let (result, _ctx) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2154,7 +2154,7 @@ mod tests {
 
         let packet: Vec<u8> = [eth, outer_v6.clone(), inner_v6.clone(), tcp].concat();
         let ctx = TcContext::new(packet.clone());
-        let (result, _ctx) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2199,7 +2199,7 @@ mod tests {
 
         let packet: Vec<u8> = [eth, outer_v4.clone(), inner_v6.clone(), tcp].concat();
         let ctx = TcContext::new(packet);
-        let (result, _ctx) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2264,7 +2264,7 @@ mod tests {
 
         let packet: Vec<u8> = [eth, outer.clone(), middle.clone(), inner.clone(), tcp].concat();
         let ctx = TcContext::new(packet);
-        let (result, _ctx) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2305,7 +2305,7 @@ mod tests {
 
         let packet: Vec<u8> = [eth, outer.clone(), middle, inner.clone(), tcp].concat();
         let ctx = TcContext::new(packet);
-        let (result, _ctx) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2364,7 +2364,7 @@ mod tests {
         ]
         .concat();
         let ctx = TcContext::new(packet);
-        let (result, _ctx) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2420,7 +2420,7 @@ mod tests {
         ]
         .concat();
         let ctx = TcContext::new(packet);
-        let (result, _ctx) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
