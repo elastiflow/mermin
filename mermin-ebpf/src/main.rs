@@ -220,7 +220,9 @@ fn try_mermin(ctx: TcContext) -> Result<i32, ()> {
         }
     }
 
+    let ifindex = unsafe { (*ctx.skb.skb).ifindex };
     let packet_meta = PacketMeta {
+        ifindex,
         src_ipv6_addr,
         dst_ipv6_addr,
         tunnel_src_ipv6_addr,

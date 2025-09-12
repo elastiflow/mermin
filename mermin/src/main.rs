@@ -4,6 +4,7 @@ mod k8s;
 mod runtime;
 
 use std::{
+    collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::Arc,
 };
@@ -15,6 +16,7 @@ use aya::{
 };
 use log::{debug, info, warn};
 use mermin_common::{IpAddrType, PacketMeta};
+use pnet::datalink;
 use tokio::signal;
 
 use crate::{
@@ -62,16 +64,31 @@ async fn main() -> anyhow::Result<()> {
         warn!("failed to initialize eBPF logger: {e}");
     }
 
-    let Config { interface, .. } = config;
-    let iface = &interface[0];
-    // error adding clsact to the interface if it is already added is harmless
-    // the full cleanup can be done with 'sudo tc qdisc del dev eth0 clsact'.
-    let _ = tc::qdisc_add_clsact(iface);
     let program: &mut SchedClassifier = ebpf.program_mut("mermin").unwrap().try_into()?;
     program.load()?;
-    program.attach(iface, TcAttachType::Egress)?;
 
-    info!("eBPF program attached. Waiting for events... Press Ctrl-C to exit.");
+    let Config { interface, .. } = config;
+
+    for iface in &interface {
+        // error adding clsact to the interface if it is already added is harmless
+        // the full cleanup can be done with 'sudo tc qdisc del dev eth0 clsact'.
+        let _ = tc::qdisc_add_clsact(iface);
+        program.attach(iface, TcAttachType::Egress)?;
+        info!("eBPF program attached to {iface}");
+    }
+
+    info!("eBPF program attached to all interfaces. Waiting for events... Press Ctrl-C to exit.");
+
+    info!("Building interface index map...");
+    let iface_map: Arc<HashMap<u32, String>> = {
+        let mut map = HashMap::new();
+        for iface in datalink::interfaces() {
+            if interface.contains(&iface.name) {
+                map.insert(iface.index, iface.name.clone());
+            }
+        }
+        Arc::new(map)
+    };
 
     // Initialize the Kubernetes client
     info!("Initializing Kubernetes client...");
@@ -97,16 +114,16 @@ async fn main() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow!("PACKETS map not present in the object"))?;
     let mut ring_buf = RingBuf::try_from(map)?;
 
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<(PacketMeta, String)>(1024);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(PacketMeta, String, String)>(1024);
 
     let kube_client_clone = kube_client.clone();
 
     tokio::spawn(async move {
-        while let Some((event, community_id)) = rx.recv().await {
+        while let Some((event, community_id, iface_name)) = rx.recv().await {
             info!("Received packet to parse for Community ID {community_id}");
             if let Some(client) = &kube_client_clone {
                 let enriched_packet = parse_packet(&event, client, community_id).await;
-                info!("Enriched packet: {enriched_packet:?}");
+                info!("[{iface_name}] Enriched packet: {enriched_packet:?}");
             } else {
                 info!(
                     "Skipping packet enrichment for Community ID {community_id}: Kubernetes client not available"
@@ -115,6 +132,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    let task_iface_map = Arc::clone(&iface_map);
     tokio::spawn(async move {
         info!("Userspace task started. Polling the ring buffer...");
         loop {
@@ -122,6 +140,11 @@ async fn main() -> anyhow::Result<()> {
                 Some(bytes) => {
                     let event: PacketMeta =
                         unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const PacketMeta) };
+
+                    let iface_name = task_iface_map
+                        .get(&event.ifindex)
+                        .map(String::as_str)
+                        .unwrap_or("unknown_if");
 
                     // Helper function to format IP address based on type
                     let format_ip = |addr_type: IpAddrType,
@@ -210,7 +233,10 @@ async fn main() -> anyhow::Result<()> {
                         );
                     }
 
-                    if let Err(e) = tx.send((event, community_id)).await {
+                    if let Err(e) = tx
+                        .send((event, community_id, String::from(iface_name)))
+                        .await
+                    {
                         warn!("Failed to send packet to enrichment channel: {e}");
                     }
                 }
