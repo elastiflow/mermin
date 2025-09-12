@@ -15,8 +15,7 @@ use kube::{Resource, ResourceExt};
 use log::warn;
 use mermin_common::{IpAddrType, PacketMeta};
 use network_types::ip::IpProto;
-
-use crate::k8s::Attributor;
+use crate::k8s::attributor::Attributor;
 
 /// Holds metadata for a single Kubernetes object.
 #[derive(Debug, Clone)]

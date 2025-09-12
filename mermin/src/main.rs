@@ -1,6 +1,15 @@
 mod community_id;
-mod k8s;
 mod runtime;
+use mermincore::k8s::resource_parser::{
+    parse_packet,
+};
+
+use merminexporters::{logging::LoggingExporterAdapter, otlp};
+
+#[cfg(feature = "otlp")]
+use merminexporters::otlp::trace::TraceExporterAdapter;
+
+use mermincore::k8s::attributor::Attributor;
 
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
@@ -15,9 +24,9 @@ use aya::{
 use log::{debug, info, warn};
 use mermin_common::{IpAddrType, PacketMeta};
 use tokio::signal;
-
+use mermincore::ports::FlowExporterPort;
 use crate::{
-    community_id::CommunityIdGenerator, k8s::resource_parser::parse_packet, runtime::conf::Config,
+    community_id::CommunityIdGenerator, runtime::conf::Config,
 };
 
 #[tokio::main]
@@ -31,7 +40,10 @@ async fn main() -> anyhow::Result<()> {
     let runtime = runtime::Runtime::new()?;
     let runtime::Runtime { config, .. } = runtime;
     let community_id_generator = CommunityIdGenerator::new(0);
+    #[cfg(feature = "otlp")]
+    let _ = otlp::trace::init_tracer_provider("flow_trace_exporter");
 
+    let exporter = create_exporter();
     // TODO: switch to using tracing for logging and allow users to configure the log level via conf
     env_logger::Builder::from_default_env()
         .target(env_logger::Target::Stdout)
@@ -74,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize the Kubernetes client
     info!("Initializing Kubernetes client...");
-    let kube_client = match k8s::Attributor::new().await {
+    let kube_client = match Attributor::new().await {
         Ok(client) => {
             // TODO: we should implement an event based notifier
             // that sends a signal when the kubeclient is ready with its stores instead of waiting for a fixed interval.
@@ -97,7 +109,6 @@ async fn main() -> anyhow::Result<()> {
     let mut ring_buf = RingBuf::try_from(map)?;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<(PacketMeta, String)>(1024);
-
     let kube_client_clone = kube_client.clone();
 
     tokio::spawn(async move {
@@ -105,7 +116,7 @@ async fn main() -> anyhow::Result<()> {
             info!("Received packet to parse for Community ID {community_id}");
             if let Some(client) = &kube_client_clone {
                 let enriched_packet = parse_packet(&event, client, community_id).await;
-                info!("Enriched packet: {enriched_packet:?}");
+                exporter.export_flow(enriched_packet).await;
             } else {
                 info!(
                     "Skipping packet enrichment for Community ID {community_id}: Kubernetes client not available"
@@ -206,3 +217,20 @@ struct FlowRecord {
     // Implicit padding (2 bytes) is added here by the compiler to ensure
     // the total struct size (88 bytes) is a multiple of the maximum alignment (8 bytes).
 }
+
+fn create_exporter() -> Arc<dyn FlowExporterPort> {
+    #[cfg(not(feature = "otlp"))]
+    {
+        info!("Using Logging Exporter Adapter (default).");
+        let exporter = LoggingExporterAdapter::new();
+        Arc::new(exporter)
+    }
+
+    #[cfg(feature = "otlp")]
+    {
+        info!("Using OTLP Exporter Adapter.");
+        let exporter = TraceExporterAdapter::new();
+        Arc::new(exporter)
+    }
+}
+

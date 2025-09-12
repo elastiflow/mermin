@@ -10,7 +10,9 @@ license.workspace = true
 socket2 = "0.5"
 
 [dependencies]
-mermin-common = { path = "../mermin-common", features = [] }
+mermin-common = { path = "../mermin-common" }
+mermin-core = { path = "../mermin-core"}
+mermin-exporters = { path = "../mermin-exporters" }
 network-types = { path = "../network-types" }
 
 anyhow = { workspace = true, default-features = true }
@@ -30,17 +32,12 @@ tokio = { workspace = true, features = [
 ] }
 clap = { workspace = true, features = ["derive", "env", "help", "suggestions", "usage"] }
 figment = { version = "0.10", features = ["env", "test", "yaml"] }
-kube = { version = "1.1.0", features = ["runtime", "derive", "client"] }
-kube-runtime = "1.1.0"
-k8s-openapi = { version = "0.25.0", features = ["v1_30"] }
-futures = "0.3"
-async-trait = "0.1.88"
 serde = { version = "1.0.219", features = ["derive"] }
-tracing-subscriber = "0.3.19"
 tracing = "0.1.41"
 humantime = "2.2.0"
 base64 = "0.21"
 sha1 = "0.10"
+
 [build-dependencies]
 anyhow = { workspace = true }
 aya-build = { workspace = true }
@@ -49,3 +46,9 @@ common-build = { path = "../common-build" }
 [[bin]]
 name = "mermin"
 path = "src/main.rs"
+
+[features]
+otlp = [
+    "mermin-exporters/otlp"
+]
+default = ["otlp"]

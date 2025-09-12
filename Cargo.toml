@@ -8,8 +8,10 @@ members = [
     "network-types/tests/integration",
     "network-types/tests/integration-common",
     "network-types/tests/integration-ebpf",
+    "mermin-exporters",
+    "mermin-core"
 ]
-default-members = ["mermin", "mermin-common", "network-types"]
+default-members = ["mermin", "mermin-common", "network-types", "mermin-exporters", "mermin-core"]
 
 [workspace.package]
 license = "MIT OR Apache-2.0"

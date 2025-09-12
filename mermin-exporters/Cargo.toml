@@ -1,0 +1,29 @@
+[package]
+name = "mermin-exporters"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+mermin-core = { path = "../mermin-core" }
+anyhow = { workspace = true, default-features = true }
+opentelemetry = { version = "0.30.0" , optional = true}
+opentelemetry_sdk = { version = "0.30.0", features = ["experimental_async_runtime", "rt-tokio"], optional = true }
+opentelemetry-otlp = { version = "0.30.0", features = ["grpc-tonic"] ,optional = true}
+async-trait = "0.1.89"
+tracing = { version = "0.1.41", optional = true }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"], optional = true }
+tracing-opentelemetry = {version = "0.31.0", optional = true }
+
+[lib]
+name = "merminexporters"
+path = "src/lib.rs"
+
+[features]
+otlp = [
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry",
+    "tracing-subscriber",
+    "tracing-opentelemetry",
+    "tracing"
+]
