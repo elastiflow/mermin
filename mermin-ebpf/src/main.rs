@@ -260,9 +260,9 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
         }
     }
 
-    // #[cfg(not(feature = "test"))]
-    // let ifindex = unsafe { (*ctx.skb.skb).ifindex };
-    // #[cfg(feature = "test")]
+    #[cfg(not(feature = "test"))]
+    let ifindex = unsafe { (*ctx.skb.skb).ifindex };
+    #[cfg(feature = "test")]
     let ifindex = 0;
     let packet_meta = PacketMeta {
         ifindex,
@@ -526,12 +526,12 @@ impl Parser {
         let udp_dst_port = udp_hdr.dst_port();
         self.next_hdr = if udp_dst_port == geneve_port {
             HeaderType::Geneve
-        } else if udp_dst_port == vxlan_port {
+        }else if udp_dst_port == vxlan_port {
             HeaderType::Vxlan
         } else {
             HeaderType::StopProcessing
         };
-
+        
         Ok(udp_hdr)
     }
 
