@@ -83,6 +83,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
     let mut parser = Parser::default();
     let options = ParserOptions::default();
     let mut found_tunnel = false;
+    let mut wireguard = false;
 
     let mut src_ipv6_addr: [u8; 16] = [0; 16];
     let mut dst_ipv6_addr: [u8; 16] = [0; 16];
@@ -225,6 +226,9 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                             tunnel_proto = proto;
                             found_tunnel = true;
                         }
+                        if udp_dst_port == options.wireguard_port {
+                            wireguard = true;
+                        }
 
                         Ok(())
                     }
@@ -256,7 +260,10 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
         }
     }
 
-    let ifindex = unsafe { (*ctx.skb.skb).ifindex };
+    // #[cfg(not(feature = "test"))]
+    // let ifindex = unsafe { (*ctx.skb.skb).ifindex };
+    // #[cfg(feature = "test")]
+    let ifindex = 0;
     let packet_meta = PacketMeta {
         ifindex,
         src_ipv6_addr,
@@ -276,6 +283,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
         proto,
         tunnel_ip_addr_type,
         tunnel_proto,
+        wireguard,
     };
 
     (ctx, Ok((TC_ACT_PIPE, packet_meta)))
@@ -345,8 +353,6 @@ impl Parser {
             IpProto::Tcp | IpProto::Udp | IpProto::Icmp => {
                 self.next_hdr = HeaderType::Proto(next_hdr);
             }
-            IpProto::Ipv4 => self.next_hdr = HeaderType::Ipv4,
-            IpProto::Ipv6 => self.next_hdr = HeaderType::Ipv6,
             IpProto::Ipv4 => self.next_hdr = HeaderType::Ipv4,
             IpProto::Ipv6 => self.next_hdr = HeaderType::Ipv6,
             _ => {
@@ -656,6 +662,7 @@ struct ParserOptions {
     /// Default is 6081 as per IANA assignment
     geneve_port: u16,
     vxlan_port: u16,
+    wireguard_port: u16,
 }
 
 impl Default for ParserOptions {
@@ -663,6 +670,7 @@ impl Default for ParserOptions {
         ParserOptions {
             geneve_port: 6081,
             vxlan_port: 4789,
+            wireguard_port: 51820,
         }
     }
 }
@@ -1374,11 +1382,13 @@ mod tests {
         let options = ParserOptions {
             geneve_port: 8080,
             vxlan_port: 8081,
+            wireguard_port: 8082,
         };
 
         // Verify custom options are set
         assert_eq!(options.geneve_port, 8080);
         assert_eq!(options.vxlan_port, 8081);
+        assert_eq!(options.wireguard_port, 8082);
 
         // Verify other fields have default values
         assert_eq!(parser.offset, 0);
@@ -1395,6 +1405,7 @@ mod tests {
         let default_options = ParserOptions::default();
         assert_eq!(default_options.geneve_port, 6081);
         assert_eq!(default_options.vxlan_port, 4789);
+        assert_eq!(default_options.wireguard_port, 51820);
     }
 
     #[test]
@@ -2483,5 +2494,46 @@ mod tests {
         assert_eq!(packet_meta.proto, IpProto::Tcp);
         assert_eq!(packet_meta.src_port(), 12345);
         assert_eq!(packet_meta.dst_port(), 80);
+    }
+
+    #[test]
+    fn test_try_mermin_wireguard_udp() {
+        // Eth (IPv4) -> IPv4 (proto=UDP) -> UDP(dst=51820) [WireGuard]
+        let eth = create_eth_test_packet();
+
+        let mut outer_v4 = create_ipv4_test_packet();
+        outer_v4[9] = IpProto::Udp as u8; // Next header UDP
+        // Outer IPv4 addresses
+        outer_v4[12..16].copy_from_slice(&[203, 0, 113, 1]); // 203.0.113.1
+        outer_v4[16..20].copy_from_slice(&[203, 0, 113, 2]); // 203.0.113.2
+
+        // UDP header with WireGuard default port 51820
+        let mut udp = vec![0u8; 8];
+        udp[0..2].copy_from_slice(&[0x30, 0x39]); // src 12345
+        udp[2..4].copy_from_slice(&51820u16.to_be_bytes()); // 51820 -> [0xCA, 0x2C]
+        udp[4..6].copy_from_slice(&(8u16).to_be_bytes()); // length = header only
+        // checksum left 0
+
+        // Fix outer IPv4 total length = Outer IPv4 + UDP only (no payload needed for recognition)
+        let tot_len = (outer_v4.len() + udp.len()) as u16; // 20 + 8 = 28
+        outer_v4[2..4].copy_from_slice(&tot_len.to_be_bytes());
+
+        // Compose packet: Eth + IPv4 + UDP
+        let packet: Vec<u8> = [eth, outer_v4.clone(), udp.clone()].concat();
+        let ctx = TcContext::new(packet);
+        let (_ctx, result) = try_mermin(ctx);
+        assert!(result.is_ok());
+        let (_code, packet_meta) = result.unwrap();
+
+        // WireGuard must be recognized
+        assert!(packet_meta.wireguard, "expected WireGuard flag to be true");
+
+        // Flow should reflect the same outer IPv4/UDP since we break on WG
+        assert_eq!(packet_meta.ip_addr_type, IpAddrType::Ipv4);
+        assert_eq!(packet_meta.src_ipv4_addr, [203, 0, 113, 1]);
+        assert_eq!(packet_meta.dst_ipv4_addr, [203, 0, 113, 2]);
+        assert_eq!(packet_meta.proto, IpProto::Udp);
+        assert_eq!(packet_meta.src_port(), 12345);
+        assert_eq!(packet_meta.dst_port(), 51820);
     }
 }

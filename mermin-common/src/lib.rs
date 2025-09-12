@@ -66,6 +66,8 @@ pub struct PacketMeta {
     pub tunnel_ip_addr_type: IpAddrType,
     /// Network protocol identifier (outermost, e.g., TCP = 6, UDP = 17).
     pub tunnel_proto: IpProto,
+    /// Wireguard identifier
+    pub wireguard: bool,
 }
 
 impl PacketMeta {
@@ -156,6 +158,7 @@ mod tests {
             tunnel_dst_port: tunnel_dst_port.to_be_bytes(),
             tunnel_ip_addr_type: Ipv6,
             tunnel_proto: IpProto::Udp,
+            wireguard: false,
         };
 
         // Test field access
