@@ -5,7 +5,7 @@ use aya_ebpf::bindings::TC_ACT_PIPE;
 #[cfg(not(feature = "test"))]
 use aya_ebpf::{
     macros::{classifier, map},
-    maps::RingBuf,
+    maps::{PerCpuArray, RingBuf},
     programs::TcContext,
 };
 #[cfg(not(feature = "test"))]
@@ -35,6 +35,11 @@ use network_types::{
 #[map]
 static mut PACKETS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0); // 256 KB
 
+// Scratch space for constructing packet metadata off of the stack frame
+#[cfg(not(feature = "test"))]
+#[map]
+static mut SCRATCH_META: PerCpuArray<PacketMeta> = PerCpuArray::with_max_entries(1, 0);
+
 // Defines what kind of header we expect to process in the current iteration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HeaderType {
@@ -60,15 +65,10 @@ pub enum Error {
 #[cfg(not(feature = "test"))]
 #[classifier]
 pub fn mermin(ctx: TcContext) -> i32 {
-    let (ctx, res) = try_mermin(ctx);
+    let (_ctx, res) = try_mermin(ctx);
     match res {
-        Ok((binding, packet_meta)) => {
-            unsafe {
-                #[allow(static_mut_refs)]
-                if PACKETS.output(&packet_meta, 0).is_err() {
-                    error!(&ctx, "mermin: failed to write packet to ring buffer");
-                }
-            }
+        Ok((binding, _packet_meta_ignored)) => {
+            // try_mermin already wrote PacketMeta to ring buffer using SCRATCH_META
             binding
         }
         Err(_) => TC_ACT_PIPE,
@@ -264,6 +264,46 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
     let ifindex = unsafe { (*ctx.skb.skb).ifindex };
     #[cfg(feature = "test")]
     let ifindex = 0;
+
+    // In non-test builds, populate the per-CPU scratch area and write to the ring buffer
+    #[cfg(not(feature = "test"))]
+    unsafe {
+        // Need to allow a reference to the scratch slot to be held by the closure below
+        #[allow(static_mut_refs)]
+        if let Some(meta_ptr) = SCRATCH_META.get_ptr_mut(0) {
+            let meta: &mut PacketMeta = &mut *meta_ptr;
+            // Fill fields from the parsed values (kept as small locals above)
+            meta.ifindex = ifindex;
+            meta.src_ipv6_addr = src_ipv6_addr;
+            meta.dst_ipv6_addr = dst_ipv6_addr;
+            meta.tunnel_src_ipv6_addr = tunnel_src_ipv6_addr;
+            meta.tunnel_dst_ipv6_addr = tunnel_dst_ipv6_addr;
+            meta.src_ipv4_addr = src_ipv4_addr;
+            meta.dst_ipv4_addr = dst_ipv4_addr;
+            meta.l3_octet_count = l3_octet_count;
+            meta.tunnel_src_ipv4_addr = tunnel_src_ipv4_addr;
+            meta.tunnel_dst_ipv4_addr = tunnel_dst_ipv4_addr;
+            meta.src_port = src_port;
+            meta.dst_port = dst_port;
+            meta.tunnel_src_port = tunnel_src_port;
+            meta.tunnel_dst_port = tunnel_dst_port;
+            meta.ip_addr_type = ip_addr_type;
+            meta.proto = proto;
+            meta.tunnel_ip_addr_type = tunnel_ip_addr_type;
+            meta.tunnel_proto = tunnel_proto;
+            meta.wireguard = wireguard;
+
+            #[allow(static_mut_refs)]
+            if PACKETS.output(meta, 0).is_err() {
+                error!(&ctx, "mermin: failed to write packet to ring buffer");
+            }
+        } else {
+            error!(&ctx, "mermin: scratch slot unavailable");
+        }
+    }
+
+    // In test feature builds, return a fully populated PacketMeta for inspection
+    #[cfg(feature = "test")]
     let packet_meta = PacketMeta {
         ifindex,
         src_ipv6_addr,
@@ -285,6 +325,10 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
         tunnel_proto,
         wireguard,
     };
+
+    // Return dummy PacketMeta in live builds
+    #[cfg(not(feature = "test"))]
+    let packet_meta = PacketMeta::default();
 
     (ctx, Ok((TC_ACT_PIPE, packet_meta)))
 }
@@ -506,6 +550,19 @@ impl Parser {
         Ok(tcp_hdr)
     }
 
+    #[inline(never)]
+    fn classify_udp(&mut self, udp_dst_port: u16, geneve_port: u16, vxlan_port: u16) {
+        // IANA has assigned port 6081 as the fixed well-known destination port for Geneve and port 4789 as the fixed well-known destination port for Vxlan.
+        // Although the well-known value should be used by default, it is RECOMMENDED that implementations make these configurable.
+        self.next_hdr = if udp_dst_port == geneve_port {
+            HeaderType::Geneve
+        } else if udp_dst_port == vxlan_port {
+            HeaderType::Vxlan
+        } else {
+            HeaderType::StopProcessing
+        };
+    }
+
     /// Parses the UDP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
     fn parse_udp_header(
@@ -521,17 +578,7 @@ impl Parser {
         let udp_hdr: UdpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += UdpHdr::LEN;
 
-        // IANA has assigned port 6081 as the fixed well-known destination port for Geneve and port 4789 as the fixed well-known destination port for Vxlan.
-        // Although the well-known value should be used by default, it is RECOMMENDED that implementations make these configurable.
-        let udp_dst_port = udp_hdr.dst_port();
-        self.next_hdr = if udp_dst_port == geneve_port {
-            HeaderType::Geneve
-        }else if udp_dst_port == vxlan_port {
-            HeaderType::Vxlan
-        } else {
-            HeaderType::StopProcessing
-        };
-        
+        self.classify_udp(udp_hdr.dst_port(), geneve_port, vxlan_port);
         Ok(udp_hdr)
     }
 
