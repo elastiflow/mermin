@@ -16,9 +16,11 @@ use network_types::{
     eth::EthHdr,
     fragment::FragmentHdr,
     geneve::GeneveHdr,
+    gre::GreHdr,
     hop::HopOptHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
     mobility::MobilityHdr,
+    parse_gre_hdr,
     route::{
         CrhHeader, RoutingHeaderType, RplSourceRouteHeader, SegmentRoutingHeader,
         Type2RoutingHeader,
@@ -59,6 +61,7 @@ fn u8_to_packet_type(val: u8) -> Option<PacketType> {
         18 => Some(PacketType::Mobility),
         19 => Some(PacketType::Shim6),
         20 => Some(PacketType::Hip),
+        21 => Some(PacketType::Gre),
         _ => None,
     }
 }
@@ -79,7 +82,7 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
     const PAYLOAD_OFFSET: usize = EthHdr::LEN + Ipv4Hdr::LEN + UdpHdr::LEN;
 
     let packet_type_byte: u8 = ctx.load(PAYLOAD_OFFSET).map_err(|_| TC_ACT_SHOT)?;
-    let data_offset = PAYLOAD_OFFSET + 1;
+    let mut data_offset = PAYLOAD_OFFSET + 1;
 
     let packet_type = match u8_to_packet_type(packet_type_byte) {
         Some(pt) => pt,
@@ -262,6 +265,16 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             ParsedHeader {
                 type_: PacketType::Hip,
                 data: HeaderUnion { hip: header },
+            }
+        }
+        PacketType::Gre => {
+            let header = parse_gre_hdr!(ctx, data_offset);
+            match header {
+                Ok(gre_hdr) => ParsedHeader {
+                    type_: PacketType::Gre,
+                    data: HeaderUnion { gre: gre_hdr },
+                },
+                _ => return Err(TC_ACT_SHOT),
             }
         }
     };

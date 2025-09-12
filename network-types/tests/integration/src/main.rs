@@ -5,6 +5,7 @@ mod esp;
 mod eth;
 mod fragment;
 mod geneve;
+mod gre;
 mod hip;
 mod hop;
 mod ipv4;
@@ -31,6 +32,7 @@ use crate::{
     eth::{create_eth_test_packet, verify_eth_header},
     fragment::{create_fragment_test_packet, verify_fragment_header},
     geneve::{create_geneve_test_packet, verify_geneve_header},
+    gre::{create_gre_test_packet, verify_gre_header},
     hip::{create_hip_test_packet, create_hip_with_params_test_packet, verify_hip_header},
     hop::{create_hop_test_packet, verify_hop_header},
     ipv4::{create_ipv4_test_packet, verify_ipv4_header},
@@ -237,4 +239,12 @@ define_header_test!(
     PacketType::Hip,
     create_hip_with_params_test_packet,
     verify_hip_header
+);
+
+define_header_test!(
+    test_parses_gre_header,
+    GreHdr,
+    PacketType::Gre,
+    create_gre_test_packet,
+    verify_gre_header
 );

@@ -9,6 +9,7 @@ use network_types::{
     eth::EthHdr,
     fragment::FragmentHdr,
     geneve::GeneveHdr,
+    gre::GreHdr,
     hop::HopOptHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
     mobility::MobilityHdr,
@@ -46,6 +47,7 @@ pub enum PacketType {
     Mobility = 18,
     Shim6 = 19,
     Hip = 20,
+    Gre = 21,
 }
 
 /// A union to hold any of the possible parsed network headers.
@@ -73,6 +75,7 @@ pub union HeaderUnion {
     pub mobility: MobilityHdr,
     pub shim6: Shim6Hdr,
     pub hip: network_types::hip::HipHdr,
+    pub gre: GreHdr,
 }
 
 /// The final struct sent back to user-space. It contains the type of

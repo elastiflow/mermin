@@ -18,11 +18,13 @@ use network_types::{
     eth::{EthHdr, EtherType},
     fragment::FragmentHdr,
     geneve::GeneveHdr,
+    gre::GreHdr,
     hip::HipHdr,
     hop::HopOptHdr,
     icmp::IcmpHdr,
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
     mobility::MobilityHdr,
+    parse_gre_hdr,
     route::{GenericRoute, RoutingHeaderType},
     shim6::Shim6Hdr,
     tcp::TcpHdr,
@@ -192,6 +194,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                 Err(e) => Err(e),
             },
             HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(&ctx),
+            HeaderType::Proto(IpProto::Gre) => parser.parse_gre_header(&ctx),
             HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx),
             HeaderType::Proto(IpProto::Tcp) => match parser.parse_tcp_header(&ctx) {
                 Ok(tcp_hdr) => {
@@ -256,6 +259,9 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
         }
     }
 
+    #[cfg(test)]
+    let ifindex = 0;
+    #[cfg(not(test))]
     let ifindex = unsafe { (*ctx.skb.skb).ifindex };
     let packet_meta = PacketMeta {
         ifindex,
@@ -342,7 +348,7 @@ impl Parser {
 
         let next_hdr = ipv4_hdr.proto;
         match next_hdr {
-            IpProto::Tcp | IpProto::Udp | IpProto::Icmp => {
+            IpProto::Tcp | IpProto::Udp | IpProto::Icmp | IpProto::Gre | IpProto::Esp => {
                 self.next_hdr = HeaderType::Proto(next_hdr);
             }
             IpProto::Ipv4 => self.next_hdr = HeaderType::Ipv4,
@@ -461,6 +467,28 @@ impl Parser {
 
         // Always set the next header regardless of hdr_ext_len
         self.next_hdr = HeaderType::Proto(hop_hdr.next_hdr);
+
+        Ok(())
+    }
+
+    /// Parses the GRE header in the packet and updates the parser state accordingly.
+    /// Returns an error if the header cannot be loaded.
+    fn parse_gre_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+        let mut data_offset = self.offset;
+        let gre_hdr = parse_gre_hdr!(ctx, data_offset);
+
+        match gre_hdr {
+            Ok(gre_hdr) => {
+                self.offset += GreHdr::LEN;
+                let protocol_type = gre_hdr.proto();
+                match protocol_type {
+                    Ok(EtherType::Ipv4) => self.next_hdr = HeaderType::Ipv4,
+                    Ok(EtherType::Ipv6) => self.next_hdr = HeaderType::Ipv6,
+                    _ => self.next_hdr = HeaderType::StopProcessing,
+                }
+            }
+            Err(_) => return Err(Error::OutOfBounds),
+        }
 
         Ok(())
     }
@@ -1233,6 +1261,18 @@ mod tests {
         packet.extend_from_slice(&[0x12, 0x34, 0x56]);
         // Reserved 8 bits
         packet.push(0x00);
+
+        packet
+    }
+
+    // Helper function to create a GRE test packet
+    fn create_gre_test_packet() -> Vec<u8> {
+        let mut packet = Vec::new();
+
+        // GRE header fields
+        packet.push(0x00); // Checksum Present: No, Routing Present: No
+        packet.push(0x00); // Version: 0
+        packet.extend_from_slice(&[0x08, 0x00]); // Protocol Type: IPv4 (0x0800)
 
         packet
     }
@@ -2174,6 +2214,20 @@ mod tests {
 
         packet_meta.tunnel_ip_addr_type = ipv6_type;
         assert!(matches!(packet_meta.tunnel_ip_addr_type, IpAddrType::Ipv6));
+    }
+
+    #[test]
+    fn test_parse_gre_header() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::Gre);
+        let packet = create_gre_test_packet();
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_gre_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, GreHdr::LEN);
+        assert!(matches!(parser.next_hdr, HeaderType::Ipv4));
     }
 
     #[test]
