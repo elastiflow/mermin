@@ -42,6 +42,7 @@ tracing = "0.1.41"
 humantime = "2.2.0"
 base64 = "0.21"
 sha1 = "0.10"
+pnet = "0.34"
 [build-dependencies]
 anyhow = { workspace = true }
 aya-build = { workspace = true }
