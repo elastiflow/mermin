@@ -550,19 +550,6 @@ impl Parser {
         Ok(tcp_hdr)
     }
 
-    #[inline(never)]
-    fn classify_udp(&mut self, udp_dst_port: u16, geneve_port: u16, vxlan_port: u16) {
-        // IANA has assigned port 6081 as the fixed well-known destination port for Geneve and port 4789 as the fixed well-known destination port for Vxlan.
-        // Although the well-known value should be used by default, it is RECOMMENDED that implementations make these configurable.
-        self.next_hdr = if udp_dst_port == geneve_port {
-            HeaderType::Geneve
-        } else if udp_dst_port == vxlan_port {
-            HeaderType::Vxlan
-        } else {
-            HeaderType::StopProcessing
-        };
-    }
-
     /// Parses the UDP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
     fn parse_udp_header(
@@ -578,7 +565,16 @@ impl Parser {
         let udp_hdr: UdpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += UdpHdr::LEN;
 
-        self.classify_udp(udp_hdr.dst_port(), geneve_port, vxlan_port);
+        // IANA has assigned port 6081 as the fixed well-known destination port for Geneve and port 4789 as the fixed well-known destination port for Vxlan.
+        // Although the well-known value should be used by default, it is RECOMMENDED that implementations make these configurable.
+        let udp_dst_port = udp_hdr.dst_port();
+        self.next_hdr = if udp_dst_port == geneve_port {
+            HeaderType::Geneve
+        } else if udp_dst_port == vxlan_port {
+            HeaderType::Vxlan
+        } else {
+            HeaderType::StopProcessing
+        };
         Ok(udp_hdr)
     }
 
