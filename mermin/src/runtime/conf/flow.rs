@@ -19,7 +19,7 @@ use crate::runtime::conf::conf_serde::duration;
 /// tcp-fin: 5 - If we see a FIN flag for a TCP flow, generate a record 5 secs after the flag.
 /// tcp-rst: 5 - If we see an RST flag for a TCP flow, generate a record 5 secs after the flag.
 /// udp: 20 - If no activity has been observed for a UDP flow in the last 20 seconds, generate a record.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct FlowConf {
     /// The maximum number of flow records in a batch.
     /// - Default Value: `64`

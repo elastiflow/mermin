@@ -21,7 +21,7 @@ use crate::runtime::{
 };
 
 pub mod conf_serde;
-mod flow;
+pub mod flow;
 
 /// Represents the configuration for the application, containing settings
 /// related to interface, logging, reloading, and flow management.
@@ -66,7 +66,7 @@ pub struct Conf {
     /// - Default: 2
     /// - Example: Increase for high CPU systems, keep at 1-2 for most deployments
     #[serde(default = "defaults::flow_workers")]
-    pub flow_workers: usize,
+    pub packet_worker_count: usize,
 
     /// Maximum time to wait for graceful shutdown of pipeline components
     /// Increase for environments with slow disk I/O or network operations
@@ -89,7 +89,7 @@ impl Default for Conf {
             auto_reload: false,
             log_level: Level::INFO,
             packet_channel_capacity: defaults::packet_channel_capacity(),
-            flow_workers: defaults::flow_workers(),
+            packet_worker_count: defaults::flow_workers(),
             shutdown_timeout: defaults::shutdown_timeout(),
             flow: FlowConf::default(),
         }
@@ -100,7 +100,7 @@ mod defaults {
     use std::time::Duration;
 
     pub fn packet_channel_capacity() -> usize {
-        10000
+        1024
     }
 
     pub fn flow_workers() -> usize {
@@ -313,6 +313,8 @@ impl From<figment::Error> for ConfigError {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use clap::Parser;
     use figment::Jail;
     use tracing::Level;
@@ -327,8 +329,8 @@ mod tests {
         assert_eq!(cfg.config_path, None);
         assert_eq!(cfg.auto_reload, false);
         assert_eq!(cfg.log_level, Level::INFO);
-        assert_eq!(cfg.packet_channel_capacity, 10000);
-        assert_eq!(cfg.flow_workers, 2);
+        assert_eq!(cfg.packet_channel_capacity, 1024);
+        assert_eq!(cfg.packet_worker_count, 2);
         assert_eq!(cfg.shutdown_timeout, Duration::from_secs(5));
     }
 
@@ -344,7 +346,7 @@ mod tests {
             cfg.packet_channel_capacity,
             deserialized.packet_channel_capacity
         );
-        assert_eq!(cfg.flow_workers, deserialized.flow_workers);
+        assert_eq!(cfg.packet_worker_count, deserialized.packet_worker_count);
     }
 
     #[test]

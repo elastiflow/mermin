@@ -6,6 +6,9 @@ description = "An eBPF-based observability tool to monitor network traffic and s
 
 license.workspace = true
 
+[features]
+flow = []
+
 [dev-dependencies]
 socket2 = "0.5"
 
