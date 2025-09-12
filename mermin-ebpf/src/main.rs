@@ -60,7 +60,8 @@ pub enum Error {
 #[cfg(not(feature = "test"))]
 #[classifier]
 pub fn mermin(ctx: TcContext) -> i32 {
-    match try_mermin(&ctx) {
+    let (res, ctx) = try_mermin(ctx);
+    match res {
         Ok((binding, packet_meta)) => {
             unsafe {
                 #[allow(static_mut_refs)]
@@ -74,7 +75,7 @@ pub fn mermin(ctx: TcContext) -> i32 {
     }
 }
 
-fn try_mermin(ctx: &TcContext) -> Result<(i32, PacketMeta), ()> {
+fn try_mermin(ctx: TcContext) -> (Result<(i32, PacketMeta), ()>, TcContext) {
     const MAX_HEADER_PARSE_DEPTH: usize = 12;
 
     // Information for building flow records (prioritizes innermost headers).
@@ -103,8 +104,8 @@ fn try_mermin(ctx: &TcContext) -> Result<(i32, PacketMeta), ()> {
 
     for _ in 0..MAX_HEADER_PARSE_DEPTH {
         let result: Result<(), Error> = match parser.next_hdr {
-            HeaderType::Ethernet => parser.parse_ethernet_header(ctx),
-            HeaderType::Ipv4 => match parser.parse_ipv4_header(ctx) {
+            HeaderType::Ethernet => parser.parse_ethernet_header(&ctx),
+            HeaderType::Ipv4 => match parser.parse_ipv4_header(&ctx) {
                 Ok(ipv4_hdr) => {
                     // Check if proto is set to IP-in-IP and the tunnel hasn't been set yet
                     if !found_tunnel
@@ -130,7 +131,7 @@ fn try_mermin(ctx: &TcContext) -> Result<(i32, PacketMeta), ()> {
                 }
                 Err(e) => Err(e),
             },
-            HeaderType::Ipv6 => match parser.parse_ipv6_header(ctx) {
+            HeaderType::Ipv6 => match parser.parse_ipv6_header(&ctx) {
                 Ok(ipv6_hdr) => {
                     // Check if proto is set to IP-in-IP and the tunnel hasn't been set yet
                     if !found_tunnel
@@ -158,7 +159,7 @@ fn try_mermin(ctx: &TcContext) -> Result<(i32, PacketMeta), ()> {
                 }
                 Err(e) => Err(e),
             },
-            HeaderType::Geneve => match parser.parse_geneve_header(ctx) {
+            HeaderType::Geneve => match parser.parse_geneve_header(&ctx) {
                 Ok(_) => {
                     // Reset inner headers to prepare for parsing encapsulated packet
                     src_ipv4_addr = [0; 4];
@@ -174,7 +175,7 @@ fn try_mermin(ctx: &TcContext) -> Result<(i32, PacketMeta), ()> {
                 }
                 Err(e) => Err(e),
             },
-            HeaderType::Vxlan => match parser.parse_vxlan_header(ctx) {
+            HeaderType::Vxlan => match parser.parse_vxlan_header(&ctx) {
                 Ok(_) => {
                     // Reset inner headers to prepare for parsing encapsulated packet
                     src_ipv4_addr = [0; 4];
@@ -190,9 +191,9 @@ fn try_mermin(ctx: &TcContext) -> Result<(i32, PacketMeta), ()> {
                 }
                 Err(e) => Err(e),
             },
-            HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(ctx),
-            HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(ctx),
-            HeaderType::Proto(IpProto::Tcp) => match parser.parse_tcp_header(ctx) {
+            HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(&ctx),
+            HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx),
+            HeaderType::Proto(IpProto::Tcp) => match parser.parse_tcp_header(&ctx) {
                 Ok(tcp_hdr) => {
                     src_port = tcp_hdr.src;
                     dst_port = tcp_hdr.dst;
@@ -201,7 +202,7 @@ fn try_mermin(ctx: &TcContext) -> Result<(i32, PacketMeta), ()> {
                 Err(e) => Err(e),
             },
             HeaderType::Proto(IpProto::Udp) => {
-                match parser.parse_udp_header(ctx, options.geneve_port, options.vxlan_port) {
+                match parser.parse_udp_header(&ctx, options.geneve_port, options.vxlan_port) {
                     Ok(udp_hdr) => {
                         src_port = udp_hdr.src;
                         dst_port = udp_hdr.dst;
@@ -230,28 +231,28 @@ fn try_mermin(ctx: &TcContext) -> Result<(i32, PacketMeta), ()> {
                     Err(e) => Err(e),
                 }
             }
-            HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_route_header(ctx),
+            HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_route_header(&ctx),
             HeaderType::Route(_) => {
                 break;
             }
-            HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(ctx),
-            HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(ctx),
-            HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(ctx),
-            HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(ctx),
+            HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
+            HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
+            HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
-            HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(ctx),
-            HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(ctx),
-            HeaderType::Proto(IpProto::Hip) => parser.parse_hip_header(ctx),
-            HeaderType::Proto(IpProto::Shim6) => parser.parse_shim6_header(ctx),
+            HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx),
+            HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx),
+            HeaderType::Proto(IpProto::Hip) => parser.parse_hip_header(&ctx),
+            HeaderType::Proto(IpProto::Shim6) => parser.parse_shim6_header(&ctx),
             HeaderType::Proto(_) => {
                 break;
             }
             HeaderType::StopProcessing => break, // Graceful stop
-            HeaderType::ErrorOccurred => return Ok((TC_ACT_PIPE, PacketMeta::default())), // Error, pass packet
+            HeaderType::ErrorOccurred => return (Ok((TC_ACT_PIPE, PacketMeta::default())), ctx), // Error, pass packet
         };
 
         if result.is_err() {
-            error!(ctx, "mermin: parser failed");
+            error!(&ctx, "mermin: parser failed");
         }
     }
 
@@ -275,7 +276,7 @@ fn try_mermin(ctx: &TcContext) -> Result<(i32, PacketMeta), ()> {
         tunnel_proto,
     };
 
-    Ok((TC_ACT_PIPE, packet_meta))
+    (Ok((TC_ACT_PIPE, packet_meta)), ctx)
 }
 
 struct Parser {
@@ -342,8 +343,8 @@ impl Parser {
             IpProto::Tcp | IpProto::Udp | IpProto::Icmp => {
                 self.next_hdr = HeaderType::Proto(next_hdr);
             }
-            IpProto::Ipv6 => self.next_hdr = HeaderType::Ipv6,
             IpProto::Ipv4 => self.next_hdr = HeaderType::Ipv4,
+            IpProto::Ipv6 => self.next_hdr = HeaderType::Ipv6,
             _ => {
                 self.next_hdr = HeaderType::StopProcessing;
             }
@@ -380,8 +381,8 @@ impl Parser {
             IpProto::Ipv6NoNxt => {
                 self.next_hdr = HeaderType::StopProcessing;
             }
-            IpProto::Ipv6 => self.next_hdr = HeaderType::Ipv6,
             IpProto::Ipv4 => self.next_hdr = HeaderType::Ipv4,
+            IpProto::Ipv6 => self.next_hdr = HeaderType::Ipv6,
             _ => {
                 self.next_hdr = HeaderType::StopProcessing;
                 return Ok(ipv6_hdr);
@@ -1228,7 +1229,7 @@ mod tests {
         let ctx = TcContext::new(packet);
 
         // Call try_mermin and get the populated packet_meta
-        let result = try_mermin(&ctx);
+        let (result, _ctx) = try_mermin(ctx);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -1280,7 +1281,9 @@ mod tests {
         .concat();
 
         let ctx = TcContext::new(packet.clone());
-        let (_code, packet_meta) = try_mermin(&ctx).unwrap();
+        let (result, _ctx) = try_mermin(ctx);
+        assert!(result.is_ok());
+        let (_code, packet_meta) = result.unwrap();
 
         // Assert on tunnel fields
         assert_eq!(packet_meta.tunnel_ip_addr_type, IpAddrType::Ipv6);
@@ -2151,25 +2154,27 @@ mod tests {
 
         let packet: Vec<u8> = [eth, outer_v6.clone(), inner_v6.clone(), tcp].concat();
         let ctx = TcContext::new(packet.clone());
-        let (_code, meta) = try_mermin(&ctx).unwrap();
+        let (result, _ctx) = try_mermin(ctx);
+        assert!(result.is_ok());
+        let (_code, packet_meta) = result.unwrap();
 
         // Tunnel is outer IPv6
         let outer_hdr: Ipv6Hdr = TcContext::new(packet).load(EthHdr::LEN).unwrap();
-        assert_eq!(meta.tunnel_ip_addr_type, IpAddrType::Ipv6);
-        assert_eq!(meta.tunnel_src_ipv6_addr, outer_hdr.src_addr);
-        assert_eq!(meta.tunnel_dst_ipv6_addr, outer_hdr.dst_addr);
+        assert_eq!(packet_meta.tunnel_ip_addr_type, IpAddrType::Ipv6);
+        assert_eq!(packet_meta.tunnel_src_ipv6_addr, outer_hdr.src_addr);
+        assert_eq!(packet_meta.tunnel_dst_ipv6_addr, outer_hdr.dst_addr);
 
         // Flow is inner IPv6
-        assert_eq!(meta.ip_addr_type, IpAddrType::Ipv6);
-        assert_eq!(meta.src_ipv6_addr, inner_v6[8..24]);
-        assert_eq!(meta.dst_ipv6_addr, inner_v6[24..40]);
-        assert_eq!(meta.proto, IpProto::Tcp);
-        assert_eq!(meta.src_port(), 12345);
-        assert_eq!(meta.dst_port(), 80);
+        assert_eq!(packet_meta.ip_addr_type, IpAddrType::Ipv6);
+        assert_eq!(packet_meta.src_ipv6_addr, inner_v6[8..24]);
+        assert_eq!(packet_meta.dst_ipv6_addr, inner_v6[24..40]);
+        assert_eq!(packet_meta.proto, IpProto::Tcp);
+        assert_eq!(packet_meta.src_port(), 12345);
+        assert_eq!(packet_meta.dst_port(), 80);
 
         // Tunnel L4 ports are not set for IP-in-IP
-        assert_eq!(meta.tunnel_src_port(), 0);
-        assert_eq!(meta.tunnel_dst_port(), 0);
+        assert_eq!(packet_meta.tunnel_src_port(), 0);
+        assert_eq!(packet_meta.tunnel_dst_port(), 0);
     }
 
     #[test]
@@ -2194,28 +2199,30 @@ mod tests {
 
         let packet: Vec<u8> = [eth, outer_v4.clone(), inner_v6.clone(), tcp].concat();
         let ctx = TcContext::new(packet);
-        let (_code, meta) = try_mermin(&ctx).unwrap();
+        let (result, _ctx) = try_mermin(ctx);
+        assert!(result.is_ok());
+        let (_code, packet_meta) = result.unwrap();
 
         // Tunnel is outer IPv4
-        assert_eq!(meta.tunnel_ip_addr_type, IpAddrType::Ipv4);
-        assert_eq!(meta.tunnel_src_ipv4_addr, [10, 0, 0, 1]);
-        assert_eq!(meta.tunnel_dst_ipv4_addr, [10, 0, 0, 2]);
+        assert_eq!(packet_meta.tunnel_ip_addr_type, IpAddrType::Ipv4);
+        assert_eq!(packet_meta.tunnel_src_ipv4_addr, [10, 0, 0, 1]);
+        assert_eq!(packet_meta.tunnel_dst_ipv4_addr, [10, 0, 0, 2]);
 
         // Flow is inner IPv6
-        assert_eq!(meta.ip_addr_type, IpAddrType::Ipv6);
+        assert_eq!(packet_meta.ip_addr_type, IpAddrType::Ipv6);
         assert_eq!(
-            meta.src_ipv6_addr,
+            packet_meta.src_ipv6_addr,
             [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
         );
         assert_eq!(
-            meta.dst_ipv6_addr,
+            packet_meta.dst_ipv6_addr,
             [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2]
         );
-        assert_eq!(meta.proto, IpProto::Tcp);
-        assert_eq!(meta.src_port(), 12345);
-        assert_eq!(meta.dst_port(), 80);
-        assert_eq!(meta.tunnel_src_port(), 0);
-        assert_eq!(meta.tunnel_dst_port(), 0);
+        assert_eq!(packet_meta.proto, IpProto::Tcp);
+        assert_eq!(packet_meta.src_port(), 12345);
+        assert_eq!(packet_meta.dst_port(), 80);
+        assert_eq!(packet_meta.tunnel_src_port(), 0);
+        assert_eq!(packet_meta.tunnel_dst_port(), 0);
     }
 
     #[test]
@@ -2257,17 +2264,19 @@ mod tests {
 
         let packet: Vec<u8> = [eth, outer.clone(), middle.clone(), inner.clone(), tcp].concat();
         let ctx = TcContext::new(packet);
-        let (_code, meta) = try_mermin(&ctx).unwrap();
+        let (result, _ctx) = try_mermin(ctx);
+        assert!(result.is_ok());
+        let (_code, packet_meta) = result.unwrap();
 
         // Tunnel from outer
-        assert_eq!(meta.tunnel_ip_addr_type, IpAddrType::Ipv6);
-        assert_eq!(meta.tunnel_src_ipv6_addr, &outer[8..24]);
-        assert_eq!(meta.tunnel_dst_ipv6_addr, &outer[24..40]);
+        assert_eq!(packet_meta.tunnel_ip_addr_type, IpAddrType::Ipv6);
+        assert_eq!(packet_meta.tunnel_src_ipv6_addr, &outer[8..24]);
+        assert_eq!(packet_meta.tunnel_dst_ipv6_addr, &outer[24..40]);
         // Flow from inner; middle ignored
-        assert_eq!(meta.ip_addr_type, IpAddrType::Ipv6);
-        assert_eq!(meta.src_ipv6_addr, &inner[8..24]);
-        assert_eq!(meta.dst_ipv6_addr, &inner[24..40]);
-        assert_eq!(meta.proto, IpProto::Tcp);
+        assert_eq!(packet_meta.ip_addr_type, IpAddrType::Ipv6);
+        assert_eq!(packet_meta.src_ipv6_addr, &inner[8..24]);
+        assert_eq!(packet_meta.dst_ipv6_addr, &inner[24..40]);
+        assert_eq!(packet_meta.proto, IpProto::Tcp);
     }
 
     #[test]
@@ -2296,19 +2305,21 @@ mod tests {
 
         let packet: Vec<u8> = [eth, outer.clone(), middle, inner.clone(), tcp].concat();
         let ctx = TcContext::new(packet);
-        let (_code, meta) = try_mermin(&ctx).unwrap();
+        let (result, _ctx) = try_mermin(ctx);
+        assert!(result.is_ok());
+        let (_code, packet_meta) = result.unwrap();
 
         // Tunnel from outer
-        assert_eq!(meta.tunnel_ip_addr_type, IpAddrType::Ipv4);
-        assert_eq!(meta.tunnel_src_ipv4_addr, [10, 0, 0, 1]);
-        assert_eq!(meta.tunnel_dst_ipv4_addr, [10, 0, 0, 2]);
+        assert_eq!(packet_meta.tunnel_ip_addr_type, IpAddrType::Ipv4);
+        assert_eq!(packet_meta.tunnel_src_ipv4_addr, [10, 0, 0, 1]);
+        assert_eq!(packet_meta.tunnel_dst_ipv4_addr, [10, 0, 0, 2]);
         // Flow from inner
-        assert_eq!(meta.ip_addr_type, IpAddrType::Ipv4);
-        assert_eq!(meta.src_ipv4_addr, [0xc0, 0xa8, 0x01, 0x01]);
-        assert_eq!(meta.dst_ipv4_addr, [0xc0, 0xa8, 0x01, 0x02]);
-        assert_eq!(meta.proto, IpProto::Tcp);
-        assert_eq!(meta.src_port(), 12345);
-        assert_eq!(meta.dst_port(), 80);
+        assert_eq!(packet_meta.ip_addr_type, IpAddrType::Ipv4);
+        assert_eq!(packet_meta.src_ipv4_addr, [0xc0, 0xa8, 0x01, 0x01]);
+        assert_eq!(packet_meta.dst_ipv4_addr, [0xc0, 0xa8, 0x01, 0x02]);
+        assert_eq!(packet_meta.proto, IpProto::Tcp);
+        assert_eq!(packet_meta.src_port(), 12345);
+        assert_eq!(packet_meta.dst_port(), 80);
     }
 
     #[test]
@@ -2353,22 +2364,24 @@ mod tests {
         ]
         .concat();
         let ctx = TcContext::new(packet);
-        let (_code, meta) = try_mermin(&ctx).unwrap();
+        let (result, _ctx) = try_mermin(ctx);
+        assert!(result.is_ok());
+        let (_code, packet_meta) = result.unwrap();
 
         // Tunnel should be outer IPv4 + UDP ports
-        assert_eq!(meta.tunnel_ip_addr_type, IpAddrType::Ipv4);
-        assert_eq!(meta.tunnel_src_ipv4_addr, [192, 0, 2, 1]);
-        assert_eq!(meta.tunnel_dst_ipv4_addr, [192, 0, 2, 2]);
-        assert_eq!(meta.tunnel_src_port(), 12345);
-        assert_eq!(meta.tunnel_dst_port(), 4789);
+        assert_eq!(packet_meta.tunnel_ip_addr_type, IpAddrType::Ipv4);
+        assert_eq!(packet_meta.tunnel_src_ipv4_addr, [192, 0, 2, 1]);
+        assert_eq!(packet_meta.tunnel_dst_ipv4_addr, [192, 0, 2, 2]);
+        assert_eq!(packet_meta.tunnel_src_port(), 12345);
+        assert_eq!(packet_meta.tunnel_dst_port(), 4789);
 
         // Flow should be inner IPv4/TCP
-        assert_eq!(meta.ip_addr_type, IpAddrType::Ipv4);
-        assert_eq!(meta.src_ipv4_addr, [0xc0, 0xa8, 0x01, 0x01]);
-        assert_eq!(meta.dst_ipv4_addr, [0xc0, 0xa8, 0x01, 0x02]);
-        assert_eq!(meta.proto, IpProto::Tcp);
-        assert_eq!(meta.src_port(), 12345);
-        assert_eq!(meta.dst_port(), 80);
+        assert_eq!(packet_meta.ip_addr_type, IpAddrType::Ipv4);
+        assert_eq!(packet_meta.src_ipv4_addr, [0xc0, 0xa8, 0x01, 0x01]);
+        assert_eq!(packet_meta.dst_ipv4_addr, [0xc0, 0xa8, 0x01, 0x02]);
+        assert_eq!(packet_meta.proto, IpProto::Tcp);
+        assert_eq!(packet_meta.src_port(), 12345);
+        assert_eq!(packet_meta.dst_port(), 80);
     }
 
     #[test]
@@ -2407,21 +2420,23 @@ mod tests {
         ]
         .concat();
         let ctx = TcContext::new(packet);
-        let (_code, meta) = try_mermin(&ctx).unwrap();
+        let (result, _ctx) = try_mermin(ctx);
+        assert!(result.is_ok());
+        let (_code, packet_meta) = result.unwrap();
 
         // Tunnel is outer IPv4 + UDP ports
-        assert_eq!(meta.tunnel_ip_addr_type, IpAddrType::Ipv4);
-        assert_eq!(meta.tunnel_src_ipv4_addr, [198, 51, 100, 1]);
-        assert_eq!(meta.tunnel_dst_ipv4_addr, [198, 51, 100, 2]);
-        assert_eq!(meta.tunnel_src_port(), 12345);
-        assert_eq!(meta.tunnel_dst_port(), 6081);
+        assert_eq!(packet_meta.tunnel_ip_addr_type, IpAddrType::Ipv4);
+        assert_eq!(packet_meta.tunnel_src_ipv4_addr, [198, 51, 100, 1]);
+        assert_eq!(packet_meta.tunnel_dst_ipv4_addr, [198, 51, 100, 2]);
+        assert_eq!(packet_meta.tunnel_src_port(), 12345);
+        assert_eq!(packet_meta.tunnel_dst_port(), 6081);
 
         // Flow is inner IPv4/TCP
-        assert_eq!(meta.ip_addr_type, IpAddrType::Ipv4);
-        assert_eq!(meta.src_ipv4_addr, [0xc0, 0xa8, 0x01, 0x01]);
-        assert_eq!(meta.dst_ipv4_addr, [0xc0, 0xa8, 0x01, 0x02]);
-        assert_eq!(meta.proto, IpProto::Tcp);
-        assert_eq!(meta.src_port(), 12345);
-        assert_eq!(meta.dst_port(), 80);
+        assert_eq!(packet_meta.ip_addr_type, IpAddrType::Ipv4);
+        assert_eq!(packet_meta.src_ipv4_addr, [0xc0, 0xa8, 0x01, 0x01]);
+        assert_eq!(packet_meta.dst_ipv4_addr, [0xc0, 0xa8, 0x01, 0x02]);
+        assert_eq!(packet_meta.proto, IpProto::Tcp);
+        assert_eq!(packet_meta.src_port(), 12345);
+        assert_eq!(packet_meta.dst_port(), 80);
     }
 }
