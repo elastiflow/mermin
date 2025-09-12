@@ -104,8 +104,8 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
 
     for _ in 0..MAX_HEADER_PARSE_DEPTH {
         let result: Result<(), Error> = match parser.next_hdr {
-            HeaderType::Ethernet => parser.parse_ethernet_header(ctx),
-            HeaderType::Ipv4 => match parser.parse_ipv4_header(ctx) {
+            HeaderType::Ethernet => parser.parse_ethernet_header(&ctx),
+            HeaderType::Ipv4 => match parser.parse_ipv4_header(&ctx) {
                 Ok(ipv4_hdr) => {
                     // Check if proto is set to IP-in-IP and the tunnel hasn't been set yet
                     if !found_tunnel
@@ -131,7 +131,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                 }
                 Err(e) => Err(e),
             },
-            HeaderType::Ipv6 => match parser.parse_ipv6_header(ctx) {
+            HeaderType::Ipv6 => match parser.parse_ipv6_header(&ctx) {
                 Ok(ipv6_hdr) => {
                     // Check if proto is set to IP-in-IP and the tunnel hasn't been set yet
                     if !found_tunnel
@@ -159,7 +159,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                 }
                 Err(e) => Err(e),
             },
-            HeaderType::Geneve => match parser.parse_geneve_header(ctx) {
+            HeaderType::Geneve => match parser.parse_geneve_header(&ctx) {
                 Ok(_) => {
                     // Reset inner headers to prepare for parsing encapsulated packet
                     src_ipv4_addr = [0; 4];
@@ -175,7 +175,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                 }
                 Err(e) => Err(e),
             },
-            HeaderType::Vxlan => match parser.parse_vxlan_header(ctx) {
+            HeaderType::Vxlan => match parser.parse_vxlan_header(&ctx) {
                 Ok(_) => {
                     // Reset inner headers to prepare for parsing encapsulated packet
                     src_ipv4_addr = [0; 4];
@@ -191,9 +191,9 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                 }
                 Err(e) => Err(e),
             },
-            HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(ctx),
-            HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(ctx),
-            HeaderType::Proto(IpProto::Tcp) => match parser.parse_tcp_header(ctx) {
+            HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(&ctx),
+            HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx),
+            HeaderType::Proto(IpProto::Tcp) => match parser.parse_tcp_header(&ctx) {
                 Ok(tcp_hdr) => {
                     src_port = tcp_hdr.src;
                     dst_port = tcp_hdr.dst;
@@ -202,7 +202,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                 Err(e) => Err(e),
             },
             HeaderType::Proto(IpProto::Udp) => {
-                match parser.parse_udp_header(ctx, options.geneve_port, options.vxlan_port) {
+                match parser.parse_udp_header(&ctx, options.geneve_port, options.vxlan_port) {
                     Ok(udp_hdr) => {
                         src_port = udp_hdr.src;
                         dst_port = udp_hdr.dst;
@@ -231,19 +231,19 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                     Err(e) => Err(e),
                 }
             }
-            HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_route_header(ctx),
+            HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_route_header(&ctx),
             HeaderType::Route(_) => {
                 break;
             }
-            HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(ctx),
-            HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(ctx),
-            HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(ctx),
-            HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(ctx),
+            HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
+            HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
+            HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
-            HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(ctx),
-            HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(ctx),
-            HeaderType::Proto(IpProto::Hip) => parser.parse_hip_header(ctx),
-            HeaderType::Proto(IpProto::Shim6) => parser.parse_shim6_header(ctx),
+            HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx),
+            HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx),
+            HeaderType::Proto(IpProto::Hip) => parser.parse_hip_header(&ctx),
+            HeaderType::Proto(IpProto::Shim6) => parser.parse_shim6_header(&ctx),
             HeaderType::Proto(_) => {
                 break;
             }
@@ -252,7 +252,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
         };
 
         if result.is_err() {
-            error!(ctx, "mermin: parser failed");
+            error!(&ctx, "mermin: parser failed");
         }
     }
 
@@ -348,6 +348,7 @@ impl Parser {
             IpProto::Ipv4 => self.next_hdr = HeaderType::Ipv4,
             IpProto::Ipv6 => self.next_hdr = HeaderType::Ipv6,
             IpProto::Ipv4 => self.next_hdr = HeaderType::Ipv4,
+            IpProto::Ipv6 => self.next_hdr = HeaderType::Ipv6,
             _ => {
                 self.next_hdr = HeaderType::StopProcessing;
             }
