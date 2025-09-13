@@ -7,23 +7,30 @@ edition = "2021"
 mermin-core = { path = "../mermin-core" }
 anyhow = { workspace = true, default-features = true }
 opentelemetry = { version = "0.30.0" , optional = true}
-opentelemetry_sdk = { version = "0.30.0", features = ["experimental_async_runtime", "rt-tokio"], optional = true }
+opentelemetry_sdk = { version = "0.30.0", features = ["experimental_async_runtime", "rt-tokio", "experimental_trace_batch_span_processor_with_async_runtime"], optional = true }
 opentelemetry-otlp = { version = "0.30.0", features = ["grpc-tonic"] ,optional = true}
 async-trait = "0.1.89"
 tracing = { version = "0.1.41", optional = true }
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"], optional = true }
 tracing-opentelemetry = {version = "0.31.0", optional = true }
+env_logger = { workspace = true, default-features = true, optional = true }
+tonic = { version = "0.13.1" , optional = true }
+
 
 [lib]
 name = "merminexporters"
 path = "src/lib.rs"
 
 [features]
+default = ["logger"]
 otlp = [
     "dep:opentelemetry",
     "dep:opentelemetry_sdk",
     "dep:opentelemetry",
+    "dep:opentelemetry-otlp",
     "tracing-subscriber",
     "tracing-opentelemetry",
-    "tracing"
+    "tracing",
+    "tonic",
 ]
+logger = ["dep:env_logger"]

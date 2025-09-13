@@ -15,6 +15,7 @@ use kube::{Resource, ResourceExt};
 use log::warn;
 use mermin_common::{IpAddrType, PacketMeta};
 use network_types::ip::IpProto;
+use crate::flow::base::EnrichedFlowData;
 use crate::k8s::attributor::Attributor;
 
 /// Holds metadata for a single Kubernetes object.
@@ -75,14 +76,6 @@ pub enum EnrichedInfo {
     EndpointSlice {
         slice: K8sObjectMeta,
     },
-}
-
-#[derive(Debug, Default)]
-#[allow(dead_code)]
-pub struct EnrichedFlowData {
-    pub id: String,
-    pub source: Option<EnrichedInfo>,
-    pub destination: Option<EnrichedInfo>,
 }
 
 #[derive(Debug)]

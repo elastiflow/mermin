@@ -1,14 +1,6 @@
 mod community_id;
 mod runtime;
-use mermincore::k8s::resource_parser::{
-    parse_packet,
-};
-
-use merminexporters::{logging::LoggingExporterAdapter, otlp};
-
-#[cfg(feature = "otlp")]
-use merminexporters::otlp::trace::TraceExporterAdapter;
-
+use mermincore::k8s::resource_parser::{parse_packet};
 use mermincore::k8s::attributor::Attributor;
 
 use std::{
@@ -24,7 +16,9 @@ use aya::{
 use log::{debug, info, warn};
 use mermin_common::{IpAddrType, PacketMeta};
 use tokio::signal;
-use mermincore::ports::FlowExporterPort;
+use mermincore::flow::base::EnrichedFlowData;
+use mermincore::flow::exporter::FlowExporter;
+use merminexporters::otlp::opts::ExporterOptions;
 use crate::{
     community_id::CommunityIdGenerator, runtime::conf::Config,
 };
@@ -40,14 +34,7 @@ async fn main() -> anyhow::Result<()> {
     let runtime = runtime::Runtime::new()?;
     let runtime::Runtime { config, .. } = runtime;
     let community_id_generator = CommunityIdGenerator::new(0);
-    #[cfg(feature = "otlp")]
-    let _ = otlp::trace::init_tracer_provider("flow_trace_exporter");
-
-    let exporter = create_exporter();
-    // TODO: switch to using tracing for logging and allow users to configure the log level via conf
-    env_logger::Builder::from_default_env()
-        .target(env_logger::Target::Stdout)
-        .init();
+    let exporter = create_exporter().await?;
 
     // Bump the memlock rlimit. This is needed for older kernels that don't use the
     // new memcg based accounting, see https://lwn.net/Articles/837122/
@@ -109,14 +96,26 @@ async fn main() -> anyhow::Result<()> {
     let mut ring_buf = RingBuf::try_from(map)?;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<(PacketMeta, String)>(1024);
+    let (exporter_tx, mut exporter_rx) = tokio::sync::mpsc::channel::<anyhow::Result<EnrichedFlowData>>(1024);
     let kube_client_clone = kube_client.clone();
+
+    tokio::spawn(async move {
+        while let Some(EnrichedFlowData) = exporter_rx.recv().await {
+            info!("Exporting result...");
+            exporter.export_flow(EnrichedFlowData).await;
+        }
+        info!("Enrichment task exiting...");
+        exporter.shutdown().await
+    });
 
     tokio::spawn(async move {
         while let Some((event, community_id)) = rx.recv().await {
             info!("Received packet to parse for Community ID {community_id}");
             if let Some(client) = &kube_client_clone {
                 let enriched_packet = parse_packet(&event, client, community_id).await;
-                exporter.export_flow(enriched_packet).await;
+                if let Err(e) = exporter_tx.send(enriched_packet).await {
+                    warn!("Failed to send enriched packed to chanel: {e}");
+                }
             } else {
                 info!(
                     "Skipping packet enrichment for Community ID {community_id}: Kubernetes client not available"
@@ -191,7 +190,6 @@ async fn main() -> anyhow::Result<()> {
     println!("Waiting for Ctrl-C...");
     signal::ctrl_c().await?;
     println!("Exiting...");
-
     Ok(())
 }
 
@@ -218,19 +216,43 @@ struct FlowRecord {
     // the total struct size (88 bytes) is a multiple of the maximum alignment (8 bytes).
 }
 
-fn create_exporter() -> Arc<dyn FlowExporterPort> {
-    #[cfg(not(feature = "otlp"))]
+async fn create_exporter() -> Result<Arc<dyn FlowExporter + 'static>, anyhow::Error>{
+    #[cfg(feature = "logger")]
     {
-        info!("Using Logging Exporter Adapter (default).");
-        let exporter = LoggingExporterAdapter::new();
-        Arc::new(exporter)
+        return Ok(create_logger_exporter())
     }
 
     #[cfg(feature = "otlp")]
     {
-        info!("Using OTLP Exporter Adapter.");
-        let exporter = TraceExporterAdapter::new();
-        Arc::new(exporter)
+        create_otlp_exporter().await
+    }
+
+    #[cfg(not(any(feature = "logger", feature = "otlp")))]
+    {
+        panic!("No exporter enabled. Please enable at least one exporter feature (e.g., 'logger' or 'otlp').");
     }
 }
 
+#[cfg(feature = "otlp")]
+async fn create_otlp_exporter() -> Result<Arc<dyn FlowExporter>, anyhow::Error> {
+    info!("Using OTLP Exporter Adapter.");
+    use merminexporters::otlp::trace::lib::{init_tracer_provider, TraceExporterAdapter};
+
+    // TODO: make endpoint and timeout configurable
+    let provider = init_tracer_provider(ExporterOptions {
+        endpoint: "http://host.docker.internal:4317",
+        timeout_seconds: 5,
+        protocol: "grpc".to_string(),
+    }).await?;
+
+    let exporter = TraceExporterAdapter::new(provider);
+    Ok(Arc::new(exporter))
+}
+
+#[cfg(feature = "logger")]
+fn create_logger_exporter() -> Arc<dyn FlowExporter> {
+    use merminexporters::logger::lib::LoggingExporterAdapter;
+    info!("Using Logging Exporter Adapter (default).");
+    let exporter = LoggingExporterAdapter::new();
+    Arc::new(exporter)
+}

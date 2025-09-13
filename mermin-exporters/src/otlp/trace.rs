@@ -1,98 +1,161 @@
-use std::sync::Arc;
-use opentelemetry::trace::{Span, SpanKind, Status, Tracer, TracerProvider};
-use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::propagation::TraceContextPropagator;
-use opentelemetry_sdk::trace::{BatchSpanProcessor, SdkTracerProvider};
-use std::time::Duration;
-use async_trait::async_trait;
-use opentelemetry::global;
-use mermincore::{
-    ports::FlowExporterPort,
-    k8s::resource_parser::EnrichedFlowData,
-};
-use anyhow::Result;
+#[cfg(feature = "otlp")]
+pub mod lib {
+    use async_trait::async_trait;
+    use anyhow::Result;
+    use opentelemetry_otlp::{WithExportConfig, WithTonicConfig};
+    use opentelemetry_sdk::propagation::TraceContextPropagator;
+    use opentelemetry_sdk::trace::{ SdkTracerProvider};
+    use opentelemetry::global;
+    use opentelemetry::trace::{FutureExt, Status, TracerProvider};
+    use opentelemetry_sdk::runtime;
+    use tracing::{debug, error, info, Span};
+    use tracing_opentelemetry::OpenTelemetrySpanExt;
+    use tracing_subscriber::EnvFilter;
+    use tracing_subscriber::fmt::format::FmtSpan;
+    use tracing_subscriber::fmt::Layer;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use mermincore::flow::base::EnrichedFlowData;
+    use mermincore::flow::exporter::FlowExporter;
+    use crate::otlp::opts::{ExporterOptions, ExporterProtocol};
+    use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
+    use tonic::transport::channel::Channel;
+    use tonic::transport::Uri;
 
-
-pub fn init_tracer_provider(svc_name: &str) -> SdkTracerProvider {
-    // 1. Create the OTLP exporter
-    // This uses a builder pattern to configure the gRPC endpoint.
-    let exporter = opentelemetry_otlp::SpanExporter::builder()
-        .with_tonic()
-        .with_endpoint("http://localhost:4317") // Default OTel Collector endpoint
-        .with_timeout(Duration::from_secs(5))
-        .build()
-        .expect("Failed to create OTLP span exporter.");
-
-    // 2. Create a batch span processor.
-    // This collects spans and sends them in batches for better performance.
-    let processor = BatchSpanProcessor::builder(exporter).build();
-
-    // 3. Create the tracer provider.
-    let provider = SdkTracerProvider::builder()
-        .with_span_processor(processor)
-        .build();
-
-    // Set the global tracer provider and propagator
-    global::set_tracer_provider(provider.clone());
-    global::set_text_map_propagator(TraceContextPropagator::new());
-
-    provider
-}
-
-/// Creates and works with a simple span.
-fn test_span() {
-    // Get a tracer from the global provider.
-    let tracer = global::tracer("flow_exporter_service");
-
-    // Start a new span.
-    let mut span = tracer
-        .span_builder("mock_flow_exporter_span")
-        .with_kind(SpanKind::Internal)
-        .start(&tracer);
-
-    // Simulate doing some work.
-    span.add_event("Doing some work...", vec![]);
-    std::thread::sleep(Duration::from_millis(50));
-    span.add_event("Work complete!", vec![]);
-
-    // Set the status of the span.
-    span.set_status(Status::Ok);
-
-    // Manually end the span.
-    // When the span variable is dropped, `end` is called automatically.
-    // Calling it explicitly is fine and gives clear control.
-    span.end();
-}
-
-
-// This is the OTLP Adapter.
-pub struct TraceExporterAdapter {
-    tracer: opentelemetry::global::BoxedTracer,
-}
-
-impl TraceExporterAdapter {
-    pub fn new() -> Self {
-        let tracer = global::tracer("flow-tracer");
-        Self { tracer }
+    pub struct TraceExporterAdapter {
+        provider: SdkTracerProvider,
     }
-}
 
-// Here, the adapter implements the port.
-#[async_trait]
-impl FlowExporterPort for TraceExporterAdapter {
-    #[tracing::instrument(
-        name = "network.flow",
-        skip(self, packet),
-        fields(net.flow.community.id = %packet.id)
-    )]
-    fn export_flow(&self, packet: Result<EnrichedFlowData>) {
-        if packet.is_ok() {
-            let data = packet.expect("expected enriched flow data");
-            let span = tracing::Span::current();
-            span.record("netlfow.community", data.id.as_str());
-            // TODO::Map Flows to Spans
-            tracing::info!("Flow exported to OTLP");
+    impl TraceExporterAdapter {
+        pub fn new(provider: SdkTracerProvider) -> Self {
+            Self {
+                provider
+            }
+        }
+    }
+
+    pub trait Recordable {
+        fn record(&self, span: &Span);
+    }
+
+    #[async_trait]
+    impl FlowExporter for TraceExporterAdapter {
+        #[tracing::instrument(
+            name = "net.flow",
+            skip(self, flow),
+            fields(
+                community.id = tracing::field::Empty,
+                error.message = tracing::field::Empty,
+            )
+        )]
+        async fn export_flow(&self, flow: Result<EnrichedFlowData>) {
+            let span = Span::current();
+            match flow {
+                Ok(data) => {
+                    data.record(&span);
+                    span.set_status(Status::Ok);
+                    debug!("exported recordable: {:?}", data);
+                }
+                Err(e) => {
+                    error!("error exporting recordable: {}", e);
+                    span.set_status(
+                        Status::error(
+                            format!("error_message: {}", e.to_string()),
+                        ),
+                    );
+                }
+            }
         }
 
+        async fn shutdown(&self) -> Result<()> {
+            self.provider.force_flush().map_err(|e| {
+                error!("Error flushing OTLP trace exporter: {}", e);
+                anyhow::anyhow!(e)
+            })?;
+            self.provider.shutdown().map(
+                |()| {
+                    debug!("OTLP trace exporter shut down gracefully.");
+                },
+            ).map_err(|e| {
+                error!("Error shutting down OTLP trace exporter: {}", e);
+                anyhow::anyhow!(e)
+            })
+        }
+    }
+
+    #[macro_export]
+    macro_rules! record_fields {
+    // Base case: All tokens have been processed, do nothing.
+    ($span:expr) => {};
+
+    // Rule for a simple field: `self.field`
+    // Matches the field, records it, and recurses on the rest.
+    ($span:expr, $owner:ident.$field:ident $(, $($rest:tt)*)?) => {
+        $span.record(stringify!($field), &$owner.$field);
+        $crate::record_fields!($span $(, $($rest)*)?);
+    };
+
+    // Rule for an optional field: `optional self.field`
+    ($span:expr, optional $owner:ident.$field:ident $(, $($rest:tt)*)?) => {
+        if let Some(value) = &$owner.$field {
+            $span.record(stringify!($field), &value);
+        }
+        $crate::record_fields!($span $(, $($rest)*)?);
+    };
+
+    // Rule for a field with a custom name: `("name" => value)`
+    ($span:expr, ($name:literal => $value:expr) $(, $($rest:tt)*)?) => {
+        $span.record($name, &$value);
+        $crate::record_fields!($span $(, $($rest)*)?);
+    };
+}
+
+    impl Recordable for EnrichedFlowData {
+        fn record(&self, span: &Span) {
+            record_fields!(
+                span,
+                ("community.id" => self.id.as_str())
+            );
+        }
+    }
+
+    pub async fn init_tracer_provider(opts: ExporterOptions) -> Result<SdkTracerProvider, tonic::transport::Error>{
+        let uri = Uri::from_static(opts.endpoint);
+        let channel = Channel::builder(uri)
+            .connect().await?;
+
+        let exporter = opentelemetry_otlp::SpanExporter::builder()
+            .with_tonic() // for gRPC
+            .with_channel(channel)
+            .with_protocol(ExporterProtocol::from(opts.protocol).into())
+            .build()
+            .expect("Failed to create OTLP span exporter.");
+
+        let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio)
+            .build();
+
+        let provider = SdkTracerProvider::builder()
+            .with_span_processor(processor)
+            .build();
+
+        global::set_tracer_provider(provider.clone());
+        global::set_text_map_propagator(TraceContextPropagator::new());
+
+        let filter = EnvFilter::from_default_env();
+
+        let fmt_layer = Layer::new()
+            .with_span_events(FmtSpan::FULL);
+
+        let trace_layer = tracing_opentelemetry::layer()
+            .with_tracer(provider.tracer("otlp-flow-tracer"));
+
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(fmt_layer)
+            .with(trace_layer)
+            .init();
+
+        info!("Tracer initialized. Console logging and OTLP exporting are active.");
+        Ok(provider)
     }
 }

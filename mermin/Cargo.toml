@@ -18,7 +18,6 @@ network-types = { path = "../network-types" }
 anyhow = { workspace = true, default-features = true }
 aya = { workspace = true, features = ["async_tokio"] }
 aya-log = { workspace = true }
-env_logger = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }
 tokio = { workspace = true, features = [
@@ -48,7 +47,7 @@ name = "mermin"
 path = "src/main.rs"
 
 [features]
-otlp = [
-    "mermin-exporters/otlp"
-]
 default = ["otlp"]
+
+logger = ["mermin-exporters/logger"]
+otlp = ["mermin-exporters/otlp"]
