@@ -684,25 +684,63 @@ mod host_test_shim {
 
     use crate::Error;
 
-    // A minimal stand-in for aya_ebpf::programs::TcContext used by parser functions
-    #[derive(Clone)]
-    pub struct TcContext {
-        data: Vec<u8>,
+    // Mock __sk_buff that mimics the real structure's ifindex field
+    #[repr(C)]
+    pub struct MockSkBuff {
+        pub ifindex: u32,
+        // Add other fields as needed for future testing
     }
-    impl TcContext {
-        pub fn new(data: Vec<u8>) -> Self {
-            Self { data }
+
+    // Mock SkBuff that wraps the mock __sk_buff like the real one
+    pub struct SkBuff {
+        pub skb: *mut MockSkBuff,
+        _data: Vec<u8>,                           // Keep data alive
+        _mock_skb: alloc::boxed::Box<MockSkBuff>, // Keep mock alive
+    }
+
+    impl SkBuff {
+        pub fn new(data: Vec<u8>, ifindex: u32) -> Self {
+            let mock_skb = alloc::boxed::Box::new(MockSkBuff { ifindex });
+            let skb_ptr = mock_skb.as_ref() as *const MockSkBuff as *mut MockSkBuff;
+
+            Self {
+                skb: skb_ptr,
+                _data: data,
+                _mock_skb: mock_skb,
+            }
         }
+
         pub fn len(&self) -> u32 {
-            self.data.len() as u32
+            self._data.len() as u32
         }
+
         pub fn load<T: Copy>(&self, offset: usize) -> Result<T, Error> {
-            if offset + mem::size_of::<T>() > self.data.len() {
+            if offset + mem::size_of::<T>() > self._data.len() {
                 return Err(Error::OutOfBounds);
             }
-            let ptr = unsafe { self.data.as_ptr().add(offset) as *const T };
+            let ptr = unsafe { self._data.as_ptr().add(offset) as *const T };
             let value = unsafe { *ptr };
             Ok(value)
+        }
+    }
+
+    // Test TcContext that mimics the real aya_ebpf TcContext interface
+    pub struct TcContext {
+        pub skb: SkBuff,
+    }
+
+    impl TcContext {
+        pub fn new(data: Vec<u8>) -> Self {
+            let skb = SkBuff::new(data, 42); // Use test ifindex of 42
+            Self { skb }
+        }
+
+        pub fn len(&self) -> u32 {
+            self.skb.len()
+        }
+
+        pub fn load<T: Copy>(&self, offset: usize) -> Result<T, Error> {
+            self.skb.load(offset)
         }
     }
 
@@ -1236,6 +1274,9 @@ mod tests {
         let (_code, packet_meta) = result.unwrap();
 
         // Assert on the parsed metadata
+        // Verify ifindex is set from test shim
+        assert_eq!(packet_meta.ifindex, 42);
+
         // Outer IPv4 is the tunnel
         assert_eq!(packet_meta.tunnel_ip_addr_type, IpAddrType::Ipv4);
         assert_eq!(packet_meta.tunnel_src_ipv4_addr, [10, 0, 0, 1]);
