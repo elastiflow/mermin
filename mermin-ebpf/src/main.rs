@@ -1311,21 +1311,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parser_initialization() {
-        let parser = Parser::default();
-
-        assert_eq!(parser.offset, 0);
-        assert!(matches!(parser.next_hdr, HeaderType::Ethernet));
-
-        // Check that packet_meta is initialized with default values
-        let packet_meta = PacketMeta::default();
-        assert_eq!(packet_meta.src_ipv4_addr, [0, 0, 0, 0]);
-        assert_eq!(packet_meta.dst_ipv4_addr, [0, 0, 0, 0]);
-        assert_eq!(packet_meta.src_port, [0, 0]);
-        assert_eq!(packet_meta.dst_port, [0, 0]);
-    }
-
-    #[test]
     fn test_parser_with_options() {
         let parser = Parser::default();
         let options = ParserOptions {
@@ -1352,6 +1337,21 @@ mod tests {
         let default_options = ParserOptions::default();
         assert_eq!(default_options.geneve_port, 6081);
         assert_eq!(default_options.vxlan_port, 4789);
+    }
+
+    #[test]
+    fn test_parser_initialization() {
+        let parser = Parser::default();
+
+        assert_eq!(parser.offset, 0);
+        assert!(matches!(parser.next_hdr, HeaderType::Ethernet));
+
+        // Check that packet_meta is initialized with default values
+        let packet_meta = PacketMeta::default();
+        assert_eq!(packet_meta.src_ipv4_addr, [0, 0, 0, 0]);
+        assert_eq!(packet_meta.dst_ipv4_addr, [0, 0, 0, 0]);
+        assert_eq!(packet_meta.src_port, [0, 0]);
+        assert_eq!(packet_meta.dst_port, [0, 0]);
     }
 
     #[test]
