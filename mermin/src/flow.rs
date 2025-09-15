@@ -1,13 +1,19 @@
-use std::{net::IpAddr, time::Duration};
+use std::{net::IpAddr, sync::Arc, time::Duration};
 
+use dashmap::DashMap;
+use fxhash::FxBuildHasher;
 use mermin_common::PacketMeta;
 use network_types::ip::IpProto;
 use tokio::sync::mpsc;
 
 use crate::{
+    community_id::CommunityIdGenerator,
     k8s::{EnrichedInfo, resource_parser::NetworkPolicy},
     runtime::conf::flow::FlowConf,
 };
+
+#[allow(dead_code)]
+type FlowMap = Arc<DashMap<String, FlowRecord, FxBuildHasher>>;
 
 #[derive(Debug, Default)]
 #[allow(dead_code)]
@@ -25,6 +31,7 @@ pub enum FlowDirection {
     Egress,
 }
 
+#[allow(dead_code)]
 pub struct FlowRecord {
     pub id: String,
     pub ifindex: u32,
@@ -42,15 +49,19 @@ pub struct FlowRecord {
     pub packets: u32,
 }
 
+#[allow(dead_code)]
 pub struct FlowProducer {
     flow_conf: FlowConf,
     packet_channel_capacity: usize,
     packet_worker_count: usize,
+    flow_map: FlowMap,
+    community_id_generator: CommunityIdGenerator,
     packet_event_rx: mpsc::Receiver<PacketMeta>,
     flow_event_tx: mpsc::Sender<FlowRecord>,
 }
 
 impl FlowProducer {
+    #[allow(dead_code)]
     pub fn new(
         flow_conf: FlowConf,
         packet_channel_capacity: usize,
@@ -58,15 +69,25 @@ impl FlowProducer {
         packet_event_rx: mpsc::Receiver<PacketMeta>,
         flow_event_tx: mpsc::Sender<FlowRecord>,
     ) -> Self {
+        let flow_map_capacity = packet_channel_capacity * 8;
+        let flow_map = Arc::new(DashMap::with_capacity_and_hasher(
+            flow_map_capacity,
+            FxBuildHasher::default(),
+        ));
+        let community_id_generator = CommunityIdGenerator::new(0);
+
         Self {
             flow_conf,
             packet_channel_capacity,
             packet_worker_count,
+            community_id_generator,
+            flow_map,
             packet_event_rx,
             flow_event_tx,
         }
     }
 
+    #[allow(dead_code)]
     pub async fn run(mut self) {
         // Create channels for each worker
         let mut worker_channels = Vec::new();
@@ -79,6 +100,8 @@ impl FlowProducer {
 
             let packet_worker = PacketWorker::new(
                 self.flow_conf.clone(),
+                Arc::clone(&self.flow_map),
+                self.community_id_generator.clone(),
                 worker_rx,
                 self.flow_event_tx.clone(),
             );
@@ -98,7 +121,7 @@ impl FlowProducer {
                 let current_worker = (worker_index + attempt) % worker_count;
                 let worker_tx = &worker_channels[current_worker];
 
-                match worker_tx.try_send(packet.clone()) {
+                match worker_tx.try_send(packet) {
                     Ok(_) => {
                         worker_index = (current_worker + 1) % worker_count;
                         sent = true;
@@ -118,6 +141,8 @@ impl FlowProducer {
             if !sent {
                 // All workers are full - fallback to blocking send to preferred worker
                 let worker_tx = &worker_channels[worker_index];
+                // TODO: remove this once we have a better way to handle this
+                #[allow(clippy::redundant_pattern_matching)]
                 if let Err(_) = worker_tx.send(packet).await {
                     // Worker channel is closed, handle gracefully
                     continue;
@@ -128,6 +153,7 @@ impl FlowProducer {
     }
 }
 
+#[allow(dead_code)]
 pub struct PacketWorker {
     max_batch_size: usize,
     max_batch_interval: Duration,
@@ -139,13 +165,18 @@ pub struct PacketWorker {
     tcp_rst_timeout: Duration,
     udp_timeout: Duration,
 
+    flow_map: FlowMap,
+    community_id_generator: CommunityIdGenerator,
     pub packet_event_rx: mpsc::Receiver<PacketMeta>,
     pub flow_event_tx: mpsc::Sender<FlowRecord>,
 }
 
 impl PacketWorker {
+    #[allow(dead_code)]
     pub fn new(
         flow_conf: FlowConf,
+        flow_map: FlowMap,
+        community_id_generator: CommunityIdGenerator,
         packet_event_rx: mpsc::Receiver<PacketMeta>,
         flow_event_tx: mpsc::Sender<FlowRecord>,
     ) -> Self {
@@ -161,14 +192,80 @@ impl PacketWorker {
             udp_timeout: flow_conf.udp_timeout,
             packet_event_rx,
             flow_event_tx,
+            flow_map,
+            community_id_generator,
         }
     }
 
+    #[allow(dead_code)]
+    fn extract_ip_addresses(
+        ip_addr_type: mermin_common::IpAddrType,
+        src_ipv4_addr: [u8; 4],
+        dst_ipv4_addr: [u8; 4],
+        src_ipv6_addr: [u8; 16],
+        dst_ipv6_addr: [u8; 16],
+    ) -> (IpAddr, IpAddr) {
+        match ip_addr_type {
+            mermin_common::IpAddrType::Ipv4 => {
+                let src = IpAddr::V4(std::net::Ipv4Addr::from(src_ipv4_addr));
+                let dst = IpAddr::V4(std::net::Ipv4Addr::from(dst_ipv4_addr));
+                (src, dst)
+            }
+            mermin_common::IpAddrType::Ipv6 => {
+                let src = IpAddr::V6(std::net::Ipv6Addr::from(src_ipv6_addr));
+                let dst = IpAddr::V6(std::net::Ipv6Addr::from(dst_ipv6_addr));
+                (src, dst)
+            }
+        }
+    }
+
+    #[allow(dead_code)]
     pub async fn run(mut self) {
         while let Some(packet) = self.packet_event_rx.recv().await {
-            // TODO: Process packet into flow records
-            // let flow_record = FlowRecord::new(packet);
-            // self.flow_event_tx.send(flow_record).await.unwrap();
+            let (src_addr, dst_addr) = Self::extract_ip_addresses(
+                packet.ip_addr_type,
+                packet.src_ipv4_addr,
+                packet.dst_ipv4_addr,
+                packet.src_ipv6_addr,
+                packet.dst_ipv6_addr,
+            );
+            let (tunnel_src_addr, tunnel_dst_addr) = Self::extract_ip_addresses(
+                packet.tunnel_ip_addr_type,
+                packet.tunnel_src_ipv4_addr,
+                packet.tunnel_dst_ipv4_addr,
+                packet.tunnel_src_ipv6_addr,
+                packet.tunnel_dst_ipv6_addr,
+            );
+
+            let src_port = packet.src_port();
+            let dst_port = packet.dst_port();
+
+            let community_id = self.community_id_generator.generate(
+                src_addr,
+                dst_addr,
+                src_port,
+                dst_port,
+                packet.proto,
+            );
+
+            let flow_record = FlowRecord {
+                id: community_id.clone(),
+                ifindex: packet.ifindex,
+                src_addr,
+                dst_addr,
+                src_port,
+                dst_port,
+                proto: packet.proto,
+                tunnel_src_addr,
+                tunnel_dst_addr,
+                tunnel_src_port: packet.tunnel_src_port(),
+                tunnel_dst_port: packet.tunnel_dst_port(),
+                tunnel_proto: packet.tunnel_proto,
+                bytes: packet.l3_octet_count,
+                packets: 1,
+            };
+
+            self.flow_map.insert(community_id, flow_record);
         }
     }
 }

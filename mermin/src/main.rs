@@ -99,6 +99,25 @@ async fn main() -> anyhow::Result<()> {
     {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(PacketMeta, String, String)>(1024);
 
+        // Initialize the Kubernetes client
+        info!("Initializing Kubernetes client...");
+        let kube_client = match k8s::Attributor::new().await {
+            Ok(client) => {
+                // TODO: we should implement an event based notifier
+                // that sends a signal when the kubeclient is ready with its stores instead of waiting for a fixed interval.
+                info!("Kubernetes client initialized successfully");
+                info!("Waiting for reflectors to populate stores...");
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                info!("Reflectors should have populated stores by now");
+                Some(Arc::new(client))
+            }
+            Err(e) => {
+                warn!("Failed to initialize Kubernetes client: {e}");
+                warn!("Pod metadata lookup will not be available");
+                None
+            }
+        };
+
         let kube_client_clone = kube_client.clone();
 
         tokio::spawn(async move {

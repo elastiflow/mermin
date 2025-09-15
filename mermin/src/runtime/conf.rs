@@ -335,7 +335,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pipeline_serialization() {
+    fn test_conf_serialization() {
         let cfg = Conf::default();
 
         // Test that it can be serialized and deserialized
