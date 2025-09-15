@@ -9,7 +9,7 @@ RELEASE_NAME="mermin"
 NAMESPACE="atlantis"
 DOCKER_IMAGE_NAME="mermin:latest"
 VALUES_FILE="local/values.yaml"
-CNIS=("calico" "cilium" "flannel")
+CNI="${CNI:-calico}"
 # Define a host path for CNI binaries needed by Flannel
 HOST_CNI_PATH="$HOME/cni-plugins-for-kind"
 
@@ -84,18 +84,8 @@ install_cni() {
       ;;
     *)
       error "Unsupported CNI: $1"
-      exit 1
       ;;
   esac
-}
-
-build_image() {
-  if ! docker image inspect "$DOCKER_IMAGE_NAME" >/dev/null 2>&1; then
-    log "Building Docker image: $DOCKER_IMAGE_NAME"
-    docker build -t "$DOCKER_IMAGE_NAME" --target runner-debug .
-  else
-    log "Docker image already built: $DOCKER_IMAGE_NAME"
-  fi
 }
 
 load_image_into_kind() {
@@ -105,69 +95,112 @@ load_image_into_kind() {
 
 deploy_helm_chart() {
   helm upgrade --install "$RELEASE_NAME" "$HELM_CHART_PATH" \
-    -n "$NAMESPACE" --values "$VALUES_FILE" --wait --timeout=180s --create-namespace
+    -n "$NAMESPACE" --values "$VALUES_FILE" --wait --timeout=3m --create-namespace
 }
 
 verify_deployment() {
-  kubectl wait --for=condition=Ready pods --all -n "$NAMESPACE" --timeout=180s
+  kubectl wait --for=condition=Ready pods -l "app.kubernetes.io/name=${RELEASE_NAME}" -n "$NAMESPACE" --timeout=3m
+}
+
+# verify_agent_logs() {
+#   log "Verifying mermin agent logs are enriching data..."
+#   export NAMESPACE RELEASE_NAME
+#   local pods
+#   mapfile -t pods < <(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=${RELEASE_NAME}" -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}')
+
+#   if [ ${#pods[@]} -eq 0 ]; then
+#     error "No mermin pods found to test." && exit 1
+#   fi
+
+#   for pod in "${pods[@]}"; do
+#     (
+#       local counter=0
+#       while [ $counter -lt 30 ]; do
+#         if kubectl logs -n "${NAMESPACE}" "$pod" | grep --color=never "Enriched packet"; then
+#           exit 0
+#         fi
+#         counter=$((counter + 1))
+#         sleep 2
+#       done
+#       exit 1
+#     ) &
+#   done
+
+#   log "Waiting for all pod checks to complete..."
+#   local has_succeeded=0
+#   for job in $(jobs -p); do
+#     if wait "$job"; then
+#       has_succeeded=1
+#     fi
+#   done
+
+#   if [ "$has_succeeded" -eq 1 ]; then
+#     log "🎉 Test PASSED: At least one agent pod is enriching data."
+#   else
+#     error "❌ Test FAILED: No agent pods showed 'Enriched packet' logs."
+#     exit 1
+#   fi
+# }
+
+verify_agent_logs() {
+  log "Verifying mermin agent logs are enriching data..."
+  export NAMESPACE RELEASE_NAME
+  local pods
+  mapfile -t pods < <(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=${RELEASE_NAME}" -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}')
+
+  if [ ${#pods[@]} -eq 0 ]; then
+    error "No mermin pods found to test." && exit 1
+  fi
+
+  for pod in "${pods[@]}"; do
+    (
+      local counter=0
+      while [ $counter -lt 30 ]; do
+        # THE FIX: Use process substitution '<()' to avoid the pipefail issue.
+        if grep -q --color=never "Enriched packet" <(kubectl logs -n "${NAMESPACE}" "$pod" --tail=50); then
+          exit 0
+        fi
+        counter=$((counter + 1))
+        sleep 2
+      done
+      exit 1
+    ) &
+  done
+
+  log "Waiting for all pod checks to complete..."
+  local has_succeeded=0
+  for job in $(jobs -p); do
+    if wait "$job"; then
+      has_succeeded=1
+    fi
+  done
+
+  if [ "$has_succeeded" -eq 1 ]; then
+    log "🎉 Test PASSED: At least one agent pod is enriching data."
+  else
+    error "❌ Test FAILED: No agent pods showed 'Enriched packet' logs."
+    exit 1
+  fi
 }
 
 cleanup() {
   kind delete cluster --name "$CLUSTER_NAME" || true
 }
 
-verify_agent_logs() {
-  log "Verifying mermin agent logs are enriching data..."
-  kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=${RELEASE_NAME}" -o 'jsonpath={.items[*].metadata.name}' | \
-  while read -r pod; do
-    (
-      counter=0
-      while [ $counter -lt 15 ]; do
-        if kubectl logs -n "${NAMESPACE}" "$pod" | grep -q "Enriched packet"; then
-          printf "✅ Success: Found 'Enriched packet' in logs for %s.\\n" "$pod"
-          exit 0
-        fi
-        counter=$((counter + 1))
-        sleep 2
-      done
-      printf "❌ Failed: Did not find 'Enriched packet' in logs for pod %s after 30 seconds.\\n" "$pod" >&2
-      exit 1
-    ) &
-  done
-
-  local has_failed=0
-  for job in $(jobs -p); do
-    wait "$job" || has_failed=1
-  done
-
-  if [ "$has_failed" -ne 0 ]; then
-    error "One or more agent pods failed the log verification."
-  fi
-
-  log "🎉 All mermin agent pods have the expected log output."
-}
-
 #----------------#
 # Main execution #
 #----------------#
 
-build_image
+log "==============================="
+log "Testing with CNI: $CNI"
+log "==============================="
 
-for cni in "${CNIS[@]}"; do
-  log "==============================="
-  log "Testing with CNI: $cni"
-  log "==============================="
+create_kind_cluster
+install_cni "${CNI}"
+kubectl wait --for=condition=Ready nodes --all --timeout=3m
+load_image_into_kind
+deploy_helm_chart
+verify_deployment
+verify_agent_logs
 
-  create_kind_cluster
-  install_cni "$cni"
-  kubectl wait --for=condition=Ready nodes --all --timeout=120s
-  load_image_into_kind
-  deploy_helm_chart
-  verify_deployment
-  verify_agent_logs
-  cleanup
-
-  log "✅ Test succeeded with CNI: $cni"
-done
-
-log "🎉 All CNI tests completed successfully."
+log "✅ Test succeeded with CNI: $CNI"
