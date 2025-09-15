@@ -18,7 +18,7 @@ use network_types::{
     eth::{EthHdr, EtherType},
     fragment::FragmentHdr,
     geneve::GeneveHdr,
-    gre::GreHdr,
+    gre::{GreHdr, GreRoutingHeader},
     hip::HipHdr,
     hop::HopOptHdr,
     icmp::IcmpHdr,
@@ -344,7 +344,13 @@ impl Parser {
 
         let next_hdr = ipv4_hdr.proto;
         match next_hdr {
-            IpProto::Icmp | IpProto::Tcp | IpProto::Udp | IpProto::Gre | IpProto::Esp | IpProto::Ah | IpProto::Hip => {
+            IpProto::Icmp
+            | IpProto::Tcp
+            | IpProto::Udp
+            | IpProto::Gre
+            | IpProto::Esp
+            | IpProto::Ah
+            | IpProto::Hip => {
                 self.next_hdr = HeaderType::Proto(next_hdr);
             }
             IpProto::Ipv4 => self.next_hdr = HeaderType::Ipv4,
@@ -370,10 +376,12 @@ impl Parser {
 
         let next_hdr = ipv6_hdr.next_hdr;
         match next_hdr {
-            IpProto::Tcp | IpProto::Udp | IpProto::Ipv6Icmp => {
-                self.next_hdr = HeaderType::Proto(next_hdr);
-            }
-            IpProto::HopOpt
+            IpProto::Tcp
+            | IpProto::Udp
+            | IpProto::Ipv6Icmp
+            | IpProto::Esp
+            | IpProto::Ah
+            | IpProto::HopOpt
             | IpProto::Ipv6Route
             | IpProto::Ipv6Frag
             | IpProto::Ipv6Opts
@@ -475,7 +483,49 @@ impl Parser {
         }
 
         let gre_hdr: GreHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += gre_hdr.total_hdr_len();
+        let mut total_offset = gre_hdr.total_hdr_len();
+
+        // Handle variable-length routing field if R flag is set
+        if gre_hdr.r_flg() {
+            let routing_start_offset = self.offset + total_offset;
+
+            let mut routing_len = 0;
+            let mut current_offset = routing_start_offset;
+
+            loop {
+                if current_offset + GreRoutingHeader::LEN > ctx.len() as usize {
+                    return Err(Error::OutOfBounds);
+                }
+
+                let sre_header: GreRoutingHeader =
+                    ctx.load(current_offset).map_err(|_| Error::OutOfBounds)?;
+
+                if sre_header.address_family == 0 && sre_header.sre_length == 0 {
+                    routing_len += GreRoutingHeader::LEN;
+                    break;
+                }
+
+                if sre_header.sre_length < GreRoutingHeader::LEN as u8 {
+                    return Err(Error::OutOfBounds);
+                }
+
+                if current_offset + sre_header.sre_length as usize > ctx.len() as usize {
+                    return Err(Error::OutOfBounds);
+                }
+
+                routing_len += sre_header.sre_length as usize;
+                current_offset += sre_header.sre_length as usize;
+
+                // Prevent infinite loops
+                if routing_len > 1024 {
+                    return Err(Error::OutOfBounds);
+                }
+            }
+
+            total_offset += routing_len;
+        }
+
+        self.offset += total_offset;
 
         let protocol_type = gre_hdr.protocol();
         match protocol_type {
@@ -1262,14 +1312,43 @@ mod tests {
         packet
     }
 
-    // Helper function to create a GRE test packet
-    fn create_gre_test_packet() -> Vec<u8> {
+    // Helper function to create a GRE test packet with configurable routing
+    fn create_gre_test_packet_with_routing(with_routing: bool) -> Vec<u8> {
         let mut packet = Vec::new();
 
-        // GRE header fields
-        packet.push(0x00); // Checksum Present: No, Routing Present: No
-        packet.push(0x00); // Version: 0
-        packet.extend_from_slice(&[0x08, 0x00]); // Protocol Type: IPv4 (0x0800)
+        if with_routing {
+            // GRE header with Routing Present flag set
+            packet.push(0x40); // Routing Present: Yes (R=1), Checksum Present: No
+            packet.push(0x00); // Version: 0
+            packet.extend_from_slice(&[0x08, 0x00]); // Protocol Type: IPv4 (0x0800)
+
+            // Checksum/Offset field (present when R flag is set)
+            packet.extend_from_slice(&[0x00, 0x00]); // Checksum: 0 (not used when C=0)
+            packet.extend_from_slice(&[0x00, 0x00]); // Offset: 0
+
+            // Routing field with multiple SREs
+            // First SRE: Address Family 0x0002 (IP), Length 8 bytes
+            packet.extend_from_slice(&[0x00, 0x02]); // Address Family: IP (2)
+            packet.push(0x00); // SRE Offset: 0
+            packet.push(0x08); // SRE Length: 8 bytes (4 byte header + 4 byte routing info)
+            packet.extend_from_slice(&[0x01, 0x02, 0x03, 0x04]); // Routing Information (4 bytes)
+
+            // Second SRE: Address Family 0x0003, Length 12 bytes
+            packet.extend_from_slice(&[0x00, 0x03]); // Address Family: 3
+            packet.push(0x00); // SRE Offset: 0
+            packet.push(0x0C); // SRE Length: 12 bytes (4 byte header + 8 byte routing info)
+            packet.extend_from_slice(&[0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C]); // Routing Information (8 bytes)
+
+            // NULL SRE (terminator)
+            packet.extend_from_slice(&[0x00, 0x00]); // Address Family: 0 (NULL)
+            packet.push(0x00); // SRE Offset: 0
+            packet.push(0x00); // SRE Length: 0 (indicates end)
+        } else {
+            // Basic GRE header without routing
+            packet.push(0x00); // Checksum Present: No, Routing Present: No
+            packet.push(0x00); // Version: 0
+            packet.extend_from_slice(&[0x08, 0x00]); // Protocol Type: IPv4 (0x0800)
+        }
 
         packet
     }
@@ -2215,16 +2294,40 @@ mod tests {
 
     #[test]
     fn test_parse_gre_header() {
-        let mut parser = Parser::default();
-        parser.next_hdr = HeaderType::Proto(IpProto::Gre);
-        let packet = create_gre_test_packet();
-        let ctx = TcContext::new(packet);
+        {
+            let mut parser = Parser::default();
+            parser.next_hdr = HeaderType::Proto(IpProto::Gre);
+            let packet = create_gre_test_packet_with_routing(false);
+            let ctx = TcContext::new(packet);
 
-        let result = parser.parse_gre_header(&ctx);
+            let result = parser.parse_gre_header(&ctx);
 
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, GreHdr::LEN);
-        assert!(matches!(parser.next_hdr, HeaderType::Ipv4));
+            assert!(result.is_ok());
+            assert_eq!(parser.offset, GreHdr::LEN); // Only fixed header
+            assert!(matches!(parser.next_hdr, HeaderType::Ipv4));
+        }
+
+        {
+            let mut parser = Parser::default();
+            parser.next_hdr = HeaderType::Proto(IpProto::Gre);
+            let packet = create_gre_test_packet_with_routing(true);
+            let ctx = TcContext::new(packet.clone());
+
+            let result = parser.parse_gre_header(&ctx);
+
+            assert!(result.is_ok());
+            // Expected offset: 4 (fixed header) + 4 (checksum/offset) + 8 (first SRE) + 12 (second SRE) + 4 (NULL SRE) = 32
+            assert_eq!(parser.offset, 32);
+            assert!(matches!(parser.next_hdr, HeaderType::Ipv4));
+
+            // Verify the packet structure matches our expectations
+            assert_eq!(packet.len(), 32);
+            assert_eq!(packet[0], 0x40); // R flag set
+            assert_eq!(packet[4], 0x00); // Checksum field start
+            assert_eq!(packet[8], 0x00); // First SRE address family high byte
+            assert_eq!(packet[9], 0x02); // First SRE address family low byte (IP)
+            assert_eq!(packet[11], 0x08); // First SRE length
+        }
     }
 
     #[test]

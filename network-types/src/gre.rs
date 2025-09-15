@@ -31,13 +31,14 @@ impl GreHdr {
     /// - Checksum/Offset: 4 bytes (if C or R flag is set)
     /// - Key: 4 bytes (if K flag is set)
     /// - Sequence Number: 4 bytes (if S flag is set)
-    /// - Routing: Variable length (if R flag is set, but not calculated here)
     ///
-    /// Note: According to RFC, if either the Checksum Present bit or the Routing Present bit
-    /// are set, both the Checksum and Offset fields are present in the GRE packet.
+    /// Note: This method only calculates the length of the fixed optional fields.
+    /// When the Routing Present flag (R) is set, there is also a variable-length
+    /// routing field that must be parsed separately using packet data.
+    /// Use the parse_gre_header function for complete header parsing including routing.
     ///
     /// # Returns
-    /// The total length of the GRE header in bytes (excluding variable-length routing data).
+    /// The length of the fixed GRE header fields in bytes (excluding variable-length routing data).
     pub fn total_hdr_len(&self) -> usize {
         let mut len = Self::LEN; // Fixed 4 bytes
 
@@ -51,9 +52,6 @@ impl GreHdr {
         if self.seq_flg() {
             len += 4; // Sequence Number field
         }
-
-        // Note: Variable-length Routing field is not calculated here
-        // as it requires parsing the routing information structure
 
         len
     }
@@ -182,6 +180,87 @@ impl GreHdr {
     #[inline]
     pub fn set_protocol(&mut self, proto: u16) {
         self.proto = proto;
+    }
+
+    /// Calculates the total length of the routing field by parsing SREs.
+    /// This requires access to the packet data to read the variable-length routing information.
+    ///
+    /// # Parameters
+    /// * `data`: Slice containing the routing field data (starting after checksum/offset field)
+    ///
+    /// # Returns
+    /// Total length of the routing field in bytes, or an error if parsing fails
+    pub fn calculate_routing_len(data: &[u8]) -> Result<usize, &'static str> {
+        let mut offset = 0;
+        let mut total_len = 0;
+
+        loop {
+            // Ensure we have enough bytes for the SRE header
+            if offset + GreRoutingHeader::LEN > data.len() {
+                return Err("Insufficient data for SRE header");
+            }
+
+            // Parse the SRE header
+            let sre_header = unsafe {
+                core::ptr::read_unaligned(data.as_ptr().add(offset) as *const GreRoutingHeader)
+            };
+
+            // Convert from network byte order
+            let address_family = u16::from_be(sre_header.address_family);
+            let sre_length = sre_header.sre_length;
+
+            // Check for NULL SRE (terminator)
+            if address_family == 0 && sre_length == 0 {
+                total_len += GreRoutingHeader::LEN;
+                break;
+            }
+
+            // Validate SRE length
+            if sre_length < GreRoutingHeader::LEN as u8 {
+                return Err("Invalid SRE length");
+            }
+
+            // Ensure we have enough data for the complete SRE
+            if offset + sre_length as usize > data.len() {
+                return Err("Insufficient data for complete SRE");
+            }
+
+            total_len += sre_length as usize;
+            offset += sre_length as usize;
+        }
+
+        Ok(total_len)
+    }
+}
+
+/// Represents the static part of a GRE Source Route Entry (SRE).
+/// Each SRE contains a 4-byte header followed by variable-length routing information.
+#[repr(C, packed)]
+#[derive(Debug, Copy, Clone, Default)]
+pub struct GreRoutingHeader {
+    /// Address Family (2 bytes) - indicates syntax/semantics of routing info
+    pub address_family: u16,
+    /// SRE Offset (1 byte) - offset to active entry in routing info
+    pub sre_offset: u8,
+    /// SRE Length (1 byte) - total length of this SRE in bytes
+    /// If 0, this indicates the last SRE (NULL terminator)
+    pub sre_length: u8,
+}
+
+impl GreRoutingHeader {
+    /// The size of the SRE header in bytes (Address Family + SRE Offset + SRE Length)
+    pub const LEN: usize = core::mem::size_of::<GreRoutingHeader>();
+
+    /// Checks if this is a NULL SRE (terminator)
+    #[inline]
+    pub fn is_null_sre(&self) -> bool {
+        self.address_family == 0 && self.sre_length == 0
+    }
+
+    /// Gets the total length of this SRE including the routing information
+    #[inline]
+    pub fn total_sre_len(&self) -> usize {
+        self.sre_length as usize
     }
 }
 

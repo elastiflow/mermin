@@ -81,7 +81,7 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
     const PAYLOAD_OFFSET: usize = EthHdr::LEN + Ipv4Hdr::LEN + UdpHdr::LEN;
 
     let packet_type_byte: u8 = ctx.load(PAYLOAD_OFFSET).map_err(|_| TC_ACT_SHOT)?;
-    let mut data_offset = PAYLOAD_OFFSET + 1;
+    let data_offset = PAYLOAD_OFFSET + 1;
 
     let packet_type = match u8_to_packet_type(packet_type_byte) {
         Some(pt) => pt,
