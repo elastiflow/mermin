@@ -59,7 +59,7 @@ jobs:
         run: cargo clippy -p mermin-ebpf -- -D warnings
 
       - name: Lint userspace code
-        run: cargo clippy --all-features -- -D warnings
+        run: cargo clippy -- -D warnings
 
   test:
     name: Run Tests

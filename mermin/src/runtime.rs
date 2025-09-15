@@ -4,7 +4,7 @@ use clap::Parser;
 
 use crate::runtime::{
     cli::Cli,
-    conf::{Config, ConfigError},
+    conf::{Conf, ConfigError},
 };
 
 pub mod cli;
@@ -13,13 +13,13 @@ pub mod conf;
 pub struct Runtime {
     #[allow(dead_code)]
     pub cli: Cli,
-    pub config: Config,
+    pub config: Conf,
 }
 
 impl Runtime {
     pub fn new() -> Result<Self, RuntimeError> {
         let cli = Cli::parse();
-        let (config, cli) = Config::new(cli)?;
+        let (config, cli) = Conf::new(cli)?;
 
         Ok(Runtime { cli, config })
     }
@@ -27,13 +27,13 @@ impl Runtime {
 
 #[derive(Debug)]
 pub enum RuntimeError {
-    Config(ConfigError),
+    Conf(ConfigError),
 }
 
 impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RuntimeError::Config(e) => e.fmt(f),
+            RuntimeError::Conf(e) => e.fmt(f),
         }
     }
 }
@@ -41,13 +41,13 @@ impl fmt::Display for RuntimeError {
 impl Error for RuntimeError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            RuntimeError::Config(e) => Some(e),
+            RuntimeError::Conf(e) => Some(e),
         }
     }
 }
 
 impl From<ConfigError> for RuntimeError {
     fn from(e: ConfigError) -> Self {
-        RuntimeError::Config(e)
+        RuntimeError::Conf(e)
     }
 }
