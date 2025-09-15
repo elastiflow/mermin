@@ -102,46 +102,6 @@ verify_deployment() {
   kubectl wait --for=condition=Ready pods -l "app.kubernetes.io/name=${RELEASE_NAME}" -n "$NAMESPACE" --timeout=3m
 }
 
-# verify_agent_logs() {
-#   log "Verifying mermin agent logs are enriching data..."
-#   export NAMESPACE RELEASE_NAME
-#   local pods
-#   mapfile -t pods < <(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=${RELEASE_NAME}" -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}')
-
-#   if [ ${#pods[@]} -eq 0 ]; then
-#     error "No mermin pods found to test." && exit 1
-#   fi
-
-#   for pod in "${pods[@]}"; do
-#     (
-#       local counter=0
-#       while [ $counter -lt 30 ]; do
-#         if kubectl logs -n "${NAMESPACE}" "$pod" | grep --color=never "Enriched packet"; then
-#           exit 0
-#         fi
-#         counter=$((counter + 1))
-#         sleep 2
-#       done
-#       exit 1
-#     ) &
-#   done
-
-#   log "Waiting for all pod checks to complete..."
-#   local has_succeeded=0
-#   for job in $(jobs -p); do
-#     if wait "$job"; then
-#       has_succeeded=1
-#     fi
-#   done
-
-#   if [ "$has_succeeded" -eq 1 ]; then
-#     log "🎉 Test PASSED: At least one agent pod is enriching data."
-#   else
-#     error "❌ Test FAILED: No agent pods showed 'Enriched packet' logs."
-#     exit 1
-#   fi
-# }
-
 verify_agent_logs() {
   log "Verifying mermin agent logs are enriching data..."
   export NAMESPACE RELEASE_NAME
@@ -156,7 +116,6 @@ verify_agent_logs() {
     (
       local counter=0
       while [ $counter -lt 30 ]; do
-        # THE FIX: Use process substitution '<()' to avoid the pipefail issue.
         if grep -q --color=never "Enriched packet" <(kubectl logs -n "${NAMESPACE}" "$pod" --tail=50); then
           exit 0
         fi
@@ -176,9 +135,9 @@ verify_agent_logs() {
   done
 
   if [ "$has_succeeded" -eq 1 ]; then
-    log "🎉 Test PASSED: At least one agent pod is enriching data."
+    log "Test PASSED: At least one agent pod is enriching data."
   else
-    error "❌ Test FAILED: No agent pods showed 'Enriched packet' logs."
+    error "Test FAILED: No agent pods showed 'Enriched packet' logs."
     exit 1
   fi
 }
@@ -203,4 +162,4 @@ deploy_helm_chart
 verify_deployment
 verify_agent_logs
 
-log "✅ Test succeeded with CNI: $CNI"
+log "Test succeeded with CNI: $CNI"
