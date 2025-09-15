@@ -260,11 +260,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
         }
     }
 
-    #[cfg(not(feature = "test"))]
     let ifindex = unsafe { (*ctx.skb.skb).ifindex };
-    #[cfg(feature = "test")]
-    let ifindex = 0;
-
     // In non-test builds, populate the per-CPU scratch area and write to the ring buffer
     #[cfg(not(feature = "test"))]
     unsafe {
@@ -746,6 +742,7 @@ mod host_test_shim {
 
     // Mock SkBuff that wraps the mock __sk_buff like the real one
     pub struct SkBuff {
+        #[allow(dead_code)]
         pub skb: *mut MockSkBuff,
         _data: Vec<u8>,                           // Keep data alive
         _mock_skb: alloc::boxed::Box<MockSkBuff>, // Keep mock alive
