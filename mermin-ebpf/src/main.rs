@@ -344,7 +344,7 @@ impl Parser {
 
         let next_hdr = ipv4_hdr.proto;
         match next_hdr {
-            IpProto::Tcp | IpProto::Udp | IpProto::Icmp | IpProto::Gre | IpProto::Esp => {
+            IpProto::Icmp | IpProto::Tcp | IpProto::Udp | IpProto::Gre | IpProto::Esp | IpProto:Ah | IpProto:Hip => {
                 self.next_hdr = HeaderType::Proto(next_hdr);
             }
             IpProto::Ipv4 => self.next_hdr = HeaderType::Ipv4,
