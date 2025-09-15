@@ -28,6 +28,7 @@ log = { version = "0.4.22", default-features = false }
 tokio = { version = "1.40.0", default-features = false }
 toml = { version = "0.9.5", default-features = false, features = ["parse", "serde"] }
 which = { version = "6.0.0", default-features = false }
+criterion = { version = "0.5", features = ["html_reports"] }
 
 [profile.release.package.mermin-ebpf]
 debug = 2

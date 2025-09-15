@@ -8,6 +8,11 @@ license.workspace = true
 
 [dev-dependencies]
 socket2 = "0.5"
+criterion = { workspace = true }
+
+[[bench]]
+name = "ebpf_simulation"
+harness = false
 
 [dependencies]
 mermin-common = { path = "../mermin-common", features = [] }
