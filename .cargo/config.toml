@@ -1,0 +1,3 @@
+# Only configure the target-specific linker, no global env vars — this is for local development on non-linux machine
+[target.aarch64-unknown-linux-musl]
+linker = "aarch64-linux-musl-gcc"

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::runtime::conf::conf_serde::duration;
 
-/// The `Flow` struct represents the configuration parameters for managing flows in a system.
+/// The `FlowConf` struct represents the configuration parameters for managing flows in a system.
 /// Each field specifies configurable time-to-live (TTL) values or intervals for different types
 /// of network traffic flows. These configurations influence when flow records are generated and
 /// how long active or inactive flows are tracked.
@@ -19,77 +19,77 @@ use crate::runtime::conf::conf_serde::duration;
 /// tcp-fin: 5 - If we see a FIN flag for a TCP flow, generate a record 5 secs after the flag.
 /// tcp-rst: 5 - If we see an RST flag for a TCP flow, generate a record 5 secs after the flag.
 /// udp: 20 - If no activity has been observed for a UDP flow in the last 20 seconds, generate a record.
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Flow {
-    /// The interval between checks for expired flows.
-    /// Adjusting this parameter can group more flows into a single NetFlow packet
-    /// or increase efficiency by reducing expiration checks.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct FlowConf {
+    /// The maximum number of flow records in a batch.
+    /// - Default Value: `64`
+    /// - Example: If set to `64`, the system will flush a batch of 64 flow records to the output.
+    #[serde(default = "defaults::max_batch_size")]
+    pub max_batch_size: usize,
+
+    /// The maxmimum interval when a batch of flow records is flushed to the output.
     /// - Default Value: `10s`
-    /// - Example: If set to `10s`, the system will check every 10 seconds for flows that are ready to be sent.
-    #[serde(default = "defaults::expiry_interval", with = "duration")]
-    pub expiry_interval: Duration,
+    /// - Example: If set to `10s`, the system will flush a batch of flow records to the output every 10 seconds if the batch size is not reached.
+    #[serde(default = "defaults::max_batch_interval", with = "duration")]
+    pub max_batch_interval: Duration,
 
-    /// The maximum time-to-live for an active flow.
-    /// Flows will be forcefully terminated after this period, regardless of their state.
+    /// The maximum interval between records for an active flow.
     /// - Default Value: `60s`
-    /// - Example: If set to `60s`, an active flow exceeding 60 seconds will be forcibly recorded and stopped.
-    #[serde(default = "defaults::max_active_life", with = "duration")]
-    pub max_active_life: Duration,
+    /// - Example: If set to `60s`, a flow record will be generated if the flow has been active for 60 seconds, but has not timed out.
+    #[serde(default = "defaults::max_record_interval", with = "duration")]
+    pub max_record_interval: Duration,
 
-    /// A general time-to-live for all types of network connections
+    /// A general timeout for all types of network connections
     /// unless overridden by specific rules for the traffic type (e.g., TCP, UDP, ICMP).
+    /// A flow is dropped when a flow has not seen any activity for the timeout period.
+    /// Typically, this a flow timeout will generate a flow record, but if a flow has seen 0 packets, it will not generate a flow record.
     /// - Default Value: `30s`
-    /// - Example: If a flow remains inactive for 30 seconds, its record will be generated.
-    #[serde(default = "defaults::flow_generic", with = "duration")]
-    pub flow_generic: Duration,
+    /// - Example: If set to `30s`, a flow record will be generated if flow packet count is not zero and the flow has not seen any activity for 30 seconds, then the flow will be dropped.
+    #[serde(default = "defaults::generic_timeout", with = "duration")]
+    pub generic_timeout: Duration,
 
-    /// The time-to-live for ICMP flows. If no activity is observed within this period,
-    /// a record will be generated.
+    /// The timeout for ICMP flows.
     /// - Default Value: `10s`
     /// - Example: If set to `10s`, an ICMP flow with no activity for 10 seconds will be recorded.
-    #[serde(default = "defaults::icmp", with = "duration")]
-    pub icmp: Duration,
+    #[serde(default = "defaults::icmp_timeout", with = "duration")]
+    pub icmp_timeout: Duration,
 
-    /// The time-to-live for general TCP flows. This is used for connections that are still open
+    /// The timeout for general TCP flows. This is used for connections that are still open
     /// without specific termination signals (e.g., FIN or RST).
     /// - Default Value: `20s`
-    /// - Example: A TCP flow with no activity for 20 seconds will have a record generated.
-    #[serde(default = "defaults::tcp", with = "duration")]
-    pub tcp: Duration,
+    #[serde(default = "defaults::tcp_timeout", with = "duration")]
+    pub tcp_timeout: Duration,
 
-    /// The time-to-live applied to TCP flows when a FIN (finish) flag is observed.
+    /// The timeout applied to TCP flows when a FIN (finish) flag is observed.
     /// This indicates the connection is being gracefully closed.
     /// - Default Value: `5s`
-    /// - Example: A TCP flow will have a record generated 5 seconds after both endpoints send a FIN packet.
-    #[serde(default = "defaults::tcp_fin", with = "duration")]
-    pub tcp_fin: Duration,
+    #[serde(default = "defaults::tcp_fin_timeout", with = "duration")]
+    pub tcp_fin_timeout: Duration,
 
-    /// The time-to-live applied to TCP flows when a RST (reset) flag is observed.
+    /// The timeout applied to TCP flows when a RST (reset) flag is observed.
     /// This indicates a connection termination, typically in error or unexpectedly.
     /// - Default Value: `5s`
-    /// - Example: A flow will have a record generated 5 seconds after a RST flag is detected.
-    #[serde(default = "defaults::tcp_rst", with = "duration")]
-    pub tcp_rst: Duration,
+    #[serde(default = "defaults::tcp_rst_timeout", with = "duration")]
+    pub tcp_rst_timeout: Duration,
 
-    /// The time-to-live for UDP flows. Since UDP is connectionless,
-    /// this determines how long inactive flows are tracked before being recorded.
-    /// - Default Value: `20s`
-    /// - Example: A UDP flow with no activity for 20 seconds will have a record generated.
-    #[serde(default = "defaults::udp", with = "duration")]
-    pub udp: Duration,
+    /// The timeout for UDP flows.
+    /// - Default Value: `60s`
+    #[serde(default = "defaults::udp_timeout", with = "duration")]
+    pub udp_timeout: Duration,
 }
 
-impl Default for Flow {
-    fn default() -> Flow {
-        Flow {
-            expiry_interval: defaults::expiry_interval(),
-            max_active_life: defaults::max_active_life(),
-            flow_generic: defaults::flow_generic(),
-            icmp: defaults::icmp(),
-            tcp: defaults::tcp(),
-            tcp_fin: defaults::tcp_fin(),
-            tcp_rst: defaults::tcp_rst(),
-            udp: defaults::udp(),
+impl Default for FlowConf {
+    fn default() -> FlowConf {
+        FlowConf {
+            max_batch_size: defaults::max_batch_size(),
+            max_batch_interval: defaults::max_batch_interval(),
+            max_record_interval: defaults::max_record_interval(),
+            generic_timeout: defaults::generic_timeout(),
+            icmp_timeout: defaults::icmp_timeout(),
+            tcp_timeout: defaults::tcp_timeout(),
+            tcp_fin_timeout: defaults::tcp_fin_timeout(),
+            tcp_rst_timeout: defaults::tcp_rst_timeout(),
+            udp_timeout: defaults::udp_timeout(),
         }
     }
 }
@@ -97,28 +97,31 @@ impl Default for Flow {
 mod defaults {
     use std::time::Duration;
 
-    pub fn expiry_interval() -> Duration {
-        Duration::from_secs(10)
+    pub fn max_batch_size() -> usize {
+        64
     }
-    pub fn max_active_life() -> Duration {
+    pub fn max_batch_interval() -> Duration {
+        Duration::from_secs(5)
+    }
+    pub fn max_record_interval() -> Duration {
         Duration::from_secs(60)
     }
-    pub fn flow_generic() -> Duration {
+    pub fn generic_timeout() -> Duration {
         Duration::from_secs(30)
     }
-    pub fn icmp() -> Duration {
+    pub fn icmp_timeout() -> Duration {
         Duration::from_secs(10)
     }
-    pub fn tcp() -> Duration {
+    pub fn tcp_timeout() -> Duration {
         Duration::from_secs(20)
     }
-    pub fn tcp_fin() -> Duration {
+    pub fn tcp_fin_timeout() -> Duration {
         Duration::from_secs(5)
     }
-    pub fn tcp_rst() -> Duration {
+    pub fn tcp_rst_timeout() -> Duration {
         Duration::from_secs(5)
     }
-    pub fn udp() -> Duration {
-        Duration::from_secs(20)
+    pub fn udp_timeout() -> Duration {
+        Duration::from_secs(60)
     }
 }

@@ -5,7 +5,7 @@ use network_types::ip::IpProto;
 use sha1::{Digest, Sha1};
 
 /// Community ID generator with configurable seed
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CommunityIdGenerator {
     seed: u16,
 }
