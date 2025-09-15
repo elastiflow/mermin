@@ -20,7 +20,6 @@ use network_types::{
     hop::HopOptHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
     mobility::MobilityHdr,
-    parse_gre_hdr,
     route::{
         CrhHeader, RoutingHeaderType, RplSourceRouteHeader, SegmentRoutingHeader,
         Type2RoutingHeader,
@@ -268,13 +267,10 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::Gre => {
-            let header = parse_gre_hdr!(ctx, data_offset);
-            match header {
-                Ok(gre_hdr) => ParsedHeader {
-                    type_: PacketType::Gre,
-                    data: HeaderUnion { gre: gre_hdr },
-                },
-                _ => return Err(TC_ACT_SHOT),
+            let header: GreHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            ParsedHeader {
+                type_: PacketType::Gre,
+                data: HeaderUnion { gre: header },
             }
         }
     };

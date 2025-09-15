@@ -24,7 +24,6 @@ use network_types::{
     icmp::IcmpHdr,
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
     mobility::MobilityHdr,
-    parse_gre_hdr,
     route::{GenericRoute, RoutingHeaderType},
     shim6::Shim6Hdr,
     tcp::TcpHdr,
@@ -78,7 +77,7 @@ pub fn mermin(ctx: TcContext) -> i32 {
 }
 
 fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
-    const MAX_HEADER_PARSE_DEPTH: usize = 12;
+    const MAX_HEADER_PARSE_DEPTH: usize = 8;
 
     // Information for building flow records (prioritizes innermost headers).
     // These fields will be updated as we parse deeper or encounter encapsulations.
@@ -259,9 +258,6 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
         }
     }
 
-    #[cfg(test)]
-    let ifindex = 0;
-    #[cfg(not(test))]
     let ifindex = unsafe { (*ctx.skb.skb).ifindex };
     let packet_meta = PacketMeta {
         ifindex,
@@ -474,21 +470,22 @@ impl Parser {
     /// Parses the GRE header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
     fn parse_gre_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        let mut data_offset = self.offset;
-        let gre_hdr = parse_gre_hdr!(ctx, data_offset);
-
-        match gre_hdr {
-            Ok(gre_hdr) => {
-                self.offset += GreHdr::LEN;
-                let protocol_type = gre_hdr.proto();
-                match protocol_type {
-                    Ok(EtherType::Ipv4) => self.next_hdr = HeaderType::Ipv4,
-                    Ok(EtherType::Ipv6) => self.next_hdr = HeaderType::Ipv6,
-                    _ => self.next_hdr = HeaderType::StopProcessing,
-                }
-            }
-            Err(_) => return Err(Error::OutOfBounds),
+        if self.offset + GreHdr::LEN > ctx.len() as usize {
+            return Err(Error::OutOfBounds);
         }
+
+        let gre_hdr: GreHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += gre_hdr.total_hdr_len();
+
+        let protocol_type = gre_hdr.protocol();
+        match protocol_type {
+            Ok(EtherType::Ipv4) => self.next_hdr = HeaderType::Ipv4,
+            Ok(EtherType::Ipv6) => self.next_hdr = HeaderType::Ipv6,
+            _ => {
+                self.next_hdr = HeaderType::StopProcessing;
+                return Ok(());
+            }
+        };
 
         Ok(())
     }
