@@ -43,6 +43,10 @@ spec:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: health
+              containerPort: {{ .Values.merminConfig.health_port | default 8080 }}
+              protocol: TCP
           args:
             - "--config"
             - "/etc/mermin/mermin-config.yaml"
@@ -66,6 +70,8 @@ spec:
               value: "kubernetes"
             - name: MERMIN_HOST_PID_ENRICHMENT
               value: {{ .Values.config.hostPidEnrichment | quote }}
+            - name: MERMIN_HEALTH_PORT
+              value: {{ .Values.merminConfig.health_port | default 8080 | quote }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           resources:

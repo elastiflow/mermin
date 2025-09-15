@@ -79,6 +79,10 @@ pub struct Conf {
     /// This field encapsulates additional configuration details specific
     /// to how the application's logic operates.
     pub flow: FlowConf,
+
+    /// Port for health check endpoint
+    /// - Default: 8080
+    pub health_port: u16,
 }
 
 impl Default for Conf {
@@ -92,6 +96,7 @@ impl Default for Conf {
             packet_worker_count: defaults::flow_workers(),
             shutdown_timeout: defaults::shutdown_timeout(),
             flow: FlowConf::default(),
+            health_port: 8080,
         }
     }
 }
@@ -516,5 +521,27 @@ interface: ["eth2", "eth3"]
             "unexpected error: {}",
             msg
         );
+    }
+
+    #[test]
+    fn loads_health_port_from_yaml_file() {
+        Jail::expect_with(|jail| {
+            let path = "mermin_health.yaml";
+            jail.create_file(
+                path,
+                r#"
+interface:
+  - eth0
+health_port: 8081
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config loads from yaml file");
+            assert_eq!(cfg.interface, Vec::from(["eth0".to_string()]));
+            assert_eq!(cfg.health_port, 8081);
+
+            Ok(())
+        });
     }
 }

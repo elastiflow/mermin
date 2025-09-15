@@ -5,3 +5,4 @@ image:
 merminConfig:
   interface:
     - eth0
+  health_port: 8080

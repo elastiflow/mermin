@@ -55,27 +55,37 @@ resources: {}
   #   cpu: 1
   #   memory: 256Mi
 
-# TODO: Probes are not yet implemented in mermin.
-# The configuration is left here as a placeholder for future use.
-# livenessProbe:
-#   exec:
-#     command:
-#     - /path/to/liveness
-#   initialDelaySeconds: 30
-#   periodSeconds: 10
-#
-# readinessProbe:
-#   exec:
-#     command:
-#     - /path/to/readiness
-#   initialDelaySeconds: 15
-#   periodSeconds: 5
-# startupProbe:
-#   exec:
-#     command:
-#     - /path/to/startup
-#   initialDelaySeconds: 15
-#   periodSeconds: 5
+merminConfig:
+  interface:
+    - "eth0"
+  health_port: 8080
+
+livenessProbe:
+  httpGet:
+    path: /livez
+    port: health
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: health
+  initialDelaySeconds: 15
+  periodSeconds: 5
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+startupProbe:
+  httpGet:
+    path: /startup
+    port: health
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 5
+  failureThreshold: 30
 
 tolerations:
   - effect: NoSchedule
