@@ -6,6 +6,7 @@ pub mod esp;
 pub mod eth;
 pub mod fragment;
 pub mod geneve;
+pub mod gre;
 pub mod hip;
 pub mod hop;
 pub mod icmp;

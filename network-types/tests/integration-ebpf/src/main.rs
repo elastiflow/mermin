@@ -16,6 +16,7 @@ use network_types::{
     eth::EthHdr,
     fragment::FragmentHdr,
     geneve::GeneveHdr,
+    gre::GreHdr,
     hop::HopOptHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
     mobility::MobilityHdr,
@@ -59,6 +60,7 @@ fn u8_to_packet_type(val: u8) -> Option<PacketType> {
         18 => Some(PacketType::Mobility),
         19 => Some(PacketType::Shim6),
         20 => Some(PacketType::Hip),
+        21 => Some(PacketType::Gre),
         _ => None,
     }
 }
@@ -262,6 +264,13 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             ParsedHeader {
                 type_: PacketType::Hip,
                 data: HeaderUnion { hip: header },
+            }
+        }
+        PacketType::Gre => {
+            let header: GreHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            ParsedHeader {
+                type_: PacketType::Gre,
+                data: HeaderUnion { gre: header },
             }
         }
     };
