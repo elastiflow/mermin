@@ -7,7 +7,8 @@ CLUSTER_NAME="${CLUSTER_NAME:-mermin-cni-test}"
 HELM_CHART_PATH="${HELM_CHART_PATH:-./charts/mermin}"
 RELEASE_NAME="${RELEASE_NAME:-mermin}"
 NAMESPACE="${NAMESPACE:-atlantis}"
-DOCKER_IMAGE_NAME="${DOCKER_IMAGE_NAME:-mermin:latest}"
+DOCKER_IMAGE_NAME="${DOCKER_IMAGE_NAME:-mermin}"
+DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-latest}"
 VALUES_FILE="${VALUES_FILE:-local/values.yaml}"
 CNI="${CNI:-calico}"
 HOST_CNI_PATH="$HOME/cni-plugins-for-kind"
@@ -104,7 +105,10 @@ load_image_into_kind() {
 
 deploy_helm_chart() {
   helm upgrade --install "$RELEASE_NAME" "$HELM_CHART_PATH" \
-    -n "$NAMESPACE" --values "$VALUES_FILE" --wait --timeout=5m --create-namespace
+    -n "$NAMESPACE" --values "$VALUES_FILE" \
+    --set image.repository="$DOCKER_IMAGE_NAME" \
+    --set image.tag="$DOCKER_IMAGE_TAG" \
+    --wait --timeout=3m --create-namespace
 }
 
 verify_deployment() {

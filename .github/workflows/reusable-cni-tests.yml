@@ -90,5 +90,5 @@ jobs:
       - name: Run E2E Test for ${{ matrix.cni }}
         env:
           CNI: ${{ matrix.cni }}
-          DOCKER_IMAGE_NAME: not-exists.elastiflow.com/mermin:latest
+          DOCKER_IMAGE_NAME: not-exists.elastiflow.com/mermin
         run: ./test_cni.sh
