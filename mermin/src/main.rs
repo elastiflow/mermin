@@ -436,8 +436,21 @@ async fn main() -> anyhow::Result<()> {
         health_state.ready_to_process.store(true, Ordering::Relaxed);
     }
 
-    health_state.startup_complete.store(true, Ordering::Relaxed);
-    info!("Startup complete - all systems ready");
+    let all_systems_ready = health_state.ebpf_loaded.load(Ordering::Relaxed)
+        && health_state.k8s_connected.load(Ordering::Relaxed)
+        && health_state.ready_to_process.load(Ordering::Relaxed);
+
+    health_state
+        .startup_complete
+        .store(all_systems_ready, Ordering::Relaxed);
+
+    if all_systems_ready {
+        info!("Startup complete - all systems ready");
+    } else {
+        warn!(
+            "Startup completed but some systems are not ready - check readiness endpoint for details"
+        );
+    }
 
     println!("Waiting for Ctrl-C...");
     signal::ctrl_c().await?;

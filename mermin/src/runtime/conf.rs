@@ -56,6 +56,10 @@ pub struct Conf {
     #[serde(with = "level")]
     pub log_level: Level,
 
+    /// Port for health check endpoint
+    /// - Default: 8080
+    pub health_port: u16,
+
     /// Capacity of the channel for packet events between the ring buffer reader and flow workers
     /// - Default: 10000
     /// - Example: Increase for high-traffic environments, decrease for memory-constrained systems
@@ -79,10 +83,6 @@ pub struct Conf {
     /// This field encapsulates additional configuration details specific
     /// to how the application's logic operates.
     pub flow: FlowConf,
-
-    /// Port for health check endpoint
-    /// - Default: 8080
-    pub health_port: u16,
 }
 
 impl Default for Conf {
@@ -92,11 +92,11 @@ impl Default for Conf {
             config_path: None,
             auto_reload: false,
             log_level: Level::INFO,
+            health_port: 8080,
             packet_channel_capacity: defaults::packet_channel_capacity(),
             packet_worker_count: defaults::flow_workers(),
             shutdown_timeout: defaults::shutdown_timeout(),
             flow: FlowConf::default(),
-            health_port: 8080,
         }
     }
 }
