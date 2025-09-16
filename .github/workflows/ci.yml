@@ -177,7 +177,6 @@ jobs:
 
   cni_tests:
     name: CNI Tests
-    needs: docker_build
     uses: ./.github/workflows/reusable-cni-tests.yml
 
   all_checks:
