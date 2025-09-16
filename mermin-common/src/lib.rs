@@ -115,131 +115,163 @@ impl PacketMeta {
     }
 
     // Innermost TCP flag methods
+    #[inline]
     pub fn fin(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_FIN)
     }
 
+    #[inline]
     pub fn set_fin(&mut self, fin: bool) {
         Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_FIN, fin)
     }
 
+    #[inline]
     pub fn syn(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_SYN)
     }
 
+    #[inline]
     pub fn set_syn(&mut self, syn: bool) {
         Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_SYN, syn)
     }
 
+    #[inline]
     pub fn rst(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_RST)
     }
 
+    #[inline]
     pub fn set_rst(&mut self, rst: bool) {
         Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_RST, rst)
     }
 
+    #[inline]
     pub fn psh(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_PSH)
     }
 
+    #[inline]
     pub fn set_psh(&mut self, psh: bool) {
         Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_PSH, psh)
     }
 
+    #[inline]
     pub fn ack(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_ACK)
     }
 
+    #[inline]
     pub fn set_ack(&mut self, ack: bool) {
         Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_ACK, ack)
     }
 
+    #[inline]
     pub fn urg(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_URG)
     }
 
+    #[inline]
     pub fn set_urg(&mut self, urg: bool) {
         Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_URG, urg)
     }
 
+    #[inline]
     pub fn ece(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_ECE)
     }
 
+    #[inline]
     pub fn set_ece(&mut self, ece: bool) {
         Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_ECE, ece)
     }
 
+    #[inline]
     pub fn cwr(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_CWR)
     }
 
+    #[inline]
     pub fn set_cwr(&mut self, cwr: bool) {
         Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_CWR, cwr)
     }
 
     // Outermost Tunnel TCP flag methods
+    #[inline]
     pub fn tunnel_fin(&self) -> bool {
         Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_FIN)
     }
 
+    #[inline]
     pub fn set_tunnel_fin(&mut self, fin: bool) {
         Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_FIN, fin)
     }
 
+    #[inline]
     pub fn tunnel_syn(&self) -> bool {
         Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_SYN)
     }
 
+    #[inline]
     pub fn set_tunnel_syn(&mut self, syn: bool) {
         Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_SYN, syn)
     }
 
+    #[inline]
     pub fn tunnel_rst(&self) -> bool {
         Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_RST)
     }
 
+    #[inline]
     pub fn set_tunnel_rst(&mut self, rst: bool) {
         Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_RST, rst)
     }
 
+    #[inline]
     pub fn tunnel_psh(&self) -> bool {
         Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_PSH)
     }
 
+    #[inline]
     pub fn set_tunnel_psh(&mut self, psh: bool) {
         Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_PSH, psh)
     }
 
+    #[inline]
     pub fn tunnel_ack(&self) -> bool {
         Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_ACK)
     }
 
+    #[inline]
     pub fn set_tunnel_ack(&mut self, ack: bool) {
         Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_ACK, ack)
     }
 
+    #[inline]
     pub fn tunnel_urg(&self) -> bool {
         Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_URG)
     }
 
+    #[inline]
     pub fn set_tunnel_urg(&mut self, urg: bool) {
         Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_URG, urg)
     }
 
+    #[inline]
     pub fn tunnel_ece(&self) -> bool {
         Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_ECE)
     }
 
+    #[inline]
     pub fn set_tunnel_ece(&mut self, ece: bool) {
         Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_ECE, ece)
     }
 
+    #[inline]
     pub fn tunnel_cwr(&self) -> bool {
         Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_CWR)
     }
 
+    #[inline]
     pub fn set_tunnel_cwr(&mut self, cwr: bool) {
         Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_CWR, cwr)
     }
