@@ -7,13 +7,17 @@ use network_types::{
     destopts::DestOptsHdr,
     esp::Esp,
     eth::EthHdr,
-    fragment::Fragment,
+    fragment::FragmentHdr,
     geneve::GeneveHdr,
+    gre::GreHdr,
     hop::HopOptHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
+    mobility::MobilityHdr,
     route::{CrhHeader, RplSourceRouteHeader, SegmentRoutingHeader, Type2RoutingHeader},
+    shim6::Shim6Hdr,
     tcp::TcpHdr,
     udp::UdpHdr,
+    vxlan::VxlanHdr,
 };
 
 #[cfg(feature = "user")]
@@ -39,6 +43,11 @@ pub enum PacketType {
     Crh32 = 14,
     Fragment = 15,
     DestOpts = 16,
+    Vxlan = 17,
+    Mobility = 18,
+    Shim6 = 19,
+    Hip = 20,
+    Gre = 21,
 }
 
 /// A union to hold any of the possible parsed network headers.
@@ -60,8 +69,13 @@ pub union HeaderUnion {
     pub segment_routing: SegmentRoutingHeader,
     pub crh16: CrhHeader,
     pub crh32: CrhHeader,
-    pub fragment: Fragment,
+    pub fragment: FragmentHdr,
     pub destopts: DestOptsHdr,
+    pub vxlan: VxlanHdr,
+    pub mobility: MobilityHdr,
+    pub shim6: Shim6Hdr,
+    pub hip: network_types::hip::HipHdr,
+    pub gre: GreHdr,
 }
 
 /// The final struct sent back to user-space. It contains the type of

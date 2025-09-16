@@ -22,7 +22,7 @@ pub fn create_segment_routing_test_packet() -> (Vec<u8>, SegmentRoutingHeader) {
     // GenericRoute (4 bytes) - starting at byte 1
     packet_data[1] = IpProto::Tcp as u8; // Next Header
     packet_data[2] = 4; // Hdr Ext Len (4 * 8 = 32 bytes additional data)
-    packet_data[3] = RoutingHeaderType::SegmentRoutingHeader.as_u8(); // Routing Type (4)
+    packet_data[3] = RoutingHeaderType::SegmentRoutingHeader as u8;
     packet_data[4] = 1; // Segments Left (index of current active segment)
 
     // SegmentFixedHeader (4 bytes) - starting at byte 5
@@ -45,7 +45,7 @@ pub fn create_segment_routing_test_packet() -> (Vec<u8>, SegmentRoutingHeader) {
     let gen_route = GenericRoute {
         next_hdr: IpProto::Tcp,
         hdr_ext_len: 4,
-        type_: RoutingHeaderType::SegmentRoutingHeader.as_u8(),
+        type_: RoutingHeaderType::SegmentRoutingHeader,
         sgmt_left: 1,
     };
 
@@ -56,7 +56,7 @@ pub fn create_segment_routing_test_packet() -> (Vec<u8>, SegmentRoutingHeader) {
     };
 
     let header = SegmentRoutingHeader {
-        gen_route,
+        generic_route: gen_route,
         fixed_hdr,
     };
 
@@ -80,7 +80,7 @@ pub fn create_segment_routing_with_tlvs_test_packet() -> (Vec<u8>, SegmentRoutin
     // GenericRoute (4 bytes)
     packet_data[1] = IpProto::Ipv6 as u8; // Next Header
     packet_data[2] = 3; // Hdr Ext Len = 0 (no additional data)
-    packet_data[3] = RoutingHeaderType::SegmentRoutingHeader.as_u8(); // Routing Type (4)
+    packet_data[3] = RoutingHeaderType::SegmentRoutingHeader as u8;
     packet_data[4] = 0; // Segments Left
 
     // SegmentFixedHeader (4 bytes)
@@ -101,7 +101,7 @@ pub fn create_segment_routing_with_tlvs_test_packet() -> (Vec<u8>, SegmentRoutin
     let gen_route = GenericRoute {
         next_hdr: IpProto::Ipv6,
         hdr_ext_len: 3,
-        type_: RoutingHeaderType::SegmentRoutingHeader.as_u8(),
+        type_: RoutingHeaderType::SegmentRoutingHeader,
         sgmt_left: 0,
     };
 
@@ -112,7 +112,7 @@ pub fn create_segment_routing_with_tlvs_test_packet() -> (Vec<u8>, SegmentRoutin
     };
 
     let header = SegmentRoutingHeader {
-        gen_route,
+        generic_route: gen_route,
         fixed_hdr,
     };
 
@@ -129,19 +129,19 @@ pub fn verify_segment_routing_header(received: ParsedHeader, expected: SegmentRo
 
     // Verify GenericRoute fields
     assert_eq!(
-        parsed_header.gen_route.next_hdr, expected_header.gen_route.next_hdr,
+        parsed_header.generic_route.next_hdr, expected_header.generic_route.next_hdr,
         "Next Header mismatch"
     );
     assert_eq!(
-        parsed_header.gen_route.hdr_ext_len, expected_header.gen_route.hdr_ext_len,
+        parsed_header.generic_route.hdr_ext_len, expected_header.generic_route.hdr_ext_len,
         "Header Extension Length mismatch"
     );
     assert_eq!(
-        parsed_header.gen_route.type_, expected_header.gen_route.type_,
+        parsed_header.generic_route.type_, expected_header.generic_route.type_,
         "Routing Type mismatch"
     );
     assert_eq!(
-        parsed_header.gen_route.sgmt_left, expected_header.gen_route.sgmt_left,
+        parsed_header.generic_route.sgmt_left, expected_header.generic_route.sgmt_left,
         "Segments Left mismatch"
     );
 
@@ -160,8 +160,8 @@ pub fn verify_segment_routing_header(received: ParsedHeader, expected: SegmentRo
     );
 
     // Additionally verify total header length computation matches our constructed variable data
-    let total_hdr_len_bytes = 8 + (parsed_header.gen_route.hdr_ext_len as usize) * 8;
-    match parsed_header.gen_route.hdr_ext_len {
+    let total_hdr_len_bytes = 8 + (parsed_header.generic_route.hdr_ext_len as usize) * 8;
+    match parsed_header.generic_route.hdr_ext_len {
         4 => assert_eq!(
             total_hdr_len_bytes, 40,
             "Expected 40-byte SRH for hdr_ext_len=4"

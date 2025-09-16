@@ -14,16 +14,20 @@ use network_types::{
     destopts::DestOptsHdr,
     esp::Esp,
     eth::EthHdr,
-    fragment::Fragment,
+    fragment::FragmentHdr,
     geneve::GeneveHdr,
+    gre::GreHdr,
     hop::HopOptHdr,
     ip::{Ipv4Hdr, Ipv6Hdr},
+    mobility::MobilityHdr,
     route::{
         CrhHeader, RoutingHeaderType, RplSourceRouteHeader, SegmentRoutingHeader,
         Type2RoutingHeader,
     },
+    shim6::Shim6Hdr,
     tcp::TcpHdr,
     udp::UdpHdr,
+    vxlan::VxlanHdr,
 };
 
 pub const MAX_RPL_ADDR_STORAGE: usize = 128;
@@ -52,6 +56,11 @@ fn u8_to_packet_type(val: u8) -> Option<PacketType> {
         14 => Some(PacketType::Crh32),
         15 => Some(PacketType::Fragment),
         16 => Some(PacketType::DestOpts),
+        17 => Some(PacketType::Vxlan),
+        18 => Some(PacketType::Mobility),
+        19 => Some(PacketType::Shim6),
+        20 => Some(PacketType::Hip),
+        21 => Some(PacketType::Gre),
         _ => None,
     }
 }
@@ -152,7 +161,7 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::Fragment => {
-            let header: Fragment = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            let header: FragmentHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             ParsedHeader {
                 type_: PacketType::Fragment,
                 data: HeaderUnion { fragment: header },
@@ -163,6 +172,13 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             ParsedHeader {
                 type_: PacketType::DestOpts,
                 data: HeaderUnion { destopts: header },
+            }
+        }
+        PacketType::Mobility => {
+            let header: MobilityHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            ParsedHeader {
+                type_: PacketType::Mobility,
+                data: HeaderUnion { mobility: header },
             }
         }
         PacketType::Type2 => {
@@ -177,7 +193,7 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             let offset = data_offset;
             let rpl_header: RplSourceRouteHeader = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
 
-            if rpl_header.gen_route.type_ != RoutingHeaderType::RplSourceRoute.as_u8() {
+            if rpl_header.generic_route.type_ != RoutingHeaderType::RplSourceRoute {
                 return Err(TC_ACT_SHOT);
             }
 
@@ -190,7 +206,7 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             let offset = data_offset;
             let segment_hdr: SegmentRoutingHeader = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
 
-            if segment_hdr.gen_route.type_ != RoutingHeaderType::SegmentRoutingHeader.as_u8() {
+            if segment_hdr.generic_route.type_ != RoutingHeaderType::SegmentRoutingHeader {
                 return Err(TC_ACT_SHOT);
             }
 
@@ -201,18 +217,25 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
                 },
             }
         }
+        PacketType::Shim6 => {
+            let header: Shim6Hdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            ParsedHeader {
+                type_: PacketType::Shim6,
+                data: HeaderUnion { shim6: header },
+            }
+        }
         PacketType::Crh16 | PacketType::Crh32 => {
             let offset = data_offset;
             let crh_header: CrhHeader = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
 
             // Verify routing type matches expected CRH type
             let expected_type = match packet_type {
-                PacketType::Crh16 => RoutingHeaderType::Crh16.as_u8(),
-                PacketType::Crh32 => RoutingHeaderType::Crh32.as_u8(),
+                PacketType::Crh16 => RoutingHeaderType::Crh16,
+                PacketType::Crh32 => RoutingHeaderType::Crh32,
                 _ => return Err(TC_ACT_SHOT),
             };
 
-            if crh_header.gen_route.type_ != expected_type {
+            if crh_header.generic_route.type_ != expected_type {
                 return Err(TC_ACT_SHOT);
             }
 
@@ -226,6 +249,28 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
                     data: HeaderUnion { crh32: crh_header },
                 },
                 _ => return Err(TC_ACT_SHOT),
+            }
+        }
+        PacketType::Vxlan => {
+            let header: VxlanHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            ParsedHeader {
+                type_: PacketType::Vxlan,
+                data: HeaderUnion { vxlan: header },
+            }
+        }
+        PacketType::Hip => {
+            let header: network_types::hip::HipHdr =
+                ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            ParsedHeader {
+                type_: PacketType::Hip,
+                data: HeaderUnion { hip: header },
+            }
+        }
+        PacketType::Gre => {
+            let header: GreHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            ParsedHeader {
+                type_: PacketType::Gre,
+                data: HeaderUnion { gre: header },
             }
         }
     };

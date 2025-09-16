@@ -6,7 +6,11 @@ description = "An eBPF-based observability tool to monitor network traffic and s
 
 license.workspace = true
 
+[features]
+flow = []
+
 [dev-dependencies]
+serde_yaml = "0.9.34"
 socket2 = "0.5"
 
 [dependencies]
@@ -42,6 +46,9 @@ tracing = "0.1.41"
 humantime = "2.2.0"
 base64 = "0.21"
 sha1 = "0.10"
+pnet = "0.34"
+dashmap = "6.0"
+fxhash = "0.2"
 [build-dependencies]
 anyhow = { workspace = true }
 aya-build = { workspace = true }

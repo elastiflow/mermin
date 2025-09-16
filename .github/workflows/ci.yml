@@ -13,7 +13,7 @@ jobs:
     name: Check Formatting
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
@@ -25,7 +25,10 @@ jobs:
     name: Check, Lint & Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+      - uses: hadolint/hadolint-action@v3.2.0
+        with:
+          dockerfile: Dockerfile
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: nightly-2025-06-23
@@ -56,13 +59,13 @@ jobs:
         run: cargo clippy -p mermin-ebpf -- -D warnings
 
       - name: Lint userspace code
-        run: cargo clippy --all-features -- -D warnings
+        run: cargo clippy -- -D warnings
 
   test:
     name: Run Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: nightly-2025-06-23
@@ -101,7 +104,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Set up Helm
@@ -131,6 +134,47 @@ jobs:
       #   if: steps.list-changed.outputs.changed == 'true'
       #   run: ct install --target-branch ${{ github.event.repository.default_branch }}
 
+  docker_build:
+    name: Docker build
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      matrix:
+        runner: [ubuntu-latest, ubuntu-latest-arm]
+        target: [runner, runner-debug]
+    env:
+      RUNNER_PLATFORM: |
+        {
+            "ubuntu-latest": "linux/amd64",
+            "ubuntu-latest-arm": "linux/arm64"
+        }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - uses: google-github-actions/auth@v2
+        id: gcr_auth
+        with:
+          token_format: "access_token"
+          project_id: "pub-artifacts-j8rjbu"
+          workload_identity_provider: "projects/701687754822/locations/global/workloadIdentityPools/github-actions/providers/github-actions"
+          service_account: "gha-registry-writer@pub-artifacts-j8rjbu.iam.gserviceaccount.com"
+      - name: Login to GCR
+        uses: docker/login-action@v3
+        with:
+          registry: us-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.gcr_auth.outputs.access_token }}
+      - name: Build docker image
+        uses: elastiflow/gha-reusable/actions/docker-build-push@v0
+        with:
+          platforms: ${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }}
+          target: ${{ matrix.target }}
+          cache_from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-ci-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }}
+          cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-ci-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }},mode=max
+
   all_checks:
     name: All Checks
     if: always()
@@ -140,6 +184,7 @@ jobs:
       - check_and_build
       - test
       - helm_checks
+      - docker_build
     steps:
       - name: Check if all checks passed
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe

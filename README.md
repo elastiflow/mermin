@@ -132,7 +132,7 @@ cargo test
 Run the following command to run the unit tests for the eBPF program only:
 
 ```shell
-cargo test -p mermin-ebpf
+cargo test -p mermin-ebpf --features test
 ```
 
 #### Format your code
@@ -637,6 +637,10 @@ You can integrate eBPF program analysis into your CI/CD pipeline:
 This comprehensive approach ensures you can monitor and optimize your integration test eBPF programs throughout the development lifecycle.
 
 -----
+
+## Artifacts
+
+The image with the `-debug` prefix is built using the `gcr.io/distroless/cc-debian12:debug` base image and provides additional debugging tools compared to the standard image.
 
 ## 📜 License
 
