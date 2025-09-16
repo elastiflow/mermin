@@ -179,10 +179,6 @@ jobs:
     name: CNI Tests
     needs: docker_build
     uses: ./.github/workflows/reusable-cni-tests.yml
-    with:
-      cni-list: '["calico", "cilium", "flannel", "kindnetd"]'
-      workload_identity_provider: "projects/701687754822/locations/global/workloadIdentityPools/github-actions/providers/github-actions"
-      service_account: "gha-registry-writer@pub-artifacts-j8rjbu.iam.gserviceaccount.com"
 
   all_checks:
     name: All Checks
