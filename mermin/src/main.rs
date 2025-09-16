@@ -19,9 +19,9 @@ use mermin_common::{IpAddrType, PacketMeta};
 use pnet::datalink;
 use tokio::signal;
 
-use crate::{
-    community_id::CommunityIdGenerator, k8s::resource_parser::parse_packet, runtime::conf::Conf,
-};
+#[cfg_attr(feature = "flow", allow(unused_imports))]
+use crate::k8s::resource_parser::parse_packet;
+use crate::{community_id::CommunityIdGenerator, runtime::conf::Conf};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

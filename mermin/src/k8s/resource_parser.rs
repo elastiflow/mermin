@@ -146,6 +146,7 @@ impl<'a> PacketEnricher<'a> {
     }
 }
 
+#[cfg_attr(feature = "flow", allow(dead_code))]
 pub async fn parse_packet(
     packet: &PacketMeta,
     attributor: &Attributor,
