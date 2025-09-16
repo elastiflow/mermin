@@ -38,7 +38,7 @@ use network_types::{
 // todo: verify buffer size
 #[cfg(not(feature = "test"))]
 #[map]
-static mut PACKETS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0); // 256 KB
+static mut PACKETS_META: RingBuf = RingBuf::with_byte_size(256 * 1024, 0); // 256 KB
 
 #[cfg(not(feature = "test"))]
 #[map]
@@ -370,10 +370,12 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
         l3_octet_count: meta.l3_octet_count,
         tunnel_src_ipv4_addr: meta.tunnel_src_ipv4_addr,
         tunnel_dst_ipv4_addr: meta.tunnel_dst_ipv4_addr,
-        src_port: meta.src_port,
+        ether_type: Default::default(),
+		src_port: meta.src_port,
         dst_port: meta.dst_port,
         tunnel_src_port: meta.tunnel_src_port,
         tunnel_dst_port: meta.tunnel_dst_port,
+		tunnel_ether_type: Default::default(),
         ip_addr_type: meta.ip_addr_type,
         proto: meta.proto,
         tcp_flags: meta.tcp_flags,

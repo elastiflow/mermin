@@ -10,7 +10,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Debug,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    net::IpAddr,
     sync::Arc,
 };
 
@@ -36,23 +36,26 @@ use kube::{
     runtime::reflector,
 };
 use kube_runtime::{WatchStreamExt, watcher};
-use log::{debug, info, warn};
-use mermin_common::{IpAddrType, PacketMeta};
+use log::{debug, warn};
 use network_types::ip::IpProto;
+use tracing::error;
 
-use crate::flow::FlowDirection;
+use crate::flow::{FlowAttributes, FlowDirection};
 
 pub mod resource_parser;
 
 /// Holds metadata for a single Kubernetes object.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct K8sObjectMeta {
+    #[allow(dead_code)]
     pub kind: String,
     pub name: String,
+    #[allow(dead_code)]
     pub uid: Option<String>,
     pub namespace: Option<String>,
+    #[allow(dead_code)]
     pub labels: Option<HashMap<String, String>>,
+    #[allow(dead_code)]
     pub annotations: Option<HashMap<String, String>>,
 }
 
@@ -86,8 +89,7 @@ pub enum WorkloadOwner {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub enum EnrichedInfo {
+pub enum AttributionInfo {
     Pod {
         pod: K8sObjectMeta,
         owner: Option<WorkloadOwner>,
@@ -97,6 +99,7 @@ pub enum EnrichedInfo {
     },
     Service {
         service: K8sObjectMeta,
+        #[allow(dead_code)]
         backend_ips: Vec<String>,
     },
     EndpointSlice {
@@ -221,13 +224,13 @@ impl ResourceStore {
             Ok(store) => Ok(store),
             Err(e) => {
                 if is_critical {
-                    warn!("Failed to create critical reflector for {resource_name}: {e}");
+                    warn!("failed to create critical reflector for {resource_name}: {e}");
                     Err(anyhow::anyhow!(
-                        "Failed to create critical reflector for {resource_name}: {e}"
+                        "failed to create critical reflector for {resource_name}: {e}"
                     ))
                 } else {
                     warn!(
-                        "Failed to create reflector for {resource_name}: {e}. Continuing with an empty store."
+                        "failed to create reflector for {resource_name}: {e}. Continuing with an empty store."
                     );
                     let (reader, _) = reflector::store();
                     Ok(reader)
@@ -269,16 +272,16 @@ where
     let reflector = reflector(writer, watcher(api, watcher::Config::default()));
 
     tokio::spawn(async move {
-        info!("Starting reflector for {resource_name}");
+        debug!("starting reflector for {resource_name}");
         reflector
             .applied_objects()
             .try_for_each(|resource| {
                 let name = resource.meta().name.as_deref().unwrap_or("unknown");
-                debug!("Applied {resource_name} '{name}' to store");
+                debug!("applied {resource_name} '{name}' to store");
                 async { Ok(()) }
             })
             .await
-            .unwrap_or_else(|e| warn!("Reflector error for {resource_name}: {e}"));
+            .unwrap_or_else(|e| error!("reflector error for {resource_name}: {e}"));
     });
 
     Ok(reader)
@@ -297,15 +300,18 @@ pub struct FlowContext<'a> {
 }
 
 impl<'a> FlowContext<'a> {
-    pub async fn from_packet(
-        packet: &PacketMeta,
+    pub async fn from_flow_attrs(
+        flow_attrs: &FlowAttributes,
         attributor: &Attributor,
         namespace: &'a str,
     ) -> Self {
         // Extract IPs and ports
-        let (src_ip, dst_ip) = Self::extract_ips(packet);
-        let port = Self::extract_dst_port(packet);
-        let protocol = packet.proto;
+        let (src_ip, dst_ip, port, protocol) = (
+            flow_attrs.source_address,
+            flow_attrs.destination_address,
+            flow_attrs.destination_port,
+            flow_attrs.network_transport,
+        );
 
         // Resolve pods
         let src_pod = attributor.get_pod_by_ip(src_ip).await;
@@ -320,33 +326,6 @@ impl<'a> FlowContext<'a> {
             port,
             protocol,
         }
-    }
-
-    /// Extract source and destination IP address from packet metadata
-    fn extract_ips(packet: &PacketMeta) -> (IpAddr, IpAddr) {
-        match packet.ip_addr_type {
-            IpAddrType::Ipv4 => {
-                let src_ipv4_addr = packet.src_ipv4_addr;
-                let dst_ipv4_addr = packet.dst_ipv4_addr;
-                (
-                    IpAddr::V4(Ipv4Addr::from(src_ipv4_addr)),
-                    IpAddr::V4(Ipv4Addr::from(dst_ipv4_addr)),
-                )
-            }
-            IpAddrType::Ipv6 => {
-                let src_ipv6_addr = packet.src_ipv6_addr;
-                let dst_ipv6_addr = packet.dst_ipv6_addr;
-                (
-                    IpAddr::V6(Ipv6Addr::from(src_ipv6_addr)),
-                    IpAddr::V6(Ipv6Addr::from(dst_ipv6_addr)),
-                )
-            }
-        }
-    }
-
-    /// Extract destination port from packet metadata
-    fn extract_dst_port(packet: &PacketMeta) -> u16 {
-        u16::from_be_bytes(packet.dst_port)
     }
 }
 
@@ -395,7 +374,7 @@ impl Attributor {
                 }
             } else {
                 warn!(
-                    "Failed to find owner {} ({}) in store for namespace {}",
+                    "failed to find owner {} ({}) in store for namespace {}",
                     owner_ref.name, owner_ref.kind, namespace
                 );
                 break;
@@ -434,7 +413,7 @@ impl Attributor {
             "Job" => find_in_store!(Job, Job),
             _ => {
                 warn!(
-                    "Owner lookup for kind '{}' is not implemented.",
+                    "owner lookup for kind '{}' is not implemented",
                     owner_ref.kind
                 );
                 None
@@ -480,17 +459,6 @@ impl Attributor {
                     .and_then(|status| status.addresses.as_ref())
                     .is_some_and(|addresses| addresses.iter().any(|addr| addr.address == ip_str))
             })
-            .cloned()
-    }
-
-    #[allow(dead_code)]
-    /// Looks up a Node by its name (to find a Pod's host).
-    pub async fn get_node_by_name(&self, name: &str) -> Option<Arc<Node>> {
-        self.resource_store
-            .nodes
-            .state()
-            .iter()
-            .find(|node| node.metadata.name.as_deref() == Some(name))
             .cloned()
     }
 
@@ -877,7 +845,7 @@ impl Attributor {
         match cidr.parse::<IpNetwork>() {
             Ok(network) => network.contains(ip),
             Err(_) => {
-                debug!("Failed to parse CIDR string: {cidr}");
+                debug!("failed to parse CIDR string: {cidr}");
                 false
             }
         }
@@ -916,63 +884,5 @@ impl Attributor {
                 }
             }
         }
-    }
-
-    /// Gathers the names of all discoverable resources within a given namespace.
-    #[allow(dead_code)]
-    pub fn get_resources_by_namespace(
-        &self,
-        namespace: &str,
-    ) -> HashMap<&'static str, Vec<String>> {
-        let mut resources = HashMap::new();
-
-        let mut add = |kind: &'static str, names: Vec<String>| {
-            if !names.is_empty() {
-                resources.insert(kind, names);
-            }
-        };
-
-        macro_rules! get_names {
-            ($resource:ty) => {
-                self.resource_store
-                    .get_by_namespace::<$resource>(namespace)
-                    .iter()
-                    .filter_map(|r| r.meta().name.clone())
-                    .collect()
-            };
-        }
-
-        // Cluster-scoped resources
-        let node_names = self
-            .resource_store
-            .nodes
-            .state()
-            .iter()
-            .filter_map(|node| node.meta().name.clone())
-            .collect();
-        add("Node", node_names);
-
-        let namespace_names = self
-            .resource_store
-            .namespaces
-            .state()
-            .iter()
-            .filter_map(|ns| ns.meta().name.clone())
-            .collect();
-        add("Namespace", namespace_names);
-
-        // Namespaced resources
-        add("Pod", get_names!(Pod));
-        add("Deployment", get_names!(Deployment));
-        add("ReplicaSet", get_names!(ReplicaSet));
-        add("StatefulSet", get_names!(StatefulSet));
-        add("DaemonSet", get_names!(DaemonSet));
-        add("Job", get_names!(Job));
-        add("Service", get_names!(Service));
-        add("Ingress", get_names!(Ingress));
-        add("EndpointSlice", get_names!(EndpointSlice));
-        add("NetworkPolicy", get_names!(NetworkPolicy));
-
-        resources
     }
 }

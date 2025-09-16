@@ -13,11 +13,12 @@ use figment::{
 use serde::{Deserialize, Serialize};
 use tracing::Level;
 
-use crate::runtime::{
-    cli::Cli,
-    conf::{
-        conf_serde::{duration, level},
-        flow::FlowConf,
+use crate::{
+    otlp,
+    otlp::opts::{ExporterOptions, SpanOptions},
+    runtime::{
+        cli::Cli,
+        conf::conf_serde::{duration, level},
     },
 };
 
@@ -127,7 +128,12 @@ pub struct Conf {
     /// settings related to the application's runtime flow management.
     /// This field encapsulates additional configuration details specific
     /// to how the application's logic operates.
-    pub flow: FlowConf,
+    pub span: SpanOptions,
+
+    /// OpenTelemetry Protocol (OTLP) exporter configuration options.
+    /// This field holds settings for exporting telemetry data
+    /// using the OTLP standard.
+    pub otlp: ExporterOptions,
 }
 
 impl Default for Conf {
@@ -142,7 +148,8 @@ impl Default for Conf {
             packet_channel_capacity: defaults::packet_channel_capacity(),
             packet_worker_count: defaults::flow_workers(),
             shutdown_timeout: defaults::shutdown_timeout(),
-            flow: FlowConf::default(),
+            span: SpanOptions::default(),
+            otlp: otlp::opts::ExporterOptions::default(),
         }
     }
 }
@@ -359,6 +366,77 @@ impl Error for ConfigError {
 impl From<figment::Error> for ConfigError {
     fn from(e: figment::Error) -> Self {
         ConfigError::Extraction(Box::from(e))
+    }
+}
+
+pub mod conf_serde {
+    pub mod level {
+        use serde::{self, Deserialize, Deserializer, Serializer};
+        use tracing::Level;
+
+        pub fn serialize<S>(level: &Level, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            serializer.serialize_str(level.as_str())
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Level, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let s = String::deserialize(deserializer)?;
+            s.parse::<Level>().map_err(serde::de::Error::custom)
+        }
+
+        pub mod option {
+            use super::*;
+
+            pub fn serialize<S>(level: &Option<Level>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                match level {
+                    Some(l) => serializer.serialize_str(l.as_str()),
+                    None => serializer.serialize_none(),
+                }
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Level>, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let opt = Option::<String>::deserialize(deserializer)?;
+                match opt {
+                    Some(s) => s
+                        .parse::<Level>()
+                        .map(Some)
+                        .map_err(serde::de::Error::custom),
+                    None => Ok(None),
+                }
+            }
+        }
+    }
+
+    pub mod duration {
+        use std::time::Duration;
+
+        use serde::{Deserialize, Deserializer, Serializer};
+
+        pub fn serialize<S>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            serializer.serialize_str(&humantime::format_duration(*duration).to_string())
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let s = String::deserialize(deserializer)?;
+            humantime::parse_duration(&s).map_err(serde::de::Error::custom)
+        }
     }
 }
 
