@@ -20,10 +20,11 @@ use mermin_common::{IpAddrType, PacketMeta};
 use pnet::datalink;
 use tokio::signal;
 
+#[cfg_attr(feature = "flow", allow(unused_imports))]
+use crate::k8s::resource_parser::parse_packet;
 use crate::{
     community_id::CommunityIdGenerator,
     health::{HealthState, start_api_server},
-    k8s::resource_parser::parse_packet,
     runtime::conf::Conf,
 };
 
