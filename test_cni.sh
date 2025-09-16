@@ -3,12 +3,12 @@ set -euo pipefail
 
 trap 'cleanup' EXIT
 
-CLUSTER_NAME="mermin-cni-test"
-HELM_CHART_PATH="./charts/mermin"
-RELEASE_NAME="mermin"
-NAMESPACE="atlantis"
-DOCKER_IMAGE_NAME="mermin:latest"
-VALUES_FILE="local/values.yaml"
+CLUSTER_NAME="${CLUSTER_NAME:-mermin-cni-test}"
+HELM_CHART_PATH="${HELM_CHART_PATH:-./charts/mermin}"
+RELEASE_NAME="${RELEASE_NAME:-mermin}"
+NAMESPACE="${NAMESPACE:-atlantis}"
+DOCKER_IMAGE_NAME="${DOCKER_IMAGE_NAME:-mermin:latest}"
+VALUES_FILE="${VALUES_FILE:-local/values.yaml}"
 CNI="${CNI:-calico}"
 HOST_CNI_PATH="$HOME/cni-plugins-for-kind"
 
