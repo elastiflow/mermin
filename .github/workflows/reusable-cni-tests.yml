@@ -58,7 +58,7 @@ jobs:
           path: image-artifact/
 
   cni-integration-test:
-    name: CNI Test - ${{ matrix.cni }}
+    name: ${{ matrix.cni }}
     needs: build
     runs-on: ubuntu-latest
     strategy:
@@ -90,4 +90,5 @@ jobs:
       - name: Run E2E Test for ${{ matrix.cni }}
         env:
           CNI: ${{ matrix.cni }}
+          DOCKER_IMAGE_NAME: not-exists.elastiflow.com/mermin:latest
         run: ./test_cni.sh
