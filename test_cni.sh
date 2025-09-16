@@ -51,7 +51,7 @@ install_flannel() {
   done
   echo "Installing Flannel manifest..."
   kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
-  kubectl rollout status daemonset kube-flannel-ds -n kube-flannel --timeout=120s
+  kubectl rollout status daemonset kube-flannel-ds -n kube-flannel --timeout=240s
 }
 
 install_kindnetd() {
