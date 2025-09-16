@@ -14,6 +14,8 @@ use serde_json::json;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 
+use crate::runtime::conf::ApiConf;
+
 #[derive(Clone)]
 pub struct HealthState {
     pub ebpf_loaded: Arc<AtomicBool>,
@@ -103,11 +105,13 @@ pub fn create_health_router(state: HealthState) -> Router {
         .with_state(state)
 }
 
-pub async fn start_health_server(state: HealthState, port: u16) -> anyhow::Result<()> {
+pub async fn start_api_server(state: HealthState, config: &ApiConf) -> anyhow::Result<()> {
     let app = create_health_router(state);
-    let listener = TcpListener::bind(format!("0.0.0.0:{port}")).await?;
 
-    log::info!("Health check server listening on port {port}");
+    let bind_address = format!("{}:{}", config.listen_address, config.port);
+    let listener = TcpListener::bind(&bind_address).await?;
+
+    log::info!("API server with health checks listening on {bind_address}");
     axum::serve(listener, app).await?;
     Ok(())
 }

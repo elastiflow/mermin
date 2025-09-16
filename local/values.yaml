@@ -2,7 +2,19 @@ fullNameOverride: mermin
 image:
   repository: mermin
   tag: latest
-merminConfig:
+config:
   interface:
     - eth0
-  health_port: 8080
+  api:
+    listenAddress: "0.0.0.0"
+
+  metrics:
+    listenAddress: "0.0.0.0"
+
+ports:
+  - name: api
+    containerPort: 8080
+    protocol: TCP
+  - name: metrics
+    containerPort: 10250
+    protocol: TCP

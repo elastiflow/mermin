@@ -55,15 +55,18 @@ resources: {}
   #   cpu: 1
   #   memory: 256Mi
 
-merminConfig:
-  interface:
-    - "eth0"
-  health_port: 8080
+ports:
+  - name: api
+    containerPort: 8080
+    protocol: TCP
+  - name: metrics
+    containerPort: 10250
+    protocol: TCP
 
 livenessProbe:
   httpGet:
     path: /livez
-    port: health
+    port: api
   initialDelaySeconds: 30
   periodSeconds: 10
   timeoutSeconds: 5
@@ -72,7 +75,7 @@ livenessProbe:
 readinessProbe:
   httpGet:
     path: /readyz
-    port: health
+    port: api
   initialDelaySeconds: 15
   periodSeconds: 5
   timeoutSeconds: 5
@@ -81,7 +84,7 @@ readinessProbe:
 startupProbe:
   httpGet:
     path: /startup
-    port: health
+    port: api
   initialDelaySeconds: 10
   periodSeconds: 5
   timeoutSeconds: 5
@@ -96,3 +99,10 @@ affinity: {}
 config:
   # Set to true to allow enable host's process list (/proc) for mapping kernel events to specific processes.
   hostPidEnrichment: true
+  interface: []
+
+  api:
+    listenAddress: "0.0.0.0"
+
+  metrics:
+    listenAddress: "0.0.0.0"

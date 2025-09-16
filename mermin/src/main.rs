@@ -22,7 +22,7 @@ use tokio::signal;
 
 use crate::{
     community_id::CommunityIdGenerator,
-    health::{HealthState, start_health_server},
+    health::{HealthState, start_api_server},
     k8s::resource_parser::parse_packet,
     runtime::conf::Conf,
 };
@@ -55,11 +55,7 @@ async fn main() -> anyhow::Result<()> {
         debug!("remove limit on locked memory failed, ret is: {ret}");
     }
 
-    let Conf {
-        interface,
-        health_port,
-        ..
-    } = config;
+    let Conf { interface, api, .. } = config;
 
     // This will include your eBPF object file as raw bytes at compile-time and load it at
     // runtime. This approach is recommended for most real-world use cases. If you would
@@ -75,13 +71,16 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let health_state = HealthState::default();
-    let health_state_clone = health_state.clone();
 
-    tokio::spawn(async move {
-        if let Err(e) = start_health_server(health_state_clone, health_port).await {
-            log::error!("Health server error: {e}");
-        }
-    });
+    if api.enabled {
+        let health_state_clone = health_state.clone();
+
+        tokio::spawn(async move {
+            if let Err(e) = start_api_server(health_state_clone, &api).await {
+                log::error!("API server error: {e}");
+            }
+        });
+    }
 
     let program: &mut SchedClassifier = ebpf.program_mut("mermin").unwrap().try_into()?;
     program.load()?;
