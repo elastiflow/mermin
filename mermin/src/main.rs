@@ -1,12 +1,13 @@
 mod community_id;
 mod flow;
+mod health;
 mod k8s;
 mod runtime;
 
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::Arc,
+    sync::{Arc, atomic::Ordering},
 };
 
 use anyhow::anyhow;
@@ -19,8 +20,12 @@ use mermin_common::{IpAddrType, PacketMeta};
 use pnet::datalink;
 use tokio::signal;
 
+#[cfg_attr(feature = "flow", allow(unused_imports))]
+use crate::k8s::resource_parser::parse_packet;
 use crate::{
-    community_id::CommunityIdGenerator, k8s::resource_parser::parse_packet, runtime::conf::Conf,
+    community_id::CommunityIdGenerator,
+    health::{HealthState, start_api_server},
+    runtime::conf::Conf,
 };
 
 #[tokio::main]
@@ -51,6 +56,8 @@ async fn main() -> anyhow::Result<()> {
         debug!("remove limit on locked memory failed, ret is: {ret}");
     }
 
+    let Conf { interface, api, .. } = config;
+
     // This will include your eBPF object file as raw bytes at compile-time and load it at
     // runtime. This approach is recommended for most real-world use cases. If you would
     // like to specify the eBPF program at runtime rather than at compile-time, you can
@@ -64,10 +71,20 @@ async fn main() -> anyhow::Result<()> {
         warn!("failed to initialize eBPF logger: {e}");
     }
 
+    let health_state = HealthState::default();
+
+    if api.enabled {
+        let health_state_clone = health_state.clone();
+
+        tokio::spawn(async move {
+            if let Err(e) = start_api_server(health_state_clone, &api).await {
+                log::error!("API server error: {e}");
+            }
+        });
+    }
+
     let program: &mut SchedClassifier = ebpf.program_mut("mermin").unwrap().try_into()?;
     program.load()?;
-
-    let Conf { interface, .. } = config;
 
     for iface in &interface {
         // error adding clsact to the interface if it is already added is harmless
@@ -78,6 +95,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     info!("eBPF program attached to all interfaces. Waiting for events... Press Ctrl-C to exit.");
+
+    health_state.ebpf_loaded.store(true, Ordering::Relaxed);
 
     info!("Building interface index map...");
     let iface_map: Arc<HashMap<u32, String>> = {
@@ -106,6 +125,7 @@ async fn main() -> anyhow::Result<()> {
                 // TODO: we should implement an event based notifier
                 // that sends a signal when the kubeclient is ready with its stores instead of waiting for a fixed interval.
                 info!("Kubernetes client initialized successfully");
+                health_state.k8s_connected.store(true, Ordering::Relaxed);
                 info!("Waiting for reflectors to populate stores...");
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                 info!("Reflectors should have populated stores by now");
@@ -114,6 +134,7 @@ async fn main() -> anyhow::Result<()> {
             Err(e) => {
                 warn!("Failed to initialize Kubernetes client: {e}");
                 warn!("Pod metadata lookup will not be available");
+                health_state.k8s_connected.store(false, Ordering::Relaxed);
                 None
             }
         };
@@ -262,6 +283,8 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         });
+
+        health_state.ready_to_process.store(true, Ordering::Relaxed);
     }
 
     #[cfg(feature = "flow")]
@@ -408,6 +431,25 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         });
+
+        // Mark system as ready to process packets
+        health_state.ready_to_process.store(true, Ordering::Relaxed);
+    }
+
+    let all_systems_ready = health_state.ebpf_loaded.load(Ordering::Relaxed)
+        && health_state.k8s_connected.load(Ordering::Relaxed)
+        && health_state.ready_to_process.load(Ordering::Relaxed);
+
+    health_state
+        .startup_complete
+        .store(all_systems_ready, Ordering::Relaxed);
+
+    if all_systems_ready {
+        info!("Startup complete - all systems ready");
+    } else {
+        warn!(
+            "Startup completed but some systems are not ready - check readiness endpoint for details"
+        );
     }
 
     println!("Waiting for Ctrl-C...");

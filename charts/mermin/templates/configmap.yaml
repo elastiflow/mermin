@@ -7,4 +7,31 @@ metadata:
     {{- include "mermin.labels" . | nindent 4 }}
 data:
   mermin-config.yaml: |
-    {{- toYaml .Values.merminConfig | nindent 4 }}
+    {{- with .Values.config }}
+    interface:
+      {{- toYaml .interface | nindent 6 }}
+    {{- end }}
+
+    # API server configuration
+    api:
+      enabled: true
+      {{- with .Values.config.api }}
+      listen_address: {{ .listenAddress | quote }}
+      {{- end }}
+      {{- range .Values.ports }}
+      {{- if eq .name "api" }}
+      port: {{ .containerPort }}
+      {{- end }}
+      {{- end }}
+
+    # Metrics server configuration
+    metrics:
+      enabled: true
+      {{- with .Values.config.metrics }}
+      listen_address: {{ .listenAddress | quote }}
+      {{- end }}
+      {{- range .Values.ports }}
+      {{- if eq .name "metrics" }}
+      port: {{ .containerPort }}
+      {{- end }}
+      {{- end }}
