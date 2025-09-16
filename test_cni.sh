@@ -50,18 +50,18 @@ install_flannel() {
       curl -sL "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-${ARCH}-${CNI_VERSION}.tgz" | tar -C /opt/cni/bin -xz;
     '
   done
+  sleep 10
   echo "Installing Flannel manifest..."
-  kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+  kubectl apply -f https://github.com/flannel-io/flannel/releases/download/v0.24.2/kube-flannel.yml
   kubectl rollout status daemonset kube-flannel-ds -n kube-flannel --timeout=240s
-  echo "Waiting for /run/flannel/subnet.env to appear..."
+  kubectl wait --for=condition=ready pod -l app=flannel -n kube-flannel --timeout=240s
   for node in $(kind get nodes --name "${CLUSTER_NAME}"); do
-    timeout 180s bash -c "until docker exec ${node} test -f /run/flannel/subnet.env; do sleep 1; done" || {
-      echo "Timeout waiting for /run/flannel/subnet.env on ${node}"
+    timeout 180s bash -c "until docker exec ${node} test -f /run/flannel/subnet.env; do sleep 2; done" || {
+      kubectl logs -n kube-flannel -l app=flannel --tail=20
       exit 1
     }
   done
 }
-
 
 install_kindnetd() {
   echo "Using default Kind CNI (kindnetd)..."
