@@ -42,6 +42,7 @@ install_cilium() {
 }
 
 install_flannel() {
+  echo "Installing CNI plugin binaries for Flannel..."
   for node in $(kind get nodes --name "${CLUSTER_NAME}"); do
     docker exec "${node}" sh -c '
       ARCH=$(uname -m | sed "s/x86_64/amd64/" | sed "s/aarch64/arm64/");
@@ -49,15 +50,18 @@ install_flannel() {
       curl -sL "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-${ARCH}-${CNI_VERSION}.tgz" | tar -C /opt/cni/bin -xz;
     '
   done
-  kubectl apply -f https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml
-  kubectl patch cm -n kube-flannel kube-flannel-cfg --type merge --patch \
-    '{"data":{"net-conf.json":"{\"Network\":\"10.244.0.0/16\",\"Backend\":{\"Type\":\"vxlan\"}}"}}'
-  kubectl patch ds -n kube-flannel kube-fl flannel-ds --type json --patch '[
-    {"op": "add", "path": "/spec/template/spec/containers/0/command", "value": ["/opt/bin/flanneld", "--ip-masq", "--kube-subnet-mgr", "--iface=eth0", "--node-name=$(POD_NODE_NAME)"]},
-    {"op": "add", "path": "/spec/template/spec/containers/0/env", "value": [{"name": "POD_NODE_NAME", "valueFrom": {"fieldRef": {"fieldPath": "spec.nodeName"}}}]}
-  ]'
-  kubectl wait --for=condition=ready -n kube-flannel pods -l app=flannel --timeout=120s
+  echo "Installing Flannel manifest..."
+  kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+  kubectl rollout status daemonset kube-flannel-ds -n kube-flannel --timeout=240s
+  echo "Waiting for /run/flannel/subnet.env to appear..."
+  for node in $(kind get nodes --name "${CLUSTER_NAME}"); do
+    timeout 180s bash -c "until docker exec ${node} test -f /run/flannel/subnet.env; do sleep 1; done" || {
+      echo "Timeout waiting for /run/flannel/subnet.env on ${node}"
+      exit 1
+    }
+  done
 }
+
 
 install_kindnetd() {
   echo "Using default Kind CNI (kindnetd)..."
