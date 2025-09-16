@@ -62,10 +62,14 @@ pub struct PacketMeta {
     pub ip_addr_type: IpAddrType,
     /// Network protocol identifier (innermost, e.g., TCP = 6, UDP = 17).
     pub proto: IpProto,
+    /// TCP flags (innermost) - bitfield: FIN|SYN|RST|PSH|ACK|URG|ECE|CWR
+    pub tcp_flags: u8,
     /// Indicates whether the flow record uses IPv4 or IPv6 addressing (outermost).
     pub tunnel_ip_addr_type: IpAddrType,
     /// Network protocol identifier (outermost, e.g., TCP = 6, UDP = 17).
     pub tunnel_proto: IpProto,
+    /// TCP flags (outermost) - bitfield: FIN|SYN|RST|PSH|ACK|URG|ECE|CWR
+    pub tunnel_tcp_flags: u8,
 }
 
 impl PacketMeta {
@@ -83,6 +87,161 @@ impl PacketMeta {
 
     pub fn tunnel_dst_port(&self) -> u16 {
         u16::from_be_bytes(self.tunnel_dst_port)
+    }
+
+    // TCP flag constants (same as in tcp.rs)
+    const TCP_FLAG_FIN: u8 = 0x01;
+    const TCP_FLAG_SYN: u8 = 0x02;
+    const TCP_FLAG_RST: u8 = 0x04;
+    const TCP_FLAG_PSH: u8 = 0x08;
+    const TCP_FLAG_ACK: u8 = 0x10;
+    const TCP_FLAG_URG: u8 = 0x20;
+    const TCP_FLAG_ECE: u8 = 0x40;
+    const TCP_FLAG_CWR: u8 = 0x80;
+
+    // Helper methods for flag manipulation
+    #[inline]
+    fn get_tcp_flag(flags: u8, mask: u8) -> bool {
+        (flags & mask) != 0
+    }
+
+    #[inline]
+    fn set_tcp_flag(flags: &mut u8, mask: u8, value: bool) {
+        if value {
+            *flags |= mask;
+        } else {
+            *flags &= !mask;
+        }
+    }
+
+    // Innermost TCP flag methods
+    pub fn fin(&self) -> bool {
+        Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_FIN)
+    }
+
+    pub fn set_fin(&mut self, fin: bool) {
+        Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_FIN, fin)
+    }
+
+    pub fn syn(&self) -> bool {
+        Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_SYN)
+    }
+
+    pub fn set_syn(&mut self, syn: bool) {
+        Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_SYN, syn)
+    }
+
+    pub fn rst(&self) -> bool {
+        Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_RST)
+    }
+
+    pub fn set_rst(&mut self, rst: bool) {
+        Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_RST, rst)
+    }
+
+    pub fn psh(&self) -> bool {
+        Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_PSH)
+    }
+
+    pub fn set_psh(&mut self, psh: bool) {
+        Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_PSH, psh)
+    }
+
+    pub fn ack(&self) -> bool {
+        Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_ACK)
+    }
+
+    pub fn set_ack(&mut self, ack: bool) {
+        Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_ACK, ack)
+    }
+
+    pub fn urg(&self) -> bool {
+        Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_URG)
+    }
+
+    pub fn set_urg(&mut self, urg: bool) {
+        Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_URG, urg)
+    }
+
+    pub fn ece(&self) -> bool {
+        Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_ECE)
+    }
+
+    pub fn set_ece(&mut self, ece: bool) {
+        Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_ECE, ece)
+    }
+
+    pub fn cwr(&self) -> bool {
+        Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_CWR)
+    }
+
+    pub fn set_cwr(&mut self, cwr: bool) {
+        Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_CWR, cwr)
+    }
+
+    // Outermost Tunnel TCP flag methods
+    pub fn tunnel_fin(&self) -> bool {
+        Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_FIN)
+    }
+
+    pub fn set_tunnel_fin(&mut self, fin: bool) {
+        Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_FIN, fin)
+    }
+
+    pub fn tunnel_syn(&self) -> bool {
+        Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_SYN)
+    }
+
+    pub fn set_tunnel_syn(&mut self, syn: bool) {
+        Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_SYN, syn)
+    }
+
+    pub fn tunnel_rst(&self) -> bool {
+        Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_RST)
+    }
+
+    pub fn set_tunnel_rst(&mut self, rst: bool) {
+        Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_RST, rst)
+    }
+
+    pub fn tunnel_psh(&self) -> bool {
+        Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_PSH)
+    }
+
+    pub fn set_tunnel_psh(&mut self, psh: bool) {
+        Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_PSH, psh)
+    }
+
+    pub fn tunnel_ack(&self) -> bool {
+        Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_ACK)
+    }
+
+    pub fn set_tunnel_ack(&mut self, ack: bool) {
+        Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_ACK, ack)
+    }
+
+    pub fn tunnel_urg(&self) -> bool {
+        Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_URG)
+    }
+
+    pub fn set_tunnel_urg(&mut self, urg: bool) {
+        Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_URG, urg)
+    }
+
+    pub fn tunnel_ece(&self) -> bool {
+        Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_ECE)
+    }
+
+    pub fn set_tunnel_ece(&mut self, ece: bool) {
+        Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_ECE, ece)
+    }
+
+    pub fn tunnel_cwr(&self) -> bool {
+        Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_CWR)
+    }
+
+    pub fn set_tunnel_cwr(&mut self, cwr: bool) {
+        Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_CWR, cwr)
     }
 }
 
@@ -137,7 +296,8 @@ mod tests {
         let tunnel_src_port: u16 = 12346;
         let tunnel_dst_port: u16 = 81;
 
-        let record = PacketMeta {
+        // Set some TCP flags for both outer and tunnel
+        let mut record = PacketMeta {
             ifindex: 1,
             src_ipv6_addr: src_ipv6_val,
             dst_ipv6_addr: dst_ipv6_val,
@@ -156,7 +316,29 @@ mod tests {
             tunnel_dst_port: tunnel_dst_port.to_be_bytes(),
             tunnel_ip_addr_type: Ipv6,
             tunnel_proto: IpProto::Udp,
+            tcp_flags: 0,
+            tunnel_tcp_flags: 0,
         };
+
+        // Set TCP flags for outer header
+        record.set_syn(true);
+        record.set_ack(true);
+        record.set_fin(false);
+        record.set_rst(true);
+        record.set_psh(false);
+        record.set_urg(true);
+        record.set_ece(false);
+        record.set_cwr(true);
+
+        // Set TCP flags for tunnel header
+        record.set_tunnel_syn(false);
+        record.set_tunnel_ack(true);
+        record.set_tunnel_fin(true);
+        record.set_tunnel_rst(false);
+        record.set_tunnel_psh(true);
+        record.set_tunnel_urg(false);
+        record.set_tunnel_ece(true);
+        record.set_tunnel_cwr(false);
 
         // Test field access
         assert_eq!(record.ifindex, 1);
@@ -177,5 +359,25 @@ mod tests {
         assert_eq!(record.tunnel_dst_port, tunnel_dst_port.to_be_bytes());
         assert_eq!(record.tunnel_ip_addr_type, Ipv6);
         assert_eq!(record.tunnel_proto, IpProto::Udp);
+
+        // Test TCP flag accessors for outer header
+        assert_eq!(record.syn(), true);
+        assert_eq!(record.ack(), true);
+        assert_eq!(record.fin(), false);
+        assert_eq!(record.rst(), true);
+        assert_eq!(record.psh(), false);
+        assert_eq!(record.urg(), true);
+        assert_eq!(record.ece(), false);
+        assert_eq!(record.cwr(), true);
+
+        // Test TCP flag accessors for tunnel header
+        assert_eq!(record.tunnel_syn(), false);
+        assert_eq!(record.tunnel_ack(), true);
+        assert_eq!(record.tunnel_fin(), true);
+        assert_eq!(record.tunnel_rst(), false);
+        assert_eq!(record.tunnel_psh(), true);
+        assert_eq!(record.tunnel_urg(), false);
+        assert_eq!(record.tunnel_ece(), true);
+        assert_eq!(record.tunnel_cwr(), false);
     }
 }
