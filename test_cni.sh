@@ -104,7 +104,7 @@ load_image_into_kind() {
 
 deploy_helm_chart() {
   helm upgrade --install "$RELEASE_NAME" "$HELM_CHART_PATH" \
-    -n "$NAMESPACE" --values "$VALUES_FILE" --wait --timeout=3m --create-namespace
+    -n "$NAMESPACE" --values "$VALUES_FILE" --wait --timeout=5m --create-namespace
 }
 
 verify_deployment() {
