@@ -52,6 +52,7 @@ install_flannel() {
   done
   echo "Installing Flannel manifest..."
   kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+  kubectl patch cm -n kube-flannel kube-flannel-cfg --type merge --patch '{"data":{"net-conf.json":"{\"Network\":\"10.244.0.0/16\",\"Backend\":{\"Type\":\"vxlan\"},\"ipam\": {\"type\": \"host-local\", \"dataDir\": \"/run/cni-ipam-state\"}}"}}'
   kubectl rollout status daemonset kube-flannel-ds -n kube-flannel --timeout=240s
 }
 
