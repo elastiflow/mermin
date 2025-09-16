@@ -155,6 +155,15 @@ cleanup() {
   kind delete cluster --name "$CLUSTER_NAME" || true
 }
 
+dump_debug_info() {
+  echo "=== Pod Status Summary ==="
+  kubectl get pods -n "${NAMESPACE}" -o wide
+  echo "=== Pod Details and Events ==="
+  kubectl describe pods -n "${NAMESPACE}"
+  echo "=== Full Namespace Event Log (sorted by time) ==="
+  kubectl get events -n "${NAMESPACE}" --sort-by='.lastTimestamp'
+}
+
 #----------------#
 # Main execution #
 #----------------#
@@ -167,7 +176,7 @@ create_kind_cluster "${CNI}"
 install_cni "${CNI}"
 kubectl wait --for=condition=Ready nodes --all --timeout=3m
 load_image_into_kind
-deploy_helm_chart
+deploy_helm_chart || { dump_debug_info; exit 1; }
 verify_deployment
 verify_agent_logs
 
