@@ -43,6 +43,7 @@ spec:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports: {{ .Values.ports | toYaml | nindent 12 }}
           args:
             - "--config"
             - "/etc/mermin/mermin-config.yaml"

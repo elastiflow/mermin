@@ -55,27 +55,40 @@ resources: {}
   #   cpu: 1
   #   memory: 256Mi
 
-# TODO: Probes are not yet implemented in mermin.
-# The configuration is left here as a placeholder for future use.
-# livenessProbe:
-#   exec:
-#     command:
-#     - /path/to/liveness
-#   initialDelaySeconds: 30
-#   periodSeconds: 10
-#
-# readinessProbe:
-#   exec:
-#     command:
-#     - /path/to/readiness
-#   initialDelaySeconds: 15
-#   periodSeconds: 5
-# startupProbe:
-#   exec:
-#     command:
-#     - /path/to/startup
-#   initialDelaySeconds: 15
-#   periodSeconds: 5
+ports:
+  - name: api
+    containerPort: 8080
+    protocol: TCP
+  - name: metrics
+    containerPort: 10250
+    protocol: TCP
+
+livenessProbe:
+  httpGet:
+    path: /livez
+    port: api
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: api
+  initialDelaySeconds: 15
+  periodSeconds: 5
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+startupProbe:
+  httpGet:
+    path: /startup
+    port: api
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 5
+  failureThreshold: 30
 
 tolerations:
   - effect: NoSchedule
@@ -86,3 +99,10 @@ affinity: {}
 config:
   # Set to true to allow enable host's process list (/proc) for mapping kernel events to specific processes.
   hostPidEnrichment: true
+  interface: []
+
+  api:
+    listenAddress: "0.0.0.0"
+
+  metrics:
+    listenAddress: "0.0.0.0"

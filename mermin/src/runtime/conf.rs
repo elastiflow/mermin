@@ -1,6 +1,7 @@
 use std::{
     error::Error,
     fmt,
+    net::Ipv4Addr,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -22,6 +23,46 @@ use crate::runtime::{
 
 pub mod conf_serde;
 pub mod flow;
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ApiConf {
+    /// Enable the API server.
+    pub enabled: bool,
+    /// The network address the API server will listen on.
+    pub listen_address: String,
+    /// The port the API server will listen on.
+    pub port: u16,
+}
+
+impl Default for ApiConf {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
+            port: 8080,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct MetricsConf {
+    /// Enable the metrics server.
+    pub enabled: bool,
+    /// The network address the metrics server will listen on.
+    pub listen_address: String,
+    /// The port the metrics server will listen on.
+    pub port: u16,
+}
+
+impl Default for MetricsConf {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
+            port: 10250,
+        }
+    }
+}
 
 /// Represents the configuration for the application, containing settings
 /// related to interface, logging, reloading, and flow management.
@@ -56,6 +97,14 @@ pub struct Conf {
     #[serde(with = "level")]
     pub log_level: Level,
 
+    /// Configuration for the API server (health endpoints).
+    #[serde(default)]
+    pub api: ApiConf,
+
+    /// Configuration for the Metrics server (e.g., for Prometheus scraping).
+    #[serde(default)]
+    pub metrics: MetricsConf,
+
     /// Capacity of the channel for packet events between the ring buffer reader and flow workers
     /// - Default: 10000
     /// - Example: Increase for high-traffic environments, decrease for memory-constrained systems
@@ -88,6 +137,8 @@ impl Default for Conf {
             config_path: None,
             auto_reload: false,
             log_level: Level::INFO,
+            api: ApiConf::default(),
+            metrics: MetricsConf::default(),
             packet_channel_capacity: defaults::packet_channel_capacity(),
             packet_worker_count: defaults::flow_workers(),
             shutdown_timeout: defaults::shutdown_timeout(),
@@ -329,6 +380,7 @@ mod tests {
         assert_eq!(cfg.config_path, None);
         assert_eq!(cfg.auto_reload, false);
         assert_eq!(cfg.log_level, Level::INFO);
+        assert_eq!(cfg.api.port, 8080);
         assert_eq!(cfg.packet_channel_capacity, 1024);
         assert_eq!(cfg.packet_worker_count, 2);
         assert_eq!(cfg.shutdown_timeout, Duration::from_secs(5));
@@ -516,5 +568,42 @@ interface: ["eth2", "eth3"]
             "unexpected error: {}",
             msg
         );
+    }
+
+    #[test]
+    fn loads_api_and_metrics_config_from_yaml_file() {
+        Jail::expect_with(|jail| {
+            let path = "mermin_custom_api.yaml";
+
+            jail.create_file(
+                path,
+                r#"
+# Custom configuration for testing
+interface:
+  - eth1
+
+api:
+  listen_address: "127.0.0.1"
+  port: 8081
+
+metrics:
+  listen_address: "0.0.0.0"
+  port: 9090
+                "#,
+            )?;
+
+            // The rest of the test logic remains the same
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load from yaml file");
+
+            // Assert that all the custom values from the file were loaded correctly
+            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.api.listen_address, "127.0.0.1");
+            assert_eq!(cfg.api.port, 8081);
+            assert_eq!(cfg.metrics.listen_address, "0.0.0.0");
+            assert_eq!(cfg.metrics.port, 9090);
+
+            Ok(())
+        });
     }
 }
