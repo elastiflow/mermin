@@ -43,7 +43,6 @@ jobs:
         id: prepare_release
         uses: elastiflow/gha-reusable/actions/prepare-release@v0
         with:
-          branch: "${{ github.ref_name }}"
           changelog_update: true
           github_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Create Pull Request
@@ -77,8 +76,7 @@ jobs:
         id: prepare_release
         uses: elastiflow/gha-reusable/actions/prepare-release@v0
         with:
-          branch: "${{ github.ref_name }}"
-          changelog_update: true
+          add_git_notes: true
           github_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Create and push semver tag
         if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
@@ -91,12 +89,18 @@ jobs:
         uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8
         with:
           tag_name: v${{ steps.prepare_release.outputs.new_release_version }}
-          body: ${{ steps.prepare_release.outputs.new_release_notes }}
+          body: |
+            ${{ steps.prepare_release.outputs.new_release_notes }}
+
+            Docker images:
+            - `ghcr.io/elastiflow/mermin:v${{ steps.prepare_release.outputs.new_release_version }}`
+            - `ghcr.io/elastiflow/mermin:v${{ steps.prepare_release.outputs.new_release_version }}-debug`
           preserve_order: true
           make_latest: true
 
   docker_build_push:
     name: Docker build/push
+    needs: [release]
     runs-on: ubuntu-latest-8c
     timeout-minutes: 90
     permissions:
