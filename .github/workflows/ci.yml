@@ -177,6 +177,9 @@ jobs:
 
   cni_tests:
     name: CNI Tests
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/reusable-cni-tests.yml
 
   all_checks:
