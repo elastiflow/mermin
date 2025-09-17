@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
       - name: debug
-        run: echo '${{ toJson(github.event.pull_request) }}''
+        run: echo '${{ toJson(github.event.pull_request) }}'
       - name: Install commitlint
         run: npm install -D @commitlint/cli @commitlint/config-conventional
       - name: Validate PR commits with commitlint
