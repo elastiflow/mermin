@@ -1217,7 +1217,7 @@ mod tests {
         // Reserved = 0 (3 bytes)
         packet.extend_from_slice(&[0x00, 0x00, 0x00]);
         // Sender Index = 1234 (4 bytes)
-        packet.extend_from_slice(&1234u32.to_be_bytes());
+        packet.extend_from_slice(&1234u32.to_le_bytes());
         // Ephemeral key (32 bytes of test data)
         packet.extend_from_slice(&[0x01; 32]);
         // Encrypted Static (48 bytes of test data)
@@ -1240,9 +1240,9 @@ mod tests {
         // Reserved = 0 (3 bytes)
         packet.extend_from_slice(&[0x00, 0x00, 0x00]);
         // Sender Index = 5432 (4 bytes)
-        packet.extend_from_slice(&5432u32.to_be_bytes());
+        packet.extend_from_slice(&5432u32.to_le_bytes());
         // Receiver Index = 1234 (4 bytes)
-        packet.extend_from_slice(&1234u32.to_be_bytes());
+        packet.extend_from_slice(&1234u32.to_le_bytes());
         // Ephemeral key (32 bytes of test data)
         packet.extend_from_slice(&[0x06; 32]);
         // Encrypted Nothing (16 bytes of test data)
@@ -1263,7 +1263,7 @@ mod tests {
         // Reserved = 0 (3 bytes)
         packet.extend_from_slice(&[0x00, 0x00, 0x00]);
         // Receiver Index = 12345 (4 bytes)
-        packet.extend_from_slice(&12345u32.to_be_bytes());
+        packet.extend_from_slice(&12345u32.to_le_bytes());
         // Nonce (24 bytes of test data)
         packet.extend_from_slice(&[0x0A; 24]);
         // Encrypted Cookie (16 bytes of test data)
@@ -1280,7 +1280,7 @@ mod tests {
         // Reserved = 0 (3 bytes)
         packet.extend_from_slice(&[0x00, 0x00, 0x00]);
         // Receiver Index = 12345 (4 bytes)
-        packet.extend_from_slice(&12345u32.to_be_bytes());
+        packet.extend_from_slice(&12345u32.to_le_bytes());
         // Counter (8 bytes of test data)
         packet.extend_from_slice(&[0x0C; 8]);
         packet

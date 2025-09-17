@@ -37,12 +37,12 @@ impl WireGuardMinimalHeader {
 
     #[inline]
     pub fn sender_ind(&self) -> u32 {
-        u32::from_be_bytes(self.sender_ind)
+        u32::from_le_bytes(self.sender_ind)
     }
 
     #[inline]
     pub fn receiver_ind(&self) -> u32 {
-        u32::from_be_bytes(self.receiver_ind)
+        u32::from_le_bytes(self.receiver_ind)
     }
 }
 

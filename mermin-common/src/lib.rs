@@ -354,7 +354,6 @@ mod tests {
             tunnel_proto: IpProto::Udp,
             tcp_flags: 0,
             tunnel_tcp_flags: 0,
-            found_tunnel: false,
         };
 
         // Set TCP flags for outer header
