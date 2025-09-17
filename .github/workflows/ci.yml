@@ -5,196 +5,202 @@ concurrency:
 
 on:
   pull_request:
+    # types: [edited, opened]
   push:
     branches: [main]
 
 jobs:
-  fmt:
-    name: Check Formatting
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          components: rustfmt
+  pr_checks:
+    name: PR Checks
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/reusable_pr_checks.yml
 
-      - name: cargo fmt --check
-        run: cargo fmt -- --check
+  # fmt:
+  #   name: Check Formatting
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #     - uses: actions-rust-lang/setup-rust-toolchain@v1
+  #       with:
+  #         components: rustfmt
 
-  check_and_build:
-    name: Check, Lint & Build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: hadolint/hadolint-action@v3.2.0
-        with:
-          dockerfile: Dockerfile
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: nightly-2025-06-23
-          components: clippy, rust-src
-      - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+  #     - name: cargo fmt --check
+  #       run: cargo fmt -- --check
 
-      - name: Install eBPF dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang llvm libelf-dev libz-dev linux-headers-$(uname -r)
+  # check_and_build:
+  #   name: Check, Lint & Build
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #     - uses: hadolint/hadolint-action@v3.2.0
+  #       with:
+  #         dockerfile: Dockerfile
+  #     - uses: actions-rust-lang/setup-rust-toolchain@v1
+  #       with:
+  #         toolchain: nightly-2025-06-23
+  #         components: clippy, rust-src
+  #     - name: Cache dependencies
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: |
+  #           ~/.cargo/bin/
+  #           ~/.cargo/registry/index/
+  #           ~/.cargo/registry/cache/
+  #           ~/.cargo/git/db/
+  #           target/
+  #         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install bpf-linker
-        run: command -v bpf-linker &> /dev/null || cargo install bpf-linker
+  #     - name: Install eBPF dependencies
+  #       run: |
+  #         sudo apt-get update
+  #         sudo apt-get install -y --no-install-recommends clang llvm libelf-dev libz-dev linux-headers-$(uname -r)
 
-      - name: Build eBPF and userspace code
-        run: cargo build -r
+  #     - name: Install bpf-linker
+  #       run: command -v bpf-linker &> /dev/null || cargo install bpf-linker
 
-      - name: Lint eBPF code
-        run: cargo clippy -p mermin-ebpf -- -D warnings
+  #     - name: Build eBPF and userspace code
+  #       run: cargo build -r
 
-      - name: Lint userspace code
-        run: cargo clippy -- -D warnings
+  #     - name: Lint eBPF code
+  #       run: cargo clippy -p mermin-ebpf -- -D warnings
 
-  test:
-    name: Run Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: nightly-2025-06-23
-          components: rust-src
-      - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Install eBPF dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang llvm libelf-dev libz-dev make
+  #     - name: Lint userspace code
+  #       run: cargo clippy -- -D warnings
 
-      - name: Install bpf-linker
-        run: command -v bpf-linker &> /dev/null || cargo install bpf-linker
+  # test:
+  #   name: Run Tests
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #     - uses: actions-rust-lang/setup-rust-toolchain@v1
+  #       with:
+  #         toolchain: nightly-2025-06-23
+  #         components: rust-src
+  #     - name: Cache dependencies
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: |
+  #           ~/.cargo/bin/
+  #           ~/.cargo/registry/index/
+  #           ~/.cargo/registry/cache/
+  #           ~/.cargo/git/db/
+  #           target/
+  #         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+  #     - name: Install eBPF dependencies
+  #       run: |
+  #         sudo apt-get update
+  #         sudo apt-get install -y --no-install-recommends clang llvm libelf-dev libz-dev make
 
-      - name: Run default tests
-        run: cargo test -r
+  #     - name: Install bpf-linker
+  #       run: command -v bpf-linker &> /dev/null || cargo install bpf-linker
 
-      - name: Run eBPF tests
-        run: cargo test -r -p mermin-ebpf --features test
+  #     - name: Run default tests
+  #       run: cargo test -r
 
-      - name: Run integration tests
-        run: |
-          cd network-types/tests
-          make test-ci
+  #     - name: Run eBPF tests
+  #       run: cargo test -r -p mermin-ebpf --features test
 
-  helm_checks:
-    name: Run Helm sanity checks
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - name: Set up Helm
-        uses: azure/setup-helm@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          check-latest: true
-      - name: Set up chart-testing
-        uses: helm/chart-testing-action@v2.7.0
-      - name: Run chart-testing (list-changed)
-        id: list-changed
-        run: |
-          changed=$(ct list-changed --target-branch ${{ github.event.repository.default_branch }})
-          if [[ -n "$changed" ]]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Run chart-testing (lint)
-        if: steps.list-changed.outputs.changed == 'true'
-        # TODO(mack#ENG-53|2025-08-06): Remove --check-version-increment when ready to publish
-        run: ct lint --target-branch ${{ github.event.repository.default_branch }} --validate-maintainers=false --check-version-increment=false
-      - name: Create kind cluster
-        if: steps.list-changed.outputs.changed == 'true'
-        uses: helm/kind-action@v1.12.0
-      # TODO: Enable this when the docker image is available on Docker Hub.
-      # - name: Run chart-testing (install)
-      #   if: steps.list-changed.outputs.changed == 'true'
-      #   run: ct install --target-branch ${{ github.event.repository.default_branch }}
+  #     - name: Run integration tests
+  #       run: |
+  #         cd network-types/tests
+  #         make test-ci
 
-  docker_build:
-    name: Docker build
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      id-token: write
-    strategy:
-      matrix:
-        runner: [ubuntu-latest, ubuntu-latest-arm]
-        target: [runner, runner-debug]
-    env:
-      RUNNER_PLATFORM: |
-        {
-            "ubuntu-latest": "linux/amd64",
-            "ubuntu-latest-arm": "linux/arm64"
-        }
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-      - uses: google-github-actions/auth@v2
-        id: gcr_auth
-        with:
-          token_format: "access_token"
-          project_id: "pub-artifacts-j8rjbu"
-          workload_identity_provider: "projects/701687754822/locations/global/workloadIdentityPools/github-actions/providers/github-actions"
-          service_account: "gha-registry-writer@pub-artifacts-j8rjbu.iam.gserviceaccount.com"
-      - name: Login to GCR
-        uses: docker/login-action@v3
-        with:
-          registry: us-docker.pkg.dev
-          username: oauth2accesstoken
-          password: ${{ steps.gcr_auth.outputs.access_token }}
-      - name: Build docker image
-        uses: elastiflow/gha-reusable/actions/docker-build-push@v0
-        with:
-          platforms: ${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }}
-          target: ${{ matrix.target }}
-          cache_from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-ci-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }}
-          cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-ci-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }},mode=max
+  # helm_checks:
+  #   name: Run Helm sanity checks
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v5
+  #       with:
+  #         fetch-depth: 0
+  #     - name: Set up Helm
+  #       uses: azure/setup-helm@v4
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: "3.13"
+  #         check-latest: true
+  #     - name: Set up chart-testing
+  #       uses: helm/chart-testing-action@v2.7.0
+  #     - name: Run chart-testing (list-changed)
+  #       id: list-changed
+  #       run: |
+  #         changed=$(ct list-changed --target-branch ${{ github.event.repository.default_branch }})
+  #         if [[ -n "$changed" ]]; then
+  #           echo "changed=true" >> "$GITHUB_OUTPUT"
+  #         fi
+  #     - name: Run chart-testing (lint)
+  #       if: steps.list-changed.outputs.changed == 'true'
+  #       # TODO(mack#ENG-53|2025-08-06): Remove --check-version-increment when ready to publish
+  #       run: ct lint --target-branch ${{ github.event.repository.default_branch }} --validate-maintainers=false --check-version-increment=false
+  #     - name: Create kind cluster
+  #       if: steps.list-changed.outputs.changed == 'true'
+  #       uses: helm/kind-action@v1.12.0
+  #     # TODO: Enable this when the docker image is available on Docker Hub.
+  #     # - name: Run chart-testing (install)
+  #     #   if: steps.list-changed.outputs.changed == 'true'
+  #     #   run: ct install --target-branch ${{ github.event.repository.default_branch }}
 
-  cni_tests:
-    name: CNI Tests
-    permissions:
-      contents: read
-      id-token: write
-    uses: ./.github/workflows/reusable-cni-tests.yml
+  # docker_build:
+  #   name: Docker build
+  #   runs-on: ${{ matrix.runner }}
+  #   timeout-minutes: 30
+  #   permissions:
+  #     contents: read
+  #     id-token: write
+  #   strategy:
+  #     matrix:
+  #       runner: [ubuntu-latest, ubuntu-latest-arm]
+  #       target: [runner, runner-debug]
+  #   env:
+  #     RUNNER_PLATFORM: |
+  #       {
+  #           "ubuntu-latest": "linux/amd64",
+  #           "ubuntu-latest-arm": "linux/arm64"
+  #       }
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v5
+  #     - uses: google-github-actions/auth@v2
+  #       id: gcr_auth
+  #       with:
+  #         token_format: "access_token"
+  #         project_id: "pub-artifacts-j8rjbu"
+  #         workload_identity_provider: "projects/701687754822/locations/global/workloadIdentityPools/github-actions/providers/github-actions"
+  #         service_account: "gha-registry-writer@pub-artifacts-j8rjbu.iam.gserviceaccount.com"
+  #     - name: Login to GCR
+  #       uses: docker/login-action@v3
+  #       with:
+  #         registry: us-docker.pkg.dev
+  #         username: oauth2accesstoken
+  #         password: ${{ steps.gcr_auth.outputs.access_token }}
+  #     - name: Build docker image
+  #       uses: elastiflow/gha-reusable/actions/docker-build-push@v0
+  #       with:
+  #         platforms: ${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }}
+  #         target: ${{ matrix.target }}
+  #         cache_from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-ci-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }}
+  #         cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-ci-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }},mode=max
 
-  all_checks:
-    name: All Checks
-    if: always()
-    runs-on: ubuntu-latest
-    needs:
-      - fmt
-      - check_and_build
-      - test
-      - helm_checks
-      - docker_build
-      - cni_tests
-    steps:
-      - name: Check if all checks passed
-        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe
-        with:
-          jobs: ${{ toJSON(needs) }}
+  # cni_tests:
+  #   name: CNI Tests
+  #   permissions:
+  #     contents: read
+  #     id-token: write
+  #   uses: ./.github/workflows/reusable-cni-tests.yml
+
+  # all_checks:
+  #   name: All Checks
+  #   if: always()
+  #   runs-on: ubuntu-latest
+  #   needs:
+  #     - fmt
+  #     - check_and_build
+  #     - test
+  #     - helm_checks
+  #     - docker_build
+  #     - cni_tests
+  #   steps:
+  #     - name: Check if all checks passed
+  #       uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe
+  #       with:
+  #         jobs: ${{ toJSON(needs) }}

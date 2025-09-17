@@ -1,0 +1,24 @@
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        type: string
+        default: ubuntu-latest
+        description: "GHA runner for the job (ubuntu-latest, ubuntu-latest-4c, ubuntu-latest-8c)"
+      timeout-minutes:
+        type: number
+        default: 5
+        description: "Job timeout in minutes"
+
+jobs:
+  pr_title_lint:
+    name: 'pr-title-lint'
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - name: debug
+        run: echo '${{ toJson(github.event.pull_request) }}''
+      - name: Install commitlint
+        run: npm install -D @commitlint/cli @commitlint/config-conventional
+      - name: Validate PR commits with commitlint
+        run: npx commitlint --last --verbose
