@@ -16,21 +16,11 @@ jobs:
     runs-on: ${{ inputs.runs-on }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
-      - name: debug
-        run: |
-          cat << EOF
-            ${{ toJson(github.event.pull_request) }}
-          EOF
-      # - name: debug
-      #   run: |
-      #     cat << EOF
-      #       ${{ toJson(github.event) }}
-      #     EOF
       - name: Checkout
         uses: actions/checkout@v5
       - name: Install commitlint
         run: npm install -D @commitlint/cli @commitlint/config-conventional
       - name: Validate PR commits with commitlint
         run: |
-          printf '%q\n' '${{ toJson(github.event.pull_request.title) }}' > /tmp/pr_title
+          echo '${{ toJson(github.event.pull_request.title) }}' > /tmp/pr_title
           npx commitlint --edit /tmp/pr_title --verbose
