@@ -24,4 +24,6 @@ jobs:
       - name: Install commitlint
         run: npm install -D @commitlint/cli @commitlint/config-conventional
       - name: Validate PR commits with commitlint
-        run: npx commitlint --last --verbose
+        run: |
+          npx commitlint --version
+          npx commitlint --last --verbose
