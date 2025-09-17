@@ -19,8 +19,13 @@ jobs:
       - name: debug
         run: |
           cat << EOF
-            ${{ toJson(github.event) }}
+            ${{ toJson(github.event.pull_request) }}
           EOF
+      # - name: debug
+      #   run: |
+      #     cat << EOF
+      #       ${{ toJson(github.event) }}
+      #     EOF
       - name: Checkout
         uses: actions/checkout@v5
       - name: Install commitlint
