@@ -73,18 +73,22 @@ pub struct PacketMeta {
 }
 
 impl PacketMeta {
+    #[inline]
     pub fn src_port(&self) -> u16 {
         u16::from_be_bytes(self.src_port)
     }
 
+    #[inline]
     pub fn dst_port(&self) -> u16 {
         u16::from_be_bytes(self.dst_port)
     }
 
+    #[inline]
     pub fn tunnel_src_port(&self) -> u16 {
         u16::from_be_bytes(self.tunnel_src_port)
     }
 
+    #[inline]
     pub fn tunnel_dst_port(&self) -> u16 {
         u16::from_be_bytes(self.tunnel_dst_port)
     }
