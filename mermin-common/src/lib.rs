@@ -58,8 +58,6 @@ pub struct PacketMeta {
 
     // Fields with 1-byte alignment
     // ---
-    /// Parsing boolean to help with tunneling
-    pub found_tunnel: bool,
     /// Indicates whether the flow record uses IPv4 or IPv6 addressing (innermost).
     pub ip_addr_type: IpAddrType,
     /// Network protocol identifier (innermost, e.g., TCP = 6, UDP = 17).
@@ -75,18 +73,22 @@ pub struct PacketMeta {
 }
 
 impl PacketMeta {
+    #[inline]
     pub fn src_port(&self) -> u16 {
         u16::from_be_bytes(self.src_port)
     }
 
+    #[inline]
     pub fn dst_port(&self) -> u16 {
         u16::from_be_bytes(self.dst_port)
     }
 
+    #[inline]
     pub fn tunnel_src_port(&self) -> u16 {
         u16::from_be_bytes(self.tunnel_src_port)
     }
 
+    #[inline]
     pub fn tunnel_dst_port(&self) -> u16 {
         u16::from_be_bytes(self.tunnel_dst_port)
     }

@@ -42,7 +42,7 @@ static mut PACKETS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0); // 256 KB
 
 #[cfg(not(feature = "test"))]
 #[map]
-static mut SCRATCH_META: PerCpuArray<PacketMeta> = PerCpuArray::with_max_entries(1, 0);
+static mut PACKET_META: PerCpuArray<PacketMeta> = PerCpuArray::with_max_entries(1, 0);
 
 // Defines what kind of header we expect to process in the current iteration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,33 +87,13 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
     // These fields will be updated as we parse deeper or encounter encapsulations.
     let mut parser = Parser::default();
     let options = ParserOptions::default();
-    // let mut found_tunnel = false;
-    // let mut tcp_flags: u8 = 0;
-    // let mut tunnel_tcp_flags: u8 = 0;
-
-    // let mut src_ipv6_addr: [u8; 16] = [0; 16];
-    // let mut dst_ipv6_addr: [u8; 16] = [0; 16];
-    // let mut tunnel_src_ipv6_addr: [u8; 16] = [0; 16];
-    // let mut tunnel_dst_ipv6_addr: [u8; 16] = [0; 16];
-    // let mut src_ipv4_addr: [u8; 4] = [0; 4];
-    // let mut dst_ipv4_addr: [u8; 4] = [0; 4];
-    // let mut l3_octet_count: u32 = 0;
-    // let mut tunnel_src_ipv4_addr: [u8; 4] = [0; 4];
-    // let mut tunnel_dst_ipv4_addr: [u8; 4] = [0; 4];
-    // let mut src_port: [u8; 2] = [0; 2];
-    // let mut dst_port: [u8; 2] = [0; 2];
-    // let mut tunnel_src_port: [u8; 2] = [0; 2];
-    // let mut tunnel_dst_port: [u8; 2] = [0; 2];
-    // let mut ip_addr_type: IpAddrType = IpAddrType::default();
-    // let mut proto: IpProto = IpProto::default();
-    // let mut tunnel_ip_addr_type: IpAddrType = IpAddrType::default();
-    // let mut tunnel_proto: IpProto = IpProto::default();
+    let mut found_tunnel = false;
 
     // Get PacketMeta from PerCpuArray instead of using local variables
     #[cfg(not(feature = "test"))]
     let meta_ptr = unsafe {
         #[allow(static_mut_refs)]
-        match SCRATCH_META.get_ptr_mut(0) {
+        match PACKET_META.get_ptr_mut(0) {
             Some(ptr) => ptr,
             None => return (ctx, Err(())),
         }
@@ -128,23 +108,23 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
 
     // Initialize the meta with default values
     meta.ifindex = unsafe { (*ctx.skb.skb).ifindex };
-    meta.found_tunnel = false;
     meta.src_ipv6_addr = [0; 16];
     meta.dst_ipv6_addr = [0; 16];
-    meta.tunnel_src_ipv6_addr = [0; 16];
-    meta.tunnel_dst_ipv6_addr = [0; 16];
     meta.src_ipv4_addr = [0; 4];
     meta.dst_ipv4_addr = [0; 4];
     meta.l3_octet_count = 0;
-    meta.tunnel_src_ipv4_addr = [0; 4];
-    meta.tunnel_dst_ipv4_addr = [0; 4];
     meta.src_port = [0; 2];
     meta.dst_port = [0; 2];
-    meta.tunnel_src_port = [0; 2];
-    meta.tunnel_dst_port = [0; 2];
     meta.ip_addr_type = IpAddrType::default();
     meta.proto = IpProto::default();
     meta.tcp_flags = 0;
+
+    meta.tunnel_src_ipv6_addr = [0; 16];
+    meta.tunnel_dst_ipv6_addr = [0; 16];
+    meta.tunnel_src_ipv4_addr = [0; 4];
+    meta.tunnel_dst_ipv4_addr = [0; 4];
+    meta.tunnel_src_port = [0; 2];
+    meta.tunnel_dst_port = [0; 2];
     meta.tunnel_ip_addr_type = IpAddrType::default();
     meta.tunnel_proto = IpProto::default();
     meta.tunnel_tcp_flags = 0;
@@ -155,7 +135,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
             HeaderType::Ipv4 => match parser.parse_ipv4_header(&ctx) {
                 Ok(ipv4_hdr) => {
                     // Check if proto is set to IP-in-IP and the tunnel hasn't been set yet
-                    if !meta.found_tunnel
+                    if !found_tunnel
                         && (ipv4_hdr.proto == IpProto::Ipv4 || ipv4_hdr.proto == IpProto::Ipv6)
                     {
                         meta.tunnel_src_ipv4_addr = ipv4_hdr.src_addr;
@@ -165,7 +145,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                         meta.tunnel_ip_addr_type = IpAddrType::Ipv4;
                         meta.tunnel_proto = meta.proto;
                         meta.tunnel_tcp_flags = meta.tcp_flags;
-                        meta.found_tunnel = true;
+                        found_tunnel = true;
                     } else {
                         // policy: innermost IP header determines the flow IPs
                         meta.src_ipv4_addr = ipv4_hdr.src_addr;
@@ -182,7 +162,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
             HeaderType::Ipv6 => match parser.parse_ipv6_header(&ctx) {
                 Ok(ipv6_hdr) => {
                     // Check if proto is set to IP-in-IP and the tunnel hasn't been set yet
-                    if !meta.found_tunnel
+                    if !found_tunnel
                         && (ipv6_hdr.next_hdr == IpProto::Ipv6
                             || ipv6_hdr.next_hdr == IpProto::Ipv4)
                     {
@@ -193,7 +173,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                         meta.tunnel_ip_addr_type = IpAddrType::Ipv6;
                         meta.tunnel_proto = meta.proto;
                         meta.tunnel_tcp_flags = meta.tcp_flags;
-                        meta.found_tunnel = true;
+                        found_tunnel = true;
                     } else {
                         // policy: innermost IP header determines the flow IPs
                         meta.src_ipv6_addr = ipv6_hdr.src_addr;
@@ -322,7 +302,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                         let udp_dst_port = udp_hdr.dst_port();
 
                         // Capture outer headers before entering Geneve or VXLAN tunnel
-                        if !meta.found_tunnel
+                        if !found_tunnel
                             && (udp_dst_port == options.geneve_port
                                 || udp_dst_port == options.vxlan_port)
                         {
@@ -335,7 +315,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                             meta.tunnel_ip_addr_type = meta.ip_addr_type;
                             meta.tunnel_proto = meta.proto;
                             meta.tunnel_tcp_flags = meta.tcp_flags;
-                            meta.found_tunnel = true;
+                            found_tunnel = true;
                         }
                         // TODO: Double check if we need an else here to save the UDP values in the case of no tunnel
 
@@ -381,7 +361,6 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
     #[cfg(feature = "test")]
     let packet_meta = PacketMeta {
         ifindex: meta.ifindex,
-        found_tunnel: meta.found_tunnel,
         src_ipv6_addr: meta.src_ipv6_addr,
         dst_ipv6_addr: meta.dst_ipv6_addr,
         tunnel_src_ipv6_addr: meta.tunnel_src_ipv6_addr,
