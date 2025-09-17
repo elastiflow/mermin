@@ -5,7 +5,7 @@ use aya_ebpf::bindings::TC_ACT_PIPE;
 #[cfg(not(feature = "test"))]
 use aya_ebpf::{
     macros::{classifier, map},
-    maps::RingBuf,
+    maps::{PerCpuArray, RingBuf},
     programs::TcContext,
 };
 #[cfg(not(feature = "test"))]
@@ -40,6 +40,10 @@ use network_types::{
 #[map]
 static mut PACKETS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0); // 256 KB
 
+#[cfg(not(feature = "test"))]
+#[map]
+static mut SCRATCH_META: PerCpuArray<PacketMeta> = PerCpuArray::with_max_entries(1, 0);
+
 // Defines what kind of header we expect to process in the current iteration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HeaderType {
@@ -66,15 +70,10 @@ pub enum Error {
 #[cfg(not(feature = "test"))]
 #[classifier]
 pub fn mermin(ctx: TcContext) -> i32 {
-    let (ctx, res) = try_mermin(ctx);
+    let (_ctx, res) = try_mermin(ctx);
     match res {
-        Ok((binding, packet_meta)) => {
-            unsafe {
-                #[allow(static_mut_refs)]
-                if PACKETS.output(&packet_meta, 0).is_err() {
-                    error!(&ctx, "mermin: failed to write packet to ring buffer");
-                }
-            }
+        Ok((binding, _packet_meta_ignored)) => {
+            // try_mermin already wrote PacketMeta to ring buffer using SCRATCH_META
             binding
         }
         Err(_) => TC_ACT_PIPE,
@@ -330,6 +329,44 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
     }
 
     let ifindex = unsafe { (*ctx.skb.skb).ifindex };
+    #[cfg(not(feature = "test"))]
+    unsafe {
+        // Need to allow a reference to the scratch slot to be held by the closure below
+        #[allow(static_mut_refs)]
+        if let Some(meta_ptr) = SCRATCH_META.get_ptr_mut(0) {
+            let meta: &mut PacketMeta = &mut *meta_ptr;
+            // Fill fields from the parsed values (kept as small locals above)
+            meta.ifindex = ifindex;
+            meta.src_ipv6_addr = src_ipv6_addr;
+            meta.dst_ipv6_addr = dst_ipv6_addr;
+            meta.tunnel_src_ipv6_addr = tunnel_src_ipv6_addr;
+            meta.tunnel_dst_ipv6_addr = tunnel_dst_ipv6_addr;
+            meta.src_ipv4_addr = src_ipv4_addr;
+            meta.dst_ipv4_addr = dst_ipv4_addr;
+            meta.l3_octet_count = l3_octet_count;
+            meta.tunnel_src_ipv4_addr = tunnel_src_ipv4_addr;
+            meta.tunnel_dst_ipv4_addr = tunnel_dst_ipv4_addr;
+            meta.src_port = src_port;
+            meta.dst_port = dst_port;
+            meta.tunnel_src_port = tunnel_src_port;
+            meta.tunnel_dst_port = tunnel_dst_port;
+            meta.ip_addr_type = ip_addr_type;
+            meta.proto = proto;
+            meta.tunnel_ip_addr_type = tunnel_ip_addr_type;
+            meta.tunnel_proto = tunnel_proto;
+            meta.tcp_flags = tcp_flags;
+            meta.tunnel_tcp_flags = tunnel_tcp_flags;
+
+            #[allow(static_mut_refs)]
+            if PACKETS.output(meta, 0).is_err() {
+                error!(&ctx, "mermin: failed to write packet to ring buffer");
+            }
+        } else {
+            error!(&ctx, "mermin: scratch slot unavailable");
+        }
+    }
+
+    #[cfg(feature = "test")]
     let packet_meta = PacketMeta {
         ifindex,
         src_ipv6_addr,
@@ -352,6 +389,10 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
         tunnel_proto,
         tunnel_tcp_flags,
     };
+
+    // Return dummy PacketMeta in live builds
+    #[cfg(not(feature = "test"))]
+    let packet_meta = PacketMeta::default();
 
     (ctx, Ok((TC_ACT_PIPE, packet_meta)))
 }
