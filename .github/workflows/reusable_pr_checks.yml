@@ -22,5 +22,4 @@ jobs:
         run: npm install -D @commitlint/cli @commitlint/config-conventional
       - name: Validate PR commits with commitlint
         run: |
-          echo '${{ toJson(github.event.pull_request.title) }}' > /tmp/pr_title
-          npx commitlint --edit /tmp/pr_title --verbose
+          echo '${{ github.event.pull_request.title }}' | npx commitlint --verbose
