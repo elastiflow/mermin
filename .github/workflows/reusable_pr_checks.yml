@@ -19,11 +19,12 @@ jobs:
       - name: debug
         run: |
           cat << EOF
-            ${{ toJson(github.event.pull_request) }}
+            ${{ toJson(github.event) }}
           EOF
+      - name: Checkout
+        uses: actions/checkout@v5
       - name: Install commitlint
         run: npm install -D @commitlint/cli @commitlint/config-conventional
       - name: Validate PR commits with commitlint
         run: |
-          npx commitlint --version
           npx commitlint --last --verbose
