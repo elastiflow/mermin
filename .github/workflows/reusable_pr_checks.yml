@@ -33,6 +33,6 @@ jobs:
       - name: Validate PR commits with commitlint
         run: |
           cat <<- EOF > /tmp/pr_title
-            ${{ toJson(github.event.pull_request) }}
+            ${{ toJson(github.event.pull_request.title) }}
           EOF
           npx commitlint --edit /tmp/pr_title --verbose
