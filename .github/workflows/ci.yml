@@ -12,7 +12,7 @@ on:
 jobs:
   pr_checks:
     name: PR Checks
-    if: ${{ github.event_name == 'pull_request' && github.event.action.synchronize }}
+    # if: ${{ github.event_name == 'pull_request' && github.event.action.synchronize }}
     uses: ./.github/workflows/reusable_pr_checks.yml
 
   # fmt:
