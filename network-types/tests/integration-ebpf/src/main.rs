@@ -61,6 +61,7 @@ fn u8_to_packet_type(val: u8) -> Option<PacketType> {
         19 => Some(PacketType::Shim6),
         20 => Some(PacketType::Hip),
         21 => Some(PacketType::Gre),
+        22 => Some(PacketType::WireGuard),
         _ => None,
     }
 }
@@ -271,6 +272,14 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             ParsedHeader {
                 type_: PacketType::Gre,
                 data: HeaderUnion { gre: header },
+            }
+        }
+        PacketType::WireGuard => {
+            let header: integration_common::WireGuardMinimalHeader =
+                ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            ParsedHeader {
+                type_: PacketType::WireGuard,
+                data: HeaderUnion { wireguard: header },
             }
         }
     };

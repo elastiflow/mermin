@@ -17,3 +17,4 @@ pub mod shim6;
 pub mod tcp;
 pub mod udp;
 pub mod vxlan;
+pub mod wireguard;

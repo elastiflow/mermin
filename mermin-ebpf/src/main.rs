@@ -5,7 +5,7 @@ use aya_ebpf::bindings::TC_ACT_PIPE;
 #[cfg(not(feature = "test"))]
 use aya_ebpf::{
     macros::{classifier, map},
-    maps::RingBuf,
+    maps::{PerCpuArray, RingBuf},
     programs::TcContext,
 };
 #[cfg(not(feature = "test"))]
@@ -29,12 +29,20 @@ use network_types::{
     tcp::TcpHdr,
     udp::UdpHdr,
     vxlan::VxlanHdr,
+    wireguard::{
+        WireGuardCookieReply, WireGuardInitiation, WireGuardResponse, WireGuardTransportData,
+        WireGuardType,
+    },
 };
 
 // todo: verify buffer size
 #[cfg(not(feature = "test"))]
 #[map]
 static mut PACKETS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0); // 256 KB
+
+#[cfg(not(feature = "test"))]
+#[map]
+static mut PACKET_META: PerCpuArray<PacketMeta> = PerCpuArray::with_max_entries(1, 0);
 
 // Defines what kind of header we expect to process in the current iteration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +52,7 @@ enum HeaderType {
     Ipv6,
     Geneve,
     Vxlan,
+    Wireguard,
     Proto(IpProto),
     Route(RoutingHeaderType),
     StopProcessing, // Indicates parsing should terminate for flow key purposes
@@ -61,15 +70,10 @@ pub enum Error {
 #[cfg(not(feature = "test"))]
 #[classifier]
 pub fn mermin(ctx: TcContext) -> i32 {
-    let (ctx, res) = try_mermin(ctx);
+    let (_ctx, res) = try_mermin(ctx);
     match res {
-        Ok((binding, packet_meta)) => {
-            unsafe {
-                #[allow(static_mut_refs)]
-                if PACKETS.output(&packet_meta, 0).is_err() {
-                    error!(&ctx, "mermin: failed to write packet to ring buffer");
-                }
-            }
+        Ok((binding, _packet_meta_ignored)) => {
+            // try_mermin already wrote PacketMeta to ring buffer using SCRATCH_META
             binding
         }
         Err(_) => TC_ACT_PIPE,
@@ -84,26 +88,46 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
     let mut parser = Parser::default();
     let options = ParserOptions::default();
     let mut found_tunnel = false;
-    let mut tcp_flags: u8 = 0;
-    let mut tunnel_tcp_flags: u8 = 0;
 
-    let mut src_ipv6_addr: [u8; 16] = [0; 16];
-    let mut dst_ipv6_addr: [u8; 16] = [0; 16];
-    let mut tunnel_src_ipv6_addr: [u8; 16] = [0; 16];
-    let mut tunnel_dst_ipv6_addr: [u8; 16] = [0; 16];
-    let mut src_ipv4_addr: [u8; 4] = [0; 4];
-    let mut dst_ipv4_addr: [u8; 4] = [0; 4];
-    let mut l3_octet_count: u32 = 0;
-    let mut tunnel_src_ipv4_addr: [u8; 4] = [0; 4];
-    let mut tunnel_dst_ipv4_addr: [u8; 4] = [0; 4];
-    let mut src_port: [u8; 2] = [0; 2];
-    let mut dst_port: [u8; 2] = [0; 2];
-    let mut tunnel_src_port: [u8; 2] = [0; 2];
-    let mut tunnel_dst_port: [u8; 2] = [0; 2];
-    let mut ip_addr_type: IpAddrType = IpAddrType::default();
-    let mut proto: IpProto = IpProto::default();
-    let mut tunnel_ip_addr_type: IpAddrType = IpAddrType::default();
-    let mut tunnel_proto: IpProto = IpProto::default();
+    // Get PacketMeta from PerCpuArray instead of using local variables
+    #[cfg(not(feature = "test"))]
+    let meta_ptr = unsafe {
+        #[allow(static_mut_refs)]
+        match PACKET_META.get_ptr_mut(0) {
+            Some(ptr) => ptr,
+            None => return (ctx, Err(())),
+        }
+    };
+
+    #[cfg(not(feature = "test"))]
+    let meta: &mut PacketMeta = unsafe { &mut *meta_ptr };
+
+    // For tests, use a local variable
+    #[cfg(feature = "test")]
+    let mut meta = PacketMeta::default();
+
+    // Initialize the meta with default values
+    meta.ifindex = unsafe { (*ctx.skb.skb).ifindex };
+    meta.src_ipv6_addr = [0; 16];
+    meta.dst_ipv6_addr = [0; 16];
+    meta.src_ipv4_addr = [0; 4];
+    meta.dst_ipv4_addr = [0; 4];
+    meta.l3_octet_count = 0;
+    meta.src_port = [0; 2];
+    meta.dst_port = [0; 2];
+    meta.ip_addr_type = IpAddrType::default();
+    meta.proto = IpProto::default();
+    meta.tcp_flags = 0;
+
+    meta.tunnel_src_ipv6_addr = [0; 16];
+    meta.tunnel_dst_ipv6_addr = [0; 16];
+    meta.tunnel_src_ipv4_addr = [0; 4];
+    meta.tunnel_dst_ipv4_addr = [0; 4];
+    meta.tunnel_src_port = [0; 2];
+    meta.tunnel_dst_port = [0; 2];
+    meta.tunnel_ip_addr_type = IpAddrType::default();
+    meta.tunnel_proto = IpProto::default();
+    meta.tunnel_tcp_flags = 0;
 
     for _ in 0..MAX_HEADER_PARSE_DEPTH {
         let result: Result<(), Error> = match parser.next_hdr {
@@ -114,21 +138,21 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                     if !found_tunnel
                         && (ipv4_hdr.proto == IpProto::Ipv4 || ipv4_hdr.proto == IpProto::Ipv6)
                     {
-                        tunnel_src_ipv4_addr = ipv4_hdr.src_addr;
-                        tunnel_dst_ipv4_addr = ipv4_hdr.dst_addr;
-                        tunnel_src_port = src_port;
-                        tunnel_dst_port = dst_port;
-                        tunnel_ip_addr_type = IpAddrType::Ipv4;
-                        tunnel_proto = proto;
-                        tunnel_tcp_flags = tcp_flags;
+                        meta.tunnel_src_ipv4_addr = ipv4_hdr.src_addr;
+                        meta.tunnel_dst_ipv4_addr = ipv4_hdr.dst_addr;
+                        meta.tunnel_src_port = meta.src_port;
+                        meta.tunnel_dst_port = meta.dst_port;
+                        meta.tunnel_ip_addr_type = IpAddrType::Ipv4;
+                        meta.tunnel_proto = meta.proto;
+                        meta.tunnel_tcp_flags = meta.tcp_flags;
                         found_tunnel = true;
                     } else {
                         // policy: innermost IP header determines the flow IPs
-                        src_ipv4_addr = ipv4_hdr.src_addr;
-                        dst_ipv4_addr = ipv4_hdr.dst_addr;
-                        l3_octet_count = parser.calc_l3_octet_count(ctx.len());
-                        ip_addr_type = IpAddrType::Ipv4;
-                        proto = ipv4_hdr.proto;
+                        meta.src_ipv4_addr = ipv4_hdr.src_addr;
+                        meta.dst_ipv4_addr = ipv4_hdr.dst_addr;
+                        meta.l3_octet_count = parser.calc_l3_octet_count(ctx.len());
+                        meta.ip_addr_type = IpAddrType::Ipv4;
+                        meta.proto = ipv4_hdr.proto;
                         // todo: Extract additional fields from ipv4_hdr
                     }
                     Ok(())
@@ -142,21 +166,21 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                         && (ipv6_hdr.next_hdr == IpProto::Ipv6
                             || ipv6_hdr.next_hdr == IpProto::Ipv4)
                     {
-                        tunnel_src_ipv6_addr = ipv6_hdr.src_addr;
-                        tunnel_dst_ipv6_addr = ipv6_hdr.dst_addr;
-                        tunnel_src_port = src_port;
-                        tunnel_dst_port = dst_port;
-                        tunnel_ip_addr_type = IpAddrType::Ipv6;
-                        tunnel_proto = proto;
-                        tunnel_tcp_flags = tcp_flags;
+                        meta.tunnel_src_ipv6_addr = ipv6_hdr.src_addr;
+                        meta.tunnel_dst_ipv6_addr = ipv6_hdr.dst_addr;
+                        meta.tunnel_src_port = meta.src_port;
+                        meta.tunnel_dst_port = meta.dst_port;
+                        meta.tunnel_ip_addr_type = IpAddrType::Ipv6;
+                        meta.tunnel_proto = meta.proto;
+                        meta.tunnel_tcp_flags = meta.tcp_flags;
                         found_tunnel = true;
                     } else {
                         // policy: innermost IP header determines the flow IPs
-                        src_ipv6_addr = ipv6_hdr.src_addr;
-                        dst_ipv6_addr = ipv6_hdr.dst_addr;
-                        l3_octet_count = parser.calc_l3_octet_count(ctx.len());
-                        ip_addr_type = IpAddrType::Ipv6;
-                        proto = ipv6_hdr.next_hdr;
+                        meta.src_ipv6_addr = ipv6_hdr.src_addr;
+                        meta.dst_ipv6_addr = ipv6_hdr.dst_addr;
+                        meta.l3_octet_count = parser.calc_l3_octet_count(ctx.len());
+                        meta.ip_addr_type = IpAddrType::Ipv6;
+                        meta.proto = ipv6_hdr.next_hdr;
                         // todo: Extract additional fields from ipv6_hdr
                     }
 
@@ -167,15 +191,15 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
             HeaderType::Geneve => match parser.parse_geneve_header(&ctx) {
                 Ok(_) => {
                     // Reset inner headers to prepare for parsing encapsulated packet
-                    src_ipv4_addr = [0; 4];
-                    dst_ipv4_addr = [0; 4];
-                    src_ipv6_addr = [0; 16];
-                    dst_ipv6_addr = [0; 16];
-                    src_port = [0; 2];
-                    dst_port = [0; 2];
-                    tcp_flags = 0;
-                    ip_addr_type = IpAddrType::default();
-                    proto = IpProto::default();
+                    meta.src_ipv4_addr = [0; 4];
+                    meta.dst_ipv4_addr = [0; 4];
+                    meta.src_ipv6_addr = [0; 16];
+                    meta.dst_ipv6_addr = [0; 16];
+                    meta.src_port = [0; 2];
+                    meta.dst_port = [0; 2];
+                    meta.tcp_flags = 0;
+                    meta.ip_addr_type = IpAddrType::default();
+                    meta.proto = IpProto::default();
 
                     Ok(())
                 }
@@ -184,37 +208,95 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
             HeaderType::Vxlan => match parser.parse_vxlan_header(&ctx) {
                 Ok(_) => {
                     // Reset inner headers to prepare for parsing encapsulated packet
-                    src_ipv4_addr = [0; 4];
-                    dst_ipv4_addr = [0; 4];
-                    src_ipv6_addr = [0; 16];
-                    dst_ipv6_addr = [0; 16];
-                    src_port = [0; 2];
-                    dst_port = [0; 2];
-                    tcp_flags = 0;
-                    ip_addr_type = IpAddrType::default();
-                    proto = IpProto::default();
+                    meta.src_ipv4_addr = [0; 4];
+                    meta.dst_ipv4_addr = [0; 4];
+                    meta.src_ipv6_addr = [0; 16];
+                    meta.dst_ipv6_addr = [0; 16];
+                    meta.src_port = [0; 2];
+                    meta.dst_port = [0; 2];
+                    meta.tcp_flags = 0;
+                    meta.ip_addr_type = IpAddrType::default();
+                    meta.proto = IpProto::default();
 
                     Ok(())
                 }
                 Err(e) => Err(e),
             },
+            HeaderType::Wireguard => {
+                parser.next_hdr = HeaderType::StopProcessing;
+                // Read the first byte to determine WireGuard message type
+                if parser.offset + 1 > ctx.len() as usize {
+                    return (ctx, Err(()));
+                }
+                let wireguard_type: u8 = match ctx.load(parser.offset) {
+                    Ok(byte) => byte,
+                    Err(_) => return (ctx, Err(())),
+                };
+                let wg_type = WireGuardType::from(wireguard_type);
+
+                // TODO: Extract specific fields from different WireGuard headers to PacketMeta
+                match wg_type {
+                    WireGuardType::HandshakeInitiation => {
+                        match parser.parse_wireguard_init(&ctx) {
+                            Ok(_wg_init) => {
+                                // let wireguard_initiation = wg_init;
+                                Ok(())
+                            }
+                            Err(e) => Err(e),
+                        }
+                    }
+                    WireGuardType::HandshakeResponse => {
+                        match parser.parse_wireguard_response(&ctx) {
+                            Ok(_wg_resp) => {
+                                // let wireguard_response = wg_resp;
+                                Ok(())
+                            }
+                            Err(e) => Err(e),
+                        }
+                    }
+                    WireGuardType::CookieReply => {
+                        match parser.parse_wireguard_cookie_reply(&ctx) {
+                            Ok(_wg_cookie_reply) => {
+                                // let wireguard_cookie_reply = wg_cookie_reply;
+                                Ok(())
+                            }
+                            Err(e) => Err(e),
+                        }
+                    }
+                    WireGuardType::TransportData => {
+                        match parser.parse_wireguard_transport_data(&ctx) {
+                            Ok(_wg_transport_data) => {
+                                // let wireguard_transport_data = wg_transport_data;
+                                Ok(())
+                            }
+                            Err(e) => Err(e),
+                        }
+                    }
+                    _ => Err(Error::Unsupported),
+                }
+            }
             HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(&ctx),
             HeaderType::Proto(IpProto::Gre) => parser.parse_gre_header(&ctx),
             HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx),
             HeaderType::Proto(IpProto::Tcp) => match parser.parse_tcp_header(&ctx) {
                 Ok(tcp_hdr) => {
-                    src_port = tcp_hdr.src;
-                    dst_port = tcp_hdr.dst;
-                    tcp_flags = tcp_hdr.off_res_flags[1]; // Extract flags from off_res_flags[1]
+                    meta.src_port = tcp_hdr.src;
+                    meta.dst_port = tcp_hdr.dst;
+                    meta.tcp_flags = tcp_hdr.off_res_flags[1]; // Extract flags from off_res_flags[1]
                     Ok(())
                 }
                 Err(e) => Err(e),
             },
             HeaderType::Proto(IpProto::Udp) => {
-                match parser.parse_udp_header(&ctx, options.geneve_port, options.vxlan_port) {
+                match parser.parse_udp_header(
+                    &ctx,
+                    options.geneve_port,
+                    options.vxlan_port,
+                    options.wireguard_port,
+                ) {
                     Ok(udp_hdr) => {
-                        src_port = udp_hdr.src;
-                        dst_port = udp_hdr.dst;
+                        meta.src_port = udp_hdr.src;
+                        meta.dst_port = udp_hdr.dst;
                         // TODO: extract and assign additional udp fields
 
                         let udp_dst_port = udp_hdr.dst_port();
@@ -224,17 +306,18 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                             && (udp_dst_port == options.geneve_port
                                 || udp_dst_port == options.vxlan_port)
                         {
-                            tunnel_src_ipv6_addr = src_ipv6_addr;
-                            tunnel_dst_ipv6_addr = dst_ipv6_addr;
-                            tunnel_src_ipv4_addr = src_ipv4_addr;
-                            tunnel_dst_ipv4_addr = dst_ipv4_addr;
-                            tunnel_src_port = src_port;
-                            tunnel_dst_port = dst_port;
-                            tunnel_ip_addr_type = ip_addr_type;
-                            tunnel_proto = proto;
-                            tunnel_tcp_flags = tcp_flags;
+                            meta.tunnel_src_ipv6_addr = meta.src_ipv6_addr;
+                            meta.tunnel_dst_ipv6_addr = meta.dst_ipv6_addr;
+                            meta.tunnel_src_ipv4_addr = meta.src_ipv4_addr;
+                            meta.tunnel_dst_ipv4_addr = meta.dst_ipv4_addr;
+                            meta.tunnel_src_port = meta.src_port;
+                            meta.tunnel_dst_port = meta.dst_port;
+                            meta.tunnel_ip_addr_type = meta.ip_addr_type;
+                            meta.tunnel_proto = meta.proto;
+                            meta.tunnel_tcp_flags = meta.tcp_flags;
                             found_tunnel = true;
                         }
+                        // TODO: Double check if we need an else here to save the UDP values in the case of no tunnel
 
                         Ok(())
                     }
@@ -266,29 +349,41 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
         }
     }
 
-    let ifindex = unsafe { (*ctx.skb.skb).ifindex };
+    // At the end, write the meta to the ring buffer
+    #[cfg(not(feature = "test"))]
+    unsafe {
+        #[allow(static_mut_refs)]
+        if PACKETS.output(meta, 0).is_err() {
+            error!(&ctx, "mermin: failed to write packet to ring buffer");
+        }
+    }
+
+    #[cfg(feature = "test")]
     let packet_meta = PacketMeta {
-        ifindex,
-        src_ipv6_addr,
-        dst_ipv6_addr,
-        tunnel_src_ipv6_addr,
-        tunnel_dst_ipv6_addr,
-        src_ipv4_addr,
-        dst_ipv4_addr,
-        l3_octet_count,
-        tunnel_src_ipv4_addr,
-        tunnel_dst_ipv4_addr,
-        src_port,
-        dst_port,
-        tunnel_src_port,
-        tunnel_dst_port,
-        ip_addr_type,
-        proto,
-        tcp_flags,
-        tunnel_ip_addr_type,
-        tunnel_proto,
-        tunnel_tcp_flags,
+        ifindex: meta.ifindex,
+        src_ipv6_addr: meta.src_ipv6_addr,
+        dst_ipv6_addr: meta.dst_ipv6_addr,
+        tunnel_src_ipv6_addr: meta.tunnel_src_ipv6_addr,
+        tunnel_dst_ipv6_addr: meta.tunnel_dst_ipv6_addr,
+        src_ipv4_addr: meta.src_ipv4_addr,
+        dst_ipv4_addr: meta.dst_ipv4_addr,
+        l3_octet_count: meta.l3_octet_count,
+        tunnel_src_ipv4_addr: meta.tunnel_src_ipv4_addr,
+        tunnel_dst_ipv4_addr: meta.tunnel_dst_ipv4_addr,
+        src_port: meta.src_port,
+        dst_port: meta.dst_port,
+        tunnel_src_port: meta.tunnel_src_port,
+        tunnel_dst_port: meta.tunnel_dst_port,
+        ip_addr_type: meta.ip_addr_type,
+        proto: meta.proto,
+        tcp_flags: meta.tcp_flags,
+        tunnel_ip_addr_type: meta.tunnel_ip_addr_type,
+        tunnel_proto: meta.tunnel_proto,
+        tunnel_tcp_flags: meta.tunnel_tcp_flags,
     };
+
+    #[cfg(not(feature = "test"))]
+    let packet_meta = PacketMeta::default();
 
     (ctx, Ok((TC_ACT_PIPE, packet_meta)))
 }
@@ -469,6 +564,62 @@ impl Parser {
         Ok(())
     }
 
+    /// Parses a WireGuard Handshake Initiation packet.
+    /// Returns the parsed WireGuardInitiation struct.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_wireguard_init(&mut self, ctx: &TcContext) -> Result<WireGuardInitiation, Error> {
+        if self.offset + WireGuardInitiation::LEN > ctx.len() as usize {
+            return Err(Error::OutOfBounds);
+        }
+        let wg_init: WireGuardInitiation = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += WireGuardInitiation::LEN;
+        Ok(wg_init)
+    }
+
+    /// Parses a WireGuard Handshake Response packet.
+    /// Returns the parsed WireGuardResponse struct.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_wireguard_response(&mut self, ctx: &TcContext) -> Result<WireGuardResponse, Error> {
+        if self.offset + WireGuardResponse::LEN > ctx.len() as usize {
+            return Err(Error::OutOfBounds);
+        }
+        let wg_resp: WireGuardResponse = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += WireGuardResponse::LEN;
+        Ok(wg_resp)
+    }
+
+    /// Parses a WireGuard Cookie Reply packet.
+    /// Returns the parsed WireGuardCookieReply struct.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_wireguard_cookie_reply(
+        &mut self,
+        ctx: &TcContext,
+    ) -> Result<WireGuardCookieReply, Error> {
+        if self.offset + WireGuardCookieReply::LEN > ctx.len() as usize {
+            return Err(Error::OutOfBounds);
+        }
+        let wg_cookie_reply: WireGuardCookieReply =
+            ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += WireGuardCookieReply::LEN;
+        Ok(wg_cookie_reply)
+    }
+
+    /// Parses a WireGuard Transport Data packet.
+    /// Returns the parsed WireGuardTransportData struct.
+    /// Returns an error if the header cannot be loaded or is malformed.
+    fn parse_wireguard_transport_data(
+        &mut self,
+        ctx: &TcContext,
+    ) -> Result<WireGuardTransportData, Error> {
+        if self.offset + WireGuardTransportData::LEN > ctx.len() as usize {
+            return Err(Error::OutOfBounds);
+        }
+        let wg_transport_data: WireGuardTransportData =
+            ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += WireGuardTransportData::LEN;
+        Ok(wg_transport_data)
+    }
+
     /// Parses the Hop-by-Hop IPv6-extension header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_hopopt_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
@@ -590,6 +741,7 @@ impl Parser {
         ctx: &TcContext,
         geneve_port: u16,
         vxlan_port: u16,
+        wireguard_port: u16,
     ) -> Result<UdpHdr, Error> {
         if self.offset + UdpHdr::LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
@@ -605,6 +757,8 @@ impl Parser {
             HeaderType::Geneve
         } else if udp_dst_port == vxlan_port {
             HeaderType::Vxlan
+        } else if udp_dst_port == wireguard_port {
+            HeaderType::Wireguard
         } else {
             HeaderType::StopProcessing
         };
@@ -739,6 +893,7 @@ struct ParserOptions {
     /// Default is 6081 as per IANA assignment
     geneve_port: u16,
     vxlan_port: u16,
+    wireguard_port: u16,
 }
 
 impl Default for ParserOptions {
@@ -746,6 +901,7 @@ impl Default for ParserOptions {
         ParserOptions {
             geneve_port: 6081,
             vxlan_port: 4789,
+            wireguard_port: 51820,
         }
     }
 }
@@ -1049,6 +1205,84 @@ mod tests {
         // Options Data (6 bytes)
         packet.extend_from_slice(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
 
+        packet
+    }
+
+    // Helper function to create a WireGuard Initiation test packet
+    // WireGuardInitiation is 148 bytes total
+    fn create_wireguard_init_test_packet() -> Vec<u8> {
+        let mut packet = Vec::with_capacity(WireGuardInitiation::LEN);
+        //Type = 1 (Handshake Initiation)
+        packet.push(1);
+        // Reserved = 0 (3 bytes)
+        packet.extend_from_slice(&[0x00, 0x00, 0x00]);
+        // Sender Index = 1234 (4 bytes)
+        packet.extend_from_slice(&1234u32.to_le_bytes());
+        // Ephemeral key (32 bytes of test data)
+        packet.extend_from_slice(&[0x01; 32]);
+        // Encrypted Static (48 bytes of test data)
+        packet.extend_from_slice(&[0x02; 48]);
+        // Encrypted Timestamp (28 bytes of test data)
+        packet.extend_from_slice(&[0x03; 28]);
+        // MAC 1 (16 bytes of test data)
+        packet.extend_from_slice(&[0x04; 16]);
+        // MAC 2 (16 bytes of test data)
+        packet.extend_from_slice(&[0x05; 16]);
+        packet
+    }
+
+    // Helper function to create a WireGuard Response test packet
+    // WireGuardResponse is 92 bytes total
+    fn create_wireguard_response_test_packet() -> Vec<u8> {
+        let mut packet = Vec::with_capacity(WireGuardResponse::LEN);
+        // Type = 2 (Handshake Response)
+        packet.push(2);
+        // Reserved = 0 (3 bytes)
+        packet.extend_from_slice(&[0x00, 0x00, 0x00]);
+        // Sender Index = 5432 (4 bytes)
+        packet.extend_from_slice(&5432u32.to_le_bytes());
+        // Receiver Index = 1234 (4 bytes)
+        packet.extend_from_slice(&1234u32.to_le_bytes());
+        // Ephemeral key (32 bytes of test data)
+        packet.extend_from_slice(&[0x06; 32]);
+        // Encrypted Nothing (16 bytes of test data)
+        packet.extend_from_slice(&[0x07; 16]);
+        // MAC 1 (16 bytes of test data)
+        packet.extend_from_slice(&[0x08; 16]);
+        // MAC 2 (16 bytes of test data)
+        packet.extend_from_slice(&[0x09; 16]);
+        packet
+    }
+
+    // Helper function to create a WireGuard Cookie Reply test packet
+    // WireGuardCookieReply is 48 bytes total
+    fn create_wireguard_cookie_reply_test_packet() -> Vec<u8> {
+        let mut packet = Vec::with_capacity(WireGuardCookieReply::LEN);
+        // Type = 3 (Cookie Reply)
+        packet.push(3);
+        // Reserved = 0 (3 bytes)
+        packet.extend_from_slice(&[0x00, 0x00, 0x00]);
+        // Receiver Index = 12345 (4 bytes)
+        packet.extend_from_slice(&12345u32.to_le_bytes());
+        // Nonce (24 bytes of test data)
+        packet.extend_from_slice(&[0x0A; 24]);
+        // Encrypted Cookie (16 bytes of test data)
+        packet.extend_from_slice(&[0x0B; 16]);
+        packet
+    }
+
+    // Helper function to create a WireGuard Transport Data test packet
+    // WireGuardTransportData is 16 bytes total
+    fn create_wireguard_transport_data_test_packet() -> Vec<u8> {
+        let mut packet = Vec::with_capacity(WireGuardTransportData::LEN);
+        // Type = 4 (Transport Data)
+        packet.push(4);
+        // Reserved = 0 (3 bytes)
+        packet.extend_from_slice(&[0x00, 0x00, 0x00]);
+        // Receiver Index = 12345 (4 bytes)
+        packet.extend_from_slice(&12345u32.to_le_bytes());
+        // Counter (8 bytes of test data)
+        packet.extend_from_slice(&[0x0C; 8]);
         packet
     }
 
@@ -1498,11 +1732,13 @@ mod tests {
         let options = ParserOptions {
             geneve_port: 8080,
             vxlan_port: 8081,
+            wireguard_port: 8082,
         };
 
         // Verify custom options are set
         assert_eq!(options.geneve_port, 8080);
         assert_eq!(options.vxlan_port, 8081);
+        assert_eq!(options.wireguard_port, 8082);
 
         // Verify other fields have default values
         assert_eq!(parser.offset, 0);
@@ -1519,6 +1755,7 @@ mod tests {
         let default_options = ParserOptions::default();
         assert_eq!(default_options.geneve_port, 6081);
         assert_eq!(default_options.vxlan_port, 4789);
+        assert_eq!(default_options.wireguard_port, 51820);
     }
 
     #[test]
@@ -1607,7 +1844,7 @@ mod tests {
         let packet = create_udp_test_packet();
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_udp_header(&ctx, 6081, 4789);
+        let result = parser.parse_udp_header(&ctx, 6081, 4789, 51820);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, UdpHdr::LEN);
@@ -1622,7 +1859,7 @@ mod tests {
         let packet = create_udp_geneve_test_packet();
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_udp_header(&ctx, 6081, 4789);
+        let result = parser.parse_udp_header(&ctx, 6081, 4789, 51820);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, UdpHdr::LEN);
@@ -2711,5 +2948,183 @@ mod tests {
             assert_eq!(action, TC_ACT_PIPE);
             assert_eq!(packet_meta.tcp_flags, flags);
         }
+    }
+
+    #[test]
+    fn test_parse_wireguard_init() {
+        let mut parser = Parser::default();
+        let packet = create_wireguard_init_test_packet();
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_wireguard_init(&ctx);
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, WireGuardInitiation::LEN);
+        let wg_init = result.unwrap();
+
+        // Assert type field
+        assert_eq!(wg_init.type_, WireGuardType::HandshakeInitiation);
+
+        // Assert reserved field (should be all zeros)
+        assert_eq!(wg_init.reserved, [0x00, 0x00, 0x00]);
+
+        // Assert sender_ind field
+        assert_eq!(wg_init.sender_ind(), 1234);
+
+        // Assert ephemeral key field (32 bytes of 0x01)
+        assert_eq!(wg_init.ephemeral, [0x01; 32]);
+
+        // Assert encrypted_static field (48 bytes of 0x02)
+        assert_eq!(wg_init.encrypted_static, [0x02; 48]);
+
+        // Assert encrypted_timestamp field (28 bytes of 0x03)
+        assert_eq!(wg_init.encrypted_timestamp, [0x03; 28]);
+
+        // Assert mac_1 field (16 bytes of 0x04)
+        assert_eq!(wg_init.mac_1, [0x04; 16]);
+
+        // Assert mac_2 field (16 bytes of 0x05)
+        assert_eq!(wg_init.mac_2, [0x05; 16]);
+    }
+
+    #[test]
+    fn test_parse_wireguard_response() {
+        let mut parser = Parser::default();
+        let packet = create_wireguard_response_test_packet();
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_wireguard_response(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, WireGuardResponse::LEN);
+        let wg_resp = result.unwrap();
+
+        // Assert type field
+        assert_eq!(wg_resp.type_, WireGuardType::HandshakeResponse);
+
+        // Assert reserved field (should be all zeros)
+        assert_eq!(wg_resp.reserved, [0x00, 0x00, 0x00]);
+
+        // Assert sender_ind field
+        assert_eq!(wg_resp.sender_ind(), 5432);
+
+        // Assert receiver_ind field
+        assert_eq!(wg_resp.receiver_ind(), 1234);
+
+        // Assert ephemeral key field (32 bytes of 0x06)
+        assert_eq!(wg_resp.ephemeral, [0x06; 32]);
+
+        // Assert encrypted_nothing field (16 bytes of 0x07)
+        assert_eq!(wg_resp.encrypted_nothing, [0x07; 16]);
+
+        // Assert mac_1 field (16 bytes of 0x08)
+        assert_eq!(wg_resp.mac_1, [0x08; 16]);
+
+        // Assert mac_2 field (16 bytes of 0x09)
+        assert_eq!(wg_resp.mac_2, [0x09; 16]);
+    }
+
+    #[test]
+    fn test_parse_wireguard_cookie_reply() {
+        let mut parser = Parser::default();
+        let packet = create_wireguard_cookie_reply_test_packet();
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_wireguard_cookie_reply(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, WireGuardCookieReply::LEN);
+        let wg_cookie = result.unwrap();
+
+        // Assert type field
+        assert_eq!(wg_cookie.type_, WireGuardType::CookieReply);
+
+        // Assert reserved field (should be all zeros)
+        assert_eq!(wg_cookie.reserved, [0x00, 0x00, 0x00]);
+
+        // Assert receiver_ind field
+        assert_eq!(wg_cookie.receiver_ind(), 12345);
+
+        // Assert nonce field (24 bytes of 0x0A)
+        assert_eq!(wg_cookie.nonce, [0x0A; 24]);
+
+        // Assert encrypted_cookie field (16 bytes of 0x0B)
+        assert_eq!(wg_cookie.encrypted_cookie, [0x0B; 16]);
+    }
+
+    #[test]
+    fn test_parse_wireguard_transport_data() {
+        let mut parser = Parser::default();
+        let packet = create_wireguard_transport_data_test_packet();
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_wireguard_transport_data(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, WireGuardTransportData::LEN);
+        let wg_transport = result.unwrap();
+
+        // Assert type field
+        assert_eq!(wg_transport.type_, WireGuardType::TransportData);
+
+        // Assert reserved field (should be all zeros)
+        assert_eq!(wg_transport.reserved, [0x00, 0x00, 0x00]);
+
+        // Assert receiver_ind field
+        assert_eq!(wg_transport.receiver_ind(), 12345);
+
+        // Assert counter field (8 bytes of 0x0C)
+        assert_eq!(wg_transport.counter, [0x0C; 8]);
+    }
+
+    #[test]
+    fn test_parse_wireguard_init_out_of_bounds() {
+        let mut parser = Parser::default();
+        // Create a packet that's too short for WireGuard Initiation
+        let packet = vec![0u8; 10]; // Much shorter than 148 bytes needed
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_wireguard_init(&ctx);
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), Error::OutOfBounds);
+    }
+
+    #[test]
+    fn test_parse_wireguard_response_out_of_bounds() {
+        let mut parser = Parser::default();
+        // Create a packet that's too short for WireGuard Response
+        let packet = vec![0u8; 10]; // Much shorter than 92 bytes needed
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_wireguard_response(&ctx);
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), Error::OutOfBounds);
+    }
+
+    #[test]
+    fn test_parse_wireguard_cookie_reply_out_of_bounds() {
+        let mut parser = Parser::default();
+        // Create a packet that's too short for WireGuard Cookie Reply
+        let packet = vec![0u8; 10]; // Much shorter than 48 bytes needed
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_wireguard_cookie_reply(&ctx);
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), Error::OutOfBounds);
+    }
+
+    #[test]
+    fn test_parse_wireguard_transport_data_out_of_bounds() {
+        let mut parser = Parser::default();
+        // Create a packet that's too short for WireGuard Transport Data
+        let packet = vec![0u8; 10]; // Much shorter than 16 bytes needed
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_wireguard_transport_data(&ctx);
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), Error::OutOfBounds);
     }
 }
