@@ -175,6 +175,13 @@ jobs:
           cache_from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-ci-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }}
           cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-ci-${{ matrix.target }}-${{ fromJson(env.RUNNER_PLATFORM)[matrix.runner] }},mode=max
 
+  cni_tests:
+    name: CNI Tests
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/reusable-cni-tests.yml
+
   all_checks:
     name: All Checks
     if: always()
@@ -185,6 +192,7 @@ jobs:
       - test
       - helm_checks
       - docker_build
+      - cni_tests
     steps:
       - name: Check if all checks passed
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe
