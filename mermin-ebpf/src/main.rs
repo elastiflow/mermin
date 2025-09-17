@@ -84,6 +84,8 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
     let mut parser = Parser::default();
     let options = ParserOptions::default();
     let mut found_tunnel = false;
+    let mut tcp_flags: u8 = 0;
+    let mut tunnel_tcp_flags: u8 = 0;
 
     let mut src_ipv6_addr: [u8; 16] = [0; 16];
     let mut dst_ipv6_addr: [u8; 16] = [0; 16];
@@ -118,6 +120,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                         tunnel_dst_port = dst_port;
                         tunnel_ip_addr_type = IpAddrType::Ipv4;
                         tunnel_proto = proto;
+                        tunnel_tcp_flags = tcp_flags;
                         found_tunnel = true;
                     } else {
                         // policy: innermost IP header determines the flow IPs
@@ -145,6 +148,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                         tunnel_dst_port = dst_port;
                         tunnel_ip_addr_type = IpAddrType::Ipv6;
                         tunnel_proto = proto;
+                        tunnel_tcp_flags = tcp_flags;
                         found_tunnel = true;
                     } else {
                         // policy: innermost IP header determines the flow IPs
@@ -169,6 +173,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                     dst_ipv6_addr = [0; 16];
                     src_port = [0; 2];
                     dst_port = [0; 2];
+                    tcp_flags = 0;
                     ip_addr_type = IpAddrType::default();
                     proto = IpProto::default();
 
@@ -185,6 +190,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                     dst_ipv6_addr = [0; 16];
                     src_port = [0; 2];
                     dst_port = [0; 2];
+                    tcp_flags = 0;
                     ip_addr_type = IpAddrType::default();
                     proto = IpProto::default();
 
@@ -199,6 +205,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                 Ok(tcp_hdr) => {
                     src_port = tcp_hdr.src;
                     dst_port = tcp_hdr.dst;
+                    tcp_flags = tcp_hdr.off_res_flags[1]; // Extract flags from off_res_flags[1]
                     Ok(())
                 }
                 Err(e) => Err(e),
@@ -225,6 +232,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
                             tunnel_dst_port = dst_port;
                             tunnel_ip_addr_type = ip_addr_type;
                             tunnel_proto = proto;
+                            tunnel_tcp_flags = tcp_flags;
                             found_tunnel = true;
                         }
 
@@ -276,8 +284,10 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
         tunnel_dst_port,
         ip_addr_type,
         proto,
+        tcp_flags,
         tunnel_ip_addr_type,
         tunnel_proto,
+        tunnel_tcp_flags,
     };
 
     (ctx, Ok((TC_ACT_PIPE, packet_meta)))
@@ -2635,5 +2645,71 @@ mod tests {
         assert_eq!(packet_meta.proto, IpProto::Tcp);
         assert_eq!(packet_meta.src_port(), 12345);
         assert_eq!(packet_meta.dst_port(), 80);
+    }
+
+    #[test]
+    fn test_try_mermin_vxlan_tcp_flags() {
+        // Test different TCP flags within VXLAN tunnels
+        let tcp_flags = [0x02, 0x10, 0x12, 0x18, 0x01]; // SYN, ACK, SYN+ACK, PSH+ACK, FIN
+
+        for flags in tcp_flags {
+            // Eth -> IPv4 -> UDP -> VXLAN -> Eth -> IPv4 -> TCP
+            let eth = create_eth_test_packet();
+
+            let mut outer_ipv4 = create_ipv4_test_packet();
+            outer_ipv4[9] = IpProto::Udp as u8;
+            outer_ipv4[12..16].copy_from_slice(&[192, 0, 2, 1]);
+            outer_ipv4[16..20].copy_from_slice(&[192, 0, 2, 2]);
+
+            // UDP with VXLAN port
+            let mut udp = vec![0u8; 8];
+            udp[0..2].copy_from_slice(&[0x30, 0x39]); // src 12345
+            udp[2..4].copy_from_slice(&[0x12, 0xB5]); // dst 4789 (VXLAN)
+            udp[4..6].copy_from_slice(&(8u16).to_be_bytes());
+
+            let vxlan = create_vxlan_valid_packet();
+
+            // Inner Ethernet
+            let mut inner_eth = create_eth_test_packet();
+            inner_eth[12..14].copy_from_slice(&[0x08, 0x00]); // IPv4
+
+            // Inner IPv4
+            let inner_ipv4 = create_ipv4_test_packet();
+
+            // Inner TCP with specific flags
+            let mut inner_tcp = create_tcp_test_packet();
+            inner_tcp[13] = flags;
+
+            // Update lengths
+            let inner_payload_len = inner_ipv4.len() + inner_tcp.len();
+            let inner_eth_len = inner_eth.len() + inner_payload_len;
+            let vxlan_payload_len = inner_eth_len;
+            let udp_len = 8 + 8 + vxlan_payload_len; // UDP header + VXLAN header + payload
+            let outer_ipv4_len = 20 + udp_len;
+
+            // Update packet lengths
+            let mut outer_ipv4_copy = outer_ipv4.clone();
+            outer_ipv4_copy[2..4].copy_from_slice(&(outer_ipv4_len as u16).to_be_bytes());
+            udp[4..6].copy_from_slice(&(udp_len as u16).to_be_bytes());
+
+            let packet: Vec<u8> = [
+                eth,
+                outer_ipv4_copy,
+                udp,
+                vxlan,
+                inner_eth,
+                inner_ipv4,
+                inner_tcp,
+            ]
+            .concat();
+
+            let ctx = TcContext::new(packet);
+            let (_ctx, result) = try_mermin(ctx);
+
+            assert!(result.is_ok(), "Failed for TCP flags: 0x{:02x}", flags);
+            let (action, packet_meta) = result.unwrap();
+            assert_eq!(action, TC_ACT_PIPE);
+            assert_eq!(packet_meta.tcp_flags, flags);
+        }
     }
 }
