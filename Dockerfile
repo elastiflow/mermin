@@ -101,7 +101,6 @@ RUN find . -type d | while read -r i; do mkdir -p "$i/src"; echo 'fn main() {}' 
   && find . -mindepth 1 -maxdepth 1 -type d | while read -r i; do find ./target/ -type d -name "${i#./}-*" -prune -exec rm -rf {} \;; done
 
 # Copy source code
-ENV foo=bar
 COPY ./common-build ./common-build
 COPY ./mermin ./mermin
 COPY ./mermin-common ./mermin-common
