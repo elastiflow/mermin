@@ -51,8 +51,9 @@ unsafe impl Pod for ParsedHeader {}
 
 /// An enum to tell the eBPF program which header to parse.
 #[repr(u8)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum PacketType {
+    #[default]
     Eth = 1,
     Ipv4 = 2,
     Ipv6 = 3,
