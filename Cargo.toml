@@ -15,12 +15,12 @@ default-members = ["mermin", "mermin-common", "network-types"]
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+anyhow = { version = "1", default-features = false }
 aya = { version = "0.13.1", default-features = false }
 aya-build = { git = "https://github.com/aya-rs/aya", rev = "a7e3e6d4d90767d40a015a473a7d0623031ff6ee", default-features = false }
 aya-ebpf = { version = "0.1.1", default-features = false }
 aya-log = { version = "0.2.1", default-features = false }
 aya-log-ebpf = { version = "0.1.1", default-features = false }
-anyhow = { version = "1", default-features = false }
 clap = { version = "4.5.42", default-features = false, features = ["std"] }
 env_logger = { version = "0.11.5", default-features = false }
 libc = { version = "0.2.159", default-features = false }
@@ -29,12 +29,12 @@ tokio = { version = "1.40.0", default-features = false }
 toml = { version = "0.9.5", default-features = false, features = ["parse", "serde"] }
 which = { version = "6.0.0", default-features = false }
 
-[profile.release.package.mermin-ebpf]
-debug = 2
-codegen-units = 1
-
 [profile.dev]
 panic = "abort"
 
 [profile.release]
 panic = "abort"
+
+[profile.release.package.mermin-ebpf]
+debug = 2
+codegen-units = 1

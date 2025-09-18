@@ -6,23 +6,39 @@ description = "An eBPF-based observability tool to monitor network traffic and s
 
 license.workspace = true
 
-[features]
-flow = []
-
-[dev-dependencies]
-serde_yaml = "0.9.34"
-socket2 = "0.5"
+[[bin]]
+name = "mermin"
+path = "src/main.rs"
 
 [dependencies]
-mermin-common = { path = "../mermin-common", features = [] }
-network-types = { path = "../network-types" }
-
 anyhow = { workspace = true, default-features = true }
+async-trait = "0.1.88"
+axum = "0.7"
 aya = { workspace = true, features = ["async_tokio"] }
 aya-log = { workspace = true }
-env_logger = { workspace = true }
+base64 = "0.21"
+clap = { workspace = true, features = ["derive", "env", "help", "suggestions", "usage"] }
+dashmap = "6.0"
+figment = { version = "0.10", features = ["env", "test", "yaml"] }
+futures = "0.3"
+fxhash = "0.2"
+humantime = "2.2.0"
+hyper = { version = "1.0", features = ["full"] }
+ipnetwork = "0.21.1"
+k8s-openapi = { version = "0.25.0", features = ["v1_30"] }
+kube = { version = "1.1.0", features = ["runtime", "derive", "client"] }
+kube-runtime = "1.1.0"
 libc = { workspace = true }
 log = { workspace = true }
+mermin-common = { path = "../mermin-common", features = [] }
+network-types = { path = "../network-types" }
+opentelemetry = { version = "0.30.0" }
+opentelemetry-otlp = { version = "0.30.0", features = ["grpc-tonic"] }
+opentelemetry_sdk = { version = "0.30.0", features = ["experimental_async_runtime", "rt-tokio", "experimental_trace_batch_span_processor_with_async_runtime"] }
+pnet = "0.34"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.142"
+sha1 = "0.10"
 tokio = { workspace = true, features = [
     "full",
     "macros",
@@ -32,33 +48,17 @@ tokio = { workspace = true, features = [
     "signal",
     "time"
 ] }
-clap = { workspace = true, features = ["derive", "env", "help", "suggestions", "usage"] }
-figment = { version = "0.10", features = ["env", "test", "yaml"] }
-ipnetwork = "0.21.1"
-kube = { version = "1.1.0", features = ["runtime", "derive", "client"] }
-kube-runtime = "1.1.0"
-k8s-openapi = { version = "0.25.0", features = ["v1_30"] }
-futures = "0.3"
-async-trait = "0.1.88"
-serde = { version = "1.0.219", features = ["derive"] }
-tracing-subscriber = "0.3.20"
-tracing = "0.1.41"
-humantime = "2.2.0"
-base64 = "0.21"
-sha1 = "0.10"
-pnet = "0.34"
-dashmap = "6.0"
-fxhash = "0.2"
-axum = "0.7"
+tonic = { version = "0.13.1" }
 tower = "0.4"
 tower-http = { version = "0.5", features = ["trace"] }
-hyper = { version = "1.0", features = ["full"] }
-serde_json = "1.0.142"
+tracing = { version = "0.1.41" }
+tracing-opentelemetry = { version = "0.31.0" }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 [build-dependencies]
 anyhow = { workspace = true }
 aya-build = { workspace = true }
 common-build = { path = "../common-build" }
 
-[[bin]]
-name = "mermin"
-path = "src/main.rs"
+[dev-dependencies]
+serde_yaml = "0.9.34"
+socket2 = "0.5"

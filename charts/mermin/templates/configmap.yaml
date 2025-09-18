@@ -8,17 +8,23 @@ metadata:
 data:
   mermin-config.yaml: |
     {{- with .Values.config }}
+    # Network interfaces to monitor
     interface:
       {{- toYaml .interface | nindent 6 }}
-    {{- end }}
+
+    # Logging configuration
+    log_level: {{ .log_level | default "info" }}
+
+    # Automatic configuration reloading
+    auto_reload: {{ .auto_reload | default false }}
 
     # API server configuration
     api:
       enabled: true
-      {{- with .Values.config.api }}
-      listen_address: {{ .listenAddress | quote }}
+      {{- with .api }}
+      listen_address: {{ .listenAddress | default "0.0.0.0" | quote }}
       {{- end }}
-      {{- range .Values.ports }}
+      {{- range $.Values.ports }}
       {{- if eq .name "api" }}
       port: {{ .containerPort }}
       {{- end }}
@@ -27,11 +33,37 @@ data:
     # Metrics server configuration
     metrics:
       enabled: true
-      {{- with .Values.config.metrics }}
-      listen_address: {{ .listenAddress | quote }}
+      {{- with .metrics }}
+      listen_address: {{ .listenAddress | default "0.0.0.0" | quote }}
       {{- end }}
-      {{- range .Values.ports }}
+      {{- range $.Values.ports }}
       {{- if eq .name "metrics" }}
       port: {{ .containerPort }}
       {{- end }}
       {{- end }}
+
+    # Pipeline configuration
+    packet_channel_capacity: {{ .packet_channel_capacity | default 1024 }}
+    packet_worker_count: {{ .packet_worker_count | default 2 }}
+    shutdown_timeout: {{ .shutdown_timeout | default "5s" }}
+
+    # Span/Flow configuration
+    span:
+      max_batch_size: {{ .span.max_batch_size | default 64 }}
+      max_batch_interval: {{ .span.max_batch_interval | default "5s" }}
+      max_record_interval: {{ .span.max_record_interval | default "60s" }}
+      generic_timeout: {{ .span.generic_timeout | default "30s" }}
+      icmp_timeout: {{ .span.icmp_timeout | default "10s" }}
+      tcp_timeout: {{ .span.tcp_timeout | default "20s" }}
+      tcp_fin_timeout: {{ .span.tcp_fin_timeout | default "5s" }}
+      tcp_rst_timeout: {{ .span.tcp_rst_timeout | default "5s" }}
+      udp_timeout: {{ .span.udp_timeout | default "60s" }}
+
+    # Exporter configuration
+    exporter:
+      stdout_enabled: {{ .exporter.stdout_enabled | default false }}
+      otlp_enabled: {{ .exporter.otlp_enabled | default false }}
+      otlp_endpoint: {{ .exporter.otlp_endpoint | default "http://host.docker.internal:4317" | quote }}
+      otlp_timeout_seconds: {{ .exporter.otlp_timeout_seconds | default 3 }}
+      otlp_protocol: {{ .exporter.otlp_protocol | default "grpc" | quote }}
+    {{- end }}

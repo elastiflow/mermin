@@ -59,9 +59,10 @@ impl EthHdr {
 /// Protocol which is encapsulated in the payload of the Ethernet frame.
 /// These values represent the standard IEEE assigned protocol numbers
 #[repr(u16)]
-#[derive(PartialEq, Eq, Debug, Copy, Clone)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone, Default)]
 pub enum EtherType {
     Loop = 0x0060_u16.to_be(),
+    #[default]
     Ipv4 = 0x0800_u16.to_be(),
     Arp = 0x0806_u16.to_be(),
     Ieee8021q = 0x8100_u16.to_be(),
@@ -110,6 +111,40 @@ impl TryFrom<u16> for EtherType {
 impl From<EtherType> for u16 {
     fn from(ether_type: EtherType) -> Self {
         ether_type as u16
+    }
+}
+
+impl EtherType {
+    /// Returns a human-readable string representation of the EtherType.
+    ///
+    /// # Returns
+    /// A static string slice representing the protocol name
+    ///
+    /// # Examples
+    /// ```
+    /// # use network_types::eth::EtherType;
+    /// assert_eq!(EtherType::Ipv4.as_str(), "ipv4");
+    /// assert_eq!(EtherType::Arp.as_str(), "arp");
+    /// assert_eq!(EtherType::Ieee8021q.as_str(), "vlan");
+    /// ```
+    pub fn as_str(self) -> &'static str {
+        match self {
+            EtherType::Loop => "loop",
+            EtherType::Ipv4 => "ipv4",
+            EtherType::Arp => "arp",
+            EtherType::Ieee8021q => "vlan",
+            EtherType::Ipv6 => "ipv6",
+            EtherType::Ieee8021ad => "qinq",
+            EtherType::Ieee8021MacSec => "macsec",
+            EtherType::Ieee8021ah => "pbb",
+            EtherType::Ieee8021mvrp => "mvrp",
+            EtherType::FibreChannel => "fibre-channel",
+            EtherType::Infiniband => "infiniband",
+            EtherType::LoopbackIeee8023 => "loopback",
+            EtherType::Ieee8021QinQ1 => "qinq-1",
+            EtherType::Ieee8021QinQ2 => "qinq-2",
+            EtherType::Ieee8021QinQ3 => "qinq-3",
+        }
     }
 }
 
@@ -218,5 +253,24 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_ethertype_as_str() {
+        assert_eq!(EtherType::Loop.as_str(), "loop");
+        assert_eq!(EtherType::Ipv4.as_str(), "ipv4");
+        assert_eq!(EtherType::Arp.as_str(), "arp");
+        assert_eq!(EtherType::Ieee8021q.as_str(), "vlan");
+        assert_eq!(EtherType::Ipv6.as_str(), "ipv6");
+        assert_eq!(EtherType::Ieee8021ad.as_str(), "qinq");
+        assert_eq!(EtherType::Ieee8021MacSec.as_str(), "macsec");
+        assert_eq!(EtherType::Ieee8021ah.as_str(), "pbb");
+        assert_eq!(EtherType::Ieee8021mvrp.as_str(), "mvrp");
+        assert_eq!(EtherType::FibreChannel.as_str(), "fibre-channel");
+        assert_eq!(EtherType::Infiniband.as_str(), "infiniband");
+        assert_eq!(EtherType::LoopbackIeee8023.as_str(), "loopback");
+        assert_eq!(EtherType::Ieee8021QinQ1.as_str(), "qinq-1");
+        assert_eq!(EtherType::Ieee8021QinQ2.as_str(), "qinq-2");
+        assert_eq!(EtherType::Ieee8021QinQ3.as_str(), "qinq-3");
     }
 }
