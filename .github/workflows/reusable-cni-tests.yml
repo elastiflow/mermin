@@ -85,10 +85,10 @@ jobs:
         run: docker load < image-artifact/mermin-latest.tar
 
       - name: Make test script executable
-        run: chmod +x ./test_cni.sh
+        run: chmod +x ./scripts/test_cni.sh
 
       - name: Run E2E Test for ${{ matrix.cni }}
         env:
           CNI: ${{ matrix.cni }}
           DOCKER_IMAGE_NAME: not-exists.elastiflow.com/mermin
-        run: ./test_cni.sh
+        run: ./scripts/test_cni.sh
