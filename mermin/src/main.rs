@@ -1,3 +1,5 @@
+#![feature(let_chains)]
+
 mod community_id;
 mod health;
 mod k8s;
