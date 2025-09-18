@@ -72,10 +72,7 @@ pub enum Error {
 pub fn mermin(ctx: TcContext) -> i32 {
     let (_ctx, res) = try_mermin(ctx);
     match res {
-        Ok((binding, _packet_meta_ignored)) => {
-            // try_mermin already wrote PacketMeta to ring buffer using SCRATCH_META
-            binding
-        }
+        Ok((binding, _packet_meta_ignored)) => binding,
         Err(_) => TC_ACT_PIPE,
     }
 }
@@ -353,7 +350,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
     #[cfg(not(feature = "test"))]
     unsafe {
         #[allow(static_mut_refs)]
-        if PACKETS.output(meta, 0).is_err() {
+        if PACKETS_META.output(meta, 0).is_err() {
             error!(&ctx, "mermin: failed to write packet to ring buffer");
         }
     }
@@ -371,11 +368,11 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
         tunnel_src_ipv4_addr: meta.tunnel_src_ipv4_addr,
         tunnel_dst_ipv4_addr: meta.tunnel_dst_ipv4_addr,
         ether_type: Default::default(),
-		src_port: meta.src_port,
+        src_port: meta.src_port,
         dst_port: meta.dst_port,
         tunnel_src_port: meta.tunnel_src_port,
         tunnel_dst_port: meta.tunnel_dst_port,
-		tunnel_ether_type: Default::default(),
+        tunnel_ether_type: Default::default(),
         ip_addr_type: meta.ip_addr_type,
         proto: meta.proto,
         tcp_flags: meta.tcp_flags,

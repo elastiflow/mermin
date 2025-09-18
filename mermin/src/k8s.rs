@@ -160,7 +160,6 @@ impl_has_store!(NetworkPolicy, network_policies);
 
 impl ResourceStore {
     /// Initializes all resource reflectors concurrently and builds the ResourceStore.
-    #[cfg_attr(feature = "flow", allow(dead_code))]
     pub async fn new(client: Client) -> Result<Self> {
         let all_stores_result = futures::try_join!(
             Self::create_resource_store::<Pod>(&client, true),
@@ -256,7 +255,6 @@ impl ResourceStore {
 }
 
 /// Creates a new reflector for a Kubernetes resource type.
-#[cfg_attr(feature = "flow", allow(dead_code))]
 async fn create_store<K>(client: Client) -> Result<reflector::Store<K>>
 where
     K: Resource + Clone + Debug + Send + Sync + 'static + for<'de> serde::Deserialize<'de>,
@@ -338,7 +336,6 @@ pub struct Attributor {
 
 impl Attributor {
     /// Creates a new Attributor, initializing all resource reflectors concurrently.
-    #[cfg_attr(feature = "flow", allow(dead_code))]
     pub async fn new() -> Result<Self> {
         let client = Client::try_default().await?;
         let resource_store = ResourceStore::new(client.clone()).await?;

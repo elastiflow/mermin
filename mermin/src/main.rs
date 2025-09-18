@@ -21,14 +21,12 @@ use pnet::datalink;
 use tokio::{signal, sync::mpsc};
 use tracing::{debug, error, info, warn};
 
-#[cfg_attr(feature = "flow", allow(unused_imports))]
-use crate::k8s::resource_parser::parse_packet;
 use crate::{
     community_id::CommunityIdGenerator,
     flow::{FlowAttributesExporter, FlowAttributesProducer},
+    health::{HealthState, start_api_server},
     k8s::resource_parser::attribute_flow_attrs,
     otlp::opts::ExporterOptions,
-    health::{HealthState, start_api_server},
     runtime::conf::Conf,
 };
 
@@ -85,7 +83,6 @@ async fn main() -> Result<()> {
     program.load()?;
 
     // TODO: this needs to be done in a loop for each interface
-    let Conf { interface, .. } = config;
     for iface in &interface {
         // error adding clsact to the interface if it is already added is harmless
         // the full cleanup can be done with 'sudo tc qdisc del dev eth0 clsact'.
@@ -134,7 +131,7 @@ async fn main() -> Result<()> {
             // TODO: we should implement an event based notifier
             // that sends a signal when the kubeclient is ready with its stores instead of waiting for a fixed interval.
             info!("k8s client initialized successfully");
-			health_state.k8s_connected.store(true, Ordering::Relaxed);
+            health_state.k8s_connected.store(true, Ordering::Relaxed);
             debug!("waiting 10 seconds for the k8s reflector to populate stores");
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             debug!("reflectors should be populated");
@@ -144,7 +141,7 @@ async fn main() -> Result<()> {
             error!(
                 "failed to initialize k8s client - k8s metadata lookup will not be available: {e}"
             );
-			health_state.k8s_connected.store(false, Ordering::Relaxed);
+            health_state.k8s_connected.store(false, Ordering::Relaxed);
             None
         }
     };
@@ -189,28 +186,11 @@ async fn main() -> Result<()> {
         debug!("flow attributes attribution task exiting");
     });
 
-	health_state.ready_to_process.store(true, Ordering::Relaxed);
-
-	let all_systems_ready = health_state.ebpf_loaded.load(Ordering::Relaxed)
-        && health_state.k8s_connected.load(Ordering::Relaxed)
-        && health_state.ready_to_process.load(Ordering::Relaxed);
-
-    health_state
-        .startup_complete
-        .store(all_systems_ready, Ordering::Relaxed);
-
-    if all_systems_ready {
-        info!("Startup complete - all systems ready");
-    } else {
-        warn!(
-            "Startup completed but some systems are not ready - check readiness endpoint for details"
-        );
-    }
-
     tokio::spawn(async move {
         flow_attrs_producer.run().await;
         debug!("flow attributes producer task exiting");
     });
+    health_state.ready_to_process.store(true, Ordering::Relaxed);
 
     let task_iface_map = Arc::clone(&iface_map);
     tokio::spawn(async move {
@@ -261,6 +241,22 @@ async fn main() -> Result<()> {
             }
         }
     });
+
+    let all_systems_ready = health_state.ebpf_loaded.load(Ordering::Relaxed)
+        && health_state.k8s_connected.load(Ordering::Relaxed)
+        && health_state.ready_to_process.load(Ordering::Relaxed);
+
+    health_state
+        .startup_complete
+        .store(all_systems_ready, Ordering::Relaxed);
+
+    if all_systems_ready {
+        info!("startup complete - all systems ready");
+    } else {
+        warn!(
+            "startup completed but some systems are not ready - check readiness endpoint for details"
+        );
+    }
 
     tokio::spawn(async move {
         while let Some(k8s_attributed_flow_attrs) = k8s_attributed_flow_attrs_rx.recv().await {
