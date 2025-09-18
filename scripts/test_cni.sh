@@ -117,7 +117,7 @@ deploy_helm_chart() {
     HELM_CHART="$HELM_CHART_PATH" \
     HELM_NAMESPACE="$NAMESPACE" \
     HELM_VALUES="$VALUES_FILE" \
-    EXTRA_HELM_ARGS="--set image.repository=$DOCKER_IMAGE_NAME --set image.tag=$DOCKER_IMAGE_TAG --wait --timeout=3m"
+    EXTRA_HELM_ARGS="--set image.repository=$DOCKER_IMAGE_NAME --set image.tag=$DOCKER_IMAGE_TAG --wait --timeout=3m --create-namespace"
 }
 
 verify_deployment() {
@@ -192,7 +192,7 @@ install_cni "${CNI}"
 kubectl wait --for=condition=Ready nodes --all --timeout=3m
 load_image_into_kind
 deploy_helm_chart || { dump_debug_info; exit 1; }
-verify_deployment
+verify_deployment || { dump_debug_info; exit 1; }
 verify_agent_logs
 
 echo "Test succeeded with CNI: $CNI"
