@@ -43,7 +43,7 @@ securityContext:
   privileged: true
   capabilities:
     drop:
-    - ALL
+      - ALL
   readOnlyRootFilesystem: true
   runAsNonRoot: false
 
@@ -101,8 +101,36 @@ config:
   hostPidEnrichment: true
   interface: []
 
+  # Logging configuration
+  log_level: "info"
+
+  # Automatic configuration reloading
+  auto_reload: false
+
+  # API server configuration
   api:
     listenAddress: "0.0.0.0"
 
+  # Metrics server configuration
   metrics:
     listenAddress: "0.0.0.0"
+
+  # Span/Flow configuration
+  span:
+    max_batch_size: 64
+    max_batch_interval: "5s"
+    max_record_interval: "60s"
+    generic_timeout: "30s"
+    icmp_timeout: "10s"
+    tcp_timeout: "20s"
+    tcp_fin_timeout: "5s"
+    tcp_rst_timeout: "5s"
+    udp_timeout: "60s"
+
+  # Exporter configuration
+  exporter:
+    stdout_enabled: false
+    otlp_enabled: false
+    otlp_endpoint: "http://host.docker.internal:4317"
+    otlp_timeout_seconds: 3
+    otlp_protocol: "grpc"

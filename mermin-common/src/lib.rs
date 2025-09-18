@@ -1,6 +1,6 @@
 #![no_std]
 
-use network_types::ip::IpProto;
+use network_types::{eth::EtherType, ip::IpProto};
 
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
@@ -47,10 +47,14 @@ pub struct PacketMeta {
 
     // Fields with 2-byte alignment
     // ---
+    /// EtherType (innermost). Bytes represents a u16 value.
+    pub ether_type: EtherType,
     /// Source transport layer port number (innermost). Bytes represents a u16 value.
     pub src_port: [u8; 2],
     /// Destination transport layer port number (innermost). Bytes represents a u16 value.
     pub dst_port: [u8; 2],
+    /// EtherType (outermost). Bytes represents a u16 value.
+    pub tunnel_ether_type: EtherType,
     /// Source transport layer port number (outermost). Bytes represents a u16 value.
     pub tunnel_src_port: [u8; 2],
     /// Destination transport layer port number (outermost). Bytes represents a u16 value.
@@ -73,18 +77,22 @@ pub struct PacketMeta {
 }
 
 impl PacketMeta {
+    #[inline]
     pub fn src_port(&self) -> u16 {
         u16::from_be_bytes(self.src_port)
     }
 
+    #[inline]
     pub fn dst_port(&self) -> u16 {
         u16::from_be_bytes(self.dst_port)
     }
 
+    #[inline]
     pub fn tunnel_src_port(&self) -> u16 {
         u16::from_be_bytes(self.tunnel_src_port)
     }
 
+    #[inline]
     pub fn tunnel_dst_port(&self) -> u16 {
         u16::from_be_bytes(self.tunnel_dst_port)
     }
@@ -281,13 +289,15 @@ impl PacketMeta {
 mod tests {
     use core::mem::{align_of, size_of};
 
+    use network_types::eth::EtherType;
+
     use super::*;
     use crate::IpAddrType::{Ipv4, Ipv6};
 
     // Test FlowRecord size and alignment
     #[test]
     fn test_flow_record_layout() {
-        let expected_size = 104;
+        let expected_size = 112;
         let actual_size = size_of::<PacketMeta>();
 
         assert_eq!(
@@ -336,6 +346,7 @@ mod tests {
             src_ipv4_addr: src_ipv4_val,
             dst_ipv4_addr: dst_ipv4_val,
             l3_octet_count: octet_count,
+            ether_type: EtherType::Ipv4,
             src_port: src_port.to_be_bytes(),
             dst_port: dst_port.to_be_bytes(),
             ip_addr_type: Ipv4,
@@ -344,6 +355,7 @@ mod tests {
             tunnel_dst_ipv6_addr: tunnel_dst_ipv6_val,
             tunnel_src_ipv4_addr: tunnel_src_ipv4_val,
             tunnel_dst_ipv4_addr: tunnel_dst_ipv4_val,
+            tunnel_ether_type: EtherType::Ipv6,
             tunnel_src_port: tunnel_src_port.to_be_bytes(),
             tunnel_dst_port: tunnel_dst_port.to_be_bytes(),
             tunnel_ip_addr_type: Ipv6,
@@ -379,6 +391,7 @@ mod tests {
         assert_eq!(record.src_ipv6_addr, src_ipv6_val);
         assert_eq!(record.dst_ipv6_addr, dst_ipv6_val);
         assert_eq!(record.l3_octet_count, octet_count);
+        assert_eq!(record.ether_type, EtherType::Ipv4);
         assert_eq!(record.src_port(), 12345);
         assert_eq!(record.dst_port(), 80);
         assert_eq!(record.ip_addr_type, Ipv4);
@@ -387,6 +400,7 @@ mod tests {
         assert_eq!(record.tunnel_dst_ipv4_addr, tunnel_dst_ipv4_val);
         assert_eq!(record.tunnel_src_ipv6_addr, tunnel_src_ipv6_val);
         assert_eq!(record.tunnel_dst_ipv6_addr, tunnel_dst_ipv6_val);
+        assert_eq!(record.tunnel_ether_type, EtherType::Ipv6);
         assert_eq!(record.tunnel_src_port, tunnel_src_port.to_be_bytes());
         assert_eq!(record.tunnel_dst_port, tunnel_dst_port.to_be_bytes());
         assert_eq!(record.tunnel_ip_addr_type, Ipv6);
