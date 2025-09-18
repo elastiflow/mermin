@@ -39,6 +39,25 @@ async fn main() -> Result<()> {
     // TODO: do not reload global configuration found in CLI
     let runtime = runtime::Runtime::new()?;
     let runtime::Runtime { config, .. } = runtime;
+
+    let exporter = if config.exporter.otlp_enabled || config.exporter.stdout_enabled {
+        info!(
+            "initializing exporter (otlp: {}, stdout: {})",
+            config.exporter.otlp_enabled, config.exporter.stdout_enabled
+        );
+        match create_otlp_exporter(&config.exporter, config.log_level).await {
+            Ok(exporter) => Some(exporter),
+            Err(e) => {
+                error!("failed to initialize exporter: {e}");
+                warn!("continuing without exporter");
+                None
+            }
+        }
+    } else {
+        info!("all exporters disabled in configuration");
+        None
+    };
+
     let community_id_generator = CommunityIdGenerator::new(0);
 
     // Bump the memlock rlimit. This is needed for older kernels that don't use the
@@ -101,7 +120,7 @@ async fn main() -> Result<()> {
 
     health_state.ebpf_loaded.store(true, Ordering::Relaxed);
 
-    info!("Building interface index map...");
+    info!("building interface index map");
     let iface_map: Arc<HashMap<u32, String>> = {
         let mut map = HashMap::new();
         for iface in datalink::interfaces() {
@@ -143,15 +162,6 @@ async fn main() -> Result<()> {
             );
             health_state.k8s_connected.store(false, Ordering::Relaxed);
             None
-        }
-    };
-
-    info!("initializing otlp exporter");
-    let exporter = match create_otlp_exporter(&config.otlp).await {
-        Ok(exporter) => exporter,
-        Err(e) => {
-            error!("failed to initialize otlp exporter: {e}");
-            return Err(e);
         }
     };
 
@@ -260,11 +270,19 @@ async fn main() -> Result<()> {
 
     tokio::spawn(async move {
         while let Some(k8s_attributed_flow_attrs) = k8s_attributed_flow_attrs_rx.recv().await {
-            debug!("exporting result");
-            exporter.export(k8s_attributed_flow_attrs).await;
+            if let Some(ref exporter) = exporter {
+                debug!("exporting result");
+                exporter.export(k8s_attributed_flow_attrs).await;
+            } else {
+                debug!("skipping export - no exporter available");
+            }
         }
         debug!("exporting task exiting");
-        exporter.shutdown().await
+        if let Some(ref exporter) = exporter
+            && let Err(e) = exporter.shutdown().await
+        {
+            error!("error during exporter shutdown: {e}");
+        }
     });
 
     println!("waiting for ctrl+c");
@@ -276,14 +294,20 @@ async fn main() -> Result<()> {
 
 async fn create_otlp_exporter(
     conf: &ExporterOptions,
+    log_level: tracing::Level,
 ) -> Result<Arc<dyn FlowAttributesExporter>, anyhow::Error> {
     info!("Using OTLP Exporter Adapter.");
     use crate::otlp::trace::lib::{TraceExporterAdapter, init_tracer_provider};
-    let provider = init_tracer_provider(ExporterOptions {
-        endpoint: conf.endpoint.clone(),
-        timeout_seconds: conf.timeout_seconds,
-        protocol: conf.protocol.to_string(),
-    })
+    let provider = init_tracer_provider(
+        ExporterOptions {
+            otlp_enabled: conf.otlp_enabled,
+            stdout_enabled: conf.stdout_enabled,
+            otlp_endpoint: conf.otlp_endpoint.clone(),
+            otlp_timeout_seconds: conf.otlp_timeout_seconds,
+            otlp_protocol: conf.otlp_protocol.to_string(),
+        },
+        log_level,
+    )
     .await?;
 
     let exporter = TraceExporterAdapter::new(provider);

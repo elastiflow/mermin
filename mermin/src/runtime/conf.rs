@@ -130,7 +130,7 @@ pub struct Conf {
     /// OpenTelemetry Protocol (OTLP) exporter configuration options.
     /// This field holds settings for exporting telemetry data
     /// using the OTLP standard.
-    pub otlp: ExporterOptions,
+    pub exporter: ExporterOptions,
 }
 
 impl Default for Conf {
@@ -146,7 +146,7 @@ impl Default for Conf {
             packet_worker_count: defaults::flow_workers(),
             shutdown_timeout: defaults::shutdown_timeout(),
             span: SpanOptions::default(),
-            otlp: otlp::opts::ExporterOptions::default(),
+            exporter: otlp::opts::ExporterOptions::default(),
         }
     }
 }

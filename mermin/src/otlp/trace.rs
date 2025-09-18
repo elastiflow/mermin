@@ -13,10 +13,10 @@ pub mod lib {
         trace::{SdkTracerProvider, span_processor_with_async_runtime::BatchSpanProcessor},
     };
     use tonic::transport::{Uri, channel::Channel};
-    use tracing::{Span, debug, error, info};
+    use tracing::{Level, Span, debug, error, info};
     use tracing_opentelemetry::OpenTelemetrySpanExt;
     use tracing_subscriber::{
-        EnvFilter,
+        filter::LevelFilter,
         fmt::{Layer, format::FmtSpan},
         layer::SubscriberExt,
         util::SubscriberInitExt,
@@ -83,19 +83,79 @@ pub mod lib {
 
     pub async fn init_tracer_provider(
         opts: ExporterOptions,
+        log_level: Level,
     ) -> Result<SdkTracerProvider, anyhow::Error> {
-        let uri = Uri::from_static("http://host.docker.internal:4317");
-        let channel = Channel::builder(uri).connect().await?;
+        let level_filter = LevelFilter::from_level(log_level);
 
+        // Initialize tracing subscriber based on configuration
+        match (opts.otlp_enabled, opts.stdout_enabled) {
+            (true, true) => {
+                // Both OTLP and stdout enabled
+                let provider = create_otlp_provider(&opts).await?;
+                let trace_layer =
+                    tracing_opentelemetry::layer().with_tracer(provider.tracer("otlp-flow-tracer"));
+                let fmt_layer = Layer::new().with_span_events(FmtSpan::FULL);
+
+                tracing_subscriber::registry()
+                    .with(level_filter)
+                    .with(fmt_layer)
+                    .with(trace_layer)
+                    .init();
+
+                info!("tracer initialized - stdout exporter and otlp exporter are active.");
+                Ok(provider)
+            }
+            (true, false) => {
+                // Only OTLP enabled
+                let provider = create_otlp_provider(&opts).await?;
+                let trace_layer =
+                    tracing_opentelemetry::layer().with_tracer(provider.tracer("otlp-flow-tracer"));
+
+                tracing_subscriber::registry()
+                    .with(level_filter)
+                    .with(trace_layer)
+                    .init();
+
+                info!("tracer initialized - otlp exporter is active.");
+                Ok(provider)
+            }
+            (false, true) => {
+                // Only stdout enabled
+                let fmt_layer = Layer::new().with_span_events(FmtSpan::FULL);
+                tracing_subscriber::registry()
+                    .with(level_filter)
+                    .with(fmt_layer)
+                    .init();
+
+                info!("tracer initialized - stdout exporter is active");
+                Ok(create_minimal_provider())
+            }
+            (false, false) => {
+                let fmt_layer = Layer::new().with_span_events(FmtSpan::FULL);
+
+                tracing_subscriber::registry()
+                    .with(level_filter)
+                    .with(fmt_layer)
+                    .init();
+
+                info!("tracer initialized - no exporters enabled");
+                Ok(create_minimal_provider())
+            }
+        }
+    }
+
+    async fn create_otlp_provider(
+        opts: &ExporterOptions,
+    ) -> Result<SdkTracerProvider, anyhow::Error> {
+        let uri: Uri = opts.otlp_endpoint.parse()?;
+        let channel = Channel::builder(uri).connect().await?;
         let exporter = opentelemetry_otlp::SpanExporter::builder()
             .with_tonic() // for gRPC
             .with_channel(channel)
-            .with_protocol(ExporterProtocol::from(opts.protocol).into())
+            .with_protocol(ExporterProtocol::from(opts.otlp_protocol.clone()).into())
             .build()
             .expect("Failed to create OTLP span exporter.");
-
         let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio).build();
-
         let provider = SdkTracerProvider::builder()
             .with_span_processor(processor)
             .with_resource(
@@ -109,20 +169,17 @@ pub mod lib {
         global::set_tracer_provider(provider.clone());
         global::set_text_map_propagator(TraceContextPropagator::new());
 
-        let filter = EnvFilter::from_default_env();
-
-        let fmt_layer = Layer::new().with_span_events(FmtSpan::FULL);
-
-        let trace_layer =
-            tracing_opentelemetry::layer().with_tracer(provider.tracer("otlp-flow-tracer"));
-
-        tracing_subscriber::registry()
-            .with(filter)
-            .with(fmt_layer)
-            .with(trace_layer)
-            .init();
-
-        info!("Tracer initialized. Console logging and OTLP exporting are active.");
         Ok(provider)
+    }
+
+    fn create_minimal_provider() -> SdkTracerProvider {
+        SdkTracerProvider::builder()
+            .with_resource(
+                Resource::builder()
+                    .with_attribute(KeyValue::new("service.name", "mermin"))
+                    .with_attribute(KeyValue::new("service.version", env!("CARGO_PKG_VERSION")))
+                    .build(),
+            )
+            .build()
     }
 }

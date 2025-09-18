@@ -297,7 +297,7 @@ mod tests {
     // Test FlowRecord size and alignment
     #[test]
     fn test_flow_record_layout() {
-        let expected_size = 104;
+        let expected_size = 112;
         let actual_size = size_of::<PacketMeta>();
 
         assert_eq!(

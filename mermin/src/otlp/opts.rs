@@ -7,17 +7,21 @@ use crate::runtime::conf::conf_serde::duration;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ExporterOptions {
-    pub endpoint: String,
-    pub timeout_seconds: u64,
-    pub protocol: String,
+    pub otlp_enabled: bool,
+    pub stdout_enabled: bool,
+    pub otlp_endpoint: String,
+    pub otlp_timeout_seconds: u64,
+    pub otlp_protocol: String,
 }
 
 impl Default for ExporterOptions {
     fn default() -> Self {
         ExporterOptions {
-            endpoint: "http://host.docker.internal:4317".to_string(),
-            timeout_seconds: 3,
-            protocol: "grpc".to_string(),
+            stdout_enabled: false,
+            otlp_enabled: false,
+            otlp_endpoint: "http://host.docker.internal:4317".to_string(),
+            otlp_timeout_seconds: 3, // TODO: convert to Duration that uses human readable format
+            otlp_protocol: "grpc".to_string(),
         }
     }
 }
