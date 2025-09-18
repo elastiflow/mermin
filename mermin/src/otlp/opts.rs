@@ -1,8 +1,54 @@
 use std::time::Duration;
 
+use opentelemetry_otlp::Protocol;
 use serde::{Deserialize, Serialize};
 
 use crate::runtime::conf::conf_serde::duration;
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ExporterOptions {
+    pub otlp_enabled: bool,
+    pub stdout_enabled: bool,
+    pub otlp_endpoint: String,
+    pub otlp_timeout_seconds: u64,
+    pub otlp_protocol: String,
+}
+
+impl Default for ExporterOptions {
+    fn default() -> Self {
+        ExporterOptions {
+            stdout_enabled: false,
+            otlp_enabled: false,
+            otlp_endpoint: "http://host.docker.internal:4317".to_string(),
+            otlp_timeout_seconds: 3, // TODO: convert to Duration that uses human readable format
+            otlp_protocol: "grpc".to_string(),
+        }
+    }
+}
+
+pub enum ExporterProtocol {
+    Grpc,
+    HttpProto,
+}
+
+impl From<ExporterProtocol> for Protocol {
+    fn from(val: ExporterProtocol) -> Self {
+        match val {
+            ExporterProtocol::Grpc => Protocol::Grpc,
+            ExporterProtocol::HttpProto => Protocol::HttpBinary,
+        }
+    }
+}
+
+impl From<String> for ExporterProtocol {
+    fn from(value: String) -> Self {
+        match value.to_lowercase().as_str() {
+            "grpc" => ExporterProtocol::Grpc,
+            "http_proto" => ExporterProtocol::HttpProto,
+            _ => ExporterProtocol::Grpc,
+        }
+    }
+}
 
 /// The `FlowConf` struct represents the configuration parameters for managing flows in a system.
 /// Each field specifies configurable time-to-live (TTL) values or intervals for different types
@@ -20,7 +66,7 @@ use crate::runtime::conf::conf_serde::duration;
 /// tcp-rst: 5 - If we see an RST flag for a TCP flow, generate a record 5 secs after the flag.
 /// udp: 20 - If no activity has been observed for a UDP flow in the last 20 seconds, generate a record.
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct FlowConf {
+pub struct SpanOptions {
     /// The maximum number of flow records in a batch.
     /// - Default Value: `64`
     /// - Example: If set to `64`, the system will flush a batch of 64 flow records to the output.
@@ -78,9 +124,9 @@ pub struct FlowConf {
     pub udp_timeout: Duration,
 }
 
-impl Default for FlowConf {
-    fn default() -> FlowConf {
-        FlowConf {
+impl Default for SpanOptions {
+    fn default() -> SpanOptions {
+        SpanOptions {
             max_batch_size: defaults::max_batch_size(),
             max_batch_interval: defaults::max_batch_interval(),
             max_record_interval: defaults::max_record_interval(),

@@ -105,8 +105,6 @@ RUN cargo build --release
 FROM gcr.io/distroless/cc-debian12 AS runner
 ARG APP_ROOT APP
 
-ENV RUST_LOG=info
-
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
 ENTRYPOINT ["/usr/bin/mermin"]
 
@@ -114,8 +112,6 @@ ENTRYPOINT ["/usr/bin/mermin"]
 # Use a distroless base image for the final container with shell support
 FROM gcr.io/distroless/cc-debian12:debug AS runner-debug
 ARG APP_ROOT APP
-
-ENV RUST_LOG=info
 
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
 COPY --from=builder /usr/bin/bpftool /usr/bin/bpftool
