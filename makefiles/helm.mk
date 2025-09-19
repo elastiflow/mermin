@@ -23,6 +23,7 @@ define HELM_ARGS
 	--create-namespace \
 	--values ${HELM_VALUES}
 endef
+EXTRA_HELM_ARGS?=
 
 #######################
 # Deployment targets
