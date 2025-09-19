@@ -112,15 +112,18 @@ load_image_into_kind() {
 }
 
 deploy_helm_chart() {
-  helm upgrade --install "$RELEASE_NAME" "$HELM_CHART_PATH" \
-    -n "$NAMESPACE" --values "$VALUES_FILE" \
-    --set image.repository="$DOCKER_IMAGE_NAME" \
-    --set image.tag="$DOCKER_IMAGE_TAG" \
-    --wait --timeout=3m --create-namespace
+  make helm-upgrade \
+    APP="$RELEASE_NAME" \
+    HELM_CHART="$HELM_CHART_PATH" \
+    HELM_NAMESPACE="$NAMESPACE" \
+    HELM_VALUES="$VALUES_FILE" \
+    EXTRA_HELM_ARGS="--set image.repository=$DOCKER_IMAGE_NAME --set image.tag=$DOCKER_IMAGE_TAG --wait --timeout=3m --create-namespace"
 }
 
 verify_deployment() {
-  kubectl wait --for=condition=Ready pods -l "app.kubernetes.io/name=${RELEASE_NAME}" -n "$NAMESPACE" --timeout=3m
+  make k8s-rollout-status \
+    APP="$RELEASE_NAME" \
+    HELM_NAMESPACE="$NAMESPACE"
 }
 
 verify_agent_logs() {
@@ -137,7 +140,7 @@ verify_agent_logs() {
     (
       local counter=0
       while [ $counter -lt 30 ]; do
-        if grep -q --color=never "Enriched packet" <(kubectl logs -n "${NAMESPACE}" "$pod" --tail=50); then
+        if grep -q --color=never "network.flow" <(kubectl logs -n "${NAMESPACE}" "$pod" --tail=50); then
           exit 0
         fi
         counter=$((counter + 1))
@@ -158,7 +161,7 @@ verify_agent_logs() {
   if [ "$has_succeeded" -eq 1 ]; then
     echo "Test PASSED: At least one agent pod is enriching data."
   else
-    echo "Test FAILED: No agent pods showed 'Enriched packet' logs."
+    echo "Test FAILED: No agent pods showed enriched packet logs."
     exit 1
   fi
 }
@@ -189,7 +192,7 @@ install_cni "${CNI}"
 kubectl wait --for=condition=Ready nodes --all --timeout=3m
 load_image_into_kind
 deploy_helm_chart || { dump_debug_info; exit 1; }
-verify_deployment
+verify_deployment || { dump_debug_info; exit 1; }
 verify_agent_logs
 
 echo "Test succeeded with CNI: $CNI"
