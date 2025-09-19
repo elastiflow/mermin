@@ -23,6 +23,7 @@ define HELM_ARGS
 	--create-namespace \
 	--values ${HELM_VALUES}
 endef
+EXTRA_HELM_ARGS?=
 
 #######################
 # Deployment targets
@@ -50,7 +51,7 @@ helm-template-silent:
 helm-upgrade:
 	helm upgrade ${APP} ${HELM_CHART} \
 		--install \
-		${HELM_ARGS}
+		${HELM_ARGS} ${EXTRA_HELM_ARGS}
 
 .PHONY: k8s-diff
 k8s-diff: helm-template-silent
