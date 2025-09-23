@@ -20,6 +20,7 @@ base64 = "0.21"
 clap = { workspace = true, features = ["derive", "env", "help", "suggestions", "usage"] }
 dashmap = "6.0"
 figment = { version = "0.10", features = ["env", "test", "yaml"] }
+hcl-rs = "0.19.2"
 futures = "0.3"
 fxhash = "0.2"
 humantime = "2.2.0"

@@ -10,6 +10,10 @@ use figment::{
     Figment,
     providers::{Format, Serialized, Yaml},
 };
+use hcl::{
+    self, Body, Map, Value,
+    eval::{Context, Evaluate},
+};
 use serde::{Deserialize, Serialize};
 use tracing::Level;
 
@@ -59,6 +63,45 @@ impl Default for MetricsConf {
             listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
             port: 10250,
         }
+    }
+}
+
+pub struct Hcl;
+
+impl Format for Hcl {
+    type Error = hcl::Error;
+
+    // Constant to name the format in error messages.
+    const NAME: &'static str = "HCL";
+
+    fn from_str<T: serde::de::DeserializeOwned>(string: &str) -> Result<T, Self::Error> {
+        let mut context = Context::new();
+
+        // Parse the HCL content to extract locals blocks
+        let body: Body = hcl::from_str(string)?;
+
+        // Extract locals blocks and populate the context
+        for block in body.blocks() {
+            if block.identifier() == "locals" {
+                // Create a local object to hold all the local variables
+                let mut local_vars = Map::new();
+
+                for attr in block.body().attributes() {
+                    let key = attr.key();
+                    let value = attr.expr().evaluate(&context)?;
+                    local_vars.insert(key.to_string(), value);
+                }
+
+                // Convert HashMap to HCL Value::Object
+                let local_value = Value::Object(local_vars);
+
+                // Add the local variables as a "local" object in the context
+                context.declare_var("local", local_value);
+                break; // Assuming only one locals block
+            }
+        }
+
+        hcl::eval::from_str(string, &context)
     }
 }
 
@@ -168,6 +211,17 @@ mod defaults {
 }
 
 impl Conf {
+    /// Merges a configuration file into a Figment instance, automatically
+    /// selecting the correct provider based on the file extension.
+    fn merge_provider_for_path(figment: Figment, path: &Path) -> Result<Figment, ConfigError> {
+        match path.extension().and_then(|s| s.to_str()) {
+            Some("yaml") | Some("yml") => Ok(figment.merge(Yaml::file(path))),
+            Some("hcl") => Ok(figment.merge(Hcl::file(path))),
+            Some(ext) => Err(ConfigError::InvalidExtension(ext.to_string())),
+            None => Err(ConfigError::InvalidExtension("none".to_string())),
+        }
+    }
+
     /// Creates a new `Conf` instance based on the provided CLI arguments, environment variables,
     /// and configuration file. The configuration is determined using the following priority order:
     /// Defaults < Configuration File < Environment Variables < CLI Arguments.
@@ -215,7 +269,7 @@ impl Conf {
 
         let config_path_to_store = if let Some(config_path) = &cli.config {
             validate_config_path(config_path)?;
-            figment = figment.merge(Yaml::file(config_path));
+            figment = Self::merge_provider_for_path(figment, config_path)?;
             Some(config_path.clone())
         } else {
             None
@@ -273,9 +327,9 @@ impl Conf {
     #[allow(dead_code)]
     pub fn reload(&self) -> Result<Self, ConfigError> {
         if let Some(path) = &self.config_path {
-            let mut conf: Conf = Figment::from(Serialized::defaults(self))
-                .merge(Yaml::file(path))
-                .extract()?;
+            let figment =
+                Self::merge_provider_for_path(Figment::from(Serialized::defaults(self)), path)?;
+            let mut conf: Conf = figment.extract()?;
             conf.config_path = self.config_path.clone();
 
             Ok(conf)
@@ -670,6 +724,255 @@ metrics:
             // The rest of the test logic remains the same
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config should load from yaml file");
+
+            // Assert that all the custom values from the file were loaded correctly
+            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.api.listen_address, "127.0.0.1");
+            assert_eq!(cfg.api.port, 8081);
+            assert_eq!(cfg.metrics.listen_address, "0.0.0.0");
+            assert_eq!(cfg.metrics.port, 9090);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn loads_from_hcl_file() {
+        Jail::expect_with(|jail| {
+            let path = "mermin.hcl";
+            jail.create_file(
+                path,
+                r#"
+interface = ["eth0"]
+log_level = "info"
+auto_reload = true
+
+api {
+    enabled = true
+    port = 9090
+}
+
+metrics {
+    enabled = true
+    port = 10250
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
+
+            assert_eq!(cfg.interface, vec!["eth0"]);
+            assert_eq!(cfg.log_level, Level::INFO);
+            assert_eq!(cfg.auto_reload, true);
+            assert_eq!(cfg.api.port, 9090);
+            assert_eq!(cfg.metrics.port, 10250);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn validates_hcl_extension() {
+        Jail::expect_with(|jail| {
+            let path = "mermin.hcl";
+            jail.create_file(path, r#"interface = ["eth0"]"#)?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let result = Conf::new(cli);
+            assert!(result.is_ok(), "HCL extension should be valid");
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn loads_and_evaluates_hcl2_file() {
+        Jail::expect_with(|jail| {
+            let path = "complex.hcl";
+            jail.create_file(
+                path,
+                r#"
+# HCL v2 Configuration with expressions and locals
+locals {
+  base_port = 8080
+  service_name = "mermin"
+  owner = "test-team"
+}
+
+interface = ["eth0", "eth1"]
+log_level = "debug"
+auto_reload = false
+
+# Nested blocks with interpolation and expressions
+api {
+    enabled = true
+    listen_address = "0.0.0.0"
+    # Use an expression to calculate the port
+    port = local.base_port + 1
+}
+
+metrics {
+    enabled = true
+    listen_address = "0.0.0.0"
+    # Use another expression
+    port = local.base_port + 2250
+}
+
+packet_channel_capacity = 1024
+packet_worker_count = 2
+shutdown_timeout = "5s"
+
+span {
+    max_batch_size = 64
+    max_batch_interval = "5s"
+    # String interpolation example
+    max_record_interval = "${6 * 10}s" # 60s
+    generic_timeout = "30s"
+    icmp_timeout = "10s"
+    tcp_timeout = "20s"
+    tcp_fin_timeout = "5s"
+    tcp_rst_timeout = "5s"
+    udp_timeout = "60s"
+}
+
+exporter {
+    stdout_enabled = true
+    otlp_enabled = false
+    otlp_endpoint = "http://host.docker.internal:4317"
+    otlp_timeout_seconds = 3
+    otlp_protocol = "grpc"
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) =
+                Conf::new(cli).expect("config should load HCL v2 file with expressions");
+
+            // Verify that HCL v2 syntax was parsed and expressions were evaluated correctly
+            assert_eq!(cfg.interface, vec!["eth0", "eth1"]);
+            assert_eq!(cfg.log_level, Level::DEBUG);
+            assert_eq!(cfg.auto_reload, false);
+            assert_eq!(cfg.api.enabled, true);
+            assert_eq!(cfg.api.listen_address, "0.0.0.0");
+            assert_eq!(cfg.api.port, 8081); // Evaluated from `8080 + 1`
+            assert_eq!(cfg.metrics.enabled, true);
+            assert_eq!(cfg.metrics.port, 10330); // Evaluated from `8080 + 2250`
+            assert_eq!(cfg.packet_channel_capacity, 1024);
+            assert_eq!(cfg.packet_worker_count, 2);
+            assert_eq!(cfg.shutdown_timeout, Duration::from_secs(5));
+
+            // Verify span configuration with evaluated values
+            assert_eq!(cfg.span.max_batch_size, 64);
+            assert_eq!(cfg.span.max_batch_interval, Duration::from_secs(5));
+            assert_eq!(cfg.span.max_record_interval, Duration::from_secs(60)); // Evaluated from "${6 * 10}s"
+
+            // Verify exporter configuration
+            assert_eq!(cfg.exporter.stdout_enabled, true);
+            assert_eq!(cfg.exporter.otlp_enabled, false);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn reload_updates_config_from_hcl_file() {
+        Jail::expect_with(|jail| {
+            let path = "mermin_reload.hcl";
+            jail.create_file(
+                path,
+                r#"
+interface = ["eth1"]
+log_level = "info"
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config loads from HCL file");
+            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.log_level, Level::INFO);
+            assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
+
+            // Update the HCL config file
+            jail.create_file(
+                path,
+                r#"
+interface = ["eth2", "eth3"]
+log_level = "debug"
+                "#,
+            )?;
+
+            let reloaded_cfg = cfg.reload().expect("config should reload from HCL");
+            assert_eq!(
+                reloaded_cfg.interface,
+                Vec::from(["eth2".to_string(), "eth3".to_string()])
+            );
+            assert_eq!(reloaded_cfg.log_level, Level::DEBUG);
+            assert_eq!(reloaded_cfg.config_path, Some(path.parse().unwrap()));
+
+            Ok(())
+        })
+    }
+
+    // MODIFICATION: Corrected the assertion to match the actual error flow.
+    #[test]
+    fn hcl_parse_error_handling() {
+        Jail::expect_with(|jail| {
+            let path = "invalid.hcl";
+            jail.create_file(
+                path,
+                r#"
+# Invalid HCL syntax
+interface = [eth0  # Missing closing bracket and quotes
+log_level =
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let err = Conf::new(cli).expect_err("expected error with invalid HCL");
+            let msg = err.to_string();
+
+            // The error originates from the `hcl` crate, is wrapped by `figment`,
+            // and finally converted into our `ConfigError::Extraction`. The assertion
+            // should reflect this error chain. We check for "configuration error" from our
+            // Display impl and a piece of the underlying HCL error message.
+            assert!(
+                msg.contains("configuration error:")
+                    && (msg.contains("expected") || msg.contains("unexpected")),
+                "unexpected error: {}",
+                msg
+            );
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn loads_api_and_metrics_config_from_hcl_file() {
+        Jail::expect_with(|jail| {
+            let path = "mermin_custom_api.hcl";
+
+            jail.create_file(
+                path,
+                r#"
+# Custom configuration for testing
+interface = ["eth1"]
+
+api {
+    listen_address = "127.0.0.1"
+    port = 8081
+}
+
+metrics {
+    listen_address = "0.0.0.0"
+    port = 9090
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
 
             // Assert that all the custom values from the file were loaded correctly
             assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));

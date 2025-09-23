@@ -98,27 +98,76 @@ cargo build --release
 
 The build script automatically compiles the eBPF program and embeds it into the final binary.
 
-#### 2. Configuration File
+#### 2. Configuration Files
 
-A default configuration file `mermin.yaml` is provided in the project root. This file contains sensible defaults for local development, including:
+Mermin supports configuration in both **YAML** and **HCL** formats. Default configuration files for local development are provided in the project root: `mermin.yaml` and `mermin.hcl`.
 
-* **Stdout exporter enabled**: Flow data will be printed to the console for easy debugging
-* **OTLP exporter disabled**: External telemetry endpoints are disabled by default
-* **Default interfaces**: Monitors `eth0` by default
-* **Logging**: Set to `info` level
+Both files contain sensible defaults for local development, including:
 
-You can customize the configuration by editing `mermin.yaml` or creating your own configuration file. The configuration supports YAML format and includes comprehensive documentation for all available options.
+* **Stdout exporter enabled**: Flow data will be printed to the console for easy debugging.
+* **OTLP exporter disabled**: External telemetry endpoints are disabled by default.
+* **Default interfaces**: Monitors `eth0` by default.
+* **Logging**: Set to `info` level.
+
+##### HCL Configuration (`mermin.hcl`)
+
+The HCL format supports variables, expressions, and functions, making it powerful for more complex setups.
+
+```hcl
+# mermin.hcl
+locals {
+  default_interface = "eth0"
+  log_level_dev     = "debug"
+}
+
+interface    = [local.default_interface]
+auto_reload  = false
+log_level    = local.log_level_dev
+
+# OTLP Exporter is disabled for local development
+exporter {
+  stdout_enabled = true
+  otlp_enabled   = false
+}
+
+# Default span options
+span {}
+```
+
+##### YAML Configuration (`mermin.yaml`)
+
+A traditional YAML file is also provided for simpler, static configurations.
+
+```yaml
+# mermin.yaml
+interface:
+  - eth0
+auto_reload: false
+log_level: info
+exporter:
+  stdout_enabled: true
+  otlp_enabled: false
+span: {}
+```
+
+You can customize the configuration by editing these files or creating your own.
 
 #### 3. Run the agent
 
-Running the eBPF agent requires elevated privileges. A default configuration file `mermin.yaml` is provided in the project root with the stdout exporter enabled for local development.
+Running the eBPF agent requires elevated privileges. Use the `--config` flag to specify your chosen configuration file.
 
+**Using HCL:**
+```shell
+cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config mermin.hcl
+```
+
+**Using YAML:**
 ```shell
 cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config mermin.yaml
 ```
 
 > The `sudo -E` command runs the program as root while preserving the user's environment variables, which is
-> necessary for `cargo` to find the correct binary. The `--config mermin.yaml` flag loads the default configuration file with stdout exporter enabled.
+> necessary for `cargo` to find the correct binary.
 
 #### 4. Generate Traffic
 
@@ -255,8 +304,8 @@ Command Breakdown:
 * `--profile=sysadmin`: Specifies the security context profile to use for the debug container. This is required to
   run tcpdump.
 * `-- tcpdump -i eth0 -w -`: Executes tcpdump inside the debug container.
-  * `-i eth0`: Listens on the primary network interface, eth0.
-  * `-w -`: Writes the raw packet data to standard output (-) instead of a file.
+    * `-i eth0`: Listens on the primary network interface, eth0.
+    * `-w -`: Writes the raw packet data to standard output (-) instead of a file.
 * `| wireshark -k -i -`: Pipes the standard output from tcpdump into Wireshark.
 * `-k`: Starts the capture session immediately.
 * `-i -`: Reads packet data from standard input (-).
