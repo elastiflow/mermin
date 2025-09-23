@@ -1,0 +1,321 @@
+agent:
+  traces:
+    main:
+      association_destination: association.k8s_flow_attributes.destination
+      association_source: association.k8s_flow_attributes.source
+      destination: flow.span.destination
+      discovery_owner: discovery.k8s_owner.main
+      discovery_selector: discovery.k8s_selector.main
+      exclude_network_transports: []
+      exclude_network_types: []
+      exporters:
+        - exporter.stdout.json
+        - exporter.otlp.main
+      flow_connection: flow.connection.main
+      include_network_transports: []
+      include_network_types: []
+      k8s:
+        selectors:
+          - kind: Service
+          - kind: Endpoint
+          - kind: EndpointSlice
+          - kind: Gateway
+          - kind: Ingress
+          - kind: Pod
+          - kind: ReplicaSet
+          - kind: Deployment
+          - kind: Daemonset
+          - kind: StatefulSet
+          - kind: Job
+          - kind: CronJob
+          - kind: NetworkPolicy
+      network_interface:
+        exclude_names: []
+        include_names: []
+      source: flow.span.source
+association:
+  k8s_flow_attributes:
+    destination:
+      association:
+        - sources:
+            - from: flow
+              name: destination.ip
+              to:
+                - pod.status.podIP
+                - pod.status.podIPs[*]
+                - pod.status.hostIP
+                - pod.status.hostIPs[*]
+            - from: flow
+              name: destination.port
+              to:
+                - pod.spec.containers[*].ports[*].containerPort
+                - pod.spec.containers[*].ports[*].hostPort
+            - from: flow
+              name: network.transport
+              to:
+                - pod.spec.containers[*].ports[*].protocol
+        - sources:
+            - from: flow
+              name: destination.ip
+              to:
+                - node.status.addresses[*].address
+        - sources:
+            - from: flow
+              name: destination.ip
+              to:
+                - service.spec.clusterIP
+                - service.spec.clusterIPs[*]
+                - service.spec.externalIPs[*]
+                - service.spec.loadBalancerIP
+                - service.spec.externalName
+            - from: flow
+              name: destination.port
+              to:
+                - service.spec.ports[*].port
+            - from: flow
+              name: network.transport
+              to:
+                - service.spec.ports[*].protocol
+            - from: flow
+              name: network.type
+              to:
+                - service.spec.ipFamilies[*]
+        - sources:
+            - from: flow
+              name: destination.ip
+              to:
+                - endpoint.subsets[*].addresses[*].ip
+            - from: flow
+              name: destination.port
+              to:
+                - endpoint.subsets[*].ports[*].port
+            - from: flow
+              name: network.transport
+              to:
+                - endpoint.subsets[*].ports[*].protocol
+        - sources:
+            - from: flow
+              name: destination.ip
+              to:
+                - endpointslice.endpoints[*].addresses[*]
+            - from: flow
+              name: destination.port
+              to:
+                - endpointslice.ports[*].port
+            - from: flow
+              name: network.transport
+              to:
+                - endpointslice.ports[*].protocol
+        - sources:
+            - from: flow
+              name: destination.ip
+              to:
+                - ingress.status.loadBalancer.ingress[*].ip
+                - ingress.status.loadBalancer.ingress[*].hostname
+            - from: flow
+              name: destination.port
+              to:
+                - ingress.spec.defaultBackend.service.port
+                - ingress.spec.rules[*].http.paths[*].backend.service.port.number
+        - sources:
+            - from: flow
+              name: destination.ip
+              to:
+                - gateway.spec.addresses[*].value
+                - gateway.status.addresses[*].value
+            - from: flow
+              name: destination.port
+              to:
+                - gateway.spec.listeners[*].port
+        - sources:
+            - from: flow
+              name: destination.ip
+              to:
+                - networkpolicy.spec.ingress[*].from[*].ipBlock.cidr
+                - networkpolicy.spec.egress[*].to[*].ipBlock.cidr
+            - from: flow
+              name: destination.port
+              to:
+                - networkpolicy.spec.ingress[*].ports[*].port
+                - networkpolicy.spec.egress[*].ports[*].port
+            - from: flow
+              name: network.transport
+              to:
+                - networkpolicy.spec.ingress[*].ports[*].protocol
+                - networkpolicy.spec.egress[*].ports[*].protocol
+      extract:
+        metadata:
+          - "[*].metadata.name"
+          - "[*].metadata.namespace"
+          - pod.metadata.uid
+    source:
+      association:
+        - sources:
+            - from: flow
+              name: source.ip
+              to:
+                - pod.status.podIP
+                - pod.status.podIPs[*]
+                - pod.status.hostIP
+                - pod.status.hostIPs[*]
+            - from: flow
+              name: source.port
+              to:
+                - pod.spec.containers[*].ports[*].containerPort
+                - pod.spec.containers[*].ports[*].hostPort
+            - from: flow
+              name: network.transport
+              to:
+                - pod.spec.containers[*].ports[*].protocol
+        - sources:
+            - from: flow
+              name: source.ip
+              to:
+                - node.status.addresses[*].address
+        - sources:
+            - from: flow
+              name: source.ip
+              to:
+                - service.spec.clusterIP
+                - service.spec.clusterIPs[*]
+                - service.spec.externalIPs[*]
+                - service.spec.loadBalancerIP
+                - service.spec.externalName
+            - from: flow
+              name: source.port
+              to:
+                - service.spec.ports[*].port
+            - from: flow
+              name: network.transport
+              to:
+                - service.spec.ports[*].protocol
+            - from: flow
+              name: network.type
+              to:
+                - service.spec.ipFamilies[*]
+        - sources:
+            - from: flow
+              name: source.ip
+              to:
+                - endpoint.subsets[*].addresses[*].ip
+            - from: flow
+              name: source.port
+              to:
+                - endpoint.subsets[*].ports[*].port
+            - from: flow
+              name: network.transport
+              to:
+                - endpoint.subsets[*].ports[*].protocol
+        - sources:
+            - from: flow
+              name: source.ip
+              to:
+                - endpointslice.endpoints[*].addresses[*]
+            - from: flow
+              name: source.port
+              to:
+                - endpointslice.ports[*].port
+            - from: flow
+              name: network.transport
+              to:
+                - endpointslice.ports[*].protocol
+            - from: flow
+              name: network.type
+              to:
+                - endpointslice.addressType
+        - sources:
+            - from: flow
+              name: source.ip
+              to:
+                - ingress.status.loadBalancer.ingress[*].ip
+                - ingress.status.loadBalancer.ingress[*].hostname
+            - from: flow
+              name: source.port
+              to:
+                - ingress.spec.defaultBackend.service.port
+                - ingress.spec.rules[*].http.paths[*].backend.service.port.number
+        - sources:
+            - from: flow
+              name: source.ip
+              to:
+                - gateway.spec.addresses[*].value
+                - gateway.status.addresses[*].value
+            - from: flow
+              name: source.port
+              to:
+                - gateway.spec.listeners[*].port
+        - sources:
+            - from: flow
+              name: source.ip
+              to:
+                - networkpolicy.spec.ingress[*].from[*].ipBlock.cidr
+                - networkpolicy.spec.egress[*].to[*].ipBlock.cidr
+            - from: flow
+              name: source.port
+              to:
+                - networkpolicy.spec.ingress[*].ports[*].port
+                - networkpolicy.spec.egress[*].ports[*].port
+            - from: flow
+              name: network.transport
+              to:
+                - networkpolicy.spec.ingress[*].ports[*].protocol
+                - networkpolicy.spec.egress[*].ports[*].protocol
+      extract:
+        metadata:
+          - "[*].metadata.name"
+          - "[*].metadata.namespace"
+          - "[*].metadata.uid"
+discovery:
+  k8s_owner:
+    main:
+      exclude_kinds:
+        - EndpointSlice
+      include_kinds:
+        - Service
+      max_depth: 5
+      walk_max_depth: 10
+  k8s_selector:
+    main:
+      k8s_object:
+        - kind: NetworkPolicy
+          selector_match_expressions_field: spec.podSelector.matchExpressions
+          selector_match_labels_field: spec.podSelector.matchLabels
+          to: Pod
+        - kind: Service
+          selector_match_labels_field: spec.selector
+          to: Pod
+exporter:
+  otlp:
+    main:
+      address: example.com
+      auth:
+        basic:
+          pass: env("USER_SPECIFIED_ENV_VAR_TRITON_PASS")
+          user: foo
+      port: 443
+      tls:
+        ca_cert: /etc/certs/ca.crt
+        client_cert: /etc/certs/cert.crt
+        client_key: /etc/certs/cert.key
+        enabled: true
+        insecure: false
+  stdout:
+    json:
+      format: json
+flow:
+  connection:
+    main:
+      exclude_states: []
+      include_states: []
+  span:
+    destination:
+      exclude_cidrs: []
+      exclude_ports: []
+      include_cidrs: []
+      include_ports: []
+    source:
+      exclude_cidrs: []
+      exclude_ports: []
+      include_cidrs: []
+      include_ports: []
+global_opt: global_opt_value
