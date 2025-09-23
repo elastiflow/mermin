@@ -19,7 +19,7 @@ pub mod lib {
 
     use crate::{
         flow::{FlowAttributes, FlowAttributesExporter},
-        otlp::opts::{ExporterProtocol, ExporterSpecificConfig},
+        otlp::opts::{ExporterProtocol, ExporterSpecificConfig, generate_auth_headers},
     };
 
     pub struct TraceExporterAdapter {
@@ -122,7 +122,7 @@ pub mod lib {
                 // Authentication headers should take precedence over user headers
                 let mut all_headers = headers.clone().unwrap_or_default();
                 if let Some(auth_config) = auth {
-                    match crate::otlp::opts::generate_auth_headers(auth_config) {
+                    match generate_auth_headers(auth_config) {
                         Ok(auth_headers) => {
                             all_headers.extend(auth_headers);
                             info!("Applied authentication headers to OTLP exporter");

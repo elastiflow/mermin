@@ -19,8 +19,6 @@ pub struct ExporterConf {
 pub enum ExporterType {
     Otlp,
     Stdout,
-    Kafka,
-    // Add more as needed
 }
 
 // TODO: Add authentication configuration for OTLP exporters
@@ -65,11 +63,6 @@ pub enum ExporterSpecificConfig {
     },
     Stdout {
         format: String, // json, pretty, compact
-    },
-    Kafka {
-        brokers: Vec<String>,
-        topic: String,
-        partition_key: Option<String>,
     },
 }
 

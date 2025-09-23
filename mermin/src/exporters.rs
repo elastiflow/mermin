@@ -25,36 +25,28 @@ impl ExporterManager {
         let mut exporters = Vec::new();
 
         println!(
-            "[EXPORTER-MANAGER] Initializing with {} configurations",
+            "[EXPORTER-MANAGER-NEW] Initializing with {} configurations",
             configs.len()
         );
 
         for config in configs {
-            if !config.enabled {
-                println!(
-                    "[EXPORTER-MANAGER] Skipping disabled exporter: {}",
-                    config.name
-                );
-                continue;
-            }
-
             match config.exporter_type {
                 ExporterType::Otlp => {
                     println!(
-                        "[EXPORTER-MANAGER] Creating OTLP exporter for: {}",
+                        "[EXPORTER-MANAGER-NEW] Creating OTLP exporter for: {}",
                         config.name
                     );
                     match create_otlp_exporter(&config.config, log_level).await {
                         Ok(exporter) => {
                             exporters.push(exporter);
                             println!(
-                                "[EXPORTER-MANAGER] Successfully created exporter: {}",
+                                "[EXPORTER-MANAGER-NEW] Successfully created exporter: {}",
                                 config.name
                             );
                         }
                         Err(e) => {
                             println!(
-                                "[EXPORTER-MANAGER] Failed to create exporter {}: {}",
+                                "[EXPORTER-MANAGER-NEW] Failed to create exporter {}: {}",
                                 config.name, e
                             );
                         }
@@ -62,41 +54,20 @@ impl ExporterManager {
                 }
                 ExporterType::Stdout => {
                     println!(
-                        "[EXPORTER-MANAGER] Creating Stdout exporter for: {}",
+                        "[EXPORTER-MANAGER-NEW] Creating Stdout exporter for: {}",
                         config.name
                     );
                     match create_stdout_exporter(&config.config) {
                         Ok(exporter) => {
                             exporters.push(exporter);
                             println!(
-                                "[EXPORTER-MANAGER] Successfully created exporter: {}",
+                                "[EXPORTER-MANAGER-NEW] Successfully created exporter: {}",
                                 config.name
                             );
                         }
                         Err(e) => {
                             println!(
-                                "[EXPORTER-MANAGER] Failed to create exporter {}: {}",
-                                config.name, e
-                            );
-                        }
-                    }
-                }
-                ExporterType::Kafka => {
-                    println!(
-                        "[EXPORTER-MANAGER] Creating Kafka exporter for: {}",
-                        config.name
-                    );
-                    match create_kafka_exporter(&config.config).await {
-                        Ok(exporter) => {
-                            exporters.push(exporter);
-                            println!(
-                                "[EXPORTER-MANAGER] Successfully created exporter: {}",
-                                config.name
-                            );
-                        }
-                        Err(e) => {
-                            println!(
-                                "[EXPORTER-MANAGER] Failed to create exporter {}: {}",
+                                "[EXPORTER-MANAGER-NEW] Failed to create exporter {}: {}",
                                 config.name, e
                             );
                         }
@@ -106,7 +77,7 @@ impl ExporterManager {
         }
 
         println!(
-            "[EXPORTER-MANAGER] Initialized with {} active exporters",
+            "[EXPORTER-MANAGER-NEW] Initialized with {} active exporters",
             exporters.len()
         );
         Ok(Self { exporters })
@@ -114,7 +85,7 @@ impl ExporterManager {
 
     pub async fn export(&self, attrs: FlowAttributes) {
         println!(
-            "[EXPORTER-MANAGER] Exporting flow attributes to {} exporters",
+            "[EXPORTER-MANAGER-EXPORT] Exporting flow attributes to {} exporters",
             self.exporters.len()
         );
 
@@ -125,7 +96,7 @@ impl ExporterManager {
             .map(|exporter| exporter.export(attrs.clone()));
 
         futures::future::join_all(futures).await;
-        println!("[EXPORTER-MANAGER] All exporters completed processing");
+        println!("[EXPORTER-MANAGER-EXPORT] All exporters completed processing");
     }
 
     pub async fn shutdown(&self) -> Result<(), anyhow::Error> {
@@ -203,11 +174,4 @@ fn create_stdout_exporter(
         }
         _ => Err(anyhow::anyhow!("Invalid config type for stdout exporter")),
     }
-}
-
-async fn create_kafka_exporter(
-    _config: &ExporterSpecificConfig,
-) -> Result<Arc<dyn FlowAttributesExporter>, anyhow::Error> {
-    // TODO: Implement Kafka exporter
-    Err(anyhow::anyhow!("Kafka exporter not yet implemented"))
 }
