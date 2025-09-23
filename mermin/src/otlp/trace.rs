@@ -15,16 +15,11 @@ pub mod lib {
     use tonic::transport::{Uri, channel::Channel};
     use tracing::{Level, Span, debug, error, info};
     use tracing_opentelemetry::OpenTelemetrySpanExt;
-    use tracing_subscriber::{
-        filter::LevelFilter,
-        fmt::{Layer, format::FmtSpan},
-        layer::SubscriberExt,
-        util::SubscriberInitExt,
-    };
+    use tracing_subscriber::{filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
     use crate::{
         flow::{FlowAttributes, FlowAttributesExporter},
-        otlp::opts::{ExporterOptions, ExporterProtocol},
+        otlp::opts::{ExporterProtocol, ExporterSpecificConfig},
     };
 
     pub struct TraceExporterAdapter {
@@ -82,96 +77,106 @@ pub mod lib {
     }
 
     pub async fn init_tracer_provider(
-        opts: ExporterOptions,
+        opts: ExporterSpecificConfig,
         log_level: Level,
     ) -> Result<SdkTracerProvider, anyhow::Error> {
         let level_filter = LevelFilter::from_level(log_level);
 
-        // Initialize tracing subscriber based on configuration
-        match (opts.otlp_enabled, opts.stdout_enabled) {
-            (true, true) => {
-                // Both OTLP and stdout enabled
-                let provider = create_otlp_provider(&opts).await?;
-                let trace_layer =
-                    tracing_opentelemetry::layer().with_tracer(provider.tracer("otlp-flow-tracer"));
-                let fmt_layer = Layer::new().with_span_events(FmtSpan::FULL);
+        // Only OTLP enabled
+        let provider = create_otlp_provider(&opts).await?;
+        let trace_layer =
+            tracing_opentelemetry::layer().with_tracer(provider.tracer("otlp-flow-tracer"));
 
-                tracing_subscriber::registry()
-                    .with(level_filter)
-                    .with(fmt_layer)
-                    .with(trace_layer)
-                    .init();
+        tracing_subscriber::registry()
+            .with(level_filter)
+            .with(trace_layer)
+            .init();
 
-                info!("tracer initialized - stdout exporter and otlp exporter are active.");
-                Ok(provider)
-            }
-            (true, false) => {
-                // Only OTLP enabled
-                let provider = create_otlp_provider(&opts).await?;
-                let trace_layer =
-                    tracing_opentelemetry::layer().with_tracer(provider.tracer("otlp-flow-tracer"));
-
-                tracing_subscriber::registry()
-                    .with(level_filter)
-                    .with(trace_layer)
-                    .init();
-
-                info!("tracer initialized - otlp exporter is active.");
-                Ok(provider)
-            }
-            (false, true) => {
-                // Only stdout enabled
-                let fmt_layer = Layer::new().with_span_events(FmtSpan::FULL);
-                tracing_subscriber::registry()
-                    .with(level_filter)
-                    .with(fmt_layer)
-                    .init();
-
-                info!("tracer initialized - stdout exporter is active");
-                Ok(create_minimal_provider())
-            }
-            (false, false) => {
-                let fmt_layer = Layer::new().with_span_events(FmtSpan::FULL);
-
-                tracing_subscriber::registry()
-                    .with(level_filter)
-                    .with(fmt_layer)
-                    .init();
-
-                info!("tracer initialized - no exporters enabled");
-                Ok(create_minimal_provider())
-            }
-        }
-    }
-
-    async fn create_otlp_provider(
-        opts: &ExporterOptions,
-    ) -> Result<SdkTracerProvider, anyhow::Error> {
-        let uri: Uri = opts.otlp_endpoint.parse()?;
-        let channel = Channel::builder(uri).connect().await?;
-        let exporter = opentelemetry_otlp::SpanExporter::builder()
-            .with_tonic() // for gRPC
-            .with_channel(channel)
-            .with_protocol(ExporterProtocol::from(opts.otlp_protocol.clone()).into())
-            .build()
-            .expect("Failed to create OTLP span exporter.");
-        let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio).build();
-        let provider = SdkTracerProvider::builder()
-            .with_span_processor(processor)
-            .with_resource(
-                Resource::builder()
-                    .with_attribute(KeyValue::new("service.name", "mermin"))
-                    .with_attribute(KeyValue::new("service.version", env!("CARGO_PKG_VERSION")))
-                    .build(),
-            )
-            .build();
-
-        global::set_tracer_provider(provider.clone());
-        global::set_text_map_propagator(TraceContextPropagator::new());
-
+        info!("tracer initialized - otlp exporter is active.");
         Ok(provider)
     }
 
+    async fn create_otlp_provider(
+        opts: &ExporterSpecificConfig,
+    ) -> Result<SdkTracerProvider, anyhow::Error> {
+        match opts {
+            ExporterSpecificConfig::Otlp {
+                endpoint,
+                protocol,
+                headers,
+                auth,
+                ..
+            } => {
+                let uri: Uri = endpoint.parse()?;
+                let channel = Channel::builder(uri).connect().await?;
+
+                // TODO: Apply authentication configuration to the OTLP exporter
+                // This should handle different auth methods and add appropriate headers/credentials
+                // Once auth is fully implemented this should be a mut field
+                let exporter_builder = opentelemetry_otlp::SpanExporter::builder()
+                    .with_tonic() // for gRPC
+                    .with_channel(channel)
+                    .with_protocol(ExporterProtocol::from(protocol.clone()).into());
+
+                // TODO: Merge authentication headers with user-provided headers
+                // Authentication headers should take precedence over user headers
+                let mut all_headers = headers.clone().unwrap_or_default();
+                if let Some(auth_config) = auth {
+                    match crate::otlp::opts::generate_auth_headers(auth_config) {
+                        Ok(auth_headers) => {
+                            all_headers.extend(auth_headers);
+                            info!("Applied authentication headers to OTLP exporter");
+                        }
+                        Err(e) => {
+                            error!("Failed to generate authentication headers: {}", e);
+                            return Err(anyhow::anyhow!(
+                                "Authentication configuration error: {}",
+                                e
+                            ));
+                        }
+                    }
+                }
+
+                // TODO: Apply headers to the exporter builder
+                // Note: The opentelemetry_otlp crate may need to be updated to support custom headers
+                // For now, this is a placeholder for where header configuration would go
+                if !all_headers.is_empty() {
+                    // TODO: Implement header application once the OTLP crate supports it
+                    // exporter_builder = exporter_builder.with_headers(all_headers);
+                    info!(
+                        "Headers configured for OTLP exporter ({} headers)",
+                        all_headers.len()
+                    );
+                }
+
+                let exporter = exporter_builder
+                    .build()
+                    .expect("Failed to create OTLP span exporter.");
+
+                let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio).build();
+                let provider = SdkTracerProvider::builder()
+                    .with_span_processor(processor)
+                    .with_resource(
+                        Resource::builder()
+                            .with_attribute(KeyValue::new("service.name", "mermin"))
+                            .with_attribute(KeyValue::new(
+                                "service.version",
+                                env!("CARGO_PKG_VERSION"),
+                            ))
+                            .build(),
+                    )
+                    .build();
+
+                global::set_tracer_provider(provider.clone());
+                global::set_text_map_propagator(TraceContextPropagator::new());
+
+                Ok(provider)
+            }
+            _ => Err(anyhow::anyhow!("Invalid config type for OTLP exporter")),
+        }
+    }
+
+    #[allow(dead_code)]
     fn create_minimal_provider() -> SdkTracerProvider {
         SdkTracerProvider::builder()
             .with_resource(

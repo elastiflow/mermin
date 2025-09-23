@@ -1,29 +1,117 @@
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
+use base64::{Engine as _, engine::general_purpose};
 use opentelemetry_otlp::Protocol;
 use serde::{Deserialize, Serialize};
 
 use crate::runtime::conf::conf_serde::duration;
 
+// New multi-exporter configuration
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct ExporterOptions {
-    pub otlp_enabled: bool,
-    pub stdout_enabled: bool,
-    pub otlp_endpoint: String,
-    pub otlp_timeout_seconds: u64,
-    pub otlp_protocol: String,
+pub struct ExporterConf {
+    pub name: String,
+    pub enabled: bool,
+    pub exporter_type: ExporterType,
+    pub config: ExporterSpecificConfig,
 }
 
-impl Default for ExporterOptions {
-    fn default() -> Self {
-        ExporterOptions {
-            stdout_enabled: false,
-            otlp_enabled: false,
-            otlp_endpoint: "http://host.docker.internal:4317".to_string(),
-            otlp_timeout_seconds: 3, // TODO: convert to Duration that uses human readable format
-            otlp_protocol: "grpc".to_string(),
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub enum ExporterType {
+    Otlp,
+    Stdout,
+    Kafka,
+    // Add more as needed
+}
+
+// TODO: Add authentication configuration for OTLP exporters
+// This should support various auth methods like basic auth, bearer tokens, API keys, etc.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub enum AuthConfig {
+    Basic {
+        username: String,
+        password: String, // TODO: Support environment variable substitution like env("USER_SPECIFIED_ENV_VAR_TRITON_PASS")
+    },
+    Bearer {
+        token: String, // TODO: Support environment variable substitution
+    },
+    ApiKey {
+        key: String,
+        value: String, // TODO: Support environment variable substitution
+    },
+    // TODO: Add support for OAuth2, mTLS, and other authentication methods
+    // OAuth2 {
+    //     client_id: String,
+    //     client_secret: String,
+    //     token_url: String,
+    //     scopes: Vec<String>,
+    // },
+    // Mtls {
+    //     cert_path: String,
+    //     key_path: String,
+    //     ca_cert_path: Option<String>,
+    // },
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub enum ExporterSpecificConfig {
+    Otlp {
+        endpoint: String,
+        timeout_seconds: u64,
+        protocol: String,
+        headers: Option<HashMap<String, String>>,
+        batch_size: Option<usize>,
+        // TODO: Add authentication configuration
+        auth: Option<AuthConfig>,
+    },
+    Stdout {
+        format: String, // json, pretty, compact
+    },
+    Kafka {
+        brokers: Vec<String>,
+        topic: String,
+        partition_key: Option<String>,
+    },
+}
+
+// TODO: Implement environment variable substitution for authentication credentials
+// This function should handle patterns like env("VAR_NAME") and replace them with actual env values
+pub fn resolve_env_vars(value: &str) -> Result<String, String> {
+    if value.starts_with("env(") && value.ends_with(')') {
+        let env_var = &value[4..value.len() - 1]; // Remove "env(" and ")"
+        std::env::var(env_var).map_err(|_| format!("Environment variable '{env_var}' not found"))
+    } else {
+        Ok(value.to_string())
+    }
+}
+
+// TODO: Implement authentication header generation for OTLP exporters
+// This should create appropriate headers based on the auth configuration
+pub fn generate_auth_headers(auth: &AuthConfig) -> Result<HashMap<String, String>, String> {
+    let mut headers = HashMap::new();
+
+    match auth {
+        AuthConfig::Basic { username, password } => {
+            let resolved_username = resolve_env_vars(username)?;
+            let resolved_password = resolve_env_vars(password)?;
+            let credentials = general_purpose::STANDARD
+                .encode(format!("{resolved_username}:{resolved_password}"));
+            headers.insert("Authorization".to_string(), format!("Basic {credentials}"));
+        }
+        AuthConfig::Bearer { token } => {
+            let resolved_token = resolve_env_vars(token)?;
+            headers.insert(
+                "Authorization".to_string(),
+                format!("Bearer {resolved_token}"),
+            );
+        }
+        AuthConfig::ApiKey { key, value } => {
+            let resolved_key = resolve_env_vars(key)?;
+            let resolved_value = resolve_env_vars(value)?;
+            headers.insert(resolved_key, resolved_value);
         }
     }
+
+    Ok(headers)
 }
 
 pub enum ExporterProtocol {

@@ -1,4 +1,5 @@
 mod community_id;
+mod exporters;
 mod flow;
 mod health;
 mod k8s;
@@ -23,10 +24,10 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     community_id::CommunityIdGenerator,
-    flow::{FlowAttributesExporter, FlowAttributesProducer},
+    exporters::ExporterManager,
+    flow::FlowAttributesProducer,
     health::{HealthState, start_api_server},
     k8s::resource_parser::attribute_flow_attrs,
-    otlp::opts::ExporterOptions,
     runtime::conf::Conf,
 };
 
@@ -40,21 +41,19 @@ async fn main() -> Result<()> {
     let runtime = runtime::Runtime::new()?;
     let runtime::Runtime { config, .. } = runtime;
 
-    let exporter = if config.exporter.otlp_enabled || config.exporter.stdout_enabled {
-        info!(
-            "initializing exporter (otlp: {}, stdout: {})",
-            config.exporter.otlp_enabled, config.exporter.stdout_enabled
-        );
-        match create_otlp_exporter(&config.exporter, config.log_level).await {
-            Ok(exporter) => Some(exporter),
+    // Create exporter manager with multiple exporters
+    let exporter_manager = if !config.exporters.is_empty() {
+        info!("initializing {} exporters", config.exporters.len());
+        match ExporterManager::new(config.exporters.clone(), config.log_level).await {
+            Ok(manager) => Some(manager),
             Err(e) => {
-                error!("failed to initialize exporter: {e}");
-                warn!("continuing without exporter");
+                error!("failed to initialize exporters: {e}");
+                warn!("continuing without exporters");
                 None
             }
         }
     } else {
-        info!("all exporters disabled in configuration");
+        info!("no exporters configured");
         None
     };
 
@@ -281,16 +280,16 @@ async fn main() -> Result<()> {
 
     tokio::spawn(async move {
         while let Some(k8s_attributed_flow_attrs) = k8s_attributed_flow_attrs_rx.recv().await {
-            if let Some(ref exporter) = exporter {
-                debug!("exporting result");
-                exporter.export(k8s_attributed_flow_attrs).await;
+            if let Some(ref manager) = exporter_manager {
+                debug!("exporting flow attributes");
+                manager.export(k8s_attributed_flow_attrs).await;
             } else {
-                debug!("skipping export - no exporter available");
+                debug!("skipping export - no exporters available");
             }
         }
         debug!("exporting task exiting");
-        if let Some(ref exporter) = exporter
-            && let Err(e) = exporter.shutdown().await
+        if let Some(ref manager) = exporter_manager
+            && let Err(e) = manager.shutdown().await
         {
             error!("error during exporter shutdown: {e}");
         }
@@ -301,28 +300,6 @@ async fn main() -> Result<()> {
     println!("exiting");
 
     Ok(())
-}
-
-async fn create_otlp_exporter(
-    conf: &ExporterOptions,
-    log_level: tracing::Level,
-) -> Result<Arc<dyn FlowAttributesExporter>, anyhow::Error> {
-    info!("Using OTLP Exporter Adapter.");
-    use crate::otlp::trace::lib::{TraceExporterAdapter, init_tracer_provider};
-    let provider = init_tracer_provider(
-        ExporterOptions {
-            otlp_enabled: conf.otlp_enabled,
-            stdout_enabled: conf.stdout_enabled,
-            otlp_endpoint: conf.otlp_endpoint.clone(),
-            otlp_timeout_seconds: conf.otlp_timeout_seconds,
-            otlp_protocol: conf.otlp_protocol.to_string(),
-        },
-        log_level,
-    )
-    .await?;
-
-    let exporter = TraceExporterAdapter::new(provider);
-    Ok(Arc::new(exporter))
 }
 
 /// Helper function to format IP address based on type

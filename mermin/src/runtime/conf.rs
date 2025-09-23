@@ -14,8 +14,7 @@ use serde::{Deserialize, Serialize};
 use tracing::Level;
 
 use crate::{
-    otlp,
-    otlp::opts::{ExporterOptions, SpanOptions},
+    otlp::opts::{ExporterConf, SpanOptions},
     runtime::{
         cli::Cli,
         conf::conf_serde::{duration, level},
@@ -127,10 +126,10 @@ pub struct Conf {
     /// to how the application's logic operates.
     pub span: SpanOptions,
 
-    /// OpenTelemetry Protocol (OTLP) exporter configuration options.
-    /// This field holds settings for exporting telemetry data
-    /// using the OTLP standard.
-    pub exporter: ExporterOptions,
+    /// Vector of exporters configuration options.
+    /// This field holds setting for exporting telemetry data
+    /// to multiple destinations.
+    pub exporters: Vec<ExporterConf>,
 }
 
 impl Default for Conf {
@@ -146,7 +145,7 @@ impl Default for Conf {
             packet_worker_count: defaults::flow_workers(),
             shutdown_timeout: defaults::shutdown_timeout(),
             span: SpanOptions::default(),
-            exporter: otlp::opts::ExporterOptions::default(),
+            exporters: Vec::new(),
         }
     }
 }

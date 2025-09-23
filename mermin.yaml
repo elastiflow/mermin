@@ -40,13 +40,30 @@ span:
   tcp_rst_timeout: 5s
   udp_timeout: 60s
 
-# Exporter configuration
-exporter:
-  # Enable stdout exporter for local development and testing
-  stdout_enabled: true
+# Multiple exporter configuration
+exporters:
+  - name: "console-debug"
+    enabled: true
+    exporter_type: "Stdout"
+    config:
+      Stdout:
+        format: "pretty"
 
-  # OTLP exporter configuration (disabled by default)
-  otlp_enabled: false
-  otlp_endpoint: "http://host.docker.internal:4317"
-  otlp_timeout_seconds: 3
-  otlp_protocol: "grpc"
+  - name: "otlp-production"
+    enabled: true
+    exporter_type: "Otlp"
+    config:
+      Otlp:
+        endpoint: "http://jaeger:14250"
+        timeout_seconds: 5
+        protocol: "grpc"
+        headers:
+          "X-API-Key": "your-api-key"
+        batch_size: 100
+
+  - name: "console-compact"
+    enabled: true
+    exporter_type: "Stdout"
+    config:
+      Stdout:
+        format: "json-compact"
