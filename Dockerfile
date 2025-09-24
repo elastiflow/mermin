@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7-labs
+# Using "labs" due to "COPY --parents", https://docs.docker.com/reference/dockerfile/#copy---parents
 ARG APP_ROOT=/app
 ARG APP=mermin
 
@@ -82,19 +84,28 @@ RUN cargo install --git https://github.com/aya-rs/aya --locked aya-tool
 # ---- Builder Stage ----
 FROM base AS builder
 ARG APP_ROOT APP
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # hadolint ignore=DL3002 # root is needed due to eBPF
 USER root
 
 WORKDIR ${APP_ROOT}
+
+# Build dependencies (hack, https://github.com/rust-lang/cargo/issues/2644#issuecomment-2335499312)
+# Cleanup everything related Mermin code in "./target" afterwards
+COPY --parents **/Cargo.lock **/Cargo.toml ./
+COPY --parents **/rust-toolchain.toml **/rustfmt.toml ./
+RUN find . -type d | while read -r i; do mkdir -p "$i/src"; echo 'fn main() {}' > "$i/src/main.rs"; echo '// dummy line' > "$i/src/lib.rs"; done \
+  && cargo build --release \
+  && find . -type d -name 'src' -not -path './target/*' -prune -exec rm -rf {} \; \
+  && find . -mindepth 1 -maxdepth 1 -type d | while read -r i; do find ./target/ -type d -name "${i#./}-*" -prune -exec rm -rf {} \;; done
+
 # Copy source code
 COPY ./common-build ./common-build
 COPY ./mermin ./mermin
 COPY ./mermin-common ./mermin-common
 COPY ./mermin-ebpf ./mermin-ebpf
 COPY ./network-types ./network-types
-COPY Cargo.lock Cargo.toml ./
-COPY rust-toolchain.toml rustfmt.toml ./
 
 # Build the final application, leveraging the cached dependencies
 RUN cargo build --release
@@ -105,8 +116,6 @@ RUN cargo build --release
 FROM gcr.io/distroless/cc-debian12 AS runner
 ARG APP_ROOT APP
 
-ENV RUST_LOG=info
-
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
 ENTRYPOINT ["/usr/bin/mermin"]
 
@@ -114,8 +123,6 @@ ENTRYPOINT ["/usr/bin/mermin"]
 # Use a distroless base image for the final container with shell support
 FROM gcr.io/distroless/cc-debian12:debug AS runner-debug
 ARG APP_ROOT APP
-
-ENV RUST_LOG=info
 
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
 COPY --from=builder /usr/bin/bpftool /usr/bin/bpftool

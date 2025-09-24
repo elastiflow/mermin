@@ -19,6 +19,7 @@ mod type2;
 mod udp;
 mod utils;
 mod vxlan;
+mod wireguard;
 
 // Import the helper functions and macros
 use crate::{
@@ -50,6 +51,11 @@ use crate::{
     type2::{create_type2_test_packet, verify_type2_header},
     udp::{create_udp_test_packet, verify_udp_header},
     vxlan::{create_vxlan_test_packet, verify_vxlan_header},
+    wireguard::{
+        create_wireguard_cookie_reply_test_packet, create_wireguard_initiation_test_packet,
+        create_wireguard_response_test_packet, create_wireguard_transport_data_test_packet,
+        verify_wireguard_header,
+    },
 };
 
 fn main() {
@@ -247,4 +253,36 @@ define_header_test!(
     PacketType::Gre,
     create_gre_test_packet,
     verify_gre_header
+);
+
+define_header_test!(
+    test_parses_wireguard_initiation_header,
+    WireGuardMinimalHeader,
+    PacketType::WireGuard,
+    create_wireguard_initiation_test_packet,
+    verify_wireguard_header
+);
+
+define_header_test!(
+    test_parses_wireguard_response_header,
+    WireGuardMinimalHeader,
+    PacketType::WireGuard,
+    create_wireguard_response_test_packet,
+    verify_wireguard_header
+);
+
+define_header_test!(
+    test_parses_wireguard_cookie_reply_header,
+    WireGuardMinimalHeader,
+    PacketType::WireGuard,
+    create_wireguard_cookie_reply_test_packet,
+    verify_wireguard_header
+);
+
+define_header_test!(
+    test_parses_wireguard_transport_data_header,
+    WireGuardMinimalHeader,
+    PacketType::WireGuard,
+    create_wireguard_transport_data_test_packet,
+    verify_wireguard_header
 );

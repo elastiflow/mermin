@@ -18,15 +18,42 @@ use network_types::{
     tcp::TcpHdr,
     udp::UdpHdr,
     vxlan::VxlanHdr,
+    wireguard::WireGuardType,
 };
+
+/// Minimal WireGuard header for eBPF processing - only essential fields (12 bytes)
+/// This contains only the common fields across all WireGuard message types
+#[repr(C, packed)]
+#[derive(Debug, Copy, Clone)]
+pub struct WireGuardMinimalHeader {
+    pub type_: WireGuardType,
+    pub reserved: [u8; 3],
+    pub sender_ind: [u8; 4],
+    pub receiver_ind: [u8; 4], // Only used in response/transport, zero in initiation/cookie
+}
+
+impl WireGuardMinimalHeader {
+    pub const LEN: usize = core::mem::size_of::<WireGuardMinimalHeader>();
+
+    #[inline]
+    pub fn sender_ind(&self) -> u32 {
+        u32::from_le_bytes(self.sender_ind)
+    }
+
+    #[inline]
+    pub fn receiver_ind(&self) -> u32 {
+        u32::from_le_bytes(self.receiver_ind)
+    }
+}
 
 #[cfg(feature = "user")]
 unsafe impl Pod for ParsedHeader {}
 
 /// An enum to tell the eBPF program which header to parse.
 #[repr(u8)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum PacketType {
+    #[default]
     Eth = 1,
     Ipv4 = 2,
     Ipv6 = 3,
@@ -48,6 +75,7 @@ pub enum PacketType {
     Shim6 = 19,
     Hip = 20,
     Gre = 21,
+    WireGuard = 22,
 }
 
 /// A union to hold any of the possible parsed network headers.
@@ -76,6 +104,7 @@ pub union HeaderUnion {
     pub shim6: Shim6Hdr,
     pub hip: network_types::hip::HipHdr,
     pub gre: GreHdr,
+    pub wireguard: WireGuardMinimalHeader,
 }
 
 /// The final struct sent back to user-space. It contains the type of

@@ -5,6 +5,7 @@ Audience: Experienced Rust developers contributing to this workspace.
 Scope: Build/configuration specifics, testing workflow, and development conventions particular to this repository.
 
 1. Workspace layout and build specifics
+
 - Workspace members
   - Primary crates: mermin (agent), mermin-common (shared), mermin-ebpf (eBPF programs), network-types (no_std packet types)
   - Test-only helper crates (for integration suites): network-types/tests/integration, network-types/tests/integration-common, network-types/tests/integration-ebpf
@@ -23,7 +24,7 @@ Scope: Build/configuration specifics, testing workflow, and development conventi
   - Build default workspace members: cargo build
   - Build full workspace including eBPF crate: cargo build --workspace
   - Run the mermin agent (requires elevated privileges via runner):
-    RUST_LOG=info cargo run --release --config 'target."cfg(all())".runner="sudo -E"'
+    cargo run --release --config 'target."cfg(all())".runner="sudo -E"'
   - Docker/Kubernetes: See README for kind + Helm flow; common make targets exist via included makefiles/*.mk (e.g., helm-upgrade, k8s-get, k8s-diff)
 
 - Notes on network-types (no_std)
@@ -31,6 +32,7 @@ Scope: Build/configuration specifics, testing workflow, and development conventi
   - If you introduce features (e.g., serde derives), define them in network-types/Cargo.toml. The code contains #[cfg_attr(feature = "serde", ...)] hooks; without a feature, rustc emits an "unexpected cfg value: serde" warning under check-cfg. Define and gate it to avoid the warning if you plan to enable serde
 
 2. Testing: running, adding, and demonstrating
+
 - Running tests
   - Entire workspace (default members): cargo test
   - Specific crate: cargo test -p network-types
@@ -75,6 +77,7 @@ Scope: Build/configuration specifics, testing workflow, and development conventi
   - After verifying the test runs and passes, the temporary file was removed to keep the repo clean
 
 3. Development conventions and tips specific to this repo
+
 - Packet parsing in network-types
   - Header structs (e.g., AhHdr) operate on raw pointers and slices; use explicit unsafe with clear Safety sections in docs
   - Avoid assuming alignment; convert from byte slices carefully and respect endianness
@@ -101,10 +104,12 @@ Scope: Build/configuration specifics, testing workflow, and development conventi
   - Tests: cargo test (or -p <crate>)
 
 4. Known warnings and how to address them
+
 - unexpected cfg value: serde (check-cfg): either define a serde feature for the crate that uses #[cfg_attr(feature = "serde", ...)] or remove the attribute if serde is not intended
 - unsafe_op_in_unsafe_fn (E0133 warnings): wrap pointer operations and other unsafe calls in explicit unsafe blocks inside unsafe fns; add/maintain thorough safety docs
 
 5. Troubleshooting
+
 - Building eBPF on macOS:
   - Install bpf-linker with --no-default-features
   - Ensure LLVM is available (brew install llvm), and set the appropriate PATH if needed
