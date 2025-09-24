@@ -60,10 +60,26 @@ data:
       udp_timeout: {{ .span.udp_timeout | default "60s" }}
 
     # Exporter configuration
-    exporter:
-      stdout_enabled: {{ .exporter.stdout_enabled | default false }}
-      otlp_enabled: {{ .exporter.otlp_enabled | default false }}
-      otlp_endpoint: {{ .exporter.otlp_endpoint | default "http://host.docker.internal:4317" | quote }}
-      otlp_timeout_seconds: {{ .exporter.otlp_timeout_seconds | default 3 }}
-      otlp_protocol: {{ .exporter.otlp_protocol | default "grpc" | quote }}
+    exporters:
+      {{- if .exporter.stdout_enabled }}
+      - name: "stdout"
+        enabled: true
+        exporter_type: "Stdout"
+        config:
+          Stdout:
+            format: "json"
+      {{- end }}
+      {{- if .exporter.otlp_enabled }}
+      - name: "otlp"
+        enabled: true
+        exporter_type: "Otlp"
+        config:
+          Otlp:
+            endpoint: {{ .exporter.otlp_endpoint | default "http://host.docker.internal:4317" | quote }}
+            timeout_seconds: {{ .exporter.otlp_timeout_seconds | default 3 }}
+            protocol: {{ .exporter.otlp_protocol | default "grpc" | quote }}
+            headers: null
+            batch_size: null
+            auth: null
+      {{- end }}
     {{- end }}
