@@ -115,11 +115,6 @@ The HCL format supports variables, expressions, and functions, making it powerfu
 
 ```hcl
 # mermin.hcl
-locals {
-  default_interface = "eth0"
-  log_level_dev     = "debug"
-}
-
 interface    = [local.default_interface]
 auto_reload  = false
 log_level    = local.log_level_dev

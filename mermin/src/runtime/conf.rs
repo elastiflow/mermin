@@ -10,10 +10,7 @@ use figment::{
     Figment,
     providers::{Format, Serialized, Yaml},
 };
-use hcl::{
-    self, Body, Map, Value,
-    eval::{Context, Evaluate},
-};
+use hcl::{self, eval::Context};
 use serde::{Deserialize, Serialize};
 use tracing::Level;
 
@@ -75,33 +72,7 @@ impl Format for Hcl {
     const NAME: &'static str = "HCL";
 
     fn from_str<T: serde::de::DeserializeOwned>(string: &str) -> Result<T, Self::Error> {
-        let mut context = Context::new();
-
-        // Parse the HCL content to extract locals blocks
-        let body: Body = hcl::from_str(string)?;
-
-        // Extract locals blocks and populate the context
-        for block in body.blocks() {
-            if block.identifier() == "locals" {
-                // Create a local object to hold all the local variables
-                let mut local_vars = Map::new();
-
-                for attr in block.body().attributes() {
-                    let key = attr.key();
-                    let value = attr.expr().evaluate(&context)?;
-                    local_vars.insert(key.to_string(), value);
-                }
-
-                // Convert HashMap to HCL Value::Object
-                let local_value = Value::Object(local_vars);
-
-                // Add the local variables as a "local" object in the context
-                context.declare_var("local", local_value);
-                break; // Assuming only one locals block
-            }
-        }
-
-        hcl::eval::from_str(string, &context)
+        hcl::eval::from_str(string, &Context::new())
     }
 }
 
@@ -781,96 +752,6 @@ metrics {
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let result = Conf::new(cli);
             assert!(result.is_ok(), "HCL extension should be valid");
-
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn loads_and_evaluates_hcl2_file() {
-        Jail::expect_with(|jail| {
-            let path = "complex.hcl";
-            jail.create_file(
-                path,
-                r#"
-# HCL v2 Configuration with expressions and locals
-locals {
-  base_port = 8080
-  service_name = "mermin"
-  owner = "test-team"
-}
-
-interface = ["eth0", "eth1"]
-log_level = "debug"
-auto_reload = false
-
-# Nested blocks with interpolation and expressions
-api {
-    enabled = true
-    listen_address = "0.0.0.0"
-    # Use an expression to calculate the port
-    port = local.base_port + 1
-}
-
-metrics {
-    enabled = true
-    listen_address = "0.0.0.0"
-    # Use another expression
-    port = local.base_port + 2250
-}
-
-packet_channel_capacity = 1024
-packet_worker_count = 2
-shutdown_timeout = "5s"
-
-span {
-    max_batch_size = 64
-    max_batch_interval = "5s"
-    # String interpolation example
-    max_record_interval = "${6 * 10}s" # 60s
-    generic_timeout = "30s"
-    icmp_timeout = "10s"
-    tcp_timeout = "20s"
-    tcp_fin_timeout = "5s"
-    tcp_rst_timeout = "5s"
-    udp_timeout = "60s"
-}
-
-exporter {
-    stdout_enabled = true
-    otlp_enabled = false
-    otlp_endpoint = "http://host.docker.internal:4317"
-    otlp_timeout_seconds = 3
-    otlp_protocol = "grpc"
-}
-                "#,
-            )?;
-
-            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) =
-                Conf::new(cli).expect("config should load HCL v2 file with expressions");
-
-            // Verify that HCL v2 syntax was parsed and expressions were evaluated correctly
-            assert_eq!(cfg.interface, vec!["eth0", "eth1"]);
-            assert_eq!(cfg.log_level, Level::DEBUG);
-            assert_eq!(cfg.auto_reload, false);
-            assert_eq!(cfg.api.enabled, true);
-            assert_eq!(cfg.api.listen_address, "0.0.0.0");
-            assert_eq!(cfg.api.port, 8081); // Evaluated from `8080 + 1`
-            assert_eq!(cfg.metrics.enabled, true);
-            assert_eq!(cfg.metrics.port, 10330); // Evaluated from `8080 + 2250`
-            assert_eq!(cfg.packet_channel_capacity, 1024);
-            assert_eq!(cfg.packet_worker_count, 2);
-            assert_eq!(cfg.shutdown_timeout, Duration::from_secs(5));
-
-            // Verify span configuration with evaluated values
-            assert_eq!(cfg.span.max_batch_size, 64);
-            assert_eq!(cfg.span.max_batch_interval, Duration::from_secs(5));
-            assert_eq!(cfg.span.max_record_interval, Duration::from_secs(60)); // Evaluated from "${6 * 10}s"
-
-            // Verify exporter configuration
-            assert_eq!(cfg.exporter.stdout_enabled, true);
-            assert_eq!(cfg.exporter.otlp_enabled, false);
 
             Ok(())
         });
