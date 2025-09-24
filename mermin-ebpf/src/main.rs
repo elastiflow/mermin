@@ -1640,7 +1640,7 @@ mod tests {
         let ctx = TcContext::new(packet);
 
         // Call try_mermin and get the populated packet_meta
-        let (_ctx, result) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx, Direction::Ingress);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -1695,7 +1695,7 @@ mod tests {
         .concat();
 
         let ctx = TcContext::new(packet.clone());
-        let (_ctx, result) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx, Direction::Ingress);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2609,7 +2609,7 @@ mod tests {
 
         let packet: Vec<u8> = [eth, outer_v6.clone(), inner_v6.clone(), tcp].concat();
         let ctx = TcContext::new(packet.clone());
-        let (_ctx, result) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx, Direction::Ingress);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2654,7 +2654,7 @@ mod tests {
 
         let packet: Vec<u8> = [eth, outer_v4.clone(), inner_v6.clone(), tcp].concat();
         let ctx = TcContext::new(packet);
-        let (_ctx, result) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx, Direction::Ingress);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2719,7 +2719,7 @@ mod tests {
 
         let packet: Vec<u8> = [eth, outer.clone(), middle.clone(), inner.clone(), tcp].concat();
         let ctx = TcContext::new(packet);
-        let (_ctx, result) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx, Direction::Ingress);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2760,7 +2760,7 @@ mod tests {
 
         let packet: Vec<u8> = [eth, outer.clone(), middle, inner.clone(), tcp].concat();
         let ctx = TcContext::new(packet);
-        let (_ctx, result) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx, Direction::Ingress);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2819,7 +2819,7 @@ mod tests {
         ]
         .concat();
         let ctx = TcContext::new(packet);
-        let (_ctx, result) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx, Direction::Ingress);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2875,7 +2875,7 @@ mod tests {
         ]
         .concat();
         let ctx = TcContext::new(packet);
-        let (_ctx, result) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx, Direction::Ingress);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2952,7 +2952,7 @@ mod tests {
             .concat();
 
             let ctx = TcContext::new(packet);
-            let (_ctx, result) = try_mermin(ctx);
+            let (_ctx, result) = try_mermin(ctx, Direction::Ingress);
 
             assert!(result.is_ok(), "Failed for TCP flags: 0x{:02x}", flags);
             let (action, packet_meta) = result.unwrap();
