@@ -98,17 +98,28 @@ async fn main() -> Result<()> {
         });
     }
 
-    let program: &mut SchedClassifier = ebpf.program_mut("mermin").unwrap().try_into()?;
-    program.load()?;
+    // Load and attach both ingress and egress programs
+    let programs = [TcAttachType::Ingress, TcAttachType::Egress];
+    programs.iter().try_for_each(|attach_type| -> Result<()> {
+        let program: &mut SchedClassifier = ebpf
+            .program_mut(attach_type.program_name())
+            .unwrap()
+            .try_into()?;
+        program.load()?;
 
-    // TODO: this needs to be done in a loop for each interface
-    for iface in &interface {
-        // error adding clsact to the interface if it is already added is harmless
-        // the full cleanup can be done with 'sudo tc qdisc del dev eth0 clsact'.
-        let _ = tc::qdisc_add_clsact(iface);
-        program.attach(iface, TcAttachType::Egress)?;
-        info!("mermin ebpf program attached to {iface}");
-    }
+        interface.iter().try_for_each(|iface| -> Result<()> {
+            // error adding clsact to the interface if it is already added is harmless
+            // the full cleanup can be done with 'sudo tc qdisc del dev eth0 clsact'.
+            let _ = tc::qdisc_add_clsact(iface);
+
+            program.attach(iface, *attach_type)?;
+            debug!(
+                "mermin {} program attached to {iface}",
+                attach_type.direction_name()
+            );
+            Ok(())
+        })
+    })?;
 
     let map = ebpf
         .take_map("PACKETS_META")
@@ -392,5 +403,29 @@ fn log_packet_info(packet_meta: &PacketMeta, community_id: &str, iface_name: &st
             dst_port,
             packet_meta.l3_octet_count,
         );
+    }
+}
+
+/// Extension trait for TcAttachType to provide direction name
+trait TcAttachTypeExt {
+    fn direction_name(&self) -> &'static str;
+    fn program_name(&self) -> &'static str;
+}
+
+impl TcAttachTypeExt for TcAttachType {
+    fn direction_name(&self) -> &'static str {
+        match self {
+            TcAttachType::Ingress => "ingress",
+            TcAttachType::Egress => "egress",
+            TcAttachType::Custom(_) => "custom",
+        }
+    }
+
+    fn program_name(&self) -> &'static str {
+        match self {
+            TcAttachType::Ingress => "mermin_ingress",
+            TcAttachType::Egress => "mermin_egress",
+            TcAttachType::Custom(_) => "mermin_custom",
+        }
     }
 }

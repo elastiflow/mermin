@@ -3,19 +3,19 @@ name = "mermin-ebpf"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "mermin"
+path = "src/main.rs"
+
 [features]
 test = []
 
 [dependencies]
-mermin-common = { path = "../mermin-common" }
-network-types = { path = "../network-types" }
 
 aya-ebpf = { workspace = true }
 aya-log-ebpf = { workspace = true }
+mermin-common = { path = "../mermin-common" }
+network-types = { path = "../network-types" }
 
 [build-dependencies]
 which = { workspace = true }
-
-[[bin]]
-name = "mermin"
-path = "src/main.rs"

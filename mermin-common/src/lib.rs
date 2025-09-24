@@ -10,6 +10,14 @@ pub enum IpAddrType {
     Ipv6 = 6,
 }
 
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum Direction {
+    #[default]
+    Ingress = 0,
+    Egress = 1,
+}
+
 /// Represents a record containing flow metrics and identifiers.
 ///
 /// This struct is designed with a specific memory layout (`#[repr(C)]`)
@@ -74,6 +82,8 @@ pub struct PacketMeta {
     pub tunnel_proto: IpProto,
     /// TCP flags (outermost) - bitfield: FIN|SYN|RST|PSH|ACK|URG|ECE|CWR
     pub tunnel_tcp_flags: u8,
+    /// Packet direction: Ingress (incoming) or Egress (outgoing)
+    pub direction: Direction,
 }
 
 impl PacketMeta {
@@ -283,6 +293,17 @@ impl PacketMeta {
     pub fn set_tunnel_cwr(&mut self, cwr: bool) {
         Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_CWR, cwr)
     }
+
+    // Direction convenience methods
+    #[inline]
+    pub fn is_ingress(&self) -> bool {
+        self.direction == Direction::Ingress
+    }
+
+    #[inline]
+    pub fn is_egress(&self) -> bool {
+        self.direction == Direction::Egress
+    }
 }
 
 #[cfg(test)]
@@ -297,7 +318,7 @@ mod tests {
     // Test FlowRecord size and alignment
     #[test]
     fn test_flow_record_layout() {
-        let expected_size = 112;
+        let expected_size = 112; // Size remains 112 due to struct padding/alignment
         let actual_size = size_of::<PacketMeta>();
 
         assert_eq!(
@@ -362,6 +383,7 @@ mod tests {
             tunnel_proto: IpProto::Udp,
             tcp_flags: 0,
             tunnel_tcp_flags: 0,
+            direction: Direction::Egress,
         };
 
         // Set TCP flags for outer header
@@ -425,5 +447,46 @@ mod tests {
         assert_eq!(record.tunnel_urg(), false);
         assert_eq!(record.tunnel_ece(), true);
         assert_eq!(record.tunnel_cwr(), false);
+
+        // Test direction functionality
+        assert_eq!(record.direction, Direction::Egress);
+        assert_eq!(record.is_egress(), true);
+        assert_eq!(record.is_ingress(), false);
+
+        // Change direction and test
+        record.direction = Direction::Ingress;
+        assert_eq!(record.is_ingress(), true);
+        assert_eq!(record.is_egress(), false);
+    }
+
+    #[test]
+    fn test_direction_enum() {
+        // Test Direction enum values and default
+        assert_eq!(Direction::default(), Direction::Ingress);
+        assert_eq!(Direction::Ingress as u8, 0);
+        assert_eq!(Direction::Egress as u8, 1);
+
+        // Test that different directions are not equal
+        assert_ne!(Direction::Ingress, Direction::Egress);
+    }
+
+    #[test]
+    fn test_packet_meta_direction_integration() {
+        let mut packet = PacketMeta::default();
+
+        // Test default direction
+        assert_eq!(packet.direction, Direction::Ingress);
+        assert_eq!(packet.is_ingress(), true);
+        assert_eq!(packet.is_egress(), false);
+
+        // Test setting egress direction
+        packet.direction = Direction::Egress;
+        assert_eq!(packet.is_ingress(), false);
+        assert_eq!(packet.is_egress(), true);
+
+        // Test setting back to ingress
+        packet.direction = Direction::Ingress;
+        assert_eq!(packet.is_ingress(), true);
+        assert_eq!(packet.is_egress(), false);
     }
 }
