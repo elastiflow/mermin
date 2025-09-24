@@ -140,7 +140,7 @@ verify_agent_logs() {
     (
       local counter=0
       while [ $counter -lt 30 ]; do
-        if grep -q --color=never "network.flow" <(kubectl logs -n "${NAMESPACE}" "$pod" --tail=50); then
+        if grep -q --color=never "flow.community_id" <(kubectl logs -n "${NAMESPACE}" "$pod" --tail=50); then
           exit 0
         fi
         counter=$((counter + 1))
