@@ -40,7 +40,15 @@ span:
   tcp_rst_timeout: 5s
   udp_timeout: 60s
 
-# Multiple exporter configuration
+# Specify which exporters are enabled
+agent:
+  traces:
+    main:
+      exporters:
+        - exporter.otlp.main
+        - exporter.stdout.json
+
+# Exporter configuration
 exporter:
   otlp:
     main:

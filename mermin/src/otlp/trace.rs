@@ -19,9 +19,7 @@ pub mod lib {
 
     use crate::{
         flow::{FlowAttributes, FlowAttributesExporter},
-        otlp::opts::{
-            ExporterProtocol, OtlpExporterOptions, build_endpoint, generate_auth_headers,
-        },
+        otlp::opts::{ExporterProtocol, OtlpExporterOptions},
     };
 
     pub struct TraceExporterAdapter {
@@ -101,7 +99,7 @@ pub mod lib {
     async fn create_otlp_provider(
         config: &OtlpExporterOptions,
     ) -> Result<SdkTracerProvider, anyhow::Error> {
-        let endpoint = build_endpoint(&config.address, config.port);
+        let endpoint = config.build_endpoint();
         let uri: Uri = endpoint.parse()?;
         let channel = Channel::builder(uri).connect().await?;
 
@@ -124,7 +122,7 @@ pub mod lib {
         // TODO: Merge authentication headers with user-provided headers - ENG-120
         // Authentication headers should take precedence over user headers
         if let Some(auth_config) = &config.auth {
-            match generate_auth_headers(auth_config) {
+            match auth_config.generate_auth_headers() {
                 Ok(auth_headers) => {
                     info!("Applied authentication headers to OTLP exporter");
                     // TODO: Apply headers to the exporter builder - ENG-120

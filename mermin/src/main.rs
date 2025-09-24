@@ -42,19 +42,45 @@ async fn main() -> Result<()> {
     let runtime = runtime::Runtime::new()?;
     let runtime::Runtime { config, .. } = runtime;
 
-    // Initialize global tracing subscriber
-    tracing_subscriber::fmt()
-        .with_max_level(config.log_level)
-        .with_target(false) // Hide module paths for cleaner output
-        .with_thread_ids(true) // Show thread IDs for debugging
-        .with_thread_names(true) // Show thread names
-        .init();
+    let mut fmt_builder = tracing_subscriber::fmt().with_max_level(config.log_level);
 
-    // Create exporter manager with multiple exporters
+    // Configure based on log level
+    match config.log_level {
+        tracing::Level::ERROR | tracing::Level::WARN => {
+            fmt_builder = fmt_builder
+                .with_target(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_ansi(true)
+                .with_thread_ids(false)
+                .with_thread_names(false);
+        }
+        tracing::Level::INFO => {
+            fmt_builder = fmt_builder
+                .with_target(false)
+                .with_file(false)
+                .with_line_number(false)
+                .with_ansi(true)
+                .with_thread_ids(false)
+                .with_thread_names(false);
+        }
+        tracing::Level::DEBUG | tracing::Level::TRACE => {
+            fmt_builder = fmt_builder
+                .with_target(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_ansi(true)
+                .with_thread_ids(true)
+                .with_thread_names(true)
+        }
+    }
+
+    fmt_builder.init();
+
     let exporter_manager = if let Some(exporter_config) = &config.exporter {
         let exporter_count = count_exporters(exporter_config);
         info!("initializing {} exporters", exporter_count);
-        match ExporterManager::new(exporter_config.clone(), config.log_level).await {
+        match ExporterManager::new(config.agent.as_ref(), exporter_config, config.log_level).await {
             Ok(manager) => Some(manager),
             Err(e) => {
                 error!("failed to initialize exporters: {e}");
@@ -63,7 +89,7 @@ async fn main() -> Result<()> {
             }
         }
     } else {
-        info!("no exporters configured");
+        warn!("no exporters configured");
         None
     };
 

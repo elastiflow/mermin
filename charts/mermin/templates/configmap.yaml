@@ -59,27 +59,61 @@ data:
       tcp_rst_timeout: {{ .span.tcp_rst_timeout | default "5s" }}
       udp_timeout: {{ .span.udp_timeout | default "60s" }}
 
+    # Agent configuration - specify which exporters are enabled
+    agent:
+      traces:
+        main:
+          exporters:
+            {{- if .exporter.otlp_enabled }}
+            - exporter.otlp.main
+            {{- end }}
+            {{- if .exporter.stdout_enabled }}
+            - exporter.stdout.json
+            {{- end }}
+
     # Exporter configuration
-    exporters:
-      {{- if .exporter.stdout_enabled }}
-      - name: "stdout"
-        enabled: true
-        exporter_type: "Stdout"
-        config:
-          Stdout:
-            format: "json"
+    exporter:
+      {{- with .exporter }}
+      {{- if .otlp_enabled }}
+      otlp:
+        main:
+          address: {{ .otlp_address | default "example.com" | quote }}
+          {{- with .otlp_auth }}
+          auth:
+            basic:
+              pass: {{ .basic_pass | default "env(\"USER_SPECIFIED_ENV_VAR_TRITON_PASS\")" | quote }}
+              user: {{ .basic_user | default "foo" | quote }}
+          {{- end }}
+          port: {{ .otlp_port | default 443 }}
+          {{- with .otlp_tls }}
+          tls:
+            ca_cert: {{ .ca_cert | default "/etc/certs/ca.crt" | quote }}
+            client_cert: {{ .client_cert | default "/etc/certs/cert.crt" | quote }}
+            client_key: {{ .client_key | default "/etc/certs/cert.key" | quote }}
+            enabled: {{ .enabled | default true }}
+            insecure: {{ .insecure | default false }}
+          {{- else }}
+          tls:
+            ca_cert: "/etc/certs/ca.crt"
+            client_cert: "/etc/certs/cert.crt"
+            client_key: "/etc/certs/cert.key"
+            enabled: true
+            insecure: false
+          {{- end }}
       {{- end }}
-      {{- if .exporter.otlp_enabled }}
-      - name: "otlp"
-        enabled: true
-        exporter_type: "Otlp"
-        config:
-          Otlp:
-            endpoint: {{ .exporter.otlp_endpoint | default "http://host.docker.internal:4317" | quote }}
-            timeout_seconds: {{ .exporter.otlp_timeout_seconds | default 3 }}
-            protocol: {{ .exporter.otlp_protocol | default "grpc" | quote }}
-            headers: null
-            batch_size: null
-            auth: null
+      {{- if .stdout_enabled }}
+      stdout:
+        {{- with .stdout }}
+        json:
+          format: {{ .json_format | default "full" | quote }}
+        console:
+          format: {{ .console_format | default "compact" | quote }}
+        {{- else }}
+        json:
+          format: "full"
+        console:
+          format: "compact"
+        {{- end }}
+      {{- end }}
       {{- end }}
     {{- end }}

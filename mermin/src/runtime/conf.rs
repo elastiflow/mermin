@@ -61,6 +61,68 @@ impl Default for MetricsConf {
     }
 }
 
+/// Top-level agent configuration specifying which telemetry pipelines and exporters are enabled.
+///
+/// The `AgentOptions` struct defines the agent's telemetry pipeline configuration,
+/// mapping logical telemetry types (such as traces) to their respective pipeline settings.
+/// This allows the user to declaratively specify, in the configuration file, which
+/// exporters should be used for each telemetry type. For example, the `traces` field
+/// contains the configuration for the traces pipeline, including the list of exporter
+/// references (such as OTLP or stdout exporters) that should be enabled for sending trace data.
+///
+/// This struct is typically deserialized from the `agent` section of the application's
+/// configuration file. Exporter references listed here must correspond to exporter
+/// definitions in the `exporter` section of the configuration.
+///
+/// # Example (YAML)
+/// ```yaml
+/// agent:
+///   traces:
+///     main:
+///       exporters:
+///         - exporter.otlp.main
+///         - exporter.stdout.json
+/// ```
+#[derive(Debug, Deserialize, Serialize)]
+pub struct AgentOptions {
+    /// Configuration for the traces telemetry pipeline, including enabled exporters.
+    pub traces: TracesOptions,
+}
+
+/// Configuration options for the traces telemetry pipeline.
+///
+/// The `TracesOptions` struct defines the available traces pipelines for the agent,
+/// allowing the user to specify one or more logical pipelines (such as "main") for
+/// trace data. Each pipeline is represented as a field (currently only `main` is
+/// supported), and contains its own configuration, including the list of exporters
+/// to which trace data should be sent.
+///
+/// This struct is deserialized from the `agent.traces` section of the
+/// application's configuration file. Exporter references listed in each pipeline
+/// must correspond to exporter definitions in the `exporter` section of the config.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct TracesOptions {
+    /// The main traces pipeline configuration, specifying enabled exporters.
+    pub main: MainTraceOptions,
+}
+
+/// Configuration options for the main traces telemetry pipeline.
+///
+/// The `MainTraceOptions` struct specifies which exporters are enabled for the primary
+/// traces pipeline in the agent. It is typically deserialized from the `agent.traces.main`
+/// section of the application's configuration file. The `exporters` field contains a list
+/// of exporter references (such as "exporter.otlp.main" or "exporter.stdout.json"), which
+/// must correspond to exporter definitions in the `exporter` section of the configuration.
+///
+/// This struct enables flexible selection and ordering of exporters for trace data,
+/// allowing trace telemetry to be sent to multiple backends simultaneously.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct MainTraceOptions {
+    /// List of exporter references to use for the main traces pipeline.
+    /// Each entry should match a key in the `exporter` section of the config.
+    pub exporters: Vec<String>,
+}
+
 /// Represents the configuration for the application, containing settings
 /// related to interface, logging, reloading, and flow management.
 ///
@@ -126,6 +188,11 @@ pub struct Conf {
     /// to how the application's logic operates.
     pub span: SpanOptions,
 
+    /// Configuration for agent - specifies which exporters are enabled.
+    /// This field determines which exporters from the exporter configuration
+    /// should be initialized and used for telemetry data.
+    pub agent: Option<AgentOptions>,
+
     /// Configuration for exporters.
     /// This field holds settings for exporting telemetry data
     /// to multiple destinations using the new structure.
@@ -145,6 +212,7 @@ impl Default for Conf {
             packet_worker_count: defaults::flow_workers(),
             shutdown_timeout: defaults::shutdown_timeout(),
             span: SpanOptions::default(),
+            agent: None,
             exporter: None,
         }
     }
