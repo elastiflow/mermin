@@ -9,10 +9,10 @@ use serde::Serialize;
 use tokio::sync::mpsc;
 use tracing::{Span, info_span};
 
-use crate::{
-    community_id::CommunityIdGenerator,
-    otlp::{opts::SpanOptions, trace::lib::Traceable},
-};
+use crate::{community_id::CommunityIdGenerator, otlp::trace::lib::Traceable};
+
+pub mod opts;
+use opts::SpanOptions;
 
 type FlowAttrMap = Arc<DashMap<String, FlowAttributes, FxBuildHasher>>;
 

@@ -4,8 +4,8 @@ use anyhow::Result;
 use k8s_openapi::api::{core::v1::Pod, networking::v1::NetworkPolicySpec};
 
 use crate::{
-    flow::FlowAttributes,
     k8s::{AttributionInfo, Attributor, FlowContext, FlowDirection, K8sObjectMeta, WorkloadOwner},
+    span::FlowAttributes,
 };
 
 #[derive(Debug)]

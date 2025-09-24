@@ -23,8 +23,8 @@ pub mod lib {
     };
 
     use crate::{
-        flow::{FlowAttributes, FlowAttributesExporter},
         otlp::opts::{OtlpExporterOptions, StdoutExporterOptions},
+        span::{FlowAttributes, FlowAttributesExporter},
     };
 
     pub struct TraceExporterAdapter {

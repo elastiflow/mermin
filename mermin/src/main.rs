@@ -1,9 +1,9 @@
 mod community_id;
-mod flow;
 mod health;
 mod k8s;
 mod otlp;
 mod runtime;
+mod span;
 
 use std::{
     collections::HashMap,
@@ -24,7 +24,6 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     community_id::CommunityIdGenerator,
-    flow::{FlowAttributesExporter, FlowAttributesProducer},
     health::{HealthState, start_api_server},
     k8s::resource_parser::attribute_flow_attrs,
     otlp::{
@@ -32,6 +31,7 @@ use crate::{
         trace::lib::{TraceExporterAdapter, init_tracer_provider},
     },
     runtime::conf::Conf,
+    span::{FlowAttributesExporter, FlowAttributesProducer},
 };
 
 #[tokio::main]

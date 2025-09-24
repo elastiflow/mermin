@@ -40,7 +40,7 @@ use log::{debug, warn};
 use network_types::ip::IpProto;
 use tracing::error;
 
-use crate::flow::{FlowAttributes, FlowDirection};
+use crate::span::{FlowAttributes, FlowDirection};
 
 pub mod resource_parser;
 
