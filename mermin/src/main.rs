@@ -41,6 +41,14 @@ async fn main() -> Result<()> {
     let runtime = runtime::Runtime::new()?;
     let runtime::Runtime { config, .. } = runtime;
 
+    // Initialize global tracing subscriber
+    tracing_subscriber::fmt()
+        .with_max_level(config.log_level)
+        .with_target(false) // Hide module paths for cleaner output
+        .with_thread_ids(true) // Show thread IDs for debugging
+        .with_thread_names(true) // Show thread names
+        .init();
+
     // Create exporter manager with multiple exporters
     let exporter_manager = if !config.exporters.is_empty() {
         info!("initializing {} exporters", config.exporters.len());

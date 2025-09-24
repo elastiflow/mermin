@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use tracing::Level;
 
 use crate::{
-    otlp::opts::{ExporterConf, SpanOptions},
+    otlp::opts::{ExporterOption, SpanOptions},
     runtime::{
         cli::Cli,
         conf::conf_serde::{duration, level},
@@ -129,7 +129,7 @@ pub struct Conf {
     /// Vector of exporters configuration options.
     /// This field holds setting for exporting telemetry data
     /// to multiple destinations.
-    pub exporters: Vec<ExporterConf>,
+    pub exporters: Vec<ExporterOption>,
 }
 
 impl Default for Conf {

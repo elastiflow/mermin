@@ -19,7 +19,7 @@ pub mod lib {
 
     use crate::{
         flow::{FlowAttributes, FlowAttributesExporter},
-        otlp::opts::{ExporterProtocol, ExporterSpecificConfig, generate_auth_headers},
+        otlp::opts::{ExporterProtocol, ExporterSpecificOptions, generate_auth_headers},
     };
 
     pub struct TraceExporterAdapter {
@@ -77,7 +77,7 @@ pub mod lib {
     }
 
     pub async fn init_tracer_provider(
-        opts: ExporterSpecificConfig,
+        opts: ExporterSpecificOptions,
         log_level: Level,
     ) -> Result<SdkTracerProvider, anyhow::Error> {
         let level_filter = LevelFilter::from_level(log_level);
@@ -97,10 +97,10 @@ pub mod lib {
     }
 
     async fn create_otlp_provider(
-        opts: &ExporterSpecificConfig,
+        opts: &ExporterSpecificOptions,
     ) -> Result<SdkTracerProvider, anyhow::Error> {
         match opts {
-            ExporterSpecificConfig::Otlp {
+            ExporterSpecificOptions::Otlp {
                 endpoint,
                 protocol,
                 headers,
@@ -110,7 +110,7 @@ pub mod lib {
                 let uri: Uri = endpoint.parse()?;
                 let channel = Channel::builder(uri).connect().await?;
 
-                // TODO: Apply authentication configuration to the OTLP exporter
+                // TODO: Apply authentication configuration to the OTLP exporter - ENG-120
                 // This should handle different auth methods and add appropriate headers/credentials
                 // Once auth is fully implemented this should be a mut field
                 let exporter_builder = opentelemetry_otlp::SpanExporter::builder()
@@ -118,7 +118,7 @@ pub mod lib {
                     .with_channel(channel)
                     .with_protocol(ExporterProtocol::from(protocol.clone()).into());
 
-                // TODO: Merge authentication headers with user-provided headers
+                // TODO: Merge authentication headers with user-provided headers - ENG-120
                 // Authentication headers should take precedence over user headers
                 let mut all_headers = headers.clone().unwrap_or_default();
                 if let Some(auth_config) = auth {
@@ -137,11 +137,11 @@ pub mod lib {
                     }
                 }
 
-                // TODO: Apply headers to the exporter builder
+                // TODO: Apply headers to the exporter builder - ENG-120
                 // Note: The opentelemetry_otlp crate may need to be updated to support custom headers
                 // For now, this is a placeholder for where header configuration would go
                 if !all_headers.is_empty() {
-                    // TODO: Implement header application once the OTLP crate supports it
+                    // TODO: Implement header application once the OTLP crate supports it - ENG-120
                     // exporter_builder = exporter_builder.with_headers(all_headers);
                     info!(
                         "Headers configured for OTLP exporter ({} headers)",

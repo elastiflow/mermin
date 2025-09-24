@@ -8,11 +8,11 @@ use crate::runtime::conf::conf_serde::duration;
 
 // New multi-exporter configuration
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct ExporterConf {
+pub struct ExporterOption {
     pub name: String,
     pub enabled: bool,
     pub exporter_type: ExporterType,
-    pub config: ExporterSpecificConfig,
+    pub config: ExporterSpecificOptions,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -21,7 +21,7 @@ pub enum ExporterType {
     Stdout,
 }
 
-// TODO: Add authentication configuration for OTLP exporters
+// TODO: Add authentication configuration for OTLP exporters - ENG-120
 // This should support various auth methods like basic auth, bearer tokens, API keys, etc.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub enum AuthConfig {
@@ -51,7 +51,7 @@ pub enum AuthConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub enum ExporterSpecificConfig {
+pub enum ExporterSpecificOptions {
     Otlp {
         endpoint: String,
         timeout_seconds: u64,
@@ -66,7 +66,7 @@ pub enum ExporterSpecificConfig {
     },
 }
 
-// TODO: Implement environment variable substitution for authentication credentials
+// TODO: Implement environment variable substitution for authentication credentials - ENG-120
 // This function should handle patterns like env("VAR_NAME") and replace them with actual env values
 pub fn resolve_env_vars(value: &str) -> Result<String, String> {
     if value.starts_with("env(") && value.ends_with(')') {
@@ -77,7 +77,7 @@ pub fn resolve_env_vars(value: &str) -> Result<String, String> {
     }
 }
 
-// TODO: Implement authentication header generation for OTLP exporters
+// TODO: Implement authentication header generation for OTLP exporters - ENG-120
 // This should create appropriate headers based on the auth configuration
 pub fn generate_auth_headers(auth: &AuthConfig) -> Result<HashMap<String, String>, String> {
     let mut headers = HashMap::new();
