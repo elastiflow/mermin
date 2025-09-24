@@ -10,7 +10,7 @@ use aya_ebpf::{
 };
 #[cfg(not(feature = "test"))]
 use aya_log_ebpf::error;
-use mermin_common::{IpAddrType, PacketMeta};
+use mermin_common::{Direction, IpAddrType, PacketMeta};
 use network_types::{
     ah::AuthHdr,
     destopts::DestOptsHdr,
@@ -69,15 +69,25 @@ pub enum Error {
 
 #[cfg(not(feature = "test"))]
 #[classifier]
-pub fn mermin(ctx: TcContext) -> i32 {
-    let (_ctx, res) = try_mermin(ctx);
+pub fn mermin_ingress(ctx: TcContext) -> i32 {
+    let (_ctx, res) = try_mermin(ctx, Direction::Ingress);
     match res {
         Ok((binding, _packet_meta_ignored)) => binding,
         Err(_) => TC_ACT_PIPE,
     }
 }
 
-fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
+#[cfg(not(feature = "test"))]
+#[classifier]
+pub fn mermin_egress(ctx: TcContext) -> i32 {
+    let (_ctx, res) = try_mermin(ctx, Direction::Egress);
+    match res {
+        Ok((binding, _packet_meta_ignored)) => binding,
+        Err(_) => TC_ACT_PIPE,
+    }
+}
+
+fn try_mermin(ctx: TcContext, direction: Direction) -> (TcContext, Result<(i32, PacketMeta), ()>) {
     const MAX_HEADER_PARSE_DEPTH: usize = 8;
 
     // Information for building flow records (prioritizes innermost headers).
@@ -115,6 +125,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
     meta.ip_addr_type = IpAddrType::default();
     meta.proto = IpProto::default();
     meta.tcp_flags = 0;
+    meta.direction = direction;
 
     meta.tunnel_src_ipv6_addr = [0; 16];
     meta.tunnel_dst_ipv6_addr = [0; 16];
@@ -379,6 +390,7 @@ fn try_mermin(ctx: TcContext) -> (TcContext, Result<(i32, PacketMeta), ()>) {
         tunnel_ip_addr_type: meta.tunnel_ip_addr_type,
         tunnel_proto: meta.tunnel_proto,
         tunnel_tcp_flags: meta.tunnel_tcp_flags,
+        direction,
     };
 
     #[cfg(not(feature = "test"))]
@@ -1628,7 +1640,7 @@ mod tests {
         let ctx = TcContext::new(packet);
 
         // Call try_mermin and get the populated packet_meta
-        let (_ctx, result) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx, Direction::Ingress);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -1683,7 +1695,7 @@ mod tests {
         .concat();
 
         let ctx = TcContext::new(packet.clone());
-        let (_ctx, result) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx, Direction::Ingress);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2597,7 +2609,7 @@ mod tests {
 
         let packet: Vec<u8> = [eth, outer_v6.clone(), inner_v6.clone(), tcp].concat();
         let ctx = TcContext::new(packet.clone());
-        let (_ctx, result) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx, Direction::Ingress);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2642,7 +2654,7 @@ mod tests {
 
         let packet: Vec<u8> = [eth, outer_v4.clone(), inner_v6.clone(), tcp].concat();
         let ctx = TcContext::new(packet);
-        let (_ctx, result) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx, Direction::Ingress);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2707,7 +2719,7 @@ mod tests {
 
         let packet: Vec<u8> = [eth, outer.clone(), middle.clone(), inner.clone(), tcp].concat();
         let ctx = TcContext::new(packet);
-        let (_ctx, result) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx, Direction::Ingress);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2748,7 +2760,7 @@ mod tests {
 
         let packet: Vec<u8> = [eth, outer.clone(), middle, inner.clone(), tcp].concat();
         let ctx = TcContext::new(packet);
-        let (_ctx, result) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx, Direction::Ingress);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2807,7 +2819,7 @@ mod tests {
         ]
         .concat();
         let ctx = TcContext::new(packet);
-        let (_ctx, result) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx, Direction::Ingress);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2863,7 +2875,7 @@ mod tests {
         ]
         .concat();
         let ctx = TcContext::new(packet);
-        let (_ctx, result) = try_mermin(ctx);
+        let (_ctx, result) = try_mermin(ctx, Direction::Ingress);
         assert!(result.is_ok());
         let (_code, packet_meta) = result.unwrap();
 
@@ -2940,7 +2952,7 @@ mod tests {
             .concat();
 
             let ctx = TcContext::new(packet);
-            let (_ctx, result) = try_mermin(ctx);
+            let (_ctx, result) = try_mermin(ctx, Direction::Ingress);
 
             assert!(result.is_ok(), "Failed for TCP flags: 0x{:02x}", flags);
             let (action, packet_meta) = result.unwrap();
