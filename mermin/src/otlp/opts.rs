@@ -6,64 +6,49 @@ use serde::{Deserialize, Serialize};
 
 use crate::runtime::conf::conf_serde::duration;
 
-// New multi-exporter configuration
+// Main exporter configuration that matches the YAML structure
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct ExporterOption {
-    pub name: String,
+pub struct ExporterOptions {
+    pub otlp: Option<HashMap<String, OtlpExporterOptions>>,
+    pub stdout: Option<HashMap<String, StdoutExporterOptions>>,
+}
+
+// OTLP exporter configuration
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct OtlpExporterOptions {
+    pub address: String,
+    pub port: u16,
+    pub auth: Option<AuthOptions>,
+    pub tls: Option<TlsOptions>,
+}
+
+// STDOUT exporter configuration
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct StdoutExporterOptions {
+    pub format: String, // full, compact, etc.
+}
+
+// Authentication configuration
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AuthOptions {
+    pub basic: Option<BasicAuthOptions>,
+    // TODO: Add support for bearer, api_key, oauth2, mtls, etc. - ENG-120
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct BasicAuthOptions {
+    pub user: String,
+    pub pass: String, // TODO: Support environment variable substitution like env("USER_SPECIFIED_ENV_VAR_TRITON_PASS") - ENG-120
+}
+
+// TLS configuration
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct TlsOptions {
     pub enabled: bool,
-    pub exporter_type: ExporterType,
-    pub config: ExporterSpecificOptions,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub enum ExporterType {
-    Otlp,
-    Stdout,
-}
-
-// TODO: Add authentication configuration for OTLP exporters - ENG-120
-// This should support various auth methods like basic auth, bearer tokens, API keys, etc.
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub enum AuthConfig {
-    Basic {
-        username: String,
-        password: String, // TODO: Support environment variable substitution like env("USER_SPECIFIED_ENV_VAR_TRITON_PASS")
-    },
-    Bearer {
-        token: String, // TODO: Support environment variable substitution
-    },
-    ApiKey {
-        key: String,
-        value: String, // TODO: Support environment variable substitution
-    },
-    // TODO: Add support for OAuth2, mTLS, and other authentication methods
-    // OAuth2 {
-    //     client_id: String,
-    //     client_secret: String,
-    //     token_url: String,
-    //     scopes: Vec<String>,
-    // },
-    // Mtls {
-    //     cert_path: String,
-    //     key_path: String,
-    //     ca_cert_path: Option<String>,
-    // },
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub enum ExporterSpecificOptions {
-    Otlp {
-        endpoint: String,
-        timeout_seconds: u64,
-        protocol: String,
-        headers: Option<HashMap<String, String>>,
-        batch_size: Option<usize>,
-        // TODO: Add authentication configuration
-        auth: Option<AuthConfig>,
-    },
-    Stdout {
-        format: String, // json, pretty, compact
-    },
+    pub insecure: bool,
+    pub ca_cert: Option<String>,
+    pub client_cert: Option<String>,
+    pub client_key: Option<String>,
 }
 
 // TODO: Implement environment variable substitution for authentication credentials - ENG-120
@@ -79,32 +64,25 @@ pub fn resolve_env_vars(value: &str) -> Result<String, String> {
 
 // TODO: Implement authentication header generation for OTLP exporters - ENG-120
 // This should create appropriate headers based on the auth configuration
-pub fn generate_auth_headers(auth: &AuthConfig) -> Result<HashMap<String, String>, String> {
+pub fn generate_auth_headers(auth: &AuthOptions) -> Result<HashMap<String, String>, String> {
     let mut headers = HashMap::new();
 
-    match auth {
-        AuthConfig::Basic { username, password } => {
-            let resolved_username = resolve_env_vars(username)?;
-            let resolved_password = resolve_env_vars(password)?;
-            let credentials = general_purpose::STANDARD
-                .encode(format!("{resolved_username}:{resolved_password}"));
-            headers.insert("Authorization".to_string(), format!("Basic {credentials}"));
-        }
-        AuthConfig::Bearer { token } => {
-            let resolved_token = resolve_env_vars(token)?;
-            headers.insert(
-                "Authorization".to_string(),
-                format!("Bearer {resolved_token}"),
-            );
-        }
-        AuthConfig::ApiKey { key, value } => {
-            let resolved_key = resolve_env_vars(key)?;
-            let resolved_value = resolve_env_vars(value)?;
-            headers.insert(resolved_key, resolved_value);
-        }
+    if let Some(basic) = &auth.basic {
+        let resolved_user = resolve_env_vars(&basic.user)?;
+        let resolved_pass = resolve_env_vars(&basic.pass)?;
+        let credentials =
+            general_purpose::STANDARD.encode(format!("{resolved_user}:{resolved_pass}"));
+        headers.insert("Authorization".to_string(), format!("Basic {credentials}"));
     }
 
+    // TODO: Add support for other auth methods like bearer, api_key, oauth2, mtls, etc. - ENG-120
+
     Ok(headers)
+}
+
+// Helper function to build endpoint URL from address and port
+pub fn build_endpoint(address: &str, port: u16) -> String {
+    format!("{address}:{port}")
 }
 
 pub enum ExporterProtocol {

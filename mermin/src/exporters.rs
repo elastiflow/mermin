@@ -1,9 +1,10 @@
 use anyhow::Result;
+use tracing::{debug, error, info, warn};
 
 use crate::{
     flow::{FlowAttributes, FlowAttributesExporter},
     otlp::{
-        opts::{ExporterOption, ExporterSpecificOptions, ExporterType},
+        opts::{ExporterOptions, OtlpExporterOptions, StdoutExporterOptions, build_endpoint},
         trace::lib::{TraceExporterAdapter, init_tracer_provider},
     },
 };
@@ -17,80 +18,57 @@ pub struct ExporterManager {
 
 impl ExporterManager {
     pub async fn new(
-        configs: Vec<ExporterOption>,
+        config: ExporterOptions,
         log_level: tracing::Level,
     ) -> Result<Self, anyhow::Error> {
         let mut exporters: Vec<Box<dyn FlowAttributesExporter>> = Vec::new();
 
-        tracing::info!(
-            "[EXPORTER-MANAGER-NEW] Initializing with {} configurations",
-            configs.len()
-        );
-
-        for config in configs {
-            match config.exporter_type {
-                ExporterType::Otlp => {
-                    tracing::info!(
-                        "[EXPORTER-MANAGER-NEW] Creating OTLP exporter for: {}",
-                        config.name
-                    );
-                    match create_otlp_exporter(&config.config, log_level).await {
-                        Ok(exporter) => {
-                            exporters.push(exporter);
-                            tracing::info!(
-                                "[EXPORTER-MANAGER-NEW] Successfully created exporter: {}",
-                                config.name
-                            );
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                "[EXPORTER-MANAGER-NEW] Failed to create exporter {}: {}",
-                                config.name,
-                                e
-                            );
-                            return Err(anyhow::anyhow!(
-                                "Failed to create exporter {}: {}",
-                                config.name,
-                                e
-                            ));
-                        }
+        // Initialize OTLP exporters
+        if let Some(otlp_configs) = &config.otlp {
+            for (name, otlp_config) in otlp_configs {
+                debug!("creating otlp exporter for: {}", name);
+                match create_otlp_exporter(otlp_config, log_level).await {
+                    Ok(exporter) => {
+                        exporters.push(exporter);
+                        debug!("successfully created exporter: {}", name);
+                    }
+                    Err(e) => {
+                        error!("failed to create exporter {}: {}", name, e);
+                        // Continue processing other exporters instead of failing completely
+                        warn!("skipping OTLP exporter '{}' due to error", name);
                     }
                 }
-                ExporterType::Stdout => {
-                    tracing::info!(
-                        "[EXPORTER-MANAGER-NEW] Creating Stdout exporter for: {}",
-                        config.name
-                    );
-                    match create_stdout_exporter(&config.config) {
-                        Ok(exporter) => {
-                            exporters.push(exporter);
-                            tracing::info!(
-                                "[EXPORTER-MANAGER-NEW] Successfully created exporter: {}",
-                                config.name
-                            );
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                "[EXPORTER-MANAGER-NEW] Failed to create exporter {}: {}",
-                                config.name,
-                                e
-                            );
-                        }
-                    }
-                }
-            };
+            }
         }
 
-        tracing::info!(
-            "[EXPORTER-MANAGER-NEW] Initialized with {} active exporters",
-            exporters.len()
-        );
+        // Initialize STDOUT exporters
+        if let Some(stdout_configs) = &config.stdout {
+            for (name, stdout_config) in stdout_configs {
+                debug!("creating stdout exporter for: {}", name);
+                match create_stdout_exporter(stdout_config) {
+                    Ok(exporter) => {
+                        exporters.push(exporter);
+                        debug!("successfully created exporter: {}", name);
+                    }
+                    Err(e) => {
+                        error!("failed to create exporter {}: {}", name, e);
+                    }
+                }
+            }
+        }
+
+        info!("initialized with {} active exporters", exporters.len());
+
+        if exporters.is_empty() {
+            warn!("no exporters were successfully initialized");
+        }
+
         Ok(Self { exporters })
     }
 
     pub async fn export(&self, attrs: FlowAttributes) {
-        tracing::info!(
-            "[EXPORTER-MANAGER-EXPORT] Exporting flow attributes to {} exporters",
+        info!(
+            "exporting flow attributes to {} exporters",
             self.exporters.len()
         );
 
@@ -101,7 +79,7 @@ impl ExporterManager {
             .map(|exporter| exporter.export(attrs.clone()));
 
         futures::future::join_all(futures).await;
-        tracing::info!("[EXPORTER-MANAGER-EXPORT] All exporters completed processing");
+        info!("all exporters completed processing");
     }
 
     pub async fn shutdown(&self) -> Result<(), anyhow::Error> {
@@ -112,7 +90,7 @@ impl ExporterManager {
         // Handle any shutdown errors
         for result in results {
             if let Err(e) = result {
-                tracing::error!("Error during exporter shutdown: {}", e);
+                error!("error during exporter shutdown: {}", e);
             }
         }
 
@@ -122,63 +100,51 @@ impl ExporterManager {
 
 // Exporter creation functions
 async fn create_otlp_exporter(
-    config: &ExporterSpecificOptions,
+    config: &OtlpExporterOptions,
     log_level: tracing::Level,
 ) -> Result<Box<dyn FlowAttributesExporter>, anyhow::Error> {
-    match config {
-        ExporterSpecificOptions::Otlp {
-            endpoint,
-            timeout_seconds,
-            protocol,
-            auth,
-            ..
-        } => {
-            tracing::info!(
-                "[CREATE-OTLP-EXPORTER] Creating OTLP exporter with endpoint: '{endpoint}', timeout: '{timeout_seconds}', protocol: '{protocol}'"
-            );
+    let endpoint = build_endpoint(&config.address, config.port);
 
-            // TODO: Log authentication configuration (without exposing credentials) - ENG-120
-            if let Some(auth_config) = auth {
-                match auth_config {
-                    crate::otlp::opts::AuthConfig::Basic { .. } => {
-                        tracing::info!("[CREATE-OTLP-EXPORTER] Using basic authentication");
-                    }
-                    crate::otlp::opts::AuthConfig::Bearer { .. } => {
-                        tracing::info!("[CREATE-OTLP-EXPORTER] Using bearer token authentication");
-                    }
-                    crate::otlp::opts::AuthConfig::ApiKey { key, .. } => {
-                        tracing::info!(
-                            "[CREATE-OTLP-EXPORTER] Using API key authentication with key: '{key}'"
-                        );
-                    }
-                }
-            } else {
-                tracing::info!("[CREATE-OTLP-EXPORTER] No authentication configured");
-            }
+    info!(
+        "creating otlp exporter with endpoint: '{endpoint}', port: '{}'",
+        config.port
+    );
 
-            let provider = init_tracer_provider(config.clone(), log_level).await?;
-            let exporter = TraceExporterAdapter::new(provider);
-
-            Ok(Box::new(exporter))
+    // TODO: Log authentication configuration (without exposing credentials) - ENG-120
+    if let Some(auth_config) = &config.auth {
+        if auth_config.basic.is_some() {
+            debug!("using basic authentication");
         }
-        _ => Err(anyhow::anyhow!("Invalid config type for OTLP exporter")),
+        // TODO: Add support for other auth methods - ENG-120
+    } else {
+        debug!("no authentication configured");
     }
+
+    // TODO: Log TLS configuration (without exposing credentials) - ENG-120
+    if let Some(tls_config) = &config.tls {
+        if tls_config.enabled {
+            debug!("TLS enabled for OTLP exporter");
+            if tls_config.insecure {
+                warn!("TLS insecure mode enabled - this is not recommended for production");
+            }
+        }
+    } else {
+        debug!("no TLS configuration - using default settings");
+    }
+
+    let provider = init_tracer_provider(config, log_level).await?;
+    let exporter = TraceExporterAdapter::new(provider);
+
+    Ok(Box::new(exporter))
 }
 
 fn create_stdout_exporter(
-    config: &ExporterSpecificOptions,
+    config: &StdoutExporterOptions,
 ) -> Result<Box<dyn FlowAttributesExporter>, anyhow::Error> {
-    match config {
-        ExporterSpecificOptions::Stdout { format } => {
-            tracing::info!(
-                "[CREATE-STDOUT-EXPORTER] Creating stdout exporter with format: '{format}'",
-            );
-            let exporter = StdoutExporter {
-                format: format.clone(),
-            };
-            tracing::info!("[CREATE-STDOUT-EXPORTER] Stdout exporter created successfully");
-            Ok(Box::new(exporter))
-        }
-        _ => Err(anyhow::anyhow!("Invalid config type for stdout exporter")),
-    }
+    debug!("creating stdout exporter with format: '{}'", config.format);
+    let exporter = StdoutExporter {
+        format: config.format.clone(),
+    };
+    debug!("stdout exporter created successfully");
+    Ok(Box::new(exporter))
 }

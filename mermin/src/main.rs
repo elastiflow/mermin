@@ -28,6 +28,7 @@ use crate::{
     flow::FlowAttributesProducer,
     health::{HealthState, start_api_server},
     k8s::resource_parser::attribute_flow_attrs,
+    otlp::opts::ExporterOptions,
     runtime::conf::Conf,
 };
 
@@ -50,9 +51,10 @@ async fn main() -> Result<()> {
         .init();
 
     // Create exporter manager with multiple exporters
-    let exporter_manager = if !config.exporters.is_empty() {
-        info!("initializing {} exporters", config.exporters.len());
-        match ExporterManager::new(config.exporters.clone(), config.log_level).await {
+    let exporter_manager = if let Some(exporter_config) = &config.exporter {
+        let exporter_count = count_exporters(exporter_config);
+        info!("initializing {} exporters", exporter_count);
+        match ExporterManager::new(exporter_config.clone(), config.log_level).await {
             Ok(manager) => Some(manager),
             Err(e) => {
                 error!("failed to initialize exporters: {e}");
@@ -391,6 +393,16 @@ fn log_packet_info(packet_meta: &PacketMeta, community_id: &str, iface_name: &st
     }
 }
 
+fn count_exporters(config: &ExporterOptions) -> usize {
+    let mut count = 0;
+    if let Some(otlp) = &config.otlp {
+        count += otlp.len();
+    }
+    if let Some(stdout) = &config.stdout {
+        count += stdout.len();
+    }
+    count
+}
 /// Extension trait for TcAttachType to provide direction name
 trait TcAttachTypeExt {
     fn direction_name(&self) -> &'static str;

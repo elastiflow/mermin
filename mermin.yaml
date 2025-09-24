@@ -41,29 +41,24 @@ span:
   udp_timeout: 60s
 
 # Multiple exporter configuration
-exporters:
-  - name: "console-debug"
-    enabled: true
-    exporter_type: "Stdout"
-    config:
-      Stdout:
-        format: "pretty"
+exporter:
+  otlp:
+    main:
+      address: example.com
+      auth:
+        basic:
+          pass: env("USER_SPECIFIED_ENV_VAR_TRITON_PASS")
+          user: foo
+      port: 443
+      tls:
+        ca_cert: /etc/certs/ca.crt
+        client_cert: /etc/certs/cert.crt
+        client_key: /etc/certs/cert.key
+        enabled: true
+        insecure: false
+  stdout:
+    json:
+      format: full
+    console:
+      format: compact
 
-  - name: "otlp-production"
-    enabled: true
-    exporter_type: "Otlp"
-    config:
-      Otlp:
-        endpoint: "http://jaeger:14250"
-        timeout_seconds: 5
-        protocol: "grpc"
-        headers:
-          "X-API-Key": "your-api-key"
-        batch_size: 100
-
-  - name: "console-compact"
-    enabled: true
-    exporter_type: "Stdout"
-    config:
-      Stdout:
-        format: "json-compact"
