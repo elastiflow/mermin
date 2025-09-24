@@ -42,6 +42,10 @@ use tracing::error;
 
 use crate::span::flow::FlowSpan;
 
+use crate::{
+    flow::{FlowAttributes, FlowDirection},
+    runtime::conf::K8sDiscoveryOptions,
+};
 pub mod resource_parser;
 
 /// Holds metadata for a single Kubernetes object.
@@ -160,53 +164,146 @@ impl_has_store!(NetworkPolicy, network_policies);
 
 impl ResourceStore {
     /// Initializes all resource reflectors concurrently and builds the ResourceStore.
-    pub async fn new(client: Client) -> Result<Self> {
-        let all_stores_result = futures::try_join!(
-            Self::create_resource_store::<Pod>(&client, true),
-            Self::create_resource_store::<Node>(&client, false),
-            Self::create_resource_store::<Namespace>(&client, true),
-            Self::create_resource_store::<Deployment>(&client, false),
-            Self::create_resource_store::<ReplicaSet>(&client, false),
-            Self::create_resource_store::<StatefulSet>(&client, false),
-            Self::create_resource_store::<DaemonSet>(&client, false),
-            Self::create_resource_store::<Job>(&client, false),
-            Self::create_resource_store::<Service>(&client, false),
-            Self::create_resource_store::<Ingress>(&client, false),
-            Self::create_resource_store::<EndpointSlice>(&client, false),
-            Self::create_resource_store::<NetworkPolicy>(&client, false),
-        );
-
-        all_stores_result.map(
-            |(
-                pods,
-                nodes,
-                namespaces,
-                deployments,
-                replica_sets,
-                stateful_sets,
-                daemon_sets,
-                jobs,
-                services,
-                ingresses,
-                endpoint_slices,
-                network_policies,
-            )| {
-                Self {
-                    pods,
-                    nodes,
-                    namespaces,
-                    deployments,
-                    replica_sets,
-                    stateful_sets,
-                    daemon_sets,
-                    jobs,
-                    services,
-                    ingresses,
-                    endpoint_slices,
-                    network_policies,
+    pub async fn new(client: Client, discovery_opts: K8sDiscoveryOptions) -> Result<Self> {
+        // Determine which resource types should be initialized based on filtering rules
+        let should_initialize = |kind: &str| -> bool {
+            // Check all owner options to determine if this kind should be included
+            for owner_opts in discovery_opts.k8s_owner.values() {
+                // Rule 1: If an item matches an exclusion rule, it is immediately removed
+                if owner_opts.exclude_kinds.contains(&kind.to_string()) {
+                    return false;
                 }
-            },
-        )
+
+                // Rule 2: If an inclusion list is empty, everything is considered a match
+                // Rule 3: If an exclusion list is empty, nothing is excluded (everything passes exclusion check)
+                if owner_opts.include_kinds.is_empty() {
+                    // If inclusion is empty, include everything (unless excluded above)
+                    continue;
+                } else if owner_opts.include_kinds.contains(&kind.to_string()) {
+                    // If inclusion is not empty and this kind is in the list, include it
+                    continue;
+                } else {
+                    // If inclusion is not empty and this kind is not in the list, exclude it
+                    return false;
+                }
+            }
+
+            // If we get here, the kind passed all filtering rules
+            true
+        };
+
+        // Create stores for each resource type based on filtering rules
+        // Only initialize resources that should be included, create empty stores for filtered ones
+        let pods = if should_initialize("Pod") {
+            Self::create_resource_store::<Pod>(&client, true).await?
+        } else {
+            debug!("skipping pod reflector initialization due to filtering rules");
+            let (reader, _) = reflector::store();
+            reader
+        };
+
+        let nodes = if should_initialize("Node") {
+            Self::create_resource_store::<Node>(&client, false).await?
+        } else {
+            debug!("skipping node reflector initialization due to filtering rules");
+            let (reader, _) = reflector::store();
+            reader
+        };
+
+        let namespaces = if should_initialize("Namespace") {
+            Self::create_resource_store::<Namespace>(&client, true).await?
+        } else {
+            debug!("skipping namespace reflector initialization due to filtering rules");
+            let (reader, _) = reflector::store();
+            reader
+        };
+
+        let deployments = if should_initialize("Deployment") {
+            Self::create_resource_store::<Deployment>(&client, false).await?
+        } else {
+            debug!("skipping deployment reflector initialization due to filtering rules");
+            let (reader, _) = reflector::store();
+            reader
+        };
+
+        let replica_sets = if should_initialize("ReplicaSet") {
+            Self::create_resource_store::<ReplicaSet>(&client, false).await?
+        } else {
+            debug!("skipping replica set reflector initialization due to filtering rules");
+            let (reader, _) = reflector::store();
+            reader
+        };
+
+        let stateful_sets = if should_initialize("StatefulSet") {
+            Self::create_resource_store::<StatefulSet>(&client, false).await?
+        } else {
+            debug!("skipping stateful set reflector initialization due to filtering rules");
+            let (reader, _) = reflector::store();
+            reader
+        };
+
+        let daemon_sets = if should_initialize("DaemonSet") {
+            Self::create_resource_store::<DaemonSet>(&client, false).await?
+        } else {
+            debug!("skipping daemon set reflector initialization due to filtering rules");
+            let (reader, _) = reflector::store();
+            reader
+        };
+
+        let jobs = if should_initialize("Job") {
+            Self::create_resource_store::<Job>(&client, false).await?
+        } else {
+            debug!("skipping job reflector initialization due to filtering rules");
+            let (reader, _) = reflector::store();
+            reader
+        };
+
+        let services = if should_initialize("Service") {
+            Self::create_resource_store::<Service>(&client, false).await?
+        } else {
+            debug!("skipping service reflector initialization due to filtering rules");
+            let (reader, _) = reflector::store();
+            reader
+        };
+
+        let ingresses = if should_initialize("Ingress") {
+            Self::create_resource_store::<Ingress>(&client, false).await?
+        } else {
+            debug!("skipping ingress reflector initialization due to filtering rules");
+            let (reader, _) = reflector::store();
+            reader
+        };
+
+        let endpoint_slices = if should_initialize("EndpointSlice") {
+            Self::create_resource_store::<EndpointSlice>(&client, false).await?
+        } else {
+            debug!("skipping endpoint slice reflector initialization due to filtering rules");
+            let (reader, _) = reflector::store();
+            reader
+        };
+
+        let network_policies = if should_initialize("NetworkPolicy") {
+            Self::create_resource_store::<NetworkPolicy>(&client, false).await?
+        } else {
+            debug!("skipping network policy reflector initialization due to filtering rules");
+            let (reader, _) = reflector::store();
+            reader
+        };
+
+        Ok(Self {
+            pods,
+            nodes,
+            namespaces,
+            deployments,
+            replica_sets,
+            stateful_sets,
+            daemon_sets,
+            jobs,
+            services,
+            ingresses,
+            endpoint_slices,
+            network_policies,
+        })
     }
 
     /// Helper to create a store for a resource, handling failures gracefully.
@@ -336,9 +433,9 @@ pub struct Attributor {
 
 impl Attributor {
     /// Creates a new Attributor, initializing all resource reflectors concurrently.
-    pub async fn new() -> Result<Self> {
+    pub async fn new(discovery_opts: K8sDiscoveryOptions) -> Result<Self> {
         let client = Client::try_default().await?;
-        let resource_store = ResourceStore::new(client.clone()).await?;
+        let resource_store = ResourceStore::new(client.clone(), discovery_opts).await?;
         Ok(Self {
             client,
             resource_store,
@@ -346,14 +443,28 @@ impl Attributor {
     }
 
     /// Given a Pod object, traverses its ownerReferences to find its top-level managing controller.
-    pub fn get_top_level_controller(&self, pod: &Pod) -> Option<WorkloadOwner> {
+    /// The max_depth parameter limits how many levels of ownership hierarchy to traverse.
+    pub fn get_top_level_controller(&self, pod: &Pod, max_depth: u32) -> Option<WorkloadOwner> {
         let mut current_owners = pod.owner_references().to_vec();
         let mut namespace = pod.namespace().unwrap_or_default();
         let mut top_level_owner = None;
+        let mut current_depth = 0;
 
         while let Some(owner_ref) = current_owners.pop() {
+            // Check if we've reached the maximum depth
+            if current_depth >= max_depth {
+                debug!(
+                    "reached maximum depth {} while traversing owner hierarchy for pod {} in namespace {}",
+                    max_depth,
+                    pod.name_any(),
+                    namespace
+                );
+                break;
+            }
+
             if let Some((owner, next_owners_opt)) = self.get_owner(&owner_ref, &namespace) {
                 top_level_owner = Some(owner);
+                current_depth += 1;
 
                 if let Some(next_owners) = next_owners_opt {
                     current_owners = next_owners;
@@ -879,6 +990,255 @@ impl Attributor {
                     pod.namespace().as_deref().unwrap_or("default")
                         == policy_namespace.unwrap_or("default")
                 }
+            }
+        }
+    }
+
+    /// Generic method to extract selector fields from any Kubernetes resource using JSON path-like syntax
+    /// This allows us to dynamically extract selector information from any resource type
+    pub fn extract_selector_from_resource<T>(
+        &self,
+        resource: &T,
+        field_path: &str,
+    ) -> Option<serde_json::Value>
+    where
+        T: Resource + serde::Serialize,
+    {
+        // Convert the resource to JSON
+        let resource_json = match serde_json::to_value(resource) {
+            Ok(json) => json,
+            Err(_) => return None,
+        };
+
+        // Parse the field path (e.g., "spec.podSelector.matchLabels")
+        let path_parts: Vec<&str> = field_path.split('.').collect();
+
+        // Navigate through the JSON structure
+        let mut current = &resource_json;
+        for part in path_parts {
+            current = current.get(part)?;
+        }
+
+        Some(current.clone())
+    }
+
+    /// Generic method to check if a pod matches selectors extracted from any resource
+    pub fn pod_matches_extracted_selectors(
+        &self,
+        pod_meta: &K8sObjectMeta,
+        match_labels: Option<&serde_json::Value>,
+        match_expressions: Option<&serde_json::Value>,
+    ) -> bool {
+        if let Some(pod_labels) = &pod_meta.labels {
+            // Check match_labels if present
+            if let Some(labels_json) = match_labels
+                && let Some(labels_map) = labels_json.as_object()
+            {
+                for (key, value) in labels_map {
+                    if let Some(expected_value) = value.as_str()
+                        && pod_labels.get(key) != Some(&expected_value.to_string())
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            // Check match_expressions if present
+            if let Some(expressions_json) = match_expressions
+                && let Some(expressions_array) = expressions_json.as_array()
+            {
+                for expr in expressions_array {
+                    if let Some(expr_obj) = expr.as_object()
+                        && !self.evaluate_expression(expr_obj, pod_labels)
+                    {
+                        return false;
+                    }
+                }
+            }
+            true
+        } else {
+            // If pod has no labels, it only matches if there are no selector requirements
+            match_labels.is_none() && match_expressions.is_none()
+        }
+    }
+
+    /// Evaluates a single match expression against pod labels
+    fn evaluate_expression(
+        &self,
+        expr: &serde_json::Map<String, serde_json::Value>,
+        pod_labels: &HashMap<String, String>,
+    ) -> bool {
+        let key = match expr.get("key").and_then(|v| v.as_str()) {
+            Some(k) => k,
+            None => return false,
+        };
+        let operator = match expr.get("operator").and_then(|v| v.as_str()) {
+            Some(op) => op,
+            None => return false,
+        };
+        let values = expr.get("values").and_then(|v| v.as_array());
+
+        let label_value = pod_labels.get(key);
+
+        match operator {
+            "In" => {
+                if let Some(value) = label_value {
+                    values.is_some_and(|vals| vals.iter().any(|v| v.as_str() == Some(value)))
+                } else {
+                    false
+                }
+            }
+            "NotIn" => {
+                if let Some(value) = label_value {
+                    values.is_some_and(|vals| !vals.iter().any(|v| v.as_str() == Some(value)))
+                } else {
+                    true
+                }
+            }
+            "Exists" => label_value.is_some(),
+            "DoesNotExist" => label_value.is_none(),
+            _ => false,
+        }
+    }
+
+    /// Helper function to process resources and check if any match the pod
+    fn process_resources_for_pod_match<T>(
+        &self,
+        resources: Vec<std::sync::Arc<T>>,
+        pod_meta: &K8sObjectMeta,
+        selector: &crate::runtime::conf::K8sObjectSelector,
+    ) -> bool
+    where
+        T: Clone + kube::Resource + serde::Serialize,
+    {
+        for resource in resources {
+            let match_labels = if let Some(field_path) = &selector.selector_match_labels_field {
+                self.extract_selector_from_resource(&*resource, field_path)
+            } else {
+                None
+            };
+
+            let match_expressions =
+                if let Some(field_path) = &selector.selector_match_expressions_field {
+                    self.extract_selector_from_resource(&*resource, field_path)
+                } else {
+                    None
+                };
+
+            if self.pod_matches_extracted_selectors(
+                pod_meta,
+                match_labels.as_ref(),
+                match_expressions.as_ref(),
+            ) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Generic method to find resources of a specific kind that match a pod based on selector configuration
+    pub fn find_matching_resources_for_pod(
+        &self,
+        pod_meta: &K8sObjectMeta,
+        selector: &crate::runtime::conf::K8sObjectSelector,
+    ) -> bool {
+        let pod_namespace = pod_meta.namespace.as_deref().unwrap_or("default");
+
+        // Handle different resource types in the same order as ResourceStore struct fields
+        match selector.kind.as_str() {
+            "Pod" => {
+                debug!("processing pod resources for pod match");
+                let resources = self
+                    .resource_store
+                    .get_by_namespace::<k8s_openapi::api::core::v1::Pod>(pod_namespace);
+                self.process_resources_for_pod_match(resources, pod_meta, selector)
+            }
+            "Node" => {
+                debug!("processing node resources for pod match");
+                let resources = self
+                    .resource_store
+                    .get_by_namespace::<k8s_openapi::api::core::v1::Node>(pod_namespace);
+                self.process_resources_for_pod_match(resources, pod_meta, selector)
+            }
+            "Namespace" => {
+                debug!("processing namespace resources for pod match");
+                let resources = self
+                    .resource_store
+                    .get_by_namespace::<k8s_openapi::api::core::v1::Namespace>(pod_namespace);
+                self.process_resources_for_pod_match(resources, pod_meta, selector)
+            }
+            "Deployment" => {
+                debug!("processing deployment resources for pod match");
+                let resources = self
+                    .resource_store
+                    .get_by_namespace::<k8s_openapi::api::apps::v1::Deployment>(pod_namespace);
+                self.process_resources_for_pod_match(resources, pod_meta, selector)
+            }
+            "ReplicaSet" => {
+                debug!("processing replica set resources for pod match");
+                let resources = self
+                    .resource_store
+                    .get_by_namespace::<k8s_openapi::api::apps::v1::ReplicaSet>(pod_namespace);
+                self.process_resources_for_pod_match(resources, pod_meta, selector)
+            }
+            "StatefulSet" => {
+                debug!("processing stateful set resources for pod match");
+                let resources = self
+                    .resource_store
+                    .get_by_namespace::<k8s_openapi::api::apps::v1::StatefulSet>(pod_namespace);
+                self.process_resources_for_pod_match(resources, pod_meta, selector)
+            }
+            "DaemonSet" => {
+                debug!("processing daemon set resources for pod match");
+                let resources = self
+                    .resource_store
+                    .get_by_namespace::<k8s_openapi::api::apps::v1::DaemonSet>(pod_namespace);
+                self.process_resources_for_pod_match(resources, pod_meta, selector)
+            }
+            "Job" => {
+                debug!("processing job resources for pod match");
+                let resources = self
+                    .resource_store
+                    .get_by_namespace::<k8s_openapi::api::batch::v1::Job>(pod_namespace);
+                self.process_resources_for_pod_match(resources, pod_meta, selector)
+            }
+            "Service" => {
+                debug!("processing service resources for pod match");
+                let resources = self
+                    .resource_store
+                    .get_by_namespace::<k8s_openapi::api::core::v1::Service>(pod_namespace);
+                self.process_resources_for_pod_match(resources, pod_meta, selector)
+            }
+            "Ingress" => {
+                debug!("processing ingress resources for pod match");
+                let resources = self
+                    .resource_store
+                    .get_by_namespace::<k8s_openapi::api::networking::v1::Ingress>(pod_namespace);
+                self.process_resources_for_pod_match(resources, pod_meta, selector)
+            }
+            "EndpointSlice" => {
+                debug!("processing endpoint slice resources for pod match");
+                let resources = self
+                    .resource_store
+                    .get_by_namespace::<k8s_openapi::api::discovery::v1::EndpointSlice>(
+                        pod_namespace,
+                    );
+                self.process_resources_for_pod_match(resources, pod_meta, selector)
+            }
+            "NetworkPolicy" => {
+                debug!("processing network policy resources for pod match");
+                let resources = self
+                    .resource_store
+                    .get_by_namespace::<k8s_openapi::api::networking::v1::NetworkPolicy>(
+                        pod_namespace,
+                    );
+                self.process_resources_for_pod_match(resources, pod_meta, selector)
+            }
+            _ => {
+                debug!("processing unknown resource type for pod match");
+                // For unknown resource types, or custom resources, we will need to do something more generic
+                // using the Kubernetes API directly. Would likely need to extend ResourceStore as well
+                true
             }
         }
     }

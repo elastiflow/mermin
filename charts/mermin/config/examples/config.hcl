@@ -91,13 +91,6 @@ flow "span" "destination" {
 # Discovery config of type "k8s_owner" with name "main"
 discovery "k8s_owner" "main" {
   /*
-    Limit the ownerReference walk depth, e.g. If `walk_max_depth = 3`
-    If Pod <- Job <- CronJob <- Controller1 <- Controller2 <- Controller3 <- ...
-    Only Pod <- Job <- CronJob relation is discovered
-  */
-  walk_max_depth = 10
-
-  /*
     depth of attached metadata, e.g., if `maxDepth = 1`
     and object ownership `Pod <- Job <- CronJob` only Pod and Job fields are attached
   */

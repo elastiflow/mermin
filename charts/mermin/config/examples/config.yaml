@@ -273,7 +273,6 @@ discovery:
       include_kinds:
         - Service
       max_depth: 5
-      walk_max_depth: 10
   k8s_selector:
     main:
       k8s_object:

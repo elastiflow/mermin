@@ -2,10 +2,12 @@ use std::net::IpAddr;
 
 use anyhow::Result;
 use k8s_openapi::api::{core::v1::Pod, networking::v1::NetworkPolicySpec};
+use tracing::{debug, info};
 
 use crate::{
     k8s::{AttributionInfo, Attributor, FlowContext, FlowDirection, K8sObjectMeta, WorkloadOwner},
     span::flow::FlowSpan,
+    runtime::conf::{K8sDiscoveryOptions, K8sSelectorOptions},
 };
 
 #[derive(Debug)]
@@ -26,16 +28,43 @@ impl<'a> SpanAttributor<'a> {
         Self { attributor }
     }
 
+    fn should_enrich(&self, pod_meta: &K8sObjectMeta, selector_opts: &K8sSelectorOptions) -> bool {
+        info!(
+            "checking if pod {} in namespace {:?} should be enriched",
+            pod_meta.name, pod_meta.namespace
+        );
+        debug!("selector options: {:?}", selector_opts);
+        for selector in &selector_opts.k8s_object {
+            // Use the generic method to check if this pod should be enriched
+            if self
+                .attributor
+                .find_matching_resources_for_pod(pod_meta, selector)
+            {
+                return true;
+            }
+        }
+        debug!(
+            "pod {} does not match any of the selector options",
+            pod_meta.name
+        );
+        false
+    }
+
     /// Correlates flow attributes with Kubernetes resources and populates K8s metadata fields.
-    /// Returns a cloned FlowSpan with source and destination Kubernetes attributes populated.
-    async fn attribute(&self, flow_span: &FlowSpan) -> Result<FlowSpan> {
+    /// Returns a cloned FlowAttributes with source and destination Kubernetes attributes populated.
+    async fn attribute(
+        &self,
+        flow_span: &FlowSpan,
+        discovery_opts: &K8sDiscoveryOptions,
+    ) -> Result<FlowSpan> {
         // Create FlowContext directly for both directions
         let namespace = "default"; // TODO: This should be configurable or derived from context
         let ctx = FlowContext::from_flow_span(flow_span, self.attributor, namespace).await;
 
         // Resolve source and destination IPs to Kubernetes resources and evaluate policies
-        let src_attribution: Option<AttributionInfo> = self.enrich(&ctx.src_pod, ctx.src_ip).await;
-        let dst_attribution = self.enrich(&ctx.dst_pod, ctx.dst_ip).await;
+        let src_attribution: Option<AttributionInfo> =
+            self.enrich(&ctx.src_pod, ctx.src_ip, discovery_opts).await;
+        let dst_attribution = self.enrich(&ctx.dst_pod, ctx.dst_ip, discovery_opts).await;
         let (ingress_policies, egress_policies) = self.evaluate_flow_policies(&ctx).await?;
 
         // Clone the original flow attributes and populate with Kubernetes metadata
@@ -59,10 +88,29 @@ impl<'a> SpanAttributor<'a> {
 
     /// Resolves a pod and IP address to Kubernetes resource attribution information.
     /// Returns Pod attribution if available, otherwise attempts IP-based fallback resolution.
-    async fn enrich(&self, pod: &Option<Pod>, ip: IpAddr) -> Option<AttributionInfo> {
+    async fn enrich(
+        &self,
+        pod: &Option<Pod>,
+        ip: IpAddr,
+        discovery_opts: &K8sDiscoveryOptions,
+    ) -> Option<AttributionInfo> {
         if let Some(pod) = pod {
             let pod_meta = K8sObjectMeta::from(pod);
-            let owner = self.attributor.get_top_level_controller(pod);
+            let max_depth = discovery_opts
+                .k8s_owner
+                .get("main")
+                .map(|opts| opts.max_depth)
+                .unwrap_or(10);
+            let owner = self.attributor.get_top_level_controller(pod, max_depth);
+
+            info!("pod owner: {:?}", owner);
+            // Apply k8s_selector config to determine if this pod should be enriched
+            if let Some(selector_opts) = discovery_opts.k8s_selector.get("main") {
+                info!("selector options: {:?}", selector_opts);
+                if !self.should_enrich(&pod_meta, selector_opts) {
+                    return None;
+                }
+            }
             Some(AttributionInfo::Pod {
                 pod: pod_meta,
                 owner,
@@ -304,7 +352,8 @@ impl<'a> SpanAttributor<'a> {
 pub async fn attribute_flow_span(
     flow_span: &FlowSpan,
     attributor: &Attributor,
+    discovery_opts: &K8sDiscoveryOptions,
 ) -> Result<FlowSpan> {
     let span_attributor = SpanAttributor::new(attributor);
-    span_attributor.attribute(flow_span).await
+    span_attributor.attribute(flow_span, discovery_opts).await
 }

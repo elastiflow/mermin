@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     error::Error,
     fmt,
     net::Ipv4Addr,
@@ -21,6 +22,93 @@ use crate::{
     },
     span::opts::SpanOptions,
 };
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ApiConf {
+    /// Enable the API server.
+    pub enabled: bool,
+    /// The network address the API server will listen on.
+    pub listen_address: String,
+    /// The port the API server will listen on.
+    pub port: u16,
+}
+
+impl Default for ApiConf {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
+            port: 8080,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct MetricsConf {
+    /// Enable the metrics server.
+    pub enabled: bool,
+    /// The network address the metrics server will listen on.
+    pub listen_address: String,
+    /// The port the metrics server will listen on.
+    pub port: u16,
+}
+
+impl Default for MetricsConf {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
+            port: 10250,
+        }
+    }
+}
+
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
+pub struct K8sDiscoveryOptions {
+    pub k8s_owner: HashMap<String, K8sOwnerOptions>,
+    pub k8s_selector: HashMap<String, K8sSelectorOptions>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct K8sOwnerOptions {
+    pub exclude_kinds: Vec<String>,
+    pub include_kinds: Vec<String>,
+    pub max_depth: u32,
+}
+
+impl Default for K8sOwnerOptions {
+    fn default() -> Self {
+        Self {
+            exclude_kinds: Vec::new(),
+            include_kinds: Vec::new(),
+            max_depth: 10,
+        }
+    }
+}
+
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
+pub struct K8sSelectorOptions {
+    pub k8s_object: Vec<K8sObjectSelector>,
+}
+
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
+pub struct K8sObjectSelector {
+    pub kind: String,
+    pub selector_match_expressions_field: Option<String>,
+    pub selector_match_labels_field: Option<String>,
+    pub to: String,
+}
+
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
+pub struct AgentOptions {
+    pub traces: HashMap<String, TraceOptions>,
+}
+
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
+pub struct TraceOptions {
+    pub discovery_owner: String,    // Reference to discovery.k8s_owner.main
+    pub discovery_selector: String, // Reference to discovery.k8s_selector.main
+}
 
 /// Represents the configuration for the application, containing settings
 /// related to interface, logging, reloading, and flow management.
@@ -87,10 +175,15 @@ pub struct Conf {
     /// to how the application's logic operates.
     pub span: SpanOptions,
 
-    /// Configuration for agent - specifies which exporters are enabled.
-    /// This field determines which exporters from the exporter configuration
-    /// should be initialized and used for telemetry data.
+    /// Configuration for agent - specifies which mermin configs are enabled.
+    /// This field determines which configuration features
+    /// should be initialized and used for mermin
     pub agent: Option<AgentOptions>,
+
+
+    /// Configuration for Kubernetes resource discovery and enrichment.
+    #[serde(default)]
+    pub discovery: K8sDiscoveryOptions,
 
     /// Configuration for exporters.
     /// This field holds settings for exporting telemetry data
@@ -111,7 +204,14 @@ impl Default for Conf {
             packet_worker_count: defaults::flow_workers(),
             shutdown_timeout: defaults::shutdown_timeout(),
             span: SpanOptions::default(),
-            agent: Some(AgentOptions::default()),
+            exporter: otlp::opts::ExporterOptions::default(),
+            discovery: K8sDiscoveryOptions {
+                k8s_owner: HashMap::new(),
+                k8s_selector: HashMap::new(),
+            },
+            agent: AgentOptions {
+                traces: HashMap::new(),
+            },
             exporter: None,
         }
     }

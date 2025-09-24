@@ -58,4 +58,52 @@ data:
       tcp_fin_timeout: {{ .span.tcp_fin_timeout | default "5s" }}
       tcp_rst_timeout: {{ .span.tcp_rst_timeout | default "5s" }}
       udp_timeout: {{ .span.udp_timeout | default "60s" }}
+
+    # Exporter configuration
+    exporter:
+      stdout_enabled: {{ .exporter.stdout_enabled | default false }}
+      otlp_enabled: {{ .exporter.otlp_enabled | default false }}
+      otlp_endpoint: {{ .exporter.otlp_endpoint | default "http://host.docker.internal:4317" | quote }}
+      otlp_timeout_seconds: {{ .exporter.otlp_timeout_seconds | default 3 }}
+      otlp_protocol: {{ .exporter.otlp_protocol | default "grpc" | quote }}
+
+    # Agent configuration
+    agent:
+      traces:
+        main:
+          discovery_owner: {{ .agent.traces.main.discovery_owner | default "discovery.k8s_owner.main" | quote }}
+          discovery_selector: {{ .agent.traces.main.discovery_selector | default "discovery.k8s_selector.main" | quote }}
+
+    # Discovery configuration
+    discovery:
+      k8s_owner:
+        main:
+          exclude_kinds:
+            {{- with .discovery.k8s_owner.main.exclude_kinds }}
+            {{- toYaml . | nindent 12 }}
+            {{- else }}
+            - EndpointSlice
+            - "*"
+            {{- end }}
+          include_kinds:
+            {{- with .discovery.k8s_owner.main.include_kinds }}
+            {{- toYaml . | nindent 12 }}
+            {{- else }}
+            - Service
+            {{- end }}
+          max_depth: {{ .discovery.k8s_owner.main.max_depth | default 5 }}
+      k8s_selector:
+        main:
+          k8s_object:
+            {{- with .discovery.k8s_selector.main.k8s_object }}
+            {{- toYaml . | nindent 12 }}
+            {{- else }}
+            - kind: NetworkPolicy
+              selector_match_expressions_field: spec.podSelector.matchExpressions
+              selector_match_labels_field: spec.podSelector.matchLabels
+              to: Pod
+            - kind: Service
+              selector_match_labels_field: spec.selector
+              to: Pod
+            {{- end }}
     {{- end }}
