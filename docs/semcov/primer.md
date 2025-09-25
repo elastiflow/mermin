@@ -46,7 +46,7 @@ To keep the convention clean and easy to understand, attributes are organized in
 Here is what a simple Flow Span might look like in OTLP JSON format. It represents a TCP flow between two Kubernetes pods.
 ```json
 {
-  "name": "flow",
+  "name": "flow_ipv4_tcp",
   "kind": "SPAN_KIND_INTERNAL",
   "startTimeUnixNano": "1727149620000000000",
   "endTimeUnixNano": "1727149680000000000",

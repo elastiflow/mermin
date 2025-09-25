@@ -1,50 +1,57 @@
+# Network Flow Semantic Convention
+
 This document proposes a semantic convention for representing network flow data as traces. The existing network conventions are primarily designed for unidirectional, client/server interactions within an instrumented application. This proposal addresses the need to represent a network flow as a complete, bidirectional conversation, typically observed by a third party (like a network device or eBPF agent).
 
-The core of this proposal is to represent each finalized flow record as a single **Span**, creating a new standard for network observability within the OpenTelemetry ecosystem.
+The core concept of this proposal is to represent each network flow record as a single **Span**. This model elevates traces from purely application-level signals to comprehensive flow spans that capture detailed data about network traffic, creating a new standard for network observability within the OpenTelemetry ecosystem.
 
 ---
 
-### 1. Core Concepts
+## 1. Core Concepts
 
-A network flow record will be represented as a single **Span** with the following characteristics:
+Each network flow record is represented as a single OpenTelemetry **Span**. This "flow span" has the following key characteristics:
 
-* **Span Name**: The name of the span SHOULD be `flow_<network.type>_<network.transport>` — for example, `flow_ipv4_tcp`. This is more semantically accurate, establishing a clear separation between app spans and flow spans.
-* **Span Kind**: The kind of the span MUST be `INTERNAL`. A flow is an internal operation within the network infrastructure and does not represent the start or end of a request from an instrumented application's perspective.
+* **Span Name**: To clearly distinguish flow spans from application spans, the name SHOULD follow the format `flow_<network.type>_<network.transport>`. For example, a typical TCP flow over IPv4 would be named flow_ipv4_tcp.
+* **Span Kind**: The Span Kind MUST be `INTERNAL`. This signifies that the flow is an internal operation within the network infrastructure and does not represent the beginning or end of a request from the perspective of an instrumented application.
 
-#### Attribute Namespaces
+### Attribute Namespaces
 
-To ensure clarity, this convention uses & defines several primary namespaces:
+To ensure clarity, this convention uses & defines specific attribute namespaces:
 
-* **`flow.*`**: Attributes that describe the flow as a whole (e.g., `flow.bytes.total`, `flow.io.direction`, `flow.end_reason`).
-* **`source.*` / `destination.*`**: Standard OTel namespaces used to describe the two endpoints of the flow, including L3/L4 addresses and enriched Kubernetes metadata.
-* **`network.*`**: The existing OTel namespace used for protocol-specific attributes that are not specific to the source or destination endpoint (e.g., `network.transport`, `network.type.ip.dscp`, `flow.tunnel.id`).
-* **`tunnel.*`**: Attributes that describe tunneling protocols and encapsulation metadata when the flow is observed within or across tunnel infrastructure (e.g., `tunnel.type`, `tunnel.id`, `tunnel.endpoint`).
-* **`process.*`**: The existing OTel namespace used for identifying the host process associated with the flow's socket.
-* **`container.*`**: The existing OTel namespace used for identifying the container associated with the flow's socket.
+* **`flow.*`**: Describes the network conversation itself, including metrics and metadata that change over the lifetime of the flow (e.g., flow.bytes.total, flow.end_reason).
+* **`source.*` / `destination.*`**: Standard OTel namespaces that describe the two endpoints of the flow, including L3/L4 addresses and enriched metadata like Kubernetes pod names.
+* **`network.*`**: The existing OTel namespace for protocol-specific attributes that are static for the duration of the flow (e.g., network.transport, network.type).
+* **`tunnel.*`**: Describes tunneling protocols and encapsulation metadata (e.g., tunnel.type, tunnel.id). This is always the outer-most tunnel or encapsulation.
+* **`process.*` / `container.*`**: Existing OTel namespaces used to identify the host process or container associated with the flow's socket.
 
-The `flow.*` namespace is to create a clear semantic distinction between a flow of traffic—a conversation between two endpoints over time—and a network entity, such as a physical interface. The existing network namespace is already used for attributes describing network entities, and overloading it with flow-specific concepts creates ambiguity.
-A good litmus test to understand when an attribute belong in the network or the flow namespace, consider the following. Attributes that change over the lifetime of a flow span should be in the flow namespace, while attributes that stay static over that same lifetime are good candidates for the network namespace.
-For example, a metric like `network.byte_count` could be misinterpreted as the total bytes for an interface rather than for a specific five-tuple flow.
-By using flow.* for attributes that describe the conversation itself (like `flow.bytes.total` or `flow.end_reason`), we avoid overloading too many different concepts into one place, making the data more accurate and easier to understand.
+The `flow.*` namespace is critical for creating a clear semantic distinction. It separates attributes of a flow—a dynamic conversation between two endpoints over time—from attributes of a network entity, like a physical interface, whose properties are generally static. Overloading the existing network.* namespace with dynamic flow concepts would create ambiguity.
+
+A simple litmus test can help:
+
+* If an attribute's value can change during the lifetime of a flow (like a byte count), it belongs in the flow.* namespace (e.g., flow.bytes.total).
+* If an attribute's value is static for the duration of the flow (like the transport protocol), it belongs in the network.* namespace (e.g., network.transport).
+
+This separation prevents ambiguity. For instance, an attribute like network.byte_count could be misinterpreted as the total bytes for an entire network interface, whereas flow.bytes.total clearly refers to the byte count for a specific five-tuple flow. This makes the resulting telemetry data more accurate and easier to query.
 
 ---
 
-### 2. Proposed Attributes
+## 2. Proposed Attributes
 
 The following tables detail the proposed attributes for the flow span.
 
-#### Requirement Level Legend
+### Requirement Level Legend
 
 The following symbols are used in the "Required" column to indicate [OpenTelemetry attribute requirement levels](https://opentelemetry.io/docs/specs/semconv/general/attribute-requirement-level/):
 
-| Symbol | Requirement Level | Description |
-|:-------|:------------------|:------------|
-| ✓      | Required          | All instrumentations MUST populate the attribute |
-| ?      | Conditionally Required | MUST populate when the specified condition is satisfied |
-| ~      | Recommended       | SHOULD add by default if readily available and efficient |
-| ○      | Opt-In            | SHOULD populate only if user configures instrumentation to do so |
+| Symbol | Requirement Level      | Description                                                      |
+|:-------|:-----------------------|:-----------------------------------------------------------------|
+| ✓      | Required               | All instrumentations MUST populate the attribute                 |
+| ?      | Conditionally Required | MUST populate when the specified condition is satisfied          |
+| ~      | Recommended            | SHOULD add by default if readily available and efficient         |
+| ○      | Opt-In                 | SHOULD populate only if user configures instrumentation to do so |
 
-#### General Flow Attributes
+### General Flow Attributes
+
+> Note on Timestamps: The span's standard `start_time` and `end_time` fields are used to mark the beginning and end of the flow span's observation window. These are analogous to the `flowStart*` and `flowEnd*` fields in IPFIX records and are not duplicated as attributes.
 
 | Proposed Field Name     | Data Type | Description                                                                               | Notes / Decisions                                                                                                                           | Std OTel | Required   |
 |:------------------------|:----------|:------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------|:---------|:-----------|
@@ -53,9 +60,7 @@ The following symbols are used in the "Required" column to indicate [OpenTelemet
 | `flow.connection.state` | `string`  | The state of the connection (e.g., TCP state) at the time the flow was generated.         | For TCP, this would be one of the standard states like `established`, `time_wait`, etc.                                                     |          | ? TCP only |
 | `flow.end_reason`       | `string`  | The reason the flow record was exported (e.g., `active_timeout`, `end_of_flow_detected`). | Stored as a human-readable text enum based on [ipfix end reason](https://www.iana.org/assignments/ipfix/ipfix.xhtml#ipfix-flow-end-reason). |          | ✓          |
 
-> start_time and end_time are set on the span itself and is not considered attribute on spans. However, start_time and end_time are used to mark the beginning and end time of a flow span, much like flowStart* and flowEnd* fields in IPFIX records.
-
-#### L2-L4 Attributes
+### L2-L4 Attributes
 
 | Proposed Field Name       | Data Type  | Description                                                                     | Notes / Decisions                                     | Std OTel | Required |
 |:--------------------------|:-----------|:--------------------------------------------------------------------------------|:------------------------------------------------------|:---------|:---------|
@@ -81,7 +86,7 @@ The following symbols are used in the "Required" column to indicate [OpenTelemet
 | `flow.tcp.flags.bits`     | `long`     | The integer representation of all TCP flags seen during the observation window. |                                                       |          | ~        |
 | `flow.tcp.flags.tags`     | `string[]` | An array of TCP flag names (e.g., `["SYN", "ACK"]`) for all flags set.          |                                                       |          | ~        |
 
-#### Flow Metrics
+### Flow Metrics
 
 | Proposed Field Name          | Data Type | Description                                                               | Notes / Decisions                                        | Std OTel | Required |
 |:-----------------------------|:----------|:--------------------------------------------------------------------------|:---------------------------------------------------------|:---------|:---------|
@@ -96,7 +101,7 @@ The following symbols are used in the "Required" column to indicate [OpenTelemet
 
 ### Performance Metrics
 
-Time-based metrics calculated for the flow, stored in nanoseconds (`ns`). The span's standard start and end timestamps represent the flow record's observation window.
+Time-based metrics calculated for the flow, stored in nanoseconds (`ns`).
 
 | Proposed Field Name              | Data Type | Description                                                                                                                     | Notes / Decisions | Std OTel | Required |
 |:---------------------------------|:----------|:--------------------------------------------------------------------------------------------------------------------------------|:------------------|:---------|:---------|
@@ -109,7 +114,7 @@ Time-based metrics calculated for the flow, stored in nanoseconds (`ns`). The sp
 | `flow.tcp.rndtrip.latency`       | `long`    | The full round-trip time (client to server + app to client), from the **client's perspective**.                                 | Unit: `ns`.       |          | ~        |
 | `flow.tcp.rndtrip.jitter`        | `long`    | The jitter of the full round-trip time, from the **client's perspective**.                                                      | Unit: `ns`.       |          | ~        |
 
-#### Tunnel & Encapsulation Attributes
+### Tunnel & Encapsulation Attributes
 
 | Proposed Field Name          | Data Type | Description                                                                                          | Notes / Decisions                      | Std OTel | Required |
 |:-----------------------------|:----------|:-----------------------------------------------------------------------------------------------------|:---------------------------------------|:---------|:---------|
@@ -164,7 +169,7 @@ Time-based metrics calculated for the flow, stored in nanoseconds (`ns`). The sp
 
 ---
 
-### 3. Example Span (OTLP JSON)
+## 3. Example Span (OTLP JSON)
 
 Below is an example of what a resulting flow span might look like in OTLP JSON format.
 
