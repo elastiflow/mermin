@@ -11,6 +11,11 @@ log_level: debug
 # Automatic configuration reloading
 auto_reload: false
 
+# Pipeline configuration
+packet_channel_capacity: 1024
+packet_worker_count: 2
+shutdown_timeout: 5s
+
 # API server configuration (health endpoints)
 api:
   enabled: true
@@ -23,12 +28,7 @@ metrics:
   listen_address: "0.0.0.0"
   port: 10250
 
-# Pipeline configuration
-packet_channel_capacity: 1024
-packet_worker_count: 2
-shutdown_timeout: 5s
-
-# Span/Flow configuration
+# Flow Span configuration
 span:
   max_batch_size: 64
   max_batch_interval: 5s
@@ -54,8 +54,8 @@ exporter:
       address: example.com
       auth:
         basic:
-          pass: env("USER_SPECIFIED_ENV_VAR_TRITON_PASS")
-          user: foo
+          pass: "${PASSWORD}"
+          user: USERNAME
       port: 4317
       tls:
         ca_cert: /etc/certs/ca.crt
@@ -64,7 +64,5 @@ exporter:
         enabled: true
         insecure: false
   stdout:
-    json:
-      format: full
     console:
-      format: compact
+      format: full
