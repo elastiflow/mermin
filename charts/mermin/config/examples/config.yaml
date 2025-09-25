@@ -290,8 +290,8 @@ exporter:
       address: example.com
       auth:
         basic:
-          pass: env("USER_SPECIFIED_ENV_VAR_TRITON_PASS")
-          user: foo
+          pass: "${PASSWORD}"
+          user: username
       port: 443
       tls:
         ca_cert: /etc/certs/ca.crt
