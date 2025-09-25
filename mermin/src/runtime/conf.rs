@@ -21,149 +21,6 @@ use crate::{
     },
 };
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ApiConf {
-    /// Enable the API server.
-    pub enabled: bool,
-    /// The network address the API server will listen on.
-    pub listen_address: String,
-    /// The port the API server will listen on.
-    pub port: u16,
-}
-
-impl Default for ApiConf {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
-            port: 8080,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct MetricsConf {
-    /// Enable the metrics server.
-    pub enabled: bool,
-    /// The network address the metrics server will listen on.
-    pub listen_address: String,
-    /// The port the metrics server will listen on.
-    pub port: u16,
-}
-
-impl Default for MetricsConf {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
-            port: 10250,
-        }
-    }
-}
-
-/// Top-level agent configuration specifying which telemetry features are enabled.
-///
-/// The `AgentOptions` struct defines the agent's telemetry pipeline configuration,
-/// mapping logical telemetry types (such as traces) to their respective pipeline settings.
-/// This allows the user to declaratively specify, in the configuration file, which
-/// exporters should be used for each telemetry type. For example, the `traces` field
-/// contains the configuration for the traces pipeline, including the list of exporter
-/// references (such as OTLP or stdout exporters) that should be enabled for sending trace data.
-///
-/// This struct is typically deserialized from the `agent` section of the application's
-/// configuration file. Exporter references listed here must correspond to exporter
-/// definitions in the `exporter` section of the configuration.
-///
-/// # Example (YAML)
-/// ```yaml
-/// agent:
-///   traces:
-///     main:
-///       exporters:
-///         - exporter.otlp.main
-///         - exporter.stdout.json
-/// ```
-#[derive(Debug, Deserialize, Serialize)]
-pub struct AgentOptions {
-    pub traces: TracesOptions,
-}
-
-impl Default for AgentOptions {
-    fn default() -> Self {
-        Self {
-            traces: TracesOptions::default(),
-        }
-    }
-}
-
-/// Configuration options for the traces telemetry pipeline.
-///
-/// The `TracesOptions` struct defines the available traces pipelines for the agent,
-/// allowing the user to specify one or more logical pipelines (such as "main") for
-/// trace data. Each pipeline is represented as a field (currently only `main` is
-/// supported), and contains its own configuration, including the list of exporters
-/// to which trace data should be sent.
-#[derive(Debug, Deserialize, Serialize)]
-pub struct TracesOptions {
-    pub main: MainTraceOptions,
-}
-
-impl Default for TracesOptions {
-    fn default() -> Self {
-        Self {
-            main: MainTraceOptions::default(),
-        }
-    }
-}
-
-/// Configuration options for the main traces telemetry pipeline.
-#[derive(Debug, Deserialize, Serialize)]
-pub struct MainTraceOptions {
-    /// List of exporter references to use for the main traces pipeline.
-    /// Each entry should match a key in the `exporter` section of the config.
-    pub exporters: ExporterReferences,
-}
-
-impl Default for MainTraceOptions {
-    fn default() -> Self {
-        Self {
-            exporters: Vec::new(),
-        }
-    }
-}
-
-pub type ExporterReferences = Vec<String>;
-
-pub trait ExporterReferencesParser {
-    fn parse(&self) -> Result<Vec<ExporterReference>, String>;
-}
-
-impl ExporterReferencesParser for ExporterReferences {
-    fn parse(&self) -> Result<Vec<ExporterReference>, String> {
-        self.iter().map(|reference| {
-            match reference.split('.').collect::<Vec<_>>().as_slice() {
-                ["exporter", type_ @ ("otlp" | "stdout"), name] => Ok(ExporterReference {
-                    type_: type_.to_string(),
-                    name: name.to_string(),
-                }),
-                ["exporter", invalid_type, _] => Err(format!(
-                    "unsupported exporter type: '{invalid_type}' - supported types: otlp, stdout"
-                )),
-                _ => Err(format!(
-                    "invalid format: '{reference}' - expected: 'exporter.<type>.<name>'"
-                )),
-            }
-        }).collect::<Result<Vec<ExporterReference>, String>>()
-    }
-}
-
-/// Represents a parsed exporter reference from the agent configuration.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ExporterReference {
-    pub type_: String,
-    pub name: String,
-}
-
 /// Represents the configuration for the application, containing settings
 /// related to interface, logging, reloading, and flow management.
 ///
@@ -253,7 +110,7 @@ impl Default for Conf {
             packet_worker_count: defaults::flow_workers(),
             shutdown_timeout: defaults::shutdown_timeout(),
             span: SpanOptions::default(),
-            agent: AgentOptions::default(),
+            agent: Some(AgentOptions::default()),
             exporter: None,
         }
     }
@@ -543,6 +400,144 @@ pub mod conf_serde {
             humantime::parse_duration(&s).map_err(serde::de::Error::custom)
         }
     }
+
+    pub mod exporter_protocol {
+        use serde::{Deserialize, Deserializer, Serializer};
+
+        use crate::otlp::opts::ExporterProtocol;
+
+        pub fn serialize<S>(protocol: &ExporterProtocol, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            serializer.serialize_str(&protocol.to_string())
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<ExporterProtocol, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let s = String::deserialize(deserializer)?;
+            Ok(ExporterProtocol::from(s))
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ApiConf {
+    /// Enable the API server.
+    pub enabled: bool,
+    /// The network address the API server will listen on.
+    pub listen_address: String,
+    /// The port the API server will listen on.
+    pub port: u16,
+}
+
+impl Default for ApiConf {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
+            port: 8080,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct MetricsConf {
+    /// Enable the metrics server.
+    pub enabled: bool,
+    /// The network address the metrics server will listen on.
+    pub listen_address: String,
+    /// The port the metrics server will listen on.
+    pub port: u16,
+}
+
+impl Default for MetricsConf {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
+            port: 10250,
+        }
+    }
+}
+
+/// Top-level agent configuration specifying which telemetry features are enabled.
+///
+/// The `AgentOptions` struct defines the agent's telemetry pipeline configuration,
+/// mapping logical telemetry types (such as traces) to their respective pipeline settings.
+/// This allows the user to declaratively specify, in the configuration file, which
+/// exporters should be used for each telemetry type. For example, the `traces` field
+/// contains the configuration for the traces pipeline, including the list of exporter
+/// references (such as OTLP or stdout exporters) that should be enabled for sending trace data.
+///
+/// This struct is typically deserialized from the `agent` section of the application's
+/// configuration file. Exporter references listed here must correspond to exporter
+/// definitions in the `exporter` section of the configuration.
+///
+/// # Example (YAML)
+/// ```yaml
+/// agent:
+///   traces:
+///     main:
+///       exporters:
+///         - exporter.otlp.main
+///         - exporter.stdout.json
+/// ```
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct AgentOptions {
+    pub traces: TracesOptions,
+}
+/// Configuration options for the traces telemetry pipeline.
+///
+/// The `TracesOptions` struct defines the available traces pipelines for the agent,
+/// allowing the user to specify one or more logical pipelines (such as "main") for
+/// trace data. Each pipeline is represented as a field (currently only `main` is
+/// supported), and contains its own configuration, including the list of exporters
+/// to which trace data should be sent.
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct TracesOptions {
+    pub main: MainTraceOptions,
+}
+/// Configuration options for the main traces telemetry pipeline.
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct MainTraceOptions {
+    /// List of exporter references to use for the main traces pipeline.
+    /// Each entry should match a key in the `exporter` section of the config.
+    pub exporters: ExporterReferences,
+}
+
+pub type ExporterReferences = Vec<String>;
+
+pub trait ExporterReferencesParser {
+    fn parse(&self) -> Result<Vec<ExporterReference>, String>;
+}
+
+impl ExporterReferencesParser for ExporterReferences {
+    fn parse(&self) -> Result<Vec<ExporterReference>, String> {
+        self.iter().map(|reference| {
+            match reference.split('.').collect::<Vec<_>>().as_slice() {
+                ["exporter", type_ @ ("otlp" | "stdout"), name] => Ok(ExporterReference {
+                    type_: type_.to_string(),
+                    name: name.to_string(),
+                }),
+                ["exporter", invalid_type, _] => Err(format!(
+                    "unsupported exporter type: '{invalid_type}' - supported types: otlp, stdout"
+                )),
+                _ => Err(format!(
+                    "invalid format: '{reference}' - expected: 'exporter.<type>.<name>'"
+                )),
+            }
+        }).collect::<Result<Vec<ExporterReference>, String>>()
+    }
+}
+
+/// Represents a parsed exporter reference from the agent configuration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExporterReference {
+    pub type_: String,
+    pub name: String,
 }
 
 #[cfg(test)]
@@ -553,8 +548,23 @@ mod tests {
     use figment::Jail;
     use tracing::Level;
 
-    use super::Conf;
+    use super::{Conf, ExporterReference};
     use crate::runtime::cli::Cli;
+
+    fn parse_exporter_reference(reference: &str) -> Result<ExporterReference, String> {
+        match reference.split('.').collect::<Vec<_>>().as_slice() {
+            ["exporter", type_ @ ("otlp" | "stdout"), name] => Ok(ExporterReference {
+                type_: type_.to_string(),
+                name: name.to_string(),
+            }),
+            ["exporter", invalid_type, _] => Err(format!(
+                "unsupported exporter type: '{invalid_type}' - supported types: otlp, stdout"
+            )),
+            _ => Err(format!(
+                "invalid format: '{reference}' - expected: 'exporter.<type>.<name>'"
+            )),
+        }
+    }
 
     #[test]
     fn default_impl_has_eth0_interface() {

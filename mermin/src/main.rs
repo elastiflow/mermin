@@ -1,5 +1,4 @@
 mod community_id;
-mod exporters;
 mod flow;
 mod health;
 mod k8s;
@@ -24,11 +23,13 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     community_id::CommunityIdGenerator,
-    exporters::ExporterResolver,
-    flow::FlowAttributesProducer,
+    flow::{FlowAttributesExporter, FlowAttributesProducer},
     health::{HealthState, start_api_server},
     k8s::resource_parser::attribute_flow_attrs,
-    otlp::opts::ExporterOptions,
+    otlp::{
+        opts::{ExporterOptions, OtlpExporterOptions, StdoutExporterOptions, resolve_exporters},
+        trace::lib::{TraceExporterAdapter, init_tracer_provider},
+    },
     runtime::conf::Conf,
 };
 
@@ -42,50 +43,38 @@ async fn main() -> Result<()> {
     let runtime = runtime::Runtime::new()?;
     let runtime::Runtime { config, .. } = runtime;
 
-    let mut fmt_builder = tracing_subscriber::fmt().with_max_level(config.log_level);
+    let agent_opts = config
+        .agent
+        .as_ref()
+        .ok_or_else(|| anyhow!("no agent options configured"))?;
+    let exporter_opts = if let Some(opts) = config.exporter.as_ref() {
+        opts
+    } else {
+        warn!("no exporter options configured, continuing without exporters");
+        &ExporterOptions::default()
+    };
 
-    // Configure based on log level
-    match config.log_level {
-        tracing::Level::ERROR | tracing::Level::WARN => {
-            fmt_builder = fmt_builder
-                .with_target(true)
-                .with_file(true)
-                .with_line_number(true)
-                .with_ansi(true)
-                .with_thread_ids(false)
-                .with_thread_names(false);
-        }
-        tracing::Level::INFO => {
-            fmt_builder = fmt_builder
-                .with_target(false)
-                .with_file(false)
-                .with_line_number(false)
-                .with_ansi(true)
-                .with_thread_ids(false)
-                .with_thread_names(false);
-        }
-        tracing::Level::DEBUG | tracing::Level::TRACE => {
-            fmt_builder = fmt_builder
-                .with_target(true)
-                .with_file(true)
-                .with_line_number(true)
-                .with_ansi(true)
-                .with_thread_ids(true)
-                .with_thread_names(true)
-        }
-    }
+    let (otlp_exporters, stdout_exporters) =
+        resolve_exporters(agent_opts.traces.main.exporters.clone(), exporter_opts)
+            .map_err(|e| anyhow!("failed to resolve exporters: {e}"))?;
 
-    fmt_builder.init();
-
-    let exporter_manager = if let Some(exporter_config) = &config.exporter {
-        let exporter_count = count_exporters(exporter_config);
-        info!("initializing {} exporters", exporter_count);
-        match ExporterResolver::new(config.agent.as_ref(), exporter_config, config.log_level).await
+    let exporter = if !otlp_exporters.is_empty() || !stdout_exporters.is_empty() {
+        info!(
+            "initializing exporter (otlp: {}, stdout: {})",
+            otlp_exporters.len(),
+            stdout_exporters.len()
+        );
+        match create_otlp_exporter(
+            otlp_exporters.first(),
+            stdout_exporters.first(),
+            config.log_level,
+        )
+        .await
         {
-            Ok(manager) => Some(manager),
+            Ok(exporter) => Some(exporter),
             Err(e) => {
-                error!("failed to initialize exporters: {e}");
-                warn!("continuing without exporters");
+                error!("failed to initialize exporter: {e}");
+                warn!("continuing without exporter");
                 None
             }
         }
@@ -317,18 +306,18 @@ async fn main() -> Result<()> {
 
     tokio::spawn(async move {
         while let Some(k8s_attributed_flow_attrs) = k8s_attributed_flow_attrs_rx.recv().await {
-            if let Some(ref manager) = exporter_manager {
-                debug!("exporting flow attributes");
-                manager.export(k8s_attributed_flow_attrs).await;
+            if let Some(ref exporter) = exporter {
+                debug!("exporting flow spans");
+                exporter.export(k8s_attributed_flow_attrs).await;
             } else {
                 debug!("skipping export - no exporters available");
             }
         }
         debug!("exporting task exiting");
-        if let Some(ref manager) = exporter_manager
-            && let Err(e) = manager.shutdown().await
+        if let Some(ref exporter) = exporter
+            && let Err(e) = exporter.shutdown().await
         {
-            error!("error during exporter shutdown: {e}");
+            error!("error during exporters shutdown: {e}");
         }
     });
 
@@ -337,6 +326,21 @@ async fn main() -> Result<()> {
     println!("exiting");
 
     Ok(())
+}
+
+// TODO: eng-205 should refactor this because we're overloading the otlp exporter with stdout exporters here and that's not a good idea.
+// TODO: eng-205 should allow for multiple otlp exporters
+async fn create_otlp_exporter(
+    otlp_exporters: Option<&OtlpExporterOptions>,
+    stdout_exporters: Option<&StdoutExporterOptions>,
+    log_level: tracing::Level,
+) -> Result<Arc<dyn FlowAttributesExporter>, anyhow::Error> {
+    info!("using otlp exporter adapter");
+
+    let provider = init_tracer_provider(otlp_exporters, stdout_exporters, log_level).await?;
+
+    let exporter = TraceExporterAdapter::new(provider);
+    Ok(Arc::new(exporter))
 }
 
 /// Helper function to format IP address based on type
@@ -420,16 +424,6 @@ fn log_packet_info(packet_meta: &PacketMeta, community_id: &str, iface_name: &st
     }
 }
 
-fn count_exporters(config: &ExporterOptions) -> usize {
-    let mut count = 0;
-    if let Some(otlp) = &config.otlp {
-        count += otlp.len();
-    }
-    if let Some(stdout) = &config.stdout {
-        count += stdout.len();
-    }
-    count
-}
 /// Extension trait for TcAttachType to provide direction name
 trait TcAttachTypeExt {
     fn direction_name(&self) -> &'static str;

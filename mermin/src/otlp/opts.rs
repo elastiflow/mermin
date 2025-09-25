@@ -4,7 +4,10 @@ use base64::{Engine as _, engine::general_purpose};
 use opentelemetry_otlp::Protocol;
 use serde::{Deserialize, Serialize};
 
-use crate::runtime::conf::conf_serde::duration;
+use crate::runtime::conf::{
+    ExporterReferences, ExporterReferencesParser,
+    conf_serde::{duration, exporter_protocol},
+};
 
 /// Configuration options for all telemetry exporters used by the application.
 ///
@@ -40,7 +43,7 @@ use crate::runtime::conf::conf_serde::duration;
 ///
 /// Exporter references in the agent configuration (e.g., `exporter.otlp.main`) must match
 /// the keys defined in these maps.
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Default, Deserialize, Serialize, Clone)]
 pub struct ExporterOptions {
     /// OTLP (OpenTelemetry Protocol) exporter configurations, keyed by exporter name.
     pub otlp: Option<HashMap<String, OtlpExporterOptions>>,
@@ -48,13 +51,65 @@ pub struct ExporterOptions {
     pub stdout: Option<HashMap<String, StdoutExporterOptions>>,
 }
 
-impl Default for ExporterOptions {
-    fn default() -> Self {
-        Self {
-            otlp: None,
-            stdout: None,
-        }
+pub fn resolve_exporters(
+    exporter_refs: ExporterReferences,
+    exporter_opts: &ExporterOptions,
+) -> Result<(Vec<OtlpExporterOptions>, Vec<StdoutExporterOptions>), anyhow::Error> {
+    if exporter_refs.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
     }
+
+    let enabled_exporters = exporter_refs.parse().map_err(|e| anyhow::anyhow!(e))?;
+
+    let mut otlp_exporters: Vec<OtlpExporterOptions> = Vec::new();
+    let mut stdout_exporters: Vec<StdoutExporterOptions> = Vec::new();
+
+    enabled_exporters
+    .iter()
+    .try_for_each(|exporter_ref| -> Result<(), anyhow::Error> {
+        match exporter_ref.type_.as_str() {
+            "otlp" => {
+                if let Some(otlp_opts_map) = &exporter_opts.otlp {
+                    if let Some(otlp_opts) = otlp_opts_map.get(&exporter_ref.name) {
+                        otlp_exporters.push(otlp_opts.clone());
+                    } else {
+                        return Err(anyhow::anyhow!(
+                            "otlp exporter '{}' referenced in agent config but not found in exporter config",
+                            exporter_ref.name
+                        ));
+                    }
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "otlp exporter '{}' referenced in agent config but no otlp exporters configured",
+                        exporter_ref.name
+                    ));
+                }
+            }
+            "stdout" => {
+                if let Some(stdout_opts_map) = &exporter_opts.stdout {
+                    if let Some(stdout_opts) = stdout_opts_map.get(&exporter_ref.name) {
+                        stdout_exporters.push(stdout_opts.clone());
+                    } else {
+                        return Err(anyhow::anyhow!(
+                            "stdout exporter '{}' referenced in agent config but not found in exporter config",
+                            exporter_ref.name
+                        ));
+                    }
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "stdout exporter '{}' referenced in agent config but no stdout exporters configured",
+                        exporter_ref.name
+                    ));
+                }
+            }
+            _ => {
+                return Err(anyhow::anyhow!("unsupported exporter type: {}", exporter_ref.type_));
+            }
+        }
+        Ok(())
+    })?;
+
+    Ok((otlp_exporters, stdout_exporters))
 }
 
 /// Configuration options for an individual OTLP (OpenTelemetry Protocol) exporter instance.
@@ -94,8 +149,12 @@ impl Default for ExporterOptions {
 /// - `tls`: Optional TLS configuration for secure communication.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct OtlpExporterOptions {
+    #[serde(default = "defaults::address")]
     pub address: String,
+    #[serde(default = "defaults::port")]
     pub port: u16,
+    #[serde(default = "defaults::protocol", with = "exporter_protocol")]
+    pub protocol: ExporterProtocol,
     pub auth: Option<AuthOptions>,
     pub tls: Option<TlsOptions>,
 }
@@ -215,16 +274,49 @@ impl OtlpExporterOptions {
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum ExporterProtocol {
     Grpc,
-    HttpProto,
+    HttpBinary,
+}
+
+impl serde::Serialize for ExporterProtocol {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let s = match self {
+            ExporterProtocol::Grpc => "grpc",
+            ExporterProtocol::HttpBinary => "http_binary",
+        };
+        serializer.serialize_str(s)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ExporterProtocol {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(ExporterProtocol::from(s))
+    }
 }
 
 impl From<ExporterProtocol> for Protocol {
     fn from(val: ExporterProtocol) -> Self {
         match val {
             ExporterProtocol::Grpc => Protocol::Grpc,
-            ExporterProtocol::HttpProto => Protocol::HttpBinary,
+            ExporterProtocol::HttpBinary => Protocol::HttpBinary,
+        }
+    }
+}
+
+impl std::fmt::Display for ExporterProtocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExporterProtocol::Grpc => write!(f, "grpc"),
+            ExporterProtocol::HttpBinary => write!(f, "http_binary"),
         }
     }
 }
@@ -233,7 +325,7 @@ impl From<String> for ExporterProtocol {
     fn from(value: String) -> Self {
         match value.to_lowercase().as_str() {
             "grpc" => ExporterProtocol::Grpc,
-            "http_proto" => ExporterProtocol::HttpProto,
+            "http_binary" => ExporterProtocol::HttpBinary,
             _ => ExporterProtocol::Grpc,
         }
     }
@@ -332,6 +424,17 @@ impl Default for SpanOptions {
 mod defaults {
     use std::time::Duration;
 
+    use crate::otlp::opts::ExporterProtocol;
+
+    pub fn address() -> String {
+        "localhost".to_string()
+    }
+    pub fn port() -> u16 {
+        4317
+    }
+    pub fn protocol() -> ExporterProtocol {
+        ExporterProtocol::Grpc
+    }
     pub fn max_batch_size() -> usize {
         64
     }
@@ -358,5 +461,50 @@ mod defaults {
     }
     pub fn udp_timeout() -> Duration {
         Duration::from_secs(60)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json;
+
+    use super::*;
+
+    #[test]
+    fn test_exporter_protocol_serialization() {
+        // Test Grpc variant
+        let grpc = ExporterProtocol::Grpc;
+        let serialized = serde_json::to_string(&grpc).unwrap();
+        assert_eq!(serialized, "\"grpc\"");
+
+        // Test HttpBinary variant
+        let http_binary = ExporterProtocol::HttpBinary;
+        let serialized = serde_json::to_string(&http_binary).unwrap();
+        assert_eq!(serialized, "\"http_binary\"");
+    }
+
+    #[test]
+    fn test_exporter_protocol_deserialization() {
+        // Test grpc string
+        let deserialized: ExporterProtocol = serde_json::from_str("\"grpc\"").unwrap();
+        assert!(matches!(deserialized, ExporterProtocol::Grpc));
+
+        // Test http_binary string
+        let deserialized: ExporterProtocol = serde_json::from_str("\"http_binary\"").unwrap();
+        assert!(matches!(deserialized, ExporterProtocol::HttpBinary));
+
+        // Test case insensitive
+        let deserialized: ExporterProtocol = serde_json::from_str("\"GRPC\"").unwrap();
+        assert!(matches!(deserialized, ExporterProtocol::Grpc));
+
+        // Test invalid value defaults to Grpc
+        let deserialized: ExporterProtocol = serde_json::from_str("\"invalid\"").unwrap();
+        assert!(matches!(deserialized, ExporterProtocol::Grpc));
+    }
+
+    #[test]
+    fn test_exporter_protocol_display() {
+        assert_eq!(ExporterProtocol::Grpc.to_string(), "grpc");
+        assert_eq!(ExporterProtocol::HttpBinary.to_string(), "http_binary");
     }
 }

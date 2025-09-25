@@ -45,7 +45,6 @@ agent:
   traces:
     main:
       exporters:
-        - exporter.otlp.main
         - exporter.stdout.json
 
 # Exporter configuration
