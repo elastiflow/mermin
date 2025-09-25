@@ -96,14 +96,14 @@ The following symbols are used in the "Required" column to indicate [OpenTelemet
 
 | Proposed Field Name          | Data Type | Description                                                               | Notes / Decisions                                        | Std OTel | Required |
 |:-----------------------------|:----------|:--------------------------------------------------------------------------|:---------------------------------------------------------|:---------|:---------|
-| `flow.bytes.total`           | `long`    | Total number of bytes observed for this flow since its start.             | The term `bytes` is preferred over `octets` for clarity. |          | ~        |
 | `flow.bytes.delta`           | `long`    | Number of bytes observed in the last measurement interval for the flow.   |                                                          |          | ✓        |
-| `flow.packets.total`         | `long`    | Total number of packets observed for this flow since its start.           |                                                          |          | ~        |
+| `flow.bytes.total`           | `long`    | Total number of bytes observed for this flow since its start.             | The term `bytes` is preferred over `octets` for clarity. |          | ~        |
 | `flow.packets.delta`         | `long`    | Number of packets observed in the last measurement interval for the flow. |                                                          |          | ✓        |
-| `flow.reverse.bytes.total`   | `long`    | Total bytes in the reverse direction of the flow since its start.         |                                                          |          | ✓        |
+| `flow.packets.total`         | `long`    | Total number of packets observed for this flow since its start.           |                                                          |          | ~        |
 | `flow.reverse.bytes.delta`   | `long`    | Delta bytes in the reverse direction of the flow.                         |                                                          |          | ✓        |
-| `flow.reverse.packets.total` | `long`    | Total packets in the reverse direction of the flow since its start.       |                                                          |          | ✓        |
+| `flow.reverse.bytes.total`   | `long`    | Total bytes in the reverse direction of the flow since its start.         |                                                          |          | ~        |
 | `flow.reverse.packets.delta` | `long`    | Delta packets in the reverse direction of the flow.                       |                                                          |          | ✓        |
+| `flow.reverse.packets.total` | `long`    | Total packets in the reverse direction of the flow since its start.       |                                                          |          | ~        |
 
 ### Performance Metrics
 
