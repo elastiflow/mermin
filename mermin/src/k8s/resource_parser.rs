@@ -10,6 +10,13 @@ use crate::{
     runtime::conf::{K8sDiscoveryOptions, K8sSelectorOptions},
 };
 
+/// Result of enriching a pod/IP with Kubernetes metadata, including the derived namespace
+#[derive(Debug)]
+struct EnrichmentResult {
+    attribution: Option<AttributionInfo>,
+    namespace: Option<String>,
+}
+
 #[derive(Debug)]
 pub struct NetworkPolicy {
     pub policy: K8sObjectMeta,
@@ -57,26 +64,42 @@ impl<'a> SpanAttributor<'a> {
         flow_span: &FlowSpan,
         discovery_opts: &K8sDiscoveryOptions,
     ) -> Result<FlowSpan> {
-        // Create FlowContext directly for both directions
-        let namespace = "default"; // TODO: This should be configurable or derived from context
-        let ctx = FlowContext::from_flow_span(flow_span, self.attributor, namespace).await;
+        // Create initial FlowContext with default namespace to get pod information
+        let initial_namespace = "default";
+        let initial_ctx =
+            FlowContext::from_flow_span(flow_span, self.attributor, initial_namespace).await;
 
-        // Resolve source and destination IPs to Kubernetes resources and evaluate policies
-        let src_attribution: Option<AttributionInfo> =
-            self.enrich(&ctx.src_pod, ctx.src_ip, discovery_opts).await;
-        let dst_attribution = self.enrich(&ctx.dst_pod, ctx.dst_ip, discovery_opts).await;
+        // Resolve source attribution first to derive the correct namespace
+        let src_enrichment = self
+            .enrich(&initial_ctx.src_pod, initial_ctx.src_ip, discovery_opts)
+            .await;
+
+        // Use namespace from src_enrichment, fallback to default
+        let namespace = if let Some(ns) = src_enrichment.namespace {
+            ns
+        } else {
+            "default".to_string()
+        };
+
+        // Create final FlowContext with the derived namespace
+        let ctx = FlowContext::from_flow_attrs(flow_attrs, self.attributor, &namespace).await;
+
+        // Resolve destination attribution with the correct context
+        let dst_enrichment = self.enrich(&ctx.dst_pod, ctx.dst_ip, discovery_opts).await;
+        // Update namespace in ctx here as evaluate_flow_policies uses the namespace from the flow attributes
+
         let (ingress_policies, egress_policies) = self.evaluate_flow_policies(&ctx).await?;
 
         // Clone the original flow attributes and populate with Kubernetes metadata
         let mut attributed_flow = flow_span.clone();
 
         // Populate source Kubernetes attributes
-        if let Some(src_info) = &src_attribution {
+        if let Some(src_info) = &src_enrichment.attribution {
             self.populate_k8s_attributes(&mut attributed_flow, src_info, true);
         }
 
         // Populate destination Kubernetes attributes
-        if let Some(dst_info) = &dst_attribution {
+        if let Some(dst_info) = &dst_enrichment.attribution {
             self.populate_k8s_attributes(&mut attributed_flow, dst_info, false);
         }
 
@@ -88,12 +111,13 @@ impl<'a> SpanAttributor<'a> {
 
     /// Resolves a pod and IP address to Kubernetes resource attribution information.
     /// Returns Pod attribution if available, otherwise attempts IP-based fallback resolution.
+    /// Also extracts the namespace from the owner if available, otherwise uses the pod's namespace.
     async fn enrich(
         &self,
         pod: &Option<Pod>,
         ip: IpAddr,
         discovery_opts: &K8sDiscoveryOptions,
-    ) -> Option<AttributionInfo> {
+    ) -> EnrichmentResult {
         if let Some(pod) = pod {
             let pod_meta = K8sObjectMeta::from(pod);
             let max_depth = discovery_opts
@@ -104,19 +128,56 @@ impl<'a> SpanAttributor<'a> {
             let owner = self.attributor.get_top_level_controller(pod, max_depth);
 
             info!("pod owner: {:?}", owner);
+
+            // Extract namespace from owner if available, otherwise use pod's namespace
+            let namespace = if let Some(ref workload_owner) = owner {
+                match workload_owner {
+                    WorkloadOwner::ReplicaSet(meta) => meta.namespace.clone(),
+                    WorkloadOwner::Deployment(meta) => meta.namespace.clone(),
+                    WorkloadOwner::StatefulSet(meta) => meta.namespace.clone(),
+                    WorkloadOwner::DaemonSet(meta) => meta.namespace.clone(),
+                    WorkloadOwner::Job(meta) => meta.namespace.clone(),
+                }
+            } else {
+                pod_meta.namespace.clone()
+            };
+
             // Apply k8s_selector config to determine if this pod should be enriched
             if let Some(selector_opts) = discovery_opts.k8s_selector.get("main") {
                 info!("selector options: {:?}", selector_opts);
                 if !self.should_enrich(&pod_meta, selector_opts) {
-                    return None;
+                    return EnrichmentResult {
+                        attribution: None,
+                        namespace: None,
+                    };
                 }
             }
-            Some(AttributionInfo::Pod {
-                pod: pod_meta,
-                owner,
-            })
+
+            EnrichmentResult {
+                attribution: Some(AttributionInfo::Pod {
+                    pod: pod_meta,
+                    owner,
+                }),
+                namespace,
+            }
         } else {
-            self.enrich_ip_fallback(ip).await
+            let attribution = self.enrich_ip_fallback(ip).await;
+            // Extract namespace from IP fallback AttributionInfo if available
+            let namespace = if let Some(ref attr_info) = attribution {
+                match attr_info {
+                    AttributionInfo::Node { node } => node.namespace.clone(),
+                    AttributionInfo::Service { service, .. } => service.namespace.clone(),
+                    AttributionInfo::EndpointSlice { slice } => slice.namespace.clone(),
+                    AttributionInfo::Pod { .. } => None, // This shouldn't happen in IP fallback
+                }
+            } else {
+                None
+            };
+
+            EnrichmentResult {
+                attribution,
+                namespace,
+            }
         }
     }
 
