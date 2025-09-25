@@ -11,7 +11,14 @@ The core concept of this proposal is to represent each network flow record as a 
 Each network flow record is represented as a single OpenTelemetry **Span**. This "flow span" has the following key characteristics:
 
 * **Span Name**: To clearly distinguish flow spans from application spans, the name SHOULD follow the format `flow_<network.type>_<network.transport>`. For example, a typical TCP flow over IPv4 would be named flow_ipv4_tcp.
-* **Span Kind**: The Span Kind MUST be `INTERNAL`. This signifies that the flow is an internal operation within the network infrastructure and does not represent the beginning or end of a request from the perspective of an instrumented application.
+* **Span Kind**: The Span Kind MUST be `CLIENT`, `SERVER`, or `INTERNAL`. Using `CLIENT` or `SERVER` provides crucial directional context that the generic `INTERNAL` kind lacks, eliminating the need for separate attributes like `flow.initiator: source/destination` or `flow.biflow_direction: initiator/reverseInitiator`.
+  * `CLIENT`: Represents the perspective of the connection initiator. An agent infers this when observing an outbound connection that originates from an ephemeral (non-listening) port or through protocol-specific logic.
+    * **Example (TCP)**: A host sends a packet from an ephemeral source port (e.g., 54211) to a destination service port (e.g., 443).
+    * **Example (ICMP)**: A host sends an ICMP "Echo Request" packet.
+  * `SERVER`: Represents the perspective of the connection receiver. An agent infers this when observing an inbound connection directed to a port that a local process is actively listening on.
+    * **Example (TCP)**: A host sends a packet from a source port that it is also a listening port (e.g., 443) to an ephemeral destination port (e.g., 54211).
+    * **Example (ICMP)**: A host sends an ICMP "Echo Reply" packet.
+  * `INTERNAL`: Used as a fallback when the client/server relationship cannot be determined.
 
 ### Attribute Namespaces
 
@@ -51,12 +58,11 @@ The following symbols are used in the "Required" column to indicate [OpenTelemet
 
 ### General Flow Attributes
 
-> Note on Timestamps: The span's standard `start_time` and `end_time` fields are used to mark the beginning and end of the flow span's observation window. These are analogous to the `flowStart*` and `flowEnd*` fields in IPFIX records and are not duplicated as attributes.
+> Note on Timestamps: The span's standard `start_time_unix_nano` and `end_time_unix_nano` fields are used to mark the beginning and end of the flow span's observation window. These are analogous to the `flowStart*` and `flowEnd*` fields in IPFIX records and are not duplicated as attributes.
 
 | Proposed Field Name     | Data Type | Description                                                                               | Notes / Decisions                                                                                                                           | Std OTel | Required   |
 |:------------------------|:----------|:------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------|:---------|:-----------|
 | `flow.community_id`     | `string`  | The Community ID hash of the flow's five-tuple.                                           | A common way to identify a network flow across different monitoring points.                                                                 |          | ✓          |
-| `flow.initiator`        | `string`  | Indicates which side of the flow initiated the connection.                                | Enum values: `source`, `destination`. This is modeled after biflowDirection in IANA.                                                        |          | ✓          |
 | `flow.connection.state` | `string`  | The state of the connection (e.g., TCP state) at the time the flow was generated.         | For TCP, this would be one of the standard states like `established`, `time_wait`, etc.                                                     |          | ? TCP only |
 | `flow.end_reason`       | `string`  | The reason the flow record was exported (e.g., `active_timeout`, `end_of_flow_detected`). | Stored as a human-readable text enum based on [ipfix end reason](https://www.iana.org/assignments/ipfix/ipfix.xhtml#ipfix-flow-end-reason). |          | ✓          |
 
@@ -133,8 +139,8 @@ Time-based metrics calculated for the flow, stored in nanoseconds (`ns`).
 
 ### Kubernetes & Application Attributes
 
-| Proposed Field Name                | Data Type  | Description                                                             | Notes / Decisions                                               | Std OTel | Required |
-|:-----------------------------------|:-----------|:------------------------------------------------------------------------|-----------------------------------------------------------------|:---------|:---------|
+| Proposed Field Name                | Data Type  | Description                                                             | Notes / Decisions                          | Std OTel | Required |
+|:-----------------------------------|:-----------|:------------------------------------------------------------------------|--------------------------------------------|:---------|:---------|
 | `source.k8s.cluster.name`          | `string`   | The name of the Kubernetes cluster for the source.                      |                                            | ✓        | ○        |
 | `source.k8s.namespace.name`        | `string`   | The name of the Kubernetes Namespace for the source.                    |                                            | ✓        | ○        |
 | `source.k8s.node.name`             | `string`   | The name of the Kubernetes Node for the source.                         |                                            | ✓        | ○        |
