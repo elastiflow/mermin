@@ -5,6 +5,7 @@ use dashmap::DashMap;
 use fxhash::FxBuildHasher;
 use mermin_common::PacketMeta;
 use network_types::{eth::EtherType, ip::IpProto};
+use serde::Serialize;
 use tokio::sync::mpsc;
 use tracing::{Span, info_span};
 
@@ -24,7 +25,7 @@ pub trait FlowAttributesExporter: Send + Sync {
 // TODO: Draw inspiration from the following:
 // - https://opentelemetry.io/docs/specs/semconv/system/system-metrics/#network-metrics
 // - https://opentelemetry.io/docs/specs/semconv/registry/attributes/network/
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct FlowAttributes {
     pub community_id: String,
 
@@ -39,7 +40,9 @@ pub struct FlowAttributes {
     pub source_port: u16,
     pub destination_address: IpAddr,
     pub destination_port: u16,
+    #[serde(serialize_with = "serialize_ip_proto")]
     pub network_transport: IpProto,
+    #[serde(serialize_with = "serialize_ether_type")]
     pub network_type: EtherType,
 
     // Tunnel
@@ -48,7 +51,9 @@ pub struct FlowAttributes {
     pub tunnel_source_port: u16,
     pub tunnel_destination_address: IpAddr,
     pub tunnel_destination_port: u16,
+    #[serde(serialize_with = "serialize_ip_proto")]
     pub tunnel_network_transport: IpProto,
+    #[serde(serialize_with = "serialize_ether_type")]
     pub tunnel_network_type: EtherType,
 
     // Source Kubernetes attributes
@@ -110,6 +115,21 @@ pub struct FlowAttributes {
     // pub flow_end_reason: u8,
     // // Implicit padding (2 bytes) is added here by the compiler to ensure
     // // the total struct size (88 bytes) is a multiple of the maximum alignment (8 bytes).
+}
+
+// Helpers to serialize the IP protocol and EtherType which do not natively implement Serialize
+fn serialize_ip_proto<S>(proto: &IpProto, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&proto.to_string())
+}
+
+fn serialize_ether_type<S>(ether_type: &EtherType, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(ether_type.as_str())
 }
 
 impl Traceable for FlowAttributes {

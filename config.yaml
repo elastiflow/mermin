@@ -11,6 +11,11 @@ log_level: debug
 # Automatic configuration reloading
 auto_reload: false
 
+# Pipeline configuration
+packet_channel_capacity: 1024
+packet_worker_count: 2
+shutdown_timeout: 5s
+
 # API server configuration (health endpoints)
 api:
   enabled: true
@@ -23,12 +28,7 @@ metrics:
   listen_address: "0.0.0.0"
   port: 10250
 
-# Pipeline configuration
-packet_channel_capacity: 1024
-packet_worker_count: 2
-shutdown_timeout: 5s
-
-# Span/Flow configuration
+# Flow Span configuration
 span:
   max_batch_size: 64
   max_batch_interval: 5s
@@ -40,13 +40,29 @@ span:
   tcp_rst_timeout: 5s
   udp_timeout: 60s
 
+# Specify which exporters are enabled
+agent:
+  traces:
+    main:
+      exporters:
+        - exporter.stdout.console
+
 # Exporter configuration
 exporter:
-  # Enable stdout exporter for local development and testing
-  stdout_enabled: true
-
-  # OTLP exporter configuration (disabled by default)
-  otlp_enabled: false
-  otlp_endpoint: "http://host.docker.internal:4317"
-  otlp_timeout_seconds: 3
-  otlp_protocol: "grpc"
+  otlp:
+    main:
+      address: example.com
+      auth:
+        basic:
+          pass: "${PASSWORD}"
+          user: USERNAME
+      port: 4317
+      tls:
+        ca_cert: /etc/certs/ca.crt
+        client_cert: /etc/certs/cert.crt
+        client_key: /etc/certs/cert.key
+        enabled: true
+        insecure: false
+  stdout:
+    console:
+      format: full

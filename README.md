@@ -100,25 +100,25 @@ The build script automatically compiles the eBPF program and embeds it into the 
 
 #### 2. Configuration File
 
-A default configuration file `mermin.yaml` is provided in the project root. This file contains sensible defaults for local development, including:
+A default configuration file `config.yaml` is provided in the project root. This file contains sensible defaults for local development, including:
 
 * **Stdout exporter enabled**: Flow data will be printed to the console for easy debugging
 * **OTLP exporter disabled**: External telemetry endpoints are disabled by default
 * **Default interfaces**: Monitors `eth0` by default
 * **Logging**: Set to `info` level
 
-You can customize the configuration by editing `mermin.yaml` or creating your own configuration file. The configuration supports YAML format and includes comprehensive documentation for all available options.
+You can customize the configuration by editing `config.yaml` or creating your own configuration file. The configuration supports YAML format and includes comprehensive documentation for all available options.
 
 #### 3. Run the agent
 
-Running the eBPF agent requires elevated privileges. A default configuration file `mermin.yaml` is provided in the project root with the stdout exporter enabled for local development.
+Running the eBPF agent requires elevated privileges. A default configuration file `config.yaml` is provided in the project root with the stdout exporter enabled for local development.
 
 ```shell
-cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config mermin.yaml
+cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config config.yaml
 ```
 
 > The `sudo -E` command runs the program as root while preserving the user's environment variables, which is
-> necessary for `cargo` to find the correct binary. The `--config mermin.yaml` flag loads the default configuration file with stdout exporter enabled.
+> necessary for `cargo` to find the correct binary. The `--config config.yaml` flag loads the default configuration file with stdout exporter enabled.
 
 #### 4. Generate Traffic
 
