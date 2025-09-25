@@ -57,7 +57,7 @@ exporter:
         basic:
           pass: env("USER_SPECIFIED_ENV_VAR_TRITON_PASS")
           user: foo
-      port: 443
+      port: 4317
       tls:
         ca_cert: /etc/certs/ca.crt
         client_cert: /etc/certs/cert.crt
@@ -69,4 +69,3 @@ exporter:
       format: full
     console:
       format: compact
-

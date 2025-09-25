@@ -1,4 +1,5 @@
 use anyhow::Result;
+use stdout::StdoutExporter;
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -7,188 +8,32 @@ use crate::{
         opts::{ExporterOptions, OtlpExporterOptions, StdoutExporterOptions},
         trace::lib::{TraceExporterAdapter, init_tracer_provider},
     },
+    runtime::conf::{ExporterReferences, ExporterReferencesParser},
 };
 
-pub mod stdout;
-use stdout::StdoutExporter;
-
-/// Represents a parsed exporter reference from the agent configuration.
-/// Example: "exporter.otlp.main" -> ExporterRef { exporter_type: "otlp", name: "main" }
-#[derive(Debug, Clone, PartialEq)]
-pub struct ExporterRef {
-    pub exporter_type: String,
-    pub name: String,
-}
-
-/// Parses an exporter reference string into its components.
-///
-/// # Arguments
-/// * `reference` - The exporter reference string (e.g., "exporter.otlp.main")
-///
-/// # Returns
-/// * `Result<ExporterRef>` - The parsed exporter reference or an error if parsing fails
-///
-/// # Examples
-/// ```
-/// let ref_str = "exporter.otlp.main";
-/// let exporter_ref = parse_exporter_reference(ref_str).unwrap();
-/// assert_eq!(exporter_ref.exporter_type, "otlp");
-/// assert_eq!(exporter_ref.name, "main");
-/// ```
-pub fn parse_exporter_reference(reference: &str) -> Result<ExporterRef, String> {
-    // Expected format: "exporter.<type>.<name>"
-    // Example: "exporter.otlp.main" or "exporter.stdout.json"
-
-    let parts: Vec<&str> = reference.split('.').collect();
-
-    if parts.len() != 3 {
-        return Err(format!(
-            "Invalid exporter reference format: '{reference}'. Expected format: 'exporter.<type>.<name>'"
-        ));
-    }
-
-    if parts[0] != "exporter" {
-        return Err(format!(
-            "Invalid exporter reference: '{reference}'. Must start with 'exporter.'"
-        ));
-    }
-
-    let exporter_type = parts[1].to_string();
-    let name = parts[2].to_string();
-
-    // Validate exporter type
-    match exporter_type.as_str() {
-        "otlp" | "stdout" => {
-            // Valid exporter types
-        }
-        _ => {
-            return Err(format!(
-                "Unsupported exporter type: '{exporter_type}'. Supported types: otlp, stdout"
-            ));
-        }
-    }
-
-    Ok(ExporterRef {
-        exporter_type,
-        name,
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_exporter_reference_valid() {
-        let result = parse_exporter_reference("exporter.otlp.main").unwrap();
-        assert_eq!(result.exporter_type, "otlp");
-        assert_eq!(result.name, "main");
-
-        let result = parse_exporter_reference("exporter.stdout.json").unwrap();
-        assert_eq!(result.exporter_type, "stdout");
-        assert_eq!(result.name, "json");
-    }
-
-    #[test]
-    fn test_parse_exporter_reference_invalid_format() {
-        let result = parse_exporter_reference("invalid.format");
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("Invalid exporter reference format")
-        );
-
-        let result = parse_exporter_reference("exporter.otlp");
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("Invalid exporter reference format")
-        );
-
-        let result = parse_exporter_reference("exporter.otlp.main.extra");
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("Invalid exporter reference format")
-        );
-    }
-
-    #[test]
-    fn test_parse_exporter_reference_invalid_prefix() {
-        let result = parse_exporter_reference("invalid.otlp.main");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Must start with 'exporter.'"));
-    }
-
-    #[test]
-    fn test_parse_exporter_reference_unsupported_type() {
-        let result = parse_exporter_reference("exporter.invalid.main");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Unsupported exporter type"));
-    }
-}
-
-pub struct ExporterManager {
+pub struct ExporterResolver {
     exporters: Vec<Box<dyn FlowAttributesExporter>>,
 }
 
-impl ExporterManager {
+impl ExporterResolver {
     pub async fn new(
-        agent_config: Option<&crate::runtime::conf::AgentOptions>,
+        exporter_refs: ExporterReferences,
         exporter_config: &ExporterOptions,
         log_level: tracing::Level,
     ) -> Result<Self, anyhow::Error> {
-        let mut exporters: Vec<Box<dyn FlowAttributesExporter>> = Vec::new();
+        if exporter_refs.is_empty() {
+            warn!("no exporters enabled in agent configuration");
+            return Ok(Self {
+                exporters: Vec::new(),
+            });
+        }
 
-        // If no agent config is provided, fall back to creating all available exporters
-        let enabled_exporters = if let Some(agent_config) = agent_config {
-            // Parse exporter references from agent configuration
-            let mut enabled_refs = Vec::new();
-            for exporter_ref_str in &agent_config.traces.main.exporters {
-                match parse_exporter_reference(exporter_ref_str) {
-                    Ok(exporter_ref) => {
-                        enabled_refs.push(exporter_ref);
-                        debug!("parsed enabled exporter: {}", exporter_ref_str);
-                    }
-                    Err(e) => {
-                        error!(
-                            "failed to parse exporter reference '{}': {}",
-                            exporter_ref_str, e
-                        );
-                        warn!("skipping invalid exporter reference: {}", exporter_ref_str);
-                    }
-                }
-            }
-            enabled_refs
-        } else {
-            warn!("no agent configuration provided - initializing all available exporters");
-            // Fallback: create all available exporters
-            let mut all_refs = Vec::new();
-            if let Some(otlp_configs) = &exporter_config.otlp {
-                for name in otlp_configs.keys() {
-                    all_refs.push(ExporterRef {
-                        exporter_type: "otlp".to_string(),
-                        name: name.clone(),
-                    });
-                }
-            }
-            if let Some(stdout_configs) = &exporter_config.stdout {
-                for name in stdout_configs.keys() {
-                    all_refs.push(ExporterRef {
-                        exporter_type: "stdout".to_string(),
-                        name: name.clone(),
-                    });
-                }
-            }
-            all_refs
-        };
+        let enabled_exporters = exporter_refs.parse().map_err(|e| anyhow::anyhow!(e))?;
+        let mut exporters: Vec<Box<dyn FlowAttributesExporter>> = Vec::new();
 
         // Initialize only the enabled exporters
         for exporter_ref in enabled_exporters {
-            match exporter_ref.exporter_type.as_str() {
+            match exporter_ref.type_.as_str() {
                 "otlp" => {
                     if let Some(otlp_configs) = &exporter_config.otlp {
                         if let Some(otlp_config) = otlp_configs.get(&exporter_ref.name) {
@@ -252,7 +97,7 @@ impl ExporterManager {
                     }
                 }
                 _ => {
-                    error!("unsupported exporter type: {}", exporter_ref.exporter_type);
+                    error!("unsupported exporter type: {}", exporter_ref.type_);
                 }
             }
         }

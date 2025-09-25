@@ -24,7 +24,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     community_id::CommunityIdGenerator,
-    exporters::ExporterManager,
+    exporters::ExporterResolver,
     flow::FlowAttributesProducer,
     health::{HealthState, start_api_server},
     k8s::resource_parser::attribute_flow_attrs,
@@ -80,7 +80,8 @@ async fn main() -> Result<()> {
     let exporter_manager = if let Some(exporter_config) = &config.exporter {
         let exporter_count = count_exporters(exporter_config);
         info!("initializing {} exporters", exporter_count);
-        match ExporterManager::new(config.agent.as_ref(), exporter_config, config.log_level).await {
+        match ExporterResolver::new(config.agent.as_ref(), exporter_config, config.log_level).await
+        {
             Ok(manager) => Some(manager),
             Err(e) => {
                 error!("failed to initialize exporters: {e}");

@@ -48,6 +48,15 @@ pub struct ExporterOptions {
     pub stdout: Option<HashMap<String, StdoutExporterOptions>>,
 }
 
+impl Default for ExporterOptions {
+    fn default() -> Self {
+        Self {
+            otlp: None,
+            stdout: None,
+        }
+    }
+}
+
 /// Configuration options for an individual OTLP (OpenTelemetry Protocol) exporter instance.
 ///
 /// This struct defines all the necessary parameters to configure an OTLP exporter,
@@ -108,6 +117,7 @@ pub struct OtlpExporterOptions {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct StdoutExporterOptions {
     /// The output format for the exporter (e.g., "full", "compact", "json", etc.).
+    /// Note: Only "full" is supported.
     pub format: String,
 }
 
@@ -181,17 +191,6 @@ pub struct TlsOptions {
     pub client_key: Option<String>,
 }
 
-// TODO: Implement environment variable substitution for authentication credentials - ENG-120
-// This function should handle patterns like env("VAR_NAME") and replace them with actual env values
-pub fn resolve_env_vars(value: &str) -> Result<String, String> {
-    if value.starts_with("env(") && value.ends_with(')') {
-        let env_var = &value[4..value.len() - 1]; // Remove "env(" and ")"
-        std::env::var(env_var).map_err(|_| format!("Environment variable '{env_var}' not found"))
-    } else {
-        Ok(value.to_string())
-    }
-}
-
 impl AuthOptions {
     // TODO: Implement authentication header generation for OTLP exporters - ENG-120
     // This should create appropriate headers based on the auth configuration
@@ -199,10 +198,8 @@ impl AuthOptions {
         let mut headers = HashMap::new();
 
         if let Some(basic) = &self.basic {
-            let resolved_user = resolve_env_vars(&basic.user)?;
-            let resolved_pass = resolve_env_vars(&basic.pass)?;
             let credentials =
-                general_purpose::STANDARD.encode(format!("{resolved_user}:{resolved_pass}"));
+                general_purpose::STANDARD.encode(format!("{}:{}", basic.user, basic.pass));
             headers.insert("Authorization".to_string(), format!("Basic {credentials}"));
         }
 
@@ -213,7 +210,6 @@ impl AuthOptions {
 }
 
 impl OtlpExporterOptions {
-    // Helper function to build endpoint URL from address and port
     pub fn build_endpoint(&self) -> String {
         format!("{}:{}", self.address, self.port)
     }

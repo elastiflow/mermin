@@ -61,7 +61,7 @@ impl Default for MetricsConf {
     }
 }
 
-/// Top-level agent configuration specifying which telemetry pipelines and exporters are enabled.
+/// Top-level agent configuration specifying which telemetry features are enabled.
 ///
 /// The `AgentOptions` struct defines the agent's telemetry pipeline configuration,
 /// mapping logical telemetry types (such as traces) to their respective pipeline settings.
@@ -85,8 +85,15 @@ impl Default for MetricsConf {
 /// ```
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AgentOptions {
-    /// Configuration for the traces telemetry pipeline, including enabled exporters.
     pub traces: TracesOptions,
+}
+
+impl Default for AgentOptions {
+    fn default() -> Self {
+        Self {
+            traces: TracesOptions::default(),
+        }
+    }
 }
 
 /// Configuration options for the traces telemetry pipeline.
@@ -96,31 +103,65 @@ pub struct AgentOptions {
 /// trace data. Each pipeline is represented as a field (currently only `main` is
 /// supported), and contains its own configuration, including the list of exporters
 /// to which trace data should be sent.
-///
-/// This struct is deserialized from the `agent.traces` section of the
-/// application's configuration file. Exporter references listed in each pipeline
-/// must correspond to exporter definitions in the `exporter` section of the config.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TracesOptions {
-    /// The main traces pipeline configuration, specifying enabled exporters.
     pub main: MainTraceOptions,
 }
 
+impl Default for TracesOptions {
+    fn default() -> Self {
+        Self {
+            main: MainTraceOptions::default(),
+        }
+    }
+}
+
 /// Configuration options for the main traces telemetry pipeline.
-///
-/// The `MainTraceOptions` struct specifies which exporters are enabled for the primary
-/// traces pipeline in the agent. It is typically deserialized from the `agent.traces.main`
-/// section of the application's configuration file. The `exporters` field contains a list
-/// of exporter references (such as "exporter.otlp.main" or "exporter.stdout.json"), which
-/// must correspond to exporter definitions in the `exporter` section of the configuration.
-///
-/// This struct enables flexible selection and ordering of exporters for trace data,
-/// allowing trace telemetry to be sent to multiple backends simultaneously.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct MainTraceOptions {
     /// List of exporter references to use for the main traces pipeline.
     /// Each entry should match a key in the `exporter` section of the config.
-    pub exporters: Vec<String>,
+    pub exporters: ExporterReferences,
+}
+
+impl Default for MainTraceOptions {
+    fn default() -> Self {
+        Self {
+            exporters: Vec::new(),
+        }
+    }
+}
+
+pub type ExporterReferences = Vec<String>;
+
+pub trait ExporterReferencesParser {
+    fn parse(&self) -> Result<Vec<ExporterReference>, String>;
+}
+
+impl ExporterReferencesParser for ExporterReferences {
+    fn parse(&self) -> Result<Vec<ExporterReference>, String> {
+        self.iter().map(|reference| {
+            match reference.split('.').collect::<Vec<_>>().as_slice() {
+                ["exporter", type_ @ ("otlp" | "stdout"), name] => Ok(ExporterReference {
+                    type_: type_.to_string(),
+                    name: name.to_string(),
+                }),
+                ["exporter", invalid_type, _] => Err(format!(
+                    "unsupported exporter type: '{invalid_type}' - supported types: otlp, stdout"
+                )),
+                _ => Err(format!(
+                    "invalid format: '{reference}' - expected: 'exporter.<type>.<name>'"
+                )),
+            }
+        }).collect::<Result<Vec<ExporterReference>, String>>()
+    }
+}
+
+/// Represents a parsed exporter reference from the agent configuration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExporterReference {
+    pub type_: String,
+    pub name: String,
 }
 
 /// Represents the configuration for the application, containing settings
@@ -212,7 +253,7 @@ impl Default for Conf {
             packet_worker_count: defaults::flow_workers(),
             shutdown_timeout: defaults::shutdown_timeout(),
             span: SpanOptions::default(),
-            agent: None,
+            agent: AgentOptions::default(),
             exporter: None,
         }
     }
@@ -747,5 +788,45 @@ metrics:
 
             Ok(())
         });
+    }
+
+    #[test]
+    fn test_parse_exporter_reference_valid() {
+        let result = parse_exporter_reference("exporter.otlp.main").unwrap();
+        assert_eq!(result.type_, "otlp");
+        assert_eq!(result.name, "main");
+
+        let result = parse_exporter_reference("exporter.stdout.json").unwrap();
+        assert_eq!(result.type_, "stdout");
+        assert_eq!(result.name, "json");
+    }
+
+    #[test]
+    fn test_parse_exporter_reference_invalid_format() {
+        let result = parse_exporter_reference("invalid.format");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("invalid format"));
+
+        let result = parse_exporter_reference("exporter.otlp");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("invalid format"));
+
+        let result = parse_exporter_reference("exporter.otlp.main.extra");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("invalid format"));
+    }
+
+    #[test]
+    fn test_parse_exporter_reference_invalid_prefix() {
+        let result = parse_exporter_reference("invalid.otlp.main");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("invalid format"));
+    }
+
+    #[test]
+    fn test_parse_exporter_reference_unsupported_type() {
+        let result = parse_exporter_reference("exporter.invalid.main");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unsupported exporter type"));
     }
 }
