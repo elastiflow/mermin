@@ -17,6 +17,7 @@ use aya::{
     programs::{SchedClassifier, TcAttachType, tc},
 };
 use mermin_common::{IpAddrType, PacketMeta};
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use pnet::datalink;
 use tokio::{signal, sync::mpsc};
 use tracing::{debug, error, info, warn};
@@ -27,7 +28,7 @@ use crate::{
     health::{HealthState, start_api_server},
     k8s::resource_parser::attribute_flow_attrs,
     otlp::{
-        opts::{ExporterOptions, OtlpExporterOptions, StdoutExporterOptions, resolve_exporters},
+        opts::{ExporterOptions, resolve_exporters},
         trace::lib::{TraceExporterAdapter, init_tracer_provider},
     },
     runtime::conf::Conf,
@@ -43,72 +44,50 @@ async fn main() -> Result<()> {
     let runtime = runtime::Runtime::new()?;
     let runtime::Runtime { config, .. } = runtime;
 
-    let mut fmt_builder = tracing_subscriber::fmt().with_max_level(config.log_level);
-    match config.log_level {
-        tracing::Level::DEBUG => fmt_builder = fmt_builder.with_file(true).with_line_number(true),
-        tracing::Level::TRACE => {
-            fmt_builder = fmt_builder
-                .with_thread_ids(true)
-                .with_thread_names(true)
-                .with_file(true)
-                .with_line_number(true)
-        }
-        _ => {
-            // default format:
-            // Format {
-            //     format: Full,
-            //     timer: SystemTime,
-            //     ansi: None, // conditionally set based on environment, handled by tracing-subscriber
-            //     display_timestamp: true,
-            //     display_target: true,
-            //     display_level: true,
-            //     display_thread_id: false,
-            //     display_thread_name: false,
-            //     display_filename: false,
-            //     display_line_number: false,
-            // }
-        }
-    }
-    fmt_builder.init();
+    // Resolve exporters and initialize tracing
+    let (exporter, _provider) = match config.agent.as_ref() {
+        Some(agent_opts) => {
+            let default_exporter_opts = ExporterOptions::default();
+            let exporter_opts = config.exporter.as_ref().unwrap_or(&default_exporter_opts);
+            let (otlp_exporters, stdout_exporters) =
+                resolve_exporters(agent_opts.traces.main.exporters.clone(), exporter_opts)
+                    .map_err(|e| anyhow!("failed to resolve exporters: {e}"))?;
 
-    let agent_opts = config
-        .agent
-        .as_ref()
-        .ok_or_else(|| anyhow!("no agent options configured"))?;
-    let exporter_opts = if let Some(opts) = config.exporter.as_ref() {
-        opts
-    } else {
-        warn!("no exporter options configured, continuing without exporters");
-        &ExporterOptions::default()
-    };
+            if !otlp_exporters.is_empty() || !stdout_exporters.is_empty() {
+                info!(
+                    "initializing exporter (otlp: {}, stdout: {})",
+                    otlp_exporters.len(),
+                    stdout_exporters.len()
+                );
 
-    let (otlp_exporters, stdout_exporters) =
-        resolve_exporters(agent_opts.traces.main.exporters.clone(), exporter_opts)
-            .map_err(|e| anyhow!("failed to resolve exporters: {e}"))?;
+                // Initialize tracing with exporters configured
+                let provider = init_tracer_provider(
+                    otlp_exporters.first(),
+                    stdout_exporters.first(),
+                    config.log_level,
+                )
+                .await?;
 
-    let exporter = if !otlp_exporters.is_empty() || !stdout_exporters.is_empty() {
-        info!(
-            "initializing exporter (otlp: {}, stdout: {})",
-            otlp_exporters.len(),
-            stdout_exporters.len()
-        );
-        match create_otlp_exporter(
-            otlp_exporters.first(),
-            stdout_exporters.first(),
-            config.log_level,
-        )
-        .await
-        {
-            Ok(exporter) => Some(exporter),
-            Err(e) => {
-                error!("failed to initialize exporter: {e}");
-                warn!("continuing without exporter");
-                None
+                let exporter = create_otlp_exporter(provider.clone())
+                    .await
+                    .map_err(|e| {
+                        error!("failed to create exporter adapter: {e}");
+                        e
+                    })
+                    .ok();
+
+                (exporter, provider)
+            } else {
+                warn!("no exporters configured in agent options");
+                let provider = init_tracer_provider(None, None, config.log_level).await?;
+                (None, provider)
             }
         }
-    } else {
-        warn!("no exporters configured");
-        None
+        None => {
+            warn!("no agent options configured, continuing without exporters");
+            let provider = init_tracer_provider(None, None, config.log_level).await?;
+            (None, provider)
+        }
     };
 
     let community_id_generator = CommunityIdGenerator::new(0);
@@ -356,17 +335,10 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-// TODO: eng-205 should refactor this because we're overloading the otlp exporter with stdout exporters here and that's not a good idea.
-// TODO: eng-205 should allow for multiple otlp exporters
 async fn create_otlp_exporter(
-    otlp_exporters: Option<&OtlpExporterOptions>,
-    stdout_exporters: Option<&StdoutExporterOptions>,
-    log_level: tracing::Level,
+    provider: SdkTracerProvider,
 ) -> Result<Arc<dyn FlowAttributesExporter>, anyhow::Error> {
     info!("using otlp exporter adapter");
-
-    let provider = init_tracer_provider(otlp_exporters, stdout_exporters, log_level).await?;
-
     let exporter = TraceExporterAdapter::new(provider);
     Ok(Arc::new(exporter))
 }
