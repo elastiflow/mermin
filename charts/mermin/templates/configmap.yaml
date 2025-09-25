@@ -58,12 +58,4 @@ data:
       tcp_fin_timeout: {{ .span.tcp_fin_timeout | default "5s" }}
       tcp_rst_timeout: {{ .span.tcp_rst_timeout | default "5s" }}
       udp_timeout: {{ .span.udp_timeout | default "60s" }}
-
-    # Exporter configuration
-    exporter:
-      stdout_enabled: {{ .exporter.stdout_enabled | default false }}
-      otlp_enabled: {{ .exporter.otlp_enabled | default false }}
-      otlp_endpoint: {{ .exporter.otlp_endpoint | default "http://host.docker.internal:4317" | quote }}
-      otlp_timeout_seconds: {{ .exporter.otlp_timeout_seconds | default 3 }}
-      otlp_protocol: {{ .exporter.otlp_protocol | default "grpc" | quote }}
     {{- end }}

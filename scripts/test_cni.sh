@@ -129,8 +129,13 @@ verify_deployment() {
 verify_agent_logs() {
   echo "Verifying mermin agent logs are enriching data..."
   export NAMESPACE RELEASE_NAME
-  local pods
-  mapfile -t pods < <(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=${RELEASE_NAME}" -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}')
+  local pods=()
+  while IFS= read -r pod_name; do
+    # Add the pod name to the array, but only if it's not an empty line
+    if [[ -n "$pod_name" ]]; then
+      pods+=("$pod_name")
+    fi
+  done < <(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=${RELEASE_NAME}" -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}')
 
   if [ ${#pods[@]} -eq 0 ]; then
     echo "No mermin pods found to test." && exit 1
@@ -140,7 +145,7 @@ verify_agent_logs() {
     (
       local counter=0
       while [ $counter -lt 30 ]; do
-        if grep -q --color=never "network.flow" <(kubectl logs -n "${NAMESPACE}" "$pod" --tail=50); then
+        if grep -q --color=never "community_id" <(kubectl logs -n "${NAMESPACE}" "$pod" --tail=50); then
           exit 0
         fi
         counter=$((counter + 1))
