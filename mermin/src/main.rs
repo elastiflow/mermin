@@ -43,6 +43,34 @@ async fn main() -> Result<()> {
     let runtime = runtime::Runtime::new()?;
     let runtime::Runtime { config, .. } = runtime;
 
+    let mut fmt_builder = tracing_subscriber::fmt().with_max_level(config.log_level);
+    match config.log_level {
+        tracing::Level::DEBUG => fmt_builder = fmt_builder.with_file(true).with_line_number(true),
+        tracing::Level::TRACE => {
+            fmt_builder = fmt_builder
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .with_file(true)
+                .with_line_number(true)
+        }
+        _ => {
+            // default format:
+            // Format {
+            //     format: Full,
+            //     timer: SystemTime,
+            //     ansi: None, // conditionally set based on environment, handled by tracing-subscriber
+            //     display_timestamp: true,
+            //     display_target: true,
+            //     display_level: true,
+            //     display_thread_id: false,
+            //     display_thread_name: false,
+            //     display_filename: false,
+            //     display_line_number: false,
+            // }
+        }
+    }
+    fmt_builder.init();
+
     let agent_opts = config
         .agent
         .as_ref()
