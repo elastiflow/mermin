@@ -45,7 +45,7 @@ agent:
   traces:
     main:
       exporters:
-        - exporter.stdout.json
+        - exporter.stdout.console
 
 # Exporter configuration
 exporter:

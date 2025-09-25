@@ -126,5 +126,6 @@ FROM gcr.io/distroless/cc-debian12:debug AS runner-debug
 ARG APP_ROOT APP
 
 COPY ./config.hcl /etc/mermin/config.hcl
+COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
 COPY --from=builder /usr/bin/bpftool /usr/bin/bpftool
 ENTRYPOINT ["/usr/bin/mermin"]

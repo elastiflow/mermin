@@ -58,3 +58,4 @@ data:
       tcp_fin_timeout: {{ .span.tcp_fin_timeout | default "5s" }}
       tcp_rst_timeout: {{ .span.tcp_rst_timeout | default "5s" }}
       udp_timeout: {{ .span.udp_timeout | default "60s" }}
+    {{- end }}

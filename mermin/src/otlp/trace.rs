@@ -81,6 +81,7 @@ pub mod lib {
         }
     }
 
+    // TODO: ENG-205 should allow for multiple exporters of different types because agent.traces.main.exporters can be a list of exporters.
     pub async fn init_tracer_provider(
         otlp_opts: Option<&OtlpExporterOptions>,
         stdout_opts: Option<&StdoutExporterOptions>,
