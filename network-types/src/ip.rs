@@ -918,6 +918,137 @@ impl core::fmt::Display for IpProto {
     }
 }
 
+/// Protocol which is encapsulated in the IPv4 packet.
+/// <https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml>
+#[repr(u8)]
+#[derive(Default, PartialEq, Eq, Debug, Copy, Clone)]
+pub enum IpDscp {
+    #[default]
+    Df = 0,
+    Cs1 = 8,
+    Af11 = 10,
+    Af12 = 12,
+    Af13 = 14,
+    Cs2 = 16,
+    Af21 = 18,
+    Af22 = 20,
+    Af23 = 22,
+    Cs3 = 24,
+    Af31 = 26,
+    Af32 = 28,
+    Af33 = 30,
+    Cs4 = 32,
+    Af41 = 34,
+    Af42 = 36,
+    Af43 = 38,
+    Cs5 = 40,
+    Voice = 44,
+    Ef = 46,
+    Cs6 = 48,
+    Cs7 = 56,
+}
+
+impl IpDscp {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            IpDscp::Df => "df",
+            IpDscp::Cs1 => "cs1",
+            IpDscp::Af11 => "af11",
+            IpDscp::Af12 => "af12",
+            IpDscp::Af13 => "af13",
+            IpDscp::Cs2 => "cs2",
+            IpDscp::Af21 => "af21",
+            IpDscp::Af22 => "af22",
+            IpDscp::Af23 => "af23",
+            IpDscp::Cs3 => "cs3",
+            IpDscp::Af31 => "af31",
+            IpDscp::Af32 => "af32",
+            IpDscp::Af33 => "af33",
+            IpDscp::Cs4 => "cs4",
+            IpDscp::Af41 => "af41",
+            IpDscp::Af42 => "af42",
+            IpDscp::Af43 => "af43",
+            IpDscp::Cs5 => "cs5",
+            IpDscp::Voice => "voice",
+            IpDscp::Ef => "ef",
+            IpDscp::Cs6 => "cs6",
+            IpDscp::Cs7 => "cs7",
+        }
+    }
+
+    pub fn try_from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(IpDscp::Df),
+            8 => Some(IpDscp::Cs1),
+            10 => Some(IpDscp::Af11),
+            12 => Some(IpDscp::Af12),
+            14 => Some(IpDscp::Af13),
+            16 => Some(IpDscp::Cs2),
+            18 => Some(IpDscp::Af21),
+            20 => Some(IpDscp::Af22),
+            22 => Some(IpDscp::Af23),
+            24 => Some(IpDscp::Cs3),
+            26 => Some(IpDscp::Af31),
+            28 => Some(IpDscp::Af32),
+            30 => Some(IpDscp::Af33),
+            32 => Some(IpDscp::Cs4),
+            34 => Some(IpDscp::Af41),
+            36 => Some(IpDscp::Af42),
+            38 => Some(IpDscp::Af43),
+            40 => Some(IpDscp::Cs5),
+            44 => Some(IpDscp::Voice),
+            46 => Some(IpDscp::Ef),
+            48 => Some(IpDscp::Cs6),
+            56 => Some(IpDscp::Cs7),
+            _ => None,
+        }
+    }
+}
+
+impl core::fmt::Display for IpDscp {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// Explicit Congestion Notification (ECN) value from the IP header.
+#[repr(u8)]
+#[derive(Default, PartialEq, Eq, Debug, Copy, Clone)]
+pub enum IpEcn {
+    #[default]
+    NonEct = 0,
+    Ect1 = 1,
+    Ect0 = 2,
+    Ce = 3,
+}
+
+impl IpEcn {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            IpEcn::NonEct => "non-ect",
+            IpEcn::Ect1 => "ect1",
+            IpEcn::Ect0 => "ect0",
+            IpEcn::Ce => "ce",
+        }
+    }
+
+    pub fn try_from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(IpEcn::NonEct),
+            1 => Some(IpEcn::Ect1),
+            2 => Some(IpEcn::Ect0),
+            3 => Some(IpEcn::Ce),
+            _ => None,
+        }
+    }
+}
+
+impl core::fmt::Display for IpEcn {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use core::net::{Ipv4Addr, Ipv6Addr};
