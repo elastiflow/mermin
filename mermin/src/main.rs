@@ -25,13 +25,13 @@ use tracing::{debug, error, info, warn};
 use crate::{
     community_id::CommunityIdGenerator,
     health::{HealthState, start_api_server},
-    k8s::resource_parser::attribute_flow_attrs,
+    k8s::resource_parser::attribute_flow_span,
     otlp::{
         opts::{ExporterOptions, resolve_exporters},
         trace::lib::{TraceExporterAdapter, init_tracer_provider},
     },
     runtime::conf::Conf,
-    span::{FlowAttributesExporter, FlowAttributesProducer},
+    span::{flow::FlowSpanExporter, producer::FlowSpanProducer},
 };
 
 #[tokio::main]
@@ -175,16 +175,16 @@ async fn main() -> Result<()> {
     };
 
     let (packet_meta_tx, packet_meta_rx) = mpsc::channel(config.packet_channel_capacity);
-    let (flow_attrs_tx, mut flow_attrs_rx) = mpsc::channel(config.packet_channel_capacity);
-    let (k8s_attributed_flow_attrs_tx, mut k8s_attributed_flow_attrs_rx) =
+    let (flow_span_tx, mut flow_span_rx) = mpsc::channel(config.packet_channel_capacity);
+    let (k8s_attributed_flow_span_tx, mut k8s_attributed_flow_span_rx) =
         mpsc::channel(config.packet_channel_capacity);
 
-    let flow_attrs_producer = FlowAttributesProducer::new(
+    let flow_span_producer = FlowSpanProducer::new(
         config.span,
         config.packet_channel_capacity,
         config.packet_worker_count,
         packet_meta_rx,
-        flow_attrs_tx,
+        flow_span_tx,
     );
 
     info!("initializing k8s client");
@@ -210,15 +210,13 @@ async fn main() -> Result<()> {
 
     let k8s_attributor_clone = k8s_attributor.clone();
     tokio::spawn(async move {
-        while let Some(flow_attrs) = flow_attrs_rx.recv().await {
+        while let Some(flow_span) = flow_span_rx.recv().await {
             // Attempt K8s attribution for enhanced logging/debugging first
             if let Some(attributor) = &k8s_attributor_clone {
-                match attribute_flow_attrs(&flow_attrs, attributor).await {
-                    Ok(attributed_flow_attrs) => {
-                        debug!("k8s attributed flow attributes: {attributed_flow_attrs:?}");
-                        if let Err(e) = k8s_attributed_flow_attrs_tx
-                            .send(attributed_flow_attrs)
-                            .await
+                match attribute_flow_span(&flow_span, attributor).await {
+                    Ok(attributed_flow_span) => {
+                        debug!("k8s attributed flow attributes: {attributed_flow_span:?}");
+                        if let Err(e) = k8s_attributed_flow_span_tx.send(attributed_flow_span).await
                         {
                             error!(
                                 "failed to send attributed flow attributes to k8s attribution channel: {e}"
@@ -232,7 +230,7 @@ async fn main() -> Result<()> {
             } else {
                 debug!(
                     "skipping k8s attribution for flow attributes with community id {}: k8s client not available",
-                    flow_attrs.community_id
+                    flow_span.community_id
                 );
             }
         }
@@ -240,7 +238,7 @@ async fn main() -> Result<()> {
     });
 
     tokio::spawn(async move {
-        flow_attrs_producer.run().await;
+        flow_span_producer.run().await;
         debug!("flow attributes producer task exiting");
     });
     health_state.ready_to_process.store(true, Ordering::Relaxed);
@@ -312,10 +310,10 @@ async fn main() -> Result<()> {
     }
 
     tokio::spawn(async move {
-        while let Some(k8s_attributed_flow_attrs) = k8s_attributed_flow_attrs_rx.recv().await {
+        while let Some(k8s_attributed_flow_span) = k8s_attributed_flow_span_rx.recv().await {
             if let Some(ref exporter) = exporter {
                 debug!("exporting flow spans");
-                exporter.export(k8s_attributed_flow_attrs).await;
+                exporter.export(k8s_attributed_flow_span).await;
             } else {
                 debug!("skipping export - no exporters available");
             }
@@ -337,7 +335,7 @@ async fn main() -> Result<()> {
 
 async fn create_otlp_exporter(
     provider: SdkTracerProvider,
-) -> Result<Arc<dyn FlowAttributesExporter>, anyhow::Error> {
+) -> Result<Arc<dyn FlowSpanExporter>, anyhow::Error> {
     info!("using otlp exporter adapter");
     let exporter = TraceExporterAdapter::new(provider);
     Ok(Arc::new(exporter))

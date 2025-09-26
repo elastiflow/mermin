@@ -40,7 +40,7 @@ use log::{debug, warn};
 use network_types::ip::IpProto;
 use tracing::error;
 
-use crate::span::{FlowAttributes, FlowDirection};
+use crate::span::flow::FlowSpan;
 
 pub mod resource_parser;
 
@@ -298,17 +298,17 @@ pub struct FlowContext<'a> {
 }
 
 impl<'a> FlowContext<'a> {
-    pub async fn from_flow_attrs(
-        flow_attrs: &FlowAttributes,
+    pub async fn from_flow_span(
+        flow_span: &FlowSpan,
         attributor: &Attributor,
         namespace: &'a str,
     ) -> Self {
         // Extract IPs and ports
         let (src_ip, dst_ip, port, protocol) = (
-            flow_attrs.source_address,
-            flow_attrs.destination_address,
-            flow_attrs.destination_port,
-            flow_attrs.network_transport,
+            flow_span.source_address,
+            flow_span.destination_address,
+            flow_span.destination_port,
+            flow_span.network_transport,
         );
 
         // Resolve pods
@@ -882,4 +882,11 @@ impl Attributor {
             }
         }
     }
+}
+
+/// Flow direction for policy evaluation
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FlowDirection {
+    Ingress,
+    Egress,
 }

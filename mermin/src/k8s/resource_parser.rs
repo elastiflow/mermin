@@ -5,7 +5,7 @@ use k8s_openapi::api::{core::v1::Pod, networking::v1::NetworkPolicySpec};
 
 use crate::{
     k8s::{AttributionInfo, Attributor, FlowContext, FlowDirection, K8sObjectMeta, WorkloadOwner},
-    span::FlowAttributes,
+    span::flow::FlowSpan,
 };
 
 #[derive(Debug)]
@@ -15,7 +15,7 @@ pub struct NetworkPolicy {
     pub spec: NetworkPolicySpec,
 }
 
-/// Kubernetes attribution processor that correlates FlowAttributes with Kubernetes metadata
+/// Kubernetes attribution processor that correlates a FlowSpan with Kubernetes metadata
 /// to produce enriched flow attributes containing resource information.
 struct SpanAttributor<'a> {
     attributor: &'a Attributor,
@@ -27,11 +27,11 @@ impl<'a> SpanAttributor<'a> {
     }
 
     /// Correlates flow attributes with Kubernetes resources and populates K8s metadata fields.
-    /// Returns a cloned FlowAttributes with source and destination Kubernetes attributes populated.
-    async fn attribute(&self, flow_attrs: &FlowAttributes) -> Result<FlowAttributes> {
+    /// Returns a cloned FlowSpan with source and destination Kubernetes attributes populated.
+    async fn attribute(&self, flow_span: &FlowSpan) -> Result<FlowSpan> {
         // Create FlowContext directly for both directions
         let namespace = "default"; // TODO: This should be configurable or derived from context
-        let ctx = FlowContext::from_flow_attrs(flow_attrs, self.attributor, namespace).await;
+        let ctx = FlowContext::from_flow_span(flow_span, self.attributor, namespace).await;
 
         // Resolve source and destination IPs to Kubernetes resources and evaluate policies
         let src_attribution: Option<AttributionInfo> = self.enrich(&ctx.src_pod, ctx.src_ip).await;
@@ -39,7 +39,7 @@ impl<'a> SpanAttributor<'a> {
         let (ingress_policies, egress_policies) = self.evaluate_flow_policies(&ctx).await?;
 
         // Clone the original flow attributes and populate with Kubernetes metadata
-        let mut attributed_flow = flow_attrs.clone();
+        let mut attributed_flow = flow_span.clone();
 
         // Populate source Kubernetes attributes
         if let Some(src_info) = &src_attribution {
@@ -72,34 +72,34 @@ impl<'a> SpanAttributor<'a> {
         }
     }
 
-    /// Populates Kubernetes attributes in FlowAttributes based on AttributionInfo.
+    /// Populates Kubernetes attributes in a FlowSpan based on AttributionInfo.
     /// Maps resource metadata to the appropriate source or destination K8s fields.
     fn populate_k8s_attributes(
         &self,
-        flow_attrs: &mut FlowAttributes,
+        flow_span: &mut FlowSpan,
         attribution_info: &AttributionInfo,
         is_source: bool,
     ) {
         match attribution_info {
             AttributionInfo::Pod { pod, owner } => {
-                self.set_k8s_attr(flow_attrs, "pod.name", &pod.name, is_source);
-                self.set_k8s_attr_opt(flow_attrs, "namespace.name", &pod.namespace, is_source);
+                self.set_k8s_attr(flow_span, "pod.name", &pod.name, is_source);
+                self.set_k8s_attr_opt(flow_span, "namespace.name", &pod.namespace, is_source);
 
                 // Populate workload controller information if available
                 if let Some(workload_owner) = owner {
-                    self.populate_workload_attributes(flow_attrs, workload_owner, is_source);
+                    self.populate_workload_attributes(flow_span, workload_owner, is_source);
                 }
             }
             AttributionInfo::Node { node } => {
-                self.set_k8s_attr(flow_attrs, "node.name", &node.name, is_source);
+                self.set_k8s_attr(flow_span, "node.name", &node.name, is_source);
             }
             AttributionInfo::Service { service, .. } => {
-                self.set_k8s_attr(flow_attrs, "service.name", &service.name, is_source);
-                self.set_k8s_attr_opt(flow_attrs, "namespace.name", &service.namespace, is_source);
+                self.set_k8s_attr(flow_span, "service.name", &service.name, is_source);
+                self.set_k8s_attr_opt(flow_span, "namespace.name", &service.namespace, is_source);
             }
             AttributionInfo::EndpointSlice { slice } => {
                 // EndpointSlice provides namespace context for service discovery
-                self.set_k8s_attr_opt(flow_attrs, "namespace.name", &slice.namespace, is_source);
+                self.set_k8s_attr_opt(flow_span, "namespace.name", &slice.namespace, is_source);
             }
         }
     }
@@ -108,25 +108,25 @@ impl<'a> SpanAttributor<'a> {
     /// Handles Deployment, ReplicaSet, StatefulSet, DaemonSet, and Job controllers.
     fn populate_workload_attributes(
         &self,
-        flow_attrs: &mut FlowAttributes,
+        flow_span: &mut FlowSpan,
         owner: &WorkloadOwner,
         is_source: bool,
     ) {
         match owner {
             WorkloadOwner::Deployment(meta) => {
-                self.set_k8s_attr(flow_attrs, "deployment.name", &meta.name, is_source);
+                self.set_k8s_attr(flow_span, "deployment.name", &meta.name, is_source);
             }
             WorkloadOwner::ReplicaSet(meta) => {
-                self.set_k8s_attr(flow_attrs, "replicaset.name", &meta.name, is_source);
+                self.set_k8s_attr(flow_span, "replicaset.name", &meta.name, is_source);
             }
             WorkloadOwner::StatefulSet(meta) => {
-                self.set_k8s_attr(flow_attrs, "statefulset.name", &meta.name, is_source);
+                self.set_k8s_attr(flow_span, "statefulset.name", &meta.name, is_source);
             }
             WorkloadOwner::DaemonSet(meta) => {
-                self.set_k8s_attr(flow_attrs, "daemonset.name", &meta.name, is_source);
+                self.set_k8s_attr(flow_span, "daemonset.name", &meta.name, is_source);
             }
             WorkloadOwner::Job(meta) => {
-                self.set_k8s_attr(flow_attrs, "job.name", &meta.name, is_source);
+                self.set_k8s_attr(flow_span, "job.name", &meta.name, is_source);
             }
         }
     }
@@ -134,18 +134,18 @@ impl<'a> SpanAttributor<'a> {
     /// Sets a required Kubernetes attribute by wrapping the value in Some().
     fn set_k8s_attr(
         &self,
-        flow_attrs: &mut FlowAttributes,
+        flow_span: &mut FlowSpan,
         attr_name: &str,
         value: &str,
         is_source: bool,
     ) {
-        self.set_k8s_attr_opt(flow_attrs, attr_name, &Some(value.to_string()), is_source);
+        self.set_k8s_attr_opt(flow_span, attr_name, &Some(value.to_string()), is_source);
     }
 
     /// Sets an optional Kubernetes attribute using a compact mapping approach.
     fn set_k8s_attr_opt(
         &self,
-        flow_attrs: &mut FlowAttributes,
+        flow_span: &mut FlowSpan,
         attr_name: &str,
         value: &Option<String>,
         is_source: bool,
@@ -154,8 +154,8 @@ impl<'a> SpanAttributor<'a> {
             ($(($attr:literal, $source_field:ident, $dest_field:ident)),* $(,)?) => {
                 match (is_source, attr_name) {
                     $(
-                        (true, $attr) => &mut flow_attrs.$source_field,
-                        (false, $attr) => &mut flow_attrs.$dest_field,
+                        (true, $attr) => &mut flow_span.$source_field,
+                        (false, $attr) => &mut flow_span.$dest_field,
                     )*
                     _ => return, // Unknown attribute - silently ignored for forward compatibility
                 }
@@ -181,11 +181,11 @@ impl<'a> SpanAttributor<'a> {
         *field = value.clone();
     }
 
-    /// Populates network policy attribution in FlowAttributes.
+    /// Populates network policy attribution in a FlowSpan.
     /// Converts policy lists to comma-separated strings for telemetry.
     fn populate_network_policies(
         &self,
-        flow_attrs: &mut FlowAttributes,
+        flow_span: &mut FlowSpan,
         ingress_policies: &[NetworkPolicy],
         egress_policies: &[NetworkPolicy],
     ) {
@@ -201,7 +201,7 @@ impl<'a> SpanAttributor<'a> {
                     }
                 })
                 .collect();
-            flow_attrs.network_policies_ingress = Some(policy_names.join(","));
+            flow_span.network_policies_ingress = Some(policy_names.join(","));
         }
 
         // Format egress policies (affecting source pod)
@@ -216,7 +216,7 @@ impl<'a> SpanAttributor<'a> {
                     }
                 })
                 .collect();
-            flow_attrs.network_policies_egress = Some(policy_names.join(","));
+            flow_span.network_policies_egress = Some(policy_names.join(","));
         }
     }
 
@@ -299,12 +299,12 @@ impl<'a> SpanAttributor<'a> {
     }
 }
 
-/// Public interface for attributing FlowAttributes with Kubernetes metadata.
+/// Public interface for attributing a FlowSpan with Kubernetes metadata.
 /// Creates a SpanAttributor and performs the correlation process.
-pub async fn attribute_flow_attrs(
-    flow_attrs: &FlowAttributes,
+pub async fn attribute_flow_span(
+    flow_span: &FlowSpan,
     attributor: &Attributor,
-) -> Result<FlowAttributes> {
+) -> Result<FlowSpan> {
     let span_attributor = SpanAttributor::new(attributor);
-    span_attributor.attribute(flow_attrs).await
+    span_attributor.attribute(flow_span).await
 }
