@@ -60,7 +60,6 @@ pub fn resolve_exporters(
     }
 
     let enabled_exporters = exporter_refs.parse().map_err(|e| anyhow::anyhow!(e))?;
-
     let mut otlp_exporters: Vec<OtlpExporterOptions> = Vec::new();
     let mut stdout_exporters: Vec<StdoutExporterOptions> = Vec::new();
 

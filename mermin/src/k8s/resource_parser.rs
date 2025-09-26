@@ -2,7 +2,6 @@ use std::net::IpAddr;
 
 use anyhow::Result;
 use k8s_openapi::api::{core::v1::Pod, networking::v1::NetworkPolicySpec};
-use tracing::info;
 
 use crate::{
     k8s::{AttributionInfo, Attributor, FlowContext, FlowDirection, K8sObjectMeta, WorkloadOwner},
@@ -28,7 +27,7 @@ impl<'a> SpanAttributor<'a> {
     }
 
     /// Correlates flow attributes with Kubernetes resources and populates K8s metadata fields.
-    /// Returns a cloned FlowAttributes with source and destination Kubernetes attributes populated.
+    /// Returns a cloned FlowSpan with source and destination Kubernetes attributes populated.
     async fn attribute(&self, flow_span: &FlowSpan) -> Result<FlowSpan> {
         // Create FlowContext directly for both directions
         let namespace = "default"; // TODO: This should be configurable or derived from context
@@ -36,7 +35,7 @@ impl<'a> SpanAttributor<'a> {
 
         // Resolve source and destination IPs to Kubernetes resources and evaluate policies
         let src_attribution: Option<AttributionInfo> = self.enrich(&ctx.src_pod, ctx.src_ip).await;
-        let dst_attribution: Option<AttributionInfo> = self.enrich(&ctx.dst_pod, ctx.dst_ip).await;
+        let dst_attribution = self.enrich(&ctx.dst_pod, ctx.dst_ip).await;
 
         let (ingress_policies, egress_policies) = self.evaluate_flow_policies(&ctx).await?;
 
@@ -64,9 +63,7 @@ impl<'a> SpanAttributor<'a> {
     async fn enrich(&self, pod: &Option<Pod>, ip: IpAddr) -> Option<AttributionInfo> {
         if let Some(pod) = pod {
             let pod_meta = K8sObjectMeta::from(pod);
-            let owner = self.attributor.get_top_level_controller(pod, 10);
-
-            info!("pod owner: {:?}", owner);
+            let owner = self.attributor.get_top_level_controller(pod);
 
             Some(AttributionInfo::Pod {
                 pod: pod_meta,

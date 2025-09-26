@@ -160,33 +160,52 @@ impl_has_store!(NetworkPolicy, network_policies);
 impl ResourceStore {
     /// Initializes all resource reflectors concurrently and builds the ResourceStore.
     pub async fn new(client: Client) -> Result<Self> {
-        let pods = Self::create_resource_store::<Pod>(&client, true).await?;
-        let nodes = Self::create_resource_store::<Node>(&client, false).await?;
-        let namespaces = Self::create_resource_store::<Namespace>(&client, true).await?;
-        let deployments = Self::create_resource_store::<Deployment>(&client, false).await?;
-        let replica_sets = Self::create_resource_store::<ReplicaSet>(&client, false).await?;
-        let stateful_sets = Self::create_resource_store::<StatefulSet>(&client, false).await?;
-        let daemon_sets = Self::create_resource_store::<DaemonSet>(&client, false).await?;
-        let jobs = Self::create_resource_store::<Job>(&client, false).await?;
-        let services = Self::create_resource_store::<Service>(&client, false).await?;
-        let ingresses = Self::create_resource_store::<Ingress>(&client, false).await?;
-        let endpoint_slices = Self::create_resource_store::<EndpointSlice>(&client, false).await?;
-        let network_policies = Self::create_resource_store::<NetworkPolicy>(&client, false).await?;
+        let all_stores_result = futures::try_join!(
+            Self::create_resource_store::<Pod>(&client, true),
+            Self::create_resource_store::<Node>(&client, false),
+            Self::create_resource_store::<Namespace>(&client, true),
+            Self::create_resource_store::<Deployment>(&client, false),
+            Self::create_resource_store::<ReplicaSet>(&client, false),
+            Self::create_resource_store::<StatefulSet>(&client, false),
+            Self::create_resource_store::<DaemonSet>(&client, false),
+            Self::create_resource_store::<Job>(&client, false),
+            Self::create_resource_store::<Service>(&client, false),
+            Self::create_resource_store::<Ingress>(&client, false),
+            Self::create_resource_store::<EndpointSlice>(&client, false),
+            Self::create_resource_store::<NetworkPolicy>(&client, false),
+        );
 
-        Ok(Self {
-            pods,
-            nodes,
-            namespaces,
-            deployments,
-            replica_sets,
-            stateful_sets,
-            daemon_sets,
-            jobs,
-            services,
-            ingresses,
-            endpoint_slices,
-            network_policies,
-        })
+        all_stores_result.map(
+            |(
+                pods,
+                nodes,
+                namespaces,
+                deployments,
+                replica_sets,
+                stateful_sets,
+                daemon_sets,
+                jobs,
+                services,
+                ingresses,
+                endpoint_slices,
+                network_policies,
+            )| {
+                Self {
+                    pods,
+                    nodes,
+                    namespaces,
+                    deployments,
+                    replica_sets,
+                    stateful_sets,
+                    daemon_sets,
+                    jobs,
+                    services,
+                    ingresses,
+                    endpoint_slices,
+                    network_policies,
+                }
+            },
+        )
     }
 
     /// Helper to create a store for a resource, handling failures gracefully.
@@ -327,27 +346,14 @@ impl Attributor {
 
     /// Given a Pod object, traverses its ownerReferences to find its top-level managing controller.
     /// The max_depth parameter limits how many levels of ownership hierarchy to traverse.
-    pub fn get_top_level_controller(&self, pod: &Pod, max_depth: u32) -> Option<WorkloadOwner> {
+    pub fn get_top_level_controller(&self, pod: &Pod) -> Option<WorkloadOwner> {
         let mut current_owners = pod.owner_references().to_vec();
         let mut namespace = pod.namespace().unwrap_or_default();
         let mut top_level_owner = None;
-        let mut current_depth = 0;
 
         while let Some(owner_ref) = current_owners.pop() {
-            // Check if we've reached the maximum depth
-            if current_depth >= max_depth {
-                debug!(
-                    "reached maximum depth {} while traversing owner hierarchy for pod {} in namespace {}",
-                    max_depth,
-                    pod.name_any(),
-                    namespace
-                );
-                break;
-            }
-
             if let Some((owner, next_owners_opt)) = self.get_owner(&owner_ref, &namespace) {
                 top_level_owner = Some(owner);
-                current_depth += 1;
 
                 if let Some(next_owners) = next_owners_opt {
                     current_owners = next_owners;

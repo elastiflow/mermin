@@ -58,6 +58,7 @@ async fn main() -> Result<()> {
             );
 
             let default_exporter_opts = ExporterOptions::default();
+
             let exporter_opts = config.exporter.as_ref().unwrap_or(&default_exporter_opts);
             let (otlp_exporters, stdout_exporters) = resolve_exporters(
                 agent_opts
