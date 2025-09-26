@@ -110,8 +110,7 @@ impl<'a> SpanAttributor<'a> {
 
             // Apply k8s_selector config to determine if this pod should be enriched
             if let Some(selector_opts) = discovery_opts.k8s_selector.get("main") {
-                // TODO: we shouldn't get by hardcoded main, but iterate over config types?
-                info!("selector options: {:?}", selector_opts);
+                // TODO: we shouldn't get by hardcoded main, but iterate over config types? Or pass in the specific config block name.
                 if !self.should_enrich(&pod_meta, selector_opts) {
                     return None;
                 };
@@ -121,7 +120,6 @@ impl<'a> SpanAttributor<'a> {
                 owner,
             })
         } else {
-            // Try IP-based fallback resolution (Node, Service, EndpointSlice)
             self.enrich_ip_fallback(ip).await
         }
     }

@@ -44,7 +44,7 @@ use crate::span::flow::FlowSpan;
 
 use crate::{
     flow::{FlowAttributes, FlowDirection},
-    runtime::conf::K8sDiscoveryOptions,
+    runtime::conf::{K8sDiscoveryOptions, K8sObjectSelector},
 };
 pub mod resource_parser;
 
@@ -1106,7 +1106,7 @@ impl Attributor {
         &self,
         resources: Vec<std::sync::Arc<T>>,
         pod_meta: &K8sObjectMeta,
-        selector: &crate::runtime::conf::K8sObjectSelector,
+        selector: K8sObjectSelector,
     ) -> bool
     where
         T: Clone + kube::Resource + serde::Serialize,
@@ -1144,77 +1144,77 @@ impl Attributor {
     ) -> bool {
         let pod_namespace = pod_meta.namespace.as_deref().unwrap_or("default");
 
-        // Handle different resource types in the same order as ResourceStore struct fields
+        // Handle different resource types
         match selector.kind.as_str() {
             "Pod" => {
                 debug!("processing pod resources for pod match");
                 let resources = self
                     .resource_store
                     .get_by_namespace::<k8s_openapi::api::core::v1::Pod>(pod_namespace);
-                self.process_resources_for_pod_match(resources, pod_meta, selector)
+                self.process_resources_for_pod_match(resources, pod_meta, selector.clone())
             }
             "Node" => {
                 debug!("processing node resources for pod match");
                 let resources = self
                     .resource_store
                     .get_by_namespace::<k8s_openapi::api::core::v1::Node>(pod_namespace);
-                self.process_resources_for_pod_match(resources, pod_meta, selector)
+                self.process_resources_for_pod_match(resources, pod_meta, selector.clone())
             }
             "Namespace" => {
                 debug!("processing namespace resources for pod match");
                 let resources = self
                     .resource_store
                     .get_by_namespace::<k8s_openapi::api::core::v1::Namespace>(pod_namespace);
-                self.process_resources_for_pod_match(resources, pod_meta, selector)
+                self.process_resources_for_pod_match(resources, pod_meta, selector.clone())
             }
             "Deployment" => {
                 debug!("processing deployment resources for pod match");
                 let resources = self
                     .resource_store
                     .get_by_namespace::<k8s_openapi::api::apps::v1::Deployment>(pod_namespace);
-                self.process_resources_for_pod_match(resources, pod_meta, selector)
+                self.process_resources_for_pod_match(resources, pod_meta, selector.clone())
             }
             "ReplicaSet" => {
                 debug!("processing replica set resources for pod match");
                 let resources = self
                     .resource_store
                     .get_by_namespace::<k8s_openapi::api::apps::v1::ReplicaSet>(pod_namespace);
-                self.process_resources_for_pod_match(resources, pod_meta, selector)
+                self.process_resources_for_pod_match(resources, pod_meta, selector.clone())
             }
             "StatefulSet" => {
                 debug!("processing stateful set resources for pod match");
                 let resources = self
                     .resource_store
                     .get_by_namespace::<k8s_openapi::api::apps::v1::StatefulSet>(pod_namespace);
-                self.process_resources_for_pod_match(resources, pod_meta, selector)
+                self.process_resources_for_pod_match(resources, pod_meta, selector.clone())
             }
             "DaemonSet" => {
                 debug!("processing daemon set resources for pod match");
                 let resources = self
                     .resource_store
                     .get_by_namespace::<k8s_openapi::api::apps::v1::DaemonSet>(pod_namespace);
-                self.process_resources_for_pod_match(resources, pod_meta, selector)
+                self.process_resources_for_pod_match(resources, pod_meta, selector.clone())
             }
             "Job" => {
                 debug!("processing job resources for pod match");
                 let resources = self
                     .resource_store
                     .get_by_namespace::<k8s_openapi::api::batch::v1::Job>(pod_namespace);
-                self.process_resources_for_pod_match(resources, pod_meta, selector)
+                self.process_resources_for_pod_match(resources, pod_meta, selector.clone())
             }
             "Service" => {
                 debug!("processing service resources for pod match");
                 let resources = self
                     .resource_store
                     .get_by_namespace::<k8s_openapi::api::core::v1::Service>(pod_namespace);
-                self.process_resources_for_pod_match(resources, pod_meta, selector)
+                self.process_resources_for_pod_match(resources, pod_meta, selector.clone())
             }
             "Ingress" => {
                 debug!("processing ingress resources for pod match");
                 let resources = self
                     .resource_store
                     .get_by_namespace::<k8s_openapi::api::networking::v1::Ingress>(pod_namespace);
-                self.process_resources_for_pod_match(resources, pod_meta, selector)
+                self.process_resources_for_pod_match(resources, pod_meta, selector.clone())
             }
             "EndpointSlice" => {
                 debug!("processing endpoint slice resources for pod match");
@@ -1223,7 +1223,7 @@ impl Attributor {
                     .get_by_namespace::<k8s_openapi::api::discovery::v1::EndpointSlice>(
                         pod_namespace,
                     );
-                self.process_resources_for_pod_match(resources, pod_meta, selector)
+                self.process_resources_for_pod_match(resources, pod_meta, selector.clone())
             }
             "NetworkPolicy" => {
                 debug!("processing network policy resources for pod match");
@@ -1232,7 +1232,7 @@ impl Attributor {
                     .get_by_namespace::<k8s_openapi::api::networking::v1::NetworkPolicy>(
                         pod_namespace,
                     );
-                self.process_resources_for_pod_match(resources, pod_meta, selector)
+                self.process_resources_for_pod_match(resources, pod_meta, selector.clone())
             }
             _ => {
                 debug!("processing unknown resource type for pod match");
