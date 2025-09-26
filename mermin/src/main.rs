@@ -13,6 +13,15 @@ use std::{
     sync::{Arc, atomic::Ordering},
 };
 
+use crate::otlp::provider::{init_internal_tracing, init_mermin_provider};
+use crate::{
+    community_id::CommunityIdGenerator,
+    health::{HealthState, start_api_server},
+    k8s::resource_parser::attribute_flow_span,
+    otlp::trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
+    runtime::conf::Conf,
+    span::producer::FlowSpanProducer,
+};
 use anyhow::{Result, anyhow};
 use aya::{
     maps::RingBuf,
@@ -24,18 +33,6 @@ use pnet::datalink;
 use tokio::{signal, sync::mpsc};
 use tracing::{debug, error, info, warn};
 
-use crate::{
-    community_id::CommunityIdGenerator,
-    health::{HealthState, start_api_server},
-    k8s::resource_parser::attribute_flow_span,
-    otlp::{
-        opts::{ExporterOptions, resolve_exporters},
-        trace::lib::{TraceExporterAdapter, init_tracer_provider},
-    },
-    runtime::conf::Conf,
-    span::{flow::FlowSpanExporter, producer::FlowSpanProducer},
-};
-
 #[tokio::main]
 async fn main() -> Result<()> {
     // TODO: runtime should be aware of all threads and tasks spawned by the eBPF program so that they can be gracefully shutdown and restarted.
@@ -46,54 +43,18 @@ async fn main() -> Result<()> {
     let runtime = runtime::Runtime::new()?;
     let runtime::Runtime { config, .. } = runtime;
 
-    // Resolve exporters and initialize tracing
-    let (exporter, _provider) = match config.agent.as_ref() {
-        Some(agent_opts) => {
-            let default_exporter_opts = ExporterOptions::default();
-            let exporter_opts = config.exporter.as_ref().unwrap_or(&default_exporter_opts);
-            let (otlp_exporters, stdout_exporters) =
-                resolve_exporters(agent_opts.traces.main.exporters.clone(), exporter_opts)
-                    .map_err(|e| anyhow!("failed to resolve exporters: {e}"))?;
-
-            if !otlp_exporters.is_empty() || !stdout_exporters.is_empty() {
-                info!(
-                    "initializing exporter (otlp: {}, stdout: {})",
-                    otlp_exporters.len(),
-                    stdout_exporters.len()
-                );
-
-                // Initialize tracing with exporters configured
-                let provider = init_tracer_provider(
-                    otlp_exporters.first(),
-                    stdout_exporters.first(),
-                    config.log_level,
-                )
-                .await?;
-
-                let exporter = create_otlp_exporter(provider.clone())
-                    .await
-                    .map_err(|e| {
-                        error!("failed to create exporter adapter: {e}");
-                        e
-                    })
-                    .ok();
-
-                (exporter, provider)
-            } else {
-                warn!("no exporters configured in agent options");
-                let provider = init_tracer_provider(None, None, config.log_level).await?;
-                (None, provider)
-            }
-        }
-        None => {
-            warn!("no agent options configured, continuing without exporters");
-            let provider = init_tracer_provider(None, None, config.log_level).await?;
-            (None, provider)
-        }
+    init_internal_tracing(config.log_level)?;
+    let mut app_tracer_provider: Option<SdkTracerProvider> = None;
+    if let Some(agent_options) = config.exporter {
+        app_tracer_provider = init_mermin_provider(agent_options).await.ok();
     };
 
-    let community_id_generator = CommunityIdGenerator::new(0);
+    let mut exporter: Arc<dyn TraceableExporter> = Arc::new(NoOpExporterAdapter::default());
+    if let Some(provider) = app_tracer_provider {
+        exporter = create_otlp_exporter(provider).await?;
+    }
 
+    let community_id_generator = CommunityIdGenerator::new(0);
     // Bump the memlock rlimit. This is needed for older kernels that don't use the
     // new memcg based accounting, see https://lwn.net/Articles/837122/
     let rlim = libc::rlimit {
@@ -219,6 +180,7 @@ async fn main() -> Result<()> {
                 match attribute_flow_span(&flow_span, attributor).await {
                     Ok(attributed_flow_span) => {
                         debug!("k8s attributed flow attributes: {attributed_flow_span:?}");
+
                         if let Err(e) = k8s_attributed_flow_span_tx.send(attributed_flow_span).await
                         {
                             error!(
@@ -314,19 +276,11 @@ async fn main() -> Result<()> {
 
     tokio::spawn(async move {
         while let Some(k8s_attributed_flow_span) = k8s_attributed_flow_span_rx.recv().await {
-            if let Some(ref exporter) = exporter {
-                debug!("exporting flow spans");
-                exporter.export(k8s_attributed_flow_span).await;
-            } else {
-                debug!("skipping export - no exporters available");
-            }
+            let traceable: TraceableRecord = Arc::new(k8s_attributed_flow_span);
+            debug!("exporting flow spans");
+            exporter.export(traceable).await;
         }
         debug!("exporting task exiting");
-        if let Some(ref exporter) = exporter
-            && let Err(e) = exporter.shutdown().await
-        {
-            error!("error during exporters shutdown: {e}");
-        }
     });
 
     println!("waiting for ctrl+c");
@@ -338,7 +292,7 @@ async fn main() -> Result<()> {
 
 async fn create_otlp_exporter(
     provider: SdkTracerProvider,
-) -> Result<Arc<dyn FlowSpanExporter>, anyhow::Error> {
+) -> Result<Arc<dyn TraceableExporter>, anyhow::Error> {
     info!("using otlp exporter adapter");
     let exporter = TraceExporterAdapter::new(provider);
     Ok(Arc::new(exporter))

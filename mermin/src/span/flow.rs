@@ -1,14 +1,13 @@
-use std::{net::IpAddr, sync::Arc};
-
-use async_trait::async_trait;
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
+use k8s_openapi::chrono;
 use network_types::{eth::EtherType, ip::IpProto};
-use opentelemetry::trace::SpanKind;
 use serde::{Serialize, Serializer};
-use tracing::{Span, info_span};
+use opentelemetry::KeyValue;
+use opentelemetry::trace::{Span, SpanKind};
+use std::{net::IpAddr, sync::Arc, time::SystemTime};
 
-use crate::{otlp::trace::lib::Traceable, span::tcp::ConnectionState};
+use crate::{otlp::trace::Traceable, span::tcp::ConnectionState};
 
 /// Flow End Reason based on RFC 5102 IPFIX Information Model
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -196,393 +195,501 @@ pub struct SpanAttributes {
 }
 
 impl Traceable for FlowSpan {
-    fn to_span(&self) -> Span {
-        #[allow(unused_variables)]
-        let span_name = format!(
+    fn start_time(&self) -> SystemTime {
+        chrono::DateTime::from_timestamp_nanos(self.start_time as i64).into()
+    }
+
+    fn end_time(&self) -> SystemTime {
+        chrono::DateTime::from_timestamp_nanos(self.end_time as i64).into()
+    }
+
+    fn name(&self) -> Option<String> {
+        Some(format!(
             "flow_{}_{}",
             self.attributes.network_type.as_str(),
             self.attributes.network_transport.to_string().as_str()
-        );
+        ))
+    }
 
-        // Create span with required fields and placeholders for optional fields
-        // TODO: replace with span! macro once we migrate away from using tracing here.
-        // TODO: tracing::field::Empty should not be added in the future when migrating away from using tracing here.
-        let span = info_span!(
-            "flow_span", // TODO: replace with span_name once we migrate away from using tracing here.
-            "flow.community_id" = self.attributes.flow_community_id,
-            "flow.connection_state" = tracing::field::Empty,
-            "flow.end_reason" = tracing::field::Empty,
-            "network.source.address" = self.attributes.source_address.to_string(),
-            "network.source.port" = self.attributes.source_port,
-            "network.destination.address" = self.attributes.destination_address.to_string(),
-            "network.destination.port" = self.attributes.destination_port,
-            "network.transport" = self.attributes.network_transport.to_string(),
-            "network.type" = self.attributes.network_type.as_str().to_string(),
-            "network.interface.index" = tracing::field::Empty,
-            "network.interface.name" = tracing::field::Empty,
-            "network.interface.mac" = tracing::field::Empty,
-            "flow.ip.dscp.id" = tracing::field::Empty,
-            "flow.ip.dscp.name" = tracing::field::Empty,
-            "flow.ip.ecn.id" = tracing::field::Empty,
-            "flow.ip.ecn.name" = tracing::field::Empty,
-            "flow.ip.ttl" = tracing::field::Empty,
-            "flow.ip.flow_label" = tracing::field::Empty,
-            "flow.icmp.type.id" = tracing::field::Empty,
-            "flow.icmp.type.name" = tracing::field::Empty,
-            "flow.icmp.code.id" = tracing::field::Empty,
-            "flow.icmp.code.name" = tracing::field::Empty,
-            "flow.tcp.flags.bits" = tracing::field::Empty,
-            "flow.tcp.flags.tags" = tracing::field::Empty,
-            "flow.bytes.delta" = self.attributes.flow_bytes_delta,
-            "flow.bytes.total" = self.attributes.flow_bytes_total,
-            "flow.packets.delta" = self.attributes.flow_packets_delta,
-            "flow.packets.total" = self.attributes.flow_packets_total,
-            "flow.reverse.bytes.delta" = self.attributes.flow_reverse_bytes_delta,
-            "flow.reverse.bytes.total" = self.attributes.flow_reverse_bytes_total,
-            "flow.reverse.packets.delta" = self.attributes.flow_reverse_packets_delta,
-            "flow.reverse.packets.total" = self.attributes.flow_reverse_packets_total,
-            "flow.tcp.handshake.snd.latency" = tracing::field::Empty,
-            "flow.tcp.handshake.snd.jitter" = tracing::field::Empty,
-            "flow.tcp.handshake.cnd.latency" = tracing::field::Empty,
-            "flow.tcp.handshake.cnd.jitter" = tracing::field::Empty,
-            "flow.tcp.svc.latency" = tracing::field::Empty,
-            "flow.tcp.svc.jitter" = tracing::field::Empty,
-            "flow.tcp.rndtrip.latency" = tracing::field::Empty,
-            "flow.tcp.rndtrip.jitter" = tracing::field::Empty,
-            "tunnel.type" = tracing::field::Empty,
-            "tunnel.source.address" = tracing::field::Empty,
-            "tunnel.source.port" = tracing::field::Empty,
-            "tunnel.destination.address" = tracing::field::Empty,
-            "tunnel.destination.port" = tracing::field::Empty,
-            "tunnel.network.transport" = tracing::field::Empty,
-            "tunnel.network.type" = tracing::field::Empty,
-            "tunnel.id" = tracing::field::Empty,
-            "tunnel.key" = tracing::field::Empty,
-            "tunnel.sender_index" = tracing::field::Empty,
-            "tunnel.receiver_index" = tracing::field::Empty,
-            "tunnel.spi" = tracing::field::Empty,
-            "source.k8s.cluster.name" = tracing::field::Empty,
-            "source.k8s.cluster.uid" = tracing::field::Empty,
-            "source.k8s.node.name" = tracing::field::Empty,
-            "source.k8s.node.uid" = tracing::field::Empty,
-            "source.k8s.namespace.name" = tracing::field::Empty,
-            "source.k8s.pod.name" = tracing::field::Empty,
-            "source.k8s.pod.uid" = tracing::field::Empty,
-            "source.k8s.container.name" = tracing::field::Empty,
-            "source.k8s.deployment.name" = tracing::field::Empty,
-            "source.k8s.deployment.uid" = tracing::field::Empty,
-            "source.k8s.replicaset.name" = tracing::field::Empty,
-            "source.k8s.replicaset.uid" = tracing::field::Empty,
-            "source.k8s.statefulset.name" = tracing::field::Empty,
-            "source.k8s.statefulset.uid" = tracing::field::Empty,
-            "source.k8s.daemonset.name" = tracing::field::Empty,
-            "source.k8s.daemonset.uid" = tracing::field::Empty,
-            "source.k8s.job.name" = tracing::field::Empty,
-            "source.k8s.job.uid" = tracing::field::Empty,
-            "source.k8s.cronjob.name" = tracing::field::Empty,
-            "source.k8s.cronjob.uid" = tracing::field::Empty,
-            "source.k8s.service.name" = tracing::field::Empty,
-            "source.k8s.service.uid" = tracing::field::Empty,
-            "destination.k8s.cluster.name" = tracing::field::Empty,
-            "destination.k8s.cluster.uid" = tracing::field::Empty,
-            "destination.k8s.node.name" = tracing::field::Empty,
-            "destination.k8s.node.uid" = tracing::field::Empty,
-            "destination.k8s.namespace.name" = tracing::field::Empty,
-            "destination.k8s.pod.name" = tracing::field::Empty,
-            "destination.k8s.pod.uid" = tracing::field::Empty,
-            "destination.k8s.container.name" = tracing::field::Empty,
-            "destination.k8s.deployment.name" = tracing::field::Empty,
-            "destination.k8s.deployment.uid" = tracing::field::Empty,
-            "destination.k8s.replicaset.name" = tracing::field::Empty,
-            "destination.k8s.replicaset.uid" = tracing::field::Empty,
-            "destination.k8s.statefulset.name" = tracing::field::Empty,
-            "destination.k8s.statefulset.uid" = tracing::field::Empty,
-            "destination.k8s.daemonset.name" = tracing::field::Empty,
-            "destination.k8s.daemonset.uid" = tracing::field::Empty,
-            "destination.k8s.job.name" = tracing::field::Empty,
-            "destination.k8s.job.uid" = tracing::field::Empty,
-            "destination.k8s.cronjob.name" = tracing::field::Empty,
-            "destination.k8s.cronjob.uid" = tracing::field::Empty,
-            "destination.k8s.service.name" = tracing::field::Empty,
-            "destination.k8s.service.uid" = tracing::field::Empty,
-            "network.policies.ingress" = tracing::field::Empty,
-            "network.policies.egress" = tracing::field::Empty,
-            "process.executable.name" = tracing::field::Empty,
-            "container.image.name" = tracing::field::Empty,
-            "container.name" = tracing::field::Empty,
-        );
+    fn record(&self, mut span: opentelemetry_sdk::trace::Span) -> opentelemetry_sdk::trace::Span {
+        let mut kvs = Vec::with_capacity(115);
+        kvs.push(KeyValue::new(
+            "flow.community_id",
+            self.attributes.flow_community_id.to_string(),
+        ));
+        kvs.push(KeyValue::new("flow.connection_state", ""));
+        kvs.push(KeyValue::new(
+            "network.source.address",
+            self.attributes.source_address.to_string(),
+        ));
+        kvs.push(KeyValue::new(
+            "network.source.port",
+            self.attributes.source_port as i64,
+        ));
+        kvs.push(KeyValue::new(
+            "network.destination.address",
+            self.attributes.destination_address.to_string(),
+        ));
+        kvs.push(KeyValue::new(
+            "network.destination.port",
+            self.attributes.destination_port as i64,
+        ));
+        kvs.push(KeyValue::new(
+            "network.transport",
+            self.attributes.network_transport.to_owned().as_str(),
+        ));
+        kvs.push(KeyValue::new(
+            "network.type",
+            self.attributes.network_type.to_owned().as_str(),
+        ));
+        kvs.push(KeyValue::new("network.interface.index", ""));
+        kvs.push(KeyValue::new("network.interface.name", ""));
+        kvs.push(KeyValue::new("network.interface.mac", ""));
+        kvs.push(KeyValue::new("flow.ip.dscp.id", ""));
+        kvs.push(KeyValue::new("flow.ip.dscp.name", ""));
+        kvs.push(KeyValue::new("flow.ip.ecn.id", ""));
+        kvs.push(KeyValue::new("flow.ip.ecn.name", ""));
+        kvs.push(KeyValue::new("flow.ip.ttl", ""));
+        kvs.push(KeyValue::new("flow.ip.flow_label", ""));
+        kvs.push(KeyValue::new("flow.icmp.type.id", ""));
+        kvs.push(KeyValue::new("flow.icmp.type.name", ""));
+        kvs.push(KeyValue::new("flow.icmp.code.id", ""));
+        kvs.push(KeyValue::new("flow.icmp.code.name", ""));
+        kvs.push(KeyValue::new("flow.tcp.flags.bits", ""));
+        kvs.push(KeyValue::new("flow.tcp.flags.tags", ""));
+        kvs.push(KeyValue::new(
+            "flow.bytes.delta",
+            self.attributes.flow_bytes_delta,
+        ));
+        kvs.push(KeyValue::new(
+            "flow.bytes.total",
+            self.attributes.flow_bytes_total,
+        ));
+        kvs.push(KeyValue::new(
+            "flow.packets.delta",
+            self.attributes.flow_packets_delta,
+        ));
+        kvs.push(KeyValue::new(
+            "flow.packets.total",
+            self.attributes.flow_packets_total,
+        ));
+        kvs.push(KeyValue::new(
+            "flow.reverse.bytes.delta",
+            self.attributes.flow_reverse_bytes_delta,
+        ));
+        kvs.push(KeyValue::new(
+            "flow.reverse.bytes.total",
+            self.attributes.flow_reverse_bytes_total,
+        ));
+        kvs.push(KeyValue::new(
+            "flow.reverse.packets.delta",
+            self.attributes.flow_reverse_packets_delta,
+        ));
+        kvs.push(KeyValue::new(
+            "flow.reverse.packets.total",
+            self.attributes.flow_reverse_packets_total,
+        ));
+        kvs.push(KeyValue::new("flow.tcp.handshake.snd.latency", ""));
+        kvs.push(KeyValue::new("flow.tcp.handshake.snd.jitter", ""));
+        kvs.push(KeyValue::new("flow.tcp.handshake.cnd.latency", ""));
+        kvs.push(KeyValue::new("flow.tcp.handshake.cnd.jitter", ""));
+        kvs.push(KeyValue::new("flow.tcp.svc.latency", ""));
+        kvs.push(KeyValue::new("flow.tcp.svc.jitter", ""));
+        kvs.push(KeyValue::new("flow.tcp.rndtrip.latency", ""));
+        kvs.push(KeyValue::new("flow.tcp.rndtrip.jitter", ""));
+        kvs.push(KeyValue::new("tunnel.type", ""));
+        kvs.push(KeyValue::new("tunnel.source.address", ""));
+        kvs.push(KeyValue::new("tunnel.source.port", ""));
+        kvs.push(KeyValue::new("tunnel.destination.address", ""));
+        kvs.push(KeyValue::new("tunnel.destination.port", ""));
+        kvs.push(KeyValue::new("tunnel.network.transport", ""));
+        kvs.push(KeyValue::new("tunnel.network.type", ""));
+        kvs.push(KeyValue::new("tunnel.id", ""));
+        kvs.push(KeyValue::new("tunnel.key", ""));
+        kvs.push(KeyValue::new("tunnel.sender_index", ""));
+        kvs.push(KeyValue::new("tunnel.receiver_index", ""));
+        kvs.push(KeyValue::new("tunnel.spi", ""));
+        kvs.push(KeyValue::new("source.k8s.cluster.name", ""));
+        kvs.push(KeyValue::new("source.k8s.cluster.uid", ""));
+        kvs.push(KeyValue::new("source.k8s.node.name", ""));
+        kvs.push(KeyValue::new("source.k8s.node.uid", ""));
+        kvs.push(KeyValue::new("source.k8s.namespace.name", ""));
+        kvs.push(KeyValue::new("source.k8s.pod.name", ""));
+        kvs.push(KeyValue::new("source.k8s.pod.uid", ""));
+        kvs.push(KeyValue::new("source.k8s.container.name", ""));
+        kvs.push(KeyValue::new("source.k8s.deployment.name", ""));
+        kvs.push(KeyValue::new("source.k8s.deployment.uid", ""));
+        kvs.push(KeyValue::new("source.k8s.replicaset.name", ""));
+        kvs.push(KeyValue::new("source.k8s.replicaset.uid", ""));
+        kvs.push(KeyValue::new("source.k8s.statefulset.name", ""));
+        kvs.push(KeyValue::new("source.k8s.statefulset.uid", ""));
+        kvs.push(KeyValue::new("source.k8s.daemonset.name", ""));
+        kvs.push(KeyValue::new("source.k8s.daemonset.uid", ""));
+        kvs.push(KeyValue::new("source.k8s.job.name", ""));
+        kvs.push(KeyValue::new("source.k8s.job.uid", ""));
+        kvs.push(KeyValue::new("source.k8s.cronjob.name", ""));
+        kvs.push(KeyValue::new("source.k8s.cronjob.uid", ""));
+        kvs.push(KeyValue::new("source.k8s.service.name", ""));
+        kvs.push(KeyValue::new("source.k8s.service.uid", ""));
+        kvs.push(KeyValue::new("destination.k8s.cluster.name", ""));
+        kvs.push(KeyValue::new("destination.k8s.cluster.uid", ""));
+        kvs.push(KeyValue::new("destination.k8s.node.name", ""));
+        kvs.push(KeyValue::new("destination.k8s.node.uid", ""));
+        kvs.push(KeyValue::new("destination.k8s.namespace.name", ""));
+        kvs.push(KeyValue::new("destination.k8s.pod.name", ""));
+        kvs.push(KeyValue::new("destination.k8s.pod.uid", ""));
+        kvs.push(KeyValue::new("destination.k8s.container.name", ""));
+        kvs.push(KeyValue::new("destination.k8s.deployment.name", ""));
+        kvs.push(KeyValue::new("destination.k8s.deployment.uid", ""));
+        kvs.push(KeyValue::new("destination.k8s.replicaset.name", ""));
+        kvs.push(KeyValue::new("destination.k8s.replicaset.uid", ""));
+        kvs.push(KeyValue::new("destination.k8s.statefulset.name", ""));
+        kvs.push(KeyValue::new("destination.k8s.statefulset.uid", ""));
+        kvs.push(KeyValue::new("destination.k8s.daemonset.name", ""));
+        kvs.push(KeyValue::new("destination.k8s.daemonset.uid", ""));
+        kvs.push(KeyValue::new("destination.k8s.job.name", ""));
+        kvs.push(KeyValue::new("destination.k8s.job.uid", ""));
+        kvs.push(KeyValue::new("destination.k8s.cronjob.name", ""));
+        kvs.push(KeyValue::new("destination.k8s.cronjob.uid", ""));
+        kvs.push(KeyValue::new("destination.k8s.service.name", ""));
+        kvs.push(KeyValue::new("destination.k8s.service.uid", ""));
+        kvs.push(KeyValue::new("network.policies.ingress", ""));
+        kvs.push(KeyValue::new("network.policies.egress", ""));
+        kvs.push(KeyValue::new("process.executable.name", ""));
+        kvs.push(KeyValue::new("container.image.name", ""));
+        kvs.push(KeyValue::new("container.name", ""));
 
         // Record optional fields only if they have values
         if let Some(ref value) = self.attributes.flow_connection_state {
-            span.record("flow.connection_state", value.as_str());
+            kvs.push(KeyValue::new("flow.connection_state", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.flow_end_reason {
-            span.record("flow.end_reason", value.as_str());
+            kvs.push(KeyValue::new("flow.end_reason", value.as_str()));
         }
         if let Some(value) = self.attributes.network_interface_index {
-            span.record("network.interface.index", value);
+            kvs.push(KeyValue::new("network.interface.index", value as i64));
         }
         if let Some(ref value) = self.attributes.network_interface_name {
-            span.record("network.interface.name", value);
+            kvs.push(KeyValue::new("network.interface.name", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.network_interface_mac {
-            span.record("network.interface.mac", value.to_string().as_str());
+            kvs.push(KeyValue::new("network.interface.mac", value.to_owned()));
         }
         if let Some(value) = self.attributes.flow_ip_dscp_id {
-            span.record("flow.ip.dscp.id", value);
+            kvs.push(KeyValue::new("flow.ip.dscp.id", value as i64));
         }
         if let Some(ref value) = self.attributes.flow_ip_dscp_name {
-            span.record("flow.ip.dscp.name", value);
+            kvs.push(KeyValue::new("flow.ip.dscp.name", value.to_owned()));
         }
         if let Some(value) = self.attributes.flow_ip_ecn_id {
-            span.record("flow.ip.ecn.id", value);
+            kvs.push(KeyValue::new("flow.ip.ecn.id", value as i64));
         }
         if let Some(ref value) = self.attributes.flow_ip_ecn_name {
-            span.record("flow.ip.ecn.name", value);
+            kvs.push(KeyValue::new("flow.ip.ecn.name", value.to_owned()));
         }
         if let Some(value) = self.attributes.flow_ip_ttl {
-            span.record("flow.ip.ttl", value);
+            kvs.push(KeyValue::new("flow.ip.ttl", value as i64));
         }
         if let Some(value) = self.attributes.flow_ip_flow_label {
-            span.record("flow.ip.flow_label", value);
+            kvs.push(KeyValue::new("flow.ip.flow_label", value as i64));
         }
         if let Some(value) = self.attributes.flow_icmp_type_id {
-            span.record("flow.icmp.type.id", value);
+            kvs.push(KeyValue::new("flow.icmp.type.id", value as i64));
         }
         if let Some(ref value) = self.attributes.flow_icmp_type_name {
-            span.record("flow.icmp.type.name", value);
+            kvs.push(KeyValue::new("flow.icmp.type.name", value.to_owned()));
         }
         if let Some(value) = self.attributes.flow_icmp_code_id {
-            span.record("flow.icmp.code.id", value);
+            kvs.push(KeyValue::new("flow.icmp.code.id", value as i64));
         }
         if let Some(ref value) = self.attributes.flow_icmp_code_name {
-            span.record("flow.icmp.code.name", value);
+            kvs.push(KeyValue::new("flow.icmp.code.name", value.to_owned()));
         }
         if let Some(value) = self.attributes.flow_tcp_flags_bits {
-            span.record("flow.tcp.flags.bits", value);
+            kvs.push(KeyValue::new("flow.tcp.flags.bits", value as i64));
         }
         if let Some(ref value) = self.attributes.flow_tcp_flags_tags {
-            span.record("flow.tcp.flags.tags", format!("{value:?}"));
+            kvs.push(KeyValue::new("flow.tcp.flags.tags", format!("{value:?}")));
         }
         if let Some(value) = self.attributes.flow_tcp_handshake_snd_latency {
-            span.record("flow.tcp.handshake.snd.latency", value);
+            kvs.push(KeyValue::new("flow.tcp.handshake.snd.latency", value));
         }
         if let Some(value) = self.attributes.flow_tcp_handshake_snd_jitter {
-            span.record("flow.tcp.handshake.snd.jitter", value);
+            kvs.push(KeyValue::new("flow.tcp.handshake.snd.jitter", value));
         }
         if let Some(value) = self.attributes.flow_tcp_handshake_cnd_latency {
-            span.record("flow.tcp.handshake.cnd.latency", value);
+            kvs.push(KeyValue::new("flow.tcp.handshake.cnd.latency", value));
         }
         if let Some(value) = self.attributes.flow_tcp_handshake_cnd_jitter {
-            span.record("flow.tcp.handshake.cnd.jitter", value);
+            kvs.push(KeyValue::new("flow.tcp.handshake.cnd.jitter", value));
         }
         if let Some(value) = self.attributes.flow_tcp_svc_latency {
-            span.record("flow.tcp.svc.latency", value);
+            kvs.push(KeyValue::new("flow.tcp.svc.latency", value));
         }
         if let Some(value) = self.attributes.flow_tcp_svc_jitter {
-            span.record("flow.tcp.svc.jitter", value);
+            kvs.push(KeyValue::new("flow.tcp.svc.jitter", value));
         }
         if let Some(value) = self.attributes.flow_tcp_rndtrip_latency {
-            span.record("flow.tcp.rndtrip.latency", value);
+            kvs.push(KeyValue::new("flow.tcp.rndtrip.latency", value));
         }
         if let Some(value) = self.attributes.flow_tcp_rndtrip_jitter {
-            span.record("flow.tcp.rndtrip.jitter", value);
+            kvs.push(KeyValue::new("flow.tcp.rndtrip.jitter", value));
         }
         if let Some(ref value) = self.attributes.tunnel_type {
-            span.record("tunnel.type", value);
+            kvs.push(KeyValue::new("tunnel.type", value.to_owned()));
         }
         if let Some(value) = self.attributes.tunnel_source_address {
-            span.record("tunnel.source.address", value.to_string());
+            kvs.push(KeyValue::new("tunnel.source.address", value.to_string()));
         }
         if let Some(value) = self.attributes.tunnel_source_port {
-            span.record("tunnel.source.port", value);
+            kvs.push(KeyValue::new("tunnel.source.port", value as i64));
         }
         if let Some(value) = self.attributes.tunnel_destination_address {
-            span.record("tunnel.destination.address", value.to_string());
+            kvs.push(KeyValue::new(
+                "tunnel.destination.address",
+                value.to_string(),
+            ));
         }
         if let Some(value) = self.attributes.tunnel_destination_port {
-            span.record("tunnel.destination.port", value);
+            kvs.push(KeyValue::new("tunnel.destination.port", value as i64));
         }
         if let Some(value) = self.attributes.tunnel_network_transport {
-            span.record("tunnel.network.transport", value.to_string());
+            kvs.push(KeyValue::new("tunnel.network.transport", value.to_string()));
         }
         if let Some(value) = self.attributes.tunnel_network_type {
-            span.record("tunnel.network.type", value.as_str().to_string());
+            kvs.push(KeyValue::new(
+                "tunnel.network.type",
+                value.as_str().to_string(),
+            ));
         }
         if let Some(ref value) = self.attributes.tunnel_id {
-            span.record("tunnel.id", value);
+            kvs.push(KeyValue::new("tunnel.id", value.to_owned()));
         }
         if let Some(value) = self.attributes.tunnel_key {
-            span.record("tunnel.key", value);
+            kvs.push(KeyValue::new("tunnel.key", value as i64));
         }
         if let Some(value) = self.attributes.tunnel_sender_index {
-            span.record("tunnel.sender_index", value);
+            kvs.push(KeyValue::new("tunnel.sender_index", value as i64));
         }
         if let Some(value) = self.attributes.tunnel_receiver_index {
-            span.record("tunnel.receiver_index", value);
+            kvs.push(KeyValue::new("tunnel.receiver_index", value as i64));
         }
         if let Some(value) = self.attributes.tunnel_spi {
-            span.record("tunnel.spi", value);
+            kvs.push(KeyValue::new("tunnel.spi", value as i64));
         }
         if let Some(ref value) = self.attributes.source_k8s_cluster_name {
-            span.record("source.k8s.cluster.name", value);
+            kvs.push(KeyValue::new("source.k8s.cluster.name", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_cluster_uid {
-            span.record("source.k8s.cluster.uid", value);
+            kvs.push(KeyValue::new("source.k8s.cluster.uid", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_node_name {
-            span.record("source.k8s.node.name", value);
+            kvs.push(KeyValue::new("source.k8s.node.name", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_node_uid {
-            span.record("source.k8s.node.uid", value);
+            kvs.push(KeyValue::new("source.k8s.node.uid", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_namespace_name {
-            span.record("source.k8s.namespace.name", value);
+            kvs.push(KeyValue::new("source.k8s.namespace.name", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_pod_name {
-            span.record("source.k8s.pod.name", value);
+            kvs.push(KeyValue::new("source.k8s.pod.name", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_pod_uid {
-            span.record("source.k8s.pod.uid", value);
+            kvs.push(KeyValue::new("source.k8s.pod.uid", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_container_name {
-            span.record("source.k8s.container.name", value);
+            kvs.push(KeyValue::new("source.k8s.container.name", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_deployment_name {
-            span.record("source.k8s.deployment.name", value);
+            kvs.push(KeyValue::new(
+                "source.k8s.deployment.name",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.source_k8s_deployment_uid {
-            span.record("source.k8s.deployment.uid", value);
+            kvs.push(KeyValue::new("source.k8s.deployment.uid", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_replicaset_name {
-            span.record("source.k8s.replicaset.name", value);
+            kvs.push(KeyValue::new(
+                "source.k8s.replicaset.name",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.source_k8s_replicaset_uid {
-            span.record("source.k8s.replicaset.uid", value);
+            kvs.push(KeyValue::new("source.k8s.replicaset.uid", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_statefulset_name {
-            span.record("source.k8s.statefulset.name", value);
+            kvs.push(KeyValue::new(
+                "source.k8s.statefulset.name",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.source_k8s_statefulset_uid {
-            span.record("source.k8s.statefulset.uid", value);
+            kvs.push(KeyValue::new(
+                "source.k8s.statefulset.uid",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.source_k8s_daemonset_name {
-            span.record("source.k8s.daemonset.name", value);
+            kvs.push(KeyValue::new("source.k8s.daemonset.name", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_daemonset_uid {
-            span.record("source.k8s.daemonset.uid", value);
+            kvs.push(KeyValue::new("source.k8s.daemonset.uid", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_job_name {
-            span.record("source.k8s.job.name", value);
+            kvs.push(KeyValue::new("source.k8s.job.name", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_job_uid {
-            span.record("source.k8s.job.uid", value);
+            kvs.push(KeyValue::new("source.k8s.job.uid", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_cronjob_name {
-            span.record("source.k8s.cronjob.name", value);
+            kvs.push(KeyValue::new("source.k8s.cronjob.name", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_cronjob_uid {
-            span.record("source.k8s.cronjob.uid", value);
+            kvs.push(KeyValue::new("source.k8s.cronjob.uid", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_service_name {
-            span.record("source.k8s.service.name", value);
+            kvs.push(KeyValue::new("source.k8s.service.name", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_service_uid {
-            span.record("source.k8s.service.uid", value);
+            kvs.push(KeyValue::new("source.k8s.service.uid", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.destination_k8s_cluster_name {
-            span.record("destination.k8s.cluster.name", value);
+            kvs.push(KeyValue::new(
+                "destination.k8s.cluster.name",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_cluster_uid {
-            span.record("destination.k8s.cluster.uid", value);
+            kvs.push(KeyValue::new(
+                "destination.k8s.cluster.uid",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_node_name {
-            span.record("destination.k8s.node.name", value);
+            kvs.push(KeyValue::new("destination.k8s.node.name", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.destination_k8s_node_uid {
-            span.record("destination.k8s.node.uid", value);
+            kvs.push(KeyValue::new("destination.k8s.node.uid", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.destination_k8s_namespace_name {
-            span.record("destination.k8s.namespace.name", value);
+            kvs.push(KeyValue::new(
+                "destination.k8s.namespace.name",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_pod_name {
-            span.record("destination.k8s.pod.name", value);
+            kvs.push(KeyValue::new("destination.k8s.pod.name", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.destination_k8s_pod_uid {
-            span.record("destination.k8s.pod.uid", value);
+            kvs.push(KeyValue::new("destination.k8s.pod.uid", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.destination_k8s_container_name {
-            span.record("destination.k8s.container.name", value);
+            kvs.push(KeyValue::new(
+                "destination.k8s.container.name",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_deployment_name {
-            span.record("destination.k8s.deployment.name", value);
+            kvs.push(KeyValue::new(
+                "destination.k8s.deployment.name",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_deployment_uid {
-            span.record("destination.k8s.deployment.uid", value);
+            kvs.push(KeyValue::new(
+                "destination.k8s.deployment.uid",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_replicaset_name {
-            span.record("destination.k8s.replicaset.name", value);
+            kvs.push(KeyValue::new(
+                "destination.k8s.replicaset.name",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_replicaset_uid {
-            span.record("destination.k8s.replicaset.uid", value);
+            kvs.push(KeyValue::new(
+                "destination.k8s.replicaset.uid",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_statefulset_name {
-            span.record("destination.k8s.statefulset.name", value);
+            kvs.push(KeyValue::new(
+                "destination.k8s.statefulset.name",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_statefulset_uid {
-            span.record("destination.k8s.statefulset.uid", value);
+            kvs.push(KeyValue::new(
+                "destination.k8s.statefulset.uid",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_daemonset_name {
-            span.record("destination.k8s.daemonset.name", value);
+            kvs.push(KeyValue::new(
+                "destination.k8s.daemonset.name",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_daemonset_uid {
-            span.record("destination.k8s.daemonset.uid", value);
+            kvs.push(KeyValue::new(
+                "destination.k8s.daemonset.uid",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_job_name {
-            span.record("destination.k8s.job.name", value);
+            kvs.push(KeyValue::new("destination.k8s.job.name", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.destination_k8s_job_uid {
-            span.record("destination.k8s.job.uid", value);
+            kvs.push(KeyValue::new("destination.k8s.job.uid", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.destination_k8s_cronjob_name {
-            span.record("destination.k8s.cronjob.name", value);
+            kvs.push(KeyValue::new(
+                "destination.k8s.cronjob.name",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_cronjob_uid {
-            span.record("destination.k8s.cronjob.uid", value);
+            kvs.push(KeyValue::new(
+                "destination.k8s.cronjob.uid",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_service_name {
-            span.record("destination.k8s.service.name", value);
+            kvs.push(KeyValue::new(
+                "destination.k8s.service.name",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_service_uid {
-            span.record("destination.k8s.service.uid", value);
+            kvs.push(KeyValue::new(
+                "destination.k8s.service.uid",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.network_policies_ingress {
-            span.record("network.policies.ingress", value.join(","));
+            kvs.push(KeyValue::new("network.policies.ingress", value.join(",")));
         }
         if let Some(ref value) = self.attributes.network_policies_egress {
-            span.record("network.policies.egress", value.join(","));
+            kvs.push(KeyValue::new("network.policies.egress", value.join(",")));
         }
         if let Some(ref value) = self.attributes.process_executable_name {
-            span.record("process.executable.name", value);
+            kvs.push(KeyValue::new("process.executable.name", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.container_image_name {
-            span.record("container.image.name", value);
+            kvs.push(KeyValue::new("container.image.name", value.to_string()));
         }
         if let Some(ref value) = self.attributes.container_name {
-            span.record("container.name", value);
+            kvs.push(KeyValue::new("container.name", value.to_owned()));
         }
-
+        span.set_attributes(kvs);
         span
     }
 }
 
 pub type FlowSpanMap = Arc<DashMap<String, FlowSpan, FxBuildHasher>>;
-
-#[async_trait]
-pub trait FlowSpanExporter: Send + Sync {
-    async fn export(&self, flow_span: FlowSpan);
-    async fn shutdown(&self) -> anyhow::Result<()>;
-}
 
 // Helpers to serialize the IP protocol and EtherType which do not natively implement Serialize
 fn serialize_ip_proto<S>(proto: &IpProto, serializer: S) -> Result<S::Ok, S::Error>
