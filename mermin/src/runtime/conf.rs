@@ -15,10 +15,7 @@ use serde::{Deserialize, Serialize};
 use tracing::Level;
 
 use crate::{
-    otlp::{
-        self,
-        opts::{ExporterOptions, SpanOptions},
-    },
+    otlp::{self, opts::ExporterOptions},
     runtime::{
         cli::Cli,
         conf::conf_serde::{duration, level},

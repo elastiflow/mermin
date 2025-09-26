@@ -6,8 +6,8 @@ use tracing::{debug, info};
 
 use crate::{
     k8s::{AttributionInfo, Attributor, FlowContext, FlowDirection, K8sObjectMeta, WorkloadOwner},
-    span::flow::FlowSpan,
     runtime::conf::{K8sDiscoveryOptions, K8sSelectorOptions},
+    span::flow::FlowSpan,
 };
 
 #[derive(Debug)]

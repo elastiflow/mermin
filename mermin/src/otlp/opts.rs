@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::runtime::conf::{
     Conf, ExporterReferences, ExporterReferencesParser, K8sDiscoveryOptions,
-    conf_serde::{duration, exporter_protocol},
+    conf_serde::exporter_protocol,
 };
 
 /// Configuration options for all telemetry exporters used by the application.

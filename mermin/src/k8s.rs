@@ -40,11 +40,9 @@ use log::{debug, warn};
 use network_types::ip::IpProto;
 use tracing::error;
 
-use crate::span::flow::FlowSpan;
-
 use crate::{
-    flow::{FlowAttributes, FlowDirection},
     runtime::conf::{K8sDiscoveryOptions, K8sObjectSelector},
+    span::flow::FlowSpan,
 };
 pub mod resource_parser;
 

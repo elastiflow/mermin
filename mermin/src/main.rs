@@ -24,9 +24,8 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     community_id::CommunityIdGenerator,
-    flow::{FlowAttributesExporter, FlowAttributesProducer},
+    health::{HealthState, start_api_server},
     k8s::resource_parser::attribute_flow_span,
-    health::{start_api_server, HealthState},
     otlp::{
         opts::{ExporterOptions, resolve_discovery_options, resolve_exporters},
         trace::lib::{TraceExporterAdapter, init_tracer_provider},
@@ -233,15 +232,15 @@ async fn main() -> Result<()> {
         Arc::new(map)
     };
 
-    let (packet_meta_tx, packet_meta_rx) = mpsc::channel(config.packet_channel_capacity);
-    let (flow_span_tx, mut flow_span_rx) = mpsc::channel(config.packet_channel_capacity);
+    let (packet_meta_tx, packet_meta_rx) = mpsc::channel(packet_channel_capacity);
+    let (flow_span_tx, mut flow_span_rx) = mpsc::channel(packet_channel_capacity);
     let (k8s_attributed_flow_span_tx, mut k8s_attributed_flow_span_rx) =
-        mpsc::channel(config.packet_channel_capacity);
+        mpsc::channel(packet_channel_capacity);
 
     let flow_span_producer = FlowSpanProducer::new(
-        config.span,
-        config.packet_channel_capacity,
-        config.packet_worker_count,
+        span_options,
+        packet_channel_capacity,
+        packet_worker_count,
         packet_meta_rx,
         flow_span_tx,
     );
@@ -276,9 +275,7 @@ async fn main() -> Result<()> {
                 match attribute_flow_span(&flow_span, attributor, &discovery_opts_clone).await {
                     Ok(attributed_flow_span) => {
                         debug!("k8s attributed flow attributes: {attributed_flow_span:?}");
-                        if let Err(e) = k8s_attributed_flow_span_tx
-                            .send(attributed_flow_span)
-                            .await
+                        if let Err(e) = k8s_attributed_flow_span_tx.send(attributed_flow_span).await
                         {
                             error!(
                                 "failed to send attributed flow attributes to k8s attribution channel: {e}"
