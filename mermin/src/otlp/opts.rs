@@ -3,10 +3,9 @@ use std::collections::HashMap;
 use base64::{Engine as _, engine::general_purpose};
 use opentelemetry_otlp::Protocol;
 use serde::{Deserialize, Serialize};
-use tracing::info;
 
 use crate::runtime::conf::{
-    ExporterReferences, ExporterReferencesParser, K8sDiscoveryOptions, Conf,
+    Conf, ExporterReferences, ExporterReferencesParser, K8sDiscoveryOptions,
     conf_serde::{duration, exporter_protocol},
 };
 
@@ -114,15 +113,15 @@ pub fn resolve_exporters(
 }
 
 /// Resolves discovery options from agent configuration references.
-/// 
+///
 /// This function takes discovery reference strings (e.g., "discovery.k8s_owner.main")
 /// and extracts the corresponding configuration objects from the global discovery config.
-/// 
+///
 /// # Arguments
 /// * `discovery_owner_ref` - Reference to k8s_owner config (e.g., "discovery.k8s_owner.main")
 /// * `discovery_selector_ref` - Reference to k8s_selector config (e.g., "discovery.k8s_selector.main")
 /// * `config` - The global configuration containing discovery options
-/// 
+///
 /// # Returns
 /// * `Result<K8sDiscoveryOptions, anyhow::Error>` - Resolved discovery options or detailed error
 pub fn resolve_discovery_options(
@@ -137,7 +136,7 @@ pub fn resolve_discovery_options(
             "invalid discovery owner reference format: '{}', expected format: 'discovery.k8s_owner.<name>'",
             discovery_owner_ref
         ))?;
-    
+
     // Parse the discovery selector reference (e.g., "discovery.k8s_selector.main" -> "main")
     let selector_name = discovery_selector_ref
         .strip_prefix("discovery.k8s_selector.")
@@ -147,10 +146,10 @@ pub fn resolve_discovery_options(
         ))?;
 
     // Get the global discovery configuration
-    let global_discovery = config.discovery.as_ref()
-        .ok_or_else(|| anyhow::anyhow!(
-            "discovery configuration is missing from global config"
-        ))?; 
+    let global_discovery = config
+        .discovery
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("discovery configuration is missing from global config"))?;
     // Extract the specific owner configuration
     let owner_options = global_discovery.k8s_owner.get(owner_name)
         .ok_or_else(|| anyhow::anyhow!(

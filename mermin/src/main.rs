@@ -25,11 +25,11 @@ use tracing::{debug, error, info, warn};
 use crate::{
     community_id::CommunityIdGenerator,
     flow::{FlowAttributesExporter, FlowAttributesProducer},
-    health::{start_api_server, HealthState},
     k8s::resource_parser::attribute_flow_span,
+    health::{start_api_server, HealthState},
     otlp::{
-        opts::{resolve_discovery_options, resolve_exporters, ExporterOptions},
-        trace::lib::{init_tracer_provider, TraceExporterAdapter},
+        opts::{ExporterOptions, resolve_discovery_options, resolve_exporters},
+        trace::lib::{TraceExporterAdapter, init_tracer_provider},
     },
     runtime::conf::{Conf, TraceOptions},
     span::{flow::FlowSpanExporter, producer::FlowSpanProducer},
@@ -50,7 +50,12 @@ async fn main() -> Result<()> {
         Some(agent_opts) => {
             info!(
                 "agent configuration found: {} trace pipelines configured",
-                agent_opts.traces.get("main").unwrap_or(&TraceOptions::default()).exporters.len()
+                agent_opts
+                    .traces
+                    .get("main")
+                    .unwrap_or(&TraceOptions::default())
+                    .exporters
+                    .len()
             );
 
             let default_exporter_opts = ExporterOptions::default();
@@ -121,20 +126,28 @@ async fn main() -> Result<()> {
     let discovery_opts = match config.agent.as_ref() {
         Some(agent_opts) => {
             // Get the main trace configuration
-            if let Some(main_trace) = agent_opts.traces.get("main") { // TODO: change to support multiple trace pipelines
+            if let Some(main_trace) = agent_opts.traces.get("main") {
+                // TODO: change to support multiple trace pipelines
                 info!(
                     "main_trace found: discovery_owner = '{}', discovery_selector = '{}', exporters = {:?}",
-                    main_trace.discovery_owner,
-                    main_trace.discovery_selector,
-                    main_trace.exporters
+                    main_trace.discovery_owner, main_trace.discovery_selector, main_trace.exporters
                 );
-                resolve_discovery_options(&main_trace.discovery_owner, &main_trace.discovery_selector, &config)
-                    .unwrap_or_else(|e| {
-                        warn!("failed to resolve discovery options from agent config: {}, using defaults", e);
-                        config.discovery.clone().unwrap_or_default()
-                    })
+                resolve_discovery_options(
+                    &main_trace.discovery_owner,
+                    &main_trace.discovery_selector,
+                    &config,
+                )
+                .unwrap_or_else(|e| {
+                    warn!(
+                        "failed to resolve discovery options from agent config: {}, using defaults",
+                        e
+                    );
+                    config.discovery.clone().unwrap_or_default()
+                })
             } else {
-                warn!("no 'main' trace configuration found in agent options, using default discovery config");
+                warn!(
+                    "no 'main' trace configuration found in agent options, using default discovery config"
+                );
                 config.discovery.clone().unwrap_or_default()
             }
         }
