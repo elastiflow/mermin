@@ -63,16 +63,25 @@ impl Default for MetricsConf {
     }
 }
 
+/// Options for Kubernetes resource discovery.
+/// Controls how owners and selectors are configured for resource attribution.
 #[derive(Default, Debug, Deserialize, Serialize, Clone)]
 pub struct K8sDiscoveryOptions {
+    /// Mapping of owner config names to owner options. e.g. "main"
     pub k8s_owner: HashMap<String, K8sOwnerOptions>,
+    /// Mapping of selector config names to selector options. e.g. "main"
     pub k8s_selector: HashMap<String, K8sSelectorOptions>,
 }
 
+/// Options for discovering Kubernetes resource owners.
+/// Controls which resource kinds to include/exclude and the search depth.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct K8sOwnerOptions {
+    /// Kinds to exclude from owner discovery (e.g., EndpointSlice).
     pub exclude_kinds: Vec<String>,
+    /// Kinds to include in owner discovery (e.g., Service).
     pub include_kinds: Vec<String>,
+    /// Maximum depth to traverse owner references.
     pub max_depth: u32,
 }
 
@@ -86,28 +95,44 @@ impl Default for K8sOwnerOptions {
     }
 }
 
+/// Options for Kubernetes resource selectors.
+/// Defines which objects to match for enrichment.
 #[derive(Default, Debug, Deserialize, Serialize, Clone)]
 pub struct K8sSelectorOptions {
+    /// List of object selectors for matching resources.
     pub k8s_object: Vec<K8sObjectSelector>,
 }
 
+/// Selector for a specific Kubernetes object kind.
+/// Used to match and enrich resources based on label/field selectors.
 #[derive(Default, Debug, Deserialize, Serialize, Clone)]
 pub struct K8sObjectSelector {
+    /// The kind of Kubernetes object (e.g., NetworkPolicy, Service).
     pub kind: String,
+    /// Optional field for matchExpressions (e.g., spec.podSelector.matchExpressions).
     pub selector_match_expressions_field: Option<String>,
+    /// Optional field for matchLabels (e.g., spec.podSelector.matchLabels).
     pub selector_match_labels_field: Option<String>,
+    /// Target resource kind to associate with (e.g., Pod).
     pub to: String,
 }
 
+/// Agent-level options for trace configuration.
+/// Maps trace names to their options.
 #[derive(Default, Debug, Deserialize, Serialize, Clone)]
 pub struct AgentOptions {
+    /// Mapping of trace names to trace options.
     pub traces: HashMap<String, TraceOptions>,
 }
 
+/// Options for a specific trace configuration.
+/// References discovery owner and selector configs.
 #[derive(Default, Debug, Deserialize, Serialize, Clone)]
 pub struct TraceOptions {
-    pub discovery_owner: String,    // Reference to discovery.k8s_owner.main
-    pub discovery_selector: String, // Reference to discovery.k8s_selector.main
+    /// Reference to a discovery.k8s_owner config (e.g., "main").
+    pub discovery_owner: String,
+    /// Reference to a discovery.k8s_selector config (e.g., "main").
+    pub discovery_selector: String,
 }
 
 /// Represents the configuration for the application, containing settings
