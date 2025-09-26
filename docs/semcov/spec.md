@@ -78,7 +78,7 @@ The following symbols are used in the "Required" column to indicate [OpenTelemet
 | `network.type`            | `string`   | The network protocol type (EtherType) of the flow (e.g., `ipv4`, `ipv6`).       |                                                       | ✓        | ✓        |
 | `network.interface.index` | `long`     | The index value of the network interface where the flow was observed.           |                                                       | ✓        | ~        |
 | `network.interface.name`  | `string`   | The name of the network interface where the flow was observed.                  |                                                       | ✓        | ~        |
-| `network.interface.mac`   | `string`   | Source MAC address.                                                             | Lowercased, 6 hexidecimal values separated by colons. | ✓        | ~        |
+| `network.interface.mac`   | `string`   | Source MAC address.                                                             | Lowercased, 6 hexidecimal values separated by colons. |          | ~        |
 | `flow.ip.dscp.id`         | `long`     | Differentiated Services Code Point (DSCP) value from the IP header.             |                                                       |          | ~        |
 | `flow.ip.dscp.name`       | `string`   | Lowercase DSCP standard name.                                                   |                                                       |          | ~        |
 | `flow.ip.ecn.id`          | `long`     | Explicit Congestion Notification (ECN) value from the IP header.                |                                                       |          | ~        |
@@ -132,10 +132,10 @@ Time-based metrics calculated for the flow, stored in nanoseconds (`ns`).
 | `tunnel.network.transport`   | `string`  | The transport protocol of the flow (e.g., `tcp`, `udp`).                                             |                                        |          | ○        |
 | `tunnel.network.type`        | `string`  |                                                                                                      |                                        |          | ○        |
 | `tunnel.id`                  | `string`  | The identifier for the tunnel (e.g., VNI for VXLAN/Geneve/GRE).                                      |                                        |          | ○        |
-| `tunnel.key`                 | `string`  | The key identifier present in some GRE headers.                                                      |                                        |          | ○        |
+| `tunnel.key`                 | `long`    | The key identifier present in some GRE headers.                                                      |                                        |          | ○        |
 | `tunnel.sender_index`        | `long`    | The sender index from a WireGuard header.                                                            |                                        |          | ○        |
 | `tunnel.receiver_index`      | `long`    | The receiver index from a WireGuard header.                                                          |                                        |          | ○        |
-| `tunnel.spi`                 | `string`  | Security Parameters Index for ESP or AH headers.                                                     |                                        |          | ○        |
+| `tunnel.spi`                 | `long`    | Security Parameters Index for ESP or AH headers.                                                     |                                        |          | ○        |
 
 ### Kubernetes & Application Attributes
 

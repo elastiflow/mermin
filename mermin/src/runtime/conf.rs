@@ -14,11 +14,12 @@ use serde::{Deserialize, Serialize};
 use tracing::Level;
 
 use crate::{
-    otlp::opts::{ExporterOptions, SpanOptions},
+    otlp::opts::ExporterOptions,
     runtime::{
         cli::Cli,
         conf::conf_serde::{duration, level},
     },
+    span::opts::SpanOptions,
 };
 
 /// Represents the configuration for the application, containing settings

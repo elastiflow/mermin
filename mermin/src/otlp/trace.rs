@@ -23,8 +23,8 @@ pub mod lib {
     };
 
     use crate::{
-        flow::{FlowAttributes, FlowAttributesExporter},
         otlp::opts::{OtlpExporterOptions, StdoutExporterOptions},
+        span::flow::{FlowSpan, FlowSpanExporter},
     };
 
     pub struct TraceExporterAdapter {
@@ -53,8 +53,8 @@ pub mod lib {
     }
 
     #[async_trait]
-    impl FlowAttributesExporter for TraceExporterAdapter {
-        async fn export(&self, attrs: FlowAttributes) {
+    impl FlowSpanExporter for TraceExporterAdapter {
+        async fn export(&self, attrs: FlowSpan) {
             attrs.record(|| {
                 // Close the span with OK status after recording fields
                 let span = Span::current();
