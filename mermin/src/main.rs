@@ -246,7 +246,7 @@ async fn main() -> Result<()> {
     );
     // Verify discovery configs are loaded
     info!("loaded discovery configuration: {:?}", discovery_opts);
-    let k8s_attributor = match k8s::Attributor::new(discovery_opts.clone()).await {
+    let k8s_attributor = match k8s::Attributor::new().await {
         Ok(attributor) => {
             // TODO: we should implement an event based notifier
             // that sends a signal when the kubeclient is ready with its stores instead of waiting for a fixed interval.
@@ -267,12 +267,11 @@ async fn main() -> Result<()> {
     };
 
     let k8s_attributor_clone = k8s_attributor.clone();
-    let discovery_opts_clone = discovery_opts.clone();
     tokio::spawn(async move {
         while let Some(flow_span) = flow_span_rx.recv().await {
             // Attempt K8s attribution for enhanced logging/debugging first
             if let Some(attributor) = &k8s_attributor_clone {
-                match attribute_flow_span(&flow_span, attributor, &discovery_opts_clone).await {
+                match attribute_flow_span(&flow_span, attributor).await {
                     Ok(attributed_flow_span) => {
                         debug!("k8s attributed flow attributes: {attributed_flow_span:?}");
                         if let Err(e) = k8s_attributed_flow_span_tx.send(attributed_flow_span).await
