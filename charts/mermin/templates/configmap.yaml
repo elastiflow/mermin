@@ -61,27 +61,42 @@ data:
 
     # Exporter configuration
     exporter:
+      {{- if .exporter.otlp }}
       otlp:
+        {{- with .exporter.otlp }}
+        {{- if .main }}
         main:
-          address: {{ .exporter.otlp.main.address | default "host.docker.internal" | quote }}
-          port: {{ .exporter.otlp.main.port | default 4317 }}
-          protocol: {{ .exporter.otlp.main.protocol | default "grpc" | quote }}
-          timeout: {{ .exporter.otlp.main.timeout | default "3s" | quote }}
-          {{- if .exporter.otlp.main.auth }}
+          address: {{ .main.address | default "host.docker.internal" | quote }}
+          port: {{ .main.port | default 4317 }}
+          protocol: {{ .main.protocol | default "grpc" | quote }}
+          timeout: {{ .main.timeout | default "3s" | quote }}
+          {{- if .main.auth }}
           auth:
-            {{- toYaml .exporter.otlp.main.auth | nindent 12 }}
+            {{- toYaml .main.auth | nindent 12 }}
           {{- end }}
-          {{- if .exporter.otlp.main.tls }}
+          {{- if .main.tls }}
           tls:
-            {{- toYaml .exporter.otlp.main.tls | nindent 12 }}
+            {{- toYaml .main.tls | nindent 12 }}
           {{- end }}
+        {{- end }}
+        {{- end }}
+      {{- end }}
+      {{- if .exporter.stdout }}
       stdout:
+        {{- with .exporter.stdout }}
+        {{- if .json }}
         json:
-          format: {{ .exporter.stdout.json.format | default "json" | quote }}
+          format: {{ .json.format | default "json" | quote }}
+        {{- end }}
+        {{- end }}
+      {{- end }}
 
     # Agent configuration
+    {{- if .agent }}
     agent:
+      {{- if .agent.traces }}
       traces:
+        {{- if .agent.traces.main }}
         main:
           discovery_owner: {{ .agent.traces.main.discovery_owner | default "discovery.k8s_owner.main" | quote }}
           discovery_selector: {{ .agent.traces.main.discovery_selector | default "discovery.k8s_selector.main" | quote }}
@@ -90,12 +105,20 @@ data:
             {{- toYaml . | nindent 12 }}
             {{- else }}
             - "exporter.stdout.json"
+            {{- if .exporter.otlp.main }}
             - "exporter.otlp.main"
             {{- end }}
+            {{- end }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
 
     # Discovery configuration
+    {{- if .discovery }}
     discovery:
+      {{- if .discovery.k8s_owner }}
       k8s_owner:
+        {{- if .discovery.k8s_owner.main }}
         main:
           exclude_kinds:
             {{- with .discovery.k8s_owner.main.exclude_kinds }}
@@ -111,7 +134,11 @@ data:
             - Service
             {{- end }}
           max_depth: {{ .discovery.k8s_owner.main.max_depth | default 5 }}
+        {{- end }}
+      {{- end }}
+      {{- if .discovery.k8s_selector }}
       k8s_selector:
+        {{- if .discovery.k8s_selector.main }}
         main:
           k8s_object:
             {{- with .discovery.k8s_selector.main.k8s_object }}
@@ -125,4 +152,7 @@ data:
               selector_match_labels_field: spec.selector
               to: Pod
             {{- end }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
     {{- end }}
