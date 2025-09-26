@@ -63,12 +63,21 @@ data:
     exporter:
       otlp:
         main:
-          address: {{ .exporter.otlp_endpoint | default "host.docker.internal:4317" | quote }}
-          protocol: {{ .exporter.otlp_protocol | default "grpc" | quote }}
-          timeout: {{ .exporter.otlp_timeout_seconds | default 3 }}s
+          address: {{ .exporter.otlp.main.address | default "host.docker.internal" | quote }}
+          port: {{ .exporter.otlp.main.port | default 4317 }}
+          protocol: {{ .exporter.otlp.main.protocol | default "grpc" | quote }}
+          timeout: {{ .exporter.otlp.main.timeout | default "3s" | quote }}
+          {{- if .exporter.otlp.main.auth }}
+          auth:
+            {{- toYaml .exporter.otlp.main.auth | nindent 12 }}
+          {{- end }}
+          {{- if .exporter.otlp.main.tls }}
+          tls:
+            {{- toYaml .exporter.otlp.main.tls | nindent 12 }}
+          {{- end }}
       stdout:
         json:
-          format: "json"
+          format: {{ .exporter.stdout.json.format | default "json" | quote }}
 
     # Agent configuration
     agent:
