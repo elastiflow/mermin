@@ -30,7 +30,7 @@ use crate::{
         opts::{ExporterOptions, resolve_discovery_options, resolve_exporters},
         trace::lib::{TraceExporterAdapter, init_tracer_provider},
     },
-    runtime::conf::{Conf, TraceOptions},
+    runtime::conf::Conf,
     span::{flow::FlowSpanExporter, producer::FlowSpanProducer},
 };
 
@@ -47,16 +47,6 @@ async fn main() -> Result<()> {
     // Resolve exporters and initialize tracing
     let (exporter, _provider) = match config.agent.as_ref() {
         Some(agent_opts) => {
-            info!(
-                "agent configuration found: {} trace pipelines configured",
-                agent_opts
-                    .traces
-                    .get("main")
-                    .unwrap_or(&TraceOptions::default())
-                    .exporters
-                    .len()
-            );
-
             let default_exporter_opts = ExporterOptions::default();
 
             let exporter_opts = config.exporter.as_ref().unwrap_or(&default_exporter_opts);
@@ -157,11 +147,6 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Extract values needed after destructuring
-    let packet_channel_capacity = config.packet_channel_capacity;
-    let packet_worker_count = config.packet_worker_count;
-    let span_options = config.span;
-
     let Conf { interface, api, .. } = config;
 
     // This will include your eBPF object file as raw bytes at compile-time and load it at
@@ -233,15 +218,15 @@ async fn main() -> Result<()> {
         Arc::new(map)
     };
 
-    let (packet_meta_tx, packet_meta_rx) = mpsc::channel(packet_channel_capacity);
-    let (flow_span_tx, mut flow_span_rx) = mpsc::channel(packet_channel_capacity);
+    let (packet_meta_tx, packet_meta_rx) = mpsc::channel(config.packet_channel_capacity);
+    let (flow_span_tx, mut flow_span_rx) = mpsc::channel(config.packet_channel_capacity);
     let (k8s_attributed_flow_span_tx, mut k8s_attributed_flow_span_rx) =
-        mpsc::channel(packet_channel_capacity);
+        mpsc::channel(config.packet_channel_capacity);
 
     let flow_span_producer = FlowSpanProducer::new(
-        span_options,
-        packet_channel_capacity,
-        packet_worker_count,
+        config.span,
+        config.packet_channel_capacity,
+        config.packet_worker_count,
         packet_meta_rx,
         flow_span_tx,
     );

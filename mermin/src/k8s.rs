@@ -41,6 +41,7 @@ use network_types::ip::IpProto;
 use tracing::error;
 
 use crate::span::flow::FlowSpan;
+
 pub mod resource_parser;
 
 /// Holds metadata for a single Kubernetes object.
@@ -345,7 +346,6 @@ impl Attributor {
     }
 
     /// Given a Pod object, traverses its ownerReferences to find its top-level managing controller.
-    /// The max_depth parameter limits how many levels of ownership hierarchy to traverse.
     pub fn get_top_level_controller(&self, pod: &Pod) -> Option<WorkloadOwner> {
         let mut current_owners = pod.owner_references().to_vec();
         let mut namespace = pod.namespace().unwrap_or_default();

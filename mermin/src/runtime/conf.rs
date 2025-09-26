@@ -23,26 +23,6 @@ use crate::{
     span::opts::SpanOptions,
 };
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct MetricsConf {
-    /// Enable the metrics server.
-    pub enabled: bool,
-    /// The network address the metrics server will listen on.
-    pub listen_address: String,
-    /// The port the metrics server will listen on.
-    pub port: u16,
-}
-
-impl Default for MetricsConf {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
-            port: 10250,
-        }
-    }
-}
-
 /// Represents the configuration for the application, containing settings
 /// related to interface, logging, reloading, and flow management.
 ///
@@ -447,6 +427,26 @@ pub mod conf_serde {
         {
             let s = String::deserialize(deserializer)?;
             Ok(ExporterProtocol::from(s))
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct MetricsConf {
+    /// Enable the metrics server.
+    pub enabled: bool,
+    /// The network address the metrics server will listen on.
+    pub listen_address: String,
+    /// The port the metrics server will listen on.
+    pub port: u16,
+}
+
+impl Default for MetricsConf {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
+            port: 10250,
         }
     }
 }

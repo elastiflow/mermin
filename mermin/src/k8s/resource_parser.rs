@@ -36,7 +36,6 @@ impl<'a> SpanAttributor<'a> {
         // Resolve source and destination IPs to Kubernetes resources and evaluate policies
         let src_attribution: Option<AttributionInfo> = self.enrich(&ctx.src_pod, ctx.src_ip).await;
         let dst_attribution = self.enrich(&ctx.dst_pod, ctx.dst_ip).await;
-
         let (ingress_policies, egress_policies) = self.evaluate_flow_policies(&ctx).await?;
 
         // Clone the original flow attributes and populate with Kubernetes metadata
@@ -64,7 +63,6 @@ impl<'a> SpanAttributor<'a> {
         if let Some(pod) = pod {
             let pod_meta = K8sObjectMeta::from(pod);
             let owner = self.attributor.get_top_level_controller(pod);
-
             Some(AttributionInfo::Pod {
                 pod: pod_meta,
                 owner,
