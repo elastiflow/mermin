@@ -1,4 +1,3 @@
-use crate::otlp::opts::{ExporterOptions, ExporterProtocol, OtlpExporterOptions};
 use axum::http::Uri;
 use opentelemetry::{KeyValue, global};
 use opentelemetry_otlp::{WithExportConfig, WithTonicConfig};
@@ -11,11 +10,13 @@ use opentelemetry_sdk::{
 use opentelemetry_stdout::SpanExporter;
 use tonic::transport::{Certificate, Channel, channel::ClientTlsConfig};
 use tracing::{Level, level_filters::LevelFilter};
-use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
 use tracing_subscriber::{
     fmt::{Layer, format::FmtSpan},
+    prelude::__tracing_subscriber_SubscriberExt,
     util::SubscriberInitExt,
 };
+
+use crate::otlp::opts::{ExporterOptions, ExporterProtocol, OtlpExporterOptions};
 
 pub struct ProviderBuilder {
     pub sdk_builder: opentelemetry_sdk::trace::TracerProviderBuilder,

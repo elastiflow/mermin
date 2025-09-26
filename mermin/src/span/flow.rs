@@ -1,11 +1,14 @@
 use dashmap::DashMap;
+use std::{net::IpAddr, sync::Arc, time::SystemTime};
+
 use fxhash::FxBuildHasher;
 use k8s_openapi::chrono;
 use network_types::{eth::EtherType, ip::IpProto};
+use opentelemetry::{
+    KeyValue,
+    trace::{Span, SpanKind},
+};
 use serde::{Serialize, Serializer};
-use opentelemetry::KeyValue;
-use opentelemetry::trace::{Span, SpanKind};
-use std::{net::IpAddr, sync::Arc, time::SystemTime};
 
 use crate::{otlp::trace::Traceable, span::tcp::ConnectionState};
 

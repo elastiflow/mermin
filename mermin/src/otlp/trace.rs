@@ -1,7 +1,8 @@
+use std::{sync::Arc, time::SystemTime};
+
 use async_trait::async_trait;
 use opentelemetry::trace::{SpanKind, Tracer, TracerProvider};
 use opentelemetry_sdk::trace::SdkTracerProvider;
-use std::{sync::Arc, time::SystemTime};
 use tracing::debug;
 
 pub struct TraceExporterAdapter {
