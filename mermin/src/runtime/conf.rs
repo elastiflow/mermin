@@ -15,33 +15,16 @@ use serde::{Deserialize, Serialize};
 use tracing::Level;
 
 use crate::{
-    otlp::opts::ExporterOptions,
+    otlp::{
+        self,
+        opts::{ExporterOptions, SpanOptions},
+    },
     runtime::{
         cli::Cli,
         conf::conf_serde::{duration, level},
     },
     span::opts::SpanOptions,
 };
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ApiConf {
-    /// Enable the API server.
-    pub enabled: bool,
-    /// The network address the API server will listen on.
-    pub listen_address: String,
-    /// The port the API server will listen on.
-    pub port: u16,
-}
-
-impl Default for ApiConf {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
-            port: 8080,
-        }
-    }
-}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct MetricsConf {
@@ -61,78 +44,6 @@ impl Default for MetricsConf {
             port: 10250,
         }
     }
-}
-
-/// Options for Kubernetes resource discovery.
-/// Controls how owners and selectors are configured for resource attribution.
-#[derive(Default, Debug, Deserialize, Serialize, Clone)]
-pub struct K8sDiscoveryOptions {
-    /// Mapping of owner config names to owner options. e.g. "main"
-    pub k8s_owner: HashMap<String, K8sOwnerOptions>,
-    /// Mapping of selector config names to selector options. e.g. "main"
-    pub k8s_selector: HashMap<String, K8sSelectorOptions>,
-}
-
-/// Options for discovering Kubernetes resource owners.
-/// Controls which resource kinds to include/exclude and the search depth.
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct K8sOwnerOptions {
-    /// Kinds to exclude from owner discovery (e.g., EndpointSlice).
-    pub exclude_kinds: Vec<String>,
-    /// Kinds to include in owner discovery (e.g., Service).
-    pub include_kinds: Vec<String>,
-    /// Maximum depth to traverse owner references.
-    pub max_depth: u32,
-}
-
-impl Default for K8sOwnerOptions {
-    fn default() -> Self {
-        Self {
-            exclude_kinds: Vec::new(),
-            include_kinds: Vec::new(),
-            max_depth: 10,
-        }
-    }
-}
-
-/// Options for Kubernetes resource selectors.
-/// Defines which objects to match for enrichment.
-#[derive(Default, Debug, Deserialize, Serialize, Clone)]
-pub struct K8sSelectorOptions {
-    /// List of object selectors for matching resources.
-    pub k8s_object: Vec<K8sObjectSelector>,
-}
-
-/// Selector for a specific Kubernetes object kind.
-/// Used to match and enrich resources based on label/field selectors.
-#[derive(Default, Debug, Deserialize, Serialize, Clone)]
-pub struct K8sObjectSelector {
-    /// The kind of Kubernetes object (e.g., NetworkPolicy, Service).
-    pub kind: String,
-    /// Optional field for matchExpressions (e.g., spec.podSelector.matchExpressions).
-    pub selector_match_expressions_field: Option<String>,
-    /// Optional field for matchLabels (e.g., spec.podSelector.matchLabels).
-    pub selector_match_labels_field: Option<String>,
-    /// Target resource kind to associate with (e.g., Pod).
-    pub to: String,
-}
-
-/// Agent-level options for trace configuration.
-/// Maps trace names to their options.
-#[derive(Default, Debug, Deserialize, Serialize, Clone)]
-pub struct AgentOptions {
-    /// Mapping of trace names to trace options.
-    pub traces: HashMap<String, TraceOptions>,
-}
-
-/// Options for a specific trace configuration.
-/// References discovery owner and selector configs.
-#[derive(Default, Debug, Deserialize, Serialize, Clone)]
-pub struct TraceOptions {
-    /// Reference to a discovery.k8s_owner config (e.g., "main").
-    pub discovery_owner: String,
-    /// Reference to a discovery.k8s_selector config (e.g., "main").
-    pub discovery_selector: String,
 }
 
 /// Represents the configuration for the application, containing settings
@@ -205,10 +116,8 @@ pub struct Conf {
     /// should be initialized and used for mermin
     pub agent: Option<AgentOptions>,
 
-
     /// Configuration for Kubernetes resource discovery and enrichment.
-    #[serde(default)]
-    pub discovery: K8sDiscoveryOptions,
+    pub discovery: Option<K8sDiscoveryOptions>,
 
     /// Configuration for exporters.
     /// This field holds settings for exporting telemetry data
@@ -229,15 +138,11 @@ impl Default for Conf {
             packet_worker_count: defaults::flow_workers(),
             shutdown_timeout: defaults::shutdown_timeout(),
             span: SpanOptions::default(),
-            exporter: otlp::opts::ExporterOptions::default(),
-            discovery: K8sDiscoveryOptions {
-                k8s_owner: HashMap::new(),
-                k8s_selector: HashMap::new(),
-            },
-            agent: AgentOptions {
+            exporter: Some(otlp::opts::ExporterOptions::default()),
+            discovery: Some(K8sDiscoveryOptions::default()),
+            agent: Some(AgentOptions {
                 traces: HashMap::new(),
-            },
-            exporter: None,
+            }),
         }
     }
 }
@@ -549,46 +454,6 @@ pub mod conf_serde {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ApiConf {
-    /// Enable the API server.
-    pub enabled: bool,
-    /// The network address the API server will listen on.
-    pub listen_address: String,
-    /// The port the API server will listen on.
-    pub port: u16,
-}
-
-impl Default for ApiConf {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
-            port: 8080,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct MetricsConf {
-    /// Enable the metrics server.
-    pub enabled: bool,
-    /// The network address the metrics server will listen on.
-    pub listen_address: String,
-    /// The port the metrics server will listen on.
-    pub port: u16,
-}
-
-impl Default for MetricsConf {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
-            port: 10250,
-        }
-    }
-}
-
 /// Top-level agent configuration specifying which telemetry features are enabled.
 ///
 /// The `AgentOptions` struct defines the agent's telemetry pipeline configuration,
@@ -610,28 +475,45 @@ impl Default for MetricsConf {
 ///       exporters:
 ///         - exporter.otlp.main
 ///         - exporter.stdout.json
+///       
 /// ```
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
 pub struct AgentOptions {
-    pub traces: TracesOptions,
+    /// Mapping of trace names to trace options.
+    /// Example: "main" -> TraceOptions
+    pub traces: HashMap<String, TraceOptions>,
 }
-/// Configuration options for the traces telemetry pipeline.
-///
-/// The `TracesOptions` struct defines the available traces pipelines for the agent,
-/// allowing the user to specify one or more logical pipelines (such as "main") for
-/// trace data. Each pipeline is represented as a field (currently only `main` is
-/// supported), and contains its own configuration, including the list of exporters
-/// to which trace data should be sent.
-#[derive(Debug, Default, Deserialize, Serialize)]
-pub struct TracesOptions {
-    pub main: MainTraceOptions,
-}
-/// Configuration options for the main traces telemetry pipeline.
-#[derive(Debug, Default, Deserialize, Serialize)]
-pub struct MainTraceOptions {
-    /// List of exporter references to use for the main traces pipeline.
-    /// Each entry should match a key in the `exporter` section of the config.
+
+/// Options for a specific trace configuration.
+/// References specific configs by name from config file
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
+pub struct TraceOptions {
+    /// Reference to a discovery.k8s_owner config.
+    pub discovery_owner: String,
+    /// Reference to a discovery.k8s_selector config.
+    pub discovery_selector: String,
+    /// List of exporter references to use for the trace pipeline.
     pub exporters: ExporterReferences,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ApiConf {
+    /// Enable the API server.
+    pub enabled: bool,
+    /// The network address the API server will listen on.
+    pub listen_address: String,
+    /// The port the API server will listen on.
+    pub port: u16,
+}
+
+impl Default for ApiConf {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
+            port: 8080,
+        }
+    }
 }
 
 pub type ExporterReferences = Vec<String>;
@@ -664,6 +546,60 @@ impl ExporterReferencesParser for ExporterReferences {
 pub struct ExporterReference {
     pub type_: String,
     pub name: String,
+}
+
+/// Options for Kubernetes resource discovery.
+/// Controls how owners and selectors are configured for resource attribution.
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
+pub struct K8sDiscoveryOptions {
+    /// Mapping of owner config names to owner options. e.g. "main"
+    pub k8s_owner: HashMap<String, K8sOwnerOptions>,
+    /// Mapping of selector config names to selector options. e.g. "main"
+    pub k8s_selector: HashMap<String, K8sSelectorOptions>,
+}
+
+/// Options for discovering Kubernetes resource owners.
+/// Controls which resource kinds to include/exclude and the search depth.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct K8sOwnerOptions {
+    /// Kinds to exclude from owner discovery (e.g., EndpointSlice).
+    pub exclude_kinds: Vec<String>,
+    /// Kinds to include in owner discovery (e.g., Service).
+    pub include_kinds: Vec<String>,
+    /// Maximum depth to traverse owner references.
+    pub max_depth: u32,
+}
+
+impl Default for K8sOwnerOptions {
+    fn default() -> Self {
+        Self {
+            exclude_kinds: Vec::new(),
+            include_kinds: Vec::new(),
+            max_depth: 10,
+        }
+    }
+}
+
+/// Options for Kubernetes resource selectors.
+/// Defines which objects to match for enrichment.
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
+pub struct K8sSelectorOptions {
+    /// List of object selectors for matching resources.
+    pub k8s_object: Vec<K8sObjectSelector>,
+}
+
+/// Selector for a specific Kubernetes object kind.
+/// Used to match and enrich resources based on label/field selectors.
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
+pub struct K8sObjectSelector {
+    /// The kind of Kubernetes object (e.g., NetworkPolicy, Service).
+    pub kind: String,
+    /// Optional field for matchExpressions (e.g., spec.podSelector.matchExpressions).
+    pub selector_match_expressions_field: Option<String>,
+    /// Optional field for matchLabels (e.g., spec.podSelector.matchLabels).
+    pub selector_match_labels_field: Option<String>,
+    /// Target resource kind to associate with (e.g., Pod).
+    pub to: String,
 }
 
 #[cfg(test)]

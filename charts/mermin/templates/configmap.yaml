@@ -61,11 +61,23 @@ data:
 
     # Exporter configuration
     exporter:
-      stdout_enabled: {{ .exporter.stdout_enabled | default false }}
-      otlp_enabled: {{ .exporter.otlp_enabled | default false }}
-      otlp_endpoint: {{ .exporter.otlp_endpoint | default "http://host.docker.internal:4317" | quote }}
-      otlp_timeout_seconds: {{ .exporter.otlp_timeout_seconds | default 3 }}
-      otlp_protocol: {{ .exporter.otlp_protocol | default "grpc" | quote }}
+      otlp:
+        main:
+          address: {{ .exporter.otlp.main.address | default "host.docker.internal" | quote }}
+          port: {{ .exporter.otlp.main.port | default 4317 }}
+          protocol: {{ .exporter.otlp.main.protocol | default "grpc" | quote }}
+          timeout: {{ .exporter.otlp.main.timeout | default "3s" | quote }}
+          {{- if .exporter.otlp.main.auth }}
+          auth:
+            {{- toYaml .exporter.otlp.main.auth | nindent 12 }}
+          {{- end }}
+          {{- if .exporter.otlp.main.tls }}
+          tls:
+            {{- toYaml .exporter.otlp.main.tls | nindent 12 }}
+          {{- end }}
+      stdout:
+        json:
+          format: {{ .exporter.stdout.json.format | default "json" | quote }}
 
     # Agent configuration
     agent:
@@ -73,6 +85,13 @@ data:
         main:
           discovery_owner: {{ .agent.traces.main.discovery_owner | default "discovery.k8s_owner.main" | quote }}
           discovery_selector: {{ .agent.traces.main.discovery_selector | default "discovery.k8s_selector.main" | quote }}
+          exporters:
+            {{- with .agent.traces.main.exporters }}
+            {{- toYaml . | nindent 12 }}
+            {{- else }}
+            - "exporter.stdout.json"
+            - "exporter.otlp.main"
+            {{- end }}
 
     # Discovery configuration
     discovery:
