@@ -1,14 +1,19 @@
-use std::{net::IpAddr, sync::Arc, time::Duration};
+use std::{
+    net::IpAddr,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
 use mermin_common::PacketMeta;
+use opentelemetry::trace::SpanKind;
 use tokio::sync::mpsc;
 
 use crate::{
     community_id::CommunityIdGenerator,
     span::{
-        flow::{FlowSpan, FlowSpanMap},
+        flow::{FlowSpan, FlowSpanMap, SpanAttributes},
         opts::SpanOptions,
     },
 };
@@ -189,13 +194,23 @@ impl PacketWorker {
                 packet.src_ipv6_addr,
                 packet.dst_ipv6_addr,
             );
-            let (tunnel_src_addr, tunnel_dst_addr) = Self::extract_ip_addresses(
-                packet.tunnel_ip_addr_type,
-                packet.tunnel_src_ipv4_addr,
-                packet.tunnel_dst_ipv4_addr,
-                packet.tunnel_src_ipv6_addr,
-                packet.tunnel_dst_ipv6_addr,
-            );
+
+            // Check if this is actually tunneled traffic
+            let is_tunneled =
+                packet.tunnel_src_ipv4_addr != [0; 4] || packet.tunnel_src_ipv6_addr != [0; 16];
+
+            let tunnel_addresses = if is_tunneled {
+                Some(Self::extract_ip_addresses(
+                    packet.tunnel_ip_addr_type,
+                    packet.tunnel_src_ipv4_addr,
+                    packet.tunnel_dst_ipv4_addr,
+                    packet.tunnel_src_ipv6_addr,
+                    packet.tunnel_dst_ipv6_addr,
+                ))
+            } else {
+                None
+            };
+
             let src_port = packet.src_port();
             let dst_port = packet.dst_port();
             let community_id = self.community_id_generator.generate(
@@ -206,54 +221,133 @@ impl PacketWorker {
                 packet.proto,
             );
 
+            let now = SystemTime::now();
+            let duration_since_epoch = now.duration_since(UNIX_EPOCH).expect("Time went backwards");
+            let timestamp_nanos = duration_since_epoch.as_nanos() as u64;
+
             let attrs = FlowSpan {
-                community_id: community_id.clone(),
-                // network_interface_name: packet.ifindex,
-                source_address: src_addr,
-                source_port: src_port,
-                destination_address: dst_addr,
-                destination_port: dst_port,
-                network_transport: packet.proto,
-                network_type: packet.ether_type,
-                tunnel_source_address: tunnel_src_addr,
-                tunnel_source_port: packet.tunnel_src_port(),
-                tunnel_destination_address: tunnel_dst_addr,
-                tunnel_destination_port: packet.tunnel_dst_port(),
-                tunnel_network_transport: packet.tunnel_proto,
-                tunnel_network_type: packet.tunnel_ether_type,
-                // Source Kubernetes attributes - will be attributed later
-                source_k8s_cluster_name: None,
-                source_k8s_namespace_name: None,
-                source_k8s_node_name: None,
-                source_k8s_pod_name: None,
-                source_k8s_container_name: None,
-                source_k8s_deployment_name: None,
-                source_k8s_replicaset_name: None,
-                source_k8s_statefulset_name: None,
-                source_k8s_daemonset_name: None,
-                source_k8s_job_name: None,
-                source_k8s_cronjob_name: None,
-                source_k8s_service_name: None,
-                // Destination Kubernetes attributes - will be attributed later
-                destination_k8s_cluster_name: None,
-                destination_k8s_namespace_name: None,
-                destination_k8s_node_name: None,
-                destination_k8s_pod_name: None,
-                destination_k8s_container_name: None,
-                destination_k8s_deployment_name: None,
-                destination_k8s_replicaset_name: None,
-                destination_k8s_statefulset_name: None,
-                destination_k8s_daemonset_name: None,
-                destination_k8s_job_name: None,
-                destination_k8s_cronjob_name: None,
-                destination_k8s_service_name: None,
-                // Network Policy attribution - will be populated during attribution
-                network_policies_ingress: None,
-                network_policies_egress: None,
-                network_byte_count: packet.l3_octet_count, // TODO: should this be l3_octet_count or full byte count?
-                network_packet_count: 1,
-                network_reverse_byte_count: 0,
-                network_reverse_packet_count: 0,
+                start_time: timestamp_nanos,
+                end_time: timestamp_nanos,
+                span_kind: SpanKind::Internal,
+                attributes: SpanAttributes {
+                    flow_community_id: community_id.clone(),
+                    flow_connection_state: None,
+                    flow_end_reason: "".to_string(),
+                    source_address: src_addr,
+                    source_port: src_port,
+                    destination_address: dst_addr,
+                    destination_port: dst_port,
+                    network_transport: packet.proto,
+                    network_type: packet.ether_type,
+                    network_interface_index: None,
+                    network_interface_name: None,
+                    network_interface_mac: None,
+                    flow_ip_dscp_id: None,
+                    flow_ip_dscp_name: None,
+                    flow_ip_ecn_id: None,
+                    flow_ip_ecn_name: None,
+                    flow_ip_ttl: None,
+                    flow_ip_flow_label: None,
+                    flow_icmp_type_id: None,
+                    flow_icmp_type_name: None,
+                    flow_icmp_code_id: None,
+                    flow_icmp_code_name: None,
+                    flow_tcp_flags_bits: None,
+                    flow_tcp_flags_tags: None,
+                    flow_bytes_delta: packet.l3_octet_count as i64,
+                    flow_bytes_total: packet.l3_octet_count as i64,
+                    flow_packets_delta: 1,
+                    flow_packets_total: 1,
+                    flow_reverse_bytes_delta: 0,
+                    flow_reverse_bytes_total: 0,
+                    flow_reverse_packets_delta: 0,
+                    flow_reverse_packets_total: 0,
+                    flow_tcp_handshake_snd_latency: None,
+                    flow_tcp_handshake_snd_jitter: None,
+                    flow_tcp_handshake_cnd_latency: None,
+                    flow_tcp_handshake_cnd_jitter: None,
+                    flow_tcp_svc_latency: None,
+                    flow_tcp_svc_jitter: None,
+                    flow_tcp_rndtrip_latency: None,
+                    flow_tcp_rndtrip_jitter: None,
+                    tunnel_type: None,
+                    tunnel_source_address: tunnel_addresses.map(|(src, _)| src),
+                    tunnel_source_port: if is_tunneled {
+                        Some(packet.tunnel_src_port())
+                    } else {
+                        None
+                    },
+                    tunnel_destination_address: tunnel_addresses.map(|(_, dst)| dst),
+                    tunnel_destination_port: if is_tunneled {
+                        Some(packet.tunnel_dst_port())
+                    } else {
+                        None
+                    },
+                    tunnel_network_transport: if is_tunneled {
+                        Some(packet.tunnel_proto)
+                    } else {
+                        None
+                    },
+                    tunnel_network_type: if is_tunneled {
+                        Some(packet.tunnel_ether_type)
+                    } else {
+                        None
+                    },
+                    tunnel_id: None,
+                    tunnel_key: None,
+                    tunnel_sender_index: None,
+                    tunnel_receiver_index: None,
+                    tunnel_spi: None,
+                    source_k8s_cluster_name: None,
+                    source_k8s_cluster_uid: None,
+                    source_k8s_node_name: None,
+                    source_k8s_node_uid: None,
+                    source_k8s_namespace_name: None,
+                    source_k8s_pod_name: None,
+                    source_k8s_pod_uid: None,
+                    source_k8s_container_name: None,
+                    source_k8s_deployment_name: None,
+                    source_k8s_deployment_uid: None,
+                    source_k8s_replicaset_name: None,
+                    source_k8s_replicaset_uid: None,
+                    source_k8s_statefulset_name: None,
+                    source_k8s_statefulset_uid: None,
+                    source_k8s_daemonset_name: None,
+                    source_k8s_daemonset_uid: None,
+                    source_k8s_job_name: None,
+                    source_k8s_job_uid: None,
+                    source_k8s_cronjob_name: None,
+                    source_k8s_cronjob_uid: None,
+                    source_k8s_service_name: None,
+                    source_k8s_service_uid: None,
+                    destination_k8s_cluster_name: None,
+                    destination_k8s_cluster_uid: None,
+                    destination_k8s_node_name: None,
+                    destination_k8s_node_uid: None,
+                    destination_k8s_namespace_name: None,
+                    destination_k8s_pod_name: None,
+                    destination_k8s_pod_uid: None,
+                    destination_k8s_container_name: None,
+                    destination_k8s_deployment_name: None,
+                    destination_k8s_deployment_uid: None,
+                    destination_k8s_replicaset_name: None,
+                    destination_k8s_replicaset_uid: None,
+                    destination_k8s_statefulset_name: None,
+                    destination_k8s_statefulset_uid: None,
+                    destination_k8s_daemonset_name: None,
+                    destination_k8s_daemonset_uid: None,
+                    destination_k8s_job_name: None,
+                    destination_k8s_job_uid: None,
+                    destination_k8s_cronjob_name: None,
+                    destination_k8s_cronjob_uid: None,
+                    destination_k8s_service_name: None,
+                    destination_k8s_service_uid: None,
+                    network_policies_ingress: None,
+                    network_policies_egress: None,
+                    process_executable_name: None,
+                    container_image_name: None,
+                    container_name: None,
+                },
             };
 
             // TODO: REMOVE this is just for testing sending all flows to the exporter

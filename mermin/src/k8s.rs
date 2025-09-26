@@ -305,10 +305,10 @@ impl<'a> FlowContext<'a> {
     ) -> Self {
         // Extract IPs and ports
         let (src_ip, dst_ip, port, protocol) = (
-            flow_span.source_address,
-            flow_span.destination_address,
-            flow_span.destination_port,
-            flow_span.network_transport,
+            flow_span.attributes.source_address,
+            flow_span.attributes.destination_address,
+            flow_span.attributes.destination_port,
+            flow_span.attributes.network_transport,
         );
 
         // Resolve pods

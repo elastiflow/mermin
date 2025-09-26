@@ -230,7 +230,7 @@ async fn main() -> Result<()> {
             } else {
                 debug!(
                     "skipping k8s attribution for flow attributes with community id {}: k8s client not available",
-                    flow_span.community_id
+                    flow_span.attributes.flow_community_id
                 );
             }
         }

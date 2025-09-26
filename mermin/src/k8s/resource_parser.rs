@@ -154,8 +154,8 @@ impl<'a> SpanAttributor<'a> {
             ($(($attr:literal, $source_field:ident, $dest_field:ident)),* $(,)?) => {
                 match (is_source, attr_name) {
                     $(
-                        (true, $attr) => &mut flow_span.$source_field,
-                        (false, $attr) => &mut flow_span.$dest_field,
+                        (true, $attr) => &mut flow_span.attributes.$source_field,
+                        (false, $attr) => &mut flow_span.attributes.$dest_field,
                     )*
                     _ => return, // Unknown attribute - silently ignored for forward compatibility
                 }
@@ -201,7 +201,7 @@ impl<'a> SpanAttributor<'a> {
                     }
                 })
                 .collect();
-            flow_span.network_policies_ingress = Some(policy_names.join(","));
+            flow_span.attributes.network_policies_ingress = Some(policy_names);
         }
 
         // Format egress policies (affecting source pod)
@@ -216,7 +216,7 @@ impl<'a> SpanAttributor<'a> {
                     }
                 })
                 .collect();
-            flow_span.network_policies_egress = Some(policy_names.join(","));
+            flow_span.attributes.network_policies_egress = Some(policy_names);
         }
     }
 
