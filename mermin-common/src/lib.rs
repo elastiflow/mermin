@@ -2,22 +2,6 @@
 
 use network_types::{eth::EtherType, ip::IpProto};
 
-#[repr(u8)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
-pub enum IpAddrType {
-    #[default]
-    Ipv4 = 4,
-    Ipv6 = 6,
-}
-
-#[repr(u8)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
-pub enum Direction {
-    #[default]
-    Ingress = 0,
-    Egress = 1,
-}
-
 /// Represents a record containing flow metrics and identifiers.
 ///
 /// This struct is designed with a specific memory layout (`#[repr(C)]`)
@@ -28,7 +12,6 @@ pub enum Direction {
 #[repr(C, align(8))]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PacketMeta {
-    pub ifindex: u32,
     // Fields with 16-byte alignment
     // ---
     /// Source IPv6 address (innermost)
@@ -39,6 +22,11 @@ pub struct PacketMeta {
     pub tunnel_src_ipv6_addr: [u8; 16],
     /// Destination IPv6 address (outermost)
     pub tunnel_dst_ipv6_addr: [u8; 16],
+
+    /// Fields with 6-byte alignment
+    /// ---
+    /// Source MAC address (innermost)
+    pub src_mac_addr: [u8; 6],
 
     // Fields with 4-byte alignment
     // ---
@@ -52,6 +40,10 @@ pub struct PacketMeta {
     pub tunnel_src_ipv4_addr: [u8; 4],
     /// Destination IPv4 address (outermost)
     pub tunnel_dst_ipv4_addr: [u8; 4],
+    /// Interface index.
+    pub ifindex: u32,
+    /// Flow Label from the IPv6 header.
+    pub ip_flow_label: u32,
 
     // Fields with 2-byte alignment
     // ---
@@ -74,16 +66,24 @@ pub struct PacketMeta {
     pub ip_addr_type: IpAddrType,
     /// Network protocol identifier (innermost, e.g., TCP = 6, UDP = 17).
     pub proto: IpProto,
-    /// TCP flags (innermost) - bitfield: FIN|SYN|RST|PSH|ACK|URG|ECE|CWR
-    pub tcp_flags: u8,
     /// Indicates whether the flow record uses IPv4 or IPv6 addressing (outermost).
     pub tunnel_ip_addr_type: IpAddrType,
     /// Network protocol identifier (outermost, e.g., TCP = 6, UDP = 17).
     pub tunnel_proto: IpProto,
-    /// TCP flags (outermost) - bitfield: FIN|SYN|RST|PSH|ACK|URG|ECE|CWR
-    pub tunnel_tcp_flags: u8,
     /// Packet direction: Ingress (incoming) or Egress (outgoing)
     pub direction: Direction,
+    /// Differentiated Services Code Point (DSCP) value from the IP header.
+    pub ip_dscp_id: u8,
+    /// Explicit Congestion Notification (ECN) value from the IP header.
+    pub ip_ecn_id: u8,
+    /// Time to Live (IPv4) or Hop Limit (IPv6) value from the IP header.
+    pub ip_ttl: u8,
+    /// ICMP message type id.
+    pub icmp_type_id: u8,
+    /// ICMP message code id.
+    pub icmp_code_id: u8,
+    /// TCP flags (innermost) - bitfield: FIN|SYN|RST|PSH|ACK|URG|ECE|CWR
+    pub tcp_flags: u8,
 }
 
 impl PacketMeta {
@@ -108,28 +108,19 @@ impl PacketMeta {
     }
 
     // TCP flag constants (same as in tcp.rs)
-    const TCP_FLAG_FIN: u8 = 0x01;
-    const TCP_FLAG_SYN: u8 = 0x02;
-    const TCP_FLAG_RST: u8 = 0x04;
-    const TCP_FLAG_PSH: u8 = 0x08;
-    const TCP_FLAG_ACK: u8 = 0x10;
-    const TCP_FLAG_URG: u8 = 0x20;
-    const TCP_FLAG_ECE: u8 = 0x40;
-    const TCP_FLAG_CWR: u8 = 0x80;
+    pub const TCP_FLAG_FIN: u8 = 0x01;
+    pub const TCP_FLAG_SYN: u8 = 0x02;
+    pub const TCP_FLAG_RST: u8 = 0x04;
+    pub const TCP_FLAG_PSH: u8 = 0x08;
+    pub const TCP_FLAG_ACK: u8 = 0x10;
+    pub const TCP_FLAG_URG: u8 = 0x20;
+    pub const TCP_FLAG_ECE: u8 = 0x40;
+    pub const TCP_FLAG_CWR: u8 = 0x80;
 
     // Helper methods for flag manipulation
     #[inline]
     fn get_tcp_flag(flags: u8, mask: u8) -> bool {
         (flags & mask) != 0
-    }
-
-    #[inline]
-    fn set_tcp_flag(flags: &mut u8, mask: u8, value: bool) {
-        if value {
-            *flags |= mask;
-        } else {
-            *flags &= !mask;
-        }
     }
 
     // Innermost TCP flag methods
@@ -139,18 +130,8 @@ impl PacketMeta {
     }
 
     #[inline]
-    pub fn set_fin(&mut self, fin: bool) {
-        Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_FIN, fin)
-    }
-
-    #[inline]
     pub fn syn(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_SYN)
-    }
-
-    #[inline]
-    pub fn set_syn(&mut self, syn: bool) {
-        Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_SYN, syn)
     }
 
     #[inline]
@@ -159,18 +140,8 @@ impl PacketMeta {
     }
 
     #[inline]
-    pub fn set_rst(&mut self, rst: bool) {
-        Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_RST, rst)
-    }
-
-    #[inline]
     pub fn psh(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_PSH)
-    }
-
-    #[inline]
-    pub fn set_psh(&mut self, psh: bool) {
-        Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_PSH, psh)
     }
 
     #[inline]
@@ -179,18 +150,8 @@ impl PacketMeta {
     }
 
     #[inline]
-    pub fn set_ack(&mut self, ack: bool) {
-        Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_ACK, ack)
-    }
-
-    #[inline]
     pub fn urg(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_URG)
-    }
-
-    #[inline]
-    pub fn set_urg(&mut self, urg: bool) {
-        Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_URG, urg)
     }
 
     #[inline]
@@ -199,99 +160,8 @@ impl PacketMeta {
     }
 
     #[inline]
-    pub fn set_ece(&mut self, ece: bool) {
-        Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_ECE, ece)
-    }
-
-    #[inline]
     pub fn cwr(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_CWR)
-    }
-
-    #[inline]
-    pub fn set_cwr(&mut self, cwr: bool) {
-        Self::set_tcp_flag(&mut self.tcp_flags, Self::TCP_FLAG_CWR, cwr)
-    }
-
-    // Outermost Tunnel TCP flag methods
-    #[inline]
-    pub fn tunnel_fin(&self) -> bool {
-        Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_FIN)
-    }
-
-    #[inline]
-    pub fn set_tunnel_fin(&mut self, fin: bool) {
-        Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_FIN, fin)
-    }
-
-    #[inline]
-    pub fn tunnel_syn(&self) -> bool {
-        Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_SYN)
-    }
-
-    #[inline]
-    pub fn set_tunnel_syn(&mut self, syn: bool) {
-        Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_SYN, syn)
-    }
-
-    #[inline]
-    pub fn tunnel_rst(&self) -> bool {
-        Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_RST)
-    }
-
-    #[inline]
-    pub fn set_tunnel_rst(&mut self, rst: bool) {
-        Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_RST, rst)
-    }
-
-    #[inline]
-    pub fn tunnel_psh(&self) -> bool {
-        Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_PSH)
-    }
-
-    #[inline]
-    pub fn set_tunnel_psh(&mut self, psh: bool) {
-        Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_PSH, psh)
-    }
-
-    #[inline]
-    pub fn tunnel_ack(&self) -> bool {
-        Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_ACK)
-    }
-
-    #[inline]
-    pub fn set_tunnel_ack(&mut self, ack: bool) {
-        Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_ACK, ack)
-    }
-
-    #[inline]
-    pub fn tunnel_urg(&self) -> bool {
-        Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_URG)
-    }
-
-    #[inline]
-    pub fn set_tunnel_urg(&mut self, urg: bool) {
-        Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_URG, urg)
-    }
-
-    #[inline]
-    pub fn tunnel_ece(&self) -> bool {
-        Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_ECE)
-    }
-
-    #[inline]
-    pub fn set_tunnel_ece(&mut self, ece: bool) {
-        Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_ECE, ece)
-    }
-
-    #[inline]
-    pub fn tunnel_cwr(&self) -> bool {
-        Self::get_tcp_flag(self.tunnel_tcp_flags, Self::TCP_FLAG_CWR)
-    }
-
-    #[inline]
-    pub fn set_tunnel_cwr(&mut self, cwr: bool) {
-        Self::set_tcp_flag(&mut self.tunnel_tcp_flags, Self::TCP_FLAG_CWR, cwr)
     }
 
     // Direction convenience methods
@@ -306,6 +176,22 @@ impl PacketMeta {
     }
 }
 
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum IpAddrType {
+    #[default]
+    Ipv4 = 4,
+    Ipv6 = 6,
+}
+
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum Direction {
+    #[default]
+    Ingress = 0,
+    Egress = 1,
+}
+
 #[cfg(test)]
 mod tests {
     use core::mem::{align_of, size_of};
@@ -315,15 +201,15 @@ mod tests {
     use super::*;
     use crate::IpAddrType::{Ipv4, Ipv6};
 
-    // Test FlowRecord size and alignment
+    // Test PacketMeta size and alignment
     #[test]
-    fn test_flow_record_layout() {
-        let expected_size = 112; // Size remains 112 due to struct padding/alignment
+    fn test_packet_meta_layout() {
+        let expected_size = 128; // Size with all fields including new IP/ICMP/TCP fields
         let actual_size = size_of::<PacketMeta>();
 
         assert_eq!(
             actual_size, expected_size,
-            "Size of FlowRecord should be {expected_size} bytes, but was {actual_size} bytes"
+            "Size of PacketMeta should be {expected_size} bytes, but was {actual_size} bytes"
         );
 
         // Verify the alignment (should be the max alignment of members)
@@ -333,19 +219,20 @@ mod tests {
 
         assert_eq!(
             actual_alignment, expected_alignment,
-            "Alignment of FlowRecord should be {expected_alignment} bytes, but was {actual_alignment} bytes"
+            "Alignment of PacketMeta should be {expected_alignment} bytes, but was {actual_alignment} bytes"
         );
     }
 
-    // Test basic FlowRecord instantiation and field access
+    // Test basic PacketMeta instantiation and field access
     #[test]
-    fn test_flow_record_creation() {
+    fn test_packet_meta_creation() {
         let src_ipv4_val: [u8; 4] = 0x0A000001u32.to_be_bytes();
         let src_ipv6_val: [u8; 16] = [
             0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
         ];
         let dst_ipv4_val: [u8; 4] = 0xC0A80101u32.to_be_bytes();
         let dst_ipv6_val: [u8; 16] = [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01];
+        let src_mac_addr: [u8; 6] = [0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
         let octet_count: u32 = 15000;
         let src_port: u16 = 12345;
         let dst_port: u16 = 80;
@@ -359,7 +246,19 @@ mod tests {
         let tunnel_src_port: u16 = 12346;
         let tunnel_dst_port: u16 = 81;
 
-        // Set some TCP flags for both outer and tunnel
+        // Test values for IP fields
+        let flow_label: u32 = 0x12345; // 20-bit flow label
+        let dscp_id: u8 = 46; // EF (Expedited Forwarding) DSCP value
+        let ecn_id: u8 = 2; // ECT(0) - ECN Capable Transport
+        let ttl: u8 = 64; // Common default TTL value
+
+        // Test values for ICMP fields
+        let icmp_type: u8 = 8; // Echo Request
+        let icmp_code: u8 = 0; // Echo Request code
+
+        // Set some TCP flags - SYN|ACK|RST|URG|CWR (0x02 | 0x10 | 0x04 | 0x20 | 0x80 = 0xB6)
+        let tcp_flags: u8 = 0xB6;
+
         let mut record = PacketMeta {
             ifindex: 1,
             src_ipv6_addr: src_ipv6_val,
@@ -367,6 +266,7 @@ mod tests {
             src_ipv4_addr: src_ipv4_val,
             dst_ipv4_addr: dst_ipv4_val,
             l3_octet_count: octet_count,
+            src_mac_addr: src_mac_addr,
             ether_type: EtherType::Ipv4,
             src_port: src_port.to_be_bytes(),
             dst_port: dst_port.to_be_bytes(),
@@ -381,30 +281,15 @@ mod tests {
             tunnel_dst_port: tunnel_dst_port.to_be_bytes(),
             tunnel_ip_addr_type: Ipv6,
             tunnel_proto: IpProto::Udp,
-            tcp_flags: 0,
-            tunnel_tcp_flags: 0,
+            ip_flow_label: flow_label,
+            ip_dscp_id: dscp_id,
+            ip_ecn_id: ecn_id,
+            ip_ttl: ttl,
+            icmp_type_id: icmp_type,
+            icmp_code_id: icmp_code,
+            tcp_flags: tcp_flags,
             direction: Direction::Egress,
         };
-
-        // Set TCP flags for outer header
-        record.set_syn(true);
-        record.set_ack(true);
-        record.set_fin(false);
-        record.set_rst(true);
-        record.set_psh(false);
-        record.set_urg(true);
-        record.set_ece(false);
-        record.set_cwr(true);
-
-        // Set TCP flags for tunnel header
-        record.set_tunnel_syn(false);
-        record.set_tunnel_ack(true);
-        record.set_tunnel_fin(true);
-        record.set_tunnel_rst(false);
-        record.set_tunnel_psh(true);
-        record.set_tunnel_urg(false);
-        record.set_tunnel_ece(true);
-        record.set_tunnel_cwr(false);
 
         // Test field access
         assert_eq!(record.ifindex, 1);
@@ -412,6 +297,7 @@ mod tests {
         assert_eq!(record.dst_ipv4_addr, dst_ipv4_val);
         assert_eq!(record.src_ipv6_addr, src_ipv6_val);
         assert_eq!(record.dst_ipv6_addr, dst_ipv6_val);
+        assert_eq!(record.src_mac_addr, src_mac_addr);
         assert_eq!(record.l3_octet_count, octet_count);
         assert_eq!(record.ether_type, EtherType::Ipv4);
         assert_eq!(record.src_port(), 12345);
@@ -428,25 +314,25 @@ mod tests {
         assert_eq!(record.tunnel_ip_addr_type, Ipv6);
         assert_eq!(record.tunnel_proto, IpProto::Udp);
 
-        // Test TCP flag accessors for outer header
-        assert_eq!(record.syn(), true);
-        assert_eq!(record.ack(), true);
-        assert_eq!(record.fin(), false);
-        assert_eq!(record.rst(), true);
-        assert_eq!(record.psh(), false);
-        assert_eq!(record.urg(), true);
-        assert_eq!(record.ece(), false);
-        assert_eq!(record.cwr(), true);
+        // Test IP header fields
+        assert_eq!(record.ip_flow_label, flow_label);
+        assert_eq!(record.ip_dscp_id, dscp_id);
+        assert_eq!(record.ip_ecn_id, ecn_id);
+        assert_eq!(record.ip_ttl, ttl);
 
-        // Test TCP flag accessors for tunnel header
-        assert_eq!(record.tunnel_syn(), false);
-        assert_eq!(record.tunnel_ack(), true);
-        assert_eq!(record.tunnel_fin(), true);
-        assert_eq!(record.tunnel_rst(), false);
-        assert_eq!(record.tunnel_psh(), true);
-        assert_eq!(record.tunnel_urg(), false);
-        assert_eq!(record.tunnel_ece(), true);
-        assert_eq!(record.tunnel_cwr(), false);
+        // Test ICMP fields
+        assert_eq!(record.icmp_type_id, icmp_type);
+        assert_eq!(record.icmp_code_id, icmp_code);
+
+        // Test TCP flag accessors - flags set are SYN|ACK|RST|URG|CWR (0xB6)
+        assert_eq!(record.syn(), true); // SYN flag is set
+        assert_eq!(record.ack(), true); // ACK flag is set
+        assert_eq!(record.fin(), false); // FIN flag is not set
+        assert_eq!(record.rst(), true); // RST flag is set
+        assert_eq!(record.psh(), false); // PSH flag is not set
+        assert_eq!(record.urg(), true); // URG flag is set
+        assert_eq!(record.ece(), false); // ECE flag is not set
+        assert_eq!(record.cwr(), true); // CWR flag is set
 
         // Test direction functionality
         assert_eq!(record.direction, Direction::Egress);
@@ -471,6 +357,47 @@ mod tests {
     }
 
     #[test]
+    fn test_packet_meta_default() {
+        let packet = PacketMeta::default();
+
+        // Test that all fields are initialized to their expected default values
+        assert_eq!(packet.src_ipv6_addr, [0u8; 16]);
+        assert_eq!(packet.dst_ipv6_addr, [0u8; 16]);
+        assert_eq!(packet.tunnel_src_ipv6_addr, [0u8; 16]);
+        assert_eq!(packet.tunnel_dst_ipv6_addr, [0u8; 16]);
+        assert_eq!(packet.src_mac_addr, [0u8; 6]);
+        assert_eq!(packet.src_ipv4_addr, [0u8; 4]);
+        assert_eq!(packet.dst_ipv4_addr, [0u8; 4]);
+        assert_eq!(packet.l3_octet_count, 0);
+        assert_eq!(packet.tunnel_src_ipv4_addr, [0u8; 4]);
+        assert_eq!(packet.tunnel_dst_ipv4_addr, [0u8; 4]);
+        assert_eq!(packet.ifindex, 0);
+        assert_eq!(packet.ip_flow_label, 0);
+        assert_eq!(packet.ether_type, EtherType::default());
+        assert_eq!(packet.src_port, [0u8; 2]);
+        assert_eq!(packet.dst_port, [0u8; 2]);
+        assert_eq!(packet.tunnel_ether_type, EtherType::default());
+        assert_eq!(packet.tunnel_src_port, [0u8; 2]);
+        assert_eq!(packet.tunnel_dst_port, [0u8; 2]);
+        assert_eq!(packet.ip_addr_type, IpAddrType::default());
+        assert_eq!(packet.proto, IpProto::default());
+        assert_eq!(packet.tunnel_ip_addr_type, IpAddrType::default());
+        assert_eq!(packet.tunnel_proto, IpProto::default());
+        assert_eq!(packet.direction, Direction::default());
+        assert_eq!(packet.ip_dscp_id, 0);
+        assert_eq!(packet.ip_ecn_id, 0);
+        assert_eq!(packet.ip_ttl, 0);
+        assert_eq!(packet.icmp_type_id, 0);
+        assert_eq!(packet.icmp_code_id, 0);
+        assert_eq!(packet.tcp_flags, 0);
+
+        // Test default values for enums
+        assert_eq!(packet.ip_addr_type, IpAddrType::Ipv4);
+        assert_eq!(packet.tunnel_ip_addr_type, IpAddrType::Ipv4);
+        assert_eq!(packet.direction, Direction::Ingress);
+    }
+
+    #[test]
     fn test_packet_meta_direction_integration() {
         let mut packet = PacketMeta::default();
 
@@ -488,5 +415,153 @@ mod tests {
         packet.direction = Direction::Ingress;
         assert_eq!(packet.is_ingress(), true);
         assert_eq!(packet.is_egress(), false);
+    }
+
+    #[test]
+    fn test_tcp_flags() {
+        let mut packet = PacketMeta::default();
+
+        // Test all flags clear
+        packet.tcp_flags = 0x00;
+        assert_eq!(packet.fin(), false);
+        assert_eq!(packet.syn(), false);
+        assert_eq!(packet.rst(), false);
+        assert_eq!(packet.psh(), false);
+        assert_eq!(packet.ack(), false);
+        assert_eq!(packet.urg(), false);
+        assert_eq!(packet.ece(), false);
+        assert_eq!(packet.cwr(), false);
+
+        // Test individual flags
+        packet.tcp_flags = PacketMeta::TCP_FLAG_FIN;
+        assert_eq!(packet.fin(), true);
+        assert_eq!(packet.syn(), false);
+
+        packet.tcp_flags = PacketMeta::TCP_FLAG_SYN;
+        assert_eq!(packet.fin(), false);
+        assert_eq!(packet.syn(), true);
+
+        packet.tcp_flags = PacketMeta::TCP_FLAG_RST;
+        assert_eq!(packet.rst(), true);
+
+        packet.tcp_flags = PacketMeta::TCP_FLAG_PSH;
+        assert_eq!(packet.psh(), true);
+
+        packet.tcp_flags = PacketMeta::TCP_FLAG_ACK;
+        assert_eq!(packet.ack(), true);
+
+        packet.tcp_flags = PacketMeta::TCP_FLAG_URG;
+        assert_eq!(packet.urg(), true);
+
+        packet.tcp_flags = PacketMeta::TCP_FLAG_ECE;
+        assert_eq!(packet.ece(), true);
+
+        packet.tcp_flags = PacketMeta::TCP_FLAG_CWR;
+        assert_eq!(packet.cwr(), true);
+
+        // Test multiple flags (common SYN-ACK combination)
+        packet.tcp_flags = PacketMeta::TCP_FLAG_SYN | PacketMeta::TCP_FLAG_ACK;
+        assert_eq!(packet.syn(), true);
+        assert_eq!(packet.ack(), true);
+        assert_eq!(packet.fin(), false);
+        assert_eq!(packet.rst(), false);
+
+        // Test all flags set
+        packet.tcp_flags = 0xFF;
+        assert_eq!(packet.fin(), true);
+        assert_eq!(packet.syn(), true);
+        assert_eq!(packet.rst(), true);
+        assert_eq!(packet.psh(), true);
+        assert_eq!(packet.ack(), true);
+        assert_eq!(packet.urg(), true);
+        assert_eq!(packet.ece(), true);
+        assert_eq!(packet.cwr(), true);
+    }
+
+    #[test]
+    fn test_ip_fields() {
+        let mut packet = PacketMeta::default();
+
+        // Test flow label (20-bit value)
+        packet.ip_flow_label = 0xFFFFF; // Max 20-bit value
+        assert_eq!(packet.ip_flow_label, 0xFFFFF);
+
+        packet.ip_flow_label = 0x12345;
+        assert_eq!(packet.ip_flow_label, 0x12345);
+
+        // Test DSCP (6-bit value, max 63)
+        packet.ip_dscp_id = 0; // Best Effort
+        assert_eq!(packet.ip_dscp_id, 0);
+
+        packet.ip_dscp_id = 46; // Expedited Forwarding
+        assert_eq!(packet.ip_dscp_id, 46);
+
+        packet.ip_dscp_id = 63; // Max value
+        assert_eq!(packet.ip_dscp_id, 63);
+
+        // Test ECN (2-bit value, max 3)
+        packet.ip_ecn_id = 0; // Not ECT
+        assert_eq!(packet.ip_ecn_id, 0);
+
+        packet.ip_ecn_id = 1; // ECT(1)
+        assert_eq!(packet.ip_ecn_id, 1);
+
+        packet.ip_ecn_id = 2; // ECT(0)
+        assert_eq!(packet.ip_ecn_id, 2);
+
+        packet.ip_ecn_id = 3; // CE
+        assert_eq!(packet.ip_ecn_id, 3);
+
+        // Test TTL
+        packet.ip_ttl = 0; // Min value
+        assert_eq!(packet.ip_ttl, 0);
+
+        packet.ip_ttl = 64; // Common default
+        assert_eq!(packet.ip_ttl, 64);
+
+        packet.ip_ttl = 255; // Max value
+        assert_eq!(packet.ip_ttl, 255);
+    }
+
+    #[test]
+    fn test_icmp_fields() {
+        let mut packet = PacketMeta::default();
+
+        // Test common ICMP types and codes
+        // Echo Request
+        packet.icmp_type_id = 8;
+        packet.icmp_code_id = 0;
+        assert_eq!(packet.icmp_type_id, 8);
+        assert_eq!(packet.icmp_code_id, 0);
+
+        // Echo Reply
+        packet.icmp_type_id = 0;
+        packet.icmp_code_id = 0;
+        assert_eq!(packet.icmp_type_id, 0);
+        assert_eq!(packet.icmp_code_id, 0);
+
+        // Destination Unreachable - Network Unreachable
+        packet.icmp_type_id = 3;
+        packet.icmp_code_id = 0;
+        assert_eq!(packet.icmp_type_id, 3);
+        assert_eq!(packet.icmp_code_id, 0);
+
+        // Destination Unreachable - Port Unreachable
+        packet.icmp_type_id = 3;
+        packet.icmp_code_id = 3;
+        assert_eq!(packet.icmp_type_id, 3);
+        assert_eq!(packet.icmp_code_id, 3);
+
+        // Time Exceeded - TTL Expired
+        packet.icmp_type_id = 11;
+        packet.icmp_code_id = 0;
+        assert_eq!(packet.icmp_type_id, 11);
+        assert_eq!(packet.icmp_code_id, 0);
+
+        // Test boundary values
+        packet.icmp_type_id = 255;
+        packet.icmp_code_id = 255;
+        assert_eq!(packet.icmp_type_id, 255);
+        assert_eq!(packet.icmp_code_id, 255);
     }
 }
