@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     net::IpAddr,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -7,7 +8,12 @@ use std::{
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
 use mermin_common::PacketMeta;
+use network_types::{
+    eth::EtherType,
+    ip::{IpDscp, IpEcn, IpProto},
+};
 use opentelemetry::trace::SpanKind;
+use pnet::datalink::MacAddr;
 use tokio::sync::mpsc;
 
 use crate::{
@@ -15,6 +21,7 @@ use crate::{
     span::{
         flow::{FlowSpan, FlowSpanMap, SpanAttributes},
         opts::SpanOptions,
+        tcp::{ConnectionState, TcpFlags},
     },
 };
 
@@ -22,6 +29,7 @@ pub struct FlowSpanProducer {
     span_opts: SpanOptions,
     packet_channel_capacity: usize,
     packet_worker_count: usize,
+    iface_map: HashMap<u32, String>,
     flow_span_map: FlowSpanMap,
     community_id_generator: CommunityIdGenerator,
     packet_meta_rx: mpsc::Receiver<PacketMeta>,
@@ -33,6 +41,7 @@ impl FlowSpanProducer {
         span_opts: SpanOptions,
         packet_channel_capacity: usize,
         packet_worker_count: usize,
+        iface_map: HashMap<u32, String>,
         packet_meta_rx: mpsc::Receiver<PacketMeta>,
         flow_span_tx: mpsc::Sender<FlowSpan>,
     ) -> Self {
@@ -48,6 +57,7 @@ impl FlowSpanProducer {
             packet_channel_capacity,
             packet_worker_count,
             community_id_generator,
+            iface_map,
             flow_span_map,
             packet_meta_rx,
             flow_span_tx,
@@ -66,8 +76,9 @@ impl FlowSpanProducer {
 
             let packet_worker = PacketWorker::new(
                 self.span_opts.clone(),
-                Arc::clone(&self.flow_span_map),
                 self.community_id_generator.clone(),
+                self.iface_map.clone(),
+                Arc::clone(&self.flow_span_map),
                 worker_rx,
                 self.flow_span_tx.clone(),
             );
@@ -134,9 +145,10 @@ pub struct PacketWorker {
     tcp_rst_timeout: Duration,
     #[allow(dead_code)] // TODO: Use in timeout logic
     udp_timeout: Duration,
-    #[allow(dead_code)] // TODO: Use in flow management
-    flow_span_map: FlowSpanMap,
     community_id_generator: CommunityIdGenerator,
+    iface_map: HashMap<u32, String>,
+    #[allow(dead_code)] // TODO: Use in flow mapping
+    flow_span_map: FlowSpanMap,
     packet_meta_rx: mpsc::Receiver<PacketMeta>,
     flow_span_tx: mpsc::Sender<FlowSpan>,
 }
@@ -144,8 +156,9 @@ pub struct PacketWorker {
 impl PacketWorker {
     pub fn new(
         span_opts: SpanOptions,
-        flow_span_map: FlowSpanMap,
         community_id_generator: CommunityIdGenerator,
+        iface_map: HashMap<u32, String>,
+        flow_span_map: FlowSpanMap,
         packet_meta_rx: mpsc::Receiver<PacketMeta>,
         flow_span_tx: mpsc::Sender<FlowSpan>,
     ) -> Self {
@@ -157,10 +170,11 @@ impl PacketWorker {
             tcp_fin_timeout: span_opts.tcp_fin_timeout,
             tcp_rst_timeout: span_opts.tcp_rst_timeout,
             udp_timeout: span_opts.udp_timeout,
+            community_id_generator,
+            iface_map,
+            flow_span_map,
             packet_meta_rx,
             flow_span_tx,
-            flow_span_map,
-            community_id_generator,
         }
     }
 
@@ -187,6 +201,10 @@ impl PacketWorker {
 
     pub async fn run(mut self) {
         while let Some(packet) = self.packet_meta_rx.recv().await {
+            let now = SystemTime::now();
+            let duration_since_epoch = now.duration_since(UNIX_EPOCH).expect("time went backwards");
+            let timestamp_nanos = duration_since_epoch.as_nanos() as u64;
+
             let (src_addr, dst_addr) = Self::extract_ip_addresses(
                 packet.ip_addr_type,
                 packet.src_ipv4_addr,
@@ -194,11 +212,11 @@ impl PacketWorker {
                 packet.src_ipv6_addr,
                 packet.dst_ipv6_addr,
             );
+            let src_port = packet.src_port();
+            let dst_port = packet.dst_port();
 
-            // Check if this is actually tunneled traffic
             let is_tunneled =
                 packet.tunnel_src_ipv4_addr != [0; 4] || packet.tunnel_src_ipv6_addr != [0; 16];
-
             let tunnel_addresses = if is_tunneled {
                 Some(Self::extract_ip_addresses(
                     packet.tunnel_ip_addr_type,
@@ -211,57 +229,110 @@ impl PacketWorker {
                 None
             };
 
-            let src_port = packet.src_port();
-            let dst_port = packet.dst_port();
-            let community_id = self.community_id_generator.generate(
-                src_addr,
-                dst_addr,
-                src_port,
-                dst_port,
-                packet.proto,
-            );
-
-            let now = SystemTime::now();
-            let duration_since_epoch = now.duration_since(UNIX_EPOCH).expect("Time went backwards");
-            let timestamp_nanos = duration_since_epoch.as_nanos() as u64;
+            // Pre-calculate commonly used conditions for readability
+            let is_icmp = packet.proto == IpProto::Icmp;
+            let is_icmpv6 = packet.proto == IpProto::Ipv6Icmp;
+            let is_icmp_any = is_icmp || is_icmpv6;
+            let is_ip_flow =
+                packet.ether_type == EtherType::Ipv4 || packet.ether_type == EtherType::Ipv6;
+            let is_ipv6 = packet.ether_type == EtherType::Ipv6;
+            let is_tcp = packet.proto == IpProto::Tcp;
 
             let attrs = FlowSpan {
                 start_time: timestamp_nanos,
-                end_time: timestamp_nanos,
+                end_time: 0,
                 span_kind: SpanKind::Internal,
                 attributes: SpanAttributes {
-                    flow_community_id: community_id.clone(),
-                    flow_connection_state: None,
-                    flow_end_reason: "".to_string(),
+                    // General flow attributes
+                    flow_community_id: self
+                        .community_id_generator
+                        .generate(src_addr, dst_addr, src_port, dst_port, packet.proto)
+                        .clone(),
+                    flow_connection_state: is_tcp.then(|| ConnectionState::from_packet(&packet)),
+                    flow_end_reason: None,
+
+                    // Network endpoints
                     source_address: src_addr,
                     source_port: src_port,
                     destination_address: dst_addr,
                     destination_port: dst_port,
+
+                    // Network layer info
                     network_transport: packet.proto,
                     network_type: packet.ether_type,
-                    network_interface_index: None,
-                    network_interface_name: None,
-                    network_interface_mac: None,
-                    flow_ip_dscp_id: None,
-                    flow_ip_dscp_name: None,
-                    flow_ip_ecn_id: None,
-                    flow_ip_ecn_name: None,
-                    flow_ip_ttl: None,
-                    flow_ip_flow_label: None,
-                    flow_icmp_type_id: None,
-                    flow_icmp_type_name: None,
-                    flow_icmp_code_id: None,
-                    flow_icmp_code_name: None,
-                    flow_tcp_flags_bits: None,
-                    flow_tcp_flags_tags: None,
-                    flow_bytes_delta: packet.l3_octet_count as i64,
-                    flow_bytes_total: packet.l3_octet_count as i64,
+                    network_interface_index: Some(packet.ifindex),
+                    network_interface_name: self.iface_map.get(&packet.ifindex).cloned(),
+                    network_interface_mac: Some(MacAddr::new(
+                        packet.src_mac_addr[0],
+                        packet.src_mac_addr[1],
+                        packet.src_mac_addr[2],
+                        packet.src_mac_addr[3],
+                        packet.src_mac_addr[4],
+                        packet.src_mac_addr[5],
+                    )),
+
+                    // IP-specific fields (only populated for IPv4/IPv6 traffic)
+                    flow_ip_dscp_id: is_ip_flow.then_some(packet.ip_dscp_id),
+                    flow_ip_dscp_name: is_ip_flow.then_some(
+                        IpDscp::try_from_u8(packet.ip_dscp_id)
+                            .unwrap_or_default()
+                            .as_str()
+                            .to_string(),
+                    ),
+                    flow_ip_ecn_id: is_ip_flow.then_some(packet.ip_ecn_id),
+                    flow_ip_ecn_name: is_ip_flow.then_some(
+                        IpEcn::try_from_u8(packet.ip_ecn_id)
+                            .unwrap_or_default()
+                            .as_str()
+                            .to_string(),
+                    ),
+                    flow_ip_ttl: is_ip_flow.then_some(packet.ip_ttl),
+                    flow_ip_flow_label: is_ipv6.then_some(packet.ip_flow_label),
+
+                    // ICMP fields (only populated for ICMP/ICMPv6 traffic)
+                    flow_icmp_type_id: is_icmp_any.then_some(packet.icmp_type_id),
+                    flow_icmp_type_name: if is_icmp {
+                        network_types::icmp::get_icmpv4_type_name(packet.icmp_type_id)
+                            .map(String::from)
+                    } else if is_icmpv6 {
+                        network_types::icmp::get_icmpv6_type_name(packet.icmp_type_id)
+                            .map(String::from)
+                    } else {
+                        None
+                    },
+                    flow_icmp_code_id: is_icmp_any.then_some(packet.icmp_code_id),
+                    flow_icmp_code_name: if is_icmp {
+                        network_types::icmp::get_icmpv4_code_name(
+                            packet.icmp_type_id,
+                            packet.icmp_code_id,
+                        )
+                        .map(String::from)
+                    } else if is_icmpv6 {
+                        network_types::icmp::get_icmpv6_code_name(
+                            packet.icmp_type_id,
+                            packet.icmp_code_id,
+                        )
+                        .map(String::from)
+                    } else {
+                        None
+                    },
+
+                    // TCP flags (only populated for TCP traffic)
+                    flow_tcp_flags_bits: is_tcp.then_some(packet.tcp_flags),
+                    flow_tcp_flags_tags: is_tcp
+                        .then(|| TcpFlags::from_packet(&packet).active_flags()),
+
+                    // Flow metrics
+                    flow_bytes_delta: packet.l3_octet_count as i64, // TODO: check this for all types of packets
+                    flow_bytes_total: packet.l3_octet_count as i64, // TODO: check this for all types of packets
                     flow_packets_delta: 1,
                     flow_packets_total: 1,
                     flow_reverse_bytes_delta: 0,
                     flow_reverse_bytes_total: 0,
                     flow_reverse_packets_delta: 0,
                     flow_reverse_packets_total: 0,
+
+                    // TCP performance metrics (not yet implemented)
                     flow_tcp_handshake_snd_latency: None,
                     flow_tcp_handshake_snd_jitter: None,
                     flow_tcp_handshake_cnd_latency: None,
@@ -270,34 +341,22 @@ impl PacketWorker {
                     flow_tcp_svc_jitter: None,
                     flow_tcp_rndtrip_latency: None,
                     flow_tcp_rndtrip_jitter: None,
+
+                    // Tunnel attributes (populated when traffic is encapsulated)
                     tunnel_type: None,
                     tunnel_source_address: tunnel_addresses.map(|(src, _)| src),
-                    tunnel_source_port: if is_tunneled {
-                        Some(packet.tunnel_src_port())
-                    } else {
-                        None
-                    },
+                    tunnel_source_port: is_tunneled.then(|| packet.tunnel_src_port()),
                     tunnel_destination_address: tunnel_addresses.map(|(_, dst)| dst),
-                    tunnel_destination_port: if is_tunneled {
-                        Some(packet.tunnel_dst_port())
-                    } else {
-                        None
-                    },
-                    tunnel_network_transport: if is_tunneled {
-                        Some(packet.tunnel_proto)
-                    } else {
-                        None
-                    },
-                    tunnel_network_type: if is_tunneled {
-                        Some(packet.tunnel_ether_type)
-                    } else {
-                        None
-                    },
+                    tunnel_destination_port: is_tunneled.then(|| packet.tunnel_dst_port()),
+                    tunnel_network_transport: is_tunneled.then_some(packet.tunnel_proto),
+                    tunnel_network_type: is_tunneled.then_some(packet.tunnel_ether_type),
                     tunnel_id: None,
                     tunnel_key: None,
                     tunnel_sender_index: None,
                     tunnel_receiver_index: None,
                     tunnel_spi: None,
+
+                    // Kubernetes source attributes (not yet implemented)
                     source_k8s_cluster_name: None,
                     source_k8s_cluster_uid: None,
                     source_k8s_node_name: None,
@@ -320,6 +379,8 @@ impl PacketWorker {
                     source_k8s_cronjob_uid: None,
                     source_k8s_service_name: None,
                     source_k8s_service_uid: None,
+
+                    // Kubernetes destination attributes (not yet implemented)
                     destination_k8s_cluster_name: None,
                     destination_k8s_cluster_uid: None,
                     destination_k8s_node_name: None,
@@ -342,6 +403,8 @@ impl PacketWorker {
                     destination_k8s_cronjob_uid: None,
                     destination_k8s_service_name: None,
                     destination_k8s_service_uid: None,
+
+                    // Application and policy attributes (not yet implemented)
                     network_policies_ingress: None,
                     network_policies_egress: None,
                     process_executable_name: None,

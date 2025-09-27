@@ -102,7 +102,7 @@ impl From<u8> for WireGuardType {
 pub struct WireGuardInitiation {
     pub type_: WireGuardType,
     pub reserved: [u8; 3],
-    pub sender_ind: [u8; 4],
+    pub sender_idx: [u8; 4],
     pub ephemeral: [u8; 32],
     pub encrypted_static: [u8; 48],
     pub encrypted_timestamp: [u8; 28],
@@ -114,13 +114,13 @@ impl WireGuardInitiation {
     pub const LEN: usize = mem::size_of::<WireGuardInitiation>();
 
     #[inline]
-    pub fn sender_ind(&self) -> u32 {
-        u32::from_le_bytes(self.sender_ind)
+    pub fn sender_idx(&self) -> u32 {
+        u32::from_le_bytes(self.sender_idx)
     }
 
     #[inline]
-    pub fn set_sender_ind(&mut self, sender_ind: u32) {
-        self.sender_ind = sender_ind.to_le_bytes();
+    pub fn set_sender_idx(&mut self, sender_idx: u32) {
+        self.sender_idx = sender_idx.to_le_bytes();
     }
 
     #[inline]
@@ -199,8 +199,8 @@ impl WireGuardInitiation {
 pub struct WireGuardResponse {
     pub type_: WireGuardType,
     pub reserved: [u8; 3],
-    pub sender_ind: [u8; 4],
-    pub receiver_ind: [u8; 4],
+    pub sender_idx: [u8; 4],
+    pub receiver_idx: [u8; 4],
     pub ephemeral: [u8; 32],
     pub encrypted_nothing: [u8; 16],
     pub mac_1: [u8; 16],
@@ -211,23 +211,23 @@ impl WireGuardResponse {
     pub const LEN: usize = mem::size_of::<WireGuardResponse>();
 
     #[inline]
-    pub fn sender_ind(&self) -> u32 {
-        u32::from_le_bytes(self.sender_ind)
+    pub fn sender_idx(&self) -> u32 {
+        u32::from_le_bytes(self.sender_idx)
     }
 
     #[inline]
-    pub fn set_sender_ind(&mut self, sender_ind: u32) {
-        self.sender_ind = sender_ind.to_le_bytes();
+    pub fn set_sender_idx(&mut self, sender_idx: u32) {
+        self.sender_idx = sender_idx.to_le_bytes();
     }
 
     #[inline]
-    pub fn receiver_ind(&self) -> u32 {
-        u32::from_le_bytes(self.receiver_ind)
+    pub fn receiver_idx(&self) -> u32 {
+        u32::from_le_bytes(self.receiver_idx)
     }
 
     #[inline]
-    pub fn set_receiver_ind(&mut self, receiver_ind: u32) {
-        self.receiver_ind = receiver_ind.to_le_bytes();
+    pub fn set_receiver_idx(&mut self, receiver_idx: u32) {
+        self.receiver_idx = receiver_idx.to_le_bytes();
     }
 
     #[inline]
@@ -307,7 +307,7 @@ impl WireGuardResponse {
 pub struct WireGuardCookieReply {
     pub type_: WireGuardType,
     pub reserved: [u8; 3],
-    pub receiver_ind: [u8; 4],
+    pub receiver_idx: [u8; 4],
     pub nonce: [u8; 24],
     pub encrypted_cookie: [u8; 16],
 }
@@ -316,13 +316,13 @@ impl WireGuardCookieReply {
     pub const LEN: usize = mem::size_of::<WireGuardCookieReply>();
 
     #[inline]
-    pub fn receiver_ind(&self) -> u32 {
-        u32::from_le_bytes(self.receiver_ind)
+    pub fn receiver_idx(&self) -> u32 {
+        u32::from_le_bytes(self.receiver_idx)
     }
 
     #[inline]
-    pub fn set_receiver_ind(&mut self, receiver_ind: u32) {
-        self.receiver_ind = receiver_ind.to_le_bytes();
+    pub fn set_receiver_idx(&mut self, receiver_idx: u32) {
+        self.receiver_idx = receiver_idx.to_le_bytes();
     }
 
     #[inline]
@@ -380,7 +380,7 @@ impl WireGuardCookieReply {
 pub struct WireGuardTransportData {
     pub type_: WireGuardType,
     pub reserved: [u8; 3],
-    pub receiver_ind: [u8; 4],
+    pub receiver_idx: [u8; 4],
     pub counter: [u8; 8],
 }
 
@@ -388,13 +388,13 @@ impl WireGuardTransportData {
     pub const LEN: usize = mem::size_of::<WireGuardTransportData>();
 
     #[inline]
-    pub fn receiver_ind(&self) -> u32 {
-        u32::from_le_bytes(self.receiver_ind)
+    pub fn receiver_idx(&self) -> u32 {
+        u32::from_le_bytes(self.receiver_idx)
     }
 
     #[inline]
-    pub fn set_receiver_ind(&mut self, receiver_ind: u32) {
-        self.receiver_ind = receiver_ind.to_le_bytes();
+    pub fn set_receiver_idx(&mut self, receiver_idx: u32) {
+        self.receiver_idx = receiver_idx.to_le_bytes();
     }
 
     #[inline]
@@ -436,7 +436,7 @@ mod tests {
         let mut initiation = WireGuardInitiation {
             type_: WireGuardType::HandshakeInitiation,
             reserved: [0; 3],
-            sender_ind: [0; 4],
+            sender_idx: [0; 4],
             ephemeral: [0; 32],
             encrypted_static: [0; 48],
             encrypted_timestamp: [0; 28],
@@ -444,10 +444,10 @@ mod tests {
             mac_2: [0; 16],
         };
 
-        // Test sender_ind field
-        initiation.set_sender_ind(0x12345678);
-        assert_eq!(initiation.sender_ind(), 0x12345678);
-        assert_eq!(initiation.sender_ind, [0x78, 0x56, 0x34, 0x12]);
+        // Test sender_idx field
+        initiation.set_sender_idx(0x12345678);
+        assert_eq!(initiation.sender_idx(), 0x12345678);
+        assert_eq!(initiation.sender_idx, [0x78, 0x56, 0x34, 0x12]);
 
         // Test mac_1 field
         let test_mac_1 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
@@ -473,23 +473,23 @@ mod tests {
         let mut response = WireGuardResponse {
             type_: WireGuardType::HandshakeResponse,
             reserved: [0; 3],
-            sender_ind: [0; 4],
-            receiver_ind: [0; 4],
+            sender_idx: [0; 4],
+            receiver_idx: [0; 4],
             ephemeral: [0; 32],
             encrypted_nothing: [0; 16],
             mac_1: [0; 16],
             mac_2: [0; 16],
         };
 
-        // Test sender_ind field
-        response.set_sender_ind(0x87654321);
-        assert_eq!(response.sender_ind(), 0x87654321);
-        assert_eq!(response.sender_ind, [0x21, 0x43, 0x65, 0x87]);
+        // Test sender_idx field
+        response.set_sender_idx(0x87654321);
+        assert_eq!(response.sender_idx(), 0x87654321);
+        assert_eq!(response.sender_idx, [0x21, 0x43, 0x65, 0x87]);
 
-        // Test receiver_ind field
-        response.set_receiver_ind(0x11223344);
-        assert_eq!(response.receiver_ind(), 0x11223344);
-        assert_eq!(response.receiver_ind, [0x44, 0x33, 0x22, 0x11]);
+        // Test receiver_idx field
+        response.set_receiver_idx(0x11223344);
+        assert_eq!(response.receiver_idx(), 0x11223344);
+        assert_eq!(response.receiver_idx, [0x44, 0x33, 0x22, 0x11]);
 
         // Test encrypted_nothing field
         let test_encrypted = [
@@ -536,15 +536,15 @@ mod tests {
         let mut cookie_reply = WireGuardCookieReply {
             type_: WireGuardType::CookieReply,
             reserved: [0; 3],
-            receiver_ind: [0; 4],
+            receiver_idx: [0; 4],
             nonce: [0; 24],
             encrypted_cookie: [0; 16],
         };
 
-        // Test receiver_ind field
-        cookie_reply.set_receiver_ind(0xDEADBEEF);
-        assert_eq!(cookie_reply.receiver_ind(), 0xDEADBEEF);
-        assert_eq!(cookie_reply.receiver_ind, [0xEF, 0xBE, 0xAD, 0xDE]);
+        // Test receiver_idx field
+        cookie_reply.set_receiver_idx(0xDEADBEEF);
+        assert_eq!(cookie_reply.receiver_idx(), 0xDEADBEEF);
+        assert_eq!(cookie_reply.receiver_idx, [0xEF, 0xBE, 0xAD, 0xDE]);
 
         // Test encrypted_cookie field
         let test_cookie = [
@@ -573,14 +573,14 @@ mod tests {
         let mut transport_data = WireGuardTransportData {
             type_: WireGuardType::TransportData,
             reserved: [0; 3],
-            receiver_ind: [0; 4],
+            receiver_idx: [0; 4],
             counter: [0; 8],
         };
 
-        // Test receiver_ind field
-        transport_data.set_receiver_ind(0xCAFEBABE);
-        assert_eq!(transport_data.receiver_ind(), 0xCAFEBABE);
-        assert_eq!(transport_data.receiver_ind, [0xBE, 0xBA, 0xFE, 0xCA]);
+        // Test receiver_idx field
+        transport_data.set_receiver_idx(0xCAFEBABE);
+        assert_eq!(transport_data.receiver_idx(), 0xCAFEBABE);
+        assert_eq!(transport_data.receiver_idx, [0xBE, 0xBA, 0xFE, 0xCA]);
 
         // Test counter field
         transport_data.set_counter(0x123456789ABCDEF0);
@@ -606,7 +606,7 @@ mod tests {
         let mut initiation = WireGuardInitiation {
             type_: WireGuardType::HandshakeInitiation,
             reserved: [0; 3],
-            sender_ind: [0; 4],
+            sender_idx: [0; 4],
             ephemeral: [0; 32],
             encrypted_static: [0; 48],
             encrypted_timestamp: [0; 28],
@@ -614,10 +614,10 @@ mod tests {
             mac_2: [0; 16],
         };
 
-        // Test sender_ind little-endian conversion
-        initiation.set_sender_ind(0x12345678);
-        assert_eq!(initiation.sender_ind, [0x78, 0x56, 0x34, 0x12]); // Little-endian byte order
-        assert_eq!(initiation.sender_ind(), 0x12345678);
+        // Test sender_idx little-endian conversion
+        initiation.set_sender_idx(0x12345678);
+        assert_eq!(initiation.sender_idx, [0x78, 0x56, 0x34, 0x12]); // Little-endian byte order
+        assert_eq!(initiation.sender_idx(), 0x12345678);
 
         // Test MAC little-endian conversion
         let mac_value = 0x123456789ABCDEF0FEDCBA9876543210;
@@ -634,7 +634,7 @@ mod tests {
         let mut initiation = WireGuardInitiation {
             type_: WireGuardType::HandshakeInitiation,
             reserved: [0; 3],
-            sender_ind: [0; 4],
+            sender_idx: [0; 4],
             ephemeral: [0; 32],
             encrypted_static: [0; 48],
             encrypted_timestamp: [0; 28],
@@ -643,9 +643,9 @@ mod tests {
         };
 
         // Test maximum u32 value
-        initiation.set_sender_ind(u32::MAX);
-        assert_eq!(initiation.sender_ind(), u32::MAX);
-        assert_eq!(initiation.sender_ind, [0xFF, 0xFF, 0xFF, 0xFF]);
+        initiation.set_sender_idx(u32::MAX);
+        assert_eq!(initiation.sender_idx(), u32::MAX);
+        assert_eq!(initiation.sender_idx, [0xFF, 0xFF, 0xFF, 0xFF]);
 
         // Test maximum u128 value for MAC
         let max_mac = u128::MAX;
@@ -654,9 +654,9 @@ mod tests {
         assert_eq!(initiation.mac_1, [0xFF; 16]);
 
         // Test zero values
-        initiation.set_sender_ind(0);
-        assert_eq!(initiation.sender_ind(), 0);
-        assert_eq!(initiation.sender_ind, [0; 4]);
+        initiation.set_sender_idx(0);
+        assert_eq!(initiation.sender_idx(), 0);
+        assert_eq!(initiation.sender_idx, [0; 4]);
 
         initiation.set_mac_1(0);
         assert_eq!(initiation.mac_1(), 0);
@@ -668,14 +668,14 @@ mod tests {
         let mut transport_data = WireGuardTransportData {
             type_: WireGuardType::TransportData,
             reserved: [0; 3],
-            receiver_ind: [0; 4],
+            receiver_idx: [0; 4],
             counter: [0; 8],
         };
 
-        // Test maximum u32 value for receiver_ind
-        transport_data.set_receiver_ind(u32::MAX);
-        assert_eq!(transport_data.receiver_ind(), u32::MAX);
-        assert_eq!(transport_data.receiver_ind, [0xFF, 0xFF, 0xFF, 0xFF]);
+        // Test maximum u32 value for receiver_idx
+        transport_data.set_receiver_idx(u32::MAX);
+        assert_eq!(transport_data.receiver_idx(), u32::MAX);
+        assert_eq!(transport_data.receiver_idx, [0xFF, 0xFF, 0xFF, 0xFF]);
 
         // Test maximum u64 value for counter
         transport_data.set_counter(u64::MAX);
@@ -683,11 +683,11 @@ mod tests {
         assert_eq!(transport_data.counter, [0xFF; 8]);
 
         // Test zero values
-        transport_data.set_receiver_ind(0);
+        transport_data.set_receiver_idx(0);
         transport_data.set_counter(0);
-        assert_eq!(transport_data.receiver_ind(), 0);
+        assert_eq!(transport_data.receiver_idx(), 0);
         assert_eq!(transport_data.counter(), 0);
-        assert_eq!(transport_data.receiver_ind, [0; 4]);
+        assert_eq!(transport_data.receiver_idx, [0; 4]);
         assert_eq!(transport_data.counter, [0; 8]);
     }
 }

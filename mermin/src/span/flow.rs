@@ -5,10 +5,63 @@ use dashmap::DashMap;
 use fxhash::FxBuildHasher;
 use network_types::{eth::EtherType, ip::IpProto};
 use opentelemetry::trace::SpanKind;
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 use tracing::{Span, info_span};
 
-use crate::otlp::trace::lib::Traceable;
+use crate::{otlp::trace::lib::Traceable, span::tcp::ConnectionState};
+
+/// Flow End Reason based on RFC 5102 IPFIX Information Model
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum FlowEndReason {
+    /// 0x01: The Flow was terminated because it was considered to be idle
+    IdleTimeout,
+    /// 0x02: The Flow was terminated for reporting purposes while it was still active
+    ActiveTimeout,
+    /// 0x03: The Flow was terminated because signals indicating the end of the Flow were detected (e.g., TCP FIN flag)
+    EndOfFlowDetected,
+    /// 0x04: The Flow was terminated because of some external event (e.g., shutdown of the Metering Process)
+    ForcedEnd,
+    /// 0x05: The Flow was terminated because of lack of resources available to the Metering Process and/or the Exporting Process
+    LackOfResources,
+}
+
+#[allow(dead_code)]
+impl FlowEndReason {
+    /// Convert the enum variant to its string representation
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FlowEndReason::IdleTimeout => "idle timeout",
+            FlowEndReason::ActiveTimeout => "active timeout",
+            FlowEndReason::EndOfFlowDetected => "end of Flow detected",
+            FlowEndReason::ForcedEnd => "forced end",
+            FlowEndReason::LackOfResources => "lack of resources",
+        }
+    }
+
+    /// Convert the enum variant to its numeric value as specified in RFC 5102
+    pub fn to_u8(self) -> u8 {
+        match self {
+            FlowEndReason::IdleTimeout => 0x01,
+            FlowEndReason::ActiveTimeout => 0x02,
+            FlowEndReason::EndOfFlowDetected => 0x03,
+            FlowEndReason::ForcedEnd => 0x04,
+            FlowEndReason::LackOfResources => 0x05,
+        }
+    }
+
+    /// Create FlowEndReason from a numeric value
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0x01 => Some(FlowEndReason::IdleTimeout),
+            0x02 => Some(FlowEndReason::ActiveTimeout),
+            0x03 => Some(FlowEndReason::EndOfFlowDetected),
+            0x04 => Some(FlowEndReason::ForcedEnd),
+            0x05 => Some(FlowEndReason::LackOfResources),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FlowSpan {
@@ -23,8 +76,10 @@ pub struct FlowSpan {
 pub struct SpanAttributes {
     // General Flow Attribute
     pub flow_community_id: String,
-    pub flow_connection_state: Option<String>, // TODO: enum
-    pub flow_end_reason: String,               // TODO: enum
+    #[serde(serialize_with = "serialize_connection_state")]
+    pub flow_connection_state: Option<ConnectionState>,
+    #[serde(serialize_with = "serialize_flow_end_reason")]
+    pub flow_end_reason: Option<FlowEndReason>,
 
     // L2-L4 Attributes
     pub source_address: IpAddr,
@@ -37,17 +92,18 @@ pub struct SpanAttributes {
     pub network_type: EtherType,
     pub network_interface_index: Option<u32>,
     pub network_interface_name: Option<String>,
-    pub network_interface_mac: Option<String>, // TODO: is there a better type?
-    pub flow_ip_dscp_id: Option<u8>,           // TODO: enum
-    pub flow_ip_dscp_name: Option<String>,     // TODO: enum
-    pub flow_ip_ecn_id: Option<u8>,            // TODO: enum
-    pub flow_ip_ecn_name: Option<String>,      // TODO: enum
+    #[serde(serialize_with = "serialize_option_mac_addr")]
+    pub network_interface_mac: Option<pnet::datalink::MacAddr>,
+    pub flow_ip_dscp_id: Option<u8>,
+    pub flow_ip_dscp_name: Option<String>,
+    pub flow_ip_ecn_id: Option<u8>,
+    pub flow_ip_ecn_name: Option<String>,
     pub flow_ip_ttl: Option<u8>,
     pub flow_ip_flow_label: Option<u32>,
-    pub flow_icmp_type_id: Option<u8>,       // TODO: enum
-    pub flow_icmp_type_name: Option<String>, // TODO: enum
-    pub flow_icmp_code_id: Option<u8>,       // TODO: enum
-    pub flow_icmp_code_name: Option<String>, // TODO: enum
+    pub flow_icmp_type_id: Option<u8>,
+    pub flow_icmp_type_name: Option<String>,
+    pub flow_icmp_code_id: Option<u8>,
+    pub flow_icmp_code_name: Option<String>,
     pub flow_tcp_flags_bits: Option<u8>,
     pub flow_tcp_flags_tags: Option<Vec<String>>, // TODO: enum
 
@@ -155,7 +211,7 @@ impl Traceable for FlowSpan {
             "flow_span", // TODO: replace with span_name once we migrate away from using tracing here.
             "flow.community_id" = self.attributes.flow_community_id,
             "flow.connection_state" = tracing::field::Empty,
-            "flow.end_reason" = self.attributes.flow_end_reason,
+            "flow.end_reason" = tracing::field::Empty,
             "network.source.address" = self.attributes.source_address.to_string(),
             "network.source.port" = self.attributes.source_port,
             "network.destination.address" = self.attributes.destination_address.to_string(),
@@ -258,7 +314,10 @@ impl Traceable for FlowSpan {
 
         // Record optional fields only if they have values
         if let Some(ref value) = self.attributes.flow_connection_state {
-            span.record("flow.connection_state", value);
+            span.record("flow.connection_state", value.as_str());
+        }
+        if let Some(ref value) = self.attributes.flow_end_reason {
+            span.record("flow.end_reason", value.as_str());
         }
         if let Some(value) = self.attributes.network_interface_index {
             span.record("network.interface.index", value);
@@ -267,7 +326,7 @@ impl Traceable for FlowSpan {
             span.record("network.interface.name", value);
         }
         if let Some(ref value) = self.attributes.network_interface_mac {
-            span.record("network.interface.mac", value);
+            span.record("network.interface.mac", value.to_string().as_str());
         }
         if let Some(value) = self.attributes.flow_ip_dscp_id {
             span.record("flow.ip.dscp.id", value);
@@ -533,6 +592,19 @@ where
     serializer.serialize_str(&proto.to_string())
 }
 
+fn serialize_connection_state<S>(
+    state: &Option<ConnectionState>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match state {
+        Some(s) => serializer.serialize_str(s.as_str()),
+        None => serializer.serialize_none(),
+    }
+}
+
 fn serialize_ether_type<S>(ether_type: &EtherType, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
@@ -575,4 +647,30 @@ where
         SpanKind::Internal => "INTERNAL",
     };
     serializer.serialize_str(kind_str)
+}
+
+fn serialize_option_mac_addr<S>(
+    mac_addr: &Option<pnet::datalink::MacAddr>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match mac_addr {
+        Some(addr) => serializer.serialize_str(&addr.to_string()),
+        None => serializer.serialize_none(),
+    }
+}
+
+fn serialize_flow_end_reason<S>(
+    reason: &Option<FlowEndReason>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match reason {
+        Some(r) => serializer.serialize_str(r.as_str()),
+        None => serializer.serialize_none(),
+    }
 }

@@ -164,14 +164,14 @@ async fn main() -> Result<()> {
     health_state.ebpf_loaded.store(true, Ordering::Relaxed);
 
     info!("building interface index map");
-    let iface_map: Arc<HashMap<u32, String>> = {
+    let iface_map: HashMap<u32, String> = {
         let mut map = HashMap::new();
         for iface in datalink::interfaces() {
             if interface.contains(&iface.name) {
                 map.insert(iface.index, iface.name.clone());
             }
         }
-        Arc::new(map)
+        map
     };
 
     let (packet_meta_tx, packet_meta_rx) = mpsc::channel(config.packet_channel_capacity);
@@ -183,6 +183,7 @@ async fn main() -> Result<()> {
         config.span,
         config.packet_channel_capacity,
         config.packet_worker_count,
+        iface_map.clone(),
         packet_meta_rx,
         flow_span_tx,
     );
@@ -243,7 +244,7 @@ async fn main() -> Result<()> {
     });
     health_state.ready_to_process.store(true, Ordering::Relaxed);
 
-    let task_iface_map = Arc::clone(&iface_map);
+    let task_iface_map = Arc::new(iface_map);
     tokio::spawn(async move {
         info!("userspace task started: reading from ring buffer for packet metadata");
         loop {
@@ -255,7 +256,7 @@ async fn main() -> Result<()> {
                     let iface_name = task_iface_map
                         .get(&packet_meta.ifindex)
                         .map(String::as_str)
-                        .unwrap_or("unknown_if");
+                        .unwrap_or("");
 
                     // Extract port numbers for community ID generation
                     let src_port = packet_meta.src_port();
