@@ -268,42 +268,10 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> (TcContext, Result<(i32, 
                 let wg_type = WireGuardType::from(wireguard_type);
 
                 match wg_type {
-                    WireGuardType::HandshakeInitiation => {
-                        match parser.parse_wireguard_init(&ctx) {
-                            Ok(_wg_init) => {
-                                // let wireguard_initiation = wg_init;
-                                Ok(())
-                            }
-                            Err(e) => Err(e),
-                        }
-                    }
-                    WireGuardType::HandshakeResponse => {
-                        match parser.parse_wireguard_response(&ctx) {
-                            Ok(_wg_resp) => {
-                                // let wireguard_response = wg_resp;
-                                Ok(())
-                            }
-                            Err(e) => Err(e),
-                        }
-                    }
-                    WireGuardType::CookieReply => {
-                        match parser.parse_wireguard_cookie_reply(&ctx) {
-                            Ok(_wg_cookie_reply) => {
-                                // let wireguard_cookie_reply = wg_cookie_reply;
-                                Ok(())
-                            }
-                            Err(e) => Err(e),
-                        }
-                    }
-                    WireGuardType::TransportData => {
-                        match parser.parse_wireguard_transport_data(&ctx) {
-                            Ok(_wg_transport_data) => {
-                                // let wireguard_transport_data = wg_transport_data;
-                                Ok(())
-                            }
-                            Err(e) => Err(e),
-                        }
-                    }
+                    WireGuardType::HandshakeInitiation => parser.parse_wireguard_init(&ctx),
+                    WireGuardType::HandshakeResponse => parser.parse_wireguard_response(&ctx),
+                    WireGuardType::CookieReply => parser.parse_wireguard_cookie_reply(&ctx),
+                    WireGuardType::TransportData => parser.parse_wireguard_transport_data(&ctx),
                     _ => Err(Error::Unsupported),
                 }
             }
@@ -623,59 +591,55 @@ impl Parser {
     }
 
     /// Parses a WireGuard Handshake Initiation packet.
-    /// Returns the parsed WireGuardInitiation struct.
+    /// Validates and advances the parser offset.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_wireguard_init(&mut self, ctx: &TcContext) -> Result<WireGuardInitiation, Error> {
+    fn parse_wireguard_init(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + WireGuardInitiation::LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
-        let wg_init: WireGuardInitiation = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        // Validate the header can be loaded without storing the large struct
+        let _: u8 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += WireGuardInitiation::LEN;
-        Ok(wg_init)
+        Ok(())
     }
 
     /// Parses a WireGuard Handshake Response packet.
-    /// Returns the parsed WireGuardResponse struct.
+    /// Validates and advances the parser offset.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_wireguard_response(&mut self, ctx: &TcContext) -> Result<WireGuardResponse, Error> {
+    fn parse_wireguard_response(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + WireGuardResponse::LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
-        let wg_resp: WireGuardResponse = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        // Validate the header can be loaded without storing the large struct
+        let _: u8 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += WireGuardResponse::LEN;
-        Ok(wg_resp)
+        Ok(())
     }
 
     /// Parses a WireGuard Cookie Reply packet.
-    /// Returns the parsed WireGuardCookieReply struct.
+    /// Validates and advances the parser offset.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_wireguard_cookie_reply(
-        &mut self,
-        ctx: &TcContext,
-    ) -> Result<WireGuardCookieReply, Error> {
+    fn parse_wireguard_cookie_reply(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + WireGuardCookieReply::LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
-        let wg_cookie_reply: WireGuardCookieReply =
-            ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        // Validate the header can be loaded without storing the large struct
+        let _: u8 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += WireGuardCookieReply::LEN;
-        Ok(wg_cookie_reply)
+        Ok(())
     }
 
     /// Parses a WireGuard Transport Data packet.
-    /// Returns the parsed WireGuardTransportData struct.
+    /// Validates and advances the parser offset.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_wireguard_transport_data(
-        &mut self,
-        ctx: &TcContext,
-    ) -> Result<WireGuardTransportData, Error> {
+    fn parse_wireguard_transport_data(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + WireGuardTransportData::LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
-        let wg_transport_data: WireGuardTransportData =
-            ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        // Validate the header can be loaded without storing the large struct
+        let _: u8 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += WireGuardTransportData::LEN;
-        Ok(wg_transport_data)
+        Ok(())
     }
 
     /// Parses the Hop-by-Hop IPv6-extension header in the packet and updates the parser state accordingly.
@@ -3006,31 +2970,8 @@ mod tests {
         let result = parser.parse_wireguard_init(&ctx);
         assert!(result.is_ok());
         assert_eq!(parser.offset, WireGuardInitiation::LEN);
-        let wg_init = result.unwrap();
-
-        // Assert type field
-        assert_eq!(wg_init.type_, WireGuardType::HandshakeInitiation);
-
-        // Assert reserved field (should be all zeros)
-        assert_eq!(wg_init.reserved, [0x00, 0x00, 0x00]);
-
-        // Assert sender_ind field
-        assert_eq!(wg_init.sender_ind(), 1234);
-
-        // Assert ephemeral key field (32 bytes of 0x01)
-        assert_eq!(wg_init.ephemeral, [0x01; 32]);
-
-        // Assert encrypted_static field (48 bytes of 0x02)
-        assert_eq!(wg_init.encrypted_static, [0x02; 48]);
-
-        // Assert encrypted_timestamp field (28 bytes of 0x03)
-        assert_eq!(wg_init.encrypted_timestamp, [0x03; 28]);
-
-        // Assert mac_1 field (16 bytes of 0x04)
-        assert_eq!(wg_init.mac_1, [0x04; 16]);
-
-        // Assert mac_2 field (16 bytes of 0x05)
-        assert_eq!(wg_init.mac_2, [0x05; 16]);
+        // Note: Function now returns () to reduce stack usage
+        // Detailed field validation has been removed to optimize for eBPF verification
     }
 
     #[test]
@@ -3043,31 +2984,8 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, WireGuardResponse::LEN);
-        let wg_resp = result.unwrap();
-
-        // Assert type field
-        assert_eq!(wg_resp.type_, WireGuardType::HandshakeResponse);
-
-        // Assert reserved field (should be all zeros)
-        assert_eq!(wg_resp.reserved, [0x00, 0x00, 0x00]);
-
-        // Assert sender_ind field
-        assert_eq!(wg_resp.sender_ind(), 5432);
-
-        // Assert receiver_ind field
-        assert_eq!(wg_resp.receiver_ind(), 1234);
-
-        // Assert ephemeral key field (32 bytes of 0x06)
-        assert_eq!(wg_resp.ephemeral, [0x06; 32]);
-
-        // Assert encrypted_nothing field (16 bytes of 0x07)
-        assert_eq!(wg_resp.encrypted_nothing, [0x07; 16]);
-
-        // Assert mac_1 field (16 bytes of 0x08)
-        assert_eq!(wg_resp.mac_1, [0x08; 16]);
-
-        // Assert mac_2 field (16 bytes of 0x09)
-        assert_eq!(wg_resp.mac_2, [0x09; 16]);
+        // Note: Function now returns () to reduce stack usage
+        // Detailed field validation has been removed to optimize for eBPF verification
     }
 
     #[test]
@@ -3080,22 +2998,8 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, WireGuardCookieReply::LEN);
-        let wg_cookie = result.unwrap();
-
-        // Assert type field
-        assert_eq!(wg_cookie.type_, WireGuardType::CookieReply);
-
-        // Assert reserved field (should be all zeros)
-        assert_eq!(wg_cookie.reserved, [0x00, 0x00, 0x00]);
-
-        // Assert receiver_ind field
-        assert_eq!(wg_cookie.receiver_ind(), 12345);
-
-        // Assert nonce field (24 bytes of 0x0A)
-        assert_eq!(wg_cookie.nonce, [0x0A; 24]);
-
-        // Assert encrypted_cookie field (16 bytes of 0x0B)
-        assert_eq!(wg_cookie.encrypted_cookie, [0x0B; 16]);
+        // Note: Function now returns () to reduce stack usage
+        // Detailed field validation has been removed to optimize for eBPF verification
     }
 
     #[test]
@@ -3108,19 +3012,8 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, WireGuardTransportData::LEN);
-        let wg_transport = result.unwrap();
-
-        // Assert type field
-        assert_eq!(wg_transport.type_, WireGuardType::TransportData);
-
-        // Assert reserved field (should be all zeros)
-        assert_eq!(wg_transport.reserved, [0x00, 0x00, 0x00]);
-
-        // Assert receiver_ind field
-        assert_eq!(wg_transport.receiver_ind(), 12345);
-
-        // Assert counter field (8 bytes of 0x0C)
-        assert_eq!(wg_transport.counter, [0x0C; 8]);
+        // Note: Function now returns () to reduce stack usage
+        // Detailed field validation has been removed to optimize for eBPF verification
     }
 
     #[test]
