@@ -267,7 +267,6 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> (TcContext, Result<(i32, 
                 };
                 let wg_type = WireGuardType::from(wireguard_type);
 
-                // TODO: Extract specific fields from different WireGuard headers to PacketMeta
                 match wg_type {
                     WireGuardType::HandshakeInitiation => {
                         match parser.parse_wireguard_init(&ctx) {
@@ -314,6 +313,14 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> (TcContext, Result<(i32, 
                 Err(e) => Err(e),
             },
             HeaderType::Proto(IpProto::Icmp) => match parser.parse_icmp_header(&ctx) {
+                Ok(icmp_hdr) => {
+                    meta.icmp_type_id = icmp_hdr._type;
+                    meta.icmp_code_id = icmp_hdr.code;
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            },
+            HeaderType::Proto(IpProto::Ipv6Icmp) => match parser.parse_icmp_header(&ctx) {
                 Ok(icmp_hdr) => {
                     meta.icmp_type_id = icmp_hdr._type;
                     meta.icmp_code_id = icmp_hdr.code;
@@ -372,14 +379,6 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> (TcContext, Result<(i32, 
             },
             HeaderType::Proto(IpProto::Ah) => match parser.parse_ah_header(&ctx) {
                 Ok(_ah_hdr) => Ok(()),
-                Err(e) => Err(e),
-            },
-            HeaderType::Proto(IpProto::Ipv6Icmp) => match parser.parse_icmp_header(&ctx) {
-                Ok(icmp_hdr) => {
-                    meta.icmp_type_id = icmp_hdr._type;
-                    meta.icmp_code_id = icmp_hdr.code;
-                    Ok(())
-                }
                 Err(e) => Err(e),
             },
             HeaderType::Proto(IpProto::Ipv6NoNxt) => break,

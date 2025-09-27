@@ -231,6 +231,8 @@ impl PacketWorker {
 
             // Pre-calculate commonly used conditions for readability
             let is_icmp = packet.proto == IpProto::Icmp;
+            let is_icmpv6 = packet.proto == IpProto::Ipv6Icmp;
+            let is_icmp_any = is_icmp || is_icmpv6;
             let is_ip_flow =
                 packet.ether_type == EtherType::Ipv4 || packet.ether_type == EtherType::Ipv6;
             let is_ipv6 = packet.ether_type == EtherType::Ipv6;
@@ -287,22 +289,33 @@ impl PacketWorker {
                     flow_ip_ttl: is_ip_flow.then_some(packet.ip_ttl),
                     flow_ip_flow_label: is_ipv6.then_some(packet.ip_flow_label),
 
-                    // ICMP fields (only populated for ICMP traffic)
-                    flow_icmp_type_id: is_icmp.then_some(packet.icmp_type_id),
-                    flow_icmp_type_name: is_icmp
-                        .then(|| network_types::icmp::get_icmp_type_name(packet.icmp_type_id))
-                        .flatten()
-                        .map(String::from),
-                    flow_icmp_code_id: is_icmp.then_some(packet.icmp_code_id),
-                    flow_icmp_code_name: is_icmp
-                        .then(|| {
-                            network_types::icmp::get_icmp_code_name(
-                                packet.icmp_type_id,
-                                packet.icmp_code_id,
-                            )
-                        })
-                        .flatten()
-                        .map(String::from),
+                    // ICMP fields (only populated for ICMP/ICMPv6 traffic)
+                    flow_icmp_type_id: is_icmp_any.then_some(packet.icmp_type_id),
+                    flow_icmp_type_name: if is_icmp {
+                        network_types::icmp::get_icmpv4_type_name(packet.icmp_type_id)
+                            .map(String::from)
+                    } else if is_icmpv6 {
+                        network_types::icmp::get_icmpv6_type_name(packet.icmp_type_id)
+                            .map(String::from)
+                    } else {
+                        None
+                    },
+                    flow_icmp_code_id: is_icmp_any.then_some(packet.icmp_code_id),
+                    flow_icmp_code_name: if is_icmp {
+                        network_types::icmp::get_icmpv4_code_name(
+                            packet.icmp_type_id,
+                            packet.icmp_code_id,
+                        )
+                        .map(String::from)
+                    } else if is_icmpv6 {
+                        network_types::icmp::get_icmpv6_code_name(
+                            packet.icmp_type_id,
+                            packet.icmp_code_id,
+                        )
+                        .map(String::from)
+                    } else {
+                        None
+                    },
 
                     // TCP flags (only populated for TCP traffic)
                     flow_tcp_flags_bits: is_tcp.then_some(packet.tcp_flags),

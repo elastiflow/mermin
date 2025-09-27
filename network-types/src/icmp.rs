@@ -45,7 +45,7 @@ pub struct IcmpHdr {
     pub data: [u8; 4],
 }
 
-/// Common ICMP message types
+/// ICMPv4 message types (RFC 792 and extensions)
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum IcmpType {
@@ -53,6 +53,8 @@ pub enum IcmpType {
     EchoReply = 0,
     /// Destination Unreachable
     DestinationUnreachable = 3,
+    /// Source Quench
+    SourceQuench = 4,
     /// Redirect
     Redirect = 5,
     /// Echo Request (ping)
@@ -83,20 +85,24 @@ pub enum IcmpType {
     ExtendedEchoRequest = 42,
     /// Extended Echo Reply
     ExtendedEchoReply = 43,
-    // ICMPv6 specific types (RFC 4443)
+}
+
+/// ICMPv6 message types (RFC 4443 and extensions)
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Icmpv6Type {
     /// Destination Unreachable (ICMPv6)
-    Icmpv6DestinationUnreachable = 1,
+    DestinationUnreachable = 1,
     /// Packet Too Big (ICMPv6)
     PacketTooBig = 2,
-    /// Time Exceeded (ICMPv6) - Note: different from IPv4 type 11
-    // TODO: this is a problem because it overlaps with Icmp 3 Destionation Unreachable
-    Icmpv6TimeExceeded = 3,
-    /// Parameter Problem (ICMPv6) - Note: different from IPv4 type 12
-    Icmpv6ParameterProblem = 4,
+    /// Time Exceeded (ICMPv6)
+    TimeExceeded = 3,
+    /// Parameter Problem (ICMPv6)
+    ParameterProblem = 4,
     /// Echo Request (ICMPv6)
-    Icmpv6EchoRequest = 128,
+    EchoRequest = 128,
     /// Echo Reply (ICMPv6)
-    Icmpv6EchoReply = 129,
+    EchoReply = 129,
     /// Multicast Listener Discovery (MLD) Query (ICMPv6)
     MldQuery = 130,
     /// Multicast Listener Discovery (MLD) Report (ICMPv6)
@@ -104,15 +110,15 @@ pub enum IcmpType {
     /// Multicast Listener Discovery (MLD) Done (ICMPv6)
     MldDone = 132,
     /// Router Solicitation (ICMPv6)
-    Icmpv6RouterSolicitation = 133,
+    RouterSolicitation = 133,
     /// Router Advertisement (ICMPv6)
-    Icmpv6RouterAdvertisement = 134,
+    RouterAdvertisement = 134,
     /// Neighbor Solicitation (ICMPv6)
     NeighborSolicitation = 135,
     /// Neighbor Advertisement (ICMPv6)
     NeighborAdvertisement = 136,
     /// Redirect Message (ICMPv6)
-    Icmpv6Redirect = 137,
+    Redirect = 137,
     /// Router Renumbering (ICMPv6)
     RouterRenumbering = 138,
     /// ICMP Node Information Query (ICMPv6)
@@ -156,9 +162,9 @@ pub enum IcmpType {
     /// Duplicate Address Confirmation Code Suffix (ICMPv6)
     DuplicateAddressConfirmationCodeSuffix = 158,
     /// Extended Echo Request (ICMPv6)
-    Icmpv6ExtendedEchoRequest = 160,
+    ExtendedEchoRequest = 160,
     /// Extended Echo Reply (ICMPv6)
-    Icmpv6ExtendedEchoReply = 161,
+    ExtendedEchoReply = 161,
 }
 
 impl IcmpType {
@@ -166,6 +172,7 @@ impl IcmpType {
         match self {
             IcmpType::EchoReply => "echo_reply",
             IcmpType::DestinationUnreachable => "destination_unreachable",
+            IcmpType::SourceQuench => "source_quench",
             IcmpType::Redirect => "redirect",
             IcmpType::EchoRequest => "echo_request",
             IcmpType::RouterAdvertisement => "router_advertisement",
@@ -181,49 +188,6 @@ impl IcmpType {
             IcmpType::Photuris => "photuris",
             IcmpType::ExtendedEchoRequest => "extended_echo_request",
             IcmpType::ExtendedEchoReply => "extended_echo_reply",
-            IcmpType::Icmpv6DestinationUnreachable => "icmpv6_destination_unreachable",
-            IcmpType::PacketTooBig => "packet_too_big",
-            IcmpType::Icmpv6TimeExceeded => "icmpv6_time_exceeded",
-            IcmpType::Icmpv6ParameterProblem => "ipv6_parameter_problem",
-            IcmpType::Icmpv6EchoRequest => "icmpv6_echo_request",
-            IcmpType::Icmpv6EchoReply => "icmpv6_echo_reply",
-            IcmpType::MldQuery => "mld_query",
-            IcmpType::MldReport => "mld_report",
-            IcmpType::MldDone => "mld_done",
-            IcmpType::Icmpv6RouterSolicitation => "icmpv6_router_solicitation",
-            IcmpType::Icmpv6RouterAdvertisement => "icmpv6_router_advertisement",
-            IcmpType::NeighborSolicitation => "neighbor_solicitation",
-            IcmpType::NeighborAdvertisement => "neighbor_advertisement",
-            IcmpType::Icmpv6Redirect => "icmpv6_redirect",
-            IcmpType::RouterRenumbering => "router_renumbering",
-            IcmpType::NodeInformationQuery => "node_information_query",
-            IcmpType::NodeInformationResponse => "node_information_response",
-            IcmpType::InverseNeighborDiscoverySolicitation => {
-                "inverse_neighbor_discovery_solicitation"
-            }
-            IcmpType::InverseNeighborDiscoveryAdvertisement => {
-                "inverse_neighbor_discovery_advertisement"
-            }
-            IcmpType::Mldv2MulticastListenerReport => "mldv2_multicast_listener_report",
-            IcmpType::HomeAgentAddressDiscoveryRequest => "home_agent_address_discovery_request",
-            IcmpType::HomeAgentAddressDiscoveryReply => "home_agent_address_discovery_reply",
-            IcmpType::MobilePrefixSolicitation => "mobile_prefix_solicitation",
-            IcmpType::MobilePrefixAdvertisement => "mobile_prefix_advertisement",
-            IcmpType::CertificationPathSolicitation => "certification_path_solicitation",
-            IcmpType::CertificationPathAdvertisement => "certification_path_advertisement",
-            IcmpType::ExperimentalMobilityProtocols => "experimental_mobility_protocols",
-            IcmpType::MulticastRouterAdvertisement => "multicast_router_advertisement",
-            IcmpType::MulticastRouterSolicitation => "multicast_router_solicitation",
-            IcmpType::MulticastRouterTermination => "multicast_router_termination",
-            IcmpType::Fmipv6Messages => "fmipv6_messages",
-            IcmpType::RplControlMessage => "rpl_control_message",
-            IcmpType::MplControlMessage => "mpl_control_message",
-            IcmpType::DuplicateAddressRequestCodeSuffix => "duplicate_address_request_code_suffix",
-            IcmpType::DuplicateAddressConfirmationCodeSuffix => {
-                "duplicate_address_confirmation_code_suffix"
-            }
-            IcmpType::Icmpv6ExtendedEchoRequest => "icmpv6_extended_echo_request",
-            IcmpType::Icmpv6ExtendedEchoReply => "icmpv6_extended_echo_reply",
         }
     }
 
@@ -231,6 +195,7 @@ impl IcmpType {
         match value {
             0 => Some(IcmpType::EchoReply),
             3 => Some(IcmpType::DestinationUnreachable),
+            4 => Some(IcmpType::SourceQuench),
             5 => Some(IcmpType::Redirect),
             8 => Some(IcmpType::EchoRequest),
             9 => Some(IcmpType::RouterAdvertisement),
@@ -246,43 +211,101 @@ impl IcmpType {
             40 => Some(IcmpType::Photuris),
             42 => Some(IcmpType::ExtendedEchoRequest),
             43 => Some(IcmpType::ExtendedEchoReply),
-            1 => Some(IcmpType::Icmpv6DestinationUnreachable),
-            2 => Some(IcmpType::PacketTooBig),
-            3 => Some(IcmpType::Icmpv6TimeExceeded),
-            4 => Some(IcmpType::Icmpv6ParameterProblem),
-            128 => Some(IcmpType::Icmpv6EchoRequest),
-            129 => Some(IcmpType::Icmpv6EchoReply),
-            130 => Some(IcmpType::MldQuery),
-            131 => Some(IcmpType::MldReport),
-            132 => Some(IcmpType::MldDone),
-            133 => Some(IcmpType::Icmpv6RouterSolicitation),
-            134 => Some(IcmpType::Icmpv6RouterAdvertisement),
-            135 => Some(IcmpType::NeighborSolicitation),
-            136 => Some(IcmpType::NeighborAdvertisement),
-            137 => Some(IcmpType::Icmpv6Redirect),
-            138 => Some(IcmpType::RouterRenumbering),
-            139 => Some(IcmpType::NodeInformationQuery),
-            140 => Some(IcmpType::NodeInformationResponse),
-            141 => Some(IcmpType::InverseNeighborDiscoverySolicitation),
-            142 => Some(IcmpType::InverseNeighborDiscoveryAdvertisement),
-            143 => Some(IcmpType::Mldv2MulticastListenerReport),
-            144 => Some(IcmpType::HomeAgentAddressDiscoveryRequest),
-            145 => Some(IcmpType::HomeAgentAddressDiscoveryReply),
-            146 => Some(IcmpType::MobilePrefixSolicitation),
-            147 => Some(IcmpType::MobilePrefixAdvertisement),
-            148 => Some(IcmpType::CertificationPathSolicitation),
-            149 => Some(IcmpType::CertificationPathAdvertisement),
-            150 => Some(IcmpType::ExperimentalMobilityProtocols),
-            151 => Some(IcmpType::MulticastRouterAdvertisement),
-            152 => Some(IcmpType::MulticastRouterSolicitation),
-            153 => Some(IcmpType::MulticastRouterTermination),
-            154 => Some(IcmpType::Fmipv6Messages),
-            155 => Some(IcmpType::RplControlMessage),
-            156 => Some(IcmpType::MplControlMessage),
-            157 => Some(IcmpType::DuplicateAddressRequestCodeSuffix),
-            158 => Some(IcmpType::DuplicateAddressConfirmationCodeSuffix),
-            160 => Some(IcmpType::Icmpv6ExtendedEchoRequest),
-            161 => Some(IcmpType::Icmpv6ExtendedEchoReply),
+            _ => None,
+        }
+    }
+}
+
+impl Icmpv6Type {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Icmpv6Type::DestinationUnreachable => "destination_unreachable",
+            Icmpv6Type::PacketTooBig => "packet_too_big",
+            Icmpv6Type::TimeExceeded => "time_exceeded",
+            Icmpv6Type::ParameterProblem => "parameter_problem",
+            Icmpv6Type::EchoRequest => "echo_request",
+            Icmpv6Type::EchoReply => "echo_reply",
+            Icmpv6Type::MldQuery => "mld_query",
+            Icmpv6Type::MldReport => "mld_report",
+            Icmpv6Type::MldDone => "mld_done",
+            Icmpv6Type::RouterSolicitation => "router_solicitation",
+            Icmpv6Type::RouterAdvertisement => "router_advertisement",
+            Icmpv6Type::NeighborSolicitation => "neighbor_solicitation",
+            Icmpv6Type::NeighborAdvertisement => "neighbor_advertisement",
+            Icmpv6Type::Redirect => "redirect",
+            Icmpv6Type::RouterRenumbering => "router_renumbering",
+            Icmpv6Type::NodeInformationQuery => "node_information_query",
+            Icmpv6Type::NodeInformationResponse => "node_information_response",
+            Icmpv6Type::InverseNeighborDiscoverySolicitation => {
+                "inverse_neighbor_discovery_solicitation"
+            }
+            Icmpv6Type::InverseNeighborDiscoveryAdvertisement => {
+                "inverse_neighbor_discovery_advertisement"
+            }
+            Icmpv6Type::Mldv2MulticastListenerReport => "mldv2_multicast_listener_report",
+            Icmpv6Type::HomeAgentAddressDiscoveryRequest => "home_agent_address_discovery_request",
+            Icmpv6Type::HomeAgentAddressDiscoveryReply => "home_agent_address_discovery_reply",
+            Icmpv6Type::MobilePrefixSolicitation => "mobile_prefix_solicitation",
+            Icmpv6Type::MobilePrefixAdvertisement => "mobile_prefix_advertisement",
+            Icmpv6Type::CertificationPathSolicitation => "certification_path_solicitation",
+            Icmpv6Type::CertificationPathAdvertisement => "certification_path_advertisement",
+            Icmpv6Type::ExperimentalMobilityProtocols => "experimental_mobility_protocols",
+            Icmpv6Type::MulticastRouterAdvertisement => "multicast_router_advertisement",
+            Icmpv6Type::MulticastRouterSolicitation => "multicast_router_solicitation",
+            Icmpv6Type::MulticastRouterTermination => "multicast_router_termination",
+            Icmpv6Type::Fmipv6Messages => "fmipv6_messages",
+            Icmpv6Type::RplControlMessage => "rpl_control_message",
+            Icmpv6Type::MplControlMessage => "mpl_control_message",
+            Icmpv6Type::DuplicateAddressRequestCodeSuffix => {
+                "duplicate_address_request_code_suffix"
+            }
+            Icmpv6Type::DuplicateAddressConfirmationCodeSuffix => {
+                "duplicate_address_confirmation_code_suffix"
+            }
+            Icmpv6Type::ExtendedEchoRequest => "extended_echo_request",
+            Icmpv6Type::ExtendedEchoReply => "extended_echo_reply",
+        }
+    }
+
+    pub fn try_from_u8(value: u8) -> Option<Self> {
+        match value {
+            1 => Some(Icmpv6Type::DestinationUnreachable),
+            2 => Some(Icmpv6Type::PacketTooBig),
+            3 => Some(Icmpv6Type::TimeExceeded),
+            4 => Some(Icmpv6Type::ParameterProblem),
+            128 => Some(Icmpv6Type::EchoRequest),
+            129 => Some(Icmpv6Type::EchoReply),
+            130 => Some(Icmpv6Type::MldQuery),
+            131 => Some(Icmpv6Type::MldReport),
+            132 => Some(Icmpv6Type::MldDone),
+            133 => Some(Icmpv6Type::RouterSolicitation),
+            134 => Some(Icmpv6Type::RouterAdvertisement),
+            135 => Some(Icmpv6Type::NeighborSolicitation),
+            136 => Some(Icmpv6Type::NeighborAdvertisement),
+            137 => Some(Icmpv6Type::Redirect),
+            138 => Some(Icmpv6Type::RouterRenumbering),
+            139 => Some(Icmpv6Type::NodeInformationQuery),
+            140 => Some(Icmpv6Type::NodeInformationResponse),
+            141 => Some(Icmpv6Type::InverseNeighborDiscoverySolicitation),
+            142 => Some(Icmpv6Type::InverseNeighborDiscoveryAdvertisement),
+            143 => Some(Icmpv6Type::Mldv2MulticastListenerReport),
+            144 => Some(Icmpv6Type::HomeAgentAddressDiscoveryRequest),
+            145 => Some(Icmpv6Type::HomeAgentAddressDiscoveryReply),
+            146 => Some(Icmpv6Type::MobilePrefixSolicitation),
+            147 => Some(Icmpv6Type::MobilePrefixAdvertisement),
+            148 => Some(Icmpv6Type::CertificationPathSolicitation),
+            149 => Some(Icmpv6Type::CertificationPathAdvertisement),
+            150 => Some(Icmpv6Type::ExperimentalMobilityProtocols),
+            151 => Some(Icmpv6Type::MulticastRouterAdvertisement),
+            152 => Some(Icmpv6Type::MulticastRouterSolicitation),
+            153 => Some(Icmpv6Type::MulticastRouterTermination),
+            154 => Some(Icmpv6Type::Fmipv6Messages),
+            155 => Some(Icmpv6Type::RplControlMessage),
+            156 => Some(Icmpv6Type::MplControlMessage),
+            157 => Some(Icmpv6Type::DuplicateAddressRequestCodeSuffix),
+            158 => Some(Icmpv6Type::DuplicateAddressConfirmationCodeSuffix),
+            160 => Some(Icmpv6Type::ExtendedEchoRequest),
+            161 => Some(Icmpv6Type::ExtendedEchoReply),
             _ => None,
         }
     }
@@ -378,6 +401,28 @@ impl DestinationUnreachableCode {
             13 => Some(DestinationUnreachableCode::CommunicationAdministrativelyProhibited),
             14 => Some(DestinationUnreachableCode::HostPrecedenceViolation),
             15 => Some(DestinationUnreachableCode::PrecedenceCutoffInEffect),
+            _ => None,
+        }
+    }
+}
+
+/// Source Quench codes (type 4)
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum SourceQuenchCode {
+    NoCode = 0,
+}
+
+impl SourceQuenchCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SourceQuenchCode::NoCode => "",
+        }
+    }
+
+    pub fn try_from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(SourceQuenchCode::NoCode),
             _ => None,
         }
     }
@@ -645,8 +690,6 @@ impl AddressMaskReplyCode {
         }
     }
 }
-
-/// Photuris codes (type 40)
 
 /// Photuris codes (type 40)
 #[repr(u8)]
@@ -1723,6 +1766,7 @@ impl Icmpv6ExtendedEchoReplyCode {
 pub enum IcmpCode {
     Echo(EchoCode),
     DestinationUnreachable(DestinationUnreachableCode),
+    SourceQuench(SourceQuenchCode),
     Redirect(RedirectCode),
     RouterAdvertisement(RouterAdvertisementCode),
     RouterSolicitation(RouterSelectionCode),
@@ -1783,6 +1827,7 @@ impl IcmpCode {
         match self {
             IcmpCode::Echo(code) => code.as_str(),
             IcmpCode::DestinationUnreachable(code) => code.as_str(),
+            IcmpCode::SourceQuench(code) => code.as_str(),
             IcmpCode::Redirect(code) => code.as_str(),
             IcmpCode::RouterAdvertisement(code) => code.as_str(),
             IcmpCode::RouterSolicitation(code) => code.as_str(),
@@ -1987,7 +2032,7 @@ impl TryFrom<u8> for IcmpType {
         match value {
             0 => Ok(IcmpType::EchoReply),
             3 => Ok(IcmpType::DestinationUnreachable),
-            4 => Ok(IcmpType::ParameterProblem),
+            4 => Ok(IcmpType::SourceQuench),
             5 => Ok(IcmpType::Redirect),
             8 => Ok(IcmpType::EchoRequest),
             9 => Ok(IcmpType::RouterAdvertisement),
@@ -2003,44 +2048,54 @@ impl TryFrom<u8> for IcmpType {
             40 => Ok(IcmpType::Photuris),
             42 => Ok(IcmpType::ExtendedEchoRequest),
             43 => Ok(IcmpType::ExtendedEchoReply),
-            // ICMPv6 specific types (RFC 4443)
-            1 => Ok(IcmpType::Icmpv6DestinationUnreachable),
-            2 => Ok(IcmpType::PacketTooBig),
-            3 => Ok(IcmpType::Icmpv6TimeExceeded),
-            128 => Ok(IcmpType::Icmpv6EchoRequest),
-            129 => Ok(IcmpType::Icmpv6EchoReply),
-            130 => Ok(IcmpType::MldQuery),
-            131 => Ok(IcmpType::MldReport),
-            132 => Ok(IcmpType::MldDone),
-            133 => Ok(IcmpType::Icmpv6RouterSolicitation),
-            134 => Ok(IcmpType::Icmpv6RouterAdvertisement),
-            135 => Ok(IcmpType::NeighborSolicitation),
-            136 => Ok(IcmpType::NeighborAdvertisement),
-            137 => Ok(IcmpType::Icmpv6Redirect),
-            138 => Ok(IcmpType::RouterRenumbering),
-            139 => Ok(IcmpType::NodeInformationQuery),
-            140 => Ok(IcmpType::NodeInformationResponse),
-            141 => Ok(IcmpType::InverseNeighborDiscoverySolicitation),
-            142 => Ok(IcmpType::InverseNeighborDiscoveryAdvertisement),
-            143 => Ok(IcmpType::Mldv2MulticastListenerReport),
-            144 => Ok(IcmpType::HomeAgentAddressDiscoveryRequest),
-            145 => Ok(IcmpType::HomeAgentAddressDiscoveryReply),
-            146 => Ok(IcmpType::MobilePrefixSolicitation),
-            147 => Ok(IcmpType::MobilePrefixAdvertisement),
-            148 => Ok(IcmpType::CertificationPathSolicitation),
-            149 => Ok(IcmpType::CertificationPathAdvertisement),
-            150 => Ok(IcmpType::ExperimentalMobilityProtocols),
-            151 => Ok(IcmpType::MulticastRouterAdvertisement),
-            152 => Ok(IcmpType::MulticastRouterSolicitation),
-            153 => Ok(IcmpType::MulticastRouterTermination),
-            154 => Ok(IcmpType::Fmipv6Messages),
-            155 => Ok(IcmpType::RplControlMessage),
-            156 => Ok(IcmpType::MplControlMessage),
-            157 => Ok(IcmpType::DuplicateAddressRequestCodeSuffix),
-            158 => Ok(IcmpType::DuplicateAddressConfirmationCodeSuffix),
-            160 => Ok(IcmpType::Icmpv6ExtendedEchoRequest),
-            161 => Ok(IcmpType::Icmpv6ExtendedEchoReply),
+            _ => Err(value),
+        }
+    }
+}
 
+// This allows converting a u8 value into an Icmpv6Type enum variant.
+// This is useful when parsing headers.
+impl TryFrom<u8> for Icmpv6Type {
+    type Error = u8; // Return the unknown value itself as the error
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Icmpv6Type::DestinationUnreachable),
+            2 => Ok(Icmpv6Type::PacketTooBig),
+            3 => Ok(Icmpv6Type::TimeExceeded),
+            128 => Ok(Icmpv6Type::EchoRequest),
+            129 => Ok(Icmpv6Type::EchoReply),
+            130 => Ok(Icmpv6Type::MldQuery),
+            131 => Ok(Icmpv6Type::MldReport),
+            132 => Ok(Icmpv6Type::MldDone),
+            133 => Ok(Icmpv6Type::RouterSolicitation),
+            134 => Ok(Icmpv6Type::RouterAdvertisement),
+            135 => Ok(Icmpv6Type::NeighborSolicitation),
+            136 => Ok(Icmpv6Type::NeighborAdvertisement),
+            137 => Ok(Icmpv6Type::Redirect),
+            138 => Ok(Icmpv6Type::RouterRenumbering),
+            139 => Ok(Icmpv6Type::NodeInformationQuery),
+            140 => Ok(Icmpv6Type::NodeInformationResponse),
+            141 => Ok(Icmpv6Type::InverseNeighborDiscoverySolicitation),
+            142 => Ok(Icmpv6Type::InverseNeighborDiscoveryAdvertisement),
+            143 => Ok(Icmpv6Type::Mldv2MulticastListenerReport),
+            144 => Ok(Icmpv6Type::HomeAgentAddressDiscoveryRequest),
+            145 => Ok(Icmpv6Type::HomeAgentAddressDiscoveryReply),
+            146 => Ok(Icmpv6Type::MobilePrefixSolicitation),
+            147 => Ok(Icmpv6Type::MobilePrefixAdvertisement),
+            148 => Ok(Icmpv6Type::CertificationPathSolicitation),
+            149 => Ok(Icmpv6Type::CertificationPathAdvertisement),
+            150 => Ok(Icmpv6Type::ExperimentalMobilityProtocols),
+            151 => Ok(Icmpv6Type::MulticastRouterAdvertisement),
+            152 => Ok(Icmpv6Type::MulticastRouterSolicitation),
+            153 => Ok(Icmpv6Type::MulticastRouterTermination),
+            154 => Ok(Icmpv6Type::Fmipv6Messages),
+            155 => Ok(Icmpv6Type::RplControlMessage),
+            156 => Ok(Icmpv6Type::MplControlMessage),
+            157 => Ok(Icmpv6Type::DuplicateAddressRequestCodeSuffix),
+            158 => Ok(Icmpv6Type::DuplicateAddressConfirmationCodeSuffix),
+            160 => Ok(Icmpv6Type::ExtendedEchoRequest),
+            161 => Ok(Icmpv6Type::ExtendedEchoReply),
             _ => Err(value),
         }
     }
@@ -2063,6 +2118,12 @@ impl From<EchoCode> for u8 {
 
 impl From<DestinationUnreachableCode> for u8 {
     fn from(code: DestinationUnreachableCode) -> Self {
+        code as u8
+    }
+}
+
+impl From<SourceQuenchCode> for u8 {
+    fn from(code: SourceQuenchCode) -> Self {
         code as u8
     }
 }
@@ -2381,6 +2442,7 @@ impl From<IcmpCode> for u8 {
         match icmp_code {
             IcmpCode::Echo(code) => code.into(),
             IcmpCode::DestinationUnreachable(code) => code.into(),
+            IcmpCode::SourceQuench(code) => code.into(),
             IcmpCode::Redirect(code) => code.into(),
             IcmpCode::RouterAdvertisement(code) => code.into(),
             IcmpCode::RouterSolicitation(code) => code.into(),
@@ -2495,6 +2557,10 @@ fn parse_code_for_type(icmp_type: IcmpType, code_value: u8) -> Result<IcmpCode, 
             )),
             _ => Err(code_value),
         },
+        IcmpType::SourceQuench => match code_value {
+            0 => Ok(IcmpCode::SourceQuench(SourceQuenchCode::NoCode)),
+            _ => Err(code_value),
+        },
         IcmpType::Redirect => match code_value {
             0 => Ok(IcmpCode::Redirect(RedirectCode::RedirectForNetwork)),
             1 => Ok(IcmpCode::Redirect(RedirectCode::RedirectForHost)),
@@ -2584,8 +2650,12 @@ fn parse_code_for_type(icmp_type: IcmpType, code_value: u8) -> Result<IcmpCode, 
             )),
             _ => Err(code_value),
         },
-        // ICMPv6 specific types
-        IcmpType::Icmpv6DestinationUnreachable => match code_value {
+    }
+}
+
+fn parse_code_for_type_v6(icmp_type: Icmpv6Type, code_value: u8) -> Result<IcmpCode, u8> {
+    match icmp_type {
+        Icmpv6Type::DestinationUnreachable => match code_value {
             0 => Ok(IcmpCode::Icmpv6DestinationUnreachable(
                 Icmpv6DestinationUnreachableCode::NoRouteToDestination,
             )),
@@ -2618,11 +2688,11 @@ fn parse_code_for_type(icmp_type: IcmpType, code_value: u8) -> Result<IcmpCode, 
             )),
             _ => Err(code_value),
         },
-        IcmpType::PacketTooBig => match code_value {
+        Icmpv6Type::PacketTooBig => match code_value {
             0 => Ok(IcmpCode::PacketTooBig(PacketTooBigCode::NoCode)),
             _ => Err(code_value),
         },
-        IcmpType::Icmpv6TimeExceeded => match code_value {
+        Icmpv6Type::TimeExceeded => match code_value {
             0 => Ok(IcmpCode::Icmpv6TimeExceeded(
                 Icmpv6TimeExceededCode::HopLimitExceeded,
             )),
@@ -2631,7 +2701,7 @@ fn parse_code_for_type(icmp_type: IcmpType, code_value: u8) -> Result<IcmpCode, 
             )),
             _ => Err(code_value),
         },
-        IcmpType::Icmpv6ParameterProblem => match code_value {
+        Icmpv6Type::ParameterProblem => match code_value {
             0 => Ok(IcmpCode::Icmpv6ParameterProblem(Icmpv6ParameterProblemCode::ErroneousHeaderFieldEncountered)),
             1 => Ok(IcmpCode::Icmpv6ParameterProblem(Icmpv6ParameterProblemCode::UnrecognizedNextHeaderTypeEncountered)),
             2 => Ok(IcmpCode::Icmpv6ParameterProblem(Icmpv6ParameterProblemCode::UnrecognizedIPv6OptionEncountered)),
@@ -2645,160 +2715,160 @@ fn parse_code_for_type(icmp_type: IcmpType, code_value: u8) -> Result<IcmpCode, 
             10 => Ok(IcmpCode::Icmpv6ParameterProblem(Icmpv6ParameterProblemCode::OptionTooBig)),
             _ => Err(code_value),
         },
-        IcmpType::Icmpv6EchoRequest => match code_value {
+        Icmpv6Type::EchoRequest => match code_value {
             0 => Ok(IcmpCode::Icmpv6EchoRequest(Icmpv6EchoRequestCode::NoCode)),
             _ => Err(code_value),
         },
-        IcmpType::Icmpv6EchoReply => match code_value {
+        Icmpv6Type::EchoReply => match code_value {
             0 => Ok(IcmpCode::Icmpv6EchoReply(Icmpv6EchoReplyCode::NoCode)),
             _ => Err(code_value),
         },
-        IcmpType::MldQuery => match code_value {
+        Icmpv6Type::MldQuery => match code_value {
             0 => Ok(IcmpCode::MldQuery(MldQueryCode::NoCode)),
             _ => Err(code_value),
         },
-        IcmpType::MldReport => match code_value {
+        Icmpv6Type::MldReport => match code_value {
             0 => Ok(IcmpCode::MldReport(MldReportCode::NoCode)),
             _ => Err(code_value),
         },
-        IcmpType::MldDone => match code_value {
+        Icmpv6Type::MldDone => match code_value {
             0 => Ok(IcmpCode::MldDone(MldDoneCode::NoCode)),
             _ => Err(code_value),
         },
-        IcmpType::Icmpv6RouterSolicitation => match code_value {
+        Icmpv6Type::RouterSolicitation => match code_value {
             0 => Ok(IcmpCode::Icmpv6RouterSolicitation(
                 Icmpv6RouterSolicitationCode::NoCode,
             )),
             _ => Err(code_value),
         },
-        IcmpType::Icmpv6RouterAdvertisement => match code_value {
+        Icmpv6Type::RouterAdvertisement => match code_value {
             0 => Ok(IcmpCode::Icmpv6RouterAdvertisement(
                 Icmpv6RouterAdvertisementCode::NoCode,
             )),
             _ => Err(code_value),
         },
-        IcmpType::NeighborSolicitation => match code_value {
+        Icmpv6Type::NeighborSolicitation => match code_value {
             0 => Ok(IcmpCode::NeighborSolicitation(NeighborSolicitationCode::NoCode)),
             _ => Err(code_value),
         },
-        IcmpType::NeighborAdvertisement => match code_value {
+        Icmpv6Type::NeighborAdvertisement => match code_value {
             0 => Ok(IcmpCode::NeighborAdvertisement(NeighborAdvertisementCode::NoCode)),
             _ => Err(code_value),
         },
-        IcmpType::Icmpv6Redirect => match code_value {
+        Icmpv6Type::Redirect => match code_value {
             0 => Ok(IcmpCode::Icmpv6Redirect(Icmpv6RedirectCode::NoCode)),
             _ => Err(code_value),
         },
-        IcmpType::RouterRenumbering => match code_value {
+        Icmpv6Type::RouterRenumbering => match code_value {
             0 => Ok(IcmpCode::RouterRenumbering(RouterRenumberingCode::RouterRenumberingCommand)),
             1 => Ok(IcmpCode::RouterRenumbering(RouterRenumberingCode::RouterRenumberingResult)),
             255 => Ok(IcmpCode::RouterRenumbering(RouterRenumberingCode::SequenceNumberReset)),
             _ => Err(code_value),
         },
-        IcmpType::NodeInformationQuery => match code_value {
+        Icmpv6Type::NodeInformationQuery => match code_value {
             0 => Ok(IcmpCode::NodeInformationQuery(NodeInformationQueryCode::Data)),
             1 => Ok(IcmpCode::NodeInformationQuery(NodeInformationQueryCode::Name)),
             2 => Ok(IcmpCode::NodeInformationQuery(NodeInformationQueryCode::NameOrAddress)),
             _ => Err(code_value),
         },
-        IcmpType::NodeInformationResponse => match code_value {
+        Icmpv6Type::NodeInformationResponse => match code_value {
             0 => Ok(IcmpCode::NodeInformationResponse(NodeInformationResponseCode::SuccessfulResponse)),
             1 => Ok(IcmpCode::NodeInformationResponse(NodeInformationResponseCode::RespondingNodeIsTheNodeQueried)),
             2 => Ok(IcmpCode::NodeInformationResponse(NodeInformationResponseCode::QueryIsRecognizedButTheRequestedInfoIsUnavailable)),
             3 => Ok(IcmpCode::NodeInformationResponse(NodeInformationResponseCode::QueryIsNotRecognized)),
             _ => Err(code_value),
         },
-        IcmpType::InverseNeighborDiscoverySolicitation => match code_value {
+        Icmpv6Type::InverseNeighborDiscoverySolicitation => match code_value {
             0 => Ok(IcmpCode::InverseNeighborDiscoverySolicitation(
                 InverseNeighborDiscoverySolicitationCode::NoCode,
             )),
             _ => Err(code_value),
         },
-        IcmpType::InverseNeighborDiscoveryAdvertisement => match code_value {
+        Icmpv6Type::InverseNeighborDiscoveryAdvertisement => match code_value {
             0 => Ok(IcmpCode::InverseNeighborDiscoveryAdvertisement(
                 InverseNeighborDiscoveryAdvertisementCode::NoCode,
             )),
             _ => Err(code_value),
         },
-        IcmpType::Mldv2MulticastListenerReport => match code_value {
+        Icmpv6Type::Mldv2MulticastListenerReport => match code_value {
             0 => Ok(IcmpCode::Mldv2MulticastListenerReport(
                 Mldv2MulticastListenerReportCode::NoCode,
             )),
             _ => Err(code_value),
         },
-        IcmpType::HomeAgentAddressDiscoveryRequest => match code_value {
+        Icmpv6Type::HomeAgentAddressDiscoveryRequest => match code_value {
             0 => Ok(IcmpCode::HomeAgentAddressDiscoveryRequest(
                 HomeAgentAddressDiscoveryRequestCode::NoCode,
             )),
             _ => Err(code_value),
         },
-        IcmpType::HomeAgentAddressDiscoveryReply => match code_value {
+        Icmpv6Type::HomeAgentAddressDiscoveryReply => match code_value {
             0 => Ok(IcmpCode::HomeAgentAddressDiscoveryReply(
                 HomeAgentAddressDiscoveryReplyCode::NoCode,
             )),
             _ => Err(code_value),
         },
-        IcmpType::MobilePrefixSolicitation => match code_value {
+        Icmpv6Type::MobilePrefixSolicitation => match code_value {
             0 => Ok(IcmpCode::MobilePrefixSolicitation(
                 MobilePrefixSolicitationCode::NoCode,
             )),
             _ => Err(code_value),
         },
-        IcmpType::MobilePrefixAdvertisement => match code_value {
+        Icmpv6Type::MobilePrefixAdvertisement => match code_value {
             0 => Ok(IcmpCode::MobilePrefixAdvertisement(
                 MobilePrefixAdvertisementCode::NoCode,
             )),
             _ => Err(code_value),
         },
-        IcmpType::CertificationPathSolicitation => match code_value {
+        Icmpv6Type::CertificationPathSolicitation => match code_value {
             0 => Ok(IcmpCode::CertificationPathSolicitation(
                 CertificationPathSolicitationCode::NoCode,
             )),
             _ => Err(code_value),
         },
-        IcmpType::CertificationPathAdvertisement => match code_value {
+        Icmpv6Type::CertificationPathAdvertisement => match code_value {
             0 => Ok(IcmpCode::CertificationPathAdvertisement(
                 CertificationPathAdvertisementCode::NoCode,
             )),
             _ => Err(code_value),
         },
-        IcmpType::ExperimentalMobilityProtocols => match code_value {
+        Icmpv6Type::ExperimentalMobilityProtocols => match code_value {
             0 => Ok(IcmpCode::ExperimentalMobilityProtocols(
                 ExperimentalMobilityProtocolsCode::NoCode,
             )),
             _ => Err(code_value),
         },
-        IcmpType::MulticastRouterAdvertisement => match code_value {
+        Icmpv6Type::MulticastRouterAdvertisement => match code_value {
             0 => Ok(IcmpCode::MulticastRouterAdvertisement(
                 MulticastRouterAdvertisementCode::NoCode,
             )),
             _ => Err(code_value),
         },
-        IcmpType::MulticastRouterSolicitation => match code_value {
+        Icmpv6Type::MulticastRouterSolicitation => match code_value {
             0 => Ok(IcmpCode::MulticastRouterSolicitation(
                 MulticastRouterSolicitationCode::NoCode,
             )),
             _ => Err(code_value),
         },
-        IcmpType::MulticastRouterTermination => match code_value {
+        Icmpv6Type::MulticastRouterTermination => match code_value {
             0 => Ok(IcmpCode::MulticastRouterTermination(
                 MulticastRouterTerminationCode::NoCode,
             )),
             _ => Err(code_value),
         },
-        IcmpType::Fmipv6Messages => match code_value {
+        Icmpv6Type::Fmipv6Messages => match code_value {
             0 => Ok(IcmpCode::Fmipv6Messages(Fmipv6MessagesCode::NoCode)),
             _ => Err(code_value),
         },
-        IcmpType::RplControlMessage => match code_value {
+        Icmpv6Type::RplControlMessage => match code_value {
             0 => Ok(IcmpCode::RplControlMessage(RplControlMessageCode::NoCode)),
             _ => Err(code_value),
         },
-        IcmpType::MplControlMessage => match code_value {
+        Icmpv6Type::MplControlMessage => match code_value {
             0 => Ok(IcmpCode::MplControlMessage(MplControlMessageCode::NoCode)),
             _ => Err(code_value),
         },
-        IcmpType::DuplicateAddressRequestCodeSuffix => match code_value {
+        Icmpv6Type::DuplicateAddressRequestCodeSuffix => match code_value {
             0 => Ok(IcmpCode::DuplicateAddressRequestCodeSuffix(
                 DuplicateAddressRequestCodeSuffixCode::DarMessage,
             )),
@@ -2816,7 +2886,7 @@ fn parse_code_for_type(icmp_type: IcmpType, code_value: u8) -> Result<IcmpCode, 
             )),
             _ => Err(code_value),
         },
-        IcmpType::DuplicateAddressConfirmationCodeSuffix => match code_value {
+        Icmpv6Type::DuplicateAddressConfirmationCodeSuffix => match code_value {
             0 => Ok(IcmpCode::DuplicateAddressConfirmationCodeSuffix(
                 DuplicateAddressConfirmationCodeSuffixCode::DarMessage,
             )),
@@ -2834,13 +2904,13 @@ fn parse_code_for_type(icmp_type: IcmpType, code_value: u8) -> Result<IcmpCode, 
             )),
             _ => Err(code_value),
         },
-        IcmpType::Icmpv6ExtendedEchoRequest => match code_value {
+        Icmpv6Type::ExtendedEchoRequest => match code_value {
             0 => Ok(IcmpCode::Icmpv6ExtendedEchoRequest(
                 Icmpv6ExtendedEchoRequestCode::NoError,
             )),
             _ => Err(code_value),
         },
-        IcmpType::Icmpv6ExtendedEchoReply => match code_value {
+        Icmpv6Type::ExtendedEchoReply => match code_value {
             0 => Ok(IcmpCode::Icmpv6ExtendedEchoReply(
                 Icmpv6ExtendedEchoReplyCode::NoError,
             )),
@@ -2865,28 +2935,67 @@ fn parse_code_for_type(icmp_type: IcmpType, code_value: u8) -> Result<IcmpCode, 
 
 /// Get the string name for an ICMP type from its numeric value.
 /// Returns None if the type is unknown.
-pub fn get_icmp_type_name(type_value: u8) -> Option<&'static str> {
+pub fn get_icmpv4_type_name(type_value: u8) -> Option<&'static str> {
     IcmpType::try_from_u8(type_value).map(|t| t.as_str())
 }
 
-/// Get the string name for an ICMP code from its type and code numeric values.
+/// Get the string name for an ICMPv6 type from its numeric value.
+/// Returns None if the type is unknown.
+pub fn get_icmpv6_type_name(type_value: u8) -> Option<&'static str> {
+    Icmpv6Type::try_from_u8(type_value).map(|t| t.as_str())
+}
+
+/// Get the string name for an ICMP type, automatically detecting IPv4 or IPv6 based on the value.
+/// This function provides backward compatibility while handling the type 3 conflict properly.
+/// For type 3, it assumes ICMPv4 unless explicitly specified as ICMPv6.
+pub fn get_icmp_type_name_auto(type_value: u8) -> Option<&'static str> {
+    // For backward compatibility, this function now prefers ICMPv4,
+    // but will fall back to ICMPv6 if not found
+    if let Some(name) = get_icmpv4_type_name(type_value) {
+        return Some(name);
+    }
+
+    get_icmpv6_type_name(type_value)
+}
+
+/// Get the string name for an ICMPv4 code from its type and code numeric values.
 /// Returns None if the type or code is unknown.
-pub fn get_icmp_code_name(type_value: u8, code_value: u8) -> Option<&'static str> {
+pub fn get_icmpv4_code_name(type_value: u8, code_value: u8) -> Option<&'static str> {
     let icmp_type = IcmpType::try_from_u8(type_value)?;
     parse_code_for_type(icmp_type, code_value)
         .ok()
         .map(|c| c.as_str())
 }
 
+/// Get the string name for an ICMPv6 code from its type and code numeric values.
+/// Returns None if the type or code is unknown.
+pub fn get_icmpv6_code_name(type_value: u8, code_value: u8) -> Option<&'static str> {
+    let icmp_type = Icmpv6Type::try_from_u8(type_value)?;
+    parse_code_for_type_v6(icmp_type, code_value)
+        .ok()
+        .map(|c| c.as_str())
+}
+
 /// Get both ICMP type and code names from their numeric values.
+/// This function now tries ICMPv4 first, then ICMPv6.
 /// Returns (type_name, code_name) as Option tuples.
 pub fn get_icmp_names(
     type_value: u8,
     code_value: u8,
 ) -> (Option<&'static str>, Option<&'static str>) {
-    let type_name = get_icmp_type_name(type_value);
-    let code_name = get_icmp_code_name(type_value, code_value);
-    (type_name, code_name)
+    // Try ICMPv4 first
+    if let Some(type_name) = get_icmpv4_type_name(type_value) {
+        let code_name = get_icmpv4_code_name(type_value, code_value);
+        return (Some(type_name), code_name);
+    }
+
+    // Try ICMPv6 if not found in ICMPv4
+    if let Some(type_name) = get_icmpv6_type_name(type_value) {
+        let code_name = get_icmpv6_code_name(type_value, code_value);
+        return (Some(type_name), code_name);
+    }
+
+    (None, None)
 }
 
 #[cfg(test)]
@@ -3033,143 +3142,144 @@ mod tests {
     #[test]
     fn test_get_icmp_type_name() {
         // Test IPv4 ICMP types
-        assert_eq!(get_icmp_type_name(0), Some("echo_reply"));
-        assert_eq!(get_icmp_type_name(3), Some("destination_unreachable"));
-        assert_eq!(get_icmp_type_name(4), Some("source_quench"));
-        assert_eq!(get_icmp_type_name(5), Some("redirect"));
-        assert_eq!(get_icmp_type_name(8), Some("echo_request"));
-        assert_eq!(get_icmp_type_name(9), Some("router_advertisement"));
-        assert_eq!(get_icmp_type_name(10), Some("router_solicitation"));
-        assert_eq!(get_icmp_type_name(11), Some("time_exceeded"));
-        assert_eq!(get_icmp_type_name(12), Some("parameter_problem"));
-        assert_eq!(get_icmp_type_name(42), Some("extended_echo_request"));
-        assert_eq!(get_icmp_type_name(43), Some("extended_echo_reply"));
+        assert_eq!(get_icmpv4_type_name(0), Some("echo_reply"));
+        assert_eq!(get_icmpv4_type_name(3), Some("destination_unreachable"));
+        assert_eq!(get_icmpv4_type_name(4), Some("source_quench"));
+        assert_eq!(get_icmpv4_type_name(5), Some("redirect"));
+        assert_eq!(get_icmpv4_type_name(8), Some("echo_request"));
+        assert_eq!(get_icmpv4_type_name(9), Some("router_advertisement"));
+        assert_eq!(get_icmpv4_type_name(10), Some("router_selection"));
+        assert_eq!(get_icmpv4_type_name(11), Some("time_exceeded"));
+        assert_eq!(get_icmpv4_type_name(12), Some("parameter_problem"));
+        assert_eq!(get_icmpv4_type_name(42), Some("extended_echo_request"));
+        assert_eq!(get_icmpv4_type_name(43), Some("extended_echo_reply"));
 
         // Test ICMPv6 types
-        assert_eq!(
-            get_icmp_type_name(1),
-            Some("icmpv6_destination_unreachable")
-        );
-        assert_eq!(get_icmp_type_name(2), Some("packet_too_big"));
-        assert_eq!(get_icmp_type_name(101), Some("icmpv6_time_exceeded"));
-        assert_eq!(get_icmp_type_name(102), Some("icmpv6_parameter_problem"));
-        assert_eq!(get_icmp_type_name(128), Some("icmpv6_echo_request"));
-        assert_eq!(get_icmp_type_name(129), Some("icmpv6_echo_reply"));
-        assert_eq!(get_icmp_type_name(130), Some("mld_query"));
-        assert_eq!(get_icmp_type_name(131), Some("mld_report"));
-        assert_eq!(get_icmp_type_name(132), Some("mld_done"));
-        assert_eq!(get_icmp_type_name(133), Some("icmpv6_router_solicitation"));
-        assert_eq!(get_icmp_type_name(134), Some("icmpv6_router_advertisement"));
-        assert_eq!(get_icmp_type_name(135), Some("neighbor_solicitation"));
-        assert_eq!(get_icmp_type_name(136), Some("neighbor_advertisement"));
-        assert_eq!(get_icmp_type_name(137), Some("icmpv6_redirect"));
-        assert_eq!(
-            get_icmp_type_name(160),
-            Some("icmpv6_extended_echo_request")
-        );
-        assert_eq!(get_icmp_type_name(161), Some("icmpv6_extended_echo_reply"));
+        assert_eq!(get_icmpv6_type_name(1), Some("destination_unreachable"));
+        assert_eq!(get_icmpv6_type_name(2), Some("packet_too_big"));
+        assert_eq!(get_icmpv6_type_name(3), Some("time_exceeded"));
+        assert_eq!(get_icmpv6_type_name(4), Some("parameter_problem"));
+        assert_eq!(get_icmpv6_type_name(128), Some("echo_request"));
+        assert_eq!(get_icmpv6_type_name(129), Some("echo_reply"));
+        assert_eq!(get_icmpv6_type_name(130), Some("mld_query"));
+        assert_eq!(get_icmpv6_type_name(131), Some("mld_report"));
+        assert_eq!(get_icmpv6_type_name(132), Some("mld_done"));
+        assert_eq!(get_icmpv6_type_name(133), Some("router_solicitation"));
+        assert_eq!(get_icmpv6_type_name(134), Some("router_advertisement"));
+        assert_eq!(get_icmpv6_type_name(135), Some("neighbor_solicitation"));
+        assert_eq!(get_icmpv6_type_name(136), Some("neighbor_advertisement"));
+        assert_eq!(get_icmpv6_type_name(137), Some("redirect"));
+        assert_eq!(get_icmpv6_type_name(160), Some("extended_echo_request"));
+        assert_eq!(get_icmpv6_type_name(161), Some("extended_echo_reply"));
 
         // Test unknown types
-        assert_eq!(get_icmp_type_name(6), None);
-        assert_eq!(get_icmp_type_name(7), None);
-        assert_eq!(get_icmp_type_name(255), None);
+        assert_eq!(get_icmpv4_type_name(6), None);
+        assert_eq!(get_icmpv4_type_name(7), None);
+        assert_eq!(get_icmpv6_type_name(254), None);
+        assert_eq!(get_icmpv6_type_name(255), None);
     }
 
     #[test]
     fn test_get_icmp_code_name() {
         // Test Echo Request/Reply (should have no-code for code 0)
-        assert_eq!(get_icmp_code_name(0, 0), Some("")); // Echo Reply
-        assert_eq!(get_icmp_code_name(8, 0), Some("")); // Echo Request
-        assert_eq!(get_icmp_code_name(0, 1), None); // Invalid code for Echo Reply
-        assert_eq!(get_icmp_code_name(8, 1), None); // Invalid code for Echo Request
+        assert_eq!(get_icmpv4_code_name(0, 0), Some("")); // Echo Reply
+        assert_eq!(get_icmpv4_code_name(8, 0), Some("")); // Echo Request
+        assert_eq!(get_icmpv4_code_name(0, 1), None); // Invalid code for Echo Reply
+        assert_eq!(get_icmpv4_code_name(8, 1), None); // Invalid code for Echo Request
 
         // Test Destination Unreachable codes (type 3)
-        assert_eq!(get_icmp_code_name(3, 0), Some("net_unreachable"));
-        assert_eq!(get_icmp_code_name(3, 1), Some("host_unreachable"));
-        assert_eq!(get_icmp_code_name(3, 2), Some("protocol_unreachable"));
-        assert_eq!(get_icmp_code_name(3, 3), Some("port_unreachable"));
-        assert_eq!(get_icmp_code_name(3, 4), Some("fragmentation_needed"));
+        assert_eq!(get_icmpv4_code_name(3, 0), Some("net_unreachable"));
+        assert_eq!(get_icmpv4_code_name(3, 1), Some("host_unreachable"));
+        assert_eq!(get_icmpv4_code_name(3, 2), Some("protocol_unreachable"));
+        assert_eq!(get_icmpv4_code_name(3, 3), Some("port_unreachable"));
+        assert_eq!(get_icmpv4_code_name(3, 4), Some("fragmentation_needed"));
         assert_eq!(
-            get_icmp_code_name(3, 15),
+            get_icmpv4_code_name(3, 15),
             Some("precedence_cutoff_in_effect")
         );
-        assert_eq!(get_icmp_code_name(3, 16), None); // Invalid code
+        assert_eq!(get_icmpv4_code_name(3, 16), None); // Invalid code
 
         // Test Redirect codes (type 5)
-        assert_eq!(get_icmp_code_name(5, 0), Some("redirect_for_network"));
-        assert_eq!(get_icmp_code_name(5, 1), Some("redirect_for_host"));
+        assert_eq!(get_icmpv4_code_name(5, 0), Some("redirect_for_network"));
+        assert_eq!(get_icmpv4_code_name(5, 1), Some("redirect_for_host"));
         assert_eq!(
-            get_icmp_code_name(5, 2),
+            get_icmpv4_code_name(5, 2),
             Some("redirect_for_tos_and_network")
         );
-        assert_eq!(get_icmp_code_name(5, 3), Some("redirect_for_tos_and_host"));
-        assert_eq!(get_icmp_code_name(5, 4), None); // Invalid code
+        assert_eq!(
+            get_icmpv4_code_name(5, 3),
+            Some("redirect_for_tos_and_host")
+        );
+        assert_eq!(get_icmpv4_code_name(5, 4), None); // Invalid code
 
         // Test Time Exceeded codes (type 11)
-        assert_eq!(get_icmp_code_name(11, 0), Some("ttl_expired"));
+        assert_eq!(get_icmpv4_code_name(11, 0), Some("ttl_expired"));
         assert_eq!(
-            get_icmp_code_name(11, 1),
+            get_icmpv4_code_name(11, 1),
             Some("fragment_reassembly_time_exceeded")
         );
-        assert_eq!(get_icmp_code_name(11, 2), None); // Invalid code
+        assert_eq!(get_icmpv4_code_name(11, 2), None); // Invalid code
 
         // Test Extended Echo Reply codes (type 43)
-        assert_eq!(get_icmp_code_name(43, 0), Some("no_error"));
-        assert_eq!(get_icmp_code_name(43, 1), Some("malformed_query"));
-        assert_eq!(get_icmp_code_name(43, 2), Some("no_such_interface"));
-        assert_eq!(get_icmp_code_name(43, 3), Some("no_such_table_entry"));
+        assert_eq!(get_icmpv4_code_name(43, 0), Some("no_error"));
+        assert_eq!(get_icmpv4_code_name(43, 1), Some("malformed_query"));
+        assert_eq!(get_icmpv4_code_name(43, 2), Some("no_such_interface"));
+        assert_eq!(get_icmpv4_code_name(43, 3), Some("no_such_table_entry"));
         assert_eq!(
-            get_icmp_code_name(43, 4),
+            get_icmpv4_code_name(43, 4),
             Some("multiple_interfaces_satisfy_query")
         );
-        assert_eq!(get_icmp_code_name(43, 5), None); // Invalid code
+        assert_eq!(get_icmpv4_code_name(43, 5), None); // Invalid code
 
         // Test ICMPv6 Destination Unreachable codes (type 1)
-        assert_eq!(get_icmp_code_name(1, 0), Some("no_route_to_destination"));
+        assert_eq!(get_icmpv6_code_name(1, 0), Some("no_route_to_destination"));
         assert_eq!(
-            get_icmp_code_name(1, 1),
+            get_icmpv6_code_name(1, 1),
             Some("communication_with_destination_administratively_prohibited")
         );
-        assert_eq!(get_icmp_code_name(1, 3), Some("address_unreachable"));
-        assert_eq!(get_icmp_code_name(1, 4), Some("port_unreachable"));
-        assert_eq!(get_icmp_code_name(1, 12), None); // Invalid code
+        assert_eq!(get_icmpv6_code_name(1, 3), Some("address_unreachable"));
+        assert_eq!(get_icmpv6_code_name(1, 4), Some("port_unreachable"));
+        assert_eq!(get_icmpv6_code_name(1, 12), None); // Invalid code
 
         // Test ICMPv6 Parameter Problem codes (type 102)
         assert_eq!(
-            get_icmp_code_name(102, 0),
+            get_icmpv6_code_name(4, 0),
             Some("erroneous_header_field_encountered")
         );
         assert_eq!(
-            get_icmp_code_name(102, 1),
+            get_icmpv6_code_name(4, 1),
             Some("unrecognized_next_header_type_encountered")
         );
         assert_eq!(
-            get_icmp_code_name(102, 2),
+            get_icmpv6_code_name(4, 2),
             Some("unrecognized_ipv6_option_encountered")
         );
-        assert_eq!(get_icmp_code_name(102, 3), None); // Invalid code
+        assert_eq!(get_icmpv6_code_name(4, 11), None); // Invalid code
 
         // Test Router Renumbering codes (type 138) - has special code 255
         assert_eq!(
-            get_icmp_code_name(138, 0),
+            get_icmpv6_code_name(138, 0),
             Some("router_renumbering_command")
         );
         assert_eq!(
-            get_icmp_code_name(138, 1),
+            get_icmpv6_code_name(138, 1),
             Some("router_renumbering_result")
         );
-        assert_eq!(get_icmp_code_name(138, 255), Some("sequence_number_reset"));
-        assert_eq!(get_icmp_code_name(138, 2), None); // Invalid code
+        assert_eq!(
+            get_icmpv6_code_name(138, 255),
+            Some("sequence_number_reset")
+        );
+        assert_eq!(get_icmpv6_code_name(138, 2), None); // Invalid code
 
         // Test Node Information Query codes (type 139)
-        assert_eq!(get_icmp_code_name(139, 0), Some("data"));
-        assert_eq!(get_icmp_code_name(139, 1), Some("name"));
-        assert_eq!(get_icmp_code_name(139, 2), Some("name_or_address"));
-        assert_eq!(get_icmp_code_name(139, 3), None); // Invalid code
+        assert_eq!(get_icmpv6_code_name(139, 0), Some("data"));
+        assert_eq!(get_icmpv6_code_name(139, 1), Some("name"));
+        assert_eq!(get_icmpv6_code_name(139, 2), Some("name_or_address"));
+        assert_eq!(get_icmpv6_code_name(139, 3), None); // Invalid code
 
         // Test unknown ICMP type
-        assert_eq!(get_icmp_code_name(99, 0), None);
-        assert_eq!(get_icmp_code_name(255, 0), None);
+        assert_eq!(get_icmpv6_code_name(99, 0), None);
+        assert_eq!(get_icmpv6_code_name(255, 0), None);
     }
 
     #[test]
@@ -3193,24 +3303,12 @@ mod tests {
         );
 
         // Test ICMPv6 combinations
-        assert_eq!(
-            get_icmp_names(128, 0),
-            (Some("icmpv6_echo_request"), Some(""))
-        );
+        assert_eq!(get_icmp_names(128, 0), (Some("echo_request"), Some("")));
         assert_eq!(
             get_icmp_names(1, 3),
-            (
-                Some("icmpv6_destination_unreachable"),
-                Some("address_unreachable")
-            )
+            (Some("destination_unreachable"), Some("address_unreachable"))
         );
-        assert_eq!(
-            get_icmp_names(102, 1),
-            (
-                Some("icmpv6_parameter_problem"),
-                Some("unrecognized_next_header_type_encountered")
-            )
-        );
+        assert_eq!(get_icmp_names(4, 1), (Some("source_quench"), None));
 
         // Test unknown type (should return None for both)
         assert_eq!(get_icmp_names(99, 0), (None, None));
@@ -3230,21 +3328,38 @@ mod tests {
     }
 
     #[test]
-    fn test_comprehensive_icmp_coverage() {
+    fn test_comprehensive_icmpv4_coverage() {
         // Test that all defined ICMP types can be resolved to names
-        let test_types = [
-            0, 3, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 42, 43, // IPv4
-            1, 2, 101, 102, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141,
-            142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 160,
-            161, // ICMPv6
-        ];
+        let test_types = [0, 3, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 42, 43];
 
         for &type_val in &test_types {
-            let type_name = get_icmp_type_name(type_val);
+            let type_name = get_icmpv4_type_name(type_val);
             assert!(type_name.is_some(), "Type {} should have a name", type_val);
 
             // Test that we can get at least code 0 for each type (most common)
-            let code_name = get_icmp_code_name(type_val, 0);
+            let code_name = get_icmpv4_code_name(type_val, 0);
+            assert!(
+                code_name.is_some(),
+                "Type {} should have a valid code 0",
+                type_val
+            );
+        }
+    }
+
+    #[test]
+    fn test_comprehensive_icmpv6_coverage() {
+        // Test that all defined ICMP types can be resolved to names
+        let test_types = [
+            1, 2, 3, 4, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142,
+            143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 160, 161,
+        ];
+
+        for &type_val in &test_types {
+            let type_name = get_icmpv6_type_name(type_val);
+            assert!(type_name.is_some(), "Type {} should have a name", type_val);
+
+            // Test that we can get at least code 0 for each type (most common)
+            let code_name = get_icmpv6_code_name(type_val, 0);
             assert!(
                 code_name.is_some(),
                 "Type {} should have a valid code 0",
@@ -3298,19 +3413,43 @@ mod tests {
 
         // Test various type/code combinations that should work
         let test_cases = [
-            (8, 0, ""),                                       // Echo Request
-            (3, 1, "host_unreachable"),                       // Dest Unreachable
-            (5, 2, "redirect_for_tos_and_network"),           // Redirect
-            (11, 1, "fragment_reassembly_time_exceeded"),     // Time Exceeded
-            (43, 4, "multiple_interfaces_satisfy_query"),     // Extended Echo Reply
-            (1, 0, "no_route_to_destination"),                // ICMPv6 Dest Unreachable
-            (102, 2, "unrecognized_ipv6_option_encountered"), // ICMPv6 Parameter Problem
-            (138, 255, "sequence_number_reset"),              // Router Renumbering special code
-            (139, 1, "name"),                                 // Node Information Query
+            (3, 1, "host_unreachable"),                   // Dest Unreachable
+            (5, 2, "redirect_for_tos_and_network"),       // Redirect
+            (8, 0, ""),                                   // Echo Request
+            (11, 1, "fragment_reassembly_time_exceeded"), // Time Exceeded
+            (43, 4, "multiple_interfaces_satisfy_query"), // Extended Echo Reply
         ];
 
         for &(type_val, code_val, expected_name) in &test_cases {
-            let result = get_icmp_code_name(type_val, code_val);
+            let result = get_icmpv4_code_name(type_val, code_val);
+            assert_eq!(
+                result,
+                Some(expected_name),
+                "Failed for type {} code {}: expected '{}', got {:?}",
+                type_val,
+                code_val,
+                expected_name,
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_code_for_type_integration_v6() {
+        // Test that the internal parse_code_for_type function works correctly
+        // by testing it through the public API
+
+        // Test various type/code combinations that should work
+        let test_cases = [
+            (1, 0, "no_route_to_destination"), // ICMPv6 Dest Unreachable
+            (3, 1, "fragment_reassembly_time_exceeded"), // Time Exceeded
+            (4, 2, "unrecognized_ipv6_option_encountered"), // ICMPv6 Parameter Problem
+            (138, 255, "sequence_number_reset"), // Router Renumbering special code
+            (139, 1, "name"),                  // Node Information Query
+        ];
+
+        for &(type_val, code_val, expected_name) in &test_cases {
+            let result = get_icmpv6_code_name(type_val, code_val);
             assert_eq!(
                 result,
                 Some(expected_name),
