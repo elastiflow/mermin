@@ -26,10 +26,7 @@ use crate::{
     community_id::CommunityIdGenerator,
     health::{HealthState, start_api_server},
     k8s::resource_parser::attribute_flow_span,
-    otlp::{
-        opts::{ExporterOptions, resolve_discovery_options, resolve_exporters},
-        trace::lib::{TraceExporterAdapter, init_tracer_provider},
-    },
+    otlp::trace::lib::{TraceExporterAdapter, init_tracer_provider},
     runtime::conf::Conf,
     span::{flow::FlowSpanExporter, producer::FlowSpanProducer},
 };
@@ -44,58 +41,37 @@ async fn main() -> Result<()> {
     let runtime = runtime::Runtime::new()?;
     let runtime::Runtime { config, .. } = runtime;
 
-    // Resolve exporters and initialize tracing
-    let (exporter, _provider) = match config.agent.as_ref() {
-        Some(agent_opts) => {
-            let default_exporter_opts = ExporterOptions::default();
+    // Initialize tracing with resolved exporters
+    let (exporter, _provider) = if !config.resolved_otlp_exporters.is_empty()
+        || !config.resolved_stdout_exporters.is_empty()
+    {
+        info!(
+            "initializing exporter (otlp: {}, stdout: {})",
+            config.resolved_otlp_exporters.len(),
+            config.resolved_stdout_exporters.len()
+        );
 
-            let exporter_opts = config.exporter.as_ref().unwrap_or(&default_exporter_opts);
-            let (otlp_exporters, stdout_exporters) = resolve_exporters(
-                agent_opts
-                    .traces
-                    .get("main") // TODO: change to support multiple trace pipelines
-                    .ok_or_else(|| anyhow!("no 'main' trace configuration found"))?
-                    .exporters
-                    .clone(),
-                exporter_opts,
-            )
-            .map_err(|e| anyhow!("failed to resolve exporters: {e}"))?;
+        // Initialize tracing with exporters configured
+        let provider = init_tracer_provider(
+            config.resolved_otlp_exporters.first(),
+            config.resolved_stdout_exporters.first(),
+            config.log_level,
+        )
+        .await?;
 
-            if !otlp_exporters.is_empty() || !stdout_exporters.is_empty() {
-                info!(
-                    "initializing exporter (otlp: {}, stdout: {})",
-                    otlp_exporters.len(),
-                    stdout_exporters.len()
-                );
+        let exporter = create_otlp_exporter(provider.clone())
+            .await
+            .map_err(|e| {
+                error!("failed to create exporter adapter: {e}");
+                e
+            })
+            .ok();
 
-                // Initialize tracing with exporters configured
-                let provider = init_tracer_provider(
-                    otlp_exporters.first(),
-                    stdout_exporters.first(),
-                    config.log_level,
-                )
-                .await?;
-
-                let exporter = create_otlp_exporter(provider.clone())
-                    .await
-                    .map_err(|e| {
-                        error!("failed to create exporter adapter: {e}");
-                        e
-                    })
-                    .ok();
-
-                (exporter, provider)
-            } else {
-                warn!("no exporters configured in agent options");
-                let provider = init_tracer_provider(None, None, config.log_level).await?;
-                (None, provider)
-            }
-        }
-        None => {
-            warn!("no agent options configured, continuing without exporters");
-            let provider = init_tracer_provider(None, None, config.log_level).await?;
-            (None, provider)
-        }
+        (exporter, provider)
+    } else {
+        warn!("no exporters configured in agent options");
+        let provider = init_tracer_provider(None, None, config.log_level).await?;
+        (None, provider)
     };
 
     let community_id_generator = CommunityIdGenerator::new(0);
@@ -111,41 +87,10 @@ async fn main() -> Result<()> {
         warn!("remove limit on locked memory failed, ret is: {ret}");
     }
 
-    // Resolve discovery options from agent configuration BEFORE destructuring config
+    // Use resolved discovery options from agent configuration BEFORE destructuring config
     info!("initializing k8s client");
-    let discovery_opts = match config.agent.as_ref() {
-        Some(agent_opts) => {
-            // Get the main trace configuration
-            if let Some(main_trace) = agent_opts.traces.get("main") {
-                // TODO: change to support multiple trace pipelines
-                info!(
-                    "main_trace found: discovery_owner = '{}', discovery_selector = '{}', exporters = {:?}",
-                    main_trace.discovery_owner, main_trace.discovery_selector, main_trace.exporters
-                );
-                resolve_discovery_options(
-                    &main_trace.discovery_owner,
-                    &main_trace.discovery_selector,
-                    &config,
-                )
-                .unwrap_or_else(|e| {
-                    warn!(
-                        "failed to resolve discovery options from agent config: {}, using defaults",
-                        e
-                    );
-                    config.discovery.clone().unwrap_or_default()
-                })
-            } else {
-                warn!(
-                    "no 'main' trace configuration found in agent options, using default discovery config"
-                );
-                config.discovery.clone().unwrap_or_default()
-            }
-        }
-        None => {
-            warn!("no agent configuration found, using default discovery config");
-            config.discovery.clone().unwrap_or_default()
-        }
-    };
+    let discovery_opts = &config.resolved_discovery_options;
+    info!("loaded discovery configuration: {:?}", discovery_opts);
 
     let Conf { interface, api, .. } = config;
 
@@ -230,8 +175,7 @@ async fn main() -> Result<()> {
         packet_meta_rx,
         flow_span_tx,
     );
-    // Verify discovery configs are loaded
-    info!("loaded discovery configuration: {:?}", discovery_opts);
+
     let k8s_attributor = match k8s::Attributor::new().await {
         Ok(attributor) => {
             // TODO: we should implement an event based notifier

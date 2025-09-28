@@ -49,6 +49,8 @@ agent "traces" "main" {
   exporters = [
     "exporter.stdout.console"
   ]
+  discovery_owner    = "discovery.k8s_owner.main"
+  discovery_selector = "discovery.k8s_selector.main"
 }
 
 # OTLP exporter configuration
@@ -72,4 +74,32 @@ exporter "otlp" "main" {
 
 exporter "stdout" "console" {
   format = "full"
+}
+
+# Discovery configurations
+discovery "k8s_owner" "main" {
+  exclude_kinds = [
+    "EndpointSlice",
+    "*"
+  ]
+  include_kinds = [
+    "Service"
+  ]
+  max_depth = 5
+}
+
+discovery "k8s_selector" "main" {
+  k8s_object = [
+    {
+      kind                              = "NetworkPolicy"
+      selector_match_expressions_field = "spec.podSelector.matchExpressions"
+      selector_match_labels_field      = "spec.podSelector.matchLabels"
+      to                               = "Pod"
+    },
+    {
+      kind                         = "Service"
+      selector_match_labels_field = "spec.selector"
+      to                          = "Pod"
+    }
+  ]
 }

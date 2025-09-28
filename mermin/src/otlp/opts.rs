@@ -4,10 +4,7 @@ use base64::{Engine as _, engine::general_purpose};
 use opentelemetry_otlp::Protocol;
 use serde::{Deserialize, Serialize};
 
-use crate::runtime::conf::{
-    Conf, ExporterReferences, ExporterReferencesParser, K8sDiscoveryOptions,
-    conf_serde::exporter_protocol,
-};
+use crate::runtime::conf::conf_serde::exporter_protocol;
 
 /// Configuration options for all telemetry exporters used by the application.
 ///
@@ -49,134 +46,6 @@ pub struct ExporterOptions {
     pub otlp: Option<HashMap<String, OtlpExporterOptions>>,
     /// Stdout exporter configurations, keyed by exporter name.
     pub stdout: Option<HashMap<String, StdoutExporterOptions>>,
-}
-
-pub fn resolve_exporters(
-    exporter_refs: ExporterReferences,
-    exporter_opts: &ExporterOptions,
-) -> Result<(Vec<OtlpExporterOptions>, Vec<StdoutExporterOptions>), anyhow::Error> {
-    if exporter_refs.is_empty() {
-        return Ok((Vec::new(), Vec::new()));
-    }
-
-    let enabled_exporters = exporter_refs.parse().map_err(|e| anyhow::anyhow!(e))?;
-    let mut otlp_exporters: Vec<OtlpExporterOptions> = Vec::new();
-    let mut stdout_exporters: Vec<StdoutExporterOptions> = Vec::new();
-
-    enabled_exporters
-    .iter()
-    .try_for_each(|exporter_ref| -> Result<(), anyhow::Error> {
-        match exporter_ref.type_.as_str() {
-            "otlp" => {
-                if let Some(otlp_opts_map) = &exporter_opts.otlp {
-                    if let Some(otlp_opts) = otlp_opts_map.get(&exporter_ref.name) {
-                        otlp_exporters.push(otlp_opts.clone());
-                    } else {
-                        return Err(anyhow::anyhow!(
-                            "otlp exporter '{}' referenced in agent config but not found in exporter config",
-                            exporter_ref.name
-                        ));
-                    }
-                } else {
-                    return Err(anyhow::anyhow!(
-                        "otlp exporter '{}' referenced in agent config but no otlp exporters configured",
-                        exporter_ref.name
-                    ));
-                }
-            }
-            "stdout" => {
-                if let Some(stdout_opts_map) = &exporter_opts.stdout {
-                    if let Some(stdout_opts) = stdout_opts_map.get(&exporter_ref.name) {
-                        stdout_exporters.push(stdout_opts.clone());
-                    } else {
-                        return Err(anyhow::anyhow!(
-                            "stdout exporter '{}' referenced in agent config but not found in exporter config",
-                            exporter_ref.name
-                        ));
-                    }
-                } else {
-                    return Err(anyhow::anyhow!(
-                        "stdout exporter '{}' referenced in agent config but no stdout exporters configured",
-                        exporter_ref.name
-                    ));
-                }
-            }
-            _ => {
-                return Err(anyhow::anyhow!("unsupported exporter type: {}", exporter_ref.type_));
-            }
-        }
-        Ok(())
-    })?;
-
-    Ok((otlp_exporters, stdout_exporters))
-}
-
-/// Resolves discovery options from agent configuration references.
-///
-/// This function takes discovery reference strings (e.g., "discovery.k8s_owner.main")
-/// and extracts the corresponding configuration objects from the global discovery config.
-///
-/// # Arguments
-/// * `discovery_owner_ref` - Reference to k8s_owner config (e.g., "discovery.k8s_owner.main")
-/// * `discovery_selector_ref` - Reference to k8s_selector config (e.g., "discovery.k8s_selector.main")
-/// * `config` - The global configuration containing discovery options
-///
-/// # Returns
-/// * `Result<K8sDiscoveryOptions, anyhow::Error>` - Resolved discovery options or detailed error
-pub fn resolve_discovery_options(
-    discovery_owner_ref: &str,
-    discovery_selector_ref: &str,
-    config: &Conf,
-) -> Result<K8sDiscoveryOptions, anyhow::Error> {
-    // Parse the discovery owner reference (e.g., "discovery.k8s_owner.main" -> "main")
-    let owner_name = discovery_owner_ref
-        .strip_prefix("discovery.k8s_owner.")
-        .ok_or_else(|| anyhow::anyhow!(
-            "invalid discovery owner reference format: '{}', expected format: 'discovery.k8s_owner.<name>'",
-            discovery_owner_ref
-        ))?;
-
-    // Parse the discovery selector reference (e.g., "discovery.k8s_selector.main" -> "main")
-    let selector_name = discovery_selector_ref
-        .strip_prefix("discovery.k8s_selector.")
-        .ok_or_else(|| anyhow::anyhow!(
-            "invalid discovery selector reference format: '{}', expected format: 'discovery.k8s_selector.<name>'",
-            discovery_selector_ref
-        ))?;
-
-    // Get the global discovery configuration
-    let global_discovery = config
-        .discovery
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("discovery configuration is missing from global config"))?;
-    // Extract the specific owner configuration
-    let owner_options = global_discovery.k8s_owner.get(owner_name)
-        .ok_or_else(|| anyhow::anyhow!(
-            "k8s_owner '{}' referenced in discovery config but not found in global discovery configuration",
-            owner_name
-        ))?;
-
-    // Extract the specific selector configuration
-    let selector_options = global_discovery.k8s_selector.get(selector_name)
-        .ok_or_else(|| anyhow::anyhow!(
-            "k8s_selector '{}' referenced in discovery config but not found in global discovery configuration",
-            selector_name
-        ))?;
-
-    // Create a new K8sDiscoveryOptions with only the referenced configurations
-    let discovery_options = K8sDiscoveryOptions {
-        k8s_owner: {
-            let mut owner_map = HashMap::new();
-            owner_map.insert(owner_name.to_string(), owner_options.clone());
-            owner_map
-        },
-        k8s_selector: {
-            let mut selector_map = HashMap::new();
-            selector_map.insert(selector_name.to_string(), selector_options.clone());
-            selector_map
-        },
-    };
-    Ok(discovery_options)
 }
 
 /// Configuration options for an individual OTLP (OpenTelemetry Protocol) exporter instance.

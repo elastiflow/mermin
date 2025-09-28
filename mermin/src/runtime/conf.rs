@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tracing::Level;
 
 use crate::{
-    otlp::{self, opts::ExporterOptions},
+    otlp::opts::{ExporterOptions, OtlpExporterOptions, StdoutExporterOptions},
     runtime::{
         cli::Cli,
         conf::conf_serde::{duration, level},
@@ -100,6 +100,24 @@ pub struct Conf {
     /// This field holds settings for exporting telemetry data
     /// to multiple destinations using the new structure.
     pub exporter: Option<ExporterOptions>,
+
+    /// Resolved OTLP exporter options from agent configuration.
+    /// This field is populated during configuration loading and contains
+    /// the actual exporter configurations referenced by the agent.
+    #[serde(skip)]
+    pub resolved_otlp_exporters: Vec<OtlpExporterOptions>,
+
+    /// Resolved stdout exporter options from agent configuration.
+    /// This field is populated during configuration loading and contains
+    /// the actual exporter configurations referenced by the agent.
+    #[serde(skip)]
+    pub resolved_stdout_exporters: Vec<StdoutExporterOptions>,
+
+    /// Resolved discovery options from agent configuration.
+    /// This field is populated during configuration loading and contains
+    /// the actual discovery configurations referenced by the agent.
+    #[serde(skip)]
+    pub resolved_discovery_options: K8sDiscoveryOptions,
 }
 
 impl Default for Conf {
@@ -115,11 +133,14 @@ impl Default for Conf {
             packet_worker_count: defaults::flow_workers(),
             shutdown_timeout: defaults::shutdown_timeout(),
             span: SpanOptions::default(),
-            exporter: Some(otlp::opts::ExporterOptions::default()),
+            exporter: Some(ExporterOptions::default()),
             discovery: Some(K8sDiscoveryOptions::default()),
             agent: Some(AgentOptions {
                 traces: HashMap::new(),
             }),
+            resolved_otlp_exporters: Vec::new(),
+            resolved_stdout_exporters: Vec::new(),
+            resolved_discovery_options: K8sDiscoveryOptions::default(),
         }
     }
 }
@@ -199,6 +220,10 @@ impl Conf {
         let mut conf: Conf = figment.extract()?;
 
         conf.config_path = config_path_to_store;
+
+        // Resolve all options after loading configuration
+        conf.resolve_all_options()?;
+
         Ok((conf, cli))
     }
 
@@ -251,11 +276,216 @@ impl Conf {
                 .extract()?;
             conf.config_path = self.config_path.clone();
 
+            // Resolve all options after reloading
+            conf.resolve_all_options()?;
             Ok(conf)
         } else {
             Err(ConfigError::NoConfigFile)
         }
     }
+
+    /// Resolves exporter options from agent configuration references and stores them in the struct.
+    ///
+    /// This function takes exporter reference strings from the agent configuration
+    /// and extracts the corresponding exporter configurations from the global exporter config,
+    /// storing the results in the resolved_otlp_exporters and resolved_stdout_exporters fields.
+    ///
+    /// # Returns
+    /// * `Result<(), ConfigError>` - Success or configuration error
+    pub fn resolve_exporters(&mut self) -> Result<(), ConfigError> {
+        match self.agent.as_ref() {
+            Some(agent_opts) => {
+                let default_exporter_opts = ExporterOptions::default();
+                let exporter_opts = self.exporter.as_ref().unwrap_or(&default_exporter_opts);
+
+                if let Some(main_trace) = agent_opts.traces.get("main") {
+                    // TODO: change to support multiple trace pipelines
+                    let (otlp_exporters, stdout_exporters) =
+                        self::resolve_exporters_impl(main_trace.exporters.clone(), exporter_opts)
+                            .map_err(|e| {
+                            ConfigError::Extraction(Box::new(figment::Error::from(e.to_string())))
+                        })?;
+
+                    self.resolved_otlp_exporters = otlp_exporters;
+                    self.resolved_stdout_exporters = stdout_exporters;
+                } else {
+                    self.resolved_otlp_exporters = Vec::new();
+                    self.resolved_stdout_exporters = Vec::new();
+                }
+            }
+            None => {
+                self.resolved_otlp_exporters = Vec::new();
+                self.resolved_stdout_exporters = Vec::new();
+            }
+        }
+        Ok(())
+    }
+
+    /// Resolves discovery options from agent configuration references and stores them in the struct.
+    ///
+    /// This function takes discovery reference strings from the agent configuration
+    /// and extracts the corresponding discovery configurations from the global discovery config,
+    /// storing the result in the resolved_discovery_options field.
+    ///
+    /// # Returns
+    /// * `Result<(), ConfigError>` - Success or configuration error
+    pub fn resolve_discovery_options(&mut self) -> Result<(), ConfigError> {
+        match self.agent.as_ref() {
+            Some(agent_opts) => {
+                if let Some(main_trace) = agent_opts.traces.get("main") {
+                    // TODO: change to support multiple trace pipelines
+                    let discovery_options = self::resolve_discovery_options_impl(
+                        &main_trace.discovery_owner,
+                        &main_trace.discovery_selector,
+                        self,
+                    )
+                    .map_err(|e| {
+                        ConfigError::Extraction(Box::new(figment::Error::from(e.to_string())))
+                    })?;
+
+                    self.resolved_discovery_options = discovery_options;
+                } else {
+                    self.resolved_discovery_options = self.discovery.clone().unwrap_or_default();
+                }
+            }
+            None => {
+                self.resolved_discovery_options = self.discovery.clone().unwrap_or_default();
+            }
+        }
+        Ok(())
+    }
+
+    /// Resolves all configuration options from agent configuration references.
+    ///
+    /// This function calls both exporter and discovery resolution functions to ensure
+    /// all agent-referenced configurations are properly resolved.
+    ///
+    /// # Returns
+    /// * `Result<(), ConfigError>` - Success or configuration error
+    pub fn resolve_all_options(&mut self) -> Result<(), ConfigError> {
+        // For now, we just validate that the resolution would work
+        // In the future, we might store resolved options in the config struct
+        self.resolve_exporters()?;
+        self.resolve_discovery_options()?;
+        Ok(())
+    }
+}
+
+/// Internal implementation function for resolving exporters.
+/// This is a copy of the logic from otlp/opts.rs to avoid circular dependencies.
+fn resolve_exporters_impl(
+    exporter_refs: ExporterReferences,
+    exporter_opts: &ExporterOptions,
+) -> Result<(Vec<OtlpExporterOptions>, Vec<StdoutExporterOptions>), Box<dyn std::error::Error>> {
+    if exporter_refs.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+
+    let enabled_exporters = exporter_refs.parse()?;
+    let mut otlp_exporters: Vec<OtlpExporterOptions> = Vec::new();
+    let mut stdout_exporters: Vec<StdoutExporterOptions> = Vec::new();
+
+    enabled_exporters
+        .iter()
+        .try_for_each(|exporter_ref| -> Result<(), Box<dyn std::error::Error>> {
+            match exporter_ref.type_.as_str() {
+                "otlp" => {
+                    if let Some(otlp_opts_map) = &exporter_opts.otlp {
+                        if let Some(otlp_opts) = otlp_opts_map.get(&exporter_ref.name) {
+                            otlp_exporters.push(otlp_opts.clone());
+                        } else {
+                            return Err(format!(
+                                "otlp exporter '{}' referenced in agent config but not found in exporter config",
+                                exporter_ref.name
+                            ).into());
+                        }
+                    } else {
+                        return Err(format!(
+                            "otlp exporter '{}' referenced in agent config but no otlp exporters configured",
+                            exporter_ref.name
+                        ).into());
+                    }
+                }
+                "stdout" => {
+                    if let Some(stdout_opts_map) = &exporter_opts.stdout {
+                        if let Some(stdout_opts) = stdout_opts_map.get(&exporter_ref.name) {
+                            stdout_exporters.push(stdout_opts.clone());
+                        } else {
+                            return Err(format!(
+                                "stdout exporter '{}' referenced in agent config but not found in exporter config",
+                                exporter_ref.name
+                            ).into());
+                        }
+                    } else {
+                        return Err(format!(
+                            "stdout exporter '{}' referenced in agent config but no stdout exporters configured",
+                            exporter_ref.name
+                        ).into());
+                    }
+                }
+                _ => {
+                    return Err(format!("unsupported exporter type: {}", exporter_ref.type_).into());
+                }
+            }
+            Ok(())
+        })?;
+
+    Ok((otlp_exporters, stdout_exporters))
+}
+
+/// Internal implementation function for resolving discovery options.
+/// This is a copy of the logic from otlp/opts.rs to avoid circular dependencies.
+fn resolve_discovery_options_impl(
+    discovery_owner_ref: &str,
+    discovery_selector_ref: &str,
+    config: &Conf,
+) -> Result<K8sDiscoveryOptions, Box<dyn std::error::Error>> {
+    // Parse the discovery owner reference (e.g., "discovery.k8s_owner.main" -> "main")
+    let owner_name = discovery_owner_ref
+        .strip_prefix("discovery.k8s_owner.")
+        .ok_or_else(|| format!(
+            "invalid discovery owner reference format: '{discovery_owner_ref}', expected format: 'discovery.k8s_owner.<name>'"
+        ))?;
+
+    // Parse the discovery selector reference (e.g., "discovery.k8s_selector.main" -> "main")
+    let selector_name = discovery_selector_ref
+        .strip_prefix("discovery.k8s_selector.")
+        .ok_or_else(|| format!(
+            "invalid discovery selector reference format: '{discovery_selector_ref}', expected format: 'discovery.k8s_selector.<name>'"
+        ))?;
+
+    // Get the global discovery configuration
+    let global_discovery = config
+        .discovery
+        .as_ref()
+        .ok_or_else(|| "discovery configuration is missing from global config".to_string())?;
+
+    // Extract the specific owner configuration
+    let owner_options = global_discovery.k8s_owner.get(owner_name)
+        .ok_or_else(|| format!(
+            "k8s_owner '{owner_name}' referenced in discovery config but not found in global discovery configuration"
+        ))?;
+
+    // Extract the specific selector configuration
+    let selector_options = global_discovery.k8s_selector.get(selector_name)
+        .ok_or_else(|| format!(
+            "k8s_selector '{selector_name}' referenced in discovery config but not found in global discovery configuration"
+        ))?;
+
+    // Create a new K8sDiscoveryOptions with only the referenced configurations
+    let discovery_options = K8sDiscoveryOptions {
+        k8s_owner: {
+            let mut owner_map = HashMap::new();
+            owner_map.insert(owner_name.to_string(), owner_options.clone());
+            owner_map
+        },
+        k8s_selector: {
+            let mut selector_map = HashMap::new();
+            selector_map.insert(selector_name.to_string(), selector_options.clone());
+            selector_map
+        },
+    };
+    Ok(discovery_options)
 }
 
 /// Validates that the given path points to an existing file with a supported extension.
