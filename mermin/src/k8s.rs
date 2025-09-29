@@ -287,22 +287,17 @@ where
 
 /// Represents the context of a network flow for policy evaluation
 #[derive(Debug, Clone)]
-pub struct FlowContext<'a> {
+pub struct FlowContext {
     pub src_pod: Option<Pod>,
     pub src_ip: IpAddr,
     pub dst_pod: Option<Pod>,
     pub dst_ip: IpAddr,
-    pub namespace: &'a str,
     pub port: u16,
     pub protocol: IpProto,
 }
 
-impl<'a> FlowContext<'a> {
-    pub async fn from_flow_span(
-        flow_span: &FlowSpan,
-        attributor: &Attributor,
-        namespace: &'a str,
-    ) -> Self {
+impl FlowContext {
+    pub async fn from_flow_span(flow_span: &FlowSpan, attributor: &Attributor) -> Self {
         // Extract IPs and ports
         let (src_ip, dst_ip, port, protocol) = (
             flow_span.attributes.source_address,
@@ -320,7 +315,6 @@ impl<'a> FlowContext<'a> {
             src_ip,
             dst_pod: dst_pod.as_deref().cloned(),
             dst_ip,
-            namespace,
             port,
             protocol,
         }
@@ -694,9 +688,9 @@ impl Attributor {
         ingress_rules.iter().any(|rule| {
             let from_match = rule.from.as_ref().is_none_or(|from_peers| {
                 from_peers.is_empty()
-                    || from_peers
-                        .iter()
-                        .any(|peer| self.peer_matches(ctx, peer, true))
+                    || from_peers.iter().any(|peer| {
+                        self.peer_matches(ctx, peer, true, policy.clone().metadata.namespace)
+                    })
             });
 
             from_match && self.check_ports_match(ctx, &rule.ports, direction)
@@ -717,9 +711,9 @@ impl Attributor {
         egress_rules.iter().any(|rule| {
             let to_match = rule.to.as_ref().is_none_or(|to_peers| {
                 to_peers.is_empty()
-                    || to_peers
-                        .iter()
-                        .any(|peer| self.peer_matches(ctx, peer, false))
+                    || to_peers.iter().any(|peer| {
+                        self.peer_matches(ctx, peer, false, policy.clone().metadata.namespace)
+                    })
             });
 
             to_match && self.check_ports_match(ctx, &rule.ports, direction)
@@ -799,7 +793,13 @@ impl Attributor {
             })
     }
 
-    fn peer_matches(&self, ctx: &FlowContext, peer: &NetworkPolicyPeer, is_source: bool) -> bool {
+    fn peer_matches(
+        &self,
+        ctx: &FlowContext,
+        peer: &NetworkPolicyPeer,
+        is_source: bool,
+        policy_namespace: Option<String>,
+    ) -> bool {
         let (target_ip, target_pod) = if is_source {
             (ctx.src_ip, &ctx.src_pod)
         } else {
@@ -819,11 +819,8 @@ impl Attributor {
         };
 
         // Check for namespace selector match.
-        let namespace_matches = if is_source {
-            self.namespace_matches_selector_internal(pod, peer, false, Some(ctx.namespace))
-        } else {
-            self.namespace_matches_selector_internal(pod, peer, true, None)
-        };
+        let namespace_matches =
+            self.namespace_matches_selector_internal(pod, peer, policy_namespace);
 
         if !namespace_matches {
             return false;
@@ -853,8 +850,7 @@ impl Attributor {
         &self,
         pod: &Pod,
         peer: &NetworkPolicyPeer,
-        is_egress: bool,
-        policy_namespace: Option<&str>,
+        policy_namespace: Option<String>,
     ) -> bool {
         match &peer.namespace_selector {
             Some(ns_selector) => {
@@ -870,16 +866,10 @@ impl Attributor {
                     false
                 }
             }
-            None => {
-                if is_egress {
-                    // No namespace selector means any namespace is allowed for egress
-                    true
-                } else {
-                    // No namespace selector means same namespace as the policy for ingress
-                    pod.namespace().as_deref().unwrap_or("default")
-                        == policy_namespace.unwrap_or("default")
-                }
-            }
+            None => match (pod.namespace(), policy_namespace) {
+                (Some(pod_ns), Some(pol_ns)) => pod_ns == pol_ns,
+                _ => false,
+            },
         }
     }
 }

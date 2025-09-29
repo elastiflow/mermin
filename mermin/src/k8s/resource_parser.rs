@@ -30,8 +30,7 @@ impl<'a> SpanAttributor<'a> {
     /// Returns a cloned FlowSpan with source and destination Kubernetes attributes populated.
     async fn attribute(&self, flow_span: &FlowSpan) -> Result<FlowSpan> {
         // Create FlowContext directly for both directions
-        let namespace = "default"; // TODO: This should be configurable or derived from context
-        let ctx = FlowContext::from_flow_span(flow_span, self.attributor, namespace).await;
+        let ctx = FlowContext::from_flow_span(flow_span, self.attributor).await;
 
         // Resolve source and destination IPs to Kubernetes resources and evaluate policies
         let src_attribution: Option<AttributionInfo> = self.enrich(&ctx.src_pod, ctx.src_ip).await;
@@ -224,7 +223,7 @@ impl<'a> SpanAttributor<'a> {
     /// Returns (ingress_policies, egress_policies) for telemetry attribution.
     async fn evaluate_flow_policies(
         &self,
-        ctx: &FlowContext<'_>,
+        ctx: &FlowContext,
     ) -> Result<(Vec<NetworkPolicy>, Vec<NetworkPolicy>)> {
         let mut ingress_policies = Vec::new();
         let mut egress_policies = Vec::new();
@@ -246,7 +245,7 @@ impl<'a> SpanAttributor<'a> {
     /// Converts from the internal policy representation to our NetworkPolicy struct.
     fn get_policies_for_pod(
         &self,
-        ctx: &FlowContext<'_>,
+        ctx: &FlowContext,
         policy_pod: &Pod,
         direction: FlowDirection,
     ) -> Result<Vec<NetworkPolicy>> {
