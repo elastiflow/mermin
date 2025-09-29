@@ -1,6 +1,6 @@
-use dashmap::DashMap;
 use std::{net::IpAddr, sync::Arc, time::SystemTime};
 
+use dashmap::DashMap;
 use fxhash::FxBuildHasher;
 use k8s_openapi::chrono;
 use network_types::{eth::EtherType, ip::IpProto};
@@ -364,7 +364,7 @@ impl Traceable for FlowSpan {
 
         // Record optional fields only if they have values
         if let Some(ref value) = self.attributes.flow_connection_state {
-            kvs.push(KeyValue::new("flow.connection_state", value.to_owned()));
+            kvs.push(KeyValue::new("flow.connection_state", value.as_str()));
         }
         if let Some(ref value) = self.attributes.flow_end_reason {
             kvs.push(KeyValue::new("flow.end_reason", value.as_str()));
@@ -376,7 +376,7 @@ impl Traceable for FlowSpan {
             kvs.push(KeyValue::new("network.interface.name", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.network_interface_mac {
-            kvs.push(KeyValue::new("network.interface.mac", value.to_owned()));
+            kvs.push(KeyValue::new("network.interface.mac", value.to_string()));
         }
         if let Some(value) = self.attributes.flow_ip_dscp_id {
             kvs.push(KeyValue::new("flow.ip.dscp.id", value as i64));

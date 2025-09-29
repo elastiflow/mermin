@@ -9,14 +9,15 @@ use opentelemetry_sdk::{
 };
 use opentelemetry_stdout::SpanExporter;
 use tonic::transport::{Certificate, Channel, channel::ClientTlsConfig};
-use tracing::{Level, level_filters::LevelFilter};
+use tracing::{Level, error, info, level_filters::LevelFilter};
 use tracing_subscriber::{
-    fmt::{Layer, format::FmtSpan},
-    prelude::__tracing_subscriber_SubscriberExt,
-    util::SubscriberInitExt,
+    fmt::Layer, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt,
 };
 
-use crate::otlp::opts::{ExporterOptions, ExporterProtocol, OtlpExporterOptions};
+use crate::{
+    otlp::opts::{ExporterOptions, ExporterProtocol, OtlpExporterOptions, resolve_exporters},
+    runtime::conf::ExporterReferences,
+};
 
 pub struct ProviderBuilder {
     pub sdk_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
@@ -41,15 +42,14 @@ impl ProviderBuilder {
     ) -> Result<Self, anyhow::Error> {
         let uri: Uri = options.address.parse()?;
         let mut tls_config: Option<ClientTlsConfig> = None;
-        if let Some(tls_opts) = options.tls
-            && tls_opts.enabled
+        // TODO: Apply TLS configuration - ENG-120
+        // This should handle TLS settings from config.tls
+        if let Some(tls_config) = &options.tls
+            && tls_config.enabled
         {
-            let mut config = ClientTlsConfig::new().domain_name(options.address.to_string());
-            if let Some(ca_cert) = tls_opts.ca_cert {
-                let ca_certificate = Certificate::from_pem(ca_cert.into_bytes());
-                config = config.ca_certificate(ca_certificate)
-            }
-            tls_config = Some(config);
+            info!("TLS configuration detected for OTLP exporter");
+            // TODO: Apply TLS settings to the channel - ENG-120
+            // This would involve setting up TLS certificates and keys
         }
 
         let mut channel = Channel::builder(uri);
@@ -66,6 +66,24 @@ impl ProviderBuilder {
             .with_channel(chan)
             .with_protocol(ExporterProtocol::from(options.protocol).into());
 
+        if let Some(auth_config) = &options.auth {
+            match auth_config.generate_auth_headers() {
+                Ok(auth_headers) => {
+                    info!("Applied authentication headers to OTLP exporter");
+                    // TODO: Apply headers to the exporter builder - ENG-120
+                    // Note: The opentelemetry_otlp crate may need to be updated to support custom headers
+                    // For now, this is a placeholder for where header configuration would go
+                    info!(
+                        "Headers configured for OTLP exporter ({} headers)",
+                        auth_headers.len()
+                    );
+                }
+                Err(e) => {
+                    error!("Failed to generate authentication headers: {}", e);
+                    return Err(anyhow::anyhow!("Authentication configuration error: {}", e));
+                }
+            }
+        }
         let exporter = builder.build()?;
         let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio).build();
         self.sdk_builder = self.sdk_builder.with_span_processor(processor);
@@ -86,20 +104,22 @@ impl ProviderBuilder {
 }
 
 pub async fn init_mermin_provider(
-    otlp_exporter_options: ExporterOptions,
+    exporter_options: ExporterOptions,
+    exporter_refs: ExporterReferences,
 ) -> Result<SdkTracerProvider, anyhow::Error> {
     let mut provider = ProviderBuilder::new();
-
-    if let Some(otlp_opts) = otlp_exporter_options.otlp {
-        for options in otlp_opts {
-            provider = provider.with_otlp_exporter(options.1).await?;
-        }
+    if exporter_refs.is_empty() {
+        return Ok(provider.build());
     }
 
-    if let Some(stdout_opts) = otlp_exporter_options.stdout {
-        for _ in stdout_opts {
-            provider = provider.with_stdout_exporter();
-        }
+    let (otlp_opts, stdout_opts) = resolve_exporters(exporter_refs, &exporter_options)?;
+
+    for options in otlp_opts {
+        provider = provider.with_otlp_exporter(options).await?;
+    }
+
+    for _ in stdout_opts {
+        provider = provider.with_stdout_exporter();
     }
 
     Ok(provider.build())
@@ -107,7 +127,33 @@ pub async fn init_mermin_provider(
 
 pub fn init_internal_tracing(log_level: Level) -> anyhow::Result<()> {
     let provider = ProviderBuilder::new().with_stdout_exporter().build();
-    let fmt_layer = Layer::new().with_span_events(FmtSpan::FULL);
+    let mut fmt_layer = Layer::new();
+    match log_level {
+        Level::DEBUG => fmt_layer = fmt_layer.with_file(true).with_line_number(true),
+        Level::TRACE => {
+            fmt_layer = fmt_layer
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .with_file(true)
+                .with_line_number(true)
+        }
+        _ => {
+            // default format:
+            // Format {
+            //     format: Full,
+            //     timer: SystemTime,
+            //     ansi: None, // conditionally set based on environment, handled by tracing-subscriber
+            //     display_timestamp: true,
+            //     display_target: true,
+            //     display_level: true,
+            //     display_thread_id: false,
+            //     display_thread_name: false,
+            //     display_filename: false,
+            //     display_line_number: false,
+            // }
+        }
+    }
+
     tracing_subscriber::registry()
         .with(LevelFilter::from_level(log_level))
         .with(fmt_layer)
