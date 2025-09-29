@@ -15,17 +15,21 @@ use network_types::{
     ah::AuthHdr,
     destopts::DestOptsHdr,
     esp::Esp,
-    eth::{EthHdr, EtherType},
+    eth::{ETH_LEN, EtherType, SrcMacAddr},
     fragment::FragmentHdr,
     geneve::GeneveHdr,
     gre::{GreHdr, GreRoutingHeader},
     hip::HipHdr,
     hop::HopOptHdr,
     icmp::IcmpHdr,
-    ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
+    ip::{
+        IpProto,
+        ipv4::{self, DscpEcn, IPV4_LEN, Vihl, ihl},
+        ipv6::{self, IPV6_LEN, Vcf},
+    },
     mobility::MobilityHdr,
     route::{GenericRoute, RoutingHeaderType},
-    shim6::Shim6Hdr,
+    shim6,
     tcp::TcpHdr,
     udp::UdpHdr,
     vxlan::VxlanHdr,
@@ -147,20 +151,20 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
                     found_tunnel = true;
                 }
             }),
-            // HeaderType::Ipv6 => parser.parse_ipv6_header(&ctx, meta).map(|_| {
-            //     // Check if proto is set to IP-in-IP and the tunnel hasn't been set yet
-            //     if !found_tunnel
-            //         && (parser.next_hdr == HeaderType::Ipv6 || parser.next_hdr == HeaderType::Ipv4)
-            //     {
-            //         meta.tunnel_src_ipv6_addr = meta.src_ipv6_addr;
-            //         meta.tunnel_dst_ipv6_addr = meta.dst_ipv6_addr;
-            //         meta.tunnel_src_port = meta.src_port;
-            //         meta.tunnel_dst_port = meta.dst_port;
-            //         meta.tunnel_ip_addr_type = IpAddrType::Ipv6;
-            //         meta.tunnel_proto = meta.proto;
-            //         found_tunnel = true;
-            //     }
-            // }),
+            HeaderType::Ipv6 => parser.parse_ipv6_header(&ctx, meta).map(|_| {
+                // Check if proto is set to IP-in-IP and the tunnel hasn't been set yet
+                if !found_tunnel
+                    && (parser.next_hdr == HeaderType::Ipv6 || parser.next_hdr == HeaderType::Ipv4)
+                {
+                    meta.tunnel_src_ipv6_addr = meta.src_ipv6_addr;
+                    meta.tunnel_dst_ipv6_addr = meta.dst_ipv6_addr;
+                    meta.tunnel_src_port = meta.src_port;
+                    meta.tunnel_dst_port = meta.dst_port;
+                    meta.tunnel_ip_addr_type = IpAddrType::Ipv6;
+                    meta.tunnel_proto = meta.proto;
+                    found_tunnel = true;
+                }
+            }),
             // HeaderType::Geneve => parser.parse_geneve_header(&ctx).map(|_| {
             //     // Reset inner headers to prepare for parsing encapsulated packet
             //     meta.src_mac_addr = [0; 6];
@@ -281,7 +285,8 @@ impl Parser {
 
     // Calculate the L3 octet count (from current offset to end of packet)
     // This should be called at the start of L3 (IP) header parsing
-    fn calc_l3_octet_count(&mut self, packet_len: u32) -> u32 {
+    #[inline(always)]
+    fn calc_l3_octet_count(&self, packet_len: u32) -> u32 {
         packet_len - self.offset as u32
     }
 
@@ -292,24 +297,23 @@ impl Parser {
         ctx: &TcContext,
         meta: &mut PacketMeta,
     ) -> Result<(), Error> {
-        if self.offset + EthHdr::LEN > ctx.len() as usize {
+        if self.offset + ETH_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
-        let eth_hdr: EthHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += EthHdr::LEN;
+        let src_mac_addr: SrcMacAddr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += 12;
+        let ether_type: EtherType = ctx.load(self.offset + 12).map_err(|_| Error::OutOfBounds)?;
+        self.offset += 2;
 
-        meta.ether_type = eth_hdr.ether_type().unwrap_or_default();
-        meta.src_mac_addr = eth_hdr.src_addr;
+        meta.src_mac_addr = src_mac_addr;
+        meta.ether_type = ether_type;
 
-        match meta.ether_type {
-            EtherType::Ipv4 => self.next_hdr = HeaderType::Ipv4,
-            EtherType::Ipv6 => self.next_hdr = HeaderType::Ipv6,
-            _ => {
-                self.next_hdr = HeaderType::StopProcessing;
-                return Ok(());
-            }
-        }
+        self.next_hdr = match ether_type {
+            EtherType::Ipv4 => HeaderType::Ipv4,
+            EtherType::Ipv6 => HeaderType::Ipv6,
+            _ => HeaderType::StopProcessing,
+        };
 
         Ok(())
     }
@@ -317,73 +321,86 @@ impl Parser {
     /// Parses the IPv4 header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_ipv4_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
-        if self.offset + Ipv4Hdr::LEN > ctx.len() as usize {
+        if self.offset + IPV4_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
-        let ipv4_hdr: Ipv4Hdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        let h_len = ipv4_hdr.ihl() as usize;
-        if h_len < Ipv4Hdr::LEN {
+        // policy: innermost IP header determines the flow span IPs
+        meta.ip_addr_type = IpAddrType::Ipv4;
+
+        let h_len = ihl(ctx
+            .load::<Vihl>(self.offset)
+            .map_err(|_| Error::OutOfBounds)?) as usize;
+        if h_len < IPV4_LEN {
             return Err(Error::MalformedHeader);
         }
-        self.offset += h_len;
+        self.offset += 1; // 1 byte vihl
 
-        // policy: innermost IP header determines the flow IPs
-        meta.src_ipv4_addr = ipv4_hdr.src_addr;
-        meta.dst_ipv4_addr = ipv4_hdr.dst_addr;
+        let dscp_ecn: DscpEcn = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        meta.ip_dscp_id = ipv4::dscp(dscp_ecn);
+        meta.ip_ecn_id = ipv4::ecn(dscp_ecn);
+        self.offset += 7; // 1 byte dscp/ecn, 2 bytes total length, 2 bytes identification, 2 bytes fragmentation flags
+
+        meta.ip_ttl = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += 1;
+
+        meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += 3; // 1 byte protocol, 2 bytes checksum
+
+        meta.src_ipv4_addr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += 4; // 4 bytes source address
+
+        meta.dst_ipv4_addr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += 4; // 4 bytes destination address
+
         meta.l3_octet_count = self.calc_l3_octet_count(ctx.len());
-        meta.ip_addr_type = IpAddrType::Ipv4;
-        meta.proto = ipv4_hdr.proto;
-        meta.ip_dscp_id = ipv4_hdr.dscp();
-        meta.ip_ecn_id = ipv4_hdr.ecn();
-        meta.ip_ttl = ipv4_hdr.ttl;
 
-        let next_hdr = ipv4_hdr.proto;
-        match next_hdr {
+        self.next_hdr = match meta.proto {
             IpProto::Icmp
             | IpProto::Tcp
             | IpProto::Udp
             | IpProto::Gre
             | IpProto::Esp
             | IpProto::Ah
-            | IpProto::Hip => {
-                self.next_hdr = HeaderType::Proto(next_hdr);
-            }
-            IpProto::Ipv4 => self.next_hdr = HeaderType::Ipv4,
-            IpProto::Ipv6 => self.next_hdr = HeaderType::Ipv6,
-            _ => {
-                self.next_hdr = HeaderType::StopProcessing;
-                return Ok(());
-            }
-        }
+            | IpProto::Hip => HeaderType::Proto(meta.proto),
+            IpProto::Ipv4 => HeaderType::Ipv4,
+            IpProto::Ipv6 => HeaderType::Ipv6,
+            _ => HeaderType::StopProcessing,
+        };
 
         Ok(())
     }
 
-    /// Parses the IPv6 header in the packet and updates the parser state accordingly.
-    /// Returns an error if the header cannot be loaded or is malformed.
+    // /// Parses the IPv6 header in the packet and updates the parser state accordingly.
+    // /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_ipv6_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
-        // Add this bounds check BEFORE the load
-        if self.offset + Ipv6Hdr::LEN > ctx.len() as usize {
+        if self.offset + IPV6_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
-        let ipv6_hdr: Ipv6Hdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += Ipv6Hdr::LEN;
-
-        // policy: innermost IP header determines the flow IPs
-        meta.src_ipv6_addr = ipv6_hdr.src_addr;
-        meta.dst_ipv6_addr = ipv6_hdr.dst_addr;
-        meta.l3_octet_count = self.calc_l3_octet_count(ctx.len());
+        // policy: innermost IP header determines the flow span IPs
         meta.ip_addr_type = IpAddrType::Ipv6;
-        meta.proto = ipv6_hdr.next_hdr;
-        meta.ip_dscp_id = ipv6_hdr.dscp();
-        meta.ip_ecn_id = ipv6_hdr.ecn();
-        meta.ip_ttl = ipv6_hdr.hop_limit;
-        meta.ip_flow_label = ipv6_hdr.flow_label();
+        let vcf: Vcf = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        meta.ip_dscp_id = ipv6::dscp(vcf);
+        meta.ip_ecn_id = ipv6::ecn(vcf);
+        meta.ip_flow_label = ipv6::flow_label(vcf);
+        self.offset += 6; // 2 bytes version/dscp/ecn, 2 bytes flow label, 2 bytes payload length
 
-        let next_hdr = ipv6_hdr.next_hdr;
-        match next_hdr {
+        meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += 1;
+
+        meta.ip_ttl = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += 1;
+
+        meta.src_ipv6_addr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += 16;
+
+        meta.dst_ipv6_addr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += 16;
+
+        meta.l3_octet_count = self.calc_l3_octet_count(ctx.len());
+
+        self.next_hdr = match meta.proto {
             IpProto::Tcp
             | IpProto::Udp
             | IpProto::Ipv6Icmp
@@ -395,20 +412,12 @@ impl Parser {
             | IpProto::Ipv6Opts
             | IpProto::MobilityHeader
             | IpProto::Hip
-            | IpProto::Shim6 => {
-                self.next_hdr = HeaderType::Proto(next_hdr);
-            }
-            IpProto::Ipv6NoNxt => {
-                self.next_hdr = HeaderType::StopProcessing;
-                return Ok(());
-            }
-            IpProto::Ipv4 => self.next_hdr = HeaderType::Ipv4,
-            IpProto::Ipv6 => self.next_hdr = HeaderType::Ipv6,
-            _ => {
-                self.next_hdr = HeaderType::StopProcessing;
-                return Ok(());
-            }
-        }
+            | IpProto::Shim6 => HeaderType::Proto(meta.proto),
+            IpProto::Ipv6NoNxt => HeaderType::StopProcessing,
+            IpProto::Ipv4 => HeaderType::Ipv4,
+            IpProto::Ipv6 => HeaderType::Ipv6,
+            _ => HeaderType::StopProcessing,
+        };
 
         Ok(())
     }
@@ -465,6 +474,7 @@ impl Parser {
         }
 
         self.next_hdr = HeaderType::Ethernet;
+
         Ok(())
     }
 
@@ -498,6 +508,7 @@ impl Parser {
         // Validate the header can be loaded without storing the large struct
         let _: u8 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += WireGuardInitiation::LEN;
+
         Ok(())
     }
 
@@ -511,6 +522,7 @@ impl Parser {
         // Validate the header can be loaded without storing the large struct
         let _: u8 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += WireGuardResponse::LEN;
+
         Ok(())
     }
 
@@ -524,6 +536,7 @@ impl Parser {
         // Validate the header can be loaded without storing the large struct
         let _: u8 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += WireGuardCookieReply::LEN;
+
         Ok(())
     }
 
@@ -537,6 +550,7 @@ impl Parser {
         // Validate the header can be loaded without storing the large struct
         let _: u8 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += WireGuardTransportData::LEN;
+
         Ok(())
     }
 
@@ -791,13 +805,18 @@ impl Parser {
     /// Parses the Shim6 header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_shim6_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        if self.offset + Shim6Hdr::LEN > ctx.len() as usize {
+        if self.offset + 2 > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
-        let shim_hdr: Shim6Hdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += shim_hdr.total_hdr_len();
-        self.next_hdr = HeaderType::Proto(shim_hdr.next_hdr);
+        let next_hdr: IpProto = ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
+        let hdr_ext_len: u8 = ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
+        let total_hdr_len = shim6::calc_total_hdr_len(hdr_ext_len);
+        if self.offset + total_hdr_len > ctx.len() as usize {
+            return Err(Error::OutOfBounds);
+        }
+        self.offset += total_hdr_len;
+        self.next_hdr = HeaderType::Proto(next_hdr);
 
         Ok(())
     }

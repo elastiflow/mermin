@@ -115,14 +115,6 @@ if [ ${#LARGEST_OFFSETS[@]} -ge 3 ]; then
 fi
 
 echo ""
-echo "Your specific 544-byte case:"
-echo "  Entry function: 144 bytes (0x90)"
-echo "  Middle function: 328 bytes (0x148)"
-echo "  Leaf function: 0 bytes"  
-echo "  Overhead: 72 bytes (call overhead/padding)"
-echo "  Total: 144 + 328 + 0 + 72 = 544 bytes > 512 limit ❌"
-
-echo ""
 echo "💡 Key Insights:"
 echo "  • The verifier calculates MAXIMUM possible call depth"
 echo "  • Each function's stack usage adds cumulatively"

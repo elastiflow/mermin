@@ -1,11 +1,5 @@
-use core::mem;
-
-/// IP headers, which are present after the Ethernet header.
-pub enum IpHdr {
-    V4(Ipv4Hdr),
-    V6(Ipv6Hdr),
-}
-
+/// ## IP Headers
+///
 /// IPv4 header, which is present after the Ethernet header.
 ///  0                   1                   2                   3
 ///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -23,141 +17,7 @@ pub enum IpHdr {
 /// |                          ip_options                           |
 /// /                              ...                              /
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct Ipv4Hdr {
-    pub vihl: u8,
-    pub tos: u8,
-    pub tot_len: [u8; 2],
-    pub id: [u8; 2],
-    pub frags: [u8; 2],
-    pub ttl: u8,
-    pub proto: IpProto,
-    pub check: [u8; 2],
-    pub src_addr: [u8; 4],
-    pub dst_addr: [u8; 4],
-}
-
-impl Ipv4Hdr {
-    pub const LEN: usize = mem::size_of::<Ipv4Hdr>();
-
-    /// Returns the IP version field (should be 4).
-    #[inline]
-    pub fn version(&self) -> u8 {
-        (self.vihl >> 4) & 0xF
-    }
-
-    /// Returns the IP header length in bytes.
-    #[inline]
-    pub fn ihl(&self) -> u8 {
-        (self.vihl & 0xF) << 2
-    }
-
-    /// Sets both the version and IHL fields.
-    #[inline]
-    pub fn set_vihl(&mut self, version: u8, ihl_in_bytes: u8) {
-        let ihl_in_words = ihl_in_bytes / 4;
-        self.vihl = ((version & 0xF) << 4) | (ihl_in_words & 0xF);
-    }
-
-    /// Returns the DSCP (Differentiated Services Code Point) field.
-    #[inline]
-    pub fn dscp(&self) -> u8 {
-        (self.tos >> 2) & 0x3F
-    }
-
-    /// Returns the ECN (Explicit Congestion Notification) field.
-    #[inline]
-    pub fn ecn(&self) -> u8 {
-        self.tos & 0x3
-    }
-
-    /// Sets the TOS field with separate DSCP and ECN values.
-    #[inline]
-    pub fn set_tos(&mut self, dscp: u8, ecn: u8) {
-        self.tos = ((dscp & 0x3F) << 2) | (ecn & 0x3);
-    }
-
-    /// Returns the total length of the IP packet.
-    #[inline]
-    pub fn tot_len(&self) -> u16 {
-        u16::from_be_bytes(self.tot_len)
-    }
-
-    /// Sets the total length of the IP packet.
-    #[inline]
-    pub fn set_tot_len(&mut self, len: u16) {
-        self.tot_len = len.to_be_bytes();
-    }
-
-    /// Returns the identification field.
-    #[inline]
-    pub fn id(&self) -> u16 {
-        u16::from_be_bytes(self.id)
-    }
-
-    /// Sets the identification field.
-    #[inline]
-    pub fn set_id(&mut self, id: u16) {
-        self.id = id.to_be_bytes();
-    }
-
-    /// Returns the fragmentation flags (3 bits).
-    #[inline]
-    pub fn frag_flags(&self) -> u8 {
-        (u16::from_be_bytes(self.frags) >> 13) as u8
-    }
-
-    /// Returns the fragmentation offset (13 bits).
-    #[inline]
-    pub fn frag_offset(&self) -> u16 {
-        u16::from_be_bytes(self.frags) & 0x1FFF
-    }
-
-    /// Sets both the fragmentation flags and offset.
-    #[inline]
-    pub fn set_frags(&mut self, flags: u8, offset: u16) {
-        let value = ((flags as u16 & 0x7) << 13) | (offset & 0x1FFF);
-        self.frags = value.to_be_bytes();
-    }
-
-    /// Returns the checksum field.
-    #[inline]
-    pub fn checksum(&self) -> u16 {
-        u16::from_be_bytes(self.check)
-    }
-
-    /// Sets the checksum field.
-    #[inline]
-    pub fn set_checksum(&mut self, checksum: u16) {
-        self.check = checksum.to_be_bytes();
-    }
-
-    /// Returns the source address field.
-    #[inline]
-    pub fn src_addr(&self) -> core::net::Ipv4Addr {
-        core::net::Ipv4Addr::from(self.src_addr)
-    }
-
-    /// Returns the destination address field.
-    #[inline]
-    pub fn dst_addr(&self) -> core::net::Ipv4Addr {
-        core::net::Ipv4Addr::from(self.dst_addr)
-    }
-
-    /// Sets the source address field.
-    #[inline]
-    pub fn set_src_addr(&mut self, src: core::net::Ipv4Addr) {
-        self.src_addr = src.octets();
-    }
-
-    /// Sets the destination address field.
-    #[inline]
-    pub fn set_dst_addr(&mut self, dst: core::net::Ipv4Addr) {
-        self.dst_addr = dst.octets();
-    }
-}
-
+///
 /// IPv6 header, which is present after the Ethernet header.
 ///   0                   1                   2                   3
 ///   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -182,118 +42,144 @@ impl Ipv4Hdr {
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///  |                  destination_ipaddr (con't)                   |
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct Ipv6Hdr {
-    /// First 4 bytes containing Version (4 bits), Traffic Class (8 bits), and Flow Label (20 bits)
-    pub vcf: [u8; 4],
-    /// Payload length (excluding the IPv6 header)
-    pub payload_len: [u8; 2],
-    /// Next header protocol
-    pub next_hdr: IpProto,
-    /// Hop limit (similar to TTL in IPv4)
-    pub hop_limit: u8,
-    /// Source IPv6 address (16 bytes)
-    pub src_addr: [u8; 16],
-    /// Destination IPv6 address (16 bytes)
-    pub dst_addr: [u8; 16],
+
+/// IP headers, which are present after the Ethernet header.
+pub enum IpHdr {
+    V4,
+    V6,
 }
 
-impl Ipv6Hdr {
-    pub const LEN: usize = mem::size_of::<Ipv6Hdr>();
+pub mod ipv4 {
+    /// The length of the IPv4 header.
+    pub const IPV4_LEN: usize = 16;
 
-    /// Returns the IP version field (should be 6).
+    pub type Vihl = u8;
+    pub type DscpEcn = u8;
+    pub type TotalLen = [u8; 2];
+    pub type Identification = [u8; 2];
+    pub type Fragment = [u8; 2];
+    pub type Ttl = u8;
+    pub type Checksum = [u8; 2];
+    pub type SrcAddr = [u8; 4];
+    pub type DstAddr = [u8; 4];
+
+    /// Returns the IP version field (should be 4).
     #[inline]
-    pub fn version(&self) -> u8 {
-        (self.vcf[0] >> 4) & 0xF
+    pub fn version(vihl: Vihl) -> u8 {
+        (vihl >> 4) & 0xF
     }
 
-    /// Sets the version field.
+    /// Returns the IP header length in bytes.
     #[inline]
-    pub fn set_version(&mut self, version: u8) {
-        self.vcf[0] = (self.vcf[0] & 0x0F) | ((version & 0xF) << 4);
+    pub fn ihl(vihl: Vihl) -> u8 {
+        (vihl & 0xF) << 2
     }
 
     /// Returns the DSCP (Differentiated Services Code Point) field.
     #[inline]
-    pub fn dscp(&self) -> u8 {
-        ((self.vcf[0] & 0x0F) << 2) | ((self.vcf[1] >> 6) & 0x03)
+    pub fn dscp(dscp_ecn: DscpEcn) -> u8 {
+        (dscp_ecn >> 2) & 0x3F
     }
 
     /// Returns the ECN (Explicit Congestion Notification) field.
     #[inline]
-    pub fn ecn(&self) -> u8 {
-        (self.vcf[1] >> 4) & 0x03
+    pub fn ecn(dscp_ecn: DscpEcn) -> u8 {
+        dscp_ecn & 0x3
     }
 
-    /// Returns the flow label field (20 bits).
+    /// Returns the total length of the IP packet.
     #[inline]
-    pub fn flow_label(&self) -> u32 {
-        ((self.vcf[1] as u32 & 0x0F) << 16) | ((self.vcf[2] as u32) << 8) | (self.vcf[3] as u32)
+    pub fn tot_len(total_len: TotalLen) -> u16 {
+        u16::from_be_bytes(total_len)
     }
 
-    /// Sets the DSCP and ECN fields.
+    /// Returns the identification field.
     #[inline]
-    pub fn set_dscp_ecn(&mut self, dscp: u8, ecn: u8) {
-        // Set the lower 4 bits of the first byte (upper 4 bits of DSCP)
-        self.vcf[0] = (self.vcf[0] & 0xF0) | ((dscp >> 2) & 0x0F);
-
-        // Set the upper 2 bits of the second byte (lower 2 bits of DSCP) and the next 2 bits (ECN)
-        self.vcf[1] = (self.vcf[1] & 0x0F) | (((dscp & 0x03) << 6) | ((ecn & 0x03) << 4));
+    pub fn id(identification: Identification) -> u16 {
+        u16::from_be_bytes(identification)
     }
 
-    /// Sets the flow label field (20 bits).
+    /// Returns the fragmentation flags (3 bits).
     #[inline]
-    pub fn set_flow_label(&mut self, flow_label: u32) {
-        self.vcf[1] = (self.vcf[1] & 0xF0) | ((flow_label >> 16) as u8 & 0x0F);
-        self.vcf[2] = ((flow_label >> 8) & 0xFF) as u8;
-        self.vcf[3] = (flow_label & 0xFF) as u8;
+    pub fn frag_flags(fragments: Fragment) -> u8 {
+        (u16::from_be_bytes(fragments) >> 13) as u8
     }
 
-    /// Sets the version, DSCP, ECN, and flow label in one operation.
+    /// Returns the fragmentation offset (13 bits).
     #[inline]
-    pub fn set_vcf(&mut self, version: u8, dscp: u8, ecn: u8, flow_label: u32) {
-        self.vcf[0] = ((version & 0x0F) << 4) | ((dscp >> 2) & 0x0F);
-        self.vcf[1] =
-            ((dscp & 0x03) << 6) | ((ecn & 0x03) << 4) | ((flow_label >> 16) as u8 & 0x0F);
-        self.vcf[2] = ((flow_label >> 8) & 0xFF) as u8;
-        self.vcf[3] = (flow_label & 0xFF) as u8;
+    pub fn frag_offset(fragments: Fragment) -> u16 {
+        u16::from_be_bytes(fragments) & 0x1FFF
     }
 
-    /// Returns the payload length.
+    /// Returns the checksum field.
     #[inline]
-    pub fn payload_len(&self) -> u16 {
-        u16::from_be_bytes(self.payload_len)
-    }
-
-    /// Sets the payload length.
-    #[inline]
-    pub fn set_payload_len(&mut self, len: u16) {
-        self.payload_len = len.to_be_bytes();
+    pub fn checksum(checksum: Checksum) -> u16 {
+        u16::from_be_bytes(checksum)
     }
 
     /// Returns the source address field.
     #[inline]
-    pub fn src_addr(&self) -> core::net::Ipv6Addr {
-        core::net::Ipv6Addr::from(self.src_addr)
+    pub fn src_addr(src_addr: SrcAddr) -> core::net::Ipv4Addr {
+        core::net::Ipv4Addr::from(src_addr)
     }
 
     /// Returns the destination address field.
     #[inline]
-    pub fn dst_addr(&self) -> core::net::Ipv6Addr {
-        core::net::Ipv6Addr::from(self.dst_addr)
+    pub fn dst_addr(dst_addr: DstAddr) -> core::net::Ipv4Addr {
+        core::net::Ipv4Addr::from(dst_addr)
+    }
+}
+
+pub mod ipv6 {
+    /// The length of the IPv6 header.
+    pub const IPV6_LEN: usize = 40;
+
+    pub type Vcf = [u8; 4];
+    pub type PayloadLen = [u8; 2];
+    pub type HopLimit = u8;
+    pub type SrcAddr = [u8; 16];
+    pub type DstAddr = [u8; 16];
+
+    /// Returns the IP version field (should be 6).
+    #[inline]
+    pub fn version(vcf: Vcf) -> u8 {
+        (vcf[0] >> 4) & 0xF
     }
 
-    /// Sets the source address field.
+    /// Returns the DSCP (Differentiated Services Code Point) field.
     #[inline]
-    pub fn set_src_addr(&mut self, src: core::net::Ipv6Addr) {
-        self.src_addr = src.octets();
+    pub fn dscp(vcf: Vcf) -> u8 {
+        ((vcf[0] & 0x0F) << 2) | ((vcf[1] >> 6) & 0x03)
     }
 
-    /// Sets the destination address field.
+    /// Returns the ECN (Explicit Congestion Notification) field.
     #[inline]
-    pub fn set_dst_addr(&mut self, dst: core::net::Ipv6Addr) {
-        self.dst_addr = dst.octets();
+    pub fn ecn(vcf: Vcf) -> u8 {
+        (vcf[1] >> 4) & 0x03
+    }
+
+    /// Returns the flow label field (20 bits).
+    #[inline]
+    pub fn flow_label(vcf: Vcf) -> u32 {
+        ((vcf[1] as u32 & 0x0F) << 16) | ((vcf[2] as u32) << 8) | (vcf[3] as u32)
+    }
+
+    /// Returns the payload length.
+    #[inline]
+    pub fn payload_len(payload_len: PayloadLen) -> u16 {
+        u16::from_be_bytes(payload_len)
+    }
+
+    /// Returns the source address field.
+    #[inline]
+    pub fn src_addr(src_addr: SrcAddr) -> core::net::Ipv6Addr {
+        core::net::Ipv6Addr::from(src_addr)
+    }
+
+    /// Returns the destination address field.
+    #[inline]
+    pub fn dst_addr(dst_addr: DstAddr) -> core::net::Ipv6Addr {
+        core::net::Ipv6Addr::from(dst_addr)
     }
 }
 

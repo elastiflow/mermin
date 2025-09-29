@@ -1,6 +1,5 @@
-use core::mem;
-
 /// Ethernet header structure that appears at the beginning of every Ethernet frame.
+///
 /// This structure represents the standard IEEE 802.3 Ethernet header format.
 ///  0                   1                   2                   3
 ///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -13,48 +12,15 @@ use core::mem;
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///  |           eth_type            |
 ///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#[repr(C, packed)]
-#[derive(Debug, Copy, Clone)]
-pub struct EthHdr {
-    /// Destination MAC address.
-    pub dst_addr: [u8; 6],
-    /// Source MAC address.
-    pub src_addr: [u8; 6],
-    /// Protocol which is encapsulated in the payload of the frame.
-    /// Indicates what type of data follows the Ethernet header (e.g., IPv4, IPv6, ARP)
-    pub ether_type: u16,
-}
 
-impl EthHdr {
-    pub const LEN: usize = mem::size_of::<EthHdr>();
+/// The length of the Ethernet header.
+pub const ETH_LEN: usize = 14;
 
-    /// Attempts to convert the raw ether_type field into an EtherType enum.
-    /// Returns either the corresponding EtherType variant or the raw value if unknown.
-    ///
-    /// # Returns
-    /// - `Ok(EtherType)` if a known protocol type
-    /// - `Err(u16)` if an unknown protocol type (returns the raw value)
-    pub fn ether_type(&self) -> Result<EtherType, u16> {
-        EtherType::try_from(self.ether_type)
-    }
+/// Destination MAC address.
+pub type DstMacAddr = [u8; 6];
 
-    /// Creates a new Ethernet header with the specified addresses and protocol type
-    ///
-    /// # Parameters
-    /// - `dst_addr`: The destination MAC address
-    /// - `src_addr`: The source MAC address
-    /// - `ether_type_enum`: The protocol type encapsulated in the payload
-    ///
-    /// # Returns
-    /// A new EthHdr structure initialized with the given values
-    pub fn new(dst_addr: [u8; 6], src_addr: [u8; 6], eth_type: EtherType) -> Self {
-        EthHdr {
-            dst_addr,
-            src_addr,
-            ether_type: eth_type.into(),
-        }
-    }
-}
+/// Source MAC address.
+pub type SrcMacAddr = [u8; 6];
 
 /// Protocol which is encapsulated in the payload of the Ethernet frame.
 /// These values represent the standard IEEE assigned protocol numbers
@@ -154,45 +120,10 @@ mod tests {
 
     use super::*;
 
-    // Test constants for MAC addresses
-    const TEST_DST_MAC: [u8; 6] = [0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
-    const TEST_SRC_MAC: [u8; 6] = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
-
     #[test]
-    fn test_ethhdr_len() {
-        assert_eq!(EthHdr::LEN, 14);
-        assert_eq!(mem::size_of::<EthHdr>(), 14);
-    }
-
-    #[test]
-    fn test_ethhdr_new() {
-        let eth_hdr = EthHdr::new(TEST_DST_MAC, TEST_SRC_MAC, EtherType::Ipv4);
-        assert_eq!(eth_hdr.dst_addr, TEST_DST_MAC);
-        assert_eq!(eth_hdr.src_addr, TEST_SRC_MAC);
-        let ether_type_value = eth_hdr.ether_type;
-        assert_eq!(ether_type_value, EtherType::Ipv4 as u16);
-        assert_eq!(ether_type_value, 0x0800_u16.to_be());
-    }
-
-    #[test]
-    fn test_ethhdr_ether_type_method_known() {
-        let eth_hdr = EthHdr {
-            dst_addr: TEST_DST_MAC,
-            src_addr: TEST_SRC_MAC,
-            ether_type: EtherType::Ipv6 as u16,
-        };
-        assert_eq!(eth_hdr.ether_type().unwrap(), EtherType::Ipv6);
-    }
-
-    #[test]
-    fn test_ethhdr_ether_type_method_unknown() {
-        let unknown_type_val = 0x1234_u16.to_be();
-        let eth_hdr = EthHdr {
-            dst_addr: TEST_DST_MAC,
-            src_addr: TEST_SRC_MAC,
-            ether_type: unknown_type_val,
-        };
-        assert_eq!(eth_hdr.ether_type().unwrap_err(), unknown_type_val);
+    fn test_eth_hdr_len() {
+        assert_eq!(ETH_LEN, 14);
+        assert_eq!(ETH_LEN, 6 + 6 + 2);
     }
 
     #[test]
