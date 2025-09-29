@@ -1,3 +1,28 @@
+## [0.1.0-alpha.2](https://github.com/elastiflow/mermin/compare/v0.1.0-alpha.1...v0.1.0-alpha.2) (2025-09-27)
+
+### Features
+
+* **agent:** Implement Kubernetes Probes ([#94](https://github.com/elastiflow/mermin/issues/94)) ([3804b9f](https://github.com/elastiflow/mermin/commit/3804b9fc5d17bee124dfaf5c69fde4eb28deb93e))
+* **CI:** Add CNI Testing ([#95](https://github.com/elastiflow/mermin/issues/95)) ([297f3f4](https://github.com/elastiflow/mermin/commit/297f3f4e84363da318a54c4818f6737b90d59d15))
+* **ci:** Add PR Title linter ([#105](https://github.com/elastiflow/mermin/issues/105)) ([af69a20](https://github.com/elastiflow/mermin/commit/af69a2028e1178c1383d9f91bff4835ee73555af))
+* **configuration:** implement exporter configs and placeholder authentication ([#110](https://github.com/elastiflow/mermin/issues/110)) ([df8233c](https://github.com/elastiflow/mermin/commit/df8233c2dfc31d5947496e08c4cd68a788ab04bc))
+* **eng-101:** Semconv: Define for Network Traces + Flow Spans ([#115](https://github.com/elastiflow/mermin/issues/115)) ([70cb160](https://github.com/elastiflow/mermin/commit/70cb160e043159c5b2d4648b9d4caa67966ddec2))
+* **flow:** populate flow span attributes with enhanced network protocol support ([#121](https://github.com/elastiflow/mermin/issues/121)) ([c235734](https://github.com/elastiflow/mermin/commit/c235734c906d2c83392199d200f69cad3f21bb74))
+* **mermin-ebpf:** adjust integration tests to utilize percpuarray  ([#106](https://github.com/elastiflow/mermin/issues/106)) ([5245b14](https://github.com/elastiflow/mermin/commit/5245b141b6da1a1f56cf426560b123f0426a3e23))
+* **otlp exporter:** fully connected mermin userspace program ([#96](https://github.com/elastiflow/mermin/issues/96)) ([fc17ff8](https://github.com/elastiflow/mermin/commit/fc17ff8525c36f909c95cfb9f8bea67595160df5))
+* **span-flow:** implements new span flow spec fields ([#118](https://github.com/elastiflow/mermin/issues/118)) ([afb4a88](https://github.com/elastiflow/mermin/commit/afb4a88f01780d06d92a89fec0a179f0c94d64aa))
+* **tc-attach:** attach to ingress and egress for each interface ([#113](https://github.com/elastiflow/mermin/issues/113)) ([0a064a2](https://github.com/elastiflow/mermin/commit/0a064a2385f380b551e3a44716501b308e304640))
+* **tcp flags:** add support for extracting tcp flags from packet meta ([#100](https://github.com/elastiflow/mermin/issues/100)) ([fc68c6d](https://github.com/elastiflow/mermin/commit/fc68c6d78e6313a7602586b637dc89a16f4debe6))
+* **wireguard:** add wireguard support to ebpf parsing ([#101](https://github.com/elastiflow/mermin/issues/101)) ([28b000a](https://github.com/elastiflow/mermin/commit/28b000af9ddc499b0f4bf800e0ab7da54675b63d))
+
+### Bug Fixes
+
+* Address clippy errors about unused code ([#102](https://github.com/elastiflow/mermin/issues/102)) ([890d6a8](https://github.com/elastiflow/mermin/commit/890d6a8cf661bf8e319627527028e611b4bcdea2))
+* **CI:** fix cni test failures from new log output ([#108](https://github.com/elastiflow/mermin/issues/108)) ([9ad6ba8](https://github.com/elastiflow/mermin/commit/9ad6ba836c5561c0874ddc7dbcb61238c231fc36))
+* **ci:** Improve docker build time ([#107](https://github.com/elastiflow/mermin/issues/107)) ([234c191](https://github.com/elastiflow/mermin/commit/234c191769cb117dd5054227fb294cc46a6bdd71)), closes [/github.com/rust-lang/cargo/issues/2644#issuecomment-2335499312](https://github.com/elastiflow//github.com/rust-lang/cargo/issues/2644/issues/issuecomment-2335499312)
+* use the correct namespace when checking network policies ([#120](https://github.com/elastiflow/mermin/issues/120)) ([9d39c9f](https://github.com/elastiflow/mermin/commit/9d39c9f9ca3344e1d4f8efd17e7560fec1a381c6))
+
+
 ## [0.1.0-alpha.1](https://github.com/elastiflow/mermin/compare/v0.0.0...v0.1.0-alpha.1) (2025-09-16)
 
 ### Features
@@ -48,6 +73,3 @@
 * mermin-ebpf test shim ([#90](https://github.com/elastiflow/mermin/issues/90)) ([6db60d7](https://github.com/elastiflow/mermin/commit/6db60d7c19162e610aef37cb8cae15fd5bebfb19))
 * Missing "alpha" branch to trigger release ([f8968da](https://github.com/elastiflow/mermin/commit/f8968da74e02b9ca363babe448d17c8ec813c1b7))
 * Wrong arch in the GHCR ([#82](https://github.com/elastiflow/mermin/issues/82)) ([2466464](https://github.com/elastiflow/mermin/commit/246646445d1c74b1fff6fd55c3132d3537fbbaf9))
-
-
-
