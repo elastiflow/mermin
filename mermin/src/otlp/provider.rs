@@ -1,6 +1,6 @@
 use axum::http::Uri;
 use opentelemetry::{KeyValue, global};
-use opentelemetry_otlp::{Protocol, WithExportConfig, WithTonicConfig};
+use opentelemetry_otlp::{WithExportConfig, WithTonicConfig};
 use opentelemetry_sdk::{
     Resource,
     propagation::TraceContextPropagator,
