@@ -123,7 +123,7 @@ pub async fn init_mermin_provider(
     Ok(provider.build())
 }
 
-pub fn init_internal_tracing(log_level: Level) -> anyhow::Result<()> {
+pub fn init_internal_tracing(log_level: Level) {
     let provider = ProviderBuilder::new().with_stdout_exporter().build();
     let mut fmt_layer = Layer::new();
     match log_level {
@@ -159,5 +159,4 @@ pub fn init_internal_tracing(log_level: Level) -> anyhow::Result<()> {
 
     global::set_tracer_provider(provider);
     global::set_text_map_propagator(TraceContextPropagator::new());
-    Ok(())
 }

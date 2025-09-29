@@ -58,9 +58,9 @@ async fn main() -> Result<()> {
             None
         };
 
-    let exporter: Arc<dyn TraceableExporter> = init_exporter(app_tracer_provider).await?;
+    let exporter: Arc<dyn TraceableExporter> = init_exporter(app_tracer_provider).await;
 
-    init_internal_tracing(config.log_level)?;
+    init_internal_tracing(config.log_level);
 
     let community_id_generator = CommunityIdGenerator::new(0);
     // Bump the memlock rlimit. This is needed for older kernels that don't use the
@@ -298,15 +298,13 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn init_exporter(
-    provider: Option<SdkTracerProvider>,
-) -> Result<Arc<dyn TraceableExporter>, anyhow::Error> {
+async fn init_exporter(provider: Option<SdkTracerProvider>) -> Arc<dyn TraceableExporter> {
     if let Some(sdk_provider) = provider {
         let exporter = TraceExporterAdapter::new(sdk_provider);
-        return Ok(Arc::new(exporter));
+        return Arc::new(exporter);
     }
 
-    Ok(Arc::new(NoOpExporterAdapter::default()))
+    Arc::new(NoOpExporterAdapter::default())
 }
 
 /// Helper function to format IP address based on type

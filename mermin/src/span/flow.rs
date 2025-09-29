@@ -2,7 +2,6 @@ use std::{net::IpAddr, sync::Arc, time::SystemTime};
 
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
-use k8s_openapi::chrono;
 use network_types::{eth::EtherType, ip::IpProto};
 use opentelemetry::{
     KeyValue,
@@ -67,8 +66,8 @@ impl FlowEndReason {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FlowSpan {
-    pub start_time: u64,
-    pub end_time: u64,
+    pub start_time: SystemTime,
+    pub end_time: SystemTime,
     #[serde(serialize_with = "serialize_span_kind")]
     pub span_kind: SpanKind,
     pub attributes: SpanAttributes,
@@ -199,11 +198,11 @@ pub struct SpanAttributes {
 
 impl Traceable for FlowSpan {
     fn start_time(&self) -> SystemTime {
-        chrono::DateTime::from_timestamp_nanos(self.start_time as i64).into()
+        self.start_time
     }
 
     fn end_time(&self) -> SystemTime {
-        chrono::DateTime::from_timestamp_nanos(self.end_time as i64).into()
+        self.end_time
     }
 
     fn name(&self) -> Option<String> {
