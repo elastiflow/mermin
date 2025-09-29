@@ -145,74 +145,51 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> (TcContext, Result<(i32, 
 
     for _ in 0..MAX_HEADER_PARSE_DEPTH {
         let result: Result<(), Error> = match parser.next_hdr {
-            HeaderType::Ethernet => match parser.parse_ethernet_header(&ctx) {
-                Ok(eth_hdr) => {
-                    meta.src_mac_addr = eth_hdr.src_addr;
-                    Ok(())
-                }
-                Err(e) => Err(e),
-            },
-            HeaderType::Ipv4 => match parser.parse_ipv4_header(&ctx) {
-                Ok(ipv4_hdr) => {
+            HeaderType::Ethernet => parser.parse_ethernet_header(&ctx),
+            HeaderType::Ipv4 => {
+                // Handle tunnel logic for IPv4 after parsing
+                let parse_result = parser.parse_ipv4_header(&ctx);
+                if parse_result.is_ok() {
                     // Check if proto is set to IP-in-IP and the tunnel hasn't been set yet
-                    if !found_tunnel
-                        && (ipv4_hdr.proto == IpProto::Ipv4 || ipv4_hdr.proto == IpProto::Ipv6)
+                    // We need to check the current proto value in meta to determine tunnel behavior
+                    if !found_tunnel && (meta.proto == IpProto::Ipv4 || meta.proto == IpProto::Ipv6)
                     {
-                        meta.tunnel_src_ipv4_addr = ipv4_hdr.src_addr;
-                        meta.tunnel_dst_ipv4_addr = ipv4_hdr.dst_addr;
+                        meta.tunnel_src_ipv4_addr = meta.src_ipv4_addr;
+                        meta.tunnel_dst_ipv4_addr = meta.dst_ipv4_addr;
                         meta.tunnel_src_port = meta.src_port;
                         meta.tunnel_dst_port = meta.dst_port;
                         meta.tunnel_ip_addr_type = IpAddrType::Ipv4;
                         meta.tunnel_proto = meta.proto;
                         found_tunnel = true;
-                    } else {
-                        // policy: innermost IP header determines the flow IPs
-                        meta.src_ipv4_addr = ipv4_hdr.src_addr;
-                        meta.dst_ipv4_addr = ipv4_hdr.dst_addr;
-                        meta.l3_octet_count = parser.calc_l3_octet_count(ctx.len());
-                        meta.ip_addr_type = IpAddrType::Ipv4;
-                        meta.proto = ipv4_hdr.proto;
-                        meta.ip_dscp_id = ipv4_hdr.dscp();
-                        meta.ip_ecn_id = ipv4_hdr.ecn();
-                        meta.ip_ttl = ipv4_hdr.ttl;
                     }
-                    Ok(())
                 }
-                Err(e) => Err(e),
-            },
-            HeaderType::Ipv6 => match parser.parse_ipv6_header(&ctx) {
-                Ok(ipv6_hdr) => {
+                parse_result
+            }
+            HeaderType::Ipv6 => {
+                // Handle tunnel logic for IPv6 after parsing
+                let parse_result = parser.parse_ipv6_header(&ctx);
+                if parse_result.is_ok() {
                     // Check if proto is set to IP-in-IP and the tunnel hasn't been set yet
-                    if !found_tunnel
-                        && (ipv6_hdr.next_hdr == IpProto::Ipv6
-                            || ipv6_hdr.next_hdr == IpProto::Ipv4)
+                    let meta: &mut PacketMeta = unsafe { &mut *meta_ptr };
+
+                    if !found_tunnel && (meta.proto == IpProto::Ipv6 || meta.proto == IpProto::Ipv4)
                     {
-                        meta.tunnel_src_ipv6_addr = ipv6_hdr.src_addr;
-                        meta.tunnel_dst_ipv6_addr = ipv6_hdr.dst_addr;
+                        meta.tunnel_src_ipv6_addr = meta.src_ipv6_addr;
+                        meta.tunnel_dst_ipv6_addr = meta.dst_ipv6_addr;
                         meta.tunnel_src_port = meta.src_port;
                         meta.tunnel_dst_port = meta.dst_port;
                         meta.tunnel_ip_addr_type = IpAddrType::Ipv6;
                         meta.tunnel_proto = meta.proto;
                         found_tunnel = true;
-                    } else {
-                        // policy: innermost IP header determines the flow IPs
-                        meta.src_ipv6_addr = ipv6_hdr.src_addr;
-                        meta.dst_ipv6_addr = ipv6_hdr.dst_addr;
-                        meta.l3_octet_count = parser.calc_l3_octet_count(ctx.len());
-                        meta.ip_addr_type = IpAddrType::Ipv6;
-                        meta.proto = ipv6_hdr.next_hdr;
-                        meta.ip_dscp_id = ipv6_hdr.dscp();
-                        meta.ip_ecn_id = ipv6_hdr.ecn();
-                        meta.ip_ttl = ipv6_hdr.hop_limit;
-                        meta.ip_flow_label = ipv6_hdr.flow_label();
                     }
-                    Ok(())
                 }
-                Err(e) => Err(e),
-            },
-            HeaderType::Geneve => match parser.parse_geneve_header(&ctx) {
-                Ok(_) => {
+                parse_result
+            }
+            HeaderType::Geneve => {
+                let parse_result = parser.parse_geneve_header(&ctx);
+                if parse_result.is_ok() {
                     // Reset inner headers to prepare for parsing encapsulated packet
+                    let meta: &mut PacketMeta = unsafe { &mut *meta_ptr };
                     meta.src_mac_addr = [0; 6];
                     meta.src_ipv6_addr = [0; 16];
                     meta.dst_ipv6_addr = [0; 16];
@@ -229,12 +206,12 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> (TcContext, Result<(i32, 
                     meta.icmp_type_id = 0;
                     meta.icmp_code_id = 0;
                     meta.tcp_flags = 0;
-                    Ok(())
                 }
-                Err(e) => Err(e),
-            },
-            HeaderType::Vxlan => match parser.parse_vxlan_header(&ctx) {
-                Ok(_) => {
+                parse_result
+            }
+            HeaderType::Vxlan => {
+                let parse_result = parser.parse_vxlan_header(&ctx);
+                if parse_result.is_ok() {
                     // Reset inner headers to prepare for parsing encapsulated packet
                     meta.src_ipv6_addr = [0; 16];
                     meta.dst_ipv6_addr = [0; 16];
@@ -251,10 +228,9 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> (TcContext, Result<(i32, 
                     meta.icmp_type_id = 0;
                     meta.icmp_code_id = 0;
                     meta.tcp_flags = 0;
-                    Ok(())
                 }
-                Err(e) => Err(e),
-            },
+                parse_result
+            }
             HeaderType::Wireguard => {
                 parser.next_hdr = HeaderType::StopProcessing;
                 // Read the first byte to determine WireGuard message type
@@ -276,79 +252,45 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> (TcContext, Result<(i32, 
                 }
             }
             HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(&ctx),
-            HeaderType::Proto(IpProto::Gre) => match parser.parse_gre_header(&ctx) {
-                Ok(_gre_hdr) => Ok(()),
-                Err(e) => Err(e),
-            },
-            HeaderType::Proto(IpProto::Icmp) => match parser.parse_icmp_header(&ctx) {
-                Ok(icmp_hdr) => {
-                    meta.icmp_type_id = icmp_hdr._type;
-                    meta.icmp_code_id = icmp_hdr.code;
-                    Ok(())
-                }
-                Err(e) => Err(e),
-            },
-            HeaderType::Proto(IpProto::Ipv6Icmp) => match parser.parse_icmp_header(&ctx) {
-                Ok(icmp_hdr) => {
-                    meta.icmp_type_id = icmp_hdr._type;
-                    meta.icmp_code_id = icmp_hdr.code;
-                    Ok(())
-                }
-                Err(e) => Err(e),
-            },
-            HeaderType::Proto(IpProto::Tcp) => match parser.parse_tcp_header(&ctx) {
-                Ok(tcp_hdr) => {
-                    meta.src_port = tcp_hdr.src;
-                    meta.dst_port = tcp_hdr.dst;
-                    meta.tcp_flags = tcp_hdr.off_res_flags[1];
-                    Ok(())
-                }
-                Err(e) => Err(e),
-            },
+            HeaderType::Proto(IpProto::Gre) => parser.parse_gre_header(&ctx),
+            HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx),
+            HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx),
             HeaderType::Proto(IpProto::Udp) => {
-                match parser.parse_udp_header(
+                let parse_result = parser.parse_udp_header(
                     &ctx,
                     options.geneve_port,
                     options.vxlan_port,
                     options.wireguard_port,
-                ) {
-                    Ok(udp_hdr) => {
-                        meta.src_port = udp_hdr.src;
-                        meta.dst_port = udp_hdr.dst;
-
-                        let udp_dst_port = udp_hdr.dst_port();
-                        if !found_tunnel
-                            && (udp_dst_port == options.geneve_port
-                                || udp_dst_port == options.vxlan_port)
-                        {
-                            meta.tunnel_src_ipv6_addr = meta.src_ipv6_addr;
-                            meta.tunnel_dst_ipv6_addr = meta.dst_ipv6_addr;
-                            meta.tunnel_src_ipv4_addr = meta.src_ipv4_addr;
-                            meta.tunnel_dst_ipv4_addr = meta.dst_ipv4_addr;
-                            meta.tunnel_src_port = meta.src_port;
-                            meta.tunnel_dst_port = meta.dst_port;
-                            meta.tunnel_ip_addr_type = meta.ip_addr_type;
-                            meta.tunnel_proto = meta.proto;
-                            found_tunnel = true;
-                        }
-                        Ok(())
+                );
+                if parse_result.is_ok() {
+                    // Handle tunnel logic for UDP after parsing
+                    // Check if this is a tunnel port
+                    let udp_dst_port = u16::from_be_bytes(meta.dst_port);
+                    if !found_tunnel
+                        && (udp_dst_port == options.geneve_port
+                            || udp_dst_port == options.vxlan_port)
+                    {
+                        meta.tunnel_src_ipv6_addr = meta.src_ipv6_addr;
+                        meta.tunnel_dst_ipv6_addr = meta.dst_ipv6_addr;
+                        meta.tunnel_src_ipv4_addr = meta.src_ipv4_addr;
+                        meta.tunnel_dst_ipv4_addr = meta.dst_ipv4_addr;
+                        meta.tunnel_src_port = meta.src_port;
+                        meta.tunnel_dst_port = meta.dst_port;
+                        meta.tunnel_ip_addr_type = meta.ip_addr_type;
+                        meta.tunnel_proto = meta.proto;
+                        found_tunnel = true;
                     }
-                    Err(e) => Err(e),
                 }
+                parse_result
             }
             HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_route_header(&ctx),
             HeaderType::Route(_) => {
                 break;
             }
             HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
-            HeaderType::Proto(IpProto::Esp) => match parser.parse_esp_header(&ctx) {
-                Ok(_esp_hdr) => Ok(()),
-                Err(e) => Err(e),
-            },
-            HeaderType::Proto(IpProto::Ah) => match parser.parse_ah_header(&ctx) {
-                Ok(_ah_hdr) => Ok(()),
-                Err(e) => Err(e),
-            },
+            HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
+            HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
             HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx),
             HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx),
@@ -437,7 +379,7 @@ impl Parser {
 
     /// Parses the next header in the packet and updates the parser state accordingly.
     /// Returns an error if the header is not supported.
-    fn parse_ethernet_header(&mut self, ctx: &TcContext) -> Result<EthHdr, Error> {
+    fn parse_ethernet_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + EthHdr::LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
@@ -445,21 +387,35 @@ impl Parser {
         let eth_hdr: EthHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += EthHdr::LEN;
 
+        // Get PacketMeta from PerCpuArray and populate it
+        #[cfg(not(feature = "test"))]
+        {
+            let meta_ptr = unsafe {
+                #[allow(static_mut_refs)]
+                match PACKET_META.get_ptr_mut(0) {
+                    Some(ptr) => ptr,
+                    None => return Err(Error::OutOfBounds),
+                }
+            };
+            let meta: &mut PacketMeta = unsafe { &mut *meta_ptr };
+            meta.src_mac_addr = eth_hdr.src_addr;
+        }
+
         match eth_hdr.ether_type() {
             Ok(EtherType::Ipv4) => self.next_hdr = HeaderType::Ipv4,
             Ok(EtherType::Ipv6) => self.next_hdr = HeaderType::Ipv6,
             _ => {
                 self.next_hdr = HeaderType::StopProcessing;
-                return Ok(eth_hdr);
+                return Ok(());
             }
         }
 
-        Ok(eth_hdr)
+        Ok(())
     }
 
     /// Parses the IPv4 header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_ipv4_header(&mut self, ctx: &TcContext) -> Result<Ipv4Hdr, Error> {
+    fn parse_ipv4_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + Ipv4Hdr::LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
@@ -470,6 +426,31 @@ impl Parser {
             return Err(Error::MalformedHeader);
         }
         self.offset += h_len;
+
+        // Get PacketMeta from PerCpuArray and populate it
+        #[cfg(not(feature = "test"))]
+        {
+            let meta_ptr = unsafe {
+                #[allow(static_mut_refs)]
+                match PACKET_META.get_ptr_mut(0) {
+                    Some(ptr) => ptr,
+                    None => return Err(Error::OutOfBounds),
+                }
+            };
+            let meta: &mut PacketMeta = unsafe { &mut *meta_ptr };
+
+            // Check if proto is set to IP-in-IP and the tunnel hasn't been set yet
+            // We need to check the current tunnel state, but we'll handle this logic in try_mermin
+            // For now, just populate the basic IPv4 fields
+            meta.src_ipv4_addr = ipv4_hdr.src_addr;
+            meta.dst_ipv4_addr = ipv4_hdr.dst_addr;
+            meta.l3_octet_count = self.calc_l3_octet_count(ctx.len());
+            meta.ip_addr_type = IpAddrType::Ipv4;
+            meta.proto = ipv4_hdr.proto;
+            meta.ip_dscp_id = ipv4_hdr.dscp();
+            meta.ip_ecn_id = ipv4_hdr.ecn();
+            meta.ip_ttl = ipv4_hdr.ttl;
+        }
 
         let next_hdr = ipv4_hdr.proto;
         match next_hdr {
@@ -486,16 +467,16 @@ impl Parser {
             IpProto::Ipv6 => self.next_hdr = HeaderType::Ipv6,
             _ => {
                 self.next_hdr = HeaderType::StopProcessing;
-                return Ok(ipv4_hdr);
+                return Ok(());
             }
         }
 
-        Ok(ipv4_hdr)
+        Ok(())
     }
 
     /// Parses the IPv6 header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_ipv6_header(&mut self, ctx: &TcContext) -> Result<Ipv6Hdr, Error> {
+    fn parse_ipv6_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         // Add this bounds check BEFORE the load
         if self.offset + Ipv6Hdr::LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
@@ -503,6 +484,32 @@ impl Parser {
 
         let ipv6_hdr: Ipv6Hdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += Ipv6Hdr::LEN;
+
+        // Get PacketMeta from PerCpuArray and populate it
+        #[cfg(not(feature = "test"))]
+        {
+            let meta_ptr = unsafe {
+                #[allow(static_mut_refs)]
+                match PACKET_META.get_ptr_mut(0) {
+                    Some(ptr) => ptr,
+                    None => return Err(Error::OutOfBounds),
+                }
+            };
+            let meta: &mut PacketMeta = unsafe { &mut *meta_ptr };
+
+            // Check if proto is set to IP-in-IP and the tunnel hasn't been set yet
+            // We need to check the current tunnel state, but we'll handle this logic in try_mermin
+            // For now, just populate the basic IPv6 fields
+            meta.src_ipv6_addr = ipv6_hdr.src_addr;
+            meta.dst_ipv6_addr = ipv6_hdr.dst_addr;
+            meta.l3_octet_count = self.calc_l3_octet_count(ctx.len());
+            meta.ip_addr_type = IpAddrType::Ipv6;
+            meta.proto = ipv6_hdr.next_hdr;
+            meta.ip_dscp_id = ipv6_hdr.dscp();
+            meta.ip_ecn_id = ipv6_hdr.ecn();
+            meta.ip_ttl = ipv6_hdr.hop_limit;
+            meta.ip_flow_label = ipv6_hdr.flow_label();
+        }
 
         let next_hdr = ipv6_hdr.next_hdr;
         match next_hdr {
@@ -522,22 +529,22 @@ impl Parser {
             }
             IpProto::Ipv6NoNxt => {
                 self.next_hdr = HeaderType::StopProcessing;
-                return Ok(ipv6_hdr);
+                return Ok(());
             }
             IpProto::Ipv4 => self.next_hdr = HeaderType::Ipv4,
             IpProto::Ipv6 => self.next_hdr = HeaderType::Ipv6,
             _ => {
                 self.next_hdr = HeaderType::StopProcessing;
-                return Ok(ipv6_hdr);
+                return Ok(());
             }
         }
 
-        Ok(ipv6_hdr)
+        Ok(())
     }
 
     /// Parses the Geneve header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_geneve_header(&mut self, ctx: &TcContext) -> Result<GeneveHdr, Error> {
+    fn parse_geneve_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + GeneveHdr::LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
@@ -549,7 +556,7 @@ impl Parser {
         let version = geneve_hdr.ver();
         if version != 0 {
             self.next_hdr = HeaderType::StopProcessing;
-            return Ok(geneve_hdr);
+            return Ok(());
         }
 
         let protocol_type = geneve_hdr.protocol_type();
@@ -559,16 +566,16 @@ impl Parser {
             0x86DD => self.next_hdr = HeaderType::Ipv6,
             _ => {
                 self.next_hdr = HeaderType::StopProcessing;
-                return Ok(geneve_hdr);
+                return Ok(());
             }
         }
 
-        Ok(geneve_hdr)
+        Ok(())
     }
 
     /// Parses the VXLAN header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_vxlan_header(&mut self, ctx: &TcContext) -> Result<VxlanHdr, Error> {
+    fn parse_vxlan_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + VxlanHdr::LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
@@ -583,11 +590,11 @@ impl Parser {
 
         if (vni_flag && !has_vni) || (!vni_flag && has_vni) {
             self.next_hdr = HeaderType::StopProcessing;
-            return Ok(vxlan_hdr);
+            return Ok(());
         }
 
         self.next_hdr = HeaderType::Ethernet;
-        Ok(vxlan_hdr)
+        Ok(())
     }
 
     /// Parses a WireGuard Handshake Initiation packet.
@@ -658,7 +665,7 @@ impl Parser {
 
     /// Parses the GRE header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
-    fn parse_gre_header(&mut self, ctx: &TcContext) -> Result<GreHdr, Error> {
+    fn parse_gre_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + GreHdr::LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
@@ -714,17 +721,17 @@ impl Parser {
             Ok(EtherType::Ipv6) => self.next_hdr = HeaderType::Ipv6,
             _ => {
                 self.next_hdr = HeaderType::StopProcessing;
-                return Ok(gre_hdr);
+                return Ok(());
             }
         };
 
-        Ok(gre_hdr)
+        Ok(())
     }
 
     /// Parses the ICMP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
     /// Note: ICMP does not use ports, so src_port and dst_port remain zero.
-    fn parse_icmp_header(&mut self, ctx: &TcContext) -> Result<IcmpHdr, Error> {
+    fn parse_icmp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + IcmpHdr::LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
@@ -733,12 +740,27 @@ impl Parser {
         self.offset += IcmpHdr::LEN;
         self.next_hdr = HeaderType::StopProcessing;
 
-        Ok(icmp_hdr)
+        // Get PacketMeta from PerCpuArray and populate it
+        #[cfg(not(feature = "test"))]
+        {
+            let meta_ptr = unsafe {
+                #[allow(static_mut_refs)]
+                match PACKET_META.get_ptr_mut(0) {
+                    Some(ptr) => ptr,
+                    None => return Err(Error::OutOfBounds),
+                }
+            };
+            let meta: &mut PacketMeta = unsafe { &mut *meta_ptr };
+            meta.icmp_type_id = icmp_hdr._type;
+            meta.icmp_code_id = icmp_hdr.code;
+        }
+
+        Ok(())
     }
 
     /// Parses the TCP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
-    fn parse_tcp_header(&mut self, ctx: &TcContext) -> Result<TcpHdr, Error> {
+    fn parse_tcp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + TcpHdr::LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
@@ -747,7 +769,23 @@ impl Parser {
         self.offset += TcpHdr::LEN;
         self.next_hdr = HeaderType::StopProcessing;
 
-        Ok(tcp_hdr)
+        // Get PacketMeta from PerCpuArray and populate it
+        #[cfg(not(feature = "test"))]
+        {
+            let meta_ptr = unsafe {
+                #[allow(static_mut_refs)]
+                match PACKET_META.get_ptr_mut(0) {
+                    Some(ptr) => ptr,
+                    None => return Err(Error::OutOfBounds),
+                }
+            };
+            let meta: &mut PacketMeta = unsafe { &mut *meta_ptr };
+            meta.src_port = tcp_hdr.src;
+            meta.dst_port = tcp_hdr.dst;
+            meta.tcp_flags = tcp_hdr.off_res_flags[1];
+        }
+
+        Ok(())
     }
 
     /// Parses the UDP header in the packet and updates the parser state accordingly.
@@ -758,13 +796,28 @@ impl Parser {
         geneve_port: u16,
         vxlan_port: u16,
         wireguard_port: u16,
-    ) -> Result<UdpHdr, Error> {
+    ) -> Result<(), Error> {
         if self.offset + UdpHdr::LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
         let udp_hdr: UdpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += UdpHdr::LEN;
+
+        // Get PacketMeta from PerCpuArray and populate it
+        #[cfg(not(feature = "test"))]
+        {
+            let meta_ptr = unsafe {
+                #[allow(static_mut_refs)]
+                match PACKET_META.get_ptr_mut(0) {
+                    Some(ptr) => ptr,
+                    None => return Err(Error::OutOfBounds),
+                }
+            };
+            let meta: &mut PacketMeta = unsafe { &mut *meta_ptr };
+            meta.src_port = udp_hdr.src;
+            meta.dst_port = udp_hdr.dst;
+        }
 
         // IANA has assigned port 6081 as the fixed well-known destination port for Geneve and port 4789 as the fixed well-known destination port for Vxlan.
         // Although the well-known value should be used by default, it is RECOMMENDED that implementations make these configurable.
@@ -779,7 +832,7 @@ impl Parser {
             HeaderType::StopProcessing
         };
 
-        Ok(udp_hdr)
+        Ok(())
     }
 
     /// Parses the IPv6 routing header in the packet and dispatches to the appropriate specific parser.
@@ -811,21 +864,21 @@ impl Parser {
 
     /// Parses the ESP IPv6-extension header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_esp_header(&mut self, ctx: &TcContext) -> Result<Esp, Error> {
+    fn parse_esp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + Esp::LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
-        let esp_hdr: Esp = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        let _esp_hdr: Esp = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += Esp::LEN;
         self.next_hdr = HeaderType::StopProcessing; // ESP signals end of parsing headers because its payload is encrypted
 
-        Ok(esp_hdr)
+        Ok(())
     }
 
     /// Parses the AH IPv6-extension header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_ah_header(&mut self, ctx: &TcContext) -> Result<AuthHdr, Error> {
+    fn parse_ah_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + AuthHdr::LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
@@ -834,7 +887,7 @@ impl Parser {
         self.offset += AuthHdr::total_hdr_len(&ah_hdr);
         self.next_hdr = HeaderType::Proto(ah_hdr.next_hdr);
 
-        Ok(ah_hdr)
+        Ok(())
     }
 
     /// Parses the Destination Options IPv6-extension header and updates the parser state accordingly.
