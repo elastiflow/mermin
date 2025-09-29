@@ -18,8 +18,8 @@ use aya::{
     maps::RingBuf,
     programs::{SchedClassifier, TcAttachType, tc},
 };
+use log::info as log_info;
 use mermin_common::{IpAddrType, PacketMeta};
-use opentelemetry_sdk::trace::SdkTracerProvider;
 use pnet::datalink;
 use tokio::{signal, sync::mpsc};
 use tracing::{debug, error, info, warn};
@@ -29,12 +29,14 @@ use crate::{
     health::{HealthState, start_api_server},
     k8s::resource_parser::attribute_flow_span,
     otlp::{
-        provider::{init_internal_tracing, init_mermin_provider},
+        opts::ExporterOptions,
+        provider::{init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
     },
     runtime::conf::Conf,
     span::producer::FlowSpanProducer,
 };
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // TODO: runtime should be aware of all threads and tasks spawned by the eBPF program so that they can be gracefully shutdown and restarted.
@@ -51,16 +53,32 @@ async fn main() -> Result<()> {
         vec![]
     };
 
-    let app_tracer_provider: Option<SdkTracerProvider> =
-        if let Some(exporter_options) = config.exporter {
-            Some(init_mermin_provider(exporter_options, exporter_refs).await?)
-        } else {
-            None
-        };
-
-    let exporter: Arc<dyn TraceableExporter> = init_exporter(app_tracer_provider).await;
-
-    init_internal_tracing(config.log_level);
+    debug!("initializing exporter");
+    let exporter: Arc<dyn TraceableExporter> = match config.exporter {
+        Some(exporter_options) => {
+            log_info!("using configured exporters");
+            let app_tracer_provider = init_provider(&exporter_options, exporter_refs).await?;
+            init_internal_tracing(
+                &exporter_options,
+                config.traces.exporters,
+                config.log_level,
+                config.traces.span_level,
+            )
+            .await?;
+            Arc::new(TraceExporterAdapter::new(app_tracer_provider))
+        }
+        None => {
+            log_info!("using default Exporters");
+            init_internal_tracing(
+                &ExporterOptions::default(),
+                config.traces.exporters,
+                config.log_level,
+                config.traces.span_level,
+            )
+            .await?;
+            Arc::new(NoOpExporterAdapter::default())
+        }
+    };
 
     let community_id_generator = CommunityIdGenerator::new(0);
     // Bump the memlock rlimit. This is needed for older kernels that don't use the
@@ -188,7 +206,6 @@ async fn main() -> Result<()> {
                 match attribute_flow_span(&flow_span, attributor).await {
                     Ok(attributed_flow_span) => {
                         debug!("k8s attributed flow attributes: {attributed_flow_span:?}");
-
                         if let Err(e) = k8s_attributed_flow_span_tx.send(attributed_flow_span).await
                         {
                             error!(
@@ -296,15 +313,6 @@ async fn main() -> Result<()> {
     println!("exiting");
 
     Ok(())
-}
-
-async fn init_exporter(provider: Option<SdkTracerProvider>) -> Arc<dyn TraceableExporter> {
-    if let Some(sdk_provider) = provider {
-        let exporter = TraceExporterAdapter::new(sdk_provider);
-        return Arc::new(exporter);
-    }
-
-    Arc::new(NoOpExporterAdapter::default())
 }
 
 /// Helper function to format IP address based on type

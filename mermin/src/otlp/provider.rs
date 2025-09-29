@@ -1,5 +1,4 @@
 use axum::http::Uri;
-use tracing::warn;
 use opentelemetry::{KeyValue, global};
 use opentelemetry_otlp::{WithExportConfig, WithTonicConfig};
 use opentelemetry_sdk::{
@@ -9,14 +8,16 @@ use opentelemetry_sdk::{
     trace::{SdkTracerProvider, span_processor_with_async_runtime::BatchSpanProcessor},
 };
 use tonic::transport::{Channel, channel::ClientTlsConfig};
-use tracing::{Level, error, info, level_filters::LevelFilter};
+use tracing::{Level, error, info, level_filters::LevelFilter, warn};
 use tracing_subscriber::{
-    fmt::Layer, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt,
+    fmt::{Layer, format::FmtSpan},
+    prelude::__tracing_subscriber_SubscriberExt,
+    util::SubscriberInitExt,
 };
 
 use crate::{
     otlp::opts::{ExporterOptions, OtlpExporterOptions, resolve_exporters},
-    runtime::conf::ExporterReferences,
+    runtime::{conf::ExporterReferences, enums::SpanFmt},
 };
 
 pub struct ProviderBuilder {
@@ -102,8 +103,8 @@ impl ProviderBuilder {
     }
 }
 
-pub async fn init_mermin_provider(
-    exporter_options: ExporterOptions,
+pub async fn init_provider(
+    exporter_options: &ExporterOptions,
     exporter_refs: ExporterReferences,
 ) -> Result<SdkTracerProvider, anyhow::Error> {
     let mut provider = ProviderBuilder::new();
@@ -125,9 +126,15 @@ pub async fn init_mermin_provider(
     Ok(provider.build())
 }
 
-pub fn init_internal_tracing(log_level: Level) {
-    let provider = ProviderBuilder::new().with_stdout_exporter().build();
-    let mut fmt_layer = Layer::new();
+pub async fn init_internal_tracing(
+    exporter_options: &ExporterOptions,
+    exporter_refs: ExporterReferences,
+    log_level: Level,
+    span_fmt: SpanFmt,
+) -> Result<(), anyhow::Error> {
+    let provider = init_provider(exporter_options, exporter_refs).await?;
+    let mut fmt_layer = Layer::new().with_span_events(FmtSpan::from(span_fmt));
+
     match log_level {
         Level::DEBUG => fmt_layer = fmt_layer.with_file(true).with_line_number(true),
         Level::TRACE => {
@@ -161,4 +168,5 @@ pub fn init_internal_tracing(log_level: Level) {
 
     global::set_tracer_provider(provider);
     global::set_text_map_propagator(TraceContextPropagator::new());
+    Ok(())
 }

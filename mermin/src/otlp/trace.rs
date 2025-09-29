@@ -17,10 +17,44 @@ impl TraceExporterAdapter {
 
 pub type TraceableRecord = Arc<dyn Traceable + Send + Sync + 'static>;
 
+/// Defines a common interface for data structures that can be represented as an
+/// OpenTelemetry trace span.
 pub trait Traceable {
+    /// Returns the logical start time of the event represented by this record.
+    ///
+    /// This timestamp will be used as the `start_time_unix_nano` for the
+    /// resulting OpenTelemetry `Span`.
     fn start_time(&self) -> SystemTime;
+
+    /// Returns the logical end time of the event represented by this record.
+    ///
+    /// This timestamp will be used as the `end_time_unix_nano` for the
+    /// resulting OpenTelemetry `Span`.
     fn end_time(&self) -> SystemTime;
+
+    /// Returns a specific name for the span, if applicable.
+    ///
+    /// If `Some(String)` is returned, it will be used as the `Span` name. If `None` is
+    /// returned, the exporter is expected to use a default or generic name.
     fn name(&self) -> Option<String>;
+
+    /// Populates a pre-configured `Span` with the record's specific attributes.
+    ///
+    /// This is the core method where the implementing type is responsible for mapping
+    /// its internal fields to the key-value attributes of an OpenTelemetry `Span`.
+    ///
+    /// # Arguments
+    /// * `span` - An `opentelemetry_sdk::trace::Span` instance that has already been
+    ///   configured with its start time, end time, and name based on the other
+    ///   methods in this trait.
+    ///
+    /// # Returns
+    /// The same `Span` instance, now enriched with the record's specific attributes.
+    ///
+    /// # Important
+    /// For performance reasons within the export pipeline, this method is designed to
+    /// be called **only once** per record. The implementation should be efficient and
+    /// perform all necessary attribute-setting within this single call.
     fn record(&self, span: opentelemetry_sdk::trace::Span) -> opentelemetry_sdk::trace::Span;
 }
 
