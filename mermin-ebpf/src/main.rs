@@ -169,9 +169,6 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> (TcContext, Result<(i32, 
                 // Handle tunnel logic for IPv6 after parsing
                 let parse_result = parser.parse_ipv6_header(&ctx);
                 if parse_result.is_ok() {
-                    // Check if proto is set to IP-in-IP and the tunnel hasn't been set yet
-                    let meta: &mut PacketMeta = unsafe { &mut *meta_ptr };
-
                     if !found_tunnel && (meta.proto == IpProto::Ipv6 || meta.proto == IpProto::Ipv4)
                     {
                         meta.tunnel_src_ipv6_addr = meta.src_ipv6_addr;
@@ -188,8 +185,6 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> (TcContext, Result<(i32, 
             HeaderType::Geneve => {
                 let parse_result = parser.parse_geneve_header(&ctx);
                 if parse_result.is_ok() {
-                    // Reset inner headers to prepare for parsing encapsulated packet
-                    let meta: &mut PacketMeta = unsafe { &mut *meta_ptr };
                     meta.src_mac_addr = [0; 6];
                     meta.src_ipv6_addr = [0; 16];
                     meta.dst_ipv6_addr = [0; 16];
@@ -736,7 +731,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let icmp_hdr: IcmpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        let _icmp_hdr: IcmpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += IcmpHdr::LEN;
         self.next_hdr = HeaderType::StopProcessing;
 
@@ -751,8 +746,8 @@ impl Parser {
                 }
             };
             let meta: &mut PacketMeta = unsafe { &mut *meta_ptr };
-            meta.icmp_type_id = icmp_hdr._type;
-            meta.icmp_code_id = icmp_hdr.code;
+            meta.icmp_type_id = _icmp_hdr._type;
+            meta.icmp_code_id = _icmp_hdr.code;
         }
 
         Ok(())
@@ -765,7 +760,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let tcp_hdr: TcpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        let _tcp_hdr: TcpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.offset += TcpHdr::LEN;
         self.next_hdr = HeaderType::StopProcessing;
 
@@ -780,9 +775,9 @@ impl Parser {
                 }
             };
             let meta: &mut PacketMeta = unsafe { &mut *meta_ptr };
-            meta.src_port = tcp_hdr.src;
-            meta.dst_port = tcp_hdr.dst;
-            meta.tcp_flags = tcp_hdr.off_res_flags[1];
+            meta.src_port = _tcp_hdr.src;
+            meta.dst_port = _tcp_hdr.dst;
+            meta.tcp_flags = _tcp_hdr.off_res_flags[1];
         }
 
         Ok(())
