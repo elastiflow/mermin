@@ -115,21 +115,29 @@ config:
   metrics:
     listen_address: "0.0.0.0"
 
+  # Pipeline configuration
+  packet_channel_capacity: 1024
+  packet_worker_count: 2
+  shutdown_timeout: 5s
+
   # Span/Flow configuration
   span:
     max_batch_size: 64
-    max_batch_interval: "5s"
-    max_record_interval: "60s"
-    generic_timeout: "30s"
-    icmp_timeout: "10s"
-    tcp_timeout: "20s"
-    tcp_fin_timeout: "5s"
-    tcp_rst_timeout: "5s"
-    udp_timeout: "60s"
+    max_batch_interval: 5s
+    max_record_interval: 60s
+    generic_timeout: 30s
+    icmp_timeout: 10s
+    tcp_timeout: 20s
+    tcp_fin_timeout: 5s
+    tcp_rst_timeout: 5s
+    udp_timeout: 60s
 
   # Exporter configuration
   exporter:
-    stdout_enabled: false
+    # Enable stdout exporter for local development and testing
+    stdout_enabled: true
+
+    # OTLP exporter configuration (disabled by default)
     otlp_enabled: false
     otlp_endpoint: "http://host.docker.internal:4317"
     otlp_timeout_seconds: 3
