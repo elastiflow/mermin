@@ -97,7 +97,7 @@ command sequence:
 
 ```shell
 # 1. Create the kind cluster
-kind create cluster --config local/kind-config.yaml
+kind create cluster --config examples/local/kind-config.yaml
 
 # 2. Build the mermin image and load it into the cluster
 docker build -t mermin:latest --target runner-debug .
@@ -107,7 +107,7 @@ kind load docker-image -n atlantis mermin:latest
 helm uninstall mermin
 
 # 3b. Deploy mermin using Helm
-helm upgrade -i mermin charts/mermin --values local/values.yaml
+helm upgrade -i mermin charts/mermin --values examples/local/values.yaml
 ```
 
 > **Note**: The repository includes a `Makefile` with convenience targets (`make k8s-get`, `make k8s-diff`) for some of
