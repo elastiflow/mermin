@@ -28,12 +28,12 @@ echo ""
 
 # Analyze function calls
 echo "📞 Function Calls Found:"
-FUNCTION_CALLS=$(docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump-20 -d --section=classifier ${EBPF_BINARY} | grep -E 'call.*0x[0-9a-f]+' | grep -v 'call -0x'")
+FUNCTION_CALLS=$(docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump-20 -d --section=.text ${EBPF_BINARY} | grep -E 'call.*0x[0-9a-fA-F]+' | grep -v 'call -0x'")
 
 if [ -z "$FUNCTION_CALLS" ]; then
     echo "  ✅ No user function calls found (only eBPF helpers)"
     echo "  📋 eBPF helper calls found:"
-    docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump-20 -d --section=classifier ${EBPF_BINARY} | grep -E 'call.*-0x'" | head -3
+    docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump-20 -d --section=.text ${EBPF_BINARY} | grep -E 'call.*-0x'" | head -3
 else
     echo "$FUNCTION_CALLS" | head -5
     if [ $(echo "$FUNCTION_CALLS" | wc -l) -gt 5 ]; then
@@ -45,7 +45,7 @@ echo ""
 
 # Analyze stack usage
 echo "📊 Stack Usage Analysis:"
-STACK_OFFSETS=$(docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump-20 -d --section=classifier ${EBPF_BINARY} | grep -oE 'r10.*-.*0x[0-9a-f]+' | sed 's/.*-.*0x//' | sort -nr | uniq")
+STACK_OFFSETS=$(docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump-20 -d --section=.text ${EBPF_BINARY} | grep -oE 'r10.*-.*0x[0-9a-fA-F]+' | sed 's/.*-.*0x//' | sort -nr | uniq")
 
 if [ -z "$STACK_OFFSETS" ]; then
     echo "  🎉 NO STACK USAGE FOUND!"

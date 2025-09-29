@@ -293,6 +293,17 @@ impl TcpHdr {
         (self.data_offset() as usize) * 4
     }
 
+    /// Returns the TCP flags.
+    ///
+    /// This method returns the TCP flags from the second byte of the off_res_flags field.
+    ///
+    /// # Returns
+    /// The TCP flags as a u8 value.
+    #[inline]
+    pub fn tcp_flags(&self) -> u8 {
+        self.off_res_flags[1]
+    }
+
     /// Private helper method to get a flag bit from the second byte of `off_res_flags`.
     #[inline]
     fn get_flag(&self, mask: u8) -> bool {

@@ -22,8 +22,8 @@ fi
 # Show what we're analyzing for transparency
 echo "📍 Analyzing: $EBPF_BINARY"
 
-# Get the maximum stack usage
-MAX_STACK=$(docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump-20 -d --section=classifier ${EBPF_BINARY} | grep -oE 'r10.*-.*0x[0-9a-f]+' | sed 's/.*-.*0x//' | sort -nr | head -1")
+# Get the maximum stack usage from .text section where the actual program logic is
+MAX_STACK=$(docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump-20 -d --section=.text ${EBPF_BINARY} | grep -oE 'r10.*-.*0x[0-9a-fA-F]+' | sed 's/.*-.*0x//' | sort -nr | head -1")
 
 if [ ! -z "$MAX_STACK" ]; then
     DECIMAL_STACK=$((0x${MAX_STACK}))
