@@ -219,7 +219,6 @@ impl Traceable for FlowSpan {
             "flow.community_id",
             self.attributes.flow_community_id.to_string(),
         ));
-        kvs.push(KeyValue::new("flow.connection_state", ""));
         kvs.push(KeyValue::new(
             "network.source.address",
             self.attributes.source_address.to_string(),
@@ -244,21 +243,6 @@ impl Traceable for FlowSpan {
             "network.type",
             self.attributes.network_type.to_owned().as_str(),
         ));
-        kvs.push(KeyValue::new("network.interface.index", ""));
-        kvs.push(KeyValue::new("network.interface.name", ""));
-        kvs.push(KeyValue::new("network.interface.mac", ""));
-        kvs.push(KeyValue::new("flow.ip.dscp.id", ""));
-        kvs.push(KeyValue::new("flow.ip.dscp.name", ""));
-        kvs.push(KeyValue::new("flow.ip.ecn.id", ""));
-        kvs.push(KeyValue::new("flow.ip.ecn.name", ""));
-        kvs.push(KeyValue::new("flow.ip.ttl", ""));
-        kvs.push(KeyValue::new("flow.ip.flow_label", ""));
-        kvs.push(KeyValue::new("flow.icmp.type.id", ""));
-        kvs.push(KeyValue::new("flow.icmp.type.name", ""));
-        kvs.push(KeyValue::new("flow.icmp.code.id", ""));
-        kvs.push(KeyValue::new("flow.icmp.code.name", ""));
-        kvs.push(KeyValue::new("flow.tcp.flags.bits", ""));
-        kvs.push(KeyValue::new("flow.tcp.flags.tags", ""));
         kvs.push(KeyValue::new(
             "flow.bytes.delta",
             self.attributes.flow_bytes_delta,
@@ -291,76 +275,6 @@ impl Traceable for FlowSpan {
             "flow.reverse.packets.total",
             self.attributes.flow_reverse_packets_total,
         ));
-        kvs.push(KeyValue::new("flow.tcp.handshake.snd.latency", ""));
-        kvs.push(KeyValue::new("flow.tcp.handshake.snd.jitter", ""));
-        kvs.push(KeyValue::new("flow.tcp.handshake.cnd.latency", ""));
-        kvs.push(KeyValue::new("flow.tcp.handshake.cnd.jitter", ""));
-        kvs.push(KeyValue::new("flow.tcp.svc.latency", ""));
-        kvs.push(KeyValue::new("flow.tcp.svc.jitter", ""));
-        kvs.push(KeyValue::new("flow.tcp.rndtrip.latency", ""));
-        kvs.push(KeyValue::new("flow.tcp.rndtrip.jitter", ""));
-        kvs.push(KeyValue::new("tunnel.type", ""));
-        kvs.push(KeyValue::new("tunnel.source.address", ""));
-        kvs.push(KeyValue::new("tunnel.source.port", ""));
-        kvs.push(KeyValue::new("tunnel.destination.address", ""));
-        kvs.push(KeyValue::new("tunnel.destination.port", ""));
-        kvs.push(KeyValue::new("tunnel.network.transport", ""));
-        kvs.push(KeyValue::new("tunnel.network.type", ""));
-        kvs.push(KeyValue::new("tunnel.id", ""));
-        kvs.push(KeyValue::new("tunnel.key", ""));
-        kvs.push(KeyValue::new("tunnel.sender_index", ""));
-        kvs.push(KeyValue::new("tunnel.receiver_index", ""));
-        kvs.push(KeyValue::new("tunnel.spi", ""));
-        kvs.push(KeyValue::new("source.k8s.cluster.name", ""));
-        kvs.push(KeyValue::new("source.k8s.cluster.uid", ""));
-        kvs.push(KeyValue::new("source.k8s.node.name", ""));
-        kvs.push(KeyValue::new("source.k8s.node.uid", ""));
-        kvs.push(KeyValue::new("source.k8s.namespace.name", ""));
-        kvs.push(KeyValue::new("source.k8s.pod.name", ""));
-        kvs.push(KeyValue::new("source.k8s.pod.uid", ""));
-        kvs.push(KeyValue::new("source.k8s.container.name", ""));
-        kvs.push(KeyValue::new("source.k8s.deployment.name", ""));
-        kvs.push(KeyValue::new("source.k8s.deployment.uid", ""));
-        kvs.push(KeyValue::new("source.k8s.replicaset.name", ""));
-        kvs.push(KeyValue::new("source.k8s.replicaset.uid", ""));
-        kvs.push(KeyValue::new("source.k8s.statefulset.name", ""));
-        kvs.push(KeyValue::new("source.k8s.statefulset.uid", ""));
-        kvs.push(KeyValue::new("source.k8s.daemonset.name", ""));
-        kvs.push(KeyValue::new("source.k8s.daemonset.uid", ""));
-        kvs.push(KeyValue::new("source.k8s.job.name", ""));
-        kvs.push(KeyValue::new("source.k8s.job.uid", ""));
-        kvs.push(KeyValue::new("source.k8s.cronjob.name", ""));
-        kvs.push(KeyValue::new("source.k8s.cronjob.uid", ""));
-        kvs.push(KeyValue::new("source.k8s.service.name", ""));
-        kvs.push(KeyValue::new("source.k8s.service.uid", ""));
-        kvs.push(KeyValue::new("destination.k8s.cluster.name", ""));
-        kvs.push(KeyValue::new("destination.k8s.cluster.uid", ""));
-        kvs.push(KeyValue::new("destination.k8s.node.name", ""));
-        kvs.push(KeyValue::new("destination.k8s.node.uid", ""));
-        kvs.push(KeyValue::new("destination.k8s.namespace.name", ""));
-        kvs.push(KeyValue::new("destination.k8s.pod.name", ""));
-        kvs.push(KeyValue::new("destination.k8s.pod.uid", ""));
-        kvs.push(KeyValue::new("destination.k8s.container.name", ""));
-        kvs.push(KeyValue::new("destination.k8s.deployment.name", ""));
-        kvs.push(KeyValue::new("destination.k8s.deployment.uid", ""));
-        kvs.push(KeyValue::new("destination.k8s.replicaset.name", ""));
-        kvs.push(KeyValue::new("destination.k8s.replicaset.uid", ""));
-        kvs.push(KeyValue::new("destination.k8s.statefulset.name", ""));
-        kvs.push(KeyValue::new("destination.k8s.statefulset.uid", ""));
-        kvs.push(KeyValue::new("destination.k8s.daemonset.name", ""));
-        kvs.push(KeyValue::new("destination.k8s.daemonset.uid", ""));
-        kvs.push(KeyValue::new("destination.k8s.job.name", ""));
-        kvs.push(KeyValue::new("destination.k8s.job.uid", ""));
-        kvs.push(KeyValue::new("destination.k8s.cronjob.name", ""));
-        kvs.push(KeyValue::new("destination.k8s.cronjob.uid", ""));
-        kvs.push(KeyValue::new("destination.k8s.service.name", ""));
-        kvs.push(KeyValue::new("destination.k8s.service.uid", ""));
-        kvs.push(KeyValue::new("network.policies.ingress", ""));
-        kvs.push(KeyValue::new("network.policies.egress", ""));
-        kvs.push(KeyValue::new("process.executable.name", ""));
-        kvs.push(KeyValue::new("container.image.name", ""));
-        kvs.push(KeyValue::new("container.name", ""));
-
         // Record optional fields only if they have values
         if let Some(ref value) = self.attributes.flow_connection_state {
             kvs.push(KeyValue::new("flow.connection_state", value.as_str()));
@@ -776,7 +690,7 @@ fn serialize_flow_end_reason<S>(
     serializer: S,
 ) -> Result<S::Ok, S::Error>
 where
-    S: serde::Serializer,
+    S: Serializer,
 {
     match reason {
         Some(r) => serializer.serialize_str(r.as_str()),

@@ -1,4 +1,5 @@
 use axum::http::Uri;
+use tracing::warn;
 use opentelemetry::{KeyValue, global};
 use opentelemetry_otlp::{WithExportConfig, WithTonicConfig};
 use opentelemetry_sdk::{
@@ -52,7 +53,7 @@ impl ProviderBuilder {
 
         let mut channel = Channel::builder(uri);
         if let Some(tls) = tls_config {
-            info!("TLS configuration detected for OTLP exporter");
+            info!("tls configuration detected for otlp exporter");
             channel = channel.tls_config(tls)?;
         }
 
@@ -73,7 +74,7 @@ impl ProviderBuilder {
                     // Note: The opentelemetry_otlp crate may need to be updated to support custom headers
                     // For now, this is a placeholder for where header configuration would go
                     info!(
-                        "Headers configured for OTLP exporter ({} headers)",
+                        "headers configured for otlp exporter ({} headers)",
                         auth_headers.len()
                     );
                 }
@@ -107,6 +108,7 @@ pub async fn init_mermin_provider(
 ) -> Result<SdkTracerProvider, anyhow::Error> {
     let mut provider = ProviderBuilder::new();
     if exporter_refs.is_empty() {
+        warn!("no exporters configured");
         return Ok(provider.build());
     }
 

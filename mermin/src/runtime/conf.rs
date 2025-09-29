@@ -69,6 +69,11 @@ pub struct Conf {
     #[serde(with = "level")]
     pub log_level: Level,
 
+    /// Configuration for application tracing options.
+    /// This field holds settings related to tracing, such as span event levels
+    /// and exporter references
+    pub traces: TracingOptions,
+
     /// Configuration for the API server (health endpoints).
     #[serde(default)]
     pub api: ApiConf,
@@ -112,6 +117,26 @@ pub struct Conf {
     pub exporter: Option<ExporterOptions>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct TracingOptions {
+    /// The minimum log level for span events to be recorded
+    span_level: Level,
+
+    /// List of exporter references to use for the main traces pipeline.
+    /// Each entry should match a key in the `exporter` section of the config.
+    exporters: ExporterReferences
+}
+
+impl Default for TracingOptions {
+    fn default() -> Self {
+        Self {
+            span_level: Level::INFO,
+            exporters: ExporterReferences::new(),
+        }
+    }
+}
+
+
 impl Default for Conf {
     fn default() -> Self {
         Self {
@@ -127,6 +152,7 @@ impl Default for Conf {
             span: SpanOptions::default(),
             agent: Some(AgentOptions::default()),
             exporter: None,
+            traces: TracingOptions::default(),
         }
     }
 }
