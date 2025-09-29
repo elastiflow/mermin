@@ -109,11 +109,11 @@ config:
 
   # API server configuration
   api:
-    listenAddress: "0.0.0.0"
+    listen_address: "0.0.0.0"
 
   # Metrics server configuration
   metrics:
-    listenAddress: "0.0.0.0"
+    listen_address: "0.0.0.0"
 
   # Span/Flow configuration
   span:

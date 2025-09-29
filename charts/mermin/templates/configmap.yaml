@@ -22,7 +22,7 @@ data:
     api:
       enabled: true
       {{- with .api }}
-      listen_address: {{ .listenAddress | default "0.0.0.0" | quote }}
+      listen_address: {{ .listen_address | default "0.0.0.0" | quote }}
       {{- end }}
       {{- range $.Values.ports }}
       {{- if eq .name "api" }}
@@ -34,7 +34,7 @@ data:
     metrics:
       enabled: true
       {{- with .metrics }}
-      listen_address: {{ .listenAddress | default "0.0.0.0" | quote }}
+      listen_address: {{ .listen_address | default "0.0.0.0" | quote }}
       {{- end }}
       {{- range $.Values.ports }}
       {{- if eq .name "metrics" }}
