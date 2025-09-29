@@ -687,16 +687,19 @@ The project includes three analysis scripts in the `scripts/` directory:
 - **Purpose**: Fast individual function stack analysis for daily development and CI/CD
 - **Thresholds**: Critical >320 bytes, Warning >192 bytes (64-byte aligned)
 - **Output**: Simple pass/fail with color-coded status
+- **Features**: ✅ Forces fresh builds, detects build failures, prevents stale results
 
 **`scripts/analyze_call_chain.sh`** - Call chain overview (45 seconds)  
 - **Purpose**: Shows function calls and stack usage levels for initial investigation
 - **Output**: Function call instructions and sorted stack usage levels
 - **Use When**: Investigating verifier failures or understanding call patterns
+- **Features**: ✅ Forces fresh builds, shows binary timestamps, handles no-call scenarios
 
 **`scripts/cumulative_stack_calculator.sh`** - Educational deep dive (2 minutes)
 - **Purpose**: Step-by-step educational breakdown of cumulative stack calculation
 - **Output**: Detailed hex-to-decimal conversions, scenarios, and insights
 - **Use When**: Learning how verifier calculates stack, training new developers
+- **Features**: ✅ Forces fresh builds, comprehensive error handling
 
 #### 3. Running the Analysis
 

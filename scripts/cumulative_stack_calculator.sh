@@ -4,7 +4,27 @@
 echo "=== How to Calculate Cumulative Call Chain Stack Usage ==="
 echo ""
 
+# Force a fresh build first
+echo "🔄 Building eBPF program..."
+BUILD_RESULT=$(docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "cargo build --release" 2>&1)
+BUILD_EXIT_CODE=$?
+
+if [ $BUILD_EXIT_CODE -ne 0 ]; then
+    echo "❌ Build failed!"
+    echo "$BUILD_RESULT"
+    exit 1
+fi
+
+# Find the eBPF binary
 EBPF_BINARY=$(docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "find target -name 'mermin' -path '*/mermin-ebpf/*' -path '*/bpfel-unknown-none/release/*' | head -1")
+
+if [ -z "$EBPF_BINARY" ]; then
+    echo "❌ No eBPF binary found!"
+    exit 1
+fi
+
+echo "📍 Analyzing binary: $EBPF_BINARY"
+echo ""
 
 echo "Step 1: Find all unique stack offsets"
 echo "======================================"
