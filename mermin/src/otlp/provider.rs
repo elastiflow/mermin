@@ -8,7 +8,7 @@ use opentelemetry_sdk::{
     trace::{SdkTracerProvider, span_processor_with_async_runtime::BatchSpanProcessor},
 };
 use opentelemetry_stdout::SpanExporter;
-use tonic::transport::{Certificate, Channel, channel::ClientTlsConfig};
+use tonic::transport::{Channel, channel::ClientTlsConfig};
 use tracing::{Level, error, info, level_filters::LevelFilter};
 use tracing_subscriber::{
     fmt::Layer, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt,
@@ -40,20 +40,20 @@ impl ProviderBuilder {
         mut self,
         options: OtlpExporterOptions,
     ) -> Result<Self, anyhow::Error> {
-        let uri: Uri = options.address.parse()?;
-        let mut tls_config: Option<ClientTlsConfig> = None;
-        // TODO: Apply TLS configuration - ENG-120
-        // This should handle TLS settings from config.tls
-        if let Some(tls_config) = &options.tls
+        let uri: Uri = options.build_endpoint().parse()?;
+        let tls_config: Option<ClientTlsConfig> = if let Some(tls_config) = &options.tls
             && tls_config.enabled
         {
-            info!("TLS configuration detected for OTLP exporter");
-            // TODO: Apply TLS settings to the channel - ENG-120
-            // This would involve setting up TLS certificates and keys
-        }
+            // TODO: Apply TLS configuration - ENG-120
+            // This should handle TLS settings from config.tls
+            None
+        } else {
+            None
+        };
 
         let mut channel = Channel::builder(uri);
         if let Some(tls) = tls_config {
+            info!("TLS configuration detected for OTLP exporter");
             channel = channel.tls_config(tls)?;
         }
 
