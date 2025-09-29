@@ -50,13 +50,8 @@ impl TraceableExporter for TraceExporterAdapter {
     }
 }
 
+#[derive(Default)]
 pub struct NoOpExporterAdapter {}
-
-impl Default for NoOpExporterAdapter {
-    fn default() -> Self {
-        Self {}
-    }
-}
 
 #[async_trait]
 impl TraceableExporter for NoOpExporterAdapter {

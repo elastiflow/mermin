@@ -1,13 +1,12 @@
 use axum::http::Uri;
 use opentelemetry::{KeyValue, global};
-use opentelemetry_otlp::{WithExportConfig, WithTonicConfig};
+use opentelemetry_otlp::{Protocol, WithExportConfig, WithTonicConfig};
 use opentelemetry_sdk::{
     Resource,
     propagation::TraceContextPropagator,
     runtime,
     trace::{SdkTracerProvider, span_processor_with_async_runtime::BatchSpanProcessor},
 };
-use opentelemetry_stdout::SpanExporter;
 use tonic::transport::{Channel, channel::ClientTlsConfig};
 use tracing::{Level, error, info, level_filters::LevelFilter};
 use tracing_subscriber::{
@@ -15,7 +14,7 @@ use tracing_subscriber::{
 };
 
 use crate::{
-    otlp::opts::{ExporterOptions, ExporterProtocol, OtlpExporterOptions, resolve_exporters},
+    otlp::opts::{ExporterOptions, OtlpExporterOptions, resolve_exporters},
     runtime::conf::ExporterReferences,
 };
 
@@ -64,7 +63,7 @@ impl ProviderBuilder {
         let builder = opentelemetry_otlp::SpanExporter::builder()
             .with_tonic() // for gRPC
             .with_channel(chan)
-            .with_protocol(ExporterProtocol::from(options.protocol).into());
+            .with_protocol(opentelemetry_otlp::Protocol::from(options.protocol));
 
         if let Some(auth_config) = &options.auth {
             match auth_config.generate_auth_headers() {
@@ -91,15 +90,14 @@ impl ProviderBuilder {
     }
 
     pub fn with_stdout_exporter(mut self) -> Self {
-        let exporter = SpanExporter::default();
+        let exporter = opentelemetry_stdout::SpanExporter::default();
         let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio).build();
         self.sdk_builder = self.sdk_builder.with_span_processor(processor);
         self
     }
 
     pub fn build(self) -> SdkTracerProvider {
-        let provider = self.sdk_builder.build();
-        provider
+        self.sdk_builder.build()
     }
 }
 
