@@ -1,5 +1,4 @@
 use std::{
-    env,
     error::Error,
     fmt,
     net::Ipv4Addr,
@@ -11,7 +10,7 @@ use figment::{
     Figment,
     providers::{Format, Serialized, Yaml},
 };
-use hcl::{self, Value, eval::Context};
+use hcl::{self, eval::Context};
 use serde::{Deserialize, Serialize};
 use tracing::Level;
 
@@ -33,18 +32,7 @@ impl Format for Hcl {
     const NAME: &'static str = "HCL";
 
     fn from_str<T: serde::de::DeserializeOwned>(string: &str) -> Result<T, Self::Error> {
-        let mut context = Context::new();
-
-        let expected_vars = ["PASSWORD"];
-        for var_name in expected_vars {
-            let env_key = format!("HCL_VAR_{var_name}");
-            match env::var(env_key) {
-                Ok(value) => context.declare_var(var_name.to_string(), Value::from(value)),
-                Err(_) => context.declare_var(var_name.to_string(), ""),
-            }
-        }
-
-        hcl::eval::from_str(string, &context)
+        hcl::eval::from_str(string, &Context::new())
     }
 }
 

@@ -57,7 +57,7 @@ exporter "otlp" "main" {
   port    = 4317
 
   auth "basic" {
-    pass = "${PASSWORD}"
+    pass = "PASSWORD"
     user = "USERNAME"
   }
 
