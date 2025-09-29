@@ -1,0 +1,12 @@
+dependencies:
+- name: netobserv
+  repository: file:///Users/mack/Work/ELF/repos/helm-chart-netobserv/charts/netobserv
+  version: 0.6.0
+- name: opensearch
+  repository: https://opensearch-project.github.io/helm-charts/
+  version: 3.2.1
+- name: opensearch-dashboards
+  repository: https://opensearch-project.github.io/helm-charts/
+  version: 3.2.2
+digest: sha256:7c2a7a15b9e0a19374079cc624bd0a2daa60546fb32b815b725230079cbb337b
+generated: "2025-09-29T13:41:31.448473+03:00"

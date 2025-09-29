@@ -143,3 +143,10 @@ config:
     otlp_endpoint: "http://host.docker.internal:4317"
     otlp_timeout_seconds: 3
     otlp_protocol: "grpc"
+
+netobserv:
+  enabled: false
+opensearch:
+  enabled: false
+opensearch-dashboards:
+  enabled: false
