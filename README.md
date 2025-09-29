@@ -657,6 +657,151 @@ This comprehensive approach ensures you can monitor and optimize your integratio
 
 -----
 
+## 📊 Measuring eBPF Stack Usage
+
+eBPF programs have a strict **512-byte stack limit**. When exceeded, you'll see errors like:
+
+```
+Error: the BPF_PROG_LOAD syscall failed. Verifier output: combined stack size of 3 calls is 544. Too large
+```
+
+### 🚨 Critical Concept: Individual vs. Cumulative Stack Usage
+
+**Individual Function Stack**: Maximum stack used by any single function  
+**Cumulative Call Chain Stack**: Total stack across all functions in a call chain
+
+**The verifier failure above shows CUMULATIVE usage**: `144 + 328 + 0 = 544 bytes`
+
+### 📋 Quick Analysis
+
+#### 1. Prerequisites
+```shell
+docker build -t mermin-builder:latest --target builder .
+```
+
+#### 2. Stack Analysis Scripts
+
+The project includes three analysis scripts in the `scripts/` directory:
+
+**`scripts/check_stack_usage.sh`** - Quick health check (30 seconds)
+- **Purpose**: Fast individual function stack analysis for daily development and CI/CD
+- **Thresholds**: Critical >320 bytes, Warning >192 bytes (64-byte aligned)
+- **Output**: Simple pass/fail with color-coded status
+
+**`scripts/analyze_call_chain.sh`** - Call chain overview (45 seconds)  
+- **Purpose**: Shows function calls and stack usage levels for initial investigation
+- **Output**: Function call instructions and sorted stack usage levels
+- **Use When**: Investigating verifier failures or understanding call patterns
+
+**`scripts/cumulative_stack_calculator.sh`** - Educational deep dive (2 minutes)
+- **Purpose**: Step-by-step educational breakdown of cumulative stack calculation
+- **Output**: Detailed hex-to-decimal conversions, scenarios, and insights
+- **Use When**: Learning how verifier calculates stack, training new developers
+
+#### 3. Running the Analysis
+
+```shell
+# Quick health check (30 seconds)
+./scripts/check_stack_usage.sh
+
+# Call chain overview (45 seconds)  
+./scripts/analyze_call_chain.sh
+
+# Detailed educational analysis (2 minutes)
+./scripts/cumulative_stack_calculator.sh
+```
+
+### 🔧 Interpreting Results
+
+#### Understanding `check_stack_usage.sh` Output:
+```bash
+📊 Individual function max stack: 136 bytes (0x88)
+✅ GOOD: Individual stack usage within safe limits
+```
+- **Below 192 bytes**: ✅ Safe for most call chains
+- **192-320 bytes**: ⚠️ Monitor call depth - might exceed 512 in deep chains  
+- **Above 320 bytes**: 🔥 High risk - will likely cause verifier failures
+
+#### Understanding `analyze_call_chain.sh` Output:
+```bash
+📞 Function Calls Found:
+call    0x1         # Function call to address 0x1
+call    0x1a        # Function call to address 0x1a
+
+📊 Stack Usage Levels:
+• 328 bytes (0x148)  # Largest stack usage 
+• 144 bytes (0x90)   # Second largest
+• 136 bytes (0x88)   # Third largest
+```
+**How to interpret:**
+- **Multiple calls**: Shows potential call chain depth
+- **High stack values**: Look for values >192 bytes
+- **Combined risk**: Add largest values to estimate cumulative usage
+
+#### Understanding Verifier Error Messages:
+```
+Error: combined stack size of 3 calls is 544. Too large
+stack depth 144+328+0
+```
+**Translation:**
+- **3 calls**: Call chain is Function A → Function B → Function C  
+- **544 bytes**: Total cumulative stack (144 + 328 + 0 = 472 + ~72 bytes overhead)
+- **144, 328, 0**: Individual stack usage per function in the chain
+
+#### Critical Thresholds (64-byte aligned):
+- **192 bytes**: Warning threshold - monitor for deep call chains
+- **320 bytes**: Critical threshold - high probability of overflow  
+- **512 bytes**: Hard eBPF limit - verifier will reject
+
+
+### 🎯 Quick Fixes
+
+When you see high stack usage:
+
+1. **Split Large Functions**: Break functions >192 bytes into smaller ones
+2. **Eliminate Large Variables**: Avoid big structs on the stack
+3. **Use `#[inline(always)]`**: For small helper functions 
+4. **Check Call Depth**: Minimize function call chains
+
+### 🔍 Advanced Analysis Commands
+
+For deeper investigation:
+
+```shell
+# Find specific stack offset (e.g., 328 bytes = 0x148)
+docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump-20 -d --section=classifier ${EBPF_BINARY} | grep 'r10.*-.*0x148'"
+
+# Show function calls with context
+docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump-20 -d --section=classifier ${EBPF_BINARY} | grep -A 3 -B 3 'call.*0x'"
+
+# Count total function calls
+docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump-20 -d --section=classifier ${EBPF_BINARY} | grep -c 'call.*0x'"
+```
+
+### 🚀 CI/CD Integration
+
+**For CI/CD pipelines, use the quick health check:**
+```yaml
+- name: Check eBPF Stack Usage  
+  run: |
+    docker build -t mermin-builder:latest --target builder .
+    ./scripts/check_stack_usage.sh
+    # Exit with error if stack usage is too high
+    MAX_STACK=$(./scripts/check_stack_usage.sh | grep -oE '[0-9]+ bytes' | grep -oE '[0-9]+' | head -1)
+    if [ "$MAX_STACK" -gt 320 ]; then exit 1; fi
+```
+
+**For debugging failed CI builds, run locally:**
+```bash
+# Get detailed analysis when CI fails
+./scripts/analyze_call_chain.sh
+./scripts/cumulative_stack_calculator.sh
+```
+
+This approach gives you both quick diagnostics and deep analysis capabilities for eBPF stack issues.
+
+-----
+
 ## Artifacts
 
 The image with the `-debug` prefix is built using the `gcr.io/distroless/cc-debian12:debug` base image and provides additional debugging tools compared to the standard image.
