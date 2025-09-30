@@ -18,7 +18,7 @@ use network_types::{
     eth::{ETH_LEN, EtherType},
     fragment::FragmentHdr,
     geneve::{self, GENEVE_LEN},
-    gre::{GreHdr, GreRoutingHeader},
+    gre::{self, GRE_LEN, GRE_ROUTING_LEN},
     hip::{self, HIP_LEN},
     hop::{self, HOP_OPT_LEN},
     icmp::ICMP_LEN,
@@ -144,7 +144,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             HeaderType::Vxlan => parser.parse_vxlan_header(&ctx, meta),
             HeaderType::Wireguard => parser.parse_wireguard_header(&ctx),
             HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(&ctx, meta),
-            // HeaderType::Proto(IpProto::Gre) => parser.parse_gre_header(&ctx),
+            HeaderType::Proto(IpProto::Gre) => parser.parse_gre_header(&ctx),
             HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx, meta),
             HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx, meta),
             HeaderType::Proto(IpProto::Ipv4) => parser.parse_ipv4_header(&ctx, meta),
@@ -567,43 +567,47 @@ impl Parser {
     /// Parses the GRE header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
     fn parse_gre_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        if self.offset + GreHdr::LEN > ctx.len() as usize {
+        if self.offset + GRE_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
-        let gre_hdr: GreHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        let mut total_offset = gre_hdr.total_hdr_len();
+        let flag_res: gre::FlgsRes0Ver = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        let mut total_offset = gre::total_hdr_len(flag_res);
 
         // Handle variable-length routing field if R flag is set
-        if gre_hdr.r_flg() {
-            let routing_start_offset = self.offset + total_offset;
-
+        if gre::r_flag(flag_res) {
             let mut routing_len = 0;
-            let mut current_offset = routing_start_offset;
+            let mut current_offset = self.offset + total_offset;
 
             loop {
-                if current_offset + GreRoutingHeader::LEN > ctx.len() as usize {
+                if current_offset + GRE_ROUTING_LEN > ctx.len() as usize {
                     return Err(Error::OutOfBounds);
                 }
 
-                let sre_header: GreRoutingHeader =
-                    ctx.load(current_offset).map_err(|_| Error::OutOfBounds)?;
+                let (address_family, sre_length) = {
+                    let af: gre::AddressFamily =
+                        ctx.load(current_offset).map_err(|_| Error::OutOfBounds)?;
+                    let sl: gre::SreLength = ctx
+                        .load(current_offset + 3)
+                        .map_err(|_| Error::OutOfBounds)?;
+                    (af, sl)
+                };
 
-                if sre_header.address_family == 0 && sre_header.sre_length == 0 {
-                    routing_len += GreRoutingHeader::LEN;
+                if address_family == 0 && sre_length == 0 {
+                    routing_len += GRE_ROUTING_LEN;
                     break;
                 }
 
-                if sre_header.sre_length < GreRoutingHeader::LEN as u8 {
+                if sre_length < GRE_ROUTING_LEN as u8 {
                     return Err(Error::OutOfBounds);
                 }
 
-                if current_offset + sre_header.sre_length as usize > ctx.len() as usize {
+                if current_offset + sre_length as usize > ctx.len() as usize {
                     return Err(Error::OutOfBounds);
                 }
 
-                routing_len += sre_header.sre_length as usize;
-                current_offset += sre_header.sre_length as usize;
+                routing_len += sre_length as usize;
+                current_offset += sre_length as usize;
 
                 // Prevent infinite loops
                 if routing_len > 1024 {
@@ -616,10 +620,11 @@ impl Parser {
 
         self.offset += total_offset;
 
-        let protocol_type = gre_hdr.protocol();
+        let protocol_type: gre::ProtocolType =
+            ctx.load(self.offset + 3).map_err(|_| Error::OutOfBounds)?;
         match protocol_type {
-            Ok(EtherType::Ipv4) => self.next_hdr = HeaderType::Ipv4,
-            Ok(EtherType::Ipv6) => self.next_hdr = HeaderType::Ipv6,
+            EtherType::Ipv4 => self.next_hdr = HeaderType::Ipv4,
+            EtherType::Ipv6 => self.next_hdr = HeaderType::Ipv6,
             _ => {
                 self.next_hdr = HeaderType::StopProcessing;
                 return Ok(());

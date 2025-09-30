@@ -1,19 +1,111 @@
+//! 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |C|       Reserved0       | Ver |         Protocol Type         |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |      Checksum (optional)      |       Reserved1 (Optional)    |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! Represents a GRE (Generic Routing Encapsulation) header.
+//!
+//! This struct contains the fixed part of the GRE header, which includes
+//! flags, reserved bits, version, and protocol type.
+//!
+//! # Fields
+//! * `flgs_res0_ver`: A 2-byte array containing flags, reserved bits, and version.
+//! * `proto`: A 2-byte array containing the protocol type.
+
 use crate::eth::EtherType;
 
+/// The length of the GRE header base structure.
+pub const GRE_LEN: usize = 4;
+
+/// Combined field: Flags (4 bits), Reserved0 (3 bits), Version (3 bits).
+pub type FlgsRes0Ver = [u8; 2];
+/// Protocol Type field (16 bits).
+pub type ProtocolType = EtherType;
+
+/// The length of the GRE routing header (SRE header).
+pub const GRE_ROUTING_LEN: usize = 4;
+
+/// Address Family field (16 bits) - indicates syntax/semantics of routing info.
+pub type AddressFamily = u16;
+/// SRE Offset field (8 bits) - offset to active entry in routing info.
+pub type SreOffset = u8;
+/// SRE Length field (8 bits) - total length of this SRE in bytes.
+pub type SreLength = u8;
+
+/// Flag masks for GRE header
 pub const C_FLAG_MASK: u8 = 0x80;
 pub const R_FLAG_MASK: u8 = 0x40;
 pub const K_FLAG_MASK: u8 = 0x20;
 pub const S_FLAG_MASK: u8 = 0x10;
 pub const VER_MASK: u8 = 0x07;
 
-/// Represents a GRE (Generic Routing Encapsulation) header.
+/// Returns the Checksum Present flag (C) from the flags field.
+#[inline]
+pub fn c_flag(flgs_res0_ver: FlgsRes0Ver) -> bool {
+    flgs_res0_ver[0] & C_FLAG_MASK != 0
+}
+
+/// Returns the Routing Present flag (R) from the flags field.
+#[inline]
+pub fn r_flag(flgs_res0_ver: FlgsRes0Ver) -> bool {
+    flgs_res0_ver[0] & R_FLAG_MASK != 0
+}
+
+/// Returns the Key Present flag (K) from the flags field.
+#[inline]
+pub fn k_flag(flgs_res0_ver: FlgsRes0Ver) -> bool {
+    flgs_res0_ver[0] & K_FLAG_MASK != 0
+}
+
+/// Returns the Sequence Number Present flag (S) from the flags field.
+#[inline]
+pub fn s_flag(flgs_res0_ver: FlgsRes0Ver) -> bool {
+    flgs_res0_ver[0] & S_FLAG_MASK != 0
+}
+
+/// Returns the GRE version (3 bits) from the flags field.
+#[inline]
+pub fn version(flgs_res0_ver: FlgsRes0Ver) -> u8 {
+    flgs_res0_ver[1] & VER_MASK
+}
+
+/// Calculates the total GRE header length based on flags.
 ///
-/// This struct contains the fixed part of the GRE header, which includes
-/// flags, reserved bits, version, and protocol type.
-///
-/// # Fields
-/// * `flgs_res0_ver`: A 2-byte array containing flags, reserved bits, and version.
-/// * `proto`: A 2-byte array containing the protocol type.
+/// The GRE header has a fixed 4-byte part, plus optional fields:
+/// - Checksum/Offset: 4 bytes (if C or R flag is set)
+/// - Key: 4 bytes (if K flag is set)
+/// - Sequence Number: 4 bytes (if S flag is set)
+#[inline]
+pub fn total_hdr_len(flgs_res0_ver: FlgsRes0Ver) -> usize {
+    let mut len = GRE_LEN; // Fixed 4 bytes
+
+    // If either C or R flag is set, both Checksum and Offset fields are present
+    if c_flag(flgs_res0_ver) || r_flag(flgs_res0_ver) {
+        len += 4; // Checksum/Offset field
+    }
+    if k_flag(flgs_res0_ver) {
+        len += 4; // Key field
+    }
+    if s_flag(flgs_res0_ver) {
+        len += 4; // Sequence Number field
+    }
+
+    len
+}
+
+/// Returns the total length of the SRE including the routing information.
+#[inline]
+pub fn total_sre_len(sre_length: SreLength) -> usize {
+    sre_length as usize
+}
+
+/// Checks if this is a NULL SRE (terminator) based on address family and SRE length.
+#[inline]
+pub fn is_null_sre(address_family: AddressFamily, sre_length: SreLength) -> bool {
+    address_family == 0 && sre_length == 0
+}
+
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone, Default)]
 pub struct GreHdr {
@@ -477,5 +569,191 @@ mod tests {
 
         // Verify structure is simplified (no optional fields in struct)
         assert_eq!(core::mem::size_of::<GreHdr>(), 4); // Only fixed header
+    }
+
+    #[test]
+    fn test_gre_len_constant() {
+        assert_eq!(GRE_LEN, 4);
+    }
+
+    #[test]
+    fn test_public_type_aliases() {
+        // Test FlgsRes0Ver type alias
+        let flgs_res0_ver: FlgsRes0Ver = [0x80, 0x00]; // C flag set
+        assert_eq!(flgs_res0_ver, [0x80, 0x00]);
+
+        // Test ProtocolType type alias
+        let protocol_type: ProtocolType = EtherType::Ipv4 as u16;
+        assert_eq!(protocol_type, EtherType::Ipv4 as u16);
+    }
+
+    #[test]
+    fn test_public_flag_helper_functions() {
+        // Test C flag
+        let flgs_res0_ver: FlgsRes0Ver = [0x80, 0x00]; // C flag set
+        assert_eq!(c_flag(flgs_res0_ver), true);
+
+        let flgs_res0_ver: FlgsRes0Ver = [0x00, 0x00]; // No flags set
+        assert_eq!(c_flag(flgs_res0_ver), false);
+
+        // Test R flag
+        let flgs_res0_ver: FlgsRes0Ver = [0x40, 0x00]; // R flag set
+        assert_eq!(r_flag(flgs_res0_ver), true);
+
+        let flgs_res0_ver: FlgsRes0Ver = [0x00, 0x00]; // No flags set
+        assert_eq!(r_flag(flgs_res0_ver), false);
+
+        // Test K flag
+        let flgs_res0_ver: FlgsRes0Ver = [0x20, 0x00]; // K flag set
+        assert_eq!(k_flag(flgs_res0_ver), true);
+
+        let flgs_res0_ver: FlgsRes0Ver = [0x00, 0x00]; // No flags set
+        assert_eq!(k_flag(flgs_res0_ver), false);
+
+        // Test S flag
+        let flgs_res0_ver: FlgsRes0Ver = [0x10, 0x00]; // S flag set
+        assert_eq!(s_flag(flgs_res0_ver), true);
+
+        let flgs_res0_ver: FlgsRes0Ver = [0x00, 0x00]; // No flags set
+        assert_eq!(s_flag(flgs_res0_ver), false);
+
+        // Test version
+        let flgs_res0_ver: FlgsRes0Ver = [0x00, 0x07]; // Version 7 (max 3-bit value)
+        assert_eq!(version(flgs_res0_ver), 7);
+
+        let flgs_res0_ver: FlgsRes0Ver = [0x00, 0x00]; // Version 0
+        assert_eq!(version(flgs_res0_ver), 0);
+
+        // Test multiple flags
+        let flgs_res0_ver: FlgsRes0Ver = [0xF0, 0x05]; // All flags set, version 5
+        assert_eq!(c_flag(flgs_res0_ver), true);
+        assert_eq!(r_flag(flgs_res0_ver), true);
+        assert_eq!(k_flag(flgs_res0_ver), true);
+        assert_eq!(s_flag(flgs_res0_ver), true);
+        assert_eq!(version(flgs_res0_ver), 5);
+    }
+
+    #[test]
+    fn test_public_total_hdr_len_function() {
+        // Test with no flags set
+        let flgs_res0_ver: FlgsRes0Ver = [0x00, 0x00];
+        assert_eq!(total_hdr_len(flgs_res0_ver), 4);
+
+        // Test with C flag set
+        let flgs_res0_ver: FlgsRes0Ver = [0x80, 0x00];
+        assert_eq!(total_hdr_len(flgs_res0_ver), 8);
+
+        // Test with R flag set
+        let flgs_res0_ver: FlgsRes0Ver = [0x40, 0x00];
+        assert_eq!(total_hdr_len(flgs_res0_ver), 8);
+
+        // Test with K flag set
+        let flgs_res0_ver: FlgsRes0Ver = [0x20, 0x00];
+        assert_eq!(total_hdr_len(flgs_res0_ver), 8);
+
+        // Test with S flag set
+        let flgs_res0_ver: FlgsRes0Ver = [0x10, 0x00];
+        assert_eq!(total_hdr_len(flgs_res0_ver), 8);
+
+        // Test with C and K flags set
+        let flgs_res0_ver: FlgsRes0Ver = [0xA0, 0x00]; // C + K flags
+        assert_eq!(total_hdr_len(flgs_res0_ver), 12);
+
+        // Test with C, K, and S flags set
+        let flgs_res0_ver: FlgsRes0Ver = [0xB0, 0x00]; // C + K + S flags
+        assert_eq!(total_hdr_len(flgs_res0_ver), 16);
+
+        // Test with R and K flags set
+        let flgs_res0_ver: FlgsRes0Ver = [0x60, 0x00]; // R + K flags
+        assert_eq!(total_hdr_len(flgs_res0_ver), 12);
+
+        // Test with both C and R flags set (should still be 8 bytes for Checksum/Offset)
+        let flgs_res0_ver: FlgsRes0Ver = [0xC0, 0x00]; // C + R flags
+        assert_eq!(total_hdr_len(flgs_res0_ver), 8);
+
+        // Test with all flags set
+        let flgs_res0_ver: FlgsRes0Ver = [0xF0, 0x00]; // All flags
+        assert_eq!(total_hdr_len(flgs_res0_ver), 16);
+    }
+
+    #[test]
+    fn test_flag_masks_are_public() {
+        // Test that flag masks are accessible
+        assert_eq!(C_FLAG_MASK, 0x80);
+        assert_eq!(R_FLAG_MASK, 0x40);
+        assert_eq!(K_FLAG_MASK, 0x20);
+        assert_eq!(S_FLAG_MASK, 0x10);
+        assert_eq!(VER_MASK, 0x07);
+    }
+
+    #[test]
+    fn test_gre_routing_len_constant() {
+        assert_eq!(GRE_ROUTING_LEN, 4);
+    }
+
+    #[test]
+    fn test_gre_routing_public_type_aliases() {
+        // Test AddressFamily type alias
+        let address_family: AddressFamily = 0x0800; // IPv4
+        assert_eq!(address_family, 0x0800);
+
+        // Test SreOffset type alias
+        let sre_offset: SreOffset = 4;
+        assert_eq!(sre_offset, 4);
+
+        // Test SreLength type alias
+        let sre_length: SreLength = 8;
+        assert_eq!(sre_length, 8);
+    }
+
+    #[test]
+    fn test_gre_routing_public_helper_functions() {
+        // Test total_sre_len function
+        assert_eq!(total_sre_len(0), 0);
+        assert_eq!(total_sre_len(4), 4);
+        assert_eq!(total_sre_len(8), 8);
+        assert_eq!(total_sre_len(255), 255);
+
+        // Test is_null_sre function
+        assert_eq!(is_null_sre(0, 0), true); // NULL SRE
+        assert_eq!(is_null_sre(0x0800, 0), false); // Non-zero address family
+        assert_eq!(is_null_sre(0, 4), false); // Non-zero SRE length
+        assert_eq!(is_null_sre(0x0800, 4), false); // Both non-zero
+        assert_eq!(is_null_sre(0x86DD, 8), false); // IPv6 example
+    }
+
+    #[test]
+    fn test_gre_routing_header_consistency() {
+        // Test that public functions match struct methods
+        let routing_hdr = GreRoutingHeader {
+            address_family: 0x0800,
+            sre_offset: 4,
+            sre_length: 8,
+        };
+
+        // Test total_sre_len consistency
+        assert_eq!(
+            total_sre_len(routing_hdr.sre_length),
+            routing_hdr.total_sre_len()
+        );
+
+        // Test is_null_sre consistency
+        assert_eq!(
+            is_null_sre(routing_hdr.address_family, routing_hdr.sre_length),
+            routing_hdr.is_null_sre()
+        );
+
+        // Test with NULL SRE
+        let null_routing_hdr = GreRoutingHeader {
+            address_family: 0,
+            sre_offset: 0,
+            sre_length: 0,
+        };
+
+        assert_eq!(
+            is_null_sre(null_routing_hdr.address_family, null_routing_hdr.sre_length),
+            null_routing_hdr.is_null_sre()
+        );
+        assert_eq!(null_routing_hdr.is_null_sre(), true);
     }
 }
