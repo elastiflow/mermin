@@ -16,7 +16,6 @@ use aya::{
     maps::RingBuf,
     programs::{SchedClassifier, TcAttachType, tc},
 };
-use log::info as log_info;
 use mermin_common::{IpAddrType, PacketMeta};
 use pnet::datalink;
 use tokio::{signal, sync::mpsc};
@@ -53,7 +52,6 @@ async fn main() -> Result<()> {
 
     let exporter: Arc<dyn TraceableExporter> = match config.exporter {
         Some(exporter_options) => {
-            log_info!("using configured exporters");
             let app_tracer_provider = init_provider(&exporter_options, exporter_refs).await?;
             init_internal_tracing(
                 &exporter_options,
@@ -62,10 +60,10 @@ async fn main() -> Result<()> {
                 config.traces.span_level,
             )
             .await?;
+            info!("initialized configured exporters");
             Arc::new(TraceExporterAdapter::new(app_tracer_provider))
         }
         None => {
-            log_info!("using default exporters");
             init_internal_tracing(
                 &ExporterOptions::default(),
                 config.traces.exporters,
@@ -73,6 +71,7 @@ async fn main() -> Result<()> {
                 config.traces.span_level,
             )
             .await?;
+            info!("initialized default exporters");
             Arc::new(NoOpExporterAdapter::default())
         }
     };

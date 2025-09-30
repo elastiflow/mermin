@@ -10,7 +10,7 @@ use figment::{
     Figment,
     providers::{Format, Serialized, Yaml},
 };
-use hcl::{eval::Context};
+use hcl::eval::Context;
 use serde::{Deserialize, Serialize};
 use tracing::Level;
 
