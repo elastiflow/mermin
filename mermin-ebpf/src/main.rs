@@ -28,7 +28,7 @@ use network_types::{
         ipv6::{self, IPV6_LEN},
     },
     mobility::{self, MOBILITY_LEN},
-    route::{self, GENERIC_ROUTE_LEN, RoutingHeaderType},
+    route::{self, GENERIC_ROUTE_LEN},
     shim6::{self, SHIM6_LEN},
     tcp::TCP_LEN,
     udp::UDP_LEN,
@@ -78,7 +78,6 @@ enum HeaderType {
     Vxlan,
     Wireguard,
     Proto(IpProto),
-    Route(RoutingHeaderType),
     StopProcessing, // Indicates parsing should terminate for flow key purposes
 }
 
@@ -171,9 +170,6 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             HeaderType::Proto(IpProto::Hip) => parser.parse_hip_header(&ctx),
             HeaderType::Proto(IpProto::Shim6) => parser.parse_shim6_header(&ctx),
             HeaderType::Proto(_) => {
-                break;
-            }
-            HeaderType::Route(_) => {
                 break;
             }
             HeaderType::StopProcessing => break, // Graceful stop

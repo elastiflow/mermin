@@ -68,22 +68,18 @@ mod tests {
 
     #[test]
     fn test_ahhdr_getters_and_setters() {
-        let mut resv = [0; 2];
-        let mut s = [0; 4];
-        let mut num = [0; 4];
-
         // Test reserved
-        resv = 0x1234u16.to_be_bytes();
+        let resv = 0x1234u16.to_be_bytes();
         assert_eq!(reserved(resv), 0x1234);
         assert_eq!(resv, [0x12, 0x34]);
 
         // Test spi
-        s = 0x12345678u32.to_be_bytes();
+        let s = 0x12345678u32.to_be_bytes();
         assert_eq!(spi(s), 0x12345678);
         assert_eq!(s, [0x12, 0x34, 0x56, 0x78]);
 
         // Test seq_num
-        num = 0x87654321u32.to_be_bytes();
+        let num = 0x87654321u32.to_be_bytes();
         assert_eq!(seq_num(num), 0x87654321);
         assert_eq!(num, [0x87, 0x65, 0x43, 0x21]);
     }
@@ -96,25 +92,23 @@ mod tests {
 
     #[test]
     fn test_ahhdr_length_calculation_methods() {
-        let mut payload_len = 0;
-
         // Test with payload_len = 0
-        payload_len = 0;
+        let payload_len = 0;
         assert_eq!(total_hdr_len(payload_len), 8);
         assert_eq!(icv_len(payload_len), 0);
 
         // Test with payload_len = 1
-        payload_len = 1;
+        let payload_len = 1;
         assert_eq!(total_hdr_len(payload_len), 12);
         assert_eq!(icv_len(payload_len), 0);
 
         // Test with payload_len = 3
-        payload_len = 3;
+        let payload_len = 3;
         assert_eq!(total_hdr_len(payload_len), 20);
         assert_eq!(icv_len(payload_len), 8);
 
         // Test with payload_len = 255 (max value)
-        payload_len = 255;
+        let payload_len = 255;
         assert_eq!(total_hdr_len(payload_len), (255 + 2) * 4);
         assert_eq!(icv_len(payload_len), (255 + 2) * 4 - AH_LEN);
     }
