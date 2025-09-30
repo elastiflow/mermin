@@ -12,7 +12,7 @@ use aya_ebpf::{
 use aya_log_ebpf::error;
 use mermin_common::{Direction, IpAddrType, PacketMeta, TunnelType};
 use network_types::{
-    ah::AuthHdr,
+    ah::{self, AH_LEN, AuthHdr},
     destopts::{self},
     esp::Esp,
     eth::{ETH_LEN, EtherType},
@@ -157,8 +157,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             // HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_route_header(&ctx),
             // HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
             // HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
-            // HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
-            // HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
+            HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx, meta),
             HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx, meta),
             HeaderType::Proto(IpProto::Hip) => parser.parse_hip_header(&ctx, meta),
@@ -755,14 +754,20 @@ impl Parser {
 
     /// Parses the AH IPv6-extension header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_ah_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        if self.offset + AuthHdr::LEN > ctx.len() as usize {
+    fn parse_ah_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
+        if self.offset + AH_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
-        let ah_hdr: AuthHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += ah_hdr.total_hdr_len();
-        self.next_hdr = HeaderType::Proto(ah_hdr.next_hdr);
+        meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        let payload_len: ah::PayloadLen =
+            ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
+        // TODO: handle tunnels
+        // meta.tunnel_type = TunnelType::Ah;
+        // meta.tunnel_spi = ctx.load(self.offset + 3).map_err(|_| Error::OutOfBounds)?;
+
+        self.offset += ah::total_hdr_len(payload_len);
+        self.next_hdr = HeaderType::Proto(meta.proto);
 
         Ok(())
     }
