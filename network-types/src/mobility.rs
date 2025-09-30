@@ -14,6 +14,7 @@
 //! |                                                               |
 //! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 use crate::ip::IpProto;
+use core::mem;
 
 /// The Next Header field (8 bits)
 pub type NextHdr = IpProto;
