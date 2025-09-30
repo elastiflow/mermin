@@ -144,7 +144,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             HeaderType::Vxlan => parser.parse_vxlan_header(&ctx, meta),
             HeaderType::Wireguard => parser.parse_wireguard_header(&ctx),
             HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(&ctx, meta),
-            HeaderType::Proto(IpProto::Gre) => parser.parse_gre_header(&ctx),
+            HeaderType::Proto(IpProto::Gre) => parser.parse_gre_header(&ctx, meta),
             HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx, meta),
             HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx, meta),
             HeaderType::Proto(IpProto::Ipv4) => parser.parse_ipv4_header(&ctx, meta),
@@ -304,8 +304,8 @@ impl Parser {
             | IpProto::Esp
             | IpProto::Ah
             | IpProto::Hip
-            | IpProto::Ipv4 => HeaderType::Ipv4,
-            IpProto::Ipv6 => HeaderType::Ipv6,
+            | IpProto::Ipv4
+            | IpProto::Ipv6 => HeaderType::Proto(meta.proto),
             _ => HeaderType::StopProcessing,
         };
 
@@ -343,7 +343,6 @@ impl Parser {
             meta.l3_octet_count = self.calc_l3_octet_count(ctx.len());
         }
 
-        self.offset += IPV6_LEN;
         self.next_hdr = match meta.proto {
             IpProto::Tcp
             | IpProto::Udp
@@ -357,8 +356,8 @@ impl Parser {
             | IpProto::MobilityHeader
             | IpProto::Hip
             | IpProto::Shim6
-            | IpProto::Ipv4 => HeaderType::Ipv4,
-            IpProto::Ipv6 => HeaderType::Ipv6,
+            | IpProto::Ipv4
+            | IpProto::Ipv6 => HeaderType::Proto(meta.proto),
             IpProto::Ipv6NoNxt => HeaderType::StopProcessing,
             _ => HeaderType::StopProcessing,
         };
@@ -566,30 +565,35 @@ impl Parser {
 
     /// Parses the GRE header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
-    fn parse_gre_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+    fn parse_gre_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
         if self.offset + GRE_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
+        // TODO:
+        // if meta.tunnel_type == TunnelType::None {
+        //     meta.tunnel_type = TunnelType::Gre;
+        //     meta.tunnel_proto = meta.proto;
+        //     meta.tunnel_ether_type = meta.ether_type;
+        // }
+
+        meta.ether_type = ctx.load(self.offset + 2).map_err(|_| Error::OutOfBounds)?;
 
         let flag_res: gre::FlgsRes0Ver = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        let mut total_offset = gre::total_hdr_len(flag_res);
+        self.offset += gre::total_hdr_len(flag_res);
 
         // Handle variable-length routing field if R flag is set
         if gre::r_flag(flag_res) {
             let mut routing_len = 0;
-            let mut current_offset = self.offset + total_offset;
-
             loop {
-                if current_offset + GRE_ROUTING_LEN > ctx.len() as usize {
+                if self.offset + GRE_ROUTING_LEN > ctx.len() as usize {
                     return Err(Error::OutOfBounds);
                 }
 
                 let (address_family, sre_length) = {
                     let af: gre::AddressFamily =
-                        ctx.load(current_offset).map_err(|_| Error::OutOfBounds)?;
-                    let sl: gre::SreLength = ctx
-                        .load(current_offset + 3)
-                        .map_err(|_| Error::OutOfBounds)?;
+                        ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+                    let sl: gre::SreLength =
+                        ctx.load(self.offset + 3).map_err(|_| Error::OutOfBounds)?;
                     (af, sl)
                 };
 
@@ -602,33 +606,25 @@ impl Parser {
                     return Err(Error::OutOfBounds);
                 }
 
-                if current_offset + sre_length as usize > ctx.len() as usize {
+                if self.offset + sre_length as usize > ctx.len() as usize {
                     return Err(Error::OutOfBounds);
                 }
 
                 routing_len += sre_length as usize;
-                current_offset += sre_length as usize;
 
                 // Prevent infinite loops
-                if routing_len > 1024 {
+                if routing_len > 64 {
                     return Err(Error::OutOfBounds);
                 }
             }
 
-            total_offset += routing_len;
+            self.offset += routing_len;
         }
 
-        self.offset += total_offset;
-
-        let protocol_type: gre::ProtocolType =
-            ctx.load(self.offset + 3).map_err(|_| Error::OutOfBounds)?;
-        match protocol_type {
-            EtherType::Ipv4 => self.next_hdr = HeaderType::Ipv4,
-            EtherType::Ipv6 => self.next_hdr = HeaderType::Ipv6,
-            _ => {
-                self.next_hdr = HeaderType::StopProcessing;
-                return Ok(());
-            }
+        self.next_hdr = match meta.ether_type {
+            EtherType::Ipv4 => HeaderType::Ipv4,
+            EtherType::Ipv6 => HeaderType::Ipv6,
+            _ => HeaderType::StopProcessing,
         };
 
         Ok(())
@@ -661,6 +657,7 @@ impl Parser {
         meta.src_port = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         meta.dst_port = ctx.load(self.offset + 2).map_err(|_| Error::OutOfBounds)?;
         meta.tcp_flags = ctx.load(self.offset + 12).map_err(|_| Error::OutOfBounds)?;
+
         self.offset += TCP_LEN;
         self.next_hdr = HeaderType::StopProcessing;
 
