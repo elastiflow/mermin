@@ -20,6 +20,9 @@ use core::mem;
 /// The total size in bytes of the fixed part of the Mobility Header
 pub const MOBILITY_LEN: usize = 8;
 
+/// The total size in bytes of the fixed part of the Mobility Header
+pub const MOBILITY_LEN: usize = 8;
+
 /// The Next Header field (8 bits)
 pub type NextHdr = IpProto;
 /// The Header Length field (8 bits). This is the length of the Mobility Header in 8-octet units, not including the first 8 octets.
