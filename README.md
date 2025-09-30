@@ -98,27 +98,35 @@ cargo build --release
 
 The build script automatically compiles the eBPF program and embeds it into the final binary.
 
-#### 2. Configuration File
+#### 2. Configuration Files
 
-A default configuration file `config.yaml` is provided in the project root. This file contains sensible defaults for local development, including:
+Mermin supports configuration in both **YAML** and **HCL** formats. Default configuration files for local development are provided in the project root: `config.yaml` and `config.hcl`.
 
-* **Stdout exporter enabled**: Flow data will be printed to the console for easy debugging
-* **OTLP exporter disabled**: External telemetry endpoints are disabled by default
-* **Default interfaces**: Monitors `eth0` by default
-* **Logging**: Set to `info` level
+Both files contain sensible defaults for local development, including:
 
-You can customize the configuration by editing `config.yaml` or creating your own configuration file. The configuration supports YAML format and includes comprehensive documentation for all available options.
+* **Stdout exporter enabled**: Flow data will be printed to the console for easy debugging.
+* **OTLP exporter disabled**: External telemetry endpoints are disabled by default.
+* **Default interfaces**: Monitors `eth0` by default.
+* **Logging**: Set to `info` level.
+
+You can customize the configuration by editing these files or creating your own.
 
 #### 3. Run the agent
 
-Running the eBPF agent requires elevated privileges. A default configuration file `config.yaml` is provided in the project root with the stdout exporter enabled for local development.
+Running the eBPF agent requires elevated privileges. Use the `--config` flag to specify your chosen configuration file. Default configuration files `config.yaml` and `config.hcl` are provided in the project root with the stdout exporter enabled for local development.
 
+**Using YAML:**
 ```shell
 cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config config.yaml
 ```
 
+**Using HCL:**
+```shell
+cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config config.hcl
+```
+
 > The `sudo -E` command runs the program as root while preserving the user's environment variables, which is
-> necessary for `cargo` to find the correct binary. The `--config config.yaml` flag loads the default configuration file with stdout exporter enabled.
+> necessary for `cargo` to find the correct binary.
 
 #### 4. Generate Traffic
 
@@ -255,8 +263,8 @@ Command Breakdown:
 * `--profile=sysadmin`: Specifies the security context profile to use for the debug container. This is required to
   run tcpdump.
 * `-- tcpdump -i eth0 -w -`: Executes tcpdump inside the debug container.
-  * `-i eth0`: Listens on the primary network interface, eth0.
-  * `-w -`: Writes the raw packet data to standard output (-) instead of a file.
+    * `-i eth0`: Listens on the primary network interface, eth0.
+    * `-w -`: Writes the raw packet data to standard output (-) instead of a file.
 * `| wireshark -k -i -`: Pipes the standard output from tcpdump into Wireshark.
 * `-k`: Starts the capture session immediately.
 * `-i -`: Reads packet data from standard input (-).
