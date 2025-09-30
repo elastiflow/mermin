@@ -19,7 +19,7 @@
 //! * **Routing Type (8 bits)**: Identifies the variant of the Routing header.
 //! * **Segments Left (8 bits)**: Number of route segments remaining.
 //! * **Type-specific data (variable)**: Format depends on the Routing Type value.
-
+//!
 //! Type 2 Routing Header (Mobile IPv6) - RFC 6275
 //!
 //! This routing header is used in Mobile IPv6 to allow a packet to be routed from a
@@ -45,7 +45,7 @@
 //!
 //! * **Reserved (32 bits)**: Reserved for future use and initialized to all zeroes.
 //! * **Home Address (128 bits)**: The home address of the mobile node.
-
+//!
 //! Type 3 RPL Source Route Header - RFC 6554
 //!
 //! This routing header is used in the Routing Protocol for Low-Power and Lossy Networks (RPL)
@@ -72,7 +72,7 @@
 //! * **Pad (4 bits)**: Number of octets that are used for padding after Address
 //! * **Reserved (20 bits)**: Set to 0 by the sender and ignored by the receiver.
 //! * **Addresses[1..n] (variable)**: Vector of addresses, each of variable size depending on CmprI and CmprE.
-
+//!
 //! Type 4 Segment Routing Header (SRH) - RFC 8754
 //!
 //! This routing header is used for Segment Routing over IPv6 (SRv6). It allows a source
@@ -113,7 +113,7 @@
 //! * **Tag (16 bits)**: Tag a packet as part of a class or group of packets.
 //! * **Segment List[0..n]**: List of 128-bit IPv6 addresses representing the segments.
 //! * **Optional TLVs**: Type-Length-Value objects for additional information.
-
+//!
 //! Type 5 Compact Routing Header with 16-bit SIDs (CRH-16) - RFC 9631
 //!
 //! This routing header is an experimental alternative to SRH, designed to be more space-efficient
@@ -219,7 +219,6 @@ pub enum Ipv6RoutingHeader {
     Unknown(GenericRoute),
 }
 
-
 pub const GENERIC_ROUTE_LEN: usize = 4; // next_hdr (1) + hdr_ext_len (1) + type_ (1) + sgmt_left (1)
 
 pub type NextHdr = IpProto;
@@ -238,7 +237,6 @@ pub fn total_hdr_len(hdr_ext_len: HdrExtLen) -> usize {
 pub fn total_type_data_len(hdr_ext_len: HdrExtLen) -> usize {
     total_hdr_len(hdr_ext_len).saturating_sub(4)
 }
-
 
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
@@ -315,7 +313,6 @@ impl Type2RoutingHeader {
     /// The total size in bytes of the Type 2 Routing Header
     pub const LEN: usize = mem::size_of::<Type2RoutingHeader>();
 }
-
 
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
@@ -534,7 +531,6 @@ impl SegmentRoutingHeader {
             .saturating_sub(self.segment_list_len())
     }
 }
-
 
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]

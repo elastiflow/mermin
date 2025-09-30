@@ -15,24 +15,27 @@ use network_types::{
     ah::{self, AH_LEN},
     destopts::{self},
     esp::Esp,
-    eth::{EtherType, ETH_LEN},
-    fragment::FragmentHdr,
+    eth::{ETH_LEN, EtherType},
+    fragment::{self, FRAGMENT_LEN},
     geneve::{self, GENEVE_LEN},
     gre::{self, GRE_LEN, GRE_ROUTING_LEN},
     hip::{self, HIP_LEN},
     hop::{self, HOP_OPT_LEN},
     icmp::ICMP_LEN,
     ip::{
-        ipv4::{self, IPV4_LEN}, ipv6::{self, IPV6_LEN}, IpProto
+        IpProto,
+        ipv4::{self, IPV4_LEN},
+        ipv6::{self, IPV6_LEN},
     },
     mobility::{self, MOBILITY_LEN},
-    route::{self, RoutingHeaderType, GENERIC_ROUTE_LEN},
+    route::{self, GENERIC_ROUTE_LEN, RoutingHeaderType},
     shim6::{self, SHIM6_LEN},
     tcp::{self, TCP_LEN},
     udp::{self, UDP_LEN},
     vxlan::{self, VXLAN_LEN},
     wireguard::{
-        WireGuardType, WIREGUARD_COOKIE_REPLY_LEN, WIREGUARD_INITIATION_LEN, WIREGUARD_RESPONSE_LEN, WIREGUARD_TRANSPORT_DATA_LEN
+        WIREGUARD_COOKIE_REPLY_LEN, WIREGUARD_INITIATION_LEN, WIREGUARD_RESPONSE_LEN,
+        WIREGUARD_TRANSPORT_DATA_LEN, WireGuardType,
     },
 };
 
@@ -88,7 +91,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
     // Information for building flow records (prioritizes innermost headers).
     // These fields will be updated as we parse deeper or encounter encapsulations.
     let mut parser = Parser::default();
-    
+
     // Get PacketMeta from PerCpuArray instead of using local variables
     let meta_ptr = unsafe {
         #[allow(static_mut_refs)]
@@ -152,7 +155,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx, meta),
             HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx, meta),
             HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_route_header(&ctx),
-            // HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
             // HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
             HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx, meta),
             HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx, meta),
@@ -652,11 +655,7 @@ impl Parser {
 
     /// Parses the UDP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
-    fn parse_udp_header(
-        &mut self,
-        ctx: &TcContext,
-        meta: &mut PacketMeta,
-    ) -> Result<(), Error> {
+    fn parse_udp_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
         if self.offset + UDP_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
@@ -714,8 +713,9 @@ impl Parser {
         if self.offset + GENERIC_ROUTE_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
-        self.next_hdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += route::total_hdr_len(ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?);
+        self.next_hdr = HeaderType::Proto(ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?);
+        self.offset +=
+            route::total_hdr_len(ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?);
 
         Ok(())
     }
@@ -723,13 +723,12 @@ impl Parser {
     /// Parses the IPv6 Fragment header and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_fragment_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        if self.offset + FragmentHdr::LEN > ctx.len() as usize {
+        if self.offset + FRAGMENT_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
-        let frag_hdr: FragmentHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += FragmentHdr::LEN;
-        self.next_hdr = HeaderType::Proto(frag_hdr.next_hdr);
+        self.next_hdr = HeaderType::Proto(ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?);
+        self.offset += FRAGMENT_LEN;
 
         Ok(())
     }
