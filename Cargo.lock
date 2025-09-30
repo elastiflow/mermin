@@ -1819,6 +1819,7 @@ dependencies = [
  "network-types",
  "opentelemetry",
  "opentelemetry-otlp",
+ "opentelemetry-stdout",
  "opentelemetry_sdk",
  "pnet",
  "serde",
@@ -2008,6 +2009,17 @@ dependencies = [
  "opentelemetry_sdk",
  "prost",
  "tonic",
+]
+
+[[package]]
+name = "opentelemetry-stdout"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "447191061af41c3943e082ea359ab8b64ff27d6d34d30d327df309ddef1eef6f"
+dependencies = [
+ "chrono",
+ "opentelemetry",
+ "opentelemetry_sdk",
 ]
 
 [[package]]
@@ -3190,6 +3202,7 @@ dependencies = [
  "prost",
  "socket2 0.5.10",
  "tokio",
+ "tokio-rustls",
  "tokio-stream",
  "tower 0.5.2",
  "tower-layer",

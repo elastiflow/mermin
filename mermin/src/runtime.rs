@@ -9,6 +9,7 @@ use crate::runtime::{
 
 pub mod cli;
 pub mod conf;
+pub mod enums;
 
 pub struct Runtime {
     #[allow(dead_code)]

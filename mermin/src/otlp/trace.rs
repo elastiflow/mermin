@@ -1,252 +1,95 @@
-pub mod lib {
-    use anyhow::Result;
-    use async_trait::async_trait;
-    use opentelemetry::{
-        KeyValue, global,
-        trace::{Status, TracerProvider},
-    };
-    use opentelemetry_otlp::{WithExportConfig, WithTonicConfig};
-    use opentelemetry_sdk::{
-        Resource,
-        propagation::TraceContextPropagator,
-        runtime,
-        trace::{SdkTracerProvider, span_processor_with_async_runtime::BatchSpanProcessor},
-    };
-    use tonic::transport::{Uri, channel::Channel};
-    use tracing::{Level, Span, debug, error, info};
-    use tracing_opentelemetry::OpenTelemetrySpanExt;
-    use tracing_subscriber::{
-        filter::LevelFilter,
-        fmt::{Layer, format::FmtSpan},
-        layer::SubscriberExt,
-        util::SubscriberInitExt,
-    };
+use std::{sync::Arc, time::SystemTime};
 
-    use crate::{
-        otlp::opts::{OtlpExporterOptions, StdoutExporterOptions},
-        span::flow::{FlowSpan, FlowSpanExporter},
-    };
+use async_trait::async_trait;
+use opentelemetry::trace::{SpanKind, Tracer, TracerProvider};
+use opentelemetry_sdk::trace::SdkTracerProvider;
+use tracing::debug;
 
-    pub struct TraceExporterAdapter {
-        provider: SdkTracerProvider,
+pub struct TraceExporterAdapter {
+    provider: SdkTracerProvider,
+}
+
+impl TraceExporterAdapter {
+    pub fn new(provider: SdkTracerProvider) -> Self {
+        Self { provider }
     }
+}
 
-    impl TraceExporterAdapter {
-        pub fn new(provider: SdkTracerProvider) -> Self {
-            Self { provider }
-        }
+pub type TraceableRecord = Arc<dyn Traceable + Send + Sync + 'static>;
+
+/// Defines a common interface for data structures that can be represented as an
+/// OpenTelemetry trace span.
+pub trait Traceable {
+    /// Returns the logical start time of the event represented by this record.
+    ///
+    /// This timestamp will be used as the `start_time_unix_nano` for the
+    /// resulting OpenTelemetry `Span`.
+    fn start_time(&self) -> SystemTime;
+
+    /// Returns the logical end time of the event represented by this record.
+    ///
+    /// This timestamp will be used as the `end_time_unix_nano` for the
+    /// resulting OpenTelemetry `Span`.
+    fn end_time(&self) -> SystemTime;
+
+    /// Returns a specific name for the span, if applicable.
+    ///
+    /// If `Some(String)` is returned, it will be used as the `Span` name. If `None` is
+    /// returned, the exporter is expected to use a default or generic name.
+    fn name(&self) -> Option<String>;
+
+    /// Populates a pre-configured `Span` with the record's specific attributes.
+    ///
+    /// This is the core method where the implementing type is responsible for mapping
+    /// its internal fields to the key-value attributes of an OpenTelemetry `Span`.
+    ///
+    /// # Arguments
+    /// * `span` - An `opentelemetry_sdk::trace::Span` instance that has already been
+    ///   configured with its start time, end time, and name based on the other
+    ///   methods in this trait.
+    ///
+    /// # Returns
+    /// The same `Span` instance, now enriched with the record's specific attributes.
+    ///
+    /// # Important
+    /// For performance reasons within the export pipeline, this method is designed to
+    /// be called **only once** per record. The implementation should be efficient and
+    /// perform all necessary attribute-setting within this single call.
+    fn record(&self, span: opentelemetry_sdk::trace::Span) -> opentelemetry_sdk::trace::Span;
+}
+
+#[async_trait]
+pub trait TraceableExporter: Send + Sync {
+    async fn export(&self, traceable_record: TraceableRecord);
+}
+
+#[async_trait]
+impl TraceableExporter for TraceExporterAdapter {
+    async fn export(&self, traceable: TraceableRecord) {
+        let tracer = self.provider.tracer("mermin");
+        let name = if let Some(name) = traceable.name() {
+            name
+        } else {
+            "flow".to_string()
+        };
+
+        let mut span = tracer
+            .span_builder(name)
+            //TODO: Once SOURCE & DESTINATION are span kind are available, use them here
+            .with_kind(SpanKind::Internal)
+            .with_start_time(traceable.start_time())
+            .start(&tracer);
+        span = traceable.record(span);
+        opentelemetry::trace::Span::end_with_timestamp(&mut span, traceable.end_time());
     }
+}
 
-    pub trait Traceable {
-        /// Required method: Defines how to create a span with the
-        /// correct name and fields for this specific type.
-        fn to_span(&self) -> Span;
+#[derive(Default)]
+pub struct NoOpExporterAdapter {}
 
-        /// Provided method: Creates the span using `to_span` and executes
-        /// the given closure within its context.
-        fn record<F, T>(&self, f: F) -> T
-        where
-            F: FnOnce() -> T,
-        {
-            self.to_span().in_scope(f)
-        }
-    }
-
-    #[async_trait]
-    impl FlowSpanExporter for TraceExporterAdapter {
-        async fn export(&self, attrs: FlowSpan) {
-            attrs.record(|| {
-                // Close the span with OK status after recording fields
-                let span = Span::current();
-                span.set_status(Status::Ok);
-                debug!("Exported recordable in span");
-            });
-        }
-
-        async fn shutdown(&self) -> Result<()> {
-            self.provider.force_flush().map_err(|e| {
-                error!("Error flushing OTLP trace exporter: {}", e);
-                anyhow::anyhow!(e)
-            })?;
-
-            self.provider
-                .shutdown()
-                .map(|()| {
-                    debug!("OTLP trace exporter shut down gracefully.");
-                })
-                .map_err(|e| {
-                    error!("Error shutting down OTLP trace exporter: {}", e);
-                    anyhow::anyhow!(e)
-                })
-        }
-    }
-
-    // TODO: ENG-205 should allow for multiple exporters of different types because agent.traces.main.exporters can be a list of exporters.
-    pub async fn init_tracer_provider(
-        otlp_opts: Option<&OtlpExporterOptions>,
-        stdout_opts: Option<&StdoutExporterOptions>,
-        log_level: Level,
-    ) -> Result<SdkTracerProvider, anyhow::Error> {
-        let level_filter = LevelFilter::from_level(log_level);
-
-        let mut fmt_layer = Layer::new();
-        match log_level {
-            Level::DEBUG => fmt_layer = fmt_layer.with_file(true).with_line_number(true),
-            Level::TRACE => {
-                fmt_layer = fmt_layer
-                    .with_thread_ids(true)
-                    .with_thread_names(true)
-                    .with_file(true)
-                    .with_line_number(true)
-            }
-            _ => {
-                // default format:
-                // Format {
-                //     format: Full,
-                //     timer: SystemTime,
-                //     ansi: None, // conditionally set based on environment, handled by tracing-subscriber
-                //     display_timestamp: true,
-                //     display_target: true,
-                //     display_level: true,
-                //     display_thread_id: false,
-                //     display_thread_name: false,
-                //     display_filename: false,
-                //     display_line_number: false,
-                // }
-            }
-        }
-
-        if stdout_opts.is_some() {
-            fmt_layer = fmt_layer.with_span_events(FmtSpan::FULL);
-        }
-
-        // Initialize tracing subscriber based on configuration
-        match (otlp_opts.is_some(), stdout_opts.is_some()) {
-            (true, true) => {
-                // Both OTLP and stdout enabled
-                let provider = create_otlp_provider(otlp_opts.unwrap()).await?;
-                let trace_layer =
-                    tracing_opentelemetry::layer().with_tracer(provider.tracer("otlp-flow-tracer"));
-
-                tracing_subscriber::registry()
-                    .with(level_filter)
-                    .with(fmt_layer)
-                    .with(trace_layer)
-                    .init();
-
-                info!("tracer initialized - stdout exporter and otlp exporter are active.");
-                Ok(provider)
-            }
-            (true, false) => {
-                // Only OTLP enabled
-                let provider = create_otlp_provider(otlp_opts.unwrap()).await?;
-                let trace_layer =
-                    tracing_opentelemetry::layer().with_tracer(provider.tracer("otlp-flow-tracer"));
-
-                tracing_subscriber::registry()
-                    .with(level_filter)
-                    .with(trace_layer)
-                    .init();
-
-                info!("tracer initialized - otlp exporter is active.");
-                Ok(provider)
-            }
-            (false, true) => {
-                // Only stdout enabled
-                tracing_subscriber::registry()
-                    .with(level_filter)
-                    .with(fmt_layer)
-                    .init();
-
-                info!("tracer initialized - stdout exporter is active");
-                Ok(create_minimal_provider())
-            }
-            (false, false) => {
-                // No exporters enabled - just basic logging
-                tracing_subscriber::registry()
-                    .with(level_filter)
-                    .with(fmt_layer)
-                    .init();
-
-                info!("tracer initialized - no exporters enabled");
-                Ok(create_minimal_provider())
-            }
-        }
-    }
-
-    async fn create_otlp_provider(
-        opts: &OtlpExporterOptions,
-    ) -> Result<SdkTracerProvider, anyhow::Error> {
-        let endpoint = opts.build_endpoint();
-        let uri: Uri = endpoint.parse()?;
-        let channel = Channel::builder(uri).connect().await?;
-
-        // TODO: Apply TLS configuration - ENG-120
-        // This should handle TLS settings from config.tls
-        if let Some(tls_config) = &opts.tls
-            && tls_config.enabled
-        {
-            info!("TLS configuration detected for OTLP exporter");
-            // TODO: Apply TLS settings to the channel - ENG-120
-            // This would involve setting up TLS certificates and keys
-        }
-
-        // TODO: Apply authentication configuration to the OTLP exporter - ENG-120
-        let exporter_builder = opentelemetry_otlp::SpanExporter::builder()
-            .with_tonic() // for gRPC
-            .with_channel(channel)
-            .with_protocol(opts.protocol.clone().into());
-
-        // TODO: Merge authentication headers with user-provided headers - ENG-120
-        // Authentication headers should take precedence over user headers
-        if let Some(auth_config) = &opts.auth {
-            match auth_config.generate_auth_headers() {
-                Ok(auth_headers) => {
-                    info!("Applied authentication headers to OTLP exporter");
-                    // TODO: Apply headers to the exporter builder - ENG-120
-                    // Note: The opentelemetry_otlp crate may need to be updated to support custom headers
-                    // For now, this is a placeholder for where header configuration would go
-                    info!(
-                        "Headers configured for OTLP exporter ({} headers)",
-                        auth_headers.len()
-                    );
-                }
-                Err(e) => {
-                    error!("Failed to generate authentication headers: {}", e);
-                    return Err(anyhow::anyhow!("Authentication configuration error: {}", e));
-                }
-            }
-        }
-
-        let exporter = exporter_builder
-            .build()
-            .expect("Failed to create OTLP span exporter.");
-        let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio).build();
-        let provider = SdkTracerProvider::builder()
-            .with_span_processor(processor)
-            .with_resource(
-                Resource::builder()
-                    .with_attribute(KeyValue::new("service.name", "mermin"))
-                    .with_attribute(KeyValue::new("service.version", env!("CARGO_PKG_VERSION")))
-                    .build(),
-            )
-            .build();
-
-        global::set_tracer_provider(provider.clone());
-        global::set_text_map_propagator(TraceContextPropagator::new());
-
-        Ok(provider)
-    }
-
-    #[allow(dead_code)]
-    fn create_minimal_provider() -> SdkTracerProvider {
-        SdkTracerProvider::builder()
-            .with_resource(
-                Resource::builder()
-                    .with_attribute(KeyValue::new("service.name", "mermin"))
-                    .with_attribute(KeyValue::new("service.version", env!("CARGO_PKG_VERSION")))
-                    .build(),
-            )
-            .build()
+#[async_trait]
+impl TraceableExporter for NoOpExporterAdapter {
+    async fn export(&self, _traceable: TraceableRecord) {
+        debug!("skipping export - no exporters available");
     }
 }
