@@ -46,8 +46,8 @@
 //!   encrypted to prevent replay attacks. Includes a 16-byte AEAD authentication tag.
 //! - **MAC 1 & MAC 2 (16 bytes each)**: Message Authentication Codes (BLAKE2s) to
 //!   protect the header against tampering and provide some DoS resistance.
-//! 
-//! 
+//!
+//!
 //! ## Message Type 2: Handshake Response
 //!
 //! The reply sent by the responder to complete the handshake. After this
@@ -239,12 +239,10 @@ pub fn mac_1(mac_1: WgMac1) -> u128 {
     u128::from_le_bytes(mac_1)
 }
 
-
 #[inline]
 pub fn mac_2(mac_2: WgMac2) -> u128 {
     u128::from_le_bytes(mac_2)
 }
-
 
 #[inline]
 pub fn encrypted_nothing(encrypted_nothing: WgEncryptedNothing) -> u128 {
@@ -289,10 +287,10 @@ mod tests {
     fn test_wireguard_sender_idx_helper_function() {
         let sender_idx_bytes: WgSenderIdx = [0x78, 0x56, 0x34, 0x12];
         assert_eq!(sender_idx(sender_idx_bytes), 0x12345678);
-        
+
         let zero_bytes: WgSenderIdx = [0x00, 0x00, 0x00, 0x00];
         assert_eq!(sender_idx(zero_bytes), 0);
-        
+
         let max_bytes: WgSenderIdx = [0xFF, 0xFF, 0xFF, 0xFF];
         assert_eq!(sender_idx(max_bytes), u32::MAX);
     }

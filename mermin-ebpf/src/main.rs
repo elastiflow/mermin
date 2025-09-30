@@ -15,15 +15,17 @@ use network_types::{
     ah::AuthHdr,
     destopts::DestOptsHdr,
     esp::Esp,
-    eth::{EtherType, ETH_LEN},
+    eth::{ETH_LEN, EtherType},
     fragment::FragmentHdr,
     geneve::{self, GENEVE_LEN},
     gre::{GreHdr, GreRoutingHeader},
     hip::{self, HIP_LEN},
-    hop::HopOptHdr,
+    hop::{self, HOP_OPT_LEN},
     icmp::ICMP_LEN,
     ip::{
-        ipv4::{self, IPV4_LEN}, ipv6::{self, IPV6_LEN}, IpProto
+        IpProto,
+        ipv4::{self, IPV4_LEN},
+        ipv6::{self, IPV6_LEN},
     },
     mobility::MobilityHdr,
     route::{GenericRoute, RoutingHeaderType},
@@ -32,8 +34,8 @@ use network_types::{
     udp::UdpHdr,
     vxlan::{self, VXLAN_LEN},
     wireguard::{
-        WireGuardType, WIREGUARD_INITIATION_LEN, WIREGUARD_RESPONSE_LEN,
-        WIREGUARD_COOKIE_REPLY_LEN, WIREGUARD_TRANSPORT_DATA_LEN,
+        WIREGUARD_COOKIE_REPLY_LEN, WIREGUARD_INITIATION_LEN, WIREGUARD_RESPONSE_LEN,
+        WIREGUARD_TRANSPORT_DATA_LEN, WireGuardType,
     },
 };
 
@@ -141,7 +143,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             HeaderType::Geneve => parser.parse_geneve_header(&ctx, meta),
             HeaderType::Vxlan => parser.parse_vxlan_header(&ctx, meta),
             HeaderType::Wireguard => parser.parse_wireguard_header(&ctx),
-            // HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(&ctx),
+            HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(&ctx, meta),
             // HeaderType::Proto(IpProto::Gre) => parser.parse_gre_header(&ctx),
             HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx, meta),
             HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx, meta),
@@ -189,7 +191,6 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
                 break;
             }
             HeaderType::StopProcessing => break, // Graceful stop
-            #[warn(unreachable_patterns)]
             _ => break,
         };
 
@@ -521,7 +522,7 @@ impl Parser {
     /// Validates and advances the parser offset.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_wireguard_transport_data(&mut self, ctx: &TcContext) -> Result<(), Error> {
-            if self.offset + WIREGUARD_TRANSPORT_DATA_LEN > ctx.len() as usize {
+        if self.offset + WIREGUARD_TRANSPORT_DATA_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
         // Validate the header can be loaded without storing the large struct
@@ -533,14 +534,32 @@ impl Parser {
 
     /// Parses the Hop-by-Hop IPv6-extension header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_hopopt_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        if self.offset + HopOptHdr::LEN > ctx.len() as usize {
+    fn parse_hopopt_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
+        if self.offset + HOP_OPT_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
+        meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.next_hdr = match meta.proto {
+            IpProto::Tcp
+            | IpProto::Udp
+            | IpProto::Ipv6Icmp
+            | IpProto::Esp
+            | IpProto::Ah
+            | IpProto::HopOpt
+            | IpProto::Ipv6Route
+            | IpProto::Ipv6Frag
+            | IpProto::Ipv6Opts
+            | IpProto::MobilityHeader
+            | IpProto::Hip
+            | IpProto::Shim6
+            | IpProto::Ipv4
+            | IpProto::Ipv6 => HeaderType::Proto(meta.proto),
+            IpProto::Ipv6NoNxt => HeaderType::StopProcessing,
+            _ => HeaderType::StopProcessing,
+        };
 
-        let hop_hdr: HopOptHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += hop_hdr.total_hdr_len();
-        self.next_hdr = HeaderType::Proto(hop_hdr.next_hdr);
+        let hdr_ext_len: hop::HdrExtLen = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += hop::total_hdr_len(hdr_ext_len);
 
         Ok(())
     }
