@@ -1,6 +1,6 @@
 //! IPv6 Routing Extension Header Format
 //!
-//!  0                   1                   2                   3
+//! 0                   1                   2                   3
 //! 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 //! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //! |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left | <- Generic Header
@@ -25,7 +25,7 @@
 //! This routing header is used in Mobile IPv6 to allow a packet to be routed from a
 //! mobile node's home address to its current location (care-of address).
 //!
-//!  0                   1                   2                   3
+//! 0                   1                   2                   3
 //! 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 //! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //! |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left | <- Generic Header
@@ -51,7 +51,7 @@
 //! This routing header is used in the Routing Protocol for Low-Power and Lossy Networks (RPL)
 //! for source routing in constrained environments like sensor networks.
 //!
-//!  0                   1                   2                   3
+//! 0                   1                   2                   3
 //! 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 //! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //! |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left | <- Generic Header
@@ -78,7 +78,7 @@
 //! This routing header is used for Segment Routing over IPv6 (SRv6). It allows a source
 //! to specify a path for a packet to traverse by listing an ordered set of segments.
 //!
-//!  0                   1                   2                   3
+//! 0                   1                   2                   3
 //! 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 //! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //! |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left |
