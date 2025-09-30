@@ -13,7 +13,7 @@ use aya_log_ebpf::error;
 use mermin_common::{Direction, IpAddrType, PacketMeta, TunnelType};
 use network_types::{
     ah::AuthHdr,
-    destopts::DestOptsHdr,
+    destopts::{self},
     esp::Esp,
     eth::{ETH_LEN, EtherType},
     fragment::FragmentHdr,
@@ -180,7 +180,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             // HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
             // HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
             // HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
-            // HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx, meta),
             HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx, meta),
             HeaderType::Proto(IpProto::Hip) => parser.parse_hip_header(&ctx, meta),
             HeaderType::Proto(IpProto::Shim6) => parser.parse_shim6_header(&ctx, meta),
@@ -757,14 +757,21 @@ impl Parser {
 
     /// Parses the Destination Options IPv6-extension header and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_destopts_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        if self.offset + DestOptsHdr::LEN > ctx.len() as usize {
+    fn parse_destopts_header(
+        &mut self,
+        ctx: &TcContext,
+        meta: &mut PacketMeta,
+    ) -> Result<(), Error> {
+        if self.offset + destopts::DEST_OPTS_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
-        let dest_hdr: DestOptsHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += dest_hdr.total_hdr_len();
-        self.next_hdr = HeaderType::Proto(dest_hdr.next_hdr);
+        meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        let hdr_ext_len: destopts::HdrExtLen =
+            ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
+
+        self.offset += destopts::total_hdr_len(hdr_ext_len);
+        self.next_hdr = HeaderType::Proto(meta.proto);
 
         Ok(())
     }
