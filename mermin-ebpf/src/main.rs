@@ -14,9 +14,9 @@ use mermin_common::{Direction, IpAddrType, PacketMeta, TunnelType};
 use network_types::{
     ah::{self, AH_LEN},
     destopts::{self},
-    esp::Esp,
+    esp::ESP_LEN,
     eth::{ETH_LEN, EtherType},
-    fragment::{self, FRAGMENT_LEN},
+    fragment::FRAGMENT_LEN,
     geneve::{self, GENEVE_LEN},
     gre::{self, GRE_LEN, GRE_ROUTING_LEN},
     hip::{self, HIP_LEN},
@@ -30,8 +30,8 @@ use network_types::{
     mobility::{self, MOBILITY_LEN},
     route::{self, GENERIC_ROUTE_LEN, RoutingHeaderType},
     shim6::{self, SHIM6_LEN},
-    tcp::{self, TCP_LEN},
-    udp::{self, UDP_LEN},
+    tcp::TCP_LEN,
+    udp::UDP_LEN,
     vxlan::{self, VXLAN_LEN},
     wireguard::{
         WIREGUARD_COOKIE_REPLY_LEN, WIREGUARD_INITIATION_LEN, WIREGUARD_RESPONSE_LEN,
@@ -156,7 +156,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx, meta),
             HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_route_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
-            // HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
+            HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
             HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx, meta),
             HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx, meta),
             HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx, meta),
@@ -169,7 +169,6 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
                 break;
             }
             HeaderType::StopProcessing => break, // Graceful stop
-            _ => break,
         };
 
         if result.is_err() {
@@ -736,12 +735,10 @@ impl Parser {
     /// Parses the ESP IPv6-extension header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_esp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        if self.offset + Esp::LEN > ctx.len() as usize {
+        if self.offset + ESP_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
-
-        let _esp_hdr: Esp = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += Esp::LEN;
+        self.offset += ESP_LEN;
         self.next_hdr = HeaderType::StopProcessing; // ESP signals end of parsing headers because its payload is encrypted
 
         Ok(())
