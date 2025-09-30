@@ -15,6 +15,7 @@
 //! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 use crate::ip::IpProto;
+use core::mem;
 
 /// The total size in bytes of the fixed part of the Mobility Header
 pub const MOBILITY_LEN: usize = 8;
