@@ -154,8 +154,8 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             HeaderType::Proto(IpProto::Ipv6) => parser.parse_ipv6_header(&ctx, meta),
             HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx, meta),
             HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx, meta),
-            HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_route_header(&ctx),
-            HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_route_header(&ctx, meta),
+            HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx, meta),
             HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
             HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx, meta),
             HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx, meta),
@@ -662,29 +662,26 @@ impl Parser {
         meta.src_port = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         meta.dst_port = ctx.load(self.offset + 2).map_err(|_| Error::OutOfBounds)?;
 
-        // Get parser options from PerCpuArray
-        let options_ptr = unsafe {
+        let dst_port = meta.dst_port();
+        self.next_hdr = unsafe {
             #[allow(static_mut_refs)]
-            match PARSER_OPTIONS.get_ptr_mut(0) {
-                Some(ptr) => ptr,
-                None => {
-                    error!(ctx, "PARSER_OPTIONS map not accessible");
-                    return Err(Error::Unsupported);
+            match PARSER_OPTIONS.get_ptr(0) {
+                Some(ptr) => {
+                    // IANA has assigned port 6081 as the fixed well-known destination port for Geneve and port 4789 as the fixed well-known destination port for Vxlan.
+                    // Although the well-known value should be used by default, it is RECOMMENDED that implementations make these configurable.
+                    let opts = &*ptr;
+                    if dst_port == opts.geneve_port {
+                        HeaderType::Geneve
+                    } else if dst_port == opts.vxlan_port {
+                        HeaderType::Vxlan
+                    } else if dst_port == opts.wireguard_port {
+                        HeaderType::Wireguard
+                    } else {
+                        HeaderType::StopProcessing
+                    }
                 }
+                None => HeaderType::StopProcessing, // Graceful degradation
             }
-        };
-        let options: &ParserOptions = unsafe { &*options_ptr };
-
-        // IANA has assigned port 6081 as the fixed well-known destination port for Geneve and port 4789 as the fixed well-known destination port for Vxlan.
-        // Although the well-known value should be used by default, it is RECOMMENDED that implementations make these configurable.
-        self.next_hdr = if meta.dst_port() == options.geneve_port {
-            HeaderType::Geneve
-        } else if meta.dst_port() == options.vxlan_port {
-            HeaderType::Vxlan
-        } else if meta.dst_port() == options.wireguard_port {
-            HeaderType::Wireguard
-        } else {
-            HeaderType::StopProcessing
         };
 
         if meta.tunnel_type == TunnelType::None
@@ -692,27 +689,39 @@ impl Parser {
                 || self.next_hdr == HeaderType::Vxlan
                 || self.next_hdr == HeaderType::Wireguard)
         {
-            // Do not set tunnel_type here, it will be set in the next header parser
-            meta.tunnel_src_ipv6_addr = meta.src_ipv6_addr;
-            meta.tunnel_dst_ipv6_addr = meta.dst_ipv6_addr;
-            meta.tunnel_src_ipv4_addr = meta.src_ipv4_addr;
-            meta.tunnel_dst_ipv4_addr = meta.dst_ipv4_addr;
+            // Only copy the address type we're actually using
+            meta.tunnel_ip_addr_type = meta.ip_addr_type;
+            if meta.tunnel_ip_addr_type == IpAddrType::Ipv4 {
+                meta.tunnel_src_ipv4_addr = meta.src_ipv4_addr;
+                meta.tunnel_dst_ipv4_addr = meta.dst_ipv4_addr;
+            } else {
+                meta.tunnel_src_ipv6_addr = meta.src_ipv6_addr;
+                meta.tunnel_dst_ipv6_addr = meta.dst_ipv6_addr;
+            }
             meta.tunnel_src_port = meta.src_port;
             meta.tunnel_dst_port = meta.dst_port;
-            meta.tunnel_ip_addr_type = meta.ip_addr_type;
             meta.tunnel_proto = meta.proto;
             meta.tunnel_ether_type = meta.ether_type;
         }
+        self.offset += UDP_LEN;
+
         Ok(())
     }
 
     /// Parses the IPv6 routing header in the packet and dispatches to the appropriate specific parser.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_generic_route_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+    fn parse_generic_route_header(
+        &mut self,
+        ctx: &TcContext,
+        meta: &mut PacketMeta,
+    ) -> Result<(), Error> {
         if self.offset + GENERIC_ROUTE_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
-        self.next_hdr = HeaderType::Proto(ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?);
+
+        meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+
+        self.next_hdr = HeaderType::Proto(meta.proto);
         self.offset +=
             route::total_hdr_len(ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?);
 
@@ -721,13 +730,19 @@ impl Parser {
 
     /// Parses the IPv6 Fragment header and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_fragment_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+    fn parse_fragment_header(
+        &mut self,
+        ctx: &TcContext,
+        meta: &mut PacketMeta,
+    ) -> Result<(), Error> {
         if self.offset + FRAGMENT_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
-        self.next_hdr = HeaderType::Proto(ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?);
+        meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+
         self.offset += FRAGMENT_LEN;
+        self.next_hdr = HeaderType::Proto(meta.proto);
 
         Ok(())
     }
@@ -738,6 +753,10 @@ impl Parser {
         if self.offset + ESP_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
+        // TODO: handle tunnels
+        // meta.tunnel_type = TunnelType::Ah;
+        // meta.tunnel_spi = ctx.load(self.offset + 3).map_err(|_| Error::OutOfBounds)?;
+
         self.offset += ESP_LEN;
         self.next_hdr = HeaderType::StopProcessing; // ESP signals end of parsing headers because its payload is encrypted
 

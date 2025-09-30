@@ -18,14 +18,13 @@
 //! ~                                                               ~
 //! |                                                               |
 //! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//! Fields
-//!
-//! * **Security Parameters Index (SPI) (32 bits)**: An arbitrary value used to uniquely identify the **security association** of the receiving party.
-//! * **Sequence Number (32 bits)**: A monotonically increasing counter for protecting against **replay attacks**.
 
+/// The length of the ESP header in bytes.
 pub const ESP_LEN: usize = 8;
 
+/// Security Parameters Index (SPI) (32 bits): An arbitrary value used to uniquely identify the **security association** of the receiving party.
 pub type Spi = [u8; 4];
+/// Sequence Number (32 bits): A monotonically increasing counter for protecting against **replay attacks**.
 pub type SeqNum = [u8; 4];
 
 /// Gets the Security Parameters Index (SPI) value.

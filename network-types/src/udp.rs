@@ -1,19 +1,21 @@
 //! UDP header, which is present after the IP header.
 //!
-//!   0                   1                   2                   3
-//!   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//!  |          Source Port          |       Destination Port        |
-//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//!  |          PDU Length           |           Checksum            |
-//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//!  |                             data                              |
-//!  /                              ...                              /
-//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //! This struct represents the User Datagram Protocol (UDP) header as defined in RFC 768.
 //! The UDP header is 8 bytes long and contains source and destination ports, length, and checksum fields.
 //! All fields are stored in network byte order (big-endian).
+//!
+//!  0                   1                   2                   3
+//!  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |          Source Port          |       Destination Port        |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |          PDU Length           |           Checksum            |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                             data                              |
+//! /                              ...                              /
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
+/// The length of the UDP header in bytes.
 pub const UDP_LEN: usize = 8;
 
 /// Source port field (16 bits).
@@ -26,61 +28,41 @@ pub type Len = [u8; 2];
 pub type Checksum = [u8; 2];
 
 /// Returns the source port number.
-///
 /// This method converts the source port from network byte order (big-endian)
 /// to host byte order.
-///
-/// # Returns
-/// The source port as a u16 value.
 #[inline]
 pub fn src_port(src: SrcPort) -> u16 {
     u16::from_be_bytes(src)
 }
 
 /// Returns the destination port number.
-///
 /// This method converts the destination port from network byte order (big-endian)
 /// to host byte order.
-///
-/// # Returns
-/// The destination port as a u16 value.
 #[inline]
 pub fn dst_port(dst: DstPort) -> u16 {
     u16::from_be_bytes(dst)
 }
 
 /// Returns the length of the UDP datagram in bytes.
-///
 /// The length includes both the UDP header (8 bytes) and the UDP payload.
 /// This method converts the length from network byte order (big-endian)
 /// to host byte order.
-///
-/// # Returns
-/// The length as a u16 value.
 #[inline]
 pub fn len(len: Len) -> u16 {
     u16::from_be_bytes(len)
 }
 
 /// Returns true if the UDP length field is zero.
-///
 /// A zero length indicates an invalid or empty UDP datagram, as the minimum valid length
 /// is 8 bytes (the size of the UDP header).
-///
-/// # Returns
-/// `true` if length is zero, `false` otherwise.
 pub fn is_empty(len: Len) -> bool {
     len == [0, 0]
 }
 
 /// Returns the UDP checksum.
-///
 /// The checksum is calculated over the UDP header, the UDP payload, and a pseudo-header
 /// derived from the IP header. This method converts the checksum from network byte order
 /// (big-endian) to host byte order.
-///
-/// # Returns
-/// The checksum as a u16 value.
 #[inline]
 pub fn checksum(check: Checksum) -> u16 {
     u16::from_be_bytes(check)
