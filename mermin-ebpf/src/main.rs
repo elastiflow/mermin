@@ -19,7 +19,7 @@ use network_types::{
     fragment::FragmentHdr,
     geneve::{self, GENEVE_LEN},
     gre::{GreHdr, GreRoutingHeader},
-    hip::HipHdr,
+    hip::{self, HIP_LEN},
     hop::HopOptHdr,
     icmp::IcmpHdr,
     ip::{
@@ -87,7 +87,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
     // Information for building flow records (prioritizes innermost headers).
     // These fields will be updated as we parse deeper or encounter encapsulations.
     let mut parser = Parser::default();
-    let options = ParserOptions::default();
+    let _options = ParserOptions::default();
     let mut found_tunnel = false;
 
     // Get PacketMeta from PerCpuArray instead of using local variables
@@ -246,7 +246,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             // HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
             // HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx),
             // HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx),
-            // HeaderType::Proto(IpProto::Hip) => parser.parse_hip_header(&ctx),
+            HeaderType::Proto(IpProto::Hip) => parser.parse_hip_header(&ctx, meta),
             HeaderType::Proto(IpProto::Shim6) => parser.parse_shim6_header(&ctx, meta),
             HeaderType::Proto(_) => {
                 break;
@@ -433,7 +433,7 @@ impl Parser {
 
     /// Parses the VXLAN header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_vxlan_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
+    fn parse_vxlan_header(&mut self, ctx: &TcContext, _meta: &mut PacketMeta) -> Result<(), Error> {
         if self.offset + VXLAN_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
@@ -765,14 +765,19 @@ impl Parser {
 
     /// Parses the HIP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_hip_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        if self.offset + HipHdr::LEN > ctx.len() as usize {
+    fn parse_hip_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
+        if self.offset + HIP_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
-        let hip_hdr: HipHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += hip_hdr.total_hdr_len();
-        self.next_hdr = HeaderType::Proto(hip_hdr.next_hdr);
+        meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        let hdr_ext_len: u8 = ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
+        let total_hdr_len = hip::total_hdr_len(hdr_ext_len);
+        self.offset += total_hdr_len;
+        if self.offset > ctx.len() as usize {
+            return Err(Error::OutOfBounds);
+        }
+        self.next_hdr = HeaderType::Proto(meta.proto);
 
         Ok(())
     }
