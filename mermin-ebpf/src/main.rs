@@ -21,7 +21,7 @@ use network_types::{
     gre::{GreHdr, GreRoutingHeader},
     hip::{self, HIP_LEN},
     hop::HopOptHdr,
-    icmp::IcmpHdr,
+    icmp::ICMP_LEN,
     ip::{
         IpProto,
         ipv4::{self, IPV4_LEN},
@@ -211,8 +211,8 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             // HeaderType::Wireguard => parser.parse_wireguard_header(&ctx),
             // HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(&ctx),
             // HeaderType::Proto(IpProto::Gre) => parser.parse_gre_header(&ctx),
-            // HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx, meta),
-            // HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx, meta),
+            HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx, meta),
+            HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx, meta),
             // HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx, meta),
             // HeaderType::Proto(IpProto::Udp) => parser
             //     .parse_udp_header(
@@ -612,16 +612,15 @@ impl Parser {
     /// Returns an error if the header cannot be loaded.
     /// Note: ICMP does not use ports, so src_port and dst_port remain zero.
     fn parse_icmp_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
-        if self.offset + IcmpHdr::LEN > ctx.len() as usize {
+        if self.offset + ICMP_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
-        let icmp_hdr: IcmpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += IcmpHdr::LEN;
-        self.next_hdr = HeaderType::StopProcessing;
+        meta.icmp_type_id = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        meta.icmp_code_id = ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
 
-        meta.icmp_type_id = icmp_hdr._type;
-        meta.icmp_code_id = icmp_hdr.code;
+        self.offset += ICMP_LEN;
+        self.next_hdr = HeaderType::StopProcessing;
 
         Ok(())
     }
