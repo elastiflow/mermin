@@ -27,7 +27,7 @@ use network_types::{
         ipv4::{self, IPV4_LEN},
         ipv6::{self, IPV6_LEN},
     },
-    mobility::MobilityHdr,
+    mobility::{self, MOBILITY_LEN},
     route::{GenericRoute, RoutingHeaderType},
     shim6::{self, SHIM6_LEN},
     tcp::TcpHdr,
@@ -181,7 +181,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             // HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
             // HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
             // HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx),
-            HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx),
+            HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx, meta),
             HeaderType::Proto(IpProto::Hip) => parser.parse_hip_header(&ctx, meta),
             HeaderType::Proto(IpProto::Shim6) => parser.parse_shim6_header(&ctx, meta),
             HeaderType::Proto(_) => {
@@ -771,14 +771,21 @@ impl Parser {
 
     /// Parses the IPv6 Mobility header and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_mobility_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        if self.offset + MobilityHdr::LEN > ctx.len() as usize {
+    fn parse_mobility_header(
+        &mut self,
+        ctx: &TcContext,
+        meta: &mut PacketMeta,
+    ) -> Result<(), Error> {
+        if self.offset + MOBILITY_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
-        let mob_hdr: MobilityHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += mob_hdr.total_hdr_len();
-        self.next_hdr = HeaderType::Proto(mob_hdr.next_hdr);
+        meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        let hdr_ext_len: mobility::HdrExtLen =
+            ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
+
+        self.offset += mobility::total_hdr_len(hdr_ext_len);
+        self.next_hdr = HeaderType::Proto(meta.proto);
 
         Ok(())
     }
