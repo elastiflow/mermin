@@ -1,58 +1,174 @@
+//! TCP header, which is present after the IP header.
+//!    0                   1                   2                   3
+//!    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//!   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!   |          Source Port          |       Destination Port        |
+//!   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!   |                        Sequence Number                        |
+//!   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!   |                    Acknowledgment Number                      |
+//!   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!   |  Data |     |N|C|E|U|A|P|R|S|F|                               |
+//!   | Offset| Rsrv|S|R|C|R|C|S|S|Y|I|            Window             |
+//!   |       |     | |W|E|G|K|H|T|N|N|                               |
+//!   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!   |           Checksum            |         Urgent Pointer        |
+//!   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!   |                            Options                            |
+//!   /                              ...                              /
+//!   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!   |                            Padding                            |
+//!   /                              ...                              /
+//!   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!   |                             data                              |
+//!   /                              ...                              /
+//!   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!
+//! This struct represents the Transmission Control Protocol (TCP) header as defined in RFC 793.
+//! The TCP header is 20 bytes long (without options) and contains various fields for connection
+//! management, flow control, and reliability.
+//! All fields are stored in network byte order (big-endian).
+//!
 use core::mem;
 
-/// TCP header, which is present after the IP header.
-///    0                   1                   2                   3
-///    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///   |          Source Port          |       Destination Port        |
-///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///   |                        Sequence Number                        |
-///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///   |                    Acknowledgment Number                      |
-///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///   |  Data |     |N|C|E|U|A|P|R|S|F|                               |
-///   | Offset| Rsrv|S|R|C|R|C|S|S|Y|I|            Window             |
-///   |       |     | |W|E|G|K|H|T|N|N|                               |
-///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///   |           Checksum            |         Urgent Pointer        |
-///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///   |                            Options                            |
-///   /                              ...                              /
-///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///   |                            Padding                            |
-///   /                              ...                              /
-///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///   |                             data                              |
-///   /                              ...                              /
-///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///
-/// This struct represents the Transmission Control Protocol (TCP) header as defined in RFC 793.
-/// The TCP header is 20 bytes long (without options) and contains various fields for connection
-/// management, flow control, and reliability.
-/// All fields are stored in network byte order (big-endian).
-///
-/// # Example
-/// ```
-/// use network_types::tcp::TcpHdr;
-///
-/// let mut tcp_header = TcpHdr {
-///     src: [0, 0],
-///     dst: [0, 0],
-///     seq: [0, 0, 0, 0],
-///     ack_seq: [0, 0, 0, 0],
-///     off_res_flags: [0, 0],
-///     window: [0, 0],
-///     check: [0, 0],
-///     urg_ptr: [0, 0],
-/// };
-///
-/// tcp_header.set_src_port(12345);
-/// tcp_header.set_dst_port(80);
-/// tcp_header.set_seq(1000);
-/// tcp_header.set_ack_seq(2000);
-/// tcp_header.set_window(5840);
-/// tcp_header.set_checksum(0); // Checksum calculation would be done separately
-/// ```
+/// The length of the TCP header base structure.
+pub const TCP_LEN: usize = 20;
+
+/// Source port field (16 bits).
+pub type SrcPort = [u8; 2];
+/// Destination port field (16 bits).
+pub type DstPort = [u8; 2];
+/// Sequence number field (32 bits).
+pub type SeqNum = [u8; 4];
+/// Acknowledgment sequence number field (32 bits).
+pub type AckSeq = [u8; 4];
+/// Combined field: Data offset (4 bits), Reserved (3 bits), Flags (9 bits).
+pub type OffResFlags = [u8; 2];
+/// Window size field (16 bits).
+pub type Window = [u8; 2];
+/// Checksum field (16 bits).
+pub type Checksum = [u8; 2];
+/// Urgent pointer field (16 bits).
+pub type UrgPtr = [u8; 2];
+
+/// TCP flag masks
+pub const TCP_FLAG_FIN: u8 = 0x01;
+pub const TCP_FLAG_SYN: u8 = 0x02;
+pub const TCP_FLAG_RST: u8 = 0x04;
+pub const TCP_FLAG_PSH: u8 = 0x08;
+pub const TCP_FLAG_ACK: u8 = 0x10;
+pub const TCP_FLAG_URG: u8 = 0x20;
+pub const TCP_FLAG_ECE: u8 = 0x40;
+pub const TCP_FLAG_CWR: u8 = 0x80;
+
+/// Returns the source port from network byte order.
+#[inline]
+pub fn src_port(src: SrcPort) -> u16 {
+    u16::from_be_bytes(src)
+}
+
+/// Returns the destination port from network byte order.
+#[inline]
+pub fn dst_port(dst: DstPort) -> u16 {
+    u16::from_be_bytes(dst)
+}
+
+/// Returns the sequence number from network byte order.
+#[inline]
+pub fn seq_num(seq: SeqNum) -> u32 {
+    u32::from_be_bytes(seq)
+}
+
+/// Returns the acknowledgment sequence number from network byte order.
+#[inline]
+pub fn ack_seq(ack_seq: AckSeq) -> u32 {
+    u32::from_be_bytes(ack_seq)
+}
+
+/// Returns the window size from network byte order.
+#[inline]
+pub fn window(window: Window) -> u16 {
+    u16::from_be_bytes(window)
+}
+
+/// Returns the checksum from network byte order.
+#[inline]
+pub fn checksum(check: Checksum) -> u16 {
+    u16::from_be_bytes(check)
+}
+
+/// Returns the urgent pointer from network byte order.
+#[inline]
+pub fn urg_ptr(urg_ptr: UrgPtr) -> u16 {
+    u16::from_be_bytes(urg_ptr)
+}
+
+/// Returns the data offset value (header length in 32-bit words).
+#[inline]
+pub fn data_offset(off_res_flags: OffResFlags) -> u8 {
+    (off_res_flags[0] >> 4) & 0x0F
+}
+
+/// Returns the header length in bytes.
+#[inline]
+pub fn header_len(off_res_flags: OffResFlags) -> usize {
+    (data_offset(off_res_flags) as usize) * 4
+}
+
+/// Returns the TCP flags.
+#[inline]
+pub fn tcp_flags(off_res_flags: OffResFlags) -> u8 {
+    off_res_flags[1]
+}
+
+/// Returns true if the FIN flag is set.
+#[inline]
+pub fn fin_flag(off_res_flags: OffResFlags) -> bool {
+    (off_res_flags[1] & TCP_FLAG_FIN) != 0
+}
+
+/// Returns true if the SYN flag is set.
+#[inline]
+pub fn syn_flag(off_res_flags: OffResFlags) -> bool {
+    (off_res_flags[1] & TCP_FLAG_SYN) != 0
+}
+
+/// Returns true if the RST flag is set.
+#[inline]
+pub fn rst_flag(off_res_flags: OffResFlags) -> bool {
+    (off_res_flags[1] & TCP_FLAG_RST) != 0
+}
+
+/// Returns true if the PSH flag is set.
+#[inline]
+pub fn psh_flag(off_res_flags: OffResFlags) -> bool {
+    (off_res_flags[1] & TCP_FLAG_PSH) != 0
+}
+
+/// Returns true if the ACK flag is set.
+#[inline]
+pub fn ack_flag(off_res_flags: OffResFlags) -> bool {
+    (off_res_flags[1] & TCP_FLAG_ACK) != 0
+}
+
+/// Returns true if the URG flag is set.
+#[inline]
+pub fn urg_flag(off_res_flags: OffResFlags) -> bool {
+    (off_res_flags[1] & TCP_FLAG_URG) != 0
+}
+
+/// Returns true if the ECE flag is set.
+#[inline]
+pub fn ece_flag(off_res_flags: OffResFlags) -> bool {
+    (off_res_flags[1] & TCP_FLAG_ECE) != 0
+}
+
+/// Returns true if the CWR flag is set.
+#[inline]
+pub fn cwr_flag(off_res_flags: OffResFlags) -> bool {
+    (off_res_flags[1] & TCP_FLAG_CWR) != 0
+}
+
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
 pub struct TcpHdr {
@@ -73,17 +189,6 @@ pub struct TcpHdr {
     /// Urgent pointer in network byte order (big-endian)
     pub urg_ptr: [u8; 2],
 }
-
-// Associated constants for TCP flags
-// These would typically be part of the `impl TcpHdr` block.
-const TCP_FLAG_FIN: u8 = 0x01;
-const TCP_FLAG_SYN: u8 = 0x02;
-const TCP_FLAG_RST: u8 = 0x04;
-const TCP_FLAG_PSH: u8 = 0x08;
-const TCP_FLAG_ACK: u8 = 0x10;
-const TCP_FLAG_URG: u8 = 0x20;
-const TCP_FLAG_ECE: u8 = 0x40;
-const TCP_FLAG_CWR: u8 = 0x80;
 
 impl TcpHdr {
     /// The size of the TCP header in bytes (8 bytes).
@@ -818,5 +923,213 @@ mod test {
         tcp_hdr.set_urg_ptr(u16::MAX);
         assert_eq!(tcp_hdr.urg_ptr(), u16::MAX);
         assert_eq!(tcp_hdr.urg_ptr, [0xFF, 0xFF]);
+    }
+
+    #[test]
+    fn test_tcp_len_constant() {
+        assert_eq!(TCP_LEN, 20);
+    }
+
+    #[test]
+    fn test_public_type_aliases() {
+        // Test SrcPort type alias
+        let src_port: SrcPort = [0x12, 0x34];
+        assert_eq!(src_port, [0x12, 0x34]);
+
+        // Test DstPort type alias
+        let dst_port: DstPort = [0x56, 0x78];
+        assert_eq!(dst_port, [0x56, 0x78]);
+
+        // Test SeqNum type alias
+        let seq_num: SeqNum = [0x12, 0x34, 0x56, 0x78];
+        assert_eq!(seq_num, [0x12, 0x34, 0x56, 0x78]);
+
+        // Test AckSeq type alias
+        let ack_seq: AckSeq = [0x87, 0x65, 0x43, 0x21];
+        assert_eq!(ack_seq, [0x87, 0x65, 0x43, 0x21]);
+
+        // Test OffResFlags type alias
+        let off_res_flags: OffResFlags = [0x50, 0x18]; // Data offset 5, ACK+PSH flags
+        assert_eq!(off_res_flags, [0x50, 0x18]);
+
+        // Test Window type alias
+        let window: Window = [0x20, 0x00];
+        assert_eq!(window, [0x20, 0x00]);
+
+        // Test Checksum type alias
+        let checksum: Checksum = [0x12, 0x34];
+        assert_eq!(checksum, [0x12, 0x34]);
+
+        // Test UrgPtr type alias
+        let urg_ptr: UrgPtr = [0x00, 0x00];
+        assert_eq!(urg_ptr, [0x00, 0x00]);
+    }
+
+    #[test]
+    fn test_public_field_helper_functions() {
+        // Test src_port function
+        let src_port: SrcPort = [0x12, 0x34];
+        assert_eq!(src_port(src_port), 0x1234);
+
+        // Test dst_port function
+        let dst_port: DstPort = [0x56, 0x78];
+        assert_eq!(dst_port(dst_port), 0x5678);
+
+        // Test seq_num function
+        let seq_num: SeqNum = [0x12, 0x34, 0x56, 0x78];
+        assert_eq!(seq_num(seq_num), 0x12345678);
+
+        // Test ack_seq function
+        let ack_seq: AckSeq = [0x87, 0x65, 0x43, 0x21];
+        assert_eq!(ack_seq(ack_seq), 0x87654321);
+
+        // Test window function
+        let window: Window = [0x20, 0x00];
+        assert_eq!(window(window), 0x2000);
+
+        // Test checksum function
+        let checksum: Checksum = [0x12, 0x34];
+        assert_eq!(checksum(checksum), 0x1234);
+
+        // Test urg_ptr function
+        let urg_ptr: UrgPtr = [0x00, 0x00];
+        assert_eq!(urg_ptr(urg_ptr), 0x0000);
+    }
+
+    #[test]
+    fn test_public_off_res_flags_helper_functions() {
+        // Test data_offset function
+        let off_res_flags: OffResFlags = [0x50, 0x00]; // Data offset 5
+        assert_eq!(data_offset(off_res_flags), 5);
+
+        // Test header_len function
+        let off_res_flags: OffResFlags = [0x50, 0x00]; // Data offset 5
+        assert_eq!(header_len(off_res_flags), 20);
+
+        // Test tcp_flags function
+        let off_res_flags: OffResFlags = [0x50, 0x18]; // ACK+PSH flags
+        assert_eq!(tcp_flags(off_res_flags), 0x18);
+    }
+
+    #[test]
+    fn test_public_flag_helper_functions() {
+        // Test FIN flag
+        let off_res_flags: OffResFlags = [0x50, 0x01]; // FIN flag set
+        assert_eq!(fin_flag(off_res_flags), true);
+
+        let off_res_flags: OffResFlags = [0x50, 0x00]; // No flags set
+        assert_eq!(fin_flag(off_res_flags), false);
+
+        // Test SYN flag
+        let off_res_flags: OffResFlags = [0x50, 0x02]; // SYN flag set
+        assert_eq!(syn_flag(off_res_flags), true);
+
+        let off_res_flags: OffResFlags = [0x50, 0x00]; // No flags set
+        assert_eq!(syn_flag(off_res_flags), false);
+
+        // Test RST flag
+        let off_res_flags: OffResFlags = [0x50, 0x04]; // RST flag set
+        assert_eq!(rst_flag(off_res_flags), true);
+
+        let off_res_flags: OffResFlags = [0x50, 0x00]; // No flags set
+        assert_eq!(rst_flag(off_res_flags), false);
+
+        // Test PSH flag
+        let off_res_flags: OffResFlags = [0x50, 0x08]; // PSH flag set
+        assert_eq!(psh_flag(off_res_flags), true);
+
+        let off_res_flags: OffResFlags = [0x50, 0x00]; // No flags set
+        assert_eq!(psh_flag(off_res_flags), false);
+
+        // Test ACK flag
+        let off_res_flags: OffResFlags = [0x50, 0x10]; // ACK flag set
+        assert_eq!(ack_flag(off_res_flags), true);
+
+        let off_res_flags: OffResFlags = [0x50, 0x00]; // No flags set
+        assert_eq!(ack_flag(off_res_flags), false);
+
+        // Test URG flag
+        let off_res_flags: OffResFlags = [0x50, 0x20]; // URG flag set
+        assert_eq!(urg_flag(off_res_flags), true);
+
+        let off_res_flags: OffResFlags = [0x50, 0x00]; // No flags set
+        assert_eq!(urg_flag(off_res_flags), false);
+
+        // Test ECE flag
+        let off_res_flags: OffResFlags = [0x50, 0x40]; // ECE flag set
+        assert_eq!(ece_flag(off_res_flags), true);
+
+        let off_res_flags: OffResFlags = [0x50, 0x00]; // No flags set
+        assert_eq!(ece_flag(off_res_flags), false);
+
+        // Test CWR flag
+        let off_res_flags: OffResFlags = [0x50, 0x80]; // CWR flag set
+        assert_eq!(cwr_flag(off_res_flags), true);
+
+        let off_res_flags: OffResFlags = [0x50, 0x00]; // No flags set
+        assert_eq!(cwr_flag(off_res_flags), false);
+
+        // Test multiple flags
+        let off_res_flags: OffResFlags = [0x50, 0xFF]; // All flags set
+        assert_eq!(fin_flag(off_res_flags), true);
+        assert_eq!(syn_flag(off_res_flags), true);
+        assert_eq!(rst_flag(off_res_flags), true);
+        assert_eq!(psh_flag(off_res_flags), true);
+        assert_eq!(ack_flag(off_res_flags), true);
+        assert_eq!(urg_flag(off_res_flags), true);
+        assert_eq!(ece_flag(off_res_flags), true);
+        assert_eq!(cwr_flag(off_res_flags), true);
+    }
+
+    #[test]
+    fn test_flag_masks_are_public() {
+        // Test that flag masks are accessible
+        assert_eq!(TCP_FLAG_FIN, 0x01);
+        assert_eq!(TCP_FLAG_SYN, 0x02);
+        assert_eq!(TCP_FLAG_RST, 0x04);
+        assert_eq!(TCP_FLAG_PSH, 0x08);
+        assert_eq!(TCP_FLAG_ACK, 0x10);
+        assert_eq!(TCP_FLAG_URG, 0x20);
+        assert_eq!(TCP_FLAG_ECE, 0x40);
+        assert_eq!(TCP_FLAG_CWR, 0x80);
+    }
+
+    #[test]
+    fn test_public_functions_consistency_with_struct_methods() {
+        // Test that public functions match struct methods
+        let tcp_hdr = TcpHdr {
+            src: [0x12, 0x34],
+            dst: [0x56, 0x78],
+            seq: [0x12, 0x34, 0x56, 0x78],
+            ack_seq: [0x87, 0x65, 0x43, 0x21],
+            off_res_flags: [0x50, 0x18], // Data offset 5, ACK+PSH flags
+            window: [0x20, 0x00],
+            check: [0x12, 0x34],
+            urg_ptr: [0x00, 0x00],
+        };
+
+        // Test field consistency
+        assert_eq!(src_port(tcp_hdr.src), tcp_hdr.src_port());
+        assert_eq!(dst_port(tcp_hdr.dst), tcp_hdr.dst_port());
+        assert_eq!(seq_num(tcp_hdr.seq), tcp_hdr.seq());
+        assert_eq!(ack_seq(tcp_hdr.ack_seq), tcp_hdr.ack_seq());
+        assert_eq!(window(tcp_hdr.window), tcp_hdr.window());
+        assert_eq!(checksum(tcp_hdr.check), tcp_hdr.checksum());
+        assert_eq!(urg_ptr(tcp_hdr.urg_ptr), tcp_hdr.urg_ptr());
+
+        // Test off_res_flags consistency
+        assert_eq!(data_offset(tcp_hdr.off_res_flags), tcp_hdr.data_offset());
+        assert_eq!(header_len(tcp_hdr.off_res_flags), tcp_hdr.header_len());
+        assert_eq!(tcp_flags(tcp_hdr.off_res_flags), tcp_hdr.tcp_flags());
+
+        // Test flag consistency
+        assert_eq!(fin_flag(tcp_hdr.off_res_flags), tcp_hdr.fin());
+        assert_eq!(syn_flag(tcp_hdr.off_res_flags), tcp_hdr.syn());
+        assert_eq!(rst_flag(tcp_hdr.off_res_flags), tcp_hdr.rst());
+        assert_eq!(psh_flag(tcp_hdr.off_res_flags), tcp_hdr.psh());
+        assert_eq!(ack_flag(tcp_hdr.off_res_flags), tcp_hdr.ack());
+        assert_eq!(urg_flag(tcp_hdr.off_res_flags), tcp_hdr.urg());
+        assert_eq!(ece_flag(tcp_hdr.off_res_flags), tcp_hdr.ece());
+        assert_eq!(cwr_flag(tcp_hdr.off_res_flags), tcp_hdr.cwr());
     }
 }

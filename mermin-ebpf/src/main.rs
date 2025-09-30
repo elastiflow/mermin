@@ -30,7 +30,7 @@ use network_types::{
     mobility::{self, MOBILITY_LEN},
     route::{GenericRoute, RoutingHeaderType},
     shim6::{self, SHIM6_LEN},
-    tcp::TcpHdr,
+    tcp::{self, TCP_LEN},
     udp::UdpHdr,
     vxlan::{self, VXLAN_LEN},
     wireguard::{
@@ -149,7 +149,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx, meta),
             HeaderType::Proto(IpProto::Ipv4) => parser.parse_ipv4_header(&ctx, meta),
             HeaderType::Proto(IpProto::Ipv6) => parser.parse_ipv6_header(&ctx, meta),
-            // HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx, meta),
+            HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx, meta),
             // HeaderType::Proto(IpProto::Udp) => parser
             //     .parse_udp_header(
             //         &ctx,
@@ -654,17 +654,15 @@ impl Parser {
     /// Parses the TCP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
     fn parse_tcp_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
-        if self.offset + TcpHdr::LEN > ctx.len() as usize {
+        if self.offset + TCP_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
-        let tcp_hdr: TcpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += TcpHdr::LEN;
+        meta.src_port = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        meta.dst_port = ctx.load(self.offset + 2).map_err(|_| Error::OutOfBounds)?;
+        meta.tcp_flags = ctx.load(self.offset + 12).map_err(|_| Error::OutOfBounds)?;
+        self.offset += TCP_LEN;
         self.next_hdr = HeaderType::StopProcessing;
-
-        meta.src_port = tcp_hdr.src;
-        meta.dst_port = tcp_hdr.dst;
-        meta.tcp_flags = tcp_hdr.tcp_flags();
 
         Ok(())
     }
