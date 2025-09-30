@@ -1,17 +1,17 @@
-/// Ethernet header structure that appears at the beginning of every Ethernet frame.
-///
-/// This structure represents the standard IEEE 802.3 Ethernet header format.
-///  0                   1                   2                   3
-///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  |                     destination_mac_addr                      |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  | destination_mac_addr (con't)  |        source_mac_addr        |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  |                    source_mac_addr (con't)                    |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  |           eth_type            |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! Ethernet header structure that appears at the beginning of every Ethernet frame.
+//!
+//! This structure represents the standard IEEE 802.3 Ethernet header format.
+//!  0                   1                   2                   3
+//!  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  |                     destination_mac_addr                      |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  | destination_mac_addr (con't)  |        source_mac_addr        |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  |                    source_mac_addr (con't)                    |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  |           eth_type            |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 /// The length of the Ethernet header.
 pub const ETH_LEN: usize = 14;

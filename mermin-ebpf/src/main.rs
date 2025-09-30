@@ -15,24 +15,24 @@ use network_types::{
     ah::AuthHdr,
     destopts::DestOptsHdr,
     esp::Esp,
-    eth::{ETH_LEN, EtherType, SrcMacAddr},
+    eth::{ETH_LEN, EtherType},
     fragment::FragmentHdr,
-    geneve::{self, GENEVE_LEN, GeneveHdr},
+    geneve::{self, GENEVE_LEN},
     gre::{GreHdr, GreRoutingHeader},
     hip::HipHdr,
     hop::HopOptHdr,
     icmp::IcmpHdr,
     ip::{
         IpProto,
-        ipv4::{self, DscpEcn, IPV4_LEN, Vihl, ihl},
-        ipv6::{self, IPV6_LEN, Vcf},
+        ipv4::{self, IPV4_LEN},
+        ipv6::{self, IPV6_LEN},
     },
     mobility::MobilityHdr,
     route::{GenericRoute, RoutingHeaderType},
     shim6,
     tcp::TcpHdr,
     udp::UdpHdr,
-    vxlan::VxlanHdr,
+    vxlan::{self, VXLAN_LEN},
     wireguard::{
         WireGuardCookieReply, WireGuardInitiation, WireGuardResponse, WireGuardTransportData,
         WireGuardType,
@@ -189,7 +189,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
                 meta.icmp_code_id = 0;
                 meta.tcp_flags = 0;
             }),
-            HeaderType::Vxlan => parser.parse_vxlan_header(&ctx).map(|_| {
+            HeaderType::Vxlan => parser.parse_vxlan_header(&ctx, meta).map(|_| {
                 // Reset inner headers to prepare for parsing encapsulated packet
                 meta.src_ipv6_addr = [0; 16];
                 meta.dst_ipv6_addr = [0; 16];
@@ -307,15 +307,11 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let src_mac_addr: SrcMacAddr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += 12;
-        let ether_type: EtherType = ctx.load(self.offset + 12).map_err(|_| Error::OutOfBounds)?;
-        self.offset += 2;
+        meta.src_mac_addr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        meta.ether_type = ctx.load(self.offset + 12).map_err(|_| Error::OutOfBounds)?;
 
-        meta.src_mac_addr = src_mac_addr;
-        meta.ether_type = ether_type;
-
-        self.next_hdr = match ether_type {
+        self.offset += ETH_LEN;
+        self.next_hdr = match meta.ether_type {
             EtherType::Ipv4 => HeaderType::Ipv4,
             EtherType::Ipv6 => HeaderType::Ipv6,
             _ => HeaderType::StopProcessing,
@@ -334,33 +330,24 @@ impl Parser {
         // policy: innermost IP header determines the flow span IPs
         meta.ip_addr_type = IpAddrType::Ipv4;
 
-        let h_len = ihl(ctx
-            .load::<Vihl>(self.offset)
-            .map_err(|_| Error::OutOfBounds)?) as usize;
+        let h_len = ipv4::ihl(
+            ctx.load::<ipv4::Vihl>(self.offset)
+                .map_err(|_| Error::OutOfBounds)?,
+        ) as usize;
         if h_len < IPV4_LEN {
             return Err(Error::MalformedHeader);
         }
-        self.offset += 1; // 1 byte vihl
 
-        let dscp_ecn: DscpEcn = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        let dscp_ecn: ipv4::DscpEcn = ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
         meta.ip_dscp_id = ipv4::dscp(dscp_ecn);
         meta.ip_ecn_id = ipv4::ecn(dscp_ecn);
-        self.offset += 7; // 1 byte dscp/ecn, 2 bytes total length, 2 bytes identification, 2 bytes fragmentation flags
-
-        meta.ip_ttl = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += 1;
-
-        meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += 3; // 1 byte protocol, 2 bytes checksum
-
-        meta.src_ipv4_addr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += 4; // 4 bytes source address
-
-        meta.dst_ipv4_addr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += 4; // 4 bytes destination address
-
+        meta.ip_ttl = ctx.load(self.offset + 8).map_err(|_| Error::OutOfBounds)?;
+        meta.proto = ctx.load(self.offset + 9).map_err(|_| Error::OutOfBounds)?;
+        meta.src_ipv4_addr = ctx.load(self.offset + 12).map_err(|_| Error::OutOfBounds)?;
+        meta.dst_ipv4_addr = ctx.load(self.offset + 16).map_err(|_| Error::OutOfBounds)?;
         meta.l3_octet_count = self.calc_l3_octet_count(ctx.len());
 
+        self.offset += h_len;
         self.next_hdr = match meta.proto {
             IpProto::Icmp
             | IpProto::Tcp
@@ -386,26 +373,18 @@ impl Parser {
 
         // policy: innermost IP header determines the flow span IPs
         meta.ip_addr_type = IpAddrType::Ipv6;
-        let vcf: Vcf = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        let vcf: ipv6::Vcf = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         meta.ip_dscp_id = ipv6::dscp(vcf);
         meta.ip_ecn_id = ipv6::ecn(vcf);
         meta.ip_flow_label = ipv6::flow_label(vcf);
-        self.offset += 6; // 2 bytes version/dscp/ecn, 2 bytes flow label, 2 bytes payload length
-
-        meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += 1;
-
-        meta.ip_ttl = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += 1;
-
-        meta.src_ipv6_addr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += 16;
-
-        meta.dst_ipv6_addr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += 16;
+        meta.proto = ctx.load(self.offset + 6).map_err(|_| Error::OutOfBounds)?;
+        meta.ip_ttl = ctx.load(self.offset + 7).map_err(|_| Error::OutOfBounds)?;
+        meta.src_ipv6_addr = ctx.load(self.offset + 8).map_err(|_| Error::OutOfBounds)?;
+        meta.dst_ipv6_addr = ctx.load(self.offset + 24).map_err(|_| Error::OutOfBounds)?;
 
         meta.l3_octet_count = self.calc_l3_octet_count(ctx.len());
 
+        self.offset += IPV6_LEN;
         self.next_hdr = match meta.proto {
             IpProto::Tcp
             | IpProto::Udp
@@ -438,13 +417,10 @@ impl Parser {
         let ver_opt_len: geneve::VerOptLen =
             ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let total_hdr_len = geneve::total_hdr_len(ver_opt_len);
-        self.offset += 2; // 1 bytes ver_opt_len, 1 bytes o_c_rsvd
-        meta.tunnel_ether_type = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += 2;
+        meta.tunnel_ether_type = ctx.load(self.offset + 2).map_err(|_| Error::OutOfBounds)?;
         // TODO: Set tunnel_id = vni and tunnel_type = geneve on meta
 
-        self.offset += total_hdr_len - 4;
-
+        self.offset += total_hdr_len;
         self.next_hdr = match meta.tunnel_ether_type {
             EtherType::Ethernet => HeaderType::Ethernet,
             EtherType::Ipv4 => HeaderType::Ipv4,
@@ -457,24 +433,21 @@ impl Parser {
 
     /// Parses the VXLAN header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_vxlan_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        if self.offset + VxlanHdr::LEN > ctx.len() as usize {
+    fn parse_vxlan_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
+        if self.offset + VXLAN_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
-        let vxlan_hdr: VxlanHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += VxlanHdr::LEN;
-
-        let flag_byte = vxlan_hdr.flags();
-        let vni_flag = (flag_byte & 0x08) != 0;
-
-        let has_vni = vxlan_hdr.vni() != 0;
-
-        if (vni_flag && !has_vni) || (!vni_flag && has_vni) {
-            self.next_hdr = HeaderType::StopProcessing;
-            return Ok(());
+        let flags: vxlan::Flags = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        if vxlan::flags_i_flag(flags) {
+            // TODO: Set tunnel_id = vni on meta
+            // let vni = vxlan::vni(ctx.load(self.offset + 4).map_err(|_| Error::OutOfBounds)?);
+            // meta.tunnel_id = vni;
         }
+        // TODO: set tunnel_type = vxlan on meta
+        // meta.tunnel_type = TunnelType::Vxlan;
 
+        self.offset += VXLAN_LEN;
         self.next_hdr = HeaderType::Ethernet;
 
         Ok(())
