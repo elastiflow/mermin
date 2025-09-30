@@ -17,7 +17,6 @@ use aya::{
     programs::{SchedClassifier, TcAttachType, tc},
 };
 use mermin_common::{IpAddrType, PacketMeta};
-use opentelemetry_sdk::trace::SdkTracerProvider;
 use pnet::datalink;
 use tokio::{signal, sync::mpsc};
 use tracing::{debug, error, info, warn};
@@ -27,11 +26,12 @@ use crate::{
     health::{HealthState, start_api_server},
     k8s::resource_parser::attribute_flow_span,
     otlp::{
-        opts::{ExporterOptions, resolve_exporters},
-        trace::lib::{TraceExporterAdapter, init_tracer_provider},
+        opts::ExporterOptions,
+        provider::{init_internal_tracing, init_provider},
+        trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
     },
     runtime::conf::Conf,
-    span::{flow::FlowSpanExporter, producer::FlowSpanProducer},
+    span::producer::FlowSpanProducer,
 };
 
 #[tokio::main]
@@ -44,54 +44,39 @@ async fn main() -> Result<()> {
     let runtime = runtime::Runtime::new()?;
     let runtime::Runtime { config, .. } = runtime;
 
-    // Resolve exporters and initialize tracing
-    let (exporter, _provider) = match config.agent.as_ref() {
-        Some(agent_opts) => {
-            let default_exporter_opts = ExporterOptions::default();
-            let exporter_opts = config.exporter.as_ref().unwrap_or(&default_exporter_opts);
-            let (otlp_exporters, stdout_exporters) =
-                resolve_exporters(agent_opts.traces.main.exporters.clone(), exporter_opts)
-                    .map_err(|e| anyhow!("failed to resolve exporters: {e}"))?;
+    let exporter_refs = if let Some(agent_options) = config.agent {
+        agent_options.traces.main.exporters
+    } else {
+        vec![]
+    };
 
-            if !otlp_exporters.is_empty() || !stdout_exporters.is_empty() {
-                info!(
-                    "initializing exporter (otlp: {}, stdout: {})",
-                    otlp_exporters.len(),
-                    stdout_exporters.len()
-                );
-
-                // Initialize tracing with exporters configured
-                let provider = init_tracer_provider(
-                    otlp_exporters.first(),
-                    stdout_exporters.first(),
-                    config.log_level,
-                )
-                .await?;
-
-                let exporter = create_otlp_exporter(provider.clone())
-                    .await
-                    .map_err(|e| {
-                        error!("failed to create exporter adapter: {e}");
-                        e
-                    })
-                    .ok();
-
-                (exporter, provider)
-            } else {
-                warn!("no exporters configured in agent options");
-                let provider = init_tracer_provider(None, None, config.log_level).await?;
-                (None, provider)
-            }
+    let exporter: Arc<dyn TraceableExporter> = match config.exporter {
+        Some(exporter_options) => {
+            let app_tracer_provider = init_provider(&exporter_options, exporter_refs).await?;
+            init_internal_tracing(
+                &exporter_options,
+                config.traces.exporters,
+                config.log_level,
+                config.traces.span_level,
+            )
+            .await?;
+            info!("initialized configured exporters");
+            Arc::new(TraceExporterAdapter::new(app_tracer_provider))
         }
         None => {
-            warn!("no agent options configured, continuing without exporters");
-            let provider = init_tracer_provider(None, None, config.log_level).await?;
-            (None, provider)
+            init_internal_tracing(
+                &ExporterOptions::default(),
+                config.traces.exporters,
+                config.log_level,
+                config.traces.span_level,
+            )
+            .await?;
+            info!("initialized default exporters");
+            Arc::new(NoOpExporterAdapter::default())
         }
     };
 
     let community_id_generator = CommunityIdGenerator::new(0);
-
     // Bump the memlock rlimit. This is needed for older kernels that don't use the
     // new memcg based accounting, see https://lwn.net/Articles/837122/
     let rlim = libc::rlimit {
@@ -312,19 +297,11 @@ async fn main() -> Result<()> {
 
     tokio::spawn(async move {
         while let Some(k8s_attributed_flow_span) = k8s_attributed_flow_span_rx.recv().await {
-            if let Some(ref exporter) = exporter {
-                debug!("exporting flow spans");
-                exporter.export(k8s_attributed_flow_span).await;
-            } else {
-                debug!("skipping export - no exporters available");
-            }
+            let traceable: TraceableRecord = Arc::new(k8s_attributed_flow_span);
+            debug!("exporting flow spans");
+            exporter.export(traceable).await;
         }
         debug!("exporting task exiting");
-        if let Some(ref exporter) = exporter
-            && let Err(e) = exporter.shutdown().await
-        {
-            error!("error during exporters shutdown: {e}");
-        }
     });
 
     println!("waiting for ctrl+c");
@@ -332,14 +309,6 @@ async fn main() -> Result<()> {
     println!("exiting");
 
     Ok(())
-}
-
-async fn create_otlp_exporter(
-    provider: SdkTracerProvider,
-) -> Result<Arc<dyn FlowSpanExporter>, anyhow::Error> {
-    info!("using otlp exporter adapter");
-    let exporter = TraceExporterAdapter::new(provider);
-    Ok(Arc::new(exporter))
 }
 
 /// Helper function to format IP address based on type

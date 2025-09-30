@@ -10,7 +10,7 @@ use figment::{
     Figment,
     providers::{Format, Serialized, Yaml},
 };
-use hcl::{self, eval::Context};
+use hcl::eval::Context;
 use serde::{Deserialize, Serialize};
 use tracing::Level;
 
@@ -19,6 +19,7 @@ use crate::{
     runtime::{
         cli::Cli,
         conf::conf_serde::{duration, level},
+        enums::SpanFmt,
     },
     span::opts::SpanOptions,
 };
@@ -69,6 +70,11 @@ pub struct Conf {
     #[serde(with = "level")]
     pub log_level: Level,
 
+    /// Configuration for application tracing options.
+    /// This field holds settings related to tracing, such as span event levels
+    /// and exporter references
+    pub traces: TracingOptions,
+
     /// Configuration for the API server (health endpoints).
     #[serde(default)]
     pub api: ApiConf,
@@ -112,6 +118,32 @@ pub struct Conf {
     pub exporter: Option<ExporterOptions>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct TracingOptions {
+    /// The level of span events to record. The current default is `FmtSpan::FULL`,
+    /// which records all events (enter, exit, close) for all spans. The level can also be
+    /// one of the following:
+    /// - `SpanFmt::Full`: No span events are recorded.
+    /// - `FmtSpan::ENTER`: Only span enter events are recorded.
+    /// - `FmtSpan::EXIT`: Only span exit events are recorded.
+    /// - `FmtSpan::CLOSE`: Only span close events are recorded.
+    /// - `FmtSpan::ACTIVE`: Only span events for spans that are active (i.e., not closed) are recorded.
+    pub span_level: SpanFmt,
+
+    /// A list of exporter references to use for tracing. Each entry should match a key
+    /// in the `exporter` section of the config.
+    pub exporters: ExporterReferences,
+}
+
+impl Default for TracingOptions {
+    fn default() -> Self {
+        Self {
+            span_level: SpanFmt::Full,
+            exporters: ExporterReferences::new(),
+        }
+    }
+}
+
 impl Default for Conf {
     fn default() -> Self {
         Self {
@@ -127,6 +159,7 @@ impl Default for Conf {
             span: SpanOptions::default(),
             agent: Some(AgentOptions::default()),
             exporter: None,
+            traces: TracingOptions::default(),
         }
     }
 }
@@ -203,7 +236,6 @@ impl Conf {
     /// ```
     pub fn new(cli: Cli) -> Result<(Self, Cli), ConfigError> {
         let mut figment = Figment::new().merge(Serialized::defaults(Conf::default()));
-
         let config_path_to_store = if let Some(config_path) = &cli.config {
             validate_config_path(config_path)?;
             figment = Self::merge_provider_for_path(figment, config_path)?;

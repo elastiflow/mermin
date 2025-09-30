@@ -202,8 +202,7 @@ impl PacketWorker {
     pub async fn run(mut self) {
         while let Some(packet) = self.packet_meta_rx.recv().await {
             let now = SystemTime::now();
-            let duration_since_epoch = now.duration_since(UNIX_EPOCH).expect("time went backwards");
-            let timestamp_nanos = duration_since_epoch.as_nanos() as u64;
+            now.duration_since(UNIX_EPOCH).expect("time went backwards");
 
             let (src_addr, dst_addr) = Self::extract_ip_addresses(
                 packet.ip_addr_type,
@@ -239,8 +238,8 @@ impl PacketWorker {
             let is_tcp = packet.proto == IpProto::Tcp;
 
             let attrs = FlowSpan {
-                start_time: timestamp_nanos,
-                end_time: 0,
+                start_time: now,
+                end_time: UNIX_EPOCH,
                 span_kind: SpanKind::Internal,
                 attributes: SpanAttributes {
                     // General flow attributes
