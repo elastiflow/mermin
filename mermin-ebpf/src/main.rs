@@ -12,10 +12,10 @@ use aya_ebpf::{
 use aya_log_ebpf::error;
 use mermin_common::{Direction, IpAddrType, PacketMeta, TunnelType};
 use network_types::{
-    ah::{self, AH_LEN, AuthHdr},
+    ah::{self, AH_LEN},
     destopts::{self},
     esp::Esp,
-    eth::{ETH_LEN, EtherType},
+    eth::{EtherType, ETH_LEN},
     fragment::FragmentHdr,
     geneve::{self, GENEVE_LEN},
     gre::{self, GRE_LEN, GRE_ROUTING_LEN},
@@ -23,19 +23,16 @@ use network_types::{
     hop::{self, HOP_OPT_LEN},
     icmp::ICMP_LEN,
     ip::{
-        IpProto,
-        ipv4::{self, IPV4_LEN},
-        ipv6::{self, IPV6_LEN},
+        ipv4::{self, IPV4_LEN}, ipv6::{self, IPV6_LEN}, IpProto
     },
     mobility::{self, MOBILITY_LEN},
-    route::{GenericRoute, RoutingHeaderType},
+    route::{self, RoutingHeaderType, GENERIC_ROUTE_LEN},
     shim6::{self, SHIM6_LEN},
     tcp::{self, TCP_LEN},
     udp::{self, UDP_LEN},
     vxlan::{self, VXLAN_LEN},
     wireguard::{
-        WIREGUARD_COOKIE_REPLY_LEN, WIREGUARD_INITIATION_LEN, WIREGUARD_RESPONSE_LEN,
-        WIREGUARD_TRANSPORT_DATA_LEN, WireGuardType,
+        WireGuardType, WIREGUARD_COOKIE_REPLY_LEN, WIREGUARD_INITIATION_LEN, WIREGUARD_RESPONSE_LEN, WIREGUARD_TRANSPORT_DATA_LEN
     },
 };
 
@@ -154,10 +151,10 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             HeaderType::Proto(IpProto::Ipv6) => parser.parse_ipv6_header(&ctx, meta),
             HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx, meta),
             HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx, meta),
-            // HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_route_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_route_header(&ctx),
             // HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
             // HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
-            HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
+            HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx, meta),
             HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx, meta),
             HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx, meta),
             HeaderType::Proto(IpProto::Hip) => parser.parse_hip_header(&ctx, meta),
@@ -714,12 +711,11 @@ impl Parser {
     /// Parses the IPv6 routing header in the packet and dispatches to the appropriate specific parser.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_generic_route_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        if self.offset + GenericRoute::LEN > ctx.len() as usize {
+        if self.offset + GENERIC_ROUTE_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
-        let gen_hdr: GenericRoute = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += gen_hdr.total_hdr_len();
-        self.next_hdr = HeaderType::Route(gen_hdr.type_);
+        self.next_hdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += route::total_hdr_len(ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?);
 
         Ok(())
     }
