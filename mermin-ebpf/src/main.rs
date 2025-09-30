@@ -17,7 +17,7 @@ use network_types::{
     esp::Esp,
     eth::{ETH_LEN, EtherType, SrcMacAddr},
     fragment::FragmentHdr,
-    geneve::GeneveHdr,
+    geneve::{self, GENEVE_LEN, GeneveHdr},
     gre::{GreHdr, GreRoutingHeader},
     hip::HipHdr,
     hop::HopOptHdr,
@@ -112,6 +112,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
     meta.src_ipv4_addr = [0; 4];
     meta.dst_ipv4_addr = [0; 4];
     meta.l3_octet_count = 0;
+    meta.ether_type = EtherType::default();
     meta.src_port = [0; 2];
     meta.dst_port = [0; 2];
     meta.ip_addr_type = IpAddrType::default();
@@ -129,6 +130,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
     meta.tunnel_dst_ipv6_addr = [0; 16];
     meta.tunnel_src_ipv4_addr = [0; 4];
     meta.tunnel_dst_ipv4_addr = [0; 4];
+    meta.tunnel_ether_type = EtherType::default();
     meta.tunnel_src_port = [0; 2];
     meta.tunnel_dst_port = [0; 2];
     meta.tunnel_ip_addr_type = IpAddrType::default();
@@ -148,6 +150,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
                     meta.tunnel_dst_port = meta.dst_port;
                     meta.tunnel_ip_addr_type = IpAddrType::Ipv4;
                     meta.tunnel_proto = meta.proto;
+                    // TODO: Set tunnel_type = ipip
                     found_tunnel = true;
                 }
             }),
@@ -162,46 +165,49 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
                     meta.tunnel_dst_port = meta.dst_port;
                     meta.tunnel_ip_addr_type = IpAddrType::Ipv6;
                     meta.tunnel_proto = meta.proto;
+                    // TODO: Set tunnel_type = ipv6
                     found_tunnel = true;
                 }
             }),
-            // HeaderType::Geneve => parser.parse_geneve_header(&ctx).map(|_| {
-            //     // Reset inner headers to prepare for parsing encapsulated packet
-            //     meta.src_mac_addr = [0; 6];
-            //     meta.src_ipv6_addr = [0; 16];
-            //     meta.dst_ipv6_addr = [0; 16];
-            //     meta.src_ipv4_addr = [0; 4];
-            //     meta.dst_ipv4_addr = [0; 4];
-            //     meta.src_port = [0; 2];
-            //     meta.dst_port = [0; 2];
-            //     meta.ip_addr_type = IpAddrType::default();
-            //     meta.proto = IpProto::default();
-            //     meta.ip_dscp_id = 0;
-            //     meta.ip_ecn_id = 0;
-            //     meta.ip_ttl = 0;
-            //     meta.ip_flow_label = 0;
-            //     meta.icmp_type_id = 0;
-            //     meta.icmp_code_id = 0;
-            //     meta.tcp_flags = 0;
-            // }),
-            // HeaderType::Vxlan => parser.parse_vxlan_header(&ctx).map(|_| {
-            //     // Reset inner headers to prepare for parsing encapsulated packet
-            //     meta.src_ipv6_addr = [0; 16];
-            //     meta.dst_ipv6_addr = [0; 16];
-            //     meta.src_ipv4_addr = [0; 4];
-            //     meta.dst_ipv4_addr = [0; 4];
-            //     meta.src_port = [0; 2];
-            //     meta.dst_port = [0; 2];
-            //     meta.ip_addr_type = IpAddrType::default();
-            //     meta.proto = IpProto::default();
-            //     meta.ip_dscp_id = 0;
-            //     meta.ip_ecn_id = 0;
-            //     meta.ip_ttl = 0;
-            //     meta.ip_flow_label = 0;
-            //     meta.icmp_type_id = 0;
-            //     meta.icmp_code_id = 0;
-            //     meta.tcp_flags = 0;
-            // }),
+            HeaderType::Geneve => parser.parse_geneve_header(&ctx, meta).map(|_| {
+                // Reset inner headers to prepare for parsing encapsulated packet
+                meta.src_mac_addr = [0; 6];
+                meta.src_ipv6_addr = [0; 16];
+                meta.dst_ipv6_addr = [0; 16];
+                meta.src_ipv4_addr = [0; 4];
+                meta.dst_ipv4_addr = [0; 4];
+                meta.ether_type = EtherType::default();
+                meta.src_port = [0; 2];
+                meta.dst_port = [0; 2];
+                meta.ip_addr_type = IpAddrType::default();
+                meta.proto = IpProto::default();
+                meta.ip_dscp_id = 0;
+                meta.ip_ecn_id = 0;
+                meta.ip_ttl = 0;
+                meta.ip_flow_label = 0;
+                meta.icmp_type_id = 0;
+                meta.icmp_code_id = 0;
+                meta.tcp_flags = 0;
+            }),
+            HeaderType::Vxlan => parser.parse_vxlan_header(&ctx).map(|_| {
+                // Reset inner headers to prepare for parsing encapsulated packet
+                meta.src_ipv6_addr = [0; 16];
+                meta.dst_ipv6_addr = [0; 16];
+                meta.src_ipv4_addr = [0; 4];
+                meta.dst_ipv4_addr = [0; 4];
+                meta.ether_type = EtherType::default();
+                meta.src_port = [0; 2];
+                meta.dst_port = [0; 2];
+                meta.ip_addr_type = IpAddrType::default();
+                meta.proto = IpProto::default();
+                meta.ip_dscp_id = 0;
+                meta.ip_ecn_id = 0;
+                meta.ip_ttl = 0;
+                meta.ip_flow_label = 0;
+                meta.icmp_type_id = 0;
+                meta.icmp_code_id = 0;
+                meta.tcp_flags = 0;
+            }),
             // HeaderType::Wireguard => parser.parse_wireguard_header(&ctx),
             // HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(&ctx),
             // HeaderType::Proto(IpProto::Gre) => parser.parse_gre_header(&ctx),
@@ -424,31 +430,27 @@ impl Parser {
 
     /// Parses the Geneve header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_geneve_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
-        if self.offset + GeneveHdr::LEN > ctx.len() as usize {
+    fn parse_geneve_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
+        if self.offset + GENEVE_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
-        let geneve_hdr: GeneveHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += geneve_hdr.total_hdr_len();
+        let ver_opt_len: geneve::VerOptLen =
+            ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        let total_hdr_len = geneve::total_hdr_len(ver_opt_len);
+        self.offset += 2; // 1 bytes ver_opt_len, 1 bytes o_c_rsvd
+        meta.tunnel_ether_type = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        self.offset += 2;
+        // TODO: Set tunnel_id = vni and tunnel_type = geneve on meta
 
-        // Current version is 0. Packets with unknown version must be skipped
-        let version = geneve_hdr.ver();
-        if version != 0 {
-            self.next_hdr = HeaderType::StopProcessing;
-            return Ok(());
-        }
+        self.offset += total_hdr_len - 4;
 
-        let protocol_type = geneve_hdr.protocol_type();
-        match protocol_type {
-            0x6558 => self.next_hdr = HeaderType::Ethernet,
-            0x0800 => self.next_hdr = HeaderType::Ipv4,
-            0x86DD => self.next_hdr = HeaderType::Ipv6,
-            _ => {
-                self.next_hdr = HeaderType::StopProcessing;
-                return Ok(());
-            }
-        }
+        self.next_hdr = match meta.tunnel_ether_type {
+            EtherType::Ethernet => HeaderType::Ethernet,
+            EtherType::Ipv4 => HeaderType::Ipv4,
+            EtherType::Ipv6 => HeaderType::Ipv6,
+            _ => HeaderType::StopProcessing,
+        };
 
         Ok(())
     }

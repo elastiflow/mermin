@@ -31,6 +31,7 @@ pub enum EtherType {
     #[default]
     Ipv4 = 0x0800_u16.to_be(),
     Arp = 0x0806_u16.to_be(),
+    Ethernet = 0x6558_u16.to_be(),
     Ieee8021q = 0x8100_u16.to_be(),
     Ipv6 = 0x86DD_u16.to_be(),
     Ieee8021ad = 0x88A8_u16.to_be(),
@@ -55,6 +56,7 @@ impl TryFrom<u16> for EtherType {
             0x0060_u16 => Ok(EtherType::Loop),
             0x0800_u16 => Ok(EtherType::Ipv4),
             0x0806_u16 => Ok(EtherType::Arp),
+            0x6558_u16 => Ok(EtherType::Ethernet),
             0x8100_u16 => Ok(EtherType::Ieee8021q),
             0x86DD_u16 => Ok(EtherType::Ipv6),
             0x88A8_u16 => Ok(EtherType::Ieee8021ad),
@@ -98,6 +100,7 @@ impl EtherType {
             EtherType::Loop => "loop",
             EtherType::Ipv4 => "ipv4",
             EtherType::Arp => "arp",
+            EtherType::Ethernet => "ethernet",
             EtherType::Ieee8021q => "vlan",
             EtherType::Ipv6 => "ipv6",
             EtherType::Ieee8021ad => "qinq",
@@ -116,8 +119,6 @@ impl EtherType {
 
 #[cfg(test)]
 mod tests {
-    use core::mem;
-
     use super::*;
 
     #[test]
@@ -158,6 +159,7 @@ mod tests {
             EtherType::Loop,
             EtherType::Ipv4,
             EtherType::Arp,
+            EtherType::Ethernet,
             EtherType::Ieee8021q,
             EtherType::Ipv6,
             EtherType::Ieee8021ad,
@@ -191,6 +193,7 @@ mod tests {
         assert_eq!(EtherType::Loop.as_str(), "loop");
         assert_eq!(EtherType::Ipv4.as_str(), "ipv4");
         assert_eq!(EtherType::Arp.as_str(), "arp");
+        assert_eq!(EtherType::Ethernet.as_str(), "ethernet");
         assert_eq!(EtherType::Ieee8021q.as_str(), "vlan");
         assert_eq!(EtherType::Ipv6.as_str(), "ipv6");
         assert_eq!(EtherType::Ieee8021ad.as_str(), "qinq");
