@@ -304,8 +304,8 @@ impl Parser {
             | IpProto::Esp
             | IpProto::Ah
             | IpProto::Hip
-            | IpProto::Ipv4
-            | IpProto::Ipv6 => HeaderType::Proto(meta.proto),
+            | IpProto::Ipv4 => HeaderType::Ipv4,
+            IpProto::Ipv6 => HeaderType::Ipv6,
             _ => HeaderType::StopProcessing,
         };
 
@@ -357,8 +357,8 @@ impl Parser {
             | IpProto::MobilityHeader
             | IpProto::Hip
             | IpProto::Shim6
-            | IpProto::Ipv4
-            | IpProto::Ipv6 => HeaderType::Proto(meta.proto),
+            | IpProto::Ipv4 => HeaderType::Ipv4,
+            IpProto::Ipv6 => HeaderType::Ipv6,
             IpProto::Ipv6NoNxt => HeaderType::StopProcessing,
             _ => HeaderType::StopProcessing,
         };
