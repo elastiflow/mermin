@@ -81,6 +81,7 @@ impl TraceableExporter for TraceExporterAdapter {
             .start(&tracer);
         span = traceable.record(span);
         opentelemetry::trace::Span::end_with_timestamp(&mut span, traceable.end_time());
+        debug!("exported traceable record as span");
     }
 }
 

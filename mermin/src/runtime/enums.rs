@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum SpanFmt {
     #[default]
+    #[serde(rename = "full")]
     Full,
 }
 

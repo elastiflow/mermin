@@ -204,6 +204,9 @@ impl PacketWorker {
     pub async fn run(mut self) {
         while let Some(packet) = self.packet_meta_rx.recv().await {
             let now = SystemTime::now();
+            // TODO Remove when end_time logic is implemented. end_time needs to be >= start_time
+            // so that the consuming collectors don't drop the spans.
+            let end_time = SystemTime::now(); // Placeholder for end_time logic
             now.duration_since(UNIX_EPOCH).expect("time went backwards");
 
             let (src_addr, dst_addr) = match Self::extract_ip_addresses(
@@ -280,7 +283,7 @@ impl PacketWorker {
 
             let attrs = FlowSpan {
                 start_time: now,
-                end_time: UNIX_EPOCH,
+                end_time,
                 span_kind: SpanKind::Internal,
                 attributes: SpanAttributes {
                     // General flow attributes
