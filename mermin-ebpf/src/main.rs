@@ -48,6 +48,10 @@ static mut PACKETS_META: RingBuf = RingBuf::with_byte_size(256 * 1024, 0); // 25
 #[map]
 static mut PACKET_META: PerCpuArray<PacketMeta> = PerCpuArray::with_max_entries(1, 0);
 
+#[cfg(not(feature = "test"))]
+#[map]
+static mut PARSER_OPTIONS: PerCpuArray<ParserOptions> = PerCpuArray::with_max_entries(1, 0);
+
 // Defines what kind of header we expect to process in the current iteration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HeaderType {
@@ -87,8 +91,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
     // Information for building flow records (prioritizes innermost headers).
     // These fields will be updated as we parse deeper or encounter encapsulations.
     let mut parser = Parser::default();
-    let options = ParserOptions::default();
-
+    
     // Get PacketMeta from PerCpuArray instead of using local variables
     let meta_ptr = unsafe {
         #[allow(static_mut_refs)]
@@ -150,13 +153,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             HeaderType::Proto(IpProto::Ipv4) => parser.parse_ipv4_header(&ctx, meta),
             HeaderType::Proto(IpProto::Ipv6) => parser.parse_ipv6_header(&ctx, meta),
             HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx, meta),
-            HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(
-                &ctx,
-                meta,
-                options.geneve_port,
-                options.vxlan_port,
-                options.wireguard_port,
-            ),
+            HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx, meta),
             // HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_route_header(&ctx),
             // HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
             // HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
@@ -663,9 +660,6 @@ impl Parser {
         &mut self,
         ctx: &TcContext,
         meta: &mut PacketMeta,
-        geneve_port: u16,
-        vxlan_port: u16,
-        wireguard_port: u16,
     ) -> Result<(), Error> {
         if self.offset + UDP_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
@@ -674,13 +668,26 @@ impl Parser {
         meta.src_port = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         meta.dst_port = ctx.load(self.offset + 2).map_err(|_| Error::OutOfBounds)?;
 
+        // Get parser options from PerCpuArray
+        let options_ptr = unsafe {
+            #[allow(static_mut_refs)]
+            match PARSER_OPTIONS.get_ptr_mut(0) {
+                Some(ptr) => ptr,
+                None => {
+                    error!(ctx, "PARSER_OPTIONS map not accessible");
+                    return Err(Error::Unsupported);
+                }
+            }
+        };
+        let options: &ParserOptions = unsafe { &*options_ptr };
+
         // IANA has assigned port 6081 as the fixed well-known destination port for Geneve and port 4789 as the fixed well-known destination port for Vxlan.
         // Although the well-known value should be used by default, it is RECOMMENDED that implementations make these configurable.
-        self.next_hdr = if meta.dst_port() == geneve_port {
+        self.next_hdr = if meta.dst_port() == options.geneve_port {
             HeaderType::Geneve
-        } else if meta.dst_port() == vxlan_port {
+        } else if meta.dst_port() == options.vxlan_port {
             HeaderType::Vxlan
-        } else if meta.dst_port() == wireguard_port {
+        } else if meta.dst_port() == options.wireguard_port {
             HeaderType::Wireguard
         } else {
             HeaderType::StopProcessing
@@ -1820,7 +1827,7 @@ mod tests {
         let packet = create_udp_test_packet();
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_udp_header(&ctx, 6081, 4789, 51820);
+        let result = parser.parse_udp_header(&ctx);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, UdpHdr::LEN);
@@ -1834,7 +1841,7 @@ mod tests {
         let packet = create_udp_geneve_test_packet();
         let ctx = TcContext::new(packet);
 
-        let result = parser.parse_udp_header(&ctx, 6081, 4789, 51820);
+        let result = parser.parse_udp_header(&ctx);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, UdpHdr::LEN);
