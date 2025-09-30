@@ -27,6 +27,17 @@ Scope: Build/configuration specifics, testing workflow, and development conventi
     cargo run --release --config 'target."cfg(all())".runner="sudo -E"'
   - Docker/Kubernetes: See README for kind + Helm flow; common make targets exist via included makefiles/*.mk (e.g., helm-upgrade, k8s-get, k8s-diff)
 
+- **CRITICAL: Docker container usage for eBPF operations**
+  - **MANDATORY**: All eBPF-related commands MUST be run inside Docker container
+  - **Why**: eBPF code cannot compile on non-Linux hosts (especially macOS)
+  - **Pattern**: Always use Docker container for any eBPF operations
+  - Build container: docker build -t mermin-builder:latest --target builder .
+  - Standard command pattern: docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "[COMMAND]"
+  - Examples:
+    - Build: docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "cargo build"
+    - Test: docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "cargo test"
+    - Clean: docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "cargo clean"
+
 - Notes on network-types (no_std)
   - network-types is #![no_std] and uses explicit unsafe blocks for pointer arithmetic when parsing headers
   - If you introduce features (e.g., serde derives), define them in network-types/Cargo.toml. The code contains #[cfg_attr(feature = "serde", ...)] hooks; without a feature, rustc emits an "unexpected cfg value: serde" warning under check-cfg. Define and gate it to avoid the warning if you plan to enable serde
@@ -47,6 +58,27 @@ Scope: Build/configuration specifics, testing workflow, and development conventi
 - eBPF-related tests
   - mermin-ebpf requires the eBPF toolchain to build/run artifacts; tests that rely on kernel features or elevated permissions should be conditioned accordingly
   - Default test runs (cargo test) exclude mermin-ebpf because it's not in default-members; use --workspace to include it
+
+- eBPF development constraints and patterns
+  - Critical eBPF verifier rules to avoid build failures:
+    - NO dynamic memory allocation - Use fixed-size arrays
+    - NO recursion - Use iterative approaches
+    - NO unbounded loops - Must have provable upper limit
+    - NO unbounded memory access - Always check bounds
+    - LIMITED stack - Maximum 512 bytes
+    - MINIMIZE logging - Each log adds complexity
+  - Required patterns for eBPF code:
+    - Bounded loops: Use `for _ in 0..MAX_LIMIT` instead of `while` loops
+    - Memory access: Always check bounds before loading data
+    - Error handling: Handle errors gracefully, don't drop packets unnecessarily
+  - Example bounded loop pattern:
+    - ✅ GOOD - Will pass verification:
+      for _ in 0..1500 {  // Max Ethernet frame size
+          if offset >= ctx.len() as usize {
+              break;
+          }
+          // Process data
+      }
 
 - Lints, formatting, and style
   - Formatting: cargo fmt (rustfmt configuration is at repo root rustfmt.toml)
@@ -110,10 +142,40 @@ Scope: Build/configuration specifics, testing workflow, and development conventi
 
 5. Troubleshooting
 
+- Common build issues and solutions
+  - eBPF Compilation Failures:
+    - ✅ Solution: Always use Docker container
+    - ✅ Check: Ensure you're not trying to compile directly on macOS
+    - ✅ Verify: Container has required Linux environment
+  - Verification Failures:
+    - ✅ Solution: Simplify control flow in eBPF programs
+    - ✅ Check: Add explicit bounds to loops
+    - ✅ Monitor: Stack usage (max 512 bytes)
+    - ✅ Pattern: Use bounded loops instead of while loops
+  - Build Errors:
+    - ✅ First step: Run `cargo clean` before rebuilding
+    - ✅ Check: eBPF target is installed in container
+    - ✅ Verify: Using correct Docker container
+  - Test Failures:
+    - ✅ Pattern: Test with malformed packets
+    - ✅ Verify: Bounds checking is implemented
+    - ✅ Monitor: Instruction count and complexity
+    - ✅ Handle: Error conditions gracefully
+
 - Building eBPF on macOS:
   - Install bpf-linker with --no-default-features
   - Ensure LLVM is available (brew install llvm), and set the appropriate PATH if needed
+  - **CRITICAL**: Use Docker container for all eBPF operations
+
 - Cross-compiling mermin:
   - Use the command in README with CC and --target set for ${ARCH}-unknown-linux-musl
+
 - Permissions
   - Running the agent requires CAP_BPF and other capabilities; using cargo runner with sudo is the simplest local approach outlined in README
+
+- Decision tree for command execution
+  - Is it eBPF related? → Use Docker container (MANDATORY)
+  - Writing eBPF code? → Follow bounded loop and bounds checking patterns
+  - Build failing? → Run cargo clean, then rebuild in Docker
+  - Tests failing? → Check bounds checking and error handling
+  - Verification failing? → Simplify control flow, add explicit bounds
