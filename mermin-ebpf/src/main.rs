@@ -31,7 +31,7 @@ use network_types::{
     route::{GenericRoute, RoutingHeaderType},
     shim6::{self, SHIM6_LEN},
     tcp::{self, TCP_LEN},
-    udp::UdpHdr,
+    udp::{self, UDP_LEN},
     vxlan::{self, VXLAN_LEN},
     wireguard::{
         WIREGUARD_COOKIE_REPLY_LEN, WIREGUARD_INITIATION_LEN, WIREGUARD_RESPONSE_LEN,
@@ -87,7 +87,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
     // Information for building flow records (prioritizes innermost headers).
     // These fields will be updated as we parse deeper or encounter encapsulations.
     let mut parser = Parser::default();
-    let _options = ParserOptions::default();
+    let options = ParserOptions::default();
 
     // Get PacketMeta from PerCpuArray instead of using local variables
     let meta_ptr = unsafe {
@@ -142,7 +142,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             HeaderType::Ipv6 => parser.parse_ipv6_header(&ctx, meta),
             HeaderType::Geneve => parser.parse_geneve_header(&ctx, meta),
             HeaderType::Vxlan => parser.parse_vxlan_header(&ctx, meta),
-            HeaderType::Wireguard => parser.parse_wireguard_header(&ctx),
+            HeaderType::Wireguard => parser.parse_wireguard_header(&ctx, meta),
             HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(&ctx, meta),
             HeaderType::Proto(IpProto::Gre) => parser.parse_gre_header(&ctx, meta),
             HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx, meta),
@@ -150,31 +150,13 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             HeaderType::Proto(IpProto::Ipv4) => parser.parse_ipv4_header(&ctx, meta),
             HeaderType::Proto(IpProto::Ipv6) => parser.parse_ipv6_header(&ctx, meta),
             HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx, meta),
-            // HeaderType::Proto(IpProto::Udp) => parser
-            //     .parse_udp_header(
-            //         &ctx,
-            //         meta,
-            //         options.geneve_port,
-            //         options.vxlan_port,
-            //         options.wireguard_port,
-            //     )
-            //     .map(|_| {
-            //         if !found_tunnel
-            //             && (parser.next_hdr == HeaderType::Geneve
-            //                 || parser.next_hdr == HeaderType::Vxlan
-            //                 || parser.next_hdr == HeaderType::Wireguard)
-            //         {
-            //             meta.tunnel_src_ipv6_addr = meta.src_ipv6_addr;
-            //             meta.tunnel_dst_ipv6_addr = meta.dst_ipv6_addr;
-            //             meta.tunnel_src_ipv4_addr = meta.src_ipv4_addr;
-            //             meta.tunnel_dst_ipv4_addr = meta.dst_ipv4_addr;
-            //             meta.tunnel_src_port = meta.src_port;
-            //             meta.tunnel_dst_port = meta.dst_port;
-            //             meta.tunnel_ip_addr_type = meta.ip_addr_type;
-            //             meta.tunnel_proto = meta.proto;
-            //             found_tunnel = true;
-            //         }
-            //     }),
+            HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(
+                &ctx,
+                meta,
+                options.geneve_port,
+                options.vxlan_port,
+                options.wireguard_port,
+            ),
             // HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_route_header(&ctx),
             // HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
             // HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
@@ -457,7 +439,11 @@ impl Parser {
 
     /// Parses the WireGuard header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_wireguard_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+    fn parse_wireguard_header(
+        &mut self,
+        ctx: &TcContext,
+        meta: &mut PacketMeta,
+    ) -> Result<(), Error> {
         // Read the first byte to determine WireGuard message type
         if self.offset + 1 > ctx.len() as usize {
             return Err(Error::OutOfBounds);
@@ -465,6 +451,13 @@ impl Parser {
         let wireguard_type: u8 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let wg_type = WireGuardType::from(wireguard_type);
         self.next_hdr = HeaderType::StopProcessing;
+
+        //Check if tunnel type is set
+        if meta.tunnel_type == TunnelType::None {
+            meta.tunnel_type = TunnelType::Wireguard;
+            meta.tunnel_proto = meta.proto;
+            meta.tunnel_ether_type = meta.ether_type;
+        }
 
         match wg_type {
             WireGuardType::HandshakeInitiation => self.parse_wireguard_init(&ctx),
@@ -674,29 +667,41 @@ impl Parser {
         vxlan_port: u16,
         wireguard_port: u16,
     ) -> Result<(), Error> {
-        if self.offset + UdpHdr::LEN > ctx.len() as usize {
+        if self.offset + UDP_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
-        let udp_hdr: UdpHdr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        self.offset += UdpHdr::LEN;
-
-        meta.src_port = udp_hdr.src;
-        meta.dst_port = udp_hdr.dst;
+        meta.src_port = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        meta.dst_port = ctx.load(self.offset + 2).map_err(|_| Error::OutOfBounds)?;
 
         // IANA has assigned port 6081 as the fixed well-known destination port for Geneve and port 4789 as the fixed well-known destination port for Vxlan.
         // Although the well-known value should be used by default, it is RECOMMENDED that implementations make these configurable.
-        let udp_dst_port = udp_hdr.dst_port();
-        self.next_hdr = if udp_dst_port == geneve_port {
+        self.next_hdr = if meta.dst_port() == geneve_port {
             HeaderType::Geneve
-        } else if udp_dst_port == vxlan_port {
+        } else if meta.dst_port() == vxlan_port {
             HeaderType::Vxlan
-        } else if udp_dst_port == wireguard_port {
+        } else if meta.dst_port() == wireguard_port {
             HeaderType::Wireguard
         } else {
             HeaderType::StopProcessing
         };
 
+        if meta.tunnel_type == TunnelType::None
+            && (self.next_hdr == HeaderType::Geneve
+                || self.next_hdr == HeaderType::Vxlan
+                || self.next_hdr == HeaderType::Wireguard)
+        {
+            // Do not set tunnel_type here, it will be set in the next header parser
+            meta.tunnel_src_ipv6_addr = meta.src_ipv6_addr;
+            meta.tunnel_dst_ipv6_addr = meta.dst_ipv6_addr;
+            meta.tunnel_src_ipv4_addr = meta.src_ipv4_addr;
+            meta.tunnel_dst_ipv4_addr = meta.dst_ipv4_addr;
+            meta.tunnel_src_port = meta.src_port;
+            meta.tunnel_dst_port = meta.dst_port;
+            meta.tunnel_ip_addr_type = meta.ip_addr_type;
+            meta.tunnel_proto = meta.proto;
+            meta.tunnel_ether_type = meta.ether_type;
+        }
         Ok(())
     }
 

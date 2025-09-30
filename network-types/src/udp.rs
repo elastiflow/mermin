@@ -1,334 +1,205 @@
-use core::mem;
+//! UDP header, which is present after the IP header.
+//!
+//!   0                   1                   2                   3
+//!   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  |          Source Port          |       Destination Port        |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  |          PDU Length           |           Checksum            |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  |                             data                              |
+//!  /                              ...                              /
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! This struct represents the User Datagram Protocol (UDP) header as defined in RFC 768.
+//! The UDP header is 8 bytes long and contains source and destination ports, length, and checksum fields.
+//! All fields are stored in network byte order (big-endian).
 
-/// UDP header, which is present after the IP header.
+pub const UDP_LEN: usize = 8;
+
+/// Source port field (16 bits).
+pub type SrcPort = [u8; 2];
+/// Destination port field (16 bits).
+pub type DstPort = [u8; 2];
+/// Length field (16 bits).
+pub type Len = [u8; 2];
+/// Checksum field (16 bits).
+pub type Checksum = [u8; 2];
+
+/// Returns the source port number.
 ///
-///   0                   1                   2                   3
-///   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  |          Source Port          |       Destination Port        |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  |          PDU Length           |           Checksum            |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  |                             data                              |
-///  /                              ...                              /
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// This struct represents the User Datagram Protocol (UDP) header as defined in RFC 768.
-/// The UDP header is 8 bytes long and contains source and destination ports, length, and checksum fields.
-/// All fields are stored in network byte order (big-endian).
+/// This method converts the source port from network byte order (big-endian)
+/// to host byte order.
 ///
-/// # Example
-/// ```
-/// use network_types::udp::UdpHdr;
-///
-/// let mut udp_header = UdpHdr {
-///     src: [0, 0],
-///     dst: [0, 0],
-///     len: [0, 0],
-///     check: [0, 0],
-/// };
-///
-/// udp_header.set_src_port(12345);
-/// udp_header.set_dst_port(80);
-/// udp_header.set_len(28); // 8 bytes header + 20 bytes payload
-/// udp_header.set_checksum(0); // Checksum calculation would be done separately
-/// ```
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct UdpHdr {
-    /// Source port in network byte order (big-endian)
-    pub src: [u8; 2],
-    /// Destination port in network byte order (big-endian)
-    pub dst: [u8; 2],
-    /// Length of UDP header and data in bytes, in network byte order (big-endian)
-    pub len: [u8; 2],
-    /// Checksum of UDP header and data, in network byte order (big-endian)
-    pub check: [u8; 2],
+/// # Returns
+/// The source port as a u16 value.
+#[inline]
+pub fn src_port(src: SrcPort) -> u16 {
+    u16::from_be_bytes(src)
 }
 
-impl UdpHdr {
-    /// The size of the UDP header in bytes (8 bytes).
-    pub const LEN: usize = mem::size_of::<UdpHdr>();
+/// Returns the destination port number.
+///
+/// This method converts the destination port from network byte order (big-endian)
+/// to host byte order.
+///
+/// # Returns
+/// The destination port as a u16 value.
+#[inline]
+pub fn dst_port(dst: DstPort) -> u16 {
+    u16::from_be_bytes(dst)
+}
 
-    /// Returns the source port number.
-    ///
-    /// This method converts the source port from network byte order (big-endian)
-    /// to host byte order.
-    ///
-    /// # Returns
-    /// The source port as a u16 value.
-    #[inline]
-    pub fn src_port(&self) -> u16 {
-        u16::from_be_bytes(self.src)
-    }
+/// Returns the length of the UDP datagram in bytes.
+///
+/// The length includes both the UDP header (8 bytes) and the UDP payload.
+/// This method converts the length from network byte order (big-endian)
+/// to host byte order.
+///
+/// # Returns
+/// The length as a u16 value.
+#[inline]
+pub fn len(len: Len) -> u16 {
+    u16::from_be_bytes(len)
+}
 
-    /// Sets the source port number.
-    ///
-    /// This method converts the source port from host byte order
-    /// to network byte order (big-endian).
-    ///
-    /// # Parameters
-    /// * `source` - The source port number to set.
-    #[inline]
-    pub fn set_src_port(&mut self, source: u16) {
-        self.src = source.to_be_bytes();
-    }
+/// Returns true if the UDP length field is zero.
+///
+/// A zero length indicates an invalid or empty UDP datagram, as the minimum valid length
+/// is 8 bytes (the size of the UDP header).
+///
+/// # Returns
+/// `true` if length is zero, `false` otherwise.
+pub fn is_empty(len: Len) -> bool {
+    len == [0, 0]
+}
 
-    /// Returns the destination port number.
-    ///
-    /// This method converts the destination port from network byte order (big-endian)
-    /// to host byte order.
-    ///
-    /// # Returns
-    /// The destination port as a u16 value.
-    #[inline]
-    pub fn dst_port(&self) -> u16 {
-        u16::from_be_bytes(self.dst)
-    }
-
-    /// Sets the destination port number.
-    ///
-    /// This method converts the destination port from host byte order
-    /// to network byte order (big-endian).
-    ///
-    /// # Parameters
-    /// * `dest` - The destination port number to set.
-    /// ```
-    #[inline]
-    pub fn set_dst_port(&mut self, dest: u16) {
-        self.dst = dest.to_be_bytes();
-    }
-
-    /// Returns the length of the UDP datagram in bytes.
-    ///
-    /// The length includes both the UDP header (8 bytes) and the UDP payload.
-    /// This method converts the length from network byte order (big-endian)
-    /// to host byte order.
-    ///
-    /// # Returns
-    /// The length as a u16 value.
-    #[inline]
-    pub fn len(&self) -> u16 {
-        u16::from_be_bytes(self.len)
-    }
-
-    /// Returns true if the UDP length field is zero.
-    ///
-    /// A zero length indicates an invalid or empty UDP datagram, as the minimum valid length
-    /// is 8 bytes (the size of the UDP header).
-    ///
-    /// # Returns
-    /// `true` if length is zero, `false` otherwise.
-    pub fn is_empty(&self) -> bool {
-        self.len == [0, 0]
-    }
-
-    /// Sets the length of the UDP datagram in bytes.
-    ///
-    /// The length should include both the UDP header (8 bytes) and the UDP payload.
-    /// This method converts the length from host byte order to network byte order (big-endian).
-    ///
-    /// # Parameters
-    /// * `len` - The length to set in bytes.
-    #[inline]
-    pub fn set_len(&mut self, len: u16) {
-        self.len = len.to_be_bytes();
-    }
-
-    /// Returns the UDP checksum.
-    ///
-    /// The checksum is calculated over the UDP header, the UDP payload, and a pseudo-header
-    /// derived from the IP header. This method converts the checksum from network byte order
-    /// (big-endian) to host byte order.
-    ///
-    /// # Returns
-    /// The checksum as a u16 value.
-    #[inline]
-    pub fn checksum(&self) -> u16 {
-        u16::from_be_bytes(self.check)
-    }
-
-    /// Sets the UDP checksum.
-    ///
-    /// The checksum should be calculated over the UDP header, the UDP payload, and a pseudo-header
-    /// derived from the IP header. This method converts the checksum from host byte order to
-    /// network byte order (big-endian).
-    ///
-    /// A value of 0 indicates that the checksum is not used (IPv4 only).
-    ///
-    /// # Parameters
-    /// * `check` - The checksum value to set.
-    #[inline]
-    pub fn set_checksum(&mut self, check: u16) {
-        self.check = check.to_be_bytes();
-    }
+/// Returns the UDP checksum.
+///
+/// The checksum is calculated over the UDP header, the UDP payload, and a pseudo-header
+/// derived from the IP header. This method converts the checksum from network byte order
+/// (big-endian) to host byte order.
+///
+/// # Returns
+/// The checksum as a u16 value.
+#[inline]
+pub fn checksum(check: Checksum) -> u16 {
+    u16::from_be_bytes(check)
 }
 
 #[cfg(test)]
 mod test {
-    use core::mem;
-
-    use super::UdpHdr;
+    use super::*;
 
     #[test]
-    fn test_udp_hdr_size() {
-        // UdpHdr should be exactly 8 bytes
-        assert_eq!(UdpHdr::LEN, 8);
-        assert_eq!(UdpHdr::LEN, mem::size_of::<UdpHdr>());
+    fn test_udp_constants() {
+        // UDP header should be exactly 8 bytes
+        assert_eq!(UDP_LEN, 8);
     }
 
     #[test]
-    fn test_source_port() {
-        let mut udp_hdr = UdpHdr {
-            src: [0, 0],
-            dst: [0, 0],
-            len: [0, 0],
-            check: [0, 0],
-        };
-
+    fn test_src_port() {
         // Test with a standard value
-        let test_port: u16 = 12345;
-        udp_hdr.set_src_port(test_port);
-        assert_eq!(udp_hdr.src_port(), test_port);
-
-        // Verify byte order in raw storage (big-endian/network byte order)
-        assert_eq!(udp_hdr.src, [0x30, 0x39]); // 12345 in big-endian
+        let src_bytes = [0x30, 0x39]; // 12345 in big-endian
+        assert_eq!(src_port(src_bytes), 12345);
 
         // Test with zero
-        udp_hdr.set_src_port(0);
-        assert_eq!(udp_hdr.src_port(), 0);
-        assert_eq!(udp_hdr.src, [0, 0]);
+        let zero_bytes = [0, 0];
+        assert_eq!(src_port(zero_bytes), 0);
 
         // Test with max value
-        udp_hdr.set_src_port(u16::MAX);
-        assert_eq!(udp_hdr.src_port(), u16::MAX);
-        assert_eq!(udp_hdr.src, [0xFF, 0xFF]);
+        let max_bytes = [0xFF, 0xFF];
+        assert_eq!(src_port(max_bytes), u16::MAX);
     }
 
     #[test]
-    fn test_dest_port() {
-        let mut udp_hdr = UdpHdr {
-            src: [0, 0],
-            dst: [0, 0],
-            len: [0, 0],
-            check: [0, 0],
-        };
-
+    fn test_dst_port() {
         // Test with a standard value
-        let test_port: u16 = 80;
-        udp_hdr.set_dst_port(test_port);
-        assert_eq!(udp_hdr.dst_port(), test_port);
-
-        // Verify byte order in raw storage (big-endian/network byte order)
-        assert_eq!(udp_hdr.dst, [0x00, 0x50]); // 80 in big-endian
+        let dst_bytes = [0x00, 0x50]; // 80 in big-endian
+        assert_eq!(dst_port(dst_bytes), 80);
 
         // Test with zero
-        udp_hdr.set_dst_port(0);
-        assert_eq!(udp_hdr.dst_port(), 0);
-        assert_eq!(udp_hdr.dst, [0, 0]);
+        let zero_bytes = [0, 0];
+        assert_eq!(dst_port(zero_bytes), 0);
 
         // Test with max value
-        udp_hdr.set_dst_port(u16::MAX);
-        assert_eq!(udp_hdr.dst_port(), u16::MAX);
-        assert_eq!(udp_hdr.dst, [0xFF, 0xFF]);
+        let max_bytes = [0xFF, 0xFF];
+        assert_eq!(dst_port(max_bytes), u16::MAX);
     }
 
     #[test]
-    fn test_length() {
-        let mut udp_hdr = UdpHdr {
-            src: [0, 0],
-            dst: [0, 0],
-            len: [0, 0],
-            check: [0, 0],
-        };
-
+    fn test_len() {
         // Test with a standard value (8 bytes header + 20 bytes payload)
-        let test_len: u16 = 28;
-        udp_hdr.set_len(test_len);
-        assert_eq!(udp_hdr.len(), test_len);
-
-        // Verify byte order in raw storage (big-endian/network byte order)
-        assert_eq!(udp_hdr.len, [0x00, 0x1C]); // 28 in big-endian
+        let len_bytes = [0x00, 0x1C]; // 28 in big-endian
+        assert_eq!(len(len_bytes), 28);
 
         // Test with minimum valid value (just the header)
-        udp_hdr.set_len(8);
-        assert_eq!(udp_hdr.len(), 8);
-        assert_eq!(udp_hdr.len, [0x00, 0x08]);
+        let min_bytes = [0x00, 0x08]; // 8 in big-endian
+        assert_eq!(len(min_bytes), 8);
 
         // Test with max value
-        udp_hdr.set_len(u16::MAX);
-        assert_eq!(udp_hdr.len(), u16::MAX);
-        assert_eq!(udp_hdr.len, [0xFF, 0xFF]);
+        let max_bytes = [0xFF, 0xFF];
+        assert_eq!(len(max_bytes), u16::MAX);
     }
 
     #[test]
-    fn test_empty() {
-        let mut udp_hdr = UdpHdr {
-            src: [0, 0],
-            dst: [0, 0],
-            len: [0, 0],
-            check: [0, 0],
-        };
-        assert!(udp_hdr.is_empty());
-        udp_hdr.set_len(8);
-        assert!(!udp_hdr.is_empty());
-        udp_hdr.set_len(0);
-        assert!(udp_hdr.is_empty());
+    fn test_is_empty() {
+        // Test with zero length (empty)
+        let empty_bytes = [0, 0];
+        assert!(is_empty(empty_bytes));
+
+        // Test with non-zero length (not empty)
+        let non_empty_bytes = [0x00, 0x08]; // 8 in big-endian
+        assert!(!is_empty(non_empty_bytes));
+
+        // Test with another non-zero length
+        let another_non_empty = [0x00, 0x1C]; // 28 in big-endian
+        assert!(!is_empty(another_non_empty));
     }
 
     #[test]
     fn test_checksum() {
-        let mut udp_hdr = UdpHdr {
-            src: [0, 0],
-            dst: [0, 0],
-            len: [0, 0],
-            check: [0, 0],
-        };
-
         // Test with a standard value
-        let test_checksum: u16 = 0x1234;
-        udp_hdr.set_checksum(test_checksum);
-        assert_eq!(udp_hdr.checksum(), test_checksum);
-
-        // Verify byte order in raw storage (big-endian/network byte order)
-        assert_eq!(udp_hdr.check, [0x12, 0x34]);
+        let checksum_bytes = [0x12, 0x34]; // 0x1234 in big-endian
+        assert_eq!(checksum(checksum_bytes), 0x1234);
 
         // Test with zero (indicating checksum not used in IPv4)
-        udp_hdr.set_checksum(0);
-        assert_eq!(udp_hdr.checksum(), 0);
-        assert_eq!(udp_hdr.check, [0, 0]);
+        let zero_bytes = [0, 0];
+        assert_eq!(checksum(zero_bytes), 0);
 
         // Test with max value
-        udp_hdr.set_checksum(u16::MAX);
-        assert_eq!(udp_hdr.checksum(), u16::MAX);
-        assert_eq!(udp_hdr.check, [0xFF, 0xFF]);
+        let max_bytes = [0xFF, 0xFF];
+        assert_eq!(checksum(max_bytes), u16::MAX);
     }
 
     #[test]
-    fn test_complete_udp_header() {
-        // Test creating a complete UDP header
-        let mut udp_hdr = UdpHdr {
-            src: [0, 0],
-            dst: [0, 0],
-            len: [0, 0],
-            check: [0, 0],
-        };
+    fn test_type_aliases() {
+        // Test that type aliases work correctly
+        let src: SrcPort = [0x30, 0x39];
+        let dst: DstPort = [0x00, 0x50];
+        let len_field: Len = [0x00, 0x1C];
+        let check: Checksum = [0x12, 0x34];
 
-        // Set all fields
-        udp_hdr.set_src_port(12345);
-        udp_hdr.set_dst_port(80);
-        udp_hdr.set_len(28); // 8 bytes header + 20 bytes payload
-        udp_hdr.set_checksum(0x1234);
+        assert_eq!(src_port(src), 12345);
+        assert_eq!(dst_port(dst), 80);
+        assert_eq!(len(len_field), 28);
+        assert_eq!(checksum(check), 0x1234);
+    }
 
-        // Verify all values are correctly set and retrieved
-        assert_eq!(udp_hdr.src_port(), 12345);
-        assert_eq!(udp_hdr.dst_port(), 80);
-        assert_eq!(udp_hdr.len(), 28);
-        assert_eq!(udp_hdr.checksum(), 0x1234);
+    #[test]
+    fn test_byte_order_conversion() {
+        // Test that functions correctly convert from network byte order (big-endian)
+        // to host byte order
 
-        // Verify raw byte storage
-        assert_eq!(udp_hdr.src, [0x30, 0x39]); // 12345 in big-endian
-        assert_eq!(udp_hdr.dst, [0x00, 0x50]); // 80 in big-endian
-        assert_eq!(udp_hdr.len, [0x00, 0x1C]); // 28 in big-endian
-        assert_eq!(udp_hdr.check, [0x12, 0x34]); // 0x1234 in big-endian
+        // Test various port values
+        assert_eq!(src_port(12345u16.to_be_bytes()), 12345);
+        assert_eq!(dst_port(80u16.to_be_bytes()), 80);
+        assert_eq!(len(28u16.to_be_bytes()), 28);
+        assert_eq!(checksum(0x1234u16.to_be_bytes()), 0x1234);
+
+        // Test edge cases
+        assert_eq!(src_port(1u16.to_be_bytes()), 1);
+        assert_eq!(dst_port(65535u16.to_be_bytes()), 65535);
+        assert_eq!(len(0u16.to_be_bytes()), 0);
+        assert_eq!(checksum(0xFFFFu16.to_be_bytes()), 0xFFFF);
     }
 }
