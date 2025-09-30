@@ -1,8 +1,13 @@
+nameOverride: ""
+fullnameOverride: ""
+
 image:
   repository: ghcr.io/elastiflow/mermin
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: ""
+
+imagePullSecrets: []
 
 updateStrategy:
   type: RollingUpdate
@@ -10,9 +15,11 @@ updateStrategy:
     maxUnavailable: 0
     maxSurge: "10%"
 
-imagePullSecrets: []
-nameOverride: ""
-fullnameOverride: ""
+# Mermin container args
+args:
+  - "--config"
+  - "/etc/mermin/mermin-config.yaml"
+
 
 serviceAccount:
   # Specifies whether a service account should be created

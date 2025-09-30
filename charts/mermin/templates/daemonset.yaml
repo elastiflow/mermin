@@ -44,9 +44,10 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports: {{ .Values.ports | toYaml | nindent 12 }}
+          {{- with .Values.args }}
           args:
-            - "--config"
-            - "/etc/mermin/mermin-config.yaml"
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           env:
             - name: POD_NODE_NAME
               valueFrom:
