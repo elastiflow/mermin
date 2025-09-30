@@ -381,9 +381,6 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             HeaderType::Proto(_) => {
                 break;
             }
-            HeaderType::Route(_) => {
-                break;
-            }
             HeaderType::StopProcessing => break, // Graceful stop
         };
 
