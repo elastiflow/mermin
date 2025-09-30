@@ -82,7 +82,7 @@ pub fn mermin_egress(ctx: TcContext) -> i32 {
 }
 
 fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
-    const MAX_HEADER_PARSE_DEPTH: usize = 4;
+    const MAX_HEADER_PARSE_DEPTH: usize = 8;
 
     // Information for building flow records (prioritizes innermost headers).
     // These fields will be updated as we parse deeper or encounter encapsulations.
@@ -181,7 +181,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             // HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
             // HeaderType::Proto(IpProto::Ipv6NoNxt) => break,
             // HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx),
-            // HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx),
+            HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx),
             HeaderType::Proto(IpProto::Hip) => parser.parse_hip_header(&ctx, meta),
             HeaderType::Proto(IpProto::Shim6) => parser.parse_shim6_header(&ctx, meta),
             HeaderType::Proto(_) => {

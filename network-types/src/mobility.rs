@@ -1,45 +1,48 @@
-use core::mem;
-
+//! # Mobility Header Format Section 6.1.1 - https://datatracker.ietf.org/doc/html/rfc3775
+//!
+//!  0                   1                   2                   3
+//!  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! | Payload Proto |  Hdr Ext Len  |   MH Type     |   Reserved    |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |           Checksum            |    Reserved Message Data      |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                                                               |
+//! .                                                               .
+//! .                       Message Data                            .
+//! .                                                               .
+//! |                                                               |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 use crate::ip::IpProto;
 
-/// # Mobility Header Format Section 6.1.1 - https://datatracker.ietf.org/doc/html/rfc3775
-///
-///  0                   1                   2                   3
-///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// | Payload Proto |  Hdr Ext Len  |   MH Type     |   Reserved    |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |           Checksum            |    Reserved Message Data      |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                                                               |
-/// .                                                               .
-/// .                       Message Data                            .
-/// .                                                               .
-/// |                                                               |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///
-/// ## Fields
-///
-/// * **Payload Proto (8 bits)**: An 8-bit selector identifying the type of header immediately following the Mobility Header.
-///
-/// * **Hdr Ext Len (8 bits)**: An 8-bit unsigned integer representing the length of the Mobility Header in units of 8 octets, **excluding the first 8 octets**.
-///
-/// * **MH Type (8 bits)**: An 8-bit selector that identifies the specific mobility message.
-///
-/// * **Reserved (8 bits)**: Reserved for future use. Should be 0
-///
-/// * **Checksum (16 bits)**: A 16-bit unsigned integer containing the checksum of the Mobility Header.
-///
-/// * **Message Data (variable length)**: A variable-length field containing data specific to the `MH Type` indicated.
+/// The Next Header field (8 bits)
+pub type NextHdr = IpProto;
+/// The Header Length field (8 bits). This is the length of the Mobility Header in 8-octet units, not including the first 8 octets.
+pub type HdrExtLen = u8;
+/// The Mobility Header Type field (8 bits)
+pub type MhType = u8;
+/// The Reserved field (8 bits). Reserved for future use. Should be 0
+pub type Reserved = u8;
+/// The Checksum field (16 bits)
+pub type Checksum = [u8; 2];
+/// The Reserved Message Data field (16 bits). Captures last two bytes of standard mobility header length, typically reserved and set to 0
+pub type ReservedData = [u8; 2];
+
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
 pub struct MobilityHdr {
+    /// The Next Header field (8 bits)
     pub next_hdr: IpProto,
+    /// The Header Length field (8 bits). This is the length of the Mobility Header in 8-octet units, not including the first 8 octets.
     pub hdr_ext_len: u8,
+    /// The Mobility Header Type field (8 bits)
     pub mh_type: u8,
+    /// The Reserved field (8 bits). Reserved for future use. Should be 0
     pub reserved: u8,
+    /// The Checksum field (16 bits)
     pub checksum: [u8; 2],
-    pub reserved_data: [u8; 2], // Captures last two bytes of standard mobility header length, typically reserved and set to 0
+    /// The Reserved Message Data field (16 bits). Captures last two bytes of standard mobility header length, typically reserved and set to 0
+    pub reserved_data: [u8; 2],
 }
 
 impl MobilityHdr {
@@ -52,22 +55,10 @@ impl MobilityHdr {
         u16::from_be_bytes(self.checksum)
     }
 
-    /// Sets the Checksum from a 16-bit value.
-    #[inline]
-    pub fn set_checksum(&mut self, checksum: u16) {
-        self.checksum = checksum.to_be_bytes();
-    }
-
     /// Gets the Message Data Start as a 16-bit value.
     #[inline]
     pub fn reserved_data(&self) -> u16 {
         u16::from_be_bytes(self.reserved_data)
-    }
-
-    /// Sets the Message Data Start from a 16-bit value.
-    #[inline]
-    pub fn set_reserved_data(&mut self, reserved_data: u16) {
-        self.reserved_data = reserved_data.to_be_bytes();
     }
 
     /// Calculates the total length of the Hop-by-Hop header in bytes.
