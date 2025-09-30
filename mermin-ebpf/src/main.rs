@@ -48,6 +48,22 @@ static mut PACKETS_META: RingBuf = RingBuf::with_byte_size(256 * 1024, 0); // 25
 #[map]
 static mut PACKET_META: PerCpuArray<PacketMeta> = PerCpuArray::with_max_entries(1, 0);
 
+#[inline(always)]
+fn get_packet_meta(ctx: &TcContext) -> Result<&mut PacketMeta, Error> {
+    // Get PacketMeta from PerCpuArray instead of using local variables
+    let meta_ptr = unsafe {
+        #[allow(static_mut_refs)]
+        match PACKET_META.get_ptr_mut(0) {
+            Some(ptr) => ptr,
+            None => {
+                error!(ctx, "PACKET_META map not accessible");
+                return Err(Error::InternalError);
+            }
+        }
+    };
+    Ok(unsafe { &mut *meta_ptr })
+}
+
 #[cfg(not(feature = "test"))]
 #[map]
 static mut PARSER_OPTIONS: PerCpuArray<ParserOptions> = PerCpuArray::with_max_entries(1, 0);
@@ -71,6 +87,7 @@ pub enum Error {
     OutOfBounds,
     MalformedHeader,
     Unsupported,
+    InternalError,
 }
 
 #[cfg(not(feature = "test"))]
@@ -92,19 +109,10 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
     // These fields will be updated as we parse deeper or encounter encapsulations.
     let mut parser = Parser::default();
 
-    // Get PacketMeta from PerCpuArray instead of using local variables
-    let meta_ptr = unsafe {
-        #[allow(static_mut_refs)]
-        match PACKET_META.get_ptr_mut(0) {
-            Some(ptr) => ptr,
-            None => {
-                error!(&ctx, "PACKET_META map not accessible");
-                return TC_ACT_PIPE;
-            }
-        }
+    let meta = match get_packet_meta(&ctx) {
+        Ok(m) => m,
+        Err(_) => return TC_ACT_PIPE,
     };
-
-    let meta: &mut PacketMeta = unsafe { &mut *meta_ptr };
 
     // Initialize the meta with default values
     meta.ifindex = unsafe { (*ctx.skb.skb).ifindex };
@@ -140,28 +148,28 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
 
     for _ in 0..MAX_HEADER_PARSE_DEPTH {
         let result: Result<(), Error> = match parser.next_hdr {
-            HeaderType::Ethernet => parser.parse_ethernet_header(&ctx, meta),
-            HeaderType::Ipv4 => parser.parse_ipv4_header(&ctx, meta),
-            HeaderType::Ipv6 => parser.parse_ipv6_header(&ctx, meta),
-            HeaderType::Geneve => parser.parse_geneve_header(&ctx, meta),
-            HeaderType::Vxlan => parser.parse_vxlan_header(&ctx, meta),
-            HeaderType::Wireguard => parser.parse_wireguard_header(&ctx, meta),
-            HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(&ctx, meta),
-            HeaderType::Proto(IpProto::Gre) => parser.parse_gre_header(&ctx, meta),
-            HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx, meta),
-            HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx, meta),
-            HeaderType::Proto(IpProto::Ipv4) => parser.parse_ipv4_header(&ctx, meta),
-            HeaderType::Proto(IpProto::Ipv6) => parser.parse_ipv6_header(&ctx, meta),
-            HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx, meta),
-            HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx, meta),
-            HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_route_header(&ctx, meta),
-            HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx, meta),
+            HeaderType::Ethernet => parser.parse_ethernet_header(&ctx),
+            HeaderType::Ipv4 => parser.parse_ipv4_header(&ctx),
+            HeaderType::Ipv6 => parser.parse_ipv6_header(&ctx),
+            HeaderType::Geneve => parser.parse_geneve_header(&ctx),
+            HeaderType::Vxlan => parser.parse_vxlan_header(&ctx),
+            HeaderType::Wireguard => parser.parse_wireguard_header(&ctx),
+            HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(&ctx),
+            HeaderType::Proto(IpProto::Gre) => parser.parse_gre_header(&ctx),
+            HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv4) => parser.parse_ipv4_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6) => parser.parse_ipv6_header(&ctx),
+            HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx),
+            HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_route_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
             HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
-            HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx, meta),
-            HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx, meta),
-            HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx, meta),
-            HeaderType::Proto(IpProto::Hip) => parser.parse_hip_header(&ctx, meta),
-            HeaderType::Proto(IpProto::Shim6) => parser.parse_shim6_header(&ctx, meta),
+            HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx),
+            HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx),
+            HeaderType::Proto(IpProto::Hip) => parser.parse_hip_header(&ctx),
+            HeaderType::Proto(IpProto::Shim6) => parser.parse_shim6_header(&ctx),
             HeaderType::Proto(_) => {
                 break;
             }
@@ -211,15 +219,12 @@ impl Parser {
 
     /// Parses the next header in the packet and updates the parser state accordingly.
     /// Returns an error if the header is not supported.
-    fn parse_ethernet_header(
-        &mut self,
-        ctx: &TcContext,
-        meta: &mut PacketMeta,
-    ) -> Result<(), Error> {
+    fn parse_ethernet_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + ETH_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
+        let meta = get_packet_meta(&ctx)?;
         meta.src_mac_addr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         meta.ether_type = ctx.load(self.offset + 12).map_err(|_| Error::OutOfBounds)?;
 
@@ -235,7 +240,7 @@ impl Parser {
 
     /// Parses the IPv4 header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_ipv4_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
+    fn parse_ipv4_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + IPV4_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
@@ -248,6 +253,7 @@ impl Parser {
             return Err(Error::MalformedHeader);
         }
 
+        let meta = get_packet_meta(&ctx)?;
         if meta.tunnel_type == TunnelType::None
             && (meta.proto == IpProto::Ipv6 || meta.proto == IpProto::Ipv4)
         {
@@ -291,11 +297,12 @@ impl Parser {
 
     /// Parses the IPv6 header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_ipv6_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
+    fn parse_ipv6_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + IPV6_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
+        let meta = get_packet_meta(&ctx)?;
         // Check if proto is set to IP-in-IP and the tunnel hasn't been set yet
         if meta.tunnel_type == TunnelType::None
             && (meta.proto == IpProto::Ipv6 || meta.proto == IpProto::Ipv4)
@@ -344,11 +351,12 @@ impl Parser {
 
     /// Parses the Geneve header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_geneve_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
+    fn parse_geneve_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + GENEVE_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
+        let meta = get_packet_meta(&ctx)?;
         let ver_opt_len: geneve::VerOptLen =
             ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let total_hdr_len = geneve::total_hdr_len(ver_opt_len);
@@ -392,11 +400,12 @@ impl Parser {
 
     /// Parses the VXLAN header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_vxlan_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
+    fn parse_vxlan_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + VXLAN_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
+        let meta = get_packet_meta(&ctx)?;
         if meta.tunnel_type == TunnelType::None {
             let flags: vxlan::Flags = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
             if vxlan::flags_i_flag(flags) {
@@ -434,11 +443,7 @@ impl Parser {
 
     /// Parses the WireGuard header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_wireguard_header(
-        &mut self,
-        ctx: &TcContext,
-        meta: &mut PacketMeta,
-    ) -> Result<(), Error> {
+    fn parse_wireguard_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         // Read the first byte to determine WireGuard message type
         if self.offset + 1 > ctx.len() as usize {
             return Err(Error::OutOfBounds);
@@ -447,6 +452,7 @@ impl Parser {
         let wg_type = WireGuardType::from(wireguard_type);
         self.next_hdr = HeaderType::StopProcessing;
 
+        let meta = get_packet_meta(&ctx)?;
         //Check if tunnel type is set
         if meta.tunnel_type == TunnelType::None {
             meta.tunnel_type = TunnelType::Wireguard;
@@ -521,10 +527,12 @@ impl Parser {
 
     /// Parses the Hop-by-Hop IPv6-extension header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_hopopt_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
+    fn parse_hopopt_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + HOP_OPT_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
+
+        let meta = get_packet_meta(&ctx)?;
         meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.next_hdr = match meta.proto {
             IpProto::Tcp
@@ -553,10 +561,12 @@ impl Parser {
 
     /// Parses the GRE header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
-    fn parse_gre_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
+    fn parse_gre_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + GRE_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
+
+        let meta = get_packet_meta(&ctx)?;
         // TODO:
         // if meta.tunnel_type == TunnelType::None {
         //     meta.tunnel_type = TunnelType::Gre;
@@ -621,11 +631,12 @@ impl Parser {
     /// Parses the ICMP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
     /// Note: ICMP does not use ports, so src_port and dst_port remain zero.
-    fn parse_icmp_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
+    fn parse_icmp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + ICMP_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
+        let meta = get_packet_meta(&ctx)?;
         meta.icmp_type_id = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         meta.icmp_code_id = ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
 
@@ -637,11 +648,12 @@ impl Parser {
 
     /// Parses the TCP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
-    fn parse_tcp_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
+    fn parse_tcp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + TCP_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
+        let meta = get_packet_meta(&ctx)?;
         meta.src_port = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         meta.dst_port = ctx.load(self.offset + 2).map_err(|_| Error::OutOfBounds)?;
         meta.tcp_flags = ctx.load(self.offset + 12).map_err(|_| Error::OutOfBounds)?;
@@ -654,11 +666,12 @@ impl Parser {
 
     /// Parses the UDP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
-    fn parse_udp_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
+    fn parse_udp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + UDP_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
+        let meta = get_packet_meta(&ctx)?;
         meta.src_port = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         meta.dst_port = ctx.load(self.offset + 2).map_err(|_| Error::OutOfBounds)?;
 
@@ -710,15 +723,12 @@ impl Parser {
 
     /// Parses the IPv6 routing header in the packet and dispatches to the appropriate specific parser.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_generic_route_header(
-        &mut self,
-        ctx: &TcContext,
-        meta: &mut PacketMeta,
-    ) -> Result<(), Error> {
+    fn parse_generic_route_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + GENERIC_ROUTE_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
+        let meta = get_packet_meta(&ctx)?;
         meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
 
         self.next_hdr = HeaderType::Proto(meta.proto);
@@ -730,15 +740,12 @@ impl Parser {
 
     /// Parses the IPv6 Fragment header and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_fragment_header(
-        &mut self,
-        ctx: &TcContext,
-        meta: &mut PacketMeta,
-    ) -> Result<(), Error> {
+    fn parse_fragment_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + FRAGMENT_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
+        let meta = get_packet_meta(&ctx)?;
         meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
 
         self.offset += FRAGMENT_LEN;
@@ -753,8 +760,10 @@ impl Parser {
         if self.offset + ESP_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
+
+        let _meta = get_packet_meta(&ctx)?;
         // TODO: handle tunnels
-        // meta.tunnel_type = TunnelType::Ah;
+        // meta.tunnel_type = TunnelType::Esp;
         // meta.tunnel_spi = ctx.load(self.offset + 3).map_err(|_| Error::OutOfBounds)?;
 
         self.offset += ESP_LEN;
@@ -765,11 +774,12 @@ impl Parser {
 
     /// Parses the AH IPv6-extension header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_ah_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
+    fn parse_ah_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + AH_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
+        let meta = get_packet_meta(&ctx)?;
         meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let payload_len: ah::PayloadLen =
             ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
@@ -785,15 +795,12 @@ impl Parser {
 
     /// Parses the Destination Options IPv6-extension header and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_destopts_header(
-        &mut self,
-        ctx: &TcContext,
-        meta: &mut PacketMeta,
-    ) -> Result<(), Error> {
+    fn parse_destopts_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + destopts::DEST_OPTS_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
+        let meta = get_packet_meta(&ctx)?;
         meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let hdr_ext_len: destopts::HdrExtLen =
             ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
@@ -806,15 +813,12 @@ impl Parser {
 
     /// Parses the IPv6 Mobility header and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_mobility_header(
-        &mut self,
-        ctx: &TcContext,
-        meta: &mut PacketMeta,
-    ) -> Result<(), Error> {
+    fn parse_mobility_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + MOBILITY_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
+        let meta = get_packet_meta(&ctx)?;
         meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let hdr_ext_len: mobility::HdrExtLen =
             ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
@@ -827,11 +831,12 @@ impl Parser {
 
     /// Parses the HIP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_hip_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
+    fn parse_hip_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + HIP_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
+        let meta = get_packet_meta(&ctx)?;
         meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let hdr_ext_len: u8 = ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
         if hdr_ext_len > 64 {
@@ -853,10 +858,12 @@ impl Parser {
 
     /// Parses the Shim6 header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
-    fn parse_shim6_header(&mut self, ctx: &TcContext, meta: &mut PacketMeta) -> Result<(), Error> {
+    fn parse_shim6_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + SHIM6_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
+
+        let meta = get_packet_meta(&ctx)?;
         meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
 
         let hdr_ext_len: u8 = ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
