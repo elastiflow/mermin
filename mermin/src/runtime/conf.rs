@@ -130,7 +130,8 @@ pub struct TracingOptions {
     /// - `FmtSpan::ACTIVE`: Only span events for spans that are active (i.e., not closed) are recorded.
     pub span_level: SpanFmt,
 
-    ///
+    /// A list of exporter references to use for tracing. Each entry should match a key
+    /// in the `exporter` section of the config.
     pub exporters: ExporterReferences,
 }
 

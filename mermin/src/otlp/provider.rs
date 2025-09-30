@@ -113,7 +113,7 @@ pub async fn init_provider(
         return Ok(provider.build());
     }
 
-    let (otlp_opts, stdout_opts) = resolve_exporters(exporter_refs, &exporter_options)?;
+    let (otlp_opts, stdout_opts) = resolve_exporters(exporter_refs, exporter_options)?;
 
     for options in otlp_opts {
         provider = provider.with_otlp_exporter(options).await?;

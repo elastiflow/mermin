@@ -1,14 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum SpanFmt {
+    #[default]
     Full,
-}
-
-impl Default for SpanFmt {
-    fn default() -> Self {
-        SpanFmt::Full
-    }
 }
 
 impl From<SpanFmt> for tracing_subscriber::fmt::format::FmtSpan {

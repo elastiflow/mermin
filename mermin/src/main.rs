@@ -1,5 +1,3 @@
-#![feature(let_chains)]
-
 mod community_id;
 mod health;
 mod k8s;
@@ -53,7 +51,6 @@ async fn main() -> Result<()> {
         vec![]
     };
 
-    debug!("initializing exporter");
     let exporter: Arc<dyn TraceableExporter> = match config.exporter {
         Some(exporter_options) => {
             log_info!("using configured exporters");
@@ -68,7 +65,7 @@ async fn main() -> Result<()> {
             Arc::new(TraceExporterAdapter::new(app_tracer_provider))
         }
         None => {
-            log_info!("using default Exporters");
+            log_info!("using default exporters");
             init_internal_tracing(
                 &ExporterOptions::default(),
                 config.traces.exporters,
