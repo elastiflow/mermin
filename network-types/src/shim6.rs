@@ -1,149 +1,87 @@
-use core::mem;
+//! The Shim6 Control Header is a common header format used for various control messages within the Shim6 protocol.
+//! All Shim6 headers are designed to be a multiple of 8 octets in length, with a minimum size of 8 octets.
+//!
+//! Shim6 Control Message Header Format
+//!
+//!  0                   1                   2                   3
+//!  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! | Next Header   | Hdr Ext Len   |P|      Type     |Type-specific|S|
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |           Checksum            |                               |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                               |
+//! |                                                               |
+//! .                     Type-specific format                      .
+//! .                                                               .
+//! |                                                               |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+/// The size of the fixed part of the Shim6 Header in bytes.
+pub const SHIM6_LEN: usize = 8;
+
+/// The Next Header field (8 bits)
+pub type NextHdr = IpProto;
+/// The Header Length field (8 bits). This is the length of the Shim6 header
+/// in 8-octet units, not including the first 8 octets.
+pub type HdrExtLen = u8;
+/// The P bit (1) + Message Type (7)
+pub type PType = u8;
+/// The Type-specific (7) + S bit (1)
+pub type TypeS = u8;
+/// The Checksum field (16 bits)
+pub type Checksum = [u8; 2];
+/// The first 2 bytes of the Type-Specific data, part of the 8-octet base header.
+pub type TypeData = [u8; 2];
 
 use crate::ip::IpProto;
 
-/// The Shim6 Control Header is a common header format used for various control messages within the Shim6 protocol.
-/// All Shim6 headers are designed to be a multiple of 8 octets in length, with a minimum size of 8 octets.
-///
-/// Shim6 Control Message Header Format
-///
-///  0                   1                   2                   3
-///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// | Next Header   | Hdr Ext Len   |P|      Type     |Type-specific|S|
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |           Checksum            |                               |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                               |
-/// |                                                               |
-/// .                     Type-specific format                      .
-/// .                                                               .
-/// |                                                               |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///
-///
-/// Fields
-///
-/// * **Next Header (8 bits)**: Identifies the type of header immediately following this one.
-/// * **Hdr Ext Len (8 bits)**: The length of this header in 8-octet units, not including the first 8 octets.
-/// * **P (Payload Flag) (1 bit)**: Distinguishes between Shim6 Control and Payload Extension headers. Always 0.
-/// * **Type (7 bits)**: Identifies the specific Shim6 control message type.
-/// * **Type-specific (7 bits)**: A field whose interpretation depends on the message `Type`.
-/// * **S (Shim6/HIP Distinction) (1 bit)**: Distinguishes between Shim6 and HIP messages. Always 0.
-/// * **Checksum (16 bits)**: A checksum computed over the entire Shim6 message.
-/// * **Type-specific format (variable length)**: A variable-length portion whose structure depends on the message `Type`.
-#[repr(C, packed)]
-#[derive(Debug, Copy, Clone)]
-pub struct Shim6Hdr {
-    /// Next Header field (8 bits)
-    pub next_hdr: IpProto,
-    /// Header Length field (8 bits). This is the length of the Shim6 header
-    /// in 8-octet units, not including the first 8 octets.
-    pub hdr_ext_len: u8,
-    /// P bit (1) + Message Type (7)
-    pub p_and_type: u8,
-    /// Type-specific (7) + S bit (1)
-    pub type_specific_and_s: u8,
-    /// Checksum field (16 bits)
-    pub checksum: [u8; 2],
-    /// The first 2 bytes of the Type-Specific data, part of the 8-octet base header.
-    pub type_specific_data: [u8; 2],
+/// Gets the P (Payload Flag) bit.
+#[inline]
+pub fn p(ptype: PType) -> bool {
+    (ptype >> 7) & 1 != 0
 }
 
-impl Shim6Hdr {
-    /// The size of the fixed part of the Shim6 Header in bytes.
-    pub const LEN: usize = mem::size_of::<Shim6Hdr>();
+/// Gets the message Type value (7 bits).
+#[inline]
+pub fn msg_type(p_type: PType) -> u8 {
+    p_type & 0x7F
+}
 
-    /// Gets the P (Payload Flag) bit.
-    #[inline]
-    pub fn p(&self) -> bool {
-        (self.p_and_type >> 7) & 1 != 0
-    }
+/// Gets the Type-specific bits (7 bits).
+#[inline]
+pub fn type_specific_bits(type_s: TypeS) -> u8 {
+    type_s >> 1
+}
 
-    /// Sets the P (Payload Flag) bit.
-    #[inline]
-    pub fn set_p(&mut self, p: bool) {
-        self.p_and_type = (self.p_and_type & 0x7F) | ((p as u8) << 7);
-    }
+/// Gets the S (Shim6/HIP Distinction) bit.
+#[inline]
+pub fn s(type_s: TypeS) -> bool {
+    (type_s & 1) != 0
+}
 
-    /// Gets the message Type value (7 bits).
-    #[inline]
-    pub fn msg_type(&self) -> u8 {
-        self.p_and_type & 0x7F
-    }
+/// Gets the Checksum as a 16-bit value.
+#[inline]
+pub fn checksum(checksum: Checksum) -> u16 {
+    u16::from_be_bytes(checksum)
+}
 
-    /// Sets the message Type value (7 bits).
-    #[inline]
-    pub fn set_msg_type(&mut self, msg_type: u8) {
-        self.p_and_type = (self.p_and_type & 0x80) | (msg_type & 0x7F);
-    }
-
-    /// Gets the Type-specific bits (7 bits).
-    #[inline]
-    pub fn type_specific_bits(&self) -> u8 {
-        self.type_specific_and_s >> 1
-    }
-
-    /// Sets the Type-specific bits (7 bits).
-    #[inline]
-    pub fn set_type_specific_bits(&mut self, bits: u8) {
-        self.type_specific_and_s = (self.type_specific_and_s & 0x01) | (bits << 1);
-    }
-
-    /// Gets the S (Shim6/HIP Distinction) bit.
-    #[inline]
-    pub fn s(&self) -> bool {
-        (self.type_specific_and_s & 1) != 0
-    }
-
-    /// Sets the S (Shim6/HIP Distinction) bit.
-    #[inline]
-    pub fn set_s(&mut self, s: bool) {
-        self.type_specific_and_s = (self.type_specific_and_s & 0xFE) | (s as u8);
-    }
-
-    /// Gets the Checksum as a 16-bit value.
-    #[inline]
-    pub fn checksum(&self) -> u16 {
-        u16::from_be_bytes(self.checksum)
-    }
-
-    /// Sets the Checksum from a 16-bit value.
-    #[inline]
-    pub fn set_checksum(&mut self, checksum: u16) {
-        self.checksum = checksum.to_be_bytes();
-    }
-
-    /// Gets the Type-specific data as a 16-bit value.
-    #[inline]
-    pub fn type_specific_data(&self) -> u16 {
-        u16::from_be_bytes(self.type_specific_data)
-    }
-
-    /// Sets the Type-specific data from a 16-bit value.
-    #[inline]
-    pub fn set_type_specific_data(&mut self, data: u16) {
-        self.type_specific_data = data.to_be_bytes();
-    }
-
-    /// Calculates the total length of the Shim6 header in bytes.
-    /// Total length = (hdr_ext_len + 1) * 8.
-    #[inline]
-    pub fn total_hdr_len(&self) -> usize {
-        (self.hdr_ext_len as usize + 1) << 3
-    }
-
-    /// Calculates the length of the variable-length part of the header in bytes.
-    #[inline]
-    pub fn variable_len(&self) -> usize {
-        self.total_hdr_len().saturating_sub(Self::LEN)
-    }
+/// Gets the Type-specific data as a 16-bit value.
+#[inline]
+pub fn type_specific_data(data: TypeData) -> u16 {
+    u16::from_be_bytes(data)
 }
 
 /// Calculates the total length of the Shim6 header in bytes.
 /// Total length = (hdr_ext_len + 1) * 8.
 #[inline]
-pub fn calc_total_hdr_len(hdr_ext_len: u8) -> usize {
-    (hdr_ext_len as usize + 1) << 3
+pub fn total_hdr_len(len: HdrExtLen) -> usize {
+    (len as usize + 1) << 3
+}
+
+/// Calculates the length of the variable-length part of the header in bytes.
+#[inline]
+pub fn variable_len(hdr_ext_len: HdrExtLen) -> usize {
+    total_hdr_len(hdr_ext_len).saturating_sub(SHIM6_LEN)
 }
 
 #[cfg(test)]
@@ -151,86 +89,123 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_shim6hdr_size() {
-        assert_eq!(Shim6Hdr::LEN, 8);
-        assert_eq!(Shim6Hdr::LEN, mem::size_of::<Shim6Hdr>());
+    fn test_shim6_constant() {
+        assert_eq!(SHIM6_LEN, 8);
     }
 
     #[test]
-    fn test_shim6hdr_getters_and_setters() {
-        let mut shim_hdr = Shim6Hdr {
-            next_hdr: IpProto::Ipv6NoNxt,
-            hdr_ext_len: 0,
-            p_and_type: 0,
-            type_specific_and_s: 0,
-            checksum: [0; 2],
-            type_specific_data: [0; 2],
-        };
+    fn test_p_bit_extraction() {
+        // P bit is 0
+        assert!(!p(0b00000000));
+        assert!(!p(0b01111111)); // Max type value, P=0
 
-        // Test P and Type fields
-        shim_hdr.set_p(true);
-        assert!(shim_hdr.p());
-        assert_eq!(shim_hdr.p_and_type, 0x80);
-        shim_hdr.set_msg_type(0x4A); // 74
-        assert_eq!(shim_hdr.msg_type(), 0x4A);
-        assert_eq!(shim_hdr.p_and_type, 0xCA); // 11001010
-        shim_hdr.set_p(false);
-        assert!(!shim_hdr.p());
-        assert_eq!(shim_hdr.msg_type(), 0x4A);
-        assert_eq!(shim_hdr.p_and_type, 0x4A);
-
-        // Test Type-specific and S fields
-        shim_hdr.set_s(true);
-        assert!(shim_hdr.s());
-        assert_eq!(shim_hdr.type_specific_and_s, 0x01);
-        shim_hdr.set_type_specific_bits(0x75); // 1110101
-        assert_eq!(shim_hdr.type_specific_bits(), 0x75);
-        assert_eq!(shim_hdr.type_specific_and_s, 0xEB); // 11101011
-        shim_hdr.set_s(false);
-        assert!(!shim_hdr.s());
-        assert_eq!(shim_hdr.type_specific_bits(), 0x75);
-        assert_eq!(shim_hdr.type_specific_and_s, 0xEA); // 11101010
-
-        // Test checksum
-        shim_hdr.set_checksum(0x1234);
-        assert_eq!(shim_hdr.checksum(), 0x1234);
-        assert_eq!(shim_hdr.checksum, [0x12, 0x34]);
-
-        // Test type_specific_data
-        shim_hdr.set_type_specific_data(0x5678);
-        assert_eq!(shim_hdr.type_specific_data(), 0x5678);
-        assert_eq!(shim_hdr.type_specific_data, [0x56, 0x78]);
+        // P bit is 1
+        assert!(p(0b10000000));
+        assert!(p(0b11111111)); // Max type value, P=1
     }
 
     #[test]
-    fn test_shim6hdr_length_calculation() {
-        let mut shim_hdr = Shim6Hdr {
-            next_hdr: IpProto::Ipv6NoNxt,
-            hdr_ext_len: 0,
-            p_and_type: 0,
-            type_specific_and_s: 0,
-            checksum: [0; 2],
-            type_specific_data: [0; 2],
-        };
+    fn test_msg_type_extraction() {
+        // Test various type values
+        assert_eq!(msg_type(0b00000000), 0);
+        assert_eq!(msg_type(0b01111111), 0x7F); // Max type value
+        assert_eq!(msg_type(0b10000000), 0); // P=1, Type=0
+        assert_eq!(msg_type(0b11001010), 0x4A); // P=1, Type=74
+        assert_eq!(msg_type(0b01001010), 0x4A); // P=0, Type=74
+    }
 
-        // Test with hdr_ext_len = 0
-        shim_hdr.hdr_ext_len = 0;
-        assert_eq!(shim_hdr.total_hdr_len(), 8);
-        assert_eq!(shim_hdr.variable_len(), 0);
+    #[test]
+    fn test_type_specific_bits_extraction() {
+        // Test various type-specific values
+        assert_eq!(type_specific_bits(0b00000000), 0);
+        assert_eq!(type_specific_bits(0b11111110), 0x7F); // Max type-specific value, S=0
+        assert_eq!(type_specific_bits(0b11111111), 0x7F); // Max type-specific value, S=1
+        assert_eq!(type_specific_bits(0b11101010), 0x75); // type-specific=117, S=0
+        assert_eq!(type_specific_bits(0b11101011), 0x75); // type-specific=117, S=1
+    }
+
+    #[test]
+    fn test_s_bit_extraction() {
+        // S bit is 0
+        assert!(!s(0b00000000));
+        assert!(!s(0b11111110)); // Max type-specific value, S=0
+
+        // S bit is 1
+        assert!(s(0b00000001));
+        assert!(s(0b11111111)); // Max type-specific value, S=1
+    }
+
+    #[test]
+    fn test_checksum_conversion() {
+        assert_eq!(checksum([0x00, 0x00]), 0x0000);
+        assert_eq!(checksum([0x12, 0x34]), 0x1234);
+        assert_eq!(checksum([0xFF, 0xFF]), 0xFFFF);
+        assert_eq!(checksum([0xAB, 0xCD]), 0xABCD);
+    }
+
+    #[test]
+    fn test_type_specific_data_conversion() {
+        assert_eq!(type_specific_data([0x00, 0x00]), 0x0000);
+        assert_eq!(type_specific_data([0x56, 0x78]), 0x5678);
+        assert_eq!(type_specific_data([0xFF, 0xFF]), 0xFFFF);
+        assert_eq!(type_specific_data([0x12, 0x34]), 0x1234);
+    }
+
+    #[test]
+    fn test_total_hdr_len_calculation() {
+        // Test with hdr_ext_len = 0 (minimum)
+        assert_eq!(total_hdr_len(0), 8);
 
         // Test with hdr_ext_len = 1
-        shim_hdr.hdr_ext_len = 1;
-        assert_eq!(shim_hdr.total_hdr_len(), 16);
-        assert_eq!(shim_hdr.variable_len(), 8);
+        assert_eq!(total_hdr_len(1), 16);
 
         // Test with hdr_ext_len = 3
-        shim_hdr.hdr_ext_len = 3;
-        assert_eq!(shim_hdr.total_hdr_len(), 32);
-        assert_eq!(shim_hdr.variable_len(), 24);
+        assert_eq!(total_hdr_len(3), 32);
 
-        // Test with hdr_ext_len = 255 (max value)
-        shim_hdr.hdr_ext_len = 255;
-        assert_eq!(shim_hdr.total_hdr_len(), (255 + 1) * 8);
-        assert_eq!(shim_hdr.variable_len(), 255 * 8);
+        // Test with hdr_ext_len = 255 (maximum)
+        assert_eq!(total_hdr_len(255), (255 + 1) * 8);
+        assert_eq!(total_hdr_len(255), 2048);
+    }
+
+    #[test]
+    fn test_variable_len_calculation() {
+        // Test with hdr_ext_len = 0 (no variable part)
+        assert_eq!(variable_len(0), 0);
+
+        // Test with hdr_ext_len = 1
+        assert_eq!(variable_len(1), 8);
+
+        // Test with hdr_ext_len = 3
+        assert_eq!(variable_len(3), 24);
+
+        // Test with hdr_ext_len = 255 (maximum)
+        assert_eq!(variable_len(255), 255 * 8);
+        assert_eq!(variable_len(255), 2040);
+    }
+
+    #[test]
+    fn test_combined_field_operations() {
+        // Test P and Type together
+        let p_type: PType = 0xCA; // P=1, Type=74
+        assert!(p(p_type));
+        assert_eq!(msg_type(p_type), 0x4A);
+
+        // Test Type-specific and S together
+        let type_s: TypeS = 0xEB; // Type-specific=117, S=1
+        assert_eq!(type_specific_bits(type_s), 0x75);
+        assert!(s(type_s));
+
+        // Test checksum conversion
+        let chksum: Checksum = [0x12, 0x34];
+        assert_eq!(checksum(chksum), 0x1234);
+
+        // Test type-specific data conversion
+        let data: TypeData = [0x56, 0x78];
+        assert_eq!(type_specific_data(data), 0x5678);
+
+        // Test length calculations with hdr_ext_len = 2
+        let hdr_len: HdrExtLen = 2;
+        assert_eq!(total_hdr_len(hdr_len), 24);
+        assert_eq!(variable_len(hdr_len), 16);
     }
 }
