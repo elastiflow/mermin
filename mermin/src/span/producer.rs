@@ -7,7 +7,7 @@ use std::{
 
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
-use mermin_common::PacketMeta;
+use mermin_common::{PacketMeta, TunnelType};
 use network_types::{
     eth::EtherType,
     ip::{IpDscp, IpEcn, IpProto},
@@ -214,8 +214,7 @@ impl PacketWorker {
             let src_port = packet.src_port();
             let dst_port = packet.dst_port();
 
-            let is_tunneled =
-                packet.tunnel_src_ipv4_addr != [0; 4] || packet.tunnel_src_ipv6_addr != [0; 16];
+            let is_tunneled = packet.tunnel_type != TunnelType::None;
             let tunnel_addresses = if is_tunneled {
                 Some(Self::extract_ip_addresses(
                     packet.tunnel_ip_addr_type,
@@ -227,6 +226,13 @@ impl PacketWorker {
             } else {
                 None
             };
+            let tunnel_has_id = packet.tunnel_type == TunnelType::Gre
+                || packet.tunnel_type == TunnelType::Geneve
+                || packet.tunnel_type == TunnelType::Vxlan;
+            let tunnel_has_sender_index = packet.tunnel_type == TunnelType::Wireguard;
+            let tunnel_has_receiver_index = packet.tunnel_type == TunnelType::Wireguard;
+            let tunnel_has_spi =
+                packet.tunnel_type == TunnelType::Esp || packet.tunnel_type == TunnelType::Ah;
 
             // Pre-calculate commonly used conditions for readability
             let is_icmp = packet.proto == IpProto::Icmp;
@@ -344,17 +350,19 @@ impl PacketWorker {
                     flow_tcp_rndtrip_jitter: None,
 
                     // Tunnel attributes (populated when traffic is encapsulated)
-                    tunnel_type: None,
+                    tunnel_type: is_tunneled.then_some(packet.tunnel_type),
                     tunnel_source_address: tunnel_addresses.map(|(src, _)| src),
                     tunnel_source_port: is_tunneled.then(|| packet.tunnel_src_port()),
                     tunnel_destination_address: tunnel_addresses.map(|(_, dst)| dst),
                     tunnel_destination_port: is_tunneled.then(|| packet.tunnel_dst_port()),
                     tunnel_network_transport: is_tunneled.then_some(packet.tunnel_proto),
                     tunnel_network_type: is_tunneled.then_some(packet.tunnel_ether_type),
-                    tunnel_id: None,
-                    tunnel_sender_index: None,
-                    tunnel_receiver_index: None,
-                    tunnel_spi: None,
+                    tunnel_id: tunnel_has_id.then_some(packet.tunnel_id),
+                    tunnel_sender_index: tunnel_has_sender_index
+                        .then_some(packet.tunnel_sender_index),
+                    tunnel_receiver_index: tunnel_has_receiver_index
+                        .then_some(packet.tunnel_receiver_index),
+                    tunnel_spi: tunnel_has_spi.then_some(packet.tunnel_spi),
 
                     // Kubernetes source attributes (not yet implemented)
                     source_k8s_cluster_name: None,

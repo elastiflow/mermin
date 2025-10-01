@@ -353,7 +353,7 @@ impl Traceable for FlowSpan {
             kvs.push(KeyValue::new("flow.tcp.rndtrip.jitter", value));
         }
         if let Some(ref value) = self.attributes.tunnel_type {
-            kvs.push(KeyValue::new("tunnel.type", value.to_owned()));
+            kvs.push(KeyValue::new("tunnel.type", value.as_str()));
         }
         if let Some(value) = self.attributes.tunnel_source_address {
             kvs.push(KeyValue::new("tunnel.source.address", value.to_string()));

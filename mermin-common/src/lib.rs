@@ -103,10 +103,12 @@ pub enum TunnelType {
     None = 0,
     Ipv4 = 1,
     Ipv6 = 2,
-    Geneve = 3,
-    Gre = 4,
-    Vxlan = 5,
-    Wireguard = 6,
+    Gre = 3,
+    Esp = 4,
+    Ah = 5,
+    Geneve = 6,
+    Vxlan = 7,
+    Wireguard = 8,
 }
 
 impl From<IpProto> for TunnelType {
@@ -114,6 +116,9 @@ impl From<IpProto> for TunnelType {
         match proto {
             IpProto::Ipv4 => TunnelType::Ipv4,
             IpProto::Ipv6 => TunnelType::Ipv6,
+            IpProto::Gre => TunnelType::Gre,
+            IpProto::Esp => TunnelType::Esp,
+            IpProto::Ah => TunnelType::Ah,
             _ => TunnelType::None,
         }
     }
@@ -124,6 +129,12 @@ impl TunnelType {
         match self {
             TunnelType::Ipv4 => "ipv4",
             TunnelType::Ipv6 => "ipv6",
+            TunnelType::Gre => "gre",
+            TunnelType::Esp => "esp",
+            TunnelType::Ah => "ah",
+            TunnelType::Geneve => "geneve",
+            TunnelType::Vxlan => "vxlan",
+            TunnelType::Wireguard => "wireguard",
             _ => "none",
         }
     }
