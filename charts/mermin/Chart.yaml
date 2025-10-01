@@ -9,8 +9,7 @@ sources:
   - https://github.com/elastiflow/mermin
 dependencies:
   - name: netobserv
-    # repository: https://elastiflow.github.io/helm-chart-netobserv/
-    repository: file:///Users/mack/Work/ELF/repos/helm-chart-netobserv/charts/netobserv
+    repository: https://elastiflow.github.io/helm-chart-netobserv/
     version: ">= 0.6.0"
     condition: netobserv.enabled
   - name: opensearch
