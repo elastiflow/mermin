@@ -53,7 +53,7 @@ pub mod ipv4 {
     use crate::ip::IpProto;
 
     /// The length of the IPv4 header.
-    pub const IPV4_LEN: usize = 16;
+    pub const IPV4_LEN: usize = 20;
 
     pub type Vihl = u8;
     pub type DscpEcn = u8;
@@ -949,7 +949,7 @@ mod tests {
 
     #[test]
     fn test_ipv4_len() {
-        assert_eq!(ipv4::IPV4_LEN, 16);
+        assert_eq!(ipv4::IPV4_LEN, 20);
     }
 
     #[test]

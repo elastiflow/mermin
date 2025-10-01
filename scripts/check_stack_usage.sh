@@ -38,7 +38,7 @@ if [ ! -z "$MAX_STACK" ]; then
     fi
     
     echo ""
-    echo "⚠️  IMPORTANT: This measures individual functions only."
+    echo "💡 NOTE: This measures individual functions only."
     echo "   Verifier failures like 'combined stack size...544. Too large'"
     echo "   are CUMULATIVE across function call chains."
 else
