@@ -52,6 +52,7 @@ agent "traces" "main" {
 }
 
 # ------------------------
+# TODO(Cleanup for GA): Cleanup this comment after full config implementation
 # New config format
 # ------------------------
 
