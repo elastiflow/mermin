@@ -217,14 +217,14 @@ fmtconvert -from hcl -to yaml examples/local/config.hcl > examples/local/config.
 
 Running the eBPF agent requires elevated privileges. Use the `--config` flag to specify your chosen configuration file. Default configuration file `config.hcl` is provided in the project root with the stdout exporter enabled for local development.
 
-**Using YAML:**
-```shell
-cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config <(fmtconvert -from hcl -to yaml examples/local/config.hcl)
-```
-
 **Using HCL:**
 ```shell
 cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config examples/local/config.hcl
+```
+
+**Using YAML:**
+```shell
+cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config <(fmtconvert -from hcl -to yaml examples/local/config.hcl)
 ```
 
 > The `sudo -E` command runs the program as root while preserving the user's environment variables, which is
