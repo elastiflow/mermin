@@ -171,11 +171,11 @@ pub struct OtlpExporterOptions {
 /// is the output format, which determines how the telemetry data is rendered.
 ///
 /// # Fields
-/// - `format`: The output format for the exporter (e.g., "full", "compact", "json").
+/// - `format`: The output format for the exporter (e.g., "plain", "json", "json_pretty").
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct StdoutExporterOptions {
-    /// The output format for the exporter (e.g., "full", "compact", "json", etc.).
-    /// Note: Only "full" is supported.
+    /// The output format for the exporter (e.g., "plain", "json", "json_pretty", etc.).
+    /// Note: Only "plain" is currently supported.
     pub format: String,
 }
 
