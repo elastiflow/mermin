@@ -112,6 +112,9 @@ load_image_into_kind() {
 }
 
 deploy_helm_chart() {
+  helm repo add netobserv https://elastiflow.github.io/helm-chart-netobserv/
+  helm repo add opensearch https://opensearch-project.github.io/helm-charts/
+  helm dependency build
   make helm-upgrade \
     APP="$RELEASE_NAME" \
     HELM_CHART="$HELM_CHART_PATH" \

@@ -118,14 +118,20 @@ kind create cluster --config examples/local/kind-config.yaml
 docker build -t mermin:latest --target runner-debug .
 kind load docker-image -n atlantis mermin:latest
 
-# 3a. (optional) if you already have a Helm release, uninstall it first
+# 3. Fetch Helm dependencies
+helm repo add netobserv https://elastiflow.github.io/helm-chart-netobserv/
+helm repo add opensearch https://opensearch-project.github.io/helm-charts/
+helm repo update
+helm dependency build charts/mermin
+
+# 4a. (optional) if you already have a Helm release, uninstall it first
 helm uninstall mermin
 
-# 3b. Deploy mermin using Helm
+# 4b. Deploy mermin using Helm
 make helm-upgrade
-# 3c. Or deploy mermin using Helm with a non-default config
+# 4c. Or deploy mermin using Helm with a non-default config
 make helm-upgrade EXTRA_HELM_ARGS='--set-file config.source=examples/local/config.hcl'
-# 3d. Or deploy using raw Helm cli
+# 4d. Or deploy using raw Helm cli
 helm upgrade -i mermin charts/mermin --values examples/local/values.yaml --wait --timeout 10m
 ```
 

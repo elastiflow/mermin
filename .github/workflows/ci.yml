@@ -125,6 +125,11 @@ jobs:
           check-latest: true
       - name: Set up chart-testing
         uses: helm/chart-testing-action@v2.7.0
+      - name: Install Helm dependencies
+        run: |
+          helm repo add netobserv https://elastiflow.github.io/helm-chart-netobserv/
+          helm repo add opensearch https://opensearch-project.github.io/helm-charts/
+          helm dependency build
       - name: Run chart-testing (list-changed)
         id: list-changed
         run: |
