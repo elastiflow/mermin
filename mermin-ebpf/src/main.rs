@@ -50,6 +50,7 @@ static mut PACKET_META: PerCpuArray<PacketMeta> = PerCpuArray::with_max_entries(
 
 #[cfg(not(feature = "test"))]
 #[inline(always)]
+#[allow(clippy::mut_from_ref)]
 fn get_packet_meta(ctx: &TcContext) -> Result<&mut PacketMeta, Error> {
     // Get PacketMeta from PerCpuArray instead of using local variables
     let meta_ptr = unsafe {
@@ -71,6 +72,7 @@ static mut PARSER_OPTIONS: PerCpuArray<ParserOptions> = PerCpuArray::with_max_en
 
 #[cfg(not(feature = "test"))]
 #[inline(always)]
+#[allow(clippy::mut_from_ref)]
 fn get_parser_options(ctx: &TcContext) -> Result<&mut ParserOptions, Error> {
     // Get ParserOptions from PerCpuArray instead of using local variables
     let options_ptr = unsafe {
@@ -268,7 +270,7 @@ impl Parser {
             return Err(Error::MalformedHeader);
         }
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         meta.proto = ctx.load(self.offset + 9).map_err(|_| Error::OutOfBounds)?;
 
         // Check if this is an encapsulated packet
@@ -331,7 +333,7 @@ impl Parser {
         }
 
         // policy: innermost IP header determines the flow span IPs
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         meta.ip_addr_type = IpAddrType::Ipv4;
         let dscp_ecn: ipv4::DscpEcn = ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
         meta.ip_dscp_id = ipv4::dscp(dscp_ecn);
@@ -365,7 +367,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         meta.proto = ctx.load(self.offset + 6).map_err(|_| Error::OutOfBounds)?;
 
         if (meta.proto == IpProto::Ipv6 || meta.proto == IpProto::Ipv4)
@@ -426,7 +428,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let meta: &mut PacketMeta = get_packet_meta(&ctx)?;
+        let meta: &mut PacketMeta = get_packet_meta(ctx)?;
 
         // policy: innermost IP header determines the flow span IPs
         meta.ip_addr_type = IpAddrType::Ipv6;
@@ -573,10 +575,10 @@ impl Parser {
         }
 
         match wg_type {
-            WireGuardType::HandshakeInitiation => self.parse_wireguard_init(&ctx),
-            WireGuardType::HandshakeResponse => self.parse_wireguard_response(&ctx),
-            WireGuardType::CookieReply => self.parse_wireguard_cookie_reply(&ctx),
-            WireGuardType::TransportData => self.parse_wireguard_transport_data(&ctx),
+            WireGuardType::HandshakeInitiation => self.parse_wireguard_init(ctx),
+            WireGuardType::HandshakeResponse => self.parse_wireguard_response(ctx),
+            WireGuardType::CookieReply => self.parse_wireguard_cookie_reply(ctx),
+            WireGuardType::TransportData => self.parse_wireguard_transport_data(ctx),
             _ => Err(Error::Unsupported),
         }
     }
@@ -701,15 +703,17 @@ impl Parser {
         if gre::r_flag(flag_res) {
             let mut routing_len = 0;
             loop {
-                if self.offset + GRE_ROUTING_LEN > ctx.len() as usize {
+                if self.offset + routing_len + GRE_ROUTING_LEN > ctx.len() as usize {
                     return Err(Error::OutOfBounds);
                 }
 
                 let (address_family, sre_length) = {
-                    let af: gre::AddressFamily =
-                        ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-                    let sl: gre::SreLength =
-                        ctx.load(self.offset + 3).map_err(|_| Error::OutOfBounds)?;
+                    let af: gre::AddressFamily = ctx
+                        .load(self.offset + routing_len)
+                        .map_err(|_| Error::OutOfBounds)?;
+                    let sl: gre::SreLength = ctx
+                        .load(self.offset + routing_len + 3)
+                        .map_err(|_| Error::OutOfBounds)?;
                     (af, sl)
                 };
 
@@ -722,7 +726,7 @@ impl Parser {
                     return Err(Error::OutOfBounds);
                 }
 
-                if self.offset + sre_length as usize > ctx.len() as usize {
+                if self.offset + routing_len + sre_length as usize > ctx.len() as usize {
                     return Err(Error::OutOfBounds);
                 }
 
@@ -795,7 +799,7 @@ impl Parser {
 
         let dst_port = meta.dst_port();
 
-        let opts = get_parser_options(&ctx)?;
+        let opts = get_parser_options(ctx)?;
         // IANA has assigned port 6081 as the fixed well-known destination port for Geneve and port 4789 as the fixed well-known destination port for Vxlan.
         // Although the well-known value should be used by default, it is RECOMMENDED that implementations make these configurable.
         self.next_hdr = if dst_port == opts.geneve_port {
@@ -1048,6 +1052,7 @@ mod host_test_shim {
 
     // Mock SkBuff that wraps the mock __sk_buff like the real one
     pub struct SkBuff {
+        #[allow(dead_code)]
         pub skb: *mut MockSkBuff,
         _data: Vec<u8>,                           // Keep data alive
         _mock_skb: alloc::boxed::Box<MockSkBuff>, // Keep mock alive
@@ -3182,5 +3187,158 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), Error::OutOfBounds);
+    }
+
+    #[test]
+    fn test_parse_ipv4_encap() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv4);
+        let packet = create_ipv4_test_packet();
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_ipv4_encap(&ctx);
+
+        assert!(result.is_ok());
+        // IHL=5 means 5*4=20 bytes header length
+        assert_eq!(parser.offset, 20);
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    #[test]
+    fn test_parse_ipv4_encap_out_of_bounds() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv4);
+        let packet = vec![0u8; 10]; // Too short for IPv4 header
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_ipv4_encap(&ctx);
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), Error::OutOfBounds);
+    }
+
+    #[test]
+    fn test_parse_ipv4_encap_invalid_header_length() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv4);
+        let mut packet = create_ipv4_test_packet();
+        // Set IHL to 3 (12 bytes), which is less than minimum 20 bytes
+        packet[0] = 0x43;
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_ipv4_encap(&ctx);
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), Error::MalformedHeader);
+    }
+
+    #[test]
+    fn test_parse_ipv6_encap() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6);
+        let packet = create_ipv6_test_packet();
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_ipv6_encap(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, IPV6_LEN);
+        assert!(matches!(parser.next_hdr, HeaderType::Proto(IpProto::Tcp)));
+    }
+
+    #[test]
+    fn test_parse_ipv6_encap_out_of_bounds() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Proto(IpProto::Ipv6);
+        let packet = vec![0u8; 20]; // Too short for IPv6 header (needs 40 bytes)
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_ipv6_encap(&ctx);
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), Error::OutOfBounds);
+    }
+
+    #[test]
+    fn test_parse_wireguard_header_initiation() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Wireguard;
+        let packet = create_wireguard_init_test_packet();
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_wireguard_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, WIREGUARD_INITIATION_LEN);
+        assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
+    }
+
+    #[test]
+    fn test_parse_wireguard_header_response() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Wireguard;
+        let packet = create_wireguard_response_test_packet();
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_wireguard_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, WIREGUARD_RESPONSE_LEN);
+        assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
+    }
+
+    #[test]
+    fn test_parse_wireguard_header_cookie_reply() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Wireguard;
+        let packet = create_wireguard_cookie_reply_test_packet();
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_wireguard_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, WIREGUARD_COOKIE_REPLY_LEN);
+        assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
+    }
+
+    #[test]
+    fn test_parse_wireguard_header_transport_data() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Wireguard;
+        let packet = create_wireguard_transport_data_test_packet();
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_wireguard_header(&ctx);
+
+        assert!(result.is_ok());
+        assert_eq!(parser.offset, WIREGUARD_TRANSPORT_DATA_LEN);
+        assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
+    }
+
+    #[test]
+    fn test_parse_wireguard_header_out_of_bounds() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Wireguard;
+        let packet = vec![0u8; 0]; // Empty packet
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_wireguard_header(&ctx);
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), Error::OutOfBounds);
+    }
+
+    #[test]
+    fn test_parse_wireguard_header_unsupported_type() {
+        let mut parser = Parser::default();
+        parser.next_hdr = HeaderType::Wireguard;
+        let mut packet = vec![0u8; 16];
+        packet[0] = 0xFF; // Invalid WireGuard type
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_wireguard_header(&ctx);
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), Error::Unsupported);
     }
 }
