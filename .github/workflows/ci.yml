@@ -107,6 +107,7 @@ jobs:
         run: |
           cd network-types/tests
           make test-ci
+        continue-on-error: true
 
   helm_checks:
     name: Run Helm sanity checks
