@@ -54,92 +54,6 @@ mod defaults {
     }
 }
 
-/// The fully resolved and validated application configuration.
-/// This is the struct that the rest of the application should use.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AppConf {
-    /// A vector of strings representing the network interfaces or endpoints
-    /// that the application should operate on. These interfaces are read
-    /// directly from the configuration file.
-    pub interface: Vec<String>,
-
-    /// A boolean flag indicating whether the application should automatically
-    /// reload the configuration whenever changes are detected in the
-    /// relevant configuration file. This is typically used to support runtime
-    /// configuration updates.
-    pub auto_reload: bool,
-
-    /// The logging level for the application, serialized and deserialized
-    /// using the custom Serde module named `level`. This allows more
-    /// precise handling of log level values, particularly when
-    /// deserializing from non-standard formats.
-    #[serde(with = "level")]
-    pub log_level: Level,
-
-    /// Configuration for the API server (health endpoints).
-    #[serde(default)]
-    pub api: ApiConf,
-
-    /// Configuration for the Metrics server (e.g., for Prometheus scraping).
-    #[serde(default)]
-    pub metrics: MetricsConf,
-
-    /// Capacity of the channel for packet events between the ring buffer reader and flow workers
-    /// - Default: 10000
-    /// - Example: Increase for high-traffic environments, decrease for memory-constrained systems
-    #[serde(default = "defaults::packet_channel_capacity")]
-    pub packet_channel_capacity: usize,
-
-    /// Number of worker tasks for flow processing
-    /// - Default: 2
-    /// - Example: Increase for high CPU systems, keep at 1-2 for most deployments
-    #[serde(default = "defaults::flow_workers")]
-    pub packet_worker_count: usize,
-
-    /// Maximum time to wait for graceful shutdown of pipeline components
-    /// Increase for environments with slow disk I/O or network operations
-    /// - Default: 5s
-    #[serde(default = "defaults::shutdown_timeout", with = "duration")]
-    pub shutdown_timeout: Duration,
-
-    /// A `Flow` type (defined elsewhere in the codebase) which contains
-    /// settings related to the application's runtime flow management.
-    /// This field encapsulates additional configuration details specific
-    /// to how the application's logic operates.
-    pub span: SpanOptions,
-
-    /// A map of fully resolved and ready-to-use trace pipelines.
-    pub trace_pipelines: HashMap<String, ResolvedTracePipeline>,
-}
-
-impl AppConf {
-    /// Transforms a `RawConf` into a resolved `AppConf`.
-    /// This is where all references are resolved and the final configuration is built.
-    fn from_raw(raw: RawConf) -> Result<Self, ConfigError> {
-        let mut trace_pipelines = HashMap::new();
-
-        if let Some(agent) = raw.clone().agent {
-            for (name, trace_opts) in agent.traces {
-                let resolved_pipeline = ResolvedTracePipeline::from_raw(&name, trace_opts, &raw)?;
-                trace_pipelines.insert(name, resolved_pipeline);
-            }
-        }
-
-        Ok(Self {
-            interface: raw.interface,
-            auto_reload: raw.auto_reload,
-            log_level: raw.log_level,
-            api: raw.api,
-            metrics: raw.metrics,
-            packet_channel_capacity: raw.packet_channel_capacity,
-            packet_worker_count: raw.packet_worker_count,
-            shutdown_timeout: raw.shutdown_timeout,
-            span: raw.span,
-            trace_pipelines,
-        })
-    }
-}
-
 /// Represents a single, fully resolved trace pipeline with its discovery
 /// and exporter configurations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,7 +74,7 @@ impl ResolvedTracePipeline {
     fn from_raw(
         pipeline_name: &str,
         raw_opts: RawTraceOptions,
-        raw_conf: &RawConf,
+        raw_conf: &Conf,
     ) -> Result<Self, ConfigError> {
         // Resolve Exporters
         let mut exporters = Vec::new();
@@ -214,10 +128,60 @@ impl ResolvedTracePipeline {
 /// This struct is serializable and deserializable using Serde, allowing
 /// it to be easily read from or written to configuration files in
 /// formats like YAML.
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Conf {
-    /// The active, resolved application configuration.
-    pub app: AppConf,
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct AppProps {
+    /// A vector of strings representing the network interfaces or endpoints
+    /// that the application should operate on. These interfaces are read
+    /// directly from the configuration file.
+    pub interface: Vec<String>,
+
+    /// A boolean flag indicating whether the application should automatically
+    /// reload the configuration whenever changes are detected in the
+    /// relevant configuration file. This is typically used to support runtime
+    /// configuration updates.
+    pub auto_reload: bool,
+
+    /// The logging level for the application, serialized and deserialized
+    /// using the custom Serde module named `level`. This allows more
+    /// precise handling of log level values, particularly when
+    /// deserializing from non-standard formats.
+    #[serde(with = "level")]
+    pub log_level: Level,
+
+    /// Configuration for the API server (health endpoints).
+    #[serde(default)]
+    pub api: ApiConf,
+
+    /// Configuration for the Metrics server (e.g., for Prometheus scraping).
+    #[serde(default)]
+    pub metrics: MetricsConf,
+
+    /// Capacity of the channel for packet events between the ring buffer reader and flow workers
+    /// - Default: 10000
+    /// - Example: Increase for high-traffic environments, decrease for memory-constrained systems
+    #[serde(default = "defaults::packet_channel_capacity")]
+    pub packet_channel_capacity: usize,
+
+    /// Number of worker tasks for flow processing
+    /// - Default: 2
+    /// - Example: Increase for high CPU systems, keep at 1-2 for most deployments
+    #[serde(default = "defaults::flow_workers")]
+    pub packet_worker_count: usize,
+
+    /// Maximum time to wait for graceful shutdown of pipeline components
+    /// Increase for environments with slow disk I/O or network operations
+    /// - Default: 5s
+    #[serde(default = "defaults::shutdown_timeout", with = "duration")]
+    pub shutdown_timeout: Duration,
+
+    /// A `Flow` type (defined elsewhere in the codebase) which contains
+    /// settings related to the application's runtime flow management.
+    /// This field encapsulates additional configuration details specific
+    /// to how the application's logic operates.
+    pub span: SpanOptions,
+
+    /// A map of fully resolved and ready-to-use trace pipelines.
+    pub trace_pipelines: HashMap<String, ResolvedTracePipeline>,
 
     /// An optional `PathBuf` field that represents the file path to the
     /// configuration file. This field is annotated with `#[serde(skip)]`,
@@ -228,7 +192,7 @@ pub struct Conf {
     config_path: Option<PathBuf>,
 }
 
-impl Conf {
+impl AppProps {
     /// Merges a configuration file into a Figment instance, automatically
     /// selecting the correct provider based on the file extension.
     fn merge_provider_for_path(figment: Figment, path: &Path) -> Result<Figment, ConfigError> {
@@ -238,6 +202,22 @@ impl Conf {
             Some(ext) => Err(ConfigError::InvalidExtension(ext.to_string())),
             None => Err(ConfigError::InvalidExtension("none".to_string())),
         }
+    }
+
+    fn resolve_trace_pipelines(
+        raw_conf: &Conf,
+    ) -> Result<HashMap<String, ResolvedTracePipeline>, ConfigError> {
+        let mut trace_pipelines = HashMap::new();
+
+        if let Some(agent) = &raw_conf.agent {
+            for (name, trace_opts) in agent.traces.clone() {
+                let resolved_pipeline =
+                    ResolvedTracePipeline::from_raw(&name, trace_opts, raw_conf)?;
+                trace_pipelines.insert(name, resolved_pipeline);
+            }
+        }
+
+        Ok(trace_pipelines)
     }
 
     /// Creates a new `Conf` instance based on the provided CLI arguments, environment variables,
@@ -283,7 +263,7 @@ impl Conf {
     /// }
     /// ```
     pub fn new(cli: Cli) -> Result<(Self, Cli), ConfigError> {
-        let mut figment = Figment::new().merge(Serialized::defaults(RawConf::default()));
+        let mut figment = Figment::new().merge(Serialized::defaults(Conf::default()));
 
         let config_path_to_store = if let Some(config_path) = &cli.config {
             validate_config_path(config_path)?;
@@ -295,11 +275,21 @@ impl Conf {
 
         figment = figment.merge(Serialized::defaults(&cli));
 
-        let raw_conf: RawConf = figment.extract()?;
-        let app_conf = AppConf::from_raw(raw_conf)?;
+        let raw_conf: Conf = figment.extract()?;
+
+        let trace_pipelines = Self::resolve_trace_pipelines(&raw_conf)?;
 
         let conf = Self {
-            app: app_conf,
+            interface: raw_conf.interface,
+            auto_reload: raw_conf.auto_reload,
+            log_level: raw_conf.log_level,
+            api: raw_conf.api,
+            metrics: raw_conf.metrics,
+            packet_channel_capacity: raw_conf.packet_channel_capacity,
+            packet_worker_count: raw_conf.packet_worker_count,
+            shutdown_timeout: raw_conf.shutdown_timeout,
+            span: raw_conf.span,
+            trace_pipelines,
             config_path: config_path_to_store,
         };
 
@@ -353,14 +343,24 @@ impl Conf {
 
         // Create a new Figment instance, using the current resolved config
         // as the base. This preserves CLI/env vars. Then merge the file on top.
-        let mut figment = Figment::from(Serialized::defaults(&self.app));
+        let mut figment = Figment::from(Serialized::defaults(&self));
         figment = Self::merge_provider_for_path(figment, path)?;
 
-        let raw_conf: RawConf = figment.extract()?;
-        let app_conf = AppConf::from_raw(raw_conf)?;
+        let raw_conf: Conf = figment.extract()?;
+
+        let trace_pipelines = Self::resolve_trace_pipelines(&raw_conf)?;
 
         Ok(Self {
-            app: app_conf,
+            interface: raw_conf.interface,
+            auto_reload: raw_conf.auto_reload,
+            log_level: raw_conf.log_level,
+            api: raw_conf.api,
+            metrics: raw_conf.metrics,
+            packet_channel_capacity: raw_conf.packet_channel_capacity,
+            packet_worker_count: raw_conf.packet_worker_count,
+            shutdown_timeout: raw_conf.shutdown_timeout,
+            span: raw_conf.span,
+            trace_pipelines,
             config_path: self.config_path.clone(),
         })
     }
@@ -368,7 +368,7 @@ impl Conf {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
-struct RawConf {
+struct Conf {
     interface: Vec<String>,
     auto_reload: bool,
     #[serde(with = "level")]
@@ -384,7 +384,7 @@ struct RawConf {
     exporter: Option<ExporterOptions>,
 }
 
-impl Default for RawConf {
+impl Default for Conf {
     fn default() -> Self {
         Self {
             interface: vec!["eth0".to_string()],
@@ -798,7 +798,7 @@ mod tests {
     use figment::Jail;
     use tracing::Level;
 
-    use super::{AppConf, Conf, ExporterReference, RawConf};
+    use super::{AppProps, Conf, ExporterReference};
     use crate::runtime::cli::Cli;
 
     fn parse_exporter_reference(reference: &str) -> Result<ExporterReference, String> {
@@ -816,10 +816,28 @@ mod tests {
         }
     }
 
+    fn create_default_app_props() -> AppProps {
+        let raw_conf = Conf::default();
+        let trace_pipelines = AppProps::resolve_trace_pipelines(&raw_conf)
+            .expect("resolving default pipelines should succeed");
+        AppProps {
+            interface: raw_conf.interface,
+            auto_reload: raw_conf.auto_reload,
+            log_level: raw_conf.log_level,
+            api: raw_conf.api,
+            metrics: raw_conf.metrics,
+            packet_channel_capacity: raw_conf.packet_channel_capacity,
+            packet_worker_count: raw_conf.packet_worker_count,
+            shutdown_timeout: raw_conf.shutdown_timeout,
+            span: raw_conf.span,
+            trace_pipelines,
+            config_path: None,
+        }
+    }
+
     #[test]
     fn default_impl_has_eth0_interface() {
-        let raw_conf = RawConf::default();
-        let cfg = AppConf::from_raw(raw_conf).unwrap();
+        let cfg = create_default_app_props();
         assert_eq!(cfg.interface, Vec::from(["eth0".to_string()]));
         assert_eq!(cfg.auto_reload, false);
         assert_eq!(cfg.log_level, Level::INFO);
@@ -831,12 +849,11 @@ mod tests {
 
     #[test]
     fn test_conf_serialization() {
-        let raw_conf = RawConf::default();
-        let cfg = AppConf::from_raw(raw_conf).unwrap();
+        let cfg = Conf::default();
 
         // Test that it can be serialized and deserialized
         let serialized = serde_yaml::to_string(&cfg).expect("should serialize");
-        let deserialized: AppConf = serde_yaml::from_str(&serialized).expect("should deserialize");
+        let deserialized: Conf = serde_yaml::from_str(&serialized).expect("should deserialize");
 
         assert_eq!(
             cfg.packet_channel_capacity,
@@ -849,7 +866,7 @@ mod tests {
     fn new_succeeds_without_config_path() {
         Jail::expect_with(|_| {
             let cli = Cli::parse_from(["mermin"]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load without path");
+            let (cfg, _cli) = AppProps::new(cli).expect("config should load without path");
             assert_eq!(cfg.config_path, None);
 
             Ok(())
@@ -860,7 +877,7 @@ mod tests {
     fn new_errors_with_nonexistent_config_file() {
         Jail::expect_with(|_| {
             let cli = Cli::parse_from(["mermin", "--config", "nonexistent.yaml"]);
-            let err = Conf::new(cli).expect_err("expected error with nonexistent file");
+            let err = AppProps::new(cli).expect_err("expected error with nonexistent file");
             let msg = err.to_string();
             assert!(
                 msg.contains("no config file provided"),
@@ -879,7 +896,7 @@ mod tests {
             jail.create_dir(path)?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let err = Conf::new(cli).expect_err("expected error with directory path");
+            let err = AppProps::new(cli).expect_err("expected error with directory path");
             let msg = err.to_string();
             assert!(
                 msg.contains("is not a valid file"),
@@ -898,7 +915,7 @@ mod tests {
             jail.create_file(path, "")?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let err = Conf::new(cli).expect_err("expected error with invalid extension");
+            let err = AppProps::new(cli).expect_err("expected error with invalid extension");
             let msg = err.to_string();
             assert!(
                 msg.contains("invalid file extension '.toml'"),
@@ -932,10 +949,10 @@ log_level: warn
                 "--log-level",
                 "debug",
             ]);
-            let (cfg, _cli) = Conf::new(cli).expect("config loads from cli file");
-            assert_eq!(cfg.app.interface, Vec::from(["eth1".to_string()]));
-            assert_eq!(cfg.app.auto_reload, true);
-            assert_eq!(cfg.app.log_level, Level::DEBUG);
+            let (cfg, _cli) = AppProps::new(cli).expect("config loads from cli file");
+            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.auto_reload, true);
+            assert_eq!(cfg.log_level, Level::DEBUG);
 
             Ok(())
         });
@@ -956,10 +973,10 @@ log_level: debug
             jail.set_env("MERMIN_CONFIG_PATH", path);
 
             let cli = Cli::parse_from(["mermin"]);
-            let (cfg, _cli) = Conf::new(cli).expect("config loads from env file");
-            assert_eq!(cfg.app.interface, Vec::from(["eth1".to_string()]));
-            assert_eq!(cfg.app.auto_reload, true);
-            assert_eq!(cfg.app.log_level, Level::DEBUG);
+            let (cfg, _cli) = AppProps::new(cli).expect("config loads from env file");
+            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.auto_reload, true);
+            assert_eq!(cfg.log_level, Level::DEBUG);
 
             Ok(())
         });
@@ -977,8 +994,8 @@ interface: ["eth1"]
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config loads from cli file");
-            assert_eq!(cfg.app.interface, Vec::from(["eth1".to_string()]));
+            let (cfg, _cli) = AppProps::new(cli).expect("config loads from cli file");
+            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
 
             // Update the config file
@@ -991,7 +1008,7 @@ interface: ["eth2", "eth3"]
 
             let reloaded_cfg = cfg.reload().expect("config should reload");
             assert_eq!(
-                reloaded_cfg.app.interface,
+                reloaded_cfg.interface,
                 Vec::from(["eth2".to_string(), "eth3".to_string()])
             );
             assert_eq!(reloaded_cfg.config_path, Some(path.parse().unwrap()));
@@ -1002,12 +1019,7 @@ interface: ["eth2", "eth3"]
 
     #[test]
     fn reload_fails_without_config_path() {
-        let app_conf = AppConf::from_raw(RawConf::default())
-            .expect("resolving a default raw config should always succeed");
-        let cfg = Conf {
-            app: app_conf,
-            config_path: None,
-        };
+        let cfg = create_default_app_props();
         let err = cfg
             .reload()
             .expect_err("expected error when reloading without config path");
@@ -1043,14 +1055,14 @@ metrics:
 
             // The rest of the test logic remains the same
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load from yaml file");
+            let (cfg, _cli) = AppProps::new(cli).expect("config should load from yaml file");
 
             // Assert that all the custom values from the file were loaded correctly
-            assert_eq!(cfg.app.interface, Vec::from(["eth1".to_string()]));
-            assert_eq!(cfg.app.api.listen_address, "127.0.0.1");
-            assert_eq!(cfg.app.api.port, 8081);
-            assert_eq!(cfg.app.metrics.listen_address, "0.0.0.0");
-            assert_eq!(cfg.app.metrics.port, 9090);
+            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.api.listen_address, "127.0.0.1");
+            assert_eq!(cfg.api.port, 8081);
+            assert_eq!(cfg.metrics.listen_address, "0.0.0.0");
+            assert_eq!(cfg.metrics.port, 9090);
 
             Ok(())
         });
@@ -1080,13 +1092,13 @@ metrics {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
+            let (cfg, _cli) = AppProps::new(cli).expect("config should load from HCL file");
 
-            assert_eq!(cfg.app.interface, vec!["eth0"]);
-            assert_eq!(cfg.app.log_level, Level::INFO);
-            assert_eq!(cfg.app.auto_reload, true);
-            assert_eq!(cfg.app.api.port, 9090);
-            assert_eq!(cfg.app.metrics.port, 10250);
+            assert_eq!(cfg.interface, vec!["eth0"]);
+            assert_eq!(cfg.log_level, Level::INFO);
+            assert_eq!(cfg.auto_reload, true);
+            assert_eq!(cfg.api.port, 9090);
+            assert_eq!(cfg.metrics.port, 10250);
 
             Ok(())
         });
@@ -1099,7 +1111,7 @@ metrics {
             jail.create_file(path, r#"interface = ["eth0"]"#)?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let result = Conf::new(cli);
+            let result = AppProps::new(cli);
             assert!(result.is_ok(), "HCL extension should be valid");
 
             Ok(())
@@ -1119,9 +1131,9 @@ log_level = "info"
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config loads from HCL file");
-            assert_eq!(cfg.app.interface, Vec::from(["eth1".to_string()]));
-            assert_eq!(cfg.app.log_level, Level::INFO);
+            let (cfg, _cli) = AppProps::new(cli).expect("config loads from HCL file");
+            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
 
             // Update the HCL config file
@@ -1135,10 +1147,10 @@ log_level = "debug"
 
             let reloaded_cfg = cfg.reload().expect("config should reload from HCL");
             assert_eq!(
-                reloaded_cfg.app.interface,
+                reloaded_cfg.interface,
                 Vec::from(["eth2".to_string(), "eth3".to_string()])
             );
-            assert_eq!(reloaded_cfg.app.log_level, Level::DEBUG);
+            assert_eq!(reloaded_cfg.log_level, Level::DEBUG);
             assert_eq!(reloaded_cfg.config_path, Some(path.parse().unwrap()));
 
             Ok(())
@@ -1160,7 +1172,7 @@ log_level =
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let err = Conf::new(cli).expect_err("expected error with invalid HCL");
+            let err = AppProps::new(cli).expect_err("expected error with invalid HCL");
             let msg = err.to_string();
 
             // The error originates from the `hcl` crate, is wrapped by `figment`,
@@ -1202,14 +1214,14 @@ metrics {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
+            let (cfg, _cli) = AppProps::new(cli).expect("config should load from HCL file");
 
             // Assert that all the custom values from the file were loaded correctly
-            assert_eq!(cfg.app.interface, Vec::from(["eth1".to_string()]));
-            assert_eq!(cfg.app.api.listen_address, "127.0.0.1");
-            assert_eq!(cfg.app.api.port, 8081);
-            assert_eq!(cfg.app.metrics.listen_address, "0.0.0.0");
-            assert_eq!(cfg.app.metrics.port, 9090);
+            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.api.listen_address, "127.0.0.1");
+            assert_eq!(cfg.api.port, 8081);
+            assert_eq!(cfg.metrics.listen_address, "0.0.0.0");
+            assert_eq!(cfg.metrics.port, 9090);
 
             Ok(())
         });

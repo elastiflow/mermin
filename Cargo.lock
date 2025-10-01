@@ -1807,7 +1807,6 @@ dependencies = [
  "futures",
  "fxhash",
  "hcl-rs",
- "http",
  "humantime",
  "hyper",
  "ipnetwork 0.21.1",

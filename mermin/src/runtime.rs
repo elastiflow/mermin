@@ -4,7 +4,7 @@ use clap::Parser;
 
 use crate::runtime::{
     cli::Cli,
-    conf::{Conf, ConfigError},
+    conf::{AppProps, ConfigError},
 };
 
 pub mod cli;
@@ -14,13 +14,13 @@ pub mod enums;
 pub struct Runtime {
     #[allow(dead_code)]
     pub cli: Cli,
-    pub config: Conf,
+    pub config: AppProps,
 }
 
 impl Runtime {
     pub fn new() -> Result<Self, RuntimeError> {
         let cli = Cli::parse();
-        let (config, cli) = Conf::new(cli)?;
+        let (config, cli) = AppProps::new(cli)?;
 
         Ok(Runtime { cli, config })
     }
