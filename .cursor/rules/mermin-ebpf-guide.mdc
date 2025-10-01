@@ -1,12 +1,12 @@
 ---
-alwaysApply: true
+description: Essential guide for eBPF development in Mermin. Use when working with eBPF code (mermin-ebpf/), building/testing the project, debugging verifier issues, implementing network packet processing, or dealing with eBPF-specific constraints (bounded loops, stack limits, memory access patterns). Contains Docker container requirements, development patterns, debugging commands, and deployment workflows.
+alwaysApply: false
 ---
-
 # Mermin eBPF Development Guide for AI Agents
 
 This guide provides essential instructions for AI agents working with the Mermin project in Cursor IDE. It consolidates best practices for eBPF development with Aya in Rust.
 
-## 🚨 Critical Rules - Always Follow
+## Critical Rules - Always Follow
 
 ### 1. **MANDATORY: Use Docker for ALL eBPF Operations**
 
@@ -54,7 +54,7 @@ docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builde
 docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "dmesg | grep -i 'bpf\|ebpf' | tail -20"
 ```
 
-## 🔧 eBPF Development Patterns
+## eBPF Development Patterns
 
 ### 1. **Bounded Loops (Required for Verification)**
 
@@ -117,7 +117,7 @@ unsafe {
 - Use simple messages - complex formatting often fails verification
 - Test without logging first - get your core logic working, then add logging
 
-## 🐛 Debugging and Troubleshooting
+## Debugging and Troubleshooting
 
 ### Common Issues and Solutions
 
@@ -169,7 +169,7 @@ kubectl get pods -l app.kubernetes.io/name=mermin
 kubectl logs -l app.kubernetes.io/name=mermin -f
 ```
 
-## 📚 Key Concepts for AI Agents
+## Key Concepts for AI Agents
 
 ### eBPF Verifier Constraints
 
@@ -193,46 +193,10 @@ kubectl logs -l app.kubernetes.io/name=mermin -f
 - Monitor instruction count
 - Test error conditions
 
-## 🔗 Quick Reference
-
-### Essential Patterns
-
-```rust
-// Packet parsing structure
-struct PacketParser {
-    offset: usize,
-}
-
-// Protocol detection
-match eth.ether_type {
-    0x0800 => parse_ipv4(&ctx),
-    0x86DD => parse_ipv6(&ctx),
-    _ => return Ok(TC_ACT_PIPE),
-}
-
-// Flow tracking
-let flow_key = FlowKey {
-    src_ip: ip.src_addr,
-    dst_ip: ip.dst_addr,
-    src_port: tcp.src_port,
-    dst_port: tcp.dst_port,
-    protocol: ip.protocol,
-};
-```
-
-## ⚠️ Important Reminders
+## Important Reminders
 
 1. **ALWAYS use Docker** for eBPF operations
 2. **NEVER assume** direct compilation will work on macOS
 3. **ALWAYS test** in containerized environment
 4. **MONITOR** instruction count and complexity
 5. **HANDLE errors** gracefully - don't drop packets unnecessarily
-
-## 📞 Getting Help
-
-- Check verification logs with `dmesg`
-- Use `bpftool` for runtime inspection
-- Review Aya documentation at <https://aya-rs.dev/>
-- Consult eBPF docs at <https://docs.ebpf.io/>
-
-Remember: When in doubt, simplify your eBPF program. Complex logic often fails verification.

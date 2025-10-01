@@ -4,11 +4,31 @@
 echo "=== How to Calculate Cumulative Call Chain Stack Usage ==="
 echo ""
 
+# Force a fresh build first
+echo "🔄 Building eBPF program..."
+BUILD_RESULT=$(docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "cargo build --release" 2>&1)
+BUILD_EXIT_CODE=$?
+
+if [ $BUILD_EXIT_CODE -ne 0 ]; then
+    echo "❌ Build failed!"
+    echo "$BUILD_RESULT"
+    exit 1
+fi
+
+# Find the eBPF binary
 EBPF_BINARY=$(docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "find target -name 'mermin' -path '*/mermin-ebpf/*' -path '*/bpfel-unknown-none/release/*' | head -1")
+
+if [ -z "$EBPF_BINARY" ]; then
+    echo "❌ No eBPF binary found!"
+    exit 1
+fi
+
+echo "📍 Analyzing binary: $EBPF_BINARY"
+echo ""
 
 echo "Step 1: Find all unique stack offsets"
 echo "======================================"
-STACK_OFFSETS=$(docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump-20 -d --section=classifier ${EBPF_BINARY} | grep -oE 'r10.*-.*0x[0-9a-f]+' | sed 's/.*-.*0x//' | sort -nr | uniq")
+STACK_OFFSETS=$(docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump-20 -d --section=.text ${EBPF_BINARY} | grep -oE 'r10.*-.*0x[0-9a-fA-F]+' | sed 's/.*-.*0x//' | sort -nr | uniq")
 
 echo "All stack offsets found (hex -> decimal):"
 for offset in $STACK_OFFSETS; do
@@ -21,7 +41,7 @@ echo "Step 2: Identify call chains"
 echo "============================"
 
 echo "Function calls found:"
-CALLS=$(docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump-20 -d --section=classifier ${EBPF_BINARY} | grep -E 'call.*0x[0-9a-f]+' | grep -v 'call -0x' | head -5")
+CALLS=$(docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump-20 -d --section=.text ${EBPF_BINARY} | grep -E 'call.*0x[0-9a-fA-F]+' | grep -v 'call -0x' | head -5")
 echo "$CALLS"
 
 echo ""
@@ -31,7 +51,7 @@ echo "================================"
 echo "For each call, find nearby stack usage:"
 # Example for the first few calls
 docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "
-llvm-objdump-20 -d --section=classifier ${EBPF_BINARY} | 
+llvm-objdump-20 -d --section=.text ${EBPF_BINARY} | 
 awk '/call.*0x[0-9a-f]+/ && !/call -0x/ {
     call_line = \$0
     call_inst = \$1
@@ -93,14 +113,6 @@ if [ ${#LARGEST_OFFSETS[@]} -ge 3 ]; then
         echo "  ✅ Scenario 1 within limits"
     fi
 fi
-
-echo ""
-echo "Your specific 544-byte case:"
-echo "  Entry function: 144 bytes (0x90)"
-echo "  Middle function: 328 bytes (0x148)"
-echo "  Leaf function: 0 bytes"  
-echo "  Overhead: 72 bytes (call overhead/padding)"
-echo "  Total: 144 + 328 + 0 + 72 = 544 bytes > 512 limit ❌"
 
 echo ""
 echo "💡 Key Insights:"

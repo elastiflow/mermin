@@ -1,299 +1,191 @@
-use core::mem;
+//! ## IP Headers
+//!
+//! IPv4 header, which is present after the Ethernet header.
+//!  0                   1                   2                   3
+//!  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |ip_ver | h_len |  ip_dscp  |ecn|        ip_total_length        |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |       ip_identification       |flags|   ip_fragment_offset    |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |    ip_ttl     |  ip_protocol  |          ip_checksum          |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                         source_ipaddr                         |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                      destination_ipaddr                       |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                          ip_options                           |
+//! /                              ...                              /
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!
+//! IPv6 header, which is present after the Ethernet header.
+//!   0                   1                   2                   3
+//!   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  |ip_ver |  ip_dscp  |ecn|             ip_flow_label             |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  |       ip_payload_length       |ip_next_header | ip_hop_limit  |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  |                         source_ipaddr                         |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  |                     source_ipaddr (con't)                     |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  |                     source_ipaddr (con't)                     |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  |                     source_ipaddr (con't)                     |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  |                      destination_ipaddr                       |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  |                  destination_ipaddr (con't)                   |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  |                  destination_ipaddr (con't)                   |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  |                  destination_ipaddr (con't)                   |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 /// IP headers, which are present after the Ethernet header.
 pub enum IpHdr {
-    V4(Ipv4Hdr),
-    V6(Ipv6Hdr),
+    V4,
+    V6,
 }
 
-/// IPv4 header, which is present after the Ethernet header.
-///  0                   1                   2                   3
-///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |ip_ver | h_len |  ip_dscp  |ecn|        ip_total_length        |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |       ip_identification       |flags|   ip_fragment_offset    |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |    ip_ttl     |  ip_protocol  |          ip_checksum          |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                         source_ipaddr                         |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                      destination_ipaddr                       |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                          ip_options                           |
-/// /                              ...                              /
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct Ipv4Hdr {
-    pub vihl: u8,
-    pub tos: u8,
-    pub tot_len: [u8; 2],
-    pub id: [u8; 2],
-    pub frags: [u8; 2],
-    pub ttl: u8,
-    pub proto: IpProto,
-    pub check: [u8; 2],
-    pub src_addr: [u8; 4],
-    pub dst_addr: [u8; 4],
-}
+pub mod ipv4 {
+    use crate::ip::IpProto;
 
-impl Ipv4Hdr {
-    pub const LEN: usize = mem::size_of::<Ipv4Hdr>();
+    /// The length of the IPv4 header.
+    pub const IPV4_LEN: usize = 20;
+
+    pub type Vihl = u8;
+    pub type DscpEcn = u8;
+    pub type TotalLen = [u8; 2];
+    pub type Identification = [u8; 2];
+    pub type Fragment = [u8; 2];
+    pub type Ttl = u8;
+    pub type Protocol = IpProto;
+    pub type Checksum = [u8; 2];
+    pub type SrcAddr = [u8; 4];
+    pub type DstAddr = [u8; 4];
 
     /// Returns the IP version field (should be 4).
     #[inline]
-    pub fn version(&self) -> u8 {
-        (self.vihl >> 4) & 0xF
+    pub fn version(vihl: Vihl) -> u8 {
+        (vihl >> 4) & 0xF
     }
 
     /// Returns the IP header length in bytes.
     #[inline]
-    pub fn ihl(&self) -> u8 {
-        (self.vihl & 0xF) << 2
-    }
-
-    /// Sets both the version and IHL fields.
-    #[inline]
-    pub fn set_vihl(&mut self, version: u8, ihl_in_bytes: u8) {
-        let ihl_in_words = ihl_in_bytes / 4;
-        self.vihl = ((version & 0xF) << 4) | (ihl_in_words & 0xF);
+    pub fn ihl(vihl: Vihl) -> u8 {
+        (vihl & 0xF) << 2
     }
 
     /// Returns the DSCP (Differentiated Services Code Point) field.
     #[inline]
-    pub fn dscp(&self) -> u8 {
-        (self.tos >> 2) & 0x3F
+    pub fn dscp(dscp_ecn: DscpEcn) -> u8 {
+        (dscp_ecn >> 2) & 0x3F
     }
 
     /// Returns the ECN (Explicit Congestion Notification) field.
     #[inline]
-    pub fn ecn(&self) -> u8 {
-        self.tos & 0x3
-    }
-
-    /// Sets the TOS field with separate DSCP and ECN values.
-    #[inline]
-    pub fn set_tos(&mut self, dscp: u8, ecn: u8) {
-        self.tos = ((dscp & 0x3F) << 2) | (ecn & 0x3);
+    pub fn ecn(dscp_ecn: DscpEcn) -> u8 {
+        dscp_ecn & 0x3
     }
 
     /// Returns the total length of the IP packet.
     #[inline]
-    pub fn tot_len(&self) -> u16 {
-        u16::from_be_bytes(self.tot_len)
-    }
-
-    /// Sets the total length of the IP packet.
-    #[inline]
-    pub fn set_tot_len(&mut self, len: u16) {
-        self.tot_len = len.to_be_bytes();
+    pub fn tot_len(total_len: TotalLen) -> u16 {
+        u16::from_be_bytes(total_len)
     }
 
     /// Returns the identification field.
     #[inline]
-    pub fn id(&self) -> u16 {
-        u16::from_be_bytes(self.id)
-    }
-
-    /// Sets the identification field.
-    #[inline]
-    pub fn set_id(&mut self, id: u16) {
-        self.id = id.to_be_bytes();
+    pub fn id(identification: Identification) -> u16 {
+        u16::from_be_bytes(identification)
     }
 
     /// Returns the fragmentation flags (3 bits).
     #[inline]
-    pub fn frag_flags(&self) -> u8 {
-        (u16::from_be_bytes(self.frags) >> 13) as u8
+    pub fn frag_flags(fragments: Fragment) -> u8 {
+        (u16::from_be_bytes(fragments) >> 13) as u8
     }
 
     /// Returns the fragmentation offset (13 bits).
     #[inline]
-    pub fn frag_offset(&self) -> u16 {
-        u16::from_be_bytes(self.frags) & 0x1FFF
-    }
-
-    /// Sets both the fragmentation flags and offset.
-    #[inline]
-    pub fn set_frags(&mut self, flags: u8, offset: u16) {
-        let value = ((flags as u16 & 0x7) << 13) | (offset & 0x1FFF);
-        self.frags = value.to_be_bytes();
+    pub fn frag_offset(fragments: Fragment) -> u16 {
+        u16::from_be_bytes(fragments) & 0x1FFF
     }
 
     /// Returns the checksum field.
     #[inline]
-    pub fn checksum(&self) -> u16 {
-        u16::from_be_bytes(self.check)
-    }
-
-    /// Sets the checksum field.
-    #[inline]
-    pub fn set_checksum(&mut self, checksum: u16) {
-        self.check = checksum.to_be_bytes();
+    pub fn checksum(checksum: Checksum) -> u16 {
+        u16::from_be_bytes(checksum)
     }
 
     /// Returns the source address field.
     #[inline]
-    pub fn src_addr(&self) -> core::net::Ipv4Addr {
-        core::net::Ipv4Addr::from(self.src_addr)
+    pub fn src_addr(src_addr: SrcAddr) -> core::net::Ipv4Addr {
+        core::net::Ipv4Addr::from(src_addr)
     }
 
     /// Returns the destination address field.
     #[inline]
-    pub fn dst_addr(&self) -> core::net::Ipv4Addr {
-        core::net::Ipv4Addr::from(self.dst_addr)
-    }
-
-    /// Sets the source address field.
-    #[inline]
-    pub fn set_src_addr(&mut self, src: core::net::Ipv4Addr) {
-        self.src_addr = src.octets();
-    }
-
-    /// Sets the destination address field.
-    #[inline]
-    pub fn set_dst_addr(&mut self, dst: core::net::Ipv4Addr) {
-        self.dst_addr = dst.octets();
+    pub fn dst_addr(dst_addr: DstAddr) -> core::net::Ipv4Addr {
+        core::net::Ipv4Addr::from(dst_addr)
     }
 }
 
-/// IPv6 header, which is present after the Ethernet header.
-///   0                   1                   2                   3
-///   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  |ip_ver |  ip_dscp  |ecn|             ip_flow_label             |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  |       ip_payload_length       |ip_next_header | ip_hop_limit  |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  |                         source_ipaddr                         |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  |                     source_ipaddr (con't)                     |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  |                     source_ipaddr (con't)                     |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  |                     source_ipaddr (con't)                     |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  |                      destination_ipaddr                       |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  |                  destination_ipaddr (con't)                   |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  |                  destination_ipaddr (con't)                   |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  |                  destination_ipaddr (con't)                   |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct Ipv6Hdr {
-    /// First 4 bytes containing Version (4 bits), Traffic Class (8 bits), and Flow Label (20 bits)
-    pub vcf: [u8; 4],
-    /// Payload length (excluding the IPv6 header)
-    pub payload_len: [u8; 2],
-    /// Next header protocol
-    pub next_hdr: IpProto,
-    /// Hop limit (similar to TTL in IPv4)
-    pub hop_limit: u8,
-    /// Source IPv6 address (16 bytes)
-    pub src_addr: [u8; 16],
-    /// Destination IPv6 address (16 bytes)
-    pub dst_addr: [u8; 16],
-}
+pub mod ipv6 {
+    use crate::ip::IpProto;
 
-impl Ipv6Hdr {
-    pub const LEN: usize = mem::size_of::<Ipv6Hdr>();
+    /// The length of the IPv6 header.
+    pub const IPV6_LEN: usize = 40;
+
+    pub type Vcf = [u8; 4];
+    pub type PayloadLen = [u8; 2];
+    pub type NextHdr = IpProto;
+    pub type HopLimit = u8;
+    pub type SrcAddr = [u8; 16];
+    pub type DstAddr = [u8; 16];
 
     /// Returns the IP version field (should be 6).
     #[inline]
-    pub fn version(&self) -> u8 {
-        (self.vcf[0] >> 4) & 0xF
-    }
-
-    /// Sets the version field.
-    #[inline]
-    pub fn set_version(&mut self, version: u8) {
-        self.vcf[0] = (self.vcf[0] & 0x0F) | ((version & 0xF) << 4);
+    pub fn version(vcf: Vcf) -> u8 {
+        (vcf[0] >> 4) & 0xF
     }
 
     /// Returns the DSCP (Differentiated Services Code Point) field.
     #[inline]
-    pub fn dscp(&self) -> u8 {
-        ((self.vcf[0] & 0x0F) << 2) | ((self.vcf[1] >> 6) & 0x03)
+    pub fn dscp(vcf: Vcf) -> u8 {
+        ((vcf[0] & 0x0F) << 2) | ((vcf[1] >> 6) & 0x03)
     }
 
     /// Returns the ECN (Explicit Congestion Notification) field.
     #[inline]
-    pub fn ecn(&self) -> u8 {
-        (self.vcf[1] >> 4) & 0x03
+    pub fn ecn(vcf: Vcf) -> u8 {
+        (vcf[1] >> 4) & 0x03
     }
 
     /// Returns the flow label field (20 bits).
     #[inline]
-    pub fn flow_label(&self) -> u32 {
-        ((self.vcf[1] as u32 & 0x0F) << 16) | ((self.vcf[2] as u32) << 8) | (self.vcf[3] as u32)
-    }
-
-    /// Sets the DSCP and ECN fields.
-    #[inline]
-    pub fn set_dscp_ecn(&mut self, dscp: u8, ecn: u8) {
-        // Set the lower 4 bits of the first byte (upper 4 bits of DSCP)
-        self.vcf[0] = (self.vcf[0] & 0xF0) | ((dscp >> 2) & 0x0F);
-
-        // Set the upper 2 bits of the second byte (lower 2 bits of DSCP) and the next 2 bits (ECN)
-        self.vcf[1] = (self.vcf[1] & 0x0F) | (((dscp & 0x03) << 6) | ((ecn & 0x03) << 4));
-    }
-
-    /// Sets the flow label field (20 bits).
-    #[inline]
-    pub fn set_flow_label(&mut self, flow_label: u32) {
-        self.vcf[1] = (self.vcf[1] & 0xF0) | ((flow_label >> 16) as u8 & 0x0F);
-        self.vcf[2] = ((flow_label >> 8) & 0xFF) as u8;
-        self.vcf[3] = (flow_label & 0xFF) as u8;
-    }
-
-    /// Sets the version, DSCP, ECN, and flow label in one operation.
-    #[inline]
-    pub fn set_vcf(&mut self, version: u8, dscp: u8, ecn: u8, flow_label: u32) {
-        self.vcf[0] = ((version & 0x0F) << 4) | ((dscp >> 2) & 0x0F);
-        self.vcf[1] =
-            ((dscp & 0x03) << 6) | ((ecn & 0x03) << 4) | ((flow_label >> 16) as u8 & 0x0F);
-        self.vcf[2] = ((flow_label >> 8) & 0xFF) as u8;
-        self.vcf[3] = (flow_label & 0xFF) as u8;
+    pub fn flow_label(vcf: Vcf) -> u32 {
+        ((vcf[1] as u32 & 0x0F) << 16) | ((vcf[2] as u32) << 8) | (vcf[3] as u32)
     }
 
     /// Returns the payload length.
     #[inline]
-    pub fn payload_len(&self) -> u16 {
-        u16::from_be_bytes(self.payload_len)
-    }
-
-    /// Sets the payload length.
-    #[inline]
-    pub fn set_payload_len(&mut self, len: u16) {
-        self.payload_len = len.to_be_bytes();
+    pub fn payload_len(payload_len: PayloadLen) -> u16 {
+        u16::from_be_bytes(payload_len)
     }
 
     /// Returns the source address field.
     #[inline]
-    pub fn src_addr(&self) -> core::net::Ipv6Addr {
-        core::net::Ipv6Addr::from(self.src_addr)
+    pub fn src_addr(src_addr: SrcAddr) -> core::net::Ipv6Addr {
+        core::net::Ipv6Addr::from(src_addr)
     }
 
     /// Returns the destination address field.
     #[inline]
-    pub fn dst_addr(&self) -> core::net::Ipv6Addr {
-        core::net::Ipv6Addr::from(self.dst_addr)
-    }
-
-    /// Sets the source address field.
-    #[inline]
-    pub fn set_src_addr(&mut self, src: core::net::Ipv6Addr) {
-        self.src_addr = src.octets();
-    }
-
-    /// Sets the destination address field.
-    #[inline]
-    pub fn set_dst_addr(&mut self, dst: core::net::Ipv6Addr) {
-        self.dst_addr = dst.octets();
+    pub fn dst_addr(dst_addr: DstAddr) -> core::net::Ipv6Addr {
+        core::net::Ipv6Addr::from(dst_addr)
     }
 }
 
@@ -1055,179 +947,190 @@ mod tests {
 
     use super::*;
 
-    // Helper to create a default Ipv4Hdr for tests
-    fn default_ipv4_hdr() -> Ipv4Hdr {
-        Ipv4Hdr {
-            vihl: 0,
-            tos: 0,
-            tot_len: [0; 2],
-            id: [0; 2],
-            frags: [0; 2],
-            ttl: 0,
-            proto: IpProto::Tcp,
-            check: [0; 2],
-            src_addr: [0; 4],
-            dst_addr: [0; 4],
-        }
-    }
-
-    // Helper to create a default Ipv6Hdr for tests
-    fn default_ipv6_hdr() -> Ipv6Hdr {
-        Ipv6Hdr {
-            vcf: [0; 4],
-            payload_len: [0; 2],
-            next_hdr: IpProto::Tcp,
-            hop_limit: 0,
-            src_addr: [0; 16],
-            dst_addr: [0; 16],
-        }
+    #[test]
+    fn test_ipv4_len() {
+        assert_eq!(ipv4::IPV4_LEN, 20);
     }
 
     #[test]
-    fn test_ipv4_vihl() {
-        let mut hdr = default_ipv4_hdr();
-        hdr.set_vihl(4, 20); // Version 4, IHL 20 bytes (5 words)
-        assert_eq!(hdr.version(), 4);
-        assert_eq!(hdr.ihl(), 20);
+    fn test_ipv4_version() {
+        let vihl: ipv4::Vihl = 0x45; // Version 4, IHL 5 words (20 bytes)
+        assert_eq!(ipv4::version(vihl), 4);
 
-        hdr.set_vihl(4, 24); // Version 4, IHL 24 bytes (6 words)
-        assert_eq!(hdr.version(), 4);
-        assert_eq!(hdr.ihl(), 24);
+        let vihl: ipv4::Vihl = 0x46; // Version 4, IHL 6 words (24 bytes)
+        assert_eq!(ipv4::version(vihl), 4);
     }
 
     #[test]
-    fn test_ipv4_tos() {
-        let mut hdr = default_ipv4_hdr();
-        hdr.set_tos(0b001010, 0b01); // DSCP 10, ECN 1
-        assert_eq!(hdr.dscp(), 0b001010);
-        assert_eq!(hdr.ecn(), 0b01);
+    fn test_ipv4_ihl() {
+        let vihl: ipv4::Vihl = 0x45; // Version 4, IHL 5 words (20 bytes)
+        assert_eq!(ipv4::ihl(vihl), 20);
 
-        hdr.set_tos(0b110011, 0b10); // DSCP 51, ECN 2
-        assert_eq!(hdr.dscp(), 0b110011);
-        assert_eq!(hdr.ecn(), 0b10);
+        let vihl: ipv4::Vihl = 0x46; // Version 4, IHL 6 words (24 bytes)
+        assert_eq!(ipv4::ihl(vihl), 24);
+
+        let vihl: ipv4::Vihl = 0x4F; // Version 4, IHL 15 words (60 bytes, max)
+        assert_eq!(ipv4::ihl(vihl), 60);
+    }
+
+    #[test]
+    fn test_ipv4_dscp() {
+        let dscp_ecn: ipv4::DscpEcn = 0b00101001; // DSCP 10, ECN 1
+        assert_eq!(ipv4::dscp(dscp_ecn), 0b001010);
+
+        let dscp_ecn: ipv4::DscpEcn = 0b11001110; // DSCP 51, ECN 2
+        assert_eq!(ipv4::dscp(dscp_ecn), 0b110011);
+    }
+
+    #[test]
+    fn test_ipv4_ecn() {
+        let dscp_ecn: ipv4::DscpEcn = 0b00101001; // DSCP 10, ECN 1
+        assert_eq!(ipv4::ecn(dscp_ecn), 0b01);
+
+        let dscp_ecn: ipv4::DscpEcn = 0b11001110; // DSCP 51, ECN 2
+        assert_eq!(ipv4::ecn(dscp_ecn), 0b10);
     }
 
     #[test]
     fn test_ipv4_tot_len() {
-        let mut hdr = default_ipv4_hdr();
-        hdr.set_tot_len(1500);
-        assert_eq!(hdr.tot_len(), 1500);
+        let tot_len: ipv4::TotalLen = [0x05, 0xDC]; // 1500 in big-endian
+        assert_eq!(ipv4::tot_len(tot_len), 1500);
+
+        let tot_len: ipv4::TotalLen = [0x00, 0x14]; // 20 in big-endian
+        assert_eq!(ipv4::tot_len(tot_len), 20);
     }
 
     #[test]
     fn test_ipv4_id() {
-        let mut hdr = default_ipv4_hdr();
-        hdr.set_id(0xABCD);
-        assert_eq!(hdr.id(), 0xABCD);
+        let id: ipv4::Identification = [0xAB, 0xCD];
+        assert_eq!(ipv4::id(id), 0xABCD);
     }
 
     #[test]
-    fn test_ipv4_frags() {
-        let mut hdr = default_ipv4_hdr();
+    fn test_ipv4_frag_flags() {
         // Flags: 0b010 (DF set), Offset: 100
-        hdr.set_frags(0b010, 100);
-        assert_eq!(hdr.frag_flags(), 0b010);
-        assert_eq!(hdr.frag_offset(), 100);
+        let fragment: ipv4::Fragment = [0x41, 0x64]; // 0b0100000101100100
+        assert_eq!(ipv4::frag_flags(fragment), 0b010);
 
-        // Flags: 0b001 (MF set), Offset: 0x1ABC
-        hdr.set_frags(0b001, 0x1ABC);
-        assert_eq!(hdr.frag_flags(), 0b001);
-        assert_eq!(hdr.frag_offset(), 0x1ABC);
+        // Flags: 0b001 (MF set), Offset: 0
+        let fragment: ipv4::Fragment = [0x20, 0x00]; // 0b0010000000000000
+        assert_eq!(ipv4::frag_flags(fragment), 0b001);
+    }
+
+    #[test]
+    fn test_ipv4_frag_offset() {
+        // Flags: 0b010 (DF set), Offset: 356
+        // 0x41 = 0b01000001, 0x64 = 0b01100100
+        // Combined: 0b0100000101100100
+        // Flags (top 3 bits): 0b010
+        // Offset (bottom 13 bits): 0b0000101100100 = 356
+        let fragment: ipv4::Fragment = [0x41, 0x64];
+        assert_eq!(ipv4::frag_offset(fragment), 356);
+
+        // Flags: 0b010 (DF set), Offset: 100
+        // To get offset 100 = 0b0001100100, with flags 0b010
+        // Combined: 0b0100001100100 = 0x4064
+        let fragment: ipv4::Fragment = [0x40, 0x64];
+        assert_eq!(ipv4::frag_offset(fragment), 100);
+
+        // Flags: 0b001 (MF set), Offset: 0x0ABC (2748)
+        let fragment: ipv4::Fragment = [0x2A, 0xBC];
+        assert_eq!(ipv4::frag_offset(fragment), 0x0ABC);
     }
 
     #[test]
     fn test_ipv4_checksum() {
-        let mut hdr = default_ipv4_hdr();
-        hdr.set_checksum(0x1234);
-        assert_eq!(hdr.checksum(), 0x1234);
+        let checksum: ipv4::Checksum = [0x12, 0x34];
+        assert_eq!(ipv4::checksum(checksum), 0x1234);
     }
 
     #[test]
-    fn test_ipv4_addrs() {
-        let mut hdr = default_ipv4_hdr();
-        let src = Ipv4Addr::new(192, 168, 1, 1);
-        let dst = Ipv4Addr::new(10, 0, 0, 1);
-        hdr.set_src_addr(src);
-        hdr.set_dst_addr(dst);
-        assert_eq!(hdr.src_addr(), src);
-        assert_eq!(hdr.dst_addr(), dst);
+    fn test_ipv4_src_addr() {
+        let src_addr: ipv4::SrcAddr = [192, 168, 1, 1];
+        assert_eq!(ipv4::src_addr(src_addr), Ipv4Addr::new(192, 168, 1, 1));
+    }
+
+    #[test]
+    fn test_ipv4_dst_addr() {
+        let dst_addr: ipv4::DstAddr = [10, 0, 0, 1];
+        assert_eq!(ipv4::dst_addr(dst_addr), Ipv4Addr::new(10, 0, 0, 1));
+    }
+
+    #[test]
+    fn test_ipv6_len() {
+        assert_eq!(ipv6::IPV6_LEN, 40);
     }
 
     #[test]
     fn test_ipv6_version() {
-        let mut hdr = default_ipv6_hdr();
-        hdr.set_version(6);
-        assert_eq!(hdr.version(), 6);
+        let vcf: ipv6::Vcf = [0x60, 0x00, 0x00, 0x00]; // Version 6
+        assert_eq!(ipv6::version(vcf), 6);
+
+        let vcf: ipv6::Vcf = [0x6F, 0xFF, 0xFF, 0xFF]; // Version 6, all other bits set
+        assert_eq!(ipv6::version(vcf), 6);
     }
 
     #[test]
-    fn test_ipv6_dscp_ecn() {
-        let mut hdr = default_ipv6_hdr();
-        // DSCP: 0b001010 (10), ECN: 0b01 (1)
-        hdr.set_dscp_ecn(0b001010, 0b01);
-        assert_eq!(hdr.dscp(), 0b001010);
-        assert_eq!(hdr.ecn(), 0b01);
+    fn test_ipv6_dscp() {
+        // DSCP: 0b001010 (10)
+        // vcf[0] = version (0b0110) + DSCP bits 5-2 (0b0010) = 0b01100010 = 0x62
+        // vcf[1] = DSCP bits 1-0 (0b10) in top 2 bits = 0b10000000 = 0x80
+        let vcf: ipv6::Vcf = [0x62, 0x80, 0x00, 0x00];
+        assert_eq!(ipv6::dscp(vcf), 0b001010);
 
-        // DSCP: 0b110011 (51), ECN: 0b10 (2)
-        // Ensure other parts of vcf[0] and vcf[1] are not clobbered unnecessarily
-        // by setting version and flow label first
-        hdr.set_version(6);
-        hdr.set_flow_label(0xFFFFF); // Max flow label
-        hdr.set_dscp_ecn(0b110011, 0b10);
-        assert_eq!(hdr.version(), 6); // Check version is maintained
-        assert_eq!(hdr.dscp(), 0b110011);
-        assert_eq!(hdr.ecn(), 0b10);
-        assert_eq!(hdr.flow_label(), 0xFFFFF); // Check flow label is maintained
+        // DSCP: 0b111111 (63, max value)
+        // vcf[0] = version (0b0110) + DSCP bits 5-2 (0b1111) = 0b01101111 = 0x6F
+        // vcf[1] = DSCP bits 1-0 (0b11) in top 2 bits = 0b11000000 = 0xC0
+        let vcf: ipv6::Vcf = [0x6F, 0xC0, 0x00, 0x00];
+        assert_eq!(ipv6::dscp(vcf), 0b111111);
+    }
+
+    #[test]
+    fn test_ipv6_ecn() {
+        // ECN: 0b01 (1)
+        let vcf: ipv6::Vcf = [0x60, 0x10, 0x00, 0x00]; // Version 6, ECN 1
+        assert_eq!(ipv6::ecn(vcf), 0b01);
     }
 
     #[test]
     fn test_ipv6_flow_label() {
-        let mut hdr = default_ipv6_hdr();
-        hdr.set_flow_label(0x12345); // 20-bit value
-        assert_eq!(hdr.flow_label(), 0x12345);
+        // Flow label: 0x12345 (20-bit value)
+        let vcf: ipv6::Vcf = [0x60, 0x01, 0x23, 0x45];
+        assert_eq!(ipv6::flow_label(vcf), 0x12345);
 
-        // Ensure other parts of vcf[1] are not clobbered
-        // by setting dscp and ecn first
-        hdr.set_version(6);
-        hdr.set_dscp_ecn(0b001010, 0b01);
-        hdr.set_flow_label(0xABCDE);
-        assert_eq!(hdr.version(), 6);
-        assert_eq!(hdr.dscp(), 0b001010);
-        assert_eq!(hdr.ecn(), 0b01);
-        assert_eq!(hdr.flow_label(), 0xABCDE);
-    }
-
-    #[test]
-    fn test_ipv6_set_vcf() {
-        let mut hdr = default_ipv6_hdr();
-        let version = 6;
-        let dscp = 0b001111; // 15
-        let ecn = 0b11; // 3
-        let flow_label = 0xFEDCB; // 20-bit
-
-        hdr.set_vcf(version, dscp, ecn, flow_label);
-        assert_eq!(hdr.version(), version);
-        assert_eq!(hdr.dscp(), dscp);
-        assert_eq!(hdr.ecn(), ecn);
-        assert_eq!(hdr.flow_label(), flow_label);
+        // Max flow label: 0xFFFFF
+        let vcf: ipv6::Vcf = [0x6F, 0xFF, 0xFF, 0xFF];
+        assert_eq!(ipv6::flow_label(vcf), 0xFFFFF);
     }
 
     #[test]
     fn test_ipv6_payload_len() {
-        let mut hdr = default_ipv6_hdr();
-        hdr.set_payload_len(3000);
-        assert_eq!(hdr.payload_len(), 3000);
+        let payload_len: ipv6::PayloadLen = [0x0B, 0xB8]; // 3000 in big-endian
+        assert_eq!(ipv6::payload_len(payload_len), 3000);
     }
 
     #[test]
-    fn test_ipv6_addrs() {
-        let mut hdr = default_ipv6_hdr();
-        let src = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0x0001);
-        let dst = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0x0002);
-        hdr.set_src_addr(src);
-        hdr.set_dst_addr(dst);
-        assert_eq!(hdr.src_addr(), src);
-        assert_eq!(hdr.dst_addr(), dst);
+    fn test_ipv6_src_addr() {
+        let src_addr: ipv6::SrcAddr = [
+            0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x01,
+        ];
+        assert_eq!(
+            ipv6::src_addr(src_addr),
+            Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0x0001)
+        );
+    }
+
+    #[test]
+    fn test_ipv6_dst_addr() {
+        let dst_addr: ipv6::DstAddr = [
+            0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x02,
+        ];
+        assert_eq!(
+            ipv6::dst_addr(dst_addr),
+            Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0x0002)
+        );
     }
 
     #[test]
@@ -1271,20 +1174,19 @@ mod tests {
 
     #[test]
     fn test_iphdr_enum() {
-        let ipv4_hdr = default_ipv4_hdr();
-        let ip_hdr_v4 = IpHdr::V4(ipv4_hdr);
-        if let IpHdr::V4(hdr) = ip_hdr_v4 {
-            assert_eq!(hdr.vihl, ipv4_hdr.vihl); // Check a field to ensure it's the same
-        } else {
-            panic!("Expected IpHdr::V4");
+        // Test that IpHdr enum variants exist
+        let _v4 = IpHdr::V4;
+        let _v6 = IpHdr::V6;
+
+        // Test matching on the enum
+        match IpHdr::V4 {
+            IpHdr::V4 => {}
+            IpHdr::V6 => panic!("Expected V4"),
         }
 
-        let ipv6_hdr = default_ipv6_hdr();
-        let ip_hdr_v6 = IpHdr::V6(ipv6_hdr);
-        if let IpHdr::V6(hdr) = ip_hdr_v6 {
-            assert_eq!(hdr.vcf, ipv6_hdr.vcf); // Check a field
-        } else {
-            panic!("Expected IpHdr::V6");
+        match IpHdr::V6 {
+            IpHdr::V6 => {}
+            IpHdr::V4 => panic!("Expected V6"),
         }
     }
 }

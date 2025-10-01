@@ -1,60 +1,26 @@
-use core::mem;
+//! Ethernet header structure that appears at the beginning of every Ethernet frame.
+//!
+//! This structure represents the standard IEEE 802.3 Ethernet header format.
+//!  0                   1                   2                   3
+//!  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  |                     destination_mac_addr                      |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  | destination_mac_addr (con't)  |        source_mac_addr        |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  |                    source_mac_addr (con't)                    |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!  |           eth_type            |
+//!  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-/// Ethernet header structure that appears at the beginning of every Ethernet frame.
-/// This structure represents the standard IEEE 802.3 Ethernet header format.
-///  0                   1                   2                   3
-///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  |                     destination_mac_addr                      |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  | destination_mac_addr (con't)  |        source_mac_addr        |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  |                    source_mac_addr (con't)                    |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///  |           eth_type            |
-///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#[repr(C, packed)]
-#[derive(Debug, Copy, Clone)]
-pub struct EthHdr {
-    /// Destination MAC address.
-    pub dst_addr: [u8; 6],
-    /// Source MAC address.
-    pub src_addr: [u8; 6],
-    /// Protocol which is encapsulated in the payload of the frame.
-    /// Indicates what type of data follows the Ethernet header (e.g., IPv4, IPv6, ARP)
-    pub ether_type: u16,
-}
+/// The length of the Ethernet header.
+pub const ETH_LEN: usize = 14;
 
-impl EthHdr {
-    pub const LEN: usize = mem::size_of::<EthHdr>();
+/// Destination MAC address.
+pub type DstMacAddr = [u8; 6];
 
-    /// Attempts to convert the raw ether_type field into an EtherType enum.
-    /// Returns either the corresponding EtherType variant or the raw value if unknown.
-    ///
-    /// # Returns
-    /// - `Ok(EtherType)` if a known protocol type
-    /// - `Err(u16)` if an unknown protocol type (returns the raw value)
-    pub fn ether_type(&self) -> Result<EtherType, u16> {
-        EtherType::try_from(self.ether_type)
-    }
-
-    /// Creates a new Ethernet header with the specified addresses and protocol type
-    ///
-    /// # Parameters
-    /// - `dst_addr`: The destination MAC address
-    /// - `src_addr`: The source MAC address
-    /// - `ether_type_enum`: The protocol type encapsulated in the payload
-    ///
-    /// # Returns
-    /// A new EthHdr structure initialized with the given values
-    pub fn new(dst_addr: [u8; 6], src_addr: [u8; 6], eth_type: EtherType) -> Self {
-        EthHdr {
-            dst_addr,
-            src_addr,
-            ether_type: eth_type.into(),
-        }
-    }
-}
+/// Source MAC address.
+pub type SrcMacAddr = [u8; 6];
 
 /// Protocol which is encapsulated in the payload of the Ethernet frame.
 /// These values represent the standard IEEE assigned protocol numbers
@@ -65,6 +31,7 @@ pub enum EtherType {
     #[default]
     Ipv4 = 0x0800_u16.to_be(),
     Arp = 0x0806_u16.to_be(),
+    Ethernet = 0x6558_u16.to_be(),
     Ieee8021q = 0x8100_u16.to_be(),
     Ipv6 = 0x86DD_u16.to_be(),
     Ieee8021ad = 0x88A8_u16.to_be(),
@@ -89,6 +56,7 @@ impl TryFrom<u16> for EtherType {
             0x0060_u16 => Ok(EtherType::Loop),
             0x0800_u16 => Ok(EtherType::Ipv4),
             0x0806_u16 => Ok(EtherType::Arp),
+            0x6558_u16 => Ok(EtherType::Ethernet),
             0x8100_u16 => Ok(EtherType::Ieee8021q),
             0x86DD_u16 => Ok(EtherType::Ipv6),
             0x88A8_u16 => Ok(EtherType::Ieee8021ad),
@@ -132,6 +100,7 @@ impl EtherType {
             EtherType::Loop => "loop",
             EtherType::Ipv4 => "ipv4",
             EtherType::Arp => "arp",
+            EtherType::Ethernet => "ethernet",
             EtherType::Ieee8021q => "vlan",
             EtherType::Ipv6 => "ipv6",
             EtherType::Ieee8021ad => "qinq",
@@ -150,49 +119,12 @@ impl EtherType {
 
 #[cfg(test)]
 mod tests {
-    use core::mem;
-
     use super::*;
 
-    // Test constants for MAC addresses
-    const TEST_DST_MAC: [u8; 6] = [0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
-    const TEST_SRC_MAC: [u8; 6] = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
-
     #[test]
-    fn test_ethhdr_len() {
-        assert_eq!(EthHdr::LEN, 14);
-        assert_eq!(mem::size_of::<EthHdr>(), 14);
-    }
-
-    #[test]
-    fn test_ethhdr_new() {
-        let eth_hdr = EthHdr::new(TEST_DST_MAC, TEST_SRC_MAC, EtherType::Ipv4);
-        assert_eq!(eth_hdr.dst_addr, TEST_DST_MAC);
-        assert_eq!(eth_hdr.src_addr, TEST_SRC_MAC);
-        let ether_type_value = eth_hdr.ether_type;
-        assert_eq!(ether_type_value, EtherType::Ipv4 as u16);
-        assert_eq!(ether_type_value, 0x0800_u16.to_be());
-    }
-
-    #[test]
-    fn test_ethhdr_ether_type_method_known() {
-        let eth_hdr = EthHdr {
-            dst_addr: TEST_DST_MAC,
-            src_addr: TEST_SRC_MAC,
-            ether_type: EtherType::Ipv6 as u16,
-        };
-        assert_eq!(eth_hdr.ether_type().unwrap(), EtherType::Ipv6);
-    }
-
-    #[test]
-    fn test_ethhdr_ether_type_method_unknown() {
-        let unknown_type_val = 0x1234_u16.to_be();
-        let eth_hdr = EthHdr {
-            dst_addr: TEST_DST_MAC,
-            src_addr: TEST_SRC_MAC,
-            ether_type: unknown_type_val,
-        };
-        assert_eq!(eth_hdr.ether_type().unwrap_err(), unknown_type_val);
+    fn test_eth_hdr_len() {
+        assert_eq!(ETH_LEN, 14);
+        assert_eq!(ETH_LEN, 6 + 6 + 2);
     }
 
     #[test]
@@ -227,6 +159,7 @@ mod tests {
             EtherType::Loop,
             EtherType::Ipv4,
             EtherType::Arp,
+            EtherType::Ethernet,
             EtherType::Ieee8021q,
             EtherType::Ipv6,
             EtherType::Ieee8021ad,
@@ -260,6 +193,7 @@ mod tests {
         assert_eq!(EtherType::Loop.as_str(), "loop");
         assert_eq!(EtherType::Ipv4.as_str(), "ipv4");
         assert_eq!(EtherType::Arp.as_str(), "arp");
+        assert_eq!(EtherType::Ethernet.as_str(), "ethernet");
         assert_eq!(EtherType::Ieee8021q.as_str(), "vlan");
         assert_eq!(EtherType::Ipv6.as_str(), "ipv6");
         assert_eq!(EtherType::Ieee8021ad.as_str(), "qinq");
