@@ -12,7 +12,6 @@
 //! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //! |                VXLAN Network Identifier (VNI) |   Reserved    |
 //! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-use core::mem;
 
 /// Length of the VXLAN header in bytes (8 bytes).
 pub const VXLAN_LEN: usize = 8;
@@ -40,60 +39,29 @@ pub fn vni(vni: Vni) -> u32 {
     u32::from_be_bytes([0, vni[0], vni[1], vni[2]])
 }
 
-/// VXLAN (Virtual eXtensible Local Area Network) header.
-///
-/// Encapsulates OSI layer 2 Ethernet frames within layer 4 UDP packets.
-/// Uses a 24-bit VXLAN Network Identifier (VNI) for traffic segregation.
-/// Header length: 8 bytes.
-/// Reference: RFC 7348.
-#[repr(C, packed)]
-#[derive(Debug, Copy, Clone)]
-pub struct VxlanHdr {
-    /// Flags (8 bits). Bit 3 (I flag) must be 1 if VNI is present. Other bits are reserved (R).
-    pub flags: u8,
-    /// Reserved field (24 bits). Must be zero on transmission.
-    pub _reserved1: [u8; 3],
-    /// Contains the 24-bit VNI (upper 3 bytes) and an 8-bit reserved field (the lowest byte).
-    /// The reserved field (the lowest byte) must be zero on transmission.
-    pub vni: [u8; 3],
-    pub _reserved2: u8,
-}
-
-impl VxlanHdr {
-    /// Length of the VXLAN header in bytes (8 bytes).
-    pub const LEN: usize = mem::size_of::<VxlanHdr>();
-
-    /// Returns the raw flags' byte.
-    #[inline]
-    pub fn flags(&self) -> u8 {
-        self.flags
-    }
-
-    /// Returns the VXLAN Network Identifier (VNI).
-    #[inline]
-    pub fn vni(&self) -> u32 {
-        u32::from_be_bytes([0, self.vni[0], self.vni[1], self.vni[2]])
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_vxlanhdr_len() {
-        assert_eq!(VxlanHdr::LEN, 8, "VXLAN header length should be 8 bytes");
+    fn test_vxlan_len_constant() {
+        assert_eq!(VXLAN_LEN, 8, "VXLAN header length should be 8 bytes");
     }
 
     #[test]
-    fn test_vxlanhdr_vni() {
-        let mut hdr = VxlanHdr {
-            flags: 0,
-            _reserved1: [0; 3],
-            vni: [0, 0, 0],
-            _reserved2: 0,
-        };
-        assert_eq!(hdr.vni(), 0, "VNI should be 0 by default");
-        hdr.set_vni(0x123456);
-        assert_eq!(hdr.vni(), 0x123456, "VNI should be 0x123456");
+    fn test_vxlan_vni_helpers() {
+        let vni_bytes: Vni = [0x12, 0x34, 0x56];
+        assert_eq!(vni(vni_bytes), 0x123456, "VNI should be 0x123456");
+
+        let zero_vni: Vni = [0, 0, 0];
+        assert_eq!(vni(zero_vni), 0, "VNI should be 0");
+    }
+
+    #[test]
+    fn test_vxlan_flags_i_flag() {
+        // I flag is bit 3 (0x08)
+        assert_eq!(flags_i_flag(0x08), true, "I flag should be set");
+        assert_eq!(flags_i_flag(0x00), false, "I flag should not be set");
+        assert_eq!(flags_i_flag(0xFF), true, "I flag should be set");
     }
 }

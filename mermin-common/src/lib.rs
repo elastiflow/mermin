@@ -307,6 +307,8 @@ mod tests {
             tunnel_src_port: tunnel_src_port.to_be_bytes(),
             tunnel_dst_port: tunnel_dst_port.to_be_bytes(),
             tunnel_ip_addr_type: Ipv6,
+            tunnel_id: 0,
+            tunnel_type: TunnelType::None,
             tunnel_proto: IpProto::Udp,
             ip_flow_label: flow_label,
             ip_dscp_id: dscp_id,

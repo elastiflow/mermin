@@ -261,6 +261,8 @@ pub fn counter(counter: WgCounter) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use core::mem;
+
     use super::*;
 
     #[test]

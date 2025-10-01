@@ -280,8 +280,8 @@ mod tests {
         assert_eq!(flgs_res0_ver, [0x80, 0x00]);
 
         // Test ProtocolType type alias
-        let protocol_type: ProtocolType = EtherType::Ipv4 as u16;
-        assert_eq!(protocol_type, EtherType::Ipv4 as u16);
+        let protocol_type: ProtocolType = EtherType::Ipv4;
+        assert_eq!(protocol_type, EtherType::Ipv4);
 
         // Test AddressFamily type alias
         let address_family: AddressFamily = 0x0800;
