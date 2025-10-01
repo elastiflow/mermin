@@ -1345,84 +1345,54 @@ use host_test_shim::TcContext;
 #[cfg(feature = "test")]
 #[inline(always)]
 fn get_packet_meta(_ctx: &TcContext) -> Result<&'static mut PacketMeta, Error> {
-    use core::{
-        ptr::null_mut,
-        sync::atomic::{AtomicPtr, Ordering},
-    };
-    extern crate alloc;
-    use alloc::boxed::Box;
+    use std::{cell::RefCell, thread_local};
 
-    static TEST_META_PTR: AtomicPtr<PacketMeta> = AtomicPtr::new(null_mut());
-
-    let mut ptr = TEST_META_PTR.load(Ordering::Acquire);
-    if ptr.is_null() {
-        let new_meta = Box::into_raw(Box::new(PacketMeta {
-            src_ipv6_addr: [0; 16],
-            dst_ipv6_addr: [0; 16],
-            ipip_src_ipv6_addr: [0; 16],
-            ipip_dst_ipv6_addr: [0; 16],
-            tunnel_src_ipv6_addr: [0; 16],
-            tunnel_dst_ipv6_addr: [0; 16],
-            src_mac_addr: [0; 6],
-            tunnel_src_mac_addr: [0; 6],
-            src_ipv4_addr: [0; 4],
-            dst_ipv4_addr: [0; 4],
-            ifindex: 0,
-            ip_flow_label: 0,
-            l3_byte_count: 0,
-            ipsec_ah_spi: 0,
-            ipsec_esp_spi: 0,
-            ipsec_sender_index: 0,
-            ipsec_receiver_index: 0,
-            ipip_src_ipv4_addr: [0; 4],
-            ipip_dst_ipv4_addr: [0; 4],
-            tunnel_src_ipv4_addr: [0; 4],
-            tunnel_dst_ipv4_addr: [0; 4],
-            tunnel_id: 0,
-            tunnel_ipsec_ah_spi: 0,
-            ether_type: EtherType::Ipv4,
-            src_port: [0; 2],
-            dst_port: [0; 2],
-            ipip_ether_type: EtherType::Ipv4,
-            tunnel_ether_type: EtherType::Ipv4,
-            tunnel_src_port: [0; 2],
-            tunnel_dst_port: [0; 2],
-            ip_addr_type: IpAddrType::Ipv4,
-            proto: IpProto::HopOpt,
-            direction: Direction::Ingress,
-            ip_dscp_id: 0,
-            ip_ecn_id: 0,
-            ip_ttl: 0,
-            icmp_type_id: 0,
-            icmp_code_id: 0,
-            tcp_flags: 0,
-            ah_exists: false,
-            esp_exists: false,
-            wireguard_exists: false,
-            ipip_ip_addr_type: IpAddrType::Ipv4,
-            ipip_proto: IpProto::HopOpt,
-            tunnel_ip_addr_type: IpAddrType::Ipv4,
-            tunnel_type: TunnelType::None,
-            tunnel_proto: IpProto::HopOpt,
-            tunnel_ah_exists: false,
-        }));
-        match TEST_META_PTR.compare_exchange(
-            null_mut(),
-            new_meta,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
-            Ok(_) => ptr = new_meta,
-            Err(existing) => {
-                // Another thread won the race, use their pointer and free ours
-                unsafe {
-                    drop(Box::from_raw(new_meta));
-                }
-                ptr = existing;
-            }
-        }
+    thread_local! {
+        static TEST_META: RefCell<Option<PacketMeta>> = RefCell::new(None);
     }
-    Ok(unsafe { &mut *ptr })
+
+    TEST_META.with(|meta_cell| {
+        let mut meta_opt = meta_cell.borrow_mut();
+        if meta_opt.is_none() {
+            *meta_opt = Some(PacketMeta {
+                src_ipv6_addr: [0; 16],
+                dst_ipv6_addr: [0; 16],
+                tunnel_src_ipv6_addr: [0; 16],
+                tunnel_dst_ipv6_addr: [0; 16],
+                src_mac_addr: [0; 6],
+                src_ipv4_addr: [0; 4],
+                dst_ipv4_addr: [0; 4],
+                ifindex: 0,
+                ip_flow_label: 0,
+                l3_octet_count: 0,
+                tunnel_src_ipv4_addr: [0; 4],
+                tunnel_dst_ipv4_addr: [0; 4],
+                tunnel_id: 0,
+                ether_type: EtherType::Ipv4,
+                src_port: [0; 2],
+                dst_port: [0; 2],
+                tunnel_ether_type: EtherType::Ipv4,
+                tunnel_src_port: [0; 2],
+                tunnel_dst_port: [0; 2],
+                ip_addr_type: IpAddrType::Ipv4,
+                proto: IpProto::HopOpt,
+                direction: Direction::Ingress,
+                ip_dscp_id: 0,
+                ip_ecn_id: 0,
+                ip_ttl: 0,
+                icmp_type_id: 0,
+                icmp_code_id: 0,
+                tcp_flags: 0,
+                tunnel_ip_addr_type: IpAddrType::Ipv4,
+                tunnel_proto: IpProto::HopOpt,
+                tunnel_type: TunnelType::None,
+            });
+        }
+
+        // This is safe because we know the Option is Some after the above check
+        let meta_ptr = meta_opt.as_mut().unwrap() as *mut PacketMeta;
+        Ok(unsafe { &mut *meta_ptr })
+    })
 }
 
 #[cfg(feature = "test")]
