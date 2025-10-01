@@ -2,6 +2,7 @@ use std::{net::IpAddr, sync::Arc, time::SystemTime};
 
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
+use mermin_common::TunnelType;
 use network_types::{eth::EtherType, ip::IpProto};
 use opentelemetry::{
     KeyValue,
@@ -129,7 +130,8 @@ pub struct SpanAttributes {
     pub flow_tcp_rndtrip_jitter: Option<i64>,
 
     // Tunnel Attributes
-    pub tunnel_type: Option<String>, // TODO: enum
+    #[serde(serialize_with = "serialize_option_tunnel_type")]
+    pub tunnel_type: Option<TunnelType>,
     pub tunnel_source_address: Option<IpAddr>,
     pub tunnel_source_port: Option<u16>,
     pub tunnel_destination_address: Option<IpAddr>,
@@ -138,8 +140,7 @@ pub struct SpanAttributes {
     pub tunnel_network_transport: Option<IpProto>,
     #[serde(serialize_with = "serialize_option_ether_type")]
     pub tunnel_network_type: Option<EtherType>,
-    pub tunnel_id: Option<String>,
-    pub tunnel_key: Option<u32>,
+    pub tunnel_id: Option<u32>,
     pub tunnel_sender_index: Option<u32>,
     pub tunnel_receiver_index: Option<u32>,
     pub tunnel_spi: Option<u32>,
@@ -378,11 +379,8 @@ impl Traceable for FlowSpan {
                 value.as_str().to_string(),
             ));
         }
-        if let Some(ref value) = self.attributes.tunnel_id {
-            kvs.push(KeyValue::new("tunnel.id", value.to_owned()));
-        }
-        if let Some(value) = self.attributes.tunnel_key {
-            kvs.push(KeyValue::new("tunnel.key", value as i64));
+        if let Some(value) = self.attributes.tunnel_id {
+            kvs.push(KeyValue::new("tunnel.id", value as i64));
         }
         if let Some(value) = self.attributes.tunnel_sender_index {
             kvs.push(KeyValue::new("tunnel.sender_index", value as i64));
@@ -694,6 +692,19 @@ where
 {
     match reason {
         Some(r) => serializer.serialize_str(r.as_str()),
+        None => serializer.serialize_none(),
+    }
+}
+
+fn serialize_option_tunnel_type<S>(
+    tunnel_type: &Option<TunnelType>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match tunnel_type {
+        Some(t) => serializer.serialize_str(t.as_str()),
         None => serializer.serialize_none(),
     }
 }

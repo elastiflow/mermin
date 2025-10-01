@@ -247,7 +247,9 @@ impl PacketWorker {
                         .community_id_generator
                         .generate(src_addr, dst_addr, src_port, dst_port, packet.proto)
                         .clone(),
-                    flow_connection_state: is_tcp.then(|| ConnectionState::from_packet(&packet)),
+                    flow_connection_state: is_tcp
+                        .then(|| ConnectionState::from_packet(&packet))
+                        .flatten(),
                     flow_end_reason: None,
 
                     // Network endpoints
@@ -350,7 +352,6 @@ impl PacketWorker {
                     tunnel_network_transport: is_tunneled.then_some(packet.tunnel_proto),
                     tunnel_network_type: is_tunneled.then_some(packet.tunnel_ether_type),
                     tunnel_id: None,
-                    tunnel_key: None,
                     tunnel_sender_index: None,
                     tunnel_receiver_index: None,
                     tunnel_spi: None,

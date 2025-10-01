@@ -110,8 +110,6 @@ pub enum ConnectionState {
     LastAck,
     /// Waiting for enough time to pass to be sure the remote TCP peer received the acknowledgment of its connection termination request
     TimeWait,
-    /// Unknown connection state - used when flags don't match any known pattern
-    Unknown,
 }
 
 impl ConnectionState {
@@ -129,7 +127,6 @@ impl ConnectionState {
             ConnectionState::Closing => "closing",
             ConnectionState::LastAck => "last_ack",
             ConnectionState::TimeWait => "time_wait",
-            ConnectionState::Unknown => "unknown",
         }
     }
 
@@ -137,31 +134,31 @@ impl ConnectionState {
     ///
     /// This method infers the initial connection state from TCP flags according to RFC 9293.
     /// Note: This provides a best-effort state determination from a single packet's flags.
-    pub fn from_packet(packet: &PacketMeta) -> Self {
+    pub fn from_packet(packet: &PacketMeta) -> Option<Self> {
         // Check flag combinations in order of specificity
         match (packet.syn(), packet.ack(), packet.fin(), packet.rst()) {
             // RST flag indicates connection closed/reset
-            (_, _, _, true) => ConnectionState::Closed,
+            (_, _, _, true) => Some(ConnectionState::Closed),
 
             // SYN only - connection initiation (SYN-SENT state)
-            (true, false, false, false) => ConnectionState::SynSent,
+            (true, false, false, false) => Some(ConnectionState::SynSent),
 
             // SYN+ACK - connection response (SYN-RECEIVED state)
-            (true, true, false, false) => ConnectionState::SynReceived,
+            (true, true, false, false) => Some(ConnectionState::SynReceived),
 
             // FIN+ACK - connection termination (FIN-WAIT-1 or CLOSING)
             // Note: We can't distinguish between FIN-WAIT-1 and CLOSING from flags alone
-            (false, true, true, false) => ConnectionState::FinWait1,
+            (false, true, true, false) => Some(ConnectionState::FinWait1),
 
             // ACK flag - established connection (ESTABLISHED state)
             // This includes PSH+ACK for data transfer
-            (false, true, false, false) => ConnectionState::Established,
+            (false, true, false, false) => Some(ConnectionState::Established),
 
             // FIN only - uncommon but could indicate FIN-WAIT-1
-            (false, false, true, false) => ConnectionState::FinWait1,
+            (false, false, true, false) => Some(ConnectionState::FinWait1),
 
             // No meaningful flags or unusual combinations
-            _ => ConnectionState::Unknown,
+            _ => None,
         }
     }
 }
@@ -228,64 +225,61 @@ mod tests {
         packet.tcp_flags = PacketMeta::TCP_FLAG_SYN;
         assert_eq!(
             ConnectionState::from_packet(&packet),
-            ConnectionState::SynSent
+            Some(ConnectionState::SynSent)
         );
 
         // Test SYN+ACK - connection response
         packet.tcp_flags = PacketMeta::TCP_FLAG_SYN | PacketMeta::TCP_FLAG_ACK;
         assert_eq!(
             ConnectionState::from_packet(&packet),
-            ConnectionState::SynReceived
+            Some(ConnectionState::SynReceived)
         );
 
         // Test ACK only - established connection
         packet.tcp_flags = PacketMeta::TCP_FLAG_ACK;
         assert_eq!(
             ConnectionState::from_packet(&packet),
-            ConnectionState::Established
+            Some(ConnectionState::Established)
         );
 
         // Test PSH+ACK - established connection with data
         packet.tcp_flags = PacketMeta::TCP_FLAG_PSH | PacketMeta::TCP_FLAG_ACK;
         assert_eq!(
             ConnectionState::from_packet(&packet),
-            ConnectionState::Established
+            Some(ConnectionState::Established)
         );
 
         // Test FIN only - connection termination
         packet.tcp_flags = PacketMeta::TCP_FLAG_FIN;
         assert_eq!(
             ConnectionState::from_packet(&packet),
-            ConnectionState::FinWait1
+            Some(ConnectionState::FinWait1)
         );
 
         // Test FIN+ACK - graceful close
         packet.tcp_flags = PacketMeta::TCP_FLAG_FIN | PacketMeta::TCP_FLAG_ACK;
         assert_eq!(
             ConnectionState::from_packet(&packet),
-            ConnectionState::FinWait1
+            Some(ConnectionState::FinWait1)
         );
 
         // Test RST - connection reset
         packet.tcp_flags = PacketMeta::TCP_FLAG_RST;
         assert_eq!(
             ConnectionState::from_packet(&packet),
-            ConnectionState::Closed
+            Some(ConnectionState::Closed)
         );
 
         // Test RST+ACK - connection reset with ack
         packet.tcp_flags = PacketMeta::TCP_FLAG_RST | PacketMeta::TCP_FLAG_ACK;
         assert_eq!(
             ConnectionState::from_packet(&packet),
-            ConnectionState::Closed
+            Some(ConnectionState::Closed)
         );
 
         // Test no flags
         packet.tcp_flags = 0;
-        assert_eq!(
-            ConnectionState::from_packet(&packet),
-            ConnectionState::Unknown
-        );
+        assert_eq!(ConnectionState::from_packet(&packet), None);
 
         // Test as_str() conversion
         assert_eq!(ConnectionState::SynSent.as_str(), "syn_sent");
@@ -298,6 +292,5 @@ mod tests {
         assert_eq!(ConnectionState::LastAck.as_str(), "last_ack");
         assert_eq!(ConnectionState::TimeWait.as_str(), "time_wait");
         assert_eq!(ConnectionState::Closed.as_str(), "closed");
-        assert_eq!(ConnectionState::Unknown.as_str(), "unknown");
     }
 }
