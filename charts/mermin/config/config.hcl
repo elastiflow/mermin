@@ -75,5 +75,5 @@ exporter "otlp" "main" {
 }
 
 exporter "stdout" "console" {
-  format = "plain"
+  format = "full"
 }
