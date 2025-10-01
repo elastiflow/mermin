@@ -1,48 +1,75 @@
-use core::mem;
+//! ICMP header for IPv4, which is present after the IP header as defined in RFC 792
+//!
+//! ICMP (Internet Control Message Protocol) is used for diagnostic and error
+//! reporting purposes. Unlike TCP and UDP, ICMP does not use port numbers.
+//! All fields are stored in network byte order (big-endian).
+//!
+//!    0                   1                   2                   3
+//!    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//!   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!   |     Type      |     Code      |          Checksum             |
+//!   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!   |                             Data                              |
+//!   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-/// ICMP header for IPv4, which is present after the IP header.
+/// The size of the ICMP header in bytes.
+pub const ICMP_LEN: usize = 8;
+
+/// ICMP message type (8 bits)
+pub type Type = u8;
+/// ICMP message code (8 bits)
+pub type Code = u8;
+/// ICMP checksum in network byte order (big-endian)
+pub type Checksum = [u8; 2];
+/// ICMP data field - varies by message type (4 bytes)
+pub type Data = [u8; 4];
+
+/// Attempts to convert the raw icmp_type field into an IcmpType enum.
+/// Returns either the corresponding IcmpType variant or the raw value if unknown.
+#[inline]
+pub fn icmp_type(type_: Type) -> Result<IcmpType, u8> {
+    IcmpType::try_from(type_)
+}
+
+/// Attempts to convert the raw code field into a type-specific IcmpCode enum variant.
+/// The interpretation depends on the message type.
+#[inline]
+pub fn code(type_: Type, code: Code) -> Result<IcmpCode, u8> {
+    let icmp_type = icmp_type(type_)?;
+    parse_code_for_type(icmp_type, code)
+}
+
+/// Returns the ICMP checksum.
 ///
-/// ICMP (Internet Control Message Protocol) is used for diagnostic and error
-/// reporting purposes. Unlike TCP and UDP, ICMP does not use port numbers.
-///
-/// Basic ICMP Header Format:
-///    0                   1                   2                   3
-///    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///   |     Type      |     Code      |          Checksum             |
-///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///   |                             Data                              |
-///   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///
-/// This struct represents the basic ICMP header as defined in RFC 792.
-/// The ICMP header is 8 bytes long (including the 4-byte data field).
-/// All fields are stored in network byte order (big-endian).
-///
-/// # Example
-/// ```
-/// use network_types::icmp::IcmpHdr;
-///
-/// let mut icmp_header = IcmpHdr {
-///     _type: 8,  // Echo Request
-///     code: 0,       // Code 0 for Echo Request
-///     checksum: [0, 0],
-///     data: [0, 0, 0, 0],
-/// };
-///
-/// icmp_header.set_checksum(0x1234);
-/// assert_eq!(icmp_header.checksum(), 0x1234);
-/// ```
-#[repr(C, packed)]
-#[derive(Debug, Copy, Clone)]
-pub struct IcmpHdr {
-    /// ICMP message type (8 bits)
-    pub _type: u8,
-    /// ICMP message code (8 bits)
-    pub code: u8,
-    /// ICMP checksum in network byte order (big-endian)
-    pub checksum: [u8; 2],
-    /// ICMP data field - varies by message type (4 bytes)
-    pub data: [u8; 4],
+/// This method converts the checksum from network byte order (big-endian)
+/// to host byte order.
+#[inline]
+pub fn checksum(checksum: Checksum) -> u16 {
+    u16::from_be_bytes(checksum)
+}
+
+/// Returns the ICMP data field as a u32.
+/// This method converts the data field from network byte order (big-endian)
+/// to host byte order. The interpretation of this field depends on the ICMP type.
+#[inline]
+pub fn data(data: Data) -> u32 {
+    u32::from_be_bytes(data)
+}
+
+/// Returns the identifier field for Echo Request/Reply messages.
+/// For Echo Request and Echo Reply messages, the first 2 bytes of the data
+/// field contain an identifier that can be used to match requests with replies.
+#[inline]
+pub fn identifier(data: Data) -> u16 {
+    u16::from_be_bytes([data[0], data[1]])
+}
+
+/// Returns the sequence number field for Echo Request/Reply messages.
+/// For Echo Request and Echo Reply messages, the last 2 bytes of the data
+/// field contain a sequence number that can be used to match requests with replies.
+#[inline]
+pub fn sequence(data: Data) -> u16 {
+    u16::from_be_bytes([data[2], data[3]])
 }
 
 /// ICMPv4 message types (RFC 792 and extensions)
@@ -85,6 +112,55 @@ pub enum IcmpType {
     ExtendedEchoRequest = 42,
     /// Extended Echo Reply
     ExtendedEchoReply = 43,
+}
+
+impl IcmpType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            IcmpType::EchoReply => "echo_reply",
+            IcmpType::DestinationUnreachable => "destination_unreachable",
+            IcmpType::SourceQuench => "source_quench",
+            IcmpType::Redirect => "redirect",
+            IcmpType::EchoRequest => "echo_request",
+            IcmpType::RouterAdvertisement => "router_advertisement",
+            IcmpType::RouterSelection => "router_selection",
+            IcmpType::TimeExceeded => "time_exceeded",
+            IcmpType::ParameterProblem => "parameter_problem",
+            IcmpType::Timestamp => "timestamp",
+            IcmpType::TimestampReply => "timestamp_reply",
+            IcmpType::InformationRequest => "information_request",
+            IcmpType::InformationReply => "information_reply",
+            IcmpType::AddressMaskRequest => "address_mask_request",
+            IcmpType::AddressMaskReply => "address_mask_reply",
+            IcmpType::Photuris => "photuris",
+            IcmpType::ExtendedEchoRequest => "extended_echo_request",
+            IcmpType::ExtendedEchoReply => "extended_echo_reply",
+        }
+    }
+
+    pub fn try_from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(IcmpType::EchoReply),
+            3 => Some(IcmpType::DestinationUnreachable),
+            4 => Some(IcmpType::SourceQuench),
+            5 => Some(IcmpType::Redirect),
+            8 => Some(IcmpType::EchoRequest),
+            9 => Some(IcmpType::RouterAdvertisement),
+            10 => Some(IcmpType::RouterSelection),
+            11 => Some(IcmpType::TimeExceeded),
+            12 => Some(IcmpType::ParameterProblem),
+            13 => Some(IcmpType::Timestamp),
+            14 => Some(IcmpType::TimestampReply),
+            15 => Some(IcmpType::InformationRequest),
+            16 => Some(IcmpType::InformationReply),
+            17 => Some(IcmpType::AddressMaskRequest),
+            18 => Some(IcmpType::AddressMaskReply),
+            40 => Some(IcmpType::Photuris),
+            42 => Some(IcmpType::ExtendedEchoRequest),
+            43 => Some(IcmpType::ExtendedEchoReply),
+            _ => None,
+        }
+    }
 }
 
 /// ICMPv6 message types (RFC 4443 and extensions)
@@ -165,55 +241,6 @@ pub enum Icmpv6Type {
     ExtendedEchoRequest = 160,
     /// Extended Echo Reply (ICMPv6)
     ExtendedEchoReply = 161,
-}
-
-impl IcmpType {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            IcmpType::EchoReply => "echo_reply",
-            IcmpType::DestinationUnreachable => "destination_unreachable",
-            IcmpType::SourceQuench => "source_quench",
-            IcmpType::Redirect => "redirect",
-            IcmpType::EchoRequest => "echo_request",
-            IcmpType::RouterAdvertisement => "router_advertisement",
-            IcmpType::RouterSelection => "router_selection",
-            IcmpType::TimeExceeded => "time_exceeded",
-            IcmpType::ParameterProblem => "parameter_problem",
-            IcmpType::Timestamp => "timestamp",
-            IcmpType::TimestampReply => "timestamp_reply",
-            IcmpType::InformationRequest => "information_request",
-            IcmpType::InformationReply => "information_reply",
-            IcmpType::AddressMaskRequest => "address_mask_request",
-            IcmpType::AddressMaskReply => "address_mask_reply",
-            IcmpType::Photuris => "photuris",
-            IcmpType::ExtendedEchoRequest => "extended_echo_request",
-            IcmpType::ExtendedEchoReply => "extended_echo_reply",
-        }
-    }
-
-    pub fn try_from_u8(value: u8) -> Option<Self> {
-        match value {
-            0 => Some(IcmpType::EchoReply),
-            3 => Some(IcmpType::DestinationUnreachable),
-            4 => Some(IcmpType::SourceQuench),
-            5 => Some(IcmpType::Redirect),
-            8 => Some(IcmpType::EchoRequest),
-            9 => Some(IcmpType::RouterAdvertisement),
-            10 => Some(IcmpType::RouterSelection),
-            11 => Some(IcmpType::TimeExceeded),
-            12 => Some(IcmpType::ParameterProblem),
-            13 => Some(IcmpType::Timestamp),
-            14 => Some(IcmpType::TimestampReply),
-            15 => Some(IcmpType::InformationRequest),
-            16 => Some(IcmpType::InformationReply),
-            17 => Some(IcmpType::AddressMaskRequest),
-            18 => Some(IcmpType::AddressMaskReply),
-            40 => Some(IcmpType::Photuris),
-            42 => Some(IcmpType::ExtendedEchoRequest),
-            43 => Some(IcmpType::ExtendedEchoReply),
-            _ => None,
-        }
-    }
 }
 
 impl Icmpv6Type {
@@ -1883,146 +1910,6 @@ impl IcmpCode {
     }
 }
 
-impl IcmpHdr {
-    /// The size of the ICMP header in bytes (8 bytes).
-    pub const LEN: usize = mem::size_of::<IcmpHdr>();
-
-    /// Attempts to convert the raw icmp_type field into an IcmpType enum.
-    /// Returns either the corresponding IcmpType variant or the raw value if unknown.
-    ///
-    /// # Returns
-    /// - `Ok(IcmpType)` if a known message type
-    /// - `Err(u8)` if an unknown message type (returns the raw value)
-    #[inline]
-    pub fn icmp_type(&self) -> Result<IcmpType, u8> {
-        IcmpType::try_from(self._type)
-    }
-
-    /// Sets the ICMP message type.
-    ///
-    /// # Parameters
-    /// * `icmp_type` - The ICMP message type to set.
-    #[inline]
-    pub fn set_icmp_type(&mut self, icmp_type: IcmpType) {
-        self._type = icmp_type as u8;
-    }
-
-    /// Attempts to convert the raw code field into a type-specific IcmpCode enum variant.
-    /// The interpretation depends on the message type.
-    ///
-    /// # Returns
-    /// - `Ok(IcmpCode)` if a known code value for the current message type
-    /// - `Err(u8)` if an unknown code value (returns the raw value)
-    #[inline]
-    pub fn code(&self) -> Result<IcmpCode, u8> {
-        let icmp_type = self.icmp_type()?;
-        parse_code_for_type(icmp_type, self.code)
-    }
-
-    /// Sets the ICMP message code using a type-specific IcmpCode enum.
-    ///
-    /// # Parameters
-    /// * `code` - The ICMP message code to set.
-    #[inline]
-    pub fn set_code(&mut self, code: IcmpCode) {
-        self.code = code.into();
-    }
-
-    /// Returns the ICMP checksum.
-    ///
-    /// This method converts the checksum from network byte order (big-endian)
-    /// to host byte order.
-    ///
-    /// # Returns
-    /// The checksum as a u16 value.
-    #[inline]
-    pub fn checksum(&self) -> u16 {
-        u16::from_be_bytes(self.checksum)
-    }
-
-    /// Sets the ICMP checksum.
-    ///
-    /// This method converts the checksum from host byte order
-    /// to network byte order (big-endian).
-    ///
-    /// # Parameters
-    /// * `checksum` - The checksum to set.
-    #[inline]
-    pub fn set_checksum(&mut self, checksum: u16) {
-        self.checksum = checksum.to_be_bytes();
-    }
-
-    /// Returns the ICMP data field as a u32.
-    ///
-    /// This method converts the data field from network byte order (big-endian)
-    /// to host byte order. The interpretation of this field depends on the ICMP type.
-    ///
-    /// # Returns
-    /// The data field as a u32 value.
-    #[inline]
-    pub fn data(&self) -> u32 {
-        u32::from_be_bytes(self.data)
-    }
-
-    /// Sets the ICMP data field.
-    ///
-    /// This method converts the data field from host byte order
-    /// to network byte order (big-endian).
-    ///
-    /// # Parameters
-    /// * `data` - The data field to set.
-    #[inline]
-    pub fn set_data(&mut self, data: u32) {
-        self.data = data.to_be_bytes();
-    }
-
-    /// Returns the identifier field for Echo Request/Reply messages.
-    ///
-    /// For Echo Request and Echo Reply messages, the first 2 bytes of the data
-    /// field contain an identifier that can be used to match requests with replies.
-    ///
-    /// # Returns
-    /// The identifier as a u16 value.
-    #[inline]
-    pub fn identifier(&self) -> u16 {
-        u16::from_be_bytes([self.data[0], self.data[1]])
-    }
-
-    /// Sets the identifier field for Echo Request/Reply messages.
-    ///
-    /// # Parameters
-    /// * `id` - The identifier to set.
-    #[inline]
-    pub fn set_identifier(&mut self, id: u16) {
-        let bytes = id.to_be_bytes();
-        self.data[0] = bytes[0];
-        self.data[1] = bytes[1];
-    }
-
-    /// Returns the sequence number field for Echo Request/Reply messages.
-    ///
-    /// For Echo Request and Echo Reply messages, the last 2 bytes of the data
-    /// field contain a sequence number that can be used to match requests with replies.
-    ///
-    /// # Returns
-    /// The sequence number as a u16 value.
-    #[inline]
-    pub fn sequence(&self) -> u16 {
-        u16::from_be_bytes([self.data[2], self.data[3]])
-    }
-
-    /// Sets the sequence number field for Echo Request/Reply messages.
-    ///
-    /// # Parameters
-    /// * `seq` - The sequence number to set.
-    #[inline]
-    pub fn set_sequence(&mut self, seq: u16) {
-        let bytes = seq.to_be_bytes();
-        self.data[2] = bytes[0];
-        self.data[3] = bytes[1];
-    }
-}
-
 // This allows converting a u8 value into an IcmpType enum variant.
 // This is useful when parsing headers.
 impl TryFrom<u8> for IcmpType {
@@ -3003,132 +2890,102 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_icmp_hdr_size() {
-        // IcmpHdr should be exactly 8 bytes
-        assert_eq!(IcmpHdr::LEN, 8);
-        assert_eq!(IcmpHdr::LEN, mem::size_of::<IcmpHdr>());
+    fn test_icmp_constant() {
+        assert_eq!(ICMP_LEN, 8);
     }
 
     #[test]
-    fn test_icmp_type_and_code() {
-        let mut icmp_hdr = IcmpHdr {
-            _type: 0,
-            code: 0,
-            checksum: [0, 0],
-            data: [0, 0, 0, 0],
-        };
+    fn test_icmp_type_conversion() {
+        // Test valid ICMP types
+        assert_eq!(icmp_type(0), Ok(IcmpType::EchoReply));
+        assert_eq!(icmp_type(3), Ok(IcmpType::DestinationUnreachable));
+        assert_eq!(icmp_type(8), Ok(IcmpType::EchoRequest));
+        assert_eq!(icmp_type(11), Ok(IcmpType::TimeExceeded));
+        assert_eq!(icmp_type(42), Ok(IcmpType::ExtendedEchoRequest));
+        assert_eq!(icmp_type(43), Ok(IcmpType::ExtendedEchoReply));
 
-        // Test Echo Request
-        icmp_hdr.set_icmp_type(IcmpType::EchoRequest);
-        icmp_hdr.set_code(IcmpCode::Echo(EchoCode::NoCode));
-        assert_eq!(icmp_hdr.icmp_type().unwrap(), IcmpType::EchoRequest);
-        assert_eq!(icmp_hdr.code().unwrap(), IcmpCode::Echo(EchoCode::NoCode));
+        // Test invalid ICMP type
+        assert_eq!(icmp_type(99), Err(99));
+        assert_eq!(icmp_type(255), Err(255));
+    }
 
-        // Test Echo Reply
-        icmp_hdr.set_icmp_type(IcmpType::EchoReply);
-        icmp_hdr.set_code(IcmpCode::Echo(EchoCode::NoCode));
-        assert_eq!(icmp_hdr.icmp_type().unwrap(), IcmpType::EchoReply);
-        assert_eq!(icmp_hdr.code().unwrap(), IcmpCode::Echo(EchoCode::NoCode));
+    #[test]
+    fn test_code_parsing() {
+        // Test Echo Request/Reply (type 8, code 0)
+        assert_eq!(code(8, 0), Ok(IcmpCode::Echo(EchoCode::NoCode)));
+        assert_eq!(code(0, 0), Ok(IcmpCode::Echo(EchoCode::NoCode)));
 
-        // Test Destination Unreachable
-        icmp_hdr.set_icmp_type(IcmpType::DestinationUnreachable);
-        icmp_hdr.set_code(IcmpCode::DestinationUnreachable(
-            DestinationUnreachableCode::HostUnreachable,
-        ));
+        // Test Destination Unreachable codes (type 3)
         assert_eq!(
-            icmp_hdr.icmp_type().unwrap(),
-            IcmpType::DestinationUnreachable
+            code(3, 0),
+            Ok(IcmpCode::DestinationUnreachable(
+                DestinationUnreachableCode::NetUnreachable
+            ))
         );
         assert_eq!(
-            icmp_hdr.code().unwrap(),
-            IcmpCode::DestinationUnreachable(DestinationUnreachableCode::HostUnreachable)
+            code(3, 1),
+            Ok(IcmpCode::DestinationUnreachable(
+                DestinationUnreachableCode::HostUnreachable
+            ))
         );
+        assert_eq!(
+            code(3, 3),
+            Ok(IcmpCode::DestinationUnreachable(
+                DestinationUnreachableCode::PortUnreachable
+            ))
+        );
+
+        // Test invalid code for valid type
+        assert_eq!(code(8, 1), Err(1));
+        assert_eq!(code(3, 99), Err(99));
+
+        // Test invalid type
+        assert_eq!(code(99, 0), Err(99));
     }
 
     #[test]
-    fn test_checksum() {
-        let mut icmp_hdr = IcmpHdr {
-            _type: IcmpType::EchoRequest as u8,
-            code: 0,
-            checksum: [0, 0],
-            data: [0, 0, 0, 0],
-        };
-
-        // Test with a standard value
-        let test_checksum: u16 = 0x1234;
-        icmp_hdr.set_checksum(test_checksum);
-        assert_eq!(icmp_hdr.checksum(), test_checksum);
-
-        // Verify byte order in raw storage (big-endian/network byte order)
-        assert_eq!(icmp_hdr.checksum, [0x12, 0x34]);
-
-        // Test with zero
-        icmp_hdr.set_checksum(0);
-        assert_eq!(icmp_hdr.checksum(), 0);
-        assert_eq!(icmp_hdr.checksum, [0, 0]);
-
-        // Test with max value
-        icmp_hdr.set_checksum(u16::MAX);
-        assert_eq!(icmp_hdr.checksum(), u16::MAX);
-        assert_eq!(icmp_hdr.checksum, [0xFF, 0xFF]);
+    fn test_checksum_conversion() {
+        // Test various checksum values
+        assert_eq!(checksum([0x00, 0x00]), 0x0000);
+        assert_eq!(checksum([0x12, 0x34]), 0x1234);
+        assert_eq!(checksum([0xFF, 0xFF]), 0xFFFF);
+        assert_eq!(checksum([0xAB, 0xCD]), 0xABCD);
     }
 
     #[test]
-    fn test_data_field() {
-        let mut icmp_hdr = IcmpHdr {
-            _type: IcmpType::EchoRequest as u8,
-            code: 0,
-            checksum: [0, 0],
-            data: [0, 0, 0, 0],
-        };
-
-        // Test with a standard value
-        let test_data: u32 = 0x12345678;
-        icmp_hdr.set_data(test_data);
-        assert_eq!(icmp_hdr.data(), test_data);
-
-        // Verify byte order in raw storage (big-endian/network byte order)
-        assert_eq!(icmp_hdr.data, [0x12, 0x34, 0x56, 0x78]);
-
-        // Test with zero
-        icmp_hdr.set_data(0);
-        assert_eq!(icmp_hdr.data(), 0);
-        assert_eq!(icmp_hdr.data, [0, 0, 0, 0]);
-
-        // Test with max value
-        icmp_hdr.set_data(u32::MAX);
-        assert_eq!(icmp_hdr.data(), u32::MAX);
-        assert_eq!(icmp_hdr.data, [0xFF, 0xFF, 0xFF, 0xFF]);
+    fn test_data_conversion() {
+        // Test various data field values
+        assert_eq!(data([0x00, 0x00, 0x00, 0x00]), 0x00000000);
+        assert_eq!(data([0x12, 0x34, 0x56, 0x78]), 0x12345678);
+        assert_eq!(data([0xFF, 0xFF, 0xFF, 0xFF]), 0xFFFFFFFF);
+        assert_eq!(data([0xAB, 0xCD, 0xEF, 0x01]), 0xABCDEF01);
     }
 
     #[test]
-    fn test_echo_request_reply_fields() {
-        let mut icmp_hdr = IcmpHdr {
-            _type: IcmpType::EchoRequest as u8,
-            code: 0,
-            checksum: [0, 0],
-            data: [0, 0, 0, 0],
-        };
+    fn test_identifier_extraction() {
+        // Test identifier extraction from data field
+        assert_eq!(identifier([0x00, 0x00, 0x00, 0x00]), 0x0000);
+        assert_eq!(identifier([0x12, 0x34, 0x56, 0x78]), 0x1234);
+        assert_eq!(identifier([0xFF, 0xFF, 0x00, 0x00]), 0xFFFF);
+        assert_eq!(identifier([0xAB, 0xCD, 0xEF, 0x01]), 0xABCD);
+    }
 
-        // Test identifier
-        let test_id: u16 = 0x1234;
-        icmp_hdr.set_identifier(test_id);
-        assert_eq!(icmp_hdr.identifier(), test_id);
-        assert_eq!(icmp_hdr.data[0], 0x12);
-        assert_eq!(icmp_hdr.data[1], 0x34);
+    #[test]
+    fn test_sequence_extraction() {
+        // Test sequence number extraction from data field
+        assert_eq!(sequence([0x00, 0x00, 0x00, 0x00]), 0x0000);
+        assert_eq!(sequence([0x12, 0x34, 0x56, 0x78]), 0x5678);
+        assert_eq!(sequence([0x00, 0x00, 0xFF, 0xFF]), 0xFFFF);
+        assert_eq!(sequence([0xAB, 0xCD, 0xEF, 0x01]), 0xEF01);
+    }
 
-        // Test sequence number
-        let test_seq: u16 = 0x5678;
-        icmp_hdr.set_sequence(test_seq);
-        assert_eq!(icmp_hdr.sequence(), test_seq);
-        assert_eq!(icmp_hdr.data[2], 0x56);
-        assert_eq!(icmp_hdr.data[3], 0x78);
-
-        // Verify identifier is still intact
-        assert_eq!(icmp_hdr.identifier(), test_id);
-
-        // Test combined data field
-        assert_eq!(icmp_hdr.data(), 0x12345678);
+    #[test]
+    fn test_echo_fields_combined() {
+        // Test that identifier and sequence work correctly together
+        let data_field: Data = [0x12, 0x34, 0x56, 0x78];
+        assert_eq!(identifier(data_field), 0x1234);
+        assert_eq!(sequence(data_field), 0x5678);
+        assert_eq!(data(data_field), 0x12345678);
     }
 
     #[test]

@@ -1,3 +1,168 @@
+//! IPv6 Routing Extension Header Format
+//!
+//! 0                   1                   2                   3
+//! 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left | <- Generic Header
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                                                               |
+//! .                                                               .
+//! .                       type-specific data                      .
+//! .                                                               .
+//! |                                                               |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!
+//! Fields
+//!
+//! * **Next Header (8 bits)**: Identifies the type of the next header.
+//! * **Hdr Ext Len (8 bits)**: The length of the Routing header in 8-octet units, not including the first 8 octets.
+//! * **Routing Type (8 bits)**: Identifies the variant of the Routing header.
+//! * **Segments Left (8 bits)**: Number of route segments remaining.
+//! * **Type-specific data (variable)**: Format depends on the Routing Type value.
+//!
+//! Type 2 Routing Header (Mobile IPv6) - RFC 6275
+//!
+//! This routing header is used in Mobile IPv6 to allow a packet to be routed from a
+//! mobile node's home address to its current location (care-of address).
+//!
+//! 0                   1                   2                   3
+//! 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left | <- Generic Header
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                           Reserved                            |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                                                               |
+//! |                                                               |
+//! |                                                               |
+//! |                         Home Address                          |
+//! |                                                               |
+//! |                                                               |
+//! |                                                               |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!
+//! Fields
+//!
+//! * **Reserved (32 bits)**: Reserved for future use and initialized to all zeroes.
+//! * **Home Address (128 bits)**: The home address of the mobile node.
+//!
+//! Type 3 RPL Source Route Header - RFC 6554
+//!
+//! This routing header is used in the Routing Protocol for Low-Power and Lossy Networks (RPL)
+//! for source routing in constrained environments like sensor networks.
+//!
+//! 0                   1                   2                   3
+//! 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left | <- Generic Header
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! | CmprI | CmprE |  Pad  |               Reserved                | <- RPL Fixed Header
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                                                               |
+//! .                                                               .
+//! .                        Addresses[1..n]                        . <-
+//! .                                                               .
+//! |                                                               |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!
+//! Fields
+//!
+//! * **CmprI (4 bits)**: Number of prefix octets elided from addresses in the Addresses field.
+//! * **CmprE (4 bits)**: Number of prefix octets elided from the last address in the Addresses field.
+//! * **Pad (4 bits)**: Number of octets that are used for padding after Address
+//! * **Reserved (20 bits)**: Set to 0 by the sender and ignored by the receiver.
+//! * **Addresses[1..n] (variable)**: Vector of addresses, each of variable size depending on CmprI and CmprE.
+//!
+//! Type 4 Segment Routing Header (SRH) - RFC 8754
+//!
+//! This routing header is used for Segment Routing over IPv6 (SRv6). It allows a source
+//! to specify a path for a packet to traverse by listing an ordered set of segments.
+//!
+//! 0                   1                   2                   3
+//! 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |  Last Entry   |     Flags     |              Tag              |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                                                               |
+//! |            Segment List[0] (128 bits IPv6 address)            |
+//! |                                                               |
+//! |                                                               |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                                                               |
+//! |                                                               |
+//! ...                                                           ...
+//! |                                                               |
+//! |                                                               |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                                                               |
+//! |            Segment List[n] (128 bits IPv6 address)            |
+//! |                                                               |
+//! |                                                               |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! //                                                             //
+//! //         Optional Type Length Value objects (variable)       //
+//! //                                                             //
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!
+//! Fields
+//!
+//! * **Last Entry (8 bits)**: Index of the last entry in the Segment List.
+//! * **Flags (8 bits)**: 8 bits of flags.
+//! * **Tag (16 bits)**: Tag a packet as part of a class or group of packets.
+//! * **Segment List[0..n]**: List of 128-bit IPv6 addresses representing the segments.
+//! * **Optional TLVs**: Type-Length-Value objects for additional information.
+//!
+//! Type 5 Compact Routing Header with 16-bit SIDs (CRH-16) - RFC 9631
+//!
+//! This routing header is an experimental alternative to SRH, designed to be more space-efficient
+//! by using 16-bit Segment Identifiers (SIDs) instead of full IPv6 addresses.
+//!
+//! 0                   1                   2                   3
+//! 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |              SID[0]           |              SID[1]           |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |              ...              |              ...              |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |              ...              |              SID[n]           |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!
+//! Fields
+//!
+//! * **Next Header (8 bits)**: Identifies the type of the next header.
+//! * **Hdr Ext Len (8 bits)**: The length of the Routing header in 8-octet units, not including the first 8 octets.
+//! * **Routing Type (8 bits)**: Identifies the variant of the Routing header. For CRH-16, this is 5.
+//! * **Segments Left (8 bits)**: Index of the current active segment in the SID List.
+//! * **SID List[0..n]**: List of 16-bit Segment Identifiers.
+//!
+//! Type 6 Compact Routing Header with 32-bit SIDs (CRH-32) - RFC 9631
+//!
+//! This routing header is an experimental alternative to SRH, designed to be more space-efficient
+//! by using 32-bit Segment Identifiers (SIDs) instead of full IPv6 addresses.
+//!
+//! 0                   1                   2                   3
+//! 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                              SID[0]                           |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                              ...                              |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                              SID[n]                           |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//!
+//! Fields
+//!
+//! * **Next Header (8 bits)**: Identifies the type of the next header.
+//! * **Hdr Ext Len (8 bits)**: The length of the Routing header in 8-octet units, not including the first 8 octets.
+//! * **Routing Type (8 bits)**: Identifies the variant of the Routing header. For CRH-32, this is 6.
+//! * **Segments Left (8 bits)**: Index of the current active segment in the SID List.
+//! * **SID List[0..n]**: List of 32-bit Segment Identifiers.
 use core::mem;
 
 use crate::ip::IpProto;
@@ -54,27 +219,25 @@ pub enum Ipv6RoutingHeader {
     Unknown(GenericRoute),
 }
 
-/// IPv6 Routing Extension Header Format
-///
-///  0                   1                   2                   3
-/// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left | <- Generic Header
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                                                               |
-/// .                                                               .
-/// .                       type-specific data                      .
-/// .                                                               .
-/// |                                                               |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///
-/// Fields
-///
-/// * **Next Header (8 bits)**: Identifies the type of the next header.
-/// * **Hdr Ext Len (8 bits)**: The length of the Routing header in 8-octet units, not including the first 8 octets.
-/// * **Routing Type (8 bits)**: Identifies the variant of the Routing header.
-/// * **Segments Left (8 bits)**: Number of route segments remaining.
-/// * **Type-specific data (variable)**: Format depends on the Routing Type value.
+pub const GENERIC_ROUTE_LEN: usize = 4; // next_hdr (1) + hdr_ext_len (1) + type_ (1) + sgmt_left (1)
+
+pub type NextHdr = IpProto;
+pub type HdrExtLen = u8;
+pub type Type_ = RoutingHeaderType;
+pub type SgmtLeft = u8;
+
+#[inline]
+pub fn total_hdr_len(hdr_ext_len: HdrExtLen) -> usize {
+    (hdr_ext_len as usize + 1) << 3
+}
+
+/// Calculates the total length of the Type-specific data field in bytes.
+/// Total Header Length - 4 bytes (for next_hdr, hdr_ext_len, type_, and sgmt_left)
+#[inline]
+pub fn total_type_data_len(hdr_ext_len: HdrExtLen) -> usize {
+    total_hdr_len(hdr_ext_len).saturating_sub(4)
+}
+
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
 pub struct GenericRoute {
@@ -104,35 +267,6 @@ impl GenericRoute {
     }
 }
 
-/// Type 2 Routing Header (Mobile IPv6) - RFC 6275
-///
-/// This routing header is used in Mobile IPv6 to allow a packet to be routed from a
-/// mobile node's home address to its current location (care-of address).
-///
-///  0                   1                   2                   3
-/// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left | <- Generic Header
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                           Reserved                            |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                                                               |
-/// |                                                               |
-/// |                                                               |
-/// |                         Home Address                          |
-/// |                                                               |
-/// |                                                               |
-/// |                                                               |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///
-/// Fields
-///
-/// * **Next Header (8 bits)**: Identifies the type of the next header.
-/// * **Hdr Ext Len (8 bits)**: The length of the Routing header in 8-octet units, not including the first 8 octets. For Type 2, this is always 2.
-/// * **Routing Type (8 bits)**: Identifies the variant of the Routing header. For Type 2, this is 2.
-/// * **Segments Left (8 bits)**: Number of route segments remaining. For Type 2, this is always 1.
-/// * **Reserved (32 bits)**: Reserved for future use and initialized to all zeroes.
-/// * **Home Address (128 bits)**: The home address of the mobile node.
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
 pub struct Type2FixedHeader {
@@ -180,36 +314,6 @@ impl Type2RoutingHeader {
     pub const LEN: usize = mem::size_of::<Type2RoutingHeader>();
 }
 
-/// Type 3 RPL Source Route Header - RFC 6554
-///
-/// This routing header is used in the Routing Protocol for Low-Power and Lossy Networks (RPL)
-/// for source routing in constrained environments like sensor networks.
-///
-///  0                   1                   2                   3
-/// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left | <- Generic Header
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// | CmprI | CmprE |  Pad  |               Reserved                | <- RPL Fixed Header
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                                                               |
-/// .                                                               .
-/// .                        Addresses[1..n]                        . <-
-/// .                                                               .
-/// |                                                               |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///
-/// Fields
-///
-/// * **Next Header (8 bits)**: Identifies the type of the next header.
-/// * **Hdr Ext Len (8 bits)**: The length of the Routing header in 8-octet units, not including the first 8 octets.
-/// * **Routing Type (8 bits)**: Identifies the variant of the Routing header. For Type 3, this is 3.
-/// * **Segments Left (8 bits)**: Number of route segments remaining.
-/// * **CmprI (4 bits)**: Number of prefix octets elided from addresses in the Addresses field.
-/// * **CmprE (4 bits)**: Number of prefix octets elided from the last address in the Addresses field.
-/// * **Pad (4 bits)**: Number of octets that are used for padding after Address
-/// * **Reserved (20 bits)**: Set to 0 by the sender and ignored by the receiver.
-/// * **Addresses[1..n] (variable)**: Vector of addresses, each of variable size depending on CmprI and CmprE.
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
 pub struct RplSourceFixedHeader {
@@ -357,50 +461,6 @@ impl RplSourceRouteHeader {
     }
 }
 
-/// Type 4 Segment Routing Header (SRH) - RFC 8754
-///
-/// This routing header is used for Segment Routing over IPv6 (SRv6). It allows a source
-/// to specify a path for a packet to traverse by listing an ordered set of segments.
-///
-///  0                   1                   2                   3
-/// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |  Last Entry   |     Flags     |              Tag              |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                                                               |
-/// |            Segment List[0] (128 bits IPv6 address)            |
-/// |                                                               |
-/// |                                                               |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                                                               |
-/// |                                                               |
-/// ...                                                           ...
-/// |                                                               |
-/// |                                                               |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                                                               |
-/// |            Segment List[n] (128 bits IPv6 address)            |
-/// |                                                               |
-/// |                                                               |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// //                                                             //
-/// //         Optional Type Length Value objects (variable)       //
-/// //                                                             //
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///
-/// Fields
-///
-/// * **Next Header (8 bits)**: Identifies the type of the next header.
-/// * **Hdr Ext Len (8 bits)**: The length of the Routing header in 8-octet units, not including the first 8 octets.
-/// * **Routing Type (8 bits)**: Identifies the variant of the Routing header. For SRH, this is 4.
-/// * **Segments Left (8 bits)**: Index of the current active segment in the Segment List.
-/// * **Last Entry (8 bits)**: Index of the last entry in the Segment List.
-/// * **Flags (8 bits)**: 8 bits of flags.
-/// * **Tag (16 bits)**: Tag a packet as part of a class or group of packets.
-/// * **Segment List[0..n]**: List of 128-bit IPv6 addresses representing the segments.
-/// * **Optional TLVs**: Type-Length-Value objects for additional information.
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
 pub struct SegmentFixedHeader {
@@ -472,56 +532,6 @@ impl SegmentRoutingHeader {
     }
 }
 
-/// Type 5 Compact Routing Header with 16-bit SIDs (CRH-16) - RFC 9631
-///
-/// This routing header is an experimental alternative to SRH, designed to be more space-efficient
-/// by using 16-bit Segment Identifiers (SIDs) instead of full IPv6 addresses.
-///
-/// 0                   1                   2                   3
-/// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |              SID[0]           |              SID[1]           |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |              ...              |              ...              |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |              ...              |              SID[n]           |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///
-/// Fields
-///
-/// * **Next Header (8 bits)**: Identifies the type of the next header.
-/// * **Hdr Ext Len (8 bits)**: The length of the Routing header in 8-octet units, not including the first 8 octets.
-/// * **Routing Type (8 bits)**: Identifies the variant of the Routing header. For CRH-16, this is 5.
-/// * **Segments Left (8 bits)**: Index of the current active segment in the SID List.
-/// * **SID List[0..n]**: List of 16-bit Segment Identifiers.
-///
-/// Type 6 Compact Routing Header with 32-bit SIDs (CRH-32) - RFC 9631
-///
-/// This routing header is an experimental alternative to SRH, designed to be more space-efficient
-/// by using 32-bit Segment Identifiers (SIDs) instead of full IPv6 addresses.
-///
-/// 0                   1                   2                   3
-/// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |  Next Header  |  Hdr Ext Len  |  Routing Type | Segments Left |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                              SID[0]                           |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                              ...                              |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                              SID[n]                           |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///
-/// Fields
-///
-/// * **Next Header (8 bits)**: Identifies the type of the next header.
-/// * **Hdr Ext Len (8 bits)**: The length of the Routing header in 8-octet units, not including the first 8 octets.
-/// * **Routing Type (8 bits)**: Identifies the variant of the Routing header. For CRH-32, this is 6.
-/// * **Segments Left (8 bits)**: Index of the current active segment in the SID List.
-/// * **SID List[0..n]**: List of 32-bit Segment Identifiers.
-// This seems kind of redundant to have a wrapper around GenericRoute, but it does distinguish it.
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
 pub struct CrhHeader {

@@ -34,56 +34,83 @@ pub struct PacketMeta {
     pub src_ipv4_addr: [u8; 4],
     /// Destination IPv4 address (innermost)
     pub dst_ipv4_addr: [u8; 4],
-    /// Total count of bytes in a packet.
+    /// Interface index
+    pub ifindex: u32,
+    /// Flow Label from the IPv6 header
+    pub ip_flow_label: u32,
+    /// Total count of bytes in a packet
     pub l3_octet_count: u32,
     /// Source IPv4 address (outermost)
     pub tunnel_src_ipv4_addr: [u8; 4],
     /// Destination IPv4 address (outermost)
     pub tunnel_dst_ipv4_addr: [u8; 4],
-    /// Interface index.
-    pub ifindex: u32,
-    /// Flow Label from the IPv6 header.
-    pub ip_flow_label: u32,
+    /// Tunnel id, typically a VNI
+    pub tunnel_id: u32,
 
     // Fields with 2-byte alignment
     // ---
-    /// EtherType (innermost). Bytes represents a u16 value.
+    /// EtherType (innermost). Bytes represents a u16 value
     pub ether_type: EtherType,
-    /// Source transport layer port number (innermost). Bytes represents a u16 value.
+    /// Source transport layer port number (innermost). Bytes represents a u16 value
     pub src_port: [u8; 2],
-    /// Destination transport layer port number (innermost). Bytes represents a u16 value.
+    /// Destination transport layer port number (innermost). Bytes represents a u16 value
     pub dst_port: [u8; 2],
-    /// EtherType (outermost). Bytes represents a u16 value.
+    /// EtherType (outermost). Bytes represents a u16 value
     pub tunnel_ether_type: EtherType,
-    /// Source transport layer port number (outermost). Bytes represents a u16 value.
+    /// Source transport layer port number (outermost). Bytes represents a u16 value
     pub tunnel_src_port: [u8; 2],
-    /// Destination transport layer port number (outermost). Bytes represents a u16 value.
+    /// Destination transport layer port number (outermost). Bytes represents a u16 value
     pub tunnel_dst_port: [u8; 2],
 
     // Fields with 1-byte alignment
     // ---
-    /// Indicates whether the flow record uses IPv4 or IPv6 addressing (innermost).
+    /// Indicates whether the flow record uses IPv4 or IPv6 addressing (innermost)
     pub ip_addr_type: IpAddrType,
-    /// Network protocol identifier (innermost, e.g., TCP = 6, UDP = 17).
+    /// Network protocol identifier (innermost, e.g., TCP = 6, UDP = 17)
     pub proto: IpProto,
-    /// Indicates whether the flow record uses IPv4 or IPv6 addressing (outermost).
-    pub tunnel_ip_addr_type: IpAddrType,
-    /// Network protocol identifier (outermost, e.g., TCP = 6, UDP = 17).
-    pub tunnel_proto: IpProto,
     /// Packet direction: Ingress (incoming) or Egress (outgoing)
     pub direction: Direction,
-    /// Differentiated Services Code Point (DSCP) value from the IP header.
+    /// Differentiated Services Code Point (DSCP) value from the IP header
     pub ip_dscp_id: u8,
-    /// Explicit Congestion Notification (ECN) value from the IP header.
+    /// Explicit Congestion Notification (ECN) value from the IP header
     pub ip_ecn_id: u8,
-    /// Time to Live (IPv4) or Hop Limit (IPv6) value from the IP header.
+    /// Time to Live (IPv4) or Hop Limit (IPv6) value from the IP header
     pub ip_ttl: u8,
-    /// ICMP message type id.
+    /// ICMP message type id
     pub icmp_type_id: u8,
-    /// ICMP message code id.
+    /// ICMP message code id
     pub icmp_code_id: u8,
     /// TCP flags (innermost) - bitfield: FIN|SYN|RST|PSH|ACK|URG|ECE|CWR
     pub tcp_flags: u8,
+    /// Indicates whether the flow record uses IPv4 or IPv6 addressing (outermost)
+    pub tunnel_ip_addr_type: IpAddrType,
+    /// Network protocol identifier (outermost, e.g., TCP = 6, UDP = 17)
+    pub tunnel_proto: IpProto,
+    /// Tunnel type
+    pub tunnel_type: TunnelType,
+}
+
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum TunnelType {
+    #[default]
+    None = 0,
+    Ipv4 = 1,
+    Ipv6 = 2,
+    Geneve = 3,
+    Gre = 4,
+    Vxlan = 5,
+    Wireguard = 6,
+}
+
+impl From<IpProto> for TunnelType {
+    fn from(proto: IpProto) -> Self {
+        match proto {
+            IpProto::Ipv4 => TunnelType::Ipv4,
+            IpProto::Ipv6 => TunnelType::Ipv6,
+            _ => TunnelType::None,
+        }
+    }
 }
 
 impl PacketMeta {
@@ -280,6 +307,8 @@ mod tests {
             tunnel_src_port: tunnel_src_port.to_be_bytes(),
             tunnel_dst_port: tunnel_dst_port.to_be_bytes(),
             tunnel_ip_addr_type: Ipv6,
+            tunnel_id: 0,
+            tunnel_type: TunnelType::None,
             tunnel_proto: IpProto::Udp,
             ip_flow_label: flow_label,
             ip_dscp_id: dscp_id,
