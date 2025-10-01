@@ -22,6 +22,9 @@ spec:
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        {{- if .Values.config.restartOnConfigChange }}
+        config_sha: {{ include  "mermin.config" . | sha256sum }}
+        {{- end }}
     spec:
       {{- with .Values.tolerations }}
       tolerations:
@@ -66,8 +69,6 @@ spec:
                   fieldPath: metadata.namespace
             - name: MERMIN_PLATFORM
               value: "kubernetes"
-            - name: MERMIN_HOST_PID_ENRICHMENT
-              value: {{ .Values.config.hostPidEnrichment | quote }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           resources:
@@ -88,7 +89,7 @@ spec:
             - name: bpf-fs
               mountPath: /sys/fs/bpf
               readOnly: false
-            - name: mermin-config-volume
+            - name: mermin-config
               mountPath: /etc/mermin
               readOnly: true
       volumes:
@@ -96,6 +97,6 @@ spec:
           hostPath:
             path: /sys/fs/bpf
             type: DirectoryOrCreate
-        - name: mermin-config-volume
+        - name: mermin-config
           configMap:
             name: {{ include "mermin.fullname" . }}-config
