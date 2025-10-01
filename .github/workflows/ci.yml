@@ -129,7 +129,7 @@ jobs:
         run: |
           helm repo add netobserv https://elastiflow.github.io/helm-chart-netobserv/
           helm repo add opensearch https://opensearch-project.github.io/helm-charts/
-          helm dependency build
+          helm dependency build charts/mermin
       - name: Run chart-testing (list-changed)
         id: list-changed
         run: |
