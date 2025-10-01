@@ -71,11 +71,11 @@ static mut PARSER_OPTIONS: PerCpuArray<ParserOptions> = PerCpuArray::with_max_en
 
 #[cfg(not(feature = "test"))]
 #[inline(always)]
-fn get_parser_options(ctx: &TcContext) -> Result<&'static ParserOptions, Error> {
+fn get_parser_options(ctx: &TcContext) -> Result<&mut ParserOptions, Error> {
     // Get ParserOptions from PerCpuArray instead of using local variables
     let options_ptr = unsafe {
         #[allow(static_mut_refs)]
-        match PARSER_OPTIONS.get_ptr(0) {
+        match PARSER_OPTIONS.get_ptr_mut(0) {
             Some(ptr) => ptr,
             None => {
                 error!(ctx, "PARSER_OPTIONS map not accessible");
@@ -83,7 +83,7 @@ fn get_parser_options(ctx: &TcContext) -> Result<&'static ParserOptions, Error> 
             }
         }
     };
-    Ok(unsafe { &*options_ptr })
+    Ok(unsafe { &mut *options_ptr })
 }
 
 // Defines what kind of header we expect to process in the current iteration.
@@ -239,7 +239,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         meta.src_mac_addr = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         meta.ether_type = ctx.load(self.offset + 12).map_err(|_| Error::OutOfBounds)?;
 
@@ -268,7 +268,7 @@ impl Parser {
             return Err(Error::MalformedHeader);
         }
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         if meta.tunnel_type == TunnelType::None
             && (meta.proto == IpProto::Ipv6 || meta.proto == IpProto::Ipv4)
         {
@@ -317,7 +317,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         // Check if proto is set to IP-in-IP and the tunnel hasn't been set yet
         if meta.tunnel_type == TunnelType::None
             && (meta.proto == IpProto::Ipv6 || meta.proto == IpProto::Ipv4)
@@ -372,7 +372,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         let ver_opt_len: geneve::VerOptLen =
             ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let total_hdr_len = geneve::total_hdr_len(ver_opt_len);
@@ -421,7 +421,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         if meta.tunnel_type == TunnelType::None {
             let flags: vxlan::Flags = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
             if vxlan::flags_i_flag(flags) {
@@ -468,7 +468,7 @@ impl Parser {
         let wg_type = WireGuardType::from(wireguard_type);
         self.next_hdr = HeaderType::StopProcessing;
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         //Check if tunnel type is set
         if meta.tunnel_type == TunnelType::None {
             meta.tunnel_type = TunnelType::Wireguard;
@@ -548,7 +548,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         self.next_hdr = match meta.proto {
             IpProto::Tcp
@@ -588,7 +588,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         // TODO:
         // if meta.tunnel_type == TunnelType::None {
         //     meta.tunnel_type = TunnelType::Gre;
@@ -603,6 +603,7 @@ impl Parser {
 
         // Handle variable-length routing field if R flag is set
         if gre::r_flag(flag_res) {
+            let mut routing_len = 0;
             loop {
                 if self.offset + GRE_ROUTING_LEN > ctx.len() as usize {
                     return Err(Error::OutOfBounds);
@@ -617,7 +618,7 @@ impl Parser {
                 };
 
                 if address_family == 0 && sre_length == 0 {
-                    self.offset += GRE_ROUTING_LEN;
+                    routing_len += GRE_ROUTING_LEN;
                     break;
                 }
 
@@ -629,13 +630,15 @@ impl Parser {
                     return Err(Error::OutOfBounds);
                 }
 
-                self.offset += sre_length as usize;
+                routing_len += sre_length as usize;
 
-                // Prevent infinite loops - reasonable max is a few SREs
-                if self.offset > ctx.len() as usize {
+                // Prevent infinite loops
+                if routing_len > 64 {
                     return Err(Error::OutOfBounds);
                 }
             }
+
+            self.offset += routing_len;
         }
 
         self.next_hdr = match meta.ether_type {
@@ -655,7 +658,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         meta.icmp_type_id = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         meta.icmp_code_id = ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
 
@@ -672,7 +675,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         meta.src_port = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         meta.dst_port = ctx.load(self.offset + 2).map_err(|_| Error::OutOfBounds)?;
         meta.tcp_flags = ctx.load(self.offset + 12).map_err(|_| Error::OutOfBounds)?;
@@ -690,7 +693,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         meta.src_port = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         meta.dst_port = ctx.load(self.offset + 2).map_err(|_| Error::OutOfBounds)?;
 
@@ -740,7 +743,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
 
         self.next_hdr = HeaderType::Proto(meta.proto);
@@ -757,7 +760,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
 
         self.offset += FRAGMENT_LEN;
@@ -773,7 +776,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let _meta = get_packet_meta(&ctx)?;
+        let _meta = get_packet_meta(ctx)?;
         // TODO: handle tunnels
         // meta.tunnel_type = TunnelType::Esp;
         // meta.tunnel_spi = ctx.load(self.offset + 3).map_err(|_| Error::OutOfBounds)?;
@@ -791,7 +794,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let payload_len: ah::PayloadLen =
             ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
@@ -812,7 +815,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let hdr_ext_len: destopts::HdrExtLen =
             ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
@@ -835,7 +838,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let hdr_ext_len: mobility::HdrExtLen =
             ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
@@ -853,7 +856,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         let hdr_ext_len: u8 = ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
         if hdr_ext_len > 64 {
@@ -880,7 +883,7 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let meta = get_packet_meta(&ctx)?;
+        let meta = get_packet_meta(ctx)?;
         meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
 
         let hdr_ext_len: u8 = ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
