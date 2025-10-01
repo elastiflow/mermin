@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     error::Error,
     fmt,
     net::Ipv4Addr,
@@ -15,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use tracing::Level;
 
 use crate::{
-    otlp::opts::ExporterOptions,
+    otlp::opts::{ExporterOptions, OtlpExporterOptions, StdoutExporterOptions},
     runtime::{
         cli::Cli,
         conf::conf_serde::{duration, level},
@@ -37,25 +38,30 @@ impl Format for Hcl {
     }
 }
 
-/// Represents the configuration for the application, containing settings
-/// related to interface, logging, reloading, and flow management.
-///
-/// This struct is serializable and deserializable using Serde, allowing
-/// it to be easily read from or written to configuration files in
-/// formats like YAML.
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Conf {
+mod defaults {
+    use std::time::Duration;
+
+    pub fn packet_channel_capacity() -> usize {
+        1024
+    }
+
+    pub fn flow_workers() -> usize {
+        2
+    }
+
+    pub fn shutdown_timeout() -> Duration {
+        Duration::from_secs(5)
+    }
+}
+
+/// The fully resolved and validated application configuration.
+/// This is the struct that the rest of the application should use.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppConf {
     /// A vector of strings representing the network interfaces or endpoints
     /// that the application should operate on. These interfaces are read
     /// directly from the configuration file.
     pub interface: Vec<String>,
-
-    /// An optional `PathBuf` field that represents the file path to the
-    /// configuration file. This field is annotated with `#[serde(skip)]`,
-    /// meaning its value will not be serialized or deserialized. It is
-    /// used internally for managing the configuration's source path.
-    #[serde(skip)]
-    pub config_path: Option<PathBuf>,
 
     /// A boolean flag indicating whether the application should automatically
     /// reload the configuration whenever changes are detected in the
@@ -69,11 +75,6 @@ pub struct Conf {
     /// deserializing from non-standard formats.
     #[serde(with = "level")]
     pub log_level: Level,
-
-    /// Configuration for application tracing options.
-    /// This field holds settings related to tracing, such as span event levels
-    /// and exporter references
-    pub traces: TracingOptions,
 
     /// Configuration for the API server (health endpoints).
     #[serde(default)]
@@ -107,77 +108,124 @@ pub struct Conf {
     /// to how the application's logic operates.
     pub span: SpanOptions,
 
-    /// Configuration for agent - specifies which exporters are enabled.
-    /// This field determines which exporters from the exporter configuration
-    /// should be initialized and used for telemetry data.
-    pub agent: Option<AgentOptions>,
-
-    /// Configuration for exporters.
-    /// This field holds settings for exporting telemetry data
-    /// to multiple destinations using the new structure.
-    pub exporter: Option<ExporterOptions>,
+    /// A map of fully resolved and ready-to-use trace pipelines.
+    pub trace_pipelines: HashMap<String, ResolvedTracePipeline>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct TracingOptions {
-    /// The level of span events to record. The current default is `FmtSpan::FULL`,
-    /// which records all events (enter, exit, close) for all spans. The level can also be
-    /// one of the following:
-    /// - `SpanFmt::Full`: No span events are recorded.
-    /// - `FmtSpan::ENTER`: Only span enter events are recorded.
-    /// - `FmtSpan::EXIT`: Only span exit events are recorded.
-    /// - `FmtSpan::CLOSE`: Only span close events are recorded.
-    /// - `FmtSpan::ACTIVE`: Only span events for spans that are active (i.e., not closed) are recorded.
+impl AppConf {
+    /// Transforms a `RawConf` into a resolved `AppConf`.
+    /// This is where all references are resolved and the final configuration is built.
+    fn from_raw(raw: RawConf) -> Result<Self, ConfigError> {
+        let mut trace_pipelines = HashMap::new();
+
+        if let Some(agent) = raw.clone().agent {
+            for (name, trace_opts) in agent.traces {
+                let resolved_pipeline = ResolvedTracePipeline::from_raw(&name, trace_opts, &raw)?;
+                trace_pipelines.insert(name, resolved_pipeline);
+            }
+        }
+
+        Ok(Self {
+            interface: raw.interface,
+            auto_reload: raw.auto_reload,
+            log_level: raw.log_level,
+            api: raw.api,
+            metrics: raw.metrics,
+            packet_channel_capacity: raw.packet_channel_capacity,
+            packet_worker_count: raw.packet_worker_count,
+            shutdown_timeout: raw.shutdown_timeout,
+            span: raw.span,
+            trace_pipelines,
+        })
+    }
+}
+
+/// Represents a single, fully resolved trace pipeline with its discovery
+/// and exporter configurations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvedTracePipeline {
     pub span_level: SpanFmt,
-
-    /// A list of exporter references to use for tracing. Each entry should match a key
-    /// in the `exporter` section of the config.
-    pub exporters: ExporterReferences,
+    pub exporters: Vec<ResolvedExporter>,
 }
 
-impl Default for TracingOptions {
-    fn default() -> Self {
-        Self {
-            span_level: SpanFmt::Full,
-            exporters: ExporterReferences::new(),
+/// An enum representing a specific, resolved exporter configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ResolvedExporter {
+    Otlp(OtlpExporterOptions),
+    Stdout(StdoutExporterOptions),
+}
+
+impl ResolvedTracePipeline {
+    /// Resolves a single trace pipeline from the raw configuration.
+    fn from_raw(
+        pipeline_name: &str,
+        raw_opts: RawTraceOptions,
+        raw_conf: &RawConf,
+    ) -> Result<Self, ConfigError> {
+        // Resolve Exporters
+        let mut exporters = Vec::new();
+        let parsed_refs = raw_opts.exporters.parse().unwrap();
+        for exporter_ref in parsed_refs {
+            match exporter_ref.type_.as_str() {
+                "otlp" => {
+                    let opts = raw_conf
+                        .exporter
+                        .as_ref()
+                        .and_then(|e| e.otlp.as_ref())
+                        .and_then(|otlp_map| otlp_map.get(&exporter_ref.name))
+                        .cloned()
+                        .ok_or_else(|| {
+                            ConfigError::InvalidReference(format!(
+                                "OTLP exporter '{}' not found for pipeline '{}'",
+                                exporter_ref.name, pipeline_name
+                            ))
+                        })?;
+                    exporters.push(ResolvedExporter::Otlp(opts));
+                }
+                "stdout" => {
+                    let opts = raw_conf
+                        .exporter
+                        .as_ref()
+                        .and_then(|e| e.stdout.as_ref())
+                        .and_then(|stdout_map| stdout_map.get(&exporter_ref.name))
+                        .cloned()
+                        .ok_or_else(|| {
+                            ConfigError::InvalidReference(format!(
+                                "Stdout exporter '{}' not found for pipeline '{}'",
+                                exporter_ref.name, pipeline_name
+                            ))
+                        })?;
+                    exporters.push(ResolvedExporter::Stdout(opts));
+                }
+                _ => { /* Already handled by .parse() */ }
+            }
         }
+
+        Ok(Self {
+            span_level: raw_opts.span_level,
+            exporters,
+        })
     }
 }
 
-impl Default for Conf {
-    fn default() -> Self {
-        Self {
-            interface: Vec::from(["eth0".to_string()]),
-            config_path: None,
-            auto_reload: false,
-            log_level: Level::INFO,
-            api: ApiConf::default(),
-            metrics: MetricsConf::default(),
-            packet_channel_capacity: defaults::packet_channel_capacity(),
-            packet_worker_count: defaults::flow_workers(),
-            shutdown_timeout: defaults::shutdown_timeout(),
-            span: SpanOptions::default(),
-            agent: Some(AgentOptions::default()),
-            exporter: None,
-            traces: TracingOptions::default(),
-        }
-    }
-}
+/// Represents the configuration for the application, containing settings
+/// related to interface, logging, reloading, and flow management.
+///
+/// This struct is serializable and deserializable using Serde, allowing
+/// it to be easily read from or written to configuration files in
+/// formats like YAML.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Conf {
+    /// The active, resolved application configuration.
+    pub app: AppConf,
 
-mod defaults {
-    use std::time::Duration;
-
-    pub fn packet_channel_capacity() -> usize {
-        1024
-    }
-
-    pub fn flow_workers() -> usize {
-        2
-    }
-
-    pub fn shutdown_timeout() -> Duration {
-        Duration::from_secs(5)
-    }
+    /// An optional `PathBuf` field that represents the file path to the
+    /// configuration file. This field is annotated with `#[serde(skip)]`,
+    /// meaning its value will not be serialized or deserialized. It is
+    /// used internally for managing the configuration's source path.
+    #[serde(skip)]
+    #[allow(dead_code)]
+    config_path: Option<PathBuf>,
 }
 
 impl Conf {
@@ -235,7 +283,8 @@ impl Conf {
     /// }
     /// ```
     pub fn new(cli: Cli) -> Result<(Self, Cli), ConfigError> {
-        let mut figment = Figment::new().merge(Serialized::defaults(Conf::default()));
+        let mut figment = Figment::new().merge(Serialized::defaults(RawConf::default()));
+
         let config_path_to_store = if let Some(config_path) = &cli.config {
             validate_config_path(config_path)?;
             figment = Self::merge_provider_for_path(figment, config_path)?;
@@ -246,9 +295,14 @@ impl Conf {
 
         figment = figment.merge(Serialized::defaults(&cli));
 
-        let mut conf: Conf = figment.extract()?;
+        let raw_conf: RawConf = figment.extract()?;
+        let app_conf = AppConf::from_raw(raw_conf)?;
 
-        conf.config_path = config_path_to_store;
+        let conf = Self {
+            app: app_conf,
+            config_path: config_path_to_store,
+        };
+
         Ok((conf, cli))
     }
 
@@ -295,16 +349,110 @@ impl Conf {
     /// ```
     #[allow(dead_code)]
     pub fn reload(&self) -> Result<Self, ConfigError> {
-        if let Some(path) = &self.config_path {
-            let figment =
-                Self::merge_provider_for_path(Figment::from(Serialized::defaults(self)), path)?;
-            let mut conf: Conf = figment.extract()?;
-            conf.config_path = self.config_path.clone();
+        let path = self.config_path.as_ref().ok_or(ConfigError::NoConfigFile)?;
 
-            Ok(conf)
-        } else {
-            Err(ConfigError::NoConfigFile)
+        // Create a new Figment instance, using the current resolved config
+        // as the base. This preserves CLI/env vars. Then merge the file on top.
+        let mut figment = Figment::from(Serialized::defaults(&self.app));
+        figment = Self::merge_provider_for_path(figment, path)?;
+
+        let raw_conf: RawConf = figment.extract()?;
+        let app_conf = AppConf::from_raw(raw_conf)?;
+
+        Ok(Self {
+            app: app_conf,
+            config_path: self.config_path.clone(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
+struct RawConf {
+    interface: Vec<String>,
+    auto_reload: bool,
+    #[serde(with = "level")]
+    log_level: Level,
+    api: ApiConf,
+    metrics: MetricsConf,
+    packet_channel_capacity: usize,
+    packet_worker_count: usize,
+    #[serde(with = "duration")]
+    shutdown_timeout: Duration,
+    span: SpanOptions,
+    agent: Option<RawAgentOptions>,
+    exporter: Option<ExporterOptions>,
+}
+
+impl Default for RawConf {
+    fn default() -> Self {
+        Self {
+            interface: vec!["eth0".to_string()],
+            auto_reload: false,
+            log_level: Level::INFO,
+            api: ApiConf::default(),
+            metrics: MetricsConf::default(),
+            packet_channel_capacity: defaults::packet_channel_capacity(),
+            packet_worker_count: defaults::flow_workers(),
+            shutdown_timeout: defaults::shutdown_timeout(),
+            span: SpanOptions::default(),
+            agent: None,
+            exporter: None,
         }
+    }
+}
+
+/// A generic enum to handle fields that can either be a reference string
+/// or an inlined struct.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(untagged)]
+#[allow(dead_code)]
+enum ReferenceOrInline<T> {
+    Reference(String),
+    Inline(T),
+}
+
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
+struct RawAgentOptions {
+    traces: HashMap<String, RawTraceOptions>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(default)]
+struct RawTraceOptions {
+    /// The level of span events to record. The current default is `FmtSpan::FULL`,
+    /// which records all events (enter, exit, close) for all spans. The level can also be
+    /// one of the following:
+    /// - `SpanFmt::Full`: No span events are recorded.
+    /// - `FmtSpan::ENTER`: Only span enter events are recorded.
+    /// - `FmtSpan::EXIT`: Only span exit events are recorded.
+    /// - `FmtSpan::CLOSE`: Only span close events are recorded.
+    /// - `FmtSpan::ACTIVE`: Only span events for spans that are active (i.e., not closed) are recorded.
+    pub span_level: SpanFmt,
+
+    /// A list of exporter references to use for tracing. Each entry should match a key
+    /// in the `exporter` section of the config.
+    pub exporters: ExporterReferences,
+}
+
+impl Default for RawTraceOptions {
+    fn default() -> Self {
+        Self {
+            span_level: SpanFmt::Full,
+            exporters: ExporterReferences::new(),
+        }
+    }
+}
+
+// Default implementations for the ReferenceOrInline types
+impl Default for ReferenceOrInline<K8sOwnerOptions> {
+    fn default() -> Self {
+        Self::Inline(K8sOwnerOptions::default())
+    }
+}
+impl Default for ReferenceOrInline<K8sSelectorOptions> {
+    fn default() -> Self {
+        Self::Inline(K8sSelectorOptions::default())
     }
 }
 
@@ -354,7 +502,9 @@ pub enum ConfigError {
     InvalidConfigPath(String),
     /// Error: The file has an unsupported extension.
     InvalidExtension(String),
-    /// Error: Failed to extract configuration data. (from your original code)
+    /// A reference string (e.g., "exporter.otlp.main") could not be resolved.
+    InvalidReference(String),
+    /// An error occurred during deserialization or processing.
     Extraction(Box<figment::Error>),
 }
 
@@ -369,6 +519,7 @@ impl fmt::Display for ConfigError {
                     "invalid file extension '.{ext}' — expected 'yaml', 'yml', or 'hcl'"
                 )
             }
+            ConfigError::InvalidReference(r) => write!(f, "invalid configuration reference: {r}"),
             ConfigError::Extraction(e) => write!(f, "configuration error: {e}"),
         }
     }
@@ -481,27 +632,7 @@ pub mod conf_serde {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ApiConf {
-    /// Enable the API server.
-    pub enabled: bool,
-    /// The network address the API server will listen on.
-    pub listen_address: String,
-    /// The port the API server will listen on.
-    pub port: u16,
-}
-
-impl Default for ApiConf {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
-            port: 8080,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct MetricsConf {
     /// Enable the metrics server.
     pub enabled: bool,
@@ -542,28 +673,45 @@ impl Default for MetricsConf {
 ///       exporters:
 ///         - exporter.otlp.main
 ///         - exporter.stdout.json
-/// ```
-#[derive(Debug, Default, Deserialize, Serialize)]
-pub struct AgentOptions {
-    pub traces: TracesOptions,
-}
-/// Configuration options for the traces telemetry pipeline.
 ///
-/// The `TracesOptions` struct defines the available traces pipelines for the agent,
-/// allowing the user to specify one or more logical pipelines (such as "main") for
-/// trace data. Each pipeline is represented as a field (currently only `main` is
-/// supported), and contains its own configuration, including the list of exporters
-/// to which trace data should be sent.
-#[derive(Debug, Default, Deserialize, Serialize)]
-pub struct TracesOptions {
-    pub main: MainTraceOptions,
+/// ```
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
+pub struct AgentOptions {
+    /// Mapping of trace names to trace options.
+    /// Example: "main" -> TraceOptions
+    pub traces: HashMap<String, TraceOptions>,
 }
-/// Configuration options for the main traces telemetry pipeline.
-#[derive(Debug, Default, Deserialize, Serialize)]
-pub struct MainTraceOptions {
-    /// List of exporter references to use for the main traces pipeline.
-    /// Each entry should match a key in the `exporter` section of the config.
+
+/// Options for a specific trace configuration.
+/// References specific configs by name from config file
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
+pub struct TraceOptions {
+    /// Reference to a discovery.k8s_owner config.
+    pub discovery_owner: String,
+    /// Reference to a discovery.k8s_selector config.
+    pub discovery_selector: String,
+    /// List of exporter references to use for the trace pipeline.
     pub exporters: ExporterReferences,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ApiConf {
+    /// Enable the API server.
+    pub enabled: bool,
+    /// The network address the API server will listen on.
+    pub listen_address: String,
+    /// The port the API server will listen on.
+    pub port: u16,
+}
+
+impl Default for ApiConf {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
+            port: 8080,
+        }
+    }
 }
 
 pub type ExporterReferences = Vec<String>;
@@ -598,6 +746,50 @@ pub struct ExporterReference {
     pub name: String,
 }
 
+/// Options for discovering Kubernetes resource owners.
+/// Controls which resource kinds to include/exclude and the search depth.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct K8sOwnerOptions {
+    /// Kinds to exclude from owner discovery (e.g., EndpointSlice).
+    pub exclude_kinds: Vec<String>,
+    /// Kinds to include in owner discovery (e.g., Service).
+    pub include_kinds: Vec<String>,
+    /// Maximum depth to traverse owner references.
+    pub max_depth: u32,
+}
+
+impl Default for K8sOwnerOptions {
+    fn default() -> Self {
+        Self {
+            exclude_kinds: Vec::new(),
+            include_kinds: Vec::new(),
+            max_depth: 10,
+        }
+    }
+}
+
+/// Options for Kubernetes resource selectors.
+/// Defines which objects to match for enrichment.
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
+pub struct K8sSelectorOptions {
+    /// List of object selectors for matching resources.
+    pub k8s_object: Vec<K8sObjectSelector>,
+}
+
+/// Selector for a specific Kubernetes object kind.
+/// Used to match and enrich resources based on label/field selectors.
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
+pub struct K8sObjectSelector {
+    /// The kind of Kubernetes object (e.g., NetworkPolicy, Service).
+    pub kind: String,
+    /// Optional field for matchExpressions (e.g., spec.podSelector.matchExpressions).
+    pub selector_match_expressions_field: Option<String>,
+    /// Optional field for matchLabels (e.g., spec.podSelector.matchLabels).
+    pub selector_match_labels_field: Option<String>,
+    /// Target resource kind to associate with (e.g., Pod).
+    pub to: String,
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -606,7 +798,7 @@ mod tests {
     use figment::Jail;
     use tracing::Level;
 
-    use super::{Conf, ExporterReference};
+    use super::{AppConf, Conf, ExporterReference, RawConf};
     use crate::runtime::cli::Cli;
 
     fn parse_exporter_reference(reference: &str) -> Result<ExporterReference, String> {
@@ -626,9 +818,9 @@ mod tests {
 
     #[test]
     fn default_impl_has_eth0_interface() {
-        let cfg = Conf::default();
+        let raw_conf = RawConf::default();
+        let cfg = AppConf::from_raw(raw_conf).unwrap();
         assert_eq!(cfg.interface, Vec::from(["eth0".to_string()]));
-        assert_eq!(cfg.config_path, None);
         assert_eq!(cfg.auto_reload, false);
         assert_eq!(cfg.log_level, Level::INFO);
         assert_eq!(cfg.api.port, 8080);
@@ -639,11 +831,12 @@ mod tests {
 
     #[test]
     fn test_conf_serialization() {
-        let cfg = Conf::default();
+        let raw_conf = RawConf::default();
+        let cfg = AppConf::from_raw(raw_conf).unwrap();
 
         // Test that it can be serialized and deserialized
         let serialized = serde_yaml::to_string(&cfg).expect("should serialize");
-        let deserialized: Conf = serde_yaml::from_str(&serialized).expect("should deserialize");
+        let deserialized: AppConf = serde_yaml::from_str(&serialized).expect("should deserialize");
 
         assert_eq!(
             cfg.packet_channel_capacity,
@@ -740,9 +933,9 @@ log_level: warn
                 "debug",
             ]);
             let (cfg, _cli) = Conf::new(cli).expect("config loads from cli file");
-            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
-            assert_eq!(cfg.auto_reload, true);
-            assert_eq!(cfg.log_level, Level::DEBUG);
+            assert_eq!(cfg.app.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.app.auto_reload, true);
+            assert_eq!(cfg.app.log_level, Level::DEBUG);
 
             Ok(())
         });
@@ -764,9 +957,9 @@ log_level: debug
 
             let cli = Cli::parse_from(["mermin"]);
             let (cfg, _cli) = Conf::new(cli).expect("config loads from env file");
-            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
-            assert_eq!(cfg.auto_reload, true);
-            assert_eq!(cfg.log_level, Level::DEBUG);
+            assert_eq!(cfg.app.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.app.auto_reload, true);
+            assert_eq!(cfg.app.log_level, Level::DEBUG);
 
             Ok(())
         });
@@ -785,7 +978,7 @@ interface: ["eth1"]
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config loads from cli file");
-            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.app.interface, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
 
             // Update the config file
@@ -798,7 +991,7 @@ interface: ["eth2", "eth3"]
 
             let reloaded_cfg = cfg.reload().expect("config should reload");
             assert_eq!(
-                reloaded_cfg.interface,
+                reloaded_cfg.app.interface,
                 Vec::from(["eth2".to_string(), "eth3".to_string()])
             );
             assert_eq!(reloaded_cfg.config_path, Some(path.parse().unwrap()));
@@ -809,7 +1002,12 @@ interface: ["eth2", "eth3"]
 
     #[test]
     fn reload_fails_without_config_path() {
-        let cfg = Conf::default();
+        let app_conf = AppConf::from_raw(RawConf::default())
+            .expect("resolving a default raw config should always succeed");
+        let cfg = Conf {
+            app: app_conf,
+            config_path: None,
+        };
         let err = cfg
             .reload()
             .expect_err("expected error when reloading without config path");
@@ -848,11 +1046,11 @@ metrics:
             let (cfg, _cli) = Conf::new(cli).expect("config should load from yaml file");
 
             // Assert that all the custom values from the file were loaded correctly
-            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
-            assert_eq!(cfg.api.listen_address, "127.0.0.1");
-            assert_eq!(cfg.api.port, 8081);
-            assert_eq!(cfg.metrics.listen_address, "0.0.0.0");
-            assert_eq!(cfg.metrics.port, 9090);
+            assert_eq!(cfg.app.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.app.api.listen_address, "127.0.0.1");
+            assert_eq!(cfg.app.api.port, 8081);
+            assert_eq!(cfg.app.metrics.listen_address, "0.0.0.0");
+            assert_eq!(cfg.app.metrics.port, 9090);
 
             Ok(())
         });
@@ -884,11 +1082,11 @@ metrics {
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
 
-            assert_eq!(cfg.interface, vec!["eth0"]);
-            assert_eq!(cfg.log_level, Level::INFO);
-            assert_eq!(cfg.auto_reload, true);
-            assert_eq!(cfg.api.port, 9090);
-            assert_eq!(cfg.metrics.port, 10250);
+            assert_eq!(cfg.app.interface, vec!["eth0"]);
+            assert_eq!(cfg.app.log_level, Level::INFO);
+            assert_eq!(cfg.app.auto_reload, true);
+            assert_eq!(cfg.app.api.port, 9090);
+            assert_eq!(cfg.app.metrics.port, 10250);
 
             Ok(())
         });
@@ -922,8 +1120,8 @@ log_level = "info"
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config loads from HCL file");
-            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
-            assert_eq!(cfg.log_level, Level::INFO);
+            assert_eq!(cfg.app.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.app.log_level, Level::INFO);
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
 
             // Update the HCL config file
@@ -937,10 +1135,10 @@ log_level = "debug"
 
             let reloaded_cfg = cfg.reload().expect("config should reload from HCL");
             assert_eq!(
-                reloaded_cfg.interface,
+                reloaded_cfg.app.interface,
                 Vec::from(["eth2".to_string(), "eth3".to_string()])
             );
-            assert_eq!(reloaded_cfg.log_level, Level::DEBUG);
+            assert_eq!(reloaded_cfg.app.log_level, Level::DEBUG);
             assert_eq!(reloaded_cfg.config_path, Some(path.parse().unwrap()));
 
             Ok(())
@@ -1007,11 +1205,11 @@ metrics {
             let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
 
             // Assert that all the custom values from the file were loaded correctly
-            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
-            assert_eq!(cfg.api.listen_address, "127.0.0.1");
-            assert_eq!(cfg.api.port, 8081);
-            assert_eq!(cfg.metrics.listen_address, "0.0.0.0");
-            assert_eq!(cfg.metrics.port, 9090);
+            assert_eq!(cfg.app.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.app.api.listen_address, "127.0.0.1");
+            assert_eq!(cfg.app.api.port, 8081);
+            assert_eq!(cfg.app.metrics.listen_address, "0.0.0.0");
+            assert_eq!(cfg.app.metrics.port, 9090);
 
             Ok(())
         });

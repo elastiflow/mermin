@@ -19,17 +19,17 @@ use aya::{
 use mermin_common::PacketMeta;
 use pnet::datalink;
 use tokio::{io::unix::AsyncFd, signal, sync::mpsc};
+use runtime::conf;
 use tracing::{debug, error, info, warn};
 
 use crate::{
     health::{HealthState, start_api_server},
     k8s::resource_parser::attribute_flow_span,
     otlp::{
-        opts::ExporterOptions,
         provider::{init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
     },
-    runtime::conf::Conf,
+    runtime::enums::SpanFmt,
     span::producer::FlowSpanProducer,
 };
 
@@ -42,38 +42,46 @@ async fn main() -> Result<()> {
     // TODO: do not reload global configuration found in CLI
     let runtime = runtime::Runtime::new()?;
     let runtime::Runtime { config, .. } = runtime;
+    let app_conf = &config.app;
 
-    let exporter_refs = if let Some(agent_options) = config.agent {
-        agent_options.traces.main.exporters
-    } else {
-        vec![]
-    };
+    let mut otlp_exporters = Vec::new();
+    let mut stdout_exporters = Vec::new();
+    let mut span_level = SpanFmt::default();
 
-    let exporter: Arc<dyn TraceableExporter> = match config.exporter {
-        Some(exporter_options) => {
+    for pipeline in app_conf.trace_pipelines.values() {
+        span_level = pipeline.span_level;
+        for exporter in &pipeline.exporters {
+            match exporter {
+                conf::ResolvedExporter::Otlp(opts) => otlp_exporters.push(opts.clone()),
+                conf::ResolvedExporter::Stdout(opts) => stdout_exporters.push(opts.clone()),
+            }
+        }
+    }
+
+    let exporter: Arc<dyn TraceableExporter> =
+        if !otlp_exporters.is_empty() || !stdout_exporters.is_empty() {
+            let app_tracer_provider =
+                init_provider(otlp_exporters.clone(), stdout_exporters.clone()).await?;
             init_internal_tracing(
-                &exporter_options,
-                config.traces.exporters,
-                config.log_level,
-                config.traces.span_level,
+                otlp_exporters.clone(),
+                stdout_exporters.clone(),
+                app_conf.log_level,
+                span_level,
             )
             .await?;
-            let app_tracer_provider = init_provider(&exporter_options, exporter_refs).await;
             info!("initialized configured exporters");
             Arc::new(TraceExporterAdapter::new(app_tracer_provider))
-        }
-        None => {
+        } else {
             init_internal_tracing(
-                &ExporterOptions::default(),
-                config.traces.exporters,
-                config.log_level,
-                config.traces.span_level,
+                otlp_exporters.clone(),
+                stdout_exporters.clone(),
+                app_conf.log_level,
+                span_level,
             )
             .await?;
             info!("initialized default exporters");
             Arc::new(NoOpExporterAdapter::default())
-        }
-    };
+        };
 
     // Bump the memlock rlimit. This is needed for older kernels that don't use the
     // new memcg based accounting, see https://lwn.net/Articles/837122/
@@ -85,8 +93,6 @@ async fn main() -> Result<()> {
     if ret != 0 {
         warn!("remove limit on locked memory failed, ret is: {ret}");
     }
-
-    let Conf { interface, api, .. } = config;
 
     // This will include your eBPF object file as raw bytes at compile-time and load it at
     // runtime. This approach is recommended for most real-world use cases. If you would
@@ -103,11 +109,12 @@ async fn main() -> Result<()> {
 
     let health_state = HealthState::default();
 
-    if api.enabled {
+    if app_conf.api.enabled {
         let health_state_clone = health_state.clone();
+        let api_conf = app_conf.api.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = start_api_server(health_state_clone, &api).await {
+            if let Err(e) = start_api_server(health_state_clone, &api_conf).await {
                 log::error!("API server error: {e}");
             }
         });
@@ -122,18 +129,21 @@ async fn main() -> Result<()> {
             .try_into()?;
         program.load()?;
 
-        interface.iter().try_for_each(|iface| -> Result<()> {
-            // error adding clsact to the interface if it is already added is harmless
-            // the full cleanup can be done with 'sudo tc qdisc del dev eth0 clsact'.
-            let _ = tc::qdisc_add_clsact(iface);
+        app_conf
+            .interface
+            .iter()
+            .try_for_each(|iface| -> Result<()> {
+                // error adding clsact to the interface if it is already added is harmless
+                // the full cleanup can be done with 'sudo tc qdisc del dev eth0 clsact'.
+                let _ = tc::qdisc_add_clsact(iface);
 
-            program.attach(iface, *attach_type)?;
-            debug!(
-                "mermin {} program attached to {iface}",
-                attach_type.direction_name()
-            );
-            Ok(())
-        })
+                program.attach(iface, *attach_type)?;
+                debug!(
+                    "mermin {} program attached to {iface}",
+                    attach_type.direction_name()
+                );
+                Ok(())
+            })
     })?;
 
     let map = ebpf
@@ -150,44 +160,40 @@ async fn main() -> Result<()> {
     let iface_map: HashMap<u32, String> = {
         let mut map = HashMap::new();
         for iface in datalink::interfaces() {
-            if interface.contains(&iface.name) {
+            if app_conf.interface.contains(&iface.name) {
                 map.insert(iface.index, iface.name.clone());
             }
         }
         map
     };
 
-    let (packet_meta_tx, packet_meta_rx) = mpsc::channel(config.packet_channel_capacity);
-    let (flow_span_tx, mut flow_span_rx) = mpsc::channel(config.packet_channel_capacity);
+    let (packet_meta_tx, packet_meta_rx) = mpsc::channel(app_conf.packet_channel_capacity);
+    let (flow_span_tx, mut flow_span_rx) = mpsc::channel(app_conf.packet_channel_capacity);
     let (k8s_attributed_flow_span_tx, mut k8s_attributed_flow_span_rx) =
-        mpsc::channel(config.packet_channel_capacity);
+        mpsc::channel(app_conf.packet_channel_capacity);
 
     let flow_span_producer = FlowSpanProducer::new(
-        config.span,
-        config.packet_channel_capacity,
-        config.packet_worker_count,
+        app_conf.clone().span,
+        app_conf.packet_channel_capacity,
+        app_conf.packet_worker_count,
         iface_map.clone(),
         packet_meta_rx,
         flow_span_tx,
     );
 
     info!("initializing k8s client");
-    let k8s_attributor = match k8s::Attributor::new().await {
+    let k8s_attributor = match k8s::Attributor::new(health_state.clone()).await {
         Ok(attributor) => {
-            // TODO: we should implement an event based notifier
-            // that sends a signal when the kubeclient is ready with its stores instead of waiting for a fixed interval.
-            info!("k8s client initialized successfully");
-            health_state.k8s_connected.store(true, Ordering::Relaxed);
-            debug!("waiting 10 seconds for the k8s reflector to populate stores");
-            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-            debug!("reflectors should be populated");
+            info!("k8s client initialized successfully and all caches are synced");
             Some(Arc::new(attributor))
         }
         Err(e) => {
             error!(
                 "failed to initialize k8s client - k8s metadata lookup will not be available: {e}"
             );
-            health_state.k8s_connected.store(false, Ordering::Relaxed);
+            health_state
+                .k8s_caches_synced
+                .store(false, Ordering::Relaxed);
             None
         }
     };
@@ -263,22 +269,6 @@ async fn main() -> Result<()> {
         }
     });
 
-    let all_systems_ready = health_state.ebpf_loaded.load(Ordering::Relaxed)
-        && health_state.k8s_connected.load(Ordering::Relaxed)
-        && health_state.ready_to_process.load(Ordering::Relaxed);
-
-    health_state
-        .startup_complete
-        .store(all_systems_ready, Ordering::Relaxed);
-
-    if all_systems_ready {
-        info!("startup complete - all systems ready");
-    } else {
-        warn!(
-            "startup completed but some systems are not ready - check readiness endpoint for details"
-        );
-    }
-
     tokio::spawn(async move {
         while let Some(k8s_attributed_flow_span) = k8s_attributed_flow_span_rx.recv().await {
             let traceable: TraceableRecord = Arc::new(k8s_attributed_flow_span);
@@ -287,6 +277,19 @@ async fn main() -> Result<()> {
         }
         debug!("exporting task exiting");
     });
+
+    info!("application startup sequence finished.");
+    health_state.startup_complete.store(true, Ordering::Relaxed);
+
+    let is_ready = health_state.ebpf_loaded.load(Ordering::Relaxed)
+        && health_state.k8s_caches_synced.load(Ordering::Relaxed)
+        && health_state.ready_to_process.load(Ordering::Relaxed);
+
+    if is_ready {
+        info!("all systems are ready, application is healthy.");
+    } else {
+        warn!("application is running but is not healthy. check /readyz endpoint for details.");
+    }
 
     println!("waiting for ctrl+c");
     signal::ctrl_c().await?;
