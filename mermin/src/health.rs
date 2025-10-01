@@ -60,15 +60,6 @@ pub async fn readiness_handler(State(state): State<HealthState>) -> impl IntoRes
 
     let is_ready = ebpf_loaded && k8s_caches_synced && ready_to_process;
 
-    if !is_ready {
-        log::warn!(
-            "Readiness probe failed. States: [eBPF loaded: {}, K8s caches synced: {}, Ready to process: {}]",
-            ebpf_loaded,
-            k8s_caches_synced,
-            ready_to_process
-        );
-    }
-
     let status_code = if is_ready {
         StatusCode::OK
     } else {
