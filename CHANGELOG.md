@@ -1,3 +1,14 @@
+## [0.1.0-alpha.3](https://github.com/elastiflow/mermin/compare/v0.1.0-alpha.2...v0.1.0-alpha.3) (2025-10-01)
+
+### Features
+
+* **configuration:** support hcl files ([#117](https://github.com/elastiflow/mermin/issues/117)) ([e5e6e9b](https://github.com/elastiflow/mermin/commit/e5e6e9b2364061752282a49bd0a998b479f4ecaa))
+
+### Bug Fixes
+
+* **ebpf:** refactors the ebpf code to stay in compliance with the verifier ([#125](https://github.com/elastiflow/mermin/issues/125)) ([160f7e8](https://github.com/elastiflow/mermin/commit/160f7e8f2a0d9a46efdbe58cd844ee43ab8e8bea))
+
+
 ## [0.1.0-alpha.2](https://github.com/elastiflow/mermin/compare/v0.1.0-alpha.1...v0.1.0-alpha.2) (2025-09-27)
 
 ### Features
