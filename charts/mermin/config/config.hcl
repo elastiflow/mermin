@@ -51,6 +51,10 @@ agent "traces" "main" {
   ]
 }
 
+# ------------------------
+# New config format
+# ------------------------
+
 # OTLP exporter configuration
 exporter "otlp" "main" {
   address = "example.com"
