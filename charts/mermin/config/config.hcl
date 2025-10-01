@@ -47,7 +47,7 @@ span {
 # Specify which exporters are enabled
 agent "traces" "main" {
   exporters = [
-    "exporter.stdout.console"
+    "exporter.stdout.main"
   ]
 }
 
@@ -75,6 +75,6 @@ exporter "otlp" "main" {
   }
 }
 
-exporter "stdout" "console" {
+exporter "stdout" "main" {
   format = "full"
 }
