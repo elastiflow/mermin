@@ -2,9 +2,7 @@
 # This configuration file contains default settings for the Mermin eBPF network observability tool for local development.
 
 # Network interfaces to monitor
-interface = [
-  "eth0"
-]
+interface = ["eth0"]
 
 # Logging configuration
 log_level = "info"
@@ -50,11 +48,6 @@ agent "traces" "main" {
     "exporter.stdout.main"
   ]
 }
-
-# ------------------------
-# TODO(Cleanup for GA): Cleanup this comment after full config implementation
-# New config format
-# ------------------------
 
 # OTLP exporter configuration
 exporter "otlp" "main" {
