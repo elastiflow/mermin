@@ -7,7 +7,7 @@ interface = [
 ]
 
 # Logging configuration
-log_level = "debug"
+log_level = "debug" # TODO(Cleanup for GA): Should be "info"
 
 # Automatic configuration reloading
 auto_reload = false
@@ -75,5 +75,5 @@ exporter "otlp" "main" {
 }
 
 exporter "stdout" "console" {
-  format = "full"
+  format = "plain"
 }

@@ -12,7 +12,7 @@ K8S_ROLLOUT_TIMEOUT=600s
 # HELM_CHART?="oci://us-docker.pkg.dev/pub-artifacts-j8rjbu/helm-elastiflow/mermin"
 HELM_CHART?="charts/mermin"
 HELM_CHART_VERSION?=
-HELM_OUTPUT_DIR_PREFIX?=tmp
+HELM_OUTPUT_DIR_PREFIX?=helm_rendered
 HELM_OUTPUT_DIR?=${HELM_OUTPUT_DIR_PREFIX}/mermin/templates
 HELM_NAMESPACE?=default
 HELM_VALUES=examples/local/values.yaml
@@ -38,20 +38,21 @@ helm-template:
 	rm -rf ${HELM_OUTPUT_DIR}
 	helm template ${APP} ${HELM_CHART} \
 		--output-dir ${HELM_OUTPUT_DIR_PREFIX} \
-		${HELM_ARGS}
+		${HELM_ARGS} ${EXTRA_HELM_ARGS}
 
 .PHONY: helm-template-silent
 helm-template-silent:
 	@rm -rf ${HELM_OUTPUT_DIR} > /dev/null
 	@helm template ${APP} ${HELM_CHART} \
 		--output-dir ${HELM_OUTPUT_DIR_PREFIX} \
-		${HELM_ARGS} > /dev/null
+		${HELM_ARGS} ${EXTRA_HELM_ARGS} > /dev/null
 
 .PHONY: helm-upgrade
 helm-upgrade:
-	helm upgrade ${APP} ${HELM_CHART} \
-		--install \
-		${HELM_ARGS} ${EXTRA_HELM_ARGS}
+	helm upgrade \
+		--install --wait --timeout 10m \
+		${HELM_ARGS} ${EXTRA_HELM_ARGS} \
+		${APP} ${HELM_CHART}
 
 .PHONY: k8s-diff
 k8s-diff: helm-template-silent
@@ -66,8 +67,7 @@ k8s-rollout-status: helm-template-silent
 		${HELM_OUTPUT_DIR}/podmonitoring.yaml \
 		${HELM_OUTPUT_DIR}/redpanda_topic.yaml \
 		${HELM_OUTPUT_DIR}/certificate.yaml
-	kubectl -n ${HELM_NAMESPACE} rollout status -f ${HELM_OUTPUT_DIR} \
-		-l 'kind in (deployment,sts,ds)' \
+	kubectl -n ${HELM_NAMESPACE} rollout status -f ${HELM_OUTPUT_DIR}/daemonset.yaml \
 		--timeout=${K8S_ROLLOUT_TIMEOUT}
 
 .PHONY: k8s-get

@@ -18,7 +18,7 @@ updateStrategy:
 # Mermin container args
 args:
   - "--config"
-  - "/etc/mermin/mermin-config.yaml"
+  - "/etc/mermin/config.hcl"
 
 
 serviceAccount:
@@ -113,7 +113,7 @@ config:
   restartOnConfigChange: true
   # Set to true to allow enable host's process list (/proc) for mapping kernel events to specific processes.
   hostPidEnrichment: true
-  source: '{{ tpl (.Files.Get "config/config.hcl") . }}'
+  source: '{{ .Files.Get "config/config.hcl" }}'
   # "source" is used if undefined. "content" supports templating
   # content: |
   #   interface = [
