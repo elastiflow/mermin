@@ -1,8 +1,13 @@
+nameOverride: ""
+fullnameOverride: ""
+
 image:
-  repository: elastiflow/mermin
+  repository: ghcr.io/elastiflow/mermin
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: ""
+
+imagePullSecrets: []
 
 updateStrategy:
   type: RollingUpdate
@@ -10,9 +15,11 @@ updateStrategy:
     maxUnavailable: 0
     maxSurge: "10%"
 
-imagePullSecrets: []
-nameOverride: ""
-fullnameOverride: ""
+# Mermin container args
+args:
+  - "--config"
+  - "/etc/mermin/config.hcl"
+
 
 serviceAccount:
   # Specifies whether a service account should be created
@@ -48,6 +55,7 @@ securityContext:
   runAsNonRoot: false
 
 resources: {}
+  # TODO(mack#ENG-123|2025-09-29): Set default resources relative to the flows per second
   # limits:
   #   cpu: 1
   #   memory: 256Mi
@@ -96,41 +104,26 @@ tolerations:
 
 affinity: {}
 
+# Configuration is done via ConfigMap, you may:
+#   - use default config
+#   - set custom config via "--set-file config.source=${PATH_RELATIVE_TO_PWD}"
+#   - Define "content" key (see example)
 config:
+  # Inject config hash to the pod label to force pod restart
+  restartOnConfigChange: true
   # Set to true to allow enable host's process list (/proc) for mapping kernel events to specific processes.
   hostPidEnrichment: true
-  interface: []
+  source: '{{ .Files.Get "config/config.hcl" }}'
+  # "source" is used if undefined. "content" supports templating
+  # content: |
+  #   interface = [
+  #     "eth0"
+  #   ]
+  #   log_level = "info"
 
-  # Logging configuration
-  log_level: "info"
-
-  # Automatic configuration reloading
-  auto_reload: false
-
-  # API server configuration
-  api:
-    listenAddress: "0.0.0.0"
-
-  # Metrics server configuration
-  metrics:
-    listenAddress: "0.0.0.0"
-
-  # Span/Flow configuration
-  span:
-    max_batch_size: 64
-    max_batch_interval: "5s"
-    max_record_interval: "60s"
-    generic_timeout: "30s"
-    icmp_timeout: "10s"
-    tcp_timeout: "20s"
-    tcp_fin_timeout: "5s"
-    tcp_rst_timeout: "5s"
-    udp_timeout: "60s"
-
-  # Exporter configuration
-  exporter:
-    stdout_enabled: false
-    otlp_enabled: false
-    otlp_endpoint: "http://host.docker.internal:4317"
-    otlp_timeout_seconds: 3
-    otlp_protocol: "grpc"
+netobserv:
+  enabled: false
+opensearch:
+  enabled: false
+opensearch-dashboards:
+  enabled: false

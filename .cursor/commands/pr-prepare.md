@@ -6,7 +6,7 @@ This command provides a complete eBPF-focused PR workflow for the Mermin project
 
 1. **Change Analysis**:
    - Runs `git diff alpha..HEAD` to analyze actual code changes
-   - Identifies which components were modified (eBPF, Kubernetes, etc.)  
+   - Identifies which components were modified (eBPF, Kubernetes, etc.)
    - Suggests appropriate PR categorization based on file changes
    - Generates smart commit summaries
 
@@ -77,7 +77,7 @@ docker run --privileged --mount type=bind,source=.,target=/app \
 
 ```bash
 helm lint charts/mermin/
-helm template charts/mermin/ --values local/values.yaml
+helm template charts/mermin/ --values examples/local/values.yaml
 ```
 
 ### 3. PR Content Generation
@@ -98,7 +98,7 @@ type(scope): description
 
 Examples:
 feat(ebpf): add TCP flow tracking to packet parser
-fix(k8s): resolve daemonset privilege escalation  
+fix(k8s): resolve daemonset privilege escalation
 perf(net): optimize packet processing bounds
 refactor(build): simplify conditional compilation
 ```
@@ -192,18 +192,18 @@ The command analyzes your `git diff` and suggests:
 ```shell
 🔍 Analyzing changes...
    Modified: mermin-ebpf/src/main.rs (2 insertions, 2 deletions)
-   
+
 📋 Suggested PR Info:
    Type: Refactor
    Scope: eBPF conditional compilation
    Focus: Build configuration improvement
-   
+
 ✅ All Validations Passed:
    ✓ Docker build successful
-   ✓ eBPF compilation clean  
+   ✓ eBPF compilation clean
    ✓ Code quality checks passed
    ✓ Kubernetes manifests valid
-   
+
 🚀 Opening PR: https://github.com/elastiflow/mermin/compare/main...your-branch
    Template: Using .github/PULL_REQUEST_TEMPLATE.md
    Pre-filled: Based on git diff analysis

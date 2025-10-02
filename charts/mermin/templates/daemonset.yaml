@@ -13,9 +13,14 @@ spec:
       {{- include "mermin.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
+      {{- if or .Values.podAnnotations .Values.config.restartOnConfigChange }}
       annotations:
+        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.config.restartOnConfigChange }}
+        config_sha: {{ include  "mermin.config" . | sha256sum }}
+        {{- end }}
       {{- end }}
       labels:
         {{- include "mermin.selectorLabels" . | nindent 8 }}
@@ -44,9 +49,10 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports: {{ .Values.ports | toYaml | nindent 12 }}
+          {{- with .Values.args }}
           args:
-            - "--config"
-            - "/etc/mermin/mermin-config.yaml"
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           env:
             - name: POD_NODE_NAME
               valueFrom:
@@ -65,8 +71,9 @@ spec:
                   fieldPath: metadata.namespace
             - name: MERMIN_PLATFORM
               value: "kubernetes"
-            - name: MERMIN_HOST_PID_ENRICHMENT
-              value: {{ .Values.config.hostPidEnrichment | quote }}
+            # TODO(mack#LGO-376|2025-10-01): Figure out if option is valid
+            # - name: MERMIN_HOST_PID_ENRICHMENT
+            #   value: {{ .Values.config.hostPidEnrichment | quote }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           resources:
@@ -87,7 +94,7 @@ spec:
             - name: bpf-fs
               mountPath: /sys/fs/bpf
               readOnly: false
-            - name: mermin-config-volume
+            - name: mermin-config
               mountPath: /etc/mermin
               readOnly: true
       volumes:
@@ -95,6 +102,6 @@ spec:
           hostPath:
             path: /sys/fs/bpf
             type: DirectoryOrCreate
-        - name: mermin-config-volume
+        - name: mermin-config
           configMap:
             name: {{ include "mermin.fullname" . }}-config

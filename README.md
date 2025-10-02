@@ -6,8 +6,94 @@ observability platforms.
 
 -----
 
+- [🚀 Quick Start: Deploying to Kubernetes with `kind`](#-quick-start-deploying-to-kubernetes-with-kind)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+  - [Verifying the Deployment](#verifying-the-deployment)
+  - [Cleanup](#cleanup)
+- [🧑‍💻 Local Development and Contribution](#-local-development-and-contribution)
+  - [Prerequisites](#prerequisites-1)
+  - [Build and Run Locally](#build-and-run-locally)
+    - [1. Build the `mermin` agent](#1-build-the-mermin-agent)
+    - [2. Configuration Files](#2-configuration-files)
+    - [3. Run the agent](#3-run-the-agent)
+    - [4. Generate Traffic](#4-generate-traffic)
+  - [Testing and Linting](#testing-and-linting)
+    - [Run unit tests](#run-unit-tests)
+    - [Format your code](#format-your-code)
+    - [Run Clippy for lints](#run-clippy-for-lints)
+  - [Using a Dockerized Build Environment](#using-a-dockerized-build-environment)
+    - [1. Build the containerized environment](#1-build-the-containerized-environment)
+    - [2. Run commands inside the container](#2-run-commands-inside-the-container)
+  - [Cross-Compiling](#cross-compiling)
+  - [Debugging with Wireshark](#debugging-with-wireshark)
+    - [Prerequisites](#prerequisites-2)
+    - [1. Identify Your Target Pod](#1-identify-your-target-pod)
+    - [2. Start the Live Capture](#2-start-the-live-capture)
+    - [3. Generate Network Traffic](#3-generate-network-traffic)
+    - [4. Inspect the Packets](#4-inspect-the-packets)
+- [🔍 Debugging eBPF Programs with bpftool](#-debugging-ebpf-programs-with-bpftool)
+  - [Prerequisites](#prerequisites-3)
+    - [1. Build the containerized environment (if not already built)](#1-build-the-containerized-environment-if-not-already-built)
+    - [2. Access the container with bpftool](#2-access-the-container-with-bpftool)
+  - [Basic eBPF Program Inspection](#basic-ebpf-program-inspection)
+    - [List all loaded eBPF programs](#list-all-loaded-ebpf-programs)
+    - [Find specific programs by name](#find-specific-programs-by-name)
+    - [Get detailed information about a specific program](#get-detailed-information-about-a-specific-program)
+  - [Analyzing Program Instructions](#analyzing-program-instructions)
+    - [Count the number of instructions in an eBPF program](#count-the-number-of-instructions-in-an-ebpf-program)
+    - [Alternative methods for instruction counting](#alternative-methods-for-instruction-counting)
+  - [Advanced eBPF Analysis](#advanced-ebpf-analysis)
+    - [Inspect eBPF maps](#inspect-ebpf-maps)
+    - [Check program verification details](#check-program-verification-details)
+    - [Monitor program performance](#monitor-program-performance)
+  - [Troubleshooting Common Issues](#troubleshooting-common-issues)
+    - [Program loading failures](#program-loading-failures)
+    - [Instruction limit exceeded](#instruction-limit-exceeded)
+    - [Memory issues](#memory-issues)
+  - [Integration with Development Workflow](#integration-with-development-workflow)
+- [🔍 Inspecting eBPF Programs for Network-Types Integration Tests](#-inspecting-ebpf-programs-for-network-types-integration-tests)
+  - [Prerequisites](#prerequisites-4)
+  - [Building the Integration Test eBPF Programs](#building-the-integration-test-ebpf-programs)
+  - [Inspecting eBPF Programs Using bpftool](#inspecting-ebpf-programs-using-bpftool)
+    - [Method 1: Direct Binary Analysis (Recommended)](#method-1-direct-binary-analysis-recommended)
+    - [Method 2: Runtime Inspection (If Programs Load)](#method-2-runtime-inspection-if-programs-load)
+  - [Understanding the Integration Test eBPF Programs](#understanding-the-integration-test-ebpf-programs)
+    - [Program Structure](#program-structure)
+    - [Key Components](#key-components)
+    - [Instruction Count Analysis](#instruction-count-analysis)
+  - [Advanced Analysis Techniques](#advanced-analysis-techniques)
+    - [Disassembly Analysis](#disassembly-analysis)
+    - [Protocol-Specific Analysis](#protocol-specific-analysis)
+  - [Performance and Optimization](#performance-and-optimization)
+    - [Instruction Count Monitoring](#instruction-count-monitoring)
+    - [Memory Usage Analysis](#memory-usage-analysis)
+  - [Troubleshooting Integration Test eBPF Programs](#troubleshooting-integration-test-ebpf-programs)
+    - [Common Issues](#common-issues)
+    - [Debugging Commands](#debugging-commands)
+  - [Integration with CI/CD](#integration-with-cicd)
+- [📊 Measuring eBPF Stack Usage](#-measuring-ebpf-stack-usage)
+  - [🚨 Critical Concept: Individual vs. Cumulative Stack Usage](#-critical-concept-individual-vs-cumulative-stack-usage)
+  - [📋 Quick Analysis](#-quick-analysis)
+    - [1. Prerequisites](#1-prerequisites)
+    - [2. Stack Analysis Scripts](#2-stack-analysis-scripts)
+    - [3. Running the Analysis](#3-running-the-analysis)
+  - [🔧 Interpreting Results](#-interpreting-results)
+    - [Understanding `check_stack_usage.sh` Output:](#understanding-check_stack_usagesh-output)
+    - [Understanding `analyze_call_chain.sh` Output:](#understanding-analyze_call_chainsh-output)
+    - [Understanding Verifier Error Messages:](#understanding-verifier-error-messages)
+    - [Critical Thresholds (64-byte aligned):](#critical-thresholds-64-byte-aligned)
+  - [🎯 Quick Fixes](#-quick-fixes)
+  - [🔍 Advanced Analysis Commands](#-advanced-analysis-commands)
+  - [🚀 CI/CD Integration](#-cicd-integration)
+- [Artifacts](#artifacts)
+- [📜 License](#-license)
+    - [eBPF](#ebpf)
+
+
 ## 🚀 Quick Start: Deploying to Kubernetes with `kind`
 
+Mermin is distributed using Helm charts, examples for various deployments may be found in the `examples/` directory.
 This guide will get you running Mermin on a local **Kubernetes** cluster using [kind](https://kind.sigs.k8s.io/).
 
 ### Prerequisites
@@ -26,17 +112,27 @@ command sequence:
 
 ```shell
 # 1. Create the kind cluster
-kind create cluster --config local/kind-config.yaml
+kind create cluster --config examples/local/kind-config.yaml
 
 # 2. Build the mermin image and load it into the cluster
 docker build -t mermin:latest --target runner-debug .
 kind load docker-image -n atlantis mermin:latest
 
-# 3a. (optional) if you already have a Helm release, uninstall it first
+# 3. Fetch Helm dependencies
+helm repo add netobserv https://elastiflow.github.io/helm-chart-netobserv/
+helm repo add opensearch https://opensearch-project.github.io/helm-charts/
+helm repo update
+helm dependency build charts/mermin
+
+# 4a. (optional) if you already have a Helm release, uninstall it first
 helm uninstall mermin
 
-# 3b. Deploy mermin using Helm
-helm upgrade -i mermin charts/mermin --values local/values.yaml
+# 4b. Deploy mermin using Helm
+make helm-upgrade
+# 4c. Or deploy mermin using Helm with a non-default config
+make helm-upgrade EXTRA_HELM_ARGS='--set-file config.source=examples/local/config.hcl'
+# 4d. Or deploy using raw Helm cli
+helm upgrade -i mermin charts/mermin --values examples/local/values.yaml --wait --timeout 10m
 ```
 
 > **Note**: The repository includes a `Makefile` with convenience targets (`make k8s-get`, `make k8s-diff`) for some of
@@ -100,9 +196,9 @@ The build script automatically compiles the eBPF program and embeds it into the 
 
 #### 2. Configuration Files
 
-Mermin supports configuration in both **YAML** and **HCL** formats. Default configuration files for local development are provided in the project root: `config.yaml` and `config.hcl`.
+Mermin supports configuration in both **YAML** and **HCL** formats. Default configuration file for local development is provided in the project root: `config.hcl`.
 
-Both files contain sensible defaults for local development, including:
+File contain sensible defaults for local development, including:
 
 * **Stdout exporter enabled**: Flow data will be printed to the console for easy debugging.
 * **OTLP exporter disabled**: External telemetry endpoints are disabled by default.
@@ -111,18 +207,24 @@ Both files contain sensible defaults for local development, including:
 
 You can customize the configuration by editing these files or creating your own.
 
+Mermin also supports YAML configuration which can be generated by using [fmtconvert](https://github.com/genelet/determined/tree/main/cmd/fmtconvert) tool (`go install github.com/genelet/determined/cmd/fmtconvert@latest`)
+
+```sh
+fmtconvert -from hcl -to yaml examples/local/config.hcl > examples/local/config.yaml
+```
+
 #### 3. Run the agent
 
-Running the eBPF agent requires elevated privileges. Use the `--config` flag to specify your chosen configuration file. Default configuration files `config.yaml` and `config.hcl` are provided in the project root with the stdout exporter enabled for local development.
-
-**Using YAML:**
-```shell
-cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config config.yaml
-```
+Running the eBPF agent requires elevated privileges. Use the `--config` flag to specify your chosen configuration file. Default configuration file `config.hcl` is provided in the project root with the stdout exporter enabled for local development.
 
 **Using HCL:**
 ```shell
-cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config config.hcl
+cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config examples/local/config.hcl
+```
+
+**Using YAML:**
+```shell
+cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config <(fmtconvert -from hcl -to yaml examples/local/config.hcl)
 ```
 
 > The `sudo -E` command runs the program as root while preserving the user's environment variables, which is
@@ -667,7 +769,7 @@ Error: the BPF_PROG_LOAD syscall failed. Verifier output: combined stack size of
 
 ### 🚨 Critical Concept: Individual vs. Cumulative Stack Usage
 
-**Individual Function Stack**: Maximum stack used by any single function  
+**Individual Function Stack**: Maximum stack used by any single function
 **Cumulative Call Chain Stack**: Total stack across all functions in a call chain
 
 **The verifier failure above shows CUMULATIVE usage**: `144 + 328 + 0 = 544 bytes`
@@ -689,7 +791,7 @@ The project includes three analysis scripts in the `scripts/` directory:
 - **Output**: Simple pass/fail with color-coded status
 - **Features**: ✅ Forces fresh builds, detects build failures, prevents stale results
 
-**`scripts/analyze_call_chain.sh`** - Call chain overview (45 seconds)  
+**`scripts/analyze_call_chain.sh`** - Call chain overview (45 seconds)
 - **Purpose**: Shows function calls and stack usage levels for initial investigation
 - **Output**: Function call instructions and sorted stack usage levels
 - **Use When**: Investigating verifier failures or understanding call patterns
@@ -707,7 +809,7 @@ The project includes three analysis scripts in the `scripts/` directory:
 # Quick health check (30 seconds)
 ./scripts/check_stack_usage.sh
 
-# Call chain overview (45 seconds)  
+# Call chain overview (45 seconds)
 ./scripts/analyze_call_chain.sh
 
 # Detailed educational analysis (2 minutes)
@@ -722,7 +824,7 @@ The project includes three analysis scripts in the `scripts/` directory:
 ✅ GOOD: Individual stack usage within safe limits
 ```
 - **Below 192 bytes**: ✅ Safe for most call chains
-- **192-320 bytes**: ⚠️ Monitor call depth - might exceed 512 in deep chains  
+- **192-320 bytes**: ⚠️ Monitor call depth - might exceed 512 in deep chains
 - **Above 320 bytes**: 🔥 High risk - will likely cause verifier failures
 
 #### Understanding `analyze_call_chain.sh` Output:
@@ -732,7 +834,7 @@ call    0x1         # Function call to address 0x1
 call    0x1a        # Function call to address 0x1a
 
 📊 Stack Usage Levels:
-• 328 bytes (0x148)  # Largest stack usage 
+• 328 bytes (0x148)  # Largest stack usage
 • 144 bytes (0x90)   # Second largest
 • 136 bytes (0x88)   # Third largest
 ```
@@ -747,13 +849,13 @@ Error: combined stack size of 3 calls is 544. Too large
 stack depth 144+328+0
 ```
 **Translation:**
-- **3 calls**: Call chain is Function A → Function B → Function C  
+- **3 calls**: Call chain is Function A → Function B → Function C
 - **544 bytes**: Total cumulative stack (144 + 328 + 0 = 472 + ~72 bytes overhead)
 - **144, 328, 0**: Individual stack usage per function in the chain
 
 #### Critical Thresholds (64-byte aligned):
 - **192 bytes**: Warning threshold - monitor for deep call chains
-- **320 bytes**: Critical threshold - high probability of overflow  
+- **320 bytes**: Critical threshold - high probability of overflow
 - **512 bytes**: Hard eBPF limit - verifier will reject
 
 
@@ -763,7 +865,7 @@ When you see high stack usage:
 
 1. **Split Large Functions**: Break functions >192 bytes into smaller ones
 2. **Eliminate Large Variables**: Avoid big structs on the stack
-3. **Use `#[inline(always)]`**: For small helper functions 
+3. **Use `#[inline(always)]`**: For small helper functions
 4. **Check Call Depth**: Minimize function call chains
 
 ### 🔍 Advanced Analysis Commands
@@ -785,7 +887,7 @@ docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:la
 
 **For CI/CD pipelines, use the quick health check:**
 ```yaml
-- name: Check eBPF Stack Usage  
+- name: Check eBPF Stack Usage
   run: |
     docker build -t mermin-builder:latest --target builder .
     ./scripts/check_stack_usage.sh
