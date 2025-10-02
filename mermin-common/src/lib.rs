@@ -18,15 +18,21 @@ pub struct PacketMeta {
     pub src_ipv6_addr: [u8; 16],
     /// Destination IPv6 address (innermost)
     pub dst_ipv6_addr: [u8; 16],
-    /// Source IPv6 address (outermost)
+    /// Ip-in-Ip Source IPv6 address (outermost)
+    pub ipip_src_ipv6_addr: [u8; 16],
+    /// Ip-in-Ip Destination IPv6 address (outermost)
+    pub ipip_dst_ipv6_addr: [u8; 16],
+    /// Tunnel Source IPv6 address (outermost)
     pub tunnel_src_ipv6_addr: [u8; 16],
-    /// Destination IPv6 address (outermost)
+    /// Tunnel Destination IPv6 address (outermost)
     pub tunnel_dst_ipv6_addr: [u8; 16],
 
     /// Fields with 6-byte alignment
     /// ---
     /// Source MAC address (innermost)
     pub src_mac_addr: [u8; 6],
+    /// Tunnel Source MAC address (outermost)
+    pub tunnel_src_mac_addr: [u8; 6],
 
     // Fields with 4-byte alignment
     // ---
@@ -40,12 +46,26 @@ pub struct PacketMeta {
     pub ip_flow_label: u32,
     /// Total count of bytes in a packet
     pub l3_octet_count: u32,
-    /// Source IPv4 address (outermost)
+    /// Tunnel Security Parameter Index
+    pub ipsec_ah_spi: u32,
+    /// Tunnel Security Parameter Index
+    pub ipsec_esp_spi: u32,
+    /// Tunnel sender index
+    pub ipsec_sender_index: u32,
+    /// Tunnel receiver index
+    pub ipsec_receiver_index: u32,
+    /// Ip-in-Ip Source IPv4 address (outermost)
+    pub ipip_src_ipv4_addr: [u8; 4],
+    /// Ip-in-Ip Destination IPv4 address (outermost)
+    pub ipip_dst_ipv4_addr: [u8; 4],
+    /// Tunnel Source IPv4 address (outermost)
     pub tunnel_src_ipv4_addr: [u8; 4],
-    /// Destination IPv4 address (outermost)
+    /// Tunnel Destination IPv4 address (outermost)
     pub tunnel_dst_ipv4_addr: [u8; 4],
-    /// Tunnel id, typically a VNI
+    /// Tunnel id, typically a VNI or Key ID
     pub tunnel_id: u32,
+    /// Tunnel Security Parameter Index
+    pub tunnel_ipsec_ah_spi: u32,
 
     // Fields with 2-byte alignment
     // ---
@@ -55,6 +75,8 @@ pub struct PacketMeta {
     pub src_port: [u8; 2],
     /// Destination transport layer port number (innermost). Bytes represents a u16 value
     pub dst_port: [u8; 2],
+    /// Ip-in-Ip EtherType (outermost). Bytes represents a u16 value
+    pub ipip_ether_type: EtherType,
     /// EtherType (outermost). Bytes represents a u16 value
     pub tunnel_ether_type: EtherType,
     /// Source transport layer port number (outermost). Bytes represents a u16 value
@@ -82,12 +104,24 @@ pub struct PacketMeta {
     pub icmp_code_id: u8,
     /// TCP flags (innermost) - bitfield: FIN|SYN|RST|PSH|ACK|URG|ECE|CWR
     pub tcp_flags: u8,
+    /// Indicates whether the packet uses AH headers (outermost after tunnel)
+    pub ah_exists: bool,
+    /// Indicates whether the packet uses ESP headers (outermost after tunnel)
+    pub esp_exists: bool,
+    /// Indicates whether the packet uses Wireguard headers (outermost after tunnel)
+    pub wireguard_exists: bool,
+    /// Indicates whether the flow record uses IPv4 or IPv6 addressing (outermost)
+    pub ipip_ip_addr_type: IpAddrType,
+    /// Ip-in-Ip protocol identifier (outermost, e.g., IPv4 = 4, IPv6 = 41)
+    pub ipip_proto: IpProto,
     /// Indicates whether the flow record uses IPv4 or IPv6 addressing (outermost)
     pub tunnel_ip_addr_type: IpAddrType,
-    /// Network protocol identifier (outermost, e.g., TCP = 6, UDP = 17)
-    pub tunnel_proto: IpProto,
     /// Tunnel type
     pub tunnel_type: TunnelType,
+    /// Network protocol identifier (outermost, e.g., TCP = 6, UDP = 17)
+    pub tunnel_proto: IpProto,
+    /// Indicates whether the packet uses AH headers (outermost)
+    pub tunnel_ah_exists: bool,
 }
 
 #[repr(u8)]
@@ -95,20 +129,18 @@ pub struct PacketMeta {
 pub enum TunnelType {
     #[default]
     None = 0,
-    Ipv4 = 1,
-    Ipv6 = 2,
-    Geneve = 3,
-    Gre = 4,
-    Vxlan = 5,
-    Wireguard = 6,
+    Geneve = 1,
+    Gre = 2,
+    Vxlan = 3,
 }
 
-impl From<IpProto> for TunnelType {
-    fn from(proto: IpProto) -> Self {
-        match proto {
-            IpProto::Ipv4 => TunnelType::Ipv4,
-            IpProto::Ipv6 => TunnelType::Ipv6,
-            _ => TunnelType::None,
+impl TunnelType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TunnelType::Geneve => "geneve",
+            TunnelType::Gre => "gre",
+            TunnelType::Vxlan => "vxlan",
+            _ => "none",
         }
     }
 }
@@ -207,6 +239,7 @@ impl PacketMeta {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum IpAddrType {
     #[default]
+    Unknown = 0,
     Ipv4 = 4,
     Ipv6 = 6,
 }
@@ -215,8 +248,8 @@ pub enum IpAddrType {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum Direction {
     #[default]
-    Ingress = 0,
-    Egress = 1,
+    Egress = 0,
+    Ingress = 1,
 }
 
 #[cfg(test)]
@@ -231,7 +264,7 @@ mod tests {
     // Test PacketMeta size and alignment
     #[test]
     fn test_packet_meta_layout() {
-        let expected_size = 128; // Size with all fields including new IP/ICMP/TCP fields
+        let expected_size = 200; // Size with all fields including new IP/ICMP/TCP fields
         let actual_size = size_of::<PacketMeta>();
 
         assert_eq!(
@@ -308,6 +341,7 @@ mod tests {
             tunnel_dst_port: tunnel_dst_port.to_be_bytes(),
             tunnel_ip_addr_type: Ipv6,
             tunnel_id: 0,
+            tunnel_ipsec_ah_spi: 0,
             tunnel_type: TunnelType::None,
             tunnel_proto: IpProto::Udp,
             ip_flow_label: flow_label,
@@ -318,6 +352,7 @@ mod tests {
             icmp_code_id: icmp_code,
             tcp_flags: tcp_flags,
             direction: Direction::Egress,
+            ..Default::default()
         };
 
         // Test field access
@@ -377,9 +412,9 @@ mod tests {
     #[test]
     fn test_direction_enum() {
         // Test Direction enum values and default
-        assert_eq!(Direction::default(), Direction::Ingress);
-        assert_eq!(Direction::Ingress as u8, 0);
-        assert_eq!(Direction::Egress as u8, 1);
+        assert_eq!(Direction::default(), Direction::Egress);
+        assert_eq!(Direction::Egress as u8, 0);
+        assert_eq!(Direction::Ingress as u8, 1);
 
         // Test that different directions are not equal
         assert_ne!(Direction::Ingress, Direction::Egress);
@@ -421,9 +456,9 @@ mod tests {
         assert_eq!(packet.tcp_flags, 0);
 
         // Test default values for enums
-        assert_eq!(packet.ip_addr_type, IpAddrType::Ipv4);
-        assert_eq!(packet.tunnel_ip_addr_type, IpAddrType::Ipv4);
-        assert_eq!(packet.direction, Direction::Ingress);
+        assert_eq!(packet.ip_addr_type, IpAddrType::Unknown);
+        assert_eq!(packet.tunnel_ip_addr_type, IpAddrType::Unknown);
+        assert_eq!(packet.direction, Direction::Egress);
     }
 
     #[test]
@@ -431,9 +466,9 @@ mod tests {
         let mut packet = PacketMeta::default();
 
         // Test default direction
-        assert_eq!(packet.direction, Direction::Ingress);
-        assert_eq!(packet.is_ingress(), true);
-        assert_eq!(packet.is_egress(), false);
+        assert_eq!(packet.direction, Direction::Egress);
+        assert_eq!(packet.is_ingress(), false);
+        assert_eq!(packet.is_egress(), true);
 
         // Test setting egress direction
         packet.direction = Direction::Egress;

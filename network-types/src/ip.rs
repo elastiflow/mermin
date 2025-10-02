@@ -195,7 +195,6 @@ pub mod ipv6 {
 #[derive(Default, PartialEq, Eq, Debug, Copy, Clone)]
 pub enum IpProto {
     /// IPv6 Hop-by-Hop Option
-    #[default]
     HopOpt = 0,
     /// Internet Control Message
     Icmp = 1,
@@ -490,6 +489,7 @@ pub enum IpProto {
     /// Use for experimentation and testing
     Test2 = 254,
     /// Reserved
+    #[default]
     Reserved = 255,
 }
 

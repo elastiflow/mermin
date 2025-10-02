@@ -7,7 +7,7 @@ mod span;
 
 use std::{
     collections::HashMap,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    os::unix::io::AsRawFd,
     sync::{Arc, atomic::Ordering},
 };
 
@@ -16,13 +16,12 @@ use aya::{
     maps::RingBuf,
     programs::{SchedClassifier, TcAttachType, tc},
 };
-use mermin_common::{IpAddrType, PacketMeta};
+use mermin_common::PacketMeta;
 use pnet::datalink;
-use tokio::{signal, sync::mpsc};
+use tokio::{io::unix::AsyncFd, signal, sync::mpsc};
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    community_id::CommunityIdGenerator,
     health::{HealthState, start_api_server},
     k8s::resource_parser::attribute_flow_span,
     otlp::{
@@ -76,7 +75,6 @@ async fn main() -> Result<()> {
         }
     };
 
-    let community_id_generator = CommunityIdGenerator::new(0);
     // Bump the memlock rlimit. This is needed for older kernels that don't use the
     // new memcg based accounting, see https://lwn.net/Articles/837122/
     let rlim = libc::rlimit {
@@ -229,53 +227,39 @@ async fn main() -> Result<()> {
     });
     health_state.ready_to_process.store(true, Ordering::Relaxed);
 
-    let task_iface_map = Arc::new(iface_map);
     tokio::spawn(async move {
         info!("userspace task started: reading from ring buffer for packet metadata");
+
+        // Wrap the ring buffer's fd in AsyncFd for event-driven polling
+        let async_fd = match AsyncFd::new(ring_buf.as_raw_fd()) {
+            Ok(fd) => fd,
+            Err(e) => {
+                error!("failed to create AsyncFd for ring buffer: {e}");
+                return;
+            }
+        };
+
         loop {
-            match ring_buf.next() {
-                Some(bytes) => {
-                    let packet_meta: PacketMeta =
-                        unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const PacketMeta) };
-
-                    let iface_name = task_iface_map
-                        .get(&packet_meta.ifindex)
-                        .map(String::as_str)
-                        .unwrap_or("");
-
-                    // Extract port numbers for community ID generation
-                    let src_port = packet_meta.src_port();
-                    let dst_port = packet_meta.dst_port();
-
-                    let community_id = match packet_meta.ip_addr_type {
-                        IpAddrType::Ipv4 => community_id_generator.generate(
-                            IpAddr::V4(Ipv4Addr::from(packet_meta.src_ipv4_addr)),
-                            IpAddr::V4(Ipv4Addr::from(packet_meta.dst_ipv4_addr)),
-                            src_port,
-                            dst_port,
-                            packet_meta.proto,
-                        ),
-                        IpAddrType::Ipv6 => community_id_generator.generate(
-                            IpAddr::V6(Ipv6Addr::from(packet_meta.src_ipv6_addr)),
-                            IpAddr::V6(Ipv6Addr::from(packet_meta.dst_ipv6_addr)),
-                            src_port,
-                            dst_port,
-                            packet_meta.proto,
-                        ),
-                    };
-
-                    // Log packet details if debug logging is enabled
-                    log_packet_info(&packet_meta, &community_id, iface_name);
-
-                    if let Err(e) = packet_meta_tx.send(packet_meta).await {
-                        warn!("failed to send packet to k8s attribution channel: {e}");
-                    }
+            // Wait for the ring buffer to be readable (event-driven, no busy-loop)
+            let mut guard = match async_fd.readable().await {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("error waiting for ring buffer readability: {e}");
+                    break;
                 }
-                None => {
-                    // Short sleep to prevent busy-looping.
-                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            };
+
+            // Consume all available data in a batch
+            while let Some(bytes) = ring_buf.next() {
+                let packet_meta: PacketMeta =
+                    unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const PacketMeta) };
+
+                if let Err(e) = packet_meta_tx.send(packet_meta).await {
+                    warn!("failed to send packet to k8s attribution channel: {e}");
                 }
             }
+
+            guard.clear_ready();
         }
     });
 
@@ -309,87 +293,6 @@ async fn main() -> Result<()> {
     println!("exiting");
 
     Ok(())
-}
-
-/// Helper function to format IP address based on type
-fn format_ip(addr_type: IpAddrType, ipv4_addr: [u8; 4], ipv6_addr: [u8; 16]) -> String {
-    match addr_type {
-        IpAddrType::Ipv4 => Ipv4Addr::from(ipv4_addr).to_string(),
-        IpAddrType::Ipv6 => Ipv6Addr::from(ipv6_addr).to_string(),
-    }
-}
-
-/// Log packet information in a structured way
-fn log_packet_info(packet_meta: &PacketMeta, community_id: &str, iface_name: &str) {
-    let src_port = packet_meta.src_port();
-    let dst_port = packet_meta.dst_port();
-
-    // Check if this is tunneled traffic
-    let is_tunneled =
-        packet_meta.tunnel_src_ipv4_addr != [0; 4] || packet_meta.tunnel_src_ipv6_addr != [0; 16];
-
-    if is_tunneled {
-        let tunnel_src_ip = format_ip(
-            packet_meta.tunnel_ip_addr_type,
-            packet_meta.tunnel_src_ipv4_addr,
-            packet_meta.tunnel_src_ipv6_addr,
-        );
-        let tunnel_dst_ip = format_ip(
-            packet_meta.tunnel_ip_addr_type,
-            packet_meta.tunnel_dst_ipv4_addr,
-            packet_meta.tunnel_dst_ipv6_addr,
-        );
-        let inner_src_ip = format_ip(
-            packet_meta.ip_addr_type,
-            packet_meta.src_ipv4_addr,
-            packet_meta.src_ipv6_addr,
-        );
-        let inner_dst_ip = format_ip(
-            packet_meta.ip_addr_type,
-            packet_meta.dst_ipv4_addr,
-            packet_meta.dst_ipv6_addr,
-        );
-        let tunnel_src_port = packet_meta.tunnel_src_port();
-        let tunnel_dst_port = packet_meta.tunnel_dst_port();
-
-        debug!(
-            "[{iface_name}] Tunneled {} packet: {} | Tunnel: {}:{} -> {}:{} ({}) | Inner: {}:{} -> {}:{} | bytes: {}",
-            packet_meta.proto,
-            community_id,
-            tunnel_src_ip,
-            tunnel_src_port,
-            tunnel_dst_ip,
-            tunnel_dst_port,
-            packet_meta.tunnel_proto,
-            inner_src_ip,
-            src_port,
-            inner_dst_ip,
-            dst_port,
-            packet_meta.l3_octet_count,
-        );
-    } else {
-        let src_ip = format_ip(
-            packet_meta.ip_addr_type,
-            packet_meta.src_ipv4_addr,
-            packet_meta.src_ipv6_addr,
-        );
-        let dst_ip = format_ip(
-            packet_meta.ip_addr_type,
-            packet_meta.dst_ipv4_addr,
-            packet_meta.dst_ipv6_addr,
-        );
-
-        debug!(
-            "[{iface_name}] {} packet: {} | {}:{} -> {}:{} | bytes: {}",
-            packet_meta.proto,
-            community_id,
-            src_ip,
-            src_port,
-            dst_ip,
-            dst_port,
-            packet_meta.l3_octet_count,
-        );
-    }
 }
 
 /// Extension trait for TcAttachType to provide direction name
