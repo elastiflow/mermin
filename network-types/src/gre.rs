@@ -1,17 +1,21 @@
-//! 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//! |C|       Reserved0       | Ver |         Protocol Type         |
-//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//! |      Checksum (optional)      |       Reserved1 (Optional)    |
-//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//! Represents a GRE (Generic Routing Encapsulation) header.
+//! //! Represents a GRE (Generic Routing Encapsulation) header.
 //!
 //! This struct contains the fixed part of the GRE header, which includes
 //! flags, reserved bits, version, and protocol type.
 //!
-//! # Fields
-//! * `flgs_res0_ver`: A 2-byte array containing flags, reserved bits, and version.
-//! * `proto`: A 2-byte array containing the protocol type.
+//!  0                   1                   2                   3
+//!  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |C|R|K|S|s|Recur|  Flags  | Ver |         Protocol Type         |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |      Checksum (optional)      |       Offset (optional)       |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                         Key (optional)                        |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                    Sequence Number (optional)                 |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                         Routing (optional)
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 use crate::eth::EtherType;
 
@@ -21,6 +25,10 @@ pub const GRE_LEN: usize = 4;
 pub type FlgsRes0Ver = [u8; 2];
 /// Protocol Type field (16 bits).
 pub type ProtocolType = EtherType;
+/// Key field (32 bits).
+pub type Key = [u8; 4];
+/// Sequence Number field (32 bits).
+pub type SequenceNumber = [u8; 4];
 /// The length of the GRE routing header (SRE header).
 pub const GRE_ROUTING_LEN: usize = 4;
 /// Address Family field (16 bits) - indicates syntax/semantics of routing info.
@@ -65,6 +73,11 @@ pub fn s_flag(flgs_res0_ver: FlgsRes0Ver) -> bool {
 #[inline]
 pub fn version(flgs_res0_ver: FlgsRes0Ver) -> u8 {
     flgs_res0_ver[1] & VER_MASK
+}
+
+#[inline]
+pub fn key(key: Key) -> u32 {
+    u32::from_le_bytes(key)
 }
 
 /// Calculates the total GRE header length based on flags.

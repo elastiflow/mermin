@@ -248,6 +248,10 @@ async fn main() -> Result<()> {
                     let dst_port = packet_meta.dst_port();
 
                     let community_id = match packet_meta.ip_addr_type {
+                        IpAddrType::Unknown => {
+                            warn!("unknown IP address type, skipping community ID generation");
+                            continue;
+                        }
                         IpAddrType::Ipv4 => community_id_generator.generate(
                             IpAddr::V4(Ipv4Addr::from(packet_meta.src_ipv4_addr)),
                             IpAddr::V4(Ipv4Addr::from(packet_meta.dst_ipv4_addr)),
@@ -314,6 +318,7 @@ async fn main() -> Result<()> {
 /// Helper function to format IP address based on type
 fn format_ip(addr_type: IpAddrType, ipv4_addr: [u8; 4], ipv6_addr: [u8; 16]) -> String {
     match addr_type {
+        IpAddrType::Unknown => "unknown".to_string(),
         IpAddrType::Ipv4 => Ipv4Addr::from(ipv4_addr).to_string(),
         IpAddrType::Ipv6 => Ipv6Addr::from(ipv6_addr).to_string(),
     }

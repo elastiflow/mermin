@@ -15,6 +15,7 @@ use network_types::{
 use opentelemetry::trace::SpanKind;
 use pnet::datalink::MacAddr;
 use tokio::sync::mpsc;
+use tracing::warn;
 
 use crate::{
     community_id::CommunityIdGenerator,
@@ -184,17 +185,18 @@ impl PacketWorker {
         dst_ipv4_addr: [u8; 4],
         src_ipv6_addr: [u8; 16],
         dst_ipv6_addr: [u8; 16],
-    ) -> (IpAddr, IpAddr) {
+    ) -> Result<(IpAddr, IpAddr), Error> {
         match ip_addr_type {
+            IpAddrType::Unknown => Err(Error::UnknownIpAddrType),
             IpAddrType::Ipv4 => {
                 let src = IpAddr::V4(std::net::Ipv4Addr::from(src_ipv4_addr));
                 let dst = IpAddr::V4(std::net::Ipv4Addr::from(dst_ipv4_addr));
-                (src, dst)
+                Ok((src, dst))
             }
             IpAddrType::Ipv6 => {
                 let src = IpAddr::V6(std::net::Ipv6Addr::from(src_ipv6_addr));
                 let dst = IpAddr::V6(std::net::Ipv6Addr::from(dst_ipv6_addr));
-                (src, dst)
+                Ok((src, dst))
             }
         }
     }
@@ -204,25 +206,32 @@ impl PacketWorker {
             let now = SystemTime::now();
             now.duration_since(UNIX_EPOCH).expect("time went backwards");
 
-            let (src_addr, dst_addr) = Self::extract_ip_addresses(
+            let (src_addr, dst_addr) = match Self::extract_ip_addresses(
                 packet.ip_addr_type,
                 packet.src_ipv4_addr,
                 packet.dst_ipv4_addr,
                 packet.src_ipv6_addr,
                 packet.dst_ipv6_addr,
-            );
+            ) {
+                Ok(addrs) => addrs,
+                Err(_) => {
+                    warn!("unknown IP address type, skipping flow span production");
+                    continue;
+                }
+            };
             let src_port = packet.src_port();
             let dst_port = packet.dst_port();
 
             let is_tunneled = packet.tunnel_type != TunnelType::None;
             let tunnel_addresses = if is_tunneled {
-                Some(Self::extract_ip_addresses(
+                Self::extract_ip_addresses(
                     packet.tunnel_ip_addr_type,
                     packet.tunnel_src_ipv4_addr,
                     packet.tunnel_dst_ipv4_addr,
                     packet.tunnel_src_ipv6_addr,
                     packet.tunnel_dst_ipv6_addr,
-                ))
+                )
+                .ok()
             } else {
                 None
             };
@@ -420,4 +429,9 @@ impl PacketWorker {
             let _ = self.flow_span_tx.send(attrs).await;
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Error {
+    UnknownIpAddrType,
 }

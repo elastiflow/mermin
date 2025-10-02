@@ -31,6 +31,8 @@ pub struct PacketMeta {
     /// ---
     /// Source MAC address (innermost)
     pub src_mac_addr: [u8; 6],
+    /// Tunnel Source MAC address (outermost)
+    pub tunnel_src_mac_addr: [u8; 6],
 
     // Fields with 4-byte alignment
     // ---
@@ -102,6 +104,12 @@ pub struct PacketMeta {
     pub icmp_code_id: u8,
     /// TCP flags (innermost) - bitfield: FIN|SYN|RST|PSH|ACK|URG|ECE|CWR
     pub tcp_flags: u8,
+    /// Indicates whether the packet uses AH headers (outermost after tunnel)
+    pub ah_exists: bool,
+    /// Indicates whether the packet uses ESP headers (outermost after tunnel)
+    pub esp_exists: bool,
+    /// Indicates whether the packet uses Wireguard headers (outermost after tunnel)
+    pub wireguard_exists: bool,
     /// Indicates whether the flow record uses IPv4 or IPv6 addressing (outermost)
     pub ipip_ip_addr_type: IpAddrType,
     /// Ip-in-Ip protocol identifier (outermost, e.g., IPv4 = 4, IPv6 = 41)
@@ -112,6 +120,8 @@ pub struct PacketMeta {
     pub tunnel_type: TunnelType,
     /// Network protocol identifier (outermost, e.g., TCP = 6, UDP = 17)
     pub tunnel_proto: IpProto,
+    /// Indicates whether the packet uses AH headers (outermost)
+    pub tunnel_ah_exists: bool,
 }
 
 #[repr(u8)]
@@ -229,6 +239,7 @@ impl PacketMeta {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum IpAddrType {
     #[default]
+    Unknown = 0,
     Ipv4 = 4,
     Ipv6 = 6,
 }
