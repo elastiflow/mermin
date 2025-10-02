@@ -1,16 +1,6 @@
-use std::{
-    collections::HashMap,
-    error::Error,
-    fmt,
-    net::Ipv4Addr,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{collections::HashMap, error::Error, fmt, net::Ipv4Addr, path::Path, time::Duration};
 
-use figment::{
-    Figment,
-    providers::{Format, Serialized, Yaml},
-};
+use figment::providers::Format;
 use hcl::eval::Context;
 use serde::{Deserialize, Serialize};
 use tracing::Level;
@@ -18,7 +8,6 @@ use tracing::Level;
 use crate::{
     otlp::opts::{ExporterOptions, OtlpExporterOptions, StdoutExporterOptions},
     runtime::{
-        cli::Cli,
         conf::conf_serde::{duration, level},
         enums::SpanFmt,
     },
@@ -38,44 +27,28 @@ impl Format for Hcl {
     }
 }
 
-mod defaults {
-    use std::time::Duration;
-
-    pub fn packet_channel_capacity() -> usize {
-        1024
-    }
-
-    pub fn flow_workers() -> usize {
-        2
-    }
-
-    pub fn shutdown_timeout() -> Duration {
-        Duration::from_secs(5)
-    }
-}
-
 /// Represents a single, fully resolved trace pipeline with its discovery
 /// and exporter configurations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResolvedTracePipeline {
+pub struct TracePipeline {
     pub span_level: SpanFmt,
-    pub exporters: Vec<ResolvedExporter>,
+    pub exporters: Vec<ExportOption>,
 }
 
 /// An enum representing a specific, resolved exporter configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ResolvedExporter {
+pub enum ExportOption {
     Otlp(OtlpExporterOptions),
     Stdout(StdoutExporterOptions),
 }
 
-impl ResolvedTracePipeline {
+impl TracePipeline {
     /// Resolves a single trace pipeline from the raw configuration.
-    fn from_raw(
+    pub fn from_raw(
         pipeline_name: &str,
         raw_opts: RawTraceOptions,
         raw_conf: &Conf,
-    ) -> Result<Self, ConfigError> {
+    ) -> Result<Self, ConfError> {
         // Resolve Exporters
         let mut exporters = Vec::new();
         let parsed_refs = raw_opts.exporters.parse().unwrap();
@@ -89,12 +62,12 @@ impl ResolvedTracePipeline {
                         .and_then(|otlp_map| otlp_map.get(&exporter_ref.name))
                         .cloned()
                         .ok_or_else(|| {
-                            ConfigError::InvalidReference(format!(
+                            ConfError::InvalidReference(format!(
                                 "OTLP exporter '{}' not found for pipeline '{}'",
                                 exporter_ref.name, pipeline_name
                             ))
                         })?;
-                    exporters.push(ResolvedExporter::Otlp(opts));
+                    exporters.push(ExportOption::Otlp(opts));
                 }
                 "stdout" => {
                     let opts = raw_conf
@@ -104,12 +77,12 @@ impl ResolvedTracePipeline {
                         .and_then(|stdout_map| stdout_map.get(&exporter_ref.name))
                         .cloned()
                         .ok_or_else(|| {
-                            ConfigError::InvalidReference(format!(
+                            ConfError::InvalidReference(format!(
                                 "Stdout exporter '{}' not found for pipeline '{}'",
                                 exporter_ref.name, pipeline_name
                             ))
                         })?;
-                    exporters.push(ResolvedExporter::Stdout(opts));
+                    exporters.push(ExportOption::Stdout(opts));
                 }
                 _ => { /* Already handled by .parse() */ }
             }
@@ -122,266 +95,22 @@ impl ResolvedTracePipeline {
     }
 }
 
-/// Represents the configuration for the application, containing settings
-/// related to interface, logging, reloading, and flow management.
-///
-/// This struct is serializable and deserializable using Serde, allowing
-/// it to be easily read from or written to configuration files in
-/// formats like YAML.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AppProps {
-    /// A vector of strings representing the network interfaces or endpoints
-    /// that the application should operate on. These interfaces are read
-    /// directly from the configuration file.
-    pub interface: Vec<String>,
-
-    /// A boolean flag indicating whether the application should automatically
-    /// reload the configuration whenever changes are detected in the
-    /// relevant configuration file. This is typically used to support runtime
-    /// configuration updates.
-    pub auto_reload: bool,
-
-    /// The logging level for the application, serialized and deserialized
-    /// using the custom Serde module named `level`. This allows more
-    /// precise handling of log level values, particularly when
-    /// deserializing from non-standard formats.
-    #[serde(with = "level")]
-    pub log_level: Level,
-
-    /// Configuration for the API server (health endpoints).
-    #[serde(default)]
-    pub api: ApiConf,
-
-    /// Configuration for the Metrics server (e.g., for Prometheus scraping).
-    #[serde(default)]
-    pub metrics: MetricsConf,
-
-    /// Capacity of the channel for packet events between the ring buffer reader and flow workers
-    /// - Default: 10000
-    /// - Example: Increase for high-traffic environments, decrease for memory-constrained systems
-    #[serde(default = "defaults::packet_channel_capacity")]
-    pub packet_channel_capacity: usize,
-
-    /// Number of worker tasks for flow processing
-    /// - Default: 2
-    /// - Example: Increase for high CPU systems, keep at 1-2 for most deployments
-    #[serde(default = "defaults::flow_workers")]
-    pub packet_worker_count: usize,
-
-    /// Maximum time to wait for graceful shutdown of pipeline components
-    /// Increase for environments with slow disk I/O or network operations
-    /// - Default: 5s
-    #[serde(default = "defaults::shutdown_timeout", with = "duration")]
-    pub shutdown_timeout: Duration,
-
-    /// A `Flow` type (defined elsewhere in the codebase) which contains
-    /// settings related to the application's runtime flow management.
-    /// This field encapsulates additional configuration details specific
-    /// to how the application's logic operates.
-    pub span: SpanOptions,
-
-    /// A map of fully resolved and ready-to-use trace pipelines.
-    pub trace_pipelines: HashMap<String, ResolvedTracePipeline>,
-
-    /// An optional `PathBuf` field that represents the file path to the
-    /// configuration file. This field is annotated with `#[serde(skip)]`,
-    /// meaning its value will not be serialized or deserialized. It is
-    /// used internally for managing the configuration's source path.
-    #[serde(skip)]
-    #[allow(dead_code)]
-    config_path: Option<PathBuf>,
-}
-
-impl AppProps {
-    /// Merges a configuration file into a Figment instance, automatically
-    /// selecting the correct provider based on the file extension.
-    fn merge_provider_for_path(figment: Figment, path: &Path) -> Result<Figment, ConfigError> {
-        match path.extension().and_then(|s| s.to_str()) {
-            Some("yaml") | Some("yml") => Ok(figment.merge(Yaml::file(path))),
-            Some("hcl") => Ok(figment.merge(Hcl::file(path))),
-            Some(ext) => Err(ConfigError::InvalidExtension(ext.to_string())),
-            None => Err(ConfigError::InvalidExtension("none".to_string())),
-        }
-    }
-
-    fn resolve_trace_pipelines(
-        raw_conf: &Conf,
-    ) -> Result<HashMap<String, ResolvedTracePipeline>, ConfigError> {
-        let mut trace_pipelines = HashMap::new();
-
-        if let Some(agent) = &raw_conf.agent {
-            for (name, trace_opts) in agent.traces.clone() {
-                let resolved_pipeline =
-                    ResolvedTracePipeline::from_raw(&name, trace_opts, raw_conf)?;
-                trace_pipelines.insert(name, resolved_pipeline);
-            }
-        }
-
-        Ok(trace_pipelines)
-    }
-
-    /// Creates a new `Conf` instance based on the provided CLI arguments, environment variables,
-    /// and configuration file. The configuration is determined using the following priority order:
-    /// Defaults < Configuration File < Environment Variables < CLI Arguments.
-    ///
-    /// # Arguments
-    /// * `cli` - An instance of `Cli` containing parsed CLI arguments.
-    ///
-    /// # Returns
-    /// * `Result<(Self, Cli), ConfigError>` - Returns an `Ok((Conf, Cli))` if successful, or a `ConfigError`
-    ///   if there are issues during configuration extraction.
-    ///
-    /// # Errors
-    /// * `ConfigError::NoConfigFile` - Returned if no configuration file is specified or found.
-    /// * `ConfigError::InvalidConfigPath` - Returned if the `config_path` from the environment
-    ///   variable cannot be converted to a valid string.
-    /// * Other `ConfigError` variants - Errors propagated during the extraction of the configuration.
-    ///
-    /// # Behavior
-    /// 1. Initializes a `Figment` instance with default values from `cli` and merges it with
-    ///    environment variables prefixed by "MERMIN_".
-    /// 2. Attempts to retrieve the `config_path` from the CLI arguments or the environment variable.
-    ///    If no path is provided or found, the function returns a `ConfigError::NoConfigFile`.
-    /// 3. If a configuration file is specified via CLI or environment variable, it is merged with
-    ///    the existing `Figment` configuration.
-    /// 4. Extracts the final configuration into a `Conf` struct, storing the path to the
-    ///    configuration file (if any).
-    ///
-    /// # Example
-    /// ```
-    /// use my_crate::{ConfigError, Conf};
-    /// use my_crate::Cli;
-    ///
-    /// let cli = Cli::parse(); // Parse CLI arguments
-    /// match Conf::new(cli) {
-    ///     Ok((conf, _cli)) => {
-    ///         println!("Configuration loaded successfully: {:?}", conf);
-    ///     },
-    ///     Err(err) => {
-    ///         eprintln!("Failed to load configuration: {}", err);
-    ///     },
-    /// }
-    /// ```
-    pub fn new(cli: Cli) -> Result<(Self, Cli), ConfigError> {
-        let mut figment = Figment::new().merge(Serialized::defaults(Conf::default()));
-
-        let config_path_to_store = if let Some(config_path) = &cli.config {
-            validate_config_path(config_path)?;
-            figment = Self::merge_provider_for_path(figment, config_path)?;
-            Some(config_path.clone())
-        } else {
-            None
-        };
-
-        figment = figment.merge(Serialized::defaults(&cli));
-
-        let raw_conf: Conf = figment.extract()?;
-
-        let trace_pipelines = Self::resolve_trace_pipelines(&raw_conf)?;
-
-        let conf = Self {
-            interface: raw_conf.interface,
-            auto_reload: raw_conf.auto_reload,
-            log_level: raw_conf.log_level,
-            api: raw_conf.api,
-            metrics: raw_conf.metrics,
-            packet_channel_capacity: raw_conf.packet_channel_capacity,
-            packet_worker_count: raw_conf.packet_worker_count,
-            shutdown_timeout: raw_conf.shutdown_timeout,
-            span: raw_conf.span,
-            trace_pipelines,
-            config_path: config_path_to_store,
-        };
-
-        Ok((conf, cli))
-    }
-
-    /// Reloads the configuration from the config file and returns a new instance
-    /// of the configuration object.
-    ///
-    /// This method allows for dynamic reloading of the configuration without
-    /// requiring a restart of the application. Any updates to the configuration
-    /// file will be applied, creating a new configuration object based on the
-    /// file's content.
-    ///
-    /// Note:
-    /// - Command-line arguments (CLI) and environment variables (ENV VARS) will
-    ///   not be reloaded since it is assumed that the shell environment remains
-    ///   the same. The reload operation will use the current configuration as the
-    ///   base and layer the updated configuration file on top of it.
-    /// - If no configuration file path has been specified, an error will be returned.
-    ///
-    /// # Returns
-    /// - `Ok(Self)` containing the reloaded configuration object if the reload
-    ///   operation succeeds.
-    /// - `Err(ConfigError::NoConfigFile)` if no configuration file path is set.
-    /// - Returns other variants of `ConfigError` if the configuration fails to
-    ///   load or extract properly.
-    ///
-    /// # Errors
-    /// This function returns a `ConfigError` in the following scenarios:
-    /// - If there is no configuration file path specified (`ConfigError::NoConfigFile`).
-    /// - If the configuration fails to load or parse from the file.
-    ///
-    /// # Example
-    /// ```rust
-    /// use conf::Conf;
-    ///
-    /// let conf = Conf::default();
-    /// match conf.reload() {
-    ///     Ok(new_config) => {
-    ///         println!("Configuration reloaded successfully.");
-    ///     }
-    ///     Err(e) => {
-    ///         eprintln!("Failed to reload configuration: {:?}", e);
-    ///     }
-    /// }
-    /// ```
-    #[allow(dead_code)]
-    pub fn reload(&self) -> Result<Self, ConfigError> {
-        let path = self.config_path.as_ref().ok_or(ConfigError::NoConfigFile)?;
-
-        // Create a new Figment instance, using the current resolved config
-        // as the base. This preserves CLI/env vars. Then merge the file on top.
-        let mut figment = Figment::from(Serialized::defaults(&self));
-        figment = Self::merge_provider_for_path(figment, path)?;
-
-        let raw_conf: Conf = figment.extract()?;
-
-        let trace_pipelines = Self::resolve_trace_pipelines(&raw_conf)?;
-
-        Ok(Self {
-            interface: raw_conf.interface,
-            auto_reload: raw_conf.auto_reload,
-            log_level: raw_conf.log_level,
-            api: raw_conf.api,
-            metrics: raw_conf.metrics,
-            packet_channel_capacity: raw_conf.packet_channel_capacity,
-            packet_worker_count: raw_conf.packet_worker_count,
-            shutdown_timeout: raw_conf.shutdown_timeout,
-            span: raw_conf.span,
-            trace_pipelines,
-            config_path: self.config_path.clone(),
-        })
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
-struct Conf {
-    interface: Vec<String>,
-    auto_reload: bool,
+pub struct Conf {
+    pub interface: Vec<String>,
+    pub auto_reload: bool,
     #[serde(with = "level")]
-    log_level: Level,
-    api: ApiConf,
-    metrics: MetricsConf,
-    packet_channel_capacity: usize,
-    packet_worker_count: usize,
+    pub log_level: Level,
+    pub api: ApiConf,
+    pub metrics: MetricsConf,
+    pub packet_channel_capacity: usize,
+    pub packet_worker_count: usize,
     #[serde(with = "duration")]
-    shutdown_timeout: Duration,
-    span: SpanOptions,
-    agent: Option<RawAgentOptions>,
-    exporter: Option<ExporterOptions>,
+    pub shutdown_timeout: Duration,
+    pub span: SpanOptions,
+    pub agent: Option<RawAgentOptions>,
+    pub exporter: Option<ExporterOptions>,
 }
 
 impl Default for Conf {
@@ -402,24 +131,40 @@ impl Default for Conf {
     }
 }
 
+pub mod defaults {
+    use std::time::Duration;
+
+    pub fn packet_channel_capacity() -> usize {
+        1024
+    }
+
+    pub fn flow_workers() -> usize {
+        2
+    }
+
+    pub fn shutdown_timeout() -> Duration {
+        Duration::from_secs(5)
+    }
+}
+
 /// A generic enum to handle fields that can either be a reference string
 /// or an inlined struct.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(untagged)]
 #[allow(dead_code)]
-enum ReferenceOrInline<T> {
+pub enum ReferenceOrInline<T> {
     Reference(String),
     Inline(T),
 }
 
 #[derive(Default, Debug, Deserialize, Serialize, Clone)]
-struct RawAgentOptions {
-    traces: HashMap<String, RawTraceOptions>,
+pub struct RawAgentOptions {
+    pub traces: HashMap<String, RawTraceOptions>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(default)]
-struct RawTraceOptions {
+pub struct RawTraceOptions {
     /// The level of span events to record. The current default is `FmtSpan::FULL`,
     /// which records all events (enter, exit, close) for all spans. The level can also be
     /// one of the following:
@@ -467,19 +212,19 @@ impl Default for ReferenceOrInline<K8sSelectorOptions> {
 /// * `ConfigError::NoConfigFile` - If the path does not exist.
 /// * `ConfigError::InvalidConfigPath` - If the path points to a directory.
 /// * `ConfigError::InvalidExtension` - If the file extension is not `yaml`, `yml`, or `hcl`.
-fn validate_config_path(path: &Path) -> Result<(), ConfigError> {
+pub fn validate_config_path(path: &Path) -> Result<(), ConfError> {
     // 1. First, check that the path points to a file. The `is_file()` method
     // conveniently returns false if the path doesn't exist or if it's not a file.
     if !path.is_file() {
         // If it's not a file, distinguish between "doesn't exist" and "is a directory".
         if path.exists() {
             // Path exists but is not a file (it's a directory).
-            return Err(ConfigError::InvalidConfigPath(
+            return Err(ConfError::InvalidConfigPath(
                 path.to_string_lossy().into_owned(),
             ));
         } else {
             // Path does not exist at all.
-            return Err(ConfigError::NoConfigFile);
+            return Err(ConfError::NoConfigFile);
         }
     }
 
@@ -488,14 +233,14 @@ fn validate_config_path(path: &Path) -> Result<(), ConfigError> {
         // Allowed extensions
         Some("yaml") | Some("yml") | Some("hcl") => Ok(()),
         // An unsupported extension was found
-        Some(ext) => Err(ConfigError::InvalidExtension(ext.to_string())),
+        Some(ext) => Err(ConfError::InvalidExtension(ext.to_string())),
         // No extension was found
-        None => Err(ConfigError::InvalidExtension("none".to_string())),
+        None => Err(ConfError::InvalidExtension("none".to_string())),
     }
 }
 
 #[derive(Debug)]
-pub enum ConfigError {
+pub enum ConfError {
     /// Error: The specified configuration file does not exist.
     NoConfigFile,
     /// Error: The path exists but is not a file (e.g., it's a directory).
@@ -508,35 +253,35 @@ pub enum ConfigError {
     Extraction(Box<figment::Error>),
 }
 
-impl fmt::Display for ConfigError {
+impl fmt::Display for ConfError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ConfigError::NoConfigFile => write!(f, "no config file provided"),
-            ConfigError::InvalidConfigPath(p) => write!(f, "path '{p}' is not a valid file"),
-            ConfigError::InvalidExtension(ext) => {
+            ConfError::NoConfigFile => write!(f, "no config file provided"),
+            ConfError::InvalidConfigPath(p) => write!(f, "path '{p}' is not a valid file"),
+            ConfError::InvalidExtension(ext) => {
                 write!(
                     f,
                     "invalid file extension '.{ext}' — expected 'yaml', 'yml', or 'hcl'"
                 )
             }
-            ConfigError::InvalidReference(r) => write!(f, "invalid configuration reference: {r}"),
-            ConfigError::Extraction(e) => write!(f, "configuration error: {e}"),
+            ConfError::InvalidReference(r) => write!(f, "invalid configuration reference: {r}"),
+            ConfError::Extraction(e) => write!(f, "configuration error: {e}"),
         }
     }
 }
 
-impl Error for ConfigError {
+impl Error for ConfError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            ConfigError::Extraction(e) => Some(e),
+            ConfError::Extraction(e) => Some(e),
             _ => None,
         }
     }
 }
 
-impl From<figment::Error> for ConfigError {
+impl From<figment::Error> for ConfError {
     fn from(e: figment::Error) -> Self {
-        ConfigError::Extraction(Box::from(e))
+        ConfError::Extraction(Box::from(e))
     }
 }
 
@@ -632,6 +377,26 @@ pub mod conf_serde {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ApiConf {
+    /// Enable the API server.
+    pub enabled: bool,
+    /// The network address the API server will listen on.
+    pub listen_address: String,
+    /// The port the API server will listen on.
+    pub port: u16,
+}
+
+impl Default for ApiConf {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
+            port: 8080,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct MetricsConf {
     /// Enable the metrics server.
@@ -686,32 +451,8 @@ pub struct AgentOptions {
 /// References specific configs by name from config file
 #[derive(Default, Debug, Deserialize, Serialize, Clone)]
 pub struct TraceOptions {
-    /// Reference to a discovery.k8s_owner config.
-    pub discovery_owner: String,
-    /// Reference to a discovery.k8s_selector config.
-    pub discovery_selector: String,
     /// List of exporter references to use for the trace pipeline.
     pub exporters: ExporterReferences,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct ApiConf {
-    /// Enable the API server.
-    pub enabled: bool,
-    /// The network address the API server will listen on.
-    pub listen_address: String,
-    /// The port the API server will listen on.
-    pub port: u16,
-}
-
-impl Default for ApiConf {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
-            port: 8080,
-        }
-    }
 }
 
 pub type ExporterReferences = Vec<String>;
@@ -798,8 +539,8 @@ mod tests {
     use figment::Jail;
     use tracing::Level;
 
-    use super::{AppProps, Conf, ExporterReference};
-    use crate::runtime::cli::Cli;
+    use super::{Conf, ExporterReference};
+    use crate::runtime::{cli::Cli, props::Properties};
 
     fn parse_exporter_reference(reference: &str) -> Result<ExporterReference, String> {
         match reference.split('.').collect::<Vec<_>>().as_slice() {
@@ -816,11 +557,11 @@ mod tests {
         }
     }
 
-    fn create_default_app_props() -> AppProps {
+    fn create_default_app_props() -> Properties {
         let raw_conf = Conf::default();
-        let trace_pipelines = AppProps::resolve_trace_pipelines(&raw_conf)
+        let trace_pipelines = Properties::resolve_trace_pipelines(&raw_conf)
             .expect("resolving default pipelines should succeed");
-        AppProps {
+        Properties {
             interface: raw_conf.interface,
             auto_reload: raw_conf.auto_reload,
             log_level: raw_conf.log_level,
@@ -866,7 +607,7 @@ mod tests {
     fn new_succeeds_without_config_path() {
         Jail::expect_with(|_| {
             let cli = Cli::parse_from(["mermin"]);
-            let (cfg, _cli) = AppProps::new(cli).expect("config should load without path");
+            let (cfg, _cli) = Properties::new(cli).expect("config should load without path");
             assert_eq!(cfg.config_path, None);
 
             Ok(())
@@ -877,7 +618,7 @@ mod tests {
     fn new_errors_with_nonexistent_config_file() {
         Jail::expect_with(|_| {
             let cli = Cli::parse_from(["mermin", "--config", "nonexistent.yaml"]);
-            let err = AppProps::new(cli).expect_err("expected error with nonexistent file");
+            let err = Properties::new(cli).expect_err("expected error with nonexistent file");
             let msg = err.to_string();
             assert!(
                 msg.contains("no config file provided"),
@@ -896,7 +637,7 @@ mod tests {
             jail.create_dir(path)?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let err = AppProps::new(cli).expect_err("expected error with directory path");
+            let err = Properties::new(cli).expect_err("expected error with directory path");
             let msg = err.to_string();
             assert!(
                 msg.contains("is not a valid file"),
@@ -915,7 +656,7 @@ mod tests {
             jail.create_file(path, "")?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let err = AppProps::new(cli).expect_err("expected error with invalid extension");
+            let err = Properties::new(cli).expect_err("expected error with invalid extension");
             let msg = err.to_string();
             assert!(
                 msg.contains("invalid file extension '.toml'"),
@@ -949,7 +690,7 @@ log_level: warn
                 "--log-level",
                 "debug",
             ]);
-            let (cfg, _cli) = AppProps::new(cli).expect("config loads from cli file");
+            let (cfg, _cli) = Properties::new(cli).expect("config loads from cli file");
             assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.log_level, Level::DEBUG);
@@ -973,7 +714,7 @@ log_level: debug
             jail.set_env("MERMIN_CONFIG_PATH", path);
 
             let cli = Cli::parse_from(["mermin"]);
-            let (cfg, _cli) = AppProps::new(cli).expect("config loads from env file");
+            let (cfg, _cli) = Properties::new(cli).expect("config loads from env file");
             assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.log_level, Level::DEBUG);
@@ -994,7 +735,7 @@ interface: ["eth1"]
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = AppProps::new(cli).expect("config loads from cli file");
+            let (cfg, _cli) = Properties::new(cli).expect("config loads from cli file");
             assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
 
@@ -1055,7 +796,7 @@ metrics:
 
             // The rest of the test logic remains the same
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = AppProps::new(cli).expect("config should load from yaml file");
+            let (cfg, _cli) = Properties::new(cli).expect("config should load from yaml file");
 
             // Assert that all the custom values from the file were loaded correctly
             assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
@@ -1092,7 +833,7 @@ metrics {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = AppProps::new(cli).expect("config should load from HCL file");
+            let (cfg, _cli) = Properties::new(cli).expect("config should load from HCL file");
 
             assert_eq!(cfg.interface, vec!["eth0"]);
             assert_eq!(cfg.log_level, Level::INFO);
@@ -1111,7 +852,7 @@ metrics {
             jail.create_file(path, r#"interface = ["eth0"]"#)?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let result = AppProps::new(cli);
+            let result = Properties::new(cli);
             assert!(result.is_ok(), "HCL extension should be valid");
 
             Ok(())
@@ -1131,7 +872,7 @@ log_level = "info"
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = AppProps::new(cli).expect("config loads from HCL file");
+            let (cfg, _cli) = Properties::new(cli).expect("config loads from HCL file");
             assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
@@ -1172,7 +913,7 @@ log_level =
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let err = AppProps::new(cli).expect_err("expected error with invalid HCL");
+            let err = Properties::new(cli).expect_err("expected error with invalid HCL");
             let msg = err.to_string();
 
             // The error originates from the `hcl` crate, is wrapped by `figment`,
@@ -1214,7 +955,7 @@ metrics {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = AppProps::new(cli).expect("config should load from HCL file");
+            let (cfg, _cli) = Properties::new(cli).expect("config should load from HCL file");
 
             // Assert that all the custom values from the file were loaded correctly
             assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));

@@ -29,7 +29,6 @@ use crate::{
         provider::{init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
     },
-    runtime::enums::SpanFmt,
     span::producer::FlowSpanProducer,
 };
 
@@ -41,21 +40,12 @@ async fn main() -> Result<()> {
     // TODO: listen for SIGTERM `kill -TERM $(pidof mermin)` to gracefully shutdown the eBPF program and all configuration.
     // TODO: do not reload global configuration found in CLI
     let runtime = runtime::Runtime::new()?;
-    let runtime::Runtime { config, .. } = runtime;
+    let runtime::Runtime {
+        properties: props, ..
+    } = runtime;
 
-    let mut otlp_exporters = Vec::new();
-    let mut stdout_exporters = Vec::new();
-    let mut span_level = SpanFmt::default();
-
-    for pipeline in config.trace_pipelines.values() {
-        span_level = pipeline.span_level;
-        for exporter in &pipeline.exporters {
-            match exporter {
-                conf::ResolvedExporter::Otlp(opts) => otlp_exporters.push(opts.clone()),
-                conf::ResolvedExporter::Stdout(opts) => stdout_exporters.push(opts.clone()),
-            }
-        }
-    }
+    let span_level = props.get_trace_pipeline_span_level();
+    let (otlp_exporters, stdout_exporters) = props.get_trace_pipeline_exporters();
 
     let exporter: Arc<dyn TraceableExporter> =
         if !otlp_exporters.is_empty() || !stdout_exporters.is_empty() {
@@ -64,7 +54,7 @@ async fn main() -> Result<()> {
             init_internal_tracing(
                 otlp_exporters.clone(),
                 stdout_exporters.clone(),
-                config.log_level,
+                props.log_level,
                 span_level,
             )
             .await?;
@@ -74,7 +64,7 @@ async fn main() -> Result<()> {
             init_internal_tracing(
                 otlp_exporters.clone(),
                 stdout_exporters.clone(),
-                config.log_level,
+                props.log_level,
                 span_level,
             )
             .await?;
@@ -108,9 +98,9 @@ async fn main() -> Result<()> {
 
     let health_state = HealthState::default();
 
-    if config.api.enabled {
+    if props.api.enabled {
         let health_state_clone = health_state.clone();
-        let api_conf = config.api.clone();
+        let api_conf = props.api.clone();
 
         tokio::spawn(async move {
             if let Err(e) = start_api_server(health_state_clone, &api_conf).await {
@@ -128,7 +118,7 @@ async fn main() -> Result<()> {
             .try_into()?;
         program.load()?;
 
-        config.interface.iter().try_for_each(|iface| -> Result<()> {
+        props.interface.iter().try_for_each(|iface| -> Result<()> {
             // error adding clsact to the interface if it is already added is harmless
             // the full cleanup can be done with 'sudo tc qdisc del dev eth0 clsact'.
             let _ = tc::qdisc_add_clsact(iface);
@@ -156,22 +146,22 @@ async fn main() -> Result<()> {
     let iface_map: HashMap<u32, String> = {
         let mut map = HashMap::new();
         for iface in datalink::interfaces() {
-            if config.interface.contains(&iface.name) {
+            if props.interface.contains(&iface.name) {
                 map.insert(iface.index, iface.name.clone());
             }
         }
         map
     };
 
-    let (packet_meta_tx, packet_meta_rx) = mpsc::channel(config.packet_channel_capacity);
-    let (flow_span_tx, mut flow_span_rx) = mpsc::channel(config.packet_channel_capacity);
+    let (packet_meta_tx, packet_meta_rx) = mpsc::channel(props.packet_channel_capacity);
+    let (flow_span_tx, mut flow_span_rx) = mpsc::channel(props.packet_channel_capacity);
     let (k8s_attributed_flow_span_tx, mut k8s_attributed_flow_span_rx) =
-        mpsc::channel(config.packet_channel_capacity);
+        mpsc::channel(props.packet_channel_capacity);
 
     let flow_span_producer = FlowSpanProducer::new(
-        config.clone().span,
-        config.packet_channel_capacity,
-        config.packet_worker_count,
+        props.clone().span,
+        props.packet_channel_capacity,
+        props.packet_worker_count,
         iface_map.clone(),
         packet_meta_rx,
         flow_span_tx,
