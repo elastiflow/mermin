@@ -125,18 +125,18 @@ Time-based metrics calculated for the flow, stored in nanoseconds (`ns`).
 | Proposed Field Name          | Data Type | Description                                                                 | Notes / Decisions                        | Std OTel | Required |
 |:-----------------------------|:----------|:----------------------------------------------------------------------------|:-----------------------------------------|:---------|:---------|
 | `tunnel.type`                | `string`  | The type of tunnel protocol (e.g., `vxlan`, `geneve`, `gre`).               | Tunnel is always the outermost header.   |          | ○        |
+| `tunnel.network.type`        | `string`  | The network protocol type (EtherType) of the flow (e.g., `ipv4`, `ipv6`).   |                                          |          | ○        |
+| `tunnel.network.transport`   | `string`  | The transport protocol of the flow (e.g., `tcp`, `udp`).                    |                                          |          | ○        |
 | `tunnel.source.address`      | `string`  | The source IP address of the tunnel's outer header.                         |                                          |          | ○        |
 | `tunnel.source.port`         | `long`    |                                                                             |                                          |          | ○        |
 | `tunnel.destination.address` | `string`  | The destination IP address of the tunnel's outer header.                    |                                          |          | ○        |
 | `tunnel.destination.port`    | `long`    |                                                                             |                                          |          | ○        |
-| `tunnel.network.transport`   | `string`  | The transport protocol of the flow (e.g., `tcp`, `udp`).                    |                                          |          | ○        |
-| `tunnel.network.type`        | `string`  | The network protocol type (EtherType) of the flow (e.g., `ipv4`, `ipv6`).   |                                          |          | ○        |
 | `tunnel.id`                  | `string`  | The identifier for the tunnel (e.g., VNI for VXLAN/Geneve, Key ID for GRE). |                                          |          | ○        |
 | `tunnel.ipsec.ah.spi`        | `long`    | Security Parameters Index for AH headers.                                   |                                          |          | ○        |
+| `ipip.network.type`          | `string`  | The network protocol type (EtherType) of the flow (e.g., `ipv4`, `ipv6`).   |                                          |          | ○        |
+| `ipip.network.transport`     | `string`  | The transport protocol of the flow (e.g., `ipv4`, `ipv6`).                  |                                          |          | ○        |
 | `ipip.source.address`        | `string`  | The source IP address of the tunnel's outer header.                         | Ip-in-Ip is always the outermost header. |          | ○        |
 | `ipip.destination.address`   | `string`  | The destination IP address of the tunnel's outer header.                    |                                          |          | ○        |
-| `ipip.network.transport`     | `string`  | The transport protocol of the flow (e.g., `ipv4`, `ipv6`).                  |                                          |          | ○        |
-| `ipip.network.type`          | `string`  | The network protocol type (EtherType) of the flow (e.g., `ipv4`, `ipv6`).   |                                          |          | ○        |
 | `flow.ipsec.ah.spi`          | `long`    | Security Parameters Index for AH headers.                                   |                                          |          | ○        |
 | `flow.ipsec.esp.spi`         | `long`    | Security Parameters Index for ESP headers.                                  |                                          |          | ○        |
 | `flow.ipsec.sender_index`    | `long`    | The sender index from a WireGuard header.                                   |                                          |          | ○        |

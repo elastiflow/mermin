@@ -196,6 +196,7 @@ pub mod ipv6 {
 pub enum IpProto {
     /// IPv6 Hop-by-Hop Option
     #[default]
+    // TODO: change default to reserved and set protocol to none when generating flow in userspace
     HopOpt = 0,
     /// Internet Control Message
     Icmp = 1,

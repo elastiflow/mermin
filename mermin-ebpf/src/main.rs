@@ -136,18 +136,18 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
 
     // Initialize the meta with default values
     meta.ifindex = unsafe { (*ctx.skb.skb).ifindex };
+    meta.direction = direction;
+    meta.ether_type = EtherType::default();
+    meta.proto = IpProto::default();
     meta.src_mac_addr = [0; 6];
+    meta.ip_addr_type = IpAddrType::default();
     meta.src_ipv6_addr = [0; 16];
     meta.dst_ipv6_addr = [0; 16];
     meta.src_ipv4_addr = [0; 4];
     meta.dst_ipv4_addr = [0; 4];
     meta.l3_octet_count = 0;
-    meta.ether_type = EtherType::default();
     meta.src_port = [0; 2];
     meta.dst_port = [0; 2];
-    meta.ip_addr_type = IpAddrType::default();
-    meta.proto = IpProto::default();
-    meta.direction = direction;
     meta.ip_dscp_id = 0;
     meta.ip_ecn_id = 0;
     meta.ip_ttl = 0;
@@ -155,16 +155,185 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
     meta.icmp_type_id = 0;
     meta.icmp_code_id = 0;
     meta.tcp_flags = 0;
+    meta.ipsec_ah_spi = 0;
+    meta.ipsec_esp_spi = 0;
+    meta.ipsec_sender_index = 0;
+    meta.ipsec_receiver_index = 0;
 
+    meta.ipip_ether_type = EtherType::default();
+    meta.ipip_proto = IpProto::default();
+    meta.ipip_ip_addr_type = IpAddrType::default();
+    meta.ipip_src_ipv6_addr = [0; 16];
+    meta.ipip_dst_ipv6_addr = [0; 16];
+    meta.ipip_src_ipv4_addr = [0; 4];
+    meta.ipip_dst_ipv4_addr = [0; 4];
+
+    meta.tunnel_type = TunnelType::None;
+    meta.tunnel_ether_type = EtherType::default();
+    meta.tunnel_proto = IpProto::default();
+    meta.tunnel_ip_addr_type = IpAddrType::default();
     meta.tunnel_src_ipv6_addr = [0; 16];
     meta.tunnel_dst_ipv6_addr = [0; 16];
     meta.tunnel_src_ipv4_addr = [0; 4];
     meta.tunnel_dst_ipv4_addr = [0; 4];
-    meta.tunnel_ether_type = EtherType::default();
     meta.tunnel_src_port = [0; 2];
     meta.tunnel_dst_port = [0; 2];
-    meta.tunnel_ip_addr_type = IpAddrType::default();
-    meta.tunnel_proto = IpProto::default();
+    meta.tunnel_id = 0;
+    meta.tunnel_ipsec_ah_spi = 0;
+
+    /*
+
+    [ ] Ethernet -> Ipv4 -> Ipv4 -> Tcp
+
+        meta.src_mac_addr = ETH_SRC_ADDR;
+        meta.ether_type = EtherType::Ipv4;
+        meta.proto = IpProto::Ipv4 -> IpProto::Tcp;
+        meta.ip_addr_type = IpAddrType::Ipv4;
+        meta.ip_dscp_id = DSCP;
+        meta.ip_ecn_id = ECN;
+        meta.ip_ttl = TTL;
+        meta.src_ipv4_addr = IPv4_SRC_ADDR;
+        meta.dst_ipv4_addr = IPv4_DST_ADDR;
+        meta.l3_octet_count = L3_OCTET_COUNT;
+        meta.src_port = TCP_SRC_PORT;
+        meta.dst_port = TCP_DST_PORT;
+        meta.tcp_flags = TCP_FLAGS;
+
+        meta.tunnel_type = TunnelType::Ipv4;
+        meta.tunnel_ip_addr_type = IpAddrType::Ipv4;
+        meta.tunnel_proto = IpProto::Ipv4;
+        meta.tunnel_src_ipv4_addr = IPv4_SRC_ADDR;
+        meta.tunnel_dst_ipv4_addr = IPv4_DST_ADDR;
+
+    [ ] Ethernet -> Ipv6 -> Ipv4 -> Tcp
+
+        meta.src_mac_addr = ETH_SRC_ADDR;
+        meta.ether_type = EtherType::Ipv6;
+        meta.proto = IpProto::Ipv6 -> IpProto::Tcp;
+        meta.ip_addr_type = IpAddrType::Ipv4;
+        meta.ip_dscp_id = DSCP;
+        meta.ip_ecn_id = ECN;
+        meta.ip_ttl = TTL;
+        meta.src_ipv4_addr = IPv4_SRC_ADDR;
+        meta.dst_ipv4_addr = IPv4_DST_ADDR;
+        meta.l3_octet_count = L3_OCTET_COUNT;
+        meta.src_port = TCP_SRC_PORT;
+        meta.dst_port = TCP_DST_PORT;
+        meta.tcp_flags = TCP_FLAGS;
+
+        meta.tunnel_type = TunnelType::Ipv6;
+        meta.tunnel_ip_addr_type = IpAddrType::Ipv6;
+        meta.tunnel_proto = IpProto::Ipv6;
+        meta.tunnel_src_ipv6_addr = IPv6_SRC_ADDR;
+        meta.tunnel_dst_ipv6_addr = IPv6_DST_ADDR;
+
+    [ ] Ethernet -> Ipv4 -> Ipv4 -> Udp -> Vxlan -> Ethernet -> Ipv6 -> Ipv4 -> Tcp
+
+        meta.src_mac_addr = ETH_SRC_ADDR -> 0 -> ETH_SRC_ADDR;
+        meta.ether_type = EtherType::Ipv4 -> 0 -> EtherType::Ipv6;
+        meta.proto = IpProto::Ipv4 -> IpProto::Udp -> 0 -> IpProto::Ipv4 -> IpProto::Tcp;
+        meta.ip_addr_type = IpAddrType::Ipv4 -> 0 -> IpAddrType::Ipv6 -> IpAddrType::Ipv4;
+        meta.ip_dscp_id = DSCP -> 0 -> DSCP;
+        meta.ip_ecn_id = ECN -> 0 -> ECN;
+        meta.flow_label = 0 -> FLOW_LABEL;
+        meta.ip_ttl = TTL -> 0 -> TTL;
+        meta.src_ipv4_addr = IPv4_SRC_ADDR -> 0 -> IPv4_SRC_ADDR;
+        meta.dst_ipv4_addr = IPv4_DST_ADDR -> 0 -> IPv4_DST_ADDR;
+        meta.src_ipv6_addr = 0 -> IPv4_SRC_ADDR;
+        meta.dst_ipv6_addr = 0 -> IPv4_DST_ADDR;
+        meta.l3_octet_count = L3_OCTET_COUNT -> 0 -> L3_OCTET_COUNT -> L3_OCTET_COUNT;
+        meta.src_port = UDP_SRC_PORT -> 0 -> TCP_SRC_PORT;
+        meta.dst_port = UDP_DST_PORT -> 0 -> TCP_DST_PORT;
+        meta.tcp_flags = 0 -> TCP_FLAGS;
+
+        meta.tunnel_type = TunnelType::Ipv4;
+        meta.tunnel_ip_addr_type = IpAddrType::Ipv4;
+        meta.tunnel_proto = IpProto::Ipv4;
+        meta.tunnel_src_ipv4_addr = IPv4_SRC_ADDR;
+        meta.tunnel_dst_ipv4_addr = IPv4_DST_ADDR;
+
+    [ ] Ethernet -> Ipv6 -> Udp -> Vxlan -> Ethernet -> Ipv4 -> Tcp
+
+        meta.src_mac_addr = ETH_SRC_ADDR -> 0 -> ETH_SRC_ADDR;
+        meta.ether_type = EtherType::Ipv6 -> 0 -> EtherType::Ipv4;
+        meta.proto = IpProto::Udp -> 0 -> IpProto::Tcp;
+        meta.ip_addr_type = IpAddrType::Ipv6 -> 0 -> IpAddrType::Ipv4;
+        meta.ip_dscp_id = DSCP -> 0 -> DSCP;
+        meta.ip_ecn_id = ECN -> 0 -> ECN;
+        meta.ip_flow_label = FLOW_LABEL -> 0;
+        meta.ip_ttl = TTL -> 0 -> TTL;
+        meta.src_ipv4_addr = 0 -> IPv4_SRC_ADDR;
+        meta.dst_ipv4_addr = 0 -> IPv4_DST_ADDR;
+        meta.src_ipv6_addr = IPv6_SRC_ADDR -> 0;
+        meta.dst_ipv6_addr = IPv6_DST_ADDR -> 0;
+        meta.l3_octet_count = L3_OCTET_COUNT -> 0;
+        meta.src_port = UDP_SRC_PORT -> 0 -> TCP_SRC_PORT;
+        meta.dst_port = UDP_DST_PORT -> 0 -> TCP_DST_PORT;
+        meta.tcp_flags = 0 -> TCP_FLAGS;
+
+        meta.tunnel_type = TunnelType::Vxlan;
+        meta.tunnel_id = TUNNEL_ID;
+        meta.tunnel_ether_type = EtherType::Ipv6;
+        meta.tunnel_proto = IpProto::Udp;
+        meta.tunnel_ip_addr_type = IpAddrType::Ipv6;
+        meta.tunnel_src_ipv6_addr = IPv6_SRC_ADDR;
+        meta.tunnel_dst_ipv6_addr = IPv6_DST_ADDR;
+        meta.tunnel_src_port = UDP_SRC_PORT;
+        meta.tunnel_dst_port = UDP_DST_PORT;
+
+    [ ] Ethernet -> Ipv6 -> Ipv4 -> Udp -> Vxlan -> Ethernet -> Ipv4 -> Tcp
+
+        meta.src_mac_addr = ETH_SRC_ADDR -> 0 -> ETH_SRC_ADDR;
+        meta.ether_type = EtherType::Ipv6;
+        meta.proto = IpProto::Ipv4 -> IpProto::Udp;
+        meta.ip_addr_type = IpAddrType::Ipv6 -> IpAddrType::Ipv4;
+        meta.ip_dscp_id = DSCP;
+        meta.ip_ecn_id = ECN;
+        meta.ip_flow_label = 0;
+        meta.ip_ttl = TTL;
+        meta.src_ipv4_addr = IPv4_SRC_ADDR;
+        meta.dst_ipv4_addr = IPv4_DST_ADDR;
+        meta.src_ipv6_addr = 0;
+        meta.dst_ipv6_addr = 0;
+        meta.l3_octet_count = L3_OCTET_COUNT;
+        meta.src_port = UDP_SRC_PORT;
+        meta.dst_port = UDP_DST_PORT;
+        meta.tcp_flags = 0;
+
+        meta.tunnel_type = TunnelType::Ipv6;
+        meta.tunnel_id = ;
+        meta.tunnel_ether_type = ;
+        meta.tunnel_proto = TunnelProto::Ipv6;
+        meta.tunnel_ip_addr_type = IpAddrType::Ipv6;
+        meta.tunnel_src_ipv6_addr = IPv6_SRC_ADDR;
+        meta.tunnel_dst_ipv6_addr = IPv6_DST_ADDR;
+        meta.tunnel_src_port = ;
+        meta.tunnel_dst_port = ;
+
+    ## Geneve
+
+    [ ] Ethernet -> Ipv4 -> Udp -> Geneve -> Ipv4 -> <IpProto>
+    [ ] Ethernet -> Ipv6 -> Udp -> Geneve -> Ipv4 -> <IpProto>
+    [ ] Ethernet -> Ipv4 -> Udp -> Geneve -> Ethernet -> Ipv4 -> <IpProto>
+
+    ## Gre
+
+    [ ] Ethernet -> Ipv4 -> Gre -> Ipv4 -> <IpProto>
+    [ ] Ethernet -> Ipv6 -> Gre -> Ipv4 -> <IpProto>
+    [ ] Ethernet -> Ipv4 -> Gre -> Ethernet -> Ipv4 -> <IpProto>
+
+    ## Ipsec
+
+    [ ] Ethernet -> Ipv4 -> Ah -> <IpProto>
+    [ ] Ethernet -> Ipv6 -> Ah -> Ipv4 -> <IpProto>
+    [ ] Ethernet -> Ipv6 -> Udp -> Vxlan -> Ethernet -> Ipv4 -> Ah -> <IpProto>
+    [ ] Ethernet -> Ipv6 -> Ipv4 -> Udp -> Vxlan -> Ethernet -> Ipv4 -> Ah -> <IpProto>
+    [ ] Ethernet -> Ipv4 -> Esp -> <IpProto>
+    [ ] Ethernet -> Ipv4 -> Udp -> Vxlan -> Ethernet -> Ipv4 -> Esp -> <IpProto>
+    [ ] Ethernet -> Ipv4 -> Wireguard -> <IpProto>
+    [ ] Ethernet -> Ipv4 -> Udp -> Vxlan -> Ethernet -> Ipv4 -> Wireguard -> <IpProto>
+
+    */
 
     for _ in 0..MAX_HEADER_PARSE_DEPTH {
         let result: Result<(), Error> = match parser.next_hdr {
@@ -249,7 +418,7 @@ impl Parser {
         self.next_hdr = match meta.ether_type {
             EtherType::Ipv4 => HeaderType::Ipv4,
             EtherType::Ipv6 => HeaderType::Ipv6,
-            _ => HeaderType::StopProcessing,
+            _ => return Err(Error::Unsupported),
         };
 
         Ok(())
@@ -273,18 +442,14 @@ impl Parser {
         let meta = get_packet_meta(ctx)?;
         meta.proto = ctx.load(self.offset + 9).map_err(|_| Error::OutOfBounds)?;
 
-        // Check if this is an encapsulated packet
-        if (meta.proto == IpProto::Ipv6 || meta.proto == IpProto::Ipv4)
-            && meta.tunnel_type == TunnelType::None
-        {
-            meta.tunnel_type = TunnelType::from(meta.proto);
-            meta.tunnel_ip_addr_type = IpAddrType::Ipv4;
-            meta.tunnel_src_ipv4_addr =
-                ctx.load(self.offset + 12).map_err(|_| Error::OutOfBounds)?;
-            meta.tunnel_dst_ipv4_addr =
-                ctx.load(self.offset + 16).map_err(|_| Error::OutOfBounds)?;
-            meta.tunnel_proto = IpProto::Ipv4;
-            meta.tunnel_type = TunnelType::from(meta.proto);
+        // Check if this is an encapsulated packet - outermost IP header determines the ipip values
+        let ipip_exists = meta.ipip_proto == IpProto::Ipv6 || meta.ipip_proto == IpProto::Ipv4;
+        if (meta.proto == IpProto::Ipv6 || meta.proto == IpProto::Ipv4) && !ipip_exists {
+            meta.ipip_ether_type = EtherType::Ipv4;
+            meta.ipip_proto = meta.proto;
+            meta.ipip_ip_addr_type = IpAddrType::Ipv4;
+            meta.ipip_src_ipv4_addr = ctx.load(self.offset + 12).map_err(|_| Error::OutOfBounds)?;
+            meta.ipip_dst_ipv4_addr = ctx.load(self.offset + 16).map_err(|_| Error::OutOfBounds)?;
 
             self.offset += h_len;
             self.next_hdr = HeaderType::Proto(meta.proto);
@@ -310,7 +475,9 @@ impl Parser {
             | IpProto::Gre
             | IpProto::Esp
             | IpProto::Ah
-            | IpProto::Hip => HeaderType::Proto(meta.proto),
+            | IpProto::Hip
+            | IpProto::Ipv4
+            | IpProto::Ipv6 => HeaderType::Proto(meta.proto),
             _ => HeaderType::StopProcessing,
         };
 
@@ -335,11 +502,11 @@ impl Parser {
         // policy: innermost IP header determines the flow span IPs
         let meta = get_packet_meta(ctx)?;
         meta.ip_addr_type = IpAddrType::Ipv4;
+        meta.proto = ctx.load(self.offset + 9).map_err(|_| Error::OutOfBounds)?;
         let dscp_ecn: ipv4::DscpEcn = ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
         meta.ip_dscp_id = ipv4::dscp(dscp_ecn);
         meta.ip_ecn_id = ipv4::ecn(dscp_ecn);
         meta.ip_ttl = ctx.load(self.offset + 8).map_err(|_| Error::OutOfBounds)?;
-        meta.proto = ctx.load(self.offset + 9).map_err(|_| Error::OutOfBounds)?;
         meta.src_ipv4_addr = ctx.load(self.offset + 12).map_err(|_| Error::OutOfBounds)?;
         meta.dst_ipv4_addr = ctx.load(self.offset + 16).map_err(|_| Error::OutOfBounds)?;
         meta.l3_octet_count = self.calc_l3_octet_count(ctx.len());
@@ -370,17 +537,18 @@ impl Parser {
         let meta = get_packet_meta(ctx)?;
         meta.proto = ctx.load(self.offset + 6).map_err(|_| Error::OutOfBounds)?;
 
+        // Check if this is an encapsulated packet - outermost IP header determines the ipip values
         if (meta.proto == IpProto::Ipv6 || meta.proto == IpProto::Ipv4)
             && meta.tunnel_type == TunnelType::None
         {
             // save outer IP header values
-            meta.tunnel_type = TunnelType::from(meta.proto);
-            meta.tunnel_ip_addr_type = IpAddrType::Ipv6;
+            meta.ipip_ether_type = EtherType::Ipv6;
+            meta.ipip_proto = meta.proto;
+            meta.ipip_ip_addr_type = IpAddrType::Ipv6;
             meta.tunnel_src_ipv6_addr =
                 ctx.load(self.offset + 8).map_err(|_| Error::OutOfBounds)?;
             meta.tunnel_dst_ipv6_addr =
                 ctx.load(self.offset + 24).map_err(|_| Error::OutOfBounds)?;
-            meta.tunnel_proto = IpProto::Ipv6;
 
             self.offset += IPV6_LEN;
             self.next_hdr = HeaderType::Proto(meta.proto);
@@ -412,8 +580,9 @@ impl Parser {
             | IpProto::Ipv6Opts
             | IpProto::MobilityHeader
             | IpProto::Hip
-            | IpProto::Shim6 => HeaderType::Proto(meta.proto),
-            IpProto::Ipv6NoNxt => HeaderType::StopProcessing,
+            | IpProto::Shim6
+            | IpProto::Ipv4
+            | IpProto::Ipv6 => HeaderType::Proto(meta.proto),
             _ => HeaderType::StopProcessing,
         };
 
@@ -456,7 +625,6 @@ impl Parser {
             | IpProto::MobilityHeader
             | IpProto::Hip
             | IpProto::Shim6 => HeaderType::Proto(meta.proto),
-            IpProto::Ipv6NoNxt => HeaderType::StopProcessing,
             _ => HeaderType::StopProcessing,
         };
 
@@ -483,16 +651,17 @@ impl Parser {
 
         // Reset inner headers to prepare for parsing encapsulated packet
         // TODO see if I can abstract into a function without increasing the stack size
+        meta.ether_type = EtherType::default();
+        meta.proto = IpProto::default();
         meta.src_mac_addr = [0; 6];
+        meta.ip_addr_type = IpAddrType::default();
         meta.src_ipv6_addr = [0; 16];
         meta.dst_ipv6_addr = [0; 16];
         meta.src_ipv4_addr = [0; 4];
         meta.dst_ipv4_addr = [0; 4];
-        meta.ether_type = EtherType::default();
+        meta.l3_octet_count = 0;
         meta.src_port = [0; 2];
         meta.dst_port = [0; 2];
-        meta.ip_addr_type = IpAddrType::default();
-        meta.proto = IpProto::default();
         meta.ip_dscp_id = 0;
         meta.ip_ecn_id = 0;
         meta.ip_ttl = 0;
@@ -531,16 +700,17 @@ impl Parser {
 
         // Reset inner headers to prepare for parsing encapsulated packet
         // TODO see if I can abstract into a function without increasing the stack size
+        meta.ether_type = EtherType::default();
+        meta.proto = IpProto::default();
         meta.src_mac_addr = [0; 6];
+        meta.ip_addr_type = IpAddrType::default();
         meta.src_ipv6_addr = [0; 16];
         meta.dst_ipv6_addr = [0; 16];
         meta.src_ipv4_addr = [0; 4];
         meta.dst_ipv4_addr = [0; 4];
-        meta.ether_type = EtherType::default();
+        meta.l3_octet_count = 0;
         meta.src_port = [0; 2];
         meta.dst_port = [0; 2];
-        meta.ip_addr_type = IpAddrType::default();
-        meta.proto = IpProto::default();
         meta.ip_dscp_id = 0;
         meta.ip_ecn_id = 0;
         meta.ip_ttl = 0;
@@ -762,7 +932,6 @@ impl Parser {
         meta.icmp_type_id = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         meta.icmp_code_id = ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
 
-        self.offset += ICMP_LEN;
         self.next_hdr = HeaderType::StopProcessing;
 
         Ok(())
@@ -780,7 +949,6 @@ impl Parser {
         meta.dst_port = ctx.load(self.offset + 2).map_err(|_| Error::OutOfBounds)?;
         meta.tcp_flags = ctx.load(self.offset + 12).map_err(|_| Error::OutOfBounds)?;
 
-        self.offset += TCP_LEN;
         self.next_hdr = HeaderType::StopProcessing;
 
         Ok(())
@@ -818,18 +986,18 @@ impl Parser {
                 || self.next_hdr == HeaderType::Wireguard)
         {
             // Only copy the address type we're actually using
+            meta.tunnel_ether_type = meta.ether_type;
+            meta.tunnel_proto = meta.proto;
             meta.tunnel_ip_addr_type = meta.ip_addr_type;
             if meta.tunnel_ip_addr_type == IpAddrType::Ipv4 {
                 meta.tunnel_src_ipv4_addr = meta.src_ipv4_addr;
                 meta.tunnel_dst_ipv4_addr = meta.dst_ipv4_addr;
-            } else {
+            } else if meta.tunnel_ip_addr_type == IpAddrType::Ipv6 {
                 meta.tunnel_src_ipv6_addr = meta.src_ipv6_addr;
                 meta.tunnel_dst_ipv6_addr = meta.dst_ipv6_addr;
             }
             meta.tunnel_src_port = meta.src_port;
             meta.tunnel_dst_port = meta.dst_port;
-            meta.tunnel_proto = meta.proto;
-            meta.tunnel_ether_type = meta.ether_type;
         }
         self.offset += UDP_LEN;
 
@@ -881,7 +1049,6 @@ impl Parser {
         // meta.tunnel_type = TunnelType::Esp;
         // meta.tunnel_spi = ctx.load(self.offset + 3).map_err(|_| Error::OutOfBounds)?;
 
-        self.offset += ESP_LEN;
         self.next_hdr = HeaderType::StopProcessing; // ESP signals end of parsing headers because its payload is encrypted
 
         Ok(())
@@ -1150,6 +1317,9 @@ fn get_packet_meta(_ctx: &TcContext) -> Result<&'static mut PacketMeta, Error> {
             tunnel_src_ipv4_addr: [0; 4],
             tunnel_dst_ipv4_addr: [0; 4],
             tunnel_id: 0,
+            tunnel_sender_index: 0,
+            tunnel_receiver_index: 0,
+            tunnel_spi: 0,
             ether_type: EtherType::Ipv4,
             src_port: [0; 2],
             dst_port: [0; 2],
@@ -1219,6 +1389,19 @@ mod tests {
         packet.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
         // EtherType (0x0800, big-endian for IPv4)
         packet.extend_from_slice(&[0x08, 0x00]);
+
+        packet
+    }
+
+    fn create_eth_test_packet_unsupported() -> Vec<u8> {
+        let mut packet = Vec::new();
+
+        // Destination MAC (ff:ff:ff:ff:ff:ff)
+        packet.extend_from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+        // Source MAC (00:11:22:33:44:55)
+        packet.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+        // EtherType (0x0800, big-endian for IPv4)
+        packet.extend_from_slice(&[0x89, 0x06]);
 
         packet
     }
@@ -1974,6 +2157,20 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(parser.offset, ETH_LEN);
         assert!(matches!(parser.next_hdr, HeaderType::Ipv4));
+    }
+
+    #[test]
+    fn test_parse_ethernet_header_unsupported() {
+        let mut parser = Parser::default();
+        let packet = create_eth_test_packet_unsupported();
+        let ctx = TcContext::new(packet);
+
+        let result = parser.parse_ethernet_header(&ctx);
+
+        assert!(result.is_ok());
+        assert!(matches!(result, Err(Error::Unsupported)));
+        assert_eq!(parser.offset, ETH_LEN);
+        assert!(matches!(parser.next_hdr, HeaderType::Ethernet));
     }
 
     #[test]

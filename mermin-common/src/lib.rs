@@ -88,8 +88,6 @@ pub struct PacketMeta {
     pub ip_addr_type: IpAddrType,
     /// Network protocol identifier (innermost, e.g., TCP = 6, UDP = 17)
     pub proto: IpProto,
-    /// Ip-in-Ip protocol identifier (outermost, e.g., IPv4 = 4, IPv6 = 41)
-    pub ipip_proto: IpProto,
     /// Packet direction: Ingress (incoming) or Egress (outgoing)
     pub direction: Direction,
     /// Differentiated Services Code Point (DSCP) value from the IP header
@@ -105,6 +103,10 @@ pub struct PacketMeta {
     /// TCP flags (innermost) - bitfield: FIN|SYN|RST|PSH|ACK|URG|ECE|CWR
     pub tcp_flags: u8,
     /// Indicates whether the flow record uses IPv4 or IPv6 addressing (outermost)
+    pub ipip_ip_addr_type: IpAddrType,
+    /// Ip-in-Ip protocol identifier (outermost, e.g., IPv4 = 4, IPv6 = 41)
+    pub ipip_proto: IpProto,
+    /// Indicates whether the flow record uses IPv4 or IPv6 addressing (outermost)
     pub tunnel_ip_addr_type: IpAddrType,
     /// Tunnel type
     pub tunnel_type: TunnelType,
@@ -118,16 +120,16 @@ pub enum TunnelType {
     #[default]
     None = 0,
     Geneve = 1,
-    Vxlan = 2,
-    Wireguard = 3,
+    Gre = 2,
+    Vxlan = 3,
 }
 
 impl TunnelType {
     pub fn as_str(&self) -> &'static str {
         match self {
             TunnelType::Geneve => "geneve",
+            TunnelType::Gre => "gre",
             TunnelType::Vxlan => "vxlan",
-            TunnelType::Wireguard => "wireguard",
             _ => "none",
         }
     }
