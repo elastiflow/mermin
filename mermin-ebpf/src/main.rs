@@ -942,6 +942,7 @@ impl Parser {
         meta.icmp_type_id = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
         meta.icmp_code_id = ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
 
+        self.offset += ICMP_LEN;
         self.next_hdr = HeaderType::StopProcessing;
 
         Ok(())
@@ -959,6 +960,7 @@ impl Parser {
         meta.dst_port = ctx.load(self.offset + 2).map_err(|_| Error::OutOfBounds)?;
         meta.tcp_flags = ctx.load(self.offset + 12).map_err(|_| Error::OutOfBounds)?;
 
+        self.offset += TCP_LEN;
         self.next_hdr = HeaderType::StopProcessing;
 
         Ok(())
@@ -1069,6 +1071,7 @@ impl Parser {
             meta.ipsec_esp_spi = esp::spi(ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?);
         }
 
+        self.offset += ESP_LEN;
         self.next_hdr = HeaderType::StopProcessing; // ESP signals end of parsing headers because its payload is encrypted
 
         Ok(())
@@ -1356,23 +1359,31 @@ fn get_packet_meta(_ctx: &TcContext) -> Result<&'static mut PacketMeta, Error> {
         let new_meta = Box::into_raw(Box::new(PacketMeta {
             src_ipv6_addr: [0; 16],
             dst_ipv6_addr: [0; 16],
+            ipip_src_ipv6_addr: [0; 16],
+            ipip_dst_ipv6_addr: [0; 16],
             tunnel_src_ipv6_addr: [0; 16],
             tunnel_dst_ipv6_addr: [0; 16],
             src_mac_addr: [0; 6],
+            tunnel_src_mac_addr: [0; 6],
             src_ipv4_addr: [0; 4],
             dst_ipv4_addr: [0; 4],
             ifindex: 0,
             ip_flow_label: 0,
             l3_octet_count: 0,
+            ipsec_ah_spi: 0,
+            ipsec_esp_spi: 0,
+            ipsec_sender_index: 0,
+            ipsec_receiver_index: 0,
+            ipip_src_ipv4_addr: [0; 4],
+            ipip_dst_ipv4_addr: [0; 4],
             tunnel_src_ipv4_addr: [0; 4],
             tunnel_dst_ipv4_addr: [0; 4],
             tunnel_id: 0,
-            tunnel_sender_index: 0,
-            tunnel_receiver_index: 0,
-            tunnel_spi: 0,
+            tunnel_ipsec_ah_spi: 0,
             ether_type: EtherType::Ipv4,
             src_port: [0; 2],
             dst_port: [0; 2],
+            ipip_ether_type: EtherType::Ipv4,
             tunnel_ether_type: EtherType::Ipv4,
             tunnel_src_port: [0; 2],
             tunnel_dst_port: [0; 2],
@@ -1385,9 +1396,15 @@ fn get_packet_meta(_ctx: &TcContext) -> Result<&'static mut PacketMeta, Error> {
             icmp_type_id: 0,
             icmp_code_id: 0,
             tcp_flags: 0,
+            ah_exists: false,
+            esp_exists: false,
+            wireguard_exists: false,
+            ipip_ip_addr_type: IpAddrType::Ipv4,
+            ipip_proto: IpProto::HopOpt,
             tunnel_ip_addr_type: IpAddrType::Ipv4,
-            tunnel_proto: IpProto::HopOpt,
             tunnel_type: TunnelType::None,
+            tunnel_proto: IpProto::HopOpt,
+            tunnel_ah_exists: false,
         }));
         match TEST_META_PTR.compare_exchange(
             null_mut(),
@@ -2217,7 +2234,7 @@ mod tests {
 
         let result = parser.parse_ethernet_header(&ctx);
 
-        assert!(result.is_ok());
+        assert!(!result.is_ok());
         assert!(matches!(result, Err(Error::Unsupported)));
         assert_eq!(parser.offset, ETH_LEN);
         assert!(matches!(parser.next_hdr, HeaderType::Ethernet));
@@ -2898,9 +2915,9 @@ mod tests {
         let ipv6_type = IpAddrType::Ipv6;
         let default_type = IpAddrType::default();
 
+        assert!(matches!(default_type, IpAddrType::Unknown));
         assert!(matches!(ipv4_type, IpAddrType::Ipv4));
         assert!(matches!(ipv6_type, IpAddrType::Ipv6));
-        assert!(matches!(default_type, IpAddrType::Ipv4)); // Default is Ipv4
 
         // Test in PacketMeta context
         let mut packet_meta = PacketMeta::default();

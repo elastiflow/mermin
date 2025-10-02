@@ -108,6 +108,10 @@ pub struct SpanAttributes {
     pub flow_icmp_code_name: Option<String>,
     pub flow_tcp_flags_bits: Option<u8>,
     pub flow_tcp_flags_tags: Option<Vec<String>>, // TODO: enum
+    pub flow_ipsec_ah_spi: Option<u32>,
+    pub flow_ipsec_esp_spi: Option<u32>,
+    pub flow_ipsec_sender_index: Option<u32>,
+    pub flow_ipsec_receiver_index: Option<u32>,
 
     // Flow Metrics
     pub flow_bytes_delta: i64,
@@ -129,19 +133,29 @@ pub struct SpanAttributes {
     pub flow_tcp_rndtrip_latency: Option<i64>,
     pub flow_tcp_rndtrip_jitter: Option<i64>,
 
+    // Ip-in-Ip Attributes
+    #[serde(serialize_with = "serialize_option_ether_type")]
+    pub ipip_network_type: Option<EtherType>,
+    #[serde(serialize_with = "serialize_option_ip_proto")]
+    pub ipip_network_transport: Option<IpProto>,
+    pub ipip_source_address: Option<IpAddr>,
+    pub ipip_destination_address: Option<IpAddr>,
+
     // Tunnel Attributes
     #[serde(serialize_with = "serialize_option_tunnel_type")]
     pub tunnel_type: Option<TunnelType>,
+    #[serde(serialize_with = "serialize_option_mac_addr")]
+    pub tunnel_network_interface_mac: Option<pnet::datalink::MacAddr>,
+    #[serde(serialize_with = "serialize_option_ether_type")]
+    pub tunnel_network_type: Option<EtherType>,
+    #[serde(serialize_with = "serialize_option_ip_proto")]
+    pub tunnel_network_transport: Option<IpProto>,
     pub tunnel_source_address: Option<IpAddr>,
     pub tunnel_source_port: Option<u16>,
     pub tunnel_destination_address: Option<IpAddr>,
     pub tunnel_destination_port: Option<u16>,
-    #[serde(serialize_with = "serialize_option_ip_proto")]
-    pub tunnel_network_transport: Option<IpProto>,
-    #[serde(serialize_with = "serialize_option_ether_type")]
-    pub tunnel_network_type: Option<EtherType>,
     pub tunnel_id: Option<u32>,
-    pub tunnel_spi: Option<u32>,
+    pub tunnel_ipsec_ah_spi: Option<u32>,
 
     // Kubernetes & Application Attributes
     pub source_k8s_cluster_name: Option<String>,
@@ -219,28 +233,28 @@ impl Traceable for FlowSpan {
             self.attributes.flow_community_id.to_string(),
         ));
         kvs.push(KeyValue::new(
-            "network.source.address",
-            self.attributes.source_address.to_string(),
-        ));
-        kvs.push(KeyValue::new(
-            "network.source.port",
-            self.attributes.source_port as i64,
-        ));
-        kvs.push(KeyValue::new(
-            "network.destination.address",
-            self.attributes.destination_address.to_string(),
-        ));
-        kvs.push(KeyValue::new(
-            "network.destination.port",
-            self.attributes.destination_port as i64,
+            "network.type",
+            self.attributes.network_type.to_owned().as_str(),
         ));
         kvs.push(KeyValue::new(
             "network.transport",
             self.attributes.network_transport.to_owned().as_str(),
         ));
         kvs.push(KeyValue::new(
-            "network.type",
-            self.attributes.network_type.to_owned().as_str(),
+            "source.address",
+            self.attributes.source_address.to_string(),
+        ));
+        kvs.push(KeyValue::new(
+            "source.port",
+            self.attributes.source_port as i64,
+        ));
+        kvs.push(KeyValue::new(
+            "destination.address",
+            self.attributes.destination_address.to_string(),
+        ));
+        kvs.push(KeyValue::new(
+            "destination.port",
+            self.attributes.destination_port as i64,
         ));
         kvs.push(KeyValue::new(
             "flow.bytes.delta",
@@ -326,6 +340,18 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.flow_tcp_flags_tags {
             kvs.push(KeyValue::new("flow.tcp.flags.tags", format!("{value:?}")));
         }
+        if let Some(value) = self.attributes.flow_ipsec_ah_spi {
+            kvs.push(KeyValue::new("flow.ipsec.ah.spi", value as i64));
+        }
+        if let Some(value) = self.attributes.flow_ipsec_esp_spi {
+            kvs.push(KeyValue::new("flow.ipsec.esp.spi", value as i64));
+        }
+        if let Some(value) = self.attributes.flow_ipsec_sender_index {
+            kvs.push(KeyValue::new("flow.ipsec.sender.index", value as i64));
+        }
+        if let Some(value) = self.attributes.flow_ipsec_receiver_index {
+            kvs.push(KeyValue::new("flow.ipsec.receiver.index", value as i64));
+        }
         if let Some(value) = self.attributes.flow_tcp_handshake_snd_latency {
             kvs.push(KeyValue::new("flow.tcp.handshake.snd.latency", value));
         }
@@ -350,8 +376,35 @@ impl Traceable for FlowSpan {
         if let Some(value) = self.attributes.flow_tcp_rndtrip_jitter {
             kvs.push(KeyValue::new("flow.tcp.rndtrip.jitter", value));
         }
+        if let Some(ref value) = self.attributes.ipip_network_type {
+            kvs.push(KeyValue::new("ipip.network.type", value.as_str()));
+        }
+        if let Some(ref value) = self.attributes.ipip_network_transport {
+            kvs.push(KeyValue::new("ipip.network.transport", value.to_string()));
+        }
+        if let Some(ref value) = self.attributes.ipip_source_address {
+            kvs.push(KeyValue::new("ipip.source.address", value.to_string()));
+        }
+        if let Some(ref value) = self.attributes.ipip_destination_address {
+            kvs.push(KeyValue::new("ipip.destination.address", value.to_string()));
+        }
         if let Some(ref value) = self.attributes.tunnel_type {
             kvs.push(KeyValue::new("tunnel.type", value.as_str()));
+        }
+        if let Some(ref value) = self.attributes.tunnel_network_interface_mac {
+            kvs.push(KeyValue::new(
+                "tunnel.network.interface.mac",
+                value.to_string(),
+            ));
+        }
+        if let Some(value) = self.attributes.tunnel_network_type {
+            kvs.push(KeyValue::new(
+                "tunnel.network.type",
+                value.as_str().to_string(),
+            ));
+        }
+        if let Some(value) = self.attributes.tunnel_network_transport {
+            kvs.push(KeyValue::new("tunnel.network.transport", value.to_string()));
         }
         if let Some(value) = self.attributes.tunnel_source_address {
             kvs.push(KeyValue::new("tunnel.source.address", value.to_string()));
@@ -368,20 +421,11 @@ impl Traceable for FlowSpan {
         if let Some(value) = self.attributes.tunnel_destination_port {
             kvs.push(KeyValue::new("tunnel.destination.port", value as i64));
         }
-        if let Some(value) = self.attributes.tunnel_network_transport {
-            kvs.push(KeyValue::new("tunnel.network.transport", value.to_string()));
-        }
-        if let Some(value) = self.attributes.tunnel_network_type {
-            kvs.push(KeyValue::new(
-                "tunnel.network.type",
-                value.as_str().to_string(),
-            ));
-        }
         if let Some(value) = self.attributes.tunnel_id {
             kvs.push(KeyValue::new("tunnel.id", value as i64));
         }
-        if let Some(value) = self.attributes.tunnel_spi {
-            kvs.push(KeyValue::new("tunnel.spi", value as i64));
+        if let Some(value) = self.attributes.tunnel_ipsec_ah_spi {
+            kvs.push(KeyValue::new("tunnel.ipsec.ah.spi", value as i64));
         }
         if let Some(ref value) = self.attributes.source_k8s_cluster_name {
             kvs.push(KeyValue::new("source.k8s.cluster.name", value.to_owned()));

@@ -248,8 +248,8 @@ pub enum IpAddrType {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum Direction {
     #[default]
-    Ingress = 0,
-    Egress = 1,
+    Egress = 0,
+    Ingress = 1,
 }
 
 #[cfg(test)]
@@ -264,7 +264,7 @@ mod tests {
     // Test PacketMeta size and alignment
     #[test]
     fn test_packet_meta_layout() {
-        let expected_size = 128; // Size with all fields including new IP/ICMP/TCP fields
+        let expected_size = 200; // Size with all fields including new IP/ICMP/TCP fields
         let actual_size = size_of::<PacketMeta>();
 
         assert_eq!(
@@ -412,9 +412,9 @@ mod tests {
     #[test]
     fn test_direction_enum() {
         // Test Direction enum values and default
-        assert_eq!(Direction::default(), Direction::Ingress);
-        assert_eq!(Direction::Ingress as u8, 0);
-        assert_eq!(Direction::Egress as u8, 1);
+        assert_eq!(Direction::default(), Direction::Egress);
+        assert_eq!(Direction::Egress as u8, 0);
+        assert_eq!(Direction::Ingress as u8, 1);
 
         // Test that different directions are not equal
         assert_ne!(Direction::Ingress, Direction::Egress);
@@ -456,9 +456,9 @@ mod tests {
         assert_eq!(packet.tcp_flags, 0);
 
         // Test default values for enums
-        assert_eq!(packet.ip_addr_type, IpAddrType::Ipv4);
-        assert_eq!(packet.tunnel_ip_addr_type, IpAddrType::Ipv4);
-        assert_eq!(packet.direction, Direction::Ingress);
+        assert_eq!(packet.ip_addr_type, IpAddrType::Unknown);
+        assert_eq!(packet.tunnel_ip_addr_type, IpAddrType::Unknown);
+        assert_eq!(packet.direction, Direction::Egress);
     }
 
     #[test]
@@ -466,9 +466,9 @@ mod tests {
         let mut packet = PacketMeta::default();
 
         // Test default direction
-        assert_eq!(packet.direction, Direction::Ingress);
-        assert_eq!(packet.is_ingress(), true);
-        assert_eq!(packet.is_egress(), false);
+        assert_eq!(packet.direction, Direction::Egress);
+        assert_eq!(packet.is_ingress(), false);
+        assert_eq!(packet.is_egress(), true);
 
         // Test setting egress direction
         packet.direction = Direction::Egress;
