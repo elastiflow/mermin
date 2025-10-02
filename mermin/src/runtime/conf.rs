@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tracing::Level;
 
 use crate::{
-    otlp::opts::{ExporterOptions, OtlpExporterOptions, StdoutExporterOptions},
+    otlp::opts::ExporterOptions,
     runtime::{
         conf::conf_serde::{duration, level},
         enums::SpanFmt,
@@ -27,74 +27,6 @@ impl Format for Hcl {
     }
 }
 
-/// Represents a single, fully resolved trace pipeline with its discovery
-/// and exporter configurations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TracePipeline {
-    pub span_level: SpanFmt,
-    pub exporters: Vec<ExportOption>,
-}
-
-/// An enum representing a specific, resolved exporter configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ExportOption {
-    Otlp(OtlpExporterOptions),
-    Stdout(StdoutExporterOptions),
-}
-
-impl TracePipeline {
-    /// Resolves a single trace pipeline from the raw configuration.
-    pub fn from_raw(
-        pipeline_name: &str,
-        raw_opts: RawTraceOptions,
-        raw_conf: &Conf,
-    ) -> Result<Self, ConfError> {
-        // Resolve Exporters
-        let mut exporters = Vec::new();
-        let parsed_refs = raw_opts.exporters.parse().unwrap();
-        for exporter_ref in parsed_refs {
-            match exporter_ref.type_.as_str() {
-                "otlp" => {
-                    let opts = raw_conf
-                        .exporter
-                        .as_ref()
-                        .and_then(|e| e.otlp.as_ref())
-                        .and_then(|otlp_map| otlp_map.get(&exporter_ref.name))
-                        .cloned()
-                        .ok_or_else(|| {
-                            ConfError::InvalidReference(format!(
-                                "OTLP exporter '{}' not found for pipeline '{}'",
-                                exporter_ref.name, pipeline_name
-                            ))
-                        })?;
-                    exporters.push(ExportOption::Otlp(opts));
-                }
-                "stdout" => {
-                    let opts = raw_conf
-                        .exporter
-                        .as_ref()
-                        .and_then(|e| e.stdout.as_ref())
-                        .and_then(|stdout_map| stdout_map.get(&exporter_ref.name))
-                        .cloned()
-                        .ok_or_else(|| {
-                            ConfError::InvalidReference(format!(
-                                "Stdout exporter '{}' not found for pipeline '{}'",
-                                exporter_ref.name, pipeline_name
-                            ))
-                        })?;
-                    exporters.push(ExportOption::Stdout(opts));
-                }
-                _ => { /* Already handled by .parse() */ }
-            }
-        }
-
-        Ok(Self {
-            span_level: raw_opts.span_level,
-            exporters,
-        })
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Conf {
@@ -109,7 +41,7 @@ pub struct Conf {
     #[serde(with = "duration")]
     pub shutdown_timeout: Duration,
     pub span: SpanOptions,
-    pub agent: Option<RawAgentOptions>,
+    pub agent: Option<AgentOptions>,
     pub exporter: Option<ExporterOptions>,
 }
 
@@ -157,14 +89,97 @@ pub enum ReferenceOrInline<T> {
     Inline(T),
 }
 
-#[derive(Default, Debug, Deserialize, Serialize, Clone)]
-pub struct RawAgentOptions {
-    pub traces: HashMap<String, RawTraceOptions>,
+// Default implementations for the ReferenceOrInline types
+impl Default for ReferenceOrInline<K8sOwnerOptions> {
+    fn default() -> Self {
+        Self::Inline(K8sOwnerOptions::default())
+    }
+}
+impl Default for ReferenceOrInline<K8sSelectorOptions> {
+    fn default() -> Self {
+        Self::Inline(K8sSelectorOptions::default())
+    }
 }
 
+/// Options for discovering Kubernetes resource owners.
+/// Controls which resource kinds to include/exclude and the search depth.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct K8sOwnerOptions {
+    /// Kinds to exclude from owner discovery (e.g., EndpointSlice).
+    pub exclude_kinds: Vec<String>,
+    /// Kinds to include in owner discovery (e.g., Service).
+    pub include_kinds: Vec<String>,
+    /// Maximum depth to traverse owner references.
+    pub max_depth: u32,
+}
+
+impl Default for K8sOwnerOptions {
+    fn default() -> Self {
+        Self {
+            exclude_kinds: Vec::new(),
+            include_kinds: Vec::new(),
+            max_depth: 10,
+        }
+    }
+}
+
+/// Options for Kubernetes resource selectors.
+/// Defines which objects to match for enrichment.
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
+pub struct K8sSelectorOptions {
+    /// List of object selectors for matching resources.
+    pub k8s_object: Vec<K8sObjectSelector>,
+}
+
+/// Selector for a specific Kubernetes object kind.
+/// Used to match and enrich resources based on label/field selectors.
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
+pub struct K8sObjectSelector {
+    /// The kind of Kubernetes object (e.g., NetworkPolicy, Service).
+    pub kind: String,
+    /// Optional field for matchExpressions (e.g., spec.podSelector.matchExpressions).
+    pub selector_match_expressions_field: Option<String>,
+    /// Optional field for matchLabels (e.g., spec.podSelector.matchLabels).
+    pub selector_match_labels_field: Option<String>,
+    /// Target resource kind to associate with (e.g., Pod).
+    pub to: String,
+}
+
+/// Top-level agent configuration specifying which telemetry features are enabled.
+///
+/// The `AgentOptions` struct defines the agent's telemetry pipeline configuration,
+/// mapping logical telemetry types (such as traces) to their respective pipeline settings.
+/// This allows the user to declaratively specify, in the configuration file, which
+/// exporters should be used for each telemetry type. For example, the `traces` field
+/// contains the configuration for the traces pipeline, including the list of exporter
+/// references (such as OTLP or stdout exporters) that should be enabled for sending trace data.
+///
+/// This struct is typically deserialized from the `agent` section of the application's
+/// configuration file. Exporter references listed here must correspond to exporter
+/// definitions in the `exporter` section of the configuration.
+///
+/// # Example (YAML)
+/// ```yaml
+/// agent:
+///   traces:
+///     main:
+///       exporters:
+///         - exporter.otlp.main
+///         - exporter.stdout.json
+///
+/// ```
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
+pub struct AgentOptions {
+    /// Mapping of trace names to trace options.
+    /// Example: "main" -> TraceOptions
+    pub traces: HashMap<String, TraceOptions>,
+}
+
+/// Options for a specific trace configuration.
+/// References specific configs by name from config file
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(default)]
-pub struct RawTraceOptions {
+pub struct TraceOptions {
     /// The level of span events to record. The current default is `FmtSpan::FULL`,
     /// which records all events (enter, exit, close) for all spans. The level can also be
     /// one of the following:
@@ -180,7 +195,7 @@ pub struct RawTraceOptions {
     pub exporters: ExporterReferences,
 }
 
-impl Default for RawTraceOptions {
+impl Default for TraceOptions {
     fn default() -> Self {
         Self {
             span_level: SpanFmt::Full,
@@ -189,16 +204,36 @@ impl Default for RawTraceOptions {
     }
 }
 
-// Default implementations for the ReferenceOrInline types
-impl Default for ReferenceOrInline<K8sOwnerOptions> {
-    fn default() -> Self {
-        Self::Inline(K8sOwnerOptions::default())
+pub type ExporterReferences = Vec<String>;
+
+pub trait ExporterReferencesParser {
+    fn parse(&self) -> Result<Vec<ExporterReference>, String>;
+}
+
+impl ExporterReferencesParser for ExporterReferences {
+    fn parse(&self) -> Result<Vec<ExporterReference>, String> {
+        self.iter().map(|reference| {
+            match reference.split('.').collect::<Vec<_>>().as_slice() {
+                ["exporter", type_ @ ("otlp" | "stdout"), name] => Ok(ExporterReference {
+                    type_: type_.to_string(),
+                    name: name.to_string(),
+                }),
+                ["exporter", invalid_type, _] => Err(format!(
+                    "unsupported exporter type: '{invalid_type}' - supported types: otlp, stdout"
+                )),
+                _ => Err(format!(
+                    "invalid format: '{reference}' - expected: 'exporter.<type>.<name>'"
+                )),
+            }
+        }).collect::<Result<Vec<ExporterReference>, String>>()
     }
 }
-impl Default for ReferenceOrInline<K8sSelectorOptions> {
-    fn default() -> Self {
-        Self::Inline(K8sSelectorOptions::default())
-    }
+
+/// Represents a parsed exporter reference from the agent configuration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExporterReference {
+    pub type_: String,
+    pub name: String,
 }
 
 /// Validates that the given path points to an existing file with a supported extension.
@@ -415,120 +450,6 @@ impl Default for MetricsConf {
             port: 10250,
         }
     }
-}
-
-/// Top-level agent configuration specifying which telemetry features are enabled.
-///
-/// The `AgentOptions` struct defines the agent's telemetry pipeline configuration,
-/// mapping logical telemetry types (such as traces) to their respective pipeline settings.
-/// This allows the user to declaratively specify, in the configuration file, which
-/// exporters should be used for each telemetry type. For example, the `traces` field
-/// contains the configuration for the traces pipeline, including the list of exporter
-/// references (such as OTLP or stdout exporters) that should be enabled for sending trace data.
-///
-/// This struct is typically deserialized from the `agent` section of the application's
-/// configuration file. Exporter references listed here must correspond to exporter
-/// definitions in the `exporter` section of the configuration.
-///
-/// # Example (YAML)
-/// ```yaml
-/// agent:
-///   traces:
-///     main:
-///       exporters:
-///         - exporter.otlp.main
-///         - exporter.stdout.json
-///
-/// ```
-#[derive(Default, Debug, Deserialize, Serialize, Clone)]
-pub struct AgentOptions {
-    /// Mapping of trace names to trace options.
-    /// Example: "main" -> TraceOptions
-    pub traces: HashMap<String, TraceOptions>,
-}
-
-/// Options for a specific trace configuration.
-/// References specific configs by name from config file
-#[derive(Default, Debug, Deserialize, Serialize, Clone)]
-pub struct TraceOptions {
-    /// List of exporter references to use for the trace pipeline.
-    pub exporters: ExporterReferences,
-}
-
-pub type ExporterReferences = Vec<String>;
-
-pub trait ExporterReferencesParser {
-    fn parse(&self) -> Result<Vec<ExporterReference>, String>;
-}
-
-impl ExporterReferencesParser for ExporterReferences {
-    fn parse(&self) -> Result<Vec<ExporterReference>, String> {
-        self.iter().map(|reference| {
-            match reference.split('.').collect::<Vec<_>>().as_slice() {
-                ["exporter", type_ @ ("otlp" | "stdout"), name] => Ok(ExporterReference {
-                    type_: type_.to_string(),
-                    name: name.to_string(),
-                }),
-                ["exporter", invalid_type, _] => Err(format!(
-                    "unsupported exporter type: '{invalid_type}' - supported types: otlp, stdout"
-                )),
-                _ => Err(format!(
-                    "invalid format: '{reference}' - expected: 'exporter.<type>.<name>'"
-                )),
-            }
-        }).collect::<Result<Vec<ExporterReference>, String>>()
-    }
-}
-
-/// Represents a parsed exporter reference from the agent configuration.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ExporterReference {
-    pub type_: String,
-    pub name: String,
-}
-
-/// Options for discovering Kubernetes resource owners.
-/// Controls which resource kinds to include/exclude and the search depth.
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct K8sOwnerOptions {
-    /// Kinds to exclude from owner discovery (e.g., EndpointSlice).
-    pub exclude_kinds: Vec<String>,
-    /// Kinds to include in owner discovery (e.g., Service).
-    pub include_kinds: Vec<String>,
-    /// Maximum depth to traverse owner references.
-    pub max_depth: u32,
-}
-
-impl Default for K8sOwnerOptions {
-    fn default() -> Self {
-        Self {
-            exclude_kinds: Vec::new(),
-            include_kinds: Vec::new(),
-            max_depth: 10,
-        }
-    }
-}
-
-/// Options for Kubernetes resource selectors.
-/// Defines which objects to match for enrichment.
-#[derive(Default, Debug, Deserialize, Serialize, Clone)]
-pub struct K8sSelectorOptions {
-    /// List of object selectors for matching resources.
-    pub k8s_object: Vec<K8sObjectSelector>,
-}
-
-/// Selector for a specific Kubernetes object kind.
-/// Used to match and enrich resources based on label/field selectors.
-#[derive(Default, Debug, Deserialize, Serialize, Clone)]
-pub struct K8sObjectSelector {
-    /// The kind of Kubernetes object (e.g., NetworkPolicy, Service).
-    pub kind: String,
-    /// Optional field for matchExpressions (e.g., spec.podSelector.matchExpressions).
-    pub selector_match_expressions_field: Option<String>,
-    /// Optional field for matchLabels (e.g., spec.podSelector.matchLabels).
-    pub selector_match_labels_field: Option<String>,
-    /// Target resource kind to associate with (e.g., Pod).
-    pub to: String,
 }
 
 #[cfg(test)]

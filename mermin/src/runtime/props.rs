@@ -15,9 +15,8 @@ use crate::{
     otlp::opts::{OtlpExporterOptions, StdoutExporterOptions},
     runtime::{
         cli::Cli,
-        conf,
         conf::{
-            ApiConf, Conf, ConfError, Hcl, MetricsConf, TracePipeline,
+            ApiConf, Conf, ConfError, ExporterReferencesParser, Hcl, MetricsConf, TraceOptions,
             conf_serde::{duration, level},
             defaults, validate_config_path,
         },
@@ -285,12 +284,80 @@ impl Properties {
         for pipeline in self.trace_pipelines.values() {
             for exporter in &pipeline.exporters {
                 match exporter {
-                    conf::ExportOption::Otlp(opts) => otlp_exporters.push(opts.clone()),
-                    conf::ExportOption::Stdout(opts) => stdout_exporters.push(opts.clone()),
+                    ExportOption::Otlp(opts) => otlp_exporters.push(opts.clone()),
+                    ExportOption::Stdout(opts) => stdout_exporters.push(opts.clone()),
                 }
             }
         }
 
         (otlp_exporters, stdout_exporters)
+    }
+}
+
+/// Represents a single, fully resolved trace pipeline with its discovery
+/// and exporter configurations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TracePipeline {
+    pub span_level: SpanFmt,
+    pub exporters: Vec<ExportOption>,
+}
+
+/// An enum representing a specific, resolved exporter configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ExportOption {
+    Otlp(OtlpExporterOptions),
+    Stdout(StdoutExporterOptions),
+}
+
+impl TracePipeline {
+    /// Resolves a single trace pipeline from the raw configuration.
+    pub fn from_raw(
+        pipeline_name: &str,
+        raw_opts: TraceOptions,
+        raw_conf: &Conf,
+    ) -> Result<Self, ConfError> {
+        // Resolve Exporters
+        let mut exporters = Vec::new();
+        let parsed_refs = raw_opts.exporters.parse().unwrap();
+        for exporter_ref in parsed_refs {
+            match exporter_ref.type_.as_str() {
+                "otlp" => {
+                    let opts = raw_conf
+                        .exporter
+                        .as_ref()
+                        .and_then(|e| e.otlp.as_ref())
+                        .and_then(|otlp_map| otlp_map.get(&exporter_ref.name))
+                        .cloned()
+                        .ok_or_else(|| {
+                            ConfError::InvalidReference(format!(
+                                "OTLP exporter '{}' not found for pipeline '{}'",
+                                exporter_ref.name, pipeline_name
+                            ))
+                        })?;
+                    exporters.push(ExportOption::Otlp(opts));
+                }
+                "stdout" => {
+                    let opts = raw_conf
+                        .exporter
+                        .as_ref()
+                        .and_then(|e| e.stdout.as_ref())
+                        .and_then(|stdout_map| stdout_map.get(&exporter_ref.name))
+                        .cloned()
+                        .ok_or_else(|| {
+                            ConfError::InvalidReference(format!(
+                                "Stdout exporter '{}' not found for pipeline '{}'",
+                                exporter_ref.name, pipeline_name
+                            ))
+                        })?;
+                    exporters.push(ExportOption::Stdout(opts));
+                }
+                _ => { /* Already handled by .parse() */ }
+            }
+        }
+
+        Ok(Self {
+            span_level: raw_opts.span_level,
+            exporters,
+        })
     }
 }
