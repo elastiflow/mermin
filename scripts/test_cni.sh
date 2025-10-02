@@ -9,7 +9,7 @@ RELEASE_NAME="${RELEASE_NAME:-mermin}"
 NAMESPACE="${NAMESPACE:-atlantis}"
 DOCKER_IMAGE_NAME="${DOCKER_IMAGE_NAME:-mermin}"
 DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-latest}"
-VALUES_FILE="${VALUES_FILE:-local/values.yaml}"
+VALUES_FILE="${VALUES_FILE:-examples/local/values.yaml}"
 CNI="${CNI:-calico}"
 HOST_CNI_PATH="$HOME/cni-plugins-for-kind"
 
@@ -112,6 +112,9 @@ load_image_into_kind() {
 }
 
 deploy_helm_chart() {
+  helm repo add netobserv https://elastiflow.github.io/helm-chart-netobserv/
+  helm repo add opensearch https://opensearch-project.github.io/helm-charts/
+  helm dependency build $HELM_CHART_PATH
   make helm-upgrade \
     APP="$RELEASE_NAME" \
     HELM_CHART="$HELM_CHART_PATH" \

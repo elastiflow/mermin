@@ -2,12 +2,10 @@
 # This configuration file contains default settings for the Mermin eBPF network observability tool for local development.
 
 # Network interfaces to monitor
-interface = [
-  "eth0"
-]
+interface = ["eth0"]
 
 # Logging configuration
-log_level = "debug"
+log_level = "debug" # TODO(Cleanup for GA): Should be "info"
 
 # Automatic configuration reloading
 auto_reload = false
@@ -47,7 +45,7 @@ span {
 # Specify which exporters are enabled
 agent "traces" "main" {
   exporters = [
-    "exporter.stdout.console"
+    "exporter.stdout.main"
   ]
 }
 
@@ -70,6 +68,6 @@ exporter "otlp" "main" {
   }
 }
 
-exporter "stdout" "console" {
+exporter "stdout" "main" {
   format = "full"
 }

@@ -17,7 +17,7 @@ impl From<SpanFmt> for tracing_subscriber::fmt::format::FmtSpan {
 impl From<String> for SpanFmt {
     fn from(s: String) -> Self {
         match s.to_lowercase().as_str() {
-            "full" => SpanFmt::Full,
+            "plain" => SpanFmt::Full,
             _ => SpanFmt::Full,
         }
     }
