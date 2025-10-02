@@ -1,13 +1,13 @@
 use std::{
     collections::HashMap,
-    net::IpAddr,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
-use mermin_common::PacketMeta;
+use mermin_common::{IpAddrType, PacketMeta, TunnelType};
 use network_types::{
     eth::EtherType,
     ip::{IpDscp, IpEcn, IpProto},
@@ -15,6 +15,7 @@ use network_types::{
 use opentelemetry::trace::SpanKind;
 use pnet::datalink::MacAddr;
 use tokio::sync::mpsc;
+use tracing::{debug, warn};
 
 use crate::{
     community_id::CommunityIdGenerator,
@@ -179,22 +180,23 @@ impl PacketWorker {
     }
 
     fn extract_ip_addresses(
-        ip_addr_type: mermin_common::IpAddrType,
+        ip_addr_type: IpAddrType,
         src_ipv4_addr: [u8; 4],
         dst_ipv4_addr: [u8; 4],
         src_ipv6_addr: [u8; 16],
         dst_ipv6_addr: [u8; 16],
-    ) -> (IpAddr, IpAddr) {
+    ) -> Result<(IpAddr, IpAddr), Error> {
         match ip_addr_type {
-            mermin_common::IpAddrType::Ipv4 => {
+            IpAddrType::Unknown => Err(Error::UnknownIpAddrType),
+            IpAddrType::Ipv4 => {
                 let src = IpAddr::V4(std::net::Ipv4Addr::from(src_ipv4_addr));
                 let dst = IpAddr::V4(std::net::Ipv4Addr::from(dst_ipv4_addr));
-                (src, dst)
+                Ok((src, dst))
             }
-            mermin_common::IpAddrType::Ipv6 => {
+            IpAddrType::Ipv6 => {
                 let src = IpAddr::V6(std::net::Ipv6Addr::from(src_ipv6_addr));
                 let dst = IpAddr::V6(std::net::Ipv6Addr::from(dst_ipv6_addr));
-                (src, dst)
+                Ok((src, dst))
             }
         }
     }
@@ -204,31 +206,38 @@ impl PacketWorker {
             let now = SystemTime::now();
             now.duration_since(UNIX_EPOCH).expect("time went backwards");
 
-            let (src_addr, dst_addr) = Self::extract_ip_addresses(
+            let (src_addr, dst_addr) = match Self::extract_ip_addresses(
                 packet.ip_addr_type,
                 packet.src_ipv4_addr,
                 packet.dst_ipv4_addr,
                 packet.src_ipv6_addr,
                 packet.dst_ipv6_addr,
-            );
+            ) {
+                Ok(addrs) => addrs,
+                Err(_) => {
+                    warn!("unknown IP address type, skipping flow span production");
+                    continue;
+                }
+            };
             let src_port = packet.src_port();
             let dst_port = packet.dst_port();
 
-            let is_tunneled =
-                packet.tunnel_src_ipv4_addr != [0; 4] || packet.tunnel_src_ipv6_addr != [0; 16];
-            let tunnel_addresses = if is_tunneled {
-                Some(Self::extract_ip_addresses(
-                    packet.tunnel_ip_addr_type,
-                    packet.tunnel_src_ipv4_addr,
-                    packet.tunnel_dst_ipv4_addr,
-                    packet.tunnel_src_ipv6_addr,
-                    packet.tunnel_dst_ipv6_addr,
-                ))
-            } else {
-                None
-            };
+            let community_id = self
+                .community_id_generator
+                .generate(src_addr, dst_addr, src_port, dst_port, packet.proto)
+                .clone();
+
+            let iface_name = self.iface_map.get(&packet.ifindex);
+
+            // Log packet details if debug logging is enabled
+            log_packet_info(
+                &packet,
+                &community_id,
+                iface_name.map(String::as_str).unwrap_or(""),
+            );
 
             // Pre-calculate commonly used conditions for readability
+            let has_mac = packet.src_mac_addr != [0; 6];
             let is_icmp = packet.proto == IpProto::Icmp;
             let is_icmpv6 = packet.proto == IpProto::Ipv6Icmp;
             let is_icmp_any = is_icmp || is_icmpv6;
@@ -236,6 +245,38 @@ impl PacketWorker {
                 packet.ether_type == EtherType::Ipv4 || packet.ether_type == EtherType::Ipv6;
             let is_ipv6 = packet.ether_type == EtherType::Ipv6;
             let is_tcp = packet.proto == IpProto::Tcp;
+
+            let is_ipip = packet.ipip_ip_addr_type != IpAddrType::Unknown;
+            let ipip_addrs = if is_ipip {
+                Self::extract_ip_addresses(
+                    packet.ipip_ip_addr_type,
+                    packet.ipip_src_ipv4_addr,
+                    packet.ipip_dst_ipv4_addr,
+                    packet.ipip_src_ipv6_addr,
+                    packet.ipip_dst_ipv6_addr,
+                )
+                .ok()
+            } else {
+                None
+            };
+
+            let tunnel_has_mac = packet.tunnel_src_mac_addr != [0; 6];
+            let is_tunneled = packet.tunnel_type != TunnelType::None;
+            let tunnel_addrs = if is_tunneled {
+                Self::extract_ip_addresses(
+                    packet.tunnel_ip_addr_type,
+                    packet.tunnel_src_ipv4_addr,
+                    packet.tunnel_dst_ipv4_addr,
+                    packet.tunnel_src_ipv6_addr,
+                    packet.tunnel_dst_ipv6_addr,
+                )
+                .ok()
+            } else {
+                None
+            };
+            let tunnel_has_id = packet.tunnel_type == TunnelType::Gre
+                || packet.tunnel_type == TunnelType::Geneve
+                || packet.tunnel_type == TunnelType::Vxlan;
 
             let attrs = FlowSpan {
                 start_time: now,
@@ -247,7 +288,9 @@ impl PacketWorker {
                         .community_id_generator
                         .generate(src_addr, dst_addr, src_port, dst_port, packet.proto)
                         .clone(),
-                    flow_connection_state: is_tcp.then(|| ConnectionState::from_packet(&packet)),
+                    flow_connection_state: is_tcp
+                        .then(|| ConnectionState::from_packet(&packet))
+                        .flatten(),
                     flow_end_reason: None,
 
                     // Network endpoints
@@ -260,8 +303,8 @@ impl PacketWorker {
                     network_transport: packet.proto,
                     network_type: packet.ether_type,
                     network_interface_index: Some(packet.ifindex),
-                    network_interface_name: self.iface_map.get(&packet.ifindex).cloned(),
-                    network_interface_mac: Some(MacAddr::new(
+                    network_interface_name: iface_name.cloned(),
+                    network_interface_mac: has_mac.then_some(MacAddr::new(
                         packet.src_mac_addr[0],
                         packet.src_mac_addr[1],
                         packet.src_mac_addr[2],
@@ -321,6 +364,16 @@ impl PacketWorker {
                     flow_tcp_flags_tags: is_tcp
                         .then(|| TcpFlags::from_packet(&packet).active_flags()),
 
+                    // IPsec attributes
+                    flow_ipsec_ah_spi: packet.ah_exists.then_some(packet.ipsec_ah_spi),
+                    flow_ipsec_esp_spi: packet.esp_exists.then_some(packet.ipsec_esp_spi),
+                    flow_ipsec_sender_index: packet
+                        .wireguard_exists
+                        .then_some(packet.ipsec_sender_index),
+                    flow_ipsec_receiver_index: packet
+                        .wireguard_exists
+                        .then_some(packet.ipsec_receiver_index),
+
                     // Flow metrics
                     flow_bytes_delta: packet.l3_octet_count as i64, // TODO: check this for all types of packets
                     flow_bytes_total: packet.l3_octet_count as i64, // TODO: check this for all types of packets
@@ -341,19 +394,34 @@ impl PacketWorker {
                     flow_tcp_rndtrip_latency: None,
                     flow_tcp_rndtrip_jitter: None,
 
-                    // Tunnel attributes (populated when traffic is encapsulated)
-                    tunnel_type: None,
-                    tunnel_source_address: tunnel_addresses.map(|(src, _)| src),
-                    tunnel_source_port: is_tunneled.then(|| packet.tunnel_src_port()),
-                    tunnel_destination_address: tunnel_addresses.map(|(_, dst)| dst),
-                    tunnel_destination_port: is_tunneled.then(|| packet.tunnel_dst_port()),
-                    tunnel_network_transport: is_tunneled.then_some(packet.tunnel_proto),
+                    // Ip-in-Ip attributes
+                    ipip_network_type: is_ipip.then_some(packet.ipip_ether_type),
+                    ipip_network_transport: is_ipip.then_some(packet.ipip_proto),
+                    ipip_source_address: ipip_addrs.map(|(src, _)| src),
+                    ipip_destination_address: ipip_addrs.map(|(_, dst)| dst),
+
+                    // Tunnel attributes
+                    tunnel_type: is_tunneled.then_some(packet.tunnel_type),
+                    tunnel_network_interface_mac: (is_tunneled && tunnel_has_mac).then_some(
+                        MacAddr::new(
+                            packet.tunnel_src_mac_addr[0],
+                            packet.tunnel_src_mac_addr[1],
+                            packet.tunnel_src_mac_addr[2],
+                            packet.tunnel_src_mac_addr[3],
+                            packet.tunnel_src_mac_addr[4],
+                            packet.tunnel_src_mac_addr[5],
+                        ),
+                    ),
                     tunnel_network_type: is_tunneled.then_some(packet.tunnel_ether_type),
-                    tunnel_id: None,
-                    tunnel_key: None,
-                    tunnel_sender_index: None,
-                    tunnel_receiver_index: None,
-                    tunnel_spi: None,
+                    tunnel_network_transport: is_tunneled.then_some(packet.tunnel_proto),
+                    tunnel_source_address: tunnel_addrs.map(|(src, _)| src),
+                    tunnel_source_port: is_tunneled.then(|| packet.tunnel_src_port()),
+                    tunnel_destination_address: tunnel_addrs.map(|(_, dst)| dst),
+                    tunnel_destination_port: is_tunneled.then(|| packet.tunnel_dst_port()),
+                    tunnel_id: tunnel_has_id.then_some(packet.tunnel_id),
+                    tunnel_ipsec_ah_spi: packet
+                        .tunnel_ah_exists
+                        .then_some(packet.tunnel_ipsec_ah_spi),
 
                     // Kubernetes source attributes (not yet implemented)
                     source_k8s_cluster_name: None,
@@ -415,5 +483,92 @@ impl PacketWorker {
             // TODO: REMOVE this is just for testing sending all flows to the exporter
             let _ = self.flow_span_tx.send(attrs).await;
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Error {
+    UnknownIpAddrType,
+}
+
+/// Log packet information in a structured way
+fn log_packet_info(packet_meta: &PacketMeta, community_id: &str, iface_name: &str) {
+    let src_port = packet_meta.src_port();
+    let dst_port = packet_meta.dst_port();
+
+    // Check if this is tunneled traffic
+    let is_tunneled =
+        packet_meta.tunnel_src_ipv4_addr != [0; 4] || packet_meta.tunnel_src_ipv6_addr != [0; 16];
+
+    if is_tunneled {
+        let tunnel_src_ip = format_ip(
+            packet_meta.tunnel_ip_addr_type,
+            packet_meta.tunnel_src_ipv4_addr,
+            packet_meta.tunnel_src_ipv6_addr,
+        );
+        let tunnel_dst_ip = format_ip(
+            packet_meta.tunnel_ip_addr_type,
+            packet_meta.tunnel_dst_ipv4_addr,
+            packet_meta.tunnel_dst_ipv6_addr,
+        );
+        let inner_src_ip = format_ip(
+            packet_meta.ip_addr_type,
+            packet_meta.src_ipv4_addr,
+            packet_meta.src_ipv6_addr,
+        );
+        let inner_dst_ip = format_ip(
+            packet_meta.ip_addr_type,
+            packet_meta.dst_ipv4_addr,
+            packet_meta.dst_ipv6_addr,
+        );
+        let tunnel_src_port = packet_meta.tunnel_src_port();
+        let tunnel_dst_port = packet_meta.tunnel_dst_port();
+
+        debug!(
+            "[{iface_name}] Tunneled {} packet: {} | Tunnel: {}:{} -> {}:{} ({}) | Inner: {}:{} -> {}:{} | bytes: {}",
+            packet_meta.proto,
+            community_id,
+            tunnel_src_ip,
+            tunnel_src_port,
+            tunnel_dst_ip,
+            tunnel_dst_port,
+            packet_meta.tunnel_proto,
+            inner_src_ip,
+            src_port,
+            inner_dst_ip,
+            dst_port,
+            packet_meta.l3_octet_count,
+        );
+    } else {
+        let src_ip = format_ip(
+            packet_meta.ip_addr_type,
+            packet_meta.src_ipv4_addr,
+            packet_meta.src_ipv6_addr,
+        );
+        let dst_ip = format_ip(
+            packet_meta.ip_addr_type,
+            packet_meta.dst_ipv4_addr,
+            packet_meta.dst_ipv6_addr,
+        );
+
+        debug!(
+            "[{iface_name}] {} packet: {} | {}:{} -> {}:{} | bytes: {}",
+            packet_meta.proto,
+            community_id,
+            src_ip,
+            src_port,
+            dst_ip,
+            dst_port,
+            packet_meta.l3_octet_count,
+        );
+    }
+}
+
+/// Helper function to format IP address based on type
+fn format_ip(addr_type: IpAddrType, ipv4_addr: [u8; 4], ipv6_addr: [u8; 16]) -> String {
+    match addr_type {
+        IpAddrType::Unknown => "unknown".to_string(),
+        IpAddrType::Ipv4 => Ipv4Addr::from(ipv4_addr).to_string(),
+        IpAddrType::Ipv6 => Ipv6Addr::from(ipv6_addr).to_string(),
     }
 }

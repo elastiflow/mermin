@@ -28,7 +28,6 @@ pub type SrcMacAddr = [u8; 6];
 #[derive(PartialEq, Eq, Debug, Copy, Clone, Default)]
 pub enum EtherType {
     Loop = 0x0060_u16.to_be(),
-    #[default]
     Ipv4 = 0x0800_u16.to_be(),
     Arp = 0x0806_u16.to_be(),
     Ethernet = 0x6558_u16.to_be(),
@@ -44,6 +43,8 @@ pub enum EtherType {
     Ieee8021QinQ1 = 0x9100_u16.to_be(),
     Ieee8021QinQ2 = 0x9200_u16.to_be(),
     Ieee8021QinQ3 = 0x9300_u16.to_be(),
+    #[default]
+    Reserved = 0xFFFF_u16.to_be(),
 }
 
 // This allows converting a u16 value into an EtherType enum variant.
@@ -69,6 +70,7 @@ impl TryFrom<u16> for EtherType {
             0x9100_u16 => Ok(EtherType::Ieee8021QinQ1),
             0x9200_u16 => Ok(EtherType::Ieee8021QinQ2),
             0x9300_u16 => Ok(EtherType::Ieee8021QinQ3),
+            0xFFFF_u16 => Ok(EtherType::Reserved),
             _ => Err(value),
         }
     }
@@ -113,6 +115,7 @@ impl EtherType {
             EtherType::Ieee8021QinQ1 => "qinq-1",
             EtherType::Ieee8021QinQ2 => "qinq-2",
             EtherType::Ieee8021QinQ3 => "qinq-3",
+            EtherType::Reserved => "reserved",
         }
     }
 }
@@ -172,6 +175,7 @@ mod tests {
             EtherType::Ieee8021QinQ1,
             EtherType::Ieee8021QinQ2,
             EtherType::Ieee8021QinQ3,
+            EtherType::Reserved,
         ];
 
         for i in 0..all_types.len() {
@@ -206,5 +210,6 @@ mod tests {
         assert_eq!(EtherType::Ieee8021QinQ1.as_str(), "qinq-1");
         assert_eq!(EtherType::Ieee8021QinQ2.as_str(), "qinq-2");
         assert_eq!(EtherType::Ieee8021QinQ3.as_str(), "qinq-3");
+        assert_eq!(EtherType::Reserved.as_str(), "reserved");
     }
 }
