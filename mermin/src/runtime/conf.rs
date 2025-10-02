@@ -41,8 +41,12 @@ pub struct Conf {
     #[serde(with = "duration")]
     pub shutdown_timeout: Duration,
     pub span: SpanOptions,
+    /// Top-level agent configuration specifying which telemetry features are enabled.
     pub agent: Option<AgentOptions>,
-    pub exporter: Option<ExporterOptions>,
+    /// Contains the configuration for internal exporters
+    pub traces: Option<TracesConfig>,
+    /// References to the exporters to use for telemetry
+    pub exporter: ExporterOptions,
 }
 
 impl Default for Conf {
@@ -58,7 +62,8 @@ impl Default for Conf {
             shutdown_timeout: defaults::shutdown_timeout(),
             span: SpanOptions::default(),
             agent: None,
-            exporter: None,
+            traces: None,
+            exporter: ExporterOptions::default(),
         }
     }
 }
@@ -175,11 +180,9 @@ pub struct AgentOptions {
     pub traces: HashMap<String, TraceOptions>,
 }
 
-/// Options for a specific trace configuration.
-/// References specific configs by name from config file
+/// Options for all traces configuration
 #[derive(Debug, Deserialize, Serialize, Clone)]
-#[serde(default)]
-pub struct TraceOptions {
+pub struct TracesConfig {
     /// The level of span events to record. The current default is `FmtSpan::FULL`,
     /// which records all events (enter, exit, close) for all spans. The level can also be
     /// one of the following:
@@ -190,18 +193,18 @@ pub struct TraceOptions {
     /// - `FmtSpan::ACTIVE`: Only span events for spans that are active (i.e., not closed) are recorded.
     pub span_level: SpanFmt,
 
+    #[serde(flatten)]
+    pub pipelines: HashMap<String, TraceOptions>,
+}
+
+/// Options for a specific trace configuration.
+/// References specific configs by name from config file
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
+#[serde(default)]
+pub struct TraceOptions {
     /// A list of exporter references to use for tracing. Each entry should match a key
     /// in the `exporter` section of the config.
     pub exporters: ExporterReferences,
-}
-
-impl Default for TraceOptions {
-    fn default() -> Self {
-        Self {
-            span_level: SpanFmt::Full,
-            exporters: ExporterReferences::new(),
-        }
-    }
 }
 
 pub type ExporterReferences = Vec<String>;
@@ -461,7 +464,10 @@ mod tests {
     use tracing::Level;
 
     use super::{Conf, ExporterReference};
-    use crate::runtime::{cli::Cli, props::Properties};
+    use crate::runtime::{
+        cli::Cli,
+        props::{InternalTraces, Properties},
+    };
 
     fn parse_exporter_reference(reference: &str) -> Result<ExporterReference, String> {
         match reference.split('.').collect::<Vec<_>>().as_slice() {
@@ -482,6 +488,8 @@ mod tests {
         let raw_conf = Conf::default();
         let trace_pipelines = Properties::resolve_trace_pipelines(&raw_conf)
             .expect("resolving default pipelines should succeed");
+        let internal_traces = Properties::resolve_internal_exporters(&raw_conf)
+            .expect("resolving default internal traces should succeed");
         Properties {
             interface: raw_conf.interface,
             auto_reload: raw_conf.auto_reload,
@@ -492,7 +500,11 @@ mod tests {
             packet_worker_count: raw_conf.packet_worker_count,
             shutdown_timeout: raw_conf.shutdown_timeout,
             span: raw_conf.span,
-            trace_pipelines,
+            agent_traces: trace_pipelines,
+            internal_traces: InternalTraces {
+                span_level: raw_conf.traces.span_level,
+                traces: internal_traces,
+            },
             config_path: None,
         }
     }

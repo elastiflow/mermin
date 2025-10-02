@@ -44,33 +44,28 @@ async fn main() -> Result<()> {
         properties: props, ..
     } = runtime;
 
-    let span_level = props.get_trace_pipeline_span_level();
-    let (otlp_exporters, stdout_exporters) = props.get_trace_pipeline_exporters();
-
-    let exporter: Arc<dyn TraceableExporter> =
-        if !otlp_exporters.is_empty() || !stdout_exporters.is_empty() {
+    let span_level = props.internal_traces.span_level;
+    let (otlp_agent_exporters, stdout_agent_exporters) = props.get_agent_exporters();
+    let (otlp_internal_exporters, stdout_internal_exporters) = props.get_internal_exporters();
+    dbg!(&props);
+    let exporter: Arc<dyn TraceableExporter> = {
+        init_internal_tracing(
+            otlp_internal_exporters.clone(),
+            stdout_internal_exporters.clone(),
+            props.log_level,
+            span_level,
+        )
+        .await?;
+        if !otlp_agent_exporters.is_empty() || !stdout_agent_exporters.is_empty() {
             let app_tracer_provider =
-                init_provider(otlp_exporters.clone(), stdout_exporters.clone()).await?;
-            init_internal_tracing(
-                otlp_exporters.clone(),
-                stdout_exporters.clone(),
-                props.log_level,
-                span_level,
-            )
-            .await?;
+                init_provider(otlp_agent_exporters, stdout_agent_exporters).await?;
             info!("initialized configured exporters");
             Arc::new(TraceExporterAdapter::new(app_tracer_provider))
         } else {
-            init_internal_tracing(
-                otlp_exporters.clone(),
-                stdout_exporters.clone(),
-                props.log_level,
-                span_level,
-            )
-            .await?;
-            info!("initialized default exporters");
+            warn!("no exporters configured, using no-op exporter");
             Arc::new(NoOpExporterAdapter::default())
-        };
+        }
+    };
 
     // Bump the memlock rlimit. This is needed for older kernels that don't use the
     // new memcg based accounting, see https://lwn.net/Articles/837122/
