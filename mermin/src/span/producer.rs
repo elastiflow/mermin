@@ -229,10 +229,9 @@ impl PacketWorker {
             let tunnel_has_id = packet.tunnel_type == TunnelType::Gre
                 || packet.tunnel_type == TunnelType::Geneve
                 || packet.tunnel_type == TunnelType::Vxlan;
-            let tunnel_has_sender_index = packet.tunnel_type == TunnelType::Wireguard;
-            let tunnel_has_receiver_index = packet.tunnel_type == TunnelType::Wireguard;
-            let tunnel_has_spi =
-                packet.tunnel_type == TunnelType::Esp || packet.tunnel_type == TunnelType::Ah;
+            // let tunnel_has_spi =
+            //     packet.tunnel_type == TunnelType::Esp || packet.tunnel_type == TunnelType::Ah; // TODO: add this
+            let tunnel_has_spi = false;
 
             // Pre-calculate commonly used conditions for readability
             let is_icmp = packet.proto == IpProto::Icmp;
@@ -358,11 +357,7 @@ impl PacketWorker {
                     tunnel_network_transport: is_tunneled.then_some(packet.tunnel_proto),
                     tunnel_network_type: is_tunneled.then_some(packet.tunnel_ether_type),
                     tunnel_id: tunnel_has_id.then_some(packet.tunnel_id),
-                    tunnel_sender_index: tunnel_has_sender_index
-                        .then_some(packet.tunnel_sender_index),
-                    tunnel_receiver_index: tunnel_has_receiver_index
-                        .then_some(packet.tunnel_receiver_index),
-                    tunnel_spi: tunnel_has_spi.then_some(packet.tunnel_spi),
+                    tunnel_spi: tunnel_has_spi.then_some(packet.tunnel_ipsec_ah_spi), // TODO: add this
 
                     // Kubernetes source attributes (not yet implemented)
                     source_k8s_cluster_name: None,

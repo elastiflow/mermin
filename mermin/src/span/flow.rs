@@ -141,8 +141,6 @@ pub struct SpanAttributes {
     #[serde(serialize_with = "serialize_option_ether_type")]
     pub tunnel_network_type: Option<EtherType>,
     pub tunnel_id: Option<u32>,
-    pub tunnel_sender_index: Option<u32>,
-    pub tunnel_receiver_index: Option<u32>,
     pub tunnel_spi: Option<u32>,
 
     // Kubernetes & Application Attributes
@@ -381,12 +379,6 @@ impl Traceable for FlowSpan {
         }
         if let Some(value) = self.attributes.tunnel_id {
             kvs.push(KeyValue::new("tunnel.id", value as i64));
-        }
-        if let Some(value) = self.attributes.tunnel_sender_index {
-            kvs.push(KeyValue::new("tunnel.sender_index", value as i64));
-        }
-        if let Some(value) = self.attributes.tunnel_receiver_index {
-            kvs.push(KeyValue::new("tunnel.receiver_index", value as i64));
         }
         if let Some(value) = self.attributes.tunnel_spi {
             kvs.push(KeyValue::new("tunnel.spi", value as i64));

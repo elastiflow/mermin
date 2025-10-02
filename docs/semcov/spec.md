@@ -132,13 +132,13 @@ Time-based metrics calculated for the flow, stored in nanoseconds (`ns`).
 | `tunnel.destination.address` | `string`  | The destination IP address of the tunnel's outer header.                    |                                          |          | ○        |
 | `tunnel.destination.port`    | `long`    |                                                                             |                                          |          | ○        |
 | `tunnel.id`                  | `string`  | The identifier for the tunnel (e.g., VNI for VXLAN/Geneve, Key ID for GRE). |                                          |          | ○        |
-| `tunnel.ipsec.ah.spi`        | `long`    | Security Parameters Index for AH headers.                                   |                                          |          | ○        |
+| `tunnel.ipsec.ah.spi`        | `long`    | Security Parameters Index for AH headers.                                   | SPI from the outermost header            |          | ○        |
 | `ipip.network.type`          | `string`  | The network protocol type (EtherType) of the flow (e.g., `ipv4`, `ipv6`).   |                                          |          | ○        |
 | `ipip.network.transport`     | `string`  | The transport protocol of the flow (e.g., `ipv4`, `ipv6`).                  |                                          |          | ○        |
 | `ipip.source.address`        | `string`  | The source IP address of the tunnel's outer header.                         | Ip-in-Ip is always the outermost header. |          | ○        |
 | `ipip.destination.address`   | `string`  | The destination IP address of the tunnel's outer header.                    |                                          |          | ○        |
-| `flow.ipsec.ah.spi`          | `long`    | Security Parameters Index for AH headers.                                   |                                          |          | ○        |
-| `flow.ipsec.esp.spi`         | `long`    | Security Parameters Index for ESP headers.                                  |                                          |          | ○        |
+| `flow.ipsec.ah.spi`          | `long`    | Security Parameters Index for AH headers.                                   | SPI from the outermost header            |          | ○        |
+| `flow.ipsec.esp.spi`         | `long`    | Security Parameters Index for ESP headers.                                  | SPI from the outermost header            |          | ○        |
 | `flow.ipsec.sender_index`    | `long`    | The sender index from a WireGuard header.                                   |                                          |          | ○        |
 | `flow.ipsec.receiver_index`  | `long`    | The receiver index from a WireGuard header.                                 |                                          |          | ○        |
 

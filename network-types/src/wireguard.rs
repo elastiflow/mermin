@@ -1,3 +1,5 @@
+//! ## Message Type 1: Handshake Initiation
+//!
 //!  0                   1                   2                   3
 //!  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 //! |+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|
@@ -232,6 +234,11 @@ pub fn type_(type_: WgType) -> WireGuardType {
 #[inline]
 pub fn sender_idx(sender_idx: WgSenderIdx) -> u32 {
     u32::from_le_bytes(sender_idx)
+}
+
+#[inline]
+pub fn receiver_idx(receiver_idx: WgReceiverIdx) -> u32 {
+    u32::from_le_bytes(receiver_idx)
 }
 
 #[inline]

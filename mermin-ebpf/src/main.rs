@@ -14,7 +14,7 @@ use mermin_common::{Direction, IpAddrType, PacketMeta, TunnelType};
 use network_types::{
     ah::{self, AH_LEN},
     destopts::{self},
-    esp::ESP_LEN,
+    esp::{self, ESP_LEN},
     eth::{ETH_LEN, EtherType},
     fragment::FRAGMENT_LEN,
     geneve::{self, GENEVE_LEN},
@@ -34,7 +34,7 @@ use network_types::{
     udp::UDP_LEN,
     vxlan::{self, VXLAN_LEN},
     wireguard::{
-        WIREGUARD_COOKIE_REPLY_LEN, WIREGUARD_INITIATION_LEN, WIREGUARD_RESPONSE_LEN,
+        self, WIREGUARD_COOKIE_REPLY_LEN, WIREGUARD_INITIATION_LEN, WIREGUARD_RESPONSE_LEN,
         WIREGUARD_TRANSPORT_DATA_LEN, WireGuardType,
     },
 };
@@ -538,17 +538,13 @@ impl Parser {
         meta.proto = ctx.load(self.offset + 6).map_err(|_| Error::OutOfBounds)?;
 
         // Check if this is an encapsulated packet - outermost IP header determines the ipip values
-        if (meta.proto == IpProto::Ipv6 || meta.proto == IpProto::Ipv4)
-            && meta.tunnel_type == TunnelType::None
-        {
-            // save outer IP header values
+        let ipip_exists = meta.ipip_proto == IpProto::Ipv6 || meta.ipip_proto == IpProto::Ipv4;
+        if (meta.proto == IpProto::Ipv6 || meta.proto == IpProto::Ipv4) && !ipip_exists {
             meta.ipip_ether_type = EtherType::Ipv6;
             meta.ipip_proto = meta.proto;
             meta.ipip_ip_addr_type = IpAddrType::Ipv6;
-            meta.tunnel_src_ipv6_addr =
-                ctx.load(self.offset + 8).map_err(|_| Error::OutOfBounds)?;
-            meta.tunnel_dst_ipv6_addr =
-                ctx.load(self.offset + 24).map_err(|_| Error::OutOfBounds)?;
+            meta.ipip_src_ipv6_addr = ctx.load(self.offset + 8).map_err(|_| Error::OutOfBounds)?;
+            meta.ipip_dst_ipv6_addr = ctx.load(self.offset + 24).map_err(|_| Error::OutOfBounds)?;
 
             self.offset += IPV6_LEN;
             self.next_hdr = HeaderType::Proto(meta.proto);
@@ -633,43 +629,42 @@ impl Parser {
 
     /// Parses the Geneve header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
+    /// - Ethernet -> Ipv4 -> Udp -> Geneve -> Ipv4 -> <IpProto>
+    /// - Ethernet -> Ipv6 -> Udp -> Geneve -> Ipv4 -> <IpProto>
+    /// - Ethernet -> Ipv4 -> Udp -> Geneve -> Ethernet -> Ipv4 -> <IpProto>
     fn parse_geneve_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + GENEVE_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
 
-        let meta = get_packet_meta(ctx)?;
-        let ver_opt_len: geneve::VerOptLen =
-            ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
-        let total_hdr_len = geneve::total_hdr_len(ver_opt_len);
-        meta.tunnel_ether_type = ctx.load(self.offset + 2).map_err(|_| Error::OutOfBounds)?;
+        let meta: &mut PacketMeta = get_packet_meta(ctx)?;
         if meta.tunnel_type == TunnelType::None {
+            // policy: outermost determines the flow span tunnel attributes
             meta.tunnel_type = TunnelType::Geneve;
+            meta.tunnel_ether_type = meta.ether_type;
+            meta.tunnel_proto = meta.proto;
+            meta.tunnel_ip_addr_type = meta.ip_addr_type;
+            if meta.tunnel_ip_addr_type == IpAddrType::Ipv6 {
+                meta.tunnel_src_ipv6_addr = meta.src_ipv6_addr;
+                meta.tunnel_dst_ipv6_addr = meta.dst_ipv6_addr;
+            } else if meta.tunnel_ip_addr_type == IpAddrType::Ipv4 {
+                meta.tunnel_src_ipv4_addr = meta.src_ipv4_addr;
+                meta.tunnel_dst_ipv4_addr = meta.dst_ipv4_addr;
+            }
+            meta.tunnel_src_port = meta.src_port;
+            meta.tunnel_dst_port = meta.dst_port;
             meta.tunnel_id =
                 geneve::vni(ctx.load(self.offset + 4).map_err(|_| Error::OutOfBounds)?);
         }
+        // policy: innermost EtherType determines the flow span EtherType
+        meta.ether_type = ctx.load(self.offset + 2).map_err(|_| Error::OutOfBounds)?;
 
-        // Reset inner headers to prepare for parsing encapsulated packet
-        // TODO see if I can abstract into a function without increasing the stack size
-        meta.ether_type = EtherType::default();
-        meta.proto = IpProto::default();
-        meta.src_mac_addr = [0; 6];
-        meta.ip_addr_type = IpAddrType::default();
-        meta.src_ipv6_addr = [0; 16];
-        meta.dst_ipv6_addr = [0; 16];
-        meta.src_ipv4_addr = [0; 4];
-        meta.dst_ipv4_addr = [0; 4];
-        meta.l3_octet_count = 0;
-        meta.src_port = [0; 2];
-        meta.dst_port = [0; 2];
-        meta.ip_dscp_id = 0;
-        meta.ip_ecn_id = 0;
-        meta.ip_ttl = 0;
-        meta.ip_flow_label = 0;
-        meta.icmp_type_id = 0;
-        meta.icmp_code_id = 0;
-        meta.tcp_flags = 0;
+        // Reset inner headers to prepare for parsing tunneled packet
+        Parser::reset_inner_meta(meta);
 
+        let ver_opt_len: geneve::VerOptLen =
+            ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        let total_hdr_len = geneve::total_hdr_len(ver_opt_len);
         self.offset += total_hdr_len;
         self.next_hdr = match meta.tunnel_ether_type {
             EtherType::Ethernet => HeaderType::Ethernet,
@@ -698,26 +693,8 @@ impl Parser {
             meta.tunnel_type = TunnelType::Vxlan;
         }
 
-        // Reset inner headers to prepare for parsing encapsulated packet
-        // TODO see if I can abstract into a function without increasing the stack size
-        meta.ether_type = EtherType::default();
-        meta.proto = IpProto::default();
-        meta.src_mac_addr = [0; 6];
-        meta.ip_addr_type = IpAddrType::default();
-        meta.src_ipv6_addr = [0; 16];
-        meta.dst_ipv6_addr = [0; 16];
-        meta.src_ipv4_addr = [0; 4];
-        meta.dst_ipv4_addr = [0; 4];
-        meta.l3_octet_count = 0;
-        meta.src_port = [0; 2];
-        meta.dst_port = [0; 2];
-        meta.ip_dscp_id = 0;
-        meta.ip_ecn_id = 0;
-        meta.ip_ttl = 0;
-        meta.ip_flow_label = 0;
-        meta.icmp_type_id = 0;
-        meta.icmp_code_id = 0;
-        meta.tcp_flags = 0;
+        // Reset inner headers to prepare for parsing tunneled packet
+        Parser::reset_inner_meta(meta);
 
         self.offset += VXLAN_LEN;
         self.next_hdr = HeaderType::Ethernet;
@@ -736,14 +713,6 @@ impl Parser {
         let wg_type = WireGuardType::from(wireguard_type);
         self.next_hdr = HeaderType::StopProcessing;
 
-        let meta = get_packet_meta(ctx)?;
-        //Check if tunnel type is set
-        if meta.tunnel_type == TunnelType::None {
-            meta.tunnel_type = TunnelType::Wireguard;
-            meta.tunnel_proto = meta.proto;
-            meta.tunnel_ether_type = meta.ether_type;
-        }
-
         match wg_type {
             WireGuardType::HandshakeInitiation => self.parse_wireguard_init(ctx),
             WireGuardType::HandshakeResponse => self.parse_wireguard_response(ctx),
@@ -754,56 +723,76 @@ impl Parser {
     }
 
     /// Parses a WireGuard Handshake Initiation packet.
-    /// Validates and advances the parser offset.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_wireguard_init(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + WIREGUARD_INITIATION_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
-        // Validate the header can be loaded without storing the large struct
-        let _: u8 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+
+        let meta = get_packet_meta(ctx)?;
+        if meta.ipsec_sender_index == 0 {
+            meta.ipsec_sender_index =
+                wireguard::sender_idx(ctx.load(self.offset + 4).map_err(|_| Error::OutOfBounds)?);
+        }
+
         self.offset += WIREGUARD_INITIATION_LEN;
 
         Ok(())
     }
 
     /// Parses a WireGuard Handshake Response packet.
-    /// Validates and advances the parser offset.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_wireguard_response(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + WIREGUARD_RESPONSE_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
-        // Validate the header can be loaded without storing the large struct
-        let _: u8 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+
+        let meta = get_packet_meta(ctx)?;
+        if meta.ipsec_sender_index == 0 {
+            meta.ipsec_sender_index =
+                wireguard::sender_idx(ctx.load(self.offset + 4).map_err(|_| Error::OutOfBounds)?);
+        }
+        if meta.ipsec_receiver_index == 0 {
+            meta.ipsec_receiver_index =
+                wireguard::receiver_idx(ctx.load(self.offset + 8).map_err(|_| Error::OutOfBounds)?);
+        }
+
         self.offset += WIREGUARD_RESPONSE_LEN;
 
         Ok(())
     }
 
     /// Parses a WireGuard Cookie Reply packet.
-    /// Validates and advances the parser offset.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_wireguard_cookie_reply(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + WIREGUARD_COOKIE_REPLY_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
-        // Validate the header can be loaded without storing the large struct
-        let _: u8 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+
+        let meta = get_packet_meta(ctx)?;
+        if meta.ipsec_receiver_index == 0 {
+            meta.ipsec_receiver_index =
+                wireguard::receiver_idx(ctx.load(self.offset + 4).map_err(|_| Error::OutOfBounds)?);
+        }
+
         self.offset += WIREGUARD_COOKIE_REPLY_LEN;
 
         Ok(())
     }
 
     /// Parses a WireGuard Transport Data packet.
-    /// Validates and advances the parser offset.
     /// Returns an error if the header cannot be loaded or is malformed.
     fn parse_wireguard_transport_data(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + WIREGUARD_TRANSPORT_DATA_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
-        // Validate the header can be loaded without storing the large struct
-        let _: u8 = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+
+        let meta = get_packet_meta(ctx)?;
+        if meta.ipsec_receiver_index == 0 {
+            meta.ipsec_receiver_index =
+                wireguard::receiver_idx(ctx.load(self.offset + 4).map_err(|_| Error::OutOfBounds)?);
+        }
+
         self.offset += WIREGUARD_TRANSPORT_DATA_LEN;
 
         Ok(())
@@ -833,7 +822,6 @@ impl Parser {
             | IpProto::Shim6
             | IpProto::Ipv4
             | IpProto::Ipv6 => HeaderType::Proto(meta.proto),
-            IpProto::Ipv6NoNxt => HeaderType::StopProcessing,
             _ => HeaderType::StopProcessing,
         };
 
@@ -1044,10 +1032,10 @@ impl Parser {
             return Err(Error::OutOfBounds);
         }
 
-        let _meta = get_packet_meta(ctx)?;
-        // TODO: handle tunnels
-        // meta.tunnel_type = TunnelType::Esp;
-        // meta.tunnel_spi = ctx.load(self.offset + 3).map_err(|_| Error::OutOfBounds)?;
+        let meta = get_packet_meta(ctx)?;
+        if meta.ipsec_esp_spi == 0 {
+            meta.ipsec_esp_spi = esp::spi(ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?);
+        }
 
         self.next_hdr = HeaderType::StopProcessing; // ESP signals end of parsing headers because its payload is encrypted
 
@@ -1063,12 +1051,12 @@ impl Parser {
 
         let meta = get_packet_meta(ctx)?;
         meta.proto = ctx.load(self.offset).map_err(|_| Error::OutOfBounds)?;
+        if meta.ipsec_ah_spi == 0 {
+            meta.ipsec_ah_spi = ah::spi(ctx.load(self.offset + 4).map_err(|_| Error::OutOfBounds)?);
+        }
+
         let payload_len: ah::PayloadLen =
             ctx.load(self.offset + 1).map_err(|_| Error::OutOfBounds)?;
-        // TODO: handle tunnels
-        // meta.tunnel_type = TunnelType::Ah;
-        // meta.tunnel_spi = ctx.load(self.offset + 3).map_err(|_| Error::OutOfBounds)?;
-
         self.offset += ah::total_hdr_len(payload_len);
         self.next_hdr = HeaderType::Proto(meta.proto);
 
@@ -1169,6 +1157,31 @@ impl Parser {
         self.next_hdr = HeaderType::Proto(meta.proto);
 
         Ok(())
+    }
+
+    #[inline(always)]
+    fn reset_inner_meta(meta: &mut PacketMeta) {
+        meta.proto = IpProto::default();
+        meta.src_mac_addr = [0; 6];
+        meta.ip_addr_type = IpAddrType::default();
+        meta.src_ipv6_addr = [0; 16];
+        meta.dst_ipv6_addr = [0; 16];
+        meta.src_ipv4_addr = [0; 4];
+        meta.dst_ipv4_addr = [0; 4];
+        meta.l3_octet_count = 0;
+        meta.src_port = [0; 2];
+        meta.dst_port = [0; 2];
+        meta.ip_dscp_id = 0;
+        meta.ip_ecn_id = 0;
+        meta.ip_ttl = 0;
+        meta.ip_flow_label = 0;
+        meta.icmp_type_id = 0;
+        meta.icmp_code_id = 0;
+        meta.tcp_flags = 0;
+        meta.ipsec_ah_spi = 0;
+        meta.ipsec_esp_spi = 0;
+        meta.ipsec_sender_index = 0;
+        meta.ipsec_receiver_index = 0;
     }
 }
 
