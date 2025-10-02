@@ -7,7 +7,7 @@ use std::{
 
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
-use mermin_common::{PacketMeta, TunnelType};
+use mermin_common::{IpAddrType, PacketMeta, TunnelType};
 use network_types::{
     eth::EtherType,
     ip::{IpDscp, IpEcn, IpProto},
@@ -179,19 +179,19 @@ impl PacketWorker {
     }
 
     fn extract_ip_addresses(
-        ip_addr_type: mermin_common::IpAddrType,
+        ip_addr_type: IpAddrType,
         src_ipv4_addr: [u8; 4],
         dst_ipv4_addr: [u8; 4],
         src_ipv6_addr: [u8; 16],
         dst_ipv6_addr: [u8; 16],
     ) -> (IpAddr, IpAddr) {
         match ip_addr_type {
-            mermin_common::IpAddrType::Ipv4 => {
+            IpAddrType::Ipv4 => {
                 let src = IpAddr::V4(std::net::Ipv4Addr::from(src_ipv4_addr));
                 let dst = IpAddr::V4(std::net::Ipv4Addr::from(dst_ipv4_addr));
                 (src, dst)
             }
-            mermin_common::IpAddrType::Ipv6 => {
+            IpAddrType::Ipv6 => {
                 let src = IpAddr::V6(std::net::Ipv6Addr::from(src_ipv6_addr));
                 let dst = IpAddr::V6(std::net::Ipv6Addr::from(dst_ipv6_addr));
                 (src, dst)

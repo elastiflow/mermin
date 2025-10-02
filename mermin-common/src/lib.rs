@@ -18,9 +18,13 @@ pub struct PacketMeta {
     pub src_ipv6_addr: [u8; 16],
     /// Destination IPv6 address (innermost)
     pub dst_ipv6_addr: [u8; 16],
-    /// Source IPv6 address (outermost)
+    /// Ip-in-Ip Source IPv6 address (outermost)
+    pub ipip_src_ipv6_addr: [u8; 16],
+    /// Ip-in-Ip Destination IPv6 address (outermost)
+    pub ipip_dst_ipv6_addr: [u8; 16],
+    /// Tunnel Source IPv6 address (outermost)
     pub tunnel_src_ipv6_addr: [u8; 16],
-    /// Destination IPv6 address (outermost)
+    /// Tunnel Destination IPv6 address (outermost)
     pub tunnel_dst_ipv6_addr: [u8; 16],
 
     /// Fields with 6-byte alignment
@@ -40,18 +44,26 @@ pub struct PacketMeta {
     pub ip_flow_label: u32,
     /// Total count of bytes in a packet
     pub l3_octet_count: u32,
-    /// Source IPv4 address (outermost)
+    /// Tunnel Security Parameter Index
+    pub ipsec_ah_spi: u32,
+    /// Tunnel Security Parameter Index
+    pub ipsec_esp_spi: u32,
+    /// Tunnel sender index
+    pub ipsec_sender_index: u32,
+    /// Tunnel receiver index
+    pub ipsec_receiver_index: u32,
+    /// Ip-in-Ip Source IPv4 address (outermost)
+    pub ipip_src_ipv4_addr: [u8; 4],
+    /// Ip-in-Ip Destination IPv4 address (outermost)
+    pub ipip_dst_ipv4_addr: [u8; 4],
+    /// Tunnel Source IPv4 address (outermost)
     pub tunnel_src_ipv4_addr: [u8; 4],
-    /// Destination IPv4 address (outermost)
+    /// Tunnel Destination IPv4 address (outermost)
     pub tunnel_dst_ipv4_addr: [u8; 4],
     /// Tunnel id, typically a VNI or Key ID
     pub tunnel_id: u32,
-    /// Tunnel sender index
-    pub tunnel_sender_index: u32,
-    /// Tunnel receiver index
-    pub tunnel_receiver_index: u32,
     /// Tunnel Security Parameter Index
-    pub tunnel_spi: u32,
+    pub tunnel_ipsec_ah_spi: u32,
 
     // Fields with 2-byte alignment
     // ---
@@ -61,6 +73,8 @@ pub struct PacketMeta {
     pub src_port: [u8; 2],
     /// Destination transport layer port number (innermost). Bytes represents a u16 value
     pub dst_port: [u8; 2],
+    /// Ip-in-Ip EtherType (outermost). Bytes represents a u16 value
+    pub ipip_ether_type: EtherType,
     /// EtherType (outermost). Bytes represents a u16 value
     pub tunnel_ether_type: EtherType,
     /// Source transport layer port number (outermost). Bytes represents a u16 value
@@ -74,6 +88,8 @@ pub struct PacketMeta {
     pub ip_addr_type: IpAddrType,
     /// Network protocol identifier (innermost, e.g., TCP = 6, UDP = 17)
     pub proto: IpProto,
+    /// Ip-in-Ip protocol identifier (outermost, e.g., IPv4 = 4, IPv6 = 41)
+    pub ipip_proto: IpProto,
     /// Packet direction: Ingress (incoming) or Egress (outgoing)
     pub direction: Direction,
     /// Differentiated Services Code Point (DSCP) value from the IP header
@@ -90,10 +106,10 @@ pub struct PacketMeta {
     pub tcp_flags: u8,
     /// Indicates whether the flow record uses IPv4 or IPv6 addressing (outermost)
     pub tunnel_ip_addr_type: IpAddrType,
-    /// Network protocol identifier (outermost, e.g., TCP = 6, UDP = 17)
-    pub tunnel_proto: IpProto,
     /// Tunnel type
     pub tunnel_type: TunnelType,
+    /// Network protocol identifier (outermost, e.g., TCP = 6, UDP = 17)
+    pub tunnel_proto: IpProto,
 }
 
 #[repr(u8)]
@@ -101,37 +117,14 @@ pub struct PacketMeta {
 pub enum TunnelType {
     #[default]
     None = 0,
-    Ipv4 = 1,
-    Ipv6 = 2,
-    Gre = 3,
-    Esp = 4,
-    Ah = 5,
-    Geneve = 6,
-    Vxlan = 7,
-    Wireguard = 8,
-}
-
-impl From<IpProto> for TunnelType {
-    fn from(proto: IpProto) -> Self {
-        match proto {
-            IpProto::Ipv4 => TunnelType::Ipv4,
-            IpProto::Ipv6 => TunnelType::Ipv6,
-            IpProto::Gre => TunnelType::Gre,
-            IpProto::Esp => TunnelType::Esp,
-            IpProto::Ah => TunnelType::Ah,
-            _ => TunnelType::None,
-        }
-    }
+    Geneve = 1,
+    Vxlan = 2,
+    Wireguard = 3,
 }
 
 impl TunnelType {
     pub fn as_str(&self) -> &'static str {
         match self {
-            TunnelType::Ipv4 => "ipv4",
-            TunnelType::Ipv6 => "ipv6",
-            TunnelType::Gre => "gre",
-            TunnelType::Esp => "esp",
-            TunnelType::Ah => "ah",
             TunnelType::Geneve => "geneve",
             TunnelType::Vxlan => "vxlan",
             TunnelType::Wireguard => "wireguard",
@@ -335,9 +328,7 @@ mod tests {
             tunnel_dst_port: tunnel_dst_port.to_be_bytes(),
             tunnel_ip_addr_type: Ipv6,
             tunnel_id: 0,
-            tunnel_sender_index: 0,
-            tunnel_receiver_index: 0,
-            tunnel_spi: 0,
+            tunnel_ipsec_ah_spi: 0,
             tunnel_type: TunnelType::None,
             tunnel_proto: IpProto::Udp,
             ip_flow_label: flow_label,
@@ -348,6 +339,7 @@ mod tests {
             icmp_code_id: icmp_code,
             tcp_flags: tcp_flags,
             direction: Direction::Egress,
+            ..Default::default()
         };
 
         // Test field access
