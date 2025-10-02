@@ -2,24 +2,43 @@
 
 #[cfg(feature = "user")]
 use aya::Pod;
-use network_types::{
-    ah::AuthHdr,
-    destopts::DestOptsHdr,
-    esp::Esp,
-    eth::EthHdr,
-    fragment::FragmentHdr,
-    geneve::GeneveHdr,
-    gre::GreHdr,
-    hop::HopOptHdr,
-    ip::{Ipv4Hdr, Ipv6Hdr},
-    mobility::MobilityHdr,
-    route::{CrhHeader, RplSourceRouteHeader, SegmentRoutingHeader, Type2RoutingHeader},
-    shim6::Shim6Hdr,
-    tcp::TcpHdr,
-    udp::UdpHdr,
-    vxlan::VxlanHdr,
-    wireguard::WireGuardType,
-};
+use network_types::{eth::EtherType, wireguard::WireGuardType};
+
+/// Test data structures containing only the fields actually extracted by the parser
+/// These mirror what gets stored in PacketMeta, not the full protocol headers
+
+/// Ethernet test data - only fields extracted from Ethernet header
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct EthernetTestData {
+    pub mac_addr: [u8; 6],      // First 6 bytes (dst MAC in actual frame, stored as src in meta)
+    pub ether_type: EtherType,  // Bytes 12-13
+}
+
+/// UDP test data - only fields extracted from UDP header
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct UdpTestData {
+    pub src_port: [u8; 2],  // Bytes 0-1
+    pub dst_port: [u8; 2],  // Bytes 2-3
+}
+
+/// TCP test data - only fields extracted from TCP header
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct TcpTestData {
+    pub src_port: [u8; 2],  // Bytes 0-1
+    pub dst_port: [u8; 2],  // Bytes 2-3
+    pub tcp_flags: u8,      // Byte 13
+}
+
+/// Generic test data for IPv6 extension headers that only extract next_hdr
+/// Used for: AH, ESP, Fragment, HopOpt, DestOpts, Mobility, Shim6, Generic Routing
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct NextHdrOnlyTestData {
+    pub next_hdr: u8,  // Byte 0 - IpProto
+}
 
 /// Minimal WireGuard header for eBPF processing - only essential fields (12 bytes)
 /// This contains only the common fields across all WireGuard message types
@@ -80,31 +99,18 @@ pub enum PacketType {
 
 /// A union to hold any of the possible parsed network headers.
 /// This allows us to have a single, fixed-size return type.
+/// Contains only the fields actually extracted by the parser, not full protocol headers.
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub union HeaderUnion {
-    pub eth: EthHdr,
-    pub ipv4: Ipv4Hdr,
-    pub ipv6: Ipv6Hdr,
-    pub tcp: TcpHdr,
-    pub udp: UdpHdr,
-    pub ah: AuthHdr,
-    pub esp: Esp,
-    pub hop: HopOptHdr,
-    pub geneve: GeneveHdr,
-    pub rpl: RplSourceRouteHeader,
-    pub type2: Type2RoutingHeader,
-    pub segment_routing: SegmentRoutingHeader,
-    pub crh16: CrhHeader,
-    pub crh32: CrhHeader,
-    pub fragment: FragmentHdr,
-    pub destopts: DestOptsHdr,
-    pub vxlan: VxlanHdr,
-    pub mobility: MobilityHdr,
-    pub shim6: Shim6Hdr,
-    pub hip: network_types::hip::HipHdr,
-    pub gre: GreHdr,
+    pub eth: EthernetTestData,
+    pub udp: UdpTestData,
+    pub tcp: TcpTestData,
     pub wireguard: WireGuardMinimalHeader,
+    // IPv6 extension headers that only extract next_hdr
+    pub next_hdr_only: NextHdrOnlyTestData,  // Used for: AH, ESP, Fragment, HopOpt, DestOpts, Mobility, Shim6
+    // Placeholder for remaining complex types
+    pub placeholder: [u8; 64],
 }
 
 /// The final struct sent back to user-space. It contains the type of

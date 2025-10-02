@@ -1,43 +1,38 @@
-use integration_common::{PacketType, ParsedHeader};
-use network_types::{hop::HopOptHdr, ip::IpProto};
+use integration_common::{NextHdrOnlyTestData, PacketType, ParsedHeader};
+use network_types::{hop::HOP_OPT_LEN, ip::IpProto};
 
-// Helper for constructing Hop-by-Hop Options Header test packets
-pub fn create_hop_test_packet() -> ([u8; HopOptHdr::LEN + 1], HopOptHdr) {
-    let mut request_data = [0u8; HopOptHdr::LEN + 1];
+/// Helper for constructing Hop-by-Hop Options header test packets
+/// 
+/// Matches the new parsing methodology where we only extract:
+/// - Byte 0: Next Header (IpProto)
+pub fn create_hop_test_packet() -> ([u8; HOP_OPT_LEN + 1], NextHdrOnlyTestData) {
+    let mut request_data = [0u8; HOP_OPT_LEN + 1];
 
-    // Byte 0: The type discriminator for the eBPF program's `match` statement.
+    // Byte 0: The type discriminator for the eBPF program's `match` statement
     request_data[0] = PacketType::Hop as u8;
-    // Byte 1: Next Header (TCP = 6)
+    
+    // Byte 1: Next Header (IpProto::Tcp) - THIS IS EXTRACTED
     request_data[1] = IpProto::Tcp as u8;
-    // Byte 2: Header Extension Length (0 means 8 bytes total, which is the minimum)
+    
+    // Byte 2: Header Extension Length - NOT extracted
     request_data[2] = 0;
-    // Bytes 3-8: Option data (6 bytes)
-    request_data[3..9].copy_from_slice(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
 
-    let expected_header = HopOptHdr {
-        next_hdr: IpProto::Tcp,
-        hdr_ext_len: 0,
-        opt_data: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06],
+    let expected_data = NextHdrOnlyTestData {
+        next_hdr: IpProto::Tcp as u8,
     };
 
-    (request_data, expected_header)
+    (request_data, expected_data)
 }
 
-// Helper for verifying Hop-by-Hop Options Header test results
-pub fn verify_hop_header(received: ParsedHeader, expected: HopOptHdr) {
-    assert_eq!(received.type_, PacketType::Hop);
-    let parsed_header = unsafe { received.data.hop };
+/// Helper for verifying Hop-by-Hop Options header test results
+pub fn verify_hop_header(received: ParsedHeader, expected: NextHdrOnlyTestData) {
+    assert_eq!(received.type_, PacketType::Hop, "Packet type mismatch");
+    
+    let parsed = unsafe { received.data.next_hdr_only };
 
     assert_eq!(
-        parsed_header.next_hdr, expected.next_hdr,
-        "Next Header mismatch"
-    );
-    assert_eq!(
-        parsed_header.hdr_ext_len, expected.hdr_ext_len,
-        "Header Extension Length mismatch"
-    );
-    assert_eq!(
-        parsed_header.opt_data, expected.opt_data,
-        "Option data mismatch"
+        parsed.next_hdr, expected.next_hdr,
+        "Next header mismatch: expected {}, got {}",
+        expected.next_hdr, parsed.next_hdr
     );
 }

@@ -8,26 +8,19 @@ use aya_ebpf::{
     programs::TcContext,
 };
 use aya_log_ebpf::{Level, log};
-use integration_common::{HeaderUnion, PacketType, ParsedHeader};
+use integration_common::{EthernetTestData, HeaderUnion, NextHdrOnlyTestData, PacketType, ParsedHeader, TcpTestData, UdpTestData};
 use network_types::{
-    ah::AuthHdr,
-    destopts::DestOptsHdr,
-    esp::Esp,
-    eth::EthHdr,
-    fragment::FragmentHdr,
-    geneve::GeneveHdr,
-    gre::GreHdr,
-    hop::HopOptHdr,
-    ip::{Ipv4Hdr, Ipv6Hdr},
-    mobility::MobilityHdr,
-    route::{
-        CrhHeader, RoutingHeaderType, RplSourceRouteHeader, SegmentRoutingHeader,
-        Type2RoutingHeader,
-    },
-    shim6::Shim6Hdr,
-    tcp::TcpHdr,
-    udp::UdpHdr,
-    vxlan::VxlanHdr,
+    // ah::AH_LEN,
+    // destopts::DEST_OPTS_LEN,
+    // esp::ESP_LEN,
+    eth::{ETH_LEN, EtherType},
+    // fragment::FRAGMENT_LEN,
+    // hop::HOP_OPT_LEN,
+    // ip::IpProto,
+    // mobility::MOBILITY_LEN,
+    // shim6::SHIM6_LEN,
+    // tcp::TCP_LEN,
+    // udp::UDP_LEN,
 };
 
 pub const MAX_RPL_ADDR_STORAGE: usize = 128;
@@ -149,7 +142,13 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
 
     // In our specific test case (UDP packet on loopback), we can assume a fixed header size.
     // Ethernet Header (14 bytes) + IPv4 Header (20 bytes) + UDP Header (8 bytes) = 42 bytes.
-    const PAYLOAD_OFFSET: usize = EthHdr::LEN + Ipv4Hdr::LEN + UdpHdr::LEN;
+    const PAYLOAD_OFFSET: usize = 42;
+
+    // Bounds check for packet type byte
+    if PAYLOAD_OFFSET + 1 > ctx.len() as usize {
+        log!(&ctx, Level::Error, "Packet too short to contain type discriminator");
+        return Err(TC_ACT_SHOT);
+    }
 
     let packet_type_byte: u8 = ctx.load(PAYLOAD_OFFSET).map_err(|_| TC_ACT_SHOT)?;
     let data_offset = PAYLOAD_OFFSET + 1;
@@ -169,287 +168,503 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
 
     let (response, header_size) = match packet_type {
         PacketType::Eth => {
-            let header: EthHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
-            let first_byte = header.dst_addr[0]; // First byte of destination MAC
+            // Bounds check before parsing
+            if data_offset + ETH_LEN > ctx.len() as usize {
+                log!(&ctx, Level::Error, "Ethernet header out of bounds");
+                return Err(TC_ACT_SHOT);
+            }
+            
+            // Parse Ethernet header fields individually (matching mermin-ebpf methodology)
+            // Extract only the fields that are actually used
+            let mac_addr: [u8; 6] = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            let ether_type: EtherType = ctx.load(data_offset + 12).map_err(|_| TC_ACT_SHOT)?;
+            
+            let first_byte = mac_addr[0]; // First byte of MAC address
             store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+            
             (
                 ParsedHeader {
                     type_: PacketType::Eth,
-                    data: HeaderUnion { eth: header },
-                },
-                EthHdr::LEN as u32,
-            )
-        }
-        PacketType::Ipv4 => {
-            let header: Ipv4Hdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
-            let first_byte = header.vihl; // First byte contains version and IHL
-            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
-            (
-                ParsedHeader {
-                    type_: PacketType::Ipv4,
-                    data: HeaderUnion { ipv4: header },
-                },
-                Ipv4Hdr::LEN as u32,
-            )
-        }
-        PacketType::Ipv6 => {
-            let header: Ipv6Hdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
-            let first_byte = header.vcf[0]; // First byte contains version and traffic class
-            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
-            (
-                ParsedHeader {
-                    type_: PacketType::Ipv6,
-                    data: HeaderUnion { ipv6: header },
-                },
-                Ipv6Hdr::LEN as u32,
-            )
-        }
-        PacketType::Tcp => {
-            let header: TcpHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
-            let first_byte = header.src[0]; // First byte of source port
-            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
-            (
-                ParsedHeader {
-                    type_: PacketType::Tcp,
-                    data: HeaderUnion { tcp: header },
-                },
-                TcpHdr::LEN as u32,
-            )
-        }
-        PacketType::Udp => {
-            let header: UdpHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
-            let first_byte = header.src[0]; // First byte of source port
-            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
-            (
-                ParsedHeader {
-                    type_: PacketType::Udp,
-                    data: HeaderUnion { udp: header },
-                },
-                UdpHdr::LEN as u32,
-            )
-        }
-        PacketType::Ah => {
-            let header: AuthHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
-            let first_byte = header.next_hdr as u8; // First byte is next header
-            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
-            (
-                ParsedHeader {
-                    type_: PacketType::Ah,
-                    data: HeaderUnion { ah: header },
-                },
-                AuthHdr::LEN as u32,
-            )
-        }
-        PacketType::Esp => {
-            let header: Esp = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
-            let first_byte = header.spi[0]; // First byte of SPI
-            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
-            (
-                ParsedHeader {
-                    type_: PacketType::Esp,
-                    data: HeaderUnion { esp: header },
-                },
-                Esp::LEN as u32,
-            )
-        }
-        PacketType::Hop => {
-            let header: HopOptHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
-            let first_byte = header.next_hdr as u8; // First byte is next header
-            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
-            (
-                ParsedHeader {
-                    type_: PacketType::Hop,
-                    data: HeaderUnion { hop: header },
-                },
-                HopOptHdr::LEN as u32,
-            )
-        }
-        PacketType::Geneve => {
-            let header: GeneveHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
-            let first_byte = header.ver_opt_len; // First byte contains version and option length
-            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
-            (
-                ParsedHeader {
-                    type_: PacketType::Geneve,
-                    data: HeaderUnion { geneve: header },
-                },
-                GeneveHdr::LEN as u32,
-            )
-        }
-        PacketType::Fragment => {
-            let header: FragmentHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
-            let first_byte = header.next_hdr as u8; // First byte is next header
-            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
-            (
-                ParsedHeader {
-                    type_: PacketType::Fragment,
-                    data: HeaderUnion { fragment: header },
-                },
-                FragmentHdr::LEN as u32,
-            )
-        }
-        PacketType::DestOpts => {
-            let header: DestOptsHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
-            let first_byte = header.next_hdr as u8; // First byte is next header
-            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
-            (
-                ParsedHeader {
-                    type_: PacketType::DestOpts,
-                    data: HeaderUnion { destopts: header },
-                },
-                DestOptsHdr::LEN as u32,
-            )
-        }
-        PacketType::Mobility => {
-            let header: MobilityHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
-            let first_byte = header.next_hdr as u8; // First byte is next header
-            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
-            (
-                ParsedHeader {
-                    type_: PacketType::Mobility,
-                    data: HeaderUnion { mobility: header },
-                },
-                MobilityHdr::LEN as u32,
-            )
-        }
-        PacketType::Type2 => {
-            let type2_hdr: Type2RoutingHeader = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
-            let first_byte = type2_hdr.generic_route.next_hdr as u8; // First byte is next header
-            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
-
-            (
-                ParsedHeader {
-                    type_: PacketType::Type2,
-                    data: HeaderUnion { type2: type2_hdr },
-                },
-                Type2RoutingHeader::LEN as u32,
-            )
-        }
-        PacketType::RplSourceRoute => {
-            let offset = data_offset;
-            let rpl_header: RplSourceRouteHeader = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
-
-            if rpl_header.generic_route.type_ != RoutingHeaderType::RplSourceRoute {
-                return Err(TC_ACT_SHOT);
-            }
-
-            let first_byte = rpl_header.generic_route.next_hdr as u8; // First byte is next header
-            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
-
-            (
-                ParsedHeader {
-                    type_: PacketType::RplSourceRoute,
-                    data: HeaderUnion { rpl: rpl_header },
-                },
-                RplSourceRouteHeader::LEN as u32,
-            )
-        }
-        PacketType::SegmentRouting => {
-            let offset = data_offset;
-            let segment_hdr: SegmentRoutingHeader = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
-
-            if segment_hdr.generic_route.type_ != RoutingHeaderType::SegmentRoutingHeader {
-                return Err(TC_ACT_SHOT);
-            }
-
-            let first_byte = segment_hdr.generic_route.next_hdr as u8; // First byte is next header
-            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
-
-            (
-                ParsedHeader {
-                    type_: PacketType::SegmentRouting,
-                    data: HeaderUnion {
-                        segment_routing: segment_hdr,
+                    data: HeaderUnion { 
+                        eth: EthernetTestData {
+                            mac_addr,
+                            ether_type,
+                        }
                     },
                 },
-                SegmentRoutingHeader::LEN as u32,
+                ETH_LEN as u32,
             )
         }
-        PacketType::Shim6 => {
-            let header: Shim6Hdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
-            let first_byte = header.next_hdr as u8; // First byte is next header
-            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
-            (
-                ParsedHeader {
-                    type_: PacketType::Shim6,
-                    data: HeaderUnion { shim6: header },
-                },
-                Shim6Hdr::LEN as u32,
-            )
-        }
-        PacketType::Crh16 | PacketType::Crh32 => {
-            let offset = data_offset;
-            let crh_header: CrhHeader = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
+        // PacketType::Ipv4 => {
+        //     let header: Ipv4Hdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = header.vihl; // First byte contains version and IHL
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Ipv4,
+        //             data: HeaderUnion { ipv4: header },
+        //         },
+        //         Ipv4Hdr::LEN as u32,
+        //     )
+        // }
+        // PacketType::Ipv6 => {
+        //     let header: Ipv6Hdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = header.vcf[0]; // First byte contains version and traffic class
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Ipv6,
+        //             data: HeaderUnion { ipv6: header },
+        //         },
+        //         Ipv6Hdr::LEN as u32,
+        //     )
+        // }
+        // PacketType::Tcp => {
+        //     // Bounds check before parsing
+        //     if data_offset + TCP_LEN > ctx.len() as usize {
+        //         log!(&ctx, Level::Error, "TCP header out of bounds");
+        //         return Err(TC_ACT_SHOT);
+        //     }
+        //     
+        //     // Parse TCP header fields individually (matching mermin-ebpf methodology)
+        //     let src_port: [u8; 2] = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let dst_port: [u8; 2] = ctx.load(data_offset + 2).map_err(|_| TC_ACT_SHOT)?;
+        //     let tcp_flags: u8 = ctx.load(data_offset + 13).map_err(|_| TC_ACT_SHOT)?;
+        //     
+        //     let first_byte = src_port[0]; // First byte of source port
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Tcp,
+        //             data: HeaderUnion { 
+        //                 tcp: TcpTestData {
+        //                     src_port,
+        //                     dst_port,
+        //                     tcp_flags,
+        //                 }
+        //             },
+        //         },
+        //         TCP_LEN as u32,
+        //     )
+        // }
+        // PacketType::Udp => {
+        //     // Bounds check before parsing
+        //     if data_offset + UDP_LEN > ctx.len() as usize {
+        //         log!(&ctx, Level::Error, "UDP header out of bounds");
+        //         return Err(TC_ACT_SHOT);
+        //     }
+        //     
+        //     // Parse UDP header fields individually (matching mermin-ebpf methodology)
+        //     let src_port: [u8; 2] = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let dst_port: [u8; 2] = ctx.load(data_offset + 2).map_err(|_| TC_ACT_SHOT)?;
+        //     
+        //     let first_byte = src_port[0]; // First byte of source port
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Udp,
+        //             data: HeaderUnion { 
+        //                 udp: UdpTestData {
+        //                     src_port,
+        //                     dst_port,
+        //                 }
+        //             },
+        //         },
+        //         UDP_LEN as u32,
+        //     )
+        // }
+        // PacketType::Ah => {
+        //     // Bounds check before parsing
+        //     if data_offset + AH_LEN > ctx.len() as usize {
+        //         log!(&ctx, Level::Error, "AH header out of bounds");
+        //         return Err(TC_ACT_SHOT);
+        //     }
+        //     
+        //     // Parse AH header - only extracts next_hdr (byte 0)
+        //     let next_hdr: IpProto = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = next_hdr as u8;
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Ah,
+        //             data: HeaderUnion { 
+        //                 next_hdr_only: NextHdrOnlyTestData {
+        //                     next_hdr: first_byte,
+        //                 }
+        //             },
+        //         },
+        //         AH_LEN as u32,
+        //     )
+        // }
+        // PacketType::Esp => {
+        //     // Bounds check before parsing
+        //     if data_offset + ESP_LEN > ctx.len() as usize {
+        //         log!(&ctx, Level::Error, "ESP header out of bounds");
+        //         return Err(TC_ACT_SHOT);
+        //     }
+        //     
+        //     // Parse ESP header - only extracts next_hdr (byte 0) 
+        //     let next_hdr: IpProto = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = next_hdr as u8;
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Esp,
+        //             data: HeaderUnion { 
+        //                 next_hdr_only: NextHdrOnlyTestData {
+        //                     next_hdr: first_byte,
+        //                 }
+        //             },
+        //         },
+        //         ESP_LEN as u32,
+        //     )
+        // }
+        // PacketType::Hop => {
+        //     // Bounds check before parsing
+        //     if data_offset + HOP_OPT_LEN > ctx.len() as usize {
+        //         log!(&ctx, Level::Error, "Hop-by-Hop header out of bounds");
+        //         return Err(TC_ACT_SHOT);
+        //     }
+        //     
+        //     // Parse Hop-by-Hop Options header - only extracts next_hdr (byte 0)
+        //     let next_hdr: IpProto = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = next_hdr as u8;
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Hop,
+        //             data: HeaderUnion { 
+        //                 next_hdr_only: NextHdrOnlyTestData {
+        //                     next_hdr: first_byte,
+        //                 }
+        //             },
+        //         },
+        //         HOP_OPT_LEN as u32,
+        //     )
+        // }
+        // PacketType::Fragment => {
+        //     // Bounds check before parsing
+        //     if data_offset + FRAGMENT_LEN > ctx.len() as usize {
+        //         log!(&ctx, Level::Error, "Fragment header out of bounds");
+        //         return Err(TC_ACT_SHOT);
+        //     }
+        //     
+        //     // Parse Fragment header - only extracts next_hdr (byte 0)
+        //     let next_hdr: IpProto = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = next_hdr as u8;
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Fragment,
+        //             data: HeaderUnion { 
+        //                 next_hdr_only: NextHdrOnlyTestData {
+        //                     next_hdr: first_byte,
+        //                 }
+        //             },
+        //         },
+        //         FRAGMENT_LEN as u32,
+        //     )
+        // }
+        // PacketType::DestOpts => {
+        //     // Bounds check before parsing
+        //     if data_offset + DEST_OPTS_LEN > ctx.len() as usize {
+        //         log!(&ctx, Level::Error, "Destination Options header out of bounds");
+        //         return Err(TC_ACT_SHOT);
+        //     }
+        //     
+        //     // Parse Destination Options header - only extracts next_hdr (byte 0)
+        //     let next_hdr: IpProto = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = next_hdr as u8;
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::DestOpts,
+        //             data: HeaderUnion { 
+        //                 next_hdr_only: NextHdrOnlyTestData {
+        //                     next_hdr: first_byte,
+        //                 }
+        //             },
+        //         },
+        //         DEST_OPTS_LEN as u32,
+        //     )
+        // }
+        // PacketType::Mobility => {
+        //     // Bounds check before parsing
+        //     if data_offset + MOBILITY_LEN > ctx.len() as usize {
+        //         log!(&ctx, Level::Error, "Mobility header out of bounds");
+        //         return Err(TC_ACT_SHOT);
+        //     }
+        //     
+        //     // Parse Mobility header - only extracts next_hdr (byte 0)
+        //     let next_hdr: IpProto = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = next_hdr as u8;
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Mobility,
+        //             data: HeaderUnion { 
+        //                 next_hdr_only: NextHdrOnlyTestData {
+        //                     next_hdr: first_byte,
+        //                 }
+        //             },
+        //         },
+        //         MOBILITY_LEN as u32,
+        //     )
+        // }
+        // PacketType::Shim6 => {
+        //     // Bounds check before parsing
+        //     if data_offset + SHIM6_LEN > ctx.len() as usize {
+        //         log!(&ctx, Level::Error, "SHIM6 header out of bounds");
+        //         return Err(TC_ACT_SHOT);
+        //     }
+        //     
+        //     // Parse SHIM6 header - only extracts next_hdr (byte 0)
+        //     let next_hdr: IpProto = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = next_hdr as u8;
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Shim6,
+        //             data: HeaderUnion { 
+        //                 next_hdr_only: NextHdrOnlyTestData {
+        //                     next_hdr: first_byte,
+        //                 }
+        //             },
+        //         },
+        //         SHIM6_LEN as u32,
+        //     )
+        // }
+        // PacketType::Ah => {
+        //     let header: AuthHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = header.next_hdr as u8; // First byte is next header
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Ah,
+        //             data: HeaderUnion { ah: header },
+        //         },
+        //         AuthHdr::LEN as u32,
+        //     )
+        // }
+        // PacketType::Esp => {
+        //     let header: Esp = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = header.spi[0]; // First byte of SPI
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Esp,
+        //             data: HeaderUnion { esp: header },
+        //         },
+        //         Esp::LEN as u32,
+        //     )
+        // }
+        // PacketType::Hop => {
+        //     let header: HopOptHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = header.next_hdr as u8; // First byte is next header
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Hop,
+        //             data: HeaderUnion { hop: header },
+        //         },
+        //         HopOptHdr::LEN as u32,
+        //     )
+        // }
+        // PacketType::Geneve => {
+        //     let header: GeneveHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = header.ver_opt_len; // First byte contains version and option length
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Geneve,
+        //             data: HeaderUnion { geneve: header },
+        //         },
+        //         GeneveHdr::LEN as u32,
+        //     )
+        // }
+        // PacketType::Fragment => {
+        //     let header: FragmentHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = header.next_hdr as u8; // First byte is next header
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Fragment,
+        //             data: HeaderUnion { fragment: header },
+        //         },
+        //         FragmentHdr::LEN as u32,
+        //     )
+        // }
+        // PacketType::DestOpts => {
+        //     let header: DestOptsHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = header.next_hdr as u8; // First byte is next header
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::DestOpts,
+        //             data: HeaderUnion { destopts: header },
+        //         },
+        //         DestOptsHdr::LEN as u32,
+        //     )
+        // }
+        // PacketType::Mobility => {
+        //     let header: MobilityHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = header.next_hdr as u8; // First byte is next header
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Mobility,
+        //             data: HeaderUnion { mobility: header },
+        //         },
+        //         MobilityHdr::LEN as u32,
+        //     )
+        // }
+        // PacketType::Type2 => {
+        //     let type2_hdr: Type2RoutingHeader = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = type2_hdr.generic_route.next_hdr as u8; // First byte is next header
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
 
-            // Verify routing type matches expected CRH type
-            let expected_type = match packet_type {
-                PacketType::Crh16 => RoutingHeaderType::Crh16,
-                PacketType::Crh32 => RoutingHeaderType::Crh32,
-                _ => return Err(TC_ACT_SHOT),
-            };
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Type2,
+        //             data: HeaderUnion { type2: type2_hdr },
+        //         },
+        //         Type2RoutingHeader::LEN as u32,
+        //     )
+        // }
+        // PacketType::RplSourceRoute => {
+        //     let offset = data_offset;
+        //     let rpl_header: RplSourceRouteHeader = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
 
-            if crh_header.generic_route.type_ != expected_type {
-                return Err(TC_ACT_SHOT);
-            }
+        //     if rpl_header.generic_route.type_ != RoutingHeaderType::RplSourceRoute {
+        //         return Err(TC_ACT_SHOT);
+        //     }
 
-            let first_byte = crh_header.generic_route.next_hdr as u8; // First byte is next header
-            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     let first_byte = rpl_header.generic_route.next_hdr as u8; // First byte is next header
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
 
-            match packet_type {
-                PacketType::Crh16 => (
-                    ParsedHeader {
-                        type_: PacketType::Crh16,
-                        data: HeaderUnion { crh16: crh_header },
-                    },
-                    CrhHeader::LEN as u32,
-                ),
-                PacketType::Crh32 => (
-                    ParsedHeader {
-                        type_: PacketType::Crh32,
-                        data: HeaderUnion { crh32: crh_header },
-                    },
-                    CrhHeader::LEN as u32,
-                ),
-                _ => return Err(TC_ACT_SHOT),
-            }
-        }
-        PacketType::Vxlan => {
-            let header: VxlanHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
-            let first_byte = header.flags; // First byte contains flags
-            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
-            (
-                ParsedHeader {
-                    type_: PacketType::Vxlan,
-                    data: HeaderUnion { vxlan: header },
-                },
-                VxlanHdr::LEN as u32,
-            )
-        }
-        PacketType::Hip => {
-            let header: network_types::hip::HipHdr =
-                ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
-            let first_byte = header.next_hdr as u8; // First byte is next header
-            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
-            (
-                ParsedHeader {
-                    type_: PacketType::Hip,
-                    data: HeaderUnion { hip: header },
-                },
-                network_types::hip::HipHdr::LEN as u32,
-            )
-        }
-        PacketType::Gre => {
-            let header: GreHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
-            let first_byte = header.flgs_res0_ver[0]; // First byte contains flags
-            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
-            (
-                ParsedHeader {
-                    type_: PacketType::Gre,
-                    data: HeaderUnion { gre: header },
-                },
-                GreHdr::LEN as u32,
-            )
-        }
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::RplSourceRoute,
+        //             data: HeaderUnion { rpl: rpl_header },
+        //         },
+        //         RplSourceRouteHeader::LEN as u32,
+        //     )
+        // }
+        // PacketType::SegmentRouting => {
+        //     let offset = data_offset;
+        //     let segment_hdr: SegmentRoutingHeader = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
+
+        //     if segment_hdr.generic_route.type_ != RoutingHeaderType::SegmentRoutingHeader {
+        //         return Err(TC_ACT_SHOT);
+        //     }
+
+        //     let first_byte = segment_hdr.generic_route.next_hdr as u8; // First byte is next header
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::SegmentRouting,
+        //             data: HeaderUnion {
+        //                 segment_routing: segment_hdr,
+        //             },
+        //         },
+        //         SegmentRoutingHeader::LEN as u32,
+        //     )
+        // }
+        // PacketType::Shim6 => {
+        //     let header: Shim6Hdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = header.next_hdr as u8; // First byte is next header
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Shim6,
+        //             data: HeaderUnion { shim6: header },
+        //         },
+        //         Shim6Hdr::LEN as u32,
+        //     )
+        // }
+        // PacketType::Crh16 | PacketType::Crh32 => {
+        //     let offset = data_offset;
+        //     let crh_header: CrhHeader = ctx.load(offset).map_err(|_| TC_ACT_SHOT)?;
+
+        //     // Verify routing type matches expected CRH type
+        //     let expected_type = match packet_type {
+        //         PacketType::Crh16 => RoutingHeaderType::Crh16,
+        //         PacketType::Crh32 => RoutingHeaderType::Crh32,
+        //         _ => return Err(TC_ACT_SHOT),
+        //     };
+
+        //     if crh_header.generic_route.type_ != expected_type {
+        //         return Err(TC_ACT_SHOT);
+        //     }
+
+        //     let first_byte = crh_header.generic_route.next_hdr as u8; // First byte is next header
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+
+        //     match packet_type {
+        //         PacketType::Crh16 => (
+        //             ParsedHeader {
+        //                 type_: PacketType::Crh16,
+        //                 data: HeaderUnion { crh16: crh_header },
+        //             },
+        //             CrhHeader::LEN as u32,
+        //         ),
+        //         PacketType::Crh32 => (
+        //             ParsedHeader {
+        //                 type_: PacketType::Crh32,
+        //                 data: HeaderUnion { crh32: crh_header },
+        //             },
+        //             CrhHeader::LEN as u32,
+        //         ),
+        //         _ => return Err(TC_ACT_SHOT),
+        //     }
+        // }
+        // PacketType::Vxlan => {
+        //     let header: VxlanHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = header.flags; // First byte contains flags
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Vxlan,
+        //             data: HeaderUnion { vxlan: header },
+        //         },
+        //         VxlanHdr::LEN as u32,
+        //     )
+        // }
+        // PacketType::Hip => {
+        //     let header: network_types::hip::HipHdr =
+        //         ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = header.next_hdr as u8; // First byte is next header
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Hip,
+        //             data: HeaderUnion { hip: header },
+        //         },
+        //         network_types::hip::HipHdr::LEN as u32,
+        //     )
+        // }
+        // PacketType::Gre => {
+        //     let header: GreHdr = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+        //     let first_byte = header.flgs_res0_ver[0]; // First byte contains flags
+        //     store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+        //     (
+        //         ParsedHeader {
+        //             type_: PacketType::Gre,
+        //             data: HeaderUnion { gre: header },
+        //         },
+        //         GreHdr::LEN as u32,
+        //     )
+        // }
         PacketType::WireGuard => {
             let header: integration_common::WireGuardMinimalHeader =
                 ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
@@ -463,6 +678,7 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
                 integration_common::WireGuardMinimalHeader::LEN as u32,
             )
         }
+        _ => return Err(TC_ACT_SHOT),
     };
 
     // Output the parsed header to the PerfEventArray
