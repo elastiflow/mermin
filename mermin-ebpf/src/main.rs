@@ -314,7 +314,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
     meta.dst_ipv6_addr = [0; 16];
     meta.src_ipv4_addr = [0; 4];
     meta.dst_ipv4_addr = [0; 4];
-    meta.l3_octet_count = 0;
+    meta.l3_byte_count = 0;
     meta.src_port = [0; 2];
     meta.dst_port = [0; 2];
     meta.ip_dscp_id = 0;
@@ -418,7 +418,7 @@ impl Parser {
     // Calculate the L3 octet count (from current offset to end of packet)
     // This should be called at the start of L3 (IP) header parsing
     #[inline(always)]
-    fn calc_l3_octet_count(&self, packet_len: u32) -> u32 {
+    fn calc_l3_byte_count(&self, packet_len: u32) -> u32 {
         packet_len - self.offset as u32
     }
 
@@ -488,7 +488,7 @@ impl Parser {
         meta.ip_ttl = ctx.load(self.offset + 8).map_err(|_| Error::OutOfBounds)?;
         meta.src_ipv4_addr = ctx.load(self.offset + 12).map_err(|_| Error::OutOfBounds)?;
         meta.dst_ipv4_addr = ctx.load(self.offset + 16).map_err(|_| Error::OutOfBounds)?;
-        meta.l3_octet_count = self.calc_l3_octet_count(ctx.len());
+        meta.l3_byte_count = self.calc_l3_byte_count(ctx.len());
 
         self.offset += h_len;
         self.next_hdr = match meta.proto {
@@ -530,7 +530,7 @@ impl Parser {
         meta.ip_ttl = ctx.load(self.offset + 8).map_err(|_| Error::OutOfBounds)?;
         meta.src_ipv4_addr = ctx.load(self.offset + 12).map_err(|_| Error::OutOfBounds)?;
         meta.dst_ipv4_addr = ctx.load(self.offset + 16).map_err(|_| Error::OutOfBounds)?;
-        meta.l3_octet_count = self.calc_l3_octet_count(ctx.len());
+        meta.l3_byte_count = self.calc_l3_byte_count(ctx.len());
 
         self.offset += h_len;
         self.next_hdr = match meta.proto {
@@ -586,7 +586,7 @@ impl Parser {
         meta.ip_ttl = ctx.load(self.offset + 7).map_err(|_| Error::OutOfBounds)?;
         meta.src_ipv6_addr = ctx.load(self.offset + 8).map_err(|_| Error::OutOfBounds)?;
         meta.dst_ipv6_addr = ctx.load(self.offset + 24).map_err(|_| Error::OutOfBounds)?;
-        meta.l3_octet_count = self.calc_l3_octet_count(ctx.len());
+        meta.l3_byte_count = self.calc_l3_byte_count(ctx.len());
 
         self.offset += IPV6_LEN;
         self.next_hdr = match meta.proto {
@@ -628,7 +628,7 @@ impl Parser {
         meta.ip_ttl = ctx.load(self.offset + 7).map_err(|_| Error::OutOfBounds)?;
         meta.src_ipv6_addr = ctx.load(self.offset + 8).map_err(|_| Error::OutOfBounds)?;
         meta.dst_ipv6_addr = ctx.load(self.offset + 24).map_err(|_| Error::OutOfBounds)?;
-        meta.l3_octet_count = self.calc_l3_octet_count(ctx.len());
+        meta.l3_byte_count = self.calc_l3_byte_count(ctx.len());
 
         self.offset += IPV6_LEN;
         self.next_hdr = match meta.proto {
@@ -1205,7 +1205,7 @@ impl Parser {
         meta.dst_ipv6_addr = [0; 16];
         meta.src_ipv4_addr = [0; 4];
         meta.dst_ipv4_addr = [0; 4];
-        meta.l3_octet_count = 0;
+        meta.l3_byte_count = 0;
         meta.src_port = [0; 2];
         meta.dst_port = [0; 2];
         meta.ip_dscp_id = 0;
@@ -2208,7 +2208,7 @@ mod tests {
         let mut parser = Parser::default();
 
         parser.offset = 32;
-        let l3_count = parser.calc_l3_octet_count(256);
+        let l3_count = parser.calc_l3_byte_count(256);
 
         assert_eq!(l3_count, 224);
     }
