@@ -375,8 +375,8 @@ impl PacketWorker {
                         .then_some(packet.ipsec_receiver_index),
 
                     // Flow metrics
-                    flow_bytes_delta: packet.l3_octet_count as i64, // TODO: check this for all types of packets
-                    flow_bytes_total: packet.l3_octet_count as i64, // TODO: check this for all types of packets
+                    flow_bytes_delta: packet.l3_byte_count as i64,
+                    flow_bytes_total: packet.l3_byte_count as i64,
                     flow_packets_delta: 1,
                     flow_packets_total: 1,
                     flow_reverse_bytes_delta: 0,
@@ -537,7 +537,7 @@ fn log_packet_info(packet_meta: &PacketMeta, community_id: &str, iface_name: &st
             src_port,
             inner_dst_ip,
             dst_port,
-            packet_meta.l3_octet_count,
+            packet_meta.l3_byte_count,
         );
     } else {
         let src_ip = format_ip(
@@ -559,7 +559,7 @@ fn log_packet_info(packet_meta: &PacketMeta, community_id: &str, iface_name: &st
             src_port,
             dst_ip,
             dst_port,
-            packet_meta.l3_octet_count,
+            packet_meta.l3_byte_count,
         );
     }
 }

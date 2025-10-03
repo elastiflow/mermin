@@ -45,7 +45,7 @@ pub struct PacketMeta {
     /// Flow Label from the IPv6 header
     pub ip_flow_label: u32,
     /// Total count of bytes in a packet
-    pub l3_octet_count: u32,
+    pub l3_byte_count: u32,
     /// Tunnel Security Parameter Index
     pub ipsec_ah_spi: u32,
     /// Tunnel Security Parameter Index
@@ -325,7 +325,7 @@ mod tests {
             dst_ipv6_addr: dst_ipv6_val,
             src_ipv4_addr: src_ipv4_val,
             dst_ipv4_addr: dst_ipv4_val,
-            l3_octet_count: octet_count,
+            l3_byte_count: octet_count,
             src_mac_addr: src_mac_addr,
             ether_type: EtherType::Ipv4,
             src_port: src_port.to_be_bytes(),
@@ -362,7 +362,7 @@ mod tests {
         assert_eq!(record.src_ipv6_addr, src_ipv6_val);
         assert_eq!(record.dst_ipv6_addr, dst_ipv6_val);
         assert_eq!(record.src_mac_addr, src_mac_addr);
-        assert_eq!(record.l3_octet_count, octet_count);
+        assert_eq!(record.l3_byte_count, octet_count);
         assert_eq!(record.ether_type, EtherType::Ipv4);
         assert_eq!(record.src_port(), 12345);
         assert_eq!(record.dst_port(), 80);
@@ -432,7 +432,7 @@ mod tests {
         assert_eq!(packet.src_mac_addr, [0u8; 6]);
         assert_eq!(packet.src_ipv4_addr, [0u8; 4]);
         assert_eq!(packet.dst_ipv4_addr, [0u8; 4]);
-        assert_eq!(packet.l3_octet_count, 0);
+        assert_eq!(packet.l3_byte_count, 0);
         assert_eq!(packet.tunnel_src_ipv4_addr, [0u8; 4]);
         assert_eq!(packet.tunnel_dst_ipv4_addr, [0u8; 4]);
         assert_eq!(packet.ifindex, 0);

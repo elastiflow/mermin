@@ -122,26 +122,35 @@ Time-based metrics calculated for the flow, stored in nanoseconds (`ns`).
 
 ### Tunnel & Ip-in-Ip & IPSec Attributes
 
-| Proposed Field Name            | Data Type | Description                                                                 | Notes / Decisions                                     | Std OTel | Required |
-|:-------------------------------|:----------|:----------------------------------------------------------------------------|:------------------------------------------------------|:---------|:---------|
-| `flow.ipsec.ah.spi`            | `long`    | Security Parameters Index for AH headers.                                   | SPI from the outermost header (after a tunnel)        |          | ○        |
-| `flow.ipsec.esp.spi`           | `long`    | Security Parameters Index for ESP headers.                                  | SPI from the outermost header (after a tunnel)        |          | ○        |
-| `flow.ipsec.sender_index`      | `long`    | The sender index from a WireGuard header.                                   |                                                       |          | ○        |
-| `flow.ipsec.receiver_index`    | `long`    | The receiver index from a WireGuard header.                                 |                                                       |          | ○        |
-| `ipip.network.type`            | `string`  | The network protocol type (EtherType) of the flow (e.g., `ipv4`, `ipv6`).   |                                                       |          | ○        |
-| `ipip.network.transport`       | `string`  | The transport protocol of the flow (e.g., `ipv4`, `ipv6`).                  |                                                       |          | ○        |
-| `ipip.source.address`          | `string`  | The source IP address of the tunnel's outer header.                         | Ip-in-Ip is always the outermost header.              |          | ○        |
-| `ipip.destination.address`     | `string`  | The destination IP address of the tunnel's outer header.                    |                                                       |          | ○        |
-| `tunnel.type`                  | `string`  | The type of tunnel protocol (e.g., `vxlan`, `geneve`, `gre`).               | Tunnel is always the outermost header.                |          | ○        |
-| `tunnel.network.interface.mac` | `string`  | Source MAC address of tunnel                                                | Lowercased, 6 hexidecimal values separated by colons. |          | ~        |
-| `tunnel.network.type`          | `string`  | The network protocol type (EtherType) of the flow (e.g., `ipv4`, `ipv6`).   |                                                       |          | ○        |
-| `tunnel.network.transport`     | `string`  | The transport protocol of the flow (e.g., `tcp`, `udp`).                    |                                                       |          | ○        |
-| `tunnel.source.address`        | `string`  | The source IP address of the tunnel's outer header.                         |                                                       |          | ○        |
-| `tunnel.source.port`           | `long`    |                                                                             |                                                       |          | ○        |
-| `tunnel.destination.address`   | `string`  | The destination IP address of the tunnel's outer header.                    |                                                       |          | ○        |
-| `tunnel.destination.port`      | `long`    |                                                                             |                                                       |          | ○        |
-| `tunnel.id`                    | `string`  | The identifier for the tunnel (e.g., VNI for VXLAN/Geneve, Key ID for GRE). |                                                       |          | ○        |
-| `tunnel.ipsec.ah.spi`          | `long`    | Security Parameters Index for AH headers.                                   | SPI from the outermost header                         |          | ○        |
+| Proposed Field Name            | Data Type | Description                                                                 | Notes / Decisions                                        | Std OTel | Required |
+|:-------------------------------|:----------|:----------------------------------------------------------------------------|:---------------------------------------------------------|:---------|:---------|
+| `flow.ipsec.ah.spi`            | `long`    | Security Parameters Index for AH headers.                                   | SPI from the outermost header (after a tunnel)           |          | ○        |
+| `flow.ipsec.esp.spi`           | `long`    | Security Parameters Index for ESP headers.                                  | SPI from the outermost header (after a tunnel)           |          | ○        |
+| `flow.ipsec.sender_index`      | `long`    | The sender index from a WireGuard header.                                   |                                                          |          | ○        |
+| `flow.ipsec.receiver_index`    | `long`    | The receiver index from a WireGuard header.                                 |                                                          |          | ○        |
+| `ipip.network.type`            | `string`  | The network protocol type (EtherType) of the flow (e.g., `ipv4`, `ipv6`).   |                                                          |          | ○        |
+| `ipip.network.transport`       | `string`  | The transport protocol of the flow (e.g., `ipv4`, `ipv6`).                  |                                                          |          | ○        |
+| `ipip.source.address`          | `string`  | The source IP address of the tunnel's outer header.                         | Ip-in-Ip is always the outermost header.                 |          | ○        |
+| `ipip.destination.address`     | `string`  | The destination IP address of the tunnel's outer header.                    |                                                          |          | ○        |
+| `ipip.bytes.delta`             | `long`    | Number of bytes observed in the last measurement interval for the flow.     |                                                          |          | ✓        |
+| `ipip.bytes.total`             | `long`    | Total number of bytes observed for this flow since its start.               | The term `bytes` is preferred over `octets` for clarity. |          | ~        |
+| `ipip.reverse.bytes.delta`     | `long`    | Delta bytes in the reverse direction of the flow.                           |                                                          |          | ✓        |
+| `ipip.reverse.bytes.total`     | `long`    | Total bytes in the reverse direction of the flow since its start.           |                                                          |          | ~        |
+| `tunnel.type`                  | `string`  | The type of tunnel protocol (e.g., `vxlan`, `geneve`, `gre`).               | Tunnel is always the outermost header.                   |          | ○        |
+| `tunnel.network.interface.mac` | `string`  | Source MAC address of tunnel                                                | Lowercased, 6 hexidecimal values separated by colons.    |          | ~        |
+| `tunnel.network.type`          | `string`  | The network protocol type (EtherType) of the flow (e.g., `ipv4`, `ipv6`).   |                                                          |          | ○        |
+| `tunnel.network.transport`     | `string`  | The transport protocol of the flow (e.g., `tcp`, `udp`).                    |                                                          |          | ○        |
+| `tunnel.source.address`        | `string`  | The source IP address of the tunnel's outer header.                         |                                                          |          | ○        |
+| `tunnel.source.port`           | `long`    |                                                                             |                                                          |          | ○        |
+| `tunnel.destination.address`   | `string`  | The destination IP address of the tunnel's outer header.                    |                                                          |          | ○        |
+| `tunnel.destination.port`      | `long`    |                                                                             |                                                          |          | ○        |
+| `tunnel.id`                    | `string`  | The identifier for the tunnel (e.g., VNI for VXLAN/Geneve, Key ID for GRE). |                                                          |          | ○        |
+| `tunnel.ipsec.ah.spi`          | `long`    | Security Parameters Index for AH headers.                                   | SPI from the outermost header                            |          | ○        |
+| `tunnel.bytes.delta`           | `long`    | Number of bytes observed in the last measurement interval for the flow.     |                                                          |          | ✓        |
+| `tunnel.bytes.total`           | `long`    | Total number of bytes observed for this flow since its start.               | The term `bytes` is preferred over `octets` for clarity. |          | ~        |
+| `tunnel.reverse.bytes.delta`   | `long`    | Delta bytes in the reverse direction of the flow.                           |                                                          |          | ✓        |
+| `tunnel.reverse.bytes.total`   | `long`    | Total bytes in the reverse direction of the flow since its start.           |                                                          |          | ~        |
+
 
 ### Kubernetes & Application Attributes
 
