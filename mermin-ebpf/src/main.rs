@@ -1369,7 +1369,7 @@ fn get_packet_meta(_ctx: &TcContext) -> Result<&'static mut PacketMeta, Error> {
             dst_ipv4_addr: [0; 4],
             ifindex: 0,
             ip_flow_label: 0,
-            l3_octet_count: 0,
+            l3_byte_count: 0,
             ipsec_ah_spi: 0,
             ipsec_esp_spi: 0,
             ipsec_sender_index: 0,
