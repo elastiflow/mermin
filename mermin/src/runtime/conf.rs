@@ -62,7 +62,7 @@ impl Default for Conf {
             shutdown_timeout: defaults::shutdown_timeout(),
             span: SpanOptions::default(),
             agent: None,
-            traces: None,
+            traces: Some(TracesConfig::default()),
             exporter: ExporterOptions::default(),
         }
     }
@@ -181,7 +181,7 @@ pub struct AgentOptions {
 }
 
 /// Options for all traces configuration
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
 pub struct TracesConfig {
     /// The level of span events to record. The current default is `FmtSpan::FULL`,
     /// which records all events (enter, exit, close) for all spans. The level can also be
@@ -502,8 +502,8 @@ mod tests {
             span: raw_conf.span,
             agent_traces: trace_pipelines,
             internal_traces: InternalTraces {
-                span_level: raw_conf.traces.span_level,
-                traces: internal_traces,
+                span_level: raw_conf.traces.unwrap().span_level,
+                pipelines: internal_traces,
             },
             config_path: None,
         }
