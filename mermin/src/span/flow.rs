@@ -1,7 +1,5 @@
-use std::{net::IpAddr, sync::Arc, time::SystemTime};
+use std::{net::IpAddr, time::SystemTime};
 
-use dashmap::DashMap;
-use fxhash::FxBuildHasher;
 use mermin_common::TunnelType;
 use network_types::{eth::EtherType, ip::IpProto};
 use opentelemetry::{
@@ -649,8 +647,6 @@ impl Traceable for FlowSpan {
         span
     }
 }
-
-pub type FlowSpanMap = Arc<DashMap<String, FlowSpan, FxBuildHasher>>;
 
 // Helpers to serialize the IP protocol and EtherType which do not natively implement Serialize
 fn serialize_ip_proto<S>(proto: &IpProto, serializer: S) -> Result<S::Ok, S::Error>

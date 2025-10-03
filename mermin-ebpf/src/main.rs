@@ -173,6 +173,7 @@
 #[cfg(not(feature = "test"))]
 use aya_ebpf::{
     bindings::TC_ACT_PIPE,
+    helpers::bpf_ktime_get_ns,
     macros::{classifier, map},
     maps::{PerCpuArray, RingBuf},
     programs::TcContext,
@@ -278,6 +279,8 @@ pub enum Error {
     InternalError,
 }
 
+const MAX_HEADER_PARSE_DEPTH: usize = 8;
+
 #[cfg(not(feature = "test"))]
 #[classifier]
 pub fn mermin_ingress(ctx: TcContext) -> i32 {
@@ -292,7 +295,8 @@ pub fn mermin_egress(ctx: TcContext) -> i32 {
 
 #[cfg(not(feature = "test"))]
 fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
-    const MAX_HEADER_PARSE_DEPTH: usize = 8;
+    // Get timestamp in nanoseconds of now
+    let timestamp = unsafe { bpf_ktime_get_ns() };
 
     // Information for building flow records (prioritizes innermost headers).
     // These fields will be updated as we parse deeper or encounter encapsulations.
@@ -304,6 +308,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
     };
 
     // Initialize the meta with default values
+    meta.start_time = timestamp;
     meta.ifindex = unsafe { (*ctx.skb.skb).ifindex };
     meta.direction = direction;
     meta.src_mac_addr = [0; 6];
