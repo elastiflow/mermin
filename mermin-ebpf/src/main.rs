@@ -1355,37 +1355,59 @@ fn get_packet_meta(_ctx: &TcContext) -> Result<&'static mut PacketMeta, Error> {
         let mut meta_opt = meta_cell.borrow_mut();
         if meta_opt.is_none() {
             *meta_opt = Some(PacketMeta {
+                // Basic fields
+                ifindex: 0,
+                direction: Direction::Ingress,
+                src_mac_addr: [0; 6],
+                ether_type: EtherType::default(),
+                proto: IpProto::default(),
+                ip_addr_type: IpAddrType::default(),
                 src_ipv6_addr: [0; 16],
                 dst_ipv6_addr: [0; 16],
-                tunnel_src_ipv6_addr: [0; 16],
-                tunnel_dst_ipv6_addr: [0; 16],
-                src_mac_addr: [0; 6],
                 src_ipv4_addr: [0; 4],
                 dst_ipv4_addr: [0; 4],
-                ifindex: 0,
-                ip_flow_label: 0,
-                l3_octet_count: 0,
-                tunnel_src_ipv4_addr: [0; 4],
-                tunnel_dst_ipv4_addr: [0; 4],
-                tunnel_id: 0,
-                ether_type: EtherType::Ipv4,
+                l3_byte_count: 0,
                 src_port: [0; 2],
                 dst_port: [0; 2],
-                tunnel_ether_type: EtherType::Ipv4,
-                tunnel_src_port: [0; 2],
-                tunnel_dst_port: [0; 2],
-                ip_addr_type: IpAddrType::Ipv4,
-                proto: IpProto::HopOpt,
-                direction: Direction::Ingress,
                 ip_dscp_id: 0,
                 ip_ecn_id: 0,
                 ip_ttl: 0,
+                ip_flow_label: 0,
                 icmp_type_id: 0,
                 icmp_code_id: 0,
                 tcp_flags: 0,
-                tunnel_ip_addr_type: IpAddrType::Ipv4,
-                tunnel_proto: IpProto::HopOpt,
+                ipsec_ah_spi: 0,
+                ipsec_esp_spi: 0,
+                ipsec_sender_index: 0,
+                ipsec_receiver_index: 0,
+                ah_exists: false,
+                esp_exists: false,
+                wireguard_exists: false,
+
+                // IP-in-IP fields
+                ipip_ether_type: EtherType::default(),
+                ipip_proto: IpProto::default(),
+                ipip_ip_addr_type: IpAddrType::default(),
+                ipip_src_ipv6_addr: [0; 16],
+                ipip_dst_ipv6_addr: [0; 16],
+                ipip_src_ipv4_addr: [0; 4],
+                ipip_dst_ipv4_addr: [0; 4],
+
+                // Tunnel fields
                 tunnel_type: TunnelType::None,
+                tunnel_src_mac_addr: [0; 6],
+                tunnel_ether_type: EtherType::default(),
+                tunnel_proto: IpProto::default(),
+                tunnel_ip_addr_type: IpAddrType::default(),
+                tunnel_src_ipv6_addr: [0; 16],
+                tunnel_dst_ipv6_addr: [0; 16],
+                tunnel_src_ipv4_addr: [0; 4],
+                tunnel_dst_ipv4_addr: [0; 4],
+                tunnel_src_port: [0; 2],
+                tunnel_dst_port: [0; 2],
+                tunnel_id: 0,
+                tunnel_ipsec_ah_spi: 0,
+                tunnel_ah_exists: false,
             });
         }
 
@@ -2017,19 +2039,20 @@ mod tests {
 
         // Initialize the meta with default values by calling get_packet_meta
         let meta = get_packet_meta(&ctx)?;
-        meta.ifindex = 1; // Test ifindex
+        // Initialize the meta with default values
+        meta.ifindex = unsafe { (*ctx.skb.skb).ifindex };
+        meta.direction = direction;
         meta.src_mac_addr = [0; 6];
+        meta.ether_type = EtherType::default();
+        meta.proto = IpProto::default();
+        meta.ip_addr_type = IpAddrType::default();
         meta.src_ipv6_addr = [0; 16];
         meta.dst_ipv6_addr = [0; 16];
         meta.src_ipv4_addr = [0; 4];
         meta.dst_ipv4_addr = [0; 4];
-        meta.l3_octet_count = 0;
-        meta.ether_type = EtherType::default();
+        meta.l3_byte_count = 0;
         meta.src_port = [0; 2];
         meta.dst_port = [0; 2];
-        meta.ip_addr_type = IpAddrType::default();
-        meta.proto = IpProto::default();
-        meta.direction = direction;
         meta.ip_dscp_id = 0;
         meta.ip_ecn_id = 0;
         meta.ip_ttl = 0;
@@ -2037,17 +2060,35 @@ mod tests {
         meta.icmp_type_id = 0;
         meta.icmp_code_id = 0;
         meta.tcp_flags = 0;
+        meta.ipsec_ah_spi = 0;
+        meta.ipsec_esp_spi = 0;
+        meta.ipsec_sender_index = 0;
+        meta.ipsec_receiver_index = 0;
+        meta.ah_exists = false;
+        meta.esp_exists = false;
+        meta.wireguard_exists = false;
 
+        meta.ipip_ether_type = EtherType::default();
+        meta.ipip_proto = IpProto::default();
+        meta.ipip_ip_addr_type = IpAddrType::default();
+        meta.ipip_src_ipv6_addr = [0; 16];
+        meta.ipip_dst_ipv6_addr = [0; 16];
+        meta.ipip_src_ipv4_addr = [0; 4];
+        meta.ipip_dst_ipv4_addr = [0; 4];
+
+        meta.tunnel_type = TunnelType::None;
+        meta.tunnel_src_mac_addr = [0; 6];
+        meta.tunnel_ether_type = EtherType::default();
+        meta.tunnel_proto = IpProto::default();
+        meta.tunnel_ip_addr_type = IpAddrType::default();
         meta.tunnel_src_ipv6_addr = [0; 16];
         meta.tunnel_dst_ipv6_addr = [0; 16];
         meta.tunnel_src_ipv4_addr = [0; 4];
         meta.tunnel_dst_ipv4_addr = [0; 4];
-        meta.tunnel_ether_type = EtherType::default();
         meta.tunnel_src_port = [0; 2];
         meta.tunnel_dst_port = [0; 2];
-        meta.tunnel_ip_addr_type = IpAddrType::default();
-        meta.tunnel_proto = IpProto::default();
-        meta.tunnel_type = TunnelType::None;
+        meta.tunnel_id = 0;
+        meta.tunnel_ipsec_ah_spi = 0;
 
         const MAX_HEADER_PARSE_DEPTH: usize = 8;
 
@@ -2059,6 +2100,7 @@ mod tests {
                 HeaderType::Geneve => parser.parse_geneve_header(&ctx),
                 HeaderType::Vxlan => parser.parse_vxlan_header(&ctx),
                 HeaderType::Wireguard => parser.parse_wireguard_header(&ctx),
+                HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(&ctx),
                 HeaderType::Proto(IpProto::Gre) => parser.parse_gre_header(&ctx),
                 HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx),
                 HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx),
@@ -2120,7 +2162,7 @@ mod tests {
         let packet_meta = result.unwrap();
 
         // Assert on tunnel fields
-        assert_eq!(packet_meta.tunnel_ip_addr_type, IpAddrType::Ipv6);
+        assert_eq!(packet_meta.ipip_ether_type, EtherType::Ipv6);
 
         // Load outer IPv6 addresses directly from packet data (same approach as parsing code)
         let ctx = TcContext::new(packet.clone());
@@ -2131,8 +2173,8 @@ mod tests {
             .load(ETH_LEN + 24)
             .expect("failed to load outer ipv6 dst addr");
 
-        assert_eq!(packet_meta.tunnel_src_ipv6_addr, outer_src_addr);
-        assert_eq!(packet_meta.tunnel_dst_ipv6_addr, outer_dst_addr);
+        assert_eq!(packet_meta.ipip_src_ipv6_addr, outer_src_addr);
+        assert_eq!(packet_meta.ipip_dst_ipv6_addr, outer_dst_addr);
 
         // Assert on inner fields
         assert_eq!(packet_meta.ip_addr_type, IpAddrType::Ipv4);
@@ -2197,7 +2239,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parser_calculate_l3_octet_count() {
+    fn test_parser_calculate_l3_byte_count() {
         let mut parser = Parser::default();
 
         parser.offset = 32;
@@ -2992,9 +3034,9 @@ mod tests {
             .load(ETH_LEN + 24)
             .expect("failed to load outer ipv6 dst addr");
 
-        assert_eq!(packet_meta.tunnel_ip_addr_type, IpAddrType::Ipv6);
-        assert_eq!(packet_meta.tunnel_src_ipv6_addr, outer_src_addr);
-        assert_eq!(packet_meta.tunnel_dst_ipv6_addr, outer_dst_addr);
+        assert_eq!(packet_meta.ipip_ether_type, EtherType::Ipv6);
+        assert_eq!(packet_meta.ipip_src_ipv6_addr, outer_src_addr);
+        assert_eq!(packet_meta.ipip_dst_ipv6_addr, outer_dst_addr);
 
         // Flow is inner IPv6
         assert_eq!(packet_meta.ip_addr_type, IpAddrType::Ipv6);
@@ -3035,9 +3077,9 @@ mod tests {
         let packet_meta = result.unwrap();
 
         // Tunnel is outer IPv4
-        assert_eq!(packet_meta.tunnel_ip_addr_type, IpAddrType::Ipv4);
-        assert_eq!(packet_meta.tunnel_src_ipv4_addr, [10, 0, 0, 1]);
-        assert_eq!(packet_meta.tunnel_dst_ipv4_addr, [10, 0, 0, 2]);
+        assert_eq!(packet_meta.ipip_ether_type, EtherType::Ipv4);
+        assert_eq!(packet_meta.ipip_src_ipv4_addr, [10, 0, 0, 1]);
+        assert_eq!(packet_meta.ipip_dst_ipv4_addr, [10, 0, 0, 2]);
 
         // Flow is inner IPv6
         assert_eq!(packet_meta.ip_addr_type, IpAddrType::Ipv6);
