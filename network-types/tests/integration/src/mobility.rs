@@ -1,41 +1,47 @@
-use integration_common::{NextHdrOnlyTestData, PacketType, ParsedHeader};
+use integration_common::{MobilityTestData, PacketType, ParsedHeader};
 use network_types::{ip::IpProto, mobility::MOBILITY_LEN};
 
-/// Helper for constructing Mobility header test packets
-/// 
-/// Matches the new parsing methodology where we only extract:
-/// - Byte 0: Next Header (IpProto)
-pub fn create_mobility_test_packet() -> ([u8; MOBILITY_LEN + 1], NextHdrOnlyTestData) {
+// Helper for constructing Mobility header test packets
+// Only constructs the fields that are actually extracted by mermin-ebpf
+pub fn create_mobility_test_packet() -> ([u8; MOBILITY_LEN + 1], MobilityTestData) {
     let mut request_data = [0u8; MOBILITY_LEN + 1];
 
-    // Byte 0: The type discriminator for the eBPF program's `match` statement
+    // Byte 0: The type discriminator for the eBPF program's `match` statement.
     request_data[0] = PacketType::Mobility as u8;
-    
-    // Byte 1: Next Header (IpProto::Tcp) - THIS IS EXTRACTED
-    request_data[1] = IpProto::Tcp as u8;
-    
-    // Bytes 2-7: Remaining fields - NOT extracted
-    request_data[2] = 0;  // Header Length
-    request_data[3] = 0;  // MH Type
-    request_data[4] = 0;  // Reserved
-    request_data[5..8].copy_from_slice(&[0, 0, 0]);  // Checksum
 
-    let expected_data = NextHdrOnlyTestData {
+    // Bytes 1-8: Mobility header (8 bytes)
+    request_data[1..9].copy_from_slice(&[
+        // Byte 1: Next Header (next_hdr field - extracted at offset 0 from data)
+        IpProto::Tcp as u8,
+        // Byte 2: Header Extension Length (not extracted)
+        0,
+        // Byte 3: MH Type (not extracted)
+        0,
+        // Byte 4: Reserved (not extracted)
+        0,
+        // Bytes 5-6: Checksum (not extracted)
+        0,
+        0,
+        // Bytes 7-8: Reserved Message Data (not extracted)
+        0,
+        0,
+    ]);
+
+    let expected_header = MobilityTestData {
         next_hdr: IpProto::Tcp as u8,
     };
 
-    (request_data, expected_data)
+    (request_data, expected_header)
 }
 
-/// Helper for verifying Mobility header test results
-pub fn verify_mobility_header(received: ParsedHeader, expected: NextHdrOnlyTestData) {
-    assert_eq!(received.type_, PacketType::Mobility, "Packet type mismatch");
-    
-    let parsed = unsafe { received.data.next_hdr_only };
+// Helper for verifying Mobility header test results
+pub fn verify_mobility_header(received: ParsedHeader, expected: MobilityTestData) {
+    assert_eq!(received.type_, PacketType::Mobility);
+    let parsed_header = unsafe { received.data.mobility };
 
     assert_eq!(
-        parsed.next_hdr, expected.next_hdr,
-        "Next header mismatch: expected {}, got {}",
-        expected.next_hdr, parsed.next_hdr
+        parsed_header.next_hdr, expected.next_hdr,
+        "Next Header mismatch: got {}, expected {}",
+        parsed_header.next_hdr, expected.next_hdr
     );
 }
