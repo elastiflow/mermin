@@ -1,3 +1,11 @@
+## [0.1.0-alpha.4](https://github.com/elastiflow/mermin/compare/v0.1.0-alpha.3...v0.1.0-alpha.4) (2025-10-02)
+
+### Features
+
+* **ebpf:** add ip-in-ip and ipsec tunnel detection with refactored encapsulation handling ([#130](https://github.com/elastiflow/mermin/issues/130)) ([798a5a7](https://github.com/elastiflow/mermin/commit/798a5a76ac16b6e9b8a24cc9f10c8d8e88d4026f))
+* **helm:** Add GKE example ([#127](https://github.com/elastiflow/mermin/issues/127)) ([a0a1301](https://github.com/elastiflow/mermin/commit/a0a130132b028afc113f1c33a5d92ef972e71b6b))
+
+
 ## [0.1.0-alpha.3](https://github.com/elastiflow/mermin/compare/v0.1.0-alpha.2...v0.1.0-alpha.3) (2025-10-01)
 
 ### Features
