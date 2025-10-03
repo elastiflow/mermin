@@ -118,7 +118,7 @@ verify_data_in_grafana() {
 dump_debug_info() {
   log_error "Dumping debug information..."
   echo "--- Docker Compose Logs ---"
-  docker-compose logs
+  docker-compose -f ./mermin/tests/e2e/grafana/docker-compose.yaml logs
   echo "--- grafana Query Response ---"
   echo "${response:-"No response received"}"
 }

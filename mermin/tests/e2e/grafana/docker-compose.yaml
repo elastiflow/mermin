@@ -67,6 +67,16 @@ services:
     networks:
       - observability-net
 
+  traffic-generator:
+    image: alpine/curl:latest
+    container_name: traffic-generator
+    # This command runs a loop that sends a request to Prometheus every 5 seconds
+    command: sh -c "while true; do curl http://prometheus:9090/-/healthy; echo; sleep 5; done"
+    networks:
+      - observability-net
+    depends_on:
+      - prometheus # Ensures prometheus is up before this starts
+
 networks:
   observability-net:
     driver: bridge
