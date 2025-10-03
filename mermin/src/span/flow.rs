@@ -14,9 +14,12 @@ use crate::{
 };
 
 /// Flow End Reason based on RFC 5102 IPFIX Information Model
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[allow(dead_code)]
 pub enum FlowEndReason {
+    /// 0x00: Reserved for future use
+    #[default]
+    Reserved,
     /// 0x01: The Flow was terminated because it was considered to be idle
     IdleTimeout,
     /// 0x02: The Flow was terminated for reporting purposes while it was still active
@@ -34,6 +37,7 @@ impl FlowEndReason {
     /// Convert the enum variant to its string representation
     pub fn as_str(&self) -> &'static str {
         match self {
+            FlowEndReason::Reserved => "reserved",
             FlowEndReason::IdleTimeout => "idle timeout",
             FlowEndReason::ActiveTimeout => "active timeout",
             FlowEndReason::EndOfFlowDetected => "end of Flow detected",
@@ -45,6 +49,7 @@ impl FlowEndReason {
     /// Convert the enum variant to its numeric value as specified in RFC 5102
     pub fn to_u8(self) -> u8 {
         match self {
+            FlowEndReason::Reserved => 0x00,
             FlowEndReason::IdleTimeout => 0x01,
             FlowEndReason::ActiveTimeout => 0x02,
             FlowEndReason::EndOfFlowDetected => 0x03,
@@ -56,6 +61,7 @@ impl FlowEndReason {
     /// Create FlowEndReason from a numeric value
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
+            0x00 => Some(FlowEndReason::Reserved),
             0x01 => Some(FlowEndReason::IdleTimeout),
             0x02 => Some(FlowEndReason::ActiveTimeout),
             0x03 => Some(FlowEndReason::EndOfFlowDetected),
@@ -933,7 +939,6 @@ mod tests {
 
     #[test]
     fn test_flow_end_reason_from_u8_invalid() {
-        assert_eq!(FlowEndReason::from_u8(0x00), None);
         assert_eq!(FlowEndReason::from_u8(0x06), None);
         assert_eq!(FlowEndReason::from_u8(0xFF), None);
     }
