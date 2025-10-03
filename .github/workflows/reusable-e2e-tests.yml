@@ -118,4 +118,6 @@ jobs:
           DOCKER_IMAGE_NAME: not-exists.elastiflow.com/mermin:${{ inputs.image-tag }}
           DOCKER_IMAGE_TAG: ${{ inputs.image-tag }}
           DOCKER_REPOSITORY: not-exists.elastiflow.com/mermin
+          HOST_DOCKER_INTERNAL_ADDR: 172.17.0.1
+          MERMIN_CONFIG_PATH: mermin/tests/e2e/grafana/config/mermin.ci.hcl
         run: ${{ inputs.test-path }}

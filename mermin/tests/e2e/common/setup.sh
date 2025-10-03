@@ -12,6 +12,7 @@ DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-latest}"
 VALUES_FILE="${VALUES_FILE:-examples/local/values.yaml}"
 CNI="${CNI:-calico}"
 HOST_CNI_PATH="$HOME/cni-plugins-for-kind"
+MERMIN_CONFIG_PATH="${MERMIN_CONFIG_PATH:-examples/local/config.hcl}"
 
 # --- CNI Installation Functions ---
 install_calico() {
@@ -34,13 +35,14 @@ install_cilium() {
       /aarch64/ || /arm64/ {print "arm64"; exit}
       {print $0; exit}')
     curl -sL --remote-name-all \
-      "https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-${OS}-${ARCH}.tar.gz"{,.sha2d56sum}
+      "https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-${OS}-${ARCH}.tar.gz"{,.sha256sum}
     sha256sum --check "cilium-${OS}-${ARCH}.tar.gz.sha256sum"
     sudo tar -C /usr/local/bin -xzvf "cilium-${OS}-${ARCH}.tar.gz"
     rm "cilium-${OS}-${ARCH}.tar.gz"{,.sha256sum}
   fi
   cilium install --wait
 }
+
 
 install_flannel() {
   echo "Installing CNI plugin binaries for Flannel..."
@@ -117,7 +119,7 @@ deploy_helm_chart() {
     HELM_CHART="$HELM_CHART_PATH" \
     HELM_NAMESPACE="$NAMESPACE" \
     HELM_VALUES="$VALUES_FILE" \
-    EXTRA_HELM_ARGS="--set image.repository=$DOCKER_REPOSITORY --set image.tag=$DOCKER_IMAGE_TAG --wait --timeout=3m --create-namespace"
+    EXTRA_HELM_ARGS="--set image.repository=$DOCKER_REPOSITORY --set image.tag=$DOCKER_IMAGE_TAG --set-file config.source=$MERMIN_CONFIG_PATH --wait --timeout=3m --create-namespace"
 }
 
 # --- Main Execution ---

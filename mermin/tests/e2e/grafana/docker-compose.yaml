@@ -60,6 +60,7 @@ services:
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
       - GF_AUTH_DISABLE_LOGIN_FORM=true
       - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor
+      - HOST_DOCKER_INTERNAL_ADDR=${HOST_DOCKER_INTERNAL_ADDR:-host.docker.internal}
     ports:
       - "3000:3000"
     depends_on:

@@ -6,7 +6,7 @@ datasources:
     uid: prometheus
     access: proxy
     orgId: 1
-    url: http://host.docker.internal:9090
+    url: http://$HOST_DOCKER_INTERNAL_ADDR:9090
     basicAuth: false
     isDefault: false
     version: 1
@@ -17,7 +17,7 @@ datasources:
     type: tempo
     access: proxy
     orgId: 1
-    url: http://host.docker.internal:3200
+    url: http://$HOST_DOCKER_INTERNAL_ADDR:3200
     basicAuth: false
     isDefault: true
     version: 1

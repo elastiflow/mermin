@@ -10,6 +10,9 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+export HOST_DOCKER_INTERNAL_ADDR="${HOST_DOCKER_INTERNAL_ADDR:-host.docker.internal}"
+export MERMIN_CONFIG_PATH="${MERMIN_CONFIG_PATH:-"mermin/tests/e2e/grafana/config/mermin.hcl"}"
+
 log_info() {
   echo -e "${GREEN}[INFO]${NC} $1"
 }

@@ -9,7 +9,7 @@ processors:
 
 exporters:
   otlp:
-    endpoint: host.docker.internal:4317
+    endpoint: 172.17.0.1:4317
     tls:
       insecure: true
   debug:
