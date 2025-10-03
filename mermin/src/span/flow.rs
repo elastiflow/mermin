@@ -5,7 +5,7 @@ use fxhash::FxBuildHasher;
 use mermin_common::TunnelType;
 use network_types::{eth::EtherType, ip::IpProto};
 use opentelemetry::{
-    KeyValue,
+    KeyValue, StringValue, Value,
     trace::{Span, SpanKind},
 };
 use serde::{Serialize, Serializer};
@@ -342,10 +342,13 @@ impl Traceable for FlowSpan {
             kvs.push(KeyValue::new("flow.tcp.flags.bits", value as i64));
         }
         if let Some(ref value) = self.attributes.flow_tcp_flags_tags {
-            let flag_names: Vec<&str> = value.iter().map(|f| f.as_str()).collect();
+            let flag_values: Vec<StringValue> = value
+                .iter()
+                .map(|f| StringValue::from(f.to_string()))
+                .collect();
             kvs.push(KeyValue::new(
                 "flow.tcp.flags.tags",
-                format!("{:?}", flag_names),
+                Value::Array(flag_values.into()),
             ));
         }
         if let Some(value) = self.attributes.flow_ipsec_ah_spi {
