@@ -3,6 +3,50 @@ use mermin_common::PacketMeta;
 /// TCP flag names in order (FIN, SYN, RST, PSH, ACK, URG, ECE, CWR)
 pub const TCP_FLAG_NAMES: [&str; 8] = ["fin", "syn", "rst", "psh", "ack", "urg", "ece", "cwr"];
 
+/// Individual TCP flag as specified in the TCP header
+/// Based on IANA "TCP Header Flags" registry
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TcpFlag {
+    /// FIN: No more data from sender
+    Fin,
+    /// SYN: Synchronize sequence numbers
+    Syn,
+    /// RST: Reset the connection
+    Rst,
+    /// PSH: Push function
+    Psh,
+    /// ACK: Acknowledgment field is significant
+    Ack,
+    /// URG: Urgent pointer field is significant
+    Urg,
+    /// ECE: ECN-Echo
+    Ece,
+    /// CWR: Congestion Window Reduced
+    Cwr,
+}
+
+impl TcpFlag {
+    /// Convert the TCP flag to its string representation
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            TcpFlag::Fin => "fin",
+            TcpFlag::Syn => "syn",
+            TcpFlag::Rst => "rst",
+            TcpFlag::Psh => "psh",
+            TcpFlag::Ack => "ack",
+            TcpFlag::Urg => "urg",
+            TcpFlag::Ece => "ece",
+            TcpFlag::Cwr => "cwr",
+        }
+    }
+}
+
+impl std::fmt::Display for TcpFlag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// Represents TCP flags as an array of 8 boolean values
 /// Order: [FIN, SYN, RST, PSH, ACK, URG, ECE, CWR]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,18 +77,23 @@ impl TcpFlags {
         self.flags
     }
 
-    /// Get only the names of flags that are set
-    pub fn active_flags(&self) -> Vec<String> {
+    /// Get only the flags that are set
+    pub fn active_flags(&self) -> Vec<TcpFlag> {
+        const FLAG_ENUMS: [TcpFlag; 8] = [
+            TcpFlag::Fin,
+            TcpFlag::Syn,
+            TcpFlag::Rst,
+            TcpFlag::Psh,
+            TcpFlag::Ack,
+            TcpFlag::Urg,
+            TcpFlag::Ece,
+            TcpFlag::Cwr,
+        ];
+
         self.flags
             .iter()
-            .zip(TCP_FLAG_NAMES.iter())
-            .filter_map(|(is_set, name)| {
-                if *is_set {
-                    Some(String::from(*name))
-                } else {
-                    None
-                }
-            })
+            .zip(FLAG_ENUMS.iter())
+            .filter_map(|(is_set, flag)| if *is_set { Some(*flag) } else { None })
             .collect()
     }
 
@@ -178,7 +227,7 @@ mod tests {
         packet.tcp_flags = 0;
         let flags = TcpFlags::from_packet(&packet);
         assert_eq!(flags.as_array(), [false; 8]);
-        assert_eq!(flags.active_flags(), Vec::<String>::new());
+        assert_eq!(flags.active_flags(), Vec::<TcpFlag>::new());
         assert!(flags.none_set());
         assert_eq!(flags.count_set(), 0);
 
@@ -186,14 +235,14 @@ mod tests {
         packet.tcp_flags = PacketMeta::TCP_FLAG_SYN;
         let flags = TcpFlags::from_packet(&packet);
         assert_eq!(flags.as_array()[1], true); // SYN is at index 1
-        assert_eq!(flags.active_flags(), vec!["syn"]);
+        assert_eq!(flags.active_flags(), vec![TcpFlag::Syn]);
         assert!(flags.any_set());
         assert_eq!(flags.count_set(), 1);
 
         // Test SYN+ACK
         packet.tcp_flags = PacketMeta::TCP_FLAG_SYN | PacketMeta::TCP_FLAG_ACK;
         let flags = TcpFlags::from_packet(&packet);
-        assert_eq!(flags.active_flags(), vec!["syn", "ack"]);
+        assert_eq!(flags.active_flags(), vec![TcpFlag::Syn, TcpFlag::Ack]);
         assert_eq!(flags.count_set(), 2);
 
         // Test all flags
@@ -202,7 +251,16 @@ mod tests {
         assert_eq!(flags.as_array(), [true; 8]);
         assert_eq!(
             flags.active_flags(),
-            vec!["fin", "syn", "rst", "psh", "ack", "urg", "ece", "cwr"]
+            vec![
+                TcpFlag::Fin,
+                TcpFlag::Syn,
+                TcpFlag::Rst,
+                TcpFlag::Psh,
+                TcpFlag::Ack,
+                TcpFlag::Urg,
+                TcpFlag::Ece,
+                TcpFlag::Cwr
+            ]
         );
         assert_eq!(flags.count_set(), 8);
 

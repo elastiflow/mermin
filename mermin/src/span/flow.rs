@@ -5,12 +5,15 @@ use fxhash::FxBuildHasher;
 use mermin_common::TunnelType;
 use network_types::{eth::EtherType, ip::IpProto};
 use opentelemetry::{
-    KeyValue,
+    KeyValue, StringValue, Value,
     trace::{Span, SpanKind},
 };
 use serde::{Serialize, Serializer};
 
-use crate::{otlp::trace::Traceable, span::tcp::ConnectionState};
+use crate::{
+    otlp::trace::Traceable,
+    span::tcp::{ConnectionState, TcpFlag},
+};
 
 /// Flow End Reason based on RFC 5102 IPFIX Information Model
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,7 +110,8 @@ pub struct SpanAttributes {
     pub flow_icmp_code_id: Option<u8>,
     pub flow_icmp_code_name: Option<String>,
     pub flow_tcp_flags_bits: Option<u8>,
-    pub flow_tcp_flags_tags: Option<Vec<String>>, // TODO: enum
+    #[serde(serialize_with = "serialize_option_tcp_flags")]
+    pub flow_tcp_flags_tags: Option<Vec<TcpFlag>>,
     pub flow_ipsec_ah_spi: Option<u32>,
     pub flow_ipsec_esp_spi: Option<u32>,
     pub flow_ipsec_sender_index: Option<u32>,
@@ -338,7 +342,14 @@ impl Traceable for FlowSpan {
             kvs.push(KeyValue::new("flow.tcp.flags.bits", value as i64));
         }
         if let Some(ref value) = self.attributes.flow_tcp_flags_tags {
-            kvs.push(KeyValue::new("flow.tcp.flags.tags", format!("{value:?}")));
+            let flag_values: Vec<StringValue> = value
+                .iter()
+                .map(|f| StringValue::from(f.to_string()))
+                .collect();
+            kvs.push(KeyValue::new(
+                "flow.tcp.flags.tags",
+                Value::Array(flag_values.into()),
+            ));
         }
         if let Some(value) = self.attributes.flow_ipsec_ah_spi {
             kvs.push(KeyValue::new("flow.ipsec.ah.spi", value as i64));
@@ -741,6 +752,22 @@ where
 {
     match tunnel_type {
         Some(t) => serializer.serialize_str(t.as_str()),
+        None => serializer.serialize_none(),
+    }
+}
+
+fn serialize_option_tcp_flags<S>(
+    flags: &Option<Vec<TcpFlag>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match flags {
+        Some(flag_vec) => {
+            let flag_strings: Vec<&str> = flag_vec.iter().map(|f| f.as_str()).collect();
+            serializer.collect_seq(flag_strings)
+        }
         None => serializer.serialize_none(),
     }
 }
