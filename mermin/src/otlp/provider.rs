@@ -96,7 +96,7 @@ impl ProviderBuilder {
                 }
             }
             Err(e) => {
-                debug!("failed to build OTLP exporter: {e}");
+                error!("failed to build OTLP exporter: {e}");
                 self
             }
         }

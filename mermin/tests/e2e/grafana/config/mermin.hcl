@@ -48,7 +48,7 @@ agent "traces" "main" {
 
 # OTLP exporter configuration
 exporter "otlp" "main" {
-  address = "host.internal.docker"
+  address = "host.docker.internal"
   port    = 4318
 
   tls {
