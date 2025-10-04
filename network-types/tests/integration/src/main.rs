@@ -44,13 +44,16 @@ use crate::{
     ipv6::{create_ipv6_test_packet, verify_ipv6_header},
     mobility::{create_mobility_test_packet, verify_mobility_header},
     routing::{create_generic_route_test_packet, verify_generic_route_header},
-    shim6::{
-        create_shim6_test_packet, create_shim6_with_extension_test_packet, verify_shim6_header,
-    },
+    shim6::{create_shim6_test_packet, verify_shim6_header},
     tcp::{create_tcp_test_packet, verify_tcp_header},
     udp::{create_udp_test_packet, verify_udp_header},
     vxlan::{create_vxlan_test_packet, verify_vxlan_header},
-    wireguard::{create_wireguard_initiation_test_packet, verify_wireguard_header},
+    wireguard::{
+        create_wireguard_cookie_reply_test_packet, create_wireguard_initiation_test_packet,
+        create_wireguard_response_test_packet, create_wireguard_transport_data_test_packet,
+        verify_wireguard_cookie_reply_header, verify_wireguard_init_header,
+        verify_wireguard_response_header, verify_wireguard_transport_data_header,
+    },
 };
 
 fn main() {
@@ -197,9 +200,33 @@ define_header_test!(
 );
 
 define_header_test!(
-    test_parses_wireguard_initiation_header,
-    WireGuardMinimalHeader,
-    PacketType::WireGuard,
+    test_parses_wireguard_init_header,
+    WireGuardInitTestData,
+    PacketType::WireGuardInit,
     create_wireguard_initiation_test_packet,
-    verify_wireguard_header
+    verify_wireguard_init_header
+);
+
+define_header_test!(
+    test_parses_wireguard_response_header,
+    WireGuardResponseTestData,
+    PacketType::WireGuardResponse,
+    create_wireguard_response_test_packet,
+    verify_wireguard_response_header
+);
+
+define_header_test!(
+    test_parses_wireguard_cookie_reply_header,
+    WireGuardCookieReplyTestData,
+    PacketType::WireGuardCookieReply,
+    create_wireguard_cookie_reply_test_packet,
+    verify_wireguard_cookie_reply_header
+);
+
+define_header_test!(
+    test_parses_wireguard_transport_data_header,
+    WireGuardTransportDataTestData,
+    PacketType::WireGuardTransportData,
+    create_wireguard_transport_data_test_packet,
+    verify_wireguard_transport_data_header
 );

@@ -31,7 +31,10 @@ pub enum PacketType {
     Shim6 = 19,
     Hip = 20,
     Gre = 21,
-    WireGuard = 22,
+    WireGuardInit = 22,
+    WireGuardResponse = 23,
+    WireGuardCookieReply = 24,
+    WireGuardTransportData = 25,
 }
 
 /// A union to hold any of the possible parsed network headers.
@@ -57,7 +60,10 @@ pub union HeaderUnion {
     pub hip: HipTestData,
     pub gre: GreTestData,
     pub generic_route: GenericRouteTestData,
-    pub wireguard: WireGuardMinimalHeader,
+    pub wireguard_init: WireGuardInitTestData,
+    pub wireguard_response: WireGuardResponseTestData,
+    pub wireguard_cookie_reply: WireGuardCookieReplyTestData,
+    pub wireguard_transport_data: WireGuardTransportDataTestData,
     pub placeholder: [u8; 64],
 }
 
@@ -210,24 +216,77 @@ pub struct GenericRouteTestData {
     pub hdr_ext_len: u8, // Byte 1 - Header Extension Length
 }
 
-/// Minimal WireGuard header for eBPF processing - only essential fields (12 bytes)
-/// This contains only the common fields across all WireGuard message types
+/// WireGuard Init test data - only fields extracted from WireGuard Initiation header
+/// Based on mermin-ebpf parsing: reads ctx.load(offset + 4) for sender_idx
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct WireGuardMinimalHeader {
-    pub type_: WireGuardType,
-    pub reserved: [u8; 3],
-    pub sender_ind: [u8; 4],
-    pub receiver_ind: [u8; 4], // Only used in response/transport, zero in initiation/cookie
+pub struct WireGuardInitTestData {
+    pub type_: WireGuardType, // Byte 0 - Message type (1)
+    pub sender_ind: [u8; 4],  // Bytes 4-7 - Sender Index (le32)
 }
 
-impl WireGuardMinimalHeader {
-    pub const LEN: usize = core::mem::size_of::<WireGuardMinimalHeader>();
+impl WireGuardInitTestData {
+    pub const LEN: usize = core::mem::size_of::<WireGuardInitTestData>();
 
     #[inline]
     pub fn sender_ind(&self) -> u32 {
         u32::from_le_bytes(self.sender_ind)
     }
+}
+
+/// WireGuard Response test data - only fields extracted from WireGuard Response header
+/// Based on mermin-ebpf parsing: reads ctx.load(offset + 4) for sender_idx and ctx.load(offset + 8) for receiver_idx
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct WireGuardResponseTestData {
+    pub type_: WireGuardType,  // Byte 0 - Message type (2)
+    pub sender_ind: [u8; 4],   // Bytes 4-7 - Sender Index (le32)
+    pub receiver_ind: [u8; 4], // Bytes 8-11 - Receiver Index (le32)
+}
+
+impl WireGuardResponseTestData {
+    pub const LEN: usize = core::mem::size_of::<WireGuardResponseTestData>();
+
+    #[inline]
+    pub fn sender_ind(&self) -> u32 {
+        u32::from_le_bytes(self.sender_ind)
+    }
+
+    #[inline]
+    pub fn receiver_ind(&self) -> u32 {
+        u32::from_le_bytes(self.receiver_ind)
+    }
+}
+
+/// WireGuard Cookie Reply test data - only fields extracted from WireGuard Cookie Reply header
+/// Based on mermin-ebpf parsing: reads ctx.load(offset + 4) for receiver_idx
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct WireGuardCookieReplyTestData {
+    pub type_: WireGuardType,  // Byte 0 - Message type (3)
+    pub receiver_ind: [u8; 4], // Bytes 4-7 - Receiver Index (le32)
+}
+
+impl WireGuardCookieReplyTestData {
+    pub const LEN: usize = core::mem::size_of::<WireGuardCookieReplyTestData>();
+
+    #[inline]
+    pub fn receiver_ind(&self) -> u32 {
+        u32::from_le_bytes(self.receiver_ind)
+    }
+}
+
+/// WireGuard Transport Data test data - only fields extracted from WireGuard Transport Data header
+/// Based on mermin-ebpf parsing: reads ctx.load(offset + 4) for receiver_idx
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct WireGuardTransportDataTestData {
+    pub type_: WireGuardType,  // Byte 0 - Message type (4)
+    pub receiver_ind: [u8; 4], // Bytes 4-7 - Receiver Index (le32)
+}
+
+impl WireGuardTransportDataTestData {
+    pub const LEN: usize = core::mem::size_of::<WireGuardTransportDataTestData>();
 
     #[inline]
     pub fn receiver_ind(&self) -> u32 {

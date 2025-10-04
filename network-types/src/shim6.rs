@@ -84,13 +84,6 @@ pub fn variable_len(hdr_ext_len: HdrExtLen) -> usize {
     total_hdr_len(hdr_ext_len).saturating_sub(SHIM6_LEN)
 }
 
-/// Calculates the total length of the Shim6 header in bytes.
-/// Total length = (hdr_ext_len + 1) * 8.
-#[inline]
-pub fn calc_total_hdr_len(hdr_ext_len: u8) -> usize {
-    (hdr_ext_len as usize + 1) << 3
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

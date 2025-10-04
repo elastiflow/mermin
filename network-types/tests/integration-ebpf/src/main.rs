@@ -12,7 +12,8 @@ use integration_common::{
     AhTestData, DestOptsTestData, EspTestData, EthernetTestData, FragmentTestData,
     GenericRouteTestData, GeneveTestData, GreTestData, HeaderUnion, HipTestData, HopOptTestData,
     Ipv4TestData, Ipv6TestData, MobilityTestData, PacketType, ParsedHeader, Shim6TestData,
-    TcpTestData, UdpTestData, VxlanTestData,
+    TcpTestData, UdpTestData, VxlanTestData, WireGuardCookieReplyTestData, WireGuardInitTestData,
+    WireGuardResponseTestData, WireGuardTransportDataTestData,
 };
 use network_types::{
     ah::AH_LEN,
@@ -30,6 +31,7 @@ use network_types::{
     tcp::TCP_LEN,
     udp::UDP_LEN,
     vxlan::VXLAN_LEN,
+    wireguard::WireGuardType,
 };
 
 pub const MAX_RPL_ADDR_STORAGE: usize = 128;
@@ -75,7 +77,10 @@ fn u8_to_packet_type(val: u8) -> Option<PacketType> {
         19 => Some(PacketType::Shim6),
         20 => Some(PacketType::Hip),
         21 => Some(PacketType::Gre),
-        22 => Some(PacketType::WireGuard),
+        22 => Some(PacketType::WireGuardInit),
+        23 => Some(PacketType::WireGuardResponse),
+        24 => Some(PacketType::WireGuardCookieReply),
+        25 => Some(PacketType::WireGuardTransportData),
         _ => None,
     }
 }
@@ -620,14 +625,115 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
                 },
             }
         }
-        PacketType::WireGuard => {
-            let header: integration_common::WireGuardMinimalHeader =
-                ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
-            let first_byte = header.type_ as u8; // First byte is the message type
+        PacketType::WireGuardInit => {
+            // Bounds check before parsing
+            if data_offset + WireGuardInitTestData::LEN > ctx.len() as usize {
+                log!(&ctx, Level::Error, "WireGuard Init header out of bounds");
+                return Err(TC_ACT_SHOT);
+            }
+
+            // Parse WireGuard Init header fields individually (matching mermin-ebpf methodology)
+            // Extract only the fields that are actually used
+            let type_: WireGuardType = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            let sender_ind: [u8; 4] = ctx.load(data_offset + 4).map_err(|_| TC_ACT_SHOT)?;
+
+            let first_byte = type_ as u8; // Use message type as the first parsed byte
             store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+
             ParsedHeader {
-                type_: PacketType::WireGuard,
-                data: HeaderUnion { wireguard: header },
+                type_: PacketType::WireGuardInit,
+                data: HeaderUnion {
+                    wireguard_init: WireGuardInitTestData { type_, sender_ind },
+                },
+            }
+        }
+        PacketType::WireGuardResponse => {
+            // Bounds check before parsing
+            if data_offset + WireGuardResponseTestData::LEN > ctx.len() as usize {
+                log!(
+                    &ctx,
+                    Level::Error,
+                    "WireGuard Response header out of bounds"
+                );
+                return Err(TC_ACT_SHOT);
+            }
+
+            // Parse WireGuard Response header fields individually (matching mermin-ebpf methodology)
+            // Extract only the fields that are actually used
+            let type_: WireGuardType = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            let sender_ind: [u8; 4] = ctx.load(data_offset + 4).map_err(|_| TC_ACT_SHOT)?;
+            let receiver_ind: [u8; 4] = ctx.load(data_offset + 8).map_err(|_| TC_ACT_SHOT)?;
+
+            let first_byte = type_ as u8; // Use message type as the first parsed byte
+            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+
+            ParsedHeader {
+                type_: PacketType::WireGuardResponse,
+                data: HeaderUnion {
+                    wireguard_response: WireGuardResponseTestData {
+                        type_,
+                        sender_ind,
+                        receiver_ind,
+                    },
+                },
+            }
+        }
+        PacketType::WireGuardCookieReply => {
+            // Bounds check before parsing
+            if data_offset + WireGuardCookieReplyTestData::LEN > ctx.len() as usize {
+                log!(
+                    &ctx,
+                    Level::Error,
+                    "WireGuard Cookie Reply header out of bounds"
+                );
+                return Err(TC_ACT_SHOT);
+            }
+
+            // Parse WireGuard Cookie Reply header fields individually (matching mermin-ebpf methodology)
+            // Extract only the fields that are actually used
+            let type_: WireGuardType = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            let receiver_ind: [u8; 4] = ctx.load(data_offset + 4).map_err(|_| TC_ACT_SHOT)?;
+
+            let first_byte = type_ as u8; // Use message type as the first parsed byte
+            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+
+            ParsedHeader {
+                type_: PacketType::WireGuardCookieReply,
+                data: HeaderUnion {
+                    wireguard_cookie_reply: WireGuardCookieReplyTestData {
+                        type_,
+                        receiver_ind,
+                    },
+                },
+            }
+        }
+        PacketType::WireGuardTransportData => {
+            // Bounds check before parsing
+            if data_offset + WireGuardTransportDataTestData::LEN > ctx.len() as usize {
+                log!(
+                    &ctx,
+                    Level::Error,
+                    "WireGuard Transport Data header out of bounds"
+                );
+                return Err(TC_ACT_SHOT);
+            }
+
+            // Parse WireGuard Transport Data header fields individually (matching mermin-ebpf methodology)
+            // Extract only the fields that are actually used
+            let type_: WireGuardType = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            let receiver_ind: [u8; 4] = ctx.load(data_offset + 4).map_err(|_| TC_ACT_SHOT)?;
+
+            let first_byte = type_ as u8; // Use message type as the first parsed byte
+            store_and_verify_test_data(&ctx, packet_type, first_byte)?;
+
+            ParsedHeader {
+                type_: PacketType::WireGuardTransportData,
+                data: HeaderUnion {
+                    wireguard_transport_data: WireGuardTransportDataTestData {
+                        type_,
+                        receiver_ind,
+                    },
+                },
             }
         }
     };

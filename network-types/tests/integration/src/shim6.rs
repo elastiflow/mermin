@@ -51,8 +51,3 @@ pub fn verify_shim6_header(received: ParsedHeader, expected: Shim6TestData) {
         parsed_header.hdr_ext_len, expected.hdr_ext_len
     );
 }
-
-// Helper for Shim6 with extension - same as basic since we only extract next_hdr
-pub fn create_shim6_with_extension_test_packet() -> ([u8; SHIM6_LEN + 1], Shim6TestData) {
-    create_shim6_test_packet()
-}
