@@ -153,7 +153,7 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
 
     // In our specific test case (UDP packet on loopback), we can assume a fixed header size.
     // Ethernet Header (14 bytes) + IPv4 Header (20 bytes) + UDP Header (8 bytes) = 42 bytes.
-    const PAYLOAD_OFFSET: usize = 42;
+    const PAYLOAD_OFFSET: usize = ETH_LEN + IPV4_LEN + UDP_LEN;
 
     // Bounds check for packet type byte
     if PAYLOAD_OFFSET + 1 > ctx.len() as usize {
@@ -183,14 +183,12 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
 
     let response = match packet_type {
         PacketType::Eth => {
-            // Bounds check before parsing
             if data_offset + ETH_LEN > ctx.len() as usize {
                 log!(&ctx, Level::Error, "Ethernet header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
             // Parse Ethernet header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let mac_addr: [u8; 6] = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             let ether_type: EtherType = ctx.load(data_offset + 12).map_err(|_| TC_ACT_SHOT)?;
 
@@ -209,14 +207,12 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             // return Ok(TC_ACT_OK)
         }
         PacketType::Ipv4 => {
-            // Bounds check before parsing
             if data_offset + IPV4_LEN > ctx.len() as usize {
                 log!(&ctx, Level::Error, "IPv4 header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
             // Parse IPv4 header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let dscp_ecn: u8 = ctx.load(data_offset + 1).map_err(|_| TC_ACT_SHOT)?;
             let ttl: u8 = ctx.load(data_offset + 8).map_err(|_| TC_ACT_SHOT)?;
             let proto: u8 = ctx.load(data_offset + 9).map_err(|_| TC_ACT_SHOT)?;
@@ -239,14 +235,12 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::Ipv6 => {
-            // Bounds check before parsing
             if data_offset + IPV6_LEN > ctx.len() as usize {
                 log!(&ctx, Level::Error, "IPv6 header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
             // Parse IPv6 header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let vcf: [u8; 4] = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             let proto: u8 = ctx.load(data_offset + 6).map_err(|_| TC_ACT_SHOT)?;
             let hop_limit: u8 = ctx.load(data_offset + 7).map_err(|_| TC_ACT_SHOT)?;
@@ -270,37 +264,15 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::Tcp => {
-            // Bounds check before parsing
             if data_offset + TCP_LEN > ctx.len() as usize {
                 log!(&ctx, Level::Error, "TCP header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
             // Parse TCP header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let src_port: [u8; 2] = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             let dst_port: [u8; 2] = ctx.load(data_offset + 2).map_err(|_| TC_ACT_SHOT)?;
             let tcp_flags: u8 = ctx.load(data_offset + 13).map_err(|_| TC_ACT_SHOT)?;
-
-            // Add detailed logging
-            log!(
-                &ctx,
-                Level::Info,
-                "TCP parsing - src_port: [{}, {}]",
-                src_port[0],
-                src_port[1]
-            );
-            log!(
-                &ctx,
-                Level::Info,
-                "TCP parsing - dst_port: [{}, {}]",
-                dst_port[0],
-                dst_port[1]
-            );
-            log!(&ctx, Level::Info, "TCP parsing - tcp_flags: {}", tcp_flags);
-            log!(&ctx, Level::Info, "Expected - src_port: [0x30, 0x39]");
-            log!(&ctx, Level::Info, "Expected - dst_port: [0x00, 0x50]");
-            log!(&ctx, Level::Info, "Expected - tcp_flags: 0x02");
 
             let first_byte = src_port[0];
             store_and_verify_test_data(&ctx, packet_type, first_byte)?;
@@ -315,17 +287,14 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
                     },
                 },
             }
-            // return Ok(TC_ACT_OK);
         }
         PacketType::Udp => {
-            // Bounds check before parsing
             if data_offset + UDP_LEN > ctx.len() as usize {
                 log!(&ctx, Level::Error, "UDP header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
             // Parse UDP header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let src_port: [u8; 2] = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             let dst_port: [u8; 2] = ctx.load(data_offset + 2).map_err(|_| TC_ACT_SHOT)?;
 
@@ -340,14 +309,12 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::Ah => {
-            // Bounds check before parsing
             if data_offset + AH_LEN > ctx.len() as usize {
                 log!(&ctx, Level::Error, "AH header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
             // Parse AH header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let next_hdr: u8 = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             let spi: [u8; 4] = ctx.load(data_offset + 4).map_err(|_| TC_ACT_SHOT)?;
 
@@ -362,14 +329,12 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::Esp => {
-            // Bounds check before parsing
             if data_offset + ESP_LEN > ctx.len() as usize {
                 log!(&ctx, Level::Error, "ESP header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
             // Parse ESP header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let spi: [u8; 4] = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
 
             let first_byte = spi[0]; // Use first byte of SPI as the first parsed byte
@@ -383,7 +348,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::Hop => {
-            // Bounds check before parsing
             if data_offset + HOP_OPT_LEN > ctx.len() as usize {
                 log!(
                     &ctx,
@@ -394,7 +358,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
 
             // Parse Hop-by-Hop Options header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let next_hdr: u8 = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             let hdr_ext_len: u8 = ctx.load(data_offset + 1).map_err(|_| TC_ACT_SHOT)?;
 
@@ -412,14 +375,12 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::Fragment => {
-            // Bounds check before parsing
             if data_offset + FRAGMENT_LEN > ctx.len() as usize {
                 log!(&ctx, Level::Error, "Fragment header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
             // Parse Fragment header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let next_hdr: u8 = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
 
             let first_byte = next_hdr; // Use next_hdr as the first parsed byte
@@ -433,7 +394,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::DestOpts => {
-            // Bounds check before parsing
             if data_offset + DEST_OPTS_LEN > ctx.len() as usize {
                 log!(
                     &ctx,
@@ -443,8 +403,7 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
                 return Err(TC_ACT_SHOT);
             }
 
-            // Parse Destination Options header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
+            // Parse Dest Options header fields individually (matching mermin-ebpf methodology)
             let next_hdr: u8 = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             let hdr_ext_len: u8 = ctx.load(data_offset + 1).map_err(|_| TC_ACT_SHOT)?;
 
@@ -462,14 +421,12 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::Mobility => {
-            // Bounds check before parsing
             if data_offset + MOBILITY_LEN > ctx.len() as usize {
                 log!(&ctx, Level::Error, "Mobility header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
             // Parse Mobility header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let next_hdr: u8 = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             let hdr_ext_len: u8 = ctx.load(data_offset + 1).map_err(|_| TC_ACT_SHOT)?;
 
@@ -487,14 +444,12 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::Shim6 => {
-            // Bounds check before parsing
             if data_offset + SHIM6_LEN > ctx.len() as usize {
                 log!(&ctx, Level::Error, "Shim6 header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
             // Parse Shim6 header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let next_hdr: u8 = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             let hdr_ext_len: u8 = ctx.load(data_offset + 1).map_err(|_| TC_ACT_SHOT)?;
 
@@ -512,14 +467,12 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::Geneve => {
-            // Bounds check before parsing
             if data_offset + GENEVE_LEN > ctx.len() as usize {
                 log!(&ctx, Level::Error, "Geneve header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
             // Parse Geneve header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let ver_opt_len: u8 = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             let tunnel_ether_type: [u8; 2] = ctx.load(data_offset + 2).map_err(|_| TC_ACT_SHOT)?;
             let vni: [u8; 3] = ctx.load(data_offset + 4).map_err(|_| TC_ACT_SHOT)?;
@@ -539,7 +492,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::GenericRoute => {
-            // Bounds check before parsing
             const GENERIC_ROUTE_LEN: usize = 4;
             if data_offset + GENERIC_ROUTE_LEN > ctx.len() as usize {
                 log!(&ctx, Level::Error, "Generic Route header out of bounds");
@@ -547,7 +499,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
 
             // Parse Generic Route header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let next_hdr: u8 = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             let hdr_ext_len: u8 = ctx.load(data_offset + 1).map_err(|_| TC_ACT_SHOT)?;
 
@@ -565,14 +516,12 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::Vxlan => {
-            // Bounds check before parsing
             if data_offset + VXLAN_LEN > ctx.len() as usize {
                 log!(&ctx, Level::Error, "VXLAN header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
             // Parse VXLAN header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let flags: u8 = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             let vni: [u8; 3] = ctx.load(data_offset + 4).map_err(|_| TC_ACT_SHOT)?;
 
@@ -587,14 +536,12 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::Hip => {
-            // Bounds check before parsing
             if data_offset + HIP_LEN > ctx.len() as usize {
                 log!(&ctx, Level::Error, "HIP header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
             // Parse HIP header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let next_hdr: u8 = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             let hdr_ext_len: u8 = ctx.load(data_offset + 1).map_err(|_| TC_ACT_SHOT)?;
 
@@ -612,14 +559,12 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::Gre => {
-            // Bounds check before parsing
             if data_offset + GRE_LEN > ctx.len() as usize {
                 log!(&ctx, Level::Error, "GRE header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
             // Parse GRE header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let flag_res: [u8; 2] = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             let ether_type: [u8; 2] = ctx.load(data_offset + 2).map_err(|_| TC_ACT_SHOT)?;
 
@@ -637,14 +582,12 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::WireGuardInit => {
-            // Bounds check before parsing
             if data_offset + WireGuardInitTestData::LEN > ctx.len() as usize {
                 log!(&ctx, Level::Error, "WireGuard Init header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
             // Parse WireGuard Init header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let type_: WireGuardType = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             let sender_ind: [u8; 4] = ctx.load(data_offset + 4).map_err(|_| TC_ACT_SHOT)?;
 
@@ -659,7 +602,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::WireGuardResponse => {
-            // Bounds check before parsing
             if data_offset + WireGuardResponseTestData::LEN > ctx.len() as usize {
                 log!(
                     &ctx,
@@ -670,7 +612,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
 
             // Parse WireGuard Response header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let type_: WireGuardType = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             let sender_ind: [u8; 4] = ctx.load(data_offset + 4).map_err(|_| TC_ACT_SHOT)?;
             let receiver_ind: [u8; 4] = ctx.load(data_offset + 8).map_err(|_| TC_ACT_SHOT)?;
@@ -690,7 +631,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::WireGuardCookieReply => {
-            // Bounds check before parsing
             if data_offset + WireGuardCookieReplyTestData::LEN > ctx.len() as usize {
                 log!(
                     &ctx,
@@ -701,7 +641,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
 
             // Parse WireGuard Cookie Reply header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let type_: WireGuardType = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             let receiver_ind: [u8; 4] = ctx.load(data_offset + 4).map_err(|_| TC_ACT_SHOT)?;
 
@@ -719,7 +658,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
         }
         PacketType::WireGuardTransportData => {
-            // Bounds check before parsing
             if data_offset + WireGuardTransportDataTestData::LEN > ctx.len() as usize {
                 log!(
                     &ctx,
@@ -730,7 +668,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             }
 
             // Parse WireGuard Transport Data header fields individually (matching mermin-ebpf methodology)
-            // Extract only the fields that are actually used
             let type_: WireGuardType = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
             let receiver_ind: [u8; 4] = ctx.load(data_offset + 4).map_err(|_| TC_ACT_SHOT)?;
 
@@ -761,7 +698,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         Level::Info,
         "Successfully processed packet payload with PerCpuArray verification"
     );
-    //log!(&ctx, Level::Info, "Header size: {}", header_size);
 
     Ok(TC_ACT_OK)
 }
