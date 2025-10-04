@@ -64,12 +64,11 @@ pub union HeaderUnion {
     pub wireguard_response: WireGuardResponseTestData,
     pub wireguard_cookie_reply: WireGuardCookieReplyTestData,
     pub wireguard_transport_data: WireGuardTransportDataTestData,
-    pub placeholder: [u8; 64],
 }
 
 /// The final struct sent back to user-space. It contains the type of
 /// header that was parsed and the parsed data itself in the union.
-#[repr(C, align(8))]
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct ParsedHeader {
     pub type_: PacketType,
@@ -99,7 +98,6 @@ pub struct TcpTestData {
     pub src_port: [u8; 2], // Bytes 0-1
     pub dst_port: [u8; 2], // Bytes 2-3
     pub tcp_flags: u8,     // Byte 13
-    pub _padding: [u8; 3], // Explicit padding to 8 bytes for alignment
 }
 
 /// IPv4 test data - only fields extracted from IPv4 header
@@ -143,7 +141,8 @@ pub struct EspTestData {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct HopOptTestData {
-    pub next_hdr: u8, // Byte 0 - Next Header (IpProto)
+    pub next_hdr: u8,    // Byte 0 - Next Header (IpProto)
+    pub hdr_ext_len: u8, // Byte 1 - Header Extension Length
 }
 
 /// Fragment test data - only fields extracted from Fragment header
@@ -157,14 +156,16 @@ pub struct FragmentTestData {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct DestOptsTestData {
-    pub next_hdr: u8, // Byte 0 - Next Header (IpProto)
+    pub next_hdr: u8,    // Byte 0 - Next Header (IpProto)
+    pub hdr_ext_len: u8, // Byte 1 - Header Extension Length
 }
 
 /// Mobility test data - only fields extracted from Mobility header
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct MobilityTestData {
-    pub next_hdr: u8, // Byte 0 - Next Header (IpProto)
+    pub next_hdr: u8,    // Byte 0 - Next Header (IpProto)
+    pub hdr_ext_len: u8, // Byte 1 - Header Extension Length
 }
 
 /// Shim6 test data - only fields extracted from Shim6 header

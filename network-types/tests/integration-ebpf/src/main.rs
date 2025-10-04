@@ -312,7 +312,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
                         src_port,
                         dst_port,
                         tcp_flags,
-                        _padding: [0; 3],
                     },
                 },
             }
@@ -397,6 +396,7 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             // Parse Hop-by-Hop Options header fields individually (matching mermin-ebpf methodology)
             // Extract only the fields that are actually used
             let next_hdr: u8 = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            let hdr_ext_len: u8 = ctx.load(data_offset + 1).map_err(|_| TC_ACT_SHOT)?;
 
             let first_byte = next_hdr; // Use next_hdr as the first parsed byte
             store_and_verify_test_data(&ctx, packet_type, first_byte)?;
@@ -404,7 +404,10 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             ParsedHeader {
                 type_: PacketType::Hop,
                 data: HeaderUnion {
-                    hop: HopOptTestData { next_hdr },
+                    hop: HopOptTestData {
+                        next_hdr,
+                        hdr_ext_len,
+                    },
                 },
             }
         }
@@ -443,6 +446,7 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             // Parse Destination Options header fields individually (matching mermin-ebpf methodology)
             // Extract only the fields that are actually used
             let next_hdr: u8 = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            let hdr_ext_len: u8 = ctx.load(data_offset + 1).map_err(|_| TC_ACT_SHOT)?;
 
             let first_byte = next_hdr; // Use next_hdr as the first parsed byte
             store_and_verify_test_data(&ctx, packet_type, first_byte)?;
@@ -450,7 +454,10 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             ParsedHeader {
                 type_: PacketType::DestOpts,
                 data: HeaderUnion {
-                    destopts: DestOptsTestData { next_hdr },
+                    destopts: DestOptsTestData {
+                        next_hdr,
+                        hdr_ext_len,
+                    },
                 },
             }
         }
@@ -464,6 +471,7 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             // Parse Mobility header fields individually (matching mermin-ebpf methodology)
             // Extract only the fields that are actually used
             let next_hdr: u8 = ctx.load(data_offset).map_err(|_| TC_ACT_SHOT)?;
+            let hdr_ext_len: u8 = ctx.load(data_offset + 1).map_err(|_| TC_ACT_SHOT)?;
 
             let first_byte = next_hdr; // Use next_hdr as the first parsed byte
             store_and_verify_test_data(&ctx, packet_type, first_byte)?;
@@ -471,7 +479,10 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
             ParsedHeader {
                 type_: PacketType::Mobility,
                 data: HeaderUnion {
-                    mobility: MobilityTestData { next_hdr },
+                    mobility: MobilityTestData {
+                        next_hdr,
+                        hdr_ext_len,
+                    },
                 },
             }
         }

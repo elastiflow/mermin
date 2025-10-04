@@ -13,12 +13,13 @@ pub fn create_destopts_test_packet() -> ([u8; DEST_OPTS_LEN + 1], DestOptsTestDa
     request_data[1..3].copy_from_slice(&[
         // Byte 1: Next Header (next_hdr field - extracted at offset 0 from data)
         IpProto::Tcp as u8,
-        // Byte 2: Header Extension Length (not extracted)
-        0, // (0+1)*8 = 8 bytes total
+        // Byte 2: Header Extension Length (hdr_ext_len field - extracted at offset 1 from data)
+        1, // (1+1)*8 = 16 bytes total
     ]);
 
     let expected_header = DestOptsTestData {
         next_hdr: IpProto::Tcp as u8,
+        hdr_ext_len: 1,
     };
 
     (request_data, expected_header)
@@ -33,5 +34,11 @@ pub fn verify_destopts_header(received: ParsedHeader, expected: DestOptsTestData
         parsed_header.next_hdr, expected.next_hdr,
         "Next Header mismatch: got {}, expected {}",
         parsed_header.next_hdr, expected.next_hdr
+    );
+
+    assert_eq!(
+        parsed_header.hdr_ext_len, expected.hdr_ext_len,
+        "Header Extension Length mismatch: got {}, expected {}",
+        parsed_header.hdr_ext_len, expected.hdr_ext_len
     );
 }

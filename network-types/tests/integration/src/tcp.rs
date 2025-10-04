@@ -32,7 +32,6 @@ pub fn create_tcp_test_packet() -> ([u8; 21], TcpTestData) {
         src_port: [0x30, 0x39],
         dst_port: [0x00, 0x50],
         tcp_flags: 0x02, // SYN flag
-        _padding: [0; 3],
     };
 
     (request_data, expected_header)
