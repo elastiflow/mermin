@@ -150,10 +150,14 @@ pub fn resolve_exporters(
 pub struct OtlpExporterOptions {
     #[serde(default = "defaults::address")]
     pub address: String,
+    #[serde(default = "defaults::scheme")]
+    pub scheme: String,
     #[serde(default = "defaults::port")]
     pub port: u16,
     #[serde(default = "defaults::protocol", with = "exporter_protocol")]
     pub protocol: ExporterProtocol,
+    #[serde(default = "defaults::connection_timeout_ms")]
+    pub connection_timeout_ms: u64,
     pub auth: Option<AuthOptions>,
     pub tls: Option<TlsOptions>,
 }
@@ -269,7 +273,7 @@ impl AuthOptions {
 
 impl OtlpExporterOptions {
     pub fn build_endpoint(&self) -> String {
-        format!("{}:{}", self.address, self.port)
+        format!("{}://{}:{}", self.scheme, self.address, self.port)
     }
 }
 
@@ -341,6 +345,12 @@ mod defaults {
     }
     pub fn protocol() -> ExporterProtocol {
         ExporterProtocol::Grpc
+    }
+    pub fn scheme() -> String {
+        "http".to_string()
+    }
+    pub fn connection_timeout_ms() -> u64 {
+        10_000
     }
 }
 

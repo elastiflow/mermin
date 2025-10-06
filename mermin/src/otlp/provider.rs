@@ -1,4 +1,5 @@
 use axum::http::Uri;
+use log::{debug, error};
 use opentelemetry::{KeyValue, global};
 use opentelemetry_otlp::{WithExportConfig, WithTonicConfig};
 use opentelemetry_sdk::{
@@ -8,7 +9,7 @@ use opentelemetry_sdk::{
     trace::{SdkTracerProvider, span_processor_with_async_runtime::BatchSpanProcessor},
 };
 use tonic::transport::{Channel, channel::ClientTlsConfig};
-use tracing::{Level, error, info, level_filters::LevelFilter, warn};
+use tracing::{Level, info, level_filters::LevelFilter, warn};
 use tracing_subscriber::{
     fmt::{Layer, format::FmtSpan},
     prelude::__tracing_subscriber_SubscriberExt,
@@ -16,7 +17,7 @@ use tracing_subscriber::{
 };
 
 use crate::{
-    otlp::opts::{ExporterOptions, OtlpExporterOptions, resolve_exporters},
+    otlp::opts::{ExporterOptions, OtlpExporterOptions, StdoutExporterOptions, resolve_exporters},
     runtime::{conf::ExporterReferences, enums::SpanFmt},
 };
 
@@ -37,65 +38,76 @@ impl ProviderBuilder {
         }
     }
 
-    pub async fn with_otlp_exporter(
-        mut self,
-        options: OtlpExporterOptions,
-    ) -> Result<Self, anyhow::Error> {
-        let uri: Uri = options.build_endpoint().parse()?;
-        let tls_config: Option<ClientTlsConfig> = if let Some(tls_config) = &options.tls
-            && tls_config.enabled
-        {
-            // TODO: Apply TLS configuration - ENG-120
-            // This should handle TLS settings from config.tls
-            None
-        } else {
-            None
+    pub async fn with_otlp_exporter(self, options: OtlpExporterOptions) -> ProviderBuilder {
+        debug!("creating otlp exporter with options: {options:?}");
+        let uri: Uri = options.build_endpoint().parse().unwrap_or_else(|e| {
+            info!("failed to parse OTLP endpoint URL: {}", e);
+            Uri::default()
+        });
+
+        // TODO: Apply TLS configuration - ENG-120
+        // This should handle TLS settings from config.tls
+        let tls_config: Option<ClientTlsConfig> = match &options.tls {
+            Some(_tls_opts) => None,
+            _ => None,
         };
 
         let mut channel = Channel::builder(uri);
         if let Some(tls) = tls_config {
-            info!("tls configuration detected for otlp exporter");
-            channel = channel.tls_config(tls)?;
-        }
+            debug!("tls configuration detected for otlp exporter");
+            let res = channel.tls_config(tls);
+            if res.is_err() {
+                warn!("failed to apply tls configuration: {}", res.err().unwrap());
+                return self;
+            }
+            channel = res.unwrap();
+        };
 
-        let chan = channel
-            .connect_timeout(std::time::Duration::from_secs(5))
-            .connect()
-            .await?;
         let builder = opentelemetry_otlp::SpanExporter::builder()
             .with_tonic() // for gRPC
-            .with_channel(chan)
-            .with_protocol(opentelemetry_otlp::Protocol::from(options.protocol));
+            .with_channel(channel.connect_lazy())
+            .with_protocol(opentelemetry_otlp::Protocol::Grpc);
 
         if let Some(auth_config) = &options.auth {
             match auth_config.generate_auth_headers() {
                 Ok(auth_headers) => {
-                    info!("Applied authentication headers to OTLP exporter");
+                    info!("applied authentication headers to otlp exporter");
                     // TODO: Apply headers to the exporter builder - ENG-120
                     // Note: The opentelemetry_otlp crate may need to be updated to support custom headers
                     // For now, this is a placeholder for where header configuration would go
-                    info!(
+                    debug!(
                         "headers configured for otlp exporter ({} headers)",
                         auth_headers.len()
                     );
                 }
                 Err(e) => {
-                    error!("Failed to generate authentication headers: {}", e);
-                    return Err(anyhow::anyhow!("Authentication configuration error: {}", e));
+                    warn!("failed to generate authentication headers: {}", e);
+                    return self;
                 }
             }
         }
-        let exporter = builder.build()?;
-        let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio).build();
-        self.sdk_builder = self.sdk_builder.with_span_processor(processor);
-        Ok(self)
+
+        match builder.build() {
+            Ok(exporter) => {
+                debug!("otlp exporter built successfully");
+                let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio).build();
+                ProviderBuilder {
+                    sdk_builder: self.sdk_builder.with_span_processor(processor),
+                }
+            }
+            Err(e) => {
+                error!("failed to build OTLP exporter: {e}");
+                self
+            }
+        }
     }
 
-    pub fn with_stdout_exporter(mut self) -> Self {
+    pub fn with_stdout_exporter(self) -> ProviderBuilder {
         let exporter = opentelemetry_stdout::SpanExporter::default();
         let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio).build();
-        self.sdk_builder = self.sdk_builder.with_span_processor(processor);
-        self
+        ProviderBuilder {
+            sdk_builder: self.sdk_builder.with_span_processor(processor),
+        }
     }
 
     pub fn build(self) -> SdkTracerProvider {
@@ -106,24 +118,37 @@ impl ProviderBuilder {
 pub async fn init_provider(
     exporter_options: &ExporterOptions,
     exporter_refs: ExporterReferences,
-) -> Result<SdkTracerProvider, anyhow::Error> {
+) -> SdkTracerProvider {
     let mut provider = ProviderBuilder::new();
     if exporter_refs.is_empty() {
-        warn!("no exporters configured");
-        return Ok(provider.build());
+        info!("no exporters configured");
+        return provider.build();
     }
 
-    let (otlp_opts, stdout_opts) = resolve_exporters(exporter_refs, exporter_options)?;
+    let (otlp_opts, stdout_opts) = match resolve_exporters(exporter_refs, exporter_options) {
+        Ok((o, s)) => (o, s),
+        Err(e) => {
+            error!("failed to resolve exporters: {e}");
+            let otlp_opts: Vec<OtlpExporterOptions> = vec![];
+            let stdout_opts: Vec<StdoutExporterOptions> = vec![];
+            (otlp_opts, stdout_opts)
+        }
+    };
 
-    for options in otlp_opts {
-        provider = provider.with_otlp_exporter(options).await?;
+    info!(
+        "resolved exporters - otlp {}, stdout {}",
+        otlp_opts.len(),
+        stdout_opts.len()
+    );
+    for opts in otlp_opts {
+        provider = provider.with_otlp_exporter(opts).await;
     }
 
     for _ in stdout_opts {
         provider = provider.with_stdout_exporter();
     }
 
-    Ok(provider.build())
+    provider.build()
 }
 
 pub async fn init_internal_tracing(
@@ -132,7 +157,7 @@ pub async fn init_internal_tracing(
     log_level: Level,
     span_fmt: SpanFmt,
 ) -> Result<(), anyhow::Error> {
-    let provider = init_provider(exporter_options, exporter_refs).await?;
+    let provider = init_provider(exporter_options, exporter_refs).await;
     let mut fmt_layer = Layer::new().with_span_events(FmtSpan::from(span_fmt));
 
     match log_level {

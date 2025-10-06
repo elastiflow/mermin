@@ -13,6 +13,7 @@ target/
 tmp.*
 charts/mermin/charts/*.tgz
 helm_rendered
+/mermin/tests/e2e/grafana/tempo-data/
 
 # IDEs
 .idea
