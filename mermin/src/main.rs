@@ -51,7 +51,6 @@ async fn main() -> Result<()> {
 
     let exporter: Arc<dyn TraceableExporter> = match config.exporter {
         Some(exporter_options) => {
-            let app_tracer_provider = init_provider(&exporter_options, exporter_refs).await?;
             init_internal_tracing(
                 &exporter_options,
                 config.traces.exporters,
@@ -59,6 +58,7 @@ async fn main() -> Result<()> {
                 config.traces.span_level,
             )
             .await?;
+            let app_tracer_provider = init_provider(&exporter_options, exporter_refs).await;
             info!("initialized configured exporters");
             Arc::new(TraceExporterAdapter::new(app_tracer_provider))
         }

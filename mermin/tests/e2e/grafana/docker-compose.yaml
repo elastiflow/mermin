@@ -1,0 +1,83 @@
+services:
+
+  # Tempo runs as user 10001, and docker compose creates the volume as root.
+  # As such, we need to chown the volume in order for Tempo to start correctly.
+  init:
+    image: &tempoImage grafana/tempo:latest
+    user: root
+    entrypoint:
+      - "chown"
+      - "10001:10001"
+      - "/var/tempo"
+    volumes:
+      - ./tempo-data:/var/tempo
+
+  tempo:
+    image: *tempoImage
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    volumes:
+      - ./config/tempo.yaml:/etc/tempo.yaml
+      - ./tempo-data:/var/tempo
+    ports:
+      - "3200:3200" # tempo
+      - "4317:4317" # otlp grpc
+    depends_on:
+      - init
+    networks:
+      - observability-net
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.86.0
+    command: [ "--config=/etc/otel-collector.yaml" ]
+    volumes:
+      - ./config/otel-collector.yaml:/etc/otel-collector.yaml
+    ports:
+      - "4318:4318"
+      - "13133:13133"
+    networks:
+      - observability-net
+
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus.yaml
+      - --web.enable-remote-write-receiver
+      - --enable-feature=exemplar-storage
+      - --enable-feature=native-histograms
+    volumes:
+      - ./config/prometheus.yaml:/etc/prometheus.yaml
+    ports:
+      - "9090:9090"
+    networks:
+      - observability-net
+
+  grafana:
+    image: grafana/grafana:11.0.0
+    volumes:
+      - ./config/grafana-datasource.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor
+      - HOST_DOCKER_INTERNAL_ADDR=${HOST_DOCKER_INTERNAL_ADDR:-host.docker.internal}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - observability-net
+
+  traffic-generator:
+    image: alpine/curl:latest
+    container_name: traffic-generator
+    # This command runs a loop that sends a request to Prometheus every 5 seconds
+    command: sh -c "while true; do curl http://prometheus:9090/-/healthy; echo; sleep 5; done"
+    networks:
+      - observability-net
+    depends_on:
+      - prometheus # Ensures prometheus is up before this starts
+
+networks:
+  observability-net:
+    driver: bridge

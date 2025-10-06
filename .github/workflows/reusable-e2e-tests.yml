@@ -8,6 +8,16 @@ on:
         required: false
         default: '["calico", "cilium", "flannel", "kindnetd"]'
         type: string
+      test-path:
+        description: 'path the the e2e test suite that should be run'
+        required: true
+        type: string
+      image-tag:
+        description: 'Tag of the Mermin image to use for testing'
+        required: false
+        default: 'latest'
+        type: string
+
 
 jobs:
   build:
@@ -39,7 +49,7 @@ jobs:
         uses: elastiflow/gha-reusable/actions/docker-build-push@v0
         with:
           image: mermin
-          tag: latest
+          tag: ${{ inputs.image-tag }}
           platforms: linux/amd64
           target: runner-debug
           load: true
@@ -49,12 +59,12 @@ jobs:
       - name: Save Docker image as an artifact
         run: |
           mkdir -p image-artifact
-          docker save not-exists.elastiflow.com/mermin:latest -o image-artifact/mermin-latest.tar
+          docker save not-exists.elastiflow.com/mermin:${{ inputs.image-tag }} -o image-artifact/mermin-${{ inputs.image-tag }}.tar
 
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mermin-docker-image
+          name: mermin-docker-image-${{ inputs.image-tag }}
           path: image-artifact/
 
   cni-integration-test:
@@ -78,17 +88,36 @@ jobs:
       - name: Download Docker image artifact
         uses: actions/download-artifact@v4
         with:
-          name: mermin-docker-image
+          name: mermin-docker-image-${{ inputs.image-tag }}
           path: image-artifact/
 
       - name: Load Docker image
-        run: docker load < image-artifact/mermin-latest.tar
+        run: docker load < image-artifact/mermin-${{ inputs.image-tag }}.tar
+
+      - name: Install Docker Compose
+        run: |
+          sudo curl -L "https://github.com/docker/compose/releases/download/v2.3.3/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+          sudo chmod +x /usr/local/bin/docker-compose
+          docker-compose --version
+
+      - name: Install Homebrew
+        run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+      - name: Add Homebrew to PATH
+        run: echo "/home/linuxbrew/.linuxbrew/bin" >> $GITHUB_PATH
+
+      - name: Install gRPCurl
+        run: brew install grpcurl
 
       - name: Make test script executable
-        run: chmod +x ./scripts/test_cni.sh
+        run: chmod +x ${{ inputs.test-path }}
 
       - name: Run E2E Test for ${{ matrix.cni }}
         env:
           CNI: ${{ matrix.cni }}
-          DOCKER_IMAGE_NAME: not-exists.elastiflow.com/mermin
-        run: ./scripts/test_cni.sh
+          DOCKER_IMAGE_NAME: not-exists.elastiflow.com/mermin:${{ inputs.image-tag }}
+          DOCKER_IMAGE_TAG: ${{ inputs.image-tag }}
+          DOCKER_REPOSITORY: not-exists.elastiflow.com/mermin
+          HOST_DOCKER_INTERNAL_ADDR: 172.17.0.1
+          MERMIN_CONFIG_PATH: mermin/tests/e2e/grafana/config/mermin.ci.hcl
+        run: ${{ inputs.test-path }}
