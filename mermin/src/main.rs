@@ -29,7 +29,7 @@ use crate::{
         provider::{init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
     },
-    runtime::conf::Conf,
+    
     span::producer::FlowSpanProducer,
 };
 
@@ -43,29 +43,30 @@ async fn main() -> Result<()> {
     let runtime = runtime::Runtime::new()?;
     let runtime::Runtime { config, .. } = runtime;
 
-    let exporter_refs = if let Some(agent_options) = config.agent {
-        agent_options.traces.main.exporters
-    } else {
-        vec![]
-    };
+    let exporter_refs = config
+        .agent
+        .as_ref()
+        .map(|a| a.traces.main.exporters.clone())
+        .unwrap_or_default();
 
-    let exporter: Arc<dyn TraceableExporter> = match config.exporter {
+    let traces_exporters = config.traces.exporters.clone();
+    let exporter: Arc<dyn TraceableExporter> = match &config.exporter {
         Some(exporter_options) => {
             init_internal_tracing(
-                &exporter_options,
-                config.traces.exporters,
+                exporter_options,
+                traces_exporters.clone(),
                 config.log_level,
                 config.traces.span_level,
             )
             .await?;
-            let app_tracer_provider = init_provider(&exporter_options, exporter_refs).await;
+            let app_tracer_provider = init_provider(exporter_options, exporter_refs).await;
             info!("initialized configured exporters");
             Arc::new(TraceExporterAdapter::new(app_tracer_provider))
         }
         None => {
             init_internal_tracing(
                 &ExporterOptions::default(),
-                config.traces.exporters,
+                traces_exporters,
                 config.log_level,
                 config.traces.span_level,
             )
@@ -86,7 +87,7 @@ async fn main() -> Result<()> {
         warn!("remove limit on locked memory failed, ret is: {ret}");
     }
 
-    let Conf { api, .. } = config.clone();
+    let api = config.api.clone();
     let interface = config.resolve_interfaces();
 
     // This will include your eBPF object file as raw bytes at compile-time and load it at

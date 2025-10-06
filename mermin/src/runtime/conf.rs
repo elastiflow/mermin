@@ -50,7 +50,7 @@ pub struct Conf {
     /// A vector of strings representing the network interfaces or endpoints
     /// that the application should operate on. These interfaces are read
     /// directly from the configuration file.
-    pub interface: Vec<String>,
+    pub interfaces: Vec<String>,
 
     /// An optional `PathBuf` field that represents the file path to the
     /// configuration file. This field is annotated with `#[serde(skip)]`,
@@ -149,7 +149,7 @@ impl Default for TracingOptions {
 impl Default for Conf {
     fn default() -> Self {
         Self {
-            interface: Vec::from(["eth0".to_string()]),
+            interfaces: Vec::from(["eth0".to_string()]),
             config_path: None,
             auto_reload: false,
             log_level: Level::INFO,
@@ -314,7 +314,7 @@ impl Conf {
     /// Expand interface patterns (supports '*' and '?') into concrete interface names.
     pub fn resolve_interfaces(&self) -> Vec<String> {
         let available: Vec<String> = datalink::interfaces().into_iter().map(|i| i.name).collect();
-        Self::resolve_interfaces_from(&self.interface, &available)
+        Self::resolve_interfaces_from(&self.interfaces, &available)
     }
     fn resolve_interfaces_from(patterns: &[String], available: &[String]) -> Vec<String> {
         let mut resolved: Vec<String> = Vec::new();
@@ -787,7 +787,7 @@ mod tests {
     #[test]
     fn default_impl_has_eth0_interface() {
         let cfg = Conf::default();
-        assert_eq!(cfg.interface, Vec::from(["eth0".to_string()]));
+        assert_eq!(cfg.interfaces, Vec::from(["eth0".to_string()]));
         assert_eq!(cfg.config_path, None);
         assert_eq!(cfg.auto_reload, false);
         assert_eq!(cfg.log_level, Level::INFO);
@@ -884,7 +884,7 @@ mod tests {
             jail.create_file(
                 path,
                 r#"
-interface:
+interfaces:
   - eth1
 auto_reload: false
 log_level: warn
@@ -900,7 +900,7 @@ log_level: warn
                 "debug",
             ]);
             let (cfg, _cli) = Conf::new(cli).expect("config loads from cli file");
-            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.log_level, Level::DEBUG);
 
@@ -915,7 +915,7 @@ log_level: warn
             jail.create_file(
                 path,
                 r#"
-interface: ["eth1"]
+interfaces: ["eth1"]
 auto_reload: true
 log_level: debug
                 "#,
@@ -924,7 +924,7 @@ log_level: debug
 
             let cli = Cli::parse_from(["mermin"]);
             let (cfg, _cli) = Conf::new(cli).expect("config loads from env file");
-            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.log_level, Level::DEBUG);
 
@@ -939,26 +939,26 @@ log_level: debug
             jail.create_file(
                 path,
                 r#"
-interface: ["eth1"]
+interfaces: ["eth1"]
                 "#,
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config loads from cli file");
-            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
 
             // Update the config file
             jail.create_file(
                 path,
                 r#"
-interface: ["eth2", "eth3"]
+interfaces: ["eth2", "eth3"]
                 "#,
             )?;
 
             let reloaded_cfg = cfg.reload().expect("config should reload");
             assert_eq!(
-                reloaded_cfg.interface,
+                reloaded_cfg.interfaces,
                 Vec::from(["eth2".to_string(), "eth3".to_string()])
             );
             assert_eq!(reloaded_cfg.config_path, Some(path.parse().unwrap()));
@@ -990,7 +990,7 @@ interface: ["eth2", "eth3"]
                 path,
                 r#"
 # Custom configuration for testing
-interface:
+interfaces:
   - eth1
 
 api:
@@ -1008,7 +1008,7 @@ metrics:
             let (cfg, _cli) = Conf::new(cli).expect("config should load from yaml file");
 
             // Assert that all the custom values from the file were loaded correctly
-            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.api.listen_address, "127.0.0.1");
             assert_eq!(cfg.api.port, 8081);
             assert_eq!(cfg.metrics.listen_address, "0.0.0.0");
@@ -1044,7 +1044,7 @@ metrics {
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
 
-            assert_eq!(cfg.interface, vec!["eth0"]);
+            assert_eq!(cfg.interfaces, vec!["eth0"]);
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.api.port, 9090);
@@ -1082,7 +1082,7 @@ log_level = "info"
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config loads from HCL file");
-            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
 
@@ -1097,7 +1097,7 @@ log_level = "debug"
 
             let reloaded_cfg = cfg.reload().expect("config should reload from HCL");
             assert_eq!(
-                reloaded_cfg.interface,
+                reloaded_cfg.interfaces,
                 Vec::from(["eth2".to_string(), "eth3".to_string()])
             );
             assert_eq!(reloaded_cfg.log_level, Level::DEBUG);
@@ -1167,7 +1167,7 @@ metrics {
             let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
 
             // Assert that all the custom values from the file were loaded correctly
-            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.api.listen_address, "127.0.0.1");
             assert_eq!(cfg.api.port, 8081);
             assert_eq!(cfg.metrics.listen_address, "0.0.0.0");

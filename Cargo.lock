@@ -1822,6 +1822,7 @@ dependencies = [
  "opentelemetry-stdout",
  "opentelemetry_sdk",
  "pnet",
+ "regex",
  "serde",
  "serde_json",
  "serde_yaml",
