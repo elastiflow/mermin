@@ -11,9 +11,9 @@ use figment::{
     providers::{Format, Serialized, Yaml},
 };
 use hcl::eval::Context;
-use serde::{Deserialize, Serialize};
 use pnet::datalink;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use tracing::Level;
 
 use crate::{
@@ -324,21 +324,31 @@ impl Conf {
                 for name in available {
                     if re.is_match(name) {
                         matched = true;
-                        if !resolved.contains(name) { resolved.push(name.clone()); }
+                        if !resolved.contains(name) {
+                            resolved.push(name.clone());
+                        }
                     }
                 }
-                if !matched { tracing::warn!(pattern=%item, "no interfaces matched regex pattern"); }
+                if !matched {
+                    tracing::warn!(pattern=%item, "no interfaces matched regex pattern");
+                }
             } else if Self::is_glob(item) {
                 let mut matched = false;
                 for name in available {
                     if Self::glob_match(item, name) {
                         matched = true;
-                        if !resolved.contains(name) { resolved.push(name.clone()); }
+                        if !resolved.contains(name) {
+                            resolved.push(name.clone());
+                        }
                     }
                 }
-                if !matched { tracing::warn!(pattern=%item, "no interfaces matched glob pattern"); }
+                if !matched {
+                    tracing::warn!(pattern=%item, "no interfaces matched glob pattern");
+                }
             } else if available.contains(item) {
-                if !resolved.contains(item) { resolved.push(item.clone()); }
+                if !resolved.contains(item) {
+                    resolved.push(item.clone());
+                }
             } else {
                 tracing::warn!(iface=%item, "configured interface not found on host");
             }
@@ -347,7 +357,9 @@ impl Conf {
     }
 
     #[inline]
-    fn is_glob(s: &str) -> bool { s.contains('*') || s.contains('?') }
+    fn is_glob(s: &str) -> bool {
+        s.contains('*') || s.contains('?')
+    }
 
     // Simple wildcard matcher supporting '*' and '?'
     fn glob_match(pattern: &str, text: &str) -> bool {
@@ -357,13 +369,25 @@ impl Conf {
         let (mut star, mut match_t) = (None::<usize>, 0usize);
 
         while t < tb.len() {
-            if p < pb.len() && (pb[p] == b'?' || pb[p] == tb[t]) { p += 1; t += 1; }
-            else if p < pb.len() && pb[p] == b'*' { star = Some(p); match_t = t; p += 1; }
-            else if let Some(si) = star { p = si + 1; match_t += 1; t = match_t; }
-            else { return false; }
+            if p < pb.len() && (pb[p] == b'?' || pb[p] == tb[t]) {
+                p += 1;
+                t += 1;
+            } else if p < pb.len() && pb[p] == b'*' {
+                star = Some(p);
+                match_t = t;
+                p += 1;
+            } else if let Some(si) = star {
+                p = si + 1;
+                match_t += 1;
+                t = match_t;
+            } else {
+                return false;
+            }
         }
 
-        while p < pb.len() && pb[p] == b'*' { p += 1; }
+        while p < pb.len() && pb[p] == b'*' {
+            p += 1;
+        }
         p == pb.len()
     }
 
@@ -710,12 +734,12 @@ mod tests {
 
         // patterns including star, question, literal, and duplicates
         let patterns = vec![
-            "eth*".to_string(),    // matches eth0, eth1
-            "en0p*".to_string(),   // matches en0p1, en0p2
-            "en?".to_string(),     // matches en0
-            "lo".to_string(),      // literal match
+            "eth*".to_string(),         // matches eth0, eth1
+            "en0p*".to_string(),        // matches en0p1, en0p2
+            "en?".to_string(),          // matches en0
+            "lo".to_string(),           // literal match
             "doesnotexist".to_string(), // literal not present -> ignored with warn
-            "eth*".to_string(),    // duplicate pattern should not duplicate results
+            "eth*".to_string(),         // duplicate pattern should not duplicate results
         ];
 
         let resolved = Conf::resolve_interfaces_from(&patterns, &available);
@@ -746,10 +770,7 @@ mod tests {
         ];
 
         // regex forms: /^en0p\d+$/ matches en0p1, en0p2; /^eth[01]$/ matches eth0, eth1
-        let patterns = vec![
-            "/^en0p\\d+$/".to_string(),
-            "/^eth[01]$/".to_string(),
-        ];
+        let patterns = vec!["/^en0p\\d+$/".to_string(), "/^eth[01]$/".to_string()];
 
         let resolved = Conf::resolve_interfaces_from(&patterns, &available);
         assert_eq!(
