@@ -12,6 +12,8 @@ use figment::{
 };
 use hcl::eval::Context;
 use serde::{Deserialize, Serialize};
+use pnet::datalink;
+use regex::Regex;
 use tracing::Level;
 
 use crate::{
@@ -308,6 +310,76 @@ impl Conf {
     }
 }
 
+impl Conf {
+    /// Expand interface patterns (supports '*' and '?') into concrete interface names.
+    pub fn resolve_interfaces(&self) -> Vec<String> {
+        let available: Vec<String> = datalink::interfaces().into_iter().map(|i| i.name).collect();
+        Self::resolve_interfaces_from(&self.interface, &available)
+    }
+    fn resolve_interfaces_from(patterns: &[String], available: &[String]) -> Vec<String> {
+        let mut resolved: Vec<String> = Vec::new();
+        for item in patterns {
+            if let Some(re) = Self::parse_regex(item) {
+                let mut matched = false;
+                for name in available {
+                    if re.is_match(name) {
+                        matched = true;
+                        if !resolved.contains(name) { resolved.push(name.clone()); }
+                    }
+                }
+                if !matched { tracing::warn!(pattern=%item, "no interfaces matched regex pattern"); }
+            } else if Self::is_glob(item) {
+                let mut matched = false;
+                for name in available {
+                    if Self::glob_match(item, name) {
+                        matched = true;
+                        if !resolved.contains(name) { resolved.push(name.clone()); }
+                    }
+                }
+                if !matched { tracing::warn!(pattern=%item, "no interfaces matched glob pattern"); }
+            } else if available.contains(item) {
+                if !resolved.contains(item) { resolved.push(item.clone()); }
+            } else {
+                tracing::warn!(iface=%item, "configured interface not found on host");
+            }
+        }
+        resolved
+    }
+
+    #[inline]
+    fn is_glob(s: &str) -> bool { s.contains('*') || s.contains('?') }
+
+    // Simple wildcard matcher supporting '*' and '?'
+    fn glob_match(pattern: &str, text: &str) -> bool {
+        let pb = pattern.as_bytes();
+        let tb = text.as_bytes();
+        let (mut p, mut t) = (0usize, 0usize);
+        let (mut star, mut match_t) = (None::<usize>, 0usize);
+
+        while t < tb.len() {
+            if p < pb.len() && (pb[p] == b'?' || pb[p] == tb[t]) { p += 1; t += 1; }
+            else if p < pb.len() && pb[p] == b'*' { star = Some(p); match_t = t; p += 1; }
+            else if let Some(si) = star { p = si + 1; match_t += 1; t = match_t; }
+            else { return false; }
+        }
+
+        while p < pb.len() && pb[p] == b'*' { p += 1; }
+        p == pb.len()
+    }
+
+    #[inline]
+    fn parse_regex(pattern: &str) -> Option<Regex> {
+        // Regex form: /.../ with at least two slashes and no trailing flags for now
+        if let Some(stripped) = pattern.strip_prefix('/') {
+            if let Some(end) = stripped.rfind('/') {
+                let body = &stripped[..end];
+                return Regex::new(body).ok();
+            }
+        }
+        None
+    }
+}
+
 /// Validates that the given path points to an existing file with a supported extension.
 ///
 /// # Arguments
@@ -481,7 +553,7 @@ pub mod conf_serde {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ApiConf {
     /// Enable the API server.
     pub enabled: bool,
@@ -501,7 +573,7 @@ impl Default for ApiConf {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct MetricsConf {
     /// Enable the metrics server.
     pub enabled: bool,
@@ -622,6 +694,73 @@ mod tests {
                 "invalid format: '{reference}' - expected: 'exporter.<type>.<name>'"
             )),
         }
+    }
+
+    #[test]
+    fn resolve_interfaces_supports_globs_and_literals() {
+        // available interfaces on host (simulated)
+        let available = vec![
+            "eth0".to_string(),
+            "eth1".to_string(),
+            "en0".to_string(),
+            "en0p1".to_string(),
+            "en0p2".to_string(),
+            "lo".to_string(),
+        ];
+
+        // patterns including star, question, literal, and duplicates
+        let patterns = vec![
+            "eth*".to_string(),    // matches eth0, eth1
+            "en0p*".to_string(),   // matches en0p1, en0p2
+            "en?".to_string(),     // matches en0
+            "lo".to_string(),      // literal match
+            "doesnotexist".to_string(), // literal not present -> ignored with warn
+            "eth*".to_string(),    // duplicate pattern should not duplicate results
+        ];
+
+        let resolved = Conf::resolve_interfaces_from(&patterns, &available);
+
+        // Order is insertion order from first match occurrences
+        assert_eq!(
+            resolved,
+            vec![
+                "eth0".to_string(),
+                "eth1".to_string(),
+                "en0p1".to_string(),
+                "en0p2".to_string(),
+                "en0".to_string(),
+                "lo".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_interfaces_supports_regex() {
+        let available = vec![
+            "eth0".to_string(),
+            "eth1".to_string(),
+            "en0".to_string(),
+            "en0p1".to_string(),
+            "en0p2".to_string(),
+            "lo".to_string(),
+        ];
+
+        // regex forms: /^en0p\d+$/ matches en0p1, en0p2; /^eth[01]$/ matches eth0, eth1
+        let patterns = vec![
+            "/^en0p\\d+$/".to_string(),
+            "/^eth[01]$/".to_string(),
+        ];
+
+        let resolved = Conf::resolve_interfaces_from(&patterns, &available);
+        assert_eq!(
+            resolved,
+            vec![
+                "en0p1".to_string(),
+                "en0p2".to_string(),
+                "eth0".to_string(),
+                "eth1".to_string(),
+            ]
+        );
     }
 
     #[test]
@@ -865,7 +1004,7 @@ metrics:
             jail.create_file(
                 path,
                 r#"
-interface = ["eth0"]
+interfaces = ["eth0"]
 log_level = "info"
 auto_reload = true
 
@@ -898,7 +1037,7 @@ metrics {
     fn validates_hcl_extension() {
         Jail::expect_with(|jail| {
             let path = "mermin.hcl";
-            jail.create_file(path, r#"interface = ["eth0"]"#)?;
+            jail.create_file(path, r#"interfaces = ["eth0"]"#)?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let result = Conf::new(cli);
@@ -915,7 +1054,7 @@ metrics {
             jail.create_file(
                 path,
                 r#"
-interface = ["eth1"]
+interfaces = ["eth1"]
 log_level = "info"
                 "#,
             )?;
@@ -930,7 +1069,7 @@ log_level = "info"
             jail.create_file(
                 path,
                 r#"
-interface = ["eth2", "eth3"]
+interfaces = ["eth2", "eth3"]
 log_level = "debug"
                 "#,
             )?;
@@ -956,7 +1095,7 @@ log_level = "debug"
                 path,
                 r#"
 # Invalid HCL syntax
-interface = [eth0  # Missing closing bracket and quotes
+interfaces = [eth0  # Missing closing bracket and quotes
 log_level =
                 "#,
             )?;
@@ -989,7 +1128,7 @@ log_level =
                 path,
                 r#"
 # Custom configuration for testing
-interface = ["eth1"]
+interfaces = ["eth1"]
 
 api {
     listen_address = "127.0.0.1"

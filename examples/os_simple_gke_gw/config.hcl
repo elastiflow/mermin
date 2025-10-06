@@ -2,7 +2,12 @@
 # This configuration file contains default settings for the Mermin eBPF network observability tool for local development.
 
 # Network interfaces to monitor
-interface = ["eth0"]
+# Literal example
+interfaces = ["eth0"]
+# Glob example: match all ethernet interfaces starting with "eth"
+# interfaces = ["eth*"]
+# Regex example: match slot-based PNIN like en0p<digits>
+# interfaces = ["/^en0p\\d+$/"]
 
 # Logging configuration
 log_level = "info"

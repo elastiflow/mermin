@@ -86,7 +86,8 @@ async fn main() -> Result<()> {
         warn!("remove limit on locked memory failed, ret is: {ret}");
     }
 
-    let Conf { interface, api, .. } = config;
+    let Conf { api, .. } = config.clone();
+    let interface = config.resolve_interfaces();
 
     // This will include your eBPF object file as raw bytes at compile-time and load it at
     // runtime. This approach is recommended for most real-world use cases. If you would
