@@ -30,7 +30,7 @@ pub struct PacketMeta {
     // Fields with 8-byte alignment
     // ---
     /// Timestamp in nanoseconds when the packet was captured
-    pub start_time: u64,
+    pub capture_time: u64,
 
     /// Fields with 6-byte alignment
     /// ---
@@ -325,7 +325,7 @@ mod tests {
         let tcp_flags: u8 = 0xB6;
 
         let mut record = PacketMeta {
-            start_time: 0,
+            capture_time: 0,
             ifindex: 1,
             src_ipv6_addr: src_ipv6_val,
             dst_ipv6_addr: dst_ipv6_val,
@@ -431,7 +431,7 @@ mod tests {
         let packet = PacketMeta::default();
 
         // Test that all fields are initialized to their expected default values
-        assert_eq!(packet.start_time, 0);
+        assert_eq!(packet.capture_time, 0);
         assert_eq!(packet.src_ipv6_addr, [0u8; 16]);
         assert_eq!(packet.dst_ipv6_addr, [0u8; 16]);
         assert_eq!(packet.tunnel_src_ipv6_addr, [0u8; 16]);

@@ -1,4 +1,8 @@
 use mermin_common::PacketMeta;
+use network_types::tcp::{
+    TCP_FLAG_ACK, TCP_FLAG_CWR, TCP_FLAG_ECE, TCP_FLAG_FIN, TCP_FLAG_PSH, TCP_FLAG_RST,
+    TCP_FLAG_SYN, TCP_FLAG_URG,
+};
 
 /// Individual TCP flag as specified in the TCP header
 /// Based on IANA "TCP Header Flags" registry
@@ -82,14 +86,14 @@ impl TcpFlags {
     /// Convert u8 bit flags to a boolean array
     fn bits_to_array(bits: u8) -> [bool; 8] {
         [
-            (bits & 0x01) != 0, // FIN
-            (bits & 0x02) != 0, // SYN
-            (bits & 0x04) != 0, // RST
-            (bits & 0x08) != 0, // PSH
-            (bits & 0x10) != 0, // ACK
-            (bits & 0x20) != 0, // URG
-            (bits & 0x40) != 0, // ECE
-            (bits & 0x80) != 0, // CWR
+            (bits & TCP_FLAG_FIN) != 0, // FIN
+            (bits & TCP_FLAG_SYN) != 0, // SYN
+            (bits & TCP_FLAG_RST) != 0, // RST
+            (bits & TCP_FLAG_PSH) != 0, // PSH
+            (bits & TCP_FLAG_ACK) != 0, // ACK
+            (bits & TCP_FLAG_URG) != 0, // URG
+            (bits & TCP_FLAG_ECE) != 0, // ECE
+            (bits & TCP_FLAG_CWR) != 0, // CWR
         ]
     }
 

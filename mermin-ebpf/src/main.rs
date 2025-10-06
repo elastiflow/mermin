@@ -279,6 +279,7 @@ pub enum Error {
     InternalError,
 }
 
+#[cfg(not(feature = "test"))]
 const MAX_HEADER_PARSE_DEPTH: usize = 8;
 
 #[cfg(not(feature = "test"))]
@@ -308,7 +309,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
     };
 
     // Initialize the meta with default values
-    meta.start_time = timestamp;
+    meta.capture_time = timestamp;
     meta.ifindex = unsafe { (*ctx.skb.skb).ifindex };
     meta.direction = direction;
     meta.src_mac_addr = [0; 6];
