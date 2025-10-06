@@ -394,11 +394,11 @@ impl Conf {
     #[inline]
     fn parse_regex(pattern: &str) -> Option<Regex> {
         // Regex form: /.../ with at least two slashes and no trailing flags for now
-        if let Some(stripped) = pattern.strip_prefix('/') {
-            if let Some(end) = stripped.rfind('/') {
-                let body = &stripped[..end];
-                return Regex::new(body).ok();
-            }
+        if let Some(stripped) = pattern.strip_prefix('/')
+            && let Some(end) = stripped.rfind('/')
+        {
+            let body = &stripped[..end];
+            return Regex::new(body).ok();
         }
         None
     }
