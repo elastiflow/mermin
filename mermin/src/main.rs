@@ -19,7 +19,6 @@ use aya::{
 use mermin_common::PacketMeta;
 use pnet::datalink;
 use tokio::{io::unix::AsyncFd, signal, sync::mpsc};
-use runtime::conf;
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -47,7 +46,7 @@ async fn main() -> Result<()> {
     let span_level = props.internal_traces.span_level;
     let (otlp_agent_exporters, stdout_agent_exporters) = props.get_agent_exporters();
     let (otlp_internal_exporters, stdout_internal_exporters) = props.get_internal_exporters();
-    dbg!(&props);
+
     let exporter: Arc<dyn TraceableExporter> = {
         init_internal_tracing(
             otlp_internal_exporters.clone(),
@@ -58,7 +57,7 @@ async fn main() -> Result<()> {
         .await?;
         if !otlp_agent_exporters.is_empty() || !stdout_agent_exporters.is_empty() {
             let app_tracer_provider =
-                init_provider(otlp_agent_exporters, stdout_agent_exporters).await?;
+                init_provider(otlp_agent_exporters, stdout_agent_exporters).await;
             info!("initialized configured exporters");
             Arc::new(TraceExporterAdapter::new(app_tracer_provider))
         } else {
