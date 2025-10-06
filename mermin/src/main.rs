@@ -29,7 +29,6 @@ use crate::{
         provider::{init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
     },
-    
     span::producer::FlowSpanProducer,
 };
 
