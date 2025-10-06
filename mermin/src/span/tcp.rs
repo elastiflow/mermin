@@ -1,8 +1,5 @@
 use mermin_common::PacketMeta;
 
-/// TCP flag names in order (FIN, SYN, RST, PSH, ACK, URG, ECE, CWR)
-pub const TCP_FLAG_NAMES: [&str; 8] = ["fin", "syn", "rst", "psh", "ack", "urg", "ece", "cwr"];
-
 /// Individual TCP flag as specified in the TCP header
 /// Based on IANA "TCP Header Flags" registry
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -72,13 +69,32 @@ impl TcpFlags {
         }
     }
 
-    /// Get flags as a fixed-size array of booleans
-    pub fn as_array(&self) -> [bool; 8] {
-        self.flags
-    }
-
     /// Get only the flags that are set
     pub fn active_flags(&self) -> Vec<TcpFlag> {
+        Self::active_flags_from_array(&self.flags)
+    }
+
+    /// Convert bit flags (u8) to a vector of active TcpFlag enum variants
+    pub fn flags_from_bits(bits: u8) -> Vec<TcpFlag> {
+        Self::active_flags_from_array(&Self::bits_to_array(bits))
+    }
+
+    /// Convert u8 bit flags to a boolean array
+    fn bits_to_array(bits: u8) -> [bool; 8] {
+        [
+            (bits & 0x01) != 0, // FIN
+            (bits & 0x02) != 0, // SYN
+            (bits & 0x04) != 0, // RST
+            (bits & 0x08) != 0, // PSH
+            (bits & 0x10) != 0, // ACK
+            (bits & 0x20) != 0, // URG
+            (bits & 0x40) != 0, // ECE
+            (bits & 0x80) != 0, // CWR
+        ]
+    }
+
+    /// Convert a boolean array to a vector of active TcpFlag enum variants
+    fn active_flags_from_array(flags: &[bool; 8]) -> Vec<TcpFlag> {
         const FLAG_ENUMS: [TcpFlag; 8] = [
             TcpFlag::Fin,
             TcpFlag::Syn,
@@ -90,41 +106,11 @@ impl TcpFlags {
             TcpFlag::Cwr,
         ];
 
-        self.flags
+        flags
             .iter()
             .zip(FLAG_ENUMS.iter())
             .filter_map(|(is_set, flag)| if *is_set { Some(*flag) } else { None })
             .collect()
-    }
-
-    /// Get all flag names with their states (for consistent 8-element output)
-    /// Returns tuples of (flag_name, is_set)
-    pub fn all_flags_with_state(&self) -> Vec<(String, bool)> {
-        TCP_FLAG_NAMES
-            .iter()
-            .zip(self.flags.iter())
-            .map(|(name, is_set)| (String::from(*name), *is_set))
-            .collect()
-    }
-
-    /// Get a specific flag by index
-    pub fn get(&self, index: usize) -> Option<bool> {
-        self.flags.get(index).copied()
-    }
-
-    /// Check if any flags are set
-    pub fn any_set(&self) -> bool {
-        self.flags.iter().any(|&f| f)
-    }
-
-    /// Check if no flags are set
-    pub fn none_set(&self) -> bool {
-        !self.any_set()
-    }
-
-    /// Count the number of set flags
-    pub fn count_set(&self) -> usize {
-        self.flags.iter().filter(|&&f| f).count()
     }
 }
 
@@ -226,29 +212,26 @@ mod tests {
         // Test no flags
         packet.tcp_flags = 0;
         let flags = TcpFlags::from_packet(&packet);
-        assert_eq!(flags.as_array(), [false; 8]);
         assert_eq!(flags.active_flags(), Vec::<TcpFlag>::new());
-        assert!(flags.none_set());
-        assert_eq!(flags.count_set(), 0);
 
         // Test SYN flag only
         packet.tcp_flags = PacketMeta::TCP_FLAG_SYN;
         let flags = TcpFlags::from_packet(&packet);
-        assert_eq!(flags.as_array()[1], true); // SYN is at index 1
         assert_eq!(flags.active_flags(), vec![TcpFlag::Syn]);
-        assert!(flags.any_set());
-        assert_eq!(flags.count_set(), 1);
 
         // Test SYN+ACK
         packet.tcp_flags = PacketMeta::TCP_FLAG_SYN | PacketMeta::TCP_FLAG_ACK;
         let flags = TcpFlags::from_packet(&packet);
         assert_eq!(flags.active_flags(), vec![TcpFlag::Syn, TcpFlag::Ack]);
-        assert_eq!(flags.count_set(), 2);
+
+        // Test FIN+ACK
+        packet.tcp_flags = PacketMeta::TCP_FLAG_FIN | PacketMeta::TCP_FLAG_ACK;
+        let flags = TcpFlags::from_packet(&packet);
+        assert_eq!(flags.active_flags(), vec![TcpFlag::Fin, TcpFlag::Ack]);
 
         // Test all flags
         packet.tcp_flags = 0xFF;
         let flags = TcpFlags::from_packet(&packet);
-        assert_eq!(flags.as_array(), [true; 8]);
         assert_eq!(
             flags.active_flags(),
             vec![
@@ -262,16 +245,58 @@ mod tests {
                 TcpFlag::Cwr
             ]
         );
-        assert_eq!(flags.count_set(), 8);
+    }
 
-        // Test all_flags_with_state
-        packet.tcp_flags = PacketMeta::TCP_FLAG_SYN | PacketMeta::TCP_FLAG_ACK;
-        let flags = TcpFlags::from_packet(&packet);
-        let all_flags = flags.all_flags_with_state();
-        assert_eq!(all_flags.len(), 8);
-        assert_eq!(all_flags[0], ("fin".to_string(), false));
-        assert_eq!(all_flags[1], ("syn".to_string(), true));
-        assert_eq!(all_flags[4], ("ack".to_string(), true));
+    #[test]
+    fn test_flags_from_bits() {
+        // Test no flags
+        assert_eq!(TcpFlags::flags_from_bits(0x00), Vec::<TcpFlag>::new());
+
+        // Test individual flags
+        assert_eq!(TcpFlags::flags_from_bits(0x01), vec![TcpFlag::Fin]);
+        assert_eq!(TcpFlags::flags_from_bits(0x02), vec![TcpFlag::Syn]);
+        assert_eq!(TcpFlags::flags_from_bits(0x04), vec![TcpFlag::Rst]);
+        assert_eq!(TcpFlags::flags_from_bits(0x08), vec![TcpFlag::Psh]);
+        assert_eq!(TcpFlags::flags_from_bits(0x10), vec![TcpFlag::Ack]);
+        assert_eq!(TcpFlags::flags_from_bits(0x20), vec![TcpFlag::Urg]);
+        assert_eq!(TcpFlags::flags_from_bits(0x40), vec![TcpFlag::Ece]);
+        assert_eq!(TcpFlags::flags_from_bits(0x80), vec![TcpFlag::Cwr]);
+
+        // Test common flag combinations
+        assert_eq!(
+            TcpFlags::flags_from_bits(0x02 | 0x10), // SYN+ACK
+            vec![TcpFlag::Syn, TcpFlag::Ack]
+        );
+        assert_eq!(
+            TcpFlags::flags_from_bits(0x01 | 0x10), // FIN+ACK
+            vec![TcpFlag::Fin, TcpFlag::Ack]
+        );
+        assert_eq!(
+            TcpFlags::flags_from_bits(0x08 | 0x10), // PSH+ACK
+            vec![TcpFlag::Psh, TcpFlag::Ack]
+        );
+
+        // Test all flags
+        assert_eq!(
+            TcpFlags::flags_from_bits(0xFF),
+            vec![
+                TcpFlag::Fin,
+                TcpFlag::Syn,
+                TcpFlag::Rst,
+                TcpFlag::Psh,
+                TcpFlag::Ack,
+                TcpFlag::Urg,
+                TcpFlag::Ece,
+                TcpFlag::Cwr
+            ]
+        );
+
+        // Test that flags_from_bits and from_packet produce the same results
+        let mut packet = PacketMeta::default();
+        packet.tcp_flags = 0x12; // SYN+ACK
+        let from_packet = TcpFlags::from_packet(&packet).active_flags();
+        let from_bits = TcpFlags::flags_from_bits(0x12);
+        assert_eq!(from_packet, from_bits);
     }
 
     #[test]
