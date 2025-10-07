@@ -2,33 +2,31 @@ use std::{error::Error, fmt};
 
 use clap::Parser;
 
-use crate::runtime::{
-    cli::Cli,
-    conf::{Conf, ConfigError},
-};
+use crate::runtime::{cli::Cli, conf::ConfError, props::Properties};
 
 pub mod cli;
 pub mod conf;
 pub mod enums;
+pub mod props;
 
 pub struct Runtime {
     #[allow(dead_code)]
     pub cli: Cli,
-    pub config: Conf,
+    pub properties: Properties,
 }
 
 impl Runtime {
     pub fn new() -> Result<Self, RuntimeError> {
         let cli = Cli::parse();
-        let (config, cli) = Conf::new(cli)?;
+        let (properties, cli) = Properties::new(cli)?;
 
-        Ok(Runtime { cli, config })
+        Ok(Runtime { cli, properties })
     }
 }
 
 #[derive(Debug)]
 pub enum RuntimeError {
-    Conf(ConfigError),
+    Conf(ConfError),
 }
 
 impl fmt::Display for RuntimeError {
@@ -47,8 +45,8 @@ impl Error for RuntimeError {
     }
 }
 
-impl From<ConfigError> for RuntimeError {
-    fn from(e: ConfigError) -> Self {
+impl From<ConfError> for RuntimeError {
+    fn from(e: ConfError) -> Self {
         RuntimeError::Conf(e)
     }
 }

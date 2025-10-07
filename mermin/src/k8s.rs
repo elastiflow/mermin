@@ -11,7 +11,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     fmt::Debug,
     net::IpAddr,
-    sync::Arc,
+    sync::{Arc, atomic::Ordering},
 };
 
 use anyhow::Result;
@@ -35,12 +35,13 @@ use kube::{
     api::{Api, ListParams, Resource, ResourceExt},
     runtime::reflector,
 };
-use kube_runtime::{WatchStreamExt, watcher};
+use kube_runtime::watcher;
 use log::{debug, warn};
 use network_types::ip::IpProto;
+use tokio::sync::oneshot;
 use tracing::error;
 
-use crate::span::flow::FlowSpan;
+use crate::{health::HealthState, span::flow::FlowSpan};
 
 pub mod resource_parser;
 
@@ -160,8 +161,8 @@ impl_has_store!(NetworkPolicy, network_policies);
 
 impl ResourceStore {
     /// Initializes all resource reflectors concurrently and builds the ResourceStore.
-    pub async fn new(client: Client) -> Result<Self> {
-        let all_stores_result = futures::try_join!(
+    pub async fn new(client: Client, health_state: HealthState) -> Result<Self> {
+        let all_stores_and_handles = futures::try_join!(
             Self::create_resource_store::<Pod>(&client, true),
             Self::create_resource_store::<Node>(&client, false),
             Self::create_resource_store::<Namespace>(&client, true),
@@ -174,53 +175,75 @@ impl ResourceStore {
             Self::create_resource_store::<Ingress>(&client, false),
             Self::create_resource_store::<EndpointSlice>(&client, false),
             Self::create_resource_store::<NetworkPolicy>(&client, false),
-        );
+        )?;
 
-        all_stores_result.map(
-            |(
-                pods,
-                nodes,
-                namespaces,
-                deployments,
-                replica_sets,
-                stateful_sets,
-                daemon_sets,
-                jobs,
-                services,
-                ingresses,
-                endpoint_slices,
-                network_policies,
-            )| {
-                Self {
-                    pods,
-                    nodes,
-                    namespaces,
-                    deployments,
-                    replica_sets,
-                    stateful_sets,
-                    daemon_sets,
-                    jobs,
-                    services,
-                    ingresses,
-                    endpoint_slices,
-                    network_policies,
-                }
-            },
-        )
+        let (
+            (pods, pods_r),
+            (nodes, nodes_r),
+            (namespaces, namespaces_r),
+            (deployments, deployments_r),
+            (replica_sets, replica_sets_r),
+            (stateful_sets, stateful_sets_r),
+            (daemon_sets, daemon_sets_r),
+            (jobs, jobs_r),
+            (services, services_r),
+            (ingresses, ingresses_r),
+            (endpoint_slices, endpoint_slices_r),
+            (network_policies, network_policies_r),
+        ) = all_stores_and_handles;
+
+        let readiness_handles: Vec<_> = [
+            pods_r,
+            nodes_r,
+            namespaces_r,
+            deployments_r,
+            replica_sets_r,
+            stateful_sets_r,
+            daemon_sets_r,
+            jobs_r,
+            services_r,
+            ingresses_r,
+            endpoint_slices_r,
+            network_policies_r,
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        let _ = futures::future::join_all(readiness_handles).await;
+
+        health_state
+            .k8s_caches_synced
+            .store(true, Ordering::Relaxed);
+
+        Ok(Self {
+            pods,
+            nodes,
+            namespaces,
+            deployments,
+            replica_sets,
+            stateful_sets,
+            daemon_sets,
+            jobs,
+            services,
+            ingresses,
+            endpoint_slices,
+            network_policies,
+        })
     }
 
     /// Helper to create a store for a resource, handling failures gracefully.
     async fn create_resource_store<K>(
         client: &Client,
         is_critical: bool,
-    ) -> Result<reflector::Store<K>>
+    ) -> Result<(reflector::Store<K>, Option<oneshot::Receiver<()>>)>
     where
         K: Resource + Clone + Debug + Send + Sync + 'static + for<'de> serde::Deserialize<'de>,
         K::DynamicType: Default + std::hash::Hash + std::cmp::Eq + Clone,
     {
         let resource_name = K::kind(&K::DynamicType::default()).to_string();
         match create_store::<K>(client.clone()).await {
-            Ok(store) => Ok(store),
+            Ok((store, readiness_rx)) => Ok((store, Some(readiness_rx))),
             Err(e) => {
                 if is_critical {
                     warn!("failed to create critical reflector for {resource_name}: {e}");
@@ -232,7 +255,7 @@ impl ResourceStore {
                         "failed to create reflector for {resource_name}: {e}. Continuing with an empty store."
                     );
                     let (reader, _) = reflector::store();
-                    Ok(reader)
+                    Ok((reader, None))
                 }
             }
         }
@@ -255,7 +278,7 @@ impl ResourceStore {
 }
 
 /// Creates a new reflector for a Kubernetes resource type.
-async fn create_store<K>(client: Client) -> Result<reflector::Store<K>>
+async fn create_store<K>(client: Client) -> Result<(reflector::Store<K>, oneshot::Receiver<()>)>
 where
     K: Resource + Clone + Debug + Send + Sync + 'static + for<'de> serde::Deserialize<'de>,
     K::DynamicType: Default + std::hash::Hash + Eq + Clone,
@@ -269,20 +292,33 @@ where
     let (reader, writer) = reflector::store();
     let reflector = reflector(writer, watcher(api, watcher::Config::default()));
 
+    let (tx, rx) = oneshot::channel();
     tokio::spawn(async move {
-        debug!("starting reflector for {resource_name}");
-        reflector
-            .applied_objects()
-            .try_for_each(|resource| {
-                let name = resource.meta().name.as_deref().unwrap_or("unknown");
-                debug!("applied {resource_name} '{name}' to store");
-                async { Ok(()) }
-            })
-            .await
-            .unwrap_or_else(|e| error!("reflector error for {resource_name}: {e}"));
+        let mut pinned_reflector = Box::pin(reflector);
+        let mut sender = Some(tx);
+
+        loop {
+            match pinned_reflector.try_next().await {
+                Ok(Some(_event)) => {
+                    if let Some(sender) = sender.take()
+                        && sender.send(()).is_ok()
+                    {
+                        debug!("initial sync complete for {resource_name}");
+                    }
+                }
+                Ok(None) => {
+                    warn!("reflector stream for {resource_name} has terminated.");
+                    break;
+                }
+                Err(e) => {
+                    error!("reflector error for {resource_name}: {e}. retrying...");
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                }
+            }
+        }
     });
 
-    Ok(reader)
+    Ok((reader, rx))
 }
 
 /// Represents the context of a network flow for policy evaluation
@@ -330,9 +366,9 @@ pub struct Attributor {
 
 impl Attributor {
     /// Creates a new Attributor, initializing all resource reflectors concurrently.
-    pub async fn new() -> Result<Self> {
+    pub async fn new(health_state: HealthState) -> Result<Self> {
         let client = Client::try_default().await?;
-        let resource_store = ResourceStore::new(client.clone()).await?;
+        let resource_store = ResourceStore::new(client.clone(), health_state).await?;
         Ok(Self {
             client,
             resource_store,
