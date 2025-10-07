@@ -716,16 +716,15 @@ impl std::fmt::Display for BootTimeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BootTimeError::SystemClockBeforeEpoch(e) => {
-                write!(f, "system clock is before unix epoch: {}", e)
+                write!(f, "system clock is before unix epoch: {e}")
             }
             BootTimeError::ReadProcUptime(e) => {
-                write!(f, "failed to read /proc/uptime: {}", e)
+                write!(f, "failed to read /proc/uptime: {e}")
             }
             BootTimeError::ParseUptime(content) => {
                 write!(
                     f,
-                    "failed to parse uptime from /proc/uptime (content: '{}')",
-                    content
+                    "failed to parse uptime from /proc/uptime (content: '{content}')",
                 )
             }
         }
@@ -2250,5 +2249,279 @@ mod tests {
             community_id, "1:0bf7hyMJUwt3fMED7z8LIfRpBeo=",
             "ICMPv6 community ID should match baseline test data"
         );
+    }
+
+    /// Comprehensive end-to-end test that simulates a complete TCP flow lifecycle:
+    /// 1. Initialize FlowSpanProducer components
+    /// 2. Process multiple TCP packets (SYN, SYN-ACK, ACK, data packets)
+    /// 3. Verify periodic flow span recording (active timeout)
+    /// 4. Verify flow span timeout and removal (idle timeout)
+    #[tokio::test]
+    async fn test_flow_span_producer_full_lifecycle() {
+        // Create a custom SpanOptions with shorter timeouts for faster testing
+        let span_opts = SpanOptions {
+            max_record_interval: Duration::from_millis(200), // Record every 200ms
+            generic_timeout: Duration::from_secs(30),
+            icmp_timeout: Duration::from_secs(10),
+            tcp_timeout: Duration::from_millis(500), // Timeout after 500ms of inactivity
+            tcp_fin_timeout: Duration::from_millis(100),
+            tcp_rst_timeout: Duration::from_millis(100),
+            udp_timeout: Duration::from_secs(60),
+        };
+
+        let (packet_tx, packet_rx) = mpsc::channel(100);
+        let (flow_span_tx, mut flow_span_rx) = mpsc::channel(100);
+        let flow_span_map = Arc::new(DashMap::with_capacity_and_hasher(
+            100,
+            FxBuildHasher::default(),
+        ));
+        let community_id_generator = CommunityIdGenerator::new(0);
+        let iface_map = HashMap::new();
+
+        // Create the packet worker
+        let worker = PacketWorker {
+            max_record_interval: span_opts.max_record_interval,
+            generic_timeout: span_opts.generic_timeout,
+            icmp_timeout: span_opts.icmp_timeout,
+            tcp_timeout: span_opts.tcp_timeout,
+            tcp_fin_timeout: span_opts.tcp_fin_timeout,
+            tcp_rst_timeout: span_opts.tcp_rst_timeout,
+            udp_timeout: span_opts.udp_timeout,
+            community_id_generator,
+            iface_map,
+            flow_span_map: Arc::clone(&flow_span_map),
+            packet_meta_rx: packet_rx,
+            flow_span_tx: flow_span_tx.clone(),
+            boot_time_offset_nanos: 0, // For tests, assume capture_time is already wall clock
+        };
+
+        // Spawn the worker task
+        tokio::spawn(async move {
+            worker.run().await;
+        });
+
+        // === Phase 1: Process multiple TCP packets ===
+
+        // Packet 1: SYN (connection initiation)
+        let mut packet1 = create_test_packet(IpProto::Tcp, 0x02); // SYN
+        packet1.l3_byte_count = 60;
+        packet1.capture_time = 1_000_000_000; // 1 second
+        packet_tx.send(packet1).await.unwrap();
+
+        // Give time for packet to be processed
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Verify flow was created
+        assert_eq!(flow_span_map.len(), 1, "Flow should be created after SYN");
+
+        // Packet 2: SYN-ACK (response from server)
+        let mut packet2 = create_test_packet(IpProto::Tcp, 0x12); // SYN+ACK
+        packet2.l3_byte_count = 60;
+        packet2.capture_time = 1_050_000_000; // 1.05 seconds
+        // Reverse direction
+        packet2.src_ipv4_addr = [192, 168, 1, 2];
+        packet2.dst_ipv4_addr = [192, 168, 1, 1];
+        packet2.src_port = 80_u16.to_be_bytes();
+        packet2.dst_port = 12345_u16.to_be_bytes();
+        packet_tx.send(packet2).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Packet 3: ACK (connection established)
+        let mut packet3 = create_test_packet(IpProto::Tcp, 0x10); // ACK
+        packet3.l3_byte_count = 52;
+        packet3.capture_time = 1_100_000_000; // 1.1 seconds
+        packet_tx.send(packet3).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Packet 4: PSH+ACK (data transfer)
+        let mut packet4 = create_test_packet(IpProto::Tcp, 0x18); // PSH+ACK
+        packet4.l3_byte_count = 1500;
+        packet4.capture_time = 1_150_000_000; // 1.15 seconds
+        packet_tx.send(packet4).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Packet 5: ACK (acknowledgment)
+        let mut packet5 = create_test_packet(IpProto::Tcp, 0x10); // ACK
+        packet5.l3_byte_count = 52;
+        packet5.capture_time = 1_200_000_000; // 1.2 seconds
+        // Reverse direction
+        packet5.src_ipv4_addr = [192, 168, 1, 2];
+        packet5.dst_ipv4_addr = [192, 168, 1, 1];
+        packet5.src_port = 80_u16.to_be_bytes();
+        packet5.dst_port = 12345_u16.to_be_bytes();
+        packet_tx.send(packet5).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Verify flow metrics after all packets
+        {
+            let entry = flow_span_map.iter().next().unwrap();
+            let attrs = &entry.flow_span.attributes;
+
+            // Should have 3 packets in forward direction (SYN, ACK, PSH+ACK)
+            // and 2 packets in reverse direction (SYN-ACK, ACK)
+            assert_eq!(
+                attrs.flow_packets_total, 3,
+                "Forward packets total should be 3"
+            );
+            assert_eq!(
+                attrs.flow_reverse_packets_total, 2,
+                "Reverse packets total should be 2"
+            );
+
+            // Verify TCP flags accumulated (SYN | ACK | PSH)
+            let expected_flags = 0x02 | 0x10 | 0x08; // SYN | ACK | PSH
+            assert_eq!(
+                attrs.flow_tcp_flags_bits,
+                Some(expected_flags),
+                "TCP flags should accumulate all seen flags"
+            );
+
+            // Verify connection state progression
+            assert_eq!(
+                attrs.flow_connection_state,
+                Some(ConnectionState::Established),
+                "Connection should be in Established state"
+            );
+        }
+
+        // === Phase 2: Wait for periodic recording (ActiveTimeout) ===
+
+        // The record task should fire after max_record_interval (200ms)
+        let recorded_span = tokio::time::timeout(Duration::from_millis(500), flow_span_rx.recv())
+            .await
+            .expect("Should receive recorded span within timeout")
+            .expect("Channel should not be closed");
+
+        // Verify the recorded span has ActiveTimeout reason
+        assert_eq!(
+            recorded_span.attributes.flow_end_reason,
+            Some(FlowEndReason::ActiveTimeout),
+            "Periodic recording should have ActiveTimeout reason"
+        );
+
+        // Verify packet counts are correct in the recorded span
+        assert_eq!(
+            recorded_span.attributes.flow_packets_total, 3,
+            "Recorded span should have correct forward packet count"
+        );
+        assert_eq!(
+            recorded_span.attributes.flow_reverse_packets_total, 2,
+            "Recorded span should have correct reverse packet count"
+        );
+
+        // Verify delta counters were reset after recording
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        {
+            let entry = flow_span_map.iter().next().unwrap();
+            assert_eq!(
+                entry.flow_span.attributes.flow_packets_delta, 0,
+                "Delta counters should be reset after recording"
+            );
+        }
+
+        // === Phase 3: Wait for flow timeout (IdleTimeout) ===
+
+        // Don't send any more packets - flow should timeout after tcp_timeout (500ms)
+        // Note: We might receive more ActiveTimeout recordings before the IdleTimeout
+        let mut timeout_span = None;
+        for _ in 0..5 {
+            match tokio::time::timeout(Duration::from_millis(1000), flow_span_rx.recv()).await {
+                Ok(Some(span)) => {
+                    if span.attributes.flow_end_reason == Some(FlowEndReason::IdleTimeout) {
+                        timeout_span = Some(span);
+                        break;
+                    }
+                    // Otherwise it's another ActiveTimeout recording, continue waiting
+                }
+                Ok(None) => panic!("Channel closed unexpectedly"),
+                Err(_) => panic!("Timeout waiting for IdleTimeout span"),
+            }
+        }
+
+        let timeout_span = timeout_span.expect("Should eventually receive IdleTimeout span");
+
+        // Verify the timeout span has IdleTimeout reason
+        assert_eq!(
+            timeout_span.attributes.flow_end_reason,
+            Some(FlowEndReason::IdleTimeout),
+            "Flow timeout should have IdleTimeout reason"
+        );
+
+        // Verify flow was removed from map
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            flow_span_map.len(),
+            0,
+            "Flow should be removed from map after timeout"
+        );
+
+        // Verify total metrics in the final timeout span
+        assert_eq!(
+            timeout_span.attributes.flow_packets_total, 3,
+            "Final span should have all forward packets"
+        );
+        assert_eq!(
+            timeout_span.attributes.flow_reverse_packets_total, 2,
+            "Final span should have all reverse packets"
+        );
+
+        // === Phase 4: Verify multiple recordings scenario ===
+
+        // Send a new packet to create a new flow
+        let mut packet6 = create_test_packet(IpProto::Tcp, 0x02); // SYN
+        packet6.l3_byte_count = 60;
+        packet6.capture_time = 2_000_000_000; // 2 seconds
+        // Use different port to create different flow
+        packet6.src_port = 54321_u16.to_be_bytes();
+        packet_tx.send(packet6).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Verify new flow created
+        assert_eq!(flow_span_map.len(), 1, "New flow should be created");
+
+        // Wait for first recording
+        let first_recording = tokio::time::timeout(Duration::from_millis(400), flow_span_rx.recv())
+            .await
+            .expect("Should receive first recording")
+            .expect("Channel should not be closed");
+
+        assert_eq!(
+            first_recording.attributes.flow_end_reason,
+            Some(FlowEndReason::ActiveTimeout),
+            "First recording should be ActiveTimeout"
+        );
+
+        // Wait for second recording (flow still active)
+        let second_recording =
+            tokio::time::timeout(Duration::from_millis(400), flow_span_rx.recv())
+                .await
+                .expect("Should receive second recording")
+                .expect("Channel should not be closed");
+
+        assert_eq!(
+            second_recording.attributes.flow_end_reason,
+            Some(FlowEndReason::ActiveTimeout),
+            "Second recording should also be ActiveTimeout"
+        );
+
+        // Eventually the flow will timeout
+        let final_timeout = tokio::time::timeout(Duration::from_millis(1000), flow_span_rx.recv())
+            .await
+            .expect("Should receive final timeout")
+            .expect("Channel should not be closed");
+
+        assert_eq!(
+            final_timeout.attributes.flow_end_reason,
+            Some(FlowEndReason::IdleTimeout),
+            "Final span should have IdleTimeout"
+        );
+
+        // Clean up
+        drop(packet_tx);
     }
 }
