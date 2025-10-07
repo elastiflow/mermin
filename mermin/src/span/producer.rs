@@ -364,7 +364,7 @@ impl PacketWorker {
                 // Create new flow span
                 let flow_span = FlowSpan {
                     start_time: UNIX_EPOCH + Duration::from_nanos(packet.capture_time),
-                    end_time: UNIX_EPOCH,
+                    end_time: UNIX_EPOCH + Duration::from_nanos(packet.capture_time),
                     span_kind: SpanKind::Internal,
                     attributes: SpanAttributes {
                         // General flow attributes

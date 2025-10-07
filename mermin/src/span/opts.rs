@@ -21,18 +21,6 @@ use crate::runtime::conf::conf_serde::duration;
 /// udp: 20 - If no activity has been observed for a UDP flow span in the last 20 seconds, generate a record.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SpanOptions {
-    /// The maximum number of flow records in a batch.
-    /// - Default Value: `64`
-    /// - Example: If set to `64`, the system will flush a batch of 64 flow records to the output.
-    #[serde(default = "defaults::max_batch_size")]
-    pub max_batch_size: usize,
-
-    /// The maxmimum interval when a batch of flow records is flushed to the output.
-    /// - Default Value: `10s`
-    /// - Example: If set to `10s`, the system will flush a batch of flow records to the output every 10 seconds if the batch size is not reached.
-    #[serde(default = "defaults::max_batch_interval", with = "duration")]
-    pub max_batch_interval: Duration,
-
     /// The maximum interval between records for an active flow.
     /// - Default Value: `60s`
     /// - Example: If set to `60s`, a flow record will be generated if the flow has been active for 60 seconds, but has not timed out.
@@ -81,8 +69,6 @@ pub struct SpanOptions {
 impl Default for SpanOptions {
     fn default() -> SpanOptions {
         SpanOptions {
-            max_batch_size: defaults::max_batch_size(),
-            max_batch_interval: defaults::max_batch_interval(),
             max_record_interval: defaults::max_record_interval(),
             generic_timeout: defaults::generic_timeout(),
             icmp_timeout: defaults::icmp_timeout(),
@@ -97,12 +83,6 @@ impl Default for SpanOptions {
 mod defaults {
     use std::time::Duration;
 
-    pub fn max_batch_size() -> usize {
-        64
-    }
-    pub fn max_batch_interval() -> Duration {
-        Duration::from_secs(5)
-    }
     pub fn max_record_interval() -> Duration {
         Duration::from_secs(60)
     }
