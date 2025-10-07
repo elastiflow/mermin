@@ -173,7 +173,7 @@
 #[cfg(not(feature = "test"))]
 use aya_ebpf::{
     bindings::TC_ACT_PIPE,
-    helpers::bpf_ktime_get_ns,
+    helpers::bpf_ktime_get_boot_ns,
     macros::{classifier, map},
     maps::{PerCpuArray, RingBuf},
     programs::TcContext,
@@ -296,8 +296,9 @@ pub fn mermin_egress(ctx: TcContext) -> i32 {
 
 #[cfg(not(feature = "test"))]
 fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
-    // Get timestamp in nanoseconds of now
-    let timestamp = unsafe { bpf_ktime_get_ns() };
+    // Get timestamp in nanoseconds since boot (including suspend time)
+    // This uses CLOCK_BOOTTIME which matches /proc/uptime in userspace
+    let timestamp = unsafe { bpf_ktime_get_boot_ns() };
 
     // Information for building flow records (prioritizes innermost headers).
     // These fields will be updated as we parse deeper or encounter encapsulations.

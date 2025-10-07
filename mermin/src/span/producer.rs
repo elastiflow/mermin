@@ -5,6 +5,7 @@ use std::{
     time::{Duration, UNIX_EPOCH},
 };
 
+use chrono::{DateTime, Utc};
 use dashmap::{DashMap, mapref::entry::Entry};
 use fxhash::FxBuildHasher;
 use mermin_common::{IpAddrType, PacketMeta, TunnelType};
@@ -99,6 +100,7 @@ pub struct FlowSpanProducer {
     span_opts: SpanOptions,
     packet_channel_capacity: usize,
     packet_worker_count: usize,
+    boot_time_offset_nanos: u64,
     iface_map: HashMap<u32, String>,
     flow_span_map: FlowSpanMap,
     community_id_generator: CommunityIdGenerator,
@@ -114,7 +116,7 @@ impl FlowSpanProducer {
         iface_map: HashMap<u32, String>,
         packet_meta_rx: mpsc::Receiver<PacketMeta>,
         flow_span_tx: mpsc::Sender<FlowSpan>,
-    ) -> Self {
+    ) -> Result<Self, BootTimeError> {
         let flow_span_map_capacity = packet_channel_capacity * 8;
         let flow_span_map = Arc::new(DashMap::with_capacity_and_hasher(
             flow_span_map_capacity,
@@ -122,16 +124,21 @@ impl FlowSpanProducer {
         ));
         let community_id_generator = CommunityIdGenerator::new(0);
 
-        Self {
+        // Calculate boot time offset to convert kernel boot-relative timestamps to wall clock
+        // This is critical - if we can't determine boot time, timestamps will be wrong
+        let boot_time_offset_nanos = calculate_boot_time_offset_nanos()?;
+
+        Ok(Self {
             span_opts,
             packet_channel_capacity,
             packet_worker_count,
+            boot_time_offset_nanos,
             community_id_generator,
             iface_map,
             flow_span_map,
             packet_meta_rx,
             flow_span_tx,
-        }
+        })
     }
 
     pub async fn run(mut self) {
@@ -146,6 +153,7 @@ impl FlowSpanProducer {
 
             let packet_worker = PacketWorker::new(
                 self.span_opts.clone(),
+                self.boot_time_offset_nanos,
                 self.community_id_generator.clone(),
                 self.iface_map.clone(),
                 Arc::clone(&self.flow_span_map),
@@ -206,6 +214,7 @@ pub struct PacketWorker {
     tcp_fin_timeout: Duration,
     tcp_rst_timeout: Duration,
     udp_timeout: Duration,
+    boot_time_offset_nanos: u64,
     community_id_generator: CommunityIdGenerator,
     iface_map: HashMap<u32, String>,
     flow_span_map: FlowSpanMap,
@@ -216,6 +225,7 @@ pub struct PacketWorker {
 impl PacketWorker {
     pub fn new(
         span_opts: SpanOptions,
+        boot_time_offset_nanos: u64,
         community_id_generator: CommunityIdGenerator,
         iface_map: HashMap<u32, String>,
         flow_span_map: FlowSpanMap,
@@ -230,6 +240,7 @@ impl PacketWorker {
             tcp_fin_timeout: span_opts.tcp_fin_timeout,
             tcp_rst_timeout: span_opts.tcp_rst_timeout,
             udp_timeout: span_opts.udp_timeout,
+            boot_time_offset_nanos,
             community_id_generator,
             iface_map,
             flow_span_map,
@@ -362,9 +373,11 @@ impl PacketWorker {
         match self.flow_span_map.entry(community_id) {
             Entry::Vacant(vacant) => {
                 // Create new flow span
+                // Convert boot-relative timestamp to wall clock time
+                let wall_time_nanos = packet.capture_time + self.boot_time_offset_nanos;
                 let flow_span = FlowSpan {
-                    start_time: UNIX_EPOCH + Duration::from_nanos(packet.capture_time),
-                    end_time: UNIX_EPOCH + Duration::from_nanos(packet.capture_time),
+                    start_time: UNIX_EPOCH + Duration::from_nanos(wall_time_nanos),
+                    end_time: UNIX_EPOCH + Duration::from_nanos(wall_time_nanos),
                     span_kind: SpanKind::Internal,
                     attributes: SpanAttributes {
                         // General flow attributes
@@ -509,6 +522,28 @@ impl PacketWorker {
                     },
                 };
 
+                debug!(
+                    start_time = %format_timestamp(flow_span.start_time),
+                    end_time = %format_timestamp(flow_span.end_time),
+                    community_id = ?flow_span.attributes.flow_community_id,
+                    source_address = ?flow_span.attributes.source_address,
+                    source_port = flow_span.attributes.source_port,
+                    destination_address = ?flow_span.attributes.destination_address,
+                    destination_port = ?flow_span.attributes.destination_port,
+                    network_type = ?flow_span.attributes.network_type,
+                    network_transport = ?flow_span.attributes.network_transport,
+                    tcp_flags = ?flow_span.attributes.flow_tcp_flags_bits,
+                    flow_end_reason = ?flow_span.attributes.flow_end_reason,
+                    flow_bytes_delta = ?flow_span.attributes.flow_bytes_delta,
+                    flow_bytes_total = ?flow_span.attributes.flow_bytes_total,
+                    flow_packets_delta = ?flow_span.attributes.flow_packets_delta,
+                    flow_packets_total = ?flow_span.attributes.flow_packets_total,
+                    flow_reverse_bytes_delta = ?flow_span.attributes.flow_reverse_bytes_delta,
+                    flow_reverse_bytes_total = ?flow_span.attributes.flow_reverse_bytes_total,
+                    flow_reverse_packets_delta = ?flow_span.attributes.flow_reverse_packets_delta,
+                    flow_reverse_packets_total = ?flow_span.attributes.flow_reverse_packets_total,
+                    "span created"
+                );
                 let initial_timeout = self.calculate_timeout(&packet, &flow_span);
                 // Spawn tasks for this new flow
                 // Note: Under extremely high packet rates with many short-lived flows,
@@ -544,9 +579,18 @@ impl PacketWorker {
             Entry::Occupied(mut occupied) => {
                 let entry = occupied.get_mut();
                 let flow_span = &mut entry.flow_span;
+                debug!(
+                    community_id = ?flow_span.attributes.flow_community_id,
+                    source_address = ?flow_span.attributes.source_address,
+                    source_port = ?flow_span.attributes.source_port,
+                    destination_address = ?flow_span.attributes.destination_address,
+                    destination_port = ?flow_span.attributes.destination_port,
+                    "span updating"
+                );
 
-                // Update end time
-                flow_span.end_time = UNIX_EPOCH + Duration::from_nanos(packet.capture_time);
+                // Update end time - convert boot-relative timestamp to wall clock time
+                let wall_time_nanos = packet.capture_time + self.boot_time_offset_nanos;
+                flow_span.end_time = UNIX_EPOCH + Duration::from_nanos(wall_time_nanos);
 
                 // Determine if this packet is in the forward or reverse direction
                 let is_forward = flow_span.attributes.source_address == src_addr
@@ -589,6 +633,28 @@ impl PacketWorker {
                     }
                 }
 
+                debug!(
+                    start_time = %format_timestamp(flow_span.start_time),
+                    end_time = %format_timestamp(flow_span.end_time),
+                    community_id = ?flow_span.attributes.flow_community_id,
+                    source_address = ?flow_span.attributes.source_address,
+                    source_port = flow_span.attributes.source_port,
+                    destination_address = ?flow_span.attributes.destination_address,
+                    destination_port = ?flow_span.attributes.destination_port,
+                    network_type = ?flow_span.attributes.network_type,
+                    network_transport = ?flow_span.attributes.network_transport,
+                    tcp_flags = ?flow_span.attributes.flow_tcp_flags_bits,
+                    flow_end_reason = ?flow_span.attributes.flow_end_reason,
+                    flow_bytes_delta = ?flow_span.attributes.flow_bytes_delta,
+                    flow_bytes_total = ?flow_span.attributes.flow_bytes_total,
+                    flow_packets_delta = ?flow_span.attributes.flow_packets_delta,
+                    flow_packets_total = ?flow_span.attributes.flow_packets_total,
+                    flow_reverse_bytes_delta = ?flow_span.attributes.flow_reverse_bytes_delta,
+                    flow_reverse_bytes_total = ?flow_span.attributes.flow_reverse_bytes_total,
+                    flow_reverse_packets_delta = ?flow_span.attributes.flow_reverse_packets_delta,
+                    flow_reverse_packets_total = ?flow_span.attributes.flow_reverse_packets_total,
+                    "span updated"
+                );
                 // Calculate new timeout (might have changed due to TCP state)
                 let new_timeout = self.calculate_timeout(&packet, flow_span);
 
@@ -634,6 +700,47 @@ impl std::fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+/// Errors that can occur during boot time offset calculation
+#[derive(Debug)]
+pub enum BootTimeError {
+    /// System clock is before UNIX epoch
+    SystemClockBeforeEpoch(std::time::SystemTimeError),
+    /// Failed to read /proc/uptime
+    ReadProcUptime(std::io::Error),
+    /// Failed to parse uptime value from /proc/uptime
+    ParseUptime(String),
+}
+
+impl std::fmt::Display for BootTimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BootTimeError::SystemClockBeforeEpoch(e) => {
+                write!(f, "system clock is before unix epoch: {}", e)
+            }
+            BootTimeError::ReadProcUptime(e) => {
+                write!(f, "failed to read /proc/uptime: {}", e)
+            }
+            BootTimeError::ParseUptime(content) => {
+                write!(
+                    f,
+                    "failed to parse uptime from /proc/uptime (content: '{}')",
+                    content
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for BootTimeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            BootTimeError::SystemClockBeforeEpoch(e) => Some(e),
+            BootTimeError::ReadProcUptime(e) => Some(e),
+            BootTimeError::ParseUptime(_) => None,
+        }
+    }
+}
 
 /// Determine the appropriate flow end reason based on TCP flags
 ///
@@ -863,6 +970,65 @@ fn format_ip(addr_type: IpAddrType, ipv4_addr: [u8; 4], ipv6_addr: [u8; 16]) -> 
     }
 }
 
+/// Helper function to format SystemTime as ISO 8601 timestamp (e.g., 2023-09-27T10:00:00.123Z)
+fn format_timestamp(time: std::time::SystemTime) -> String {
+    match time.duration_since(UNIX_EPOCH) {
+        Ok(duration) => {
+            let secs = duration.as_secs() as i64;
+            let nanos = duration.subsec_nanos();
+            let datetime = DateTime::<Utc>::from_timestamp(secs, nanos)
+                .unwrap_or_else(|| DateTime::<Utc>::from_timestamp(0, 0).unwrap());
+            datetime.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+        }
+        Err(_) => "invalid_time".to_string(),
+    }
+}
+
+/// Calculate the offset needed to convert boot-relative timestamps (from bpf_ktime_get_boot_ns)
+/// to wall clock timestamps.
+///
+/// bpf_ktime_get_boot_ns() returns time in nanoseconds since boot using CLOCK_BOOTTIME,
+/// which includes suspend time. This matches /proc/uptime in userspace.
+///
+/// This function calculates: wall_clock_time_ns - boot_time_ns = offset
+///
+/// Returns an error if the boot time cannot be determined, as this would make all
+/// timestamps incorrect and render the program's output useless.
+fn calculate_boot_time_offset_nanos() -> Result<u64, BootTimeError> {
+    use std::time::SystemTime;
+
+    // Get current wall clock time since UNIX epoch
+    let now = SystemTime::now();
+    let now_since_epoch = now
+        .duration_since(UNIX_EPOCH)
+        .map_err(BootTimeError::SystemClockBeforeEpoch)?;
+    let wall_clock_nanos = now_since_epoch.as_nanos() as u64;
+
+    // Read boot time from /proc/uptime (uses CLOCK_BOOTTIME, matching bpf_ktime_get_boot_ns)
+    // Format: "uptime_seconds idle_seconds"
+    let uptime_content =
+        std::fs::read_to_string("/proc/uptime").map_err(BootTimeError::ReadProcUptime)?;
+
+    let uptime_secs = uptime_content
+        .split_whitespace()
+        .next()
+        .and_then(|s| s.parse::<f64>().ok())
+        .ok_or_else(|| BootTimeError::ParseUptime(uptime_content.clone()))?;
+
+    // Convert uptime to nanoseconds
+    let uptime_nanos = (uptime_secs * 1_000_000_000.0) as u64;
+
+    // Calculate offset: current_time - uptime = boot_time
+    let offset = wall_clock_nanos.saturating_sub(uptime_nanos);
+
+    debug!(
+        "Boot time offset calculated: {} ns (wall clock: {} ns, uptime: {} ns)",
+        offset, wall_clock_nanos, uptime_nanos
+    );
+
+    Ok(offset)
+}
+
 #[cfg(test)]
 mod tests {
     use std::net::IpAddr;
@@ -894,6 +1060,7 @@ mod tests {
             flow_span_map,
             packet_meta_rx: packet_rx,
             flow_span_tx: flow_span_tx.clone(),
+            boot_time_offset_nanos: 0, // For tests, assume capture_time is already wall clock
         };
 
         drop(packet_tx); // Close the packet channel so worker will exit
