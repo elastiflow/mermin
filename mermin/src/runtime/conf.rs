@@ -294,44 +294,42 @@ impl Conf {
 
     // Simple wildcard matcher supporting '*' and '?'
     fn glob_match(pattern: &str, text: &str) -> bool {
-        let pb = pattern.as_bytes();
-        let tb = text.as_bytes();
-        let (mut p, mut t) = (0usize, 0usize);
-        let (mut star, mut match_t) = (None::<usize>, 0usize);
+        let (pattern_bytes, text_bytes) = (pattern.as_bytes(), text.as_bytes());
+        let (mut pattern_index, mut text_index) = (0usize, 0usize);
+        let (mut last_star_pattern_index, mut last_star_text_index) = (usize::MAX, 0usize);
 
-        while t < tb.len() {
-            if p < pb.len() && (pb[p] == b'?' || pb[p] == tb[t]) {
-                p += 1;
-                t += 1;
-            } else if p < pb.len() && pb[p] == b'*' {
-                star = Some(p);
-                match_t = t;
-                p += 1;
-            } else if let Some(si) = star {
-                p = si + 1;
-                match_t += 1;
-                t = match_t;
+        while text_index < text_bytes.len() {
+            if pattern_index < pattern_bytes.len()
+                && (pattern_bytes[pattern_index] == b'?' || pattern_bytes[pattern_index] == text_bytes[text_index])
+            {
+                pattern_index += 1;
+                text_index += 1;
+            } else if pattern_index < pattern_bytes.len() && pattern_bytes[pattern_index] == b'*' {
+                last_star_pattern_index = pattern_index;
+                last_star_text_index = text_index;
+                pattern_index += 1;
+            } else if last_star_pattern_index != usize::MAX {
+                pattern_index = last_star_pattern_index + 1;
+                last_star_text_index += 1;
+                text_index = last_star_text_index;
             } else {
                 return false;
             }
         }
 
-        while p < pb.len() && pb[p] == b'*' {
-            p += 1;
+        while pattern_index < pattern_bytes.len() && pattern_bytes[pattern_index] == b'*' {
+            pattern_index += 1;
         }
-        p == pb.len()
+        pattern_index == pattern_bytes.len()
     }
 
     #[inline]
     fn parse_regex(pattern: &str) -> Option<Regex> {
-        // Regex form: /.../ with at least two slashes and no trailing flags for now
-        if let Some(stripped) = pattern.strip_prefix('/')
-            && let Some(end) = stripped.rfind('/')
-        {
-            let body = &stripped[..end];
-            return Regex::new(body).ok();
-        }
-        None
+        // Regex form: /.../ with at least two slashes and no trailing flags
+        pattern
+            .strip_prefix('/')
+            .and_then(|s| s.rsplit_once('/').map(|(body, _)| body))
+            .and_then(|body| Regex::new(body).ok())
     }
 }
 
