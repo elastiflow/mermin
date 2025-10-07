@@ -291,7 +291,6 @@ impl PacketWorker {
         };
         let src_port = packet.src_port();
         let dst_port = packet.dst_port();
-
         // For ICMP/ICMPv6, use type and code instead of ports
         let (community_src_port, community_dst_port) =
             if packet.proto == IpProto::Icmp || packet.proto == IpProto::Ipv6Icmp {
@@ -299,7 +298,6 @@ impl PacketWorker {
             } else {
                 (src_port, dst_port)
             };
-
         let community_id = self.community_id_generator.generate(
             src_addr,
             dst_addr,
@@ -307,7 +305,6 @@ impl PacketWorker {
             community_dst_port,
             packet.proto,
         );
-
         let iface_name = self.iface_map.get(&packet.ifindex);
 
         // Log packet details if debug logging is enabled
@@ -580,9 +577,15 @@ impl PacketWorker {
                     flow_span.attributes.flow_tcp_flags_tags =
                         Some(TcpFlags::flags_from_bits(combined_flags));
 
-                    // Update connection state based on the new packet
-                    if let Some(new_state) = ConnectionState::from_packet(&packet) {
+                    // Update connection state based on current state and new packet
+                    if let Some(current_state) = flow_span.attributes.flow_connection_state {
+                        // Transition to next state based on current state and packet flags
+                        let new_state =
+                            ConnectionState::next_state(current_state, &packet, is_forward);
                         flow_span.attributes.flow_connection_state = Some(new_state);
+                    } else if let Some(initial_state) = ConnectionState::from_packet(&packet) {
+                        // First time seeing this flow - initialize state
+                        flow_span.attributes.flow_connection_state = Some(initial_state);
                     }
                 }
 

@@ -1362,6 +1362,7 @@ fn get_packet_meta(_ctx: &TcContext) -> Result<&'static mut PacketMeta, Error> {
         if meta_opt.is_none() {
             *meta_opt = Some(PacketMeta {
                 // Basic fields
+                capture_time: 0,
                 ifindex: 0,
                 direction: Direction::Ingress,
                 src_mac_addr: [0; 6],

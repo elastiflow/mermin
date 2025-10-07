@@ -121,13 +121,13 @@ impl TcpFlags {
 /// TCP connection state based on RFC 9293 section 3.3.2:
 /// https://datatracker.ietf.org/doc/html/rfc9293#section-3.3.2
 ///
-/// Note that we can only infer certain states from packet flags alone.
-/// Full TCP state machine tracking would require following the entire connection lifecycle.
+/// This implementation tracks TCP connection states by observing packet flags and
+/// state transitions. Note that as a passive observer, we may not see all packets
+/// (e.g., LISTEN state), so some transitions are inferred from available information.
 ///
 /// States match OpenTelemetry semantic conventions:
 /// https://opentelemetry.io/docs/specs/semconv/attributes/network/
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // Some states will be used in future when tracking state transitions
 pub enum ConnectionState {
     /// No connection state at all
     Closed,
@@ -172,7 +172,7 @@ impl ConnectionState {
     /// Initialize connection state from the first packet
     ///
     /// This method infers the initial connection state from TCP flags according to RFC 9293.
-    /// Note: This provides a best-effort state determination from a single packet's flags.
+    /// Used when we first observe a connection (no prior state).
     pub fn from_packet(packet: &PacketMeta) -> Option<Self> {
         // Check flag combinations in order of specificity
         match (packet.syn(), packet.ack(), packet.fin(), packet.rst()) {
@@ -185,19 +185,165 @@ impl ConnectionState {
             // SYN+ACK - connection response (SYN-RECEIVED state)
             (true, true, false, false) => Some(ConnectionState::SynReceived),
 
-            // FIN+ACK - connection termination (FIN-WAIT-1 or CLOSING)
-            // Note: We can't distinguish between FIN-WAIT-1 and CLOSING from flags alone
+            // FIN+ACK - connection termination
+            // Without prior state, we assume this is FIN-WAIT-1
             (false, true, true, false) => Some(ConnectionState::FinWait1),
+
+            // FIN only - connection termination initiated
+            (false, false, true, false) => Some(ConnectionState::FinWait1),
 
             // ACK flag - established connection (ESTABLISHED state)
             // This includes PSH+ACK for data transfer
             (false, true, false, false) => Some(ConnectionState::Established),
 
-            // FIN only - uncommon but could indicate FIN-WAIT-1
-            (false, false, true, false) => Some(ConnectionState::FinWait1),
-
             // No meaningful flags or unusual combinations
             _ => None,
+        }
+    }
+
+    /// Update connection state based on current state and new packet
+    ///
+    /// Implements TCP state machine transitions according to RFC 9293 Figure 5.
+    /// This tracks state changes as we observe packets in the flow.
+    ///
+    /// Note: As a passive observer, we may miss some packets, so this is best-effort.
+    /// We track both forward and reverse direction packets in the same flow.
+    pub fn next_state(current: Self, packet: &PacketMeta, is_forward: bool) -> Self {
+        let syn = packet.syn();
+        let ack = packet.ack();
+        let fin = packet.fin();
+        let rst = packet.rst();
+
+        // RST can transition from any state to CLOSED (RFC 9293 Note 3)
+        if rst {
+            return ConnectionState::Closed;
+        }
+
+        match current {
+            // CLOSED state - should not normally receive packets, but if we do:
+            ConnectionState::Closed => {
+                // A SYN can reopen the connection
+                if syn && !ack {
+                    ConnectionState::SynSent
+                } else {
+                    ConnectionState::Closed
+                }
+            }
+
+            // SYN-SENT: Waiting for matching SYN
+            ConnectionState::SynSent => {
+                if syn && ack {
+                    // Received SYN+ACK → move to SYN-RECEIVED
+                    ConnectionState::SynReceived
+                } else if syn {
+                    // Simultaneous open: both sides send SYN
+                    ConnectionState::SynReceived
+                } else {
+                    // Stay in SYN-SENT
+                    current
+                }
+            }
+
+            // SYN-RECEIVED: Waiting for ACK of our SYN
+            ConnectionState::SynReceived => {
+                if ack && !syn && !fin {
+                    // Received final ACK of 3-way handshake → ESTABLISHED
+                    ConnectionState::Established
+                } else if fin {
+                    // FIN received during handshake → FIN-WAIT-1
+                    ConnectionState::FinWait1
+                } else {
+                    // Stay in SYN-RECEIVED
+                    current
+                }
+            }
+
+            // ESTABLISHED: Connection is open
+            ConnectionState::Established => {
+                if fin {
+                    // FIN received or sent
+                    if is_forward {
+                        // We (source) are sending FIN → FIN-WAIT-1
+                        ConnectionState::FinWait1
+                    } else {
+                        // Remote is sending FIN → CLOSE-WAIT
+                        ConnectionState::CloseWait
+                    }
+                } else {
+                    // Stay ESTABLISHED
+                    current
+                }
+            }
+
+            // FIN-WAIT-1: Waiting for FIN or ACK of our FIN
+            ConnectionState::FinWait1 => {
+                if fin && ack {
+                    // Received FIN+ACK (simultaneous close or ACK of our FIN with their FIN)
+                    // Per RFC 9293 Note 2: can go directly to TIME-WAIT
+                    ConnectionState::TimeWait
+                } else if ack && !fin {
+                    // Received ACK of our FIN → FIN-WAIT-2
+                    ConnectionState::FinWait2
+                } else if fin && !ack {
+                    // Received FIN (simultaneous close, no ACK yet) → CLOSING
+                    ConnectionState::Closing
+                } else {
+                    // Stay in FIN-WAIT-1
+                    current
+                }
+            }
+
+            // FIN-WAIT-2: Waiting for FIN from remote
+            ConnectionState::FinWait2 => {
+                if fin {
+                    // Received FIN from remote → TIME-WAIT
+                    ConnectionState::TimeWait
+                } else {
+                    // Stay in FIN-WAIT-2
+                    current
+                }
+            }
+
+            // CLOSE-WAIT: Waiting for local application to close
+            ConnectionState::CloseWait => {
+                if fin && is_forward {
+                    // Local side sends FIN → LAST-ACK
+                    ConnectionState::LastAck
+                } else {
+                    // Stay in CLOSE-WAIT
+                    current
+                }
+            }
+
+            // CLOSING: Waiting for ACK of our FIN (simultaneous close)
+            ConnectionState::Closing => {
+                if ack {
+                    // Received ACK of our FIN → TIME-WAIT
+                    ConnectionState::TimeWait
+                } else {
+                    // Stay in CLOSING
+                    current
+                }
+            }
+
+            // LAST-ACK: Waiting for ACK of our FIN
+            ConnectionState::LastAck => {
+                if ack {
+                    // Received ACK → CLOSED
+                    ConnectionState::Closed
+                } else {
+                    // Stay in LAST-ACK
+                    current
+                }
+            }
+
+            // TIME-WAIT: Waiting for 2MSL timeout
+            // In practice, we'll timeout this state via idle timeout
+            ConnectionState::TimeWait => {
+                // Stay in TIME-WAIT until timeout
+                // Note: In real TCP, this would timeout after 2*MSL
+                current
+            }
         }
     }
 }
@@ -379,5 +525,243 @@ mod tests {
         assert_eq!(ConnectionState::LastAck.as_str(), "last_ack");
         assert_eq!(ConnectionState::TimeWait.as_str(), "time_wait");
         assert_eq!(ConnectionState::Closed.as_str(), "closed");
+    }
+
+    // Helper function to create a packet with specific flags
+    fn packet_with_flags(syn: bool, ack: bool, fin: bool, rst: bool) -> PacketMeta {
+        let mut packet = PacketMeta::default();
+        packet.proto = IpProto::Tcp;
+        packet.tcp_flags = 0;
+        if syn {
+            packet.tcp_flags |= PacketMeta::TCP_FLAG_SYN;
+        }
+        if ack {
+            packet.tcp_flags |= PacketMeta::TCP_FLAG_ACK;
+        }
+        if fin {
+            packet.tcp_flags |= PacketMeta::TCP_FLAG_FIN;
+        }
+        if rst {
+            packet.tcp_flags |= PacketMeta::TCP_FLAG_RST;
+        }
+        packet
+    }
+
+    #[test]
+    fn test_state_transition_normal_handshake() {
+        // Test normal TCP 3-way handshake: SYN → SYN-ACK → ACK
+
+        // Client sends SYN (forward direction)
+        let syn_packet = packet_with_flags(true, false, false, false);
+        let state = ConnectionState::from_packet(&syn_packet).unwrap();
+        assert_eq!(state, ConnectionState::SynSent);
+
+        // Server responds with SYN+ACK (reverse direction)
+        let syn_ack_packet = packet_with_flags(true, true, false, false);
+        let state = ConnectionState::next_state(state, &syn_ack_packet, false);
+        assert_eq!(state, ConnectionState::SynReceived);
+
+        // Client sends final ACK (forward direction)
+        let ack_packet = packet_with_flags(false, true, false, false);
+        let state = ConnectionState::next_state(state, &ack_packet, true);
+        assert_eq!(state, ConnectionState::Established);
+    }
+
+    #[test]
+    fn test_state_transition_normal_close() {
+        // Test normal TCP close: FIN → FIN-ACK → ACK
+
+        // Start from established
+        let mut state = ConnectionState::Established;
+
+        // Client sends FIN (forward direction)
+        let fin_packet = packet_with_flags(false, false, true, false);
+        state = ConnectionState::next_state(state, &fin_packet, true);
+        assert_eq!(state, ConnectionState::FinWait1);
+
+        // Server sends FIN+ACK (reverse direction)
+        let fin_ack_packet = packet_with_flags(false, true, true, false);
+        state = ConnectionState::next_state(state, &fin_ack_packet, false);
+        assert_eq!(state, ConnectionState::TimeWait);
+    }
+
+    #[test]
+    fn test_state_transition_graceful_close_sequence() {
+        // Test graceful close where ACK and FIN are separate
+
+        let mut state = ConnectionState::Established;
+
+        // Client sends FIN (forward direction)
+        let fin_packet = packet_with_flags(false, false, true, false);
+        state = ConnectionState::next_state(state, &fin_packet, true);
+        assert_eq!(state, ConnectionState::FinWait1);
+
+        // Server sends ACK (reverse direction)
+        let ack_packet = packet_with_flags(false, true, false, false);
+        state = ConnectionState::next_state(state, &ack_packet, false);
+        assert_eq!(state, ConnectionState::FinWait2);
+
+        // Server sends FIN (reverse direction)
+        let fin_packet = packet_with_flags(false, false, true, false);
+        state = ConnectionState::next_state(state, &fin_packet, false);
+        assert_eq!(state, ConnectionState::TimeWait);
+    }
+
+    #[test]
+    fn test_state_transition_simultaneous_close() {
+        // Test simultaneous close where both sides send FIN
+
+        let mut state = ConnectionState::Established;
+
+        // Client sends FIN (forward direction)
+        let fin_packet = packet_with_flags(false, false, true, false);
+        state = ConnectionState::next_state(state, &fin_packet, true);
+        assert_eq!(state, ConnectionState::FinWait1);
+
+        // Server also sends FIN before ACKing client's FIN (reverse direction)
+        let fin_packet = packet_with_flags(false, false, true, false);
+        state = ConnectionState::next_state(state, &fin_packet, false);
+        assert_eq!(state, ConnectionState::Closing);
+
+        // Server sends ACK (reverse direction)
+        let ack_packet = packet_with_flags(false, true, false, false);
+        state = ConnectionState::next_state(state, &ack_packet, false);
+        assert_eq!(state, ConnectionState::TimeWait);
+    }
+
+    #[test]
+    fn test_state_transition_passive_close() {
+        // Test passive close (server closes first, client in CLOSE-WAIT)
+
+        let mut state = ConnectionState::Established;
+
+        // Server sends FIN (reverse direction)
+        let fin_packet = packet_with_flags(false, false, true, false);
+        state = ConnectionState::next_state(state, &fin_packet, false);
+        assert_eq!(state, ConnectionState::CloseWait);
+
+        // Client sends FIN (forward direction)
+        let fin_packet = packet_with_flags(false, false, true, false);
+        state = ConnectionState::next_state(state, &fin_packet, true);
+        assert_eq!(state, ConnectionState::LastAck);
+
+        // Server sends ACK (reverse direction)
+        let ack_packet = packet_with_flags(false, true, false, false);
+        state = ConnectionState::next_state(state, &ack_packet, false);
+        assert_eq!(state, ConnectionState::Closed);
+    }
+
+    #[test]
+    fn test_state_transition_rst_from_any_state() {
+        // Test that RST transitions to CLOSED from any state
+
+        let rst_packet = packet_with_flags(false, false, false, true);
+
+        let states = [
+            ConnectionState::SynSent,
+            ConnectionState::SynReceived,
+            ConnectionState::Established,
+            ConnectionState::FinWait1,
+            ConnectionState::FinWait2,
+            ConnectionState::CloseWait,
+            ConnectionState::Closing,
+            ConnectionState::LastAck,
+            ConnectionState::TimeWait,
+        ];
+
+        for state in states {
+            let new_state = ConnectionState::next_state(state, &rst_packet, true);
+            assert_eq!(
+                new_state,
+                ConnectionState::Closed,
+                "RST should transition {:?} to CLOSED",
+                state
+            );
+        }
+    }
+
+    #[test]
+    fn test_state_transition_simultaneous_open() {
+        // Test simultaneous open where both sides send SYN
+
+        let mut state = ConnectionState::SynSent;
+
+        // Receive SYN from the other side (both sent SYN)
+        let syn_packet = packet_with_flags(true, false, false, false);
+        state = ConnectionState::next_state(state, &syn_packet, false);
+        assert_eq!(state, ConnectionState::SynReceived);
+
+        // Both sides ACK each other's SYN
+        let ack_packet = packet_with_flags(false, true, false, false);
+        state = ConnectionState::next_state(state, &ack_packet, true);
+        assert_eq!(state, ConnectionState::Established);
+    }
+
+    #[test]
+    fn test_state_transition_data_transfer() {
+        // Test that data packets don't change ESTABLISHED state
+
+        let state = ConnectionState::Established;
+
+        // Data packet with ACK (forward)
+        let data_packet = packet_with_flags(false, true, false, false);
+        let new_state = ConnectionState::next_state(state, &data_packet, true);
+        assert_eq!(new_state, ConnectionState::Established);
+
+        // Data packet with PSH+ACK (reverse)
+        let mut psh_ack_packet = packet_with_flags(false, true, false, false);
+        psh_ack_packet.tcp_flags |= PacketMeta::TCP_FLAG_PSH;
+        let new_state = ConnectionState::next_state(new_state, &psh_ack_packet, false);
+        assert_eq!(new_state, ConnectionState::Established);
+    }
+
+    #[test]
+    fn test_state_transition_stay_in_state() {
+        // Test that states stay in same state when receiving unexpected packets
+
+        // FIN-WAIT-1 receiving data packets stays in FIN-WAIT-1
+        let state = ConnectionState::FinWait1;
+        let data_packet = packet_with_flags(false, false, false, false);
+        let new_state = ConnectionState::next_state(state, &data_packet, true);
+        assert_eq!(new_state, ConnectionState::FinWait1);
+
+        // FIN-WAIT-2 receiving data packets stays in FIN-WAIT-2
+        let state = ConnectionState::FinWait2;
+        let data_packet = packet_with_flags(false, true, false, false);
+        let new_state = ConnectionState::next_state(state, &data_packet, true);
+        assert_eq!(new_state, ConnectionState::FinWait2);
+
+        // CLOSE-WAIT stays until local application closes (forward FIN)
+        let state = ConnectionState::CloseWait;
+        let ack_packet = packet_with_flags(false, true, false, false);
+        let new_state = ConnectionState::next_state(state, &ack_packet, false);
+        assert_eq!(new_state, ConnectionState::CloseWait);
+    }
+
+    #[test]
+    fn test_state_transition_time_wait_stays() {
+        // TIME-WAIT should stay in TIME-WAIT (waiting for 2MSL timeout)
+
+        let state = ConnectionState::TimeWait;
+
+        // Any packet should keep it in TIME-WAIT
+        let ack_packet = packet_with_flags(false, true, false, false);
+        let new_state = ConnectionState::next_state(state, &ack_packet, true);
+        assert_eq!(new_state, ConnectionState::TimeWait);
+
+        let data_packet = packet_with_flags(false, false, false, false);
+        let new_state = ConnectionState::next_state(state, &data_packet, false);
+        assert_eq!(new_state, ConnectionState::TimeWait);
+    }
+
+    #[test]
+    fn test_state_transition_closed_to_syn_sent() {
+        // CLOSED can transition to SYN-SENT on receiving SYN
+
+        let state = ConnectionState::Closed;
+
+        let syn_packet = packet_with_flags(true, false, false, false);
+        let new_state = ConnectionState::next_state(state, &syn_packet, true);
+        assert_eq!(new_state, ConnectionState::SynSent);
     }
 }
