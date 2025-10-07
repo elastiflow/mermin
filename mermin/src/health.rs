@@ -19,7 +19,7 @@ use crate::runtime::conf::ApiConf;
 #[derive(Clone)]
 pub struct HealthState {
     pub ebpf_loaded: Arc<AtomicBool>,
-    pub k8s_connected: Arc<AtomicBool>,
+    pub k8s_caches_synced: Arc<AtomicBool>,
     pub ready_to_process: Arc<AtomicBool>,
     pub startup_complete: Arc<AtomicBool>,
 }
@@ -28,7 +28,7 @@ impl Default for HealthState {
     fn default() -> Self {
         Self {
             ebpf_loaded: Arc::new(AtomicBool::new(false)),
-            k8s_connected: Arc::new(AtomicBool::new(false)),
+            k8s_caches_synced: Arc::new(AtomicBool::new(false)),
             ready_to_process: Arc::new(AtomicBool::new(false)),
             startup_complete: Arc::new(AtomicBool::new(false)),
         }
@@ -55,10 +55,10 @@ pub async fn liveness_handler(State(state): State<HealthState>) -> impl IntoResp
 
 pub async fn readiness_handler(State(state): State<HealthState>) -> impl IntoResponse {
     let ebpf_loaded = state.ebpf_loaded.load(Ordering::Relaxed);
-    let k8s_connected = state.k8s_connected.load(Ordering::Relaxed);
+    let k8s_caches_synced = state.k8s_caches_synced.load(Ordering::Relaxed);
     let ready_to_process = state.ready_to_process.load(Ordering::Relaxed);
 
-    let is_ready = ebpf_loaded && k8s_connected && ready_to_process;
+    let is_ready = ebpf_loaded && k8s_caches_synced && ready_to_process;
 
     let status_code = if is_ready {
         StatusCode::OK
@@ -70,7 +70,7 @@ pub async fn readiness_handler(State(state): State<HealthState>) -> impl IntoRes
         "status": if is_ready { "ok" } else { "unavailable" },
         "checks": {
             "ebpf_loaded": ebpf_loaded,
-            "k8s_connected": k8s_connected,
+            "k8s_caches_synced": k8s_caches_synced,
             "ready_to_process": ready_to_process
         }
     }));

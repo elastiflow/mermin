@@ -1,45 +1,55 @@
-use integration_common::{PacketType, ParsedHeader};
-use network_types::udp::UdpHdr;
+use integration_common::{PacketType, ParsedHeader, UdpTestData};
 
-// Helper for constructing Udp header test packets
-pub fn create_udp_test_packet() -> ([u8; UdpHdr::LEN + 1], UdpHdr) {
-    let mut request_data = [0u8; UdpHdr::LEN + 1];
+// Helper for constructing UDP header test packets
+// Only constructs the fields that are actually extracted by mermin-ebpf
+pub fn create_udp_test_packet() -> ([u8; 9], UdpTestData) {
+    let mut request_data = [0u8; 9];
 
     // Byte 0: The type discriminator for the eBPF program's `match` statement.
     request_data[0] = PacketType::Udp as u8;
-    // Bytes 1-2: Source Port
-    request_data[1..3].copy_from_slice(&[0x30, 0x39]);
-    // Bytes 3-4: Destination Port
-    request_data[3..5].copy_from_slice(&[0x00, 0x50]);
-    // Bytes 5-9: Remaining values
-    request_data[5..9].copy_from_slice(&[
-        0, 0, // Header Length
-        0, 0, // Checksum
+
+    // Bytes 1-8: UDP header (8 bytes total)
+    request_data[1..9].copy_from_slice(&[
+        // Bytes 1-2: Source Port (src_port field - extracted at offset 0 from data)
+        0x30, 0x39, // Port 12345
+        // Bytes 3-4: Destination Port (dst_port field - extracted at offset 2 from data)
+        0x00, 0x50, // Port 80
+        // Bytes 5-6: Length (not extracted)
+        0x00, 0x08, // 8 bytes (header only)
+        // Bytes 7-8: Checksum (not extracted)
+        0x00, 0x00,
     ]);
 
-    let expected_header = UdpHdr {
-        src: [0x30, 0x39],
-        dst: [0x00, 0x50],
-        len: [0, 0],
-        check: [0, 0],
+    let expected_header = UdpTestData {
+        src_port: [0x30, 0x39],
+        dst_port: [0x00, 0x50],
     };
 
     (request_data, expected_header)
 }
 
-// Helper for verifying Udp header test results
-pub fn verify_udp_header(received: ParsedHeader, expected: UdpHdr) {
+// Helper for verifying UDP header test results
+pub fn verify_udp_header(received: ParsedHeader, expected: UdpTestData) {
     assert_eq!(received.type_, PacketType::Udp);
     let parsed_header = unsafe { received.data.udp };
 
-    let parsed_dst_port = parsed_header.dst;
-    let expected_dst_port = expected.dst;
     assert_eq!(
-        parsed_dst_port, expected_dst_port,
-        "Destination Port mismatch"
+        parsed_header.src_port,
+        expected.src_port,
+        "Source Port mismatch: got [{:#x}, {:#x}], expected [{:#x}, {:#x}]",
+        parsed_header.src_port[0],
+        parsed_header.src_port[1],
+        expected.src_port[0],
+        expected.src_port[1]
     );
 
-    let parsed_src_port = parsed_header.src;
-    let expected_src_port = expected.src;
-    assert_eq!(parsed_src_port, expected_src_port, "Source Port mismatch");
+    assert_eq!(
+        parsed_header.dst_port,
+        expected.dst_port,
+        "Destination Port mismatch: got [{:#x}, {:#x}], expected [{:#x}, {:#x}]",
+        parsed_header.dst_port[0],
+        parsed_header.dst_port[1],
+        expected.dst_port[0],
+        expected.dst_port[1]
+    );
 }

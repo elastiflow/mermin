@@ -1,47 +1,44 @@
-use integration_common::{PacketType, ParsedHeader};
-use network_types::{destopts::DestOptsHdr, ip::IpProto};
+use integration_common::{DestOptsTestData, PacketType, ParsedHeader};
+use network_types::{destopts::DEST_OPTS_LEN, ip::IpProto};
 
-// Helper for constructing Destination Options Header test packets
-pub fn create_destopts_test_packet() -> ([u8; DestOptsHdr::LEN + 1], DestOptsHdr) {
-    let mut request_data = [0u8; DestOptsHdr::LEN + 1];
+// Helper for constructing Destination Options header test packets
+// Only constructs the fields that are actually extracted by mermin-ebpf
+pub fn create_destopts_test_packet() -> ([u8; DEST_OPTS_LEN + 1], DestOptsTestData) {
+    let mut request_data = [0u8; DEST_OPTS_LEN + 1];
 
-    // Discriminator for eBPF match statement
+    // Byte 0: The type discriminator for the eBPF program's `match` statement.
     request_data[0] = PacketType::DestOpts as u8;
 
-    // Build expected header
-    let mut expected = DestOptsHdr {
-        next_hdr: IpProto::Tcp,
-        hdr_ext_len: 0, // minimal header size (only 8 bytes total)
-        opt_data: [0u8; 6],
+    // Bytes 1-2: Destination Options header (2 bytes minimum)
+    request_data[1..3].copy_from_slice(&[
+        // Byte 1: Next Header (next_hdr field - extracted at offset 0 from data)
+        IpProto::Tcp as u8,
+        // Byte 2: Header Extension Length (hdr_ext_len field - extracted at offset 1 from data)
+        1, // (1+1)*8 = 16 bytes total
+    ]);
+
+    let expected_header = DestOptsTestData {
+        next_hdr: IpProto::Tcp as u8,
+        hdr_ext_len: 1,
     };
 
-    expected.next_hdr = IpProto::Tcp;
-    expected.hdr_ext_len = 0;
-    // Fill some option padding bytes (for deterministic comparison)
-    expected
-        .opt_data
-        .copy_from_slice(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
-
-    // Serialize into buffer, following repr(C, packed) layout
-    request_data[1] = expected.next_hdr as u8; // Next Header
-    request_data[2] = expected.hdr_ext_len; // Hdr Ext Len
-    request_data[3..9].copy_from_slice(&expected.opt_data); // 6 bytes of option/pad
-
-    (request_data, expected)
+    (request_data, expected_header)
 }
 
-// Helper for verifying Destination Options Header test results
-pub fn verify_destopts_header(received: ParsedHeader, expected: DestOptsHdr) {
+// Helper for verifying Destination Options header test results
+pub fn verify_destopts_header(received: ParsedHeader, expected: DestOptsTestData) {
     assert_eq!(received.type_, PacketType::DestOpts);
-    let parsed = unsafe { received.data.destopts };
+    let parsed_header = unsafe { received.data.destopts };
 
-    assert_eq!(parsed.next_hdr, expected.next_hdr, "Next Header mismatch");
     assert_eq!(
-        parsed.hdr_ext_len, expected.hdr_ext_len,
-        "Hdr Ext Len mismatch"
+        parsed_header.next_hdr, expected.next_hdr,
+        "Next Header mismatch: got {}, expected {}",
+        parsed_header.next_hdr, expected.next_hdr
     );
-    assert_eq!(parsed.opt_data, expected.opt_data, "Option data mismatch");
 
-    // Also validate total length calculation for hdr_ext_len = 0
-    assert_eq!(parsed.total_hdr_len(), 8, "Total header length mismatch");
+    assert_eq!(
+        parsed_header.hdr_ext_len, expected.hdr_ext_len,
+        "Header Extension Length mismatch: got {}, expected {}",
+        parsed_header.hdr_ext_len, expected.hdr_ext_len
+    );
 }

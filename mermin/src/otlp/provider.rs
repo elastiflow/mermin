@@ -17,8 +17,8 @@ use tracing_subscriber::{
 };
 
 use crate::{
-    otlp::opts::{ExporterOptions, OtlpExporterOptions, StdoutExporterOptions, resolve_exporters},
-    runtime::{conf::ExporterReferences, enums::SpanFmt},
+    otlp::opts::{OtlpExporterOptions, StdoutExporterOptions},
+    runtime::enums::SpanFmt,
 };
 
 pub struct ProviderBuilder {
@@ -116,32 +116,18 @@ impl ProviderBuilder {
 }
 
 pub async fn init_provider(
-    exporter_options: &ExporterOptions,
-    exporter_refs: ExporterReferences,
+    otlp_opts: Vec<OtlpExporterOptions>,
+    stdout_opts: Vec<StdoutExporterOptions>,
 ) -> SdkTracerProvider {
     let mut provider = ProviderBuilder::new();
-    if exporter_refs.is_empty() {
-        info!("no exporters configured");
+
+    if otlp_opts.is_empty() && stdout_opts.is_empty() {
+        warn!("no exporters configured");
         return provider.build();
     }
 
-    let (otlp_opts, stdout_opts) = match resolve_exporters(exporter_refs, exporter_options) {
-        Ok((o, s)) => (o, s),
-        Err(e) => {
-            error!("failed to resolve exporters: {e}");
-            let otlp_opts: Vec<OtlpExporterOptions> = vec![];
-            let stdout_opts: Vec<StdoutExporterOptions> = vec![];
-            (otlp_opts, stdout_opts)
-        }
-    };
-
-    info!(
-        "resolved exporters - otlp {}, stdout {}",
-        otlp_opts.len(),
-        stdout_opts.len()
-    );
-    for opts in otlp_opts {
-        provider = provider.with_otlp_exporter(opts).await;
+    for options in otlp_opts {
+        provider = provider.with_otlp_exporter(options.clone()).await;
     }
 
     for _ in stdout_opts {
@@ -152,12 +138,12 @@ pub async fn init_provider(
 }
 
 pub async fn init_internal_tracing(
-    exporter_options: &ExporterOptions,
-    exporter_refs: ExporterReferences,
+    otlp_opts: Vec<OtlpExporterOptions>,
+    stdout_opts: Vec<StdoutExporterOptions>,
     log_level: Level,
     span_fmt: SpanFmt,
 ) -> Result<(), anyhow::Error> {
-    let provider = init_provider(exporter_options, exporter_refs).await;
+    let provider = init_provider(otlp_opts, stdout_opts).await;
     let mut fmt_layer = Layer::new().with_span_events(FmtSpan::from(span_fmt));
 
     match log_level {
