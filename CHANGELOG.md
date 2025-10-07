@@ -1,3 +1,10 @@
+## [0.1.0-alpha.5](https://github.com/elastiflow/mermin/compare/v0.1.0-alpha.4...v0.1.0-alpha.5) (2025-10-07)
+
+### Features
+
+* **tcp_flags:** tcp flags and bytes spec ([#132](https://github.com/elastiflow/mermin/issues/132)) ([8767b27](https://github.com/elastiflow/mermin/commit/8767b27d3467b80889718e0b51f2c061d71b7e46))
+
+
 ## [0.1.0-alpha.4](https://github.com/elastiflow/mermin/compare/v0.1.0-alpha.3...v0.1.0-alpha.4) (2025-10-02)
 
 ### Features
