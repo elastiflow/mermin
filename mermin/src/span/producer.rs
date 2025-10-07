@@ -5,7 +5,7 @@ use std::{
     time::{Duration, UNIX_EPOCH},
 };
 
-use dashmap::DashMap;
+use dashmap::{DashMap, mapref::entry::Entry};
 use fxhash::FxBuildHasher;
 use mermin_common::{IpAddrType, PacketMeta, TunnelType};
 use network_types::{
@@ -18,18 +18,44 @@ use pnet::datalink::MacAddr;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{debug, warn};
 
-use crate::{
+use crate::span::{
     community_id::CommunityIdGenerator,
-    span::{
-        flow::{FlowEndReason, FlowSpan, SpanAttributes},
-        opts::SpanOptions,
-        tcp::{ConnectionState, TcpFlags},
-    },
+    flow::{FlowEndReason, FlowSpan, SpanAttributes},
+    opts::SpanOptions,
+    tcp::{ConnectionState, TcpFlags},
 };
+
+/// ### Concurrency Model
+///
+/// Multiple components access the flow map concurrently:
+///
+/// 1. **PacketWorker**: Creates new flows and updates existing ones
+/// 2. **Record Task** (per flow): Periodically reads and records flow state
+/// 3. **Timeout Task** (per flow): Removes flows on timeout
+///
+/// #### Synchronization
+///
+/// - `DashMap` provides per-shard locking for concurrent access
+/// - Updates to flow attributes are performed under write lock
+/// - Record task clones flow state while holding read lock
+/// - Timeout task removes flow atomically
+///
+/// #### Potential Race Conditions
+///
+/// - Packet update vs. Record: Safe - record clones current state
+/// - Packet update vs. Timeout removal: Safe - packet finds flow missing, no-op
+/// - Record vs. Timeout: Safe - timeout waits for record to complete removal
+pub type FlowSpanMap = Arc<DashMap<String, FlowEntry, FxBuildHasher>>;
+
+/// Entry in the flow map containing both the flow span and its task handles
+pub struct FlowEntry {
+    pub flow_span: FlowSpan,
+    pub task_handles: FlowTaskHandles,
+}
 
 /// Task handles and communication channels for managing a flow's lifecycle.
 ///
-/// ## Task Lifecycle
+/// ### Task Lifecycle
 ///
 /// Each flow entry spawns two concurrent tokio tasks:
 ///
@@ -45,7 +71,7 @@ use crate::{
 ///    - When timeout fires: records final flow state, removes from map, aborts record task
 ///    - Exits after timeout fires or on shutdown signal
 ///
-/// ## Concurrency & Cleanup
+/// #### Concurrency & Cleanup
 ///
 /// - Both tasks hold an Arc to the flow_span_map for concurrent access
 /// - The timeout task is responsible for final cleanup (removing flow, aborting record task)
@@ -68,14 +94,6 @@ enum TimeoutUpdate {
     /// Reset timeout with a new duration (for TCP state changes)
     Reset(Duration),
 }
-
-/// Entry in the flow map containing both the flow span and its task handles
-pub struct FlowEntry {
-    pub flow_span: FlowSpan,
-    pub task_handles: FlowTaskHandles,
-}
-
-pub type FlowSpanMap = Arc<DashMap<String, FlowEntry, FxBuildHasher>>;
 
 pub struct FlowSpanProducer {
     span_opts: SpanOptions,
@@ -274,11 +292,21 @@ impl PacketWorker {
         let src_port = packet.src_port();
         let dst_port = packet.dst_port();
 
-        // TODO: Handle icmp and icmpv6
-        let community_id = self
-            .community_id_generator
-            .generate(src_addr, dst_addr, src_port, dst_port, packet.proto)
-            .clone();
+        // For ICMP/ICMPv6, use type and code instead of ports
+        let (community_src_port, community_dst_port) =
+            if packet.proto == IpProto::Icmp || packet.proto == IpProto::Ipv6Icmp {
+                (packet.icmp_type_id as u16, packet.icmp_code_id as u16)
+            } else {
+                (src_port, dst_port)
+            };
+
+        let community_id = self.community_id_generator.generate(
+            src_addr,
+            dst_addr,
+            community_src_port,
+            community_dst_port,
+            packet.proto,
+        );
 
         let iface_name = self.iface_map.get(&packet.ifindex);
 
@@ -331,200 +359,193 @@ impl PacketWorker {
             || packet.tunnel_type == TunnelType::Geneve
             || packet.tunnel_type == TunnelType::Vxlan;
 
-        // Check if this is a new flow or an existing one
-        let is_new_flow = !self.flow_span_map.contains_key(community_id.as_str());
+        // Use DashMap's entry API to avoid unnecessary allocations
+        // For new flows: String is moved into the map with no extra allocation
+        // For existing flows: No allocation happens at all
+        match self.flow_span_map.entry(community_id) {
+            Entry::Vacant(vacant) => {
+                // Create new flow span
+                let flow_span = FlowSpan {
+                    start_time: UNIX_EPOCH + Duration::from_nanos(packet.capture_time),
+                    end_time: UNIX_EPOCH,
+                    span_kind: SpanKind::Internal,
+                    attributes: SpanAttributes {
+                        // General flow attributes
+                        flow_community_id: vacant.key().clone(),
+                        flow_connection_state: is_tcp
+                            .then(|| ConnectionState::from_packet(&packet))
+                            .flatten(),
 
-        if is_new_flow {
-            // Create new flow span
-            let flow_span = FlowSpan {
-                start_time: UNIX_EPOCH + Duration::from_nanos(packet.capture_time),
-                end_time: UNIX_EPOCH,
-                span_kind: SpanKind::Internal,
-                attributes: SpanAttributes {
-                    // General flow attributes
-                    flow_community_id: community_id.clone(),
-                    flow_connection_state: is_tcp
-                        .then(|| ConnectionState::from_packet(&packet))
-                        .flatten(),
+                        // Network endpoints
+                        source_address: src_addr,
+                        source_port: src_port,
+                        destination_address: dst_addr,
+                        destination_port: dst_port,
 
-                    // Network endpoints
-                    source_address: src_addr,
-                    source_port: src_port,
-                    destination_address: dst_addr,
-                    destination_port: dst_port,
+                        // Network layer info
+                        network_transport: packet.proto,
+                        network_type: packet.ether_type,
+                        network_interface_index: Some(packet.ifindex),
+                        network_interface_name: iface_name.cloned(),
+                        network_interface_mac: has_mac.then_some(MacAddr::new(
+                            packet.src_mac_addr[0],
+                            packet.src_mac_addr[1],
+                            packet.src_mac_addr[2],
+                            packet.src_mac_addr[3],
+                            packet.src_mac_addr[4],
+                            packet.src_mac_addr[5],
+                        )),
 
-                    // Network layer info
-                    network_transport: packet.proto,
-                    network_type: packet.ether_type,
-                    network_interface_index: Some(packet.ifindex),
-                    network_interface_name: iface_name.cloned(),
-                    network_interface_mac: has_mac.then_some(MacAddr::new(
-                        packet.src_mac_addr[0],
-                        packet.src_mac_addr[1],
-                        packet.src_mac_addr[2],
-                        packet.src_mac_addr[3],
-                        packet.src_mac_addr[4],
-                        packet.src_mac_addr[5],
-                    )),
-
-                    // IP-specific fields (only populated for IPv4/IPv6 traffic)
-                    flow_ip_dscp_id: is_ip_flow.then_some(packet.ip_dscp_id),
-                    flow_ip_dscp_name: is_ip_flow.then_some(
-                        IpDscp::try_from_u8(packet.ip_dscp_id)
-                            .unwrap_or_default()
-                            .as_str()
-                            .to_string(),
-                    ),
-                    flow_ip_ecn_id: is_ip_flow.then_some(packet.ip_ecn_id),
-                    flow_ip_ecn_name: is_ip_flow.then_some(
-                        IpEcn::try_from_u8(packet.ip_ecn_id)
-                            .unwrap_or_default()
-                            .as_str()
-                            .to_string(),
-                    ),
-                    flow_ip_ttl: is_ip_flow.then_some(packet.ip_ttl),
-                    flow_ip_flow_label: is_ipv6.then_some(packet.ip_flow_label),
-
-                    // ICMP fields (only populated for ICMP/ICMPv6 traffic)
-                    flow_icmp_type_id: is_icmp_any.then_some(packet.icmp_type_id),
-                    flow_icmp_type_name: if is_icmp {
-                        network_types::icmp::get_icmpv4_type_name(packet.icmp_type_id)
-                            .map(String::from)
-                    } else if is_icmpv6 {
-                        network_types::icmp::get_icmpv6_type_name(packet.icmp_type_id)
-                            .map(String::from)
-                    } else {
-                        None
-                    },
-                    flow_icmp_code_id: is_icmp_any.then_some(packet.icmp_code_id),
-                    flow_icmp_code_name: if is_icmp {
-                        network_types::icmp::get_icmpv4_code_name(
-                            packet.icmp_type_id,
-                            packet.icmp_code_id,
-                        )
-                        .map(String::from)
-                    } else if is_icmpv6 {
-                        network_types::icmp::get_icmpv6_code_name(
-                            packet.icmp_type_id,
-                            packet.icmp_code_id,
-                        )
-                        .map(String::from)
-                    } else {
-                        None
-                    },
-
-                    // TCP flags (only populated for TCP traffic)
-                    flow_tcp_flags_bits: is_tcp.then_some(packet.tcp_flags),
-                    flow_tcp_flags_tags: is_tcp
-                        .then(|| TcpFlags::from_packet(&packet).active_flags()),
-
-                    // IPsec attributes
-                    flow_ipsec_ah_spi: packet.ah_exists.then_some(packet.ipsec_ah_spi),
-                    flow_ipsec_esp_spi: packet.esp_exists.then_some(packet.ipsec_esp_spi),
-                    flow_ipsec_sender_index: packet
-                        .wireguard_exists
-                        .then_some(packet.ipsec_sender_index),
-                    flow_ipsec_receiver_index: packet
-                        .wireguard_exists
-                        .then_some(packet.ipsec_receiver_index),
-
-                    // Flow metrics
-                    flow_bytes_delta: packet.l3_byte_count as i64,
-                    flow_bytes_total: packet.l3_byte_count as i64,
-                    flow_packets_delta: 1,
-                    flow_packets_total: 1,
-                    flow_reverse_bytes_delta: 0,
-                    flow_reverse_bytes_total: 0,
-                    flow_reverse_packets_delta: 0,
-                    flow_reverse_packets_total: 0,
-
-                    // TODO: eng-29
-                    // TCP performance metrics
-                    // flow_tcp_handshake_snd_latency: None,
-                    // flow_tcp_handshake_snd_jitter: None,
-                    // flow_tcp_handshake_cnd_latency: None,
-                    // flow_tcp_handshake_cnd_jitter: None,
-                    // flow_tcp_svc_latency: None,
-                    // flow_tcp_svc_jitter: None,
-                    // flow_tcp_rndtrip_latency: None,
-                    // flow_tcp_rndtrip_jitter: None,
-
-                    // Ip-in-Ip attributes
-                    ipip_network_type: is_ipip.then_some(packet.ipip_ether_type),
-                    ipip_network_transport: is_ipip.then_some(packet.ipip_proto),
-                    ipip_source_address: ipip_addrs.map(|(src, _)| src),
-                    ipip_destination_address: ipip_addrs.map(|(_, dst)| dst),
-
-                    // Tunnel attributes
-                    tunnel_type: is_tunneled.then_some(packet.tunnel_type),
-                    tunnel_network_interface_mac: (is_tunneled && tunnel_has_mac).then_some(
-                        MacAddr::new(
-                            packet.tunnel_src_mac_addr[0],
-                            packet.tunnel_src_mac_addr[1],
-                            packet.tunnel_src_mac_addr[2],
-                            packet.tunnel_src_mac_addr[3],
-                            packet.tunnel_src_mac_addr[4],
-                            packet.tunnel_src_mac_addr[5],
+                        // IP-specific fields (only populated for IPv4/IPv6 traffic)
+                        flow_ip_dscp_id: is_ip_flow.then_some(packet.ip_dscp_id),
+                        flow_ip_dscp_name: is_ip_flow.then_some(
+                            IpDscp::try_from_u8(packet.ip_dscp_id)
+                                .unwrap_or_default()
+                                .as_str()
+                                .to_string(),
                         ),
-                    ),
-                    tunnel_network_type: is_tunneled.then_some(packet.tunnel_ether_type),
-                    tunnel_network_transport: is_tunneled.then_some(packet.tunnel_proto),
-                    tunnel_source_address: tunnel_addrs.map(|(src, _)| src),
-                    tunnel_source_port: is_tunneled.then(|| packet.tunnel_src_port()),
-                    tunnel_destination_address: tunnel_addrs.map(|(_, dst)| dst),
-                    tunnel_destination_port: is_tunneled.then(|| packet.tunnel_dst_port()),
-                    tunnel_id: tunnel_has_id.then_some(packet.tunnel_id),
-                    tunnel_ipsec_ah_spi: packet
-                        .tunnel_ah_exists
-                        .then_some(packet.tunnel_ipsec_ah_spi),
+                        flow_ip_ecn_id: is_ip_flow.then_some(packet.ip_ecn_id),
+                        flow_ip_ecn_name: is_ip_flow.then_some(
+                            IpEcn::try_from_u8(packet.ip_ecn_id)
+                                .unwrap_or_default()
+                                .as_str()
+                                .to_string(),
+                        ),
+                        flow_ip_ttl: is_ip_flow.then_some(packet.ip_ttl),
+                        flow_ip_flow_label: is_ipv6.then_some(packet.ip_flow_label),
 
-                    // All other attributes default to None
-                    ..Default::default()
-                },
-            };
+                        // ICMP fields (only populated for ICMP/ICMPv6 traffic)
+                        flow_icmp_type_id: is_icmp_any.then_some(packet.icmp_type_id),
+                        flow_icmp_type_name: if is_icmp {
+                            network_types::icmp::get_icmpv4_type_name(packet.icmp_type_id)
+                                .map(String::from)
+                        } else if is_icmpv6 {
+                            network_types::icmp::get_icmpv6_type_name(packet.icmp_type_id)
+                                .map(String::from)
+                        } else {
+                            None
+                        },
+                        flow_icmp_code_id: is_icmp_any.then_some(packet.icmp_code_id),
+                        flow_icmp_code_name: if is_icmp {
+                            network_types::icmp::get_icmpv4_code_name(
+                                packet.icmp_type_id,
+                                packet.icmp_code_id,
+                            )
+                            .map(String::from)
+                        } else if is_icmpv6 {
+                            network_types::icmp::get_icmpv6_code_name(
+                                packet.icmp_type_id,
+                                packet.icmp_code_id,
+                            )
+                            .map(String::from)
+                        } else {
+                            None
+                        },
 
-            // Calculate initial timeout for this flow
-            let initial_timeout = self.calculate_timeout(&packet, &flow_span);
+                        // TCP flags (only populated for TCP traffic)
+                        flow_tcp_flags_bits: is_tcp.then_some(packet.tcp_flags),
+                        flow_tcp_flags_tags: is_tcp
+                            .then(|| TcpFlags::from_packet(&packet).active_flags()),
 
-            // Spawn tasks for this new flow
-            // Note: Under extremely high packet rates with many short-lived flows,
-            // task spawning overhead could become significant. Future optimization
-            // could use a task pool pattern if this becomes a bottleneck.
-            // Channel capacity of 32 handles bursts of packets without blocking/dropping
-            let (timeout_reset_tx, timeout_reset_rx) = mpsc::channel(32);
+                        // IPsec attributes
+                        flow_ipsec_ah_spi: packet.ah_exists.then_some(packet.ipsec_ah_spi),
+                        flow_ipsec_esp_spi: packet.esp_exists.then_some(packet.ipsec_esp_spi),
+                        flow_ipsec_sender_index: packet
+                            .wireguard_exists
+                            .then_some(packet.ipsec_sender_index),
+                        flow_ipsec_receiver_index: packet
+                            .wireguard_exists
+                            .then_some(packet.ipsec_receiver_index),
 
-            let record_task = tokio::spawn(record_task_loop(
-                community_id.clone(),
-                Arc::clone(&self.flow_span_map),
-                self.flow_span_tx.clone(),
-                self.max_record_interval,
-            ));
+                        // Flow metrics
+                        flow_bytes_delta: packet.l3_byte_count as i64,
+                        flow_bytes_total: packet.l3_byte_count as i64,
+                        flow_packets_delta: 1,
+                        flow_packets_total: 1,
+                        flow_reverse_bytes_delta: 0,
+                        flow_reverse_bytes_total: 0,
+                        flow_reverse_packets_delta: 0,
+                        flow_reverse_packets_total: 0,
 
-            let timeout_task = tokio::spawn(timeout_task_loop(
-                community_id.clone(),
-                Arc::clone(&self.flow_span_map),
-                self.flow_span_tx.clone(),
-                initial_timeout,
-                timeout_reset_rx,
-            ));
+                        // TODO: eng-29
+                        // TCP performance metrics
+                        // flow_tcp_handshake_snd_latency: None,
+                        // flow_tcp_handshake_snd_jitter: None,
+                        // flow_tcp_handshake_cnd_latency: None,
+                        // flow_tcp_handshake_cnd_jitter: None,
+                        // flow_tcp_svc_latency: None,
+                        // flow_tcp_svc_jitter: None,
+                        // flow_tcp_rndtrip_latency: None,
+                        // flow_tcp_rndtrip_jitter: None,
 
-            let task_handles = FlowTaskHandles {
-                timeout_reset_tx,
-                record_task,
-                timeout_task,
-            };
+                        // Ip-in-Ip attributes
+                        ipip_network_type: is_ipip.then_some(packet.ipip_ether_type),
+                        ipip_network_transport: is_ipip.then_some(packet.ipip_proto),
+                        ipip_source_address: ipip_addrs.map(|(src, _)| src),
+                        ipip_destination_address: ipip_addrs.map(|(_, dst)| dst),
 
-            // Insert the new flow entry into the map
-            let flow_entry = FlowEntry {
-                flow_span,
-                task_handles,
-            };
+                        // Tunnel attributes
+                        tunnel_type: is_tunneled.then_some(packet.tunnel_type),
+                        tunnel_network_interface_mac: (is_tunneled && tunnel_has_mac).then_some(
+                            MacAddr::new(
+                                packet.tunnel_src_mac_addr[0],
+                                packet.tunnel_src_mac_addr[1],
+                                packet.tunnel_src_mac_addr[2],
+                                packet.tunnel_src_mac_addr[3],
+                                packet.tunnel_src_mac_addr[4],
+                                packet.tunnel_src_mac_addr[5],
+                            ),
+                        ),
+                        tunnel_network_type: is_tunneled.then_some(packet.tunnel_ether_type),
+                        tunnel_network_transport: is_tunneled.then_some(packet.tunnel_proto),
+                        tunnel_source_address: tunnel_addrs.map(|(src, _)| src),
+                        tunnel_source_port: is_tunneled.then(|| packet.tunnel_src_port()),
+                        tunnel_destination_address: tunnel_addrs.map(|(_, dst)| dst),
+                        tunnel_destination_port: is_tunneled.then(|| packet.tunnel_dst_port()),
+                        tunnel_id: tunnel_has_id.then_some(packet.tunnel_id),
+                        tunnel_ipsec_ah_spi: packet
+                            .tunnel_ah_exists
+                            .then_some(packet.tunnel_ipsec_ah_spi),
 
-            self.flow_span_map
-                .insert(community_id.to_string(), flow_entry);
-        } else {
-            // Update existing flow
-            if let Some(mut entry) = self.flow_span_map.get_mut(community_id.as_str()) {
+                        // All other attributes default to None
+                        ..Default::default()
+                    },
+                };
+
+                let initial_timeout = self.calculate_timeout(&packet, &flow_span);
+                // Spawn tasks for this new flow
+                // Note: Under extremely high packet rates with many short-lived flows,
+                // task spawning overhead could become significant. Future optimization
+                // could use a task pool pattern if this becomes a bottleneck.
+                // Channel capacity of 32 handles bursts of packets without blocking/dropping
+                let (timeout_reset_tx, timeout_reset_rx) = mpsc::channel(32);
+                let community_id_for_tasks = vacant.key().clone();
+                let record_task = tokio::spawn(record_task_loop(
+                    community_id_for_tasks.clone(),
+                    Arc::clone(&self.flow_span_map),
+                    self.flow_span_tx.clone(),
+                    self.max_record_interval,
+                ));
+                let timeout_task = tokio::spawn(timeout_task_loop(
+                    community_id_for_tasks,
+                    Arc::clone(&self.flow_span_map),
+                    self.flow_span_tx.clone(),
+                    initial_timeout,
+                    timeout_reset_rx,
+                ));
+                let task_handles = FlowTaskHandles {
+                    timeout_reset_tx,
+                    record_task,
+                    timeout_task,
+                };
+                let flow_entry = FlowEntry {
+                    flow_span,
+                    task_handles,
+                };
+                vacant.insert(flow_entry);
+            }
+            Entry::Occupied(mut occupied) => {
+                let entry = occupied.get_mut();
                 let flow_span = &mut entry.flow_span;
 
                 // Update end time
@@ -572,16 +593,22 @@ impl PacketWorker {
                 // Note: If the channel is full, this will drop the timeout update.
                 // This is acceptable as it means the timeout task is processing updates,
                 // and a subsequent packet will trigger another reset attempt.
-                if entry
+                match entry
                     .task_handles
                     .timeout_reset_tx
                     .try_send(TimeoutUpdate::Reset(new_timeout))
-                    .is_err()
                 {
-                    debug!(
-                        "timeout reset channel full or closed for flow {}",
-                        community_id
-                    );
+                    Ok(_) => {}
+                    Err(mpsc::error::TrySendError::Full(_)) => {
+                        // This is potentially problematic - flow might timeout early
+                        debug!(
+                            "timeout reset channel full for flow {}, flow may timeout early",
+                            occupied.key()
+                        );
+                    }
+                    Err(mpsc::error::TrySendError::Closed(_)) => {
+                        debug!("timeout reset channel closed for flow {}", occupied.key());
+                    }
                 }
             }
         }
@@ -896,8 +923,6 @@ mod tests {
             span_kind: SpanKind::Internal,
             attributes: SpanAttributes {
                 flow_community_id: "test".to_string(),
-                flow_connection_state: None,
-                flow_end_reason: None,
                 source_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
                 source_port: 12345,
                 destination_address: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2)),
@@ -905,24 +930,7 @@ mod tests {
                 network_transport: proto,
                 network_type: EtherType::Ipv4,
                 network_interface_index: Some(1),
-                network_interface_name: None,
-                network_interface_mac: None,
-                flow_ip_dscp_id: None,
-                flow_ip_dscp_name: None,
-                flow_ip_ecn_id: None,
-                flow_ip_ecn_name: None,
-                flow_ip_ttl: None,
-                flow_ip_flow_label: None,
-                flow_icmp_type_id: None,
-                flow_icmp_type_name: None,
-                flow_icmp_code_id: None,
-                flow_icmp_code_name: None,
                 flow_tcp_flags_bits: Some(tcp_flags),
-                flow_tcp_flags_tags: None,
-                flow_ipsec_ah_spi: None,
-                flow_ipsec_esp_spi: None,
-                flow_ipsec_sender_index: None,
-                flow_ipsec_receiver_index: None,
                 flow_bytes_delta: 100,
                 flow_bytes_total: 100,
                 flow_packets_delta: 1,
@@ -931,77 +939,7 @@ mod tests {
                 flow_reverse_bytes_total: 0,
                 flow_reverse_packets_delta: 0,
                 flow_reverse_packets_total: 0,
-                flow_tcp_handshake_snd_latency: None,
-                flow_tcp_handshake_snd_jitter: None,
-                flow_tcp_handshake_cnd_latency: None,
-                flow_tcp_handshake_cnd_jitter: None,
-                flow_tcp_svc_latency: None,
-                flow_tcp_svc_jitter: None,
-                flow_tcp_rndtrip_latency: None,
-                flow_tcp_rndtrip_jitter: None,
-                ipip_network_type: None,
-                ipip_network_transport: None,
-                ipip_source_address: None,
-                ipip_destination_address: None,
-                tunnel_type: None,
-                tunnel_network_interface_mac: None,
-                tunnel_network_type: None,
-                tunnel_network_transport: None,
-                tunnel_source_address: None,
-                tunnel_source_port: None,
-                tunnel_destination_address: None,
-                tunnel_destination_port: None,
-                tunnel_id: None,
-                tunnel_ipsec_ah_spi: None,
-                source_k8s_cluster_name: None,
-                source_k8s_cluster_uid: None,
-                source_k8s_node_name: None,
-                source_k8s_node_uid: None,
-                source_k8s_namespace_name: None,
-                source_k8s_pod_name: None,
-                source_k8s_pod_uid: None,
-                source_k8s_container_name: None,
-                source_k8s_deployment_name: None,
-                source_k8s_deployment_uid: None,
-                source_k8s_replicaset_name: None,
-                source_k8s_replicaset_uid: None,
-                source_k8s_statefulset_name: None,
-                source_k8s_statefulset_uid: None,
-                source_k8s_daemonset_name: None,
-                source_k8s_daemonset_uid: None,
-                source_k8s_job_name: None,
-                source_k8s_job_uid: None,
-                source_k8s_cronjob_name: None,
-                source_k8s_cronjob_uid: None,
-                source_k8s_service_name: None,
-                source_k8s_service_uid: None,
-                destination_k8s_cluster_name: None,
-                destination_k8s_cluster_uid: None,
-                destination_k8s_node_name: None,
-                destination_k8s_node_uid: None,
-                destination_k8s_namespace_name: None,
-                destination_k8s_pod_name: None,
-                destination_k8s_pod_uid: None,
-                destination_k8s_container_name: None,
-                destination_k8s_deployment_name: None,
-                destination_k8s_deployment_uid: None,
-                destination_k8s_replicaset_name: None,
-                destination_k8s_replicaset_uid: None,
-                destination_k8s_statefulset_name: None,
-                destination_k8s_statefulset_uid: None,
-                destination_k8s_daemonset_name: None,
-                destination_k8s_daemonset_uid: None,
-                destination_k8s_job_name: None,
-                destination_k8s_job_uid: None,
-                destination_k8s_cronjob_name: None,
-                destination_k8s_cronjob_uid: None,
-                destination_k8s_service_name: None,
-                destination_k8s_service_uid: None,
-                network_policies_ingress: None,
-                network_policies_egress: None,
-                process_executable_name: None,
-                container_image_name: None,
-                container_name: None,
+                ..Default::default()
             },
         }
     }
@@ -1501,5 +1439,646 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), Error::UnknownIpAddrType);
+    }
+
+    #[test]
+    fn test_determine_flow_end_reason_with_fin() {
+        let reason = determine_flow_end_reason(Some(TCP_FLAG_FIN), FlowEndReason::IdleTimeout);
+        assert_eq!(reason, FlowEndReason::EndOfFlowDetected);
+    }
+
+    #[test]
+    fn test_determine_flow_end_reason_with_rst() {
+        let reason = determine_flow_end_reason(Some(TCP_FLAG_RST), FlowEndReason::ActiveTimeout);
+        assert_eq!(reason, FlowEndReason::EndOfFlowDetected);
+    }
+
+    #[test]
+    fn test_determine_flow_end_reason_with_both_fin_and_rst() {
+        let reason = determine_flow_end_reason(
+            Some(TCP_FLAG_FIN | TCP_FLAG_RST),
+            FlowEndReason::IdleTimeout,
+        );
+        assert_eq!(reason, FlowEndReason::EndOfFlowDetected);
+    }
+
+    #[test]
+    fn test_determine_flow_end_reason_no_flags() {
+        let reason = determine_flow_end_reason(None, FlowEndReason::IdleTimeout);
+        assert_eq!(reason, FlowEndReason::IdleTimeout);
+    }
+
+    #[test]
+    fn test_determine_flow_end_reason_other_flags() {
+        let reason = determine_flow_end_reason(Some(0x10), FlowEndReason::ActiveTimeout); // ACK only
+        assert_eq!(reason, FlowEndReason::ActiveTimeout);
+    }
+
+    #[test]
+    fn test_format_ip_ipv4() {
+        let result = format_ip(IpAddrType::Ipv4, [192, 168, 1, 1], [0; 16]);
+        assert_eq!(result, "192.168.1.1");
+    }
+
+    #[test]
+    fn test_format_ip_ipv6() {
+        let result = format_ip(
+            IpAddrType::Ipv6,
+            [0; 4],
+            [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        );
+        assert!(result.contains("2001:db8"));
+    }
+
+    #[test]
+    fn test_format_ip_unknown() {
+        let result = format_ip(IpAddrType::Unknown, [0; 4], [0; 16]);
+        assert_eq!(result, "unknown");
+    }
+
+    #[tokio::test]
+    async fn test_tcp_connection_state_progression() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        // SYN - initial packet
+        let packet1 = create_test_packet(IpProto::Tcp, 0x02); // SYN
+        worker.upsert_packet_meta(packet1).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(
+            entry.flow_span.attributes.flow_connection_state,
+            Some(ConnectionState::SynSent)
+        );
+        drop(entry);
+
+        // SYN-ACK - response packet
+        let packet2 = create_test_packet(IpProto::Tcp, 0x12); // SYN+ACK
+        worker.upsert_packet_meta(packet2).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(
+            entry.flow_span.attributes.flow_connection_state,
+            Some(ConnectionState::SynReceived)
+        );
+        drop(entry);
+
+        // ACK - established
+        let packet3 = create_test_packet(IpProto::Tcp, 0x10); // ACK
+        worker.upsert_packet_meta(packet3).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(
+            entry.flow_span.attributes.flow_connection_state,
+            Some(ConnectionState::Established)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_tcp_rst_sets_closed_state() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        let packet = create_test_packet(IpProto::Tcp, 0x04); // RST
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(
+            entry.flow_span.attributes.flow_connection_state,
+            Some(ConnectionState::Closed)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_icmp_type_code_names_ipv4() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        let mut packet = create_test_packet(IpProto::Icmp, 0);
+        packet.icmp_type_id = 8; // Echo Request
+        packet.icmp_code_id = 0;
+
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(entry.flow_span.attributes.flow_icmp_type_id, Some(8));
+        assert!(entry.flow_span.attributes.flow_icmp_type_name.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_icmp_type_code_names_ipv6() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        let mut packet = create_test_packet(IpProto::Ipv6Icmp, 0);
+        packet.ether_type = EtherType::Ipv6;
+        packet.ip_addr_type = IpAddrType::Ipv6;
+        packet.src_ipv6_addr = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        packet.dst_ipv6_addr = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2];
+        packet.icmp_type_id = 128; // Echo Request
+        packet.icmp_code_id = 0;
+
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(entry.flow_span.attributes.flow_icmp_type_id, Some(128));
+        assert!(entry.flow_span.attributes.flow_icmp_type_name.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_ipsec_ah_spi() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        let mut packet = create_test_packet(IpProto::Tcp, 0);
+        packet.ah_exists = true;
+        packet.ipsec_ah_spi = 12345;
+
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(entry.flow_span.attributes.flow_ipsec_ah_spi, Some(12345));
+    }
+
+    #[tokio::test]
+    async fn test_ipsec_esp_spi() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        let mut packet = create_test_packet(IpProto::Tcp, 0);
+        packet.esp_exists = true;
+        packet.ipsec_esp_spi = 67890;
+
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(entry.flow_span.attributes.flow_ipsec_esp_spi, Some(67890));
+    }
+
+    #[tokio::test]
+    async fn test_wireguard_indices() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        let mut packet = create_test_packet(IpProto::Udp, 0);
+        packet.wireguard_exists = true;
+        packet.ipsec_sender_index = 111;
+        packet.ipsec_receiver_index = 222;
+
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(
+            entry.flow_span.attributes.flow_ipsec_sender_index,
+            Some(111)
+        );
+        assert_eq!(
+            entry.flow_span.attributes.flow_ipsec_receiver_index,
+            Some(222)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_vxlan_tunnel() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        let mut packet = create_test_packet(IpProto::Tcp, 0);
+        packet.tunnel_type = TunnelType::Vxlan;
+        packet.tunnel_ip_addr_type = IpAddrType::Ipv4;
+        packet.tunnel_src_ipv4_addr = [10, 0, 0, 1];
+        packet.tunnel_dst_ipv4_addr = [10, 0, 0, 2];
+        packet.tunnel_ether_type = EtherType::Ipv4;
+        packet.tunnel_proto = IpProto::Udp;
+        packet.tunnel_id = 12345;
+
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(
+            entry.flow_span.attributes.tunnel_type,
+            Some(TunnelType::Vxlan)
+        );
+        assert_eq!(entry.flow_span.attributes.tunnel_id, Some(12345));
+        assert!(entry.flow_span.attributes.tunnel_source_address.is_some());
+        assert!(
+            entry
+                .flow_span
+                .attributes
+                .tunnel_destination_address
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_gre_tunnel() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        let mut packet = create_test_packet(IpProto::Tcp, 0);
+        packet.tunnel_type = TunnelType::Gre;
+        packet.tunnel_ip_addr_type = IpAddrType::Ipv4;
+        packet.tunnel_src_ipv4_addr = [172, 16, 0, 1];
+        packet.tunnel_dst_ipv4_addr = [172, 16, 0, 2];
+        packet.tunnel_id = 999;
+
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(
+            entry.flow_span.attributes.tunnel_type,
+            Some(TunnelType::Gre)
+        );
+        assert_eq!(entry.flow_span.attributes.tunnel_id, Some(999));
+    }
+
+    #[tokio::test]
+    async fn test_tunnel_with_mac_address() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        let mut packet = create_test_packet(IpProto::Tcp, 0);
+        packet.tunnel_type = TunnelType::Vxlan;
+        packet.tunnel_src_mac_addr = [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff];
+        packet.tunnel_ip_addr_type = IpAddrType::Ipv4;
+        packet.tunnel_src_ipv4_addr = [10, 0, 0, 1];
+        packet.tunnel_dst_ipv4_addr = [10, 0, 0, 2];
+
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert!(
+            entry
+                .flow_span
+                .attributes
+                .tunnel_network_interface_mac
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_ipip_tunnel() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        let mut packet = create_test_packet(IpProto::Tcp, 0);
+        packet.ipip_ip_addr_type = IpAddrType::Ipv4;
+        packet.ipip_src_ipv4_addr = [192, 168, 100, 1];
+        packet.ipip_dst_ipv4_addr = [192, 168, 100, 2];
+        packet.ipip_ether_type = EtherType::Ipv4;
+        packet.ipip_proto = IpProto::Tcp;
+
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(
+            entry.flow_span.attributes.ipip_network_type,
+            Some(EtherType::Ipv4)
+        );
+        assert_eq!(
+            entry.flow_span.attributes.ipip_network_transport,
+            Some(IpProto::Tcp)
+        );
+        assert!(entry.flow_span.attributes.ipip_source_address.is_some());
+        assert!(
+            entry
+                .flow_span
+                .attributes
+                .ipip_destination_address
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_ip_dscp_and_ecn() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        let mut packet = create_test_packet(IpProto::Tcp, 0);
+        packet.ip_dscp_id = 46; // EF (Expedited Forwarding)
+        packet.ip_ecn_id = 2; // ECT(0)
+
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(entry.flow_span.attributes.flow_ip_dscp_id, Some(46));
+        assert!(entry.flow_span.attributes.flow_ip_dscp_name.is_some());
+        assert_eq!(entry.flow_span.attributes.flow_ip_ecn_id, Some(2));
+        assert!(entry.flow_span.attributes.flow_ip_ecn_name.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_ipv6_flow_label() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        let mut packet = create_test_packet(IpProto::Tcp, 0);
+        packet.ether_type = EtherType::Ipv6;
+        packet.ip_addr_type = IpAddrType::Ipv6;
+        packet.src_ipv6_addr = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        packet.dst_ipv6_addr = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2];
+        packet.ip_flow_label = 0xABCDE;
+
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(entry.flow_span.attributes.flow_ip_flow_label, Some(0xABCDE));
+    }
+
+    #[tokio::test]
+    async fn test_mac_address_captured() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        let mut packet = create_test_packet(IpProto::Tcp, 0);
+        packet.src_mac_addr = [0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
+
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert!(entry.flow_span.attributes.network_interface_mac.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_zero_mac_address_ignored() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        let mut packet = create_test_packet(IpProto::Tcp, 0);
+        packet.src_mac_addr = [0; 6];
+
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert!(entry.flow_span.attributes.network_interface_mac.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_multiple_packets_same_direction() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        // First packet
+        let mut packet1 = create_test_packet(IpProto::Tcp, 0x10);
+        packet1.l3_byte_count = 100;
+        worker.upsert_packet_meta(packet1).await.unwrap();
+
+        // Second packet - same direction
+        let mut packet2 = create_test_packet(IpProto::Tcp, 0x10);
+        packet2.l3_byte_count = 100;
+        worker.upsert_packet_meta(packet2).await.unwrap();
+
+        // Third packet - same direction
+        let mut packet3 = create_test_packet(IpProto::Tcp, 0x10);
+        packet3.l3_byte_count = 100;
+        worker.upsert_packet_meta(packet3).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(entry.flow_span.attributes.flow_packets_total, 3);
+        assert_eq!(entry.flow_span.attributes.flow_bytes_total, 300);
+        assert_eq!(entry.flow_span.attributes.flow_reverse_packets_total, 0);
+    }
+
+    #[tokio::test]
+    async fn test_geneve_tunnel() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        let mut packet = create_test_packet(IpProto::Tcp, 0);
+        packet.tunnel_type = TunnelType::Geneve;
+        packet.tunnel_ip_addr_type = IpAddrType::Ipv4;
+        packet.tunnel_src_ipv4_addr = [10, 1, 1, 1];
+        packet.tunnel_dst_ipv4_addr = [10, 1, 1, 2];
+        packet.tunnel_id = 54321;
+
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(
+            entry.flow_span.attributes.tunnel_type,
+            Some(TunnelType::Geneve)
+        );
+        assert_eq!(entry.flow_span.attributes.tunnel_id, Some(54321));
+    }
+
+    #[tokio::test]
+    async fn test_tunnel_ipsec_ah_spi() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        let mut packet = create_test_packet(IpProto::Tcp, 0);
+        packet.tunnel_type = TunnelType::Vxlan;
+        packet.tunnel_ip_addr_type = IpAddrType::Ipv4;
+        packet.tunnel_src_ipv4_addr = [10, 0, 0, 1];
+        packet.tunnel_dst_ipv4_addr = [10, 0, 0, 2];
+        packet.tunnel_ah_exists = true;
+        packet.tunnel_ipsec_ah_spi = 98765;
+
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(entry.flow_span.attributes.tunnel_ipsec_ah_spi, Some(98765));
+    }
+
+    #[tokio::test]
+    async fn test_ip_ttl_captured() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        let mut packet = create_test_packet(IpProto::Tcp, 0);
+        packet.ip_ttl = 64;
+
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(entry.flow_span.attributes.flow_ip_ttl, Some(64));
+    }
+
+    #[tokio::test]
+    async fn test_non_tcp_no_connection_state() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        let packet = create_test_packet(IpProto::Udp, 0);
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(entry.flow_span.attributes.flow_connection_state, None);
+    }
+
+    #[tokio::test]
+    async fn test_non_tcp_no_tcp_flags() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        let packet = create_test_packet(IpProto::Udp, 0);
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(entry.flow_span.attributes.flow_tcp_flags_bits, None);
+        assert_eq!(entry.flow_span.attributes.flow_tcp_flags_tags, None);
+    }
+
+    #[tokio::test]
+    async fn test_icmp_community_id_bidirectional() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        // Create ICMP echo request packet (type 8, code 0)
+        let mut packet_request = create_test_packet(IpProto::Icmp, 0);
+        packet_request.icmp_type_id = 8; // Echo Request
+        packet_request.icmp_code_id = 0;
+        packet_request.l3_byte_count = 100;
+
+        worker.upsert_packet_meta(packet_request).await.unwrap();
+
+        // Create ICMP echo reply packet (type 0, code 0) - reversed src/dst
+        let mut packet_reply = create_test_packet(IpProto::Icmp, 0);
+        packet_reply.icmp_type_id = 0; // Echo Reply
+        packet_reply.icmp_code_id = 0;
+        // Swap src and dst addresses to simulate reply direction
+        packet_reply.src_ipv4_addr = [192, 168, 1, 2];
+        packet_reply.dst_ipv4_addr = [192, 168, 1, 1];
+        packet_reply.l3_byte_count = 100;
+
+        worker.upsert_packet_meta(packet_reply).await.unwrap();
+
+        // Both packets should map to the same flow (same community ID)
+        assert_eq!(
+            worker.flow_span_map.len(),
+            1,
+            "ICMP echo request and reply should create a single bidirectional flow"
+        );
+
+        // Verify the flow has packets from both directions
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(entry.flow_span.attributes.flow_packets_total, 1);
+        assert_eq!(entry.flow_span.attributes.flow_reverse_packets_total, 1);
+    }
+
+    #[tokio::test]
+    async fn test_icmpv6_community_id_bidirectional() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        // Create ICMPv6 echo request packet (type 128, code 0)
+        let mut packet_request = create_test_packet(IpProto::Ipv6Icmp, 0);
+        packet_request.ether_type = EtherType::Ipv6;
+        packet_request.ip_addr_type = IpAddrType::Ipv6;
+        packet_request.src_ipv6_addr = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        packet_request.dst_ipv6_addr = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2];
+        packet_request.icmp_type_id = 128; // Echo Request
+        packet_request.icmp_code_id = 0;
+        packet_request.l3_byte_count = 100;
+
+        worker.upsert_packet_meta(packet_request).await.unwrap();
+
+        // Create ICMPv6 echo reply packet (type 129, code 0) - reversed src/dst
+        let mut packet_reply = create_test_packet(IpProto::Ipv6Icmp, 0);
+        packet_reply.ether_type = EtherType::Ipv6;
+        packet_reply.ip_addr_type = IpAddrType::Ipv6;
+        packet_reply.src_ipv6_addr = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2];
+        packet_reply.dst_ipv6_addr = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        packet_reply.icmp_type_id = 129; // Echo Reply
+        packet_reply.icmp_code_id = 0;
+        packet_reply.l3_byte_count = 100;
+
+        worker.upsert_packet_meta(packet_reply).await.unwrap();
+
+        // Both packets should map to the same flow (same community ID)
+        assert_eq!(
+            worker.flow_span_map.len(),
+            1,
+            "ICMPv6 echo request and reply should create a single bidirectional flow"
+        );
+
+        // Verify the flow has packets from both directions
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        assert_eq!(entry.flow_span.attributes.flow_packets_total, 1);
+        assert_eq!(entry.flow_span.attributes.flow_reverse_packets_total, 1);
+    }
+
+    #[tokio::test]
+    async fn test_icmp_community_id_differs_from_tcp() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        // Create TCP packet
+        let packet_tcp = create_test_packet(IpProto::Tcp, 0x02); // SYN flag
+        worker.upsert_packet_meta(packet_tcp).await.unwrap();
+
+        // Create ICMP packet with same IP addresses
+        let mut packet_icmp = create_test_packet(IpProto::Icmp, 0);
+        packet_icmp.icmp_type_id = 8; // Echo Request
+        packet_icmp.icmp_code_id = 0;
+
+        worker.upsert_packet_meta(packet_icmp).await.unwrap();
+
+        // Should have 2 different flows (different protocols = different community IDs)
+        assert_eq!(
+            worker.flow_span_map.len(),
+            2,
+            "ICMP and TCP flows should have different community IDs"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_icmp_community_id_uses_type_code() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        // Create ICMP echo request (type 8, code 0)
+        let mut packet_echo = create_test_packet(IpProto::Icmp, 0);
+        packet_echo.icmp_type_id = 8; // Echo Request
+        packet_echo.icmp_code_id = 0;
+
+        worker.upsert_packet_meta(packet_echo).await.unwrap();
+
+        // Create ICMP destination unreachable (type 3, code 0) with same IPs
+        let mut packet_dest_unreach = create_test_packet(IpProto::Icmp, 0);
+        packet_dest_unreach.icmp_type_id = 3; // Destination Unreachable
+        packet_dest_unreach.icmp_code_id = 0;
+
+        worker
+            .upsert_packet_meta(packet_dest_unreach)
+            .await
+            .unwrap();
+
+        // Different ICMP types should create different flows (different community IDs)
+        assert_eq!(
+            worker.flow_span_map.len(),
+            2,
+            "Different ICMP types should produce different community IDs"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_icmp_community_id_baseline() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        // Create ICMP echo request matching baseline test data
+        // from community_id.rs: 1.2.3.4 -> 5.6.7.8, type 8 (echo), code 0
+        let mut packet = create_test_packet(IpProto::Icmp, 0);
+        packet.src_ipv4_addr = [1, 2, 3, 4];
+        packet.dst_ipv4_addr = [5, 6, 7, 8];
+        packet.icmp_type_id = 8;
+        packet.icmp_code_id = 0;
+
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        let community_id = &entry.flow_span.attributes.flow_community_id;
+
+        // This should match the baseline test from community_id.rs
+        assert_eq!(
+            community_id, "1:crodRHL2FEsHjbv3UkRrfbs4bZ0=",
+            "ICMP community ID should match baseline test data"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_icmpv6_community_id_baseline() {
+        let (worker, _flow_span_rx) = create_test_worker();
+
+        // Create ICMPv6 echo request matching baseline test data
+        let mut packet = create_test_packet(IpProto::Ipv6Icmp, 0);
+        packet.ether_type = EtherType::Ipv6;
+        packet.ip_addr_type = IpAddrType::Ipv6;
+        packet.src_ipv6_addr = [
+            0xfe, 0x80, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B,
+            0x0C, 0x0D,
+        ];
+        packet.dst_ipv6_addr = [
+            0xfe, 0x80, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B,
+            0x1C, 0x1D,
+        ];
+        packet.icmp_type_id = 128; // Echo Request
+        packet.icmp_code_id = 0;
+
+        worker.upsert_packet_meta(packet).await.unwrap();
+
+        let entry = worker.flow_span_map.iter().next().unwrap();
+        let community_id = &entry.flow_span.attributes.flow_community_id;
+
+        // This should match the baseline test from community_id.rs
+        assert_eq!(
+            community_id, "1:0bf7hyMJUwt3fMED7z8LIfRpBeo=",
+            "ICMPv6 community ID should match baseline test data"
+        );
     }
 }

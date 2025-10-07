@@ -1,4 +1,3 @@
-mod community_id;
 mod health;
 mod k8s;
 mod otlp;
