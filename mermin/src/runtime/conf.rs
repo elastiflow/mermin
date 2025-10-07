@@ -584,8 +584,11 @@ mod tests {
             .expect("resolving default pipelines should succeed");
         let internal_traces = Properties::resolve_internal_exporters(&raw_conf)
             .expect("resolving default internal traces should succeed");
+        let resolved_interfaces = raw_conf.resolve_interfaces();
+        let interfaces = raw_conf.interfaces;
         Properties {
-            interfaces: raw_conf.interfaces,
+            interfaces,
+            resolved_interfaces,
             auto_reload: raw_conf.auto_reload,
             log_level: raw_conf.log_level,
             api: raw_conf.api,
