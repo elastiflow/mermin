@@ -49,8 +49,8 @@ async fn main() -> Result<()> {
 
     let exporter: Arc<dyn TraceableExporter> = {
         init_internal_tracing(
-            otlp_internal_exporters.clone(),
-            stdout_internal_exporters.clone(),
+            otlp_internal_exporters,
+            stdout_internal_exporters,
             props.log_level,
             span_level,
         )
