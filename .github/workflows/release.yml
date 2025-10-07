@@ -100,6 +100,7 @@ jobs:
             Docker images:
             - `ghcr.io/elastiflow/mermin:v${{ steps.prepare_release.outputs.new_release_version }}`
             - `ghcr.io/elastiflow/mermin:v${{ steps.prepare_release.outputs.new_release_version }}-debug`
+          target_commitish: ${{ github.ref_name }}
           preserve_order: true
           make_latest: true
 
