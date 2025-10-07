@@ -1,45 +1,52 @@
-use integration_common::{PacketType, ParsedHeader};
-use network_types::{eth::EtherType, gre::GreHdr};
+use integration_common::{GreTestData, PacketType, ParsedHeader};
+use network_types::gre::GRE_LEN;
 
 // Helper for constructing GRE header test packets
-pub fn create_gre_test_packet() -> ([u8; GreHdr::LEN + 1], GreHdr) {
-    let mut request_data = [0u8; GreHdr::LEN + 1];
+// Only constructs the fields that are actually extracted by mermin-ebpf
+pub fn create_gre_test_packet() -> ([u8; GRE_LEN + 1], GreTestData) {
+    let mut request_data = [0u8; GRE_LEN + 1];
 
     // Byte 0: The type discriminator for the eBPF program's `match` statement.
     request_data[0] = PacketType::Gre as u8;
 
-    // Byte 1: C flag (1 bit), Reserved (12 bits), Version (3 bits)
-    // Setting C flag to 1, Reserved to 0, Version to 0 (0b10000000)
-    request_data[1] = 0b10000000;
+    // Bytes 1-5: GRE header (4 bytes)
+    request_data[1..5].copy_from_slice(&[
+        // Byte 1: Flags/Reserved/Version (flag_res field - extracted at offset 0 from data)
+        0x00, 0x00, // No flags set, version 0
+        // Bytes 3-4: Protocol Type (ether_type field - extracted at offset 2 from data)
+        0x08, 0x00, // IPv4 (0x0800)
+    ]);
 
-    // Byte 2: Reserved (13 bits)
-    request_data[2] = 0;
-
-    // Bytes 3-4: Protocol Type (16 bits)
-    // Setting to 0x0800 (IPv4)
-    request_data[3..5].copy_from_slice(&[0x08, 0x00]);
-
-    let expected_header = GreHdr {
-        flgs_res0_ver: [0x80, 0x00],
-        proto: EtherType::Ipv4 as u16,
+    let expected_header = GreTestData {
+        flag_res: [0x00, 0x00],   // No flags, version 0
+        ether_type: [0x08, 0x00], // IPv4
     };
+
     (request_data, expected_header)
 }
 
-// Helper for verifying Gre header test results
-pub fn verify_gre_header(received: ParsedHeader, expected: GreHdr) {
+// Helper for verifying GRE header test results
+pub fn verify_gre_header(received: ParsedHeader, expected: GreTestData) {
     assert_eq!(received.type_, PacketType::Gre);
     let parsed_header = unsafe { received.data.gre };
 
-    let parsed_flgs_res0_ver = parsed_header.flgs_res0_ver;
-    let expected_flgs_res0_ver = expected.flgs_res0_ver;
-    let parsed_proto = parsed_header.proto;
-    let expected_proto = expected.proto;
-
-    // Verify header fields
     assert_eq!(
-        parsed_flgs_res0_ver, expected_flgs_res0_ver,
-        "Flags/Reserved0/Version mismatch"
+        parsed_header.flag_res,
+        expected.flag_res,
+        "Flags/Reserved/Version mismatch: got [{:#x}, {:#x}], expected [{:#x}, {:#x}]",
+        parsed_header.flag_res[0],
+        parsed_header.flag_res[1],
+        expected.flag_res[0],
+        expected.flag_res[1]
     );
-    assert_eq!(parsed_proto, expected_proto, "Protocol mismatch");
+
+    assert_eq!(
+        parsed_header.ether_type,
+        expected.ether_type,
+        "EtherType mismatch: got [{:#x}, {:#x}], expected [{:#x}, {:#x}]",
+        parsed_header.ether_type[0],
+        parsed_header.ether_type[1],
+        expected.ether_type[0],
+        expected.ether_type[1]
+    );
 }

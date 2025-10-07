@@ -1,53 +1,70 @@
-use integration_common::{PacketType, ParsedHeader};
-use network_types::tcp::TcpHdr;
+use integration_common::{PacketType, ParsedHeader, TcpTestData};
 
-// Helper for constructing Tcp header test packets
-pub fn create_tcp_test_packet() -> ([u8; TcpHdr::LEN + 1], TcpHdr) {
-    let mut request_data = [0u8; TcpHdr::LEN + 1];
+// Helper for constructing TCP header test packets
+// Only constructs the fields that are actually extracted by mermin-ebpf
+pub fn create_tcp_test_packet() -> ([u8; 21], TcpTestData) {
+    let mut request_data = [0u8; 21];
 
     // Byte 0: The type discriminator for the eBPF program's `match` statement.
     request_data[0] = PacketType::Tcp as u8;
-    // Bytes 1-2: Source Port
-    request_data[1..3].copy_from_slice(&[0x30, 0x39]);
-    // Bytes 3-4: Destination Port
-    request_data[3..5].copy_from_slice(&[0x00, 0x50]);
-    // Bytes 5-21: Remaning values
-    request_data[5..21].copy_from_slice(&[
-        0, 0, 0, 0, // Sequence Number
-        0, 0, 0, 0, // Acknowledgement Number
-        0, 0, // Data offset, reserved bits and flags
-        0, 0, // Window size
-        0, 0, // Checksum
-        0, 0, // Urgent Pointer
+
+    // Bytes 1-20: TCP header (20 bytes total)
+    request_data[1..21].copy_from_slice(&[
+        // Bytes 0-1 of TCP header: Source Port (extracted at offset 0)
+        0x30, 0x39, // Port 12345
+        // Bytes 2-3 of TCP header: Destination Port (extracted at offset 2)
+        0x00, 0x50, // Port 80
+        // Bytes 4-7 of TCP header: Sequence Number (not extracted)
+        0x00, 0x00, 0x00, 0x01,
+        // Bytes 8-11 of TCP header: Acknowledgement Number (not extracted)
+        0x00, 0x00, 0x00, 0x00,
+        // Byte 12 of TCP header: Data Offset (4 bits) + Reserved (4 bits)
+        0x50, // Data offset = 5 (20 bytes header), reserved = 0
+        // Byte 13 of TCP header: Flags (extracted at offset 13)  ← THIS IS THE KEY
+        0x02, // SYN flag
+        // Bytes 14-15 of TCP header: Window Size (not extracted)
+        0x20, 0x00, // Bytes 16-17 of TCP header: Checksum (not extracted)
+        0x00, 0x00, // Bytes 18-19 of TCP header: Urgent Pointer (not extracted)
+        0x00, 0x00,
     ]);
 
-    let expected_header = TcpHdr {
-        src: [0x30, 0x39],
-        dst: [0x00, 0x50],
-        seq: [0, 0, 0, 0],
-        ack_seq: [0, 0, 0, 0],
-        off_res_flags: [0, 0],
-        window: [0, 0],
-        check: [0, 0],
-        urg_ptr: [0, 0],
+    let expected_header = TcpTestData {
+        src_port: [0x30, 0x39],
+        dst_port: [0x00, 0x50],
+        tcp_flags: 0x02, // SYN flag
     };
 
     (request_data, expected_header)
 }
 
-// Helper for verifying Tcp header test results
-pub fn verify_tcp_header(received: ParsedHeader, expected: TcpHdr) {
+// Helper for verifying TCP header test results
+pub fn verify_tcp_header(received: ParsedHeader, expected: TcpTestData) {
     assert_eq!(received.type_, PacketType::Tcp);
     let parsed_header = unsafe { received.data.tcp };
 
-    let parsed_dst_port = parsed_header.dst;
-    let expected_dst_port = expected.dst;
     assert_eq!(
-        parsed_dst_port, expected_dst_port,
-        "Destination Port mismatch"
+        parsed_header.src_port,
+        expected.src_port,
+        "Source Port mismatch: got [{:#x}, {:#x}], expected [{:#x}, {:#x}]",
+        parsed_header.src_port[0],
+        parsed_header.src_port[1],
+        expected.src_port[0],
+        expected.src_port[1]
     );
 
-    let parsed_src_port = parsed_header.src;
-    let expected_src_port = expected.src;
-    assert_eq!(parsed_src_port, expected_src_port, "Source Port mismatch");
+    assert_eq!(
+        parsed_header.dst_port,
+        expected.dst_port,
+        "Destination Port mismatch: got [{:#x}, {:#x}], expected [{:#x}, {:#x}]",
+        parsed_header.dst_port[0],
+        parsed_header.dst_port[1],
+        expected.dst_port[0],
+        expected.dst_port[1]
+    );
+
+    assert_eq!(
+        parsed_header.tcp_flags, expected.tcp_flags,
+        "TCP Flags mismatch: got {:#x}, expected {:#x}",
+        parsed_header.tcp_flags, expected.tcp_flags
+    );
 }

@@ -1,94 +1,67 @@
-use integration_common::{PacketType, ParsedHeader};
-use network_types::geneve::GeneveHdr;
+use integration_common::{GeneveTestData, PacketType, ParsedHeader};
+use network_types::geneve::GENEVE_LEN;
 
 // Helper for constructing Geneve header test packets
-pub fn create_geneve_test_packet() -> ([u8; GeneveHdr::LEN + 1], GeneveHdr) {
-    let mut request_data = [0u8; GeneveHdr::LEN + 1];
+// Only constructs the fields that are actually extracted by mermin-ebpf
+pub fn create_geneve_test_packet() -> ([u8; GENEVE_LEN + 1], GeneveTestData) {
+    let mut request_data = [0u8; GENEVE_LEN + 1];
 
     // Byte 0: The type discriminator for the eBPF program's `match` statement.
     request_data[0] = PacketType::Geneve as u8;
 
-    // Byte 1: Version (2 bits) and Option Length (6 bits)
-    // Setting version to 0 and option length to 2 (0b00000010)
-    request_data[1] = 0b00000010;
+    // Bytes 1-8: Geneve header (8 bytes)
+    request_data[1..9].copy_from_slice(&[
+        // Byte 1: Version + Option Length (ver_opt_len field - extracted at offset 0 from data)
+        0b00000010, // Version 0, Option Length 2
+        // Byte 2: OAM/Critical/Reserved (not extracted)
+        0b10000000, // OAM flag set, Critical flag clear
+        // Bytes 3-4: Protocol Type (tunnel_ether_type field - extracted at offset 2 from data)
+        0x08, 0x00, // IPv4 (0x0800)
+        // Bytes 5-7: VNI (vni field - extracted at offset 4 from data)
+        0x12, 0x34, 0x56, // VNI: 0x123456
+        // Byte 8: Reserved (not extracted)
+        0x00,
+    ]);
 
-    // Byte 2: OAM flag (1 bit), Critical flag (1 bit), Reserved (6 bits)
-    // Setting OAM flag to 1, Critical flag to 0 (0b10000000)
-    request_data[2] = 0b10000000;
-
-    // Bytes 3-4: Protocol Type (16 bits)
-    // Setting to 0x0800 (IPv4)
-    request_data[3..5].copy_from_slice(&[0x08, 0x00]);
-
-    // Bytes 5-7: Virtual Network Identifier (VNI) (24 bits)
-    // Setting to 0x123456
-    request_data[5..8].copy_from_slice(&[0x12, 0x34, 0x56]);
-
-    // Byte 8: Reserved (8 bits)
-    request_data[8] = 0;
-
-    let expected_header = GeneveHdr {
+    let expected_header = GeneveTestData {
         ver_opt_len: 0b00000010,
-        o_c_rsvd: 0b10000000,
-        protocol_type: [0x08, 0x00],
+        tunnel_ether_type: [0x08, 0x00],
         vni: [0x12, 0x34, 0x56],
-        reserved2: 0,
     };
 
     (request_data, expected_header)
 }
 
 // Helper for verifying Geneve header test results
-pub fn verify_geneve_header(received: ParsedHeader, expected: GeneveHdr) {
+pub fn verify_geneve_header(received: ParsedHeader, expected: GeneveTestData) {
     assert_eq!(received.type_, PacketType::Geneve);
     let parsed_header = unsafe { received.data.geneve };
 
-    // Verify version and option length
     assert_eq!(
         parsed_header.ver_opt_len, expected.ver_opt_len,
-        "Version and Option Length mismatch"
-    );
-    assert_eq!(parsed_header.ver(), expected.ver(), "Version mismatch");
-    assert_eq!(
-        parsed_header.opt_len(),
-        expected.opt_len(),
-        "Option Length mismatch"
+        "Version + Option Length mismatch: got {:#x}, expected {:#x}",
+        parsed_header.ver_opt_len, expected.ver_opt_len
     );
 
-    // Verify OAM and Critical flags
     assert_eq!(
-        parsed_header.o_c_rsvd, expected.o_c_rsvd,
-        "OAM and Critical flags mismatch"
-    );
-    assert_eq!(
-        parsed_header.o_flag(),
-        expected.o_flag(),
-        "OAM flag mismatch"
-    );
-    assert_eq!(
-        parsed_header.c_flag(),
-        expected.c_flag(),
-        "Critical flag mismatch"
+        parsed_header.tunnel_ether_type,
+        expected.tunnel_ether_type,
+        "Tunnel EtherType mismatch: got [{:#x}, {:#x}], expected [{:#x}, {:#x}]",
+        parsed_header.tunnel_ether_type[0],
+        parsed_header.tunnel_ether_type[1],
+        expected.tunnel_ether_type[0],
+        expected.tunnel_ether_type[1]
     );
 
-    // Verify Protocol Type
     assert_eq!(
-        parsed_header.protocol_type, expected.protocol_type,
-        "Protocol Type mismatch"
-    );
-    assert_eq!(
-        parsed_header.protocol_type(),
-        expected.protocol_type(),
-        "Protocol Type value mismatch"
-    );
-
-    // Verify VNI
-    assert_eq!(parsed_header.vni, expected.vni, "VNI mismatch");
-    assert_eq!(parsed_header.vni(), expected.vni(), "VNI value mismatch");
-
-    // Verify Reserved field
-    assert_eq!(
-        parsed_header.reserved2, expected.reserved2,
-        "Reserved field mismatch"
+        parsed_header.vni,
+        expected.vni,
+        "VNI mismatch: got [{:#x}, {:#x}, {:#x}], expected [{:#x}, {:#x}, {:#x}]",
+        parsed_header.vni[0],
+        parsed_header.vni[1],
+        parsed_header.vni[2],
+        expected.vni[0],
+        expected.vni[1],
+        expected.vni[2]
     );
 }

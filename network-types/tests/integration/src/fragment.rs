@@ -1,64 +1,45 @@
-use integration_common::{PacketType, ParsedHeader};
-use network_types::{fragment::FragmentHdr, ip::IpProto};
+use integration_common::{FragmentTestData, PacketType, ParsedHeader};
+use network_types::{fragment::FRAGMENT_LEN, ip::IpProto};
 
-// Helper for constructing Fragment Header test packets
-pub fn create_fragment_test_packet() -> ([u8; FragmentHdr::LEN + 1], FragmentHdr) {
-    let mut request_data = [0u8; FragmentHdr::LEN + 1];
+// Helper for constructing Fragment header test packets
+// Only constructs the fields that are actually extracted by mermin-ebpf
+pub fn create_fragment_test_packet() -> ([u8; FRAGMENT_LEN + 1], FragmentTestData) {
+    let mut request_data = [0u8; FRAGMENT_LEN + 1];
 
-    // Discriminator for eBPF match statement
+    // Byte 0: The type discriminator for the eBPF program's `match` statement.
     request_data[0] = PacketType::Fragment as u8;
 
-    // Build expected header using setters to ensure correct bit packing
-    let mut expected_header = FragmentHdr {
-        next_hdr: IpProto::Tcp,
-        reserved: 0,
-        frag_offset: 0,
-        fo_res_m: 0,
-        id: [0; 4],
+    // Bytes 1-8: Fragment header (8 bytes)
+    request_data[1..9].copy_from_slice(&[
+        // Byte 1: Next Header (next_hdr field - extracted at offset 0 from data)
+        IpProto::Tcp as u8,
+        // Byte 2: Reserved (not extracted)
+        0x00,
+        // Bytes 3-4: Fragment Offset & Flags (not extracted)
+        0x12,
+        0x34,
+        // Bytes 5-8: Identification (not extracted)
+        0x56,
+        0x78,
+        0x9A,
+        0xBC,
+    ]);
+
+    let expected_header = FragmentTestData {
+        next_hdr: IpProto::Tcp as u8,
     };
-
-    expected_header.next_hdr = IpProto::Tcp;
-    expected_header.reserved = 0;
-    // Choose an arbitrary 13-bit fragment offset
-    expected_header.set_fragment_offset(0x1234 & 0x1FFF);
-    // Set reserved2 to 0 and M flag to true
-    expected_header.set_reserved2(0);
-    expected_header.set_m_flag(true);
-    // Set identification field
-    expected_header.set_identification(0x11_22_33_44);
-
-    // Serialize fields into the request buffer following the struct layout
-    request_data[1] = expected_header.next_hdr as u8; // Next Header
-    request_data[2] = expected_header.reserved; // Reserved
-    request_data[3] = expected_header.frag_offset; // Fragment Offset (low 8 bits portion per layout)
-    request_data[4] = expected_header.fo_res_m; // Upper offset bits + reserved2 + M flag
-    request_data[5..9].copy_from_slice(&expected_header.id); // Identification
 
     (request_data, expected_header)
 }
 
-// Helper for verifying Fragment Header test results
-pub fn verify_fragment_header(received: ParsedHeader, expected: FragmentHdr) {
+// Helper for verifying Fragment header test results
+pub fn verify_fragment_header(received: ParsedHeader, expected: FragmentTestData) {
     assert_eq!(received.type_, PacketType::Fragment);
-    let parsed = unsafe { received.data.fragment };
+    let parsed_header = unsafe { received.data.fragment };
 
-    // Compare via accessors to validate bit-packed fields
-    assert_eq!(parsed.next_hdr, expected.next_hdr, "Next Header mismatch");
-    assert_eq!(parsed.reserved, expected.reserved, "Reserved mismatch");
     assert_eq!(
-        parsed.fragment_offset(),
-        expected.fragment_offset(),
-        "Fragment Offset mismatch"
-    );
-    assert_eq!(
-        parsed.reserved2(),
-        expected.reserved2(),
-        "Reserved2 mismatch"
-    );
-    assert_eq!(parsed.m_flag(), expected.m_flag(), "M flag mismatch");
-    assert_eq!(
-        parsed.identification(),
-        expected.identification(),
-        "Identification mismatch"
+        parsed_header.next_hdr, expected.next_hdr,
+        "Next Header mismatch: got {}, expected {}",
+        parsed_header.next_hdr, expected.next_hdr
     );
 }
