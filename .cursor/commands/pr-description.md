@@ -14,6 +14,8 @@ This command provides a complete eBPF-focused PR workflow for the Mermin project
    - Uses the existing `.github/PULL_REQUEST_TEMPLATE.md`
    - Pre-analyzes changes to suggest PR description content
    - Ensures all testing requirements are documented
+   - Keep the output concise and to the point. Avoid fluff.
+   - Always generate the output as markdown so I can easily copy it.
 
 ## Usage
 
