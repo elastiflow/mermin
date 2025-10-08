@@ -27,7 +27,7 @@ use crate::{
         provider::{init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
     },
-    runtime::runtime::Runtime,
+    runtime::context::Context,
     span::producer::FlowSpanProducer,
 };
 
@@ -38,8 +38,8 @@ async fn main() -> Result<()> {
     // TODO: API will come once we have an API server
     // TODO: listen for SIGTERM `kill -TERM $(pidof mermin)` to gracefully shutdown the eBPF program and all configuration.
     // TODO: do not reload global configuration found in CLI
-    let runtime = Runtime::new()?;
-    let Runtime {
+    let runtime = Context::new()?;
+    let Context {
         properties: props, ..
     } = runtime;
 
