@@ -247,44 +247,58 @@ impl Conf {
         let available: Vec<String> = datalink::interfaces().into_iter().map(|i| i.name).collect();
         Self::resolve_interfaces_from(&self.interfaces, &available)
     }
-    fn resolve_interfaces_from(patterns: &[String], available: &[String]) -> Vec<String> {
-        let mut resolved: Vec<String> = Vec::new();
-        for item in patterns {
-            if let Some(re) = Self::parse_regex(item) {
-                let mut matched = false;
-                for name in available {
-                    if re.is_match(name) {
-                        matched = true;
-                        if !resolved.contains(name) {
-                            resolved.push(name.clone());
-                        }
-                    }
+fn resolve_interfaces_from(patterns: &[String], available: &[String]) -> Vec<String> {
+        use std::collections::HashSet;
+        let mut resolved = Vec::new();
+        let mut seen = HashSet::new();
+
+        for pattern in patterns {
+            let matches = Self::find_matches(pattern, available);
+
+            if matches.is_empty() {
+                Self::warn_no_match(pattern);
+            }
+
+            for interface in matches {
+                if seen.insert(interface) {
+                    resolved.push(interface.to_string());
                 }
-                if !matched {
-                    tracing::warn!(pattern=%item, "no interfaces matched regex pattern");
-                }
-            } else if Self::is_glob(item) {
-                let mut matched = false;
-                for name in available {
-                    if Self::glob_match(item, name) {
-                        matched = true;
-                        if !resolved.contains(name) {
-                            resolved.push(name.clone());
-                        }
-                    }
-                }
-                if !matched {
-                    tracing::warn!(pattern=%item, "no interfaces matched glob pattern");
-                }
-            } else if available.contains(item) {
-                if !resolved.contains(item) {
-                    resolved.push(item.clone());
-                }
-            } else {
-                tracing::warn!(iface=%item, "configured interface not found on host");
             }
         }
+
         resolved
+    }
+
+    fn find_matches<'a>(pattern: &str, available: &'a [String]) -> Vec<&'a str> {
+        if let Some(re) = Self::parse_regex(pattern) {
+            available
+                .iter()
+                .filter(|name| re.is_match(name))
+                .map(String::as_str)
+                .collect()
+        } else if Self::is_glob(pattern) {
+            available
+                .iter()
+                .filter(|name| Self::glob_match(pattern, name))
+                .map(String::as_str)
+                .collect()
+        } else {
+            available
+                .iter()
+                .filter(|name| name.as_str() == pattern)
+                .map(String::as_str)
+                .collect()
+        }
+    }
+
+    fn warn_no_match(pattern: &str) {
+        if Self::parse_regex(pattern).is_some() {
+            warn!(pattern=%pattern, "no interfaces matched regex pattern");
+        } else if Self::is_glob(pattern) {
+            warn!(pattern=%pattern, "no interfaces matched glob pattern");
+        } else {
+            warn!(iface=%pattern, "configured interface not found on host");
+        }
     }
 
     #[inline]
