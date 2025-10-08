@@ -163,6 +163,8 @@ async fn run() -> Result<()> {
     // If a provider is already installed, install_default() returns Err, which we can safely ignore.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
+    let k8s_informer_discovery = conf.get_k8s_informer_discovery().cloned();
+
     let exporter: Arc<dyn TraceableExporter> = {
         init_internal_tracing(
             conf.log_level,
@@ -302,7 +304,8 @@ async fn run() -> Result<()> {
     )?;
 
     info!("initializing k8s client");
-    let k8s_decorator = match Decorator::new(health_state.clone()).await {
+
+    let k8s_decorator = match Attributor::new(health_state.clone(), k8s_informer_discovery).await {
         Ok(decorator) => {
             info!("k8s client initialized successfully and all caches are synced");
             Some(Arc::new(decorator))

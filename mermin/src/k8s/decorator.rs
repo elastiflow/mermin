@@ -1,4 +1,4 @@
-// k8s.rs - Kubernetes client and resource management
+// decorator.rs - Kubernetes client and resource management
 //
 // This module provides a high-level, concurrent, and ergonomic interface for
 // interacting with Kubernetes resources. It features:
@@ -8,7 +8,7 @@
 // - Network-related resources like Services, Ingresses and NetworkPolicies.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     fmt::Debug,
     net::IpAddr,
     sync::{Arc, atomic::Ordering},
@@ -35,12 +35,26 @@ use kube::{
     runtime::reflector,
 };
 use kube_runtime::watcher;
-use log::{debug, warn};
+use log::{debug, trace, warn};
 use network_types::ip::IpProto;
 use tokio::sync::oneshot;
 use tracing::error;
 
 use crate::{health::HealthState, k8s::K8sError, span::flow::FlowSpan};
+use crate::{
+    health::HealthState,
+    k8s::{filter, K8sError, opts::InformerOptions},
+    span::flow::FlowSpan,
+};
+
+/// Represents different types of selectors found in Kubernetes resources.
+#[derive(Debug, Clone)]
+enum SelectorType {
+    /// Simple key-value map selector (e.g., Service spec.selector)
+    SimpleMap(BTreeMap<String, String>),
+    /// LabelSelector with matchLabels and matchExpressions (e.g., Deployment spec.selector)
+    LabelSelector(LabelSelector),
+}
 
 /// Holds metadata for a single Kubernetes object.
 #[derive(Debug, Clone)]
@@ -90,7 +104,9 @@ pub enum WorkloadOwner {
 pub enum DecorationInfo {
     Pod {
         pod: K8sObjectMeta,
-        owner: Option<WorkloadOwner>,
+        owner: Option<Box<WorkloadOwner>>, //Box to avoid clippy large enum variant warnings
+        selected_by_services: Vec<K8sObjectMeta>,
+        selected_by_policies: Vec<K8sObjectMeta>,
     },
     Node {
         node: K8sObjectMeta,
@@ -364,6 +380,7 @@ pub struct Decorator {
     #[allow(dead_code)]
     pub client: Client,
     pub resource_store: ResourceStore,
+    pub informer_discovery: Option<InformerOptions>,
 }
 
 impl Decorator {
@@ -376,16 +393,409 @@ impl Decorator {
         Ok(Self {
             client,
             resource_store,
+            informer_discovery,
         })
     }
 
+    // ========== Generic Selector Matching System ==========
+
+    /// Extracts labels from any Kubernetes resource that implements the Resource trait.
+    fn extract_labels_from_resource<K>(&self, resource: &K) -> BTreeMap<String, String>
+    where
+        K: Resource<DynamicType = ()>,
+    {
+        resource.labels().clone().into_iter().collect()
+    }
+
+    /// Extracts a selector from a Service resource.
+    fn extract_selector_from_service(
+        &self,
+        service: &Service,
+        field_path: &str,
+    ) -> Option<SelectorType> {
+        if field_path == "spec.selector" {
+            service
+                .spec
+                .as_ref()
+                .and_then(|spec| spec.selector.clone())
+                .map(SelectorType::SimpleMap)
+        } else {
+            None
+        }
+    }
+
+    /// Extracts a selector from a NetworkPolicy resource.
+    fn extract_selector_from_network_policy(
+        &self,
+        policy: &NetworkPolicy,
+        field_path: &str,
+    ) -> Option<SelectorType> {
+        if field_path == "spec.podSelector.matchLabels"
+            || field_path == "spec.podSelector.matchExpressions"
+            || field_path.starts_with("spec.podSelector")
+        {
+            policy
+                .spec
+                .as_ref()
+                .map(|spec| SelectorType::LabelSelector(spec.pod_selector.clone()))
+        } else {
+            None
+        }
+    }
+
+    /// Extracts a selector from a Deployment resource.
+    #[allow(dead_code)]
+    fn extract_selector_from_deployment(
+        &self,
+        deployment: &Deployment,
+        field_path: &str,
+    ) -> Option<SelectorType> {
+        if field_path == "spec.selector" || field_path.starts_with("spec.selector.") {
+            deployment
+                .spec
+                .as_ref()
+                .map(|spec| SelectorType::LabelSelector(spec.selector.clone()))
+        } else {
+            None
+        }
+    }
+
+    /// Extracts a selector from a ReplicaSet resource.
+    #[allow(dead_code)]
+    fn extract_selector_from_replicaset(
+        &self,
+        rs: &ReplicaSet,
+        field_path: &str,
+    ) -> Option<SelectorType> {
+        if field_path == "spec.selector" || field_path.starts_with("spec.selector.") {
+            rs.spec
+                .as_ref()
+                .map(|spec| SelectorType::LabelSelector(spec.selector.clone()))
+        } else {
+            None
+        }
+    }
+
+    /// Extracts a selector from a StatefulSet resource.
+    #[allow(dead_code)]
+    fn extract_selector_from_statefulset(
+        &self,
+        ss: &StatefulSet,
+        field_path: &str,
+    ) -> Option<SelectorType> {
+        if field_path == "spec.selector" || field_path.starts_with("spec.selector.") {
+            ss.spec
+                .as_ref()
+                .map(|spec| SelectorType::LabelSelector(spec.selector.clone()))
+        } else {
+            None
+        }
+    }
+
+    /// Extracts a selector from a DaemonSet resource.
+    #[allow(dead_code)]
+    fn extract_selector_from_daemonset(
+        &self,
+        ds: &DaemonSet,
+        field_path: &str,
+    ) -> Option<SelectorType> {
+        if field_path == "spec.selector" || field_path.starts_with("spec.selector.") {
+            ds.spec
+                .as_ref()
+                .map(|spec| SelectorType::LabelSelector(spec.selector.clone()))
+        } else {
+            None
+        }
+    }
+
+    /// Checks if a selector matches the given labels.
+    /// Supports both simple map selectors and LabelSelector types.
+    fn selector_matches_labels(
+        &self,
+        selector: &SelectorType,
+        target_labels: &BTreeMap<String, String>,
+        selector_config: &crate::k8s::opts::K8sObjectSelector,
+    ) -> bool {
+        match selector {
+            SelectorType::SimpleMap(selector_map) => {
+                // For simple map selectors, all keys must match
+                selector_map
+                    .iter()
+                    .all(|(key, value)| target_labels.get(key) == Some(value))
+            }
+            SelectorType::LabelSelector(label_selector) => {
+                // Check matchLabels if configured
+                if selector_config.selector_match_labels_field.is_some()
+                    && let Some(match_labels) = &label_selector.match_labels
+                    && !match_labels
+                        .iter()
+                        .all(|(key, value)| target_labels.get(key) == Some(value))
+                {
+                    return false;
+                }
+
+                // Check matchExpressions if configured
+                if selector_config.selector_match_expressions_field.is_some()
+                    && let Some(match_expressions) = &label_selector.match_expressions
+                {
+                    for expr in match_expressions {
+                        if !self.expression_matches(expr, target_labels) {
+                            return false;
+                        }
+                    }
+                }
+
+                true
+            }
+        }
+    }
+
+    /// Finds all Services that select a target resource based on configured selector discovery.
+    ///
+    /// # Type Parameters
+    /// * `TargetK` - The type of target resource (e.g., Pod, EndpointSlice)
+    ///
+    /// # Arguments
+    /// * `target` - The target resource to find selecting services for
+    /// * `selector_config` - Configuration specifying which selector fields to check
+    ///
+    /// # Returns
+    /// Vector of Services that select the target resource according to the configured selectors
+    pub fn get_services_selecting<TargetK>(
+        &self,
+        target: &TargetK,
+        selector_config: &crate::k8s::opts::K8sObjectSelector,
+    ) -> Vec<Arc<Service>>
+    where
+        TargetK: Resource<DynamicType = ()>,
+    {
+        let target_namespace = target.namespace().unwrap_or_default();
+        let target_labels = self.extract_labels_from_resource(target);
+
+        let selector_field = selector_config
+            .selector_match_labels_field
+            .as_deref()
+            .unwrap_or("spec.selector");
+
+        self.resource_store
+            .get_by_namespace::<Service>(&target_namespace)
+            .into_iter()
+            .filter(|service| {
+                self.extract_selector_from_service(service, selector_field)
+                    .is_some_and(|sel| {
+                        self.selector_matches_labels(&sel, &target_labels, selector_config)
+                    })
+            })
+            .collect()
+    }
+
+    /// Finds all NetworkPolicies that apply to a target resource based on configured selector discovery.
+    ///
+    /// # Type Parameters
+    /// * `TargetK` - The type of target resource (e.g., Pod)
+    ///
+    /// # Arguments
+    /// * `target` - The target resource to find applicable network policies for
+    /// * `selector_config` - Configuration specifying which selector fields to check
+    ///
+    /// # Returns
+    /// Vector of NetworkPolicies that apply to the target resource
+    pub fn get_network_policies_selecting<TargetK>(
+        &self,
+        target: &TargetK,
+        selector_config: &crate::k8s::opts::K8sObjectSelector,
+    ) -> Vec<Arc<NetworkPolicy>>
+    where
+        TargetK: Resource<DynamicType = ()>,
+    {
+        let target_namespace = target.namespace().unwrap_or_default();
+        let target_labels = self.extract_labels_from_resource(target);
+
+        let selector_field = selector_config
+            .selector_match_labels_field
+            .as_deref()
+            .or(selector_config.selector_match_expressions_field.as_deref())
+            .unwrap_or("spec.podSelector");
+
+        self.resource_store
+            .get_by_namespace::<NetworkPolicy>(&target_namespace)
+            .into_iter()
+            .filter(|policy| {
+                self.extract_selector_from_network_policy(policy, selector_field)
+                    .is_some_and(|sel| {
+                        self.selector_matches_labels(&sel, &target_labels, selector_config)
+                    })
+            })
+            .collect()
+    }
+
+    /// Finds all Deployments that select a target resource based on configured selector discovery.
+    #[allow(dead_code)]
+    pub fn get_deployments_selecting<TargetK>(
+        &self,
+        target: &TargetK,
+        selector_config: &crate::k8s::opts::K8sObjectSelector,
+    ) -> Vec<Arc<Deployment>>
+    where
+        TargetK: Resource<DynamicType = ()>,
+    {
+        let target_namespace = target.namespace().unwrap_or_default();
+        let target_labels = self.extract_labels_from_resource(target);
+
+        let selector_field = selector_config
+            .selector_match_labels_field
+            .as_deref()
+            .or(selector_config.selector_match_expressions_field.as_deref())
+            .unwrap_or("spec.selector");
+
+        self.resource_store
+            .get_by_namespace::<Deployment>(&target_namespace)
+            .into_iter()
+            .filter(|deployment| {
+                self.extract_selector_from_deployment(deployment, selector_field)
+                    .is_some_and(|sel| {
+                        self.selector_matches_labels(&sel, &target_labels, selector_config)
+                    })
+            })
+            .collect()
+    }
+
+    /// Finds all ReplicaSets that select a target resource based on configured selector discovery.
+    #[allow(dead_code)]
+    pub fn get_replicasets_selecting<TargetK>(
+        &self,
+        target: &TargetK,
+        selector_config: &crate::k8s::opts::K8sObjectSelector,
+    ) -> Vec<Arc<ReplicaSet>>
+    where
+        TargetK: Resource<DynamicType = ()>,
+    {
+        let target_namespace = target.namespace().unwrap_or_default();
+        let target_labels = self.extract_labels_from_resource(target);
+
+        let selector_field = selector_config
+            .selector_match_labels_field
+            .as_deref()
+            .or(selector_config.selector_match_expressions_field.as_deref())
+            .unwrap_or("spec.selector");
+
+        self.resource_store
+            .get_by_namespace::<ReplicaSet>(&target_namespace)
+            .into_iter()
+            .filter(|rs| {
+                self.extract_selector_from_replicaset(rs, selector_field)
+                    .is_some_and(|sel| {
+                        self.selector_matches_labels(&sel, &target_labels, selector_config)
+                    })
+            })
+            .collect()
+    }
+
+    /// Finds all StatefulSets that select a target resource based on configured selector discovery.
+    #[allow(dead_code)]
+    pub fn get_statefulsets_selecting<TargetK>(
+        &self,
+        target: &TargetK,
+        selector_config: &crate::k8s::opts::K8sObjectSelector,
+    ) -> Vec<Arc<StatefulSet>>
+    where
+        TargetK: Resource<DynamicType = ()>,
+    {
+        let target_namespace = target.namespace().unwrap_or_default();
+        let target_labels = self.extract_labels_from_resource(target);
+
+        let selector_field = selector_config
+            .selector_match_labels_field
+            .as_deref()
+            .or(selector_config.selector_match_expressions_field.as_deref())
+            .unwrap_or("spec.selector");
+
+        self.resource_store
+            .get_by_namespace::<StatefulSet>(&target_namespace)
+            .into_iter()
+            .filter(|ss| {
+                self.extract_selector_from_statefulset(ss, selector_field)
+                    .is_some_and(|sel| {
+                        self.selector_matches_labels(&sel, &target_labels, selector_config)
+                    })
+            })
+            .collect()
+    }
+
+    /// Finds all DaemonSets that select a target resource based on configured selector discovery.
+    #[allow(dead_code)]
+    pub fn get_daemonsets_selecting<TargetK>(
+        &self,
+        target: &TargetK,
+        selector_config: &crate::k8s::opts::K8sObjectSelector,
+    ) -> Vec<Arc<DaemonSet>>
+    where
+        TargetK: Resource<DynamicType = ()>,
+    {
+        let target_namespace = target.namespace().unwrap_or_default();
+        let target_labels = self.extract_labels_from_resource(target);
+
+        let selector_field = selector_config
+            .selector_match_labels_field
+            .as_deref()
+            .or(selector_config.selector_match_expressions_field.as_deref())
+            .unwrap_or("spec.selector");
+
+        self.resource_store
+            .get_by_namespace::<DaemonSet>(&target_namespace)
+            .into_iter()
+            .filter(|ds| {
+                self.extract_selector_from_daemonset(ds, selector_field)
+                    .is_some_and(|sel| {
+                        self.selector_matches_labels(&sel, &target_labels, selector_config)
+                    })
+            })
+            .collect()
+    }
+
+    // ========== End Generic Selector Matching System ==========
+
     /// Given a Pod object, traverses its ownerReferences to find its top-level managing controller.
+    /// Uses owner_discovery options to control traversal depth and filter by kind.
     pub fn get_top_level_controller(&self, pod: &Pod) -> Option<WorkloadOwner> {
         let mut current_owners = pod.owner_references().to_vec();
         let mut namespace = pod.namespace().unwrap_or_default();
         let mut top_level_owner = None;
+        let mut depth = 0;
+
+        // Get max depth from discovery options (default: 10)
+        let max_depth = self
+            .informer_discovery
+            .as_ref()
+            .map(|d| d.owner_relations.max_depth)
+            .unwrap_or(10);
+
+        // Create filter from discovery options
+        let filter = self.informer_discovery.as_ref().map(|d| {
+            filter::IncludeExcludeFilter::new(
+                d.owner_relations.include_kinds.clone(),
+                d.owner_relations.exclude_kinds.clone(),
+            )
+        });
 
         while let Some(owner_ref) = current_owners.pop() {
+            // Check depth limit
+            if depth >= max_depth {
+                trace!("reached max owner reference depth ({max_depth}), stopping traversal");
+                break;
+            }
+
+            // Apply kind filter if configured
+            if let Some(ref f) = filter
+                && !f.matches(&owner_ref.kind)
+            {
+                trace!(
+                    "owner kind '{}' filtered out by discovery options",
+                    owner_ref.kind
+                );
+                continue;
+            }
+
             if let Some((owner, next_owners_opt)) = self.get_owner(&owner_ref, &namespace) {
                 top_level_owner = Some(owner);
 
@@ -400,6 +810,7 @@ impl Decorator {
                     }) {
                         namespace = ns.clone();
                     }
+                    depth += 1;
                 } else {
                     break;
                 }
@@ -628,7 +1039,7 @@ impl Decorator {
 
         let policies = self
             .resource_store
-            .get_by_namespace::<NetworkPolicy>(&pod_namespace)
+            .get_by_namespace::<NetworkPolicy>(pod_namespace)
             .into_iter()
             .filter(|policy| {
                 // Check if the policy's podSelector matches the destination pod
@@ -637,6 +1048,118 @@ impl Decorator {
                     .as_ref()
                     .map(|spec| spec.clone().pod_selector)
                     .is_some_and(|selector| self.selector_matches(&selector, pod_labels))
+            })
+            .collect();
+
+        Ok(policies)
+    }
+
+    /// Finds all Services that select the given pod based on configured selector discovery.
+    /// Uses K8sSelectorOptions to determine which selector fields to check.
+    ///
+    /// This method supports any target Kind that is configured in the selector_relations.
+    pub fn get_services_selecting_pod(&self, pod: &Pod) -> Vec<Arc<Service>> {
+        // Get configured selector rules for Services
+        let service_selectors: Vec<_> = self
+            .informer_discovery
+            .as_ref()
+            .map(|d| {
+                d.selector_relations
+                    .iter()
+                    .filter(|sel| sel.kind.eq_ignore_ascii_case("Service"))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // If selector discovery is not configured, use default behavior
+        if service_selectors.is_empty() {
+            return self.get_services_selecting_pod_default(pod);
+        }
+
+        // Collect services from all configured selectors
+        let all_services: Vec<_> = service_selectors
+            .into_iter()
+            .flat_map(|selector_config| self.get_services_selecting(pod, selector_config))
+            .collect();
+
+        // Deduplicate by UID
+        let mut seen_uids = HashSet::new();
+        all_services
+            .into_iter()
+            .filter(|service| {
+                if let Some(uid) = &service.metadata.uid {
+                    seen_uids.insert(uid.clone())
+                } else {
+                    true // Keep services without UID (shouldn't happen in practice)
+                }
+            })
+            .collect()
+    }
+
+    /// Default behavior: check Service spec.selector
+    fn get_services_selecting_pod_default(&self, pod: &Pod) -> Vec<Arc<Service>> {
+        let pod_namespace = pod.namespace().unwrap_or_default();
+        let pod_labels = pod.labels();
+
+        self.resource_store
+            .get_by_namespace::<Service>(&pod_namespace)
+            .into_iter()
+            .filter(|service| {
+                service
+                    .spec
+                    .as_ref()
+                    .and_then(|spec| spec.selector.as_ref())
+                    .is_some_and(|selector| {
+                        // Service selector is a simple map, not a LabelSelector
+                        selector
+                            .iter()
+                            .all(|(key, value)| pod_labels.get(key) == Some(value))
+                    })
+            })
+            .collect()
+    }
+
+    /// Enhances NetworkPolicy discovery with selector configuration.
+    /// Finds NetworkPolicies that apply to a pod using selector discovery options.
+    ///
+    /// This method supports any target Kind that is configured in the selector_relations.
+    pub fn get_network_policies_for_pod_with_discovery(
+        &self,
+        pod: &Pod,
+    ) -> Result<Vec<Arc<NetworkPolicy>>> {
+        // Get configured selector rules for NetworkPolicies
+        let policy_selectors: Vec<_> = self
+            .informer_discovery
+            .as_ref()
+            .map(|d| {
+                d.selector_relations
+                    .iter()
+                    .filter(|sel| sel.kind.eq_ignore_ascii_case("NetworkPolicy"))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // If no selector config, use existing method
+        if policy_selectors.is_empty() {
+            return self.get_network_policies_for_pod_default(pod);
+        }
+
+        // Collect policies from all configured selectors
+        let all_policies: Vec<_> = policy_selectors
+            .into_iter()
+            .flat_map(|selector_config| self.get_network_policies_selecting(pod, selector_config))
+            .collect();
+
+        // Deduplicate by UID
+        let mut seen_uids = HashSet::new();
+        let policies = all_policies
+            .into_iter()
+            .filter(|policy| {
+                if let Some(uid) = &policy.metadata.uid {
+                    seen_uids.insert(uid.clone())
+                } else {
+                    true // Keep policies without UID (shouldn't happen in practice)
+                }
             })
             .collect();
 

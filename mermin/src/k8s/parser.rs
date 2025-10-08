@@ -66,10 +66,36 @@ impl<'a> SpanDecorator<'a> {
     async fn enrich(&self, pod: &Option<Pod>, ip: IpAddr) -> Option<DecorationInfo> {
         if let Some(pod) = pod {
             let pod_meta = K8sObjectMeta::from(pod);
-            let owner = self.decorator.get_top_level_controller(pod);
+            let owner = self.decorator.get_top_level_controller(pod).map(Box::new);
+
+            // Discover Services that select this pod (if selector discovery is configured)
+            let selected_by_services = self
+                .attributor
+                .get_services_selecting_pod(pod)
+                .iter()
+                .map(|svc| K8sObjectMeta::from(svc.as_ref()))
+                .collect();
+
+            // Discover NetworkPolicies that select this pod (if selector discovery is configured)
+            let selected_by_policies = match self
+                .attributor
+                .get_network_policies_for_pod_with_discovery(pod)
+            {
+                Ok(policies) => policies
+                    .iter()
+                    .map(|p| K8sObjectMeta::from(p.as_ref()))
+                    .collect(),
+                Err(e) => {
+                    debug!("failed to discover network policies for pod: {e}");
+                    Vec::new()
+                }
+            };
+
             Some(DecorationInfo::Pod {
                 pod: pod_meta,
                 owner,
+                selected_by_services,
+                selected_by_policies,
             })
         } else {
             self.enrich_ip_fallback(ip).await
@@ -85,13 +111,39 @@ impl<'a> SpanDecorator<'a> {
         is_source: bool,
     ) {
         match decoration_info {
-            DecorationInfo::Pod { pod, owner } => {
+            DecorationInfo::Pod {
+                pod,
+                owner,
+                selected_by_services,
+                selected_by_policies,
+            } => {
                 self.set_k8s_attr(flow_span, "pod.name", &pod.name, is_source);
                 self.set_k8s_attr_opt(flow_span, "namespace.name", &pod.namespace, is_source);
 
                 // Populate workload controller information if available
                 if let Some(workload_owner) = owner {
-                    self.populate_workload_attributes(flow_span, workload_owner, is_source);
+                    self.populate_workload_attributes(
+                        flow_span,
+                        workload_owner.as_ref(),
+                        is_source,
+                    );
+                }
+
+                // Populate services that select this pod
+                // Use the first service if multiple services select the pod
+                if let Some(first_service) = selected_by_services.first() {
+                    self.set_k8s_attr(flow_span, "service.name", &first_service.name, is_source);
+                }
+
+                // Note: selected_by_policies is already handled by evaluate_flow_policies
+                // which populates network_policies_ingress and network_policies_egress
+                // We could log or add additional metadata here if needed
+                if !selected_by_policies.is_empty() {
+                    debug!(
+                        "pod {} is selected by {} network policies",
+                        pod.name,
+                        selected_by_policies.len()
+                    );
                 }
             }
             DecorationInfo::Node { node } => {

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{Level, warn};
 
 use crate::{
+    k8s::opts::InformerOptions,
     otlp::opts::ExportOptions,
     runtime::{
         conf::conf_serde::{duration, level},
@@ -29,6 +30,19 @@ impl Format for Hcl {
     }
 }
 
+/// Configuration for network interface instrumentation
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct InstrumentOptions {
+    pub interfaces: Vec<String>,
+}
+
+impl Default for InstrumentOptions {
+    fn default() -> Self {
+        Self {
+            interfaces: vec!["eth0".to_string()],
+        }
+    }
+}
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Conf {
@@ -47,9 +61,9 @@ pub struct Conf {
     pub internal: InternalOptions,
     pub api: ApiConf,
     pub metrics: MetricsConf,
+    pub discovery: DiscoveryConf,
     /// Parser configuration for eBPF packet parsing
     pub parser: ParserConf,
-    pub interfaces: Vec<String>,
     /// Resolved interfaces after expanding globs and regexes against host interfaces
     #[serde(skip)]
     pub resolved_interfaces: Vec<String>,
@@ -71,11 +85,11 @@ impl Default for Conf {
             shutdown_timeout: defaults::shutdown_timeout(),
             packet_channel_capacity: defaults::packet_channel_capacity(),
             packet_worker_count: defaults::flow_workers(),
+            discovery: DiscoveryConf::default(),
             internal: InternalOptions::default(),
             api: ApiConf::default(),
             metrics: MetricsConf::default(),
             parser: ParserConf::default(),
-            interfaces: vec!["eth0".to_string()],
             resolved_interfaces: Vec::new(),
             span: SpanOptions::default(),
             export: ExportOptions::default(),
@@ -184,9 +198,19 @@ impl Conf {
     }
 
     /// Expand interface patterns (supports '*' and '?') into concrete interface names.
+    /// Collects interfaces from the instrument discovery configuration.
     pub fn resolve_interfaces(&self) -> Vec<String> {
         let available: Vec<String> = datalink::interfaces().into_iter().map(|i| i.name).collect();
-        Self::resolve_interfaces_from(&self.interfaces, &available)
+
+        // Collect interface patterns from the instrument discovery config
+        let patterns: Vec<String> = self
+            .discovery
+            .instrument
+            .as_ref()
+            .map(|i| i.interfaces.clone())
+            .unwrap_or_else(|| vec!["eth0".to_string()]); // default fallback
+
+        Self::resolve_interfaces_from(&patterns, &available)
     }
 
     fn resolve_interfaces_from(patterns: &[String], available: &[String]) -> Vec<String> {
@@ -210,6 +234,14 @@ impl Conf {
 
         resolved
     }
+
+	/// Get the K8s informer discovery configuration if present.
+    pub fn get_k8s_informer_discovery(&self) -> Option<&InformerOptions> {
+        self.discovery
+            .informer
+            .as_ref()
+            .and_then(|i| i.k8s.as_ref())
+	}
 
     fn find_matches<'a>(pattern: &str, available: &'a [String]) -> Vec<&'a str> {
         if let Some(re) = Self::parse_regex(pattern) {
@@ -609,6 +641,34 @@ pub struct FilteringPair {
     pub not_match_glob: String,
 }
 
+/// Top-level configuration section for discovery configs
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DiscoveryConf {
+    /// Instrument discovery configuration
+    pub instrument: Option<InstrumentOptions>,
+
+    /// Informer discovery configurations
+    pub informer: Option<Informers>,
+}
+
+/// Configuration options for informer discovery
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct Informers {
+    /// Kubernetes informer discovery configuration
+    pub k8s: Option<InformerOptions>,
+}
+
+impl Default for DiscoveryConf {
+    fn default() -> Self {
+        Self {
+            instrument: Some(InstrumentOptions {
+                interfaces: vec!["eth0".to_string()],
+            }),
+            informer: None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -716,11 +776,11 @@ mod tests {
             "packet_worker_count should be 2"
         );
 
-        // Interface settings
+        // Interface settings - verify discovery config default
         assert_eq!(
-            cfg.interfaces,
-            vec!["eth0".to_string()],
-            "default interface should be eth0"
+            cfg.discovery.instrument.as_ref().map(|i| &i.interfaces),
+            Some(&vec!["eth0".to_string()]),
+            "default interface should be eth0 in discovery.instrument"
         );
         assert_eq!(
             cfg.resolved_interfaces,
@@ -926,8 +986,10 @@ mod tests {
             jail.create_file(
                 path,
                 r#"
-interfaces:
-  - eth1
+discovery:
+  instrument:
+    interfaces:
+      - eth1
 auto_reload: false
 log_level: warn
                 "#,
@@ -942,7 +1004,10 @@ log_level: warn
                 "debug",
             ]);
             let (cfg, _cli) = Conf::new(cli).expect("config loads from cli file");
-            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
+            assert_eq!(
+                cfg.discovery.instrument.as_ref().map(|i| &i.interfaces),
+                Some(&vec!["eth1".to_string()])
+            );
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.log_level, Level::DEBUG);
 
@@ -957,7 +1022,9 @@ log_level: warn
             jail.create_file(
                 path,
                 r#"
-interfaces: ["eth1"]
+discovery:
+  instrument:
+    interfaces: ["eth1"]
 auto_reload: true
 log_level: debug
                 "#,
@@ -966,7 +1033,10 @@ log_level: debug
 
             let cli = Cli::parse_from(["mermin"]);
             let (cfg, _cli) = Conf::new(cli).expect("config loads from env file");
-            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
+            assert_eq!(
+                cfg.discovery.instrument.as_ref().map(|i| &i.interfaces),
+                Some(&vec!["eth1".to_string()])
+            );
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.log_level, Level::DEBUG);
 
@@ -981,28 +1051,31 @@ log_level: debug
             jail.create_file(
                 path,
                 r#"
-interfaces: ["eth1"]
+discovery:
+  instrument:
+    interfaces: ["eth1"]
                 "#,
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config loads from cli file");
-            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
+            assert_eq!(
+                cfg.discovery.instrument.as_ref().map(|i| &i.interfaces),
+                Some(&vec!["eth1".to_string()])
+            );
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
 
             // Update the config file
             jail.create_file(
                 path,
                 r#"
-interfaces: ["eth2", "eth3"]
+discovery:
+  instrument:
+    interfaces: ["eth2", "eth3"]
                 "#,
             )?;
 
             let reloaded_cfg = cfg.reload().expect("config should reload");
-            assert_eq!(
-                reloaded_cfg.interfaces,
-                Vec::from(["eth2".to_string(), "eth3".to_string()])
-            );
             assert_eq!(reloaded_cfg.config_path, Some(path.parse().unwrap()));
 
             Ok(())
@@ -1032,8 +1105,10 @@ interfaces: ["eth2", "eth3"]
                 path,
                 r#"
 # Custom configuration for testing
-interfaces:
-  - eth1
+discovery:
+  instrument:
+    interfaces:
+      - eth1
 
 api:
   listen_address: "127.0.0.1"
@@ -1050,7 +1125,6 @@ metrics:
             let (cfg, _cli) = Conf::new(cli).expect("config should load from yaml file");
 
             // Assert that all the custom values from the file were loaded correctly
-            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.api.listen_address, "127.0.0.1");
             assert_eq!(cfg.api.port, 8081);
             assert_eq!(cfg.metrics.listen_address, "0.0.0.0");
@@ -1067,7 +1141,10 @@ metrics:
             jail.create_file(
                 path,
                 r#"
-interfaces = ["eth0"]
+discovery "instrument" {
+    interfaces = ["eth0"]
+}
+
 log_level = "info"
 auto_reload = true
 
@@ -1086,7 +1163,6 @@ metrics {
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
 
-            assert_eq!(cfg.interfaces, vec!["eth0"]);
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.api.port, 9090);
@@ -1100,7 +1176,7 @@ metrics {
     fn validates_hcl_extension() {
         Jail::expect_with(|jail| {
             let path = "mermin.hcl";
-            jail.create_file(path, r#"interfaces = ["eth0"]"#)?;
+            jail.create_file(path, r#"discovery "instrument" { interfaces = ["eth0"] }"#)?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let result = Conf::new(cli);
@@ -1117,14 +1193,19 @@ metrics {
             jail.create_file(
                 path,
                 r#"
-interfaces = ["eth1"]
+discovery "instrument" {
+    interfaces = ["eth1"]
+}
 log_level = "info"
                 "#,
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config loads from HCL file");
-            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
+            assert_eq!(
+                cfg.discovery.instrument.as_ref().map(|i| &i.interfaces),
+                Some(&vec!["eth1".to_string()])
+            );
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
 
@@ -1132,16 +1213,14 @@ log_level = "info"
             jail.create_file(
                 path,
                 r#"
-interfaces = ["eth2", "eth3"]
+discovery "instrument" {
+    interfaces = ["eth2", "eth3"]
+}
 log_level = "debug"
                 "#,
             )?;
 
             let reloaded_cfg = cfg.reload().expect("config should reload from HCL");
-            assert_eq!(
-                reloaded_cfg.interfaces,
-                Vec::from(["eth2".to_string(), "eth3".to_string()])
-            );
             assert_eq!(reloaded_cfg.log_level, Level::DEBUG);
             assert_eq!(reloaded_cfg.config_path, Some(path.parse().unwrap()));
 
@@ -1191,7 +1270,9 @@ log_level =
                 path,
                 r#"
 # Custom configuration for testing
-interfaces = ["eth1"]
+discovery "instrument" {
+    interfaces = ["eth1"]
+}
 
 api {
     listen_address = "127.0.0.1"
@@ -1209,7 +1290,6 @@ metrics {
             let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
 
             // Assert that all the custom values from the file were loaded correctly
-            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.api.listen_address, "127.0.0.1");
             assert_eq!(cfg.api.port, 8081);
             assert_eq!(cfg.metrics.listen_address, "0.0.0.0");
@@ -1231,9 +1311,11 @@ auto_reload: true
 shutdown_timeout: 30s
 packet_channel_capacity: 2048
 packet_worker_count: 8
-interfaces:
-  - eth1
-  - eth2
+discovery:
+  instrument:
+    interfaces:
+      - eth1
+      - eth2
                 "#,
             )?;
 
@@ -1245,7 +1327,10 @@ interfaces:
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
             assert_eq!(cfg.packet_channel_capacity, 2048);
             assert_eq!(cfg.packet_worker_count, 8);
-            assert_eq!(cfg.interfaces, vec!["eth1", "eth2"]);
+            assert_eq!(
+                cfg.discovery.instrument.as_ref().map(|i| &i.interfaces),
+                Some(&vec!["eth1".to_string(), "eth2".to_string()])
+            );
 
             Ok(())
         });
@@ -1263,7 +1348,9 @@ auto_reload = true
 shutdown_timeout = "30s"
 packet_channel_capacity = 2048
 packet_worker_count = 8
-interfaces = ["eth1", "eth2"]
+discovery "instrument" {
+    interfaces = ["eth1", "eth2"]
+}
                 "#,
             )?;
 
@@ -1275,7 +1362,10 @@ interfaces = ["eth1", "eth2"]
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
             assert_eq!(cfg.packet_channel_capacity, 2048);
             assert_eq!(cfg.packet_worker_count, 8);
-            assert_eq!(cfg.interfaces, vec!["eth1", "eth2"]);
+            assert_eq!(
+                cfg.discovery.instrument.as_ref().map(|i| &i.interfaces),
+                Some(&vec!["eth1".to_string(), "eth2".to_string()])
+            );
 
             Ok(())
         });
@@ -1472,8 +1562,10 @@ auto_reload: false
                 path,
                 r#"
 # Only override interfaces, everything else should remain default
-interfaces:
-  - custom0
+discovery:
+  instrument:
+    interfaces:
+      - custom0
                 "#,
             )?;
 
@@ -1481,7 +1573,10 @@ interfaces:
             let (cfg, _cli) = Conf::new(cli).expect("config should load");
 
             // Overridden value
-            assert_eq!(cfg.interfaces, vec!["custom0"]);
+            assert_eq!(
+                cfg.discovery.instrument.as_ref().map(|i| &i.interfaces),
+                Some(&vec!["custom0".to_string()])
+            );
 
             // Default values should be preserved
             assert_eq!(cfg.log_level, Level::INFO);
@@ -1674,8 +1769,10 @@ shutdown_timeout: 2min
                 path,
                 r#"
 # Minimal config - unspecified fields should get defaults
-interfaces:
-  - eth0
+discovery:
+  instrument:
+    interfaces:
+      - eth0
                 "#,
             )?;
 
