@@ -400,6 +400,7 @@ impl PacketWorker {
                 };
                 let matched_pipelines = self.router.route(&temp_span);
                 if matched_pipelines.is_empty() {
+                    debug!(community_id = %vacant.key(), "flow did not match any pipeline filters. dropping.");
                     return Ok(());
                 }
 
