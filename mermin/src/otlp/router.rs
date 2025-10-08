@@ -11,8 +11,6 @@ pub struct PipelineRouter {
 
 struct PipelineWithFilter {
     filter: PacketFilter,
-    // You might also store resolved exporters here later.
-    // exporters: Vec<ResolvedExporter>,
 }
 
 impl PipelineRouter {
