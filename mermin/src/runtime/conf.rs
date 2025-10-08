@@ -2,8 +2,10 @@ use std::{collections::HashMap, error::Error, fmt, net::Ipv4Addr, path::Path, ti
 
 use figment::providers::Format;
 use hcl::eval::Context;
+use pnet::datalink;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
-use tracing::Level;
+use tracing::{Level, warn};
 
 use crate::{
     otlp::opts::ExporterOptions,
@@ -30,7 +32,7 @@ impl Format for Hcl {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Conf {
-    pub interface: Vec<String>,
+    pub interfaces: Vec<String>,
     pub auto_reload: bool,
     #[serde(with = "level")]
     pub log_level: Level,
@@ -52,7 +54,7 @@ pub struct Conf {
 impl Default for Conf {
     fn default() -> Self {
         Self {
-            interface: vec!["eth0".to_string()],
+            interfaces: vec!["eth0".to_string()],
             auto_reload: false,
             log_level: Level::INFO,
             api: ApiConf::default(),
@@ -239,6 +241,112 @@ pub struct ExporterReference {
     pub name: String,
 }
 
+impl Conf {
+    /// Expand interface patterns (supports '*' and '?') into concrete interface names.
+    pub fn resolve_interfaces(&self) -> Vec<String> {
+        let available: Vec<String> = datalink::interfaces().into_iter().map(|i| i.name).collect();
+        Self::resolve_interfaces_from(&self.interfaces, &available)
+    }
+    fn resolve_interfaces_from(patterns: &[String], available: &[String]) -> Vec<String> {
+        use std::collections::HashSet;
+        let mut resolved = Vec::new();
+        let mut seen = HashSet::new();
+
+        for pattern in patterns {
+            let matches = Self::find_matches(pattern, available);
+
+            if matches.is_empty() {
+                Self::warn_no_match(pattern);
+            }
+
+            for interface in matches {
+                if seen.insert(interface) {
+                    resolved.push(interface.to_string());
+                }
+            }
+        }
+
+        resolved
+    }
+
+    fn find_matches<'a>(pattern: &str, available: &'a [String]) -> Vec<&'a str> {
+        if let Some(re) = Self::parse_regex(pattern) {
+            available
+                .iter()
+                .filter(|name| re.is_match(name))
+                .map(String::as_str)
+                .collect()
+        } else if Self::is_glob(pattern) {
+            available
+                .iter()
+                .filter(|name| Self::glob_match(pattern, name))
+                .map(String::as_str)
+                .collect()
+        } else {
+            available
+                .iter()
+                .filter(|name| name.as_str() == pattern)
+                .map(String::as_str)
+                .collect()
+        }
+    }
+
+    fn warn_no_match(pattern: &str) {
+        if Self::parse_regex(pattern).is_some() {
+            warn!(pattern=%pattern, "no interfaces matched regex pattern");
+        } else if Self::is_glob(pattern) {
+            warn!(pattern=%pattern, "no interfaces matched glob pattern");
+        } else {
+            warn!(iface=%pattern, "configured interface not found on host");
+        }
+    }
+
+    #[inline]
+    fn is_glob(s: &str) -> bool {
+        s.contains('*') || s.contains('?')
+    }
+
+    // Simple wildcard matcher supporting '*' and '?'
+    fn glob_match(pattern: &str, text: &str) -> bool {
+        let (pattern_bytes, text_bytes) = (pattern.as_bytes(), text.as_bytes());
+        let (mut pattern_index, mut text_index) = (0, 0);
+        let (mut last_star_pattern_index, mut last_star_text_index) = (usize::MAX, 0);
+
+        while text_index < text_bytes.len() {
+            if pattern_index < pattern_bytes.len()
+                && (pattern_bytes[pattern_index] == b'?'
+                    || pattern_bytes[pattern_index] == text_bytes[text_index])
+            {
+                pattern_index += 1;
+                text_index += 1;
+            } else if pattern_index < pattern_bytes.len() && pattern_bytes[pattern_index] == b'*' {
+                last_star_pattern_index = pattern_index;
+                last_star_text_index = text_index;
+                pattern_index += 1;
+            } else if last_star_pattern_index != usize::MAX {
+                pattern_index = last_star_pattern_index + 1;
+                last_star_text_index += 1;
+                text_index = last_star_text_index;
+            } else {
+                return false;
+            }
+        }
+
+        while pattern_index < pattern_bytes.len() && pattern_bytes[pattern_index] == b'*' {
+            pattern_index += 1;
+        }
+        pattern_index == pattern_bytes.len()
+    }
+
+    #[inline]
+    fn parse_regex(pattern: &str) -> Option<Regex> {
+        // Regex form: /.../ with at least two slashes and no trailing flags for now
+        let stripped = pattern.strip_prefix('/')?;
+        let end = stripped.rfind('/')?;
+        Regex::new(&stripped[..end]).ok()
+    }
+}
+
 /// Validates that the given path points to an existing file with a supported extension.
 ///
 /// # Arguments
@@ -361,13 +469,10 @@ pub mod conf_serde {
                 D: Deserializer<'de>,
             {
                 let opt = Option::<String>::deserialize(deserializer)?;
-                match opt {
-                    Some(s) => s
-                        .parse::<Level>()
-                        .map(Some)
-                        .map_err(serde::de::Error::custom),
-                    None => Ok(None),
-                }
+                Ok(match opt {
+                    Some(s) => Some(s.parse::<Level>().map_err(serde::de::Error::custom)?),
+                    None => None,
+                })
             }
         }
     }
@@ -490,8 +595,11 @@ mod tests {
             .expect("resolving default pipelines should succeed");
         let internal_traces = Properties::resolve_internal_exporters(&raw_conf)
             .expect("resolving default internal traces should succeed");
+        let resolved_interfaces = raw_conf.resolve_interfaces();
+        let interfaces = raw_conf.interfaces;
         Properties {
-            interface: raw_conf.interface,
+            interfaces,
+            resolved_interfaces,
             auto_reload: raw_conf.auto_reload,
             log_level: raw_conf.log_level,
             api: raw_conf.api,
@@ -510,9 +618,73 @@ mod tests {
     }
 
     #[test]
+    fn resolve_interfaces_supports_globs_and_literals() {
+        // available interfaces on host (simulated)
+        let available = vec![
+            "eth0".to_string(),
+            "eth1".to_string(),
+            "en0".to_string(),
+            "en0p1".to_string(),
+            "en0p2".to_string(),
+            "lo".to_string(),
+        ];
+
+        // patterns including star, question, literal, and duplicates
+        let patterns = vec![
+            "eth*".to_string(),         // matches eth0, eth1
+            "en0p*".to_string(),        // matches en0p1, en0p2
+            "en?".to_string(),          // matches en0
+            "lo".to_string(),           // literal match
+            "doesnotexist".to_string(), // literal not present -> ignored with warn
+            "eth*".to_string(),         // duplicate pattern should not duplicate results
+        ];
+
+        let resolved = Conf::resolve_interfaces_from(&patterns, &available);
+
+        // Order is insertion order from first match occurrences
+        assert_eq!(
+            resolved,
+            vec![
+                "eth0".to_string(),
+                "eth1".to_string(),
+                "en0p1".to_string(),
+                "en0p2".to_string(),
+                "en0".to_string(),
+                "lo".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_interfaces_supports_regex() {
+        let available = vec![
+            "eth0".to_string(),
+            "eth1".to_string(),
+            "en0".to_string(),
+            "en0p1".to_string(),
+            "en0p2".to_string(),
+            "lo".to_string(),
+        ];
+
+        // regex forms: /^en0p\d+$/ matches en0p1, en0p2; /^eth[01]$/ matches eth0, eth1
+        let patterns = vec!["/^en0p\\d+$/".to_string(), "/^eth[01]$/".to_string()];
+
+        let resolved = Conf::resolve_interfaces_from(&patterns, &available);
+        assert_eq!(
+            resolved,
+            vec![
+                "en0p1".to_string(),
+                "en0p2".to_string(),
+                "eth0".to_string(),
+                "eth1".to_string(),
+            ]
+        );
+    }
+
+    #[test]
     fn default_impl_has_eth0_interface() {
         let cfg = create_default_app_props();
-        assert_eq!(cfg.interface, Vec::from(["eth0".to_string()]));
+        assert_eq!(cfg.interfaces, Vec::from(["eth0".to_string()]));
         assert_eq!(cfg.auto_reload, false);
         assert_eq!(cfg.log_level, Level::INFO);
         assert_eq!(cfg.api.port, 8080);
@@ -608,7 +780,7 @@ mod tests {
             jail.create_file(
                 path,
                 r#"
-interface:
+interfaces:
   - eth1
 auto_reload: false
 log_level: warn
@@ -624,7 +796,7 @@ log_level: warn
                 "debug",
             ]);
             let (cfg, _cli) = Properties::new(cli).expect("config loads from cli file");
-            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.log_level, Level::DEBUG);
 
@@ -639,7 +811,7 @@ log_level: warn
             jail.create_file(
                 path,
                 r#"
-interface: ["eth1"]
+interfaces: ["eth1"]
 auto_reload: true
 log_level: debug
                 "#,
@@ -648,7 +820,7 @@ log_level: debug
 
             let cli = Cli::parse_from(["mermin"]);
             let (cfg, _cli) = Properties::new(cli).expect("config loads from env file");
-            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.log_level, Level::DEBUG);
 
@@ -663,26 +835,26 @@ log_level: debug
             jail.create_file(
                 path,
                 r#"
-interface: ["eth1"]
+interfaces: ["eth1"]
                 "#,
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Properties::new(cli).expect("config loads from cli file");
-            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
 
             // Update the config file
             jail.create_file(
                 path,
                 r#"
-interface: ["eth2", "eth3"]
+interfaces: ["eth2", "eth3"]
                 "#,
             )?;
 
             let reloaded_cfg = cfg.reload().expect("config should reload");
             assert_eq!(
-                reloaded_cfg.interface,
+                reloaded_cfg.interfaces,
                 Vec::from(["eth2".to_string(), "eth3".to_string()])
             );
             assert_eq!(reloaded_cfg.config_path, Some(path.parse().unwrap()));
@@ -714,7 +886,7 @@ interface: ["eth2", "eth3"]
                 path,
                 r#"
 # Custom configuration for testing
-interface:
+interfaces:
   - eth1
 
 api:
@@ -732,7 +904,7 @@ metrics:
             let (cfg, _cli) = Properties::new(cli).expect("config should load from yaml file");
 
             // Assert that all the custom values from the file were loaded correctly
-            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.api.listen_address, "127.0.0.1");
             assert_eq!(cfg.api.port, 8081);
             assert_eq!(cfg.metrics.listen_address, "0.0.0.0");
@@ -749,7 +921,7 @@ metrics:
             jail.create_file(
                 path,
                 r#"
-interface = ["eth0"]
+interfaces = ["eth0"]
 log_level = "info"
 auto_reload = true
 
@@ -768,7 +940,7 @@ metrics {
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Properties::new(cli).expect("config should load from HCL file");
 
-            assert_eq!(cfg.interface, vec!["eth0"]);
+            assert_eq!(cfg.interfaces, vec!["eth0"]);
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.api.port, 9090);
@@ -782,7 +954,7 @@ metrics {
     fn validates_hcl_extension() {
         Jail::expect_with(|jail| {
             let path = "mermin.hcl";
-            jail.create_file(path, r#"interface = ["eth0"]"#)?;
+            jail.create_file(path, r#"interfaces = ["eth0"]"#)?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let result = Properties::new(cli);
@@ -799,14 +971,14 @@ metrics {
             jail.create_file(
                 path,
                 r#"
-interface = ["eth1"]
+interfaces = ["eth1"]
 log_level = "info"
                 "#,
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Properties::new(cli).expect("config loads from HCL file");
-            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
 
@@ -814,14 +986,14 @@ log_level = "info"
             jail.create_file(
                 path,
                 r#"
-interface = ["eth2", "eth3"]
+interfaces = ["eth2", "eth3"]
 log_level = "debug"
                 "#,
             )?;
 
             let reloaded_cfg = cfg.reload().expect("config should reload from HCL");
             assert_eq!(
-                reloaded_cfg.interface,
+                reloaded_cfg.interfaces,
                 Vec::from(["eth2".to_string(), "eth3".to_string()])
             );
             assert_eq!(reloaded_cfg.log_level, Level::DEBUG);
@@ -840,7 +1012,7 @@ log_level = "debug"
                 path,
                 r#"
 # Invalid HCL syntax
-interface = [eth0  # Missing closing bracket and quotes
+interfaces = [eth0  # Missing closing bracket and quotes
 log_level =
                 "#,
             )?;
@@ -873,7 +1045,7 @@ log_level =
                 path,
                 r#"
 # Custom configuration for testing
-interface = ["eth1"]
+interfaces = ["eth1"]
 
 api {
     listen_address = "127.0.0.1"
@@ -891,7 +1063,7 @@ metrics {
             let (cfg, _cli) = Properties::new(cli).expect("config should load from HCL file");
 
             // Assert that all the custom values from the file were loaded correctly
-            assert_eq!(cfg.interface, Vec::from(["eth1".to_string()]));
+            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.api.listen_address, "127.0.0.1");
             assert_eq!(cfg.api.port, 8081);
             assert_eq!(cfg.metrics.listen_address, "0.0.0.0");

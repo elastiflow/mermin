@@ -116,9 +116,12 @@ config:
   source: '{{ .Files.Get "config/config.hcl" }}'
   # "source" is used if undefined. "content" supports templating
   # content: |
-  #   interface = [
-  #     "eth0"
-  #   ]
+  #   # Literal example
+  #   interfaces = ["eth0"]
+  #   # Glob example: match all ethernet interfaces starting with "eth"
+  #   # interfaces = ["eth*"]
+  #   # Regex example: match slot-based PNIN like en0p<digits>
+  #   # interfaces = ["/^en0p\\d+$/"]
   #   log_level = "info"
 
 netobserv:
