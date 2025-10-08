@@ -330,6 +330,7 @@ impl Default for SpanAttributes {
             process_executable_name: None,
             container_image_name: None,
             container_name: None,
+            matched_pipelines: Vec::new(),
         }
     }
 }

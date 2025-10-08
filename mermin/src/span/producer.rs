@@ -522,8 +522,8 @@ impl PacketWorker {
                             .then_some(packet.tunnel_ipsec_ah_spi),
 
                         // Filtering pipelines
-                        matched_pipelines: Vec::new(),
-                        
+                        matched_pipelines,
+
                         // All other attributes default to None
                         ..Default::default()
                     },
