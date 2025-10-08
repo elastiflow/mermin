@@ -523,7 +523,7 @@ impl PacketWorker {
 
                         // Filtering pipelines
                         matched_pipelines: Vec::new(),
-                        
+
                         // All other attributes default to None
                         ..Default::default()
                     },
