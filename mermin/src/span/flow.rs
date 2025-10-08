@@ -216,7 +216,8 @@ pub struct SpanAttributes {
     pub container_image_name: Option<String>,
     pub container_name: Option<String>,
 
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing, default)]
+    #[allow(dead_code)]
     pub matched_pipelines: Vec<String>,
 }
 
@@ -767,18 +768,6 @@ impl Traceable for FlowSpan {
         }
         if let Some(ref value) = self.attributes.container_name {
             kvs.push(KeyValue::new("container.name", value.to_owned()));
-        }
-        if !self.attributes.matched_pipelines.is_empty() {
-            let pipeline_values: Vec<StringValue> = self
-                .attributes
-                .matched_pipelines
-                .iter()
-                .map(|s| StringValue::from(s.clone()))
-                .collect();
-            kvs.push(KeyValue::new(
-                "mermin.matched_pipelines",
-                Value::Array(pipeline_values.into()),
-            ));
         }
         span.set_attributes(kvs);
         span
