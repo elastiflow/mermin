@@ -5,7 +5,7 @@ use hcl::eval::Context;
 use pnet::datalink;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use tracing::Level;
+use tracing::{Level, warn};
 
 use crate::{
     otlp::opts::ExporterOptions,
@@ -247,7 +247,7 @@ impl Conf {
         let available: Vec<String> = datalink::interfaces().into_iter().map(|i| i.name).collect();
         Self::resolve_interfaces_from(&self.interfaces, &available)
     }
-fn resolve_interfaces_from(patterns: &[String], available: &[String]) -> Vec<String> {
+    fn resolve_interfaces_from(patterns: &[String], available: &[String]) -> Vec<String> {
         use std::collections::HashSet;
         let mut resolved = Vec::new();
         let mut seen = HashSet::new();
@@ -309,8 +309,8 @@ fn resolve_interfaces_from(patterns: &[String], available: &[String]) -> Vec<Str
     // Simple wildcard matcher supporting '*' and '?'
     fn glob_match(pattern: &str, text: &str) -> bool {
         let (pattern_bytes, text_bytes) = (pattern.as_bytes(), text.as_bytes());
-        let (mut pattern_index, mut text_index) = (0usize, 0usize);
-        let (mut last_star_pattern_index, mut last_star_text_index) = (usize::MAX, 0usize);
+        let (mut pattern_index, mut text_index) = (0, 0);
+        let (mut last_star_pattern_index, mut last_star_text_index) = (usize::MAX, 0);
 
         while text_index < text_bytes.len() {
             if pattern_index < pattern_bytes.len()
@@ -340,11 +340,10 @@ fn resolve_interfaces_from(patterns: &[String], available: &[String]) -> Vec<Str
 
     #[inline]
     fn parse_regex(pattern: &str) -> Option<Regex> {
-        // Regex form: /.../ with at least two slashes and no trailing flags
-        pattern
-            .strip_prefix('/')
-            .and_then(|s| s.rsplit_once('/').map(|(body, _)| body))
-            .and_then(|body| Regex::new(body).ok())
+        // Regex form: /.../ with at least two slashes and no trailing flags for now
+        let stripped = pattern.strip_prefix('/')?;
+        let end = stripped.rfind('/')?;
+        Regex::new(&stripped[..end]).ok()
     }
 }
 
@@ -470,13 +469,10 @@ pub mod conf_serde {
                 D: Deserializer<'de>,
             {
                 let opt = Option::<String>::deserialize(deserializer)?;
-                match opt {
-                    Some(s) => s
-                        .parse::<Level>()
-                        .map(Some)
-                        .map_err(serde::de::Error::custom),
-                    None => Ok(None),
-                }
+                Ok(match opt {
+                    Some(s) => Some(s.parse::<Level>().map_err(serde::de::Error::custom)?),
+                    None => None,
+                })
             }
         }
     }
