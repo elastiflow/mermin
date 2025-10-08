@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 use base64::{Engine as _, engine::general_purpose};
 use opentelemetry_otlp::Protocol;
 use serde::{Deserialize, Serialize};
 
-use crate::runtime::conf::conf_serde::exporter_protocol;
+use crate::runtime::conf::conf_serde::{duration, exporter_protocol};
 
 /// Configuration options for all telemetry exporters used by the application.
 ///
@@ -85,16 +85,16 @@ pub struct ExporterOptions {
 /// - `tls`: Optional TLS configuration for secure communication.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct OtlpExporterOptions {
-    #[serde(default = "defaults::address")]
-    pub address: String,
     #[serde(default = "defaults::scheme")]
     pub scheme: String,
+    #[serde(default = "defaults::address")]
+    pub address: String,
     #[serde(default = "defaults::port")]
     pub port: u16,
     #[serde(default = "defaults::protocol", with = "exporter_protocol")]
     pub protocol: ExporterProtocol,
-    #[serde(default = "defaults::connection_timeout_ms")]
-    pub connection_timeout_ms: u64,
+    #[serde(default = "defaults::connection_timeout", with = "duration")]
+    pub connection_timeout: Duration,
     pub auth: Option<AuthOptions>,
     pub tls: Option<TlsOptions>,
 }
@@ -272,8 +272,13 @@ impl From<String> for ExporterProtocol {
 }
 
 mod defaults {
+    use std::time::Duration;
+
     use crate::otlp::opts::ExporterProtocol;
 
+    pub fn scheme() -> String {
+        "http".to_string()
+    }
     pub fn address() -> String {
         "localhost".to_string()
     }
@@ -283,11 +288,8 @@ mod defaults {
     pub fn protocol() -> ExporterProtocol {
         ExporterProtocol::Grpc
     }
-    pub fn scheme() -> String {
-        "http".to_string()
-    }
-    pub fn connection_timeout_ms() -> u64 {
-        10_000
+    pub fn connection_timeout() -> Duration {
+        Duration::from_secs(10)
     }
 }
 

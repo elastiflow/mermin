@@ -4,7 +4,9 @@ use anyhow::Result;
 use k8s_openapi::api::{core::v1::Pod, networking::v1::NetworkPolicySpec};
 
 use crate::{
-    k8s::{AttributionInfo, Attributor, FlowContext, FlowDirection, K8sObjectMeta, WorkloadOwner},
+    k8s::attributor::{
+        AttributionInfo, Attributor, FlowContext, FlowDirection, K8sObjectMeta, WorkloadOwner,
+    },
     span::flow::FlowSpan,
 };
 

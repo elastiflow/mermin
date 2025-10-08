@@ -414,8 +414,11 @@ exporter "stdout" "json" {
 
 # Exporter (output) config of type triton with name "json"
 exporter "otlp" "main" {
-  address = "example.com"
-  port    = 443
+  scheme   = "https"
+  address  = "example.com"
+  port     = 443
+  protocol = "grpc"
+  connectionTimeout = "10s"
   tls = {
     enabled     = true
     insecure    = false

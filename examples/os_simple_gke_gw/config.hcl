@@ -49,8 +49,11 @@ agent "traces" "main" {
 
 # OTLP exporter configuration
 exporter "otlp" "main" {
-  address = "example.com"
-  port    = 4317
+  scheme   = "http"
+  address  = "example.com"
+  port     = 4317
+  protocol = "grpc"
+  connectionTimeout = "10s"
 
   auth "basic" {
     pass = "PASSWORD"

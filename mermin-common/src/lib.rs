@@ -269,7 +269,7 @@ mod tests {
     // Test PacketMeta size and alignment
     #[test]
     fn test_packet_meta_layout() {
-        let expected_size = 208; // Size with all fields including new IP/ICMP/TCP fields + start_time (u64)
+        let expected_size = 208;
         let actual_size = size_of::<PacketMeta>();
 
         assert_eq!(
@@ -277,8 +277,6 @@ mod tests {
             "Size of PacketMeta should be {expected_size} bytes, but was {actual_size} bytes"
         );
 
-        // Verify the alignment (should be the max alignment of members)
-        // For this struct, the largest alignment would be for u64 fields (8 bytes)
         let expected_alignment = 8;
         let actual_alignment = align_of::<PacketMeta>();
 
