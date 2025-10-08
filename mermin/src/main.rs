@@ -112,18 +112,21 @@ async fn main() -> Result<()> {
             .try_into()?;
         program.load()?;
 
-        props.interface.iter().try_for_each(|iface| -> Result<()> {
-            // error adding clsact to the interface if it is already added is harmless
-            // the full cleanup can be done with 'sudo tc qdisc del dev eth0 clsact'.
-            let _ = tc::qdisc_add_clsact(iface);
+        props
+            .resolved_interfaces
+            .iter()
+            .try_for_each(|iface| -> Result<()> {
+                // error adding clsact to the interface if it is already added is harmless
+                // the full cleanup can be done with 'sudo tc qdisc del dev eth0 clsact'.
+                let _ = tc::qdisc_add_clsact(iface);
 
-            program.attach(iface, *attach_type)?;
-            debug!(
-                "mermin {} program attached to {iface}",
-                attach_type.direction_name()
-            );
-            Ok(())
-        })
+                program.attach(iface, *attach_type)?;
+                debug!(
+                    "mermin {} program attached to {iface}",
+                    attach_type.direction_name()
+                );
+                Ok(())
+            })
     })?;
 
     let map = ebpf
@@ -140,7 +143,7 @@ async fn main() -> Result<()> {
     let iface_map: HashMap<u32, String> = {
         let mut map = HashMap::new();
         for iface in datalink::interfaces() {
-            if props.interface.contains(&iface.name) {
+            if props.resolved_interfaces.contains(&iface.name) {
                 map.insert(iface.index, iface.name.clone());
             }
         }

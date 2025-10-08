@@ -37,7 +37,10 @@ pub struct Properties {
     /// A vector of strings representing the network interfaces or endpoints
     /// that the application should operate on. These interfaces are read
     /// directly from the configuration file.
-    pub interface: Vec<String>,
+    pub interfaces: Vec<String>,
+
+    /// Resolved interfaces after expanding globs and regexes against host interfaces
+    pub resolved_interfaces: Vec<String>,
 
     /// A boolean flag indicating whether the application should automatically
     /// reload the configuration whenever changes are detected in the
@@ -204,10 +207,17 @@ impl Properties {
 
         let trace_pipelines = Self::resolve_trace_pipelines(&raw_conf)?;
         let internal_exporters = Self::resolve_internal_exporters(&raw_conf)?;
-        let span_level = raw_conf.traces.unwrap().span_level;
+        let span_level = raw_conf
+            .traces
+            .as_ref()
+            .map(|t| t.span_level)
+            .unwrap_or_default();
 
+        let resolved_interfaces = raw_conf.resolve_interfaces();
+        let interfaces = raw_conf.interfaces;
         let conf = Self {
-            interface: raw_conf.interface,
+            interfaces,
+            resolved_interfaces,
             auto_reload: raw_conf.auto_reload,
             log_level: raw_conf.log_level,
             api: raw_conf.api,
@@ -281,10 +291,17 @@ impl Properties {
 
         let trace_pipelines = Self::resolve_trace_pipelines(&raw_conf)?;
         let internal_exporters = Self::resolve_internal_exporters(&raw_conf)?;
-        let span_level = raw_conf.traces.unwrap().span_level;
+        let span_level = raw_conf
+            .traces
+            .as_ref()
+            .map(|t| t.span_level)
+            .unwrap_or_default();
 
+        let resolved_interfaces = raw_conf.resolve_interfaces();
+        let interfaces = raw_conf.interfaces;
         Ok(Self {
-            interface: raw_conf.interface,
+            interfaces,
+            resolved_interfaces,
             auto_reload: raw_conf.auto_reload,
             log_level: raw_conf.log_level,
             api: raw_conf.api,
