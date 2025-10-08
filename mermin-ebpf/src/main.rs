@@ -309,7 +309,6 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
         Err(_) => return TC_ACT_PIPE,
     };
 
-    // Initialize the meta with default values
     meta.capture_time = timestamp;
     meta.ifindex = unsafe { (*ctx.skb.skb).ifindex };
     meta.direction = direction;

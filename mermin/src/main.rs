@@ -22,11 +22,12 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     health::{HealthState, start_api_server},
-    k8s::resource_parser::attribute_flow_span,
+    k8s::{attributor::Attributor, parser::attribute_flow_span},
     otlp::{
         provider::{init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
     },
+    runtime::context::Context,
     span::producer::FlowSpanProducer,
 };
 
@@ -37,8 +38,8 @@ async fn main() -> Result<()> {
     // TODO: API will come once we have an API server
     // TODO: listen for SIGTERM `kill -TERM $(pidof mermin)` to gracefully shutdown the eBPF program and all configuration.
     // TODO: do not reload global configuration found in CLI
-    let runtime = runtime::Runtime::new()?;
-    let runtime::Runtime {
+    let runtime = Context::new()?;
+    let Context {
         properties: props, ..
     } = runtime;
 
@@ -161,7 +162,7 @@ async fn main() -> Result<()> {
     )?;
 
     info!("initializing k8s client");
-    let k8s_attributor = match k8s::Attributor::new(health_state.clone()).await {
+    let k8s_attributor = match Attributor::new(health_state.clone()).await {
         Ok(attributor) => {
             info!("k8s client initialized successfully and all caches are synced");
             Some(Arc::new(attributor))

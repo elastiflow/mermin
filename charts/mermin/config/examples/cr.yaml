@@ -245,12 +245,15 @@ kind: MerminExporterOTLP
 metadata:
   name: main
 spec:
+  scheme: https
   address: example.com
+  port: 443
+  protocol: grpc
+  connectionTimeout: "10s"
   auth:
     basic:
       pass: env("USER_SPECIFIED_ENV_VAR_TRITON_PASS")
       user: foo
-  port: 443
   tls:
     caCert: /etc/certs/ca.crt
     clientCert: /etc/certs/cert.crt
