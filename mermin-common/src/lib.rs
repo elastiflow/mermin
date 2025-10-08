@@ -27,6 +27,11 @@ pub struct PacketMeta {
     /// Tunnel Destination IPv6 address (outermost)
     pub tunnel_dst_ipv6_addr: [u8; 16],
 
+    // Fields with 8-byte alignment
+    // ---
+    /// Timestamp in nanoseconds when the packet was captured
+    pub capture_time: u64,
+
     /// Fields with 6-byte alignment
     /// ---
     /// Source MAC address (innermost)
@@ -264,7 +269,7 @@ mod tests {
     // Test PacketMeta size and alignment
     #[test]
     fn test_packet_meta_layout() {
-        let expected_size = 200; // Size with all fields including new IP/ICMP/TCP fields
+        let expected_size = 208; // Size with all fields including new IP/ICMP/TCP fields + start_time (u64)
         let actual_size = size_of::<PacketMeta>();
 
         assert_eq!(
@@ -320,6 +325,7 @@ mod tests {
         let tcp_flags: u8 = 0xB6;
 
         let mut record = PacketMeta {
+            capture_time: 0,
             ifindex: 1,
             src_ipv6_addr: src_ipv6_val,
             dst_ipv6_addr: dst_ipv6_val,
@@ -425,6 +431,7 @@ mod tests {
         let packet = PacketMeta::default();
 
         // Test that all fields are initialized to their expected default values
+        assert_eq!(packet.capture_time, 0);
         assert_eq!(packet.src_ipv6_addr, [0u8; 16]);
         assert_eq!(packet.dst_ipv6_addr, [0u8; 16]);
         assert_eq!(packet.tunnel_src_ipv6_addr, [0u8; 16]);
