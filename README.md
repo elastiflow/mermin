@@ -1,6 +1,6 @@
 <h1 align="center"><a href="https://www.elastiflow.com" target="_blank"><img src="https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1746227898/mermin-horizontal_kxhvzo.png" width="400" alt="Mermin Logo"></a></h1>
 
-Mermin is a powerful, Kubernetes-native network traffic observability tool. 🔭 It uses an **eBPF** agent to efficiently
+Mermin is a powerful, Kubernetes-native network traffic observability tool. 🔭 It uses an **eBPF*- agent to efficiently
 capture network flow data and sends it via the **OpenTelemetry** Collector protocol for easy integration with modern
 observability platforms.
 
@@ -88,22 +88,22 @@ observability platforms.
   - [🚀 CI/CD Integration](#-cicd-integration)
 - [Artifacts](#artifacts)
 - [📜 License](#-license)
-    - [eBPF](#ebpf)
+  - [eBPF](#ebpf)
 
 
 ## 🚀 Quick Start: Deploying to Kubernetes with `kind`
 
 Mermin is distributed using Helm charts, examples for various deployments may be found in the `examples/` directory.
-This guide will get you running Mermin on a local **Kubernetes** cluster using [kind](https://kind.sigs.k8s.io/).
+This guide will get you running Mermin on a local **Kubernetes*- cluster using [kind](https://kind.sigs.k8s.io/).
 
 ### Prerequisites
 
 You'll need the following tools installed on your machine:
 
-* [Docker](https://docs.docker.com/get-docker/)
-* [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
-* [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
-* [Helm](https://helm.sh/docs/intro/install/)
+- [Docker](https://docs.docker.com/get-docker/)
+- [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
+- [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
+- [Helm](https://helm.sh/docs/intro/install/)
 
 ### Installation
 
@@ -140,13 +140,13 @@ helm upgrade -i mermin charts/mermin --values examples/local/values.yaml --wait 
 
 ### Verifying the Deployment
 
-1. **Check that the `mermin` pods are running** on each node. You should see one pod per worker node.
+1. **Check that the `mermin` pods are running*- on each node. You should see one pod per worker node.
 
    ```shell
    kubectl get pods -l app.kubernetes.io/name=mermin
    ```
 
-2. **View the logs** from any of the Mermin pods to see network flow data.
+2. **View the logs*- from any of the Mermin pods to see network flow data.
 
    ```shell
    kubectl logs -l app.kubernetes.io/name=mermin -f
@@ -181,8 +181,7 @@ Ensure you have the following installed:
 3. **bpf-linker**: `cargo install bpf-linker` (use `--no-default-features` on macOS)
 4. (if cross-compiling) **rustup target**: `rustup target add ${ARCH}-unknown-linux-musl`
 5. (if cross-compiling) **LLVM**: (e.g.) `brew install llvm` (on macOS)
-6. (if cross-compiling) **C toolchain**: (e.g.) [
-   `brew install filosottile/musl-cross/musl-cross`](https://github.com/FiloSottile/homebrew-musl-cross) (on macOS)
+6. (if cross-compiling) **C toolchain**: (e.g.) [`brew install filosottile/musl-cross/musl-cross`](https://github.com/FiloSottile/homebrew-musl-cross) (on macOS)
 
 ### Build and Run Locally
 
@@ -196,14 +195,14 @@ The build script automatically compiles the eBPF program and embeds it into the 
 
 #### 2. Configuration Files
 
-Mermin supports configuration in both **YAML** and **HCL** formats. Default configuration file for local development is provided in the project root: `config.hcl`.
+Mermin supports configuration in both **YAML*- and **HCL*- formats. Default configuration file for local development is provided in the project root: `config.hcl`.
 
 File contain sensible defaults for local development, including:
 
-* **Stdout exporter enabled**: Flow data will be printed to the console for easy debugging.
-* **OTLP exporter disabled**: External telemetry endpoints are disabled by default.
-* **Default interfaces**: Monitors `eth0` by default.
-* **Logging**: Set to `info` level.
+- **Stdout exporter enabled**: Flow data will be printed to the console for easy debugging.
+- **OTLP exporter disabled**: External telemetry endpoints are disabled by default.
+- **Default interfaces**: Monitors `eth0` by default.
+- **Logging**: Set to `info` level.
 
 You can customize the configuration by editing these files or creating your own.
 
@@ -218,11 +217,13 @@ fmtconvert -from hcl -to yaml examples/local/config.hcl > examples/local/config.
 Running the eBPF agent requires elevated privileges. Use the `--config` flag to specify your chosen configuration file. Default configuration file `config.hcl` is provided in the project root with the stdout exporter enabled for local development.
 
 **Using HCL:**
+
 ```shell
 cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config examples/local/config.hcl
 ```
 
 **Using YAML:**
+
 ```shell
 cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config <(fmtconvert -from hcl -to yaml examples/local/config.hcl)
 ```
@@ -321,9 +322,9 @@ analyzing the behavior of your eBPF programs.
 
 Before you begin, ensure you have the following tools installed and configured on your local machine:
 
-* kubectl: The Kubernetes command-line tool, configured to connect to your cluster.
-* Wireshark: The network protocol analyzer.
-* k9s (Optional): A terminal-based UI to manage Kubernetes clusters, which simplifies getting a shell into pods.
+- kubectl: The Kubernetes command-line tool, configured to connect to your cluster.
+- Wireshark: The network protocol analyzer.
+- k9s (Optional): A terminal-based UI to manage Kubernetes clusters, which simplifies getting a shell into pods.
 
 #### 1. Identify Your Target Pod
 
@@ -350,8 +351,8 @@ To start the capture, we will use kubectl debug to attach a temporary container 
 our target pod. We'll then pipe the output of tcpdump from that container directly into Wireshark on your local
 machine.
 
-Run the following command in your terminal. Replace <pod-name> with your target pod's name (e.g., mermin-vrxd2)
-and <container-name> with the name of the container (e.g., mermin) inside the pod (if it's not the default one).
+Run the following command in your terminal. Replace `<pod-name>` with your target pod's name (e.g., mermin-vrxd2)
+and `<container-name>` with the name of the container (e.g., mermin) inside the pod (if it's not the default one).
 
 ```shell
 kubectl debug -i -q <pod-name> --image=nicolaka/netshoot --target=<container-name> --profile=sysadmin -- tcpdump -i eth0 -w - | wireshark -k -i -
@@ -359,17 +360,17 @@ kubectl debug -i -q <pod-name> --image=nicolaka/netshoot --target=<container-nam
 
 Command Breakdown:
 
-* kubectl debug -i -q <pod-name>: Attaches an interactive, ephemeral debug container to the specified pod.
-* `--image=nicolaka/netshoot`: Uses the netshoot image, which is packed with useful networking utilities like tcpdump.
-* `--target=<container-name>`: Specifies which container in the pod to target for debugging.
-* `--profile=sysadmin`: Specifies the security context profile to use for the debug container. This is required to
+- kubectl debug -i -q `<pod-name>`: Attaches an interactive, ephemeral debug container to the specified pod.
+- `--image=nicolaka/netshoot`: Uses the netshoot image, which is packed with useful networking utilities like tcpdump.
+- `--target=<container-name>`: Specifies which container in the pod to target for debugging.
+- `--profile=sysadmin`: Specifies the security context profile to use for the debug container. This is required to
   run tcpdump.
-* `-- tcpdump -i eth0 -w -`: Executes tcpdump inside the debug container.
-    * `-i eth0`: Listens on the primary network interface, eth0.
-    * `-w -`: Writes the raw packet data to standard output (-) instead of a file.
-* `| wireshark -k -i -`: Pipes the standard output from tcpdump into Wireshark.
-* `-k`: Starts the capture session immediately.
-* `-i -`: Reads packet data from standard input (-).
+- `-- tcpdump -i eth0 -w -`: Executes tcpdump inside the debug container.
+  - `-i eth0`: Listens on the primary network interface, eth0.
+  - `-w -`: Writes the raw packet data to standard output (-) instead of a file.
+- `| wireshark -k -i -`: Pipes the standard output from tcpdump into Wireshark.
+- `-k`: Starts the capture session immediately.
+- `-i -`: Reads packet data from standard input (-).
 
 Example command:
 
@@ -457,13 +458,13 @@ bpftool prog show id 167
 
 This provides comprehensive information including:
 
-* Program type and name
-* Load time and user ID
-* Translated bytecode size (`xlated`)
-* JIT-compiled size (`jited`)
-* Memory lock size (`memlock`)
-* Associated map IDs
-* BTF (BPF Type Format) ID
+- Program type and name
+- Load time and user ID
+- Translated bytecode size (`xlated`)
+- JIT-compiled size (`jited`)
+- Memory lock size (`memlock`)
+- Associated map IDs
+- BTF (BPF Type Format) ID
 
 ### Analyzing Program Instructions
 
@@ -478,9 +479,9 @@ bpftool prog dump xlated id 167 | grep -E '^[0-9]+:' | wc -l
 
 **What this command does:**
 
-* `bpftool prog dump xlated id 167`: Dumps the translated bytecode for program ID 167
-* `grep -E '^[0-9]+:'`: Filters to only show lines that start with numbers (the actual instructions)
-* `wc -l`: Counts the total number of instruction lines
+- `bpftool prog dump xlated id 167`: Dumps the translated bytecode for program ID 167
+- `grep -E '^[0-9]+:'`: Filters to only show lines that start with numbers (the actual instructions)
+- `wc -l`: Counts the total number of instruction lines
 
 **Example output:**
 
@@ -498,19 +499,19 @@ This shows that your mermin eBPF program contains **2,584 instructions**.
 
 #### Alternative methods for instruction counting
 
-**Method 1: Raw line count (includes comments and headers)**
+**Method 1: Raw line count (includes comments and headers):**
 
 ```shell
 bpftool prog dump xlated id 167 | wc -l
 ```
 
-**Method 2: Size-based estimation**
+**Method 2: Size-based estimation:**
 
 ```shell
 bpftool prog show id 167 | grep xlated | awk '{print "Estimated instructions: " $2/8}'
 ```
 
-**Method 3: View actual instructions (first 20 lines)**
+**Method 3: View actual instructions (first 20 lines):**
 
 ```shell
 bpftool prog dump xlated id 167 | head -20
@@ -653,10 +654,10 @@ docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builde
 
 The integration test eBPF programs are TC classifiers that:
 
-* **Function**: `integration_test` - Main entry point
-* **Type**: `sched_cls` (TC classifier)
-* **Purpose**: Parse network packet headers for various protocols
-* **Protocols Supported**: Ethernet, IPv4/IPv6, TCP/UDP, AH, ESP, Hop-by-Hop options, Geneve
+- **Function**: `integration_test` - Main entry point
+- **Type**: `sched_cls` (TC classifier)
+- **Purpose**: Parse network packet headers for various protocols
+- **Protocols Supported**: Ethernet, IPv4/IPv6, TCP/UDP, AH, ESP, Hop-by-Hop options, Geneve
 
 #### Key Components
 
@@ -669,10 +670,10 @@ The integration test eBPF programs are TC classifiers that:
 
 Based on the current implementation, the integration test eBPF program contains:
 
-* **Total Instructions**: 1,367 (0-1366)
-* **Main Function Range**: 0-1366
-* **Architecture**: eBPF (bpfel-unknown-none)
-* **Build Profile**: Release
+- **Total Instructions**: 1,367 (0-1366)
+- **Main Function Range**: 0-1366
+- **Architecture**: eBPF (bpfel-unknown-none)
+- **Build Profile**: Release
 
 ### Advanced Analysis Techniques
 
@@ -763,7 +764,7 @@ This comprehensive approach ensures you can monitor and optimize your integratio
 
 eBPF programs have a strict **512-byte stack limit**. When exceeded, you'll see errors like:
 
-```
+```shell
 Error: the BPF_PROG_LOAD syscall failed. Verifier output: combined stack size of 3 calls is 544. Too large
 ```
 
@@ -777,6 +778,7 @@ Error: the BPF_PROG_LOAD syscall failed. Verifier output: combined stack size of
 ### 📋 Quick Analysis
 
 #### 1. Prerequisites
+
 ```shell
 docker build -t mermin-builder:latest --target builder .
 ```
@@ -785,19 +787,22 @@ docker build -t mermin-builder:latest --target builder .
 
 The project includes three analysis scripts in the `scripts/` directory:
 
-**`scripts/check_stack_usage.sh`** - Quick health check (30 seconds)
+**`scripts/check_stack_usage.sh`*- - Quick health check (30 seconds)
+
 - **Purpose**: Fast individual function stack analysis for daily development and CI/CD
 - **Thresholds**: Critical >320 bytes, Warning >192 bytes (64-byte aligned)
 - **Output**: Simple pass/fail with color-coded status
 - **Features**: ✅ Forces fresh builds, detects build failures, prevents stale results
 
-**`scripts/analyze_call_chain.sh`** - Call chain overview (45 seconds)
+**`scripts/analyze_call_chain.sh`*- - Call chain overview (45 seconds)
+
 - **Purpose**: Shows function calls and stack usage levels for initial investigation
 - **Output**: Function call instructions and sorted stack usage levels
 - **Use When**: Investigating verifier failures or understanding call patterns
 - **Features**: ✅ Forces fresh builds, shows binary timestamps, handles no-call scenarios
 
-**`scripts/cumulative_stack_calculator.sh`** - Educational deep dive (2 minutes)
+**`scripts/cumulative_stack_calculator.sh`*- - Educational deep dive (2 minutes)
+
 - **Purpose**: Step-by-step educational breakdown of cumulative stack calculation
 - **Output**: Detailed hex-to-decimal conversions, scenarios, and insights
 - **Use When**: Learning how verifier calculates stack, training new developers
@@ -818,16 +823,19 @@ The project includes three analysis scripts in the `scripts/` directory:
 
 ### 🔧 Interpreting Results
 
-#### Understanding `check_stack_usage.sh` Output:
+#### Understanding `check_stack_usage.sh` Output
+
 ```bash
 📊 Individual function max stack: 136 bytes (0x88)
 ✅ GOOD: Individual stack usage within safe limits
 ```
+
 - **Below 192 bytes**: ✅ Safe for most call chains
 - **192-320 bytes**: ⚠️ Monitor call depth - might exceed 512 in deep chains
 - **Above 320 bytes**: 🔥 High risk - will likely cause verifier failures
 
-#### Understanding `analyze_call_chain.sh` Output:
+#### Understanding `analyze_call_chain.sh` Output
+
 ```bash
 📞 Function Calls Found:
 call    0x1         # Function call to address 0x1
@@ -838,26 +846,31 @@ call    0x1a        # Function call to address 0x1a
 • 144 bytes (0x90)   # Second largest
 • 136 bytes (0x88)   # Third largest
 ```
+
 **How to interpret:**
+
 - **Multiple calls**: Shows potential call chain depth
 - **High stack values**: Look for values >192 bytes
 - **Combined risk**: Add largest values to estimate cumulative usage
 
-#### Understanding Verifier Error Messages:
-```
+#### Understanding Verifier Error Messages
+
+```shell
 Error: combined stack size of 3 calls is 544. Too large
 stack depth 144+328+0
 ```
+
 **Translation:**
+
 - **3 calls**: Call chain is Function A → Function B → Function C
 - **544 bytes**: Total cumulative stack (144 + 328 + 0 = 472 + ~72 bytes overhead)
 - **144, 328, 0**: Individual stack usage per function in the chain
 
-#### Critical Thresholds (64-byte aligned):
+#### Critical Thresholds (64-byte aligned)
+
 - **192 bytes**: Warning threshold - monitor for deep call chains
 - **320 bytes**: Critical threshold - high probability of overflow
 - **512 bytes**: Hard eBPF limit - verifier will reject
-
 
 ### 🎯 Quick Fixes
 
@@ -886,6 +899,7 @@ docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:la
 ### 🚀 CI/CD Integration
 
 **For CI/CD pipelines, use the quick health check:**
+
 ```yaml
 - name: Check eBPF Stack Usage
   run: |
@@ -897,6 +911,7 @@ docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:la
 ```
 
 **For debugging failed CI builds, run locally:**
+
 ```bash
 # Get detailed analysis when CI fails
 ./scripts/analyze_call_chain.sh
@@ -921,7 +936,7 @@ Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in this crate by you, as defined in the Apache-2.0 license, shall
 be dual licensed as above, without any additional terms or conditions.
 
-#### eBPF
+### eBPF
 
 All eBPF code is distributed under either the terms of the
 [GNU General Public License, Version 2] or the [MIT license], at your

@@ -31,8 +31,6 @@ metrics {
 
 # Flow Span configuration
 span {
-  max_batch_size = 64
-  max_batch_interval = "5s"
   max_record_interval = "60s"
   generic_timeout = "30s"
   icmp_timeout = "10s"

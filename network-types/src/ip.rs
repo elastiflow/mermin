@@ -817,6 +817,7 @@ impl core::fmt::Display for IpProto {
 pub enum IpDscp {
     #[default]
     Df = 0,
+    Le = 1,
     Cs1 = 8,
     Af11 = 10,
     Af12 = 12,
@@ -835,6 +836,7 @@ pub enum IpDscp {
     Af43 = 38,
     Cs5 = 40,
     Voice = 44,
+    Nqb = 45,
     Ef = 46,
     Cs6 = 48,
     Cs7 = 56,
@@ -844,6 +846,7 @@ impl IpDscp {
     pub fn as_str(&self) -> &'static str {
         match self {
             IpDscp::Df => "df",
+            IpDscp::Le => "le",
             IpDscp::Cs1 => "cs1",
             IpDscp::Af11 => "af11",
             IpDscp::Af12 => "af12",
@@ -862,6 +865,7 @@ impl IpDscp {
             IpDscp::Af43 => "af43",
             IpDscp::Cs5 => "cs5",
             IpDscp::Voice => "voice",
+            IpDscp::Nqb => "nqb",
             IpDscp::Ef => "ef",
             IpDscp::Cs6 => "cs6",
             IpDscp::Cs7 => "cs7",
@@ -871,6 +875,7 @@ impl IpDscp {
     pub fn try_from_u8(value: u8) -> Option<Self> {
         match value {
             0 => Some(IpDscp::Df),
+            1 => Some(IpDscp::Le),
             8 => Some(IpDscp::Cs1),
             10 => Some(IpDscp::Af11),
             12 => Some(IpDscp::Af12),
@@ -889,6 +894,7 @@ impl IpDscp {
             38 => Some(IpDscp::Af43),
             40 => Some(IpDscp::Cs5),
             44 => Some(IpDscp::Voice),
+            45 => Some(IpDscp::Nqb),
             46 => Some(IpDscp::Ef),
             48 => Some(IpDscp::Cs6),
             56 => Some(IpDscp::Cs7),

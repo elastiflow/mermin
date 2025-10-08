@@ -17,12 +17,13 @@ axum = "0.7"
 aya = { workspace = true, features = ["async_tokio"] }
 aya-log = { workspace = true }
 base64 = "0.21"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 clap = { workspace = true, features = ["derive", "env", "help", "suggestions", "usage"] }
 dashmap = "6.0"
 figment = { version = "0.10", features = ["env", "test", "yaml"] }
-hcl-rs = "0.19.2"
 futures = "0.3"
 fxhash = "0.2"
+hcl-rs = "0.19.2"
 humantime = "2.2.0"
 hyper = { version = "1.0", features = ["full"] }
 ipnetwork = "0.21.1"

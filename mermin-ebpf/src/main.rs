@@ -173,6 +173,7 @@
 #[cfg(not(feature = "test"))]
 use aya_ebpf::{
     bindings::TC_ACT_PIPE,
+    helpers::bpf_ktime_get_boot_ns,
     macros::{classifier, map},
     maps::{PerCpuArray, RingBuf},
     programs::TcContext,
@@ -279,6 +280,9 @@ pub enum Error {
 }
 
 #[cfg(not(feature = "test"))]
+const MAX_HEADER_PARSE_DEPTH: usize = 8;
+
+#[cfg(not(feature = "test"))]
 #[classifier]
 pub fn mermin_ingress(ctx: TcContext) -> i32 {
     try_mermin(ctx, Direction::Ingress)
@@ -292,7 +296,9 @@ pub fn mermin_egress(ctx: TcContext) -> i32 {
 
 #[cfg(not(feature = "test"))]
 fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
-    const MAX_HEADER_PARSE_DEPTH: usize = 8;
+    // Get timestamp in nanoseconds since boot (including suspend time)
+    // This uses CLOCK_BOOTTIME which matches /proc/uptime in userspace
+    let timestamp = unsafe { bpf_ktime_get_boot_ns() };
 
     // Information for building flow records (prioritizes innermost headers).
     // These fields will be updated as we parse deeper or encounter encapsulations.
@@ -304,6 +310,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
     };
 
     // Initialize the meta with default values
+    meta.capture_time = timestamp;
     meta.ifindex = unsafe { (*ctx.skb.skb).ifindex };
     meta.direction = direction;
     meta.src_mac_addr = [0; 6];
@@ -1356,6 +1363,7 @@ fn get_packet_meta(_ctx: &TcContext) -> Result<&'static mut PacketMeta, Error> {
         if meta_opt.is_none() {
             *meta_opt = Some(PacketMeta {
                 // Basic fields
+                capture_time: 0,
                 ifindex: 0,
                 direction: Direction::Ingress,
                 src_mac_addr: [0; 6],

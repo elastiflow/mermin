@@ -1,4 +1,3 @@
-mod community_id;
 mod health;
 mod k8s;
 mod otlp;
@@ -159,7 +158,7 @@ async fn main() -> Result<()> {
         iface_map.clone(),
         packet_meta_rx,
         flow_span_tx,
-    );
+    )?;
 
     info!("initializing k8s client");
     let k8s_attributor = match k8s::Attributor::new(health_state.clone()).await {
