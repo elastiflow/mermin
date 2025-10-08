@@ -19,11 +19,14 @@ use pnet::datalink::MacAddr;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{debug, warn};
 
-use crate::span::{
-    community_id::CommunityIdGenerator,
-    flow::{FlowEndReason, FlowSpan, SpanAttributes},
-    opts::SpanOptions,
-    tcp::{ConnectionState, TcpFlags},
+use crate::{
+    otlp::{filter::PacketFilter, router::PipelineRouter},
+    span::{
+        community_id::CommunityIdGenerator,
+        flow::{FlowEndReason, FlowSpan, SpanAttributes},
+        opts::SpanOptions,
+        tcp::{ConnectionState, TcpFlags},
+    },
 };
 
 /// ### Concurrency Model
@@ -106,6 +109,7 @@ pub struct FlowSpanProducer {
     community_id_generator: CommunityIdGenerator,
     packet_meta_rx: mpsc::Receiver<PacketMeta>,
     flow_span_tx: mpsc::Sender<FlowSpan>,
+    router: Arc<PipelineRouter>,
 }
 
 impl FlowSpanProducer {
@@ -116,6 +120,7 @@ impl FlowSpanProducer {
         iface_map: HashMap<u32, String>,
         packet_meta_rx: mpsc::Receiver<PacketMeta>,
         flow_span_tx: mpsc::Sender<FlowSpan>,
+        router: Arc<PipelineRouter>,
     ) -> Result<Self, BootTimeError> {
         let flow_span_map_capacity = packet_channel_capacity * 8;
         let flow_span_map = Arc::new(DashMap::with_capacity_and_hasher(
@@ -138,6 +143,7 @@ impl FlowSpanProducer {
             flow_span_map,
             packet_meta_rx,
             flow_span_tx,
+            router,
         })
     }
 
@@ -159,6 +165,7 @@ impl FlowSpanProducer {
                 Arc::clone(&self.flow_span_map),
                 worker_rx,
                 self.flow_span_tx.clone(),
+                Arc::clone(&self.router),
             );
             tokio::spawn(async move {
                 packet_worker.run().await;
@@ -220,6 +227,7 @@ pub struct PacketWorker {
     flow_span_map: FlowSpanMap,
     packet_meta_rx: mpsc::Receiver<PacketMeta>,
     flow_span_tx: mpsc::Sender<FlowSpan>,
+    router: Arc<PipelineRouter>,
 }
 
 impl PacketWorker {
@@ -231,6 +239,7 @@ impl PacketWorker {
         flow_span_map: FlowSpanMap,
         packet_meta_rx: mpsc::Receiver<PacketMeta>,
         flow_span_tx: mpsc::Sender<FlowSpan>,
+        router: Arc<PipelineRouter>,
     ) -> Self {
         Self {
             max_record_interval: span_opts.max_record_interval,
@@ -246,6 +255,7 @@ impl PacketWorker {
             flow_span_map,
             packet_meta_rx,
             flow_span_tx,
+            router,
         }
     }
 
@@ -372,6 +382,24 @@ impl PacketWorker {
         // For existing flows: No allocation happens at all
         match self.flow_span_map.entry(community_id) {
             Entry::Vacant(vacant) => {
+                // Check if allowed
+                let temp_span = FlowSpan {
+                    start_time: UNIX_EPOCH, // Placeholder
+                    end_time: UNIX_EPOCH,   // Placeholder
+                    span_kind: SpanKind::Internal,
+                    attributes: SpanAttributes {
+                        source_address: src_addr,
+                        source_port: src_port,
+                        destination_address: dst_addr,
+                        destination_port: dst_port,
+                        ..Default::default()
+                    },
+                };
+                let matching_pipelines = self.router.route(&temp_span);
+                if matching_pipelines.is_empty() {
+                    return Ok(()); // Filter applied here.
+                }
+
                 // Create new flow span
                 // Convert boot-relative timestamp to wall clock time
                 let wall_time_nanos = packet.capture_time + self.boot_time_offset_nanos;
@@ -518,8 +546,8 @@ impl PacketWorker {
                             .then_some(packet.tunnel_ipsec_ah_spi),
 
                         // Filtering pipelines
-                        matched_pipelines: Vec::new(),
-                        
+                        matched_pipelines,
+
                         // All other attributes default to None
                         ..Default::default()
                     },
