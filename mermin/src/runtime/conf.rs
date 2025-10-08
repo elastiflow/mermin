@@ -1,5 +1,5 @@
 use std::{error::Error, fmt, net::Ipv4Addr, path::Path, time::Duration};
-
+use std::collections::HashMap;
 use figment::providers::Format;
 use hcl::eval::Context;
 use pnet::datalink;
@@ -57,6 +57,10 @@ pub struct Conf {
     pub span: SpanOptions,
     /// References to the exporters to use for telemetry
     pub export: ExportOptions,
+    /// Configuration for flow interfaces.
+    /// This field holds settings for flow source and destination filtering.
+    #[serde(default)]
+    pub flow: Option<FlowOptions>,
 }
 
 impl Default for Conf {
@@ -76,6 +80,7 @@ impl Default for Conf {
             resolved_interfaces: Vec::new(),
             span: SpanOptions::default(),
             export: ExportOptions::default(),
+            flow: None,
         }
     }
 }
@@ -252,7 +257,7 @@ impl Conf {
         while text_index < text_bytes.len() {
             if pattern_index < pattern_bytes.len()
                 && (pattern_bytes[pattern_index] == b'?'
-                    || pattern_bytes[pattern_index] == text_bytes[text_index])
+                || pattern_bytes[pattern_index] == text_bytes[text_index])
             {
                 pattern_index += 1;
                 text_index += 1;
