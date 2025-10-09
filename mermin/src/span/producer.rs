@@ -521,9 +521,6 @@ impl PacketWorker {
                             .tunnel_ah_exists
                             .then_some(packet.tunnel_ipsec_ah_spi),
 
-                        // Filtering pipelines
-                        matched_pipelines: Vec::new(),
-
                         // All other attributes default to None
                         ..Default::default()
                     },
