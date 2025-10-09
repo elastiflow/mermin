@@ -12,7 +12,7 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use aya::{
-    maps::RingBuf,
+    maps::{Array, RingBuf},
     programs::{SchedClassifier, TcAttachType, tc},
 };
 use mermin_common::PacketMeta;
@@ -89,6 +89,22 @@ async fn main() -> Result<()> {
         // This can happen if you remove all log statements from your eBPF program.
         warn!("failed to initialize ebpf logger: {e}");
     }
+
+    // Configure parser options for tunnel port detection
+    let mut parser_options_map: Array<_, u16> = ebpf
+        .take_map("PARSER_OPTIONS")
+        .ok_or_else(|| anyhow!("PARSER_OPTIONS map not present in the object"))?
+        .try_into()?;
+
+    // Set tunnel ports in the map (indices: 0=geneve, 1=vxlan, 2=wireguard)
+    parser_options_map.set(0, props.parser.geneve_port, 0)?;
+    parser_options_map.set(1, props.parser.vxlan_port, 0)?;
+    parser_options_map.set(2, props.parser.wireguard_port, 0)?;
+
+    info!(
+        "configured tunnel ports - geneve: {}, vxlan: {}, wireguard: {}",
+        props.parser.geneve_port, props.parser.vxlan_port, props.parser.wireguard_port
+    );
 
     let health_state = HealthState::default();
 

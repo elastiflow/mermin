@@ -180,7 +180,7 @@ use aya_ebpf::{
 };
 #[cfg(not(feature = "test"))]
 use aya_log_ebpf::error;
-use mermin_common::{Direction, IpAddrType, PacketMeta, TunnelType};
+use mermin_common::{Direction, IpAddrType, PacketMeta, ParserOptions, TunnelType};
 use network_types::{
     ah::{self, AH_LEN},
     destopts::{self},
@@ -238,24 +238,30 @@ fn get_packet_meta(ctx: &TcContext) -> Result<&mut PacketMeta, Error> {
 
 #[cfg(not(feature = "test"))]
 #[map]
-static mut PARSER_OPTIONS: PerCpuArray<ParserOptions> = PerCpuArray::with_max_entries(1, 0);
+static PARSER_OPTIONS: aya_ebpf::maps::Array<u16> = aya_ebpf::maps::Array::with_max_entries(3, 0); // Update to Arraymap to satisfy aya Pod trait error. 
 
 #[cfg(not(feature = "test"))]
 #[inline(always)]
-#[allow(clippy::mut_from_ref)]
-fn get_parser_options(ctx: &TcContext) -> Result<&mut ParserOptions, Error> {
-    // Get ParserOptions from PerCpuArray instead of using local variables
-    let options_ptr = unsafe {
+fn get_parser_options(_ctx: &TcContext) -> Result<ParserOptions, Error> {
+    // Get tunnel ports from Array map (indices: 0=geneve, 1=vxlan, 2=wireguard)
+    let geneve_port = unsafe {
         #[allow(static_mut_refs)]
-        match PARSER_OPTIONS.get_ptr_mut(0) {
-            Some(ptr) => ptr,
-            None => {
-                error!(ctx, "PARSER_OPTIONS map not accessible");
-                return Err(Error::InternalError);
-            }
-        }
+        PARSER_OPTIONS.get(0).copied().unwrap_or(6081)
     };
-    Ok(unsafe { &mut *options_ptr })
+    let vxlan_port = unsafe {
+        #[allow(static_mut_refs)]
+        PARSER_OPTIONS.get(1).copied().unwrap_or(4789)
+    };
+    let wireguard_port = unsafe {
+        #[allow(static_mut_refs)]
+        PARSER_OPTIONS.get(2).copied().unwrap_or(51820)
+    };
+
+    Ok(ParserOptions {
+        geneve_port,
+        vxlan_port,
+        wireguard_port,
+    })
 }
 
 // Defines what kind of header we expect to process in the current iteration.
@@ -1231,25 +1237,6 @@ impl Parser {
     }
 }
 
-#[derive(Debug, Clone)]
-struct ParserOptions {
-    /// The port number to use for Geneve tunnel detection
-    /// Default is 6081 as per IANA assignment
-    geneve_port: u16,
-    vxlan_port: u16,
-    wireguard_port: u16,
-}
-
-impl Default for ParserOptions {
-    fn default() -> Self {
-        ParserOptions {
-            geneve_port: 6081,
-            vxlan_port: 4789,
-            wireguard_port: 51820,
-        }
-    }
-}
-
 #[cfg(not(test))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
@@ -1425,16 +1412,13 @@ fn get_packet_meta(_ctx: &TcContext) -> Result<&'static mut PacketMeta, Error> {
 }
 
 #[cfg(feature = "test")]
-static TEST_PARSER_OPTIONS: ParserOptions = ParserOptions {
-    geneve_port: 6081,
-    vxlan_port: 4789,
-    wireguard_port: 51820,
-};
-
-#[cfg(feature = "test")]
 #[inline(always)]
-fn get_parser_options(_ctx: &TcContext) -> Result<&'static ParserOptions, Error> {
-    Ok(&TEST_PARSER_OPTIONS)
+fn get_parser_options(_ctx: &TcContext) -> Result<ParserOptions, Error> {
+    Ok(ParserOptions {
+        geneve_port: 6081,
+        vxlan_port: 4789,
+        wireguard_port: 51820,
+    })
 }
 
 #[cfg(test)]

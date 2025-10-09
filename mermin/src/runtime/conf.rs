@@ -49,6 +49,8 @@ pub struct Conf {
     pub traces: InternalTraceOptions,
     /// References to the exporters to use for telemetry
     pub exporter: ExporterOptions,
+    /// Parser configuration for eBPF packet parsing
+    pub parser: ParserConf,
 }
 
 impl Default for Conf {
@@ -66,6 +68,29 @@ impl Default for Conf {
             agent: AgentOptions::default(),
             traces: InternalTraceOptions::default(),
             exporter: ExporterOptions::default(),
+            parser: ParserConf::default(),
+        }
+    }
+}
+
+/// Parser configuration for eBPF packet parsing options
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ParserConf {
+    /// Port number for Geneve tunnel detection (IANA default: 6081)
+    pub geneve_port: u16,
+    /// Port number for VXLAN tunnel detection (IANA default: 4789)
+    pub vxlan_port: u16,
+    /// Port number for WireGuard tunnel detection (IANA default: 51820)
+    pub wireguard_port: u16,
+}
+
+impl Default for ParserConf {
+    fn default() -> Self {
+        Self {
+            geneve_port: 6081,
+            vxlan_port: 4789,
+            wireguard_port: 51820,
         }
     }
 }

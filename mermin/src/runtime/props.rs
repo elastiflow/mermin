@@ -16,7 +16,7 @@ use crate::{
         cli::Cli,
         conf::{
             ApiConf, Conf, ConfError, ExporterReference, ExporterReferencesParser, Hcl,
-            MetricsConf,
+            MetricsConf, ParserConf, TraceOptions,
             conf_serde::{duration, level},
             defaults, validate_config_path,
         },
@@ -85,6 +85,10 @@ pub struct Properties {
     /// This field encapsulates additional configuration details specific
     /// to how the application's logic operates.
     pub span: SpanOptions,
+
+    /// Parser configuration for eBPF packet parsing options
+    #[serde(default)]
+    pub parser: ParserConf,
 
     /// A map of fully resolved and ready-to-use traces.
     /// agent.traces.(exporters, discovery, network)
@@ -190,6 +194,7 @@ impl Properties {
             packet_worker_count: raw_conf.packet_worker_count,
             shutdown_timeout: raw_conf.shutdown_timeout,
             span: raw_conf.span,
+            parser: raw_conf.parser,
             agent_trace,
             internal_trace,
             config_path: config_path_to_store,
@@ -266,6 +271,7 @@ impl Properties {
             packet_worker_count: raw_conf.packet_worker_count,
             shutdown_timeout: raw_conf.shutdown_timeout,
             span: raw_conf.span,
+            parser: raw_conf.parser,
             agent_trace,
             internal_trace,
             config_path: self.config_path.clone(),
