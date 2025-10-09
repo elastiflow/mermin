@@ -21,7 +21,7 @@ impl CompiledFilter {
                 .filter_map(|s| match s.parse() {
                     Ok(net) => Some(net),
                     Err(e) => {
-                        warn!("invalid CIDR string '{s}' in configuration, skipping: {e}");
+                        warn!("invalid cidr string '{s}' in configuration, skipping: {e}");
                         None
                     }
                 })
