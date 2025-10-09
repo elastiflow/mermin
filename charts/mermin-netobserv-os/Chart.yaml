@@ -1,0 +1,39 @@
+apiVersion: v2
+name: mermin
+description: A Helm chart for deploying the Mermin eBPF agent
+icon: https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1746227898/mermin-horizontal_kxhvzo.png
+type: application
+version: 0.1.0-alpha.4
+appVersion: "0.1.0-alpha.4"
+sources:
+  - https://github.com/elastiflow/mermin
+dependencies:
+  - name: mermin
+    repository: https://github.com/elastiflow/mermin/
+    version: ">= 0.1.0-alpha.5"
+    condition: mermin.enabled
+  - name: netobserv-flow
+    repository: https://elastiflow.github.io/helm-chart-netobserv/
+    version: ">= 0.1.1"
+    condition: netobserv-flow.enabled
+  - name: opensearch
+    repository: https://opensearch-project.github.io/helm-charts/
+    version: ">= 3.2.1"
+    condition: opensearch.enabled
+  - name: opensearch-dashboards
+    repository: https://opensearch-project.github.io/helm-charts/
+    version: ">= 3.2.2"
+    condition: opensearch-dashboards.enabled
+maintainers:
+  - name: ElastiFlow Engineering Team
+    email: engineering@elastiflow.com
+annotations:
+  "artifacthub.io/license": Apache-2.0
+  "artifacthub.io/links": |
+    - name: Chart Source
+      url: https://github.com/elastiflow/mermin
+keywords:
+  - netflow
+  - network
+  - flow
+  - observability
