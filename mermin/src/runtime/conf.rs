@@ -257,7 +257,7 @@ impl Conf {
         while text_index < text_bytes.len() {
             if pattern_index < pattern_bytes.len()
                 && (pattern_bytes[pattern_index] == b'?'
-                || pattern_bytes[pattern_index] == text_bytes[text_index])
+                    || pattern_bytes[pattern_index] == text_bytes[text_index])
             {
                 pattern_index += 1;
                 text_index += 1;

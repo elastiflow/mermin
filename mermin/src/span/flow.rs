@@ -209,10 +209,6 @@ pub struct SpanAttributes {
     pub process_executable_name: Option<String>,
     pub container_image_name: Option<String>,
     pub container_name: Option<String>,
-
-    #[serde(skip_serializing, default)]
-    #[allow(dead_code)]
-    pub matched_pipelines: Vec<String>,
 }
 
 impl Default for SpanAttributes {
@@ -325,7 +321,6 @@ impl Default for SpanAttributes {
             process_executable_name: None,
             container_image_name: None,
             container_name: None,
-            matched_pipelines: Vec::new(),
         }
     }
 }

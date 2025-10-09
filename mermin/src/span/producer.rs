@@ -19,14 +19,11 @@ use pnet::datalink::MacAddr;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{debug, warn};
 
-use crate::{
-    otlp::router::PipelineRouter,
-    span::{
-        community_id::CommunityIdGenerator,
-        flow::{FlowEndReason, FlowSpan, SpanAttributes},
-        opts::SpanOptions,
-        tcp::{ConnectionState, TcpFlags},
-    },
+use crate::span::{
+    community_id::CommunityIdGenerator,
+    flow::{FlowEndReason, FlowSpan, SpanAttributes},
+    opts::SpanOptions,
+    tcp::{ConnectionState, TcpFlags},
 };
 
 /// ### Concurrency Model
@@ -109,7 +106,6 @@ pub struct FlowSpanProducer {
     community_id_generator: CommunityIdGenerator,
     packet_meta_rx: mpsc::Receiver<PacketMeta>,
     flow_span_tx: mpsc::Sender<FlowSpan>,
-    router: Arc<PipelineRouter>,
 }
 
 impl FlowSpanProducer {
@@ -120,7 +116,6 @@ impl FlowSpanProducer {
         iface_map: HashMap<u32, String>,
         packet_meta_rx: mpsc::Receiver<PacketMeta>,
         flow_span_tx: mpsc::Sender<FlowSpan>,
-        router: Arc<PipelineRouter>,
     ) -> Result<Self, BootTimeError> {
         let flow_span_map_capacity = packet_channel_capacity * 8;
         let flow_span_map = Arc::new(DashMap::with_capacity_and_hasher(
@@ -143,7 +138,6 @@ impl FlowSpanProducer {
             flow_span_map,
             packet_meta_rx,
             flow_span_tx,
-            router,
         })
     }
 
@@ -157,17 +151,16 @@ impl FlowSpanProducer {
             let (worker_tx, worker_rx) = mpsc::channel(worker_capacity);
             worker_channels.push(worker_tx);
 
-            let worker_args = PacketWorkerArgs {
-                span_opts: self.span_opts.clone(),
-                boot_time_offset_nanos: self.boot_time_offset_nanos,
-                community_id_generator: self.community_id_generator.clone(),
-                iface_map: self.iface_map.clone(),
-                flow_span_map: Arc::clone(&self.flow_span_map),
-                flow_span_tx: self.flow_span_tx.clone(),
-                router: Arc::clone(&self.router),
-            };
+            let packet_worker = PacketWorker::new(
+                self.span_opts.clone(),
+                self.boot_time_offset_nanos,
+                self.community_id_generator.clone(),
+                self.iface_map.clone(),
+                Arc::clone(&self.flow_span_map),
+                worker_rx,
+                self.flow_span_tx.clone(),
+            );
 
-            let packet_worker = PacketWorker::new(worker_args, worker_rx);
             tokio::spawn(async move {
                 packet_worker.run().await;
             });
@@ -214,17 +207,6 @@ impl FlowSpanProducer {
     }
 }
 
-/// A temporary struct to bundle the numerous arguments for creating a PacketWorker.
-pub struct PacketWorkerArgs {
-    span_opts: SpanOptions,
-    boot_time_offset_nanos: u64,
-    community_id_generator: CommunityIdGenerator,
-    iface_map: HashMap<u32, String>,
-    flow_span_map: FlowSpanMap,
-    flow_span_tx: mpsc::Sender<FlowSpan>,
-    router: Arc<PipelineRouter>,
-}
-
 pub struct PacketWorker {
     max_record_interval: Duration,
     generic_timeout: Duration,
@@ -239,26 +221,32 @@ pub struct PacketWorker {
     flow_span_map: FlowSpanMap,
     packet_meta_rx: mpsc::Receiver<PacketMeta>,
     flow_span_tx: mpsc::Sender<FlowSpan>,
-    router: Arc<PipelineRouter>,
 }
 
 impl PacketWorker {
-    pub fn new(args: PacketWorkerArgs, packet_meta_rx: mpsc::Receiver<PacketMeta>) -> Self {
+    pub fn new(
+        span_opts: SpanOptions,
+        boot_time_offset_nanos: u64,
+        community_id_generator: CommunityIdGenerator,
+        iface_map: HashMap<u32, String>,
+        flow_span_map: FlowSpanMap,
+        packet_meta_rx: mpsc::Receiver<PacketMeta>,
+        flow_span_tx: mpsc::Sender<FlowSpan>,
+    ) -> Self {
         Self {
-            max_record_interval: args.span_opts.max_record_interval,
-            generic_timeout: args.span_opts.generic_timeout,
-            icmp_timeout: args.span_opts.icmp_timeout,
-            tcp_timeout: args.span_opts.tcp_timeout,
-            tcp_fin_timeout: args.span_opts.tcp_fin_timeout,
-            tcp_rst_timeout: args.span_opts.tcp_rst_timeout,
-            udp_timeout: args.span_opts.udp_timeout,
-            boot_time_offset_nanos: args.boot_time_offset_nanos,
-            community_id_generator: args.community_id_generator,
-            iface_map: args.iface_map,
-            flow_span_map: args.flow_span_map,
+            max_record_interval: span_opts.max_record_interval,
+            generic_timeout: span_opts.generic_timeout,
+            icmp_timeout: span_opts.icmp_timeout,
+            tcp_timeout: span_opts.tcp_timeout,
+            tcp_fin_timeout: span_opts.tcp_fin_timeout,
+            tcp_rst_timeout: span_opts.tcp_rst_timeout,
+            udp_timeout: span_opts.udp_timeout,
+            boot_time_offset_nanos,
+            community_id_generator,
+            iface_map,
+            flow_span_map,
             packet_meta_rx,
-            flow_span_tx: args.flow_span_tx,
-            router: args.router,
+            flow_span_tx,
         }
     }
 
@@ -385,25 +373,6 @@ impl PacketWorker {
         // For existing flows: No allocation happens at all
         match self.flow_span_map.entry(community_id) {
             Entry::Vacant(vacant) => {
-                // Check if allowed
-                let temp_span = FlowSpan {
-                    start_time: UNIX_EPOCH, // Placeholder
-                    end_time: UNIX_EPOCH,   // Placeholder
-                    span_kind: SpanKind::Internal,
-                    attributes: SpanAttributes {
-                        source_address: src_addr,
-                        source_port: src_port,
-                        destination_address: dst_addr,
-                        destination_port: dst_port,
-                        ..Default::default()
-                    },
-                };
-                let matched_pipelines = self.router.route(&temp_span);
-                if matched_pipelines.is_empty() {
-                    debug!(community_id = %vacant.key(), "flow did not match any pipeline filters. dropping.");
-                    return Ok(());
-                }
-
                 // Create new flow span
                 // Convert boot-relative timestamp to wall clock time
                 let wall_time_nanos = packet.capture_time + self.boot_time_offset_nanos;
@@ -548,9 +517,6 @@ impl PacketWorker {
                         tunnel_ipsec_ah_spi: packet
                             .tunnel_ah_exists
                             .then_some(packet.tunnel_ipsec_ah_spi),
-
-                        // Filtering pipelines
-                        matched_pipelines,
 
                         // All other attributes default to None
                         ..Default::default()
@@ -1068,7 +1034,6 @@ mod tests {
     use std::net::IpAddr;
 
     use super::*;
-    use crate::runtime::{conf::FlowSpanFilter, props::TracePipeline};
 
     /// Helper to create a test PacketWorker
     fn create_test_worker() -> (PacketWorker, mpsc::Receiver<FlowSpan>) {
@@ -1081,14 +1046,6 @@ mod tests {
         ));
         let community_id_generator = CommunityIdGenerator::new(0);
         let iface_map = HashMap::new();
-        let mut test_traces = HashMap::new();
-        let allow_all_pipeline = TracePipeline {
-            exporters: Vec::new(),
-            source_filter: FlowSpanFilter::default(),
-            destination_filter: FlowSpanFilter::default(),
-        };
-        test_traces.insert("test-pipeline".to_string(), allow_all_pipeline);
-        let router = Arc::new(PipelineRouter::new(&test_traces));
 
         let worker = PacketWorker {
             max_record_interval: span_opts.max_record_interval,
@@ -1104,7 +1061,6 @@ mod tests {
             packet_meta_rx: packet_rx,
             flow_span_tx: flow_span_tx.clone(),
             boot_time_offset_nanos: 0, // For tests, assume capture_time is already wall clock
-            router,
         };
 
         drop(packet_tx); // Close the packet channel so worker will exit
@@ -2322,14 +2278,6 @@ mod tests {
         ));
         let community_id_generator = CommunityIdGenerator::new(0);
         let iface_map = HashMap::new();
-        let mut test_traces = HashMap::new();
-        let allow_all_pipeline = TracePipeline {
-            exporters: Vec::new(),
-            source_filter: FlowSpanFilter::default(),
-            destination_filter: FlowSpanFilter::default(),
-        };
-        test_traces.insert("test-pipeline".to_string(), allow_all_pipeline);
-        let router = Arc::new(PipelineRouter::new(&test_traces));
 
         // Create the packet worker
         let worker = PacketWorker {
@@ -2346,7 +2294,6 @@ mod tests {
             packet_meta_rx: packet_rx,
             flow_span_tx: flow_span_tx.clone(),
             boot_time_offset_nanos: 0, // For tests, assume capture_time is already wall clock
-            router,
         };
 
         // Spawn the worker task

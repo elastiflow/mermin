@@ -27,7 +27,8 @@ fxhash = "0.2"
 hcl-rs = "0.19.2"
 humantime = "2.2.0"
 hyper = { version = "1.0", features = ["full"] }
-ipnetwork = "0.21.1"
+ip_network = "0.4.1"
+ip_network_table = "0.2.0"
 k8s-openapi = { version = "0.25.0", features = ["v1_30"] }
 kube = { version = "1.1.0", features = ["runtime", "derive", "client"] }
 kube-runtime = "1.1.0"
