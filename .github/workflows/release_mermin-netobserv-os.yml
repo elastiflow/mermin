@@ -10,7 +10,7 @@ on:
       - alpha
       - beta
     paths:
-      - 'charts/mermin-netobserv-os/*'
+      - 'charts/mermin-netobserv-os/**/*'
 
 env:
   BRANCH_TAG_PREFIXES: |
@@ -131,8 +131,8 @@ jobs:
           target_commitish: ${{ github.ref_name }}
           preserve_order: true
           make_latest: true
-          files: ".cr-release-packages/${{ inputs.chart_name }}-*.tgz"
+          files: ".cr-release-packages/*.tgz"
       - name: Update GH pages index
         run: |
           mkdir .cr-index
-          cr index --push -t ${{ secrets.GITHUB_TOKEN }} --owner ${{ inputs.repository_owner	}} --git-repo ${{ inputs.repository_name	}}
+          cr index --push -t ${{ secrets.GITHUB_TOKEN }} --owner elastiflow --git-repo mermin
