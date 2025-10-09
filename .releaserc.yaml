@@ -1,9 +1,0 @@
-plugins:
-  - - "@semantic-release/commit-analyzer"
-    - preset: conventionalcommits
-  - - "@semantic-release/release-notes-generator"
-    - preset: conventionalcommits
-branches:
-  - main
-  - name: (alpha|beta|rc)
-    prerelease: true

@@ -412,25 +412,23 @@ exporter "stdout" "json" {
   # }
 }
 
-# Exporter (output) config of type triton with name "json"
+# OTLP exporter configuration with name "main"
 exporter "otlp" "main" {
-  scheme   = "https"
-  address  = "example.com"
-  port     = 443
-  protocol = "grpc"
-  connectionTimeout = "10s"
-  tls = {
+  address = "example.com"
+  port    = 4317
+
+  auth {
+    basic = {
+      user = "USERNAME"
+      pass = env("USER_SPECIFIED_ENV_VAR_TRITON_PASS")
+    }
+  }
+
+  tls {
     enabled     = true
     insecure    = false
     ca_cert     = "/etc/certs/ca.crt"
     client_cert = "/etc/certs/cert.crt"
     client_key  = "/etc/certs/cert.key"
-  }
-
-  auth = {
-    basic = {
-      user = "foo"
-      pass = "env(\"USER_SPECIFIED_ENV_VAR_TRITON_PASS\")"
-    }
   }
 }
