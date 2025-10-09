@@ -1,9 +1,0 @@
-mermin:
-  enabled: false
-
-netobserv:
-  enabled: false
-opensearch:
-  enabled: false
-opensearch-dashboards:
-  enabled: false
