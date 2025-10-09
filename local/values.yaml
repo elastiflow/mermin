@@ -1,7 +1,0 @@
-fullNameOverride: mermin
-image:
-  repository: mermin
-  tag: latest
-merminConfig:
-  interface:
-    - eth0

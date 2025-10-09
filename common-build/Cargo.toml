@@ -1,9 +1,0 @@
-[package]
-name = "common-build"
-version = "0.1.0"
-edition = "2021"
-publish = false
-
-[dependencies]
-anyhow = "1.0"
-toml = "0.9"

@@ -1,5 +1,0 @@
-[toolchain]
-# Define build arguments - 2025-05-09 is the last nightly build of rust 1.88.0
-# TODO: Upgprade to rust 1.89 when image is made available with nightly-2025-06-23
-channel = "nightly-2025-06-23"
-components = [ "rust-src", "rustfmt", "clippy" ]
