@@ -175,7 +175,7 @@ use aya_ebpf::{
     bindings::TC_ACT_PIPE,
     helpers::bpf_ktime_get_boot_ns,
     macros::{classifier, map},
-    maps::{PerCpuArray, RingBuf},
+    maps::{Array, PerCpuArray, RingBuf},
     programs::TcContext,
 };
 #[cfg(not(feature = "test"))]
@@ -238,24 +238,21 @@ fn get_packet_meta(ctx: &TcContext) -> Result<&mut PacketMeta, Error> {
 
 #[cfg(not(feature = "test"))]
 #[map]
-static PARSER_OPTIONS: aya_ebpf::maps::Array<u16> = aya_ebpf::maps::Array::with_max_entries(3, 0); // Update to Arraymap to satisfy aya Pod trait error. 
+static PARSER_OPTIONS: Array<u16> = Array::with_max_entries(3, 0); // Update to map::Array to satisfy aya Pod trait error. 
 
 #[cfg(not(feature = "test"))]
 #[inline(always)]
 fn get_parser_options(_ctx: &TcContext) -> Result<ParserOptions, Error> {
     // Get tunnel ports from Array map (indices: 0=geneve, 1=vxlan, 2=wireguard)
-    let geneve_port = unsafe {
-        #[allow(static_mut_refs)]
-        PARSER_OPTIONS.get(0).copied().unwrap_or(6081)
-    };
-    let vxlan_port = unsafe {
-        #[allow(static_mut_refs)]
-        PARSER_OPTIONS.get(1).copied().unwrap_or(4789)
-    };
-    let wireguard_port = unsafe {
-        #[allow(static_mut_refs)]
-        PARSER_OPTIONS.get(2).copied().unwrap_or(51820)
-    };
+    // NOTE: Changes to these settings require a full restart
+    #[allow(static_mut_refs)]
+    let geneve_port = PARSER_OPTIONS.get(0).copied().unwrap_or(6081);
+
+    #[allow(static_mut_refs)]
+    let vxlan_port = PARSER_OPTIONS.get(1).copied().unwrap_or(4789);
+
+    #[allow(static_mut_refs)]
+    let wireguard_port = PARSER_OPTIONS.get(2).copied().unwrap_or(51820);
 
     Ok(ParserOptions {
         geneve_port,
