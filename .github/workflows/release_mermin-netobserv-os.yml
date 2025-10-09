@@ -1,0 +1,138 @@
+---
+name: Release Mermin NetObserv OpenSearch chart
+concurrency:
+  group: release-mermin-netobserv-os-${{ github.ref }}
+  cancel-in-progress: false
+on:
+  push:
+    branches:
+      - main
+      - alpha
+      - beta
+    paths:
+      - 'charts/mermin-netobserv-os/*'
+
+env:
+  BRANCH_TAG_PREFIXES: |
+    {
+        "alpha": "mermin-netobserv-os-0.1.0-alpha.",
+        "beta": "mermin-netobserv-os-0.1.0-beta.",
+        "main": "mermin-netobserv-os-"
+    }
+
+
+jobs:
+  # Detect if a commit was made from a release PR with title like '[release v0.1.1] (#49)'
+  release_or_pr:
+    name: Release or Release PR?
+    runs-on: ubuntu-latest
+    outputs:
+      is_release: ${{ steps.release_or_pr.outputs.is_release }}
+    steps:
+      - id: release_or_pr
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          cat > /tmp/commit_message <<- EOF
+          ${COMMIT_MESSAGE}
+          EOF
+          cat /tmp/commit_message
+          # https://regex101.com/r/VgA2Wj/1
+          echo $(grep -Pq '^\[release mermin-netobserv-os-(?:[0-9]{1,3}\.?){3}(?:-(?:rc|alpha|beta)(?:\.[0-9]{1,3})?)?\] \(#[0-9]{1,5}\)$' /tmp/commit_message && echo true || echo false) > /tmp/is_release
+          echo "is_release=$(cat /tmp/is_release)" >> $GITHUB_OUTPUT
+
+  release_pr_create:
+    name: Release PR create
+    needs: [release_or_pr]
+    if: ${{ ! fromJson(needs.release_or_pr.outputs.is_release) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Prepare Release
+        id: prepare_release
+        uses: elastiflow/gha-reusable/actions/prepare-release@v0
+        with:
+          tag_prefix: "${{ fromJson(env.BRANCH_TAG_PREFIXES)[github.ref_name] }}"
+          include_paths: "charts/mermin-netobserv-os/**/*"
+          changelog_update: true
+          bump_version_yaml: true
+          bump_version_yaml_path: charts/mermin/Chart.yaml
+          bump_version_yaml_key: '.version,.appVersion'
+      - name: Create Pull Request
+        if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
+        uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e # v7.0.8
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: "${{ github.ref_name }}"
+          branch: release-mermin-netobserv-os-from-${{ github.ref_name }}
+          title: '[release mermin-netobserv-os-${{ steps.prepare_release.outputs.new_release_git_tag }}]'
+          body: |
+            # Description
+            Release the mermin-netobserv-os-${{ steps.prepare_release.outputs.new_release_version }} version
+
+            # Changelog
+            ${{ steps.prepare_release.outputs.new_release_notes }}
+
+  release:
+    name: Release
+    needs: [release_or_pr]
+    if: ${{ fromJson(needs.release_or_pr.outputs.is_release) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      new_release_version: ${{ steps.prepare_release.outputs.new_release_version }}
+    env:
+      CHARTS_DIR: charts/mermin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Prepare Release
+        id: prepare_release
+        uses: elastiflow/gha-reusable/actions/prepare-release@v0
+        with:
+          tag_prefix: "${{ fromJson(env.BRANCH_TAG_PREFIXES)[github.ref_name] }}"
+          include_paths: "charts/mermin-netobserv-os/**/*"
+          add_git_notes: true
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+      - name: Install Helm dependencies
+        run: |
+          (helm dependency list ${{ env.CHARTS_DIR }} || true) | grep -E 'https://' | while read -r dep; do
+            helm repo add $(echo ${dep} | awk '{print $1}') $(echo ${dep} | awk '{print $4}')
+          done
+      - name: Install chart-releaser
+        uses: helm/chart-releaser-action@v1.7.0
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        with:
+          install_only: true
+      - name: Package helm chart
+        run: |
+          cr package ${{ env.CHARTS_DIR }}
+      - name: Create GH release
+        if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
+        uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8
+        with:
+          name: v${{ steps.prepare_release.outputs.new_release_version }}
+          tag_name: v${{ steps.prepare_release.outputs.new_release_version }}
+          body: |
+            ${{ steps.prepare_release.outputs.new_release_notes }}
+          target_commitish: ${{ github.ref_name }}
+          preserve_order: true
+          make_latest: true
+          files: ".cr-release-packages/${{ inputs.chart_name }}-*.tgz"
+      - name: Update GH pages index
+        run: |
+          mkdir .cr-index
+          cr index --push -t ${{ secrets.GITHUB_TOKEN }} --owner ${{ inputs.repository_owner	}} --git-repo ${{ inputs.repository_name	}}
