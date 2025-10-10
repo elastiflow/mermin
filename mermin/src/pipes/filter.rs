@@ -6,14 +6,14 @@ use log::warn;
 
 use crate::runtime::conf::FlowSpanFilter;
 
-struct CompiledFilter {
+struct FilterRules {
     exclude_cidrs: IpNetworkTable<()>,
     include_cidrs: IpNetworkTable<()>,
     exclude_ports: HashSet<u16>,
     include_ports: HashSet<u16>,
 }
 
-impl CompiledFilter {
+impl FilterRules {
     fn new(raw_filter: FlowSpanFilter) -> Self {
         let parse_cidrs = |cidrs: Vec<String>| -> Vec<IpNetwork> {
             cidrs
@@ -76,22 +76,22 @@ impl CompiledFilter {
 /// A pre-compiled filter for network spans.
 /// It parses CIDR strings into a more efficient representation for matching.
 pub struct PacketFilter {
-    source: CompiledFilter,
-    destination: CompiledFilter,
+    source: FilterRules,
+    destination: FilterRules,
 }
 
 impl PacketFilter {
     /// Creates a new `PacketFilter` from the resolved configuration filters.
     pub fn new(source_filter: FlowSpanFilter, destination_filter: FlowSpanFilter) -> Self {
         Self {
-            source: CompiledFilter::new(source_filter),
-            destination: CompiledFilter::new(destination_filter),
+            source: FilterRules::new(source_filter),
+            destination: FilterRules::new(destination_filter),
         }
     }
 
     /// Determines if a span should be produced based on the filtering rules.
     /// Returns `true` if the packet should be kept, `false` if it should be dropped.
-    pub fn should_produce_span(
+    pub fn should_process(
         &self,
         src_ip: IpAddr,
         src_port: u16,
