@@ -1,11 +1,14 @@
-image:
-  tag: v0.1.0-alpha.3
-# TODO(Cleanup for GA): image pull secrets not needed when going public
-imagePullSecrets:
-  - name: ghcr
+mermin:
+  enabled: true
+  image:
+    tag: v0.1.0-alpha.5
+  # TODO(Cleanup for GA): image pull secrets not needed when going public
+  imagePullSecrets:
+    - name: ghcr
 
-netobserv:
-  enabled: false # TODO(mack#LGO-376|2025-10-01): Set to true
+netobserv-flow:
+  enabled: true
+  fullnameOverride: netobserv-flow
 
   env:
     - name: EF_LICENSE_ACCEPTED
@@ -129,14 +132,14 @@ netobserv:
                 port: 4317
 
   outputOpenSearch:
-    enable: false # TODO(mack#LGO-376|2025-10-01): Set to true
+    enable: true
     addresses: opensearch-cluster-master.elastiflow.svc.gke-main-a.us-east1:9200
     password: Elast1flow! # Insecure
     tls:
       enable: true
       skipVerification: true
     dashboards:
-      provision: false # TODO(mack#LGO-376|2025-10-01): Set to true
+      provision: true
       dashboards_url: http://elastiflow-os-dashboards.elastiflow.svc.gke-main-a.us-east1:5601
 
   extraVolumes:
@@ -201,7 +204,7 @@ netobserv:
         tls.key: {{ .Files.Get "tls/netobserv.key" | b64enc }}
 
 opensearch:
-  enabled: false # TODO(mack#LGO-376|2025-10-01): Set to true
+  enabled: true
   clusterName: elastiflow
   fullnameOverride: "elastiflow-os"
   singleNode: true
@@ -250,7 +253,7 @@ opensearch:
               values: ["e2-standard-2", "e2-standard-4", "e2-standard-8"]
 
 opensearch-dashboards:
-  enabled: false # TODO(mack#LGO-376|2025-10-01): Set to true
+  enabled: true
   fullnameOverride: elastiflow-os-dashboards
   opensearchHosts: https://opensearch-cluster-master.elastiflow.svc.gke-main-a.us-east1:9200
   resources:

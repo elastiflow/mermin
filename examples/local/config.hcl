@@ -52,28 +52,6 @@ agent "traces" "main" {
   ]
 }
 
-# OTLP exporter configuration
-exporter "otlp" "main" {
-  scheme   = "http"
-  address  = "example.com"
-  port     = 4317
-  protocol = "grpc"
-  connectionTimeout = "10s"
-
-  auth "basic" {
-    pass = "PASSWORD"
-    user = "USERNAME"
-  }
-
-  tls {
-    insecure    = false
-    ca_cert     = "/etc/certs/ca.crt"
-    client_cert = "/etc/certs/cert.crt"
-    client_key  = "/etc/certs/cert.key"
-    enabled     = true
-  }
-}
-
 exporter "stdout" "main" {
   format = "full"
 }
