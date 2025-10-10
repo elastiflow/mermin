@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -17,7 +16,7 @@ use crate::{
         cli::Cli,
         conf::{
             ApiConf, Conf, ConfError, ExporterReference, ExporterReferencesParser, Hcl,
-            MetricsConf, TraceOptions,
+            MetricsConf,
             conf_serde::{duration, level},
             defaults, validate_config_path,
         },
@@ -87,15 +86,15 @@ pub struct Properties {
     /// to how the application's logic operates.
     pub span: SpanOptions,
 
-    /// A map of fully resolved and ready-to-use trace pipelines.
-    /// agent.traces.<foo>.(exporters, discovery, network)
-    pub agent_traces: HashMap<String, TracePipeline>,
+    /// A map of fully resolved and ready-to-use traces.
+    /// agent.traces.(exporters, discovery, network)
+    pub agent_trace: AgentTrace,
 
     /// Configuration for internal exporters.
     /// This field holds settings for exporting telemetry data
     /// to multiple destinations using the new structure.
-    /// traces.<foo>.exporters
-    pub internal_traces: InternalTraces,
+    /// traces.exporters
+    pub internal_trace: InternalTrace,
 
     /// An optional `PathBuf` field that represents the file path to the
     /// configuration file. This field is annotated with `#[serde(skip)]`,
@@ -116,36 +115,6 @@ impl Properties {
             Some(ext) => Err(ConfError::InvalidExtension(ext.to_string())),
             None => Err(ConfError::InvalidExtension("none".to_string())),
         }
-    }
-
-    pub fn resolve_trace_pipelines(
-        conf: &Conf,
-    ) -> Result<HashMap<String, TracePipeline>, ConfError> {
-        let mut trace_pipelines = HashMap::new();
-
-        if let Some(agent) = &conf.agent {
-            for (name, trace_opts) in agent.traces.clone() {
-                let resolved_pipeline = TracePipeline::from_raw(&name, trace_opts, conf)?;
-                trace_pipelines.insert(name, resolved_pipeline);
-            }
-        }
-
-        Ok(trace_pipelines)
-    }
-
-    pub fn resolve_internal_exporters(
-        conf: &Conf,
-    ) -> Result<HashMap<String, InternalExporters>, ConfError> {
-        let mut resolved_exporters = HashMap::new();
-        dbg!(&conf.exporter);
-        if let Some(traces) = &conf.traces {
-            for (name, exporter) in traces.pipelines.clone() {
-                let internal_exporter = InternalExporters::from_raw(&name, &exporter, conf)?;
-                resolved_exporters.insert(name, internal_exporter);
-            }
-        }
-
-        Ok(resolved_exporters)
     }
 
     /// Creates a new `Conf` instance based on the provided CLI arguments, environment variables,
@@ -205,13 +174,8 @@ impl Properties {
 
         let raw_conf: Conf = figment.extract()?;
 
-        let trace_pipelines = Self::resolve_trace_pipelines(&raw_conf)?;
-        let internal_exporters = Self::resolve_internal_exporters(&raw_conf)?;
-        let span_level = raw_conf
-            .traces
-            .as_ref()
-            .map(|t| t.span_level)
-            .unwrap_or_default();
+        let agent_trace = AgentTrace::from_raw(&raw_conf)?;
+        let internal_trace = InternalTrace::from_raw(&raw_conf)?;
 
         let resolved_interfaces = raw_conf.resolve_interfaces();
         let interfaces = raw_conf.interfaces;
@@ -226,11 +190,8 @@ impl Properties {
             packet_worker_count: raw_conf.packet_worker_count,
             shutdown_timeout: raw_conf.shutdown_timeout,
             span: raw_conf.span,
-            agent_traces: trace_pipelines,
-            internal_traces: InternalTraces {
-                pipelines: internal_exporters,
-                span_level,
-            },
+            agent_trace,
+            internal_trace,
             config_path: config_path_to_store,
         };
 
@@ -289,13 +250,8 @@ impl Properties {
 
         let raw_conf: Conf = figment.extract()?;
 
-        let trace_pipelines = Self::resolve_trace_pipelines(&raw_conf)?;
-        let internal_exporters = Self::resolve_internal_exporters(&raw_conf)?;
-        let span_level = raw_conf
-            .traces
-            .as_ref()
-            .map(|t| t.span_level)
-            .unwrap_or_default();
+        let agent_trace = AgentTrace::from_raw(&raw_conf)?;
+        let internal_trace = InternalTrace::from_raw(&raw_conf)?;
 
         let resolved_interfaces = raw_conf.resolve_interfaces();
         let interfaces = raw_conf.interfaces;
@@ -310,32 +266,22 @@ impl Properties {
             packet_worker_count: raw_conf.packet_worker_count,
             shutdown_timeout: raw_conf.shutdown_timeout,
             span: raw_conf.span,
-            agent_traces: trace_pipelines,
-            internal_traces: InternalTraces {
-                pipelines: internal_exporters,
-                span_level,
-            },
+            agent_trace,
+            internal_trace,
             config_path: self.config_path.clone(),
         })
     }
 
-    fn extract_exporters_from_pipelines<'a, I, T>(
-        pipelines: I,
-    ) -> (Vec<OtlpExporterOptions>, Vec<StdoutExporterOptions>)
-    where
-        I: Iterator<Item = &'a T>,
-        T: 'a,
-        T: AsRef<[ExportOption]>,
-    {
+    fn separate_exporters_by_type(
+        exporters: &[ExportOption],
+    ) -> (Vec<OtlpExporterOptions>, Vec<StdoutExporterOptions>) {
         let mut otlp_exporters = Vec::new();
         let mut stdout_exporters = Vec::new();
 
-        for pipeline in pipelines {
-            for exporter in pipeline.as_ref() {
-                match exporter {
-                    ExportOption::Otlp(opts) => otlp_exporters.push(opts.clone()),
-                    ExportOption::Stdout(opts) => stdout_exporters.push(opts.clone()),
-                }
+        for exporter in exporters {
+            match exporter {
+                ExportOption::Otlp(opts) => otlp_exporters.push(opts.clone()),
+                ExportOption::Stdout(opts) => stdout_exporters.push(opts.clone()),
             }
         }
 
@@ -343,52 +289,39 @@ impl Properties {
     }
 
     pub fn get_internal_exporters(&self) -> (Vec<OtlpExporterOptions>, Vec<StdoutExporterOptions>) {
-        Self::extract_exporters_from_pipelines(
-            self.internal_traces
-                .pipelines
-                .values()
-                .map(|t| &t.exporters),
-        )
+        Self::separate_exporters_by_type(&self.internal_trace.exporters)
     }
 
     pub fn get_agent_exporters(&self) -> (Vec<OtlpExporterOptions>, Vec<StdoutExporterOptions>) {
-        Self::extract_exporters_from_pipelines(self.agent_traces.values().map(|p| &p.exporters))
+        Self::separate_exporters_by_type(&self.agent_trace.exporters)
     }
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct InternalTraces {
-    #[serde(default)]
+pub struct InternalTrace {
     pub span_level: SpanFmt,
-    #[serde(flatten)]
-    pub pipelines: HashMap<String, InternalExporters>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InternalExporters {
     pub exporters: Vec<ExportOption>,
 }
 
-impl InternalExporters {
-    /// Resolves a single trace pipeline from the raw configuration.
-    pub fn from_raw(
-        pipeline_name: &str,
-        trace_opts: &TraceOptions,
-        raw_conf: &Conf,
-    ) -> Result<Self, ConfError> {
+impl InternalTrace {
+    /// Resolves internal trace from the raw configuration.
+    pub fn from_raw(raw_conf: &Conf) -> Result<Self, ConfError> {
+        let internal_opts = &raw_conf.traces;
+
         // Resolve Exporters
-        let parsed_refs = trace_opts.exporters.parse().unwrap();
-        let exporters = resolve_exporters(parsed_refs, &raw_conf.exporter, pipeline_name)?;
+        let parsed_refs = internal_opts.exporters.parse().unwrap();
+        let exporters = resolve_exporters(parsed_refs, &raw_conf.exporter)?;
 
-        // Other resolvers to be added here
-
-        Ok(Self { exporters })
+        Ok(Self {
+            span_level: internal_opts.span_level,
+            exporters,
+        })
     }
 }
 
 /// Represents a single, fully resolved trace pipeline with its corresponding configurations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TracePipeline {
+pub struct AgentTrace {
     pub exporters: Vec<ExportOption>,
 }
 
@@ -399,16 +332,13 @@ pub enum ExportOption {
     Stdout(StdoutExporterOptions),
 }
 
-impl TracePipeline {
-    /// Resolves a single trace pipeline from the raw configuration.
-    pub fn from_raw(
-        pipeline_name: &str,
-        trace_opts: TraceOptions,
-        raw_conf: &Conf,
-    ) -> Result<Self, ConfError> {
+impl AgentTrace {
+    /// Resolves a traces from the raw configuration.
+    pub fn from_raw(raw_conf: &Conf) -> Result<Self, ConfError> {
         // Resolve Exporters
+        let trace_opts = &raw_conf.agent.traces;
         let parsed_refs = trace_opts.exporters.parse().unwrap();
-        let exporters = resolve_exporters(parsed_refs, &raw_conf.exporter, pipeline_name)?;
+        let exporters = resolve_exporters(parsed_refs, &raw_conf.exporter)?;
 
         // Other resolvers to be added here
 
@@ -419,7 +349,6 @@ impl TracePipeline {
 fn resolve_exporters(
     refs: Vec<ExporterReference>,
     exporter_opts: &ExporterOptions,
-    pipeline_name: &str,
 ) -> Result<Vec<ExportOption>, ConfError> {
     let mut exporters = Vec::new();
     for exporter_ref in refs {
@@ -432,8 +361,8 @@ fn resolve_exporters(
                     .cloned()
                     .ok_or_else(|| {
                         ConfError::InvalidReference(format!(
-                            "OTLP exporter '{}' not found for pipeline '{}'",
-                            exporter_ref.name, pipeline_name
+                            "OTLP exporter '{}' not found",
+                            exporter_ref.name
                         ))
                     })?;
                 exporters.push(ExportOption::Otlp(opts));
@@ -446,8 +375,8 @@ fn resolve_exporters(
                     .cloned()
                     .ok_or_else(|| {
                         ConfError::InvalidReference(format!(
-                            "Stdout exporter '{}' not found for pipeline '{}'",
-                            exporter_ref.name, pipeline_name
+                            "Stdout exporter '{}' not found",
+                            exporter_ref.name
                         ))
                     })?;
                 exporters.push(ExportOption::Stdout(opts));

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, fmt, net::Ipv4Addr, path::Path, time::Duration};
+use std::{error::Error, fmt, net::Ipv4Addr, path::Path, time::Duration};
 
 use figment::providers::Format;
 use hcl::eval::Context;
@@ -44,9 +44,9 @@ pub struct Conf {
     pub shutdown_timeout: Duration,
     pub span: SpanOptions,
     /// Top-level agent configuration specifying which telemetry features are enabled.
-    pub agent: Option<AgentOptions>,
+    pub agent: AgentOptions,
     /// Contains the configuration for internal exporters
-    pub traces: Option<TracesConfig>,
+    pub traces: InternalTraceOptions,
     /// References to the exporters to use for telemetry
     pub exporter: ExporterOptions,
 }
@@ -63,8 +63,8 @@ impl Default for Conf {
             packet_worker_count: defaults::flow_workers(),
             shutdown_timeout: defaults::shutdown_timeout(),
             span: SpanOptions::default(),
-            agent: None,
-            traces: Some(TracesConfig::default()),
+            agent: AgentOptions::default(),
+            traces: InternalTraceOptions::default(),
             exporter: ExporterOptions::default(),
         }
     }
@@ -169,22 +169,29 @@ pub struct K8sObjectSelector {
 /// ```yaml
 /// agent:
 ///   traces:
-///     main:
-///       exporters:
-///         - exporter.otlp.main
-///         - exporter.stdout.json
-///
+///     exporters:
+///       - exporter.otlp.main
+///       - exporter.stdout.json
 /// ```
 #[derive(Default, Debug, Deserialize, Serialize, Clone)]
 pub struct AgentOptions {
-    /// Mapping of trace names to trace options.
-    /// Example: "main" -> TraceOptions
-    pub traces: HashMap<String, TraceOptions>,
+    /// Configuration for the single, primary trace pipeline
+    pub traces: TraceOptions,
 }
 
-/// Options for all traces configuration
+/// Options for the single, user-facing agent trace pipeline.
+/// Contains exporters, filtering, discovery, etc.
 #[derive(Default, Debug, Deserialize, Serialize, Clone)]
-pub struct TracesConfig {
+#[serde(default)]
+pub struct TraceOptions {
+    /// A list of exporter references to use for tracing. Each entry should match a key
+    /// in the `exporter` section of the config.
+    pub exporters: ExporterReferences,
+}
+
+/// Represents the entire top-level `traces` block for internal monitoring.
+#[derive(Default, Debug, Deserialize, Serialize, Clone)]
+pub struct InternalTraceOptions {
     /// The level of span events to record. The current default is `FmtSpan::FULL`,
     /// which records all events (enter, exit, close) for all spans. The level can also be
     /// one of the following:
@@ -195,17 +202,6 @@ pub struct TracesConfig {
     /// - `FmtSpan::ACTIVE`: Only span events for spans that are active (i.e., not closed) are recorded.
     pub span_level: SpanFmt,
 
-    #[serde(flatten)]
-    pub pipelines: HashMap<String, TraceOptions>,
-}
-
-/// Options for a specific trace configuration.
-/// References specific configs by name from config file
-#[derive(Default, Debug, Deserialize, Serialize, Clone)]
-#[serde(default)]
-pub struct TraceOptions {
-    /// A list of exporter references to use for tracing. Each entry should match a key
-    /// in the `exporter` section of the config.
     pub exporters: ExporterReferences,
 }
 
@@ -571,7 +567,7 @@ mod tests {
     use super::{Conf, ExporterReference};
     use crate::runtime::{
         cli::Cli,
-        props::{InternalTraces, Properties},
+        props::{AgentTrace, InternalTrace, Properties},
     };
 
     fn parse_exporter_reference(reference: &str) -> Result<ExporterReference, String> {
@@ -591,9 +587,9 @@ mod tests {
 
     fn create_default_app_props() -> Properties {
         let raw_conf = Conf::default();
-        let trace_pipelines = Properties::resolve_trace_pipelines(&raw_conf)
-            .expect("resolving default pipelines should succeed");
-        let internal_traces = Properties::resolve_internal_exporters(&raw_conf)
+        let agent_trace =
+            AgentTrace::from_raw(&raw_conf).expect("resolving default pipelines should succeed");
+        let internal_trace = InternalTrace::from_raw(&raw_conf)
             .expect("resolving default internal traces should succeed");
         let resolved_interfaces = raw_conf.resolve_interfaces();
         let interfaces = raw_conf.interfaces;
@@ -608,11 +604,8 @@ mod tests {
             packet_worker_count: raw_conf.packet_worker_count,
             shutdown_timeout: raw_conf.shutdown_timeout,
             span: raw_conf.span,
-            agent_traces: trace_pipelines,
-            internal_traces: InternalTraces {
-                span_level: raw_conf.traces.unwrap().span_level,
-                pipelines: internal_traces,
-            },
+            agent_trace,
+            internal_trace,
             config_path: None,
         }
     }
