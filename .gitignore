@@ -11,7 +11,7 @@ target/
 # Misc
 /tmp
 tmp.*
-charts/mermin/charts/*.tgz
+charts/**/charts/*.tgz
 helm_rendered
 /mermin/tests/e2e/grafana/tempo-data/
 

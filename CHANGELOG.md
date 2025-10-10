@@ -1,3 +1,11 @@
+## [0.1.0-alpha.6](https://github.com/elastiflow/mermin/compare/v0.1.0-alpha.5...v0.1.0-alpha.6) (2025-10-08)
+
+### Features
+
+* add regex and glob pattern matching for interface discovery ([#134](https://github.com/elastiflow/mermin/issues/134)) ([7c9ceea](https://github.com/elastiflow/mermin/commit/7c9ceeaef5a6a335c582000d3b7e7a2c8429bb3d))
+* **span:** async flow span producer with interval-based recording and protocol-aware timeouts ([#135](https://github.com/elastiflow/mermin/issues/135)) ([852e3ef](https://github.com/elastiflow/mermin/commit/852e3ef7b3a48b4a270d88beae87a7a981e13d3c))
+
+
 ## [0.1.0-alpha.5](https://github.com/elastiflow/mermin/compare/v0.1.0-alpha.4...v0.1.0-alpha.5) (2025-10-07)
 
 ### Features

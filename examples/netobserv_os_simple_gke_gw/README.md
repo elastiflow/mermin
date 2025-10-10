@@ -27,32 +27,36 @@ Notes on the example deployment:
 
 ## Install
 
-Change `gke-main-a.us-east1` in the `values.yaml` to your Kubernetes Default Domain (`cluster.local` by default)
+- Change `gke-main-a.us-east1` in the `values.yaml` to your Kubernetes Default Domain (`cluster.local` by default)
 
-```sh
-helm repo add netobserv https://elastiflow.github.io/helm-chart-netobserv/
-helm repo add opensearch https://opensearch-project.github.io/helm-charts/
-helm repo update
-helm dependency build charts/mermin
-kubectl create namespace elastiflow
+  ```sh
+  helm repo add netobserv https://elastiflow.github.io/helm-chart-netobserv/
+  helm repo add opensearch https://opensearch-project.github.io/helm-charts/
+  helm repo update
+  helm dependency build charts/mermin-netobserv-os
+  kubectl create namespace elastiflow
 
-# TODO(Cleanup for GA): image pull secrets not needed when going public
-kubectl create secret docker-registry ghcr \
-    --docker-server=ghcr.io \
-    --docker-username=elastiflow-ghcr \
-    --docker-password=${CLASSIC_GH_TOKEN}
+  # TODO(Cleanup for GA): image pull secrets not needed when going public
+  kubectl create secret docker-registry ghcr \
+      --docker-server=ghcr.io \
+      --docker-username=elastiflow-ghcr \
+      --docker-password=${CLASSIC_GH_TOKEN}
 
-# With default config
-helm upgrade -i --wait --timeout 15m -n elastiflow \
-  -f examples/os_simple_gke_gw/values.yaml \
-  mermin charts/mermin
+  # With custom config
+  helm upgrade -i --wait --timeout 15m -n elastiflow \
+    -f examples/netobserv_os_simple_gke_gw/values.yaml \
+    --set-file mermin.config.source=examples/netobserv_os_simple_gke_gw/config.hcl \
+    mermin charts/mermin-netobserv-os
 
-# With custom config
-helm upgrade -i --wait --timeout 15m -n elastiflow \
-  -f examples/os_simple_gke_gw/values.yaml \
-  --set-file config.source=examples/os_simple_gke_gw/config.hcl \
-  mermin charts/mermin
-```
+  # Get NetObserv Gateway (Load Balancer) IP
+  kubectl get gtw netobserv-flow -o=jsonpath='{.status.addresses[0].value}'
+  ```
+
+- Get NetObserv Gateway (Load Balancer) IP
+
+  ```sh
+  kubectl get gtw netobserv-flow -o=jsonpath='{.status.addresses[0].value}'
+  ```
 
 ## Access
 
@@ -69,18 +73,12 @@ Now you can navigate to the obtained IP in your browser (assuming you have acces
 To render and diff Helm templates to Kubernetes manifests, run:
 
 ```sh
-# With default config
-rm -rf helm_rendered/mermin; helm template -n elastiflow \
-  -f examples/os_simple_gke_gw/values.yaml \
-  --output-dir helm_rendered \
-  mermin charts/mermin
-
 # With custom config
 rm -rf helm_rendered/mermin; helm template -n elastiflow \
-  -f examples/os_simple_gke_gw/values.yaml \
-  --set-file config.source=examples/os_simple_gke_gw/config.hcl \
+  -f examples/netobserv_os_simple_gke_gw/values.yaml \
+  --set-file mermin.config.source=examples/netobserv_os_simple_gke_gw/config.hcl \
   --output-dir helm_rendered \
-  mermin charts/mermin
+  mermin charts/mermin-netobserv-os
 
 # Diff with existing K8s resources
 kubectl diff -R -f helm_rendered/mermin/

@@ -52,7 +52,7 @@ agent "traces" "main" {
   ]
 }
 
-# OTLP exporter configuration
+# OTLP exporter configuration with name "main"
 exporter "otlp" "main" {
   scheme   = "http"
   address  = "example.com"
@@ -60,19 +60,22 @@ exporter "otlp" "main" {
   protocol = "grpc"
   connectionTimeout = "10s"
 
-  auth "basic" {
-    pass = "PASSWORD"
-    user = "USERNAME"
+  auth {
+    basic = {
+      user = "USERNAME"
+      pass = env("USER_SPECIFIED_ENV_VAR_TRITON_PASS")
+    }
   }
 
   tls {
+    enabled     = true
     insecure    = false
     ca_cert     = "/etc/certs/ca.crt"
     client_cert = "/etc/certs/cert.crt"
     client_key  = "/etc/certs/cert.key"
-    enabled     = true
   }
 }
+
 
 exporter "stdout" "main" {
   format = "full"
