@@ -238,7 +238,7 @@ fn get_packet_meta(ctx: &TcContext) -> Result<&mut PacketMeta, Error> {
 
 #[cfg(not(feature = "test"))]
 #[map]
-static PARSER_OPTIONS: Array<u16> = Array::with_max_entries(3, 0); // Update to map::Array to satisfy aya Pod trait error. 
+static PARSER_OPTIONS: Array<u16> = Array::with_max_entries(3, 0);
 
 #[cfg(not(feature = "test"))]
 #[inline(always)]
