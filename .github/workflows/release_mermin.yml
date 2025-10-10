@@ -101,7 +101,6 @@ jobs:
         with:
           tag_prefix: ${{ fromJson(env.BRANCH_TAG_PREFIXES)[github.ref_name] }}
           exclude_paths: "examples/**/*,charts/mermin-netobserv-os/**/*"
-          add_git_notes: true
       - name: Configure Git
         run: |
           git config user.name "$GITHUB_ACTOR"
