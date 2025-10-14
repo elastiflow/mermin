@@ -85,23 +85,23 @@ traces {
 
 /*
   OBI-style service discovery configuration
-  
+
   Analogous to OBI's discovery.instrument pattern, this section defines which K8s resources
   to cache for network flow decoration. Instead of discovering processes to instrument,
   Mermin discovers K8s resources to associate with network flows.
-  
+
   See: https://opentelemetry.io/docs/zero-code/obi/configure/service-discovery/
 */
 discovery {
   /*
     K8s resources to cache for flow decoration
-    
+
     Uses OBI's discovery.instrument structure with OBI's standard field names from:
     https://opentelemetry.io/docs/zero-code/obi/configure/service-discovery/#discovery-services
-    
+
     IMPORTANT: Mermin requires k8s_kind to specify which K8s resource types to cache.
     This is Mermin-specific (OBI discovers processes via open_ports/exe_path, Mermin discovers K8s resources).
-    
+
     All other field names follow OBI's standard (flat properties, glob patterns):
     - k8s_namespace (string glob)
     - k8s_pod_name (string glob)
@@ -109,19 +109,19 @@ discovery {
     - k8s_owner_name (string glob)
     - k8s_pod_labels (map[string]string, values are globs)
     - k8s_pod_annotations (map[string]string, values are globs)
-    
+
     All selectors in an entry must match (AND logic).
   */
   instrument = [
     # Cache all Services in all namespaces
     { k8s_kind = "Service" },
-    
+
     # Cache all basic K8s networking resources
     { k8s_kind = "Endpoint" },
     { k8s_kind = "EndpointSlice" },
     { k8s_kind = "Gateway" },
     { k8s_kind = "Ingress" },
-    
+
     # Cache all Pod-related resources
     { k8s_kind = "Pod" },
     { k8s_kind = "ReplicaSet" },
@@ -130,14 +130,14 @@ discovery {
     { k8s_kind = "StatefulSet" },
     { k8s_kind = "Job" },
     { k8s_kind = "CronJob" },
-    
+
     # Cache NetworkPolicy resources
     { k8s_kind = "NetworkPolicy" },
 
     /*
       Examples using OBI's standard field names for granular selection:
     */
-    
+
     # Cache only Pods in "frontend" namespace with label app="web"
     # {
     #   k8s_kind       = "Pod"
@@ -146,13 +146,13 @@ discovery {
     #     app = "web"                # Value is a glob pattern
     #   }
     # }
-    
+
     # Cache only Pods owned by deployments matching "my-app-*"
     # {
     #   k8s_kind            = "Pod"
     #   k8s_deployment_name = "my-app-*"  # OBI standard field (string glob)
     # }
-    
+
     # Cache Pods in backend namespace with specific annotation
     # {
     #   k8s_kind            = "Pod"
@@ -161,7 +161,7 @@ discovery {
     #     "mermin.observe" = "true"           # Value is a glob pattern
     #   }
     # }
-    
+
     # Cache Pods by owner name (Deployment/ReplicaSet/DaemonSet/StatefulSet)
     # {
     #   k8s_kind       = "Pod"
@@ -171,10 +171,10 @@ discovery {
 
   /*
     K8s resources to exclude from caching (uses OBI's discovery.exclude_instrument syntax)
-    
+
     Exclusions are processed first - if a resource matches an exclusion rule, it's ignored
     even if it matches an inclusion rule.
-    
+
     Uses the same OBI field names as instrument entries above.
   */
   exclude_instrument = [
@@ -183,7 +183,7 @@ discovery {
     #   k8s_kind      = "Gateway"
     #   k8s_namespace = "loggers"  # OBI field name
     # }
-    
+
     # Example: Exclude pods with specific label
     # {
     #   k8s_kind       = "Pod"
@@ -195,7 +195,7 @@ discovery {
 
   /*
     Owner reference walking configuration
-    
+
     Controls how Mermin walks K8s owner references (Pod <- Job <- CronJob <- ...)
     and attaches owner metadata to flows.
   */
@@ -224,7 +224,7 @@ discovery {
 
   /*
     Selector-based K8s resource association
-    
+
     Extracts selectors from K8s resource definitions and matches them against other resources
     (e.g., NetworkPolicy selects Pods, Service selects Pods via spec.selector)
   */
@@ -250,17 +250,17 @@ discovery {
 
 /*
   OBI-style attributes configuration for flow decoration
-  
+
   Similar to OBI's attributes.kubernetes which decorates metrics/traces with K8s metadata,
   Mermin decorates network flows with K8s metadata by associating flow attributes
   (source/destination IP/port) with K8s resource fields.
-  
+
   See: https://opentelemetry.io/docs/zero-code/obi/configure/metrics-traces-attributes/
 */
 attributes {
   /*
     Kubernetes metadata decoration (follows OBI's attributes.kubernetes pattern)
-    
+
     Analogous to OBI's attributes.kubernetes decorator which adds standard K8s labels
     (k8s.namespace.name, k8s.deployment.name, etc.) to metrics and traces,
     Mermin extracts K8s metadata and associates it with flow source/destination attributes.
@@ -268,14 +268,14 @@ attributes {
   kubernetes {
     /*
       Source flow decoration
-      
+
       Defines how to associate source flow attributes (source.ip, source.port, etc.)
       with Kubernetes resource fields to extract and attach relevant metadata.
     */
     source {
       /*
         Metadata extraction configuration
-        
+
         Similar to OBI's extra_group_attributes which defines additional K8s metadata
         to include (e.g., k8s.app.version), this specifies which K8s resource fields
         to extract as flow attributes.
@@ -290,11 +290,11 @@ attributes {
 
         /*
           Label extraction (follows OBI's label/annotation extraction pattern)
-          
+
           Extracts labels from K8s resources and adds them as flow attributes.
           Similar to OBI's resource.opentelemetry.io/ annotation prefix pattern
           for custom attributes.
-          
+
           Example:
         */
         # label {
@@ -305,9 +305,9 @@ attributes {
 
         /*
           Annotation extraction
-          
+
           Extracts annotations from K8s resources and adds them as flow attributes.
-          
+
           Example:
         */
         # annotation {
@@ -319,11 +319,11 @@ attributes {
 
       /*
         Association rules (Mermin-specific extension)
-        
+
         Unlike OBI which automatically decorates with standard K8s labels,
         Mermin needs explicit rules to map flow attributes to K8s resource fields
         for matching and metadata extraction.
-        
+
         Each block defines how flow attributes match against K8s resource field
         values to determine which resource metadata to attach to the flow.
       */
@@ -407,7 +407,7 @@ attributes {
 
     /*
       Destination flow decoration
-      
+
       Defines how to associate destination flow attributes (destination.ip, destination.port, etc.)
       with Kubernetes resource fields to extract and attach relevant metadata.
     */
