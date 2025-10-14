@@ -271,7 +271,6 @@ discovery:
         include_kinds:
             - Service
         max_depth: 5
-        walk_max_depth: 10
     k8s_selector:
         - k8s_kind: NetworkPolicy
           selector_match_expressions_field: spec.podSelector.matchExpressions

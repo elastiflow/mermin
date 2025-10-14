@@ -35,46 +35,44 @@ metrics {
 # Use the syntax and rules of OBI: https://opentelemetry.io/docs/zero-code/obi/configure/filter-metrics-traces/
 # For globs we can use https://docs.rs/globset/latest/globset/#syntax to match the functionality of OBI.
 # OBI-aligned filter configuration with glob pattern strings
-filter {
-  source {
-    address {
-      match     = "" # CIDR/IP glob to include (e.g., "10.0.0.0/8", "192.168.1.*")
-      not_match = "" # CIDR/IP glob to exclude
-    }
-    port {
-      match     = "" # Port range/glob to include (e.g., "80", "443", "8000-8999")
-      not_match = "" # Port range/glob to exclude
-    }
+filter "source" {
+  address {
+    match     = "" # CIDR/IP glob to include (e.g., "10.0.0.0/8", "192.168.1.*")
+    not_match = "" # CIDR/IP glob to exclude
   }
-
-  destination {
-    address {
-      match     = "" # CIDR/IP glob to include
-      not_match = "" # CIDR/IP glob to exclude
-    }
-    port {
-      match     = "" # Port range/glob to include
-      not_match = "" # Port range/glob to exclude
-    }
+  port {
+    match     = "" # Port range/glob to include (e.g., "80", "443", "8000-8999")
+    not_match = "" # Port range/glob to exclude
   }
+}
 
-  network {
-    transport {
-      match     = "" # e.g., "tcp", "udp"
-      not_match = "" # e.g., "icmp"
-    }
-    type {
-      match     = "" # e.g., "ipv4", "ipv6"
+filter "destination" {
+  address {
+    match     = "" # CIDR/IP glob to include
+    not_match = "" # CIDR/IP glob to exclude
+  }
+  port {
+    match     = "" # Port range/glob to include
+    not_match = "" # Port range/glob to exclude
+  }
+}
+
+filter "network" {
+  transport {
+    match     = "" # e.g., "tcp", "udp"
+    not_match = "" # e.g., "icmp"
+  }
+  type {
+    match     = "" # e.g., "ipv4", "ipv6"
+    not_match = ""
+  }
+}
+
+filter "flow" {
+  connection {
+    state {
+      match     = "" # e.g., "established", "close_wait", "syn_sent"
       not_match = ""
-    }
-  }
-
-  flow {
-    connection {
-      state {
-        match     = "" # e.g., "established", "close_wait", "syn_sent"
-        not_match = ""
-      }
     }
   }
 }
