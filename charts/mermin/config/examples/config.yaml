@@ -6,7 +6,7 @@ attributes:
     kubernetes:
         destination:
             endpoint:
-                select:
+                sources:
                     - from: flow
                       name: destination.ip
                       to:
@@ -20,7 +20,7 @@ attributes:
                       to:
                         - endpoint.subsets[*].ports[*].protocol
             endpointslice:
-                select:
+                sources:
                     - from: flow
                       name: destination.ip
                       to:
@@ -39,7 +39,7 @@ attributes:
                     - '[*].metadata.namespace'
                     - pod.metadata.uid
             gateway:
-                select:
+                sources:
                     - from: flow
                       name: destination.ip
                       to:
@@ -50,7 +50,7 @@ attributes:
                       to:
                         - gateway.spec.listeners[*].port
             ingress:
-                select:
+                sources:
                     - from: flow
                       name: destination.ip
                       to:
@@ -62,7 +62,7 @@ attributes:
                         - ingress.spec.defaultBackend.service.port
                         - ingress.spec.rules[*].http.paths[*].backend.service.port.number
             networkpolicy:
-                select:
+                sources:
                     - from: flow
                       name: destination.ip
                       to:
@@ -79,13 +79,13 @@ attributes:
                         - networkpolicy.spec.ingress[*].ports[*].protocol
                         - networkpolicy.spec.egress[*].ports[*].protocol
             node:
-                select:
+                sources:
                     - from: flow
                       name: destination.ip
                       to:
                         - node.status.addresses[*].address
             pod:
-                select:
+                sources:
                     - from: flow
                       name: destination.ip
                       to:
@@ -103,7 +103,7 @@ attributes:
                       to:
                         - pod.spec.containers[*].ports[*].protocol
             service:
-                select:
+                sources:
                     - from: flow
                       name: destination.ip
                       to:
@@ -126,7 +126,7 @@ attributes:
                         - service.spec.ipFamilies[*]
         source:
             endpoint:
-                select:
+                sources:
                     - from: flow
                       name: source.ip
                       to:
@@ -140,7 +140,7 @@ attributes:
                       to:
                         - endpoint.subsets[*].ports[*].protocol
             endpointslice:
-                select:
+                sources:
                     - from: flow
                       name: source.ip
                       to:
@@ -163,7 +163,7 @@ attributes:
                     - '[*].metadata.namespace'
                     - '[*].metadata.uid'
             gateway:
-                select:
+                sources:
                     - from: flow
                       name: source.ip
                       to:
@@ -174,7 +174,7 @@ attributes:
                       to:
                         - gateway.spec.listeners[*].port
             ingress:
-                select:
+                sources:
                     - from: flow
                       name: source.ip
                       to:
@@ -186,7 +186,7 @@ attributes:
                         - ingress.spec.defaultBackend.service.port
                         - ingress.spec.rules[*].http.paths[*].backend.service.port.number
             networkpolicy:
-                select:
+                sources:
                     - from: flow
                       name: source.ip
                       to:
@@ -203,13 +203,13 @@ attributes:
                         - networkpolicy.spec.ingress[*].ports[*].protocol
                         - networkpolicy.spec.egress[*].ports[*].protocol
             node:
-                select:
+                sources:
                     - from: flow
                       name: source.ip
                       to:
                         - node.status.addresses[*].address
             pod:
-                select:
+                sources:
                     - from: flow
                       name: source.ip
                       to:
@@ -227,7 +227,7 @@ attributes:
                       to:
                         - pod.spec.containers[*].ports[*].protocol
             service:
-                select:
+                sources:
                     - from: flow
                       name: source.ip
                       to:
