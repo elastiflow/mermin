@@ -1,3 +1,13 @@
+## [v0.1.0-beta.2] - 2025-10-14
+
+### Bug Fixes
+
+- **ci:** Separate tag for "mermin" helm chart (#149)
+
+[v0.1.0-beta.1..v0.1.0-beta.2](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.1...v0.1.0-beta.2)
+
+
+
 ## [v0.1.0-beta.1] - 2025-10-14
 
 ### Bug Fixes
