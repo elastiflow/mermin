@@ -5,14 +5,14 @@
 interfaces = ["eth0"]
 
 # Logging configuration
-log_level = "info"
+log_level     = "info"
 trace_printer = "disabled" // disabled, text, text_indent(*new), json, json_indent
 
 # Automatic configuration reloading
 auto_reload = false
 
 # Shutdown timeout
-shutdown_timeout        = "5s"
+shutdown_timeout = "5s"
 
 # Internal channel and performance related configuration options
 packet_channel_capacity = 1024
