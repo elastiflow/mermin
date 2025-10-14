@@ -1,3 +1,17 @@
+## [v0.1.0-beta.1] - 2025-10-14
+
+### Bug Fixes
+
+- **ci:** "fetch-depth" should be 0 for releases (#143)
+- **ci:** Simplify the "is_release" regex (#145)
+### Features
+
+- **helm:** Split "mermin" and "mermin-netobserv-os" to separate charts (#141)
+
+[v0.1.0-beta.0..v0.1.0-beta.1](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.0...v0.1.0-beta.1)
+
+
+
 ## [0.1.0-alpha.6](https://github.com/elastiflow/mermin/compare/v0.1.0-alpha.5...v0.1.0-alpha.6) (2025-10-08)
 
 ### Features
