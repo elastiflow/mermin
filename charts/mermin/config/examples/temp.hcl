@@ -252,6 +252,22 @@ discovery {
 */
 attributes {
   /*
+    OBI's `select` subsection, https://opentelemetry.io/docs/zero-code/obi/configure/metrics-traces-attributes/
+
+    This is a map where each key is the name of a metric either in its OpenTelemetry or Prometheus port, and each metric has two sub-properties: include and exclude.
+    Wildcards supported in metrics/span names
+  */
+  select {
+    attr    = "flow_ipv4_*"
+    include = ["*"]
+    exclude = ["foobar"]
+  }
+  select {
+    attr    = "flow_ipv6_tcp"
+    include = ["baz"]
+  }
+
+  /*
     Kubernetes metadata decoration (follows OBI's attributes.kubernetes pattern)
 
     Analogous to OBI's attributes.kubernetes decorator which adds standard K8s labels
