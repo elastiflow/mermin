@@ -87,7 +87,9 @@ jobs:
     permissions:
       contents: write
     outputs:
+      new_release_published: ${{ steps.prepare_release.outputs.new_release_published }}
       new_release_version: ${{ steps.prepare_release.outputs.new_release_version }}
+      new_release_notes: ${{ steps.prepare_release.outputs.new_release_notes }}
     env:
       CHARTS_DIR: charts/mermin
     steps:
@@ -101,26 +103,6 @@ jobs:
         with:
           tag_prefix: ${{ fromJson(env.BRANCH_TAG_PREFIXES)[github.ref_name] }}
           exclude_paths: "examples/**/*,charts/mermin-netobserv-os/**/*"
-      - name: Configure Git
-        run: |
-          git config user.name "$GITHUB_ACTOR"
-          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
-      - name: Install Helm
-        uses: azure/setup-helm@v4
-      - name: Install Helm dependencies
-        run: |
-          (helm dependency list ${{ env.CHARTS_DIR }} || true) | grep -E 'https://' | while read -r dep; do
-            helm repo add $(echo ${dep} | awk '{print $1}') $(echo ${dep} | awk '{print $4}')
-          done
-      - name: Install chart-releaser
-        uses: helm/chart-releaser-action@v1.7.0
-        env:
-          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-        with:
-          install_only: true
-      - name: Package helm chart
-        run: |
-          cr package ${{ env.CHARTS_DIR }}
       - name: Create GH release
         if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
         uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8
@@ -136,15 +118,11 @@ jobs:
           target_commitish: ${{ github.ref_name }}
           preserve_order: true
           make_latest: true
-          files: ".cr-release-packages/*.tgz"
-      - name: Update GH pages index
-        run: |
-          mkdir .cr-index
-          cr index --push -t ${{ secrets.GITHUB_TOKEN }} --owner elastiflow --git-repo mermin
 
   docker_build_push:
     name: Docker build/push
     needs: [release]
+    if: ${{ fromJson(needs.release.outputs.new_release_published) }}
     runs-on: ubuntu-latest-8c
     timeout-minutes: 90
     permissions:
@@ -193,3 +171,53 @@ jobs:
           cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }},mode=max
           registry_username: ${{ github.actor }}
           registry_password: ${{ secrets.GITHUB_TOKEN }}
+
+  release_chart:
+    name: Release Chart
+    needs: [release, docker_build_push]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      CHARTS_DIR: charts/mermin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+      - name: Install Helm dependencies
+        run: |
+          (helm dependency list ${{ env.CHARTS_DIR }} || true) | grep -E 'https://' | while read -r dep; do
+            helm repo add $(echo ${dep} | awk '{print $1}') $(echo ${dep} | awk '{print $4}')
+          done
+      - name: Install chart-releaser
+        uses: helm/chart-releaser-action@v1.7.0
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        with:
+          install_only: true
+      - name: Package helm chart
+        run: |
+          cr package ${{ env.CHARTS_DIR }}
+      - name: Create GH release
+        if: ${{ fromJson(needs.release.outputs.new_release_published) }}
+        uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8
+        with:
+          name: mermin-${{ needs.release.outputs.new_release_version }}
+          tag_name: mermin-${{ needs.release.outputs.new_release_version }}
+          body: |
+            ${{ needs.release.outputs.new_release_notes }}
+          target_commitish: ${{ github.ref_name }}
+          preserve_order: true
+          make_latest: true
+          files: ".cr-release-packages/*.tgz"
+      - name: Update GH pages index
+        run: |
+          mkdir .cr-index
+          cr index --push -t ${{ secrets.GITHUB_TOKEN }} --owner elastiflow --git-repo mermin
