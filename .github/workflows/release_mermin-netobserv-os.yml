@@ -37,8 +37,8 @@ jobs:
           ${COMMIT_MESSAGE}
           EOF
           cat /tmp/commit_message
-          # https://regex101.com/r/VgA2Wj/1
-          echo $(grep -Pq '^\[release mermin-netobserv-os-(?:[0-9]{1,3}\.?){3}(?:-(?:rc|alpha|beta)(?:\.[0-9]{1,3})?)?\] \(#[0-9]{1,5}\)$' /tmp/commit_message && echo true || echo false) > /tmp/is_release
+          # https://regex101.com/r/1z85UX/3
+          echo $(grep -Pq '^\[release .+\] \(#[0-9]{1,5}\)$' /tmp/commit_message && echo true || echo false) > /tmp/is_release
           echo "is_release=$(cat /tmp/is_release)" >> $GITHUB_OUTPUT
 
   release_pr_create:
@@ -71,10 +71,10 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           base: "${{ github.ref_name }}"
           branch: release-mermin-netobserv-os-from-${{ github.ref_name }}
-          title: '[release mermin-netobserv-os-${{ steps.prepare_release.outputs.new_release_git_tag }}]'
+          title: '[release ${{ steps.prepare_release.outputs.new_release_git_tag }}]'
           body: |
             # Description
-            Release the mermin-netobserv-os-${{ steps.prepare_release.outputs.new_release_version }} version
+            Release the ${{ steps.prepare_release.outputs.new_release_git_tag }} version
 
             # Changelog
             ${{ steps.prepare_release.outputs.new_release_notes }}
@@ -101,7 +101,6 @@ jobs:
         with:
           tag_prefix: "${{ fromJson(env.BRANCH_TAG_PREFIXES)[github.ref_name] }}"
           include_paths: "charts/mermin-netobserv-os/**/*"
-          add_git_notes: true
       - name: Configure Git
         run: |
           git config user.name "$GITHUB_ACTOR"
