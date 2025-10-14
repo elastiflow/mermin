@@ -322,7 +322,7 @@ attributes {
       */
 
       # Pod association
-      pod {
+      association {
         sources = [
           { from = "flow", name = "source.ip", to = ["pod.status.podIP", "pod.status.podIPs[*]", "pod.status.hostIP", "pod.status.hostIPs[*]"] },
           { from = "flow", name = "source.port", to = ["pod.spec.containers[*].ports[*].containerPort", "pod.spec.containers[*].ports[*].hostPort"] },
@@ -332,7 +332,7 @@ attributes {
 
       # Node association
       # Note: node.status.addresses[*].address may require DNS resolution when type == Hostname
-      node {
+      association {
         sources = [
           { from = "flow", name = "source.ip", to = ["node.status.addresses[*].address"] },
         ]
@@ -340,7 +340,7 @@ attributes {
 
       # Service association
       # Note: service.spec.externalName requires DNS resolution
-      service {
+      association {
         sources = [
           { from = "flow", name = "source.ip", to = ["service.spec.clusterIP", "service.spec.clusterIPs[*]", "service.spec.externalIPs[*]", "service.spec.loadBalancerIP", "service.spec.externalName"] },
           { from = "flow", name = "source.port", to = ["service.spec.ports[*].port"] },
@@ -350,7 +350,7 @@ attributes {
       }
 
       # Endpoint association (deprecated K8s resource, but still supported)
-      endpoint {
+      association {
         sources = [
           { from = "flow", name = "source.ip", to = ["endpoint.subsets[*].addresses[*].ip"] },
           { from = "flow", name = "source.port", to = ["endpoint.subsets[*].ports[*].port"] },
@@ -359,7 +359,7 @@ attributes {
       }
 
       # EndpointSlice association
-      endpointslice {
+      association {
         sources = [
           { from = "flow", name = "source.ip", to = ["endpointslice.endpoints[*].addresses[*]"] },
           { from = "flow", name = "source.port", to = ["endpointslice.ports[*].port"] },
@@ -370,7 +370,7 @@ attributes {
 
       # Ingress association
       # Note: ingress.status.loadBalancer.ingress[*].hostname requires DNS resolution
-      ingress {
+      association {
         sources = [
           { from = "flow", name = "source.ip", to = ["ingress.status.loadBalancer.ingress[*].ip", "ingress.status.loadBalancer.ingress[*].hostname"] },
           { from = "flow", name = "source.port", to = ["ingress.spec.defaultBackend.service.port", "ingress.spec.rules[*].http.paths[*].backend.service.port.number"] }
@@ -379,7 +379,7 @@ attributes {
 
       # Gateway association
       # Note: gateway addresses require DNS resolution when type == Hostname
-      gateway {
+      association {
         sources = [
           { from = "flow", name = "source.ip", to = ["gateway.spec.addresses[*].value", "gateway.status.addresses[*].value"] },
           { from = "flow", name = "source.port", to = ["gateway.spec.listeners[*].port"] },
@@ -389,7 +389,7 @@ attributes {
       # NetworkPolicy association
       # Note: If endPort is defined, matching is against port-endPort range
       # Note: If port is a string, it should be resolved from related pods
-      networkpolicy {
+      association {
         sources = [
           { from = "flow", name = "source.ip", to = ["networkpolicy.spec.ingress[*].from[*].ipBlock.cidr", "networkpolicy.spec.egress[*].to[*].ipBlock.cidr"] },
           { from = "flow", name = "source.port", to = ["networkpolicy.spec.ingress[*].ports[*].port", "networkpolicy.spec.egress[*].ports[*].port"] },
@@ -429,7 +429,7 @@ attributes {
       }
 
       # Pod association
-      pod {
+      association {
         sources = [
           { from = "flow", name = "destination.ip", to = ["pod.status.podIP", "pod.status.podIPs[*]", "pod.status.hostIP", "pod.status.hostIPs[*]"] },
           { from = "flow", name = "destination.port", to = ["pod.spec.containers[*].ports[*].containerPort", "pod.spec.containers[*].ports[*].hostPort"] },
@@ -438,14 +438,14 @@ attributes {
       }
 
       # Node association
-      node {
+      association {
         sources = [
           { from = "flow", name = "destination.ip", to = ["node.status.addresses[*].address"] },
         ]
       }
 
       # Service association
-      service {
+      association {
         sources = [
           { from = "flow", name = "destination.ip", to = ["service.spec.clusterIP", "service.spec.clusterIPs[*]", "service.spec.externalIPs[*]", "service.spec.loadBalancerIP", "service.spec.externalName"] },
           { from = "flow", name = "destination.port", to = ["service.spec.ports[*].port"] },
@@ -455,7 +455,7 @@ attributes {
       }
 
       # Endpoint association
-      endpoint {
+      association {
         sources = [
           { from = "flow", name = "destination.ip", to = ["endpoint.subsets[*].addresses[*].ip"] },
           { from = "flow", name = "destination.port", to = ["endpoint.subsets[*].ports[*].port"] },
@@ -464,7 +464,7 @@ attributes {
       }
 
       # EndpointSlice association
-      endpointslice {
+      association {
         sources = [
           { from = "flow", name = "destination.ip", to = ["endpointslice.endpoints[*].addresses[*]"] },
           { from = "flow", name = "destination.port", to = ["endpointslice.ports[*].port"] },
@@ -473,7 +473,7 @@ attributes {
       }
 
       # Ingress association
-      ingress {
+      association {
         sources = [
           { from = "flow", name = "destination.ip", to = ["ingress.status.loadBalancer.ingress[*].ip", "ingress.status.loadBalancer.ingress[*].hostname"] },
           { from = "flow", name = "destination.port", to = ["ingress.spec.defaultBackend.service.port", "ingress.spec.rules[*].http.paths[*].backend.service.port.number"] }
@@ -481,7 +481,7 @@ attributes {
       }
 
       # Gateway association
-      gateway {
+      association {
         sources = [
           { from = "flow", name = "destination.ip", to = ["gateway.spec.addresses[*].value", "gateway.status.addresses[*].value"] },
           { from = "flow", name = "destination.port", to = ["gateway.spec.listeners[*].port"] },
@@ -489,7 +489,7 @@ attributes {
       }
 
       # NetworkPolicy association
-      networkpolicy {
+      association {
         sources = [
           { from = "flow", name = "destination.ip", to = ["networkpolicy.spec.ingress[*].from[*].ipBlock.cidr", "networkpolicy.spec.egress[*].to[*].ipBlock.cidr"] },
           { from = "flow", name = "destination.port", to = ["networkpolicy.spec.ingress[*].ports[*].port", "networkpolicy.spec.egress[*].ports[*].port"] },
