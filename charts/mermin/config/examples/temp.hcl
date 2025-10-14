@@ -200,12 +200,7 @@ discovery {
     and attaches owner metadata to flows.
   */
   k8s_owner = {
-    # Limit the ownerReference walk depth
-    # Example: If walk_max_depth = 3 and Pod <- Job <- CronJob <- Controller1 <- Controller2
-    # Only Pod <- Job <- CronJob relation is discovered
-    walk_max_depth = 10
-
-    # Depth of attached metadata
+    # Limit the ownerReference walk depth and depth of attached metadata
     # Example: If max_depth = 1 and Pod <- Job <- CronJob
     # Only Pod and Job metadata is attached to flows
     max_depth = 5
