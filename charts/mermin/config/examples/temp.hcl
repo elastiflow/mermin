@@ -518,27 +518,25 @@ attributes {
 
 # OTLP exporter configuration
 # See OBI export concepts: https://opentelemetry.io/docs/zero-code/obi/configure/export-data/
-otel {
-  traces = {
-    export = {
-      endpoint = "http://otelcol:4317"
-      protocol = "grpc"
-      timeout  = "10s"
+otel "traces" {
+  export = {
+    endpoint = "http://otelcol:4317"
+    protocol = "grpc"
+    timeout  = "10s"
 
-      auth = {
-        basic = {
-          user = "USERNAME"
-          pass = "PASSWORD"
-        }
+    auth = {
+      basic = {
+        user = "USERNAME"
+        pass = "PASSWORD"
       }
+    }
 
-      tls = {
-        enabled     = false
-        insecure    = false
-        ca_cert     = "/etc/certs/ca.crt"
-        client_cert = "/etc/certs/cert.crt"
-        client_key  = "/etc/certs/cert.key"
-      }
+    tls = {
+      enabled     = false
+      insecure    = false
+      ca_cert     = "/etc/certs/ca.crt"
+      client_cert = "/etc/certs/cert.crt"
+      client_key  = "/etc/certs/cert.key"
     }
   }
 }

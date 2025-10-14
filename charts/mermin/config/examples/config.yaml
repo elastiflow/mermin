@@ -234,6 +234,15 @@ attributes:
                     - '[*].metadata.name'
                     - '[*].metadata.namespace'
                     - '[*].metadata.uid'
+    select:
+        - attr: flow_ipv4_*
+          exclude:
+            - foobar
+          include:
+            - '*'
+        - attr: flow_ipv6_tcp
+          include:
+            - baz
 auto_reload: false
 discovery:
     exclude_instrument: []
