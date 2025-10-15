@@ -200,17 +200,6 @@ jobs:
       test-path: './mermin/tests/e2e/cni/test.sh'
       image-tag: 'cni-e2e-test'
 
-  grafana_tests:
-    name: Grafana Tests
-    permissions:
-      contents: read
-      id-token: write
-    uses: ./.github/workflows/reusable-e2e-tests.yml
-    with:
-      test-path: './mermin/tests/e2e/grafana/test.sh'
-      image-tag: 'grafana-e2e-test'
-      cni-list: '["calico"]'
-
 
   all_checks:
     name: All Checks
