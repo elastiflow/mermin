@@ -43,21 +43,18 @@ async fn main() -> Result<()> {
         properties: props, ..
     } = runtime;
 
-    let span_level = props.internal_trace.span_level;
-    let (otlp_agent_exporters, stdout_agent_exporters) = props.get_agent_exporters();
-    let (otlp_internal_exporters, stdout_internal_exporters) = props.get_internal_exporters();
-
     let exporter: Arc<dyn TraceableExporter> = {
         init_internal_tracing(
-            otlp_internal_exporters,
-            stdout_internal_exporters,
             props.log_level,
-            span_level,
+            props.internal.traces.span_fmt,
+            props.internal.traces.stdout,
+            props.internal.traces.otlp.clone(),
         )
         .await?;
-        if !otlp_agent_exporters.is_empty() || !stdout_agent_exporters.is_empty() {
+
+        if props.export.traces.stdout.is_some() || props.export.traces.otlp.is_some() {
             let app_tracer_provider =
-                init_provider(otlp_agent_exporters, stdout_agent_exporters).await;
+                init_provider(props.export.traces.stdout, props.export.traces.otlp.clone()).await;
             info!("initialized configured exporters");
             Arc::new(TraceExporterAdapter::new(app_tracer_provider))
         } else {

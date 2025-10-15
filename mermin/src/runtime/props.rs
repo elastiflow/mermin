@@ -11,16 +11,15 @@ use serde::{Deserialize, Serialize};
 use tracing::Level;
 
 use crate::{
-    otlp::opts::{ExporterOptions, OtlpExporterOptions, StdoutExporterOptions},
+    otlp::opts::ExportOptions,
     runtime::{
         cli::Cli,
         conf::{
-            ApiConf, Conf, ConfError, ExporterReference, ExporterReferencesParser, Hcl,
-            MetricsConf, ParserConf,
+            ApiConf, Conf, ConfError, Hcl, MetricsConf,
             conf_serde::{duration, level},
             defaults, validate_config_path,
         },
-        enums::SpanFmt,
+        opts::InternalOptions,
     },
     span::opts::SpanOptions,
 };
@@ -33,19 +32,13 @@ use crate::{
 /// formats like YAML.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Properties {
-    /// A vector of strings representing the network interfaces or endpoints
-    /// that the application should operate on. These interfaces are read
-    /// directly from the configuration file.
-    pub interfaces: Vec<String>,
-
-    /// Resolved interfaces after expanding globs and regexes against host interfaces
-    pub resolved_interfaces: Vec<String>,
-
-    /// A boolean flag indicating whether the application should automatically
-    /// reload the configuration whenever changes are detected in the
-    /// relevant configuration file. This is typically used to support runtime
-    /// configuration updates.
-    pub auto_reload: bool,
+    /// An optional `PathBuf` field that represents the file path to the
+    /// configuration file. This field is annotated with `#[serde(skip)]`,
+    /// meaning its value will not be serialized or deserialized. It is
+    /// used internally for managing the configuration's source path.
+    #[serde(skip)]
+    #[allow(dead_code)]
+    pub(crate) config_path: Option<PathBuf>,
 
     /// The logging level for the application, serialized and deserialized
     /// using the custom Serde module named `level`. This allows more
@@ -54,13 +47,17 @@ pub struct Properties {
     #[serde(with = "level")]
     pub log_level: Level,
 
-    /// Configuration for the API server (health endpoints).
-    #[serde(default)]
-    pub api: ApiConf,
+    /// A boolean flag indicating whether the application should automatically
+    /// reload the configuration whenever changes are detected in the
+    /// relevant configuration file. This is typically used to support runtime
+    /// configuration updates.
+    pub auto_reload: bool,
 
-    /// Configuration for the Metrics server (e.g., for Prometheus scraping).
-    #[serde(default)]
-    pub metrics: MetricsConf,
+    /// Maximum time to wait for graceful shutdown of pipeline components
+    /// Increase for environments with slow disk I/O or network operations
+    /// - Default: 5s
+    #[serde(default = "defaults::shutdown_timeout", with = "duration")]
+    pub shutdown_timeout: Duration,
 
     /// Capacity of the channel for packet events between the ring buffer reader and flow workers
     /// - Default: 10000
@@ -74,39 +71,37 @@ pub struct Properties {
     #[serde(default = "defaults::flow_workers")]
     pub packet_worker_count: usize,
 
-    /// Maximum time to wait for graceful shutdown of pipeline components
-    /// Increase for environments with slow disk I/O or network operations
-    /// - Default: 5s
-    #[serde(default = "defaults::shutdown_timeout", with = "duration")]
-    pub shutdown_timeout: Duration,
+    /// Configuration for internal exporters.
+    /// This field holds settings for exporting telemetry data
+    /// to multiple destinations using the new structure.
+    /// traces.exporters
+    pub internal: InternalOptions,
 
+    /// Configuration for the API server (health endpoints).
+    #[serde(default)]
+    pub api: ApiConf,
+
+    /// Configuration for the Metrics server (e.g., for Prometheus scraping).
+    #[serde(default)]
+    pub metrics: MetricsConf,
+
+    /// A vector of strings representing the network interfaces or endpoints
+    /// that the application should operate on. These interfaces are read
+    /// directly from the configuration file.
+    pub interfaces: Vec<String>,
+
+    /// Resolved interfaces after expanding globs and regexes against host interfaces
+    pub resolved_interfaces: Vec<String>,
+
+    // TODO: need to add to config examples
     /// A `Flow` type (defined elsewhere in the codebase) which contains
     /// settings related to the application's runtime flow management.
     /// This field encapsulates additional configuration details specific
     /// to how the application's logic operates.
     pub span: SpanOptions,
 
-    /// Parser configuration for eBPF packet parsing options
-    #[serde(default)]
-    pub parser: ParserConf,
-
-    /// A map of fully resolved and ready-to-use traces.
-    /// agent.traces.(exporters, discovery, network)
-    pub agent_trace: AgentTrace,
-
-    /// Configuration for internal exporters.
-    /// This field holds settings for exporting telemetry data
-    /// to multiple destinations using the new structure.
-    /// traces.exporters
-    pub internal_trace: InternalTrace,
-
-    /// An optional `PathBuf` field that represents the file path to the
-    /// configuration file. This field is annotated with `#[serde(skip)]`,
-    /// meaning its value will not be serialized or deserialized. It is
-    /// used internally for managing the configuration's source path.
-    #[serde(skip)]
-    #[allow(dead_code)]
-    pub(crate) config_path: Option<PathBuf>,
+    /// Configuration for exporters.
+    pub export: ExportOptions,
 }
 
 impl Properties {
@@ -176,28 +171,24 @@ impl Properties {
 
         figment = figment.merge(Serialized::defaults(&cli));
 
-        let raw_conf: Conf = figment.extract()?;
+        let conf: Conf = figment.extract()?;
 
-        let agent_trace = AgentTrace::from_raw(&raw_conf)?;
-        let internal_trace = InternalTrace::from_raw(&raw_conf)?;
-
-        let resolved_interfaces = raw_conf.resolve_interfaces();
-        let interfaces = raw_conf.interfaces;
+        let resolved_interfaces = conf.resolve_interfaces();
+        let interfaces = conf.interfaces;
         let conf = Self {
+            config_path: config_path_to_store,
+            log_level: conf.log_level,
+            auto_reload: conf.auto_reload,
+            shutdown_timeout: conf.shutdown_timeout,
+            packet_channel_capacity: conf.packet_channel_capacity,
+            packet_worker_count: conf.packet_worker_count,
+            internal: conf.internal,
+            api: conf.api,
+            metrics: conf.metrics,
             interfaces,
             resolved_interfaces,
-            auto_reload: raw_conf.auto_reload,
-            log_level: raw_conf.log_level,
-            api: raw_conf.api,
-            metrics: raw_conf.metrics,
-            packet_channel_capacity: raw_conf.packet_channel_capacity,
-            packet_worker_count: raw_conf.packet_worker_count,
-            shutdown_timeout: raw_conf.shutdown_timeout,
-            span: raw_conf.span,
-            parser: raw_conf.parser,
-            agent_trace,
-            internal_trace,
-            config_path: config_path_to_store,
+            span: conf.span,
+            export: conf.export,
         };
 
         Ok((conf, cli))
@@ -253,143 +244,24 @@ impl Properties {
         let mut figment = Figment::from(Serialized::defaults(&self));
         figment = Self::merge_provider_for_path(figment, path)?;
 
-        let raw_conf: Conf = figment.extract()?;
+        let conf: Conf = figment.extract()?;
 
-        let agent_trace = AgentTrace::from_raw(&raw_conf)?;
-        let internal_trace = InternalTrace::from_raw(&raw_conf)?;
-
-        let resolved_interfaces = raw_conf.resolve_interfaces();
-        let interfaces = raw_conf.interfaces;
+        let resolved_interfaces = conf.resolve_interfaces();
+        let interfaces = conf.interfaces;
         Ok(Self {
+            config_path: self.config_path.clone(),
+            log_level: conf.log_level,
+            auto_reload: conf.auto_reload,
+            shutdown_timeout: conf.shutdown_timeout,
+            packet_channel_capacity: conf.packet_channel_capacity,
+            packet_worker_count: conf.packet_worker_count,
+            internal: conf.internal,
+            api: conf.api,
+            metrics: conf.metrics,
             interfaces,
             resolved_interfaces,
-            auto_reload: raw_conf.auto_reload,
-            log_level: raw_conf.log_level,
-            api: raw_conf.api,
-            metrics: raw_conf.metrics,
-            packet_channel_capacity: raw_conf.packet_channel_capacity,
-            packet_worker_count: raw_conf.packet_worker_count,
-            shutdown_timeout: raw_conf.shutdown_timeout,
-            span: raw_conf.span,
-            parser: raw_conf.parser,
-            agent_trace,
-            internal_trace,
-            config_path: self.config_path.clone(),
+            span: conf.span,
+            export: conf.export,
         })
     }
-
-    fn separate_exporters_by_type(
-        exporters: &[ExportOption],
-    ) -> (Vec<OtlpExporterOptions>, Vec<StdoutExporterOptions>) {
-        let mut otlp_exporters = Vec::new();
-        let mut stdout_exporters = Vec::new();
-
-        for exporter in exporters {
-            match exporter {
-                ExportOption::Otlp(opts) => otlp_exporters.push(opts.clone()),
-                ExportOption::Stdout(opts) => stdout_exporters.push(opts.clone()),
-            }
-        }
-
-        (otlp_exporters, stdout_exporters)
-    }
-
-    pub fn get_internal_exporters(&self) -> (Vec<OtlpExporterOptions>, Vec<StdoutExporterOptions>) {
-        Self::separate_exporters_by_type(&self.internal_trace.exporters)
-    }
-
-    pub fn get_agent_exporters(&self) -> (Vec<OtlpExporterOptions>, Vec<StdoutExporterOptions>) {
-        Self::separate_exporters_by_type(&self.agent_trace.exporters)
-    }
-}
-
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct InternalTrace {
-    pub span_level: SpanFmt,
-    pub exporters: Vec<ExportOption>,
-}
-
-impl InternalTrace {
-    /// Resolves internal trace from the raw configuration.
-    pub fn from_raw(raw_conf: &Conf) -> Result<Self, ConfError> {
-        let internal_opts = &raw_conf.traces;
-
-        // Resolve Exporters
-        let parsed_refs = internal_opts.exporters.parse().unwrap();
-        let exporters = resolve_exporters(parsed_refs, &raw_conf.exporter)?;
-
-        Ok(Self {
-            span_level: internal_opts.span_level,
-            exporters,
-        })
-    }
-}
-
-/// Represents a single, fully resolved trace pipeline with its corresponding configurations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentTrace {
-    pub exporters: Vec<ExportOption>,
-}
-
-/// An enum representing a specific, resolved exporter configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ExportOption {
-    Otlp(OtlpExporterOptions),
-    Stdout(StdoutExporterOptions),
-}
-
-impl AgentTrace {
-    /// Resolves a traces from the raw configuration.
-    pub fn from_raw(raw_conf: &Conf) -> Result<Self, ConfError> {
-        // Resolve Exporters
-        let trace_opts = &raw_conf.agent.traces;
-        let parsed_refs = trace_opts.exporters.parse().unwrap();
-        let exporters = resolve_exporters(parsed_refs, &raw_conf.exporter)?;
-
-        // Other resolvers to be added here
-
-        Ok(Self { exporters })
-    }
-}
-
-fn resolve_exporters(
-    refs: Vec<ExporterReference>,
-    exporter_opts: &ExporterOptions,
-) -> Result<Vec<ExportOption>, ConfError> {
-    let mut exporters = Vec::new();
-    for exporter_ref in refs {
-        match exporter_ref.type_.as_str() {
-            "otlp" => {
-                let opts = exporter_opts
-                    .otlp
-                    .as_ref()
-                    .and_then(|otlp_map| otlp_map.get(&exporter_ref.name))
-                    .cloned()
-                    .ok_or_else(|| {
-                        ConfError::InvalidReference(format!(
-                            "OTLP exporter '{}' not found",
-                            exporter_ref.name
-                        ))
-                    })?;
-                exporters.push(ExportOption::Otlp(opts));
-            }
-            "stdout" => {
-                let opts = exporter_opts
-                    .stdout
-                    .as_ref()
-                    .and_then(|stdout_map| stdout_map.get(&exporter_ref.name))
-                    .cloned()
-                    .ok_or_else(|| {
-                        ConfError::InvalidReference(format!(
-                            "Stdout exporter '{}' not found",
-                            exporter_ref.name
-                        ))
-                    })?;
-                exporters.push(ExportOption::Stdout(opts));
-            }
-            _ => { /* Already handled by .parse() */ }
-        }
-    }
-
-    Ok(exporters)
 }

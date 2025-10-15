@@ -15,12 +15,12 @@ packet_channel_capacity = 1024
 packet_worker_count     = 2
 
 # Internal configuration options
-telemetry "traces" {
+internal "traces" {
   span_format = "full"
 
   stdout = "" // text, text_indent(*new), json, json_indent
 
-  export = {
+  otlp = {
     endpoint = "http://otelcol:4317"
     protocol = "grpc"
     timeout  = "10s"
@@ -558,10 +558,10 @@ filter "flow" {
 
 # OTLP exporter configuration
 # See OBI export concepts: https://opentelemetry.io/docs/zero-code/obi/configure/export-data/
-otel "traces" {
+export "traces" {
   stdout = "" // text, text_indent(*new), json, json_indent
 
-  export = {
+  otlp = {
     endpoint = "http://otelcol:4317"
     protocol = "grpc"
     timeout  = "10s"

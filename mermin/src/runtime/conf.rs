@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 use tracing::{Level, warn};
 
 use crate::{
-    otlp::opts::ExporterOptions,
+    otlp::opts::ExportOptions,
     runtime::{
         conf::conf_serde::{duration, level},
-        enums::SpanFmt,
+        opts::InternalOptions,
     },
     span::opts::SpanOptions,
 };
@@ -43,12 +43,10 @@ pub struct Conf {
     #[serde(with = "duration")]
     pub shutdown_timeout: Duration,
     pub span: SpanOptions,
-    /// Top-level agent configuration specifying which telemetry features are enabled.
-    pub agent: AgentOptions,
     /// Contains the configuration for internal exporters
-    pub traces: InternalTraceOptions,
+    pub internal: InternalOptions,
     /// References to the exporters to use for telemetry
-    pub exporter: ExporterOptions,
+    pub export: ExportOptions,
     /// Parser configuration for eBPF packet parsing
     pub parser: ParserConf,
 }
@@ -65,9 +63,8 @@ impl Default for Conf {
             packet_worker_count: defaults::flow_workers(),
             shutdown_timeout: defaults::shutdown_timeout(),
             span: SpanOptions::default(),
-            agent: AgentOptions::default(),
-            traces: InternalTraceOptions::default(),
-            exporter: ExporterOptions::default(),
+            internal: InternalOptions::default(),
+            export: ExportOptions::default(),
             parser: ParserConf::default(),
         }
     }
@@ -175,91 +172,6 @@ pub struct K8sObjectSelector {
     pub selector_match_labels_field: Option<String>,
     /// Target resource kind to associate with (e.g., Pod).
     pub to: String,
-}
-
-/// Top-level agent configuration specifying which telemetry features are enabled.
-///
-/// The `AgentOptions` struct defines the agent's telemetry pipeline configuration,
-/// mapping logical telemetry types (such as traces) to their respective pipeline settings.
-/// This allows the user to declaratively specify, in the configuration file, which
-/// exporters should be used for each telemetry type. For example, the `traces` field
-/// contains the configuration for the traces pipeline, including the list of exporter
-/// references (such as OTLP or stdout exporters) that should be enabled for sending trace data.
-///
-/// This struct is typically deserialized from the `agent` section of the application's
-/// configuration file. Exporter references listed here must correspond to exporter
-/// definitions in the `exporter` section of the configuration.
-///
-/// # Example (YAML)
-/// ```yaml
-/// agent:
-///   traces:
-///     exporters:
-///       - exporter.otlp.main
-///       - exporter.stdout.json
-/// ```
-#[derive(Default, Debug, Deserialize, Serialize, Clone)]
-pub struct AgentOptions {
-    /// Configuration for the single, primary trace pipeline
-    pub traces: TraceOptions,
-}
-
-/// Options for the single, user-facing agent trace pipeline.
-/// Contains exporters, filtering, discovery, etc.
-#[derive(Default, Debug, Deserialize, Serialize, Clone)]
-#[serde(default)]
-pub struct TraceOptions {
-    /// A list of exporter references to use for tracing. Each entry should match a key
-    /// in the `exporter` section of the config.
-    pub exporters: ExporterReferences,
-}
-
-/// Represents the entire top-level `traces` block for internal monitoring.
-#[derive(Default, Debug, Deserialize, Serialize, Clone)]
-pub struct InternalTraceOptions {
-    /// The level of span events to record. The current default is `FmtSpan::FULL`,
-    /// which records all events (enter, exit, close) for all spans. The level can also be
-    /// one of the following:
-    /// - `SpanFmt::Full`: No span events are recorded.
-    /// - `FmtSpan::ENTER`: Only span enter events are recorded.
-    /// - `FmtSpan::EXIT`: Only span exit events are recorded.
-    /// - `FmtSpan::CLOSE`: Only span close events are recorded.
-    /// - `FmtSpan::ACTIVE`: Only span events for spans that are active (i.e., not closed) are recorded.
-    pub span_level: SpanFmt,
-
-    pub exporters: ExporterReferences,
-}
-
-pub type ExporterReferences = Vec<String>;
-
-pub trait ExporterReferencesParser {
-    fn parse(&self) -> Result<Vec<ExporterReference>, String>;
-}
-
-impl ExporterReferencesParser for ExporterReferences {
-    fn parse(&self) -> Result<Vec<ExporterReference>, String> {
-        self.iter().map(|reference| {
-            match reference.split('.').collect::<Vec<_>>().as_slice() {
-                ["exporter", type_ @ ("otlp" | "stdout"), name] => Ok(ExporterReference {
-                    type_: type_.to_string(),
-                    name: name.to_string(),
-                }),
-                ["exporter", invalid_type, _] => Err(format!(
-                    "unsupported exporter type: '{invalid_type}' - supported types: otlp, stdout"
-                )),
-                _ => Err(format!(
-                    "invalid format: '{reference}' - expected: 'exporter.<type>.<name>'"
-                )),
-            }
-        }).collect::<Result<Vec<ExporterReference>, String>>()
-    }
-}
-
-/// Represents a parsed exporter reference from the agent configuration.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ExporterReference {
-    pub type_: String,
-    pub name: String,
 }
 
 impl Conf {
@@ -414,8 +326,6 @@ pub enum ConfError {
     InvalidConfigPath(String),
     /// Error: The file has an unsupported extension.
     InvalidExtension(String),
-    /// A reference string (e.g., "exporter.otlp.main") could not be resolved.
-    InvalidReference(String),
     /// An error occurred during deserialization or processing.
     Extraction(Box<figment::Error>),
 }
@@ -431,7 +341,6 @@ impl fmt::Display for ConfError {
                     "invalid file extension '.{ext}' — expected 'yaml', 'yml', or 'hcl'"
                 )
             }
-            ConfError::InvalidReference(r) => write!(f, "invalid configuration reference: {r}"),
             ConfError::Extraction(e) => write!(f, "configuration error: {e}"),
         }
     }
@@ -519,6 +428,36 @@ pub mod conf_serde {
         }
     }
 
+    pub mod stdout_fmt {
+        use serde::{Deserialize, Deserializer, Serializer};
+
+        use crate::otlp::opts::StdoutFmt;
+
+        pub fn serialize<S>(
+            stdout_fmt: &Option<StdoutFmt>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            match stdout_fmt {
+                Some(fmt) => serializer.serialize_str(fmt.as_str()),
+                None => serializer.serialize_none(),
+            }
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<StdoutFmt>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let opt = Option::<String>::deserialize(deserializer)?;
+            Ok(match opt {
+                Some(s) => Some(s.parse::<StdoutFmt>().map_err(serde::de::Error::custom)?),
+                None => None,
+            })
+        }
+    }
+
     pub mod exporter_protocol {
         use serde::{Deserialize, Deserializer, Serializer};
 
@@ -590,10 +529,7 @@ mod tests {
     use tracing::Level;
 
     use super::{Conf, ExporterReference};
-    use crate::runtime::{
-        cli::Cli,
-        props::{AgentTrace, InternalTrace, Properties},
-    };
+    use crate::runtime::{cli::Cli, props::Properties};
 
     fn parse_exporter_reference(reference: &str) -> Result<ExporterReference, String> {
         match reference.split('.').collect::<Vec<_>>().as_slice() {
@@ -612,10 +548,6 @@ mod tests {
 
     fn create_default_app_props() -> Properties {
         let raw_conf = Conf::default();
-        let agent_trace =
-            AgentTrace::from_raw(&raw_conf).expect("resolving default pipelines should succeed");
-        let internal_trace = InternalTrace::from_raw(&raw_conf)
-            .expect("resolving default internal traces should succeed");
         let resolved_interfaces = raw_conf.resolve_interfaces();
         let interfaces = raw_conf.interfaces;
         Properties {
@@ -629,9 +561,9 @@ mod tests {
             packet_worker_count: raw_conf.packet_worker_count,
             shutdown_timeout: raw_conf.shutdown_timeout,
             span: raw_conf.span,
+            internal: raw_conf.internal,
+            export: raw_conf.export,
             parser: raw_conf.parser,
-            agent_trace,
-            internal_trace,
             config_path: None,
         }
     }
