@@ -27,6 +27,16 @@ Notes on the example deployment:
 
 ## Install
 
+<!-- TODO(Cleanup for GA): Once repo is public, this step should become part of the next step without any dependencies -->
+- Add Mermin Helm chart
+
+  ```sh
+    helm repo add \
+    --username x-access-token \
+    --password ${GH_PAT} \
+    mermin https://raw.githubusercontent.com/elastiflow/mermin/gh-pages
+  ```
+  
 - Change `gke-main-a.us-east1` in the `values.yaml` to your Kubernetes Default Domain (`cluster.local` by default)
 
   ```sh

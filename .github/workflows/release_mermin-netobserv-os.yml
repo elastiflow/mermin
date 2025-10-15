@@ -108,9 +108,10 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@v4
       - name: Install Helm dependencies
+        # TODO(Cleanup for GA): Drop authentication in "helm repo add" once repo is public
         run: |
           (helm dependency list ${{ env.CHARTS_DIR }} || true) | grep -E 'https://' | while read -r dep; do
-            helm repo add $(echo ${dep} | awk '{print $1}') $(echo ${dep} | awk '{print $4}')
+            helm repo add --username x-access-token --password ${{ secrets.GITHUB_TOKEN }}$(echo ${dep} | awk '{print $1}') $(echo ${dep} | awk '{print $4}')
           done
       - name: Install chart-releaser
         uses: helm/chart-releaser-action@v1.7.0

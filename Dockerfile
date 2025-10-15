@@ -55,7 +55,7 @@ RUN apt-get install -y --no-install-recommends \
     libzstd-dev \
     libbpf-tools
 
-# Copy bpftool from the build stage and make it available system-wide
+# Download bpftool and make it available system-wide
 # hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
 RUN wget -c --progress=dot:giga -O /tmp/bpftool.tar.gz https://github.com/libbpf/bpftool/releases/download/v7.6.0/bpftool-v7.6.0-"$(dpkg --print-architecture)".tar.gz && \
   tar xfvpz /tmp/bpftool.tar.gz -C /usr/bin/ bpftool && \
