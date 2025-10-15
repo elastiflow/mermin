@@ -64,7 +64,7 @@ exporter "otlp" "main" {
     basic = {
       user = "USERNAME"
       pass = "PASSWORD"
-      # TODO(#|2025-10-15): Implement `env` function
+      # TODO(#ENG-259|2025-10-15): Implement `env` function
       # pass = env("USER_SPECIFIED_ENV_VAR_TRITON_PASS")
     }
   }
