@@ -420,7 +420,9 @@ exporter "otlp" "main" {
   auth {
     basic = {
       user = "USERNAME"
-      pass = "USER_SPECIFIED_ENV_VAR_TRITON_PASS"
+      pass = "PASSWORD"
+      # TODO(#|2025-10-15): Implement `env` function
+      # pass = env("USER_SPECIFIED_ENV_VAR_TRITON_PASS")
     }
   }
 
