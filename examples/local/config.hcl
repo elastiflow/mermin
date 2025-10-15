@@ -45,6 +45,14 @@ span {
   udp_timeout         = "60s"
 }
 
+# Parser configuration for eBPF packet parsing
+# Configure tunnel port detection (defaults shown)
+parser {
+  geneve_port    = 6081   # IANA default for Geneve
+  vxlan_port     = 4789   # IANA default for VXLAN
+  wireguard_port = 51820  # IANA default for WireGuard
+}
+
 # Specify which exporters are enabled
 agent "traces" {
   exporters = [
