@@ -16,7 +16,7 @@ use crate::{
         cli::Cli,
         conf::{
             ApiConf, Conf, ConfError, ExporterReference, ExporterReferencesParser, Hcl,
-            MetricsConf, ParserConf, TraceOptions,
+            MetricsConf, ParserConf,
             conf_serde::{duration, level},
             defaults, validate_config_path,
         },

@@ -629,6 +629,7 @@ mod tests {
             packet_worker_count: raw_conf.packet_worker_count,
             shutdown_timeout: raw_conf.shutdown_timeout,
             span: raw_conf.span,
+            parser: raw_conf.parser,
             agent_trace,
             internal_trace,
             config_path: None,
