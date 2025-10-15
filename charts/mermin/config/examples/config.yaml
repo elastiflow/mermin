@@ -283,6 +283,26 @@ discovery:
                 - kind: Job
                 - kind: CronJob
                 - kind: NetworkPolicy
+    instrument:
+        interfaces:
+            - eth0
+export:
+    traces:
+        otlp:
+            auth:
+                basic:
+                    pass: PASSWORD
+                    user: USERNAME
+            endpoint: http://otelcol:4317
+            protocol: grpc
+            timeout: 10s
+            tls:
+                ca_cert: /etc/certs/ca.crt
+                client_cert: /etc/certs/cert.crt
+                client_key: /etc/certs/cert.key
+                enabled: false
+                insecure: false
+        stdout: ""
 filter:
     destination:
         address:
@@ -315,38 +335,9 @@ informer:
         informers_resync_period: 30m
         informers_sync_timeout: 30s
         kubeconfig_path: ""
-log_level: info
-metrics:
-    enabled: true
-    listen_address: 0.0.0.0
-    port: 10250
-otel:
+internal:
     traces:
-        export:
-            auth:
-                basic:
-                    pass: PASSWORD
-                    user: USERNAME
-            endpoint: http://otelcol:4317
-            protocol: grpc
-            timeout: 10s
-            tls:
-                ca_cert: /etc/certs/ca.crt
-                client_cert: /etc/certs/cert.crt
-                client_key: /etc/certs/cert.key
-                enabled: false
-                insecure: false
-        stdout: ""
-packet_channel_capacity: 1024
-packet_worker_count: 2
-parser:
-    geneve_port: 6081
-    vxlan_port: 4789
-    wireguard_port: 51820
-shutdown_timeout: 5s
-telemetry:
-    traces:
-        export:
+        otlp:
             auth:
                 basic:
                     pass: PASSWORD
@@ -362,4 +353,24 @@ telemetry:
                 insecure: false
         span_format: full
         stdout: ""
+log_level: info
+metrics:
+    enabled: true
+    listen_address: 0.0.0.0
+    port: 10250
+packet_channel_capacity: 1024
+packet_worker_count: 2
+parser:
+    geneve_port: 6081
+    vxlan_port: 4789
+    wireguard_port: 51820
+shutdown_timeout: 5s
+span:
+    generic_timeout: 30s
+    icmp_timeout: 10s
+    max_record_interval: 60s
+    tcp_fin_timeout: 5s
+    tcp_rst_timeout: 5s
+    tcp_timeout: 20s
+    udp_timeout: 60s
 

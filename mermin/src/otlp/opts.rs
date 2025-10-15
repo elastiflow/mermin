@@ -4,9 +4,9 @@ use base64::{Engine as _, engine::general_purpose};
 use opentelemetry_otlp::Protocol;
 use serde::{Deserialize, Serialize};
 
-use crate::runtime::conf::conf_serde::{duration, exporter_protocol};
+use crate::runtime::conf::conf_serde::{duration, exporter_protocol, stdout_fmt};
 
-/// Configuration options for all telemetry exporters used by the application.
+/// Configuration options for the Mermin traces exporter.
 ///
 /// This struct defines the top-level exporter configuration, allowing the user to specify
 /// multiple exporter backends (such as OTLP and stdout) and their individual settings.
@@ -21,31 +21,90 @@ use crate::runtime::conf::conf_serde::{duration, exporter_protocol};
 ///
 /// # Example (YAML)
 /// ```yaml
-/// exporter:
-///   otlp:
-///     main:
-///       address: example.com
-///       port: 4317
-///       # ... other OTLP options ...
-///   stdout:
-///     json:
-///       format: full
-///     console:
-///       format: compact
+/// export:
+///   traces:
+///     otlp:
+///       endpoint: http://example.com:4317
+///       protocol: grpc
+///     stdout: text_indent
 /// ```
 ///
 /// # Fields
-/// - `otlp`: Optional map of OTLP exporter configurations, keyed by exporter name.
-/// - `stdout`: Optional map of stdout exporter configurations, keyed by exporter name.
-///
-/// Exporter references in the agent configuration (e.g., `exporter.otlp.main`) must match
-/// the keys defined in these maps.
+/// - `traces`: Trace exporter configuration options.
 #[derive(Debug, Default, Deserialize, Serialize, Clone)]
-pub struct ExporterOptions {
-    /// OTLP (OpenTelemetry Protocol) exporter configurations, keyed by exporter name.
-    pub otlp: Option<HashMap<String, OtlpExporterOptions>>,
-    /// Stdout exporter configurations, keyed by exporter name.
-    pub stdout: Option<HashMap<String, StdoutExporterOptions>>,
+pub struct ExportOptions {
+    #[serde(default = "defaults::traces")]
+    pub traces: TracesExportOptions,
+}
+
+/// Configuration options for trace exporters.
+///
+/// # Fields
+/// - `otlp`: Optional OTLP exporter configuration.
+/// - `stdout`: Optional stdout exporter format.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct TracesExportOptions {
+    /// Defines the format for a stdout exporter.
+    #[serde(with = "stdout_fmt")]
+    pub stdout: Option<StdoutFmt>,
+
+    /// OTLP (OpenTelemetry Protocol) exporter configurations.
+    pub otlp: Option<OtlpExporterOptions>,
+}
+
+impl Default for TracesExportOptions {
+    fn default() -> Self {
+        Self {
+            stdout: None,
+            otlp: defaults::otlp(),
+        }
+    }
+}
+
+/// StdoutFmt enum defines the format for a stdout exporter,
+/// which outputs telemetry data (such as traces or metrics) directly to
+/// the standard output (stdout) of the running process. This is useful
+/// for debugging, development, or environments where logs are collected
+/// from container or process output.
+///
+/// Note: Only "text_indent" is supported.
+#[derive(Debug, Clone, Copy)]
+pub enum StdoutFmt {
+    // Text,
+    TextIndent,
+    // Json,
+    // JsonIndent,
+}
+
+impl StdoutFmt {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            // StdoutFmt::Text => "text",
+            StdoutFmt::TextIndent => "text_indent",
+            // StdoutFmt::Json => "json",
+            // StdoutFmt::JsonIndent => "json_indent",
+        }
+    }
+}
+
+impl From<String> for StdoutFmt {
+    fn from(value: String) -> Self {
+        match value.to_lowercase().as_str() {
+            // "text" => StdoutFmt::Text,
+            "text_indent" => StdoutFmt::TextIndent,
+            // "json" => StdoutFmt::Json,
+            // "json_indent" => StdoutFmt::JsonIndent,
+            _ => StdoutFmt::TextIndent, // Default to Text
+        }
+    }
+}
+
+impl std::str::FromStr for StdoutFmt {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from(s.to_string()))
+    }
 }
 
 /// Configuration options for an individual OTLP (OpenTelemetry Protocol) exporter instance.
@@ -85,39 +144,14 @@ pub struct ExporterOptions {
 /// - `tls`: Optional TLS configuration for secure communication.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct OtlpExporterOptions {
-    #[serde(default = "defaults::scheme")]
-    pub scheme: String,
-    #[serde(default = "defaults::address")]
-    pub address: String,
-    #[serde(default = "defaults::port")]
-    pub port: u16,
+    #[serde(default = "defaults::endpoint")]
+    pub endpoint: String,
     #[serde(default = "defaults::protocol", with = "exporter_protocol")]
     pub protocol: ExporterProtocol,
-    #[serde(default = "defaults::connection_timeout", with = "duration")]
-    pub connection_timeout: Duration,
+    #[serde(default = "defaults::timeout", with = "duration")]
+    pub timeout: Duration,
     pub auth: Option<AuthOptions>,
     pub tls: Option<TlsOptions>,
-}
-
-/// Configuration options for an individual Stdout exporter instance.
-///
-/// This struct defines the parameters for configuring a Stdout exporter,
-/// which outputs telemetry data (such as traces or metrics) directly to
-/// the standard output (stdout) of the running process. This is useful
-/// for debugging, development, or environments where logs are collected
-/// from container or process output.
-///
-/// Each Stdout exporter is uniquely identified by a name in the configuration file,
-/// and its settings are provided via this struct. The primary configurable field
-/// is the output format, which determines how the telemetry data is rendered.
-///
-/// # Fields
-/// - `format`: The output format for the exporter (e.g., "full", "compact", "json").
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct StdoutExporterOptions {
-    /// The output format for the exporter (e.g., "full", "compact", "json", etc.).
-    /// Note: Only "full" is supported.
-    pub format: String,
 }
 
 /// Authentication configuration for exporters.
@@ -208,13 +242,7 @@ impl AuthOptions {
     }
 }
 
-impl OtlpExporterOptions {
-    pub fn build_endpoint(&self) -> String {
-        format!("{}://{}:{}", self.scheme, self.address, self.port)
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExporterProtocol {
     Grpc,
     HttpBinary,
@@ -274,21 +302,36 @@ impl From<String> for ExporterProtocol {
 mod defaults {
     use std::time::Duration;
 
-    use crate::otlp::opts::ExporterProtocol;
+    use crate::otlp::opts::{
+        ExporterProtocol, OtlpExporterOptions, StdoutFmt, TracesExportOptions,
+    };
 
-    pub fn scheme() -> String {
-        "http".to_string()
+    pub fn traces() -> TracesExportOptions {
+        TracesExportOptions {
+            otlp: otlp(),
+            stdout: stdout(),
+        }
     }
-    pub fn address() -> String {
-        "localhost".to_string()
+
+    pub fn otlp() -> Option<OtlpExporterOptions> {
+        Some(OtlpExporterOptions {
+            endpoint: endpoint(),
+            protocol: protocol(),
+            timeout: timeout(),
+            auth: None,
+            tls: None,
+        })
     }
-    pub fn port() -> u16 {
-        4317
+    pub fn stdout() -> Option<StdoutFmt> {
+        None
+    }
+    pub fn endpoint() -> String {
+        "http://localhost:4317".to_string()
     }
     pub fn protocol() -> ExporterProtocol {
         ExporterProtocol::Grpc
     }
-    pub fn connection_timeout() -> Duration {
+    pub fn timeout() -> Duration {
         Duration::from_secs(10)
     }
 }
