@@ -3,14 +3,16 @@ name: mermin
 description: A Helm chart for deploying the Mermin eBPF agent
 icon: https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1746227898/mermin-horizontal_kxhvzo.png
 type: application
-version: 0.1.0-alpha.4
-appVersion: "0.1.0-alpha.4"
+version: 0.1.0-beta.1
+appVersion: "0.1.0-beta.1"
 sources:
   - https://github.com/elastiflow/mermin
 dependencies:
   - name: mermin
-    repository: https://github.com/elastiflow/mermin/
-    version: ">= 0.1.0-alpha.5"
+    # TODO(Cleanup for GA): Should be https://github.com/elastiflow/mermin/, raw.githubusercontent.com... is used whilst repo is private
+    # repository: https://github.com/elastiflow/mermin/
+    repository: https://raw.githubusercontent.com/elastiflow/mermin/gh-pages
+    version: ">= 0.1.0-beta.3"
     condition: mermin.enabled
   - name: netobserv-flow
     repository: https://elastiflow.github.io/helm-chart-netobserv/
