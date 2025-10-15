@@ -136,4 +136,4 @@ jobs:
       - name: Update GH pages index
         run: |
           mkdir .cr-index
-          cr index --push -t ${{ secrets.GITHUB_TOKEN }} --owner elastiflow --git-repo mermin
+          cr index --push -t ${{ secrets.GITHUB_TOKEN }} --packages-with-index --owner elastiflow --git-repo mermin
