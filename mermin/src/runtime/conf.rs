@@ -32,40 +32,50 @@ impl Format for Hcl {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Conf {
-    pub interfaces: Vec<String>,
-    pub auto_reload: bool,
+    /// Path to the configuration file that was loaded
+    #[serde(skip)]
+    #[allow(dead_code)]
+    pub(crate) config_path: Option<std::path::PathBuf>,
     #[serde(with = "level")]
     pub log_level: Level,
-    pub api: ApiConf,
-    pub metrics: MetricsConf,
-    pub packet_channel_capacity: usize,
-    pub packet_worker_count: usize,
+    pub auto_reload: bool,
     #[serde(with = "duration")]
     pub shutdown_timeout: Duration,
-    pub span: SpanOptions,
+    pub packet_channel_capacity: usize,
+    pub packet_worker_count: usize,
     /// Contains the configuration for internal exporters
     pub internal: InternalOptions,
-    /// References to the exporters to use for telemetry
-    pub export: ExportOptions,
+    pub api: ApiConf,
+    pub metrics: MetricsConf,
     /// Parser configuration for eBPF packet parsing
     pub parser: ParserConf,
+    pub interfaces: Vec<String>,
+    /// Resolved interfaces after expanding globs and regexes against host interfaces
+    #[serde(skip)]
+    pub resolved_interfaces: Vec<String>,
+    /// Span configuration for flow span producer
+    pub span: SpanOptions,
+    /// References to the exporters to use for telemetry
+    pub export: ExportOptions,
 }
 
 impl Default for Conf {
     fn default() -> Self {
         Self {
-            interfaces: vec!["eth0".to_string()],
-            auto_reload: false,
+            config_path: None,
             log_level: Level::INFO,
-            api: ApiConf::default(),
-            metrics: MetricsConf::default(),
+            auto_reload: false,
+            shutdown_timeout: defaults::shutdown_timeout(),
             packet_channel_capacity: defaults::packet_channel_capacity(),
             packet_worker_count: defaults::flow_workers(),
-            shutdown_timeout: defaults::shutdown_timeout(),
-            span: SpanOptions::default(),
             internal: InternalOptions::default(),
-            export: ExportOptions::default(),
+            api: ApiConf::default(),
+            metrics: MetricsConf::default(),
             parser: ParserConf::default(),
+            interfaces: vec!["eth0".to_string()],
+            resolved_interfaces: Vec::new(),
+            span: SpanOptions::default(),
+            export: ExportOptions::default(),
         }
     }
 }
@@ -277,6 +287,118 @@ impl Conf {
         let stripped = pattern.strip_prefix('/')?;
         let end = stripped.rfind('/')?;
         Regex::new(&stripped[..end]).ok()
+    }
+
+    /// Merges a configuration file into a Figment instance, automatically
+    /// selecting the correct provider based on the file extension.
+    fn merge_provider_for_path(
+        figment: figment::Figment,
+        path: &Path,
+    ) -> Result<figment::Figment, ConfError> {
+        match path.extension().and_then(|s| s.to_str()) {
+            Some("yaml") | Some("yml") => Ok(figment.merge(figment::providers::Yaml::file(path))),
+            Some("hcl") => Ok(figment.merge(Hcl::file(path))),
+            Some(ext) => Err(ConfError::InvalidExtension(ext.to_string())),
+            None => Err(ConfError::InvalidExtension("none".to_string())),
+        }
+    }
+
+    /// Creates a new `Conf` instance based on the provided CLI arguments, environment variables,
+    /// and configuration file. The configuration is determined using the following priority order:
+    /// Defaults < Configuration File < Environment Variables < CLI Arguments.
+    ///
+    /// # Arguments
+    /// * `cli` - An instance of `Cli` containing parsed CLI arguments.
+    ///
+    /// # Returns
+    /// * `Result<(Self, Cli), ConfigError>` - Returns an `Ok((Conf, Cli))` if successful, or a `ConfigError`
+    ///   if there are issues during configuration extraction.
+    ///
+    /// # Errors
+    /// * `ConfigError::NoConfigFile` - Returned if no configuration file is specified or found.
+    /// * `ConfigError::InvalidConfigPath` - Returned if the `config_path` from the environment
+    ///   variable cannot be converted to a valid string.
+    /// * Other `ConfigError` variants - Errors propagated during the extraction of the configuration.
+    ///
+    /// # Behavior
+    /// 1. Initializes a `Figment` instance with default values from `cli` and merges it with
+    ///    environment variables prefixed by "MERMIN_".
+    /// 2. Attempts to retrieve the `config_path` from the CLI arguments or the environment variable.
+    ///    If no path is provided or found, the function returns a `ConfigError::NoConfigFile`.
+    /// 3. If a configuration file is specified via CLI or environment variable, it is merged with
+    ///    the existing `Figment` configuration.
+    /// 4. Extracts the final configuration into a `Conf` struct, storing the path to the
+    ///    configuration file (if any).
+    pub fn new(
+        cli: crate::runtime::cli::Cli,
+    ) -> Result<(Self, crate::runtime::cli::Cli), ConfError> {
+        use figment::{Figment, providers::Serialized};
+
+        let mut figment = Figment::new().merge(Serialized::defaults(Conf::default()));
+
+        let config_path_to_store = if let Some(config_path) = &cli.config {
+            validate_config_path(config_path)?;
+            figment = Self::merge_provider_for_path(figment, config_path)?;
+            Some(config_path.clone())
+        } else {
+            None
+        };
+
+        figment = figment.merge(Serialized::defaults(&cli));
+
+        let mut conf: Conf = figment.extract()?;
+
+        let resolved_interfaces = conf.resolve_interfaces();
+        conf.config_path = config_path_to_store;
+        conf.resolved_interfaces = resolved_interfaces;
+
+        Ok((conf, cli))
+    }
+
+    /// Reloads the configuration from the config file and returns a new instance
+    /// of the configuration object.
+    ///
+    /// This method allows for dynamic reloading of the configuration without
+    /// requiring a restart of the application. Any updates to the configuration
+    /// file will be applied, creating a new configuration object based on the
+    /// file's content.
+    ///
+    /// Note:
+    /// - Command-line arguments (CLI) and environment variables (ENV VARS) will
+    ///   not be reloaded since it is assumed that the shell environment remains
+    ///   the same. The reload operation will use the current configuration as the
+    ///   base and layer the updated configuration file on top of it.
+    /// - If no configuration file path has been specified, an error will be returned.
+    ///
+    /// # Returns
+    /// - `Ok(Self)` containing the reloaded configuration object if the reload
+    ///   operation succeeds.
+    /// - `Err(ConfigError::NoConfigFile)` if no configuration file path is set.
+    /// - Returns other variants of `ConfigError` if the configuration fails to
+    ///   load or extract properly.
+    ///
+    /// # Errors
+    /// This function returns a `ConfigError` in the following scenarios:
+    /// - If there is no configuration file path specified (`ConfigError::NoConfigFile`).
+    /// - If the configuration fails to load or parse from the file.
+    #[allow(dead_code)]
+    pub fn reload(&self) -> Result<Self, ConfError> {
+        use figment::{Figment, providers::Serialized};
+
+        let path = self.config_path.as_ref().ok_or(ConfError::NoConfigFile)?;
+
+        // Create a new Figment instance, using the current resolved config
+        // as the base. This preserves CLI/env vars. Then merge the file on top.
+        let mut figment = Figment::from(Serialized::defaults(&self));
+        figment = Self::merge_provider_for_path(figment, path)?;
+
+        let mut conf: Conf = figment.extract()?;
+
+        let resolved_interfaces = conf.resolve_interfaces();
+        conf.config_path = self.config_path.clone();
+        conf.resolved_interfaces = resolved_interfaces;
+
+        Ok(conf)
     }
 }
 
@@ -528,45 +650,8 @@ mod tests {
     use figment::Jail;
     use tracing::Level;
 
-    use super::{Conf, ExporterReference};
-    use crate::runtime::{cli::Cli, props::Properties};
-
-    fn parse_exporter_reference(reference: &str) -> Result<ExporterReference, String> {
-        match reference.split('.').collect::<Vec<_>>().as_slice() {
-            ["exporter", type_ @ ("otlp" | "stdout"), name] => Ok(ExporterReference {
-                type_: type_.to_string(),
-                name: name.to_string(),
-            }),
-            ["exporter", invalid_type, _] => Err(format!(
-                "unsupported exporter type: '{invalid_type}' - supported types: otlp, stdout"
-            )),
-            _ => Err(format!(
-                "invalid format: '{reference}' - expected: 'exporter.<type>.<name>'"
-            )),
-        }
-    }
-
-    fn create_default_app_props() -> Properties {
-        let raw_conf = Conf::default();
-        let resolved_interfaces = raw_conf.resolve_interfaces();
-        let interfaces = raw_conf.interfaces;
-        Properties {
-            interfaces,
-            resolved_interfaces,
-            auto_reload: raw_conf.auto_reload,
-            log_level: raw_conf.log_level,
-            api: raw_conf.api,
-            metrics: raw_conf.metrics,
-            packet_channel_capacity: raw_conf.packet_channel_capacity,
-            packet_worker_count: raw_conf.packet_worker_count,
-            shutdown_timeout: raw_conf.shutdown_timeout,
-            span: raw_conf.span,
-            internal: raw_conf.internal,
-            export: raw_conf.export,
-            parser: raw_conf.parser,
-            config_path: None,
-        }
-    }
+    use super::Conf;
+    use crate::runtime::cli::Cli;
 
     #[test]
     fn resolve_interfaces_supports_globs_and_literals() {
@@ -634,7 +719,7 @@ mod tests {
 
     #[test]
     fn default_impl_has_eth0_interface() {
-        let cfg = create_default_app_props();
+        let cfg = Conf::default();
         assert_eq!(cfg.interfaces, Vec::from(["eth0".to_string()]));
         assert_eq!(cfg.auto_reload, false);
         assert_eq!(cfg.log_level, Level::INFO);
@@ -663,7 +748,7 @@ mod tests {
     fn new_succeeds_without_config_path() {
         Jail::expect_with(|_| {
             let cli = Cli::parse_from(["mermin"]);
-            let (cfg, _cli) = Properties::new(cli).expect("config should load without path");
+            let (cfg, _cli) = Conf::new(cli).expect("config should load without path");
             assert_eq!(cfg.config_path, None);
 
             Ok(())
@@ -674,7 +759,7 @@ mod tests {
     fn new_errors_with_nonexistent_config_file() {
         Jail::expect_with(|_| {
             let cli = Cli::parse_from(["mermin", "--config", "nonexistent.yaml"]);
-            let err = Properties::new(cli).expect_err("expected error with nonexistent file");
+            let err = Conf::new(cli).expect_err("expected error with nonexistent file");
             let msg = err.to_string();
             assert!(
                 msg.contains("no config file provided"),
@@ -693,7 +778,7 @@ mod tests {
             jail.create_dir(path)?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let err = Properties::new(cli).expect_err("expected error with directory path");
+            let err = Conf::new(cli).expect_err("expected error with directory path");
             let msg = err.to_string();
             assert!(
                 msg.contains("is not a valid file"),
@@ -712,7 +797,7 @@ mod tests {
             jail.create_file(path, "")?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let err = Properties::new(cli).expect_err("expected error with invalid extension");
+            let err = Conf::new(cli).expect_err("expected error with invalid extension");
             let msg = err.to_string();
             assert!(
                 msg.contains("invalid file extension '.toml'"),
@@ -746,7 +831,7 @@ log_level: warn
                 "--log-level",
                 "debug",
             ]);
-            let (cfg, _cli) = Properties::new(cli).expect("config loads from cli file");
+            let (cfg, _cli) = Conf::new(cli).expect("config loads from cli file");
             assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.log_level, Level::DEBUG);
@@ -770,7 +855,7 @@ log_level: debug
             jail.set_env("MERMIN_CONFIG_PATH", path);
 
             let cli = Cli::parse_from(["mermin"]);
-            let (cfg, _cli) = Properties::new(cli).expect("config loads from env file");
+            let (cfg, _cli) = Conf::new(cli).expect("config loads from env file");
             assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.log_level, Level::DEBUG);
@@ -791,7 +876,7 @@ interfaces: ["eth1"]
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Properties::new(cli).expect("config loads from cli file");
+            let (cfg, _cli) = Conf::new(cli).expect("config loads from cli file");
             assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
 
@@ -816,7 +901,7 @@ interfaces: ["eth2", "eth3"]
 
     #[test]
     fn reload_fails_without_config_path() {
-        let cfg = create_default_app_props();
+        let cfg = Conf::default();
         let err = cfg
             .reload()
             .expect_err("expected error when reloading without config path");
@@ -852,7 +937,7 @@ metrics:
 
             // The rest of the test logic remains the same
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Properties::new(cli).expect("config should load from yaml file");
+            let (cfg, _cli) = Conf::new(cli).expect("config should load from yaml file");
 
             // Assert that all the custom values from the file were loaded correctly
             assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
@@ -889,7 +974,7 @@ metrics {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Properties::new(cli).expect("config should load from HCL file");
+            let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
 
             assert_eq!(cfg.interfaces, vec!["eth0"]);
             assert_eq!(cfg.log_level, Level::INFO);
@@ -908,7 +993,7 @@ metrics {
             jail.create_file(path, r#"interfaces = ["eth0"]"#)?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let result = Properties::new(cli);
+            let result = Conf::new(cli);
             assert!(result.is_ok(), "HCL extension should be valid");
 
             Ok(())
@@ -928,7 +1013,7 @@ log_level = "info"
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Properties::new(cli).expect("config loads from HCL file");
+            let (cfg, _cli) = Conf::new(cli).expect("config loads from HCL file");
             assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
@@ -969,7 +1054,7 @@ log_level =
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let err = Properties::new(cli).expect_err("expected error with invalid HCL");
+            let err = Conf::new(cli).expect_err("expected error with invalid HCL");
             let msg = err.to_string();
 
             // The error originates from the `hcl` crate, is wrapped by `figment`,
@@ -1011,7 +1096,7 @@ metrics {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Properties::new(cli).expect("config should load from HCL file");
+            let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
 
             // Assert that all the custom values from the file were loaded correctly
             assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
@@ -1024,43 +1109,6 @@ metrics {
         });
     }
 
-    #[test]
-    fn test_parse_exporter_reference_valid() {
-        let result = parse_exporter_reference("exporter.otlp.main").unwrap();
-        assert_eq!(result.type_, "otlp");
-        assert_eq!(result.name, "main");
-
-        let result = parse_exporter_reference("exporter.stdout.json").unwrap();
-        assert_eq!(result.type_, "stdout");
-        assert_eq!(result.name, "json");
-    }
-
-    #[test]
-    fn test_parse_exporter_reference_invalid_format() {
-        let result = parse_exporter_reference("invalid.format");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("invalid format"));
-
-        let result = parse_exporter_reference("exporter.otlp");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("invalid format"));
-
-        let result = parse_exporter_reference("exporter.otlp.main.extra");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("invalid format"));
-    }
-
-    #[test]
-    fn test_parse_exporter_reference_invalid_prefix() {
-        let result = parse_exporter_reference("invalid.otlp.main");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("invalid format"));
-    }
-
-    #[test]
-    fn test_parse_exporter_reference_unsupported_type() {
-        let result = parse_exporter_reference("exporter.invalid.main");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unsupported exporter type"));
-    }
+    // Note: Tests for parse_exporter_reference have been removed as the function
+    // and ExporterReference type were never fully implemented or were removed.
 }

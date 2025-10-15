@@ -556,6 +556,16 @@ filter "flow" {
   }
 }
 
+span {
+  max_record_interval = "60s"
+  generic_timeout     = "30s"
+  icmp_timeout        = "10s"
+  tcp_timeout         = "20s"
+  tcp_fin_timeout     = "5s"
+  tcp_rst_timeout     = "5s"
+  udp_timeout         = "60s"
+}
+
 # OTLP exporter configuration
 # See OBI export concepts: https://opentelemetry.io/docs/zero-code/obi/configure/export-data/
 export "traces" {
