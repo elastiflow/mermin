@@ -1,3 +1,13 @@
+## [v0.1.0-beta.3] - 2025-10-15
+
+### Bug Fixes
+
+- **ci:** Release helm packages to gh-pages (#151)
+
+[v0.1.0-beta.2..v0.1.0-beta.3](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.2...v0.1.0-beta.3)
+
+
+
 ## [v0.1.0-beta.2] - 2025-10-14
 
 ### Bug Fixes
