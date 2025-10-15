@@ -1,3 +1,5 @@
+mod error;
+
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -10,6 +12,7 @@ use axum::{
     response::{IntoResponse, Json},
     routing::get,
 };
+pub use error::HealthError;
 use serde_json::json;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
@@ -105,13 +108,17 @@ pub fn create_health_router(state: HealthState) -> Router {
         .with_state(state)
 }
 
-pub async fn start_api_server(state: HealthState, config: &ApiConf) -> anyhow::Result<()> {
+pub async fn start_api_server(state: HealthState, config: &ApiConf) -> Result<(), HealthError> {
     let app = create_health_router(state);
 
     let bind_address = format!("{}:{}", config.listen_address, config.port);
-    let listener = TcpListener::bind(&bind_address).await?;
+    let listener = TcpListener::bind(&bind_address)
+        .await
+        .map_err(|e| HealthError::bind_address(&bind_address, e))?;
 
     log::info!("API server with health checks listening on {bind_address}");
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .await
+        .map_err(HealthError::ServeError)?;
     Ok(())
 }

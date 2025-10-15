@@ -14,7 +14,6 @@ use std::{
     sync::{Arc, atomic::Ordering},
 };
 
-use anyhow::Result;
 use futures::TryStreamExt;
 use ipnetwork::IpNetwork;
 use k8s_openapi::{
@@ -41,6 +40,7 @@ use network_types::ip::IpProto;
 use tokio::sync::oneshot;
 use tracing::error;
 
+use super::K8sError;
 use crate::{health::HealthState, span::flow::FlowSpan};
 
 /// Holds metadata for a single Kubernetes object.
@@ -159,7 +159,7 @@ impl_has_store!(NetworkPolicy, network_policies);
 
 impl ResourceStore {
     /// Initializes all resource reflectors concurrently and builds the ResourceStore.
-    pub async fn new(client: Client, health_state: HealthState) -> Result<Self> {
+    pub async fn new(client: Client, health_state: HealthState) -> Result<Self, K8sError> {
         let all_stores_and_handles = futures::try_join!(
             Self::create_resource_store::<Pod>(&client, true),
             Self::create_resource_store::<Node>(&client, false),
@@ -234,7 +234,7 @@ impl ResourceStore {
     async fn create_resource_store<K>(
         client: &Client,
         is_critical: bool,
-    ) -> Result<(reflector::Store<K>, Option<oneshot::Receiver<()>>)>
+    ) -> Result<(reflector::Store<K>, Option<oneshot::Receiver<()>>), K8sError>
     where
         K: Resource + Clone + Debug + Send + Sync + 'static + for<'de> serde::Deserialize<'de>,
         K::DynamicType: Default + std::hash::Hash + std::cmp::Eq + Clone,
@@ -245,9 +245,7 @@ impl ResourceStore {
             Err(e) => {
                 if is_critical {
                     warn!("failed to create critical reflector for {resource_name}: {e}");
-                    Err(anyhow::anyhow!(
-                        "failed to create critical reflector for {resource_name}: {e}"
-                    ))
+                    Err(K8sError::critical_reflector(resource_name, e))
                 } else {
                     warn!(
                         "failed to create reflector for {resource_name}: {e}. Continuing with an empty store."
@@ -276,7 +274,9 @@ impl ResourceStore {
 }
 
 /// Creates a new reflector for a Kubernetes resource type.
-async fn create_store<K>(client: Client) -> Result<(reflector::Store<K>, oneshot::Receiver<()>)>
+async fn create_store<K>(
+    client: Client,
+) -> Result<(reflector::Store<K>, oneshot::Receiver<()>), K8sError>
 where
     K: Resource + Clone + Debug + Send + Sync + 'static + for<'de> serde::Deserialize<'de>,
     K::DynamicType: Default + std::hash::Hash + Eq + Clone,
@@ -285,7 +285,12 @@ where
     let api: Api<K> = Api::all(client);
 
     // Fail fast if the API is unreachable.
-    api.list(&ListParams::default().limit(1)).await?;
+    api.list(&ListParams::default().limit(1))
+        .await
+        .map_err(|e| K8sError::ResourceList {
+            resource: resource_name.clone(),
+            source: Box::new(e),
+        })?;
 
     let (reader, writer) = reflector::store();
     let reflector = reflector(writer, watcher(api, watcher::Config::default()));
@@ -364,8 +369,10 @@ pub struct Decorator {
 
 impl Decorator {
     /// Creates a new Decorator, initializing all resource reflectors concurrently.
-    pub async fn new(health_state: HealthState) -> Result<Self> {
-        let client = Client::try_default().await?;
+    pub async fn new(health_state: HealthState) -> Result<Self, K8sError> {
+        let client = Client::try_default()
+            .await
+            .map_err(|e| K8sError::ClientInitialization(Box::new(e)))?;
         let resource_store = ResourceStore::new(client.clone(), health_state).await?;
         Ok(Self {
             client,
@@ -606,7 +613,7 @@ impl Decorator {
         ctx: &FlowContext,
         pod: &Pod,
         direction: FlowDirection,
-    ) -> Result<Vec<Arc<NetworkPolicy>>> {
+    ) -> Result<Vec<Arc<NetworkPolicy>>, K8sError> {
         let applicable_policies = self.get_network_policies_for_pod(pod)?;
 
         Ok(applicable_policies
@@ -616,7 +623,7 @@ impl Decorator {
     }
 
     /// Gets NetworkPolicies that apply to the given pod based on podSelector
-    fn get_network_policies_for_pod(&self, pod: &Pod) -> Result<Vec<Arc<NetworkPolicy>>> {
+    fn get_network_policies_for_pod(&self, pod: &Pod) -> Result<Vec<Arc<NetworkPolicy>>, K8sError> {
         let pod_namespace = pod.clone().metadata.namespace.unwrap_or_default();
         let pod_labels = pod.labels();
 

@@ -1,3 +1,4 @@
+mod error;
 mod health;
 mod k8s;
 mod otlp;
@@ -10,11 +11,11 @@ use std::{
     sync::{Arc, atomic::Ordering},
 };
 
-use anyhow::{Result, anyhow};
 use aya::{
     maps::{Array, RingBuf},
     programs::{SchedClassifier, TcAttachType, tc},
 };
+use error::{MerminError, Result};
 use mermin_common::PacketMeta;
 use pnet::datalink;
 use tokio::{io::unix::AsyncFd, signal, sync::mpsc};
@@ -119,7 +120,12 @@ async fn main() -> Result<()> {
     programs.iter().try_for_each(|attach_type| -> Result<()> {
         let program: &mut SchedClassifier = ebpf
             .program_mut(attach_type.program_name())
-            .unwrap()
+            .ok_or_else(|| {
+                MerminError::internal(format!(
+                    "eBPF program '{}' not found in loaded object",
+                    attach_type.program_name()
+                ))
+            })?
             .try_into()?;
         program.load()?;
 
@@ -141,7 +147,7 @@ async fn main() -> Result<()> {
 
     let map = ebpf
         .take_map("PACKETS_META")
-        .ok_or_else(|| anyhow!("PACKETS_META map not present in the object"))?;
+        .ok_or_else(|| MerminError::ebpf_map("PACKETS_META map not present in the object"))?;
     let mut ring_buf = RingBuf::try_from(map)?;
 
     info!("waiting for packets - ring buffer initialized");
