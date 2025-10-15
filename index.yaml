@@ -7,6 +7,32 @@ entries:
         - name: Chart Source
           url: https://github.com/elastiflow/mermin
     apiVersion: v2
+    appVersion: 0.1.0-beta.3
+    created: "2025-10-15T17:03:27.845374758Z"
+    description: A Helm chart for deploying the Mermin eBPF agent
+    digest: bb3975621a2b859fcbcf6e267bf90e22a69ab52721fd78e6b9c082c8bbd82fb8
+    icon: https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1746227898/mermin-horizontal_kxhvzo.png
+    keywords:
+    - netflow
+    - network
+    - flow
+    - observability
+    maintainers:
+    - email: engineering@elastiflow.com
+      name: ElastiFlow Engineering Team
+    name: mermin
+    sources:
+    - https://github.com/elastiflow/mermin
+    type: application
+    urls:
+    - mermin-0.1.0-beta.3.tgz
+    version: 0.1.0-beta.3
+  - annotations:
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: Chart Source
+          url: https://github.com/elastiflow/mermin
+    apiVersion: v2
     appVersion: 0.1.0-beta.2
     created: "2025-10-14T19:24:50.17855274Z"
     description: A Helm chart for deploying the Mermin eBPF agent
@@ -27,4 +53,4 @@ entries:
     urls:
     - https://github.com/elastiflow/mermin/releases/download/mermin-0.1.0-beta.2/mermin-0.1.0-beta.2.tgz
     version: 0.1.0-beta.2
-generated: "2025-10-14T19:24:50.178564803Z"
+generated: "2025-10-15T17:03:27.84542421Z"
