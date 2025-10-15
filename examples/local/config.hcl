@@ -53,13 +53,29 @@ parser {
   wireguard_port = 51820  # IANA default for WireGuard
 }
 
-# Specify which exporters are enabled
-agent "traces" {
-  exporters = [
-    "exporter.stdout.main"
-  ]
-}
+# OTLP exporter configuration
+# See OBI export concepts: https://opentelemetry.io/docs/zero-code/obi/configure/export-data/
+export "traces" {
+  stdout = "text_indent" // text, text_indent(*new), json, json_indent
 
-exporter "stdout" "main" {
-  format = "full"
+  // otlp = {
+  //   endpoint = "http://otelcol:4317"
+  //   protocol = "grpc"
+  //   timeout  = "10s"
+
+  //   auth = {
+  //     basic = {
+  //       user = "USERNAME"
+  //       pass = env("USER_SPECIFIED_ENV_VAR_TRITON_PASS")
+  //     }
+  //   }
+
+  //   tls = {
+  //     enabled     = true
+  //     insecure    = false
+  //     ca_cert     = "/etc/certs/ca.crt"
+  //     client_cert = "/etc/certs/cert.crt"
+  //     client_key  = "/etc/certs/cert.key"
+  //   }
+  // }
 }

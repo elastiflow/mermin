@@ -650,8 +650,12 @@ mod tests {
     use figment::Jail;
     use tracing::Level;
 
-    use super::Conf;
-    use crate::runtime::cli::Cli;
+    use super::{ApiConf, Conf, MetricsConf, ParserConf};
+    use crate::{
+        otlp::opts::{ExportOptions, ExporterProtocol},
+        runtime::{cli::Cli, opts::InternalOptions},
+        span::opts::SpanOptions,
+    };
 
     #[test]
     fn resolve_interfaces_supports_globs_and_literals() {
@@ -718,15 +722,154 @@ mod tests {
     }
 
     #[test]
-    fn default_impl_has_eth0_interface() {
+    fn default_conf_has_expected_values() {
         let cfg = Conf::default();
-        assert_eq!(cfg.interfaces, Vec::from(["eth0".to_string()]));
-        assert_eq!(cfg.auto_reload, false);
-        assert_eq!(cfg.log_level, Level::INFO);
-        assert_eq!(cfg.api.port, 8080);
-        assert_eq!(cfg.packet_channel_capacity, 1024);
-        assert_eq!(cfg.packet_worker_count, 2);
-        assert_eq!(cfg.shutdown_timeout, Duration::from_secs(5));
+
+        // Core settings
+        assert_eq!(
+            cfg.log_level,
+            Level::INFO,
+            "default log level should be INFO"
+        );
+        assert_eq!(
+            cfg.auto_reload, false,
+            "auto_reload should be disabled by default"
+        );
+        assert_eq!(
+            cfg.shutdown_timeout,
+            Duration::from_secs(5),
+            "shutdown_timeout should be 5s"
+        );
+        assert_eq!(
+            cfg.packet_channel_capacity, 1024,
+            "packet_channel_capacity should be 1024"
+        );
+        assert_eq!(
+            cfg.packet_worker_count, 2,
+            "packet_worker_count should be 2"
+        );
+
+        // Interface settings
+        assert_eq!(
+            cfg.interfaces,
+            vec!["eth0".to_string()],
+            "default interface should be eth0"
+        );
+        assert_eq!(
+            cfg.resolved_interfaces,
+            Vec::<String>::new(),
+            "resolved_interfaces should be empty initially"
+        );
+
+        // API settings
+        assert_eq!(cfg.api.enabled, true, "API should be enabled by default");
+        assert_eq!(
+            cfg.api.listen_address, "0.0.0.0",
+            "API should listen on all interfaces by default"
+        );
+        assert_eq!(cfg.api.port, 8080, "API port should be 8080");
+
+        // Metrics settings
+        assert_eq!(
+            cfg.metrics.enabled, true,
+            "metrics should be enabled by default"
+        );
+        assert_eq!(
+            cfg.metrics.listen_address, "0.0.0.0",
+            "metrics should listen on all interfaces by default"
+        );
+        assert_eq!(cfg.metrics.port, 10250, "metrics port should be 10250");
+
+        // Parser settings
+        assert_eq!(
+            cfg.parser.geneve_port, 6081,
+            "Geneve port should be 6081 (IANA default)"
+        );
+        assert_eq!(
+            cfg.parser.vxlan_port, 4789,
+            "VXLAN port should be 4789 (IANA default)"
+        );
+        assert_eq!(
+            cfg.parser.wireguard_port, 51820,
+            "WireGuard port should be 51820 (IANA default)"
+        );
+
+        // Config path should be None
+        assert_eq!(
+            cfg.config_path, None,
+            "config_path should be None for default config"
+        );
+
+        // Span settings - verify all defaults are set
+        assert_eq!(
+            cfg.span.max_record_interval,
+            Duration::from_secs(60),
+            "default max_record_interval should be 60s"
+        );
+        assert_eq!(
+            cfg.span.generic_timeout,
+            Duration::from_secs(30),
+            "default generic_timeout should be 30s"
+        );
+        assert_eq!(
+            cfg.span.icmp_timeout,
+            Duration::from_secs(10),
+            "default icmp_timeout should be 10s"
+        );
+        assert_eq!(
+            cfg.span.tcp_timeout,
+            Duration::from_secs(20),
+            "default tcp_timeout should be 20s"
+        );
+        assert_eq!(
+            cfg.span.tcp_fin_timeout,
+            Duration::from_secs(5),
+            "default tcp_fin_timeout should be 5s"
+        );
+        assert_eq!(
+            cfg.span.tcp_rst_timeout,
+            Duration::from_secs(5),
+            "default tcp_rst_timeout should be 5s"
+        );
+        assert_eq!(
+            cfg.span.udp_timeout,
+            Duration::from_secs(60),
+            "default udp_timeout should be 60s"
+        );
+
+        // Export settings - Note: When Conf::default() is called directly (not via deserialization),
+        // the export settings are empty (no OTLP, no stdout) since the serde defaults only apply
+        // during config file deserialization
+        assert!(
+            cfg.export.traces.otlp.is_some(),
+            "default export (via ::default()) should not have OTLP configured"
+        );
+        if let Some(otlp) = &cfg.export.traces.otlp {
+            assert_eq!(otlp.endpoint, "http://localhost:4317");
+            assert_eq!(otlp.protocol, ExporterProtocol::Grpc);
+            assert_eq!(otlp.timeout, Duration::from_secs(10));
+        }
+        assert!(
+            cfg.export.traces.stdout.is_none(),
+            "default export should not have stdout enabled"
+        );
+
+        // Internal settings - verify defaults
+        assert!(
+            matches!(
+                cfg.internal.traces.span_fmt,
+                crate::runtime::opts::SpanFmt::Full
+            ),
+            "default internal span_fmt should be Full"
+        );
+        assert!(
+            cfg.internal.traces.stdout.is_none(),
+            "default internal traces stdout should be None"
+        );
+        assert!(
+            cfg.internal.traces.otlp.is_none(),
+            "default internal traces otlp should be None"
+        );
     }
 
     #[test]
@@ -1104,6 +1247,825 @@ metrics {
             assert_eq!(cfg.api.port, 8081);
             assert_eq!(cfg.metrics.listen_address, "0.0.0.0");
             assert_eq!(cfg.metrics.port, 9090);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_all_core_settings_via_yaml() {
+        Jail::expect_with(|jail| {
+            let path = "override_core.yaml";
+            jail.create_file(
+                path,
+                r#"
+log_level: error
+auto_reload: true
+shutdown_timeout: 30s
+packet_channel_capacity: 2048
+packet_worker_count: 8
+interfaces:
+  - eth1
+  - eth2
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.log_level, Level::ERROR);
+            assert_eq!(cfg.auto_reload, true);
+            assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
+            assert_eq!(cfg.packet_channel_capacity, 2048);
+            assert_eq!(cfg.packet_worker_count, 8);
+            assert_eq!(cfg.interfaces, vec!["eth1", "eth2"]);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_all_core_settings_via_hcl() {
+        Jail::expect_with(|jail| {
+            let path = "override_core.hcl";
+            jail.create_file(
+                path,
+                r#"
+log_level = "error"
+auto_reload = true
+shutdown_timeout = "30s"
+packet_channel_capacity = 2048
+packet_worker_count = 8
+interfaces = ["eth1", "eth2"]
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.log_level, Level::ERROR);
+            assert_eq!(cfg.auto_reload, true);
+            assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
+            assert_eq!(cfg.packet_channel_capacity, 2048);
+            assert_eq!(cfg.packet_worker_count, 8);
+            assert_eq!(cfg.interfaces, vec!["eth1", "eth2"]);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_api_settings_via_yaml() {
+        Jail::expect_with(|jail| {
+            let path = "override_api.yaml";
+            jail.create_file(
+                path,
+                r#"
+api:
+  enabled: false
+  listen_address: "127.0.0.1"
+  port: 9000
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.api.enabled, false);
+            assert_eq!(cfg.api.listen_address, "127.0.0.1");
+            assert_eq!(cfg.api.port, 9000);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_api_settings_via_hcl() {
+        Jail::expect_with(|jail| {
+            let path = "override_api.hcl";
+            jail.create_file(
+                path,
+                r#"
+api {
+    enabled = false
+    listen_address = "127.0.0.1"
+    port = 9000
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.api.enabled, false);
+            assert_eq!(cfg.api.listen_address, "127.0.0.1");
+            assert_eq!(cfg.api.port, 9000);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_metrics_settings_via_yaml() {
+        Jail::expect_with(|jail| {
+            let path = "override_metrics.yaml";
+            jail.create_file(
+                path,
+                r#"
+metrics:
+  enabled: false
+  listen_address: "192.168.1.1"
+  port: 9999
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.metrics.enabled, false);
+            assert_eq!(cfg.metrics.listen_address, "192.168.1.1");
+            assert_eq!(cfg.metrics.port, 9999);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_metrics_settings_via_hcl() {
+        Jail::expect_with(|jail| {
+            let path = "override_metrics.hcl";
+            jail.create_file(
+                path,
+                r#"
+metrics {
+    enabled = false
+    listen_address = "192.168.1.1"
+    port = 9999
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.metrics.enabled, false);
+            assert_eq!(cfg.metrics.listen_address, "192.168.1.1");
+            assert_eq!(cfg.metrics.port, 9999);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_parser_settings_via_yaml() {
+        Jail::expect_with(|jail| {
+            let path = "override_parser.yaml";
+            jail.create_file(
+                path,
+                r#"
+parser:
+  geneve_port: 7000
+  vxlan_port: 8000
+  wireguard_port: 9000
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.parser.geneve_port, 7000);
+            assert_eq!(cfg.parser.vxlan_port, 8000);
+            assert_eq!(cfg.parser.wireguard_port, 9000);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_parser_settings_via_hcl() {
+        Jail::expect_with(|jail| {
+            let path = "override_parser.hcl";
+            jail.create_file(
+                path,
+                r#"
+parser {
+    geneve_port = 7000
+    vxlan_port = 8000
+    wireguard_port = 9000
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.parser.geneve_port, 7000);
+            assert_eq!(cfg.parser.vxlan_port, 8000);
+            assert_eq!(cfg.parser.wireguard_port, 9000);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn cli_args_override_file_config() {
+        Jail::expect_with(|jail| {
+            let path = "cli_override.yaml";
+            jail.create_file(
+                path,
+                r#"
+log_level: info
+auto_reload: false
+                "#,
+            )?;
+
+            let cli = Cli::parse_from([
+                "mermin",
+                "--config",
+                path.into(),
+                "--log-level",
+                "warn",
+                "--auto-reload",
+            ]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            // CLI args should override file config
+            assert_eq!(cfg.log_level, Level::WARN);
+            assert_eq!(cfg.auto_reload, true);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn partial_override_preserves_defaults() {
+        Jail::expect_with(|jail| {
+            let path = "partial.yaml";
+            jail.create_file(
+                path,
+                r#"
+# Only override interfaces, everything else should remain default
+interfaces:
+  - custom0
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            // Overridden value
+            assert_eq!(cfg.interfaces, vec!["custom0"]);
+
+            // Default values should be preserved
+            assert_eq!(cfg.log_level, Level::INFO);
+            assert_eq!(cfg.auto_reload, false);
+            assert_eq!(cfg.shutdown_timeout, Duration::from_secs(5));
+            assert_eq!(cfg.packet_channel_capacity, 1024);
+            assert_eq!(cfg.packet_worker_count, 2);
+            assert_eq!(cfg.api.port, 8080);
+            assert_eq!(cfg.metrics.port, 10250);
+            assert!(matches!(
+                cfg.internal.traces.span_fmt,
+                crate::runtime::opts::SpanFmt::Full
+            ));
+            assert!(cfg.internal.traces.stdout.is_none());
+            assert!(cfg.internal.traces.otlp.is_none());
+            assert_eq!(cfg.parser.geneve_port, 6081);
+            assert_eq!(cfg.span.max_record_interval, Duration::from_secs(60));
+            assert_eq!(cfg.span.generic_timeout, Duration::from_secs(30));
+            assert_eq!(cfg.span.icmp_timeout, Duration::from_secs(10));
+            assert_eq!(cfg.span.tcp_timeout, Duration::from_secs(20));
+            assert_eq!(cfg.span.tcp_fin_timeout, Duration::from_secs(5));
+            assert_eq!(cfg.span.tcp_rst_timeout, Duration::from_secs(5));
+            assert_eq!(cfg.span.udp_timeout, Duration::from_secs(60));
+            assert!(cfg.export.traces.stdout.is_none());
+            assert!(cfg.export.traces.otlp.is_some());
+            if let Some(otlp) = &cfg.export.traces.otlp {
+                assert_eq!(otlp.endpoint, "http://localhost:4317");
+                assert_eq!(otlp.protocol, ExporterProtocol::Grpc);
+                assert_eq!(otlp.timeout, Duration::from_secs(10));
+            }
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_duration_format_variations() {
+        Jail::expect_with(|jail| {
+            let path = "duration_formats.yaml";
+            jail.create_file(
+                path,
+                r#"
+shutdown_timeout: 2min
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.shutdown_timeout, Duration::from_secs(120));
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_log_level_variations() {
+        for (level_str, expected) in [
+            ("trace", Level::TRACE),
+            ("debug", Level::DEBUG),
+            ("info", Level::INFO),
+            ("warn", Level::WARN),
+            ("error", Level::ERROR),
+        ] {
+            Jail::expect_with(|jail| {
+                let path = "log_level.yaml";
+                jail.create_file(path, &format!("log_level: {}", level_str))?;
+
+                let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+                let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+                assert_eq!(cfg.log_level, expected, "failed for level: {}", level_str);
+
+                Ok(())
+            });
+        }
+    }
+
+    #[test]
+    fn default_parser_conf_has_expected_values() {
+        let parser = ParserConf::default();
+
+        assert_eq!(
+            parser.geneve_port, 6081,
+            "Geneve default port should be 6081"
+        );
+        assert_eq!(parser.vxlan_port, 4789, "VXLAN default port should be 4789");
+        assert_eq!(
+            parser.wireguard_port, 51820,
+            "WireGuard default port should be 51820"
+        );
+    }
+
+    #[test]
+    fn default_api_conf_has_expected_values() {
+        let api = ApiConf::default();
+
+        assert_eq!(api.enabled, true, "API should be enabled by default");
+        assert_eq!(
+            api.listen_address, "0.0.0.0",
+            "API should listen on all interfaces"
+        );
+        assert_eq!(api.port, 8080, "API default port should be 8080");
+    }
+
+    #[test]
+    fn default_metrics_conf_has_expected_values() {
+        let metrics = MetricsConf::default();
+
+        assert_eq!(
+            metrics.enabled, true,
+            "metrics should be enabled by default"
+        );
+        assert_eq!(
+            metrics.listen_address, "0.0.0.0",
+            "metrics should listen on all interfaces"
+        );
+        assert_eq!(metrics.port, 10250, "metrics default port should be 10250");
+    }
+
+    #[test]
+    fn default_span_options_has_expected_values() {
+        let span = SpanOptions::default();
+
+        assert_eq!(
+            span.max_record_interval,
+            Duration::from_secs(60),
+            "max_record_interval should be 60s"
+        );
+        assert_eq!(
+            span.generic_timeout,
+            Duration::from_secs(30),
+            "generic_timeout should be 30s"
+        );
+        assert_eq!(
+            span.icmp_timeout,
+            Duration::from_secs(10),
+            "icmp_timeout should be 10s"
+        );
+        assert_eq!(
+            span.tcp_timeout,
+            Duration::from_secs(20),
+            "tcp_timeout should be 20s"
+        );
+        assert_eq!(
+            span.tcp_fin_timeout,
+            Duration::from_secs(5),
+            "tcp_fin_timeout should be 5s"
+        );
+        assert_eq!(
+            span.tcp_rst_timeout,
+            Duration::from_secs(5),
+            "tcp_rst_timeout should be 5s"
+        );
+        assert_eq!(
+            span.udp_timeout,
+            Duration::from_secs(60),
+            "udp_timeout should be 60s"
+        );
+    }
+
+    #[test]
+    fn default_export_options_has_expected_values() {
+        let export = ExportOptions::default();
+
+        // When calling ::default() directly (not via deserialization),
+        // both otlp and stdout are None since serde defaults only apply during deserialization
+        assert!(
+            export.traces.otlp.is_some(),
+            "default export (via ::default()) should not have OTLP configured"
+        );
+        if let Some(otlp) = &export.traces.otlp {
+            assert_eq!(otlp.endpoint, "http://localhost:4317");
+            assert_eq!(otlp.protocol, ExporterProtocol::Grpc);
+            assert_eq!(otlp.timeout, Duration::from_secs(10));
+        }
+        assert!(
+            export.traces.stdout.is_none(),
+            "default export should not have stdout enabled"
+        );
+    }
+
+    #[test]
+    fn minimal_config_uses_defaults() {
+        // Test that when loading from a minimal config file,
+        // unspecified fields get their default values
+        Jail::expect_with(|jail| {
+            let path = "minimal_config.yaml";
+            jail.create_file(
+                path,
+                r#"
+# Minimal config - unspecified fields should get defaults
+interfaces:
+  - eth0
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            // Verify that defaults are applied for unspecified fields
+            // Note: export.traces.otlp is None by default (not configured unless explicitly set)
+            assert!(
+                cfg.export.traces.otlp.is_some(),
+                "export OTLP should not be configured unless explicitly set in config"
+            );
+            if let Some(otlp) = &cfg.export.traces.otlp {
+                assert_eq!(otlp.endpoint, "http://localhost:4317");
+                assert_eq!(otlp.protocol, ExporterProtocol::Grpc);
+                assert_eq!(otlp.timeout, Duration::from_secs(10));
+            }
+            assert!(
+                cfg.export.traces.stdout.is_none(),
+                "export stdout should not be enabled unless explicitly set"
+            );
+
+            // Other defaults should be applied
+            assert_eq!(cfg.log_level, Level::INFO);
+            assert_eq!(cfg.packet_channel_capacity, 1024);
+
+            // Verify all span defaults
+            assert_eq!(cfg.span.max_record_interval, Duration::from_secs(60));
+            assert_eq!(cfg.span.generic_timeout, Duration::from_secs(30));
+            assert_eq!(cfg.span.icmp_timeout, Duration::from_secs(10));
+            assert_eq!(cfg.span.tcp_timeout, Duration::from_secs(20));
+            assert_eq!(cfg.span.tcp_fin_timeout, Duration::from_secs(5));
+            assert_eq!(cfg.span.tcp_rst_timeout, Duration::from_secs(5));
+            assert_eq!(cfg.span.udp_timeout, Duration::from_secs(60));
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn export_both_stdout_and_otlp_can_be_set() {
+        // Both exporters can be configured simultaneously if desired
+        Jail::expect_with(|jail| {
+            let path = "export_both.yaml";
+            jail.create_file(
+                path,
+                r#"
+export:
+  traces:
+    stdout: "text_indent"
+    otlp:
+      endpoint: "http://collector:4317"
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert!(cfg.export.traces.stdout.is_some());
+            assert!(cfg.export.traces.otlp.is_some());
+            if let Some(otlp) = &cfg.export.traces.otlp {
+                assert_eq!(otlp.endpoint, "http://collector:4317");
+            }
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn export_empty_block_has_no_exporters() {
+        // Empty export.traces block means no exporters configured
+        Jail::expect_with(|jail| {
+            let path = "export_empty.yaml";
+            jail.create_file(
+                path,
+                r#"
+export:
+  traces: {}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert!(cfg.export.traces.otlp.is_some());
+            if let Some(otlp) = &cfg.export.traces.otlp {
+                assert_eq!(otlp.endpoint, "http://localhost:4317");
+                assert_eq!(otlp.protocol, ExporterProtocol::Grpc);
+                assert_eq!(otlp.timeout, Duration::from_secs(10));
+            }
+            assert!(cfg.export.traces.stdout.is_none());
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn default_internal_options_has_expected_values() {
+        let internal = InternalOptions::default();
+
+        // Check default trace options
+        assert!(
+            matches!(
+                internal.traces.span_fmt,
+                crate::runtime::opts::SpanFmt::Full
+            ),
+            "default internal trace span_fmt should be Full"
+        );
+        assert!(
+            internal.traces.stdout.is_none(),
+            "default internal traces should not have stdout enabled"
+        );
+        assert!(
+            internal.traces.otlp.is_none(),
+            "default internal traces should not have OTLP exporter"
+        );
+    }
+
+    #[test]
+    fn override_span_settings_via_yaml() {
+        Jail::expect_with(|jail| {
+            let path = "override_span.yaml";
+            jail.create_file(
+                path,
+                r#"
+span:
+  max_record_interval: 120s
+  generic_timeout: 45s
+  icmp_timeout: 15s
+  tcp_timeout: 30s
+  tcp_fin_timeout: 10s
+  tcp_rst_timeout: 10s
+  udp_timeout: 90s
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.span.max_record_interval, Duration::from_secs(120));
+            assert_eq!(cfg.span.generic_timeout, Duration::from_secs(45));
+            assert_eq!(cfg.span.icmp_timeout, Duration::from_secs(15));
+            assert_eq!(cfg.span.tcp_timeout, Duration::from_secs(30));
+            assert_eq!(cfg.span.tcp_fin_timeout, Duration::from_secs(10));
+            assert_eq!(cfg.span.tcp_rst_timeout, Duration::from_secs(10));
+            assert_eq!(cfg.span.udp_timeout, Duration::from_secs(90));
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_span_settings_via_hcl() {
+        Jail::expect_with(|jail| {
+            let path = "override_span.hcl";
+            jail.create_file(
+                path,
+                r#"
+span {
+    max_record_interval = "120s"
+    generic_timeout = "45s"
+    icmp_timeout = "15s"
+    tcp_timeout = "30s"
+    tcp_fin_timeout = "10s"
+    tcp_rst_timeout = "10s"
+    udp_timeout = "90s"
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.span.max_record_interval, Duration::from_secs(120));
+            assert_eq!(cfg.span.generic_timeout, Duration::from_secs(45));
+            assert_eq!(cfg.span.icmp_timeout, Duration::from_secs(15));
+            assert_eq!(cfg.span.tcp_timeout, Duration::from_secs(30));
+            assert_eq!(cfg.span.tcp_fin_timeout, Duration::from_secs(10));
+            assert_eq!(cfg.span.tcp_rst_timeout, Duration::from_secs(10));
+            assert_eq!(cfg.span.udp_timeout, Duration::from_secs(90));
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_export_otlp_settings_via_yaml() {
+        Jail::expect_with(|jail| {
+            let path = "override_export.yaml";
+            jail.create_file(
+                path,
+                r#"
+export:
+  traces:
+    otlp:
+      endpoint: "http://custom:9999"
+      protocol: "http_binary"
+      timeout: 30s
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert!(cfg.export.traces.otlp.is_some());
+            if let Some(otlp) = &cfg.export.traces.otlp {
+                assert_eq!(otlp.endpoint, "http://custom:9999");
+                assert!(matches!(otlp.protocol, ExporterProtocol::HttpBinary));
+                assert_eq!(otlp.timeout, Duration::from_secs(30));
+            }
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_export_otlp_settings_via_hcl() {
+        Jail::expect_with(|jail| {
+            let path = "override_export.hcl";
+            jail.create_file(
+                path,
+                r#"
+export {
+    traces {
+        otlp {
+            endpoint = "http://custom:9999"
+            protocol = "http_binary"
+            timeout = "30s"
+        }
+    }
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert!(cfg.export.traces.otlp.is_some());
+            if let Some(otlp) = &cfg.export.traces.otlp {
+                assert_eq!(otlp.endpoint, "http://custom:9999");
+                assert!(matches!(otlp.protocol, ExporterProtocol::HttpBinary));
+                assert_eq!(otlp.timeout, Duration::from_secs(30));
+            }
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_export_stdout_via_yaml() {
+        Jail::expect_with(|jail| {
+            let path = "override_export_stdout.yaml";
+            jail.create_file(
+                path,
+                r#"
+export:
+  traces:
+    stdout: "text_indent"
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert!(cfg.export.traces.stdout.is_some());
+            if let Some(stdout) = &cfg.export.traces.stdout {
+                assert_eq!(stdout.as_str(), "text_indent");
+            }
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_export_stdout_via_hcl() {
+        Jail::expect_with(|jail| {
+            let path = "override_export_stdout.hcl";
+            jail.create_file(
+                path,
+                r#"
+export {
+    traces {
+        stdout = "text_indent"
+    }
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert!(cfg.export.traces.stdout.is_some());
+            if let Some(stdout) = &cfg.export.traces.stdout {
+                assert_eq!(stdout.as_str(), "text_indent");
+            }
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_internal_traces_via_yaml() {
+        Jail::expect_with(|jail| {
+            let path = "override_internal.yaml";
+            jail.create_file(
+                path,
+                r#"
+internal:
+  traces:
+    span_fmt: "full"
+    stdout: "text_indent"
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert!(matches!(
+                cfg.internal.traces.span_fmt,
+                crate::runtime::opts::SpanFmt::Full
+            ));
+            assert!(cfg.internal.traces.stdout.is_some());
+            if let Some(stdout) = &cfg.internal.traces.stdout {
+                assert_eq!(stdout.as_str(), "text_indent");
+            }
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_internal_traces_via_hcl() {
+        Jail::expect_with(|jail| {
+            let path = "override_internal.hcl";
+            jail.create_file(
+                path,
+                r#"
+internal {
+    traces {
+        span_fmt = "full"
+        stdout = "text_indent"
+    }
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert!(matches!(
+                cfg.internal.traces.span_fmt,
+                crate::runtime::opts::SpanFmt::Full
+            ));
+            assert!(cfg.internal.traces.stdout.is_some());
+            if let Some(stdout) = &cfg.internal.traces.stdout {
+                assert_eq!(stdout.as_str(), "text_indent");
+            }
 
             Ok(())
         });

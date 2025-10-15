@@ -42,15 +42,23 @@ pub struct ExportOptions {
 /// # Fields
 /// - `otlp`: Optional OTLP exporter configuration.
 /// - `stdout`: Optional stdout exporter format.
-#[derive(Debug, Default, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct TracesExportOptions {
     /// Defines the format for a stdout exporter.
-    #[serde(default = "defaults::stdout", with = "stdout_fmt")]
+    #[serde(with = "stdout_fmt")]
     pub stdout: Option<StdoutFmt>,
 
     /// OTLP (OpenTelemetry Protocol) exporter configurations.
-    #[serde(default = "defaults::otlp")]
     pub otlp: Option<OtlpExporterOptions>,
+}
+
+impl Default for TracesExportOptions {
+    fn default() -> Self {
+        Self {
+            stdout: None,
+            otlp: defaults::otlp(),
+        }
+    }
 }
 
 /// StdoutFmt enum defines the format for a stdout exporter,
@@ -234,13 +242,7 @@ impl AuthOptions {
     }
 }
 
-impl OtlpExporterOptions {
-    pub fn build_endpoint(&self) -> String {
-        self.endpoint.clone()
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExporterProtocol {
     Grpc,
     HttpBinary,
@@ -310,6 +312,7 @@ mod defaults {
             stdout: stdout(),
         }
     }
+
     pub fn otlp() -> Option<OtlpExporterOptions> {
         Some(OtlpExporterOptions {
             endpoint: endpoint(),

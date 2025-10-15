@@ -40,7 +40,7 @@ impl ProviderBuilder {
 
     pub async fn with_otlp_exporter(self, options: OtlpExporterOptions) -> ProviderBuilder {
         debug!("creating otlp exporter with options: {options:?}");
-        let uri: Uri = options.build_endpoint().parse().unwrap_or_else(|e| {
+        let uri: Uri = options.endpoint.clone().parse().unwrap_or_else(|e| {
             info!("failed to parse OTLP endpoint URL: {}", e);
             Uri::default()
         });
