@@ -4,20 +4,6 @@
 # Logging configuration
 log_level = "info"
 
-/*
-Interal configuration options:
-- They are missing as I'm not sure what they are.
- */
-/*
-internal {
-  metrics = {
-    verbosity = "detailed"
-  }
-  traces = {
-  }
-}
- */
-
 # Automatic configuration reloading
 auto_reload = false
 
@@ -27,6 +13,34 @@ shutdown_timeout = "5s"
 # Internal channel and performance related configuration options
 packet_channel_capacity = 1024
 packet_worker_count     = 2
+
+# Internal configuration options
+telemetry "traces" {
+  span_format = "full"
+
+  stdout = "" // text, text_indent(*new), json, json_indent
+
+  export = {
+    endpoint = "http://otelcol:4317"
+    protocol = "grpc"
+    timeout  = "10s"
+
+    auth = {
+      basic = {
+        user = "USERNAME"
+        pass = "PASSWORD"
+      }
+    }
+
+    tls = {
+      enabled     = false
+      insecure    = false
+      ca_cert     = "/etc/certs/ca.crt"
+      client_cert = "/etc/certs/cert.crt"
+      client_key  = "/etc/certs/cert.key"
+    }
+  }
+}
 
 # API server configuration (health endpoints)
 api {
@@ -42,192 +56,206 @@ metrics {
   port           = 10250
 }
 
+# Parser configuration for eBPF packet parsing
+# Configure tunnel port detection (defaults shown)
+parser {
+  geneve_port    = 6081  # IANA default for Geneve
+  vxlan_port     = 4789  # IANA default for VXLAN
+  wireguard_port = 51820 # IANA default for WireGuard
+}
+
+# K8s informer configuration
 informer "k8s" {
   kubeconfig_path         = ""
   informers_sync_timeout  = "30s"
   informers_resync_period = "30m"
 }
 
-/*
-  We are not using named blocks for discovery to enable the conversion from hcl to yaml.
-*/
-discovery {
-  instrument {
-    # Network interfaces to monitor
-    interfaces = ["eth0"]
-  }
-
-  informer "k8s" {
-    /*
-      Define which flow will be processed and sent to the output.
-      Impacts the "In-mem K8s objects cache" build by K8s informer (https://www.plural.sh/blog/manage-kubernetes-events-informers/)
-        - By default `namespaces = []`, which means "all namespaces", e.g. no filtering by namespaces.
-        - `kind` is case insensitive
-    */
-    selectors = [
-      { kind = "Service" }, { kind = "Endpoint" }, { kind = "EndpointSlice" }, { kind = "Gateway" }, { kind = "Ingress" },
-      { kind = "Pod" }, { kind = "ReplicaSet" }, { kind = "Deployment" }, { kind = "Daemonset" }, { kind = "StatefulSet" },
-      { kind = "Job" }, { kind = "CronJob" }, { kind = "NetworkPolicy" },
-
-      /*
-        Examples with more granular selectors
-      */
-      # Do not include gateways in "loggers" namespace
-      # {
-      #   namespaces = ["loggers"]
-      #   kind       = "Gateway"
-      #   include    = false
-      # }
-
-      # # Only include pods with label `operated-prometheus = "true"` AND label `env` in `["dev", "stage"]`
-      # {
-      #   kind = "Pod"
-
-      #   match_labels = {
-      #     operated-prometheus = "true"
-      #   }
-
-      #   match_expressions = [{
-      #     key      = "env"
-      #     operator = "In"
-      #     values   = ["dev", "stage"]
-      #   }]
-      # }
-    ]
-
-    /*
-      Owner reference walking configuration
-
-      Controls how Mermin walks K8s owner references (Pod <- Job <- CronJob <- ...)
-      and attaches owner metadata to flows.
-    */
-    owner_relations = {
-      # Limit the ownerReference walk depth and depth of attached metadata
-      max_depth = 5
-
-      # Include specific owner kinds in flow metadata (case insensitive)
-      include_kinds = [
-        "Service", # Add Service metadata as flow attributes
-      ]
-
-      # Exclude specific owner kinds from flow metadata (case insensitive)
-      # Exclusions override inclusions
-      exclude_kinds = [
-        "EndpointSlice", # Do not add EndpointSlice metadata as flow attributes
-      ]
-    }
-
-    /*
-      Selector-based K8s resource relations
-
-      Extracts selector s from K8s resource definitions and matches them against other resources
-      (e.g., NetworkPolicy selects Pods, Service selects Pods via spec.selector)
-    */
-    selector_relations = [
-      # NetworkPolicy -> Pod association
-      # Extract podSelector from NetworkPolicy, find matching Pods, attach NetworkPolicy metadata to their flows
-      {
-        kind                             = "NetworkPolicy" # case insensitive
-        to                               = "Pod"           # case insensitive
-        selector_match_labels_field      = "spec.podSelector.matchLabels"
-        selector_match_expressions_field = "spec.podSelector.matchExpressions"
-      },
-
-      # Service -> Pod association
-      # Extract spec.selector from Service, find matching Pods, attach Service metadata to their flows
-      {
-        kind                        = "Service" # case insensitive
-        to                          = "Pod"     # case insensitive
-        selector_match_labels_field = "spec.selector"
-      }
-    ]
-  }
+discovery "instrument" {
+  # Network interfaces to monitor
+  interfaces = ["eth0"]
 }
 
-// discovery "informer" "k8s" {
-//   /*
-//     Define which flow will be processed and sent to the output.
-//     Impacts the "In-mem K8s objects cache" build by K8s informer (https://www.plural.sh/blog/manage-kubernetes-events-informers/)
-//       - By default `namespaces = []`, which means "all namespaces", e.g. no filtering by namespaces.
-//       - `kind` is case insensitive
-//   */
-//   selectors = [
-//     { kind = "Service" }, { kind = "Endpoint" }, { kind = "EndpointSlice" }, { kind = "Gateway" }, { kind = "Ingress" },
-//     { kind = "Pod" }, { kind = "ReplicaSet" }, { kind = "Deployment" }, { kind = "Daemonset" }, { kind = "StatefulSet" },
-//     { kind = "Job" }, { kind = "CronJob" }, { kind = "NetworkPolicy" },
+discovery "informer" "k8s" {
+  /*
+    Define which flow will be processed and sent to the output.
+    Impacts the "In-mem K8s objects cache" build by K8s informer (https://www.plural.sh/blog/manage-kubernetes-events-informers/)
+      - By default `namespaces = []`, which means "all namespaces", e.g. no filtering by namespaces.
+      - `kind` is case insensitive
+  */
+  selectors = [
+    { kind = "Service" }, { kind = "Endpoint" }, { kind = "EndpointSlice" }, { kind = "Gateway" }, { kind = "Ingress" },
+    { kind = "Pod" }, { kind = "ReplicaSet" }, { kind = "Deployment" }, { kind = "Daemonset" }, { kind = "StatefulSet" },
+    { kind = "Job" }, { kind = "CronJob" }, { kind = "NetworkPolicy" },
 
-//     /*
-//       Examples with more granular selectors
-//     */
-//     # Do not include gateways in "loggers" namespace
-//     # {
-//     #   namespaces = ["loggers"]
-//     #   kind       = "Gateway"
-//     #   include    = false
-//     # }
+    /*
+      Examples with more granular selectors
+    */
+    # Do not include gateways in "loggers" namespace
+    # {
+    #   namespaces = ["loggers"]
+    #   kind       = "Gateway"
+    #   include    = false
+    # }
 
-//     # # Only include pods with label `operated-prometheus = "true"` AND label `env` in `["dev", "stage"]`
-//     # {
-//     #   kind = "Pod"
+    # # Only include pods with label `operated-prometheus = "true"` AND label `env` in `["dev", "stage"]`
+    # {
+    #   kind = "Pod"
 
-//     #   match_labels = {
-//     #     operated-prometheus = "true"
-//     #   }
+    #   match_labels = {
+    #     operated-prometheus = "true"
+    #   }
 
-//     #   match_expressions = [{
-//     #     key      = "env"
-//     #     operator = "In"
-//     #     values   = ["dev", "stage"]
-//     #   }]
-//     # }
-//   ]
+    #   match_expressions = [{
+    #     key      = "env"
+    #     operator = "In"
+    #     values   = ["dev", "stage"]
+    #   }]
+    # }
+  ]
 
-//   /*
-//     Owner reference walking configuration
+  /*
+    Owner reference walking configuration
 
-//     Controls how Mermin walks K8s owner references (Pod <- Job <- CronJob <- ...)
-//     and attaches owner metadata to flows.
-//   */
-//   owner_relations = {
-//      # Limit the ownerReference walk depth and depth of attached metadata
-//     max_depth = 5
+    Controls how Mermin walks K8s owner references (Pod <- Job <- CronJob <- ...)
+    and attaches owner metadata to flows.
+  */
+  owner_relations = {
+    # Limit the ownerReference walk depth and depth of attached metadata
+    max_depth = 5
 
-//     # Include specific owner kinds in flow metadata (case insensitive)
-//     include_kinds = [
-//       "Service", # Add Service metadata as flow attributes
-//     ]
+    # Include specific owner kinds in flow metadata (case insensitive)
+    include_kinds = [
+      "Service", # Add Service metadata as flow attributes
+    ]
 
-//     # Exclude specific owner kinds from flow metadata (case insensitive)
-//     # Exclusions override inclusions
-//     exclude_kinds = [
-//       "EndpointSlice", # Do not add EndpointSlice metadata as flow attributes
-//     ]
+    # Exclude specific owner kinds from flow metadata (case insensitive)
+    # Exclusions override inclusions
+    exclude_kinds = [
+      "EndpointSlice", # Do not add EndpointSlice metadata as flow attributes
+    ]
+  }
+
+  /*
+    Selector-based K8s resource relations
+
+    Extracts selector s from K8s resource definitions and matches them against other resources
+    (e.g., NetworkPolicy selects Pods, Service selects Pods via spec.selector)
+  */
+  selector_relations = [
+    # NetworkPolicy -> Pod association
+    # Extract podSelector from NetworkPolicy, find matching Pods, attach NetworkPolicy metadata to their flows
+    {
+      kind                             = "NetworkPolicy" # case insensitive
+      to                               = "Pod"           # case insensitive
+      selector_match_labels_field      = "spec.podSelector.matchLabels"
+      selector_match_expressions_field = "spec.podSelector.matchExpressions"
+    },
+
+    # Service -> Pod association
+    # Extract spec.selector from Service, find matching Pods, attach Service metadata to their flows
+    {
+      kind                        = "Service" # case insensitive
+      to                          = "Pod"     # case insensitive
+      selector_match_labels_field = "spec.selector"
+    }
+  ]
+}
+
+// /*
+//   We are not using named blocks for discovery to enable the conversion from hcl to yaml.
+// */
+// discovery {
+//   instrument {
+//     # Network interfaces to monitor
+//     interfaces = ["eth0"]
 //   }
 
-//   /*
-//     Selector-based K8s resource relations
+//   informer "k8s" {
+//     /*
+//       Define which flow will be processed and sent to the output.
+//       Impacts the "In-mem K8s objects cache" build by K8s informer (https://www.plural.sh/blog/manage-kubernetes-events-informers/)
+//         - By default `namespaces = []`, which means "all namespaces", e.g. no filtering by namespaces.
+//         - `kind` is case insensitive
+//     */
+//     selectors = [
+//       { kind = "Service" }, { kind = "Endpoint" }, { kind = "EndpointSlice" }, { kind = "Gateway" }, { kind = "Ingress" },
+//       { kind = "Pod" }, { kind = "ReplicaSet" }, { kind = "Deployment" }, { kind = "Daemonset" }, { kind = "StatefulSet" },
+//       { kind = "Job" }, { kind = "CronJob" }, { kind = "NetworkPolicy" },
 
-//     Extracts selector s from K8s resource definitions and matches them against other resources
-//     (e.g., NetworkPolicy selects Pods, Service selects Pods via spec.selector)
-//   */
-//   selector_relations = [
-//     # NetworkPolicy -> Pod association
-//     # Extract podSelector from NetworkPolicy, find matching Pods, attach NetworkPolicy metadata to their flows
-//     {
-//       kind                             = "NetworkPolicy" # case insensitive
-//       to                               = "Pod"           # case insensitive
-//       selector_match_labels_field      = "spec.podSelector.matchLabels"
-//       selector_match_expressions_field = "spec.podSelector.matchExpressions"
-//     },
+//       /*
+//         Examples with more granular selectors
+//       */
+//       # Do not include gateways in "loggers" namespace
+//       # {
+//       #   namespaces = ["loggers"]
+//       #   kind       = "Gateway"
+//       #   include    = false
+//       # }
 
-//     # Service -> Pod association
-//     # Extract spec.selector from Service, find matching Pods, attach Service metadata to their flows
-//     {
-//       kind                        = "Service" # case insensitive
-//       to                          = "Pod"     # case insensitive
-//       selector_match_labels_field = "spec.selector"
+//       # # Only include pods with label `operated-prometheus = "true"` AND label `env` in `["dev", "stage"]`
+//       # {
+//       #   kind = "Pod"
+
+//       #   match_labels = {
+//       #     operated-prometheus = "true"
+//       #   }
+
+//       #   match_expressions = [{
+//       #     key      = "env"
+//       #     operator = "In"
+//       #     values   = ["dev", "stage"]
+//       #   }]
+//       # }
+//     ]
+
+//     /*
+//       Owner reference walking configuration
+
+//       Controls how Mermin walks K8s owner references (Pod <- Job <- CronJob <- ...)
+//       and attaches owner metadata to flows.
+//     */
+//     owner_relations = {
+//       # Limit the ownerReference walk depth and depth of attached metadata
+//       max_depth = 5
+
+//       # Include specific owner kinds in flow metadata (case insensitive)
+//       include_kinds = [
+//         "Service", # Add Service metadata as flow attributes
+//       ]
+
+//       # Exclude specific owner kinds from flow metadata (case insensitive)
+//       # Exclusions override inclusions
+//       exclude_kinds = [
+//         "EndpointSlice", # Do not add EndpointSlice metadata as flow attributes
+//       ]
 //     }
-//   ]
+
+//     /*
+//       Selector-based K8s resource relations
+
+//       Extracts selector s from K8s resource definitions and matches them against other resources
+//       (e.g., NetworkPolicy selects Pods, Service selects Pods via spec.selector)
+//     */
+//     selector_relations = [
+//       # NetworkPolicy -> Pod association
+//       # Extract podSelector from NetworkPolicy, find matching Pods, attach NetworkPolicy metadata to their flows
+//       {
+//         kind                             = "NetworkPolicy" # case insensitive
+//         to                               = "Pod"           # case insensitive
+//         selector_match_labels_field      = "spec.podSelector.matchLabels"
+//         selector_match_expressions_field = "spec.podSelector.matchExpressions"
+//       },
+
+//       # Service -> Pod association
+//       # Extract spec.selector from Service, find matching Pods, attach Service metadata to their flows
+//       {
+//         kind                        = "Service" # case insensitive
+//         to                          = "Pod"     # case insensitive
+//         selector_match_labels_field = "spec.selector"
+//       }
+//     ]
+//   }
 // }
 
 /*
@@ -531,7 +559,7 @@ filter "flow" {
 # OTLP exporter configuration
 # See OBI export concepts: https://opentelemetry.io/docs/zero-code/obi/configure/export-data/
 otel "traces" {
-  stdout = "disabled" // disabled, text, text_indent(*new), json, json_indent
+  stdout = "" // text, text_indent(*new), json, json_indent
 
   export = {
     endpoint = "http://otelcol:4317"
