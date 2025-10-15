@@ -17,8 +17,8 @@ use tracing_subscriber::{
 };
 
 use crate::{
-    otlp::opts::{OtlpExporterOptions, StdoutExporterOptions},
-    runtime::enums::SpanFmt,
+    otlp::opts::{OtlpExporterOptions, StdoutFmt},
+    runtime::opts::SpanFmt,
 };
 
 pub struct ProviderBuilder {
@@ -40,7 +40,7 @@ impl ProviderBuilder {
 
     pub async fn with_otlp_exporter(self, options: OtlpExporterOptions) -> ProviderBuilder {
         debug!("creating otlp exporter with options: {options:?}");
-        let uri: Uri = options.build_endpoint().parse().unwrap_or_else(|e| {
+        let uri: Uri = options.endpoint.clone().parse().unwrap_or_else(|e| {
             info!("failed to parse OTLP endpoint URL: {}", e);
             Uri::default()
         });
@@ -116,21 +116,21 @@ impl ProviderBuilder {
 }
 
 pub async fn init_provider(
-    otlp_opts: Vec<OtlpExporterOptions>,
-    stdout_opts: Vec<StdoutExporterOptions>,
+    stdout: Option<StdoutFmt>,
+    otlp: Option<OtlpExporterOptions>,
 ) -> SdkTracerProvider {
     let mut provider = ProviderBuilder::new();
 
-    if otlp_opts.is_empty() && stdout_opts.is_empty() {
+    if stdout.is_none() && otlp.is_none() {
         warn!("no exporters configured");
         return provider.build();
     }
 
-    for options in otlp_opts {
-        provider = provider.with_otlp_exporter(options.clone()).await;
+    if let Some(otlp_opts) = otlp {
+        provider = provider.with_otlp_exporter(otlp_opts.clone()).await;
     }
 
-    for _ in stdout_opts {
+    if stdout.is_some() {
         provider = provider.with_stdout_exporter();
     }
 
@@ -138,12 +138,12 @@ pub async fn init_provider(
 }
 
 pub async fn init_internal_tracing(
-    otlp_opts: Vec<OtlpExporterOptions>,
-    stdout_opts: Vec<StdoutExporterOptions>,
     log_level: Level,
     span_fmt: SpanFmt,
+    stdout: Option<StdoutFmt>,
+    otlp: Option<OtlpExporterOptions>,
 ) -> Result<(), anyhow::Error> {
-    let provider = init_provider(otlp_opts, stdout_opts).await;
+    let provider = init_provider(stdout, otlp).await;
     let mut fmt_layer = Layer::new().with_span_events(FmtSpan::from(span_fmt));
 
     match log_level {

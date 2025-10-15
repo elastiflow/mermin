@@ -39,25 +39,20 @@ async fn main() -> Result<()> {
     // TODO: listen for SIGTERM `kill -TERM $(pidof mermin)` to gracefully shutdown the eBPF program and all configuration.
     // TODO: do not reload global configuration found in CLI
     let runtime = Context::new()?;
-    let Context {
-        properties: props, ..
-    } = runtime;
-
-    let span_level = props.internal_trace.span_level;
-    let (otlp_agent_exporters, stdout_agent_exporters) = props.get_agent_exporters();
-    let (otlp_internal_exporters, stdout_internal_exporters) = props.get_internal_exporters();
+    let Context { conf, .. } = runtime;
 
     let exporter: Arc<dyn TraceableExporter> = {
         init_internal_tracing(
-            otlp_internal_exporters,
-            stdout_internal_exporters,
-            props.log_level,
-            span_level,
+            conf.log_level,
+            conf.internal.traces.span_fmt,
+            conf.internal.traces.stdout,
+            conf.internal.traces.otlp.clone(),
         )
         .await?;
-        if !otlp_agent_exporters.is_empty() || !stdout_agent_exporters.is_empty() {
+
+        if conf.export.traces.stdout.is_some() || conf.export.traces.otlp.is_some() {
             let app_tracer_provider =
-                init_provider(otlp_agent_exporters, stdout_agent_exporters).await;
+                init_provider(conf.export.traces.stdout, conf.export.traces.otlp.clone()).await;
             info!("initialized configured exporters");
             Arc::new(TraceExporterAdapter::new(app_tracer_provider))
         } else {
@@ -97,20 +92,20 @@ async fn main() -> Result<()> {
         .try_into()?;
 
     // Set tunnel ports in the map (indices: 0=geneve, 1=vxlan, 2=wireguard)
-    parser_options_map.set(0, props.parser.geneve_port, 0)?;
-    parser_options_map.set(1, props.parser.vxlan_port, 0)?;
-    parser_options_map.set(2, props.parser.wireguard_port, 0)?;
+    parser_options_map.set(0, conf.parser.geneve_port, 0)?;
+    parser_options_map.set(1, conf.parser.vxlan_port, 0)?;
+    parser_options_map.set(2, conf.parser.wireguard_port, 0)?;
 
     info!(
         "configured tunnel ports - geneve: {}, vxlan: {}, wireguard: {}",
-        props.parser.geneve_port, props.parser.vxlan_port, props.parser.wireguard_port
+        conf.parser.geneve_port, conf.parser.vxlan_port, conf.parser.wireguard_port
     );
 
     let health_state = HealthState::default();
 
-    if props.api.enabled {
+    if conf.api.enabled {
         let health_state_clone = health_state.clone();
-        let api_conf = props.api.clone();
+        let api_conf = conf.api.clone();
 
         tokio::spawn(async move {
             if let Err(e) = start_api_server(health_state_clone, &api_conf).await {
@@ -128,8 +123,7 @@ async fn main() -> Result<()> {
             .try_into()?;
         program.load()?;
 
-        props
-            .resolved_interfaces
+        conf.resolved_interfaces
             .iter()
             .try_for_each(|iface| -> Result<()> {
                 // error adding clsact to the interface if it is already added is harmless
@@ -159,22 +153,22 @@ async fn main() -> Result<()> {
     let iface_map: HashMap<u32, String> = {
         let mut map = HashMap::new();
         for iface in datalink::interfaces() {
-            if props.resolved_interfaces.contains(&iface.name) {
+            if conf.resolved_interfaces.contains(&iface.name) {
                 map.insert(iface.index, iface.name.clone());
             }
         }
         map
     };
 
-    let (packet_meta_tx, packet_meta_rx) = mpsc::channel(props.packet_channel_capacity);
-    let (flow_span_tx, mut flow_span_rx) = mpsc::channel(props.packet_channel_capacity);
+    let (packet_meta_tx, packet_meta_rx) = mpsc::channel(conf.packet_channel_capacity);
+    let (flow_span_tx, mut flow_span_rx) = mpsc::channel(conf.packet_channel_capacity);
     let (k8s_attributed_flow_span_tx, mut k8s_attributed_flow_span_rx) =
-        mpsc::channel(props.packet_channel_capacity);
+        mpsc::channel(conf.packet_channel_capacity);
 
     let flow_span_producer = FlowSpanProducer::new(
-        props.clone().span,
-        props.packet_channel_capacity,
-        props.packet_worker_count,
+        conf.clone().span,
+        conf.packet_channel_capacity,
+        conf.packet_worker_count,
         iface_map.clone(),
         packet_meta_rx,
         flow_span_tx,
