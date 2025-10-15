@@ -43,7 +43,7 @@ async fn main() -> Result<()> {
         properties: props, ..
     } = runtime;
 
-    let span_level = props.internal_traces.span_level;
+    let span_level = props.internal_trace.span_level;
     let (otlp_agent_exporters, stdout_agent_exporters) = props.get_agent_exporters();
     let (otlp_internal_exporters, stdout_internal_exporters) = props.get_internal_exporters();
 

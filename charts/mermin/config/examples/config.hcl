@@ -3,7 +3,7 @@ global_opt = "global_opt_value"
 /*
   Agent config for type "flows" with name main
 */
-agent "traces" "main" {
+agent "traces" {
   /*
     Define which flow will be processed and sent to the output.
     Impacts the "In-mem K8s objects cache" build by K8s informer (https://www.plural.sh/blog/manage-kubernetes-events-informers/)
@@ -44,7 +44,7 @@ agent "traces" "main" {
   }
 
   # Include configurations
-  flow_connection = "flow.connection.main"
+  flow_connection = "flow.connection"
   network_interface = {
     include_names = [] # ["lo", "eth0"], empty list means all
     exclude_names = [] # ["lo", "eth0"], empty list means none
@@ -55,8 +55,8 @@ agent "traces" "main" {
 
   include_network_transports = [] # ["tcp", "udp"], empty list means all
   exclude_network_transports = [] # ["tcp", "udp"], empty list means none
-  include_network_types      = [] # ["ipv4", "ipv6"], empty list means all
-  exclude_network_types      = [] # ["ipv4", "ipv6"], empty list means none
+  include_network_types = [] # ["ipv4", "ipv6"], empty list means all
+  exclude_network_types = [] # ["ipv4", "ipv6"], empty list means none
 
   discovery_owner    = "discovery.k8s_owner.main"
   discovery_selector = "discovery.k8s_selector.main"
@@ -69,7 +69,7 @@ agent "traces" "main" {
 
 # Network Filtering options, includes but not limited to https://opentelemetry.io/docs/specs/semconv/registry/attributes/network/#network-attributes
 
-flow "connection" "main" {
+flow "connection" {
   include_states = [] # close_wait, empty list means all
   exclude_states = [] # close_wait, empty list means none
 }
@@ -89,7 +89,7 @@ flow "span" "destination" {
 }
 
 # Discovery config of type "k8s_owner" with name "main"
-discovery "k8s_owner" "main" {
+discovery "k8s_owner" {
   /*
     Limit the ownerReference walk depth, e.g. If `walk_max_depth = 3`
     If Pod <- Job <- CronJob <- Controller1 <- Controller2 <- Controller3 <- ...
@@ -116,14 +116,14 @@ discovery "k8s_owner" "main" {
 }
 
 # Discovery config of type "k8s_selector" with name "main"
-discovery "k8s_selector" "main" {
+discovery "k8s_selector" {
   /*
     Extract selector fields from the NetworkPolicy definition, select Pods (`to` field) based on the selectors,
     attach NetworkPolicy metadata to flows related to the selected pods
   */
   k8s_object {
-    kind                             = "NetworkPolicy" # case insensitive
-    to                               = "Pod"           # case insensitive
+    kind = "NetworkPolicy" # case insensitive
+    to = "Pod"           # case insensitive
     selector_match_labels_field      = "spec.podSelector.matchLabels"
     selector_match_expressions_field = "spec.podSelector.matchExpressions"
   }
@@ -133,8 +133,8 @@ discovery "k8s_selector" "main" {
     attach Service metadata to flows related to the selected pods
   */
   k8s_object {
-    kind                        = "Service" # case insensitive
-    to                          = "Pod"     # case insensitive
+    kind = "Service" # case insensitive
+    to = "Pod"     # case insensitive
     selector_match_labels_field = "spec.selector"
   }
 }
@@ -149,9 +149,9 @@ association "k8s_flow_attributes" "source" {
   */
   extract {
     metadata = [
-      "[*].metadata.name",      # All kinds, metadata.name
+      "[*].metadata.name", # All kinds, metadata.name
       "[*].metadata.namespace", # All kinds, metadata.namespace
-      "[*].metadata.uid",       # All kinds, metadata.uid (if present)
+      "[*].metadata.uid", # All kinds, metadata.uid (if present)
     ]
 
     /*
@@ -282,9 +282,9 @@ association "k8s_flow_attributes" "source" {
 association "k8s_flow_attributes" "destination" {
   extract {
     metadata = [
-      "[*].metadata.name",      # All kinds, metadata.name
+      "[*].metadata.name", # All kinds, metadata.name
       "[*].metadata.namespace", # All kinds, metadata.namespace
-      "pod.metadata.uid",       # All kinds, metadata.uid
+      "pod.metadata.uid", # All kinds, metadata.uid
     ]
 
     /*
@@ -420,7 +420,7 @@ exporter "otlp" "main" {
   auth {
     basic = {
       user = "USERNAME"
-      pass = env("USER_SPECIFIED_ENV_VAR_TRITON_PASS")
+      pass = "USER_SPECIFIED_ENV_VAR_TRITON_PASS"
     }
   }
 
