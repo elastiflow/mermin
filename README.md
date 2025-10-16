@@ -123,7 +123,7 @@ helm uninstall mermin
 
 # 4b. Deploy mermin using Helm
 make helm-upgrade
-# 4c. Or deploy mermin using Helm with a non-default config
+# 4c. Or deploy mermin using Helm with a non-default config (create config first)
 make helm-upgrade EXTRA_HELM_ARGS='--set-file config.content=examples/local/config.hcl'
 # 4d. Or deploy using raw Helm cli
 helm upgrade -i mermin charts/mermin --values examples/local/values.yaml --wait --timeout 10m
