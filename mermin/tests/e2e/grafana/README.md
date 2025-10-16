@@ -59,7 +59,7 @@ helm repo update
 helm dependency build charts/mermin
 
 # 4.
-make helm-upgrade EXTRA_HELM_ARGS='--set-file config.source=examples/local/config.hcl'
+make helm-upgrade EXTRA_HELM_ARGS='--set-file config.content=examples/local/config.hcl'
 
 # 5. (optional) if you already have a Helm release, uninstall it first
 helm uninstall mermin

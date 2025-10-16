@@ -60,12 +60,3 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end -}}
-
-{{/* Define Mermin config */}}
-{{- define "mermin.config" -}}
-{{- if .Values.config.content }}
-{{- tpl .Values.config.content . | nindent 4 }}
-{{- else }}
-{{- tpl .Values.config.source . | nindent 4 }}
-{{- end }}
-{{- end -}}
