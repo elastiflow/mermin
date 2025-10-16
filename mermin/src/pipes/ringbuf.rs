@@ -5,12 +5,12 @@ use mermin_common::PacketMeta;
 use tokio::{io::unix::AsyncFd, sync::mpsc};
 use tracing::{debug, error, info, warn};
 
-use crate::pipes::router::PipelineRouter;
+use crate::pipes::filter::PacketFilter;
 
 /// Handles reading packet metadata from the eBPF ring buffer and routing it through pipelines
 pub struct RingBufReader {
     ring_buf: RingBuf<aya::maps::MapData>,
-    pipeline_router: Arc<PipelineRouter>,
+    router: Arc<PacketFilter>,
     packet_meta_tx: mpsc::Sender<PacketMeta>,
 }
 
@@ -18,12 +18,12 @@ impl RingBufReader {
     /// Creates a new RingBufReader
     pub fn new(
         ring_buf: RingBuf<aya::maps::MapData>,
-        pipeline_router: Arc<PipelineRouter>,
+        router: Arc<PacketFilter>,
         packet_meta_tx: mpsc::Sender<PacketMeta>,
     ) -> Self {
         Self {
             ring_buf,
-            pipeline_router,
+            router,
             packet_meta_tx,
         }
     }
@@ -57,15 +57,14 @@ impl RingBufReader {
                     unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const PacketMeta) };
 
                 // Apply per-pipeline filtering at PacketMeta level
-                match self.pipeline_router.route_packet(&packet_meta) {
-                    Ok(matching_pipelines) => {
-                        if !matching_pipelines.is_empty() {
-                            if let Err(e) = self.packet_meta_tx.send(packet_meta).await {
-                                warn!("failed to send packet to k8s attribution channel: {e}");
-                            }
-                        } else {
-                            debug!("packet meta did not match any pipeline filters; skipping.");
+                match self.router.should_process(&packet_meta) {
+                    Ok(true) => {
+                        if let Err(e) = self.packet_meta_tx.send(packet_meta).await {
+                            warn!("failed to send packet to k8s attribution channel: {e}");
                         }
+                    }
+                    Ok(false) => {
+                        debug!("packet meta did not match any filters; skipping.");
                     }
                     Err(e) => {
                         warn!("failed to route packet meta: {e}; skipping.");

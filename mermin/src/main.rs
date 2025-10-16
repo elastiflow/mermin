@@ -29,7 +29,7 @@ use crate::{
         provider::{init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
     },
-    pipes::{ringbuf::RingBufReader, router::PipelineRouter},
+    pipes::{filter::PacketFilter, ringbuf::RingBufReader},
     runtime::context::Context,
     span::producer::FlowSpanProducer,
 };
@@ -353,7 +353,9 @@ async fn run() -> Result<()> {
     });
     health_state.ready_to_process.store(true, Ordering::Relaxed);
 
-    let ring_buf_reader = RingBufReader::new(ring_buf, pipeline_router, packet_meta_tx);
+    let packet_filter = Arc::new(PacketFilter::new(&conf));
+
+    let ring_buf_reader = RingBufReader::new(ring_buf, packet_filter, packet_meta_tx);
     tokio::spawn(async move {
         ring_buf_reader.run().await;
         debug!("ring buffer reader task exiting");

@@ -24,6 +24,7 @@ dashmap = "6.0"
 figment = { version = "0.10", features = ["env", "test", "yaml"] }
 futures = "0.3"
 fxhash = "0.2"
+glob = "0.3.3"
 hcl-rs = "0.19.2"
 humantime = "2.2.0"
 hyper = { version = "1.0", features = ["full"] }

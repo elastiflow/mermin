@@ -1,5 +1,5 @@
-use std::{error::Error, fmt, net::Ipv4Addr, path::Path, time::Duration};
-use std::collections::HashMap;
+use std::{collections::HashMap, error::Error, fmt, net::Ipv4Addr, path::Path, time::Duration};
+
 use figment::providers::Format;
 use hcl::eval::Context;
 use pnet::datalink;
@@ -58,9 +58,8 @@ pub struct Conf {
     /// References to the exporters to use for telemetry
     pub export: ExportOptions,
     /// Configuration for flow interfaces.
-    /// This field holds settings for flow source and destination filtering.
-    #[serde(default)]
-    pub flow: Option<FlowOptions>,
+    /// This field holds settings for filtering.
+    pub filter: Option<HashMap<String, FilteringOptions>>,
 }
 
 impl Default for Conf {
@@ -80,11 +79,33 @@ impl Default for Conf {
             resolved_interfaces: Vec::new(),
             span: SpanOptions::default(),
             export: ExportOptions::default(),
-            flow: None,
+            filter: None,
         }
     }
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct FilteringOptions {
+    pub address: Option<FilteringPair>,
+    pub port: Option<FilteringPair>,
+    pub transport: Option<FilteringPair>,
+    #[serde(rename = "type")]
+    pub type_: Option<FilteringPair>,
+    pub connection: Option<ConnectionOptions>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ConnectionOptions {
+    pub state: FilteringPair,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct FilteringPair {
+    #[serde(default, rename = "match")]
+    pub match_glob: String,
+    #[serde(default, rename = "not_match")]
+    pub not_match_glob: String,
+}
 impl Conf {
     /// Creates a new `Conf` instance based on the provided CLI arguments, environment variables,
     /// and configuration file. The configuration is determined using the following priority order:
