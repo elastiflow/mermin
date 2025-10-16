@@ -94,14 +94,18 @@ spec:
             - name: bpf-fs
               mountPath: /sys/fs/bpf
               readOnly: false
+            {{- if .Values.config.content }}
             - name: mermin-config
               mountPath: /etc/mermin
               readOnly: true
+            {{- end }}
       volumes:
         - name: bpf-fs
           hostPath:
             path: /sys/fs/bpf
             type: DirectoryOrCreate
+        {{- if .Values.config.content }}
         - name: mermin-config
           configMap:
             name: {{ include "mermin.fullname" . }}-config
+        {{- end }}
