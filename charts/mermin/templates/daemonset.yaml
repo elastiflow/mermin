@@ -18,8 +18,8 @@ spec:
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-        {{- if .Values.config.restartOnConfigChange }}
-        config_sha: {{ include  "mermin.config" . | sha256sum }}
+        {{- if and .Values.config.content .Values.config.restartOnConfigChange }}
+        config_sha: {{ tpl .Values.config.content . | nindent 4 | sha256sum }}
         {{- end }}
       {{- end }}
       labels:

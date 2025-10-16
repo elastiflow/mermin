@@ -113,8 +113,12 @@ config:
   restartOnConfigChange: true
   # Set to true to allow enable host's process list (/proc) for mapping kernel events to specific processes.
   hostPidEnrichment: true
-  source: '{{ .Files.Get "config/config.hcl" }}'
-  # "source" is used if undefined. "content" supports templating
+
+  # If "content" is undefined, default config values is used
+  # Examples of defining custom config:
+  # Get from file:
+  # content: '{{ .Files.Get "config/config.hcl" }}'
+  # Define config inline:
   # content: |
   #   # Literal example
   #   interfaces = ["eth0"]
