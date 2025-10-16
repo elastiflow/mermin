@@ -1,3 +1,16 @@
+## [v0.1.0-beta.4] - 2025-10-16
+
+### Bug Fixes
+
+- **helm:** Simplify the config in values (#156)
+### Features
+
+- **conf:** Support tunnel options config (#140)
+
+[v0.1.0-beta.3..v0.1.0-beta.4](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.3...v0.1.0-beta.4)
+
+
+
 ## [v0.1.0-beta.3] - 2025-10-15
 
 ### Bug Fixes
