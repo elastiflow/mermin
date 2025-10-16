@@ -45,7 +45,7 @@ Notes on the example deployment:
   # With custom config
   helm upgrade -i --wait --timeout 15m -n elastiflow \
     -f examples/netobserv_os_simple_gke_gw/values.yaml \
-    --set-file mermin.config.source=examples/netobserv_os_simple_gke_gw/config.hcl \
+    --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
     mermin charts/mermin-netobserv-os
 
   # Get NetObserv Gateway (Load Balancer) IP
@@ -76,7 +76,7 @@ To render and diff Helm templates to Kubernetes manifests, run:
 # With custom config
 rm -rf helm_rendered/mermin; helm template -n elastiflow \
   -f examples/netobserv_os_simple_gke_gw/values.yaml \
-  --set-file mermin.config.source=examples/netobserv_os_simple_gke_gw/config.hcl \
+  --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
   --output-dir helm_rendered \
   mermin charts/mermin-netobserv-os
 
