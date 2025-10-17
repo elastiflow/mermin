@@ -71,7 +71,6 @@ export "traces" {
   //   }
 
   //   tls = {
-  //     enabled     = true
   //     insecure    = false
   //     ca_cert     = "/etc/certs/ca.crt"
   //     client_cert = "/etc/certs/cert.crt"

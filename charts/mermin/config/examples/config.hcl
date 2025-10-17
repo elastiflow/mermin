@@ -33,7 +33,6 @@ internal "traces" {
     }
 
     tls = {
-      enabled     = false
       insecure    = false
       ca_cert     = "/etc/certs/ca.crt"
       client_cert = "/etc/certs/cert.crt"
@@ -584,7 +583,6 @@ export "traces" {
     }
 
     tls = {
-      enabled     = false
       insecure    = false
       ca_cert     = "/etc/certs/ca.crt"
       client_cert = "/etc/certs/cert.crt"
