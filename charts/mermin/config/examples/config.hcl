@@ -570,7 +570,7 @@ span {
 # OTLP exporter configuration
 # See OBI export concepts: https://opentelemetry.io/docs/zero-code/obi/configure/export-data/
 export "traces" {
-  stdout = ""
+  stdout = "" // text, text_indent(*new), json, json_indent
 
   otlp = {
     endpoint = "http://otelcol:4317"

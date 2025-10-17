@@ -161,11 +161,9 @@ pub struct OtlpExporterOptions {
     pub timeout: Duration,
     pub auth: Option<AuthOptions>,
     pub tls: Option<TlsOptions>,
-    /// Maximum number of spans to batch before forcing an export.
     /// Corresponds to OTEL_BSP_MAX_EXPORT_BATCH_SIZE environment variable.
     #[serde(default = "defaults::max_batch_size")]
     pub max_batch_size: usize,
-    /// Maximum time to wait before exporting a batch, even if not full.
     /// Corresponds to OTEL_BSP_SCHEDULE_DELAY environment variable.
     #[serde(default = "defaults::max_batch_interval", with = "duration")]
     pub max_batch_interval: Duration,

@@ -93,7 +93,6 @@ impl ProviderBuilder {
 
                 // SAFETY: Setting environment variables before BatchSpanProcessor initialization.
                 // The OpenTelemetry SDK reads these values during processor construction.
-                // This is done early in the application lifecycle before any other threads are spawned.
                 unsafe {
                     std::env::set_var(
                         "OTEL_BSP_MAX_EXPORT_BATCH_SIZE",
@@ -131,7 +130,6 @@ impl ProviderBuilder {
 
         // SAFETY: Setting environment variables before BatchSpanProcessor initialization.
         // The OpenTelemetry SDK reads these values during processor construction.
-        // This is done early in the application lifecycle before any other threads are spawned.
         unsafe {
             std::env::set_var("OTEL_BSP_MAX_EXPORT_BATCH_SIZE", max_batch_size.to_string());
             std::env::set_var(
