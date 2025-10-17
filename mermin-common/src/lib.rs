@@ -240,6 +240,31 @@ impl PacketMeta {
     }
 }
 
+/// Parser options for configuring tunnel port detection in eBPF
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ParserOptions {
+    /// The port number to use for Geneve tunnel detection
+    /// Default is 6081 as per IANA assignment
+    pub geneve_port: u16,
+    /// The port number to use for VXLAN tunnel detection
+    /// Default is 4789 as per IANA assignment
+    pub vxlan_port: u16,
+    /// The port number to use for WireGuard tunnel detection
+    /// Default is 51820 as per IANA assignment
+    pub wireguard_port: u16,
+}
+
+impl Default for ParserOptions {
+    fn default() -> Self {
+        ParserOptions {
+            geneve_port: 6081,
+            vxlan_port: 4789,
+            wireguard_port: 51820,
+        }
+    }
+}
+
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum IpAddrType {

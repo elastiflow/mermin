@@ -3,7 +3,7 @@
 // This module provides a high-level, concurrent, and ergonomic interface for
 // interacting with Kubernetes resources. It features:
 // - A ResourceStore for concurrent initialization and caching of resource reflectors.
-// - A high-level Attributor client for querying and correlating resources.
+// - A high-level Decorator client for querying and correlating resources.
 // - Support for Pods, Nodes, key workload types (Deployments, StatefulSets, etc.).
 // - Network-related resources like Services, Ingresses and NetworkPolicies.
 
@@ -88,7 +88,7 @@ pub enum WorkloadOwner {
 }
 
 #[derive(Debug, Clone)]
-pub enum AttributionInfo {
+pub enum DecorationInfo {
     Pod {
         pod: K8sObjectMeta,
         owner: Option<WorkloadOwner>,
@@ -331,7 +331,7 @@ pub struct FlowContext {
 }
 
 impl FlowContext {
-    pub async fn from_flow_span(flow_span: &FlowSpan, attributor: &Attributor) -> Self {
+    pub async fn from_flow_span(flow_span: &FlowSpan, decorator: &Decorator) -> Self {
         // Extract IPs and ports
         let (src_ip, dst_ip, port, protocol) = (
             flow_span.attributes.source_address,
@@ -341,8 +341,8 @@ impl FlowContext {
         );
 
         // Resolve pods
-        let src_pod = attributor.get_pod_by_ip(src_ip).await;
-        let dst_pod = attributor.get_pod_by_ip(dst_ip).await;
+        let src_pod = decorator.get_pod_by_ip(src_ip).await;
+        let dst_pod = decorator.get_pod_by_ip(dst_ip).await;
 
         Self {
             src_pod: src_pod.as_deref().cloned(),
@@ -356,14 +356,14 @@ impl FlowContext {
 }
 
 /// A high-level client for querying Kubernetes resources.
-pub struct Attributor {
+pub struct Decorator {
     #[allow(dead_code)]
     pub client: Client,
     pub resource_store: ResourceStore,
 }
 
-impl Attributor {
-    /// Creates a new Attributor, initializing all resource reflectors concurrently.
+impl Decorator {
+    /// Creates a new Decorator, initializing all resource reflectors concurrently.
     pub async fn new(health_state: HealthState) -> Result<Self> {
         let client = Client::try_default().await?;
         let resource_store = ResourceStore::new(client.clone(), health_state).await?;

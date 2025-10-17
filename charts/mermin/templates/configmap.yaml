@@ -1,3 +1,4 @@
+{{- if .Values.config.content }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -7,4 +8,5 @@ metadata:
     {{- include "mermin.labels" . | nindent 4 }}
 data:
   config.hcl: |
-    {{- include  "mermin.config" . }}
+    {{- tpl .Values.config.content . | nindent 4 }}
+{{- end }}

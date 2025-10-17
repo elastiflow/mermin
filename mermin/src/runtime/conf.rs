@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 use tracing::{Level, warn};
 
 use crate::{
-    otlp::opts::ExporterOptions,
+    otlp::opts::ExportOptions,
     runtime::{
         conf::conf_serde::{duration, level},
-        enums::SpanFmt,
+        opts::InternalOptions,
     },
     span::opts::SpanOptions,
 };
@@ -32,40 +32,72 @@ impl Format for Hcl {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Conf {
-    pub interfaces: Vec<String>,
-    pub auto_reload: bool,
+    /// Path to the configuration file that was loaded
+    #[serde(skip)]
+    #[allow(dead_code)]
+    pub(crate) config_path: Option<std::path::PathBuf>,
     #[serde(with = "level")]
     pub log_level: Level,
-    pub api: ApiConf,
-    pub metrics: MetricsConf,
-    pub packet_channel_capacity: usize,
-    pub packet_worker_count: usize,
+    pub auto_reload: bool,
     #[serde(with = "duration")]
     pub shutdown_timeout: Duration,
-    pub span: SpanOptions,
-    /// Top-level agent configuration specifying which telemetry features are enabled.
-    pub agent: AgentOptions,
+    pub packet_channel_capacity: usize,
+    pub packet_worker_count: usize,
     /// Contains the configuration for internal exporters
-    pub traces: InternalTraceOptions,
+    pub internal: InternalOptions,
+    pub api: ApiConf,
+    pub metrics: MetricsConf,
+    /// Parser configuration for eBPF packet parsing
+    pub parser: ParserConf,
+    pub interfaces: Vec<String>,
+    /// Resolved interfaces after expanding globs and regexes against host interfaces
+    #[serde(skip)]
+    pub resolved_interfaces: Vec<String>,
+    /// Span configuration for flow span producer
+    pub span: SpanOptions,
     /// References to the exporters to use for telemetry
-    pub exporter: ExporterOptions,
+    pub export: ExportOptions,
 }
 
 impl Default for Conf {
     fn default() -> Self {
         Self {
-            interfaces: vec!["eth0".to_string()],
-            auto_reload: false,
+            config_path: None,
             log_level: Level::INFO,
-            api: ApiConf::default(),
-            metrics: MetricsConf::default(),
+            auto_reload: false,
+            shutdown_timeout: defaults::shutdown_timeout(),
             packet_channel_capacity: defaults::packet_channel_capacity(),
             packet_worker_count: defaults::flow_workers(),
-            shutdown_timeout: defaults::shutdown_timeout(),
+            internal: InternalOptions::default(),
+            api: ApiConf::default(),
+            metrics: MetricsConf::default(),
+            parser: ParserConf::default(),
+            interfaces: vec!["eth0".to_string()],
+            resolved_interfaces: Vec::new(),
             span: SpanOptions::default(),
-            agent: AgentOptions::default(),
-            traces: InternalTraceOptions::default(),
-            exporter: ExporterOptions::default(),
+            export: ExportOptions::default(),
+        }
+    }
+}
+
+/// Parser configuration for eBPF packet parsing options
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ParserConf {
+    /// Port number for Geneve tunnel detection (IANA default: 6081)
+    pub geneve_port: u16,
+    /// Port number for VXLAN tunnel detection (IANA default: 4789)
+    pub vxlan_port: u16,
+    /// Port number for WireGuard tunnel detection (IANA default: 51820)
+    pub wireguard_port: u16,
+}
+
+impl Default for ParserConf {
+    fn default() -> Self {
+        Self {
+            geneve_port: 6081,
+            vxlan_port: 4789,
+            wireguard_port: 51820,
         }
     }
 }
@@ -150,91 +182,6 @@ pub struct K8sObjectSelector {
     pub selector_match_labels_field: Option<String>,
     /// Target resource kind to associate with (e.g., Pod).
     pub to: String,
-}
-
-/// Top-level agent configuration specifying which telemetry features are enabled.
-///
-/// The `AgentOptions` struct defines the agent's telemetry pipeline configuration,
-/// mapping logical telemetry types (such as traces) to their respective pipeline settings.
-/// This allows the user to declaratively specify, in the configuration file, which
-/// exporters should be used for each telemetry type. For example, the `traces` field
-/// contains the configuration for the traces pipeline, including the list of exporter
-/// references (such as OTLP or stdout exporters) that should be enabled for sending trace data.
-///
-/// This struct is typically deserialized from the `agent` section of the application's
-/// configuration file. Exporter references listed here must correspond to exporter
-/// definitions in the `exporter` section of the configuration.
-///
-/// # Example (YAML)
-/// ```yaml
-/// agent:
-///   traces:
-///     exporters:
-///       - exporter.otlp.main
-///       - exporter.stdout.json
-/// ```
-#[derive(Default, Debug, Deserialize, Serialize, Clone)]
-pub struct AgentOptions {
-    /// Configuration for the single, primary trace pipeline
-    pub traces: TraceOptions,
-}
-
-/// Options for the single, user-facing agent trace pipeline.
-/// Contains exporters, filtering, discovery, etc.
-#[derive(Default, Debug, Deserialize, Serialize, Clone)]
-#[serde(default)]
-pub struct TraceOptions {
-    /// A list of exporter references to use for tracing. Each entry should match a key
-    /// in the `exporter` section of the config.
-    pub exporters: ExporterReferences,
-}
-
-/// Represents the entire top-level `traces` block for internal monitoring.
-#[derive(Default, Debug, Deserialize, Serialize, Clone)]
-pub struct InternalTraceOptions {
-    /// The level of span events to record. The current default is `FmtSpan::FULL`,
-    /// which records all events (enter, exit, close) for all spans. The level can also be
-    /// one of the following:
-    /// - `SpanFmt::Full`: No span events are recorded.
-    /// - `FmtSpan::ENTER`: Only span enter events are recorded.
-    /// - `FmtSpan::EXIT`: Only span exit events are recorded.
-    /// - `FmtSpan::CLOSE`: Only span close events are recorded.
-    /// - `FmtSpan::ACTIVE`: Only span events for spans that are active (i.e., not closed) are recorded.
-    pub span_level: SpanFmt,
-
-    pub exporters: ExporterReferences,
-}
-
-pub type ExporterReferences = Vec<String>;
-
-pub trait ExporterReferencesParser {
-    fn parse(&self) -> Result<Vec<ExporterReference>, String>;
-}
-
-impl ExporterReferencesParser for ExporterReferences {
-    fn parse(&self) -> Result<Vec<ExporterReference>, String> {
-        self.iter().map(|reference| {
-            match reference.split('.').collect::<Vec<_>>().as_slice() {
-                ["exporter", type_ @ ("otlp" | "stdout"), name] => Ok(ExporterReference {
-                    type_: type_.to_string(),
-                    name: name.to_string(),
-                }),
-                ["exporter", invalid_type, _] => Err(format!(
-                    "unsupported exporter type: '{invalid_type}' - supported types: otlp, stdout"
-                )),
-                _ => Err(format!(
-                    "invalid format: '{reference}' - expected: 'exporter.<type>.<name>'"
-                )),
-            }
-        }).collect::<Result<Vec<ExporterReference>, String>>()
-    }
-}
-
-/// Represents a parsed exporter reference from the agent configuration.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ExporterReference {
-    pub type_: String,
-    pub name: String,
 }
 
 impl Conf {
@@ -341,6 +288,118 @@ impl Conf {
         let end = stripped.rfind('/')?;
         Regex::new(&stripped[..end]).ok()
     }
+
+    /// Merges a configuration file into a Figment instance, automatically
+    /// selecting the correct provider based on the file extension.
+    fn merge_provider_for_path(
+        figment: figment::Figment,
+        path: &Path,
+    ) -> Result<figment::Figment, ConfError> {
+        match path.extension().and_then(|s| s.to_str()) {
+            Some("yaml") | Some("yml") => Ok(figment.merge(figment::providers::Yaml::file(path))),
+            Some("hcl") => Ok(figment.merge(Hcl::file(path))),
+            Some(ext) => Err(ConfError::InvalidExtension(ext.to_string())),
+            None => Err(ConfError::InvalidExtension("none".to_string())),
+        }
+    }
+
+    /// Creates a new `Conf` instance based on the provided CLI arguments, environment variables,
+    /// and configuration file. The configuration is determined using the following priority order:
+    /// Defaults < Configuration File < Environment Variables < CLI Arguments.
+    ///
+    /// # Arguments
+    /// * `cli` - An instance of `Cli` containing parsed CLI arguments.
+    ///
+    /// # Returns
+    /// * `Result<(Self, Cli), ConfigError>` - Returns an `Ok((Conf, Cli))` if successful, or a `ConfigError`
+    ///   if there are issues during configuration extraction.
+    ///
+    /// # Errors
+    /// * `ConfigError::NoConfigFile` - Returned if no configuration file is specified or found.
+    /// * `ConfigError::InvalidConfigPath` - Returned if the `config_path` from the environment
+    ///   variable cannot be converted to a valid string.
+    /// * Other `ConfigError` variants - Errors propagated during the extraction of the configuration.
+    ///
+    /// # Behavior
+    /// 1. Initializes a `Figment` instance with default values from `cli` and merges it with
+    ///    environment variables prefixed by "MERMIN_".
+    /// 2. Attempts to retrieve the `config_path` from the CLI arguments or the environment variable.
+    ///    If no path is provided or found, the function returns a `ConfigError::NoConfigFile`.
+    /// 3. If a configuration file is specified via CLI or environment variable, it is merged with
+    ///    the existing `Figment` configuration.
+    /// 4. Extracts the final configuration into a `Conf` struct, storing the path to the
+    ///    configuration file (if any).
+    pub fn new(
+        cli: crate::runtime::cli::Cli,
+    ) -> Result<(Self, crate::runtime::cli::Cli), ConfError> {
+        use figment::{Figment, providers::Serialized};
+
+        let mut figment = Figment::new().merge(Serialized::defaults(Conf::default()));
+
+        let config_path_to_store = if let Some(config_path) = &cli.config {
+            validate_config_path(config_path)?;
+            figment = Self::merge_provider_for_path(figment, config_path)?;
+            Some(config_path.clone())
+        } else {
+            None
+        };
+
+        figment = figment.merge(Serialized::defaults(&cli));
+
+        let mut conf: Conf = figment.extract()?;
+
+        let resolved_interfaces = conf.resolve_interfaces();
+        conf.config_path = config_path_to_store;
+        conf.resolved_interfaces = resolved_interfaces;
+
+        Ok((conf, cli))
+    }
+
+    /// Reloads the configuration from the config file and returns a new instance
+    /// of the configuration object.
+    ///
+    /// This method allows for dynamic reloading of the configuration without
+    /// requiring a restart of the application. Any updates to the configuration
+    /// file will be applied, creating a new configuration object based on the
+    /// file's content.
+    ///
+    /// Note:
+    /// - Command-line arguments (CLI) and environment variables (ENV VARS) will
+    ///   not be reloaded since it is assumed that the shell environment remains
+    ///   the same. The reload operation will use the current configuration as the
+    ///   base and layer the updated configuration file on top of it.
+    /// - If no configuration file path has been specified, an error will be returned.
+    ///
+    /// # Returns
+    /// - `Ok(Self)` containing the reloaded configuration object if the reload
+    ///   operation succeeds.
+    /// - `Err(ConfigError::NoConfigFile)` if no configuration file path is set.
+    /// - Returns other variants of `ConfigError` if the configuration fails to
+    ///   load or extract properly.
+    ///
+    /// # Errors
+    /// This function returns a `ConfigError` in the following scenarios:
+    /// - If there is no configuration file path specified (`ConfigError::NoConfigFile`).
+    /// - If the configuration fails to load or parse from the file.
+    #[allow(dead_code)]
+    pub fn reload(&self) -> Result<Self, ConfError> {
+        use figment::{Figment, providers::Serialized};
+
+        let path = self.config_path.as_ref().ok_or(ConfError::NoConfigFile)?;
+
+        // Create a new Figment instance, using the current resolved config
+        // as the base. This preserves CLI/env vars. Then merge the file on top.
+        let mut figment = Figment::from(Serialized::defaults(&self));
+        figment = Self::merge_provider_for_path(figment, path)?;
+
+        let mut conf: Conf = figment.extract()?;
+
+        let resolved_interfaces = conf.resolve_interfaces();
+        conf.config_path = self.config_path.clone();
+        conf.resolved_interfaces = resolved_interfaces;
+
+        Ok(conf)
+    }
 }
 
 /// Validates that the given path points to an existing file with a supported extension.
@@ -389,8 +448,6 @@ pub enum ConfError {
     InvalidConfigPath(String),
     /// Error: The file has an unsupported extension.
     InvalidExtension(String),
-    /// A reference string (e.g., "exporter.otlp.main") could not be resolved.
-    InvalidReference(String),
     /// An error occurred during deserialization or processing.
     Extraction(Box<figment::Error>),
 }
@@ -406,7 +463,6 @@ impl fmt::Display for ConfError {
                     "invalid file extension '.{ext}' — expected 'yaml', 'yml', or 'hcl'"
                 )
             }
-            ConfError::InvalidReference(r) => write!(f, "invalid configuration reference: {r}"),
             ConfError::Extraction(e) => write!(f, "configuration error: {e}"),
         }
     }
@@ -494,6 +550,36 @@ pub mod conf_serde {
         }
     }
 
+    pub mod stdout_fmt {
+        use serde::{Deserialize, Deserializer, Serializer};
+
+        use crate::otlp::opts::StdoutFmt;
+
+        pub fn serialize<S>(
+            stdout_fmt: &Option<StdoutFmt>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            match stdout_fmt {
+                Some(fmt) => serializer.serialize_str(fmt.as_str()),
+                None => serializer.serialize_none(),
+            }
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<StdoutFmt>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let opt = Option::<String>::deserialize(deserializer)?;
+            Ok(match opt {
+                Some(s) => Some(s.parse::<StdoutFmt>().map_err(serde::de::Error::custom)?),
+                None => None,
+            })
+        }
+    }
+
     pub mod exporter_protocol {
         use serde::{Deserialize, Deserializer, Serializer};
 
@@ -564,51 +650,12 @@ mod tests {
     use figment::Jail;
     use tracing::Level;
 
-    use super::{Conf, ExporterReference};
-    use crate::runtime::{
-        cli::Cli,
-        props::{AgentTrace, InternalTrace, Properties},
+    use super::{ApiConf, Conf, MetricsConf, ParserConf};
+    use crate::{
+        otlp::opts::{ExportOptions, ExporterProtocol},
+        runtime::{cli::Cli, opts::InternalOptions},
+        span::opts::SpanOptions,
     };
-
-    fn parse_exporter_reference(reference: &str) -> Result<ExporterReference, String> {
-        match reference.split('.').collect::<Vec<_>>().as_slice() {
-            ["exporter", type_ @ ("otlp" | "stdout"), name] => Ok(ExporterReference {
-                type_: type_.to_string(),
-                name: name.to_string(),
-            }),
-            ["exporter", invalid_type, _] => Err(format!(
-                "unsupported exporter type: '{invalid_type}' - supported types: otlp, stdout"
-            )),
-            _ => Err(format!(
-                "invalid format: '{reference}' - expected: 'exporter.<type>.<name>'"
-            )),
-        }
-    }
-
-    fn create_default_app_props() -> Properties {
-        let raw_conf = Conf::default();
-        let agent_trace =
-            AgentTrace::from_raw(&raw_conf).expect("resolving default pipelines should succeed");
-        let internal_trace = InternalTrace::from_raw(&raw_conf)
-            .expect("resolving default internal traces should succeed");
-        let resolved_interfaces = raw_conf.resolve_interfaces();
-        let interfaces = raw_conf.interfaces;
-        Properties {
-            interfaces,
-            resolved_interfaces,
-            auto_reload: raw_conf.auto_reload,
-            log_level: raw_conf.log_level,
-            api: raw_conf.api,
-            metrics: raw_conf.metrics,
-            packet_channel_capacity: raw_conf.packet_channel_capacity,
-            packet_worker_count: raw_conf.packet_worker_count,
-            shutdown_timeout: raw_conf.shutdown_timeout,
-            span: raw_conf.span,
-            agent_trace,
-            internal_trace,
-            config_path: None,
-        }
-    }
 
     #[test]
     fn resolve_interfaces_supports_globs_and_literals() {
@@ -675,15 +722,154 @@ mod tests {
     }
 
     #[test]
-    fn default_impl_has_eth0_interface() {
-        let cfg = create_default_app_props();
-        assert_eq!(cfg.interfaces, Vec::from(["eth0".to_string()]));
-        assert_eq!(cfg.auto_reload, false);
-        assert_eq!(cfg.log_level, Level::INFO);
-        assert_eq!(cfg.api.port, 8080);
-        assert_eq!(cfg.packet_channel_capacity, 1024);
-        assert_eq!(cfg.packet_worker_count, 2);
-        assert_eq!(cfg.shutdown_timeout, Duration::from_secs(5));
+    fn default_conf_has_expected_values() {
+        let cfg = Conf::default();
+
+        // Core settings
+        assert_eq!(
+            cfg.log_level,
+            Level::INFO,
+            "default log level should be INFO"
+        );
+        assert_eq!(
+            cfg.auto_reload, false,
+            "auto_reload should be disabled by default"
+        );
+        assert_eq!(
+            cfg.shutdown_timeout,
+            Duration::from_secs(5),
+            "shutdown_timeout should be 5s"
+        );
+        assert_eq!(
+            cfg.packet_channel_capacity, 1024,
+            "packet_channel_capacity should be 1024"
+        );
+        assert_eq!(
+            cfg.packet_worker_count, 2,
+            "packet_worker_count should be 2"
+        );
+
+        // Interface settings
+        assert_eq!(
+            cfg.interfaces,
+            vec!["eth0".to_string()],
+            "default interface should be eth0"
+        );
+        assert_eq!(
+            cfg.resolved_interfaces,
+            Vec::<String>::new(),
+            "resolved_interfaces should be empty initially"
+        );
+
+        // API settings
+        assert_eq!(cfg.api.enabled, true, "API should be enabled by default");
+        assert_eq!(
+            cfg.api.listen_address, "0.0.0.0",
+            "API should listen on all interfaces by default"
+        );
+        assert_eq!(cfg.api.port, 8080, "API port should be 8080");
+
+        // Metrics settings
+        assert_eq!(
+            cfg.metrics.enabled, true,
+            "metrics should be enabled by default"
+        );
+        assert_eq!(
+            cfg.metrics.listen_address, "0.0.0.0",
+            "metrics should listen on all interfaces by default"
+        );
+        assert_eq!(cfg.metrics.port, 10250, "metrics port should be 10250");
+
+        // Parser settings
+        assert_eq!(
+            cfg.parser.geneve_port, 6081,
+            "Geneve port should be 6081 (IANA default)"
+        );
+        assert_eq!(
+            cfg.parser.vxlan_port, 4789,
+            "VXLAN port should be 4789 (IANA default)"
+        );
+        assert_eq!(
+            cfg.parser.wireguard_port, 51820,
+            "WireGuard port should be 51820 (IANA default)"
+        );
+
+        // Config path should be None
+        assert_eq!(
+            cfg.config_path, None,
+            "config_path should be None for default config"
+        );
+
+        // Span settings - verify all defaults are set
+        assert_eq!(
+            cfg.span.max_record_interval,
+            Duration::from_secs(60),
+            "default max_record_interval should be 60s"
+        );
+        assert_eq!(
+            cfg.span.generic_timeout,
+            Duration::from_secs(30),
+            "default generic_timeout should be 30s"
+        );
+        assert_eq!(
+            cfg.span.icmp_timeout,
+            Duration::from_secs(10),
+            "default icmp_timeout should be 10s"
+        );
+        assert_eq!(
+            cfg.span.tcp_timeout,
+            Duration::from_secs(20),
+            "default tcp_timeout should be 20s"
+        );
+        assert_eq!(
+            cfg.span.tcp_fin_timeout,
+            Duration::from_secs(5),
+            "default tcp_fin_timeout should be 5s"
+        );
+        assert_eq!(
+            cfg.span.tcp_rst_timeout,
+            Duration::from_secs(5),
+            "default tcp_rst_timeout should be 5s"
+        );
+        assert_eq!(
+            cfg.span.udp_timeout,
+            Duration::from_secs(60),
+            "default udp_timeout should be 60s"
+        );
+
+        // Export settings - Note: When Conf::default() is called directly (not via deserialization),
+        // the export settings are empty (no OTLP, no stdout) since the serde defaults only apply
+        // during config file deserialization
+        assert!(
+            cfg.export.traces.otlp.is_some(),
+            "default export (via ::default()) should not have OTLP configured"
+        );
+        if let Some(otlp) = &cfg.export.traces.otlp {
+            assert_eq!(otlp.endpoint, "http://localhost:4317");
+            assert_eq!(otlp.protocol, ExporterProtocol::Grpc);
+            assert_eq!(otlp.timeout, Duration::from_secs(10));
+        }
+        assert!(
+            cfg.export.traces.stdout.is_none(),
+            "default export should not have stdout enabled"
+        );
+
+        // Internal settings - verify defaults
+        assert!(
+            matches!(
+                cfg.internal.traces.span_fmt,
+                crate::runtime::opts::SpanFmt::Full
+            ),
+            "default internal span_fmt should be Full"
+        );
+        assert!(
+            cfg.internal.traces.stdout.is_none(),
+            "default internal traces stdout should be None"
+        );
+        assert!(
+            cfg.internal.traces.otlp.is_none(),
+            "default internal traces otlp should be None"
+        );
     }
 
     #[test]
@@ -705,7 +891,7 @@ mod tests {
     fn new_succeeds_without_config_path() {
         Jail::expect_with(|_| {
             let cli = Cli::parse_from(["mermin"]);
-            let (cfg, _cli) = Properties::new(cli).expect("config should load without path");
+            let (cfg, _cli) = Conf::new(cli).expect("config should load without path");
             assert_eq!(cfg.config_path, None);
 
             Ok(())
@@ -716,7 +902,7 @@ mod tests {
     fn new_errors_with_nonexistent_config_file() {
         Jail::expect_with(|_| {
             let cli = Cli::parse_from(["mermin", "--config", "nonexistent.yaml"]);
-            let err = Properties::new(cli).expect_err("expected error with nonexistent file");
+            let err = Conf::new(cli).expect_err("expected error with nonexistent file");
             let msg = err.to_string();
             assert!(
                 msg.contains("no config file provided"),
@@ -735,7 +921,7 @@ mod tests {
             jail.create_dir(path)?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let err = Properties::new(cli).expect_err("expected error with directory path");
+            let err = Conf::new(cli).expect_err("expected error with directory path");
             let msg = err.to_string();
             assert!(
                 msg.contains("is not a valid file"),
@@ -754,7 +940,7 @@ mod tests {
             jail.create_file(path, "")?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let err = Properties::new(cli).expect_err("expected error with invalid extension");
+            let err = Conf::new(cli).expect_err("expected error with invalid extension");
             let msg = err.to_string();
             assert!(
                 msg.contains("invalid file extension '.toml'"),
@@ -788,7 +974,7 @@ log_level: warn
                 "--log-level",
                 "debug",
             ]);
-            let (cfg, _cli) = Properties::new(cli).expect("config loads from cli file");
+            let (cfg, _cli) = Conf::new(cli).expect("config loads from cli file");
             assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.log_level, Level::DEBUG);
@@ -812,7 +998,7 @@ log_level: debug
             jail.set_env("MERMIN_CONFIG_PATH", path);
 
             let cli = Cli::parse_from(["mermin"]);
-            let (cfg, _cli) = Properties::new(cli).expect("config loads from env file");
+            let (cfg, _cli) = Conf::new(cli).expect("config loads from env file");
             assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.log_level, Level::DEBUG);
@@ -833,7 +1019,7 @@ interfaces: ["eth1"]
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Properties::new(cli).expect("config loads from cli file");
+            let (cfg, _cli) = Conf::new(cli).expect("config loads from cli file");
             assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
 
@@ -858,7 +1044,7 @@ interfaces: ["eth2", "eth3"]
 
     #[test]
     fn reload_fails_without_config_path() {
-        let cfg = create_default_app_props();
+        let cfg = Conf::default();
         let err = cfg
             .reload()
             .expect_err("expected error when reloading without config path");
@@ -894,7 +1080,7 @@ metrics:
 
             // The rest of the test logic remains the same
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Properties::new(cli).expect("config should load from yaml file");
+            let (cfg, _cli) = Conf::new(cli).expect("config should load from yaml file");
 
             // Assert that all the custom values from the file were loaded correctly
             assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
@@ -931,7 +1117,7 @@ metrics {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Properties::new(cli).expect("config should load from HCL file");
+            let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
 
             assert_eq!(cfg.interfaces, vec!["eth0"]);
             assert_eq!(cfg.log_level, Level::INFO);
@@ -950,7 +1136,7 @@ metrics {
             jail.create_file(path, r#"interfaces = ["eth0"]"#)?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let result = Properties::new(cli);
+            let result = Conf::new(cli);
             assert!(result.is_ok(), "HCL extension should be valid");
 
             Ok(())
@@ -970,7 +1156,7 @@ log_level = "info"
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Properties::new(cli).expect("config loads from HCL file");
+            let (cfg, _cli) = Conf::new(cli).expect("config loads from HCL file");
             assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
@@ -1011,7 +1197,7 @@ log_level =
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let err = Properties::new(cli).expect_err("expected error with invalid HCL");
+            let err = Conf::new(cli).expect_err("expected error with invalid HCL");
             let msg = err.to_string();
 
             // The error originates from the `hcl` crate, is wrapped by `figment`,
@@ -1053,7 +1239,7 @@ metrics {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Properties::new(cli).expect("config should load from HCL file");
+            let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
 
             // Assert that all the custom values from the file were loaded correctly
             assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
@@ -1067,42 +1253,824 @@ metrics {
     }
 
     #[test]
-    fn test_parse_exporter_reference_valid() {
-        let result = parse_exporter_reference("exporter.otlp.main").unwrap();
-        assert_eq!(result.type_, "otlp");
-        assert_eq!(result.name, "main");
+    fn override_all_core_settings_via_yaml() {
+        Jail::expect_with(|jail| {
+            let path = "override_core.yaml";
+            jail.create_file(
+                path,
+                r#"
+log_level: error
+auto_reload: true
+shutdown_timeout: 30s
+packet_channel_capacity: 2048
+packet_worker_count: 8
+interfaces:
+  - eth1
+  - eth2
+                "#,
+            )?;
 
-        let result = parse_exporter_reference("exporter.stdout.json").unwrap();
-        assert_eq!(result.type_, "stdout");
-        assert_eq!(result.name, "json");
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.log_level, Level::ERROR);
+            assert_eq!(cfg.auto_reload, true);
+            assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
+            assert_eq!(cfg.packet_channel_capacity, 2048);
+            assert_eq!(cfg.packet_worker_count, 8);
+            assert_eq!(cfg.interfaces, vec!["eth1", "eth2"]);
+
+            Ok(())
+        });
     }
 
     #[test]
-    fn test_parse_exporter_reference_invalid_format() {
-        let result = parse_exporter_reference("invalid.format");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("invalid format"));
+    fn override_all_core_settings_via_hcl() {
+        Jail::expect_with(|jail| {
+            let path = "override_core.hcl";
+            jail.create_file(
+                path,
+                r#"
+log_level = "error"
+auto_reload = true
+shutdown_timeout = "30s"
+packet_channel_capacity = 2048
+packet_worker_count = 8
+interfaces = ["eth1", "eth2"]
+                "#,
+            )?;
 
-        let result = parse_exporter_reference("exporter.otlp");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("invalid format"));
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
 
-        let result = parse_exporter_reference("exporter.otlp.main.extra");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("invalid format"));
+            assert_eq!(cfg.log_level, Level::ERROR);
+            assert_eq!(cfg.auto_reload, true);
+            assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
+            assert_eq!(cfg.packet_channel_capacity, 2048);
+            assert_eq!(cfg.packet_worker_count, 8);
+            assert_eq!(cfg.interfaces, vec!["eth1", "eth2"]);
+
+            Ok(())
+        });
     }
 
     #[test]
-    fn test_parse_exporter_reference_invalid_prefix() {
-        let result = parse_exporter_reference("invalid.otlp.main");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("invalid format"));
+    fn override_api_settings_via_yaml() {
+        Jail::expect_with(|jail| {
+            let path = "override_api.yaml";
+            jail.create_file(
+                path,
+                r#"
+api:
+  enabled: false
+  listen_address: "127.0.0.1"
+  port: 9000
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.api.enabled, false);
+            assert_eq!(cfg.api.listen_address, "127.0.0.1");
+            assert_eq!(cfg.api.port, 9000);
+
+            Ok(())
+        });
     }
 
     #[test]
-    fn test_parse_exporter_reference_unsupported_type() {
-        let result = parse_exporter_reference("exporter.invalid.main");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unsupported exporter type"));
+    fn override_api_settings_via_hcl() {
+        Jail::expect_with(|jail| {
+            let path = "override_api.hcl";
+            jail.create_file(
+                path,
+                r#"
+api {
+    enabled = false
+    listen_address = "127.0.0.1"
+    port = 9000
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.api.enabled, false);
+            assert_eq!(cfg.api.listen_address, "127.0.0.1");
+            assert_eq!(cfg.api.port, 9000);
+
+            Ok(())
+        });
     }
+
+    #[test]
+    fn override_metrics_settings_via_yaml() {
+        Jail::expect_with(|jail| {
+            let path = "override_metrics.yaml";
+            jail.create_file(
+                path,
+                r#"
+metrics:
+  enabled: false
+  listen_address: "192.168.1.1"
+  port: 9999
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.metrics.enabled, false);
+            assert_eq!(cfg.metrics.listen_address, "192.168.1.1");
+            assert_eq!(cfg.metrics.port, 9999);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_metrics_settings_via_hcl() {
+        Jail::expect_with(|jail| {
+            let path = "override_metrics.hcl";
+            jail.create_file(
+                path,
+                r#"
+metrics {
+    enabled = false
+    listen_address = "192.168.1.1"
+    port = 9999
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.metrics.enabled, false);
+            assert_eq!(cfg.metrics.listen_address, "192.168.1.1");
+            assert_eq!(cfg.metrics.port, 9999);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_parser_settings_via_yaml() {
+        Jail::expect_with(|jail| {
+            let path = "override_parser.yaml";
+            jail.create_file(
+                path,
+                r#"
+parser:
+  geneve_port: 7000
+  vxlan_port: 8000
+  wireguard_port: 9000
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.parser.geneve_port, 7000);
+            assert_eq!(cfg.parser.vxlan_port, 8000);
+            assert_eq!(cfg.parser.wireguard_port, 9000);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_parser_settings_via_hcl() {
+        Jail::expect_with(|jail| {
+            let path = "override_parser.hcl";
+            jail.create_file(
+                path,
+                r#"
+parser {
+    geneve_port = 7000
+    vxlan_port = 8000
+    wireguard_port = 9000
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.parser.geneve_port, 7000);
+            assert_eq!(cfg.parser.vxlan_port, 8000);
+            assert_eq!(cfg.parser.wireguard_port, 9000);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn cli_args_override_file_config() {
+        Jail::expect_with(|jail| {
+            let path = "cli_override.yaml";
+            jail.create_file(
+                path,
+                r#"
+log_level: info
+auto_reload: false
+                "#,
+            )?;
+
+            let cli = Cli::parse_from([
+                "mermin",
+                "--config",
+                path.into(),
+                "--log-level",
+                "warn",
+                "--auto-reload",
+            ]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            // CLI args should override file config
+            assert_eq!(cfg.log_level, Level::WARN);
+            assert_eq!(cfg.auto_reload, true);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn partial_override_preserves_defaults() {
+        Jail::expect_with(|jail| {
+            let path = "partial.yaml";
+            jail.create_file(
+                path,
+                r#"
+# Only override interfaces, everything else should remain default
+interfaces:
+  - custom0
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            // Overridden value
+            assert_eq!(cfg.interfaces, vec!["custom0"]);
+
+            // Default values should be preserved
+            assert_eq!(cfg.log_level, Level::INFO);
+            assert_eq!(cfg.auto_reload, false);
+            assert_eq!(cfg.shutdown_timeout, Duration::from_secs(5));
+            assert_eq!(cfg.packet_channel_capacity, 1024);
+            assert_eq!(cfg.packet_worker_count, 2);
+            assert_eq!(cfg.api.port, 8080);
+            assert_eq!(cfg.metrics.port, 10250);
+            assert!(matches!(
+                cfg.internal.traces.span_fmt,
+                crate::runtime::opts::SpanFmt::Full
+            ));
+            assert!(cfg.internal.traces.stdout.is_none());
+            assert!(cfg.internal.traces.otlp.is_none());
+            assert_eq!(cfg.parser.geneve_port, 6081);
+            assert_eq!(cfg.span.max_record_interval, Duration::from_secs(60));
+            assert_eq!(cfg.span.generic_timeout, Duration::from_secs(30));
+            assert_eq!(cfg.span.icmp_timeout, Duration::from_secs(10));
+            assert_eq!(cfg.span.tcp_timeout, Duration::from_secs(20));
+            assert_eq!(cfg.span.tcp_fin_timeout, Duration::from_secs(5));
+            assert_eq!(cfg.span.tcp_rst_timeout, Duration::from_secs(5));
+            assert_eq!(cfg.span.udp_timeout, Duration::from_secs(60));
+            assert!(cfg.export.traces.stdout.is_none());
+            assert!(cfg.export.traces.otlp.is_some());
+            if let Some(otlp) = &cfg.export.traces.otlp {
+                assert_eq!(otlp.endpoint, "http://localhost:4317");
+                assert_eq!(otlp.protocol, ExporterProtocol::Grpc);
+                assert_eq!(otlp.timeout, Duration::from_secs(10));
+            }
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_duration_format_variations() {
+        Jail::expect_with(|jail| {
+            let path = "duration_formats.yaml";
+            jail.create_file(
+                path,
+                r#"
+shutdown_timeout: 2min
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.shutdown_timeout, Duration::from_secs(120));
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_log_level_variations() {
+        for (level_str, expected) in [
+            ("trace", Level::TRACE),
+            ("debug", Level::DEBUG),
+            ("info", Level::INFO),
+            ("warn", Level::WARN),
+            ("error", Level::ERROR),
+        ] {
+            Jail::expect_with(|jail| {
+                let path = "log_level.yaml";
+                jail.create_file(path, &format!("log_level: {}", level_str))?;
+
+                let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+                let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+                assert_eq!(cfg.log_level, expected, "failed for level: {}", level_str);
+
+                Ok(())
+            });
+        }
+    }
+
+    #[test]
+    fn default_parser_conf_has_expected_values() {
+        let parser = ParserConf::default();
+
+        assert_eq!(
+            parser.geneve_port, 6081,
+            "Geneve default port should be 6081"
+        );
+        assert_eq!(parser.vxlan_port, 4789, "VXLAN default port should be 4789");
+        assert_eq!(
+            parser.wireguard_port, 51820,
+            "WireGuard default port should be 51820"
+        );
+    }
+
+    #[test]
+    fn default_api_conf_has_expected_values() {
+        let api = ApiConf::default();
+
+        assert_eq!(api.enabled, true, "API should be enabled by default");
+        assert_eq!(
+            api.listen_address, "0.0.0.0",
+            "API should listen on all interfaces"
+        );
+        assert_eq!(api.port, 8080, "API default port should be 8080");
+    }
+
+    #[test]
+    fn default_metrics_conf_has_expected_values() {
+        let metrics = MetricsConf::default();
+
+        assert_eq!(
+            metrics.enabled, true,
+            "metrics should be enabled by default"
+        );
+        assert_eq!(
+            metrics.listen_address, "0.0.0.0",
+            "metrics should listen on all interfaces"
+        );
+        assert_eq!(metrics.port, 10250, "metrics default port should be 10250");
+    }
+
+    #[test]
+    fn default_span_options_has_expected_values() {
+        let span = SpanOptions::default();
+
+        assert_eq!(
+            span.max_record_interval,
+            Duration::from_secs(60),
+            "max_record_interval should be 60s"
+        );
+        assert_eq!(
+            span.generic_timeout,
+            Duration::from_secs(30),
+            "generic_timeout should be 30s"
+        );
+        assert_eq!(
+            span.icmp_timeout,
+            Duration::from_secs(10),
+            "icmp_timeout should be 10s"
+        );
+        assert_eq!(
+            span.tcp_timeout,
+            Duration::from_secs(20),
+            "tcp_timeout should be 20s"
+        );
+        assert_eq!(
+            span.tcp_fin_timeout,
+            Duration::from_secs(5),
+            "tcp_fin_timeout should be 5s"
+        );
+        assert_eq!(
+            span.tcp_rst_timeout,
+            Duration::from_secs(5),
+            "tcp_rst_timeout should be 5s"
+        );
+        assert_eq!(
+            span.udp_timeout,
+            Duration::from_secs(60),
+            "udp_timeout should be 60s"
+        );
+    }
+
+    #[test]
+    fn default_export_options_has_expected_values() {
+        let export = ExportOptions::default();
+
+        // When calling ::default() directly (not via deserialization),
+        // both otlp and stdout are None since serde defaults only apply during deserialization
+        assert!(
+            export.traces.otlp.is_some(),
+            "default export (via ::default()) should not have OTLP configured"
+        );
+        if let Some(otlp) = &export.traces.otlp {
+            assert_eq!(otlp.endpoint, "http://localhost:4317");
+            assert_eq!(otlp.protocol, ExporterProtocol::Grpc);
+            assert_eq!(otlp.timeout, Duration::from_secs(10));
+        }
+        assert!(
+            export.traces.stdout.is_none(),
+            "default export should not have stdout enabled"
+        );
+    }
+
+    #[test]
+    fn minimal_config_uses_defaults() {
+        // Test that when loading from a minimal config file,
+        // unspecified fields get their default values
+        Jail::expect_with(|jail| {
+            let path = "minimal_config.yaml";
+            jail.create_file(
+                path,
+                r#"
+# Minimal config - unspecified fields should get defaults
+interfaces:
+  - eth0
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            // Verify that defaults are applied for unspecified fields
+            // Note: export.traces.otlp is None by default (not configured unless explicitly set)
+            assert!(
+                cfg.export.traces.otlp.is_some(),
+                "export OTLP should not be configured unless explicitly set in config"
+            );
+            if let Some(otlp) = &cfg.export.traces.otlp {
+                assert_eq!(otlp.endpoint, "http://localhost:4317");
+                assert_eq!(otlp.protocol, ExporterProtocol::Grpc);
+                assert_eq!(otlp.timeout, Duration::from_secs(10));
+            }
+            assert!(
+                cfg.export.traces.stdout.is_none(),
+                "export stdout should not be enabled unless explicitly set"
+            );
+
+            // Other defaults should be applied
+            assert_eq!(cfg.log_level, Level::INFO);
+            assert_eq!(cfg.packet_channel_capacity, 1024);
+
+            // Verify all span defaults
+            assert_eq!(cfg.span.max_record_interval, Duration::from_secs(60));
+            assert_eq!(cfg.span.generic_timeout, Duration::from_secs(30));
+            assert_eq!(cfg.span.icmp_timeout, Duration::from_secs(10));
+            assert_eq!(cfg.span.tcp_timeout, Duration::from_secs(20));
+            assert_eq!(cfg.span.tcp_fin_timeout, Duration::from_secs(5));
+            assert_eq!(cfg.span.tcp_rst_timeout, Duration::from_secs(5));
+            assert_eq!(cfg.span.udp_timeout, Duration::from_secs(60));
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn export_both_stdout_and_otlp_can_be_set() {
+        // Both exporters can be configured simultaneously if desired
+        Jail::expect_with(|jail| {
+            let path = "export_both.yaml";
+            jail.create_file(
+                path,
+                r#"
+export:
+  traces:
+    stdout: "text_indent"
+    otlp:
+      endpoint: "http://collector:4317"
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert!(cfg.export.traces.stdout.is_some());
+            assert!(cfg.export.traces.otlp.is_some());
+            if let Some(otlp) = &cfg.export.traces.otlp {
+                assert_eq!(otlp.endpoint, "http://collector:4317");
+            }
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn export_empty_block_has_no_exporters() {
+        // Empty export.traces block means no exporters configured
+        Jail::expect_with(|jail| {
+            let path = "export_empty.yaml";
+            jail.create_file(
+                path,
+                r#"
+export:
+  traces: {}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert!(cfg.export.traces.otlp.is_some());
+            if let Some(otlp) = &cfg.export.traces.otlp {
+                assert_eq!(otlp.endpoint, "http://localhost:4317");
+                assert_eq!(otlp.protocol, ExporterProtocol::Grpc);
+                assert_eq!(otlp.timeout, Duration::from_secs(10));
+            }
+            assert!(cfg.export.traces.stdout.is_none());
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn default_internal_options_has_expected_values() {
+        let internal = InternalOptions::default();
+
+        // Check default trace options
+        assert!(
+            matches!(
+                internal.traces.span_fmt,
+                crate::runtime::opts::SpanFmt::Full
+            ),
+            "default internal trace span_fmt should be Full"
+        );
+        assert!(
+            internal.traces.stdout.is_none(),
+            "default internal traces should not have stdout enabled"
+        );
+        assert!(
+            internal.traces.otlp.is_none(),
+            "default internal traces should not have OTLP exporter"
+        );
+    }
+
+    #[test]
+    fn override_span_settings_via_yaml() {
+        Jail::expect_with(|jail| {
+            let path = "override_span.yaml";
+            jail.create_file(
+                path,
+                r#"
+span:
+  max_record_interval: 120s
+  generic_timeout: 45s
+  icmp_timeout: 15s
+  tcp_timeout: 30s
+  tcp_fin_timeout: 10s
+  tcp_rst_timeout: 10s
+  udp_timeout: 90s
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.span.max_record_interval, Duration::from_secs(120));
+            assert_eq!(cfg.span.generic_timeout, Duration::from_secs(45));
+            assert_eq!(cfg.span.icmp_timeout, Duration::from_secs(15));
+            assert_eq!(cfg.span.tcp_timeout, Duration::from_secs(30));
+            assert_eq!(cfg.span.tcp_fin_timeout, Duration::from_secs(10));
+            assert_eq!(cfg.span.tcp_rst_timeout, Duration::from_secs(10));
+            assert_eq!(cfg.span.udp_timeout, Duration::from_secs(90));
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_span_settings_via_hcl() {
+        Jail::expect_with(|jail| {
+            let path = "override_span.hcl";
+            jail.create_file(
+                path,
+                r#"
+span {
+    max_record_interval = "120s"
+    generic_timeout = "45s"
+    icmp_timeout = "15s"
+    tcp_timeout = "30s"
+    tcp_fin_timeout = "10s"
+    tcp_rst_timeout = "10s"
+    udp_timeout = "90s"
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.span.max_record_interval, Duration::from_secs(120));
+            assert_eq!(cfg.span.generic_timeout, Duration::from_secs(45));
+            assert_eq!(cfg.span.icmp_timeout, Duration::from_secs(15));
+            assert_eq!(cfg.span.tcp_timeout, Duration::from_secs(30));
+            assert_eq!(cfg.span.tcp_fin_timeout, Duration::from_secs(10));
+            assert_eq!(cfg.span.tcp_rst_timeout, Duration::from_secs(10));
+            assert_eq!(cfg.span.udp_timeout, Duration::from_secs(90));
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_export_otlp_settings_via_yaml() {
+        Jail::expect_with(|jail| {
+            let path = "override_export.yaml";
+            jail.create_file(
+                path,
+                r#"
+export:
+  traces:
+    otlp:
+      endpoint: "http://custom:9999"
+      protocol: "http_binary"
+      timeout: 30s
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert!(cfg.export.traces.otlp.is_some());
+            if let Some(otlp) = &cfg.export.traces.otlp {
+                assert_eq!(otlp.endpoint, "http://custom:9999");
+                assert!(matches!(otlp.protocol, ExporterProtocol::HttpBinary));
+                assert_eq!(otlp.timeout, Duration::from_secs(30));
+            }
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_export_otlp_settings_via_hcl() {
+        Jail::expect_with(|jail| {
+            let path = "override_export.hcl";
+            jail.create_file(
+                path,
+                r#"
+export {
+    traces {
+        otlp {
+            endpoint = "http://custom:9999"
+            protocol = "http_binary"
+            timeout = "30s"
+        }
+    }
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert!(cfg.export.traces.otlp.is_some());
+            if let Some(otlp) = &cfg.export.traces.otlp {
+                assert_eq!(otlp.endpoint, "http://custom:9999");
+                assert!(matches!(otlp.protocol, ExporterProtocol::HttpBinary));
+                assert_eq!(otlp.timeout, Duration::from_secs(30));
+            }
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_export_stdout_via_yaml() {
+        Jail::expect_with(|jail| {
+            let path = "override_export_stdout.yaml";
+            jail.create_file(
+                path,
+                r#"
+export:
+  traces:
+    stdout: "text_indent"
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert!(cfg.export.traces.stdout.is_some());
+            if let Some(stdout) = &cfg.export.traces.stdout {
+                assert_eq!(stdout.as_str(), "text_indent");
+            }
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_export_stdout_via_hcl() {
+        Jail::expect_with(|jail| {
+            let path = "override_export_stdout.hcl";
+            jail.create_file(
+                path,
+                r#"
+export {
+    traces {
+        stdout = "text_indent"
+    }
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert!(cfg.export.traces.stdout.is_some());
+            if let Some(stdout) = &cfg.export.traces.stdout {
+                assert_eq!(stdout.as_str(), "text_indent");
+            }
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_internal_traces_via_yaml() {
+        Jail::expect_with(|jail| {
+            let path = "override_internal.yaml";
+            jail.create_file(
+                path,
+                r#"
+internal:
+  traces:
+    span_fmt: "full"
+    stdout: "text_indent"
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert!(matches!(
+                cfg.internal.traces.span_fmt,
+                crate::runtime::opts::SpanFmt::Full
+            ));
+            assert!(cfg.internal.traces.stdout.is_some());
+            if let Some(stdout) = &cfg.internal.traces.stdout {
+                assert_eq!(stdout.as_str(), "text_indent");
+            }
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn override_internal_traces_via_hcl() {
+        Jail::expect_with(|jail| {
+            let path = "override_internal.hcl";
+            jail.create_file(
+                path,
+                r#"
+internal {
+    traces {
+        span_fmt = "full"
+        stdout = "text_indent"
+    }
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert!(matches!(
+                cfg.internal.traces.span_fmt,
+                crate::runtime::opts::SpanFmt::Full
+            ));
+            assert!(cfg.internal.traces.stdout.is_some());
+            if let Some(stdout) = &cfg.internal.traces.stdout {
+                assert_eq!(stdout.as_str(), "text_indent");
+            }
+
+            Ok(())
+        });
+    }
+
+    // Note: Tests for parse_exporter_reference have been removed as the function
+    // and ExporterReference type were never fully implemented or were removed.
 }

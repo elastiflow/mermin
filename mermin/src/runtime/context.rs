@@ -2,20 +2,23 @@ use std::{error::Error, fmt};
 
 use clap::Parser;
 
-use crate::runtime::{cli::Cli, conf::ConfError, props::Properties};
+use crate::runtime::{
+    cli::Cli,
+    conf::{Conf, ConfError},
+};
 
 pub struct Context {
     #[allow(dead_code)]
     pub cli: Cli,
-    pub properties: Properties,
+    pub conf: Conf,
 }
 
 impl Context {
     pub fn new() -> Result<Self, ContextError> {
         let cli = Cli::parse();
-        let (properties, cli) = Properties::new(cli)?;
+        let (conf, cli) = Conf::new(cli)?;
 
-        Ok(Context { cli, properties })
+        Ok(Context { cli, conf })
     }
 }
 

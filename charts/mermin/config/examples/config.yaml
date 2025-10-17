@@ -1,282 +1,267 @@
-agent:
-  traces:
-    main:
-      association_destination: association.k8s_flow_attributes.destination
-      association_source: association.k8s_flow_attributes.source
-      destination: flow.span.destination
-      discovery_owner: discovery.k8s_owner.main
-      discovery_selector: discovery.k8s_selector.main
-      exclude_network_transports: []
-      exclude_network_types: []
-      exporters:
-        - exporter.stdout.json
-        - exporter.otlp.main
-      flow_connection: flow.connection.main
-      include_network_transports: []
-      include_network_types: []
-      k8s:
-        selectors:
-          - kind: Service
-          - kind: Endpoint
-          - kind: EndpointSlice
-          - kind: Gateway
-          - kind: Ingress
-          - kind: Pod
-          - kind: ReplicaSet
-          - kind: Deployment
-          - kind: Daemonset
-          - kind: StatefulSet
-          - kind: Job
-          - kind: CronJob
-          - kind: NetworkPolicy
-      network_interface:
-        exclude_names: []
-        include_names: []
-      source: flow.span.source
-association:
-  k8s_flow_attributes:
-    destination:
+api:
+  enabled: true
+  listen_address: 0.0.0.0
+  port: 8080
+attributes:
+  destination:
+    k8s:
       association:
-        - sources:
+        endpoint:
+          sources:
             - from: flow
               name: destination.ip
               to:
-                - pod.status.podIP
-                - pod.status.podIPs[*]
-                - pod.status.hostIP
-                - pod.status.hostIPs[*]
+                - subsets[*].addresses[*].ip
             - from: flow
               name: destination.port
               to:
-                - pod.spec.containers[*].ports[*].containerPort
-                - pod.spec.containers[*].ports[*].hostPort
+                - subsets[*].ports[*].port
             - from: flow
               name: network.transport
               to:
-                - pod.spec.containers[*].ports[*].protocol
-        - sources:
+                - subsets[*].ports[*].protocol
+        endpointslice:
+          sources:
             - from: flow
               name: destination.ip
               to:
-                - node.status.addresses[*].address
-        - sources:
-            - from: flow
-              name: destination.ip
-              to:
-                - service.spec.clusterIP
-                - service.spec.clusterIPs[*]
-                - service.spec.externalIPs[*]
-                - service.spec.loadBalancerIP
-                - service.spec.externalName
+                - endpoints[*].addresses[*]
             - from: flow
               name: destination.port
               to:
-                - service.spec.ports[*].port
+                - ports[*].port
             - from: flow
               name: network.transport
               to:
-                - service.spec.ports[*].protocol
+                - ports[*].protocol
+        gateway:
+          sources:
+            - from: flow
+              name: destination.ip
+              to:
+                - spec.addresses[*].value
+                - status.addresses[*].value
+            - from: flow
+              name: destination.port
+              to:
+                - spec.listeners[*].port
+        ingress:
+          sources:
+            - from: flow
+              name: destination.ip
+              to:
+                - status.loadBalancer.ingress[*].ip
+                - status.loadBalancer.ingress[*].hostname
+            - from: flow
+              name: destination.port
+              to:
+                - spec.defaultBackend.service.port
+                - spec.rules[*].http.paths[*].backend.service.port.number
+        networkpolicy:
+          sources:
+            - from: flow
+              name: destination.ip
+              to:
+                - spec.ingress[*].from[*].ipBlock.cidr
+                - spec.egress[*].to[*].ipBlock.cidr
+            - from: flow
+              name: destination.port
+              to:
+                - spec.ingress[*].ports[*].port
+                - spec.egress[*].ports[*].port
+            - from: flow
+              name: network.transport
+              to:
+                - spec.ingress[*].ports[*].protocol
+                - spec.egress[*].ports[*].protocol
+        node:
+          sources:
+            - from: flow
+              name: destination.ip
+              to:
+                - status.addresses[*].address
+        pod:
+          sources:
+            - from: flow
+              name: destination.ip
+              to:
+                - status.podIP
+                - status.podIPs[*]
+                - status.hostIP
+                - status.hostIPs[*]
+            - from: flow
+              name: destination.port
+              to:
+                - spec.containers[*].ports[*].containerPort
+                - spec.containers[*].ports[*].hostPort
+            - from: flow
+              name: network.transport
+              to:
+                - spec.containers[*].ports[*].protocol
+        service:
+          sources:
+            - from: flow
+              name: destination.ip
+              to:
+                - spec.clusterIP
+                - spec.clusterIPs[*]
+                - spec.externalIPs[*]
+                - spec.loadBalancerIP
+                - spec.externalName
+            - from: flow
+              name: destination.port
+              to:
+                - spec.ports[*].port
+            - from: flow
+              name: network.transport
+              to:
+                - spec.ports[*].protocol
             - from: flow
               name: network.type
               to:
-                - service.spec.ipFamilies[*]
-        - sources:
-            - from: flow
-              name: destination.ip
-              to:
-                - endpoint.subsets[*].addresses[*].ip
-            - from: flow
-              name: destination.port
-              to:
-                - endpoint.subsets[*].ports[*].port
-            - from: flow
-              name: network.transport
-              to:
-                - endpoint.subsets[*].ports[*].protocol
-        - sources:
-            - from: flow
-              name: destination.ip
-              to:
-                - endpointslice.endpoints[*].addresses[*]
-            - from: flow
-              name: destination.port
-              to:
-                - endpointslice.ports[*].port
-            - from: flow
-              name: network.transport
-              to:
-                - endpointslice.ports[*].protocol
-        - sources:
-            - from: flow
-              name: destination.ip
-              to:
-                - ingress.status.loadBalancer.ingress[*].ip
-                - ingress.status.loadBalancer.ingress[*].hostname
-            - from: flow
-              name: destination.port
-              to:
-                - ingress.spec.defaultBackend.service.port
-                - ingress.spec.rules[*].http.paths[*].backend.service.port.number
-        - sources:
-            - from: flow
-              name: destination.ip
-              to:
-                - gateway.spec.addresses[*].value
-                - gateway.status.addresses[*].value
-            - from: flow
-              name: destination.port
-              to:
-                - gateway.spec.listeners[*].port
-        - sources:
-            - from: flow
-              name: destination.ip
-              to:
-                - networkpolicy.spec.ingress[*].from[*].ipBlock.cidr
-                - networkpolicy.spec.egress[*].to[*].ipBlock.cidr
-            - from: flow
-              name: destination.port
-              to:
-                - networkpolicy.spec.ingress[*].ports[*].port
-                - networkpolicy.spec.egress[*].ports[*].port
-            - from: flow
-              name: network.transport
-              to:
-                - networkpolicy.spec.ingress[*].ports[*].protocol
-                - networkpolicy.spec.egress[*].ports[*].protocol
+                - spec.ipFamilies[*]
       extract:
         metadata:
           - "[*].metadata.name"
           - "[*].metadata.namespace"
           - pod.metadata.uid
-    source:
+  source:
+    k8s:
       association:
-        - sources:
+        endpoint:
+          sources:
             - from: flow
               name: source.ip
               to:
-                - pod.status.podIP
-                - pod.status.podIPs[*]
-                - pod.status.hostIP
-                - pod.status.hostIPs[*]
+                - subsets[*].addresses[*].ip
             - from: flow
               name: source.port
               to:
-                - pod.spec.containers[*].ports[*].containerPort
-                - pod.spec.containers[*].ports[*].hostPort
+                - subsets[*].ports[*].port
             - from: flow
               name: network.transport
               to:
-                - pod.spec.containers[*].ports[*].protocol
-        - sources:
+                - subsets[*].ports[*].protocol
+        endpointslice:
+          sources:
             - from: flow
               name: source.ip
               to:
-                - node.status.addresses[*].address
-        - sources:
-            - from: flow
-              name: source.ip
-              to:
-                - service.spec.clusterIP
-                - service.spec.clusterIPs[*]
-                - service.spec.externalIPs[*]
-                - service.spec.loadBalancerIP
-                - service.spec.externalName
+                - endpoints[*].addresses[*]
             - from: flow
               name: source.port
               to:
-                - service.spec.ports[*].port
+                - ports[*].port
             - from: flow
               name: network.transport
               to:
-                - service.spec.ports[*].protocol
+                - ports[*].protocol
             - from: flow
               name: network.type
               to:
-                - service.spec.ipFamilies[*]
-        - sources:
+                - addressType
+        gateway:
+          sources:
             - from: flow
               name: source.ip
               to:
-                - endpoint.subsets[*].addresses[*].ip
+                - spec.addresses[*].value
+                - status.addresses[*].value
             - from: flow
               name: source.port
               to:
-                - endpoint.subsets[*].ports[*].port
-            - from: flow
-              name: network.transport
-              to:
-                - endpoint.subsets[*].ports[*].protocol
-        - sources:
+                - spec.listeners[*].port
+        ingress:
+          sources:
             - from: flow
               name: source.ip
               to:
-                - endpointslice.endpoints[*].addresses[*]
+                - status.loadBalancer.ingress[*].ip
+                - status.loadBalancer.ingress[*].hostname
             - from: flow
               name: source.port
               to:
-                - endpointslice.ports[*].port
+                - spec.defaultBackend.service.port
+                - spec.rules[*].http.paths[*].backend.service.port.number
+        networkpolicy:
+          sources:
+            - from: flow
+              name: source.ip
+              to:
+                - spec.ingress[*].from[*].ipBlock.cidr
+                - spec.egress[*].to[*].ipBlock.cidr
+            - from: flow
+              name: source.port
+              to:
+                - spec.ingress[*].ports[*].port
+                - spec.egress[*].ports[*].port
             - from: flow
               name: network.transport
               to:
-                - endpointslice.ports[*].protocol
+                - spec.ingress[*].ports[*].protocol
+                - spec.egress[*].ports[*].protocol
+        node:
+          sources:
+            - from: flow
+              name: source.ip
+              to:
+                - status.addresses[*].address
+        pod:
+          sources:
+            - from: flow
+              name: source.ip
+              to:
+                - status.podIP
+                - status.podIPs[*]
+                - status.hostIP
+                - status.hostIPs[*]
+            - from: flow
+              name: source.port
+              to:
+                - spec.containers[*].ports[*].containerPort
+                - spec.containers[*].ports[*].hostPort
+            - from: flow
+              name: network.transport
+              to:
+                - spec.containers[*].ports[*].protocol
+        service:
+          sources:
+            - from: flow
+              name: source.ip
+              to:
+                - spec.clusterIP
+                - spec.clusterIPs[*]
+                - spec.externalIPs[*]
+                - spec.loadBalancerIP
+                - spec.externalName
+            - from: flow
+              name: source.port
+              to:
+                - spec.ports[*].port
+            - from: flow
+              name: network.transport
+              to:
+                - spec.ports[*].protocol
             - from: flow
               name: network.type
               to:
-                - endpointslice.addressType
-        - sources:
-            - from: flow
-              name: source.ip
-              to:
-                - ingress.status.loadBalancer.ingress[*].ip
-                - ingress.status.loadBalancer.ingress[*].hostname
-            - from: flow
-              name: source.port
-              to:
-                - ingress.spec.defaultBackend.service.port
-                - ingress.spec.rules[*].http.paths[*].backend.service.port.number
-        - sources:
-            - from: flow
-              name: source.ip
-              to:
-                - gateway.spec.addresses[*].value
-                - gateway.status.addresses[*].value
-            - from: flow
-              name: source.port
-              to:
-                - gateway.spec.listeners[*].port
-        - sources:
-            - from: flow
-              name: source.ip
-              to:
-                - networkpolicy.spec.ingress[*].from[*].ipBlock.cidr
-                - networkpolicy.spec.egress[*].to[*].ipBlock.cidr
-            - from: flow
-              name: source.port
-              to:
-                - networkpolicy.spec.ingress[*].ports[*].port
-                - networkpolicy.spec.egress[*].ports[*].port
-            - from: flow
-              name: network.transport
-              to:
-                - networkpolicy.spec.ingress[*].ports[*].protocol
-                - networkpolicy.spec.egress[*].ports[*].protocol
+                - spec.ipFamilies[*]
       extract:
         metadata:
           - "[*].metadata.name"
           - "[*].metadata.namespace"
           - "[*].metadata.uid"
+auto_reload: false
 discovery:
-  k8s_owner:
-    main:
-      exclude_kinds:
-        - EndpointSlice
-      include_kinds:
-        - Service
-      max_depth: 5
-      walk_max_depth: 10
-  k8s_selector:
-    main:
-      k8s_object:
+  informer:
+    k8s:
+      owner_relations:
+        exclude_kinds:
+          - EndpointSlice
+        include_kinds:
+          - Service
+        max_depth: 5
+      selector_relations:
         - kind: NetworkPolicy
           selector_match_expressions_field: spec.podSelector.matchExpressions
           selector_match_labels_field: spec.podSelector.matchLabels
@@ -284,41 +269,105 @@ discovery:
         - kind: Service
           selector_match_labels_field: spec.selector
           to: Pod
-exporter:
-  otlp:
-    main:
-      scheme: https
-      address: example.com
-      port: 443
-      protocol: grpc
-      connectionTimeout: "10s"
+      selectors:
+        - kind: Service
+        - kind: Endpoint
+        - kind: EndpointSlice
+        - kind: Gateway
+        - kind: Ingress
+        - kind: Pod
+        - kind: ReplicaSet
+        - kind: Deployment
+        - kind: Daemonset
+        - kind: StatefulSet
+        - kind: Job
+        - kind: CronJob
+        - kind: NetworkPolicy
+  instrument:
+    interfaces:
+      - eth0
+export:
+  traces:
+    otlp:
       auth:
         basic:
-          pass: "${PASSWORD}"
-          user: username
+          pass: PASSWORD
+          user: USERNAME
+      endpoint: http://otelcol:4317
+      protocol: grpc
+      timeout: 10s
       tls:
         ca_cert: /etc/certs/ca.crt
         client_cert: /etc/certs/cert.crt
         client_key: /etc/certs/cert.key
-        enabled: true
         insecure: false
-  stdout:
-    json:
-      format: json
-flow:
-  connection:
-    main:
-      exclude_states: []
-      include_states: []
-  span:
-    destination:
-      exclude_cidrs: []
-      exclude_ports: []
-      include_cidrs: []
-      include_ports: []
-    source:
-      exclude_cidrs: []
-      exclude_ports: []
-      include_cidrs: []
-      include_ports: []
-global_opt: global_opt_value
+    stdout: ""
+filter:
+  destination:
+    address:
+      match: ""
+      not_match: ""
+    port:
+      match: ""
+      not_match: ""
+  flow:
+    connection:
+      state:
+        match: ""
+        not_match: ""
+  network:
+    transport:
+      match: ""
+      not_match: ""
+    type:
+      match: ""
+      not_match: ""
+  source:
+    address:
+      match: ""
+      not_match: ""
+    port:
+      match: ""
+      not_match: ""
+informer:
+  k8s:
+    informers_resync_period: 30m
+    informers_sync_timeout: 30s
+    kubeconfig_path: ""
+internal:
+  traces:
+    otlp:
+      auth:
+        basic:
+          pass: PASSWORD
+          user: USERNAME
+      endpoint: http://otelcol:4317
+      protocol: grpc
+      timeout: 10s
+      tls:
+        ca_cert: /etc/certs/ca.crt
+        client_cert: /etc/certs/cert.crt
+        client_key: /etc/certs/cert.key
+        insecure: false
+    span_format: full
+    stdout: ""
+log_level: info
+metrics:
+  enabled: true
+  listen_address: 0.0.0.0
+  port: 10250
+packet_channel_capacity: 1024
+packet_worker_count: 2
+parser:
+  geneve_port: 6081
+  vxlan_port: 4789
+  wireguard_port: 51820
+shutdown_timeout: 5s
+span:
+  generic_timeout: 30s
+  icmp_timeout: 10s
+  max_record_interval: 60s
+  tcp_fin_timeout: 5s
+  tcp_rst_timeout: 5s
+  tcp_timeout: 20s
+  udp_timeout: 60s

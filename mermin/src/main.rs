@@ -12,7 +12,7 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use aya::{
-    maps::RingBuf,
+    maps::{Array, RingBuf},
     programs::{SchedClassifier, TcAttachType, tc},
 };
 use mermin_common::PacketMeta;
@@ -22,7 +22,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     health::{HealthState, start_api_server},
-    k8s::{attributor::Attributor, parser::attribute_flow_span},
+    k8s::{decorator::Decorator, parser::decorate_flow_span},
     otlp::{
         provider::{init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
@@ -39,25 +39,20 @@ async fn main() -> Result<()> {
     // TODO: listen for SIGTERM `kill -TERM $(pidof mermin)` to gracefully shutdown the eBPF program and all configuration.
     // TODO: do not reload global configuration found in CLI
     let runtime = Context::new()?;
-    let Context {
-        properties: props, ..
-    } = runtime;
-
-    let span_level = props.internal_trace.span_level;
-    let (otlp_agent_exporters, stdout_agent_exporters) = props.get_agent_exporters();
-    let (otlp_internal_exporters, stdout_internal_exporters) = props.get_internal_exporters();
+    let Context { conf, .. } = runtime;
 
     let exporter: Arc<dyn TraceableExporter> = {
         init_internal_tracing(
-            otlp_internal_exporters,
-            stdout_internal_exporters,
-            props.log_level,
-            span_level,
+            conf.log_level,
+            conf.internal.traces.span_fmt,
+            conf.internal.traces.stdout,
+            conf.internal.traces.otlp.clone(),
         )
         .await?;
-        if !otlp_agent_exporters.is_empty() || !stdout_agent_exporters.is_empty() {
+
+        if conf.export.traces.stdout.is_some() || conf.export.traces.otlp.is_some() {
             let app_tracer_provider =
-                init_provider(otlp_agent_exporters, stdout_agent_exporters).await;
+                init_provider(conf.export.traces.stdout, conf.export.traces.otlp.clone()).await;
             info!("initialized configured exporters");
             Arc::new(TraceExporterAdapter::new(app_tracer_provider))
         } else {
@@ -90,11 +85,27 @@ async fn main() -> Result<()> {
         warn!("failed to initialize ebpf logger: {e}");
     }
 
+    // Configure parser options for tunnel port detection
+    let mut parser_options_map: Array<_, u16> = ebpf
+        .take_map("PARSER_OPTIONS")
+        .ok_or_else(|| anyhow!("PARSER_OPTIONS map not present in the object"))?
+        .try_into()?;
+
+    // Set tunnel ports in the map (indices: 0=geneve, 1=vxlan, 2=wireguard)
+    parser_options_map.set(0, conf.parser.geneve_port, 0)?;
+    parser_options_map.set(1, conf.parser.vxlan_port, 0)?;
+    parser_options_map.set(2, conf.parser.wireguard_port, 0)?;
+
+    info!(
+        "configured tunnel ports - geneve: {}, vxlan: {}, wireguard: {}",
+        conf.parser.geneve_port, conf.parser.vxlan_port, conf.parser.wireguard_port
+    );
+
     let health_state = HealthState::default();
 
-    if props.api.enabled {
+    if conf.api.enabled {
         let health_state_clone = health_state.clone();
-        let api_conf = props.api.clone();
+        let api_conf = conf.api.clone();
 
         tokio::spawn(async move {
             if let Err(e) = start_api_server(health_state_clone, &api_conf).await {
@@ -112,8 +123,7 @@ async fn main() -> Result<()> {
             .try_into()?;
         program.load()?;
 
-        props
-            .resolved_interfaces
+        conf.resolved_interfaces
             .iter()
             .try_for_each(|iface| -> Result<()> {
                 // error adding clsact to the interface if it is already added is harmless
@@ -143,32 +153,32 @@ async fn main() -> Result<()> {
     let iface_map: HashMap<u32, String> = {
         let mut map = HashMap::new();
         for iface in datalink::interfaces() {
-            if props.resolved_interfaces.contains(&iface.name) {
+            if conf.resolved_interfaces.contains(&iface.name) {
                 map.insert(iface.index, iface.name.clone());
             }
         }
         map
     };
 
-    let (packet_meta_tx, packet_meta_rx) = mpsc::channel(props.packet_channel_capacity);
-    let (flow_span_tx, mut flow_span_rx) = mpsc::channel(props.packet_channel_capacity);
-    let (k8s_attributed_flow_span_tx, mut k8s_attributed_flow_span_rx) =
-        mpsc::channel(props.packet_channel_capacity);
+    let (packet_meta_tx, packet_meta_rx) = mpsc::channel(conf.packet_channel_capacity);
+    let (flow_span_tx, mut flow_span_rx) = mpsc::channel(conf.packet_channel_capacity);
+    let (k8s_decorated_flow_span_tx, mut k8s_decorated_flow_span_rx) =
+        mpsc::channel(conf.packet_channel_capacity);
 
     let flow_span_producer = FlowSpanProducer::new(
-        props.clone().span,
-        props.packet_channel_capacity,
-        props.packet_worker_count,
+        conf.clone().span,
+        conf.packet_channel_capacity,
+        conf.packet_worker_count,
         iface_map.clone(),
         packet_meta_rx,
         flow_span_tx,
     )?;
 
     info!("initializing k8s client");
-    let k8s_attributor = match Attributor::new(health_state.clone()).await {
-        Ok(attributor) => {
+    let k8s_decorator = match Decorator::new(health_state.clone()).await {
+        Ok(decorator) => {
             info!("k8s client initialized successfully and all caches are synced");
-            Some(Arc::new(attributor))
+            Some(Arc::new(decorator))
         }
         Err(e) => {
             error!(
@@ -181,33 +191,32 @@ async fn main() -> Result<()> {
         }
     };
 
-    let k8s_attributor_clone = k8s_attributor.clone();
+    let k8s_decorator_clone = k8s_decorator.clone();
     tokio::spawn(async move {
         while let Some(flow_span) = flow_span_rx.recv().await {
-            // Attempt K8s attribution for enhanced logging/debugging first
-            if let Some(attributor) = &k8s_attributor_clone {
-                match attribute_flow_span(&flow_span, attributor).await {
-                    Ok(attributed_flow_span) => {
-                        debug!("k8s attributed flow attributes: {attributed_flow_span:?}");
-                        if let Err(e) = k8s_attributed_flow_span_tx.send(attributed_flow_span).await
-                        {
+            // Attempt K8s decoration for enhanced logging/debugging first
+            if let Some(decorator) = &k8s_decorator_clone {
+                match decorate_flow_span(&flow_span, decorator).await {
+                    Ok(decorated_flow_span) => {
+                        debug!("k8s decorated flow attributes: {decorated_flow_span:?}");
+                        if let Err(e) = k8s_decorated_flow_span_tx.send(decorated_flow_span).await {
                             error!(
-                                "failed to send attributed flow attributes to k8s attribution channel: {e}"
+                                "failed to send decorated flow attributes to k8s decoration channel: {e}"
                             );
                         }
                     }
                     Err(e) => {
-                        debug!("failed to attribute flow attributes with k8s metadata: {e}");
+                        debug!("failed to decorate flow attributes with k8s metadata: {e}");
                     }
                 }
             } else {
                 debug!(
-                    "skipping k8s attribution for flow attributes with community id {}: k8s client not available",
+                    "skipping k8s decoration for flow attributes with community id {}: k8s client not available",
                     flow_span.attributes.flow_community_id
                 );
             }
         }
-        debug!("flow attributes attribution task exiting");
+        debug!("flow attributes decoration task exiting");
     });
 
     tokio::spawn(async move {
@@ -244,7 +253,7 @@ async fn main() -> Result<()> {
                     unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const PacketMeta) };
 
                 if let Err(e) = packet_meta_tx.send(packet_meta).await {
-                    warn!("failed to send packet to k8s attribution channel: {e}");
+                    warn!("failed to send packet to k8s decoration channel: {e}");
                 }
             }
 
@@ -253,8 +262,8 @@ async fn main() -> Result<()> {
     });
 
     tokio::spawn(async move {
-        while let Some(k8s_attributed_flow_span) = k8s_attributed_flow_span_rx.recv().await {
-            let traceable: TraceableRecord = Arc::new(k8s_attributed_flow_span);
+        while let Some(k8s_decorated_flow_span) = k8s_decorated_flow_span_rx.recv().await {
+            let traceable: TraceableRecord = Arc::new(k8s_decorated_flow_span);
             debug!("exporting flow spans");
             exporter.export(traceable).await;
         }
