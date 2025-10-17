@@ -56,6 +56,5 @@ exporter "otlp" "main" {
 
   tls {
     insecure    = true
-    enabled     = false
   }
 }
