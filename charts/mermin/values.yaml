@@ -104,18 +104,15 @@ tolerations:
 
 affinity: {}
 
-# Configuration is done via ConfigMap, you may:
-#   - use default config
-#   - set custom config via "--set-file config.source=${PATH_RELATIVE_TO_PWD}"
-#   - Define "content" key (see example)
 config:
   # Inject config hash to the pod label to force pod restart
   restartOnConfigChange: true
   # Set to true to allow enable host's process list (/proc) for mapping kernel events to specific processes.
   hostPidEnrichment: true
 
-  # If "content" is undefined, default config values is used
-  # Examples of defining custom config:
+  # If "content" is undefined, default config values are used (empty config)
+  # Examples of how to define a custom config:
+  # set a custom config via "--set-file config.content=${PATH_RELATIVE_TO_PWD}"
   # Get from file:
   # content: '{{ .Files.Get "config/config.hcl" }}'
   # Define config inline:
