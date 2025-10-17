@@ -1,2 +1,2 @@
-pub mod attributor;
+pub mod decorator;
 pub mod parser;

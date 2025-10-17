@@ -22,7 +22,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     health::{HealthState, start_api_server},
-    k8s::{attributor::Attributor, parser::attribute_flow_span},
+    k8s::{decorator::Decorator, parser::decorate_flow_span},
     otlp::{
         provider::{init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
@@ -162,7 +162,7 @@ async fn main() -> Result<()> {
 
     let (packet_meta_tx, packet_meta_rx) = mpsc::channel(conf.packet_channel_capacity);
     let (flow_span_tx, mut flow_span_rx) = mpsc::channel(conf.packet_channel_capacity);
-    let (k8s_attributed_flow_span_tx, mut k8s_attributed_flow_span_rx) =
+    let (k8s_decorated_flow_span_tx, mut k8s_decorated_flow_span_rx) =
         mpsc::channel(conf.packet_channel_capacity);
 
     let flow_span_producer = FlowSpanProducer::new(
@@ -175,10 +175,10 @@ async fn main() -> Result<()> {
     )?;
 
     info!("initializing k8s client");
-    let k8s_attributor = match Attributor::new(health_state.clone()).await {
-        Ok(attributor) => {
+    let k8s_decorator = match Decorator::new(health_state.clone()).await {
+        Ok(decorator) => {
             info!("k8s client initialized successfully and all caches are synced");
-            Some(Arc::new(attributor))
+            Some(Arc::new(decorator))
         }
         Err(e) => {
             error!(
@@ -191,33 +191,32 @@ async fn main() -> Result<()> {
         }
     };
 
-    let k8s_attributor_clone = k8s_attributor.clone();
+    let k8s_decorator_clone = k8s_decorator.clone();
     tokio::spawn(async move {
         while let Some(flow_span) = flow_span_rx.recv().await {
-            // Attempt K8s attribution for enhanced logging/debugging first
-            if let Some(attributor) = &k8s_attributor_clone {
-                match attribute_flow_span(&flow_span, attributor).await {
-                    Ok(attributed_flow_span) => {
-                        debug!("k8s attributed flow attributes: {attributed_flow_span:?}");
-                        if let Err(e) = k8s_attributed_flow_span_tx.send(attributed_flow_span).await
-                        {
+            // Attempt K8s decoration for enhanced logging/debugging first
+            if let Some(decorator) = &k8s_decorator_clone {
+                match decorate_flow_span(&flow_span, decorator).await {
+                    Ok(decorated_flow_span) => {
+                        debug!("k8s decorated flow attributes: {decorated_flow_span:?}");
+                        if let Err(e) = k8s_decorated_flow_span_tx.send(decorated_flow_span).await {
                             error!(
-                                "failed to send attributed flow attributes to k8s attribution channel: {e}"
+                                "failed to send decorated flow attributes to k8s decoration channel: {e}"
                             );
                         }
                     }
                     Err(e) => {
-                        debug!("failed to attribute flow attributes with k8s metadata: {e}");
+                        debug!("failed to decorate flow attributes with k8s metadata: {e}");
                     }
                 }
             } else {
                 debug!(
-                    "skipping k8s attribution for flow attributes with community id {}: k8s client not available",
+                    "skipping k8s decoration for flow attributes with community id {}: k8s client not available",
                     flow_span.attributes.flow_community_id
                 );
             }
         }
-        debug!("flow attributes attribution task exiting");
+        debug!("flow attributes decoration task exiting");
     });
 
     tokio::spawn(async move {
@@ -254,7 +253,7 @@ async fn main() -> Result<()> {
                     unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const PacketMeta) };
 
                 if let Err(e) = packet_meta_tx.send(packet_meta).await {
-                    warn!("failed to send packet to k8s attribution channel: {e}");
+                    warn!("failed to send packet to k8s decoration channel: {e}");
                 }
             }
 
@@ -263,8 +262,8 @@ async fn main() -> Result<()> {
     });
 
     tokio::spawn(async move {
-        while let Some(k8s_attributed_flow_span) = k8s_attributed_flow_span_rx.recv().await {
-            let traceable: TraceableRecord = Arc::new(k8s_attributed_flow_span);
+        while let Some(k8s_decorated_flow_span) = k8s_decorated_flow_span_rx.recv().await {
+            let traceable: TraceableRecord = Arc::new(k8s_decorated_flow_span);
             debug!("exporting flow spans");
             exporter.export(traceable).await;
         }
