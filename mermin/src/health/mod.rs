@@ -16,6 +16,7 @@ pub use error::HealthError;
 use serde_json::json;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
+use tracing::info;
 
 use crate::runtime::conf::ApiConf;
 
@@ -116,7 +117,11 @@ pub async fn start_api_server(state: HealthState, config: &ApiConf) -> Result<()
         .await
         .map_err(|e| HealthError::bind_address(&bind_address, e))?;
 
-    log::info!("API server with health checks listening on {bind_address}");
+    info!(
+        event.name = "api.server_listening",
+        net.listen.address = %bind_address,
+        "api server with health checks started"
+    );
     axum::serve(listener, app)
         .await
         .map_err(HealthError::ServeError)?;

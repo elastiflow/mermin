@@ -22,6 +22,7 @@ use rustls::{
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Identity};
 use tracing::{Level, debug, info, level_filters::LevelFilter, warn};
 use tracing_subscriber::{
+    EnvFilter,
     fmt::{Layer, format::FmtSpan},
     prelude::__tracing_subscriber_SubscriberExt,
     util::SubscriberInitExt,
@@ -134,8 +135,10 @@ impl ProviderBuilder {
     }
 
     pub async fn with_otlp_exporter(self, options: OtlpExporterOptions) -> Result<Self, OtlpError> {
-        debug!("creating otlp exporter with options: {options:?}");
-
+        debug!(
+            event.name = "exporter.otlp.creating",
+            "creating otlp exporter"
+        );
         let endpoint = options.build_endpoint();
         let uri: Uri = endpoint.parse().map_err(|e| {
             OtlpError::invalid_endpoint(&endpoint, format!("failed to parse as uri: {e}"))
@@ -159,20 +162,22 @@ impl ProviderBuilder {
                     "failed to generate authentication headers: {e}"
                 ))
             })?;
-            info!("applied authentication headers to otlp exporter");
+            info!(
+                event.name = "exporter.otlp.auth.configured",
+                exporter.otlp.auth.header_count = auth_headers.len(),
+                "authentication headers configured for otlp exporter"
+            );
             // TODO: Apply headers to the exporter builder - ENG-120
             // Note: The opentelemetry_otlp crate may need to be updated to support custom headers
             // For now, this is a placeholder for where header configuration would go
-            debug!(
-                "headers configured for otlp exporter ({} headers)",
-                auth_headers.len()
-            );
         }
 
         match builder.build() {
             Ok(exporter) => {
-                debug!("otlp exporter built successfully");
-
+                debug!(
+                    event.name = "exporter.otlp.build_success",
+                    "otlp exporter built successfully"
+                );
                 let batch_config = BatchConfigBuilder::default()
                     .with_max_export_batch_size(options.max_batch_size)
                     .with_scheduled_delay(options.max_batch_interval)
@@ -326,7 +331,11 @@ pub async fn init_provider(
     let mut provider = ProviderBuilder::new();
 
     if stdout.is_none() && otlp.is_none() {
-        warn!("no exporters configured");
+        warn!(
+            event.name = "exporter.misconfigured",
+            reason = "no_exporters_defined",
+            "no exporters configured; traces will not be exported"
+        );
         return Ok(provider.build());
     }
 
@@ -408,6 +417,13 @@ pub async fn init_internal_tracing(
 
     global::set_tracer_provider(provider);
     global::set_text_map_propagator(TraceContextPropagator::new());
+
+    info!(
+        event.name = "system.tracing_initialized",
+        system.log_level = %log_level,
+        "internal tracing and logging initialized"
+    );
+
     Ok(())
 }
 
