@@ -119,7 +119,7 @@ docker build -t mermin:latest --target runner-debug .
 kind load docker-image -n atlantis mermin:latest
 
 # 3. (optional) if you already have a Helm release, uninstall it first
-helm uninstall merminß
+helm uninstall mermin
 
 # 4b. Deploy mermin using Helm
 make helm-upgrade

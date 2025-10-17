@@ -118,12 +118,6 @@ jobs:
           target_commitish: ${{ github.ref_name }}
           preserve_order: true
           make_latest: true
-          files: ".cr-release-packages/*.tgz"
-      - name: Update GH pages index
-        run: |
-          mkdir .cr-index
-          cr index --push -t ${{ secrets.GITHUB_TOKEN }} --owner elastiflow --git-repo mermin
-#
 
   docker_build_push:
     name: Docker build/push
