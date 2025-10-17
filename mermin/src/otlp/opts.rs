@@ -130,7 +130,6 @@ impl std::str::FromStr for StdoutFmt {
 ///           user: foo
 ///           pass: env("MY_SECRET_PASS")
 ///       tls:
-///         enabled: true
 ///         insecure: false
 ///         ca_cert: /etc/certs/ca.crt
 ///         client_cert: /etc/certs/cert.crt
@@ -200,20 +199,17 @@ pub struct BasicAuthOptions {
 ///
 /// This struct defines the options for enabling and customizing TLS when connecting
 /// to telemetry backends (such as OTLP collectors). It allows specifying whether
-/// TLS is enabled, whether to skip certificate verification (insecure mode), and
-/// provides fields for custom certificate authority (CA) certificates and client
+/// to skip certificate verification (insecure mode) and provides fields
+/// for custom certificate authority (CA) certificates and client
 /// certificates/keys for mutual TLS authentication.
 ///
 /// # Fields
-/// - `enabled`: If true, TLS is enabled for the exporter connection.
 /// - `insecure`: If true, disables certificate verification (not recommended for production).
 /// - `ca_cert`: Optional path to a custom CA certificate file for server verification.
 /// - `client_cert`: Optional path to a client certificate file for mutual TLS.
 /// - `client_key`: Optional path to a client private key file for mutual TLS.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct TlsOptions {
-    /// Enable TLS for the exporter connection.
-    pub enabled: bool,
     /// Disable certificate verification (insecure mode).
     pub insecure: bool,
     /// Path to the CA certificate file for server verification.

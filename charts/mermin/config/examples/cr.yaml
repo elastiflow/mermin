@@ -258,5 +258,4 @@ spec:
     caCert: /etc/certs/ca.crt
     clientCert: /etc/certs/cert.crt
     clientKey: /etc/certs/cert.key
-    enabled: true
     insecure: false
