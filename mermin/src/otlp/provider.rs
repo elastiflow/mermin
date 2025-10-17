@@ -90,6 +90,26 @@ impl ProviderBuilder {
         match builder.build() {
             Ok(exporter) => {
                 debug!("otlp exporter built successfully");
+
+                // SAFETY: Setting environment variables before BatchSpanProcessor initialization.
+                // The OpenTelemetry SDK reads these values during processor construction.
+                // This is done early in the application lifecycle before any other threads are spawned.
+                unsafe {
+                    std::env::set_var(
+                        "OTEL_BSP_MAX_EXPORT_BATCH_SIZE",
+                        options.max_batch_size.to_string(),
+                    );
+                    std::env::set_var(
+                        "OTEL_BSP_SCHEDULE_DELAY",
+                        options.max_batch_interval.as_millis().to_string(),
+                    );
+                }
+
+                debug!(
+                    "batch config applied: max_batch_size={}, max_batch_interval={:?}",
+                    options.max_batch_size, options.max_batch_interval
+                );
+
                 let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio).build();
                 ProviderBuilder {
                     sdk_builder: self.sdk_builder.with_span_processor(processor),
@@ -102,8 +122,28 @@ impl ProviderBuilder {
         }
     }
 
-    pub fn with_stdout_exporter(self) -> ProviderBuilder {
+    pub fn with_stdout_exporter(
+        self,
+        max_batch_size: usize,
+        max_batch_interval: std::time::Duration,
+    ) -> ProviderBuilder {
         let exporter = opentelemetry_stdout::SpanExporter::default();
+
+        // SAFETY: Setting environment variables before BatchSpanProcessor initialization.
+        // The OpenTelemetry SDK reads these values during processor construction.
+        // This is done early in the application lifecycle before any other threads are spawned.
+        unsafe {
+            std::env::set_var("OTEL_BSP_MAX_EXPORT_BATCH_SIZE", max_batch_size.to_string());
+            std::env::set_var(
+                "OTEL_BSP_SCHEDULE_DELAY",
+                max_batch_interval.as_millis().to_string(),
+            );
+        }
+
+        debug!(
+            "batch config applied: max_batch_size={max_batch_size}, max_batch_interval={max_batch_interval:?}"
+        );
+
         let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio).build();
         ProviderBuilder {
             sdk_builder: self.sdk_builder.with_span_processor(processor),
@@ -126,12 +166,18 @@ pub async fn init_provider(
         return provider.build();
     }
 
+    let (batch_size, batch_interval) = if let Some(ref opts) = otlp {
+        (opts.max_batch_size, opts.max_batch_interval)
+    } else {
+        (512, std::time::Duration::from_secs(5))
+    };
+
     if let Some(otlp_opts) = otlp {
         provider = provider.with_otlp_exporter(otlp_opts.clone()).await;
     }
 
     if stdout.is_some() {
-        provider = provider.with_stdout_exporter();
+        provider = provider.with_stdout_exporter(batch_size, batch_interval);
     }
 
     provider.build()

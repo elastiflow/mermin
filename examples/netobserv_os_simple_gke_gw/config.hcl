@@ -62,6 +62,8 @@ export "traces" {
   //   endpoint = "http://otelcol:4317"
   //   protocol = "grpc"
   //   timeout  = "10s"
+  //   max_batch_size = 512
+  //   max_batch_interval = "5s"
 
   //   auth = {
   //     basic = {

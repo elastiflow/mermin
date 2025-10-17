@@ -118,29 +118,39 @@ impl std::str::FromStr for StdoutFmt {
 /// the network address and port of the OTLP endpoint, as well as optional authentication
 /// and TLS (Transport Layer Security) settings.
 ///
-/// # Example (YAML)
-/// ```yaml
-/// exporter:
-///   otlp:
-///     main:
-///       address: example.com
-///       port: 4317
-///       auth:
-///         basic:
-///           user: foo
-///           pass: env("MY_SECRET_PASS")
-///       tls:
-///         insecure: false
-///         ca_cert: /etc/certs/ca.crt
-///         client_cert: /etc/certs/cert.crt
-///         client_key: /etc/certs/cert.key
+/// # Example (HCL)
+/// ```hcl
+/// export "traces" {
+///   otlp = {
+///     endpoint = "http://otelcol:4317"
+///     protocol = "grpc"
+///     timeout = "10s"
+///     max_batch_size = 512
+///     max_batch_interval = "5s"
+///     auth = {
+///       basic = {
+///         user = "USERNAME"
+///         pass = "PASSWORD"
+///       }
+///     }
+///     tls = {
+///       insecure = false
+///       ca_cert = "/etc/certs/ca.crt"
+///       client_cert = "/etc/certs/cert.crt"
+///       client_key = "/etc/certs/cert.key"
+///     }
+///   }
+/// }
 /// ```
 ///
 /// # Fields
-/// - `address`: The hostname or IP address of the OTLP collector or backend.
-/// - `port`: The port number to connect to on the OTLP endpoint.
-/// - `auth`: Optional authentication configuration (e.g., basic auth).
-/// - `tls`: Optional TLS configuration for secure communication.
+/// - `endpoint`: The full OTLP endpoint URL (e.g., "http://localhost:4317")
+/// - `protocol`: The OTLP protocol to use (grpc or http_binary)
+/// - `timeout`: Request timeout duration
+/// - `auth`: Optional authentication configuration (e.g., basic auth)
+/// - `tls`: Optional TLS configuration for secure communication
+/// - `max_batch_size`: Maximum number of spans to batch before export (default: 512)
+/// - `max_batch_interval`: Maximum time to wait before exporting a batch (default: 5s)
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct OtlpExporterOptions {
     #[serde(default = "defaults::endpoint")]
@@ -151,6 +161,14 @@ pub struct OtlpExporterOptions {
     pub timeout: Duration,
     pub auth: Option<AuthOptions>,
     pub tls: Option<TlsOptions>,
+    /// Maximum number of spans to batch before forcing an export.
+    /// Corresponds to OTEL_BSP_MAX_EXPORT_BATCH_SIZE environment variable.
+    #[serde(default = "defaults::max_batch_size")]
+    pub max_batch_size: usize,
+    /// Maximum time to wait before exporting a batch, even if not full.
+    /// Corresponds to OTEL_BSP_SCHEDULE_DELAY environment variable.
+    #[serde(default = "defaults::max_batch_interval", with = "duration")]
+    pub max_batch_interval: Duration,
 }
 
 /// Authentication configuration for exporters.
@@ -316,6 +334,8 @@ mod defaults {
             timeout: timeout(),
             auth: None,
             tls: None,
+            max_batch_size: max_batch_size(),
+            max_batch_interval: max_batch_interval(),
         })
     }
     pub fn stdout() -> Option<StdoutFmt> {
@@ -329,6 +349,12 @@ mod defaults {
     }
     pub fn timeout() -> Duration {
         Duration::from_secs(10)
+    }
+    pub fn max_batch_size() -> usize {
+        512
+    }
+    pub fn max_batch_interval() -> Duration {
+        Duration::from_secs(5)
     }
 }
 
