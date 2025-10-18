@@ -134,10 +134,6 @@ impl ProviderBuilder {
             .with_max_export_timeout(max_export_timeout)
             .build();
 
-        debug!(
-            "batch config applied: max_batch_size={max_batch_size}, max_batch_interval={max_batch_interval:?}, max_queue_size={max_queue_size}, max_concurrent_exports={max_concurrent_exports}, max_export_timeout={max_export_timeout:?}"
-        );
-
         let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio)
             .with_batch_config(batch_config)
             .build();
