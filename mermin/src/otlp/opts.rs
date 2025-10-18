@@ -127,6 +127,9 @@ impl std::str::FromStr for StdoutFmt {
 ///     timeout = "10s"
 ///     max_batch_size = 512
 ///     max_batch_interval = "5s"
+///     max_queue_size = 2048
+///     max_concurrent_exports = 1
+///     max_export_timeout = "30s"
 ///     auth = {
 ///       basic = {
 ///         user = "USERNAME"
@@ -151,6 +154,9 @@ impl std::str::FromStr for StdoutFmt {
 /// - `tls`: Optional TLS configuration for secure communication
 /// - `max_batch_size`: Maximum number of spans to batch before export (default: 512)
 /// - `max_batch_interval`: Maximum time to wait before exporting a batch (default: 5s)
+/// - `max_queue_size`: Maximum queue size to buffer spans for delayed processing (default: 2048)
+/// - `max_concurrent_exports`: Maximum number of concurrent exports (default: 1, experimental)
+/// - `max_export_timeout`: Maximum duration to export a batch of data (default: 30s, experimental)
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct OtlpExporterOptions {
     #[serde(default = "defaults::endpoint")]
@@ -159,14 +165,18 @@ pub struct OtlpExporterOptions {
     pub protocol: ExporterProtocol,
     #[serde(default = "defaults::timeout", with = "duration")]
     pub timeout: Duration,
-    pub auth: Option<AuthOptions>,
-    pub tls: Option<TlsOptions>,
-    /// Corresponds to OTEL_BSP_MAX_EXPORT_BATCH_SIZE environment variable.
     #[serde(default = "defaults::max_batch_size")]
     pub max_batch_size: usize,
-    /// Corresponds to OTEL_BSP_SCHEDULE_DELAY environment variable.
     #[serde(default = "defaults::max_batch_interval", with = "duration")]
     pub max_batch_interval: Duration,
+    #[serde(default = "defaults::max_queue_size")]
+    pub max_queue_size: usize,
+    #[serde(default = "defaults::max_concurrent_exports")]
+    pub max_concurrent_exports: usize,
+    #[serde(default = "defaults::max_export_timeout", with = "duration")]
+    pub max_export_timeout: Duration,
+    pub auth: Option<AuthOptions>,
+    pub tls: Option<TlsOptions>,
 }
 
 /// Authentication configuration for exporters.
@@ -311,7 +321,7 @@ impl From<String> for ExporterProtocol {
     }
 }
 
-mod defaults {
+pub mod defaults {
     use std::time::Duration;
 
     use crate::otlp::opts::{
@@ -334,6 +344,9 @@ mod defaults {
             tls: None,
             max_batch_size: max_batch_size(),
             max_batch_interval: max_batch_interval(),
+            max_queue_size: max_queue_size(),
+            max_concurrent_exports: max_concurrent_exports(),
+            max_export_timeout: max_export_timeout(),
         })
     }
     pub fn stdout() -> Option<StdoutFmt> {
@@ -353,6 +366,15 @@ mod defaults {
     }
     pub fn max_batch_interval() -> Duration {
         Duration::from_secs(5)
+    }
+    pub fn max_queue_size() -> usize {
+        2048
+    }
+    pub fn max_concurrent_exports() -> usize {
+        1
+    }
+    pub fn max_export_timeout() -> Duration {
+        Duration::from_millis(30000)
     }
 }
 
