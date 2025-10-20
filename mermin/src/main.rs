@@ -174,7 +174,7 @@ async fn run() -> Result<()> {
 
         if conf.export.traces.stdout.is_some() || conf.export.traces.otlp.is_some() {
             let app_tracer_provider =
-                init_provider(conf.export.traces.stdout, conf.export.traces.otlp.clone()).await;
+                init_provider(conf.export.traces.stdout, conf.export.traces.otlp.clone()).await?;
             info!(
                 event.name = "exporter.initialized",
                 "initialized configured trace exporters"
