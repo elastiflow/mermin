@@ -316,16 +316,48 @@ filter:
       match: ""
       not_match: ""
   flow:
-    connection:
-      state:
-        match: ""
-        not_match: ""
+    connection_state:
+      match: ""
+      not_match: ""
+    end_reason:
+      match: "" # e.g., "end_of_flow_detected"
+      not_match: ""
+    ip_dscp_name:
+      match: "" # e.g., "ef, af11" (Expedited Forwarding, Assured Forwarding)
+      not_match: ""
+    ip_ecn_name:
+      match: "" # e.g., "ce" (Congestion Experienced)
+      not_match: ""
+    ip_ttl:
+      match: "" # e.g., "64, 128"
+      not_match: ""
+    ip_flow_label:
+      match: "" # e.g., "1000-2000"
+      not_match: ""
+    icmp_type_name:
+      match: "" # e.g., "echo_request, echo_reply"
+      not_match: ""
+    icmp_code_name:
+      match: "" # e.g., "port_unreachable"
+      not_match: ""
+    tcp_flags:
+      match: "" # e.g., "syn, ack"
+      not_match: ""
   network:
     transport:
       match: ""
       not_match: ""
     type:
       match: ""
+      not_match: ""
+    interface_name:
+      match: "" # e.g., "eth*, lo"
+      not_match: ""
+    interface_index:
+      match: "" # e.g., "1, 2"
+      not_match: ""
+    interface_mac:
+      match: "" # e.g., "00:1b:44:*:*:*"
       not_match: ""
   source:
     address:
