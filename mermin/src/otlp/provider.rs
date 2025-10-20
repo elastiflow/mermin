@@ -6,7 +6,10 @@ use opentelemetry_sdk::{
     Resource,
     propagation::TraceContextPropagator,
     runtime,
-    trace::{SdkTracerProvider, span_processor_with_async_runtime::BatchSpanProcessor},
+    trace::{
+        BatchConfigBuilder, SdkTracerProvider,
+        span_processor_with_async_runtime::BatchSpanProcessor,
+    },
 };
 use tonic::transport::{Channel, channel::ClientTlsConfig};
 use tracing::{Level, info, level_filters::LevelFilter, warn};
@@ -17,7 +20,7 @@ use tracing_subscriber::{
 };
 
 use crate::{
-    otlp::opts::{OtlpExporterOptions, StdoutFmt},
+    otlp::opts::{OtlpExporterOptions, StdoutFmt, defaults},
     runtime::opts::SpanFmt,
 };
 
@@ -90,7 +93,18 @@ impl ProviderBuilder {
         match builder.build() {
             Ok(exporter) => {
                 debug!("otlp exporter built successfully");
-                let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio).build();
+
+                let batch_config = BatchConfigBuilder::default()
+                    .with_max_export_batch_size(options.max_batch_size)
+                    .with_scheduled_delay(options.max_batch_interval)
+                    .with_max_queue_size(options.max_queue_size)
+                    .with_max_concurrent_exports(options.max_concurrent_exports)
+                    .with_max_export_timeout(options.max_export_timeout)
+                    .build();
+
+                let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio)
+                    .with_batch_config(batch_config)
+                    .build();
                 ProviderBuilder {
                     sdk_builder: self.sdk_builder.with_span_processor(processor),
                 }
@@ -102,9 +116,27 @@ impl ProviderBuilder {
         }
     }
 
-    pub fn with_stdout_exporter(self) -> ProviderBuilder {
+    pub fn with_stdout_exporter(
+        self,
+        max_batch_size: usize,
+        max_batch_interval: std::time::Duration,
+        max_queue_size: usize,
+        max_concurrent_exports: usize,
+        max_export_timeout: std::time::Duration,
+    ) -> ProviderBuilder {
         let exporter = opentelemetry_stdout::SpanExporter::default();
-        let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio).build();
+
+        let batch_config = BatchConfigBuilder::default()
+            .with_max_export_batch_size(max_batch_size)
+            .with_scheduled_delay(max_batch_interval)
+            .with_max_queue_size(max_queue_size)
+            .with_max_concurrent_exports(max_concurrent_exports)
+            .with_max_export_timeout(max_export_timeout)
+            .build();
+
+        let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio)
+            .with_batch_config(batch_config)
+            .build();
         ProviderBuilder {
             sdk_builder: self.sdk_builder.with_span_processor(processor),
         }
@@ -126,12 +158,37 @@ pub async fn init_provider(
         return provider.build();
     }
 
+    let (batch_size, batch_interval, max_queue_size, max_concurrent_exports, max_export_timeout) =
+        if let Some(ref opts) = otlp {
+            (
+                opts.max_batch_size,
+                opts.max_batch_interval,
+                opts.max_queue_size,
+                opts.max_concurrent_exports,
+                opts.max_export_timeout,
+            )
+        } else {
+            (
+                defaults::max_batch_size(),
+                defaults::max_batch_interval(),
+                defaults::max_queue_size(),
+                defaults::max_concurrent_exports(),
+                defaults::max_export_timeout(),
+            )
+        };
+
     if let Some(otlp_opts) = otlp {
         provider = provider.with_otlp_exporter(otlp_opts.clone()).await;
     }
 
     if stdout.is_some() {
-        provider = provider.with_stdout_exporter();
+        provider = provider.with_stdout_exporter(
+            batch_size,
+            batch_interval,
+            max_queue_size,
+            max_concurrent_exports,
+            max_export_timeout,
+        );
     }
 
     provider.build()
