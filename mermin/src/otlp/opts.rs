@@ -247,22 +247,38 @@ pub struct BasicAuthOptions {
 /// - **Custom CA**: Provide a `ca_cert` path to use a custom certificate authority
 ///   instead of system root certificates (useful for private CAs and self-signed certificates).
 /// - **Mutual TLS**: Provide both `client_cert` and `client_key` for mutual TLS authentication.
+/// - **Insecure Mode**: Set `insecure: true` to disable certificate verification entirely.
 ///
 /// # Self-Signed Certificates
 ///
-/// For self-signed certificates, use the `ca_cert` option to specify the self-signed certificate
-/// or the CA that signed it. This is the recommended approach for development and testing environments.
+/// For self-signed certificates in production, use the `ca_cert` option to specify the self-signed
+/// certificate or the CA that signed it. This is the recommended secure approach.
 ///
-/// Note: The `insecure` field is currently not supported in tonic 0.14.x. Attempting to set it to
-/// `true` will result in an error. For self-signed certificates, use the `ca_cert` option instead.
+/// For development/testing environments where you want to skip verification entirely,
+/// you can use `insecure: true`, but be aware this makes your connection vulnerable to
+/// man-in-the-middle attacks.
+///
+/// # Insecure Mode
+///
+/// WARNING: Setting `insecure: true` disables all certificate verification and should ONLY
+/// be used for development and testing purposes. In production, use the `ca_cert` option instead.
+///
+/// When insecure mode is enabled:
+/// - Server certificates are not validated
+/// - Any certificate will be accepted (including invalid, expired, or self-signed certificates)
+/// - The connection is vulnerable to man-in-the-middle attacks
+/// - Cannot be combined with client certificates (mutual TLS)
+/// - A warning will be logged each time a connection is established
 ///
 /// # Fields
-/// - `insecure`: Reserved for future use. Currently not supported - will return an error if set to true.
+/// - `insecure`: Disable certificate verification (insecure mode). WARNING: Only use for development/testing!
 /// - `ca_cert`: Optional path to a custom CA certificate file (overrides system root certificates).
 /// - `client_cert`: Optional path to a client certificate file for mutual TLS.
 /// - `client_key`: Optional path to a client private key file for mutual TLS.
 ///
-/// # Example (with custom CA for self-signed certificates)
+/// # Examples
+///
+/// ## Example 1: Custom CA for self-signed certificates (RECOMMENDED)
 /// ```yaml
 /// tls:
 ///   insecure: false
@@ -270,11 +286,17 @@ pub struct BasicAuthOptions {
 ///   client_cert: /etc/certs/client.crt      # Optional: for mutual TLS
 ///   client_key: /etc/certs/client.key       # Optional: for mutual TLS
 /// ```
+///
+/// ## Example 2: Insecure mode for development/testing (NOT for production!)
+/// ```yaml
+/// tls:
+///   insecure: true  # Skip all certificate verification
+/// ```
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct TlsOptions {
     /// Disable certificate verification (insecure mode).
-    /// WARNING: Currently not supported in tonic 0.14.x. Setting to true will return an error.
-    /// For self-signed certificates, use the ca_cert option instead.
+    /// WARNING: Only use for development/testing! Makes connections vulnerable to MITM attacks.
+    /// Cannot be combined with client certificates.
     pub insecure: bool,
     /// Path to the CA certificate file for server verification.
     /// When provided, this overrides system root certificates.
@@ -282,9 +304,11 @@ pub struct TlsOptions {
     pub ca_cert: Option<String>,
     /// Path to the client certificate file for mutual TLS.
     /// Must be provided together with client_key.
+    /// Cannot be used with insecure mode.
     pub client_cert: Option<String>,
     /// Path to the client private key file for mutual TLS.
     /// Must be provided together with client_cert.
+    /// Cannot be used with insecure mode.
     pub client_key: Option<String>,
 }
 
