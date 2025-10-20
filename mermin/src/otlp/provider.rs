@@ -103,10 +103,8 @@ impl ServerCertVerifier for NoVerifier {
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        // Support all signature schemes
+        // Support modern signature schemes (excluding deprecated SHA1-based schemes)
         vec![
-            SignatureScheme::RSA_PKCS1_SHA1,
-            SignatureScheme::ECDSA_SHA1_Legacy,
             SignatureScheme::RSA_PKCS1_SHA256,
             SignatureScheme::ECDSA_NISTP256_SHA256,
             SignatureScheme::RSA_PKCS1_SHA384,
@@ -144,15 +142,10 @@ impl ProviderBuilder {
         })?;
 
         let is_https = uri.scheme_str() == Some("https");
-        let use_insecure = options
-            .tls
-            .as_ref()
-            .is_some_and(|tls_opts| tls_opts.insecure);
 
-        let channel = if use_insecure {
-            Self::build_insecure_channel(uri, options.tls.as_ref().unwrap()).await?
-        } else {
-            Self::build_secure_channel(uri, is_https, &options.tls)?
+        let channel = match &options.tls {
+            Some(tls_opts) if tls_opts.insecure => Self::build_insecure_channel(uri, tls_opts)?,
+            _ => Self::build_secure_channel(uri, is_https, options.tls.as_ref())?,
         };
 
         let builder = opentelemetry_otlp::SpanExporter::builder()
@@ -227,7 +220,7 @@ impl ProviderBuilder {
         }
     }
 
-    async fn build_insecure_channel(
+    fn build_insecure_channel(
         uri: Uri,
         tls_opts: &crate::otlp::opts::TlsOptions,
     ) -> Result<Channel, OtlpError> {
@@ -265,20 +258,13 @@ impl ProviderBuilder {
             .enable_http1()
             .wrap_connector(http_connector);
 
-        Channel::builder(uri)
-            .connect_with_connector(connector)
-            .await
-            .map_err(|e| {
-                OtlpError::TlsConfiguration(format!(
-                    "failed to create channel with custom connector: {e}"
-                ))
-            })
+        Ok(Channel::builder(uri).connect_with_connector_lazy(connector))
     }
 
     fn build_secure_channel(
         uri: Uri,
         is_https: bool,
-        tls_opts: &Option<crate::otlp::opts::TlsOptions>,
+        tls_opts: Option<&crate::otlp::opts::TlsOptions>,
     ) -> Result<Channel, OtlpError> {
         let tls_config = if is_https || tls_opts.is_some() {
             let mut tls = ClientTlsConfig::new();
@@ -521,8 +507,9 @@ rstuvwxyz
     #[tokio::test]
     async fn test_insecure_mode_success() {
         // Note: This test verifies that insecure mode configuration is accepted.
-        // The actual connection will fail since there's no test server, but that's expected.
-        // In production, this would successfully establish an insecure TLS connection.
+        // With lazy connection, the channel is created successfully without immediately
+        // connecting to the server. The actual connection attempt happens later when
+        // data is sent through the channel.
         let options = OtlpExporterOptions {
             endpoint: "https://localhost:4317".to_string(),
             protocol: crate::otlp::opts::ExporterProtocol::Grpc,
@@ -544,27 +531,13 @@ rstuvwxyz
         let provider = ProviderBuilder::new();
         let result = provider.with_otlp_exporter(options).await;
 
-        // The connection will fail (no test server), but it should fail with a transport error,
-        // not a TLS configuration error, which proves insecure mode is working
-        match result {
-            Ok(_) => {
-                // Unexpected success - this would only happen if a server was actually running
-                panic!("Unexpected success - no server should be running");
-            }
-            Err(e) => {
-                // Should be a TLS configuration error with "transport error" message
-                // This proves that:
-                // 1. Insecure mode configuration was accepted
-                // 2. TLS was configured correctly (just no server to connect to)
-                let err_str = e.to_string();
-                assert!(
-                    err_str.contains("transport error")
-                        || err_str.contains("failed to create channel"),
-                    "Expected transport/connection error but got: {}",
-                    err_str
-                );
-            }
-        }
+        // With lazy connection, the channel creation should succeed
+        // The actual connection happens later when data is sent
+        assert!(
+            result.is_ok(),
+            "Expected insecure mode configuration to be accepted, but got error: {:?}",
+            result.err()
+        );
     }
 
     #[tokio::test]

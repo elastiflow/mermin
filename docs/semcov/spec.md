@@ -145,6 +145,7 @@ Time-based metrics calculated for the flow, stored in nanoseconds (`ns`).
 | `tunnel.destination.address`   | `string`  | The destination IP address of the tunnel's outer header.                    |                                                          |          | ○        |
 | `tunnel.destination.port`      | `long`    |                                                                             |                                                          |          | ○        |
 | `tunnel.id`                    | `string`  | The identifier for the tunnel (e.g., VNI for VXLAN/Geneve, Key ID for GRE). |                                                          |          | ○        |
+| `tunnel.ipsec.ah.spi`          | `long`    | Security Parameters Index for AH headers.                                   | SPI from the outermost header                            |          | ○        |
 | `tunnel.bytes.delta`           | `long`    | Number of bytes observed in the last measurement interval for the flow.     |                                                          |          | ✓        |
 | `tunnel.bytes.total`           | `long`    | Total number of bytes observed for this flow since its start.               | The term `bytes` is preferred over `octets` for clarity. |          | ~        |
 | `tunnel.reverse.bytes.delta`   | `long`    | Delta bytes in the reverse direction of the flow.                           |                                                          |          | ✓        |
