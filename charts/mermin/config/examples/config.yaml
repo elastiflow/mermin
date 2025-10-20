@@ -381,3 +381,4 @@ span:
   tcp_rst_timeout: 5s
   tcp_timeout: 20s
   udp_timeout: 60s
+  community_id_seed: 0
