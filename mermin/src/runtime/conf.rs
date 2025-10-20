@@ -91,12 +91,18 @@ pub struct FilteringOptions {
     pub transport: Option<FilteringPair>,
     #[serde(rename = "type")]
     pub type_: Option<FilteringPair>,
-    pub connection: Option<ConnectionOptions>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ConnectionOptions {
-    pub state: FilteringPair,
+    pub interface_name: Option<FilteringPair>,
+    pub interface_index: Option<FilteringPair>,
+    pub interface_mac: Option<FilteringPair>,
+    pub connection_state: Option<FilteringPair>,
+    pub end_reason: Option<FilteringPair>,
+    pub ip_dscp_name: Option<FilteringPair>,
+    pub ip_ecn_name: Option<FilteringPair>,
+    pub ip_ttl: Option<FilteringPair>,
+    pub ip_flow_label: Option<FilteringPair>,
+    pub icmp_type_name: Option<FilteringPair>,
+    pub icmp_code_name: Option<FilteringPair>,
+    pub tcp_flags: Option<FilteringPair>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]

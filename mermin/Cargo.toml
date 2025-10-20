@@ -24,7 +24,7 @@ dashmap = "6.0"
 figment = { version = "0.10", features = ["env", "test", "yaml"] }
 futures = "0.3"
 fxhash = "0.2"
-glob = "0.3.3"
+globset = "0.4.17"
 hcl-rs = "0.19.2"
 humantime = "2.2.0"
 hyper = { version = "1.0", features = ["full"] }
@@ -65,6 +65,8 @@ tower-http = { version = "0.5", features = ["trace"] }
 tracing = { version = "0.1.41" }
 tracing-opentelemetry = { version = "0.31.0" }
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+num-traits = "0.2.19"
+num-iter = "0.1.45"
 [build-dependencies]
 anyhow = { workspace = true }
 aya-build = { workspace = true }

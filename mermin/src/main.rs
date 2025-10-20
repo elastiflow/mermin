@@ -3,8 +3,8 @@ mod health;
 mod ip;
 mod k8s;
 mod otlp;
-mod pipes;
 mod runtime;
+mod source;
 mod span;
 
 use std::{
@@ -29,8 +29,8 @@ use crate::{
         provider::{init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
     },
-    pipes::{filter::PacketFilter, ringbuf::RingBufReader},
     runtime::context::Context,
+    source::{filter::PacketFilter, ringbuf::RingBufReader},
     span::producer::FlowSpanProducer,
 };
 

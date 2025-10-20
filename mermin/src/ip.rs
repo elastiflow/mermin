@@ -40,3 +40,64 @@ impl std::fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use mermin_common::IpAddrType;
+
+    use crate::ip::{Error, resolve_addrs};
+
+    #[test]
+    fn test_resolve_addrs_ipv4() {
+        let result = resolve_addrs(
+            IpAddrType::Ipv4,
+            [192, 168, 1, 1],
+            [192, 168, 1, 2],
+            [0; 16],
+            [0; 16],
+        );
+
+        assert!(result.is_ok());
+        let (src, dst) = result.unwrap();
+        assert_eq!(src, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)));
+        assert_eq!(dst, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2)));
+    }
+
+    #[test]
+    fn test_resolve_addrs_ipv6() {
+        let result = resolve_addrs(
+            IpAddrType::Ipv6,
+            [0; 4],
+            [0; 4],
+            [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+        );
+
+        assert!(result.is_ok());
+        let (src, dst) = result.unwrap();
+        match src {
+            IpAddr::V6(addr) => assert!(addr.to_string().starts_with("2001:db8")),
+            _ => panic!("Expected IPv6 address"),
+        }
+        match dst {
+            IpAddr::V6(addr) => assert!(addr.to_string().starts_with("2001:db8")),
+            _ => panic!("Expected IPv6 address"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_addrs_unknown() {
+        let result = resolve_addrs(
+            IpAddrType::Unknown,
+            [192, 168, 1, 1],
+            [192, 168, 1, 2],
+            [0; 16],
+            [0; 16],
+        );
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), Error::UnknownIpAddrType);
+    }
+}

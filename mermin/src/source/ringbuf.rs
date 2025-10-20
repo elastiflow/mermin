@@ -5,7 +5,7 @@ use mermin_common::PacketMeta;
 use tokio::{io::unix::AsyncFd, sync::mpsc};
 use tracing::{debug, error, info, warn};
 
-use crate::pipes::filter::PacketFilter;
+use crate::source::filter::PacketFilter;
 
 /// Handles reading packet metadata from the eBPF ring buffer and routing it through pipelines
 pub struct RingBufReader {
