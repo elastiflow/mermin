@@ -353,7 +353,7 @@ async fn run() -> Result<()> {
     });
     health_state.ready_to_process.store(true, Ordering::Relaxed);
 
-    let packet_filter = Arc::new(PacketFilter::new(&conf));
+    let packet_filter = Arc::new(PacketFilter::new(&conf, iface_map.clone()));
 
     let ring_buf_reader = RingBufReader::new(ring_buf, packet_filter, packet_meta_tx);
     tokio::spawn(async move {

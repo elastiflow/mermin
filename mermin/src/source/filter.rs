@@ -1,4 +1,8 @@
-use std::{collections::HashSet, net::IpAddr, str::FromStr};
+use std::{
+    collections::{HashMap, HashSet},
+    net::IpAddr,
+    str::FromStr,
+};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use ip_network::IpNetwork;
@@ -30,7 +34,6 @@ struct CompiledRules {
     interface_index: Option<CompiledRuleSet<HashSet<u32>>>,
     interface_mac: Option<CompiledRuleSet<GlobSet>>,
     connection_state: Option<CompiledRuleSet<GlobSet>>,
-    end_reason: Option<CompiledRuleSet<GlobSet>>,
     ip_dscp_name: Option<CompiledRuleSet<GlobSet>>,
     ip_ecn_name: Option<CompiledRuleSet<GlobSet>>,
     ip_ttl: Option<CompiledRuleSet<HashSet<u8>>>,
@@ -83,7 +86,7 @@ impl CompiledRules {
 
         fn build_numeric_pair<T>(pair: &FilteringPair) -> CompiledRuleSet<HashSet<T>>
         where
-            T: PrimInt + FromStr,
+            T: PrimInt + FromStr + std::hash::Hash + Eq,
             <T as FromStr>::Err: std::fmt::Debug,
         {
             CompiledRuleSet {
@@ -104,7 +107,6 @@ impl CompiledRules {
             interface_index: opts.interface_index.as_ref().map(build_numeric_pair::<u32>),
             interface_mac: opts.interface_mac.as_ref().map(build_glob_set),
             connection_state: opts.connection_state.as_ref().map(build_glob_set),
-            end_reason: opts.end_reason.as_ref().map(build_glob_set),
             ip_dscp_name: opts.ip_dscp_name.as_ref().map(build_glob_set),
             ip_ecn_name: opts.ip_ecn_name.as_ref().map(build_glob_set),
             ip_ttl: opts.ip_ttl.as_ref().map(build_numeric_pair::<u8>),
@@ -144,7 +146,7 @@ fn build_ip_network_table(s: &str) -> IpNetworkTable<()> {
 /// e.g., "80, 443, 8000-8002" -> {80, 443, 8000, 8001, 8002}
 fn build_numeric_set<T>(s: &str) -> HashSet<T>
 where
-    T: PrimInt + FromStr,
+    T: PrimInt + FromStr + std::hash::Hash + Eq,
     <T as FromStr>::Err: std::fmt::Debug,
 {
     let mut set = HashSet::new();
@@ -234,7 +236,7 @@ impl<T: std::hash::Hash + Eq> RuleCollection<T> for HashSet<T> {
 
 impl RuleCollection<str> for GlobSet {
     fn matches(&self, value: &str) -> bool {
-        self.is_match(&value.to_lowercase())
+        self.is_match(value.to_lowercase())
     }
     fn is_empty(&self) -> bool {
         GlobSet::is_empty(self)
@@ -248,10 +250,11 @@ pub struct PacketFilter {
     destination: CompiledRules,
     network: CompiledRules,
     flow: CompiledRules,
+    iface_map: HashMap<u32, String>,
 }
 
 impl PacketFilter {
-    pub fn new(conf: &Conf) -> Self {
+    pub fn new(conf: &Conf, iface_map: HashMap<u32, String>) -> Self {
         let get_filter = |name: &str| -> Option<&FilteringOptions> {
             conf.filter.as_ref().and_then(|map| map.get(name))
         };
@@ -261,6 +264,7 @@ impl PacketFilter {
             destination: CompiledRules::new(get_filter("destination")),
             network: CompiledRules::new(get_filter("network")),
             flow: CompiledRules::new(get_filter("flow")),
+            iface_map,
         }
     }
 
@@ -279,6 +283,15 @@ impl PacketFilter {
             && !rules.is_allowed(&packet.ifindex)
         {
             return Ok(false);
+        }
+        if let Some(rules) = &self.network.interface_name {
+            if let Some(iface_name) = self.iface_map.get(&packet.ifindex) {
+                if !rules.is_allowed(iface_name) {
+                    return Ok(false);
+                }
+            } else {
+                return Ok(false);
+            }
         }
         if let Some(rules) = &self.network.interface_mac {
             let mac = MacAddr::new(
@@ -357,22 +370,22 @@ impl PacketFilter {
             }
         }
 
-        if packet.proto == IpProto::Tcp {
-            if let Some(rules) = &self.flow.tcp_flags {
-                let tags = TcpFlags::from_packet(packet).active_flags();
-                if tags
+        if packet.proto == IpProto::Tcp
+            && let Some(rules) = &self.flow.tcp_flags
+        {
+            let tags = TcpFlags::from_packet(packet).active_flags();
+            if tags
+                .iter()
+                .any(|tag| rules.not_match_rules.is_match(tag.as_str()))
+            {
+                return Ok(false);
+            }
+            if !rules.match_rules.is_empty()
+                && !tags
                     .iter()
-                    .any(|tag| rules.not_match_rules.is_match(tag.as_str()))
-                {
-                    return Ok(false);
-                }
-                if !rules.match_rules.is_empty()
-                    && !tags
-                        .iter()
-                        .any(|tag| rules.match_rules.is_match(tag.as_str()))
-                {
-                    return Ok(false);
-                }
+                    .any(|tag| rules.match_rules.is_match(tag.as_str()))
+            {
+                return Ok(false);
             }
         }
 
@@ -490,7 +503,12 @@ mod tests {
     fn build_filter(filters: HashMap<String, FilteringOptions>) -> PacketFilter {
         let mut conf = Conf::default();
         conf.filter = Some(filters);
-        PacketFilter::new(&conf)
+        let iface_map: HashMap<u32, String> = HashMap::from([
+            (1, "eth0".to_string()),
+            (2, "lo".to_string()),
+            (3, "docker0".to_string()),
+        ]);
+        PacketFilter::new(&conf, iface_map)
     }
 
     #[test]

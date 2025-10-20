@@ -95,7 +95,6 @@ pub struct FilteringOptions {
     pub interface_index: Option<FilteringPair>,
     pub interface_mac: Option<FilteringPair>,
     pub connection_state: Option<FilteringPair>,
-    pub end_reason: Option<FilteringPair>,
     pub ip_dscp_name: Option<FilteringPair>,
     pub ip_ecn_name: Option<FilteringPair>,
     pub ip_ttl: Option<FilteringPair>,
