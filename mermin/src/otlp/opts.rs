@@ -231,25 +231,60 @@ pub struct BasicAuthOptions {
 /// TLS (Transport Layer Security) configuration for secure exporter connections.
 ///
 /// This struct defines the options for enabling and customizing TLS when connecting
-/// to telemetry backends (such as OTLP collectors). It allows specifying whether
-/// to skip certificate verification (insecure mode) and provides fields
-/// for custom certificate authority (CA) certificates and client
-/// certificates/keys for mutual TLS authentication.
+/// to telemetry backends (such as OTLP collectors).
+///
+/// # Automatic TLS Behavior
+///
+/// - **https:// endpoints**: TLS is automatically enabled using system root certificates
+///   when an endpoint uses the `https://` scheme, even without an explicit `tls` configuration.
+/// - **http:// endpoints**: No TLS is used unless explicitly configured via this struct.
+///
+/// # Certificate Verification
+///
+/// By default, TLS connections validate server certificates against system root certificates.
+/// You can customize this behavior:
+///
+/// - **Custom CA**: Provide a `ca_cert` path to use a custom certificate authority
+///   instead of system root certificates (useful for private CAs and self-signed certificates).
+/// - **Mutual TLS**: Provide both `client_cert` and `client_key` for mutual TLS authentication.
+///
+/// # Self-Signed Certificates
+///
+/// For self-signed certificates, use the `ca_cert` option to specify the self-signed certificate
+/// or the CA that signed it. This is the recommended approach for development and testing environments.
+///
+/// Note: The `insecure` field is currently not supported in tonic 0.14.x. Attempting to set it to
+/// `true` will result in an error. For self-signed certificates, use the `ca_cert` option instead.
 ///
 /// # Fields
-/// - `insecure`: If true, disables certificate verification (not recommended for production).
-/// - `ca_cert`: Optional path to a custom CA certificate file for server verification.
+/// - `insecure`: Reserved for future use. Currently not supported - will return an error if set to true.
+/// - `ca_cert`: Optional path to a custom CA certificate file (overrides system root certificates).
 /// - `client_cert`: Optional path to a client certificate file for mutual TLS.
 /// - `client_key`: Optional path to a client private key file for mutual TLS.
+///
+/// # Example (with custom CA for self-signed certificates)
+/// ```yaml
+/// tls:
+///   insecure: false
+///   ca_cert: /etc/certs/self-signed-ca.crt  # Add your self-signed cert here
+///   client_cert: /etc/certs/client.crt      # Optional: for mutual TLS
+///   client_key: /etc/certs/client.key       # Optional: for mutual TLS
+/// ```
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct TlsOptions {
     /// Disable certificate verification (insecure mode).
+    /// WARNING: Currently not supported in tonic 0.14.x. Setting to true will return an error.
+    /// For self-signed certificates, use the ca_cert option instead.
     pub insecure: bool,
     /// Path to the CA certificate file for server verification.
+    /// When provided, this overrides system root certificates.
+    /// Use this for self-signed certificates by specifying your self-signed cert or CA.
     pub ca_cert: Option<String>,
     /// Path to the client certificate file for mutual TLS.
+    /// Must be provided together with client_key.
     pub client_cert: Option<String>,
     /// Path to the client private key file for mutual TLS.
+    /// Must be provided together with client_cert.
     pub client_key: Option<String>,
 }
 

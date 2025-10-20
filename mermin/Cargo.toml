@@ -67,3 +67,4 @@ common-build = { path = "../common-build" }
 [dev-dependencies]
 serde_yaml = "0.9.34"
 socket2 = "0.5"
+tempfile = "3.8"

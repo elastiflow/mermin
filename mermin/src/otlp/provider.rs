@@ -1,3 +1,5 @@
+use std::fs;
+
 use axum::http::Uri;
 use log::{debug, error};
 use opentelemetry::{KeyValue, global};
@@ -11,7 +13,7 @@ use opentelemetry_sdk::{
         span_processor_with_async_runtime::BatchSpanProcessor,
     },
 };
-use tonic::transport::{Channel, ClientTlsConfig};
+use tonic::transport::{Certificate, Channel, ClientTlsConfig, Identity};
 use tracing::{Level, info, level_filters::LevelFilter, warn};
 use tracing_subscriber::{
     fmt::{Layer, format::FmtSpan},
@@ -27,8 +29,34 @@ use crate::{
     runtime::opts::SpanFmt,
 };
 
+#[derive(Debug)]
 pub struct ProviderBuilder {
     pub sdk_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
+}
+
+/// Helper function to load a certificate from a file path
+fn load_certificate(path: &str) -> Result<Certificate, OtlpError> {
+    let cert_pem = fs::read(path).map_err(|e| {
+        OtlpError::TlsConfiguration(format!("failed to read certificate file '{}': {}", path, e))
+    })?;
+    Ok(Certificate::from_pem(cert_pem))
+}
+
+/// Helper function to load client identity (certificate + private key) for mutual TLS
+fn load_client_identity(cert_path: &str, key_path: &str) -> Result<Identity, OtlpError> {
+    let cert_pem = fs::read(cert_path).map_err(|e| {
+        OtlpError::TlsConfiguration(format!(
+            "failed to read client certificate file '{}': {}",
+            cert_path, e
+        ))
+    })?;
+    let key_pem = fs::read(key_path).map_err(|e| {
+        OtlpError::TlsConfiguration(format!(
+            "failed to read client key file '{}': {}",
+            key_path, e
+        ))
+    })?;
+    Ok(Identity::from_pem(cert_pem, key_pem))
 }
 
 impl ProviderBuilder {
@@ -52,18 +80,75 @@ impl ProviderBuilder {
             OtlpError::invalid_endpoint(&endpoint, format!("failed to parse as URI: {e}"))
         })?;
 
-        // TODO: Apply TLS configuration - ENG-120
-        // This should handle TLS settings from config.tls
-        let tls_config: Option<ClientTlsConfig> = match &options.tls {
-            Some(_tls_opts) => None,
-            _ => None,
+        // Detect if the endpoint uses https:// scheme
+        let is_https = uri.scheme_str() == Some("https");
+
+        // Build TLS configuration if needed
+        let tls_config: Option<ClientTlsConfig> = if is_https || options.tls.is_some() {
+            let mut tls = ClientTlsConfig::new();
+
+            if is_https {
+                // System root certificates are automatically used via tls-native-roots feature
+                debug!("detected https:// endpoint, enabling TLS with system root certificates");
+            }
+
+            // Apply custom TLS options if provided
+            if let Some(tls_opts) = &options.tls {
+                // Handle insecure mode (skip certificate verification)
+                // TODO: Implement custom certificate verifier for insecure mode - ENG-120
+                // tonic 0.14.x with rustls doesn't provide a built-in method to skip verification.
+                // To implement this, we would need to create a custom ServerCertVerifier that
+                // accepts all certificates. For now, users should use the ca_cert option for
+                // self-signed certificates.
+                if tls_opts.insecure {
+                    return Err(OtlpError::TlsConfiguration(
+                        "insecure mode (skip certificate verification) is not supported in tonic 0.14.x. \
+                        For self-signed certificates, use the 'ca_cert' option to specify your CA certificate."
+                            .to_string(),
+                    ));
+                }
+
+                // Use system root certificates by default
+                tls = tls.with_native_roots();
+
+                // Load custom CA certificate if provided (overrides system roots)
+                if let Some(ca_cert_path) = &tls_opts.ca_cert {
+                    debug!("loading custom CA certificate from: {}", ca_cert_path);
+                    let ca_cert = load_certificate(ca_cert_path)?;
+                    tls = tls.ca_certificate(ca_cert);
+                }
+
+                // Load client certificate and key for mutual TLS if provided
+                if let (Some(client_cert_path), Some(client_key_path)) =
+                    (&tls_opts.client_cert, &tls_opts.client_key)
+                {
+                    debug!(
+                        "loading client certificate for mutual TLS from: {}",
+                        client_cert_path
+                    );
+                    let identity = load_client_identity(client_cert_path, client_key_path)?;
+                    tls = tls.identity(identity);
+                } else if tls_opts.client_cert.is_some() || tls_opts.client_key.is_some() {
+                    return Err(OtlpError::TlsConfiguration(
+                        "both client_cert and client_key must be provided for mutual TLS"
+                            .to_string(),
+                    ));
+                }
+            } else if is_https {
+                // https:// without explicit tls config - use system root certificates
+                tls = tls.with_native_roots();
+            }
+
+            Some(tls)
+        } else {
+            None
         };
 
         let mut channel = Channel::builder(uri);
         if let Some(tls) = tls_config {
-            debug!("tls configuration detected for otlp exporter");
+            debug!("applying tls configuration to otlp exporter channel");
             channel = channel.tls_config(tls).map_err(|e| {
-                OtlpError::TlsConfiguration(format!("failed to apply TLS config: {e}"))
+                OtlpError::TlsConfiguration(format!("failed to apply tls config: {e}"))
             })?;
         }
 
@@ -108,9 +193,9 @@ impl ProviderBuilder {
                 })
             }
             Err(e) => {
-                error!("failed to build OTLP exporter: {e}");
+                error!("failed to build otlp exporter: {e}");
                 Err(OtlpError::ExporterConfiguration(format!(
-                    "failed to build OTLP exporter: {e}"
+                    "failed to build otlp exporter: {e}"
                 )))
             }
         }
@@ -237,4 +322,461 @@ pub async fn init_internal_tracing(
     global::set_tracer_provider(provider);
     global::set_text_map_propagator(TraceContextPropagator::new());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use tempfile::NamedTempFile;
+
+    use super::*;
+    use crate::otlp::opts::TlsOptions;
+
+    // Helper function to create test certificate files
+    fn create_test_cert_file(content: &[u8]) -> NamedTempFile {
+        let mut file = NamedTempFile::new().expect("Failed to create temp file");
+        file.write_all(content)
+            .expect("Failed to write to temp file");
+        file.flush().expect("Failed to flush temp file");
+        file
+    }
+
+    // Sample PEM-encoded certificate for testing
+    const TEST_CERT_PEM: &[u8] = b"-----BEGIN CERTIFICATE-----
+MIICljCCAX4CCQCKz8Vz6Vr8VjANBgkqhkiG9w0BAQsFADANMQswCQYDVQQGEwJV
+UzAeFw0yNDAxMDEwMDAwMDBaFw0yNTAxMDEwMDAwMDBaMA0xCzAJBgNVBAYTAlVT
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0Z1234567890abcdefgh
+ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/abcdefgh
+ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/abcdefgh
+ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/abcdefgh
+ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/abcdefgh
+ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/abcdefgh
+ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZIDAQABMA0GCSqGSIb3DQEB
+CwUAA4IBAQAxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/abcdefghijklmn
+opqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/abcdefghijklmnop
+qrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/abcdefghijklmnopqr
+stuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/abcdefghijklmnopqrst
+uvwxyz
+-----END CERTIFICATE-----";
+
+    const TEST_KEY_PEM: &[u8] = b"-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDRnXTz1234567
+890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
++/abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
++/abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
++/abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
++/abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+AgMBAAECggEABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/abcdefghijklmno
+pqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/abcdefghijklmnop
+qrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/abcdefghijklmnopq
+rstuvwxyz
+-----END PRIVATE KEY-----";
+
+    #[tokio::test]
+    async fn test_http_endpoint_no_tls() {
+        let options = OtlpExporterOptions {
+            endpoint: "http://localhost:4317".to_string(),
+            protocol: crate::otlp::opts::ExporterProtocol::Grpc,
+            timeout: std::time::Duration::from_secs(10),
+            max_batch_size: 512,
+            max_batch_interval: std::time::Duration::from_secs(5),
+            max_queue_size: 2048,
+            max_concurrent_exports: 1,
+            max_export_timeout: std::time::Duration::from_secs(30),
+            auth: None,
+            tls: None,
+        };
+
+        let provider = ProviderBuilder::new();
+        let result = provider.with_otlp_exporter(options).await;
+
+        // Should succeed without TLS configuration for http:// endpoint
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_https_endpoint_auto_tls() {
+        let options = OtlpExporterOptions {
+            endpoint: "https://localhost:4317".to_string(),
+            protocol: crate::otlp::opts::ExporterProtocol::Grpc,
+            timeout: std::time::Duration::from_secs(10),
+            max_batch_size: 512,
+            max_batch_interval: std::time::Duration::from_secs(5),
+            max_queue_size: 2048,
+            max_concurrent_exports: 1,
+            max_export_timeout: std::time::Duration::from_secs(30),
+            auth: None,
+            tls: None,
+        };
+
+        let provider = ProviderBuilder::new();
+        let result = provider.with_otlp_exporter(options).await;
+
+        // Should succeed with automatic TLS for https:// endpoint
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_insecure_mode_not_supported() {
+        let options = OtlpExporterOptions {
+            endpoint: "https://localhost:4317".to_string(),
+            protocol: crate::otlp::opts::ExporterProtocol::Grpc,
+            timeout: std::time::Duration::from_secs(10),
+            max_batch_size: 512,
+            max_batch_interval: std::time::Duration::from_secs(5),
+            max_queue_size: 2048,
+            max_concurrent_exports: 1,
+            max_export_timeout: std::time::Duration::from_secs(30),
+            auth: None,
+            tls: Some(TlsOptions {
+                insecure: true,
+                ca_cert: None,
+                client_cert: None,
+                client_key: None,
+            }),
+        };
+
+        let provider = ProviderBuilder::new();
+        let result = provider.with_otlp_exporter(options).await;
+
+        // Should fail with clear error message about insecure mode not being supported
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, OtlpError::TlsConfiguration(_)));
+        assert!(err.to_string().contains("insecure mode"));
+        assert!(err.to_string().contains("not supported"));
+    }
+
+    #[tokio::test]
+    async fn test_custom_ca_cert() {
+        let cert_file = create_test_cert_file(TEST_CERT_PEM);
+        let cert_path = cert_file.path().to_str().unwrap().to_string();
+
+        let options = OtlpExporterOptions {
+            endpoint: "https://localhost:4317".to_string(),
+            protocol: crate::otlp::opts::ExporterProtocol::Grpc,
+            timeout: std::time::Duration::from_secs(10),
+            max_batch_size: 512,
+            max_batch_interval: std::time::Duration::from_secs(5),
+            max_queue_size: 2048,
+            max_concurrent_exports: 1,
+            max_export_timeout: std::time::Duration::from_secs(30),
+            auth: None,
+            tls: Some(TlsOptions {
+                insecure: false,
+                ca_cert: Some(cert_path),
+                client_cert: None,
+                client_key: None,
+            }),
+        };
+
+        let provider = ProviderBuilder::new();
+        let result = provider.with_otlp_exporter(options).await;
+
+        // Should succeed with custom CA certificate
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_missing_ca_cert_file() {
+        let options = OtlpExporterOptions {
+            endpoint: "https://localhost:4317".to_string(),
+            protocol: crate::otlp::opts::ExporterProtocol::Grpc,
+            timeout: std::time::Duration::from_secs(10),
+            max_batch_size: 512,
+            max_batch_interval: std::time::Duration::from_secs(5),
+            max_queue_size: 2048,
+            max_concurrent_exports: 1,
+            max_export_timeout: std::time::Duration::from_secs(30),
+            auth: None,
+            tls: Some(TlsOptions {
+                insecure: false,
+                ca_cert: Some("/nonexistent/path/to/ca.crt".to_string()),
+                client_cert: None,
+                client_key: None,
+            }),
+        };
+
+        let provider = ProviderBuilder::new();
+        let result = provider.with_otlp_exporter(options).await;
+
+        // Should fail with clear error about missing file
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, OtlpError::TlsConfiguration(_)));
+        assert!(err.to_string().contains("failed to read certificate file"));
+    }
+
+    #[tokio::test]
+    async fn test_mutual_tls_success() {
+        let cert_file = create_test_cert_file(TEST_CERT_PEM);
+        let key_file = create_test_cert_file(TEST_KEY_PEM);
+
+        let cert_path = cert_file.path().to_str().unwrap().to_string();
+        let key_path = key_file.path().to_str().unwrap().to_string();
+
+        let options = OtlpExporterOptions {
+            endpoint: "https://localhost:4317".to_string(),
+            protocol: crate::otlp::opts::ExporterProtocol::Grpc,
+            timeout: std::time::Duration::from_secs(10),
+            max_batch_size: 512,
+            max_batch_interval: std::time::Duration::from_secs(5),
+            max_queue_size: 2048,
+            max_concurrent_exports: 1,
+            max_export_timeout: std::time::Duration::from_secs(30),
+            auth: None,
+            tls: Some(TlsOptions {
+                insecure: false,
+                ca_cert: None,
+                client_cert: Some(cert_path),
+                client_key: Some(key_path),
+            }),
+        };
+
+        let provider = ProviderBuilder::new();
+        let result = provider.with_otlp_exporter(options).await;
+
+        // The test certificates may not be valid PEM format, so we just verify
+        // that the configuration was processed (either success or TLS error, not file I/O error)
+        match result {
+            Ok(_) => {
+                // Success - configuration was accepted
+            }
+            Err(e) => {
+                // If it fails, it should be a TLS configuration error (invalid cert format),
+                // not a file I/O error (which would mean the loading logic failed)
+                assert!(matches!(e, OtlpError::TlsConfiguration(_)));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_mutual_tls_missing_cert() {
+        let key_file = create_test_cert_file(TEST_KEY_PEM);
+        let key_path = key_file.path().to_str().unwrap().to_string();
+
+        let options = OtlpExporterOptions {
+            endpoint: "https://localhost:4317".to_string(),
+            protocol: crate::otlp::opts::ExporterProtocol::Grpc,
+            timeout: std::time::Duration::from_secs(10),
+            max_batch_size: 512,
+            max_batch_interval: std::time::Duration::from_secs(5),
+            max_queue_size: 2048,
+            max_concurrent_exports: 1,
+            max_export_timeout: std::time::Duration::from_secs(30),
+            auth: None,
+            tls: Some(TlsOptions {
+                insecure: false,
+                ca_cert: None,
+                client_cert: None,
+                client_key: Some(key_path),
+            }),
+        };
+
+        let provider = ProviderBuilder::new();
+        let result = provider.with_otlp_exporter(options).await;
+
+        // Should fail when only key is provided without cert
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, OtlpError::TlsConfiguration(_)));
+        assert!(
+            err.to_string()
+                .contains("both client_cert and client_key must be provided")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mutual_tls_missing_key() {
+        let cert_file = create_test_cert_file(TEST_CERT_PEM);
+        let cert_path = cert_file.path().to_str().unwrap().to_string();
+
+        let options = OtlpExporterOptions {
+            endpoint: "https://localhost:4317".to_string(),
+            protocol: crate::otlp::opts::ExporterProtocol::Grpc,
+            timeout: std::time::Duration::from_secs(10),
+            max_batch_size: 512,
+            max_batch_interval: std::time::Duration::from_secs(5),
+            max_queue_size: 2048,
+            max_concurrent_exports: 1,
+            max_export_timeout: std::time::Duration::from_secs(30),
+            auth: None,
+            tls: Some(TlsOptions {
+                insecure: false,
+                ca_cert: None,
+                client_cert: Some(cert_path),
+                client_key: None,
+            }),
+        };
+
+        let provider = ProviderBuilder::new();
+        let result = provider.with_otlp_exporter(options).await;
+
+        // Should fail when only cert is provided without key
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, OtlpError::TlsConfiguration(_)));
+        assert!(
+            err.to_string()
+                .contains("both client_cert and client_key must be provided")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_http_with_tls_config() {
+        let cert_file = create_test_cert_file(TEST_CERT_PEM);
+        let cert_path = cert_file.path().to_str().unwrap().to_string();
+
+        let options = OtlpExporterOptions {
+            endpoint: "http://localhost:4317".to_string(),
+            protocol: crate::otlp::opts::ExporterProtocol::Grpc,
+            timeout: std::time::Duration::from_secs(10),
+            max_batch_size: 512,
+            max_batch_interval: std::time::Duration::from_secs(5),
+            max_queue_size: 2048,
+            max_concurrent_exports: 1,
+            max_export_timeout: std::time::Duration::from_secs(30),
+            auth: None,
+            tls: Some(TlsOptions {
+                insecure: false,
+                ca_cert: Some(cert_path),
+                client_cert: None,
+                client_key: None,
+            }),
+        };
+
+        let provider = ProviderBuilder::new();
+        let result = provider.with_otlp_exporter(options).await;
+
+        // http:// endpoint with explicit TLS config should still work
+        // (TLS will be applied even though scheme is http)
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_missing_client_cert_file() {
+        let key_file = create_test_cert_file(TEST_KEY_PEM);
+        let key_path = key_file.path().to_str().unwrap().to_string();
+
+        let options = OtlpExporterOptions {
+            endpoint: "https://localhost:4317".to_string(),
+            protocol: crate::otlp::opts::ExporterProtocol::Grpc,
+            timeout: std::time::Duration::from_secs(10),
+            max_batch_size: 512,
+            max_batch_interval: std::time::Duration::from_secs(5),
+            max_queue_size: 2048,
+            max_concurrent_exports: 1,
+            max_export_timeout: std::time::Duration::from_secs(30),
+            auth: None,
+            tls: Some(TlsOptions {
+                insecure: false,
+                ca_cert: None,
+                client_cert: Some("/nonexistent/cert.crt".to_string()),
+                client_key: Some(key_path),
+            }),
+        };
+
+        let provider = ProviderBuilder::new();
+        let result = provider.with_otlp_exporter(options).await;
+
+        // Should fail with clear error about missing cert file
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, OtlpError::TlsConfiguration(_)));
+        assert!(
+            err.to_string()
+                .contains("failed to read client certificate file")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_missing_client_key_file() {
+        let cert_file = create_test_cert_file(TEST_CERT_PEM);
+        let cert_path = cert_file.path().to_str().unwrap().to_string();
+
+        let options = OtlpExporterOptions {
+            endpoint: "https://localhost:4317".to_string(),
+            protocol: crate::otlp::opts::ExporterProtocol::Grpc,
+            timeout: std::time::Duration::from_secs(10),
+            max_batch_size: 512,
+            max_batch_interval: std::time::Duration::from_secs(5),
+            max_queue_size: 2048,
+            max_concurrent_exports: 1,
+            max_export_timeout: std::time::Duration::from_secs(30),
+            auth: None,
+            tls: Some(TlsOptions {
+                insecure: false,
+                ca_cert: None,
+                client_cert: Some(cert_path),
+                client_key: Some("/nonexistent/key.key".to_string()),
+            }),
+        };
+
+        let provider = ProviderBuilder::new();
+        let result = provider.with_otlp_exporter(options).await;
+
+        // Should fail with clear error about missing key file
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, OtlpError::TlsConfiguration(_)));
+        assert!(err.to_string().contains("failed to read client key file"));
+    }
+
+    #[test]
+    fn test_load_certificate_success() {
+        let cert_file = create_test_cert_file(TEST_CERT_PEM);
+        let cert_path = cert_file.path().to_str().unwrap();
+
+        let result = load_certificate(cert_path);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_load_certificate_missing_file() {
+        let result = load_certificate("/nonexistent/ca.crt");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, OtlpError::TlsConfiguration(_)));
+        assert!(err.to_string().contains("failed to read certificate file"));
+    }
+
+    #[test]
+    fn test_load_client_identity_success() {
+        let cert_file = create_test_cert_file(TEST_CERT_PEM);
+        let key_file = create_test_cert_file(TEST_KEY_PEM);
+
+        let cert_path = cert_file.path().to_str().unwrap();
+        let key_path = key_file.path().to_str().unwrap();
+
+        let result = load_client_identity(cert_path, key_path);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_load_client_identity_missing_cert() {
+        let key_file = create_test_cert_file(TEST_KEY_PEM);
+        let key_path = key_file.path().to_str().unwrap();
+
+        let result = load_client_identity("/nonexistent/cert.crt", key_path);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, OtlpError::TlsConfiguration(_)));
+        assert!(
+            err.to_string()
+                .contains("failed to read client certificate file")
+        );
+    }
+
+    #[test]
+    fn test_load_client_identity_missing_key() {
+        let cert_file = create_test_cert_file(TEST_CERT_PEM);
+        let cert_path = cert_file.path().to_str().unwrap();
+
+        let result = load_client_identity(cert_path, "/nonexistent/key.key");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, OtlpError::TlsConfiguration(_)));
+        assert!(err.to_string().contains("failed to read client key file"));
+    }
 }

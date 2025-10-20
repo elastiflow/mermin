@@ -1831,6 +1831,7 @@ dependencies = [
  "serde_yaml",
  "sha1",
  "socket2 0.5.10",
+ "tempfile",
  "thiserror 2.0.14",
  "tokio",
  "tonic",
