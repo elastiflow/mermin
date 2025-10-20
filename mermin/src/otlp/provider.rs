@@ -11,7 +11,7 @@ use opentelemetry_sdk::{
         span_processor_with_async_runtime::BatchSpanProcessor,
     },
 };
-use tonic::transport::{Channel, channel::ClientTlsConfig};
+use tonic::transport::{Channel, ClientTlsConfig};
 use tracing::{Level, info, level_filters::LevelFilter, warn};
 use tracing_subscriber::{
     fmt::{Layer, format::FmtSpan},
