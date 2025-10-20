@@ -179,6 +179,13 @@ pub struct OtlpExporterOptions {
     pub tls: Option<TlsOptions>,
 }
 
+impl OtlpExporterOptions {
+    /// Builds the full endpoint URL for the OTLP exporter.
+    pub fn build_endpoint(&self) -> String {
+        self.endpoint.clone()
+    }
+}
+
 /// Authentication configuration for exporters.
 ///
 /// This struct encapsulates the authentication options that can be used when connecting

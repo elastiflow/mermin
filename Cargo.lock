@@ -560,6 +560,7 @@ name = "common-build"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "thiserror 2.0.14",
  "toml 0.9.5",
 ]
 
@@ -1459,6 +1460,7 @@ dependencies = [
  "integration-common",
  "log",
  "network-types",
+ "thiserror 2.0.14",
  "tokio",
 ]
 
@@ -1829,6 +1831,7 @@ dependencies = [
  "serde_yaml",
  "sha1",
  "socket2 0.5.10",
+ "thiserror 2.0.14",
  "tokio",
  "tonic",
  "tower 0.4.13",

@@ -1,6 +1,5 @@
 use std::{mem::size_of, sync::Once, time::Duration};
 
-use anyhow::{Context, Result, anyhow};
 use aya::{
     Ebpf, include_bytes_aligned,
     maps::AsyncPerfEventArray,
@@ -11,9 +10,89 @@ use aya_log::EbpfLogger;
 use bytes::BytesMut;
 use integration_common::ParsedHeader;
 use log::{LevelFilter, debug, info, warn};
+use thiserror::Error;
 use tokio::sync::mpsc;
 
 static LOG_INIT: Once = Once::new();
+
+/// Errors that can occur during integration testing
+#[derive(Debug, Error)]
+pub enum TestError {
+    /// Failed to load eBPF program
+    #[error("failed to load eBPF program: {0}")]
+    EbpfLoad(#[from] aya::EbpfError),
+
+    /// eBPF program not found
+    #[error("eBPF program '{name}' not found")]
+    ProgramNotFound { name: String },
+
+    /// Failed to convert program to expected type
+    #[error("failed to convert program to expected type: {0}")]
+    ProgramConversion(#[from] aya::programs::ProgramError),
+
+    /// Failed to attach program to interface
+    #[error("failed to attach program to interface '{interface}': {details}")]
+    ProgramAttach { interface: String, details: String },
+
+    /// Map not found
+    #[error("map '{name}' not found")]
+    MapNotFound { name: String },
+
+    /// Failed to convert map to expected type
+    #[error("failed to convert map to expected type: {0}")]
+    MapConversion(#[from] aya::maps::MapError),
+
+    /// Failed to get online CPUs
+    #[error("failed to get online CPUs: {message}: {source}")]
+    OnlineCpus {
+        message: String,
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// Failed to open perf buffer
+    #[error("failed to open perf buffer for CPU {cpu}: {source}")]
+    PerfBufferOpen {
+        cpu: u32,
+        #[source]
+        source: aya::maps::perf::PerfBufferError,
+    },
+
+    /// Timeout waiting for event
+    #[error("timeout waiting for event after {timeout:?}")]
+    EventTimeout { timeout: Duration },
+
+    /// Channel closed unexpectedly
+    #[error("event channel closed unexpectedly")]
+    ChannelClosed,
+
+    /// Failed to bind socket
+    #[error("failed to bind client socket to {address}: {source}")]
+    SocketBind {
+        address: String,
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// Failed to connect socket
+    #[error("failed to connect client socket to {address}: {source}")]
+    SocketConnect {
+        address: String,
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// Failed to send test data
+    #[error("failed to send test data: {0}")]
+    SendData(#[source] std::io::Error),
+
+    /// Failed to receive event from eBPF program
+    #[error("failed to receive event from eBPF program: {0}")]
+    ReceiveEvent(String),
+}
+
+/// Type alias for Result with TestError
+pub type Result<T> = std::result::Result<T, TestError>;
 
 /// Configuration options for the test harness.
 #[derive(Debug, Clone)]
@@ -98,8 +177,10 @@ impl TestHarness {
         );
         let received = tokio::time::timeout(self.config.receive_timeout, self.result_rx.recv())
             .await
-            .context("Timeout waiting for event")?
-            .ok_or_else(|| anyhow!("Channel closed unexpectedly"))?;
+            .map_err(|_| TestError::EventTimeout {
+                timeout: self.config.receive_timeout,
+            })?
+            .ok_or(TestError::ChannelClosed)?;
 
         debug!("Received event: {:?}", received.type_);
         Ok(received)
@@ -151,17 +232,19 @@ pub async fn setup_test_with_config(config: TestConfig) -> Result<TestHarness> {
     // Get the program by name and convert it to the expected type
     let program: &mut SchedClassifier = ebpf
         .program_mut(&config.program_name)
-        .context(format!("Program '{}' not found", config.program_name))?
+        .ok_or_else(|| TestError::ProgramNotFound {
+            name: config.program_name.clone(),
+        })?
         .try_into()?;
 
     // Load and attach the program
     program.load()?;
     let _link = program
         .attach(&config.interface, config.tc_attach_type)
-        .context(format!(
-            "Failed to attach program to interface '{}'",
-            config.interface
-        ))?;
+        .map_err(|e| TestError::ProgramAttach {
+            interface: config.interface.clone(),
+            details: e.to_string(),
+        })?;
 
     info!(
         "Successfully attached program to interface '{}'",
@@ -171,18 +254,28 @@ pub async fn setup_test_with_config(config: TestConfig) -> Result<TestHarness> {
     // Get the map for reading events
     let mut out_data: AsyncPerfEventArray<_> = ebpf
         .take_map(&config.map_name)
-        .context(format!("Map '{}' not found", config.map_name))?
+        .ok_or_else(|| TestError::MapNotFound {
+            name: config.map_name.clone(),
+        })?
         .try_into()?;
 
     // Create an MPSC channel to receive events from all CPU listeners.
     let (tx, rx) = mpsc::channel(config.channel_capacity);
 
     // Spawn a listener task for each online CPU.
-    let cpus = online_cpus().map_err(|(err_str, io_err)| anyhow!("{}: {}", err_str, io_err))?;
+    let cpus = online_cpus().map_err(|(err_str, io_err)| TestError::OnlineCpus {
+        message: err_str.to_string(),
+        source: io_err,
+    })?;
     info!("Setting up listeners for {} CPUs", cpus.len());
 
     for cpu_id in cpus {
-        let mut perf_buf = out_data.open(cpu_id, None)?;
+        let mut perf_buf = out_data
+            .open(cpu_id, None)
+            .map_err(|e| TestError::PerfBufferOpen {
+                cpu: cpu_id,
+                source: e,
+            })?;
         let tx_clone = tx.clone();
         let buffer_count = config.buffer_count;
 
@@ -305,10 +398,9 @@ macro_rules! define_header_test {
     // Version with custom configuration
     ($test_name:ident, $header_type:ty, $packet_type:expr, $setup_fn:expr, $verify_fn:expr, $config_expr:expr) => {
         #[tokio::test]
-        async fn $test_name() -> Result<(), anyhow::Error> {
+        async fn $test_name() -> Result<(), crate::utils::TestError> {
             use std::net::UdpSocket;
 
-            use anyhow::Context;
             use log::{debug, info};
 
             info!("--- Running Test for {} ---", stringify!($header_type));
@@ -325,16 +417,20 @@ macro_rules! define_header_test {
 
             // Create and connect the client socket
             debug!("Binding client socket to {}", config.client_bind_addr);
-            let client = UdpSocket::bind(config.client_bind_addr).context(format!(
-                "Failed to bind client socket to {}",
-                config.client_bind_addr
-            ))?;
+            let client = UdpSocket::bind(config.client_bind_addr).map_err(|e| {
+                crate::utils::TestError::SocketBind {
+                    address: config.client_bind_addr.to_string(),
+                    source: e,
+                }
+            })?;
 
             debug!("Connecting client socket to {}", config.server_addr);
-            client.connect(config.server_addr).context(format!(
-                "Failed to connect client socket to {}",
-                config.server_addr
-            ))?;
+            client.connect(config.server_addr).map_err(|e| {
+                crate::utils::TestError::SocketConnect {
+                    address: config.server_addr.to_string(),
+                    source: e,
+                }
+            })?;
 
             // Get test data from setup function
             debug!("Getting test data from setup function");
@@ -344,14 +440,14 @@ macro_rules! define_header_test {
             debug!("Sending {} bytes of test data", request_data.len());
             client
                 .send(&request_data)
-                .context("Failed to send test data")?;
+                .map_err(crate::utils::TestError::SendData)?;
 
             // Receive and verify the event
             debug!("Waiting for event from eBPF program");
             let received = harness
                 .receive_event()
                 .await
-                .context("Failed to receive event from eBPF program")?;
+                .map_err(|e| crate::utils::TestError::ReceiveEvent(e.to_string()))?;
 
             debug!("Verifying received event");
             $verify_fn(received, expected_header);

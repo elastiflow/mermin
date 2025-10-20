@@ -1,6 +1,5 @@
-use std::{error::Error, fmt};
-
 use clap::Parser;
+use thiserror::Error;
 
 use crate::runtime::{
     cli::Cli,
@@ -22,29 +21,10 @@ impl Context {
     }
 }
 
-#[derive(Debug)]
+/// Errors that can occur during runtime context initialization
+#[derive(Debug, Error)]
 pub enum ContextError {
-    Conf(ConfError),
-}
-
-impl fmt::Display for ContextError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ContextError::Conf(e) => e.fmt(f),
-        }
-    }
-}
-
-impl Error for ContextError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            ContextError::Conf(e) => Some(e),
-        }
-    }
-}
-
-impl From<ConfError> for ContextError {
-    fn from(e: ConfError) -> Self {
-        ContextError::Conf(e)
-    }
+    /// Configuration error
+    #[error("configuration error: {0}")]
+    Conf(#[from] ConfError),
 }
