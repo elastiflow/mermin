@@ -3,7 +3,6 @@ use std::net::IpAddr;
 use k8s_openapi::api::{core::v1::Pod, networking::v1::NetworkPolicySpec};
 use tracing::debug;
 
-use super::K8sError;
 use crate::{
     k8s::decorator::{
         DecorationInfo, Decorator, FlowContext, FlowDirection, K8sObjectMeta, WorkloadOwner,

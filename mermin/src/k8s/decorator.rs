@@ -40,8 +40,7 @@ use network_types::ip::IpProto;
 use tokio::sync::oneshot;
 use tracing::error;
 
-use super::K8sError;
-use crate::{health::HealthState, span::flow::FlowSpan};
+use crate::{health::HealthState, k8s::K8sError, span::flow::FlowSpan};
 
 /// Holds metadata for a single Kubernetes object.
 #[derive(Debug, Clone)]
