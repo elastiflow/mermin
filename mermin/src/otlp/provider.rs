@@ -22,9 +22,9 @@ use tracing_subscriber::{
 use crate::{
     otlp::{
         OtlpError,
-        opts::{OtlpExporterOptions, StdoutExporterOptions, defaults},
+        opts::{OtlpExporterOptions, StdoutFmt, defaults},
     },
-    runtime::enums::SpanFmt,
+    runtime::opts::SpanFmt,
 };
 
 pub struct ProviderBuilder {
@@ -44,10 +44,7 @@ impl ProviderBuilder {
         }
     }
 
-    pub async fn with_otlp_exporter(
-        mut self,
-        options: OtlpExporterOptions,
-    ) -> Result<Self, OtlpError> {
+    pub async fn with_otlp_exporter(self, options: OtlpExporterOptions) -> Result<Self, OtlpError> {
         debug!("creating otlp exporter with options: {options:?}");
 
         let endpoint = options.build_endpoint();
@@ -106,13 +103,15 @@ impl ProviderBuilder {
                 let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio)
                     .with_batch_config(batch_config)
                     .build();
-                ProviderBuilder {
+                Ok(ProviderBuilder {
                     sdk_builder: self.sdk_builder.with_span_processor(processor),
-                }
+                })
             }
             Err(e) => {
                 error!("failed to build OTLP exporter: {e}");
-                self
+                Err(OtlpError::ExporterConfiguration(format!(
+                    "failed to build OTLP exporter: {e}"
+                )))
             }
         }
     }
@@ -151,12 +150,12 @@ impl ProviderBuilder {
 pub async fn init_provider(
     stdout: Option<StdoutFmt>,
     otlp: Option<OtlpExporterOptions>,
-) -> SdkTracerProvider {
+) -> Result<SdkTracerProvider, OtlpError> {
     let mut provider = ProviderBuilder::new();
 
     if stdout.is_none() && otlp.is_none() {
         warn!("no exporters configured");
-        return provider.build();
+        return Ok(provider.build());
     }
 
     let (batch_size, batch_interval, max_queue_size, max_concurrent_exports, max_export_timeout) =
@@ -179,7 +178,7 @@ pub async fn init_provider(
         };
 
     if let Some(otlp_opts) = otlp {
-        provider = provider.with_otlp_exporter(otlp_opts.clone()).await;
+        provider = provider.with_otlp_exporter(otlp_opts.clone()).await?;
     }
 
     if stdout.is_some() {
@@ -192,16 +191,16 @@ pub async fn init_provider(
         );
     }
 
-    provider.build()
+    Ok(provider.build())
 }
 
 pub async fn init_internal_tracing(
     log_level: Level,
     span_fmt: SpanFmt,
-) -> Result<(), OtlpError> {
-    let provider = init_provider(otlp_opts, stdout_opts).await;
     stdout: Option<StdoutFmt>,
     otlp: Option<OtlpExporterOptions>,
+) -> Result<(), OtlpError> {
+    let provider = init_provider(stdout, otlp).await?;
     let mut fmt_layer = Layer::new().with_span_events(FmtSpan::from(span_fmt));
 
     match log_level {

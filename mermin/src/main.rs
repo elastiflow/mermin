@@ -53,7 +53,7 @@ async fn main() -> Result<()> {
 
         if conf.export.traces.stdout.is_some() || conf.export.traces.otlp.is_some() {
             let app_tracer_provider =
-                init_provider(conf.export.traces.stdout, conf.export.traces.otlp.clone()).await;
+                init_provider(conf.export.traces.stdout, conf.export.traces.otlp.clone()).await?;
             info!("initialized configured exporters");
             Arc::new(TraceExporterAdapter::new(app_tracer_provider))
         } else {
@@ -89,7 +89,7 @@ async fn main() -> Result<()> {
     // Configure parser options for tunnel port detection
     let mut parser_options_map: Array<_, u16> = ebpf
         .take_map("PARSER_OPTIONS")
-        .ok_or_else(|| anyhow!("PARSER_OPTIONS map not present in the object"))?
+        .ok_or_else(|| MerminError::ebpf_map("PARSER_OPTIONS map not present in the object"))?
         .try_into()?;
 
     // Set tunnel ports in the map (indices: 0=geneve, 1=vxlan, 2=wireguard)

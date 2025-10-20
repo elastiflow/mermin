@@ -4,8 +4,11 @@ use k8s_openapi::api::{core::v1::Pod, networking::v1::NetworkPolicySpec};
 use tracing::debug;
 
 use crate::{
-    k8s::decorator::{
-        DecorationInfo, Decorator, FlowContext, FlowDirection, K8sObjectMeta, WorkloadOwner,
+    k8s::{
+        K8sError,
+        decorator::{
+            DecorationInfo, Decorator, FlowContext, FlowDirection, K8sObjectMeta, WorkloadOwner,
+        },
     },
     span::flow::FlowSpan,
 };
@@ -311,11 +314,11 @@ impl<'a> SpanDecorator<'a> {
 }
 
 /// Public interface for attributing a FlowSpan with Kubernetes metadata.
-/// Creates a SpanAttributor and performs the correlation process.
+/// Creates a SpanDecorator and performs the correlation process.
 pub async fn decorate_flow_span(
     flow_span: &FlowSpan,
-    attributor: &Attributor,
+    decorator: &Decorator,
 ) -> Result<FlowSpan, K8sError> {
-    let span_attributor = SpanAttributor::new(attributor);
-    span_attributor.attribute(flow_span).await
+    let span_decorator = SpanDecorator::new(decorator);
+    span_decorator.decorate(flow_span).await
 }
