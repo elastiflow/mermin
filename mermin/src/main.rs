@@ -17,7 +17,6 @@ use aya::{
     programs::{SchedClassifier, TcAttachType, tc},
 };
 use error::{MerminError, Result};
-use mermin_common::PacketMeta;
 use pnet::datalink;
 use tokio::{signal, sync::mpsc};
 use tracing::{debug, error, info, warn};
