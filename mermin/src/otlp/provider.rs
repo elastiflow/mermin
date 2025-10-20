@@ -20,7 +20,10 @@ use tracing_subscriber::{
 };
 
 use crate::{
-    otlp::opts::{OtlpExporterOptions, StdoutFmt, defaults},
+    otlp::{
+        OtlpError,
+        opts::{OtlpExporterOptions, StdoutFmt, defaults},
+    },
     runtime::opts::SpanFmt,
 };
 
@@ -41,12 +44,13 @@ impl ProviderBuilder {
         }
     }
 
-    pub async fn with_otlp_exporter(self, options: OtlpExporterOptions) -> ProviderBuilder {
+    pub async fn with_otlp_exporter(self, options: OtlpExporterOptions) -> Result<Self, OtlpError> {
         debug!("creating otlp exporter with options: {options:?}");
-        let uri: Uri = options.endpoint.clone().parse().unwrap_or_else(|e| {
-            info!("failed to parse OTLP endpoint URL: {}", e);
-            Uri::default()
-        });
+
+        let endpoint = options.build_endpoint();
+        let uri: Uri = endpoint.parse().map_err(|e| {
+            OtlpError::invalid_endpoint(&endpoint, format!("failed to parse as URI: {e}"))
+        })?;
 
         // TODO: Apply TLS configuration - ENG-120
         // This should handle TLS settings from config.tls
@@ -58,13 +62,10 @@ impl ProviderBuilder {
         let mut channel = Channel::builder(uri);
         if let Some(tls) = tls_config {
             debug!("tls configuration detected for otlp exporter");
-            let res = channel.tls_config(tls);
-            if res.is_err() {
-                warn!("failed to apply tls configuration: {}", res.err().unwrap());
-                return self;
-            }
-            channel = res.unwrap();
-        };
+            channel = channel.tls_config(tls).map_err(|e| {
+                OtlpError::TlsConfiguration(format!("failed to apply TLS config: {e}"))
+            })?;
+        }
 
         let builder = opentelemetry_otlp::SpanExporter::builder()
             .with_tonic() // for gRPC
@@ -72,22 +73,19 @@ impl ProviderBuilder {
             .with_protocol(opentelemetry_otlp::Protocol::Grpc);
 
         if let Some(auth_config) = &options.auth {
-            match auth_config.generate_auth_headers() {
-                Ok(auth_headers) => {
-                    info!("applied authentication headers to otlp exporter");
-                    // TODO: Apply headers to the exporter builder - ENG-120
-                    // Note: The opentelemetry_otlp crate may need to be updated to support custom headers
-                    // For now, this is a placeholder for where header configuration would go
-                    debug!(
-                        "headers configured for otlp exporter ({} headers)",
-                        auth_headers.len()
-                    );
-                }
-                Err(e) => {
-                    warn!("failed to generate authentication headers: {}", e);
-                    return self;
-                }
-            }
+            let auth_headers = auth_config.generate_auth_headers().map_err(|e| {
+                OtlpError::ExporterConfiguration(format!(
+                    "failed to generate authentication headers: {e}"
+                ))
+            })?;
+            info!("applied authentication headers to otlp exporter");
+            // TODO: Apply headers to the exporter builder - ENG-120
+            // Note: The opentelemetry_otlp crate may need to be updated to support custom headers
+            // For now, this is a placeholder for where header configuration would go
+            debug!(
+                "headers configured for otlp exporter ({} headers)",
+                auth_headers.len()
+            );
         }
 
         match builder.build() {
@@ -105,13 +103,15 @@ impl ProviderBuilder {
                 let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio)
                     .with_batch_config(batch_config)
                     .build();
-                ProviderBuilder {
+                Ok(ProviderBuilder {
                     sdk_builder: self.sdk_builder.with_span_processor(processor),
-                }
+                })
             }
             Err(e) => {
                 error!("failed to build OTLP exporter: {e}");
-                self
+                Err(OtlpError::ExporterConfiguration(format!(
+                    "failed to build OTLP exporter: {e}"
+                )))
             }
         }
     }
@@ -150,12 +150,12 @@ impl ProviderBuilder {
 pub async fn init_provider(
     stdout: Option<StdoutFmt>,
     otlp: Option<OtlpExporterOptions>,
-) -> SdkTracerProvider {
+) -> Result<SdkTracerProvider, OtlpError> {
     let mut provider = ProviderBuilder::new();
 
     if stdout.is_none() && otlp.is_none() {
         warn!("no exporters configured");
-        return provider.build();
+        return Ok(provider.build());
     }
 
     let (batch_size, batch_interval, max_queue_size, max_concurrent_exports, max_export_timeout) =
@@ -178,7 +178,7 @@ pub async fn init_provider(
         };
 
     if let Some(otlp_opts) = otlp {
-        provider = provider.with_otlp_exporter(otlp_opts.clone()).await;
+        provider = provider.with_otlp_exporter(otlp_opts.clone()).await?;
     }
 
     if stdout.is_some() {
@@ -191,7 +191,7 @@ pub async fn init_provider(
         );
     }
 
-    provider.build()
+    Ok(provider.build())
 }
 
 pub async fn init_internal_tracing(
@@ -199,8 +199,8 @@ pub async fn init_internal_tracing(
     span_fmt: SpanFmt,
     stdout: Option<StdoutFmt>,
     otlp: Option<OtlpExporterOptions>,
-) -> Result<(), anyhow::Error> {
-    let provider = init_provider(stdout, otlp).await;
+) -> Result<(), OtlpError> {
+    let provider = init_provider(stdout, otlp).await?;
     let mut fmt_layer = Layer::new().with_span_events(FmtSpan::from(span_fmt));
 
     match log_level {

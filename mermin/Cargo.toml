@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { workspace = true, default-features = true }
 async-trait = "0.1.88"
+thiserror = { workspace = true }
 axum = "0.7"
 aya = { workspace = true, features = ["async_tokio"] }
 aya-log = { workspace = true }

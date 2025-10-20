@@ -1,3 +1,4 @@
+mod error;
 mod health;
 mod k8s;
 mod otlp;
@@ -10,11 +11,11 @@ use std::{
     sync::{Arc, atomic::Ordering},
 };
 
-use anyhow::{Result, anyhow};
 use aya::{
     maps::{Array, RingBuf},
     programs::{SchedClassifier, TcAttachType, tc},
 };
+use error::{MerminError, Result};
 use mermin_common::PacketMeta;
 use pnet::datalink;
 use tokio::{io::unix::AsyncFd, signal, sync::mpsc};
@@ -52,7 +53,7 @@ async fn main() -> Result<()> {
 
         if conf.export.traces.stdout.is_some() || conf.export.traces.otlp.is_some() {
             let app_tracer_provider =
-                init_provider(conf.export.traces.stdout, conf.export.traces.otlp.clone()).await;
+                init_provider(conf.export.traces.stdout, conf.export.traces.otlp.clone()).await?;
             info!("initialized configured exporters");
             Arc::new(TraceExporterAdapter::new(app_tracer_provider))
         } else {
@@ -88,7 +89,7 @@ async fn main() -> Result<()> {
     // Configure parser options for tunnel port detection
     let mut parser_options_map: Array<_, u16> = ebpf
         .take_map("PARSER_OPTIONS")
-        .ok_or_else(|| anyhow!("PARSER_OPTIONS map not present in the object"))?
+        .ok_or_else(|| MerminError::ebpf_map("PARSER_OPTIONS map not present in the object"))?
         .try_into()?;
 
     // Set tunnel ports in the map (indices: 0=geneve, 1=vxlan, 2=wireguard)
@@ -119,7 +120,12 @@ async fn main() -> Result<()> {
     programs.iter().try_for_each(|attach_type| -> Result<()> {
         let program: &mut SchedClassifier = ebpf
             .program_mut(attach_type.program_name())
-            .unwrap()
+            .ok_or_else(|| {
+                MerminError::internal(format!(
+                    "eBPF program '{}' not found in loaded object",
+                    attach_type.program_name()
+                ))
+            })?
             .try_into()?;
         program.load()?;
 
@@ -141,7 +147,7 @@ async fn main() -> Result<()> {
 
     let map = ebpf
         .take_map("PACKETS_META")
-        .ok_or_else(|| anyhow!("PACKETS_META map not present in the object"))?;
+        .ok_or_else(|| MerminError::ebpf_map("PACKETS_META map not present in the object"))?;
     let mut ring_buf = RingBuf::try_from(map)?;
 
     info!("waiting for packets - ring buffer initialized");

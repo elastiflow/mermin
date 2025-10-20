@@ -1,11 +1,14 @@
 use std::net::IpAddr;
 
-use anyhow::Result;
 use k8s_openapi::api::{core::v1::Pod, networking::v1::NetworkPolicySpec};
+use tracing::debug;
 
 use crate::{
-    k8s::decorator::{
-        DecorationInfo, Decorator, FlowContext, FlowDirection, K8sObjectMeta, WorkloadOwner,
+    k8s::{
+        K8sError,
+        decorator::{
+            DecorationInfo, Decorator, FlowContext, FlowDirection, K8sObjectMeta, WorkloadOwner,
+        },
     },
     span::flow::FlowSpan,
 };
@@ -30,7 +33,7 @@ impl<'a> SpanDecorator<'a> {
 
     /// Correlates flow attributes with Kubernetes resources and populates K8s metadata fields.
     /// Returns a cloned FlowSpan with source and destination Kubernetes attributes populated.
-    async fn decorate(&self, flow_span: &FlowSpan) -> Result<FlowSpan> {
+    async fn decorate(&self, flow_span: &FlowSpan) -> Result<FlowSpan, K8sError> {
         // Create FlowContext directly for both directions
         let ctx = FlowContext::from_flow_span(flow_span, self.decorator).await;
 
@@ -226,7 +229,7 @@ impl<'a> SpanDecorator<'a> {
     async fn evaluate_flow_policies(
         &self,
         ctx: &FlowContext,
-    ) -> Result<(Vec<NetworkPolicy>, Vec<NetworkPolicy>)> {
+    ) -> Result<(Vec<NetworkPolicy>, Vec<NetworkPolicy>), K8sError> {
         let mut ingress_policies = Vec::new();
         let mut egress_policies = Vec::new();
 
@@ -250,7 +253,7 @@ impl<'a> SpanDecorator<'a> {
         ctx: &FlowContext,
         policy_pod: &Pod,
         direction: FlowDirection,
-    ) -> Result<Vec<NetworkPolicy>> {
+    ) -> Result<Vec<NetworkPolicy>, K8sError> {
         let matching_policies = self
             .decorator
             .get_matching_network_policies(ctx, policy_pod, direction)?;
@@ -277,11 +280,16 @@ impl<'a> SpanDecorator<'a> {
         // Try to match against a Service
         if let Some(service) = self.decorator.get_service_by_ip(ip).await {
             let service_meta = K8sObjectMeta::from(service.as_ref());
-            let backend_ips = self
-                .decorator
-                .resolve_service_ip_to_backend_ips(ip)
-                .await
-                .unwrap_or_default();
+            let backend_ips = match self.decorator.resolve_service_ip_to_backend_ips(ip).await {
+                Some(ips) => ips,
+                None => {
+                    debug!(
+                        "failed to resolve backend IPs for service {} with IP {}",
+                        service_meta.name, ip
+                    );
+                    Vec::new()
+                }
+            };
 
             return Some(DecorationInfo::Service {
                 service: service_meta,
@@ -296,13 +304,21 @@ impl<'a> SpanDecorator<'a> {
             });
         }
 
+        // No Kubernetes resource found for this IP
+        debug!(
+            "IP {} could not be attributed to any Kubernetes resource (pod, node, service, or endpoint)",
+            ip
+        );
         None
     }
 }
 
-/// Public interface for decorating a FlowSpan with Kubernetes metadata.
+/// Public interface for attributing a FlowSpan with Kubernetes metadata.
 /// Creates a SpanDecorator and performs the correlation process.
-pub async fn decorate_flow_span(flow_span: &FlowSpan, decorator: &Decorator) -> Result<FlowSpan> {
+pub async fn decorate_flow_span(
+    flow_span: &FlowSpan,
+    decorator: &Decorator,
+) -> Result<FlowSpan, K8sError> {
     let span_decorator = SpanDecorator::new(decorator);
     span_decorator.decorate(flow_span).await
 }

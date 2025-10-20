@@ -6,4 +6,5 @@ publish = false
 
 [dependencies]
 anyhow = "1.0"
+thiserror = { workspace = true }
 toml = "0.9"
