@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    net::{Ipv4Addr, Ipv6Addr},
     sync::Arc,
     time::{Duration, UNIX_EPOCH},
 };
@@ -19,11 +19,14 @@ use pnet::datalink::MacAddr;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{debug, warn};
 
-use crate::span::{
-    community_id::CommunityIdGenerator,
-    flow::{FlowEndReason, FlowSpan, SpanAttributes},
-    opts::SpanOptions,
-    tcp::{ConnectionState, TcpFlags},
+use crate::{
+    ip::{Error, resolve_addrs},
+    span::{
+        community_id::CommunityIdGenerator,
+        flow::{FlowEndReason, FlowSpan, SpanAttributes},
+        opts::SpanOptions,
+        tcp::{ConnectionState, TcpFlags},
+    },
 };
 
 /// ### Concurrency Model
@@ -160,6 +163,7 @@ impl FlowSpanProducer {
                 worker_rx,
                 self.flow_span_tx.clone(),
             );
+
             tokio::spawn(async move {
                 packet_worker.run().await;
             });
@@ -288,7 +292,7 @@ impl PacketWorker {
     }
 
     async fn upsert_packet_meta(&self, packet: PacketMeta) -> Result<(), Error> {
-        let (src_addr, dst_addr) = match extract_ip_addresses(
+        let (src_addr, dst_addr) = match resolve_addrs(
             packet.ip_addr_type,
             packet.src_ipv4_addr,
             packet.dst_ipv4_addr,
@@ -337,7 +341,7 @@ impl PacketWorker {
 
         let is_ipip = packet.ipip_ip_addr_type != IpAddrType::Unknown;
         let ipip_addrs = if is_ipip {
-            extract_ip_addresses(
+            resolve_addrs(
                 packet.ipip_ip_addr_type,
                 packet.ipip_src_ipv4_addr,
                 packet.ipip_dst_ipv4_addr,
@@ -352,7 +356,7 @@ impl PacketWorker {
         let tunnel_has_mac = packet.tunnel_src_mac_addr != [0; 6];
         let is_tunneled = packet.tunnel_type != TunnelType::None;
         let tunnel_addrs = if is_tunneled {
-            extract_ip_addresses(
+            resolve_addrs(
                 packet.tunnel_ip_addr_type,
                 packet.tunnel_src_ipv4_addr,
                 packet.tunnel_dst_ipv4_addr,
@@ -686,21 +690,6 @@ impl PacketWorker {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Error {
-    UnknownIpAddrType,
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::UnknownIpAddrType => write!(f, "unknown IP address type"),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
-
 /// Errors that can occur during boot time offset calculation
 #[derive(Debug)]
 pub enum BootTimeError {
@@ -861,28 +850,6 @@ async fn timeout_task_loop(
                 // The sleep will be restarted in the next iteration
                 timeout_duration = new_duration;
             }
-        }
-    }
-}
-
-fn extract_ip_addresses(
-    ip_addr_type: IpAddrType,
-    src_ipv4_addr: [u8; 4],
-    dst_ipv4_addr: [u8; 4],
-    src_ipv6_addr: [u8; 16],
-    dst_ipv6_addr: [u8; 16],
-) -> Result<(IpAddr, IpAddr), Error> {
-    match ip_addr_type {
-        IpAddrType::Unknown => Err(Error::UnknownIpAddrType),
-        IpAddrType::Ipv4 => {
-            let src = IpAddr::V4(std::net::Ipv4Addr::from(src_ipv4_addr));
-            let dst = IpAddr::V4(std::net::Ipv4Addr::from(dst_ipv4_addr));
-            Ok((src, dst))
-        }
-        IpAddrType::Ipv6 => {
-            let src = IpAddr::V6(std::net::Ipv6Addr::from(src_ipv6_addr));
-            let dst = IpAddr::V6(std::net::Ipv6Addr::from(dst_ipv6_addr));
-            Ok((src, dst))
         }
     }
 }
@@ -1556,58 +1523,6 @@ mod tests {
 
         // Verify task completed (would be pending if still running)
         assert!(record_handle.is_finished());
-    }
-
-    #[test]
-    fn test_extract_ip_addresses_ipv4() {
-        let result = extract_ip_addresses(
-            IpAddrType::Ipv4,
-            [192, 168, 1, 1],
-            [192, 168, 1, 2],
-            [0; 16],
-            [0; 16],
-        );
-
-        assert!(result.is_ok());
-        let (src, dst) = result.unwrap();
-        assert_eq!(src, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)));
-        assert_eq!(dst, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2)));
-    }
-
-    #[test]
-    fn test_extract_ip_addresses_ipv6() {
-        let result = extract_ip_addresses(
-            IpAddrType::Ipv6,
-            [0; 4],
-            [0; 4],
-            [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-            [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-        );
-
-        assert!(result.is_ok());
-        let (src, dst) = result.unwrap();
-        match src {
-            IpAddr::V6(addr) => assert!(addr.to_string().starts_with("2001:db8")),
-            _ => panic!("Expected IPv6 address"),
-        }
-        match dst {
-            IpAddr::V6(addr) => assert!(addr.to_string().starts_with("2001:db8")),
-            _ => panic!("Expected IPv6 address"),
-        }
-    }
-
-    #[test]
-    fn test_extract_ip_addresses_unknown() {
-        let result = extract_ip_addresses(
-            IpAddrType::Unknown,
-            [192, 168, 1, 1],
-            [192, 168, 1, 2],
-            [0; 16],
-            [0; 16],
-        );
-
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), Error::UnknownIpAddrType);
     }
 
     #[test]

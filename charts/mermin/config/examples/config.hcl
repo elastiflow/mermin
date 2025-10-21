@@ -21,14 +21,14 @@ internal "traces" {
   stdout = "" // text, text_indent(*new), json, json_indent
 
   otlp = {
-    endpoint = "http://otelcol:4317"
-    protocol = "grpc"
-    timeout  = "10s"
-    max_batch_size = 512
-    max_batch_interval = "5s"
-    max_queue_size = 2048
+    endpoint               = "http://otelcol:4317"
+    protocol               = "grpc"
+    timeout                = "10s"
+    max_batch_size         = 512
+    max_batch_interval     = "5s"
+    max_queue_size         = 2048
     max_concurrent_exports = 1
-    max_export_timeout = "30s"
+    max_export_timeout     = "30s"
 
     auth = {
       basic = {
@@ -89,7 +89,8 @@ discovery "informer" "k8s" {
   */
   selectors = [
     { kind = "Service" }, { kind = "Endpoint" }, { kind = "EndpointSlice" }, { kind = "Gateway" }, { kind = "Ingress" },
-    { kind = "Pod" }, { kind = "ReplicaSet" }, { kind = "Deployment" }, { kind = "Daemonset" }, { kind = "StatefulSet" },
+    { kind = "Pod" }, { kind = "ReplicaSet" }, { kind = "Deployment" }, { kind = "Daemonset" },
+    { kind = "StatefulSet" },
     { kind = "Job" }, { kind = "CronJob" }, { kind = "NetworkPolicy" },
 
     /*
@@ -307,8 +308,14 @@ attributes "source" "k8s" {
     */
     pod = {
       sources = [
-        { from = "flow", name = "source.ip", to = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"] },
-        { from = "flow", name = "source.port", to = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"] },
+        {
+          from = "flow", name = "source.ip",
+          to   = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"]
+        },
+        {
+          from = "flow", name = "source.port",
+          to   = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"]
+        },
         { from = "flow", name = "network.transport", to = ["spec.containers[*].ports[*].protocol"] },
       ]
     }
@@ -327,7 +334,11 @@ attributes "source" "k8s" {
     */
     service = {
       sources = [
-        { from = "flow", name = "source.ip", to = ["spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"] },
+        {
+          from = "flow", name = "source.ip", to = [
+            "spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"
+          ]
+        },
         { from = "flow", name = "source.port", to = ["spec.ports[*].port"] },
         { from = "flow", name = "network.transport", to = ["spec.ports[*].protocol"] },
         { from = "flow", name = "network.type", to = ["spec.ipFamilies[*]"] },
@@ -360,8 +371,14 @@ attributes "source" "k8s" {
     */
     ingress = {
       sources = [
-        { from = "flow", name = "source.ip", to = ["status.loadBalancer.ingress[*].ip", "status.loadBalancer.ingress[*].hostname"] },
-        { from = "flow", name = "source.port", to = ["spec.defaultBackend.service.port", "spec.rules[*].http.paths[*].backend.service.port.number"] }
+        {
+          from = "flow", name = "source.ip",
+          to   = ["status.loadBalancer.ingress[*].ip", "status.loadBalancer.ingress[*].hostname"]
+        },
+        {
+          from = "flow", name = "source.port",
+          to   = ["spec.defaultBackend.service.port", "spec.rules[*].http.paths[*].backend.service.port.number"]
+        }
       ]
     }
     /*
@@ -384,9 +401,15 @@ attributes "source" "k8s" {
     */
     networkpolicy = {
       sources = [
-        { from = "flow", name = "source.ip", to = ["spec.ingress[*].from[*].ipBlock.cidr", "spec.egress[*].to[*].ipBlock.cidr"] },
+        {
+          from = "flow", name = "source.ip",
+          to   = ["spec.ingress[*].from[*].ipBlock.cidr", "spec.egress[*].to[*].ipBlock.cidr"]
+        },
         { from = "flow", name = "source.port", to = ["spec.ingress[*].ports[*].port", "spec.egress[*].ports[*].port"] },
-        { from = "flow", name = "network.transport", to = ["spec.ingress[*].ports[*].protocol", "spec.egress[*].ports[*].protocol"] },
+        {
+          from = "flow", name = "network.transport",
+          to   = ["spec.ingress[*].ports[*].protocol", "spec.egress[*].ports[*].protocol"]
+        },
       ]
     }
   }
@@ -431,8 +454,14 @@ attributes "destination" "k8s" {
     */
     pod = {
       sources = [
-        { from = "flow", name = "destination.ip", to = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"] },
-        { from = "flow", name = "destination.port", to = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"] },
+        {
+          from = "flow", name = "destination.ip",
+          to   = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"]
+        },
+        {
+          from = "flow", name = "destination.port",
+          to   = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"]
+        },
         { from = "flow", name = "network.transport", to = ["spec.containers[*].ports[*].protocol"] },
       ]
     }
@@ -451,7 +480,11 @@ attributes "destination" "k8s" {
     */
     service = {
       sources = [
-        { from = "flow", name = "destination.ip", to = ["spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"] },
+        {
+          from = "flow", name = "destination.ip", to = [
+            "spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"
+          ]
+        },
         { from = "flow", name = "destination.port", to = ["spec.ports[*].port"] },
         { from = "flow", name = "network.transport", to = ["spec.ports[*].protocol"] },
         { from = "flow", name = "network.type", to = ["spec.ipFamilies[*]"] },
@@ -483,8 +516,14 @@ attributes "destination" "k8s" {
     */
     ingress = {
       sources = [
-        { from = "flow", name = "destination.ip", to = ["status.loadBalancer.ingress[*].ip", "status.loadBalancer.ingress[*].hostname"] },
-        { from = "flow", name = "destination.port", to = ["spec.defaultBackend.service.port", "spec.rules[*].http.paths[*].backend.service.port.number"] }
+        {
+          from = "flow", name = "destination.ip",
+          to   = ["status.loadBalancer.ingress[*].ip", "status.loadBalancer.ingress[*].hostname"]
+        },
+        {
+          from = "flow", name = "destination.port",
+          to   = ["spec.defaultBackend.service.port", "spec.rules[*].http.paths[*].backend.service.port.number"]
+        }
       ]
     }
     /*
@@ -507,9 +546,18 @@ attributes "destination" "k8s" {
     */
     networkpolicy = {
       sources = [
-        { from = "flow", name = "destination.ip", to = ["spec.ingress[*].from[*].ipBlock.cidr", "spec.egress[*].to[*].ipBlock.cidr"] },
-        { from = "flow", name = "destination.port", to = ["spec.ingress[*].ports[*].port", "spec.egress[*].ports[*].port"] },
-        { from = "flow", name = "network.transport", to = ["spec.ingress[*].ports[*].protocol", "spec.egress[*].ports[*].protocol"] },
+        {
+          from = "flow", name = "destination.ip",
+          to   = ["spec.ingress[*].from[*].ipBlock.cidr", "spec.egress[*].to[*].ipBlock.cidr"]
+        },
+        {
+          from = "flow", name = "destination.port",
+          to   = ["spec.ingress[*].ports[*].port", "spec.egress[*].ports[*].port"]
+        },
+        {
+          from = "flow", name = "network.transport",
+          to   = ["spec.ingress[*].ports[*].protocol", "spec.egress[*].ports[*].protocol"]
+        },
       ]
     }
   }
@@ -519,45 +567,54 @@ attributes "destination" "k8s" {
 # For globs we can use https://docs.rs/globset/latest/globset/#syntax to match the functionality of OBI.
 # OBI-aligned filter configuration with glob pattern strings
 filter "source" {
-  address {
+  address = {
     match     = "" # CIDR/IP glob to include (e.g., "10.0.0.0/8", "192.168.1.*")
     not_match = "" # CIDR/IP glob to exclude
   }
-  port {
+  port = {
     match     = "" # Port range/glob to include (e.g., "80", "443", "8000-8999")
     not_match = "" # Port range/glob to exclude
   }
 }
 
 filter "destination" {
-  address {
+  address = {
     match     = "" # CIDR/IP glob to include
     not_match = "" # CIDR/IP glob to exclude
   }
-  port {
+  port = {
     match     = "" # Port range/glob to include
     not_match = "" # Port range/glob to exclude
   }
 }
 
 filter "network" {
-  transport {
+  transport = {
     match     = "" # e.g., "tcp", "udp"
     not_match = "" # e.g., "icmp"
   }
-  type {
+  type = {
     match     = "" # e.g., "ipv4", "ipv6"
     not_match = ""
   }
+  interface_name  = { match = "", not_match = "" }
+  interface_index = { match = "", not_match = "" }
+  interface_mac   = { match = "", not_match = "" }
 }
 
 filter "flow" {
-  connection {
-    state {
-      match     = "" # e.g., "established", "close_wait", "syn_sent"
-      not_match = ""
-    }
+  connection_state = {
+    match     = "" # e.g., "established", "close_wait", "syn_sent"
+    not_match = ""
   }
+  end_reason     = { match = "", not_match = "" }
+  ip_dscp_name   = { match = "", not_match = "" }
+  ip_ecn_name    = { match = "", not_match = "" }
+  ip_ttl         = { match = "", not_match = "" }
+  ip_flow_label  = { match = "", not_match = "" }
+  icmp_type_name = { match = "", not_match = "" }
+  icmp_code_name = { match = "", not_match = "" }
+  tcp_flags      = { match = "", not_match = "" }
 }
 
 span {
@@ -576,14 +633,14 @@ export "traces" {
   stdout = "" // text, text_indent(*new), json, json_indent
 
   otlp = {
-    endpoint = "http://otelcol:4317"
-    protocol = "grpc"
-    timeout  = "10s"
-    max_batch_size = 512
-    max_batch_interval = "5s"
-    max_queue_size = 2048
+    endpoint               = "http://otelcol:4317"
+    protocol               = "grpc"
+    timeout                = "10s"
+    max_batch_size         = 512
+    max_batch_interval     = "5s"
+    max_queue_size         = 2048
     max_concurrent_exports = 1
-    max_export_timeout = "30s"
+    max_export_timeout     = "30s"
 
     auth = {
       basic = {

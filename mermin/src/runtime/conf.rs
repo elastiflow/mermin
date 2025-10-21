@@ -1,4 +1,4 @@
-use std::{error::Error, fmt, net::Ipv4Addr, path::Path, time::Duration};
+use std::{collections::HashMap, error::Error, fmt, net::Ipv4Addr, path::Path, time::Duration};
 
 use figment::providers::Format;
 use hcl::eval::Context;
@@ -57,6 +57,9 @@ pub struct Conf {
     pub span: SpanOptions,
     /// References to the exporters to use for telemetry
     pub export: ExportOptions,
+    /// Configuration for flow interfaces.
+    /// This field holds settings for filtering.
+    pub filter: Option<HashMap<String, FilteringOptions>>,
 }
 
 impl Default for Conf {
@@ -76,6 +79,7 @@ impl Default for Conf {
             resolved_interfaces: Vec::new(),
             span: SpanOptions::default(),
             export: ExportOptions::default(),
+            filter: None,
         }
     }
 }
@@ -184,6 +188,7 @@ impl Conf {
         let available: Vec<String> = datalink::interfaces().into_iter().map(|i| i.name).collect();
         Self::resolve_interfaces_from(&self.interfaces, &available)
     }
+
     fn resolve_interfaces_from(patterns: &[String], available: &[String]) -> Vec<String> {
         use std::collections::HashSet;
         let mut resolved = Vec::new();
@@ -574,6 +579,34 @@ impl Default for MetricsConf {
             port: 10250,
         }
     }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct FilteringOptions {
+    pub address: Option<FilteringPair>,
+    pub port: Option<FilteringPair>,
+    pub transport: Option<FilteringPair>,
+    #[serde(rename = "type")]
+    pub type_: Option<FilteringPair>,
+    pub interface_name: Option<FilteringPair>,
+    pub interface_index: Option<FilteringPair>,
+    pub interface_mac: Option<FilteringPair>,
+    pub connection_state: Option<FilteringPair>,
+    pub ip_dscp_name: Option<FilteringPair>,
+    pub ip_ecn_name: Option<FilteringPair>,
+    pub ip_ttl: Option<FilteringPair>,
+    pub ip_flow_label: Option<FilteringPair>,
+    pub icmp_type_name: Option<FilteringPair>,
+    pub icmp_code_name: Option<FilteringPair>,
+    pub tcp_flags: Option<FilteringPair>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct FilteringPair {
+    #[serde(default, rename = "match")]
+    pub match_glob: String,
+    #[serde(default, rename = "not_match")]
+    pub not_match_glob: String,
 }
 
 #[cfg(test)]

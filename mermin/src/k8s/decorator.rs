@@ -15,7 +15,7 @@ use std::{
 };
 
 use futures::TryStreamExt;
-use ipnetwork::IpNetwork;
+use ip_network::IpNetwork;
 use k8s_openapi::{
     api::{
         apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet},
