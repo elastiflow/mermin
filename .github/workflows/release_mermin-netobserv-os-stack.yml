@@ -61,6 +61,7 @@ jobs:
           tag_prefix: "${{ fromJson(env.BRANCH_TAG_PREFIXES)[github.ref_name] }}"
           include_paths: "charts/mermin-netobserv-os-stack/**/*"
           changelog_update: true
+          changelog_path: charts/mermin-netobserv-os-stack/CHANGELOG.md
           bump_version_yaml: true
           bump_version_yaml_path: charts/mermin/Chart.yaml
           bump_version_yaml_key: '.version,.appVersion'
