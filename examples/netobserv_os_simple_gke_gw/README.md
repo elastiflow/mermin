@@ -32,7 +32,12 @@ Install happens in two phases:
 - Install NetObserv with OpenSearch
 - Install Mermin
 
-It is done due to assumption of no extra DNS controllers running in the cluster, so it's not possible to know the IP address of the NetObserv gRPC load balancer without extra GCP actions before NetObserv chart (dependency) is ready.
+The installation process consists of two phases:
+
+1. Install NetObserv with OpenSearch.
+2. Install Mermin.
+
+This installation assumes that no additional DNS controllers are running in the cluster. Therefore, it is not possible to know the IP address of the NetObserv gRPC load balancer without extra GCP actions before the NetObserv chart (dependency) is ready.
 
 - Phase 1
   <!-- TODO(Cleanup for GA): Once repo is public, this step should become part of the next step without any dependencies -->
