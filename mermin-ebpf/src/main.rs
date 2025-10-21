@@ -179,7 +179,7 @@ use aya_ebpf::{
     programs::TcContext,
 };
 #[cfg(not(feature = "test"))]
-use aya_log_ebpf::error;
+use aya_log_ebpf::{error, warn};
 use mermin_common::{Direction, IpAddrType, PacketMeta, ParserOptions, TunnelType};
 use network_types::{
     ah::{self, AH_LEN},
@@ -274,6 +274,16 @@ enum HeaderType {
     StopProcessing, // Indicates parsing should terminate for flow key purposes
 }
 
+/// Error types that can occur during packet parsing.
+///
+/// Error logs are emitted with human-readable descriptions including the specific header type
+/// and error reason (e.g., "parser failed: IPv4 header out of bounds").
+///
+/// **Error Types:**
+/// - **OutOfBounds** - Packet data access beyond available length
+/// - **MalformedHeader** - Header structure is invalid or corrupted
+/// - **Unsupported** - Protocol/header type not currently supported
+/// - **InternalError** - Map access failure or internal state error
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
     OutOfBounds,
@@ -393,8 +403,185 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             HeaderType::StopProcessing => break, // Graceful stop
         };
 
-        if result.is_err() {
-            error!(&ctx, "mermin: parser failed");
+        if let Err(err) = result {
+            // Macro to generate the error message for a given header type and error
+            macro_rules! err_msg {
+                ($header:expr, out_of_bounds) => {
+                    error!(&ctx, "parser failed - {} header out of bounds", $header)
+                };
+                ($header:expr, malformed) => {
+                    error!(&ctx, "parser failed - {} header malformed", $header)
+                };
+                ($header:expr, unsupported) => {
+                    error!(&ctx, "parser failed - {} unsupported", $header)
+                };
+                ($header:expr, internal) => {
+                    error!(&ctx, "parser failed - {} internal error", $header)
+                };
+            }
+
+            // Log human-readable error messages
+            match (parser.next_hdr, err) {
+                // Layer 2/3 protocols
+                (HeaderType::Ethernet, Error::OutOfBounds) => err_msg!("ethernet", out_of_bounds),
+                (HeaderType::Ethernet, Error::MalformedHeader) => err_msg!("ethernet", malformed),
+                (HeaderType::Ethernet, Error::InternalError) => err_msg!("ethernet", internal),
+
+                (HeaderType::Ipv4, Error::OutOfBounds) => err_msg!("ipv4", out_of_bounds),
+                (HeaderType::Ipv4, Error::MalformedHeader) => err_msg!("ipv4", malformed),
+                (HeaderType::Ipv4, Error::InternalError) => err_msg!("ipv4", internal),
+
+                (HeaderType::Ipv6, Error::OutOfBounds) => err_msg!("ipv6", out_of_bounds),
+                (HeaderType::Ipv6, Error::MalformedHeader) => err_msg!("ipv6", malformed),
+                (HeaderType::Ipv6, Error::InternalError) => err_msg!("ipv6", internal),
+
+                // Tunnel protocols
+                (HeaderType::Geneve, Error::OutOfBounds) => err_msg!("geneve", out_of_bounds),
+                (HeaderType::Geneve, Error::MalformedHeader) => err_msg!("geneve", malformed),
+                (HeaderType::Geneve, Error::InternalError) => err_msg!("geneve", internal),
+
+                (HeaderType::Vxlan, Error::OutOfBounds) => err_msg!("vxlan", out_of_bounds),
+                (HeaderType::Vxlan, Error::MalformedHeader) => err_msg!("vxlan", malformed),
+                (HeaderType::Vxlan, Error::InternalError) => err_msg!("vxlan", internal),
+
+                (HeaderType::Wireguard, Error::OutOfBounds) => err_msg!("wireguard", out_of_bounds),
+                (HeaderType::Wireguard, Error::MalformedHeader) => err_msg!("wireguard", malformed),
+                (HeaderType::Wireguard, Error::InternalError) => err_msg!("wireguard", internal),
+
+                // Transport layer
+                (HeaderType::Proto(IpProto::Tcp), Error::OutOfBounds) => {
+                    err_msg!("tcp", out_of_bounds)
+                }
+                (HeaderType::Proto(IpProto::Tcp), Error::MalformedHeader) => {
+                    err_msg!("tcp", malformed)
+                }
+                (HeaderType::Proto(IpProto::Tcp), Error::InternalError) => {
+                    err_msg!("tcp", internal)
+                }
+
+                (HeaderType::Proto(IpProto::Udp), Error::OutOfBounds) => {
+                    err_msg!("udp", out_of_bounds)
+                }
+                (HeaderType::Proto(IpProto::Udp), Error::MalformedHeader) => {
+                    err_msg!("udp", malformed)
+                }
+                (HeaderType::Proto(IpProto::Udp), Error::InternalError) => {
+                    err_msg!("udp", internal)
+                }
+
+                (HeaderType::Proto(IpProto::Icmp), Error::OutOfBounds) => {
+                    err_msg!("icmp", out_of_bounds)
+                }
+                (HeaderType::Proto(IpProto::Icmp), Error::MalformedHeader) => {
+                    err_msg!("icmp", malformed)
+                }
+                (HeaderType::Proto(IpProto::Icmp), Error::InternalError) => {
+                    err_msg!("icmp", internal)
+                }
+
+                (HeaderType::Proto(IpProto::Ipv6Icmp), Error::OutOfBounds) => {
+                    err_msg!("icmpv6", out_of_bounds)
+                }
+                (HeaderType::Proto(IpProto::Ipv6Icmp), Error::MalformedHeader) => {
+                    err_msg!("icmpv6", malformed)
+                }
+                (HeaderType::Proto(IpProto::Ipv6Icmp), Error::InternalError) => {
+                    err_msg!("icmpv6", internal)
+                }
+
+                // IPv6 extension headers
+                (HeaderType::Proto(IpProto::Ipv6Route), Error::OutOfBounds) => {
+                    err_msg!("ipv6 route", out_of_bounds)
+                }
+                (HeaderType::Proto(IpProto::Ipv6Route), Error::MalformedHeader) => {
+                    err_msg!("ipv6 route", malformed)
+                }
+                (HeaderType::Proto(IpProto::Ipv6Route), _) => {
+                    error!(&ctx, "parser failed - ipv6 route error")
+                }
+
+                (HeaderType::Proto(IpProto::Ipv6Frag), Error::OutOfBounds) => {
+                    err_msg!("ipv6 fragment", out_of_bounds)
+                }
+                (HeaderType::Proto(IpProto::Ipv6Frag), Error::MalformedHeader) => {
+                    err_msg!("ipv6 fragment", malformed)
+                }
+                (HeaderType::Proto(IpProto::Ipv6Frag), _) => {
+                    error!(&ctx, "parser failed - ipv6 fragment error")
+                }
+
+                (HeaderType::Proto(IpProto::Ipv6Opts), Error::OutOfBounds) => {
+                    err_msg!("ipv6 options", out_of_bounds)
+                }
+                (HeaderType::Proto(IpProto::Ipv6Opts), Error::MalformedHeader) => {
+                    err_msg!("ipv6 options", malformed)
+                }
+                (HeaderType::Proto(IpProto::Ipv6Opts), _) => {
+                    error!(&ctx, "parser failed - ipv6 options error")
+                }
+
+                // IPsec
+                (HeaderType::Proto(IpProto::Esp), Error::OutOfBounds) => {
+                    err_msg!("esp", out_of_bounds)
+                }
+                (HeaderType::Proto(IpProto::Esp), Error::MalformedHeader) => {
+                    err_msg!("esp", malformed)
+                }
+                (HeaderType::Proto(IpProto::Esp), _) => error!(&ctx, "parser failed - esp error"),
+
+                (HeaderType::Proto(IpProto::Ah), Error::OutOfBounds) => {
+                    err_msg!("ah", out_of_bounds)
+                }
+                (HeaderType::Proto(IpProto::Ah), Error::MalformedHeader) => {
+                    err_msg!("ah", malformed)
+                }
+                (HeaderType::Proto(IpProto::Ah), _) => error!(&ctx, "parser failed - ah error"),
+
+                // Other extension headers
+                (HeaderType::Proto(IpProto::MobilityHeader), Error::OutOfBounds) => {
+                    err_msg!("mobility", out_of_bounds)
+                }
+                (HeaderType::Proto(IpProto::MobilityHeader), Error::MalformedHeader) => {
+                    err_msg!("mobility", malformed)
+                }
+                (HeaderType::Proto(IpProto::MobilityHeader), _) => {
+                    error!(&ctx, "parser failed - mobility error")
+                }
+
+                (HeaderType::Proto(IpProto::Hip), Error::OutOfBounds) => {
+                    err_msg!("hip", out_of_bounds)
+                }
+                (HeaderType::Proto(IpProto::Hip), Error::MalformedHeader) => {
+                    err_msg!("hip", malformed)
+                }
+                (HeaderType::Proto(IpProto::Hip), _) => error!(&ctx, "parser failed - hip error"),
+
+                (HeaderType::Proto(IpProto::Shim6), Error::OutOfBounds) => {
+                    err_msg!("shim6", out_of_bounds)
+                }
+                (HeaderType::Proto(IpProto::Shim6), Error::MalformedHeader) => {
+                    err_msg!("shim6", malformed)
+                }
+                (HeaderType::Proto(IpProto::Shim6), _) => {
+                    error!(&ctx, "parser failed - shim6 error")
+                }
+
+                (HeaderType::Proto(IpProto::Gre), Error::OutOfBounds) => {
+                    err_msg!("gre", out_of_bounds)
+                }
+                (HeaderType::Proto(IpProto::Gre), Error::MalformedHeader) => {
+                    err_msg!("gre", malformed)
+                }
+                (HeaderType::Proto(IpProto::Gre), _) => error!(&ctx, "parser failed - gre error"),
+
+                // Catch-all for any other protocol
+                (_, Error::OutOfBounds) => {
+                    error!(&ctx, "parser failed - packet data out of bounds")
+                }
+                (_, Error::MalformedHeader) => error!(&ctx, "parser failed - malformed header"),
+                (_, Error::Unsupported) => error!(&ctx, "parser failed - unsupported protocol"),
+                (_, Error::InternalError) => error!(&ctx, "parser failed - internal error"),
+            }
             return TC_ACT_PIPE;
         }
     }
@@ -402,7 +589,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
     unsafe {
         #[allow(static_mut_refs)]
         if PACKETS_META.output(meta, 0).is_err() {
-            error!(&ctx, "mermin: failed to write packet to ring buffer");
+            error!(&ctx, "ebpf - failed to write packet to ring buffer");
         }
     }
 
@@ -446,7 +633,14 @@ impl Parser {
         self.next_hdr = match meta.ether_type {
             EtherType::Ipv4 => HeaderType::Ipv4,
             EtherType::Ipv6 => HeaderType::Ipv6,
-            _ => return Err(Error::Unsupported),
+            unsupported => {
+                warn!(
+                    ctx,
+                    "parser stopped - unsupported ether_type: 0x{:x}",
+                    u16::from_be(unsupported as u16)
+                );
+                HeaderType::StopProcessing
+            }
         };
 
         Ok(())
@@ -508,7 +702,14 @@ impl Parser {
             | IpProto::Esp
             | IpProto::Ah
             | IpProto::Hip => HeaderType::Proto(meta.proto),
-            _ => HeaderType::StopProcessing,
+            unsupported => {
+                warn!(
+                    ctx,
+                    "parser stopped - unsupported ip protocol in ipv4 header: {}",
+                    unsupported as u8
+                );
+                HeaderType::StopProcessing
+            }
         };
 
         Ok(())
@@ -550,7 +751,14 @@ impl Parser {
             | IpProto::Esp
             | IpProto::Ah
             | IpProto::Hip => HeaderType::Proto(meta.proto),
-            _ => HeaderType::StopProcessing,
+            unsupported => {
+                warn!(
+                    ctx,
+                    "parser stopped - unsupported ip protocol in ipv4 header: {}",
+                    unsupported as u8
+                );
+                HeaderType::StopProcessing
+            }
         };
 
         Ok(())
@@ -611,7 +819,14 @@ impl Parser {
             | IpProto::MobilityHeader
             | IpProto::Hip
             | IpProto::Shim6 => HeaderType::Proto(meta.proto),
-            _ => HeaderType::StopProcessing,
+            unsupported => {
+                warn!(
+                    ctx,
+                    "parser stopped - unsupported ip protocol in ipv6 header: {}",
+                    unsupported as u8
+                );
+                HeaderType::StopProcessing
+            }
         };
 
         Ok(())
@@ -653,7 +868,14 @@ impl Parser {
             | IpProto::MobilityHeader
             | IpProto::Hip
             | IpProto::Shim6 => HeaderType::Proto(meta.proto),
-            _ => HeaderType::StopProcessing,
+            unsupported => {
+                warn!(
+                    ctx,
+                    "parser stopped - unsupported ip protocol in ipv6 header: {}",
+                    unsupported as u8
+                );
+                HeaderType::StopProcessing
+            }
         };
 
         Ok(())
@@ -738,7 +960,13 @@ impl Parser {
             WireGuardType::HandshakeResponse => self.parse_wireguard_response(ctx),
             WireGuardType::CookieReply => self.parse_wireguard_cookie_reply(ctx),
             WireGuardType::TransportData => self.parse_wireguard_transport_data(ctx),
-            _ => Err(Error::Unsupported),
+            _ => {
+                warn!(
+                    ctx,
+                    "parser stopped - unsupported wireguard message type: {}", wireguard_type
+                );
+                Ok(())
+            }
         }
     }
 
@@ -1325,7 +1553,19 @@ mod host_test_shim {
     #[cfg(feature = "test")]
     #[macro_export]
     macro_rules! error {
-        ($($tt:tt)*) => {};
+        ($ctx:expr, $($arg:tt)*) => {{
+            let _ = &$ctx;
+            let _ = format_args!($($arg)*);
+        }};
+    }
+
+    #[cfg(feature = "test")]
+    #[macro_export]
+    macro_rules! warn {
+        ($ctx:expr, $($arg:tt)*) => {{
+            let _ = &$ctx;
+            let _ = format_args!($($arg)*);
+        }};
     }
 }
 
@@ -2257,10 +2497,9 @@ mod tests {
 
         let result = parser.parse_ethernet_header(&ctx);
 
-        assert!(!result.is_ok());
-        assert!(matches!(result, Err(Error::Unsupported)));
+        assert!(result.is_ok());
         assert_eq!(parser.offset, ETH_LEN);
-        assert!(matches!(parser.next_hdr, HeaderType::Ethernet));
+        assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
     }
 
     #[test]
@@ -3521,7 +3760,7 @@ mod tests {
 
         let result = parser.parse_wireguard_header(&ctx);
 
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), Error::Unsupported);
+        assert!(result.is_ok());
+        assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
     }
 }

@@ -5,8 +5,8 @@ This command provides a complete eBPF-focused PR workflow for the Mermin project
 ## What this command does
 
 1. **Change Analysis**:
-   - Runs `git diff alpha..HEAD` to analyze actual code changes
-   - Identifies which components were modified (eBPF, Kubernetes, etc.)  
+   - Runs `git diff beta..HEAD` to analyze actual code changes
+   - Identifies which components were modified (eBPF, Kubernetes, etc.)
    - Suggests appropriate PR categorization based on file changes
    - Generates smart commit summaries
 
@@ -15,7 +15,7 @@ This command provides a complete eBPF-focused PR workflow for the Mermin project
    - Pre-analyzes changes to suggest PR description content
    - Ensures all testing requirements are documented
    - Keep the output concise and to the point. Avoid fluff.
-   - **Always** generate the output as markdown so I can easily copy it.
+   - **Always** generate the output as a markdown file so I can easily copy it.
 
 ## Usage
 
@@ -27,13 +27,13 @@ Type `/pr-description` to start the comprehensive Mermin PR workflow.
 
 ```bash
 # Analyze what files changed
-git diff --name-status alpha..HEAD
+git diff --name-status beta..HEAD
 
 # Get detailed diff for PR context
-git diff alpha..HEAD
+git diff beta..HEAD
 
 # Check commit history
-git log --oneline alpha..HEAD
+git log --oneline beta..HEAD
 ```
 
 ### 2. PR Content Generation
@@ -54,7 +54,7 @@ type(scope): description
 
 Examples:
 feat(ebpf): add TCP flow tracking to packet parser
-fix(k8s): resolve daemonset privilege escalation  
+fix(k8s): resolve daemonset privilege escalation
 perf(net): optimize packet processing bounds
 refactor(build): simplify conditional compilation
 ```

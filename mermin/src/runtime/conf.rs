@@ -80,111 +80,105 @@ impl Default for Conf {
     }
 }
 
-/// Parser configuration for eBPF packet parsing options
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default)]
-pub struct ParserConf {
-    /// Port number for Geneve tunnel detection (IANA default: 6081)
-    pub geneve_port: u16,
-    /// Port number for VXLAN tunnel detection (IANA default: 4789)
-    pub vxlan_port: u16,
-    /// Port number for WireGuard tunnel detection (IANA default: 51820)
-    pub wireguard_port: u16,
-}
-
-impl Default for ParserConf {
-    fn default() -> Self {
-        Self {
-            geneve_port: 6081,
-            vxlan_port: 4789,
-            wireguard_port: 51820,
-        }
-    }
-}
-
-pub mod defaults {
-    use std::time::Duration;
-
-    pub fn packet_channel_capacity() -> usize {
-        1024
-    }
-
-    pub fn flow_workers() -> usize {
-        2
-    }
-
-    pub fn shutdown_timeout() -> Duration {
-        Duration::from_secs(5)
-    }
-}
-
-/// A generic enum to handle fields that can either be a reference string
-/// or an inlined struct.
-#[derive(Debug, Deserialize, Serialize, Clone)]
-#[serde(untagged)]
-#[allow(dead_code)]
-pub enum ReferenceOrInline<T> {
-    Reference(String),
-    Inline(T),
-}
-
-// Default implementations for the ReferenceOrInline types
-impl Default for ReferenceOrInline<K8sOwnerOptions> {
-    fn default() -> Self {
-        Self::Inline(K8sOwnerOptions::default())
-    }
-}
-impl Default for ReferenceOrInline<K8sSelectorOptions> {
-    fn default() -> Self {
-        Self::Inline(K8sSelectorOptions::default())
-    }
-}
-
-/// Options for discovering Kubernetes resource owners.
-/// Controls which resource kinds to include/exclude and the search depth.
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct K8sOwnerOptions {
-    /// Kinds to exclude from owner discovery (e.g., EndpointSlice).
-    pub exclude_kinds: Vec<String>,
-    /// Kinds to include in owner discovery (e.g., Service).
-    pub include_kinds: Vec<String>,
-    /// Maximum depth to traverse owner references.
-    pub max_depth: u32,
-}
-
-impl Default for K8sOwnerOptions {
-    fn default() -> Self {
-        Self {
-            exclude_kinds: Vec::new(),
-            include_kinds: Vec::new(),
-            max_depth: 10,
-        }
-    }
-}
-
-/// Options for Kubernetes resource selectors.
-/// Defines which objects to match for enrichment.
-#[derive(Default, Debug, Deserialize, Serialize, Clone)]
-pub struct K8sSelectorOptions {
-    /// List of object selectors for matching resources.
-    pub k8s_object: Vec<K8sObjectSelector>,
-}
-
-/// Selector for a specific Kubernetes object kind.
-/// Used to match and enrich resources based on label/field selectors.
-#[derive(Default, Debug, Deserialize, Serialize, Clone)]
-pub struct K8sObjectSelector {
-    /// The kind of Kubernetes object (e.g., NetworkPolicy, Service).
-    pub kind: String,
-    /// Optional field for matchExpressions (e.g., spec.podSelector.matchExpressions).
-    pub selector_match_expressions_field: Option<String>,
-    /// Optional field for matchLabels (e.g., spec.podSelector.matchLabels).
-    pub selector_match_labels_field: Option<String>,
-    /// Target resource kind to associate with (e.g., Pod).
-    pub to: String,
-}
-
 impl Conf {
+    /// Creates a new `Conf` instance based on the provided CLI arguments, environment variables,
+    /// and configuration file. The configuration is determined using the following priority order:
+    /// Defaults < Configuration File < Environment Variables < CLI Arguments.
+    ///
+    /// # Arguments
+    /// - `cli` - An instance of `Cli` containing parsed CLI arguments.
+    ///
+    /// # Returns
+    /// - `Result<(Self, Cli), ConfigError>` - Returns an `Ok((Conf, Cli))` if successful, or a `ConfigError`
+    ///   if there are issues during configuration extraction.
+    ///
+    /// # Errors
+    /// - `ConfigError::NoConfigFile` - Returned if no configuration file is specified or found.
+    /// - `ConfigError::InvalidConfigPath` - Returned if the `config_path` from the environment
+    ///   variable cannot be converted to a valid string.
+    /// - Other `ConfigError` variants - Errors propagated during the extraction of the configuration.
+    ///
+    /// # Behavior
+    /// 1. Initializes a `Figment` instance with default values from `cli` and merges it with
+    ///    environment variables prefixed by "MERMIN_".
+    /// 2. Attempts to retrieve the `config_path` from the CLI arguments or the environment variable.
+    ///    If no path is provided or found, the function returns a `ConfigError::NoConfigFile`.
+    /// 3. If a configuration file is specified via CLI or environment variable, it is merged with
+    ///    the existing `Figment` configuration.
+    /// 4. Extracts the final configuration into a `Conf` struct, storing the path to the
+    ///    configuration file (if any).
+    pub fn new(
+        cli: crate::runtime::cli::Cli,
+    ) -> Result<(Self, crate::runtime::cli::Cli), ConfError> {
+        use figment::{Figment, providers::Serialized};
+
+        let mut figment = Figment::new().merge(Serialized::defaults(Conf::default()));
+
+        let config_path_to_store = if let Some(config_path) = &cli.config {
+            validate_config_path(config_path)?;
+            figment = Self::merge_provider_for_path(figment, config_path)?;
+            Some(config_path.clone())
+        } else {
+            None
+        };
+
+        figment = figment.merge(Serialized::defaults(&cli));
+
+        let mut conf: Conf = figment.extract()?;
+
+        let resolved_interfaces = conf.resolve_interfaces();
+        conf.config_path = config_path_to_store;
+        conf.resolved_interfaces = resolved_interfaces;
+
+        Ok((conf, cli))
+    }
+
+    /// Reloads the configuration from the config file and returns a new instance
+    /// of the configuration object.
+    ///
+    /// This method allows for dynamic reloading of the configuration without
+    /// requiring a restart of the application. Any updates to the configuration
+    /// file will be applied, creating a new configuration object based on the
+    /// file's content.
+    ///
+    /// Note:
+    /// - Command-line arguments (CLI) and environment variables (ENV VARS) will
+    ///   not be reloaded since it is assumed that the shell environment remains
+    ///   the same. The reload operation will use the current configuration as the
+    ///   base and layer the updated configuration file on top of it.
+    /// - If no configuration file path has been specified, an error will be returned.
+    ///
+    /// # Returns
+    /// - `Ok(Self)` containing the reloaded configuration object if the reload
+    ///   operation succeeds.
+    /// - `Err(ConfigError::NoConfigFile)` if no configuration file path is set.
+    /// - Returns other variants of `ConfigError` if the configuration fails to
+    ///   load or extract properly.
+    ///
+    /// # Errors
+    /// This function returns a `ConfigError` in the following scenarios:
+    /// - If there is no configuration file path specified (`ConfigError::NoConfigFile`).
+    /// - If the configuration fails to load or parse from the file.
+    #[allow(dead_code)]
+    pub fn reload(&self) -> Result<Self, ConfError> {
+        use figment::{Figment, providers::Serialized};
+
+        let path = self.config_path.as_ref().ok_or(ConfError::NoConfigFile)?;
+
+        // Create a new Figment instance, using the current resolved config
+        // as the base. This preserves CLI/env vars. Then merge the file on top.
+        let mut figment = Figment::from(Serialized::defaults(&self));
+        figment = Self::merge_provider_for_path(figment, path)?;
+
+        let mut conf: Conf = figment.extract()?;
+
+        let resolved_interfaces = conf.resolve_interfaces();
+        conf.config_path = self.config_path.clone();
+        conf.resolved_interfaces = resolved_interfaces;
+
+        Ok(conf)
+    }
+
     /// Expand interface patterns (supports '*' and '?') into concrete interface names.
     pub fn resolve_interfaces(&self) -> Vec<String> {
         let available: Vec<String> = datalink::interfaces().into_iter().map(|i| i.name).collect();
@@ -302,103 +296,43 @@ impl Conf {
             None => Err(ConfError::InvalidExtension("none".to_string())),
         }
     }
+}
 
-    /// Creates a new `Conf` instance based on the provided CLI arguments, environment variables,
-    /// and configuration file. The configuration is determined using the following priority order:
-    /// Defaults < Configuration File < Environment Variables < CLI Arguments.
-    ///
-    /// # Arguments
-    /// * `cli` - An instance of `Cli` containing parsed CLI arguments.
-    ///
-    /// # Returns
-    /// * `Result<(Self, Cli), ConfigError>` - Returns an `Ok((Conf, Cli))` if successful, or a `ConfigError`
-    ///   if there are issues during configuration extraction.
-    ///
-    /// # Errors
-    /// * `ConfigError::NoConfigFile` - Returned if no configuration file is specified or found.
-    /// * `ConfigError::InvalidConfigPath` - Returned if the `config_path` from the environment
-    ///   variable cannot be converted to a valid string.
-    /// * Other `ConfigError` variants - Errors propagated during the extraction of the configuration.
-    ///
-    /// # Behavior
-    /// 1. Initializes a `Figment` instance with default values from `cli` and merges it with
-    ///    environment variables prefixed by "MERMIN_".
-    /// 2. Attempts to retrieve the `config_path` from the CLI arguments or the environment variable.
-    ///    If no path is provided or found, the function returns a `ConfigError::NoConfigFile`.
-    /// 3. If a configuration file is specified via CLI or environment variable, it is merged with
-    ///    the existing `Figment` configuration.
-    /// 4. Extracts the final configuration into a `Conf` struct, storing the path to the
-    ///    configuration file (if any).
-    pub fn new(
-        cli: crate::runtime::cli::Cli,
-    ) -> Result<(Self, crate::runtime::cli::Cli), ConfError> {
-        use figment::{Figment, providers::Serialized};
+/// Parser configuration for eBPF packet parsing options
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ParserConf {
+    /// Port number for Geneve tunnel detection (IANA default: 6081)
+    pub geneve_port: u16,
+    /// Port number for VXLAN tunnel detection (IANA default: 4789)
+    pub vxlan_port: u16,
+    /// Port number for WireGuard tunnel detection (IANA default: 51820)
+    pub wireguard_port: u16,
+}
 
-        let mut figment = Figment::new().merge(Serialized::defaults(Conf::default()));
+impl Default for ParserConf {
+    fn default() -> Self {
+        Self {
+            geneve_port: 6081,
+            vxlan_port: 4789,
+            wireguard_port: 51820,
+        }
+    }
+}
 
-        let config_path_to_store = if let Some(config_path) = &cli.config {
-            validate_config_path(config_path)?;
-            figment = Self::merge_provider_for_path(figment, config_path)?;
-            Some(config_path.clone())
-        } else {
-            None
-        };
+pub mod defaults {
+    use std::time::Duration;
 
-        figment = figment.merge(Serialized::defaults(&cli));
-
-        let mut conf: Conf = figment.extract()?;
-
-        let resolved_interfaces = conf.resolve_interfaces();
-        conf.config_path = config_path_to_store;
-        conf.resolved_interfaces = resolved_interfaces;
-
-        Ok((conf, cli))
+    pub fn packet_channel_capacity() -> usize {
+        1024
     }
 
-    /// Reloads the configuration from the config file and returns a new instance
-    /// of the configuration object.
-    ///
-    /// This method allows for dynamic reloading of the configuration without
-    /// requiring a restart of the application. Any updates to the configuration
-    /// file will be applied, creating a new configuration object based on the
-    /// file's content.
-    ///
-    /// Note:
-    /// - Command-line arguments (CLI) and environment variables (ENV VARS) will
-    ///   not be reloaded since it is assumed that the shell environment remains
-    ///   the same. The reload operation will use the current configuration as the
-    ///   base and layer the updated configuration file on top of it.
-    /// - If no configuration file path has been specified, an error will be returned.
-    ///
-    /// # Returns
-    /// - `Ok(Self)` containing the reloaded configuration object if the reload
-    ///   operation succeeds.
-    /// - `Err(ConfigError::NoConfigFile)` if no configuration file path is set.
-    /// - Returns other variants of `ConfigError` if the configuration fails to
-    ///   load or extract properly.
-    ///
-    /// # Errors
-    /// This function returns a `ConfigError` in the following scenarios:
-    /// - If there is no configuration file path specified (`ConfigError::NoConfigFile`).
-    /// - If the configuration fails to load or parse from the file.
-    #[allow(dead_code)]
-    pub fn reload(&self) -> Result<Self, ConfError> {
-        use figment::{Figment, providers::Serialized};
+    pub fn flow_workers() -> usize {
+        2
+    }
 
-        let path = self.config_path.as_ref().ok_or(ConfError::NoConfigFile)?;
-
-        // Create a new Figment instance, using the current resolved config
-        // as the base. This preserves CLI/env vars. Then merge the file on top.
-        let mut figment = Figment::from(Serialized::defaults(&self));
-        figment = Self::merge_provider_for_path(figment, path)?;
-
-        let mut conf: Conf = figment.extract()?;
-
-        let resolved_interfaces = conf.resolve_interfaces();
-        conf.config_path = self.config_path.clone();
-        conf.resolved_interfaces = resolved_interfaces;
-
-        Ok(conf)
+    pub fn shutdown_timeout() -> Duration {
+        Duration::from_secs(5)
     }
 }
 
@@ -406,13 +340,13 @@ impl Conf {
 ///
 /// # Arguments
 ///
-/// * `path` - A reference to a `PathBuf` to validate.
+/// - `path` - A reference to a `PathBuf` to validate.
 ///
 /// # Errors
 ///
-/// * `ConfigError::NoConfigFile` - If the path does not exist.
-/// * `ConfigError::InvalidConfigPath` - If the path points to a directory.
-/// * `ConfigError::InvalidExtension` - If the file extension is not `yaml`, `yml`, or `hcl`.
+/// - `ConfigError::NoConfigFile` - If the path does not exist.
+/// - `ConfigError::InvalidConfigPath` - If the path points to a directory.
+/// - `ConfigError::InvalidExtension` - If the file extension is not `yaml`, `yml`, or `hcl`.
 pub fn validate_config_path(path: &Path) -> Result<(), ConfError> {
     // 1. First, check that the path points to a file. The `is_file()` method
     // conveniently returns false if the path doesn't exist or if it's not a file.
