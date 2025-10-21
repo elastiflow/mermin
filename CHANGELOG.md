@@ -1,3 +1,16 @@
+## [v0.1.0-beta.5] - 2025-10-21
+
+### Features
+
+- **config:** Span batch size opts (#161)
+- **otlp:** Add tls support with mutual authentication and insecure mode (#164)
+- **agent:** Flow span src/dst configuration (#139)
+- **config:** Support communityid seed config option (#163)
+
+[v0.1.0-beta.4..v0.1.0-beta.5](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.4...v0.1.0-beta.5)
+
+
+
 ## [v0.1.0-beta.4] - 2025-10-16
 
 ### Bug Fixes
