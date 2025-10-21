@@ -16,7 +16,7 @@ use network_types::{
 use opentelemetry::trace::SpanKind;
 use pnet::datalink::MacAddr;
 use tokio::{sync::mpsc, task::JoinHandle};
-use tracing::{debug, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::{
     ip::{Error, resolve_addrs},
@@ -144,6 +144,13 @@ impl FlowSpanProducer {
     }
 
     pub async fn run(mut self) {
+        info!(
+            event.name = "task.started",
+            task.name = "span.producer",
+            task.description = "producing flow spans from packet metadata",
+            "userspace task started"
+        );
+
         // Create channels for each worker
         let mut worker_channels = Vec::new();
         let worker_capacity = self.packet_channel_capacity.max(self.packet_worker_count)
@@ -536,14 +543,16 @@ impl PacketWorker {
                     },
                 };
 
-                debug!(
-                    event.name = "flow.created",
+                trace!(
+                    event.name = "span.created",
                     flow.community_id = vacant.key().as_str(),
                     source.address = %flow_span.attributes.source_address,
                     source.port = flow_span.attributes.source_port,
                     destination.address = %flow_span.attributes.destination_address,
                     destination.port = flow_span.attributes.destination_port,
-                    "new flow created from packet"
+                    network_type = flow_span.attributes.network_type.as_str(),
+                    network_transport = flow_span.attributes.network_transport.as_str(),
+                    "new flow span created from packet"
                 );
 
                 let initial_timeout = self.calculate_timeout(&packet, &flow_span);
@@ -584,9 +593,15 @@ impl PacketWorker {
                 let flow_span = &mut entry.flow_span;
 
                 trace!(
-                    event.name = "flow.updated",
+                    event.name = "span.updated",
                     flow.community_id = %community_id,
-                    "updating existing flow with new packet"
+                    source.address = %flow_span.attributes.source_address,
+                    source.port = flow_span.attributes.source_port,
+                    destination.address = %flow_span.attributes.destination_address,
+                    destination.port = flow_span.attributes.destination_port,
+                    network_type = flow_span.attributes.network_type.as_str(),
+                    network_transport = flow_span.attributes.network_transport.as_str(),
+                    "updating existing flow span with new packet"
                 );
 
                 // Update end time - convert boot-relative timestamp to wall clock time
@@ -649,7 +664,7 @@ impl PacketWorker {
                     Ok(_) => {}
                     Err(mpsc::error::TrySendError::Full(_)) => {
                         // This is potentially problematic - flow might timeout early
-                        warn!(
+                        debug!(
                             event.name = "channel.full",
                             channel.name = "timeout_reset",
                             flow.community_id = occupied.key().as_str(),
@@ -657,7 +672,7 @@ impl PacketWorker {
                         );
                     }
                     Err(mpsc::error::TrySendError::Closed(_)) => {
-                        warn!(
+                        debug!(
                             event.name = "channel.closed",
                             channel.name = "timeout_reset",
                             flow.community_id = occupied.key().as_str(),
@@ -759,7 +774,7 @@ async fn record_task_loop(
             // Send the recorded span
             if flow_span_tx.send(recorded_span).await.is_err() {
                 warn!(
-                    event.name = "flow.export_failed",
+                    event.name = "span.export_failed",
                     flow.community_id = %community_id,
                     export.reason = "active_record", // "ActiveTimeout"
                     "failed to send flow span for active recording"
@@ -815,7 +830,7 @@ async fn timeout_task_loop(
 
                         if flow_span_tx.send(recorded_span).await.is_err() {
                             warn!(
-                                event.name = "flow.export_failed",
+                                event.name = "span.export_failed",
                                 flow.community_id = %community_id,
                                 export.reason = "idle_timeout",
                                 "failed to send timed-out flow span"

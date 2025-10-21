@@ -424,7 +424,7 @@ impl Decorator {
                     break;
                 }
             } else {
-                warn!(
+                debug!(
                     event.name = "k8s.owner_ref_missing",
                     k8s.owner.name = %owner_ref.name,
                     k8s.owner.kind = %owner_ref.kind,
@@ -466,7 +466,7 @@ impl Decorator {
             "DaemonSet" => find_in_store!(DaemonSet, DaemonSet),
             "Job" => find_in_store!(Job, Job),
             _ => {
-                warn!(
+                debug!(
                     event.name = "k8s.unsupported_owner_kind",
                     k8s.owner.kind = %owner_ref.kind,
                     "owner lookup for this resource kind is not implemented"

@@ -176,7 +176,8 @@ async fn run() -> Result<()> {
             let app_tracer_provider =
                 init_provider(conf.export.traces.stdout, conf.export.traces.otlp.clone()).await?;
             info!(
-                event.name = "exporter.initialized",
+                event.name = "task.started",
+                task.name = "exporter",
                 "initialized configured trace exporters"
             );
             Arc::new(TraceExporterAdapter::new(app_tracer_provider))
@@ -252,7 +253,7 @@ async fn run() -> Result<()> {
         tokio::spawn(async move {
             if let Err(e) = start_api_server(health_state_clone, &api_conf).await {
                 error!(
-                    event.name = "api.server_error",
+                    event.name = "api.internal_error",
                     error.message = %e,
                     "api server encountered a fatal error"
                 );
@@ -298,7 +299,7 @@ async fn run() -> Result<()> {
     let ring_buf = RingBuf::try_from(map)?;
 
     debug!(
-        event.name = "ring_buffer.initialized",
+        event.name = "source.ringbuf.initialized",
         "ring buffer initialized, waiting for packets"
     );
     info!(
@@ -316,7 +317,7 @@ async fn run() -> Result<()> {
         }
         map
     };
-    debug!(
+    info!(
         event.name = "system.config_loaded",
         system.config.type = "interface_map",
         system.config.interface_count = iface_map.len(),
@@ -344,7 +345,7 @@ async fn run() -> Result<()> {
     let k8s_decorator = match Decorator::new(health_state.clone()).await {
         Ok(decorator) => {
             info!(
-                event.name = "k8s.client_init_sucess",
+                event.name = "k8s.client.init.success",
                 "kubernetes client initialized successfully and all caches are synced"
             );
             Some(Arc::new(decorator))
@@ -364,13 +365,19 @@ async fn run() -> Result<()> {
 
     let k8s_decorator_clone = k8s_decorator.clone();
     tokio::spawn(async move {
+        info!(
+            event.name = "task.started",
+            task.name = "k8s.decorator",
+            task.description = "decorating flow attributes with kubernetes metadata",
+            "userspace task started"
+        );
         while let Some(flow_span) = flow_span_rx.recv().await {
             // Attempt K8s decoration for enhanced logging/debugging first
             if let Some(decorator) = &k8s_decorator_clone {
                 match decorate_flow_span(&flow_span, decorator).await {
                     Ok(decorated_flow_span) => {
                         debug!(
-                            event.name = "flow.decorated",
+                            event.name = "k8s.decorator.decorated",
                             flow.community_id = %decorated_flow_span.attributes.flow_community_id,
                             "successfully decorated flow attributes with kubernetes metadata"
                         );
@@ -385,7 +392,7 @@ async fn run() -> Result<()> {
                     }
                     Err(e) => {
                         debug!(
-                            event.name = "flow.attribution_failed",
+                            event.name = "k8s.decorator.failed",
                             flow.community_id = %flow_span.attributes.flow_community_id,
                             error.message = %e,
                             "failed to decorate flow attributes with kubernetes metadata"
@@ -394,7 +401,7 @@ async fn run() -> Result<()> {
                 }
             } else {
                 debug!(
-                    event.name = "flow.decoration_skipped",
+                    event.name = "k8s.decorator.skipped",
                     flow.community_id = %flow_span.attributes.flow_community_id,
                     reason = "kubernetes_client_unavailable",
                     "skipping kubernetes decoration for flow attributes"
@@ -403,7 +410,7 @@ async fn run() -> Result<()> {
         }
         debug!(
             event.name = "task.exited",
-            task.name = "flow_attributor",
+            task.name = "k8s.decorator",
             "attributes decoration task exited"
         );
     });
@@ -412,7 +419,7 @@ async fn run() -> Result<()> {
         flow_span_producer.run().await;
         debug!(
             event.name = "task.exited",
-            task.name = "flow_span_producer",
+            task.name = "span.producer",
             "flow span producer task exited"
         );
     });
@@ -425,7 +432,7 @@ async fn run() -> Result<()> {
         ring_buf_reader.run().await;
         debug!(
             event.name = "task.exited",
-            task.name = "ring_buf_reader",
+            task.name = "source.ringbuf",
             "ring buffer reader task exited"
         );
     });

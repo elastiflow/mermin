@@ -136,8 +136,8 @@ impl ProviderBuilder {
 
     pub async fn with_otlp_exporter(self, options: OtlpExporterOptions) -> Result<Self, OtlpError> {
         debug!(
-            event.name = "exporter.otlp.creating",
-            "creating otlp exporter"
+            event.name = "exporter.otlp.started",
+            "starting otlp exporter"
         );
         let endpoint = options.build_endpoint();
         let uri: Uri = endpoint.parse().map_err(|e| {

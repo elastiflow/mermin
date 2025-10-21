@@ -51,7 +51,7 @@ impl RingBufReader {
     pub async fn run(mut self) {
         info!(
             event.name = "task.started",
-            task.name = "ring_buf_reader",
+            task.name = "source.ringbuf",
             task.description = "reading from ring buffer for packet metadata",
             "userspace task started"
         );
@@ -62,7 +62,7 @@ impl RingBufReader {
             Err(e) => {
                 error!(
                     event.name = "task.error",
-                    task.name = "ring_buf_reader",
+                    task.name = "source.ringbuf",
                     error.message = %e,
                     "failed to create asyncfd for ring buffer"
                 );
@@ -77,7 +77,7 @@ impl RingBufReader {
                 Err(e) => {
                     error!(
                         event.name = "task.error",
-                        task.name = "ring_buf_reader",
+                        task.name = "source.ringbuf",
                         error.message = %e,
                         "error waiting for ring buffer readability"
                     );

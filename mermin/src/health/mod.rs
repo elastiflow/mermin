@@ -118,9 +118,9 @@ pub async fn start_api_server(state: HealthState, config: &ApiConf) -> Result<()
         .map_err(|e| HealthError::bind_address(&bind_address, e))?;
 
     info!(
-        event.name = "api.server_listening",
+        event.name = "api.started",
         net.listen.address = %bind_address,
-        "api server with health checks started"
+        "api server has started"
     );
     axum::serve(listener, app)
         .await
