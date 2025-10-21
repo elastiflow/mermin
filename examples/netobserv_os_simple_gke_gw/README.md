@@ -27,11 +27,6 @@ Notes on the example deployment:
 
 ## Install
 
-Install happens in two phases:
-
-- Install NetObserv with OpenSearch
-- Install Mermin
-
 The installation process consists of two phases:
 
 1. Install NetObserv with OpenSearch.
@@ -103,7 +98,6 @@ Now you can navigate to the obtained IP in your browser (assuming you have acces
 To render and diff Helm templates to Kubernetes manifests, run:
 
 ```sh
-# With custom config
 rm -rf helm_rendered/mermin; helm template -n elastiflow \
   -f examples/netobserv_os_simple_gke_gw/values.yaml \
   --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \

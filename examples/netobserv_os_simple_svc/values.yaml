@@ -1,0 +1,157 @@
+mermin:
+  enabled: true
+  image:
+    tag: v0.1.0-beta.6-debug
+  # TODO(Cleanup for GA): image pull secrets not needed when going public
+  imagePullSecrets:
+    - name: ghcr
+
+netobserv-flow:
+  enabled: true
+  fullnameOverride: netobserv-flow
+
+  env:
+    - name: EF_LICENSE_ACCEPTED
+      value: "true"
+    - name: EF_OUTPUT_OPENSEARCH_INDEX_TEMPLATE_REPLICAS
+      value: "0"
+    - name: EF_INPUT_OTLP_TRACE_GRPC_ENABLE
+      value: "true"
+    - name: EF_INPUT_OTLP_TRACE_GRPC_SERVER_TLS_ENABLED
+      value: "true"
+    - name: EF_INPUT_OTLP_TRACE_GRPC_SERVER_TLS_CERT_FILE
+      value: "/etc/ssl/netobserv/tls.crt"
+    - name: EF_INPUT_OTLP_TRACE_GRPC_SERVER_TLS_KEY_FILE
+      value: "/etc/ssl/netobserv/tls.key"
+    - name: EF_INPUT_OTLP_HEALTH_GRPC_ENABLE
+      value: "true"
+    - name: EF_INPUT_OTLP_HEALTH_GRPC_ADDR_PORT
+      value: "4316"
+    - name: EF_INPUT_FLOW_BENCHMARK_ENABLE
+      value: "false" # `false` is the default, keeping for ease of updating for testing
+    - name: EF_OUTPUT_STDOUT_ENABLE
+      value: "false" # `false` is the default, keeping for ease of updating for testing
+
+  resources:
+    requests:
+      cpu: "1000m"
+      memory: "6144Mi"
+    limits:
+      cpu: "2000m"
+      memory: "6144Mi"
+
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 1
+
+  # Discourage to colocate the collector with opensearch
+  topologySpreadConstraints:
+    - maxSkew: 1
+      minDomains: 2
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchExpressions:
+          - key: app.kubernetes.io/name
+            operator: In
+            values: [opensearch]
+
+  ports:
+    - name: api
+      protocol: TCP
+      containerPort: 8080
+    - name: otlp-grpc-hlth
+      protocol: TCP
+      containerPort: 4316
+    - name: otlp-grpc
+      protocol: TCP
+      containerPort: 4317
+    - name: netflow
+      protocol: UDP
+      containerPort: 9995
+
+  service:
+    ports:
+      - name: otlp-grpc
+        protocol: TCP
+        port: 4317
+        targetPort: 4317
+        appProtocol: HTTP2
+      - name: netflow
+        protocol: UDP
+        port: 9995
+        targetPort: 9995
+
+  outputOpenSearch:
+    enable: true
+    addresses: opensearch-cluster-master.elastiflow.svc.cluster.local:9200
+    password: Elast1flow! # Insecure
+    tls:
+      enable: true
+      skipVerification: true
+    dashboards:
+      provision: true
+      dashboards_url: http://elastiflow-os-dashboards.elastiflow.svc.cluster.local:5601
+
+  extraVolumes:
+    - name: netobserv-tls
+      secret:
+        secretName: netobserv-tls
+  extraVolumeMounts:
+    - name: netobserv-tls
+      mountPath: /etc/ssl/netobserv/
+
+  extraObjects:
+    - |
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: netobserv-tls
+        labels:
+          {{- include "netobserv.labels" . | nindent 4 }}
+      type: kubernetes.io/tls
+      data:
+        tls.crt: {{ .Files.Get "tls/netobserv.crt" | b64enc }}
+        tls.key: {{ .Files.Get "tls/netobserv.key" | b64enc }}
+
+opensearch:
+  enabled: true
+  clusterName: elastiflow
+  fullnameOverride: "elastiflow-os"
+  singleNode: true
+  replicas: 1
+  opensearchJavaOpts: "-Xmx3700M -Xmx3700M"
+  resources:
+    requests:
+      cpu: "2000m"
+      memory: 4000Mi
+    limits:
+      cpu: "2000m"
+      memory: 4000Mi
+
+  persistence:
+    storageClass: standard
+    size: 50Gi
+    labels:
+      enabled: true
+
+  extraEnvs:
+    - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+      value: Elast1flow! # Insecure
+
+opensearch-dashboards:
+  enabled: true
+  fullnameOverride: elastiflow-os-dashboards
+  opensearchHosts: https://opensearch-cluster-master.elastiflow.svc.cluster.local:9200
+  resources:
+    requests:
+      cpu: "1000m"
+      memory: "768Mi"
+    limits:
+      cpu: "1000m"
+      memory: "768Mi"
+
+  config:
+    ssl:
+      verificationMode: none
