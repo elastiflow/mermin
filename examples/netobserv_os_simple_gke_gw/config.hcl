@@ -1,10 +1,10 @@
 # OTLP exporter configuration
 # See OBI export concepts: https://opentelemetry.io/docs/zero-code/obi/configure/export-data/
 export "traces" {
-  stdout = "disabled"
+  stdout = ""
 
   otlp = {
-    endpoint = "https://10.0.7.216:443"
+    endpoint = "https://192.0.2.100:443"
 
     tls = {
       insecure = true
