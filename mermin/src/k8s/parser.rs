@@ -70,7 +70,7 @@ impl<'a> SpanDecorator<'a> {
 
             // Discover Services that select this pod (if selector discovery is configured)
             let selected_by_services = self
-                .attributor
+                .decorator
                 .get_services_selecting_pod(pod)
                 .iter()
                 .map(|svc| K8sObjectMeta::from(svc.as_ref()))
@@ -78,7 +78,7 @@ impl<'a> SpanDecorator<'a> {
 
             // Discover NetworkPolicies that select this pod (if selector discovery is configured)
             let selected_by_policies = match self
-                .attributor
+                .decorator
                 .get_network_policies_for_pod_with_discovery(pod)
             {
                 Ok(policies) => policies

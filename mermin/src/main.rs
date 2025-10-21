@@ -23,7 +23,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     health::{HealthState, start_api_server},
-    k8s::{decorator::Decorator, parser::decorate_flow_span},
+    k8s::parser::decorate_flow_span,
     otlp::{
         provider::{init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
@@ -305,7 +305,12 @@ async fn run() -> Result<()> {
 
     info!("initializing k8s client");
 
-    let k8s_decorator = match Attributor::new(health_state.clone(), k8s_informer_discovery).await {
+    let k8s_decorator = match crate::k8s::decorator::Decorator::new(
+        health_state.clone(),
+        k8s_informer_discovery,
+    )
+    .await
+    {
         Ok(decorator) => {
             info!("k8s client initialized successfully and all caches are synced");
             Some(Arc::new(decorator))

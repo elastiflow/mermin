@@ -235,13 +235,13 @@ impl Conf {
         resolved
     }
 
-	/// Get the K8s informer discovery configuration if present.
+    /// Get the K8s informer discovery configuration if present.
     pub fn get_k8s_informer_discovery(&self) -> Option<&InformerOptions> {
         self.discovery
             .informer
             .as_ref()
             .and_then(|i| i.k8s.as_ref())
-	}
+    }
 
     fn find_matches<'a>(pattern: &str, available: &'a [String]) -> Vec<&'a str> {
         if let Some(re) = Self::parse_regex(pattern) {

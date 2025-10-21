@@ -40,10 +40,9 @@ use network_types::ip::IpProto;
 use tokio::sync::oneshot;
 use tracing::error;
 
-use crate::{health::HealthState, k8s::K8sError, span::flow::FlowSpan};
 use crate::{
     health::HealthState,
-    k8s::{filter, K8sError, opts::InformerOptions},
+    k8s::{K8sError, filter, opts::InformerOptions},
     span::flow::FlowSpan,
 };
 
@@ -385,7 +384,10 @@ pub struct Decorator {
 
 impl Decorator {
     /// Creates a new Decorator, initializing all resource reflectors concurrently.
-    pub async fn new(health_state: HealthState) -> Result<Self, K8sError> {
+    pub async fn new(
+        health_state: HealthState,
+        informer_discovery: Option<InformerOptions>,
+    ) -> Result<Self, K8sError> {
         let client = Client::try_default()
             .await
             .map_err(|e| K8sError::ClientInitialization(Box::new(e)))?;
@@ -1039,7 +1041,7 @@ impl Decorator {
 
         let policies = self
             .resource_store
-            .get_by_namespace::<NetworkPolicy>(pod_namespace)
+            .get_by_namespace::<NetworkPolicy>(&pod_namespace)
             .into_iter()
             .filter(|policy| {
                 // Check if the policy's podSelector matches the destination pod
@@ -1126,7 +1128,7 @@ impl Decorator {
     pub fn get_network_policies_for_pod_with_discovery(
         &self,
         pod: &Pod,
-    ) -> Result<Vec<Arc<NetworkPolicy>>> {
+    ) -> Result<Vec<Arc<NetworkPolicy>>, K8sError> {
         // Get configured selector rules for NetworkPolicies
         let policy_selectors: Vec<_> = self
             .informer_discovery
@@ -1141,7 +1143,7 @@ impl Decorator {
 
         // If no selector config, use existing method
         if policy_selectors.is_empty() {
-            return self.get_network_policies_for_pod_default(pod);
+            return self.get_network_policies_for_pod(pod);
         }
 
         // Collect policies from all configured selectors
