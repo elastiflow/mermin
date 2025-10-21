@@ -64,6 +64,12 @@ pub struct SpanOptions {
     /// - Default Value: `60s`
     #[serde(default = "defaults::udp_timeout", with = "duration")]
     pub udp_timeout: Duration,
+
+    /// The seed value used for Community ID generation.
+    /// - Default Value: `0`
+    /// - Example: Set to `1` to use a different seed for Community ID hashing
+    #[serde(default = "defaults::community_id_seed")]
+    pub community_id_seed: u16,
 }
 
 impl Default for SpanOptions {
@@ -76,6 +82,7 @@ impl Default for SpanOptions {
             tcp_fin_timeout: defaults::tcp_fin_timeout(),
             tcp_rst_timeout: defaults::tcp_rst_timeout(),
             udp_timeout: defaults::udp_timeout(),
+            community_id_seed: defaults::community_id_seed(),
         }
     }
 }
@@ -103,5 +110,8 @@ mod defaults {
     }
     pub fn udp_timeout() -> Duration {
         Duration::from_secs(60)
+    }
+    pub fn community_id_seed() -> u16 {
+        0
     }
 }

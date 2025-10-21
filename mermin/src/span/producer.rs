@@ -125,7 +125,7 @@ impl FlowSpanProducer {
             flow_span_map_capacity,
             FxBuildHasher::default(),
         ));
-        let community_id_generator = CommunityIdGenerator::new(0);
+        let community_id_generator = CommunityIdGenerator::new(span_opts.community_id_seed);
 
         // Calculate boot time offset to convert kernel boot-relative timestamps to wall clock
         // This is critical - if we can't determine boot time, timestamps will be wrong
@@ -1010,7 +1010,7 @@ mod tests {
             100,
             FxBuildHasher::default(),
         ));
-        let community_id_generator = CommunityIdGenerator::new(0);
+        let community_id_generator = CommunityIdGenerator::new(span_opts.community_id_seed);
         let iface_map = HashMap::new();
 
         let worker = PacketWorker {
@@ -2182,6 +2182,7 @@ mod tests {
             tcp_fin_timeout: Duration::from_millis(100),
             tcp_rst_timeout: Duration::from_millis(100),
             udp_timeout: Duration::from_secs(60),
+            community_id_seed: 0, // Use default seed for testing
         };
 
         let (packet_tx, packet_rx) = mpsc::channel(100);
@@ -2190,7 +2191,7 @@ mod tests {
             100,
             FxBuildHasher::default(),
         ));
-        let community_id_generator = CommunityIdGenerator::new(0);
+        let community_id_generator = CommunityIdGenerator::new(span_opts.community_id_seed);
         let iface_map = HashMap::new();
 
         // Create the packet worker
