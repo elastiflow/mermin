@@ -1,13 +1,23 @@
+//! Ring buffer reader for eBPF packet metadata.
+//!
+//! This module provides the `RingBufReader` which handles reading packet metadata
+//! from the eBPF ring buffer in an event-driven manner. It applies filtering rules
+//! before forwarding packets to the processing pipeline.
+
 use std::{os::fd::AsRawFd, sync::Arc};
 
 use aya::maps::RingBuf;
 use mermin_common::PacketMeta;
 use tokio::{io::unix::AsyncFd, sync::mpsc};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, trace, warn};
 
 use crate::source::filter::PacketFilter;
 
-/// Handles reading packet metadata from the eBPF ring buffer and routing it through pipelines
+/// Handles reading packet metadata from the eBPF ring buffer and routing it through pipelines.
+///
+/// The reader operates in an event-driven fashion using `AsyncFd` to avoid busy-waiting.
+/// Each packet is validated, deserialized, filtered, and then forwarded to the processing
+/// pipeline via an async channel.
 pub struct RingBufReader {
     ring_buf: RingBuf<aya::maps::MapData>,
     router: Arc<PacketFilter>,
@@ -28,7 +38,16 @@ impl RingBufReader {
         }
     }
 
-    /// Starts the ring buffer reading task
+    /// Starts the ring buffer reading task.
+    ///
+    /// This method runs indefinitely, polling the ring buffer for new packets.
+    /// It uses event-driven I/O to avoid busy-waiting. Each packet is:
+    /// 1. Validated for size
+    /// 2. Deserialized from raw bytes
+    /// 3. Filtered against configured rules
+    /// 4. Forwarded to the processing pipeline if it passes filters
+    ///
+    /// This method consumes `self` and should be spawned in a separate tokio task.
     pub async fn run(mut self) {
         info!("userspace task started: reading from ring buffer for packet metadata");
 
@@ -53,6 +72,21 @@ impl RingBufReader {
 
             // Consume all available data in a batch
             while let Some(bytes) = self.ring_buf.next() {
+                // Validate that we have enough bytes for a PacketMeta
+                if bytes.len() < std::mem::size_of::<PacketMeta>() {
+                    warn!(
+                        "ring buffer provided insufficient bytes for PacketMeta: got {}, expected {}",
+                        bytes.len(),
+                        std::mem::size_of::<PacketMeta>()
+                    );
+                    continue;
+                }
+
+                // SAFETY: The eBPF ring buffer is guaranteed to contain properly aligned
+                // PacketMeta structures written by the kernel-side eBPF program.
+                // We've verified above that bytes.len() >= size_of::<PacketMeta>().
+                // The pointer cast is valid because PacketMeta is repr(C) and the
+                // eBPF program writes the struct with the same memory layout.
                 let packet_meta: PacketMeta =
                     unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const PacketMeta) };
 
@@ -60,14 +94,16 @@ impl RingBufReader {
                 match self.router.should_process(&packet_meta) {
                     Ok(true) => {
                         if let Err(e) = self.packet_meta_tx.send(packet_meta).await {
-                            warn!("failed to send packet to k8s attribution channel: {e}");
+                            error!("failed to send packet to k8s attribution channel: {e}");
                         }
                     }
                     Ok(false) => {
-                        debug!("packet meta did not match any filters; skipping.");
+                        trace!("packet meta did not match any filters; skipping.");
                     }
                     Err(e) => {
-                        warn!("failed to route packet meta: {e}; skipping.");
+                        warn!(
+                            "failed to parse packet metadata for filtering: {e}; skipping packet"
+                        );
                     }
                 }
             }

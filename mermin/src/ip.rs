@@ -1,3 +1,8 @@
+//! IP address resolution utilities.
+//!
+//! This module provides utilities for converting raw byte arrays into standard
+//! Rust `IpAddr` types, handling both IPv4 and IPv6 addresses.
+
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use mermin_common::IpAddrType;

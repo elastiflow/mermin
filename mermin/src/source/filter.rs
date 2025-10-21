@@ -1,3 +1,33 @@
+//! Packet filtering based on user-configured rules.
+//!
+//! This module provides high-performance packet filtering capabilities by pre-compiling
+//! filter rules at initialization time. Rules are organized into four dimensions:
+//! - `source`: Source IP address and port filtering
+//! - `destination`: Destination IP address and port filtering
+//! - `network`: Network-level filtering (transport protocol, interface, MAC address)
+//! - `flow`: Flow-level filtering (TCP state, DSCP, ECN, TTL, ICMP types, TCP flags)
+//!
+//! # Performance
+//!
+//! Filter rules are pre-compiled into efficient data structures:
+//! - IP addresses/CIDRs use trie-based `IpNetworkTable` for O(log n) lookups
+//! - Port numbers and numeric values use `HashSet` for O(1) lookups
+//! - String patterns use `GlobSet` for efficient pattern matching
+//!
+//! # Example
+//!
+//! ```ignore
+//! use mermin::source::filter::PacketFilter;
+//! use mermin::runtime::conf::Conf;
+//!
+//! let conf = Conf::load_from_file("config.hcl")?;
+//! let filter = PacketFilter::new(&conf, iface_map);
+//!
+//! if filter.should_process(&packet)? {
+//!     // Process the packet
+//! }
+//! ```
+
 use std::{
     collections::{HashMap, HashSet},
     net::IpAddr,
@@ -15,13 +45,27 @@ use network_types::{
 use num_iter::range_inclusive;
 use num_traits::PrimInt;
 use pnet::datalink::MacAddr;
-use tracing::warn;
+use tracing::{error, warn};
 
 use crate::{
     ip::{Error as IpError, resolve_addrs},
     runtime::conf::{Conf, FilteringOptions, FilteringPair},
     span::tcp::{ConnectionState, TcpFlags},
 };
+
+/// Helper macro to check if a packet passes a filter rule.
+///
+/// Returns early with `Ok(false)` if the filter exists and the value is not allowed.
+/// This reduces boilerplate in the `should_process` method.
+macro_rules! check_filter {
+    ($rules:expr, $value:expr) => {
+        if let Some(rules) = $rules {
+            if !rules.is_allowed($value) {
+                return Ok(false);
+            }
+        }
+    };
+}
 
 /// Contains a pre-compiled set of rules for a single filter dimension (e.g., "source", "network").
 #[derive(Default)]
@@ -59,7 +103,10 @@ impl CompiledRules {
         let build_glob_set = |pair: &FilteringPair| -> CompiledRuleSet<GlobSet> {
             let build = |s: &str| -> GlobSet {
                 if s.is_empty() {
-                    return GlobSetBuilder::new().build().unwrap();
+                    // Empty builder can never fail
+                    return GlobSetBuilder::new()
+                        .build()
+                        .expect("empty globset build should never fail");
                 }
                 let mut builder = GlobSetBuilder::new();
                 for part in s.split(',') {
@@ -71,11 +118,22 @@ impl CompiledRules {
                             event_name = "filter.glob_parse_failed",
                             pattern = %part,
                             error.message = %e,
-                            "Invalid glob pattern in filter config, skipping."
+                            "invalid glob pattern in filter config, skipping."
                         ),
                     }
                 }
-                builder.build().unwrap()
+                // GlobSetBuilder::build only fails if the builder is misconfigured,
+                // which cannot happen with the simple add() calls above
+                builder.build().unwrap_or_else(|e| {
+                    error!(
+                        event_name = "filter.globset_build_failed",
+                        error.message = %e,
+                        "failed to build globset, using empty set as fallback"
+                    );
+                    GlobSetBuilder::new()
+                        .build()
+                        .expect("empty globset build should never fail")
+                })
             };
 
             CompiledRuleSet {
@@ -135,7 +193,7 @@ fn build_ip_network_table(s: &str) -> IpNetworkTable<()> {
             warn!(
                 event_name = "filter.cidr_parse_failed",
                 cidr = %part,
-                "Invalid CIDR in filter config, skipping."
+                "nvalid cidr in filter config, skipping."
             );
         }
     }
@@ -162,7 +220,7 @@ where
                     warn!(
                         event_name = "filter.range_invalid",
                         range = %part,
-                        "Invalid numeric range (start > end) in filter config, skipping."
+                        "invalid numeric range (start > end) in filter config, skipping."
                     );
                     continue;
                 }
@@ -173,7 +231,7 @@ where
                 warn!(
                     event_name = "filter.range_parse_failed",
                     range = %part,
-                    "Invalid numeric range in filter config, skipping."
+                    "invalid numeric range in filter config, skipping."
                 );
             }
         } else if let Ok(val) = part.parse::<T>() {
@@ -182,7 +240,7 @@ where
             warn!(
                 event_name = "filter.value_parse_failed",
                 value = %part,
-                "Invalid numeric value in filter config, skipping."
+                "invalid numeric value in filter config, skipping."
             );
         }
     }
@@ -235,15 +293,41 @@ impl<T: std::hash::Hash + Eq> RuleCollection<T> for HashSet<T> {
 }
 
 impl RuleCollection<str> for GlobSet {
+    /// Performs case-insensitive glob pattern matching.
+    ///
+    /// # Case Sensitivity
+    ///
+    /// This implementation normalizes the input value to lowercase before matching.
+    /// This is appropriate for protocol names (e.g., "TCP", "UDP"), connection states,
+    /// and other string-based filters where case-insensitive matching is desired.
+    ///
+    /// Examples that match:
+    /// - Pattern "tcp" matches: "TCP", "tcp", "Tcp"
+    /// - Pattern "syn" matches: "SYN", "syn", "Syn"
     fn matches(&self, value: &str) -> bool {
         self.is_match(value.to_lowercase())
     }
+
     fn is_empty(&self) -> bool {
         GlobSet::is_empty(self)
     }
 }
 
 /// A pre-compiled filter that holds all filtering rules from the configuration.
+///
+/// This struct pre-compiles all filter rules at initialization time for efficient
+/// runtime packet filtering. Filters are organized into four dimensions:
+/// - `source`: Source IP address and port
+/// - `destination`: Destination IP address and port
+/// - `network`: Network-level attributes (protocol, interface, MAC)
+/// - `flow`: Flow-level attributes (TCP state, DSCP, ECN, TTL, etc.)
+///
+/// # Performance
+///
+/// Pre-compilation ensures that packet filtering has minimal overhead:
+/// - IP lookups: O(log n) via trie-based `IpNetworkTable`
+/// - Port/numeric lookups: O(1) via `HashSet`
+/// - Pattern matching: Optimized via compiled `GlobSet`
 #[derive(Default)]
 pub struct PacketFilter {
     source: CompiledRules,
@@ -254,6 +338,7 @@ pub struct PacketFilter {
 }
 
 impl PacketFilter {
+    /// Creates a new `PacketFilter` from configuration.
     pub fn new(conf: &Conf, iface_map: HashMap<u32, String>) -> Self {
         let get_filter = |name: &str| -> Option<&FilteringOptions> {
             conf.filter.as_ref().and_then(|map| map.get(name))
@@ -268,22 +353,72 @@ impl PacketFilter {
         }
     }
 
+    /// Determines if a packet should be processed based on configured filter rules.
+    ///
+    /// This is the core filtering method called for every packet in the hot path.
+    /// Filters are evaluated in a specific order to optimize for early rejection
+    /// of unwanted packets.
+    ///
+    /// # Arguments
+    ///
+    /// - `packet` - The packet metadata to evaluate against filter rules
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(true)` - Packet matches all applicable filters and should be processed
+    /// - `Ok(false)` - Packet does not match filter criteria and should be dropped
+    /// - `Err(IpError)` - Failed to parse IP addresses from packet metadata
+    ///
+    /// # Filter Evaluation Order
+    ///
+    /// Filters are evaluated in the following order for optimal performance
+    /// (evaluation short-circuits on the first mismatch):
+    ///
+    /// 1. **Network filters** (cheap to evaluate, high rejection rate):
+    ///    - Transport protocol (TCP, UDP, ICMP, etc.)
+    ///    - Network type (IPv4, IPv6)
+    ///    - Interface index, name, MAC address
+    ///
+    /// 2. **Flow filters** (protocol-specific, moderate cost):
+    ///    - TCP connection state (for TCP packets only)
+    ///    - IP DSCP and ECN values
+    ///    - IP TTL and flow label
+    ///    - ICMP type/code (for ICMP packets only)
+    ///    - TCP flags (for TCP packets only)
+    ///
+    /// 3. **Address/Port filters** (requires IP parsing, evaluated last):
+    ///    - Source IP address and port
+    ///    - Destination IP address and port
+    ///
+    /// # Performance
+    ///
+    /// This method is highly optimized for the hot path:
+    /// - Pre-compiled filter rules enable O(1) or O(log n) lookups
+    /// - Early short-circuit evaluation minimizes unnecessary checks
+    /// - IP address parsing only occurs after cheaper filters pass
+    ///
+    /// # Filter Semantics
+    ///
+    /// Each filter dimension supports both positive (`match`) and negative (`not_match`) rules:
+    /// - If `not_match` rules are present and match: packet is **rejected**
+    /// - If `match` rules are present and don't match: packet is **rejected**
+    /// - If neither set of rules is present for a filter: packet **passes** that filter
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// // Filter configuration allows only TCP traffic on port 443
+    /// if filter.should_process(&packet)? {
+    ///     process_packet(packet);
+    /// } else {
+    ///     // Packet filtered out - no processing needed
+    /// }
+    /// ```
     pub fn should_process(&self, packet: &PacketMeta) -> Result<bool, IpError> {
-        if let Some(rules) = &self.network.transport
-            && !rules.is_allowed(&packet.proto.to_string())
-        {
-            return Ok(false);
-        }
-        if let Some(rules) = &self.network.type_
-            && !rules.is_allowed(packet.ether_type.as_str())
-        {
-            return Ok(false);
-        }
-        if let Some(rules) = &self.network.interface_index
-            && !rules.is_allowed(&packet.ifindex)
-        {
-            return Ok(false);
-        }
+        // Network-level filters (cheap checks first)
+        check_filter!(&self.network.transport, &packet.proto.to_string());
+        check_filter!(&self.network.type_, packet.ether_type.as_str());
+        check_filter!(&self.network.interface_index, &packet.ifindex);
         if let Some(rules) = &self.network.interface_name {
             if let Some(iface_name) = self.iface_map.get(&packet.ifindex) {
                 if !rules.is_allowed(iface_name) {
@@ -336,16 +471,8 @@ impl PacketFilter {
                 return Ok(false);
             }
         }
-        if let Some(rules) = &self.flow.ip_ttl
-            && !rules.is_allowed(&packet.ip_ttl)
-        {
-            return Ok(false);
-        }
-        if let Some(rules) = &self.flow.ip_flow_label
-            && !rules.is_allowed(&packet.ip_flow_label)
-        {
-            return Ok(false);
-        }
+        check_filter!(&self.flow.ip_ttl, &packet.ip_ttl);
+        check_filter!(&self.flow.ip_flow_label, &packet.ip_flow_label);
 
         if packet.proto == IpProto::Icmp || packet.proto == IpProto::Ipv6Icmp {
             if let Some(rules) = &self.flow.icmp_type_name {
@@ -389,6 +516,7 @@ impl PacketFilter {
             }
         }
 
+        // Address/port filters (requires IP parsing, evaluated last)
         let (src_ip, dst_ip) = resolve_addrs(
             packet.ip_addr_type,
             packet.src_ipv4_addr,
@@ -399,26 +527,10 @@ impl PacketFilter {
         let src_port = packet.src_port();
         let dst_port = packet.dst_port();
 
-        if let Some(rules) = &self.source.address
-            && !rules.is_allowed(&src_ip)
-        {
-            return Ok(false);
-        }
-        if let Some(rules) = &self.source.port
-            && !rules.is_allowed(&src_port)
-        {
-            return Ok(false);
-        }
-        if let Some(rules) = &self.destination.address
-            && !rules.is_allowed(&dst_ip)
-        {
-            return Ok(false);
-        }
-        if let Some(rules) = &self.destination.port
-            && !rules.is_allowed(&dst_port)
-        {
-            return Ok(false);
-        }
+        check_filter!(&self.source.address, &src_ip);
+        check_filter!(&self.source.port, &src_port);
+        check_filter!(&self.destination.address, &dst_ip);
+        check_filter!(&self.destination.port, &dst_port);
 
         Ok(true)
     }
@@ -436,6 +548,11 @@ mod tests {
 
     use super::*;
     use crate::runtime::conf::{Conf, FilteringOptions, FilteringPair};
+
+    // TCP flag constants for test clarity
+    const TCP_FLAG_SYN: u8 = 0x02;
+    const TCP_FLAG_RST: u8 = 0x04;
+    const TCP_FLAG_ACK: u8 = 0x10;
 
     fn mock_packet(
         src_ip: Ipv4Addr,
@@ -757,7 +874,7 @@ mod tests {
             2,
             IpProto::Tcp,
         );
-        packet_syn_ack.tcp_flags = 0x12; // SYN+ACK
+        packet_syn_ack.tcp_flags = TCP_FLAG_SYN | TCP_FLAG_ACK;
 
         let mut packet_ack = mock_packet(
             "1.1.1.1".parse().unwrap(),
@@ -766,7 +883,7 @@ mod tests {
             2,
             IpProto::Tcp,
         );
-        packet_ack.tcp_flags = 0x10; // ACK only
+        packet_ack.tcp_flags = TCP_FLAG_ACK;
 
         let mut packet_rst = mock_packet(
             "1.1.1.1".parse().unwrap(),
@@ -775,7 +892,7 @@ mod tests {
             2,
             IpProto::Tcp,
         );
-        packet_rst.tcp_flags = 0x04; // RST
+        packet_rst.tcp_flags = TCP_FLAG_RST;
 
         let mut packet_syn_rst = mock_packet(
             "1.1.1.1".parse().unwrap(),
@@ -784,11 +901,151 @@ mod tests {
             2,
             IpProto::Tcp,
         );
-        packet_syn_rst.tcp_flags = 0x06; // SYN+RST
+        packet_syn_rst.tcp_flags = TCP_FLAG_SYN | TCP_FLAG_RST;
 
         assert!(filter.should_process(&packet_syn_ack).unwrap()); // Has ACK, no RST
         assert!(filter.should_process(&packet_ack).unwrap()); // Has ACK, no RST
         assert!(!filter.should_process(&packet_rst).unwrap()); // Has RST
         assert!(!filter.should_process(&packet_syn_rst).unwrap()); // Has RST
+    }
+
+    #[test]
+    fn test_invalid_cidr_handling() {
+        // Test that invalid CIDRs are gracefully skipped with warnings
+        let filter = build_filter(HashMap::from([(
+            "source".to_string(),
+            FilteringOptions {
+                address: Some(FilteringPair {
+                    match_glob: "192.168.1.0/24, invalid-cidr, 10.0.0.0/8".to_string(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )]));
+
+        // Valid CIDR should still work
+        let packet_in_range = mock_packet(
+            "192.168.1.50".parse().unwrap(),
+            1234,
+            "8.8.8.8".parse().unwrap(),
+            53,
+            IpProto::Tcp,
+        );
+        assert!(filter.should_process(&packet_in_range).unwrap());
+
+        // invalid CIDR shouldn't cause panic or stop processing
+        let packet_out_range = mock_packet(
+            "172.16.0.1".parse().unwrap(),
+            1234,
+            "8.8.8.8".parse().unwrap(),
+            53,
+            IpProto::Tcp,
+        );
+        assert!(!filter.should_process(&packet_out_range).unwrap());
+    }
+
+    #[test]
+    fn test_invalid_port_range_handling() {
+        // Test that invalid port ranges (start > end) are gracefully skipped
+        let filter = build_filter(HashMap::from([(
+            "destination".to_string(),
+            FilteringOptions {
+                port: Some(FilteringPair {
+                    match_glob: "80, 9000-8000, 443".to_string(), // invalid range
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )]));
+
+        // Valid ports should still work
+        let packet_80 = mock_packet(
+            "10.1.1.1".parse().unwrap(),
+            1234,
+            "10.2.2.2".parse().unwrap(),
+            80,
+            IpProto::Tcp,
+        );
+        assert!(filter.should_process(&packet_80).unwrap());
+
+        // Port in invalid range should not match
+        let packet_8500 = mock_packet(
+            "10.1.1.1".parse().unwrap(),
+            1234,
+            "10.2.2.2".parse().unwrap(),
+            8500,
+            IpProto::Tcp,
+        );
+        assert!(!filter.should_process(&packet_8500).unwrap());
+    }
+
+    #[test]
+    fn test_empty_filter_configuration() {
+        // Test that empty/missing filter configuration allows all packets
+        let filter = build_filter(HashMap::new());
+
+        let packet = mock_packet(
+            "1.2.3.4".parse().unwrap(),
+            1234,
+            "5.6.7.8".parse().unwrap(),
+            80,
+            IpProto::Tcp,
+        );
+
+        assert!(filter.should_process(&packet).unwrap());
+    }
+
+    #[test]
+    fn test_malformed_numeric_values() {
+        // Test handling of non-numeric values in numeric fields
+        let filter = build_filter(HashMap::from([(
+            "destination".to_string(),
+            FilteringOptions {
+                port: Some(FilteringPair {
+                    match_glob: "80, abc, 443, xyz-999".to_string(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )]));
+
+        // Valid numeric ports should still work
+        let packet = mock_packet(
+            "10.1.1.1".parse().unwrap(),
+            1234,
+            "10.2.2.2".parse().unwrap(),
+            443,
+            IpProto::Tcp,
+        );
+        assert!(filter.should_process(&packet).unwrap());
+    }
+
+    #[test]
+    fn test_invalid_glob_patterns() {
+        // Test that invalid glob patterns are gracefully skipped
+        let filter = build_filter(HashMap::from([(
+            "network".to_string(),
+            FilteringOptions {
+                transport: Some(FilteringPair {
+                    match_glob: "tcp, [invalid-glob, udp".to_string(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )]));
+
+        // Valid patterns should still work
+        let mut packet = mock_packet(
+            "10.1.1.1".parse().unwrap(),
+            1234,
+            "10.2.2.2".parse().unwrap(),
+            80,
+            IpProto::Tcp,
+        );
+
+        assert!(filter.should_process(&packet).unwrap());
+
+        packet.proto = IpProto::Udp;
+        assert!(filter.should_process(&packet).unwrap());
     }
 }
