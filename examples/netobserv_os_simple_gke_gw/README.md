@@ -73,7 +73,7 @@ This installation assumes that no additional DNS controllers are running in the 
     ```
 
 - Phase 2:
-  - Get NetObserv Gateway (Load Balancer) IP
+  - Get the NetObserv Gateway (Load Balancer) IP
 
     ```sh
     kubectl get gtw netobserv-flow -o=jsonpath='{.status.addresses[0].value}'
