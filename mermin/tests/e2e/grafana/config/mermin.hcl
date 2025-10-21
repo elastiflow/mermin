@@ -1,11 +1,3 @@
-# Network interfaces to monitor
-# Literal example (default)
-interfaces = ["eth0"]
-# Glob example: match all ethernet interfaces starting with "eth"
-# interfaces = ["eth*"]
-# Regex example: match slot-based PNIN like en0p<digits>
-# interfaces = ["/^en0p\\d+$/"]
-
 # Logging configuration
 log_level = "debug"
 
@@ -29,6 +21,17 @@ metrics {
   enabled        = true
   listen_address = "0.0.0.0"
   port           = 10250
+}
+
+# Discovery configuration
+discovery "instrument" {
+  # Network interfaces to monitor
+  #
+  # Glob example: match all ethernet interfaces starting with "eth"
+  # interfaces = ["eth*"]
+  # Regex example: match slot-based PNIN like en0p<digits>
+  # interfaces = ["/^en0p\\d+$/"]
+  interfaces = ["eth0"]
 }
 
 # Flow Span configuration

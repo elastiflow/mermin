@@ -33,9 +33,19 @@ impl Format for Hcl {
 #[serde(default)]
 pub struct Conf {
     /// Path to the configuration file that was loaded
+    ///
+    /// This field is not serialized and must be regenerated when loading configuration.
     #[serde(skip)]
-    #[allow(dead_code)]
-    pub(crate) config_path: Option<std::path::PathBuf>,
+    pub config_path: Option<std::path::PathBuf>,
+    /// Resolved interfaces after expanding globs and regexes against host interfaces.
+    ///
+    /// This field is populated during `Conf::new()` and `Conf::reload()` by expanding
+    /// the patterns in `discovery.instrument.interfaces` against available network
+    /// interfaces on the host. The resolution happens once per config load/reload cycle.
+    ///
+    /// This field is not serialized and must be regenerated when loading configuration.
+    #[serde(skip)]
+    pub resolved_interfaces: Vec<String>,
     #[serde(with = "level")]
     pub log_level: Level,
     pub auto_reload: bool,
@@ -49,12 +59,10 @@ pub struct Conf {
     pub metrics: MetricsConf,
     /// Parser configuration for eBPF packet parsing
     pub parser: ParserConf,
-    pub interfaces: Vec<String>,
-    /// Resolved interfaces after expanding globs and regexes against host interfaces
-    #[serde(skip)]
-    pub resolved_interfaces: Vec<String>,
     /// Span configuration for flow span producer
     pub span: SpanOptions,
+    /// Discovery configuration for network monitoring
+    pub discovery: DiscoveryConf,
     /// References to the exporters to use for telemetry
     pub export: ExportOptions,
     /// Configuration for flow interfaces.
@@ -66,6 +74,7 @@ impl Default for Conf {
     fn default() -> Self {
         Self {
             config_path: None,
+            resolved_interfaces: Vec::new(),
             log_level: Level::INFO,
             auto_reload: false,
             shutdown_timeout: defaults::shutdown_timeout(),
@@ -75,9 +84,8 @@ impl Default for Conf {
             api: ApiConf::default(),
             metrics: MetricsConf::default(),
             parser: ParserConf::default(),
-            interfaces: vec!["eth0".to_string()],
-            resolved_interfaces: Vec::new(),
             span: SpanOptions::default(),
+            discovery: DiscoveryConf::default(),
             export: ExportOptions::default(),
             filter: None,
         }
@@ -186,9 +194,29 @@ impl Conf {
     /// Expand interface patterns (supports '*' and '?') into concrete interface names.
     pub fn resolve_interfaces(&self) -> Vec<String> {
         let available: Vec<String> = datalink::interfaces().into_iter().map(|i| i.name).collect();
-        Self::resolve_interfaces_from(&self.interfaces, &available)
+        Self::resolve_interfaces_from(&self.discovery.instrument.interfaces, &available)
     }
 
+    /// Resolves interface patterns into concrete interface names.
+    ///
+    /// Supports three pattern types:
+    /// 1. **Literal matches**: `"eth0"` matches exactly `"eth0"`
+    /// 2. **Glob patterns**: `"eth*"` matches `"eth0"`, `"eth1"`, etc. using `*` and `?` wildcards
+    /// 3. **Regex patterns**: `"/^eth\d+$/"` matches `"eth0"`, `"eth1"` using full regex syntax
+    ///
+    /// Duplicate interfaces are automatically deduplicated while preserving
+    /// order of first occurrence. Patterns that match no interfaces will
+    /// generate a warning log but won't cause an error.
+    ///
+    /// # Arguments
+    ///
+    /// - `patterns` - List of interface patterns to match against
+    /// - `available` - List of available interface names on the host
+    ///
+    /// # Returns
+    ///
+    /// Vector of unique interface names that matched any of the patterns,
+    /// in order of first match occurrence.
     fn resolve_interfaces_from(patterns: &[String], available: &[String]) -> Vec<String> {
         use std::collections::HashSet;
         let mut resolved = Vec::new();
@@ -211,6 +239,19 @@ impl Conf {
         resolved
     }
 
+    /// Finds all interfaces matching a given pattern.
+    ///
+    /// Determines the pattern type (regex, glob, or literal) and applies
+    /// the appropriate matching algorithm.
+    ///
+    /// # Arguments
+    ///
+    /// - `pattern` - The pattern to match (literal, glob, or regex)
+    /// - `available` - List of available interface names
+    ///
+    /// # Returns
+    ///
+    /// Vector of interface names that match the pattern
     fn find_matches<'a>(pattern: &str, available: &'a [String]) -> Vec<&'a str> {
         if let Some(re) = Self::parse_regex(pattern) {
             available
@@ -255,49 +296,122 @@ impl Conf {
         }
     }
 
+    /// Determines if a pattern string should be treated as a glob pattern.
+    ///
+    /// Returns `true` if the pattern contains wildcard characters (`*` or `?`).
     #[inline]
     fn is_glob(s: &str) -> bool {
         s.contains('*') || s.contains('?')
     }
 
-    // Simple wildcard matcher supporting '*' and '?'
+    /// Matches a glob pattern against text using `*` and `?` wildcards.
+    ///
+    /// - `*` matches zero or more bytes
+    /// - `?` matches exactly one byte
+    ///
+    /// **Important**: This function operates at the byte level, not the character level.
+    /// For ASCII text, one byte equals one character. For UTF-8 encoded text (e.g., Unicode),
+    /// a single character may be multiple bytes, so `?` will not match a single Unicode
+    /// character unless it's ASCII.
+    ///
+    /// Uses a backtracking algorithm with byte-level operations for efficiency.
+    /// The algorithm tracks the position of the last `*` encountered to enable
+    /// backtracking when a mismatch occurs.
+    ///
+    /// # Arguments
+    ///
+    /// - `pattern` - The glob pattern to match
+    /// - `text` - The text to match against
+    ///
+    /// # Returns
+    ///
+    /// `true` if the text matches the pattern, `false` otherwise
     fn glob_match(pattern: &str, text: &str) -> bool {
+        // Sentinel value indicating no '*' wildcard has been encountered yet
+        const NO_STAR_SEEN: usize = usize::MAX;
+
         let (pattern_bytes, text_bytes) = (pattern.as_bytes(), text.as_bytes());
         let (mut pattern_index, mut text_index) = (0, 0);
-        let (mut last_star_pattern_index, mut last_star_text_index) = (usize::MAX, 0);
+        let (mut last_star_pattern_index, mut last_star_text_index) = (NO_STAR_SEEN, 0);
 
         while text_index < text_bytes.len() {
             if pattern_index < pattern_bytes.len()
                 && (pattern_bytes[pattern_index] == b'?'
                     || pattern_bytes[pattern_index] == text_bytes[text_index])
             {
+                // Direct match or '?' wildcard - advance both indices
                 pattern_index += 1;
                 text_index += 1;
             } else if pattern_index < pattern_bytes.len() && pattern_bytes[pattern_index] == b'*' {
+                // Found '*' - record position for potential backtracking
                 last_star_pattern_index = pattern_index;
                 last_star_text_index = text_index;
                 pattern_index += 1;
-            } else if last_star_pattern_index != usize::MAX {
+            } else if last_star_pattern_index != NO_STAR_SEEN {
+                // Mismatch but we have a previous '*' - backtrack and try matching more text with '*'
                 pattern_index = last_star_pattern_index + 1;
                 last_star_text_index += 1;
                 text_index = last_star_text_index;
             } else {
+                // Mismatch with no '*' to backtrack to
                 return false;
             }
         }
 
+        // Consume any trailing '*' patterns which match empty string
         while pattern_index < pattern_bytes.len() && pattern_bytes[pattern_index] == b'*' {
             pattern_index += 1;
         }
+        // Pattern matches if we've consumed all pattern characters
         pattern_index == pattern_bytes.len()
     }
 
+    /// Parses a regex pattern from the format `/pattern/`.
+    ///
+    /// Returns `Some(Regex)` if the pattern is valid regex syntax surrounded by '/',
+    /// otherwise returns `None`.
+    ///
+    /// # Security Note
+    ///
+    /// To prevent ReDoS (Regular Expression Denial of Service) attacks, this function
+    /// enforces a maximum pattern length. Overly complex regex patterns are rejected
+    /// with a warning log.
+    ///
+    /// # Pattern Format
+    ///
+    /// The pattern must be in the format `/regex_pattern/` where:
+    /// - Starts with `/`
+    /// - Ends with `/`
+    /// - Contains valid regex syntax between the slashes
+    ///
+    /// # Examples
+    ///
+    /// - `/^eth\d+$/` - Valid regex pattern matching eth followed by digits
+    /// - `/^(en|eth)[0-9]+$/` - Valid regex with alternation
+    /// - `eth0` - Not a regex (no slashes), returns `None`
+    /// - `/[unclosed/` - Invalid regex syntax, returns `None`
     #[inline]
     fn parse_regex(pattern: &str) -> Option<Regex> {
+        // Maximum regex pattern length to prevent ReDoS attacks
+        const MAX_REGEX_LENGTH: usize = 256;
+
         // Regex form: /.../ with at least two slashes and no trailing flags for now
         let stripped = pattern.strip_prefix('/')?;
         let end = stripped.rfind('/')?;
-        Regex::new(&stripped[..end]).ok()
+        let regex_pattern = &stripped[..end];
+
+        // Prevent overly complex regex patterns that could cause DoS
+        if regex_pattern.len() > MAX_REGEX_LENGTH {
+            warn!(
+                event.name = "config.regex_too_long",
+                pattern_length = regex_pattern.len(),
+                max_length = MAX_REGEX_LENGTH,
+                "regex pattern exceeds maximum length and will be ignored"
+            );
+            return None;
+        }
+
+        Regex::new(regex_pattern).ok()
     }
 
     /// Merges a configuration file into a Figment instance, automatically
@@ -333,6 +447,30 @@ impl Default for ParserConf {
             geneve_port: 6081,
             vxlan_port: 4789,
             wireguard_port: 51820,
+        }
+    }
+}
+
+/// Discovery configuration for network monitoring
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct DiscoveryConf {
+    /// Instrumentation configuration
+    pub instrument: InstrumentConf,
+}
+
+/// Instrumentation configuration for network interfaces
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub struct InstrumentConf {
+    /// Network interfaces to monitor
+    pub interfaces: Vec<String>,
+}
+
+impl Default for InstrumentConf {
+    fn default() -> Self {
+        Self {
+            interfaces: vec!["eth0".to_string()],
         }
     }
 }
@@ -730,7 +868,7 @@ mod tests {
 
         // Interface settings
         assert_eq!(
-            cfg.interfaces,
+            cfg.discovery.instrument.interfaces,
             vec!["eth0".to_string()],
             "default interface should be eth0"
         );
@@ -938,8 +1076,10 @@ mod tests {
             jail.create_file(
                 path,
                 r#"
-interfaces:
-  - eth1
+discovery:
+  instrument:
+    interfaces:
+      - eth1
 auto_reload: false
 log_level: warn
                 "#,
@@ -954,7 +1094,10 @@ log_level: warn
                 "debug",
             ]);
             let (cfg, _cli) = Conf::new(cli).expect("config loads from cli file");
-            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
+            assert_eq!(
+                cfg.discovery.instrument.interfaces,
+                Vec::from(["eth1".to_string()])
+            );
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.log_level, Level::DEBUG);
 
@@ -969,7 +1112,9 @@ log_level: warn
             jail.create_file(
                 path,
                 r#"
-interfaces: ["eth1"]
+discovery:
+  instrument:
+    interfaces: ["eth1"]
 auto_reload: true
 log_level: debug
                 "#,
@@ -978,7 +1123,10 @@ log_level: debug
 
             let cli = Cli::parse_from(["mermin"]);
             let (cfg, _cli) = Conf::new(cli).expect("config loads from env file");
-            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
+            assert_eq!(
+                cfg.discovery.instrument.interfaces,
+                Vec::from(["eth1".to_string()])
+            );
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.log_level, Level::DEBUG);
 
@@ -993,26 +1141,33 @@ log_level: debug
             jail.create_file(
                 path,
                 r#"
-interfaces: ["eth1"]
+discovery:
+  instrument:
+    interfaces: ["eth1"]
                 "#,
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config loads from cli file");
-            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
+            assert_eq!(
+                cfg.discovery.instrument.interfaces,
+                Vec::from(["eth1".to_string()])
+            );
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
 
             // Update the config file
             jail.create_file(
                 path,
                 r#"
-interfaces: ["eth2", "eth3"]
+discovery:
+  instrument:
+    interfaces: ["eth2", "eth3"]
                 "#,
             )?;
 
             let reloaded_cfg = cfg.reload().expect("config should reload");
             assert_eq!(
-                reloaded_cfg.interfaces,
+                reloaded_cfg.discovery.instrument.interfaces,
                 Vec::from(["eth2".to_string(), "eth3".to_string()])
             );
             assert_eq!(reloaded_cfg.config_path, Some(path.parse().unwrap()));
@@ -1044,8 +1199,10 @@ interfaces: ["eth2", "eth3"]
                 path,
                 r#"
 # Custom configuration for testing
-interfaces:
-  - eth1
+discovery:
+  instrument:
+    interfaces:
+      - eth1
 
 api:
   listen_address: "127.0.0.1"
@@ -1062,7 +1219,10 @@ metrics:
             let (cfg, _cli) = Conf::new(cli).expect("config should load from yaml file");
 
             // Assert that all the custom values from the file were loaded correctly
-            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
+            assert_eq!(
+                cfg.discovery.instrument.interfaces,
+                Vec::from(["eth1".to_string()])
+            );
             assert_eq!(cfg.api.listen_address, "127.0.0.1");
             assert_eq!(cfg.api.port, 8081);
             assert_eq!(cfg.metrics.listen_address, "0.0.0.0");
@@ -1079,7 +1239,10 @@ metrics:
             jail.create_file(
                 path,
                 r#"
-interfaces = ["eth0"]
+discovery "instrument" {
+    interfaces = ["eth0"]
+}
+
 log_level = "info"
 auto_reload = true
 
@@ -1098,7 +1261,7 @@ metrics {
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
 
-            assert_eq!(cfg.interfaces, vec!["eth0"]);
+            assert_eq!(cfg.discovery.instrument.interfaces, vec!["eth0"]);
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.api.port, 9090);
@@ -1112,7 +1275,7 @@ metrics {
     fn validates_hcl_extension() {
         Jail::expect_with(|jail| {
             let path = "mermin.hcl";
-            jail.create_file(path, r#"interfaces = ["eth0"]"#)?;
+            jail.create_file(path, r#"discovery "instrument" { interfaces = ["eth0"] }"#)?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let result = Conf::new(cli);
@@ -1129,14 +1292,19 @@ metrics {
             jail.create_file(
                 path,
                 r#"
-interfaces = ["eth1"]
+discovery "instrument" {
+    interfaces = ["eth1"]
+}
 log_level = "info"
                 "#,
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config loads from HCL file");
-            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
+            assert_eq!(
+                cfg.discovery.instrument.interfaces,
+                Vec::from(["eth1".to_string()])
+            );
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
 
@@ -1144,14 +1312,16 @@ log_level = "info"
             jail.create_file(
                 path,
                 r#"
-interfaces = ["eth2", "eth3"]
+discovery "instrument" {
+    interfaces = ["eth2", "eth3"]
+}
 log_level = "debug"
                 "#,
             )?;
 
             let reloaded_cfg = cfg.reload().expect("config should reload from HCL");
             assert_eq!(
-                reloaded_cfg.interfaces,
+                reloaded_cfg.discovery.instrument.interfaces,
                 Vec::from(["eth2".to_string(), "eth3".to_string()])
             );
             assert_eq!(reloaded_cfg.log_level, Level::DEBUG);
@@ -1203,7 +1373,9 @@ log_level =
                 path,
                 r#"
 # Custom configuration for testing
-interfaces = ["eth1"]
+discovery "instrument" {
+    interfaces = ["eth1"]
+}
 
 api {
     listen_address = "127.0.0.1"
@@ -1221,7 +1393,10 @@ metrics {
             let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
 
             // Assert that all the custom values from the file were loaded correctly
-            assert_eq!(cfg.interfaces, Vec::from(["eth1".to_string()]));
+            assert_eq!(
+                cfg.discovery.instrument.interfaces,
+                Vec::from(["eth1".to_string()])
+            );
             assert_eq!(cfg.api.listen_address, "127.0.0.1");
             assert_eq!(cfg.api.port, 8081);
             assert_eq!(cfg.metrics.listen_address, "0.0.0.0");
@@ -1243,9 +1418,11 @@ auto_reload: true
 shutdown_timeout: 30s
 packet_channel_capacity: 2048
 packet_worker_count: 8
-interfaces:
-  - eth1
-  - eth2
+discovery:
+  instrument:
+    interfaces:
+      - eth1
+      - eth2
                 "#,
             )?;
 
@@ -1257,7 +1434,7 @@ interfaces:
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
             assert_eq!(cfg.packet_channel_capacity, 2048);
             assert_eq!(cfg.packet_worker_count, 8);
-            assert_eq!(cfg.interfaces, vec!["eth1", "eth2"]);
+            assert_eq!(cfg.discovery.instrument.interfaces, vec!["eth1", "eth2"]);
 
             Ok(())
         });
@@ -1275,7 +1452,9 @@ auto_reload = true
 shutdown_timeout = "30s"
 packet_channel_capacity = 2048
 packet_worker_count = 8
-interfaces = ["eth1", "eth2"]
+discovery "instrument" {
+    interfaces = ["eth1", "eth2"]
+}
                 "#,
             )?;
 
@@ -1287,7 +1466,7 @@ interfaces = ["eth1", "eth2"]
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
             assert_eq!(cfg.packet_channel_capacity, 2048);
             assert_eq!(cfg.packet_worker_count, 8);
-            assert_eq!(cfg.interfaces, vec!["eth1", "eth2"]);
+            assert_eq!(cfg.discovery.instrument.interfaces, vec!["eth1", "eth2"]);
 
             Ok(())
         });
@@ -1484,8 +1663,10 @@ auto_reload: false
                 path,
                 r#"
 # Only override interfaces, everything else should remain default
-interfaces:
-  - custom0
+discovery:
+  instrument:
+    interfaces:
+      - custom0
                 "#,
             )?;
 
@@ -1493,7 +1674,7 @@ interfaces:
             let (cfg, _cli) = Conf::new(cli).expect("config should load");
 
             // Overridden value
-            assert_eq!(cfg.interfaces, vec!["custom0"]);
+            assert_eq!(cfg.discovery.instrument.interfaces, vec!["custom0"]);
 
             // Default values should be preserved
             assert_eq!(cfg.log_level, Level::INFO);
@@ -1686,8 +1867,10 @@ shutdown_timeout: 2min
                 path,
                 r#"
 # Minimal config - unspecified fields should get defaults
-interfaces:
-  - eth0
+discovery:
+  instrument:
+    interfaces:
+      - eth0
                 "#,
             )?;
 
@@ -2052,4 +2235,312 @@ internal {
 
     // Note: Tests for parse_exporter_reference have been removed as the function
     // and ExporterReference type were never fully implemented or were removed.
+
+    // Edge case tests for interface resolution
+
+    #[test]
+    fn resolve_interfaces_empty_patterns() {
+        let available = vec!["eth0".to_string(), "eth1".to_string()];
+        let patterns = vec![];
+        let resolved = Conf::resolve_interfaces_from(&patterns, &available);
+        assert_eq!(
+            resolved,
+            Vec::<String>::new(),
+            "empty pattern list should resolve to empty result"
+        );
+    }
+
+    #[test]
+    fn resolve_interfaces_empty_available() {
+        let available = vec![];
+        let patterns = vec!["eth*".to_string(), "en0".to_string()];
+        let resolved = Conf::resolve_interfaces_from(&patterns, &available);
+        assert_eq!(
+            resolved,
+            Vec::<String>::new(),
+            "empty available list should resolve to empty result"
+        );
+    }
+
+    #[test]
+    fn resolve_interfaces_malformed_regex() {
+        let available = vec!["eth0".to_string(), "eth1".to_string()];
+        let patterns = vec!["/[unclosed/".to_string()];
+        let resolved = Conf::resolve_interfaces_from(&patterns, &available);
+        assert_eq!(
+            resolved,
+            Vec::<String>::new(),
+            "malformed regex should resolve to empty result"
+        );
+    }
+
+    #[test]
+    fn resolve_interfaces_regex_without_closing_slash() {
+        let available = vec!["eth0".to_string()];
+        let patterns = vec!["/^eth0".to_string()];
+        let resolved = Conf::resolve_interfaces_from(&patterns, &available);
+        assert_eq!(
+            resolved,
+            Vec::<String>::new(),
+            "regex without closing slash should resolve to empty result"
+        );
+    }
+
+    #[test]
+    fn resolve_interfaces_very_long_regex_pattern() {
+        let available = vec!["eth0".to_string()];
+        // Create a regex pattern longer than MAX_REGEX_LENGTH (256)
+        let long_pattern = format!("/^({})+$/", "a".repeat(300));
+        let patterns = vec![long_pattern];
+        let resolved = Conf::resolve_interfaces_from(&patterns, &available);
+        assert_eq!(
+            resolved,
+            Vec::<String>::new(),
+            "overly long regex should be rejected"
+        );
+    }
+
+    #[test]
+    fn glob_match_single_star() {
+        assert!(
+            Conf::glob_match("*", "anything"),
+            "single * should match anything"
+        );
+        assert!(
+            Conf::glob_match("*", ""),
+            "single * should match empty string"
+        );
+        assert!(
+            Conf::glob_match("*", "multiple words"),
+            "single * should match text with spaces"
+        );
+    }
+
+    #[test]
+    fn glob_match_multiple_consecutive_stars() {
+        assert!(
+            Conf::glob_match("**", "anything"),
+            "** should match anything"
+        );
+        assert!(Conf::glob_match("***", "text"), "*** should match text");
+        assert!(Conf::glob_match("a**b", "ab"), "a**b should match ab");
+        assert!(Conf::glob_match("a**b", "axxxb"), "a**b should match axxxb");
+    }
+
+    #[test]
+    fn glob_match_single_question_mark() {
+        assert!(
+            Conf::glob_match("?", "a"),
+            "single ? should match single char"
+        );
+        assert!(
+            !Conf::glob_match("?", ""),
+            "single ? should not match empty string"
+        );
+        assert!(
+            !Conf::glob_match("?", "ab"),
+            "single ? should not match two chars"
+        );
+    }
+
+    #[test]
+    fn glob_match_multiple_question_marks() {
+        assert!(Conf::glob_match("???", "abc"), "??? should match 3 chars");
+        assert!(
+            !Conf::glob_match("???", "ab"),
+            "??? should not match 2 chars"
+        );
+        assert!(
+            !Conf::glob_match("???", "abcd"),
+            "??? should not match 4 chars"
+        );
+    }
+
+    #[test]
+    fn glob_match_trailing_star() {
+        assert!(Conf::glob_match("eth*", "eth"), "eth* should match eth");
+        assert!(Conf::glob_match("eth*", "eth0"), "eth* should match eth0");
+        assert!(
+            Conf::glob_match("eth*", "eth123"),
+            "eth* should match eth123"
+        );
+    }
+
+    #[test]
+    fn glob_match_leading_star() {
+        assert!(Conf::glob_match("*eth0", "eth0"), "*eth0 should match eth0");
+        assert!(
+            Conf::glob_match("*eth0", "myeth0"),
+            "*eth0 should match myeth0"
+        );
+        assert!(
+            !Conf::glob_match("*eth0", "eth0x"),
+            "*eth0 should not match eth0x"
+        );
+    }
+
+    #[test]
+    fn glob_match_middle_star() {
+        assert!(Conf::glob_match("a*b", "ab"), "a*b should match ab");
+        assert!(Conf::glob_match("a*b", "aXb"), "a*b should match aXb");
+        assert!(Conf::glob_match("a*b", "aXXXb"), "a*b should match aXXXb");
+        assert!(!Conf::glob_match("a*b", "axc"), "a*b should not match axc");
+    }
+
+    #[test]
+    fn glob_match_complex_patterns() {
+        assert!(
+            Conf::glob_match("en?p*", "en0p1"),
+            "en?p* should match en0p1"
+        );
+        assert!(
+            Conf::glob_match("en?p*", "en0p123"),
+            "en?p* should match en0p123"
+        );
+        assert!(
+            !Conf::glob_match("en?p*", "enp1"),
+            "en?p* should not match enp1 (missing char for ?)"
+        );
+        assert!(
+            !Conf::glob_match("en?p*", "en00p1"),
+            "en?p* should not match en00p1 (too many chars for ?)"
+        );
+    }
+
+    #[test]
+    fn glob_match_unicode_support() {
+        // The `*` wildcard works fine with Unicode since it matches zero or more bytes
+        assert!(
+            Conf::glob_match("eth*", "eth日本"),
+            "* wildcard should handle unicode in text"
+        );
+        assert!(
+            Conf::glob_match("*", "日本語"),
+            "* should match unicode string"
+        );
+
+        // The `?` wildcard matches one BYTE, not one Unicode character.
+        // "日" is 3 bytes in UTF-8 (0xE6 0x97 0xA5), so we need 3 `?` wildcards
+        assert!(
+            !Conf::glob_match("?", "日"),
+            "single ? should NOT match multi-byte unicode char (only matches 1 byte)"
+        );
+        assert!(
+            Conf::glob_match("???", "日"),
+            "three ? wildcards should match 3-byte UTF-8 character"
+        );
+
+        // ASCII characters work fine with `?` since they're single-byte
+        assert!(
+            Conf::glob_match("?", "a"),
+            "? should match single ASCII character (1 byte)"
+        );
+    }
+
+    #[test]
+    fn glob_match_empty_pattern_and_text() {
+        assert!(
+            Conf::glob_match("", ""),
+            "empty pattern should match empty text"
+        );
+        assert!(
+            !Conf::glob_match("", "a"),
+            "empty pattern should not match non-empty text"
+        );
+        assert!(Conf::glob_match("*", ""), "* should match empty text");
+    }
+
+    #[test]
+    fn resolve_interfaces_unicode_interface_names() {
+        // While unlikely in practice, the system should handle it gracefully
+        // The `*` wildcard works fine with Unicode since it matches at byte level
+        let available = vec!["eth0".to_string(), "interface日本".to_string()];
+        let patterns = vec!["interface*".to_string()];
+        let resolved = Conf::resolve_interfaces_from(&patterns, &available);
+        assert_eq!(
+            resolved,
+            vec!["interface日本".to_string()],
+            "* wildcard should match interface names with Unicode characters"
+        );
+    }
+
+    #[test]
+    fn resolve_interfaces_preserves_first_match_order() {
+        let available = vec![
+            "eth0".to_string(),
+            "eth1".to_string(),
+            "en0".to_string(),
+            "wlan0".to_string(),
+        ];
+        let patterns = vec![
+            "wlan*".to_string(), // matches wlan0
+            "eth*".to_string(),  // matches eth0, eth1
+            "en*".to_string(),   // matches en0
+        ];
+        let resolved = Conf::resolve_interfaces_from(&patterns, &available);
+        assert_eq!(
+            resolved,
+            vec![
+                "wlan0".to_string(),
+                "eth0".to_string(),
+                "eth1".to_string(),
+                "en0".to_string(),
+            ],
+            "should preserve order of first match"
+        );
+    }
+
+    #[test]
+    fn resolve_interfaces_mixed_pattern_types() {
+        let available = vec![
+            "eth0".to_string(),
+            "eth1".to_string(),
+            "en0".to_string(),
+            "en0p1".to_string(),
+            "en0p2".to_string(),
+            "wlan0".to_string(),
+        ];
+        let patterns = vec![
+            "wlan0".to_string(),      // literal
+            "/^eth\\d$/".to_string(), // regex
+            "en0p?".to_string(),      // glob
+        ];
+        let resolved = Conf::resolve_interfaces_from(&patterns, &available);
+        assert_eq!(
+            resolved,
+            vec![
+                "wlan0".to_string(),
+                "eth0".to_string(),
+                "eth1".to_string(),
+                "en0p1".to_string(),
+                "en0p2".to_string(),
+            ],
+            "should handle mixed literal, regex, and glob patterns"
+        );
+    }
+
+    #[test]
+    fn parse_regex_handles_special_characters() {
+        // Valid regex with special characters
+        assert!(Conf::parse_regex("/^eth[0-9]+$/").is_some());
+        assert!(Conf::parse_regex("/^(eth|en)\\d+$/").is_some());
+        assert!(Conf::parse_regex("/^eth.*$/").is_some());
+
+        // Invalid regex syntax
+        assert!(
+            Conf::parse_regex("/^eth[0-9$/").is_none(),
+            "unclosed bracket should fail"
+        );
+        assert!(
+            Conf::parse_regex("/^eth(/").is_none(),
+            "unclosed paren should fail"
+        );
+    }
+
+    #[test]
+    fn parse_regex_rejects_patterns_without_slashes() {
+        assert!(Conf::parse_regex("eth0").is_none());
+        assert!(Conf::parse_regex("^eth.*$").is_none());
+        assert!(Conf::parse_regex("").is_none());
+    }
 }
