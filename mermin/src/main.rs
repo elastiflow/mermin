@@ -32,15 +32,135 @@ use crate::{
     span::producer::FlowSpanProducer,
 };
 
+/// Display user-friendly error messages with helpful hints
+fn display_error(error: &MerminError) {
+    eprintln!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+    match error {
+        MerminError::Context(ctx_err) => {
+            eprintln!("❌ Configuration Error");
+            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+            eprintln!("{ctx_err}\n");
+
+            let err_msg = ctx_err.to_string();
+            if err_msg.contains("no config file provided") {
+                eprintln!("💡 Solution:");
+                eprintln!("   1. Create the config file at the specified path, or");
+                eprintln!("   2. Run without --config flag to use defaults, or");
+                eprintln!("   3. Unset MERMIN_CONFIG_PATH environment variable\n");
+                eprintln!("📖 Example configs:");
+                eprintln!("   - charts/mermin/config/examples/");
+            } else if err_msg.contains("invalid file extension") {
+                eprintln!("💡 Solution:");
+                eprintln!("   Use a config file with .hcl extension");
+            } else if err_msg.contains("is not a valid file") {
+                eprintln!("💡 Solution:");
+                eprintln!("   Provide a file path, not a directory");
+            } else if err_msg.contains("configuration error") {
+                eprintln!("💡 Tip:");
+                eprintln!("   Check your config file syntax and values");
+            }
+        }
+
+        MerminError::EbpfLoad(e) => {
+            eprintln!("❌ eBPF Loading Error");
+            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+            eprintln!("Failed to load eBPF program: {e}\n");
+            eprintln!("💡 Common causes:");
+            eprintln!("   - Insufficient privileges (needs root/CAP_BPF)");
+            eprintln!("   - Kernel doesn't support eBPF");
+            eprintln!("   - Incompatible kernel version");
+            eprintln!("\n💡 Solution:");
+            eprintln!("   Run with elevated privileges: sudo mermin");
+            eprintln!("   Or in Docker with --privileged flag");
+        }
+
+        MerminError::EbpfProgram(e) => {
+            eprintln!("❌ eBPF Program Error");
+            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+            eprintln!("{e}\n");
+            eprintln!("💡 Common causes:");
+            eprintln!("   - Interface doesn't exist");
+            eprintln!("   - Interface is down");
+            eprintln!("   - Insufficient privileges");
+            eprintln!("\n💡 Solution:");
+            eprintln!("   - Check interface names: ip link show");
+            eprintln!("   - Verify interfaces in config match host interfaces");
+            eprintln!("   - Run with elevated privileges");
+        }
+
+        MerminError::EbpfMap(msg) => {
+            eprintln!("❌ eBPF Map Error");
+            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+            eprintln!("{msg}\n");
+            eprintln!("💡 This is likely a compilation or loading issue.");
+            eprintln!("   Try rebuilding the project.");
+        }
+
+        MerminError::Otlp(e) => {
+            eprintln!("❌ OpenTelemetry Error");
+            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+            eprintln!("{e}\n");
+            eprintln!("💡 Common causes:");
+            eprintln!("   - OTLP endpoint is unreachable");
+            eprintln!("   - Invalid endpoint configuration");
+            eprintln!("   - Network connectivity issues");
+            eprintln!("\n💡 Solution:");
+            eprintln!("   - Verify export.traces.otlp.endpoint in config");
+            eprintln!("   - Check if the OTLP collector is running");
+            eprintln!("   - Use export.traces.stdout for local debugging");
+        }
+
+        MerminError::Health(e) => {
+            eprintln!("❌ Health/API Server Error");
+            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+            eprintln!("{e}\n");
+            eprintln!("💡 Common causes:");
+            eprintln!("   - Port already in use");
+            eprintln!("   - Invalid listen address");
+            eprintln!("\n💡 Solution:");
+            eprintln!("   - Check api.port and metrics.port in config");
+            eprintln!("   - Set api.enabled=false to disable API server");
+        }
+
+        MerminError::Signal(e) => {
+            eprintln!("❌ Signal Handling Error");
+            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+            eprintln!("{e}\n");
+        }
+
+        _ => {
+            eprintln!("❌ Error");
+            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+            eprintln!("{error}\n");
+        }
+    }
+
+    eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    eprintln!("For more information, run with: --log-level debug");
+    eprintln!("Documentation: https://github.com/elastiflow/mermin\n");
+}
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
+    if let Err(e) = run().await {
+        display_error(&e);
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
     // TODO: runtime should be aware of all threads and tasks spawned by the eBPF program so that they can be gracefully shutdown and restarted.
     // TODO: listen for SIGUP `kill -HUP $(pidof mermin)` to reload the eBPF program and all configuration
     // TODO: API will come once we have an API server
     // TODO: listen for SIGTERM `kill -TERM $(pidof mermin)` to gracefully shutdown the eBPF program and all configuration.
     // TODO: do not reload global configuration found in CLI
+
     let runtime = Context::new()?;
     let Context { conf, .. } = runtime;
+
+    // If a provider is already installed, install_default() returns Err, which we can safely ignore.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     let exporter: Arc<dyn TraceableExporter> = {
         init_internal_tracing(
@@ -289,9 +409,9 @@ async fn main() -> Result<()> {
         warn!("application is running but is not healthy. check /readyz endpoint for details.");
     }
 
-    println!("waiting for ctrl+c");
+    info!("waiting for ctrl+c");
     signal::ctrl_c().await?;
-    println!("exiting");
+    info!("exiting");
 
     Ok(())
 }
