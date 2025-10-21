@@ -225,15 +225,15 @@ impl ProviderBuilder {
         tls_opts: &crate::otlp::opts::TlsOptions,
     ) -> Result<Channel, OtlpError> {
         warn!(
-            "INSECURE MODE ENABLED: TLS certificate verification is disabled. \
-            This should only be used for development/testing. \
-            Your connection is vulnerable to man-in-the-middle attacks!"
+            "insecure mode enabled: TLS certificate verification is disabled - \
+            this should only be used for development/testing - \
+            your connection is vulnerable to man-in-the-middle attacks"
         );
 
         if tls_opts.client_cert.is_some() || tls_opts.client_key.is_some() {
             return Err(OtlpError::TlsConfiguration(
-                "insecure mode cannot be combined with client certificates. \
-                Please either disable insecure mode or remove client certificate configuration."
+                "insecure mode cannot be combined with client certificates - \
+                please either disable insecure mode or remove client certificate configuration."
                     .to_string(),
             ));
         }
