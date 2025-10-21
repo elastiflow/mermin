@@ -35,10 +35,9 @@ use kube::{
     runtime::reflector,
 };
 use kube_runtime::watcher;
-use log::{debug, warn};
 use network_types::ip::IpProto;
 use tokio::sync::oneshot;
-use tracing::error;
+use tracing::{debug, error, warn};
 
 use crate::{health::HealthState, k8s::K8sError, span::flow::FlowSpan};
 
@@ -243,11 +242,19 @@ impl ResourceStore {
             Ok((store, readiness_rx)) => Ok((store, Some(readiness_rx))),
             Err(e) => {
                 if is_critical {
-                    warn!("failed to create critical reflector for {resource_name}: {e}");
+                    error!(
+                        event.name = "k8s.reflector_create_failed",
+                        k8s.resource.name = %resource_name,
+                        error.message = %e,
+                        "failed to create critical kubernetes resource reflector"
+                    );
                     Err(K8sError::critical_reflector(resource_name, e))
                 } else {
                     warn!(
-                        "failed to create reflector for {resource_name}: {e}. Continuing with an empty store."
+                        event.name = "k8s.reflector_create_failed",
+                        k8s.resource.name = %resource_name,
+                        error.message = %e,
+                        "failed to create non-critical reflector; continuing with empty store"
                     );
                     let (reader, _) = reflector::store();
                     Ok((reader, None))
@@ -305,15 +312,28 @@ where
                     if let Some(sender) = sender.take()
                         && sender.send(()).is_ok()
                     {
-                        debug!("initial sync complete for {resource_name}");
+                        debug!(
+                            event.name = "k8s.reflector_synced",
+                            k8s.resource.name = %resource_name,
+                            "initial sync complete for kubernetes resource reflector"
+                        );
                     }
                 }
                 Ok(None) => {
-                    warn!("reflector stream for {resource_name} has terminated.");
+                    warn!(
+                        event.name = "k8s.reflector_terminated",
+                        k8s.resource.name = %resource_name,
+                        "reflector stream has terminated unexpectedly"
+                    );
                     break;
                 }
                 Err(e) => {
-                    error!("reflector error for {resource_name}: {e}. retrying...");
+                    error!(
+                        event.name = "k8s.reflector_error",
+                        k8s.resource.name = %resource_name,
+                        error.message = %e,
+                        "reflector encountered an error; will retry"
+                    );
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 }
             }
@@ -404,9 +424,12 @@ impl Decorator {
                     break;
                 }
             } else {
-                warn!(
-                    "failed to find owner {} ({}) in store for namespace {}",
-                    owner_ref.name, owner_ref.kind, namespace
+                debug!(
+                    event.name = "k8s.owner_ref_missing",
+                    k8s.owner.name = %owner_ref.name,
+                    k8s.owner.kind = %owner_ref.kind,
+                    k8s.namespace = %namespace,
+                    "failed to find owner reference in local store"
                 );
                 break;
             }
@@ -443,9 +466,10 @@ impl Decorator {
             "DaemonSet" => find_in_store!(DaemonSet, DaemonSet),
             "Job" => find_in_store!(Job, Job),
             _ => {
-                warn!(
-                    "owner lookup for kind '{}' is not implemented",
-                    owner_ref.kind
+                debug!(
+                    event.name = "k8s.unsupported_owner_kind",
+                    k8s.owner.kind = %owner_ref.kind,
+                    "owner lookup for this resource kind is not implemented"
                 );
                 None
             }
@@ -879,7 +903,11 @@ impl Decorator {
         match cidr.parse::<IpNetwork>() {
             Ok(network) => network.contains(ip),
             Err(_) => {
-                debug!("failed to parse CIDR string: {cidr}");
+                debug!(
+                    event.name = "k8s.cidr_parse_failed",
+                    net.cidr = %cidr,
+                    "failed to parse cidr string from networkpolicy"
+                );
                 false
             }
         }

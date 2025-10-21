@@ -284,8 +284,10 @@ impl<'a> SpanDecorator<'a> {
                 Some(ips) => ips,
                 None => {
                     debug!(
-                        "failed to resolve backend IPs for service {} with IP {}",
-                        service_meta.name, ip
+                        event.name = "k8s.service.backend_resolution_failed",
+                        k8s.service.name = %service_meta.name,
+                        k8s.service.ip = %ip,
+                        "failed to resolve backend ips for service"
                     );
                     Vec::new()
                 }
@@ -306,8 +308,9 @@ impl<'a> SpanDecorator<'a> {
 
         // No Kubernetes resource found for this IP
         debug!(
-            "IP {} could not be attributed to any Kubernetes resource (pod, node, service, or endpoint)",
-            ip
+            event.name = "k8s.ip_unattributable",
+            net.ip.address = %ip,
+            "ip could not be attributed to any known kubernetes resource"
         );
         None
     }

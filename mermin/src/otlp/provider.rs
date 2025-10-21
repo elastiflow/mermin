@@ -20,8 +20,9 @@ use rustls::{
     pki_types::{CertificateDer, ServerName, UnixTime},
 };
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Identity};
-use tracing::{Level, debug, info, level_filters::LevelFilter, warn};
+use tracing::{Level, debug, info, warn};
 use tracing_subscriber::{
+    EnvFilter,
     fmt::{Layer, format::FmtSpan},
     prelude::__tracing_subscriber_SubscriberExt,
     util::SubscriberInitExt,
@@ -134,8 +135,10 @@ impl ProviderBuilder {
     }
 
     pub async fn with_otlp_exporter(self, options: OtlpExporterOptions) -> Result<Self, OtlpError> {
-        debug!("creating otlp exporter with options: {options:?}");
-
+        debug!(
+            event.name = "exporter.otlp.started",
+            "starting otlp exporter"
+        );
         let endpoint = options.build_endpoint();
         let uri: Uri = endpoint.parse().map_err(|e| {
             OtlpError::invalid_endpoint(&endpoint, format!("failed to parse as uri: {e}"))
@@ -159,20 +162,22 @@ impl ProviderBuilder {
                     "failed to generate authentication headers: {e}"
                 ))
             })?;
-            info!("applied authentication headers to otlp exporter");
+            info!(
+                event.name = "exporter.otlp.auth.configured",
+                exporter.otlp.auth.header_count = auth_headers.len(),
+                "authentication headers configured for otlp exporter"
+            );
             // TODO: Apply headers to the exporter builder - ENG-120
             // Note: The opentelemetry_otlp crate may need to be updated to support custom headers
             // For now, this is a placeholder for where header configuration would go
-            debug!(
-                "headers configured for otlp exporter ({} headers)",
-                auth_headers.len()
-            );
         }
 
         match builder.build() {
             Ok(exporter) => {
-                debug!("otlp exporter built successfully");
-
+                debug!(
+                    event.name = "exporter.otlp.build_success",
+                    "otlp exporter built successfully"
+                );
                 let batch_config = BatchConfigBuilder::default()
                     .with_max_export_batch_size(options.max_batch_size)
                     .with_scheduled_delay(options.max_batch_interval)
@@ -225,9 +230,9 @@ impl ProviderBuilder {
         tls_opts: &crate::otlp::opts::TlsOptions,
     ) -> Result<Channel, OtlpError> {
         warn!(
-            "insecure mode enabled: TLS certificate verification is disabled - \
-            this should only be used for development/testing - \
-            your connection is vulnerable to man-in-the-middle attacks"
+            event.name = "exporter.otlp.insecure_mode_enabled",
+            security.risk = "man-in-the-middle",
+            "insecure otlp exporter enabled: tls certificate verification is disabled. Do not use in production."
         );
 
         if tls_opts.client_cert.is_some() || tls_opts.client_key.is_some() {
@@ -270,13 +275,21 @@ impl ProviderBuilder {
             let mut tls = ClientTlsConfig::new();
 
             if is_https {
-                debug!("detected https:// endpoint, enabling TLS with system root certificates");
+                debug!(
+                    event.name = "exporter.otlp.tls.auto_enabled",
+                    reason = "https endpoint detected",
+                    "enabling tls for otlp exporter using system root certificates"
+                );
                 tls = tls.with_native_roots();
             }
 
             if let Some(tls_opts) = tls_opts {
                 if let Some(ca_cert_path) = &tls_opts.ca_cert {
-                    debug!("loading custom CA certificate from: {}", ca_cert_path);
+                    debug!(
+                        event.name = "exporter.otlp.tls.ca_cert_loading",
+                        tls.ca_cert.path = %ca_cert_path,
+                        "loading custom ca certificate for otlp exporter"
+                    );
                     let ca_cert = load_certificate(ca_cert_path)?;
                     tls = tls.ca_certificate(ca_cert);
                 }
@@ -285,8 +298,10 @@ impl ProviderBuilder {
                     (&tls_opts.client_cert, &tls_opts.client_key)
                 {
                     debug!(
-                        "loading client certificate for mutual TLS from: {}",
-                        client_cert_path
+                        event.name = "exporter.otlp.tls.mtls_cert_loading",
+                        tls.client_cert.path = %client_cert_path,
+                        tls.client_key.path = %client_key_path,
+                        "loading client certificate and key for mutual tls"
                     );
                     let identity = load_client_identity(client_cert_path, client_key_path)?;
                     tls = tls.identity(identity);
@@ -305,7 +320,10 @@ impl ProviderBuilder {
 
         let mut channel_builder = Channel::builder(uri);
         if let Some(tls) = tls_config {
-            debug!("applying tls configuration to otlp exporter channel");
+            debug!(
+                event.name = "exporter.otlp.tls.applying_config",
+                "applying final tls configuration to otlp exporter channel"
+            );
             channel_builder = channel_builder.tls_config(tls).map_err(|e| {
                 OtlpError::TlsConfiguration(format!("failed to apply tls config: {e}"))
             })?;
@@ -326,7 +344,11 @@ pub async fn init_provider(
     let mut provider = ProviderBuilder::new();
 
     if stdout.is_none() && otlp.is_none() {
-        warn!("no exporters configured");
+        warn!(
+            event.name = "exporter.misconfigured",
+            reason = "no_exporters_defined",
+            "no exporters configured; traces will not be exported"
+        );
         return Ok(provider.build());
     }
 
@@ -401,13 +423,21 @@ pub async fn init_internal_tracing(
         }
     }
 
+    let filter = EnvFilter::new(format!("warn,mermin={log_level}"));
     tracing_subscriber::registry()
-        .with(LevelFilter::from_level(log_level))
+        .with(filter)
         .with(fmt_layer)
         .init();
 
     global::set_tracer_provider(provider);
     global::set_text_map_propagator(TraceContextPropagator::new());
+
+    info!(
+        event.name = "system.tracing_initialized",
+        system.log_level = %log_level,
+        "internal tracing and logging initialized"
+    );
+
     Ok(())
 }
 

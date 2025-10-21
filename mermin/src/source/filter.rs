@@ -193,7 +193,7 @@ fn build_ip_network_table(s: &str) -> IpNetworkTable<()> {
             warn!(
                 event_name = "filter.cidr_parse_failed",
                 cidr = %part,
-                "nvalid cidr in filter config, skipping."
+                "invalid cidr in filter config, skipping."
             );
         }
     }
