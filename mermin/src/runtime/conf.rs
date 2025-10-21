@@ -69,6 +69,9 @@ pub struct Conf {
     /// Configuration for flow interfaces.
     /// This field holds settings for filtering.
     pub filter: Option<HashMap<String, FilteringOptions>>,
+    /// Configuration for flow-to-object association.
+    #[serde(default)]
+    pub attributes: HashMap<String, HashMap<String, AttributesConf>>,
 }
 
 impl Default for Conf {
@@ -89,6 +92,7 @@ impl Default for Conf {
             discovery: DiscoveryConf::default(),
             export: ExportOptions::default(),
             filter: None,
+            attributes: HashMap::new(),
         }
     }
 }
@@ -772,6 +776,66 @@ impl Default for MetricsConf {
             port: 10250,
         }
     }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+/// Defines the configuration for associating network flows with Kubernetes objects.
+pub struct AttributesConf {
+    /// Defines metadata to extract from all Kubernetes objects.
+    pub extract: ExtractConf,
+    /// Defines rules for mapping flow attributes to Kubernetes object attributes.
+    pub association: AssociationBlock,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+/// Configuration for metadata extraction from Kubernetes objects.
+pub struct ExtractConf {
+    /// A list of metadata fields to extract.
+    pub metadata: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+/// Defines association rules for different Kubernetes object kinds.
+pub struct AssociationBlock {
+    #[serde(default)]
+    pub pod: Option<ObjectAssociationRule>,
+    #[serde(default)]
+    pub node: Option<ObjectAssociationRule>,
+    #[serde(default)]
+    pub service: Option<ObjectAssociationRule>,
+    #[serde(default)]
+    pub networkpolicy: Option<ObjectAssociationRule>,
+    #[serde(default)]
+    pub endpoint: Option<ObjectAssociationRule>,
+    #[serde(default)]
+    pub endpointslice: Option<ObjectAssociationRule>,
+    #[serde(default)]
+    pub ingress: Option<ObjectAssociationRule>,
+    #[serde(default)]
+    pub gateway: Option<ObjectAssociationRule>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+/// Represents the association rules for a specific Kubernetes object kind.
+pub struct ObjectAssociationRule {
+    /// A list of sources to match against for association.
+    pub sources: Vec<AssociationSource>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+/// Defines a single association rule mapping a flow attribute to Kubernetes object fields.
+pub struct AssociationSource {
+    /// The origin of the attribute (e.g., "flow").
+    pub from: String,
+    /// The specific attribute name (e.g., "source.ip").
+    pub name: String,
+    /// A list of Kubernetes object fields to match against.
+    pub to: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]

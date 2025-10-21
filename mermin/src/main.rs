@@ -362,6 +362,7 @@ async fn run() -> Result<()> {
         health_state.clone(),
         owner_relations_opts,
         selector_relations_opts,
+        &conf,
     )
     .await
     {

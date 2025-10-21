@@ -1,6 +1,5 @@
-use std::net::IpAddr;
-
 use k8s_openapi::api::{core::v1::Pod, networking::v1::NetworkPolicySpec};
+use kube_runtime::reflector::ObjectRef;
 use tracing::debug;
 
 use crate::{
@@ -34,25 +33,38 @@ impl<'a> SpanDecorator<'a> {
     /// Correlates flow attributes with Kubernetes resources and populates K8s metadata fields.
     /// Returns a cloned FlowSpan with source and destination Kubernetes attributes populated.
     async fn decorate(&self, flow_span: &FlowSpan) -> Result<FlowSpan, K8sError> {
-        // Create FlowContext directly for both directions
-        let ctx = FlowContext::from_flow_span(flow_span, self.decorator).await;
-
-        // Resolve source and destination IPs to Kubernetes resources and evaluate policies
-        let src_decoration: Option<DecorationInfo> = self.enrich(&ctx.src_pod, ctx.src_ip).await;
-        let dst_decoration = self.enrich(&ctx.dst_pod, ctx.dst_ip).await;
-        let (ingress_policies, egress_policies) = self.evaluate_flow_policies(&ctx).await?;
-
         // Clone the original flow attributes and populate with Kubernetes metadata
         let mut decorated_flow = flow_span.clone();
 
+        let associations = self.decorator.associate_flow(&decorated_flow).await;
+
+        let src_pod = self.find_and_get_pod(&associations, "source").await;
+        let dst_pod = self.find_and_get_pod(&associations, "destination").await;
+
+        let ctx = FlowContext {
+            src_pod: src_pod.as_deref().cloned(),
+            src_ip: flow_span.attributes.source_address,
+            dst_pod: dst_pod.as_deref().cloned(),
+            dst_ip: flow_span.attributes.destination_address,
+            port: flow_span.attributes.destination_port,
+            protocol: flow_span.attributes.network_transport,
+        };
+
+        let (ingress_policies, egress_policies) = self.evaluate_flow_policies(&ctx).await?;
+
         // Populate source Kubernetes attributes
-        if let Some(src_info) = &src_decoration {
-            self.populate_k8s_attributes(&mut decorated_flow, src_info, true);
+        if let Some(source_objects) = associations.get("source") {
+            for meta in source_objects {
+                let decoration_info = self.build_decoration_info_from_meta(meta, &src_pod).await;
+                self.populate_k8s_attributes(&mut decorated_flow, &decoration_info, true);
+            }
         }
 
-        // Populate destination Kubernetes attributes
-        if let Some(dst_info) = &dst_decoration {
-            self.populate_k8s_attributes(&mut decorated_flow, dst_info, false);
+        if let Some(destination_objects) = associations.get("destination") {
+            for meta in destination_objects {
+                let decoration_info = self.build_decoration_info_from_meta(meta, &dst_pod).await;
+                self.populate_k8s_attributes(&mut decorated_flow, &decoration_info, false);
+            }
         }
 
         // Populate network policy information
@@ -61,20 +73,54 @@ impl<'a> SpanDecorator<'a> {
         Ok(decorated_flow)
     }
 
-    /// Resolves a pod and IP address to Kubernetes resource decoration information.
-    /// Returns Pod decoration if available, otherwise attempts IP-based fallback resolution.
-    async fn enrich(&self, pod: &Option<Pod>, ip: IpAddr) -> Option<DecorationInfo> {
-        if let Some(pod) = pod {
-            let pod_meta = K8sObjectMeta::from(pod);
-            let owners = self.decorator.get_owners(pod);
-            let selector_relations = self.decorator.get_selector_based_metadata(pod);
-            Some(DecorationInfo::Pod {
-                pod: pod_meta,
-                owners,
-                selector_relations,
-            })
-        } else {
-            self.enrich_ip_fallback(ip).await
+    async fn find_and_get_pod(
+        &self,
+        associations: &std::collections::HashMap<String, Vec<K8sObjectMeta>>,
+        direction: &str,
+    ) -> Option<std::sync::Arc<Pod>> {
+        if let Some(metas) = associations.get(direction) {
+            if let Some(pod_meta) = metas.iter().find(|m| m.kind == "Pod") {
+                return self.get_pod_from_meta(pod_meta).await;
+            }
+        }
+        None
+    }
+
+    async fn get_pod_from_meta(&self, meta: &K8sObjectMeta) -> Option<std::sync::Arc<Pod>> {
+        if meta.kind != "Pod" {
+            return None;
+        }
+        let key = ObjectRef::new(&meta.name).within(meta.namespace.as_deref().unwrap_or_default());
+        self.decorator.resource_store.pods.get(&key)
+    }
+
+    async fn build_decoration_info_from_meta(
+        &self,
+        meta: &K8sObjectMeta,
+        pod_obj: &Option<std::sync::Arc<Pod>>,
+    ) -> DecorationInfo {
+        match meta.kind.as_str() {
+            "Pod" => {
+                let owners = pod_obj
+                    .as_ref()
+                    .and_then(|pod| self.decorator.get_owners(pod));
+                DecorationInfo::Pod {
+                    pod: meta.clone(),
+                    owners,
+                    selector_relations,
+                }
+            }
+            "Service" => DecorationInfo::Service {
+                service: meta.clone(),
+                backend_ips: Vec::new(),
+            },
+            "Node" => DecorationInfo::Node { node: meta.clone() },
+            "EndpointSlice" => DecorationInfo::EndpointSlice {
+                slice: meta.clone(),
+            },
+            _ => DecorationInfo::Resource {
+                resource: meta.clone(),
+            },
         }
     }
 
@@ -119,6 +165,15 @@ impl<'a> SpanDecorator<'a> {
             DecorationInfo::EndpointSlice { slice } => {
                 // EndpointSlice provides namespace context for service discovery
                 self.set_k8s_attr_opt(flow_span, "namespace.name", &slice.namespace, is_source);
+            }
+            DecorationInfo::Resource { resource } => {
+                debug!(
+                    event.name = "k8s.decorator.unhandled_resource",
+                    k8s.resource.kind = %resource.kind,
+                    k8s.resource.name = %resource.name,
+                    k8s.resource.namespace = resource.namespace.as_deref().unwrap_or(""),
+                    "skipping attribute population for unhandled kubernetes resource type"
+                );
             }
         }
     }
@@ -329,54 +384,6 @@ impl<'a> SpanDecorator<'a> {
                 spec: p.spec.clone().unwrap_or_default(),
             })
             .collect())
-    }
-
-    /// Attempts to resolve an IP address to Kubernetes resources when no pod is found.
-    /// Tries Node, Service, and EndpointSlice lookups in priority order.
-    async fn enrich_ip_fallback(&self, ip: IpAddr) -> Option<DecorationInfo> {
-        // Try to match against a Node
-        if let Some(node) = self.decorator.get_node_by_ip(ip).await {
-            return Some(DecorationInfo::Node {
-                node: K8sObjectMeta::from(node.as_ref()),
-            });
-        }
-
-        // Try to match against a Service
-        if let Some(service) = self.decorator.get_service_by_ip(ip).await {
-            let service_meta = K8sObjectMeta::from(service.as_ref());
-            let backend_ips = match self.decorator.resolve_service_ip_to_backend_ips(ip).await {
-                Some(ips) => ips,
-                None => {
-                    debug!(
-                        event.name = "k8s.service.backend_resolution_failed",
-                        k8s.service.name = %service_meta.name,
-                        k8s.service.ip = %ip,
-                        "failed to resolve backend ips for service"
-                    );
-                    Vec::new()
-                }
-            };
-
-            return Some(DecorationInfo::Service {
-                service: service_meta,
-                backend_ips,
-            });
-        }
-
-        // Try to match against an EndpointSlice
-        if let Some(slice) = self.decorator.get_endpointslice_by_ip(ip).await {
-            return Some(DecorationInfo::EndpointSlice {
-                slice: K8sObjectMeta::from(slice.as_ref()),
-            });
-        }
-
-        // No Kubernetes resource found for this IP
-        debug!(
-            event.name = "k8s.ip_unattributable",
-            net.ip.address = %ip,
-            "ip could not be attributed to any known kubernetes resource"
-        );
-        None
     }
 }
 

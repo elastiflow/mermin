@@ -36,7 +36,8 @@ use kube::{
 };
 use kube_runtime::watcher;
 use network_types::ip::IpProto;
-use tokio::sync::oneshot;
+use serde_json::Value;
+use tokio::{net::lookup_host, sync::oneshot};
 use tracing::{debug, error, warn};
 
 use crate::{
@@ -46,7 +47,7 @@ use crate::{
         owner_relations::{OwnerRelationsManager, OwnerRelationsOptions},
         selector_relations::SelectorRelationsManager,
     },
-    runtime::conf::SelectorRelationRule,
+    runtime::conf::{AttributesConf, Conf, ObjectAssociationRule, SelectorRelationRule},
     span::flow::FlowSpan,
 };
 
@@ -114,6 +115,10 @@ pub enum DecorationInfo {
     },
     EndpointSlice {
         slice: K8sObjectMeta,
+    },
+    // generic fallback for any other resource type
+    Resource {
+        resource: K8sObjectMeta,
     },
 }
 
@@ -405,6 +410,7 @@ pub struct Decorator {
     pub resource_store: ResourceStore,
     pub owner_relations_manager: OwnerRelationsManager,
     pub selector_relations_manager: Option<SelectorRelationsManager>,
+    pub association_rules: HashMap<String, HashMap<String, AttributesConf>>,
 }
 
 impl Decorator {
@@ -413,6 +419,7 @@ impl Decorator {
         health_state: HealthState,
         owner_relations_opts: Option<OwnerRelationsOptions>,
         selector_relations_opts: Option<Vec<SelectorRelationRule>>,
+        conf: &Conf,
     ) -> Result<Self, K8sError> {
         let client = Client::try_default()
             .await
@@ -436,6 +443,7 @@ impl Decorator {
             resource_store,
             owner_relations_manager,
             selector_relations_manager,
+            association_rules: conf.attributes.clone(),
         })
     }
 
@@ -924,6 +932,211 @@ impl Decorator {
             },
         }
     }
+
+    /// Associates a flow span with Kubernetes objects based on the loaded configuration.
+    /// Returns a map where keys are "source" and "destination" and values are lists of matched objects.
+    pub async fn associate_flow(
+        &self,
+        flow_span: &FlowSpan,
+    ) -> HashMap<String, Vec<K8sObjectMeta>> {
+        let mut results: HashMap<String, Vec<K8sObjectMeta>> = HashMap::new();
+
+        for (direction, providers) in &self.association_rules {
+            if let Some(k8s_conf) = providers.get("k8s") {
+                let mut matched_objects = Vec::new();
+                let assoc_block = &k8s_conf.association;
+
+                if let Some(rule) = &assoc_block.pod {
+                    matched_objects.extend(
+                        self.find_matches_for_kind::<Pod>("Pod", rule, flow_span)
+                            .await,
+                    );
+                }
+                if let Some(rule) = &assoc_block.service {
+                    matched_objects.extend(
+                        self.find_matches_for_kind::<Service>("Service", rule, flow_span)
+                            .await,
+                    );
+                }
+                if let Some(rule) = &assoc_block.node {
+                    matched_objects.extend(
+                        self.find_matches_for_kind::<Node>("Node", rule, flow_span)
+                            .await,
+                    );
+                }
+                if let Some(rule) = &assoc_block.networkpolicy {
+                    matched_objects.extend(
+                        self.find_matches_for_kind::<NetworkPolicy>(
+                            "NetworkPolicy",
+                            rule,
+                            flow_span,
+                        )
+                        .await,
+                    );
+                }
+                if let Some(rule) = &assoc_block.ingress {
+                    matched_objects.extend(
+                        self.find_matches_for_kind::<Ingress>("Ingress", rule, flow_span)
+                            .await,
+                    );
+                }
+                if let Some(rule) = &assoc_block.endpointslice {
+                    matched_objects.extend(
+                        self.find_matches_for_kind::<EndpointSlice>(
+                            "EndpointSlice",
+                            rule,
+                            flow_span,
+                        )
+                        .await,
+                    );
+                }
+
+                if !matched_objects.is_empty() {
+                    results.insert(direction.clone(), matched_objects);
+                }
+            }
+        }
+        results
+    }
+
+    /// Generic engine to find matching Kubernetes objects for a specific kind based on association rules.
+    async fn find_matches_for_kind<K>(
+        &self,
+        kind: &str,
+        rule: &ObjectAssociationRule,
+        flow_span: &FlowSpan,
+    ) -> Vec<K8sObjectMeta>
+    where
+        Self: HasStore<K>,
+        K: Resource<DynamicType = ()> + Clone + Send + Sync + for<'de> serde::Deserialize<'de>,
+    {
+        let mut matches = Vec::new();
+        let all_objects = self.resource_store.store().state();
+
+        'object_loop: for obj in all_objects.iter() {
+            let Ok(json_val) = serde_json::to_value(&**obj) else {
+                continue;
+            };
+
+            for source_rule in &rule.sources {
+                // Get the value from the flow (e.g., source_ip, destination_port)
+                let Some(flow_value) = get_flow_attribute(flow_span, &source_rule.name) else {
+                    continue;
+                };
+
+                // Get the value(s) from the K8s object
+                for to_path in &source_rule.to {
+                    let k8s_values = extract_k8s_values(&json_val, to_path);
+                    if k8s_values.is_empty() {
+                        continue;
+                    }
+
+                    if self.values_match(&flow_value, k8s_values, to_path).await {
+                        let mut meta = K8sObjectMeta::from(obj.as_ref());
+                        meta.kind = kind.to_string();
+                        matches.push(meta);
+                        continue 'object_loop;
+                    }
+                }
+            }
+        }
+        matches
+    }
+
+    /// The comparison engine. Checks if a flow value matches any of the K8s values,
+    /// handling special logic based on the attribute path.
+    async fn values_match(&self, flow_value: &str, k8s_values: Vec<&Value>, to_path: &str) -> bool {
+        if to_path.ends_with("ipBlock.cidr") {
+            let Ok(flow_ip) = flow_value.parse::<IpAddr>() else {
+                return false;
+            };
+            for k8s_val in k8s_values {
+                if let Some(cidr_str) = k8s_val.as_str() {
+                    if let Ok(network) = cidr_str.parse::<IpNetwork>() {
+                        if network.contains(flow_ip) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        // Check for fields that might contain hostnames and require DNS resolution
+        let resolve_dns = [
+            "status.addresses",            // Used by Node, Gateway
+            "spec.externalName",           // Used by Service
+            "status.loadBalancer.ingress", // Used by Ingress
+        ]
+        .iter()
+        .any(|p| to_path.contains(p));
+
+        for k8s_val in k8s_values {
+            let Some(k8s_str) = k8s_val.as_str() else {
+                continue;
+            };
+
+            if resolve_dns {
+                if let Ok(resolved_addrs) = lookup_host(format!("{k8s_str}:0")).await {
+                    for addr in resolved_addrs {
+                        if addr.ip().to_string() == flow_value {
+                            return true;
+                        }
+                    }
+                }
+            } else if k8s_str == flow_value {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+/// Helper to retrieve an attribute value from a FlowSpan by its name.
+fn get_flow_attribute(flow: &FlowSpan, attribute_name: &str) -> Option<String> {
+    match attribute_name {
+        "source.ip" => Some(flow.attributes.source_address.to_string()),
+        "destination.ip" => Some(flow.attributes.destination_address.to_string()),
+        "source.port" => Some(flow.attributes.source_port.to_string()),
+        "destination.port" => Some(flow.attributes.destination_port.to_string()),
+        "network.transport" => Some(flow.attributes.network_transport.to_string()),
+        "network.type" => Some(
+            if flow.attributes.source_address.is_ipv4() {
+                "ipv4"
+            } else {
+                "ipv6"
+            }
+            .to_string(),
+        ),
+        _ => None,
+    }
+}
+
+/// Extracts values from a serde_json::Value using a dot-notation path with wildcard support.
+fn extract_k8s_values<'a>(object: &'a Value, path: &str) -> Vec<&'a Value> {
+    let mut current_values = vec![object];
+    let parts: Vec<&str> = path.split('.').collect();
+
+    for part in parts {
+        let mut next_values = Vec::new();
+        if part == "[*]" {
+            for val in current_values {
+                if let Some(arr) = val.as_array() {
+                    next_values.extend(arr.iter());
+                }
+            }
+        } else {
+            for val in current_values {
+                if let Some(obj) = val.as_object() {
+                    if let Some(v) = obj.get(part) {
+                        next_values.push(v);
+                    }
+                }
+            }
+        }
+        current_values = next_values;
+    }
+    current_values
 }
 
 /// Flow direction for policy evaluation
