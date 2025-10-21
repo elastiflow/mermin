@@ -116,14 +116,8 @@ config:
   # Get from file:
   # content: '{{ .Files.Get "config/config.hcl" }}'
   # Define config inline:
-  # content: |
-  #   # Literal example
-  #   interfaces = ["eth0"]
-  #   # Glob example: match all ethernet interfaces starting with "eth"
-  #   # interfaces = ["eth*"]
-  #   # Regex example: match slot-based PNIN like en0p<digits>
-  #   # interfaces = ["/^en0p\\d+$/"]
-  #   log_level = "info"
+  content: |
+    # Placeholder
 
 netobserv:
   enabled: false
