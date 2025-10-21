@@ -43,6 +43,7 @@ span {
   tcp_fin_timeout = "5s"
   tcp_rst_timeout = "5s"
   udp_timeout = "60s"
+  community_id_seed = 0
 }
 
 # Parser configuration for eBPF packet parsing
