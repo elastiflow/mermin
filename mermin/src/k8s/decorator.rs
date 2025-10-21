@@ -103,7 +103,7 @@ pub enum WorkloadOwner {
 #[derive(Debug, Clone)]
 pub struct PodAttributionInfo {
     pub pod: K8sObjectMeta,
-    pub owner: Option<WorkloadOwner>, 
+    pub owner: Option<WorkloadOwner>,
     pub selected_by_services: Vec<K8sObjectMeta>,
     pub selected_by_policies: Vec<K8sObjectMeta>,
 }
