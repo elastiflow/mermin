@@ -53,8 +53,8 @@ jobs:
           platforms: linux/amd64
           target: runner-debug
           load: true
-          cache_from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-runner-debug
-          cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-runner-debug,mode=max
+          cache_from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-ci-runner-debug-linux/amd64
+          cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-ci-runner-debug-linux/amd64,mode=max
 
       - name: Save Docker image as an artifact
         run: |

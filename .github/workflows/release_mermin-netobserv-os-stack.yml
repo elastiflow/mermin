@@ -1,7 +1,7 @@
 ---
-name: Release Mermin NetObserv OpenSearch chart
+name: Release Mermin NetObserv OpenSearch stack chart
 concurrency:
-  group: release-mermin-netobserv-os-${{ github.ref }}
+  group: release-mermin-netobserv-os-stack-${{ github.ref }}
   cancel-in-progress: false
 on:
   push:
@@ -10,14 +10,14 @@ on:
       - alpha
       - beta
     paths:
-      - 'charts/mermin-netobserv-os/**/*'
+      - 'charts/mermin-netobserv-os-stack/**/*'
 
 env:
   BRANCH_TAG_PREFIXES: |
     {
-        "alpha": "mermin-netobserv-os-0.1.0-alpha.",
-        "beta": "mermin-netobserv-os-0.1.0-beta.",
-        "main": "mermin-netobserv-os-"
+        "alpha": "mermin-netobserv-os-stack-0.1.0-alpha.",
+        "beta": "mermin-netobserv-os-stack-0.1.0-beta.",
+        "main": "mermin-netobserv-os-stack-"
     }
 
 
@@ -59,7 +59,7 @@ jobs:
         uses: elastiflow/gha-reusable/actions/prepare-release@v0
         with:
           tag_prefix: "${{ fromJson(env.BRANCH_TAG_PREFIXES)[github.ref_name] }}"
-          include_paths: "charts/mermin-netobserv-os/**/*"
+          include_paths: "charts/mermin-netobserv-os-stack/**/*"
           changelog_update: true
           bump_version_yaml: true
           bump_version_yaml_path: charts/mermin/Chart.yaml
@@ -70,7 +70,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           base: "${{ github.ref_name }}"
-          branch: release-mermin-netobserv-os-from-${{ github.ref_name }}
+          branch: release-mermin-netobserv-os-stack-from-${{ github.ref_name }}
           title: '[release ${{ steps.prepare_release.outputs.new_release_git_tag }}]'
           body: |
             # Description
@@ -100,7 +100,7 @@ jobs:
         uses: elastiflow/gha-reusable/actions/prepare-release@v0
         with:
           tag_prefix: "${{ fromJson(env.BRANCH_TAG_PREFIXES)[github.ref_name] }}"
-          include_paths: "charts/mermin-netobserv-os/**/*"
+          include_paths: "charts/mermin-netobserv-os-stack/**/*"
       - name: Configure Git
         run: |
           git config user.name "$GITHUB_ACTOR"
@@ -143,6 +143,7 @@ jobs:
           git commit -m 'chore: Push chart archive'
           git push origin gh-pages
           git checkout ${{ github.ref_name }}
+          cr package ${{ env.CHARTS_DIR }}
       # TODO(Cleanup for GA): Once public, no need for --packages-with-index
       - name: Update GH pages index
         run: |

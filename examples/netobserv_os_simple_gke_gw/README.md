@@ -27,36 +27,66 @@ Notes on the example deployment:
 
 ## Install
 
-- Change `gke-main-a.us-east1` in the `values.yaml` to your Kubernetes Default Domain (`cluster.local` by default)
+Install happens in two phases:
 
-  ```sh
-  helm repo add netobserv https://elastiflow.github.io/helm-chart-netobserv/
-  helm repo add opensearch https://opensearch-project.github.io/helm-charts/
-  helm repo update
-  helm dependency build charts/mermin-netobserv-os
-  kubectl create namespace elastiflow
+- Install NetObserv with OpenSearch
+- Install Mermin
 
-  # TODO(Cleanup for GA): image pull secrets not needed when going public
-  kubectl create secret docker-registry ghcr \
-      --docker-server=ghcr.io \
-      --docker-username=elastiflow-ghcr \
-      --docker-password=${CLASSIC_GH_TOKEN}
+The installation process consists of two phases:
 
-  # With custom config
-  helm upgrade -i --wait --timeout 15m -n elastiflow \
-    -f examples/netobserv_os_simple_gke_gw/values.yaml \
-    --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
-    mermin charts/mermin-netobserv-os
+1. Install NetObserv with OpenSearch.
+2. Install Mermin.
 
-  # Get NetObserv Gateway (Load Balancer) IP
-  kubectl get gtw netobserv-flow -o=jsonpath='{.status.addresses[0].value}'
-  ```
+This installation assumes that no additional DNS controllers are running in the cluster. Therefore, it is not possible to know the IP address of the NetObserv gRPC load balancer without extra GCP actions before the NetObserv chart (dependency) is ready.
 
-- Get NetObserv Gateway (Load Balancer) IP
+- Phase 1
+  <!-- TODO(Cleanup for GA): Once repo is public, this step should become part of the next step without any dependencies -->
+  - Add Mermin Helm chart
 
-  ```sh
-  kubectl get gtw netobserv-flow -o=jsonpath='{.status.addresses[0].value}'
-  ```
+    ```sh
+    helm repo add \
+      --username x-access-token \
+      --password ${GH_PAT} \
+      mermin https://raw.githubusercontent.com/elastiflow/mermin/gh-pages
+    ```
+
+  - Change `gke-main-a.us-east1` in the `values.yaml` to your Kubernetes Default Domain (`cluster.local` by default) and deploy the chart
+
+    ```sh
+    helm repo add netobserv https://elastiflow.github.io/helm-chart-netobserv/
+    helm repo add opensearch https://opensearch-project.github.io/helm-charts/
+    helm repo update
+    helm dependency build mermin/mermin-netobserv-os-stack
+    kubectl create namespace elastiflow
+
+    # TODO(Cleanup for GA): image pull secrets not needed when going public
+    kubectl create secret docker-registry ghcr \
+        --docker-server=ghcr.io \
+        --docker-username=elastiflow-ghcr \
+        --docker-password=${CLASSIC_GH_TOKEN}
+
+    # Deploy
+    helm upgrade -i --wait --timeout 15m -n elastiflow \
+      -f examples/netobserv_os_simple_gke_gw/values.yaml \
+      --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
+      mermin mermin/mermin-netobserv-os-stack
+    ```
+
+- Phase 2:
+  - Get the NetObserv Gateway (Load Balancer) IP
+
+    ```sh
+    kubectl get gtw netobserv-flow -o=jsonpath='{.status.addresses[0].value}'
+    ```
+
+  - Modify `export.traces.otlp.endpoint` in the `config.hcl` to the value from the previous step and redeploy the chart
+
+    ```sh
+    helm upgrade -i --wait --timeout 15m -n elastiflow \
+      -f examples/netobserv_os_simple_gke_gw/values.yaml \
+      --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
+      mermin mermin/mermin-netobserv-os-stack
+    ```
 
 ## Access
 
@@ -78,7 +108,7 @@ rm -rf helm_rendered/mermin; helm template -n elastiflow \
   -f examples/netobserv_os_simple_gke_gw/values.yaml \
   --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
   --output-dir helm_rendered \
-  mermin charts/mermin-netobserv-os
+  mermin mermin/mermin-netobserv-os-stack
 
 # Diff with existing K8s resources
 kubectl diff -R -f helm_rendered/mermin/
