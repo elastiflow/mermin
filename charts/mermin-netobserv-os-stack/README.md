@@ -13,5 +13,5 @@ This is a composite chart to install Mermin with NetObserv, OpenSearch and OpenS
 ```sh
 helm repo add elastiflow https://elastiflow.github.io/mermin/
 helm repo update
-helm install mermin-netobserv-os elastiflow/mermin-netobserv-os
+helm install mermin-netobserv-os-stack elastiflow/mermin-netobserv-os-stack
 ```

@@ -39,7 +39,7 @@
 - **ci:** Simplify the "is_release" regex (#145)
 ### Features
 
-- **helm:** Split "mermin" and "mermin-netobserv-os" to separate charts (#141)
+- **helm:** Split "mermin" and "mermin-netobserv-os-stack" to separate charts (#141)
 
 [v0.1.0-beta.0..v0.1.0-beta.1](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.0...v0.1.0-beta.1)
 

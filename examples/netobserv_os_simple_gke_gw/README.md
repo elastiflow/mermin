@@ -51,7 +51,7 @@ It is done due to assumption of no extra DNS controllers running in the cluster,
     helm repo add netobserv https://elastiflow.github.io/helm-chart-netobserv/
     helm repo add opensearch https://opensearch-project.github.io/helm-charts/
     helm repo update
-    helm dependency build mermin/mermin-netobserv-os
+    helm dependency build mermin/mermin-netobserv-os-stack
     kubectl create namespace elastiflow
 
     # TODO(Cleanup for GA): image pull secrets not needed when going public
@@ -64,7 +64,7 @@ It is done due to assumption of no extra DNS controllers running in the cluster,
     helm upgrade -i --wait --timeout 15m -n elastiflow \
       -f examples/netobserv_os_simple_gke_gw/values.yaml \
       --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
-      mermin mermin/mermin-netobserv-os
+      mermin mermin/mermin-netobserv-os-stack
     ```
 
 - Phase 2:
@@ -80,7 +80,7 @@ It is done due to assumption of no extra DNS controllers running in the cluster,
     helm upgrade -i --wait --timeout 15m -n elastiflow \
       -f examples/netobserv_os_simple_gke_gw/values.yaml \
       --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
-      mermin mermin/mermin-netobserv-os
+      mermin mermin/mermin-netobserv-os-stack
     ```
 
 ## Access
@@ -103,7 +103,7 @@ rm -rf helm_rendered/mermin; helm template -n elastiflow \
   -f examples/netobserv_os_simple_gke_gw/values.yaml \
   --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
   --output-dir helm_rendered \
-  mermin mermin/mermin-netobserv-os
+  mermin mermin/mermin-netobserv-os-stack
 
 # Diff with existing K8s resources
 kubectl diff -R -f helm_rendered/mermin/
