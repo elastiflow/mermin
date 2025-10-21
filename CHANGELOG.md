@@ -1,3 +1,13 @@
+## [v0.1.0-beta.6] - 2025-10-21
+
+### Features
+
+- **helm:** Add the "Mermin NetObserv OS" umbrella chart (#142)
+
+[v0.1.0-beta.5..v0.1.0-beta.6](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.5...v0.1.0-beta.6)
+
+
+
 ## [v0.1.0-beta.5] - 2025-10-21
 
 ### Features
