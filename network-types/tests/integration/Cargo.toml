@@ -4,23 +4,21 @@ version = "0.1.0"
 edition = "2024"
 license.workspace = true
 
-[dependencies]
-aya = { workspace = true }
-aya-log = { workspace = true }
-env_logger = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "net", "signal", "sync", "time"] }
-anyhow = { workspace = true, default-features = true }
-thiserror = { workspace = true }
-log = { workspace = true }
-bytes = "1"
-integration-common = { path = "../integration-common", features = ["user"] }
-network-types = { path = "../.." }
-
-[build-dependencies]
-anyhow = { workspace = true }
-aya-build = { workspace = true }
-common-build = { path = "../../../common-build" }
-
 [[bin]]
 name = "integration"
 path = "src/main.rs"
+
+[dependencies]
+aya = { workspace = true }
+aya-log = { workspace = true }
+bytes = "1"
+env_logger = { workspace = true }
+integration-common = { path = "../integration-common", features = ["user"] }
+log = { workspace = true }
+network-types = { path = "../.." }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "net", "signal", "sync", "time"] }
+
+[build-dependencies]
+aya-build = { workspace = true }
+common-build = { path = "../../../common-build" }

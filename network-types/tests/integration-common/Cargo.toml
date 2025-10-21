@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2024"
 license.workspace = true
 
-[dependencies]
-network-types = { path = "../.." }
-aya = { workspace = true, optional = true }
-
 [features]
 default = []
 
 user = ["dep:aya"]
+
+[dependencies]
+aya = { workspace = true, optional = true }
+network-types = { path = "../.." }

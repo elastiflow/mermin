@@ -4,16 +4,16 @@ version = "0.1.0"
 edition = "2024"
 license.workspace = true
 
+[[bin]]
+name = "integration-ebpf-test"
+path = "src/main.rs"
+test = false
+
 [dependencies]
 aya-ebpf = { workspace = true }
 aya-log-ebpf = { workspace = true }
 integration-common = { path = "../integration-common", default-features = false }
 network-types = { path = "../.." }
-
-[[bin]]
-name = "integration-ebpf-test"
-path = "src/main.rs"
-test = false
 
 [build-dependencies]
 aya-build = { workspace = true }

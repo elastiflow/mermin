@@ -1,13 +1,14 @@
 mod error;
 mod health;
+mod ip;
 mod k8s;
 mod otlp;
 mod runtime;
+mod source;
 mod span;
 
 use std::{
     collections::HashMap,
-    os::unix::io::AsRawFd,
     sync::{Arc, atomic::Ordering},
 };
 
@@ -16,9 +17,8 @@ use aya::{
     programs::{SchedClassifier, TcAttachType, tc},
 };
 use error::{MerminError, Result};
-use mermin_common::PacketMeta;
 use pnet::datalink;
-use tokio::{io::unix::AsyncFd, signal, sync::mpsc};
+use tokio::{signal, sync::mpsc};
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -29,6 +29,7 @@ use crate::{
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
     },
     runtime::context::Context,
+    source::{filter::PacketFilter, ringbuf::RingBufReader},
     span::producer::FlowSpanProducer,
 };
 
@@ -268,7 +269,7 @@ async fn run() -> Result<()> {
     let map = ebpf
         .take_map("PACKETS_META")
         .ok_or_else(|| MerminError::ebpf_map("PACKETS_META map not present in the object"))?;
-    let mut ring_buf = RingBuf::try_from(map)?;
+    let ring_buf = RingBuf::try_from(map)?;
 
     info!("waiting for packets - ring buffer initialized");
     info!("press ctrl+c to exit");
@@ -351,40 +352,12 @@ async fn run() -> Result<()> {
     });
     health_state.ready_to_process.store(true, Ordering::Relaxed);
 
+    let packet_filter = Arc::new(PacketFilter::new(&conf, iface_map.clone()));
+
+    let ring_buf_reader = RingBufReader::new(ring_buf, packet_filter, packet_meta_tx);
     tokio::spawn(async move {
-        info!("userspace task started: reading from ring buffer for packet metadata");
-
-        // Wrap the ring buffer's fd in AsyncFd for event-driven polling
-        let async_fd = match AsyncFd::new(ring_buf.as_raw_fd()) {
-            Ok(fd) => fd,
-            Err(e) => {
-                error!("failed to create AsyncFd for ring buffer: {e}");
-                return;
-            }
-        };
-
-        loop {
-            // Wait for the ring buffer to be readable (event-driven, no busy-loop)
-            let mut guard = match async_fd.readable().await {
-                Ok(guard) => guard,
-                Err(e) => {
-                    error!("error waiting for ring buffer readability: {e}");
-                    break;
-                }
-            };
-
-            // Consume all available data in a batch
-            while let Some(bytes) = ring_buf.next() {
-                let packet_meta: PacketMeta =
-                    unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const PacketMeta) };
-
-                if let Err(e) = packet_meta_tx.send(packet_meta).await {
-                    warn!("failed to send packet to k8s decoration channel: {e}");
-                }
-            }
-
-            guard.clear_ready();
-        }
+        ring_buf_reader.run().await;
+        debug!("ring buffer reader task exiting");
     });
 
     tokio::spawn(async move {
