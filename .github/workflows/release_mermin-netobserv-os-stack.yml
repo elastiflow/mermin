@@ -63,7 +63,7 @@ jobs:
           changelog_update: true
           changelog_path: charts/mermin-netobserv-os-stack/CHANGELOG.md
           bump_version_yaml: true
-          bump_version_yaml_path: charts/mermin/Chart.yaml
+          bump_version_yaml_path: charts/mermin-netobserv-os-stack/Chart.yaml
           bump_version_yaml_key: '.version,.appVersion'
       - name: Create Pull Request
         if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
