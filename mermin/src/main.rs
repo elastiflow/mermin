@@ -343,7 +343,10 @@ async fn run() -> Result<()> {
     );
     let k8s_decorator = match Decorator::new(health_state.clone()).await {
         Ok(decorator) => {
-            info!("kubernetes client initialized successfully and all caches are synced");
+            info!(
+                event.name = "k8s.client_init_sucess",
+                "kubernetes client initialized successfully and all caches are synced"
+            );
             Some(Arc::new(decorator))
         }
         Err(e) => {

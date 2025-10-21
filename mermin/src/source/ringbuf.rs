@@ -49,13 +49,23 @@ impl RingBufReader {
     ///
     /// This method consumes `self` and should be spawned in a separate tokio task.
     pub async fn run(mut self) {
-        info!("userspace task started: reading from ring buffer for packet metadata");
+        info!(
+            event.name = "task.started",
+            task.name = "ring_buf_reader",
+            task.description = "reading from ring buffer for packet metadata",
+            "userspace task started"
+        );
 
         // Wrap the ring buffer's fd in AsyncFd for event-driven polling
         let async_fd = match AsyncFd::new(self.ring_buf.as_raw_fd()) {
             Ok(fd) => fd,
             Err(e) => {
-                error!("failed to create AsyncFd for ring buffer: {e}");
+                error!(
+                    event.name = "task.error",
+                    task.name = "ring_buf_reader",
+                    error.message = %e,
+                    "failed to create asyncfd for ring buffer"
+                );
                 return;
             }
         };
@@ -65,7 +75,12 @@ impl RingBufReader {
             let mut guard = match async_fd.readable().await {
                 Ok(guard) => guard,
                 Err(e) => {
-                    error!("error waiting for ring buffer readability: {e}");
+                    error!(
+                        event.name = "task.error",
+                        task.name = "ring_buf_reader",
+                        error.message = %e,
+                        "error waiting for ring buffer readability"
+                    );
                     break;
                 }
             };
@@ -75,9 +90,11 @@ impl RingBufReader {
                 // Validate that we have enough bytes for a PacketMeta
                 if bytes.len() < std::mem::size_of::<PacketMeta>() {
                     warn!(
-                        "ring buffer provided insufficient bytes for PacketMeta: got {}, expected {}",
-                        bytes.len(),
-                        std::mem::size_of::<PacketMeta>()
+                        event.name = "packet.malformed",
+                        reason = "invalid_size",
+                        packet.size.received = bytes.len(),
+                        packet.size.expected = std::mem::size_of::<PacketMeta>(),
+                        "ring buffer provided insufficient bytes for packet meta"
                     );
                     continue;
                 }
@@ -94,15 +111,25 @@ impl RingBufReader {
                 match self.router.should_process(&packet_meta) {
                     Ok(true) => {
                         if let Err(e) = self.packet_meta_tx.send(packet_meta).await {
-                            error!("failed to send packet to k8s attribution channel: {e}");
+                            error!(
+                                event.name = "channel.send_failed",
+                                channel.name = "packet_processing",
+                                error.message = %e,
+                                "failed to send packet to processing channel"
+                            );
                         }
                     }
                     Ok(false) => {
-                        trace!("packet meta did not match any filters; skipping.");
+                        trace!(
+                            event.name = "packet.filtered",
+                            "packet meta did not match any filters; skipping"
+                        );
                     }
                     Err(e) => {
                         warn!(
-                            "failed to parse packet metadata for filtering: {e}; skipping packet"
+                            event.name = "packet.filter_error",
+                            error.message = %e,
+                            "failed to parse packet metadata for filtering; skipping"
                         );
                     }
                 }
