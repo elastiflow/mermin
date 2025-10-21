@@ -7,7 +7,9 @@ use crate::{
     k8s::{
         K8sError,
         decorator::{
-            DecorationInfo, Decorator, FlowContext, FlowDirection, K8sObjectMeta, WorkloadOwner,
+            AttributionRef, AttributionStore, Decorator, EndpointSliceAttributionInfo, FlowContext,
+            FlowDirection, K8sObjectMeta, NodeAttributionInfo, PodAttributionInfo,
+            ServiceAttributionInfo, WorkloadOwner,
         },
     },
     span::flow::FlowSpan,
@@ -24,21 +26,25 @@ pub struct NetworkPolicy {
 /// to produce enriched flow attributes containing resource information.
 struct SpanDecorator<'a> {
     decorator: &'a Decorator,
+    store: AttributionStore,
 }
 
 impl<'a> SpanDecorator<'a> {
     fn new(decorator: &'a Decorator) -> Self {
-        Self { decorator }
+        Self {
+            decorator,
+            store: AttributionStore::new(),
+        }
     }
 
     /// Correlates flow attributes with Kubernetes resources and populates K8s metadata fields.
     /// Returns a cloned FlowSpan with source and destination Kubernetes attributes populated.
-    async fn decorate(&self, flow_span: &FlowSpan) -> Result<FlowSpan, K8sError> {
+    async fn decorate(mut self, flow_span: &FlowSpan) -> Result<FlowSpan, K8sError> {
         // Create FlowContext directly for both directions
         let ctx = FlowContext::from_flow_span(flow_span, self.decorator).await;
 
         // Resolve source and destination IPs to Kubernetes resources and evaluate policies
-        let src_decoration: Option<DecorationInfo> = self.enrich(&ctx.src_pod, ctx.src_ip).await;
+        let src_decoration: Option<AttributionRef> = self.enrich(&ctx.src_pod, ctx.src_ip).await;
         let dst_decoration = self.enrich(&ctx.dst_pod, ctx.dst_ip).await;
         let (ingress_policies, egress_policies) = self.evaluate_flow_policies(&ctx).await?;
 
@@ -46,13 +52,13 @@ impl<'a> SpanDecorator<'a> {
         let mut decorated_flow = flow_span.clone();
 
         // Populate source Kubernetes attributes
-        if let Some(src_info) = &src_decoration {
-            self.populate_k8s_attributes(&mut decorated_flow, src_info, true);
+        if let Some(src_ref) = src_decoration {
+            self.populate_k8s_attributes(&mut decorated_flow, src_ref, true);
         }
 
         // Populate destination Kubernetes attributes
-        if let Some(dst_info) = &dst_decoration {
-            self.populate_k8s_attributes(&mut decorated_flow, dst_info, false);
+        if let Some(dst_ref) = dst_decoration {
+            self.populate_k8s_attributes(&mut decorated_flow, dst_ref, false);
         }
 
         // Populate network policy information
@@ -63,10 +69,10 @@ impl<'a> SpanDecorator<'a> {
 
     /// Resolves a pod and IP address to Kubernetes resource decoration information.
     /// Returns Pod decoration if available, otherwise attempts IP-based fallback resolution.
-    async fn enrich(&self, pod: &Option<Pod>, ip: IpAddr) -> Option<DecorationInfo> {
+    async fn enrich(&mut self, pod: &Option<Pod>, ip: IpAddr) -> Option<AttributionRef> {
         if let Some(pod) = pod {
             let pod_meta = K8sObjectMeta::from(pod);
-            let owner = self.decorator.get_top_level_controller(pod).map(Box::new);
+            let owner = self.decorator.get_top_level_controller(pod);
 
             // Discover Services that select this pod (if selector discovery is configured)
             let selected_by_services = self
@@ -91,71 +97,96 @@ impl<'a> SpanDecorator<'a> {
                 }
             };
 
-            Some(DecorationInfo::Pod {
+            let info = PodAttributionInfo {
                 pod: pod_meta,
                 owner,
                 selected_by_services,
                 selected_by_policies,
-            })
+            };
+            Some(self.store.add_pod(info))
         } else {
             self.enrich_ip_fallback(ip).await
         }
     }
 
-    /// Populates Kubernetes attributes in a FlowSpan based on DecorationInfo.
+    /// Populates Kubernetes attributes in a FlowSpan based on AttributionRef.
     /// Maps resource metadata to the appropriate source or destination K8s fields.
     fn populate_k8s_attributes(
         &self,
         flow_span: &mut FlowSpan,
-        decoration_info: &DecorationInfo,
+        attribution_ref: AttributionRef,
         is_source: bool,
     ) {
-        match decoration_info {
-            DecorationInfo::Pod {
-                pod,
-                owner,
-                selected_by_services,
-                selected_by_policies,
-            } => {
-                self.set_k8s_attr(flow_span, "pod.name", &pod.name, is_source);
-                self.set_k8s_attr_opt(flow_span, "namespace.name", &pod.namespace, is_source);
-
-                // Populate workload controller information if available
-                if let Some(workload_owner) = owner {
-                    self.populate_workload_attributes(
+        match attribution_ref {
+            AttributionRef::Pod(idx) => {
+                if let Some(pod_info) = self.store.get_pod(idx) {
+                    self.set_k8s_attr(flow_span, "pod.name", &pod_info.pod.name, is_source);
+                    self.set_k8s_attr_opt(
                         flow_span,
-                        workload_owner.as_ref(),
+                        "namespace.name",
+                        &pod_info.pod.namespace,
+                        is_source,
+                    );
+
+                    // Populate workload controller information if available
+                    if let Some(ref workload_owner) = pod_info.owner {
+                        self.populate_workload_attributes(flow_span, workload_owner, is_source);
+                    }
+
+                    // Populate services that select this pod
+                    // Use the first service if multiple services select the pod
+                    if let Some(first_service) = pod_info.selected_by_services.first() {
+                        self.set_k8s_attr(
+                            flow_span,
+                            "service.name",
+                            &first_service.name,
+                            is_source,
+                        );
+                    }
+
+                    // Note: selected_by_policies is already handled by evaluate_flow_policies
+                    // which populates network_policies_ingress and network_policies_egress
+                    // We could log or add additional metadata here if needed
+                    if !pod_info.selected_by_policies.is_empty() {
+                        debug!(
+                            "pod {} is selected by {} network policies",
+                            pod_info.pod.name,
+                            pod_info.selected_by_policies.len()
+                        );
+                    }
+                }
+            }
+            AttributionRef::Node(idx) => {
+                if let Some(node_info) = self.store.get_node(idx) {
+                    self.set_k8s_attr(flow_span, "node.name", &node_info.node.name, is_source);
+                }
+            }
+            AttributionRef::Service(idx) => {
+                if let Some(service_info) = self.store.get_service(idx) {
+                    self.set_k8s_attr(
+                        flow_span,
+                        "service.name",
+                        &service_info.service.name,
+                        is_source,
+                    );
+                    self.set_k8s_attr_opt(
+                        flow_span,
+                        "namespace.name",
+                        &service_info.service.namespace,
                         is_source,
                     );
                 }
-
-                // Populate services that select this pod
-                // Use the first service if multiple services select the pod
-                if let Some(first_service) = selected_by_services.first() {
-                    self.set_k8s_attr(flow_span, "service.name", &first_service.name, is_source);
-                }
-
-                // Note: selected_by_policies is already handled by evaluate_flow_policies
-                // which populates network_policies_ingress and network_policies_egress
-                // We could log or add additional metadata here if needed
-                if !selected_by_policies.is_empty() {
-                    debug!(
-                        "pod {} is selected by {} network policies",
-                        pod.name,
-                        selected_by_policies.len()
+            }
+            AttributionRef::EndpointSlice(idx) => {
+                if let Some(slice_info) = self.store.get_endpoint_slice(idx) {
+                    // EndpointSlice provides namespace context for service discovery
+                    self.set_k8s_attr_opt(
+                        flow_span,
+                        "namespace.name",
+                        &slice_info.slice.namespace,
+                        is_source,
                     );
                 }
-            }
-            DecorationInfo::Node { node } => {
-                self.set_k8s_attr(flow_span, "node.name", &node.name, is_source);
-            }
-            DecorationInfo::Service { service, .. } => {
-                self.set_k8s_attr(flow_span, "service.name", &service.name, is_source);
-                self.set_k8s_attr_opt(flow_span, "namespace.name", &service.namespace, is_source);
-            }
-            DecorationInfo::EndpointSlice { slice } => {
-                // EndpointSlice provides namespace context for service discovery
-                self.set_k8s_attr_opt(flow_span, "namespace.name", &slice.namespace, is_source);
             }
         }
     }
@@ -321,12 +352,13 @@ impl<'a> SpanDecorator<'a> {
 
     /// Attempts to resolve an IP address to Kubernetes resources when no pod is found.
     /// Tries Node, Service, and EndpointSlice lookups in priority order.
-    async fn enrich_ip_fallback(&self, ip: IpAddr) -> Option<DecorationInfo> {
+    async fn enrich_ip_fallback(&mut self, ip: IpAddr) -> Option<AttributionRef> {
         // Try to match against a Node
         if let Some(node) = self.decorator.get_node_by_ip(ip).await {
-            return Some(DecorationInfo::Node {
+            let info = NodeAttributionInfo {
                 node: K8sObjectMeta::from(node.as_ref()),
-            });
+            };
+            return Some(self.store.add_node(info));
         }
 
         // Try to match against a Service
@@ -343,17 +375,19 @@ impl<'a> SpanDecorator<'a> {
                 }
             };
 
-            return Some(DecorationInfo::Service {
+            let info = ServiceAttributionInfo {
                 service: service_meta,
                 backend_ips,
-            });
+            };
+            return Some(self.store.add_service(info));
         }
 
         // Try to match against an EndpointSlice
         if let Some(slice) = self.decorator.get_endpointslice_by_ip(ip).await {
-            return Some(DecorationInfo::EndpointSlice {
+            let info = EndpointSliceAttributionInfo {
                 slice: K8sObjectMeta::from(slice.as_ref()),
-            });
+            };
+            return Some(self.store.add_endpoint_slice(info));
         }
 
         // No Kubernetes resource found for this IP

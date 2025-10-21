@@ -99,25 +99,94 @@ pub enum WorkloadOwner {
     Job(K8sObjectMeta),
 }
 
+// Define structs to hold the actual data
 #[derive(Debug, Clone)]
-pub enum DecorationInfo {
-    Pod {
-        pod: K8sObjectMeta,
-        owner: Option<Box<WorkloadOwner>>, //Box to avoid clippy large enum variant warnings
-        selected_by_services: Vec<K8sObjectMeta>,
-        selected_by_policies: Vec<K8sObjectMeta>,
-    },
-    Node {
-        node: K8sObjectMeta,
-    },
-    Service {
-        service: K8sObjectMeta,
-        #[allow(dead_code)]
-        backend_ips: Vec<String>,
-    },
-    EndpointSlice {
-        slice: K8sObjectMeta,
-    },
+pub struct PodAttributionInfo {
+    pub pod: K8sObjectMeta,
+    pub owner: Option<WorkloadOwner>, 
+    pub selected_by_services: Vec<K8sObjectMeta>,
+    pub selected_by_policies: Vec<K8sObjectMeta>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NodeAttributionInfo {
+    pub node: K8sObjectMeta,
+}
+
+#[derive(Debug, Clone)]
+pub struct ServiceAttributionInfo {
+    pub service: K8sObjectMeta,
+    #[allow(dead_code)]
+    pub backend_ips: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EndpointSliceAttributionInfo {
+    pub slice: K8sObjectMeta,
+}
+
+// Create a data store to hold the collections
+#[derive(Debug, Default)]
+pub struct AttributionStore {
+    pub pods: Vec<PodAttributionInfo>,
+    pub nodes: Vec<NodeAttributionInfo>,
+    pub services: Vec<ServiceAttributionInfo>,
+    pub endpoint_slices: Vec<EndpointSliceAttributionInfo>,
+}
+
+// The enum becomes a lightweight reference or ID
+#[derive(Clone, Copy, Debug)]
+pub enum AttributionRef {
+    Pod(usize),           // The usize is an index into `AttributionStore.pods`
+    Node(usize),          // The usize is an index into `AttributionStore.nodes`
+    Service(usize),       // The usize is an index into `AttributionStore.services`
+    EndpointSlice(usize), // The usize is an index into `AttributionStore.endpoint_slices`
+}
+
+impl AttributionStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add_pod(&mut self, info: PodAttributionInfo) -> AttributionRef {
+        let idx = self.pods.len();
+        self.pods.push(info);
+        AttributionRef::Pod(idx)
+    }
+
+    pub fn add_node(&mut self, info: NodeAttributionInfo) -> AttributionRef {
+        let idx = self.nodes.len();
+        self.nodes.push(info);
+        AttributionRef::Node(idx)
+    }
+
+    pub fn add_service(&mut self, info: ServiceAttributionInfo) -> AttributionRef {
+        let idx = self.services.len();
+        self.services.push(info);
+        AttributionRef::Service(idx)
+    }
+
+    pub fn add_endpoint_slice(&mut self, info: EndpointSliceAttributionInfo) -> AttributionRef {
+        let idx = self.endpoint_slices.len();
+        self.endpoint_slices.push(info);
+        AttributionRef::EndpointSlice(idx)
+    }
+
+    pub fn get_pod(&self, idx: usize) -> Option<&PodAttributionInfo> {
+        self.pods.get(idx)
+    }
+
+    pub fn get_node(&self, idx: usize) -> Option<&NodeAttributionInfo> {
+        self.nodes.get(idx)
+    }
+
+    pub fn get_service(&self, idx: usize) -> Option<&ServiceAttributionInfo> {
+        self.services.get(idx)
+    }
+
+    pub fn get_endpoint_slice(&self, idx: usize) -> Option<&EndpointSliceAttributionInfo> {
+        self.endpoint_slices.get(idx)
+    }
 }
 
 /// A trait for types that contain a reflector store for a specific Kubernetes resource.
