@@ -228,7 +228,7 @@ fn get_packet_meta(ctx: &TcContext) -> Result<&mut PacketMeta, Error> {
         match PACKET_META.get_ptr_mut(0) {
             Some(ptr) => ptr,
             None => {
-                error!(ctx, "PACKET_META map not accessible");
+                error!(ctx, "ebpf - fatal - could not access packet metadata map");
                 return Err(Error::InternalError);
             }
         }
@@ -589,7 +589,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
     unsafe {
         #[allow(static_mut_refs)]
         if PACKETS_META.output(meta, 0).is_err() {
-            error!(&ctx, "ebpf - failed to write packet to ring buffer");
+            error!(&ctx, "ebpf - ring buffer write failed");
         }
     }
 

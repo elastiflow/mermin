@@ -3,7 +3,7 @@ use std::{sync::Arc, time::SystemTime};
 use async_trait::async_trait;
 use opentelemetry::trace::{SpanKind, Tracer, TracerProvider};
 use opentelemetry_sdk::trace::SdkTracerProvider;
-use tracing::debug;
+use tracing::trace;
 
 pub struct TraceExporterAdapter {
     provider: SdkTracerProvider,
@@ -74,14 +74,18 @@ impl TraceableExporter for TraceExporterAdapter {
         };
 
         let mut span = tracer
-            .span_builder(name)
+            .span_builder(name.clone())
             //TODO: Once SOURCE & DESTINATION are span kind are available, use them here
             .with_kind(SpanKind::Internal)
             .with_start_time(traceable.start_time())
             .start(&tracer);
         span = traceable.record(span);
         opentelemetry::trace::Span::end_with_timestamp(&mut span, traceable.end_time());
-        debug!("exported traceable record as span");
+        trace!(
+            event.name = "span.exported",
+            span.name = %name,
+            "exported traceable record as span"
+        );
     }
 }
 
@@ -91,6 +95,10 @@ pub struct NoOpExporterAdapter {}
 #[async_trait]
 impl TraceableExporter for NoOpExporterAdapter {
     async fn export(&self, _traceable: TraceableRecord) {
-        debug!("skipping export - no exporters available");
+        trace!(
+            event.name = "span.export_skipped",
+            reason = "no_op_exporter_configured",
+            "skipping span export"
+        );
     }
 }

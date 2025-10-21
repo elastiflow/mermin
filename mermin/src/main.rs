@@ -19,7 +19,7 @@ use aya::{
 use error::{MerminError, Result};
 use pnet::datalink;
 use tokio::{signal, sync::mpsc};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     health::{HealthState, start_api_server},
@@ -175,10 +175,18 @@ async fn run() -> Result<()> {
         if conf.export.traces.stdout.is_some() || conf.export.traces.otlp.is_some() {
             let app_tracer_provider =
                 init_provider(conf.export.traces.stdout, conf.export.traces.otlp.clone()).await?;
-            info!("initialized configured exporters");
+            info!(
+                event.name = "task.started",
+                task.name = "exporter",
+                "initialized configured trace exporters"
+            );
             Arc::new(TraceExporterAdapter::new(app_tracer_provider))
         } else {
-            warn!("no exporters configured, using no-op exporter");
+            warn!(
+                event.name = "exporter.misconfigured",
+                exporter.type = "no-op",
+                "no exporters configured, using no-op exporter"
+            );
             Arc::new(NoOpExporterAdapter::default())
         }
     };
@@ -191,7 +199,12 @@ async fn run() -> Result<()> {
     };
     let ret = unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &rlim) };
     if ret != 0 {
-        warn!("remove limit on locked memory failed, ret is: {ret}");
+        warn!(
+            event.name = "system.rlimit_failed",
+            system.rlimit.type = "memlock",
+            error.code = ret,
+            "failed to remove limit on locked memory"
+        );
     }
 
     // This will include your eBPF object file as raw bytes at compile-time and load it at
@@ -204,7 +217,11 @@ async fn run() -> Result<()> {
     )))?;
     if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
         // This can happen if you remove all log statements from your eBPF program.
-        warn!("failed to initialize ebpf logger: {e}");
+        warn!(
+            event.name = "ebpf.logger_init_failed",
+            error.message = %e,
+            "failed to initialize eBPF logger"
+        );
     }
 
     // Configure parser options for tunnel port detection
@@ -219,8 +236,12 @@ async fn run() -> Result<()> {
     parser_options_map.set(2, conf.parser.wireguard_port, 0)?;
 
     info!(
-        "configured tunnel ports - geneve: {}, vxlan: {}, wireguard: {}",
-        conf.parser.geneve_port, conf.parser.vxlan_port, conf.parser.wireguard_port
+        event.name = "ebpf.config_applied",
+        ebpf.config.type = "tunnel_ports",
+        parser.geneve_port = conf.parser.geneve_port,
+        parser.vxlan_port = conf.parser.vxlan_port,
+        parser.wireguard_port = conf.parser.wireguard_port,
+        "configured ebpf tunnel ports"
     );
 
     let health_state = HealthState::default();
@@ -231,7 +252,11 @@ async fn run() -> Result<()> {
 
         tokio::spawn(async move {
             if let Err(e) = start_api_server(health_state_clone, &api_conf).await {
-                log::error!("API server error: {e}");
+                error!(
+                    event.name = "api.internal_error",
+                    error.message = %e,
+                    "api server encountered a fatal error"
+                );
             }
         });
     }
@@ -259,8 +284,10 @@ async fn run() -> Result<()> {
 
                 program.attach(iface, *attach_type)?;
                 debug!(
-                    "mermin {} program attached to {iface}",
-                    attach_type.direction_name()
+                    event.name = "ebpf.program_attached",
+                    ebpf.program.direction = attach_type.direction_name(),
+                    network.interface.name = %iface,
+                    "ebpf program attached to interface"
                 );
                 Ok(())
             })
@@ -271,12 +298,16 @@ async fn run() -> Result<()> {
         .ok_or_else(|| MerminError::ebpf_map("PACKETS_META map not present in the object"))?;
     let ring_buf = RingBuf::try_from(map)?;
 
-    info!("waiting for packets - ring buffer initialized");
-    info!("press ctrl+c to exit");
-
+    debug!(
+        event.name = "source.ringbuf.initialized",
+        "ring buffer initialized, waiting for packets"
+    );
+    info!(
+        event.name = "ebpf.ready",
+        "ebpf program loaded and ready to process network traffic"
+    );
     health_state.ebpf_loaded.store(true, Ordering::Relaxed);
 
-    info!("building interface index map");
     let iface_map: HashMap<u32, String> = {
         let mut map = HashMap::new();
         for iface in datalink::interfaces() {
@@ -286,6 +317,12 @@ async fn run() -> Result<()> {
         }
         map
     };
+    info!(
+        event.name = "system.config_loaded",
+        system.config.type = "interface_map",
+        system.config.interface_count = iface_map.len(),
+        "built interface map from configuration"
+    );
 
     let (packet_meta_tx, packet_meta_rx) = mpsc::channel(conf.packet_channel_capacity);
     let (flow_span_tx, mut flow_span_rx) = mpsc::channel(conf.packet_channel_capacity);
@@ -301,15 +338,23 @@ async fn run() -> Result<()> {
         flow_span_tx,
     )?;
 
-    info!("initializing k8s client");
+    info!(
+        event.name = "k8s.client_initializing",
+        "initializing kubernetes client"
+    );
     let k8s_decorator = match Decorator::new(health_state.clone()).await {
         Ok(decorator) => {
-            info!("k8s client initialized successfully and all caches are synced");
+            info!(
+                event.name = "k8s.client.init.success",
+                "kubernetes client initialized successfully and all caches are synced"
+            );
             Some(Arc::new(decorator))
         }
         Err(e) => {
             error!(
-                "failed to initialize k8s client - k8s metadata lookup will not be available: {e}"
+                event.name = "k8s.client_init_failed",
+                error.message = %e,
+                "failed to initialize kubernetes client; metadata lookup will be unavailable"
             );
             health_state
                 .k8s_caches_synced
@@ -320,35 +365,63 @@ async fn run() -> Result<()> {
 
     let k8s_decorator_clone = k8s_decorator.clone();
     tokio::spawn(async move {
+        info!(
+            event.name = "task.started",
+            task.name = "k8s.decorator",
+            task.description = "decorating flow attributes with kubernetes metadata",
+            "userspace task started"
+        );
         while let Some(flow_span) = flow_span_rx.recv().await {
             // Attempt K8s decoration for enhanced logging/debugging first
             if let Some(decorator) = &k8s_decorator_clone {
                 match decorate_flow_span(&flow_span, decorator).await {
                     Ok(decorated_flow_span) => {
-                        debug!("k8s decorated flow attributes: {decorated_flow_span:?}");
+                        debug!(
+                            event.name = "k8s.decorator.decorated",
+                            flow.community_id = %decorated_flow_span.attributes.flow_community_id,
+                            "successfully decorated flow attributes with kubernetes metadata"
+                        );
                         if let Err(e) = k8s_decorated_flow_span_tx.send(decorated_flow_span).await {
                             error!(
-                                "failed to send decorated flow attributes to k8s decoration channel: {e}"
+                                event.name = "channel.send_failed",
+                                channel.name = "k8s_decorated_flow_span",
+                                error.message = %e,
+                                "failed to send decorated flow attributes to kubernetes decoration channel"
                             );
                         }
                     }
                     Err(e) => {
-                        debug!("failed to decorate flow attributes with k8s metadata: {e}");
+                        debug!(
+                            event.name = "k8s.decorator.failed",
+                            flow.community_id = %flow_span.attributes.flow_community_id,
+                            error.message = %e,
+                            "failed to decorate flow attributes with kubernetes metadata"
+                        );
                     }
                 }
             } else {
                 debug!(
-                    "skipping k8s decoration for flow attributes with community id {}: k8s client not available",
-                    flow_span.attributes.flow_community_id
+                    event.name = "k8s.decorator.skipped",
+                    flow.community_id = %flow_span.attributes.flow_community_id,
+                    reason = "kubernetes_client_unavailable",
+                    "skipping kubernetes decoration for flow attributes"
                 );
             }
         }
-        debug!("flow attributes decoration task exiting");
+        debug!(
+            event.name = "task.exited",
+            task.name = "k8s.decorator",
+            "attributes decoration task exited"
+        );
     });
 
     tokio::spawn(async move {
         flow_span_producer.run().await;
-        debug!("flow attributes producer task exiting");
+        debug!(
+            event.name = "task.exited",
+            task.name = "span.producer",
+            "flow span producer task exited"
+        );
     });
     health_state.ready_to_process.store(true, Ordering::Relaxed);
 
@@ -357,19 +430,30 @@ async fn run() -> Result<()> {
     let ring_buf_reader = RingBufReader::new(ring_buf, packet_filter, packet_meta_tx);
     tokio::spawn(async move {
         ring_buf_reader.run().await;
-        debug!("ring buffer reader task exiting");
+        debug!(
+            event.name = "task.exited",
+            task.name = "source.ringbuf",
+            "ring buffer reader task exited"
+        );
     });
 
     tokio::spawn(async move {
         while let Some(k8s_decorated_flow_span) = k8s_decorated_flow_span_rx.recv().await {
             let traceable: TraceableRecord = Arc::new(k8s_decorated_flow_span);
-            debug!("exporting flow spans");
+            trace!(event.name = "flow.exporting", "exporting flow span");
             exporter.export(traceable).await;
         }
-        debug!("exporting task exiting");
+        debug!(
+            event.name = "task.exited",
+            task.name = "exporter",
+            "exporter task exited"
+        );
     });
 
-    info!("application startup sequence finished.");
+    info!(
+        event.name = "application.startup_finished",
+        "application startup sequence finished"
+    );
     health_state.startup_complete.store(true, Ordering::Relaxed);
 
     let is_ready = health_state.ebpf_loaded.load(Ordering::Relaxed)
@@ -377,9 +461,15 @@ async fn run() -> Result<()> {
         && health_state.ready_to_process.load(Ordering::Relaxed);
 
     if is_ready {
-        info!("all systems are ready, application is healthy.");
+        info!(
+            event.name = "application.healthy",
+            "all systems are ready, application is healthy"
+        );
     } else {
-        warn!("application is running but is not healthy. check /readyz endpoint for details.");
+        warn!(
+            event.name = "application.unhealthy",
+            "application is running but is not healthy"
+        );
     }
 
     info!("waiting for ctrl+c");

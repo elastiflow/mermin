@@ -235,11 +235,23 @@ impl Conf {
 
     fn warn_no_match(pattern: &str) {
         if Self::parse_regex(pattern).is_some() {
-            warn!(pattern=%pattern, "no interfaces matched regex pattern");
+            warn!(
+                event.name = "config.interface_not_found",
+                config.interface.pattern = %pattern,
+                "no interfaces matched configured regex pattern"
+            );
         } else if Self::is_glob(pattern) {
-            warn!(pattern=%pattern, "no interfaces matched glob pattern");
+            warn!(
+                event.name = "config.interface_not_found",
+                config.interface.pattern = %pattern,
+                "no interfaces matched configured glob pattern"
+            );
         } else {
-            warn!(iface=%pattern, "configured interface not found on host");
+            warn!(
+                event.name = "config.interface_not_found",
+                config.interface.name = %pattern,
+                "configured interface was not found on the host"
+            );
         }
     }
 
