@@ -7,8 +7,8 @@
 
 ## Overview
 
-This example deploys Mermin with OpenTelemetry Collector for purely for testing purposes.
-OpenTelemetry Collector output is `debug` (`stdout`), tested using [Kind](https://kind.sigs.k8s.io/)
+This example deploys Mermin with the OpenTelemetry Collector for testing purposes.
+The OpenTelemetry Collector's output is set to `debug` (`stdout`), and has been tested by using [Kind](https://kind.sigs.k8s.io/)
 
 Notes on the example deployment:
 
