@@ -124,7 +124,7 @@ discovery "informer" "k8s" {
 
     Controls how Mermin walks K8s owner references (Pod <- Job <- CronJob <- ...)
     and attaches owner metadata to flows.
-    
+
     Valid owner kinds: Deployment, ReplicaSet, StatefulSet, DaemonSet, Job, CronJob
   */
   owner_relations = {

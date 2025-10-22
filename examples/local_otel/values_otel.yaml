@@ -16,9 +16,9 @@ config:
       protocols:
         grpc:
           endpoint: ${env:MY_POD_IP}:4317
-          tls:
-            cert_file: /etc/ssl/otel/tls.crt
-            key_file: /etc/ssl/otel/tls.key
+          # tls:
+          #   cert_file: /etc/ssl/otel/tls.crt
+          #   key_file: /etc/ssl/otel/tls.key
         http:
           endpoint: ${env:MY_POD_IP}:4318
   service:

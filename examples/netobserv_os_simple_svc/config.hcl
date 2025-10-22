@@ -7,7 +7,7 @@ export "traces" {
     endpoint = "https://netobserv-flow.elastiflow.svc.cluster.local:4317"
 
     tls = {
-      insecure = true
+      insecure_skip_verify = true
     }
   }
 }
