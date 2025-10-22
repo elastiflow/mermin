@@ -39,9 +39,9 @@ internal "traces" {
 
     tls = {
       insecure_skip_verify = false
-      ca_cert     = "/etc/certs/ca.crt"
-      client_cert = "/etc/certs/cert.crt"
-      client_key  = "/etc/certs/cert.key"
+      ca_cert              = "/etc/certs/ca.crt"
+      client_cert          = "/etc/certs/cert.crt"
+      client_key           = "/etc/certs/cert.key"
     }
   }
 }
@@ -124,7 +124,7 @@ discovery "informer" "k8s" {
 
     Controls how Mermin walks K8s owner references (Pod <- Job <- CronJob <- ...)
     and attaches owner metadata to flows.
-    
+
     Valid owner kinds: Deployment, ReplicaSet, StatefulSet, DaemonSet, Job, CronJob
   */
   owner_relations = {
@@ -693,9 +693,9 @@ export "traces" {
 
     tls = {
       insecure_skip_verify = false
-      ca_cert     = "/etc/certs/ca.crt"
-      client_cert = "/etc/certs/cert.crt"
-      client_key  = "/etc/certs/cert.key"
+      ca_cert              = "/etc/certs/ca.crt"
+      client_cert          = "/etc/certs/cert.crt"
+      client_key           = "/etc/certs/cert.key"
     }
   }
 }

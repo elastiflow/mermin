@@ -1,7 +1,7 @@
 mermin:
   enabled: false
 
-netobserv:
+netobserv-flow:
   enabled: false
 opensearch:
   enabled: false
