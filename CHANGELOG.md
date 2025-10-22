@@ -13,7 +13,7 @@
 ### Features
 
 - **config:** Span batch size opts (#161)
-- **otlp:** Add tls support with mutual authentication and insecure mode (#164)
+- **otlp:** Add tls support with mutual authentication and insecure_skip_verify mode (#164)
 - **agent:** Flow span src/dst configuration (#139)
 - **config:** Support communityid seed config option (#163)
 

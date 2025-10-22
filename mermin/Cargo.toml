@@ -28,7 +28,7 @@ fxhash = "0.2"
 globset = "0.4.17"
 hcl-rs = "0.19.2"
 humantime = "2.2.0"
-hyper-rustls = "0.27"
+hyper-rustls = { version = "0.27", features = ["http2"] }
 hyper-util = "0.1"
 ip_network = "0.4.1"
 ip_network_table = "0.2.0"
@@ -42,12 +42,14 @@ network-types = { path = "../network-types" }
 num-iter = "0.1.45"
 num-traits = "0.2.19"
 opentelemetry = { version = "0.31.0" }
-opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic", "tls", "tls-roots"] }
+opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic"] }
 opentelemetry-stdout = "0.31.0"
 opentelemetry_sdk = { version = "0.31.0", features = ["experimental_async_runtime", "rt-tokio", "experimental_trace_batch_span_processor_with_async_runtime"] }
 pnet = "0.34"
 regex = "1"
 rustls = "0.23"
+rustls-native-certs = "0.8"
+rustls-pemfile = "2.2"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.142"
 sha1 = "0.10"
@@ -61,7 +63,7 @@ tokio = { workspace = true, features = [
     "signal",
     "time"
 ] }
-tonic = { version = "0.14.2", features = ["transport", "tls-native-roots"] }
+tonic = { version = "0.14.2", features = ["transport"] }
 tower-http = { version = "0.5", features = ["trace"] }
 tracing = { version = "0.1.41" }
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }

@@ -7,7 +7,7 @@ export "traces" {
     endpoint = "https://192.0.2.100:443"
 
     tls = {
-      insecure = true
+      insecure_skip_verify = true
     }
   }
 }

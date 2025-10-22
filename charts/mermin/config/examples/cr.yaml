@@ -258,4 +258,4 @@ spec:
     caCert: /etc/certs/ca.crt
     clientCert: /etc/certs/cert.crt
     clientKey: /etc/certs/cert.key
-    insecure: false
+    insecure_skip_verify: false
