@@ -124,6 +124,8 @@ discovery "informer" "k8s" {
 
     Controls how Mermin walks K8s owner references (Pod <- Job <- CronJob <- ...)
     and attaches owner metadata to flows.
+    
+    Valid owner kinds: Deployment, ReplicaSet, StatefulSet, DaemonSet, Job, CronJob
   */
   owner_relations = {
     # Limit the ownerReference walk depth and depth of attached metadata
@@ -144,8 +146,12 @@ discovery "informer" "k8s" {
   /*
     Selector-based K8s resource relations
 
-    Extracts selector s from K8s resource definitions and matches them against other resources
+    Extracts selectors from K8s resource definitions and matches them against other resources
     (e.g., NetworkPolicy selects Pods, Service selects Pods via spec.selector)
+
+    Supported resource kinds:
+    - NetworkPolicy, Service (network resources)
+    - Deployment, ReplicaSet, StatefulSet, DaemonSet, Job, CronJob (workload controllers)
   */
   selector_relations = [
     # NetworkPolicy -> Pod association
@@ -163,7 +169,42 @@ discovery "informer" "k8s" {
       kind                        = "Service" # case insensitive
       to                          = "Pod"     # case insensitive
       selector_match_labels_field = "spec.selector"
-    }
+    },
+
+    # Workload controller examples (uncomment to enable)
+    # These provide reverse lookup: find all controllers that select a given pod via label selectors
+    # Complements owner_relations which walks the owner reference chain
+
+    # {
+    #   kind                        = "Deployment"
+    #   to                          = "Pod"
+    #   selector_match_labels_field = "spec.selector.matchLabels"
+    # },
+    # {
+    #   kind                        = "ReplicaSet"
+    #   to                          = "Pod"
+    #   selector_match_labels_field = "spec.selector.matchLabels"
+    # },
+    # {
+    #   kind                        = "StatefulSet"
+    #   to                          = "Pod"
+    #   selector_match_labels_field = "spec.selector.matchLabels"
+    # },
+    # {
+    #   kind                        = "DaemonSet"
+    #   to                          = "Pod"
+    #   selector_match_labels_field = "spec.selector.matchLabels"
+    # },
+    # {
+    #   kind                        = "Job"
+    #   to                          = "Pod"
+    #   selector_match_labels_field = "spec.selector.matchLabels"
+    # },
+    # {
+    #   kind                        = "CronJob"
+    #   to                          = "Pod"
+    #   selector_match_labels_field = "spec.jobTemplate.spec.selector.matchLabels"
+    # }
   ]
 }
 

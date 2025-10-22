@@ -67,9 +67,11 @@ impl<'a> SpanDecorator<'a> {
         if let Some(pod) = pod {
             let pod_meta = K8sObjectMeta::from(pod);
             let owners = self.decorator.get_owners(pod);
+            let selector_relations = self.decorator.get_selector_based_metadata(pod);
             Some(DecorationInfo::Pod {
                 pod: pod_meta,
                 owners,
+                selector_relations,
             })
         } else {
             self.enrich_ip_fallback(ip).await
@@ -85,7 +87,11 @@ impl<'a> SpanDecorator<'a> {
         is_source: bool,
     ) {
         match decoration_info {
-            DecorationInfo::Pod { pod, owners } => {
+            DecorationInfo::Pod {
+                pod,
+                owners,
+                selector_relations,
+            } => {
                 self.set_k8s_attr(flow_span, "pod.name", &pod.name, is_source);
                 self.set_k8s_attr_opt(flow_span, "namespace.name", &pod.namespace, is_source);
 
@@ -93,6 +99,13 @@ impl<'a> SpanDecorator<'a> {
                 if let Some(workload_owners) = owners {
                     for workload_owner in workload_owners {
                         self.populate_workload_attributes(flow_span, workload_owner, is_source);
+                    }
+                }
+
+                // Populate selector-based relations (NetworkPolicies, Services that select this pod)
+                if let Some(relations) = selector_relations {
+                    for relation in relations {
+                        self.populate_selector_relation_attributes(flow_span, relation, is_source);
                     }
                 }
             }
@@ -111,7 +124,7 @@ impl<'a> SpanDecorator<'a> {
     }
 
     /// Maps workload controller metadata to the appropriate K8s attributes.
-    /// Handles Deployment, ReplicaSet, StatefulSet, DaemonSet, and Job controllers.
+    /// Handles Deployment, ReplicaSet, StatefulSet, DaemonSet, Job, and CronJob controllers.
     fn populate_workload_attributes(
         &self,
         flow_span: &mut FlowSpan,
@@ -133,6 +146,55 @@ impl<'a> SpanDecorator<'a> {
             }
             WorkloadOwner::Job(meta) => {
                 self.set_k8s_attr(flow_span, "job.name", &meta.name, is_source);
+            }
+            WorkloadOwner::CronJob(meta) => {
+                self.set_k8s_attr(flow_span, "cronjob.name", &meta.name, is_source);
+            }
+        }
+    }
+
+    /// Maps selector-based relation metadata to the appropriate K8s attributes.
+    /// Handles resources that have selectors matching the pod (e.g., NetworkPolicy, Service, workload controllers).
+    fn populate_selector_relation_attributes(
+        &self,
+        flow_span: &mut FlowSpan,
+        relation: &K8sObjectMeta,
+        is_source: bool,
+    ) {
+        // Match based on the kind field (case-insensitive comparison)
+        match relation.kind.to_lowercase().as_str() {
+            "networkpolicy" => {
+                self.set_k8s_attr(flow_span, "networkpolicy.name", &relation.name, is_source);
+            }
+            "service" => {
+                self.set_k8s_attr(flow_span, "service.name", &relation.name, is_source);
+            }
+            "replicaset" => {
+                self.set_k8s_attr(flow_span, "replicaset.name", &relation.name, is_source);
+            }
+            "deployment" => {
+                self.set_k8s_attr(flow_span, "deployment.name", &relation.name, is_source);
+            }
+            "statefulset" => {
+                self.set_k8s_attr(flow_span, "statefulset.name", &relation.name, is_source);
+            }
+            "daemonset" => {
+                self.set_k8s_attr(flow_span, "daemonset.name", &relation.name, is_source);
+            }
+            "job" => {
+                self.set_k8s_attr(flow_span, "job.name", &relation.name, is_source);
+            }
+            "cronjob" => {
+                self.set_k8s_attr(flow_span, "cronjob.name", &relation.name, is_source);
+            }
+            _ => {
+                // For other kinds, we could add a generic attribute or log
+                debug!(
+                    event.name = "k8s.selector_relation.unknown_kind",
+                    k8s.resource.kind = %relation.kind,
+                    k8s.resource.name = %relation.name,
+                    "selector relation for unsupported resource kind"
+                );
             }
         }
     }

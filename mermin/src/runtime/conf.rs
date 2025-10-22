@@ -492,7 +492,30 @@ pub struct InformerDiscoveryConf {
 pub struct K8sInformerConf {
     /// Owner relations configuration
     pub owner_relations: Option<OwnerRelationsOptions>,
-    // Additional k8s-specific informer config fields can be added here in the future
+    /// Selector-based resource relations configuration
+    ///
+    /// If None or an empty list, selector-based matching is disabled.
+    /// Rules are required for selector matching to function.
+    pub selector_relations: Option<Vec<SelectorRelationRule>>,
+}
+
+/// Configuration for a single selector-based resource relation rule
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SelectorRelationRule {
+    /// The kind of resource that contains the selector (e.g., "NetworkPolicy", "Service")
+    /// Case insensitive
+    pub kind: String,
+    /// The kind of resource to match against (e.g., "Pod")
+    /// Case insensitive
+    pub to: String,
+    /// JSON path to the matchLabels field in the source resource
+    /// Example: "spec.podSelector.matchLabels" or "spec.selector"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selector_match_labels_field: Option<String>,
+    /// JSON path to the matchExpressions field in the source resource
+    /// Example: "spec.podSelector.matchExpressions"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selector_match_expressions_field: Option<String>,
 }
 
 pub mod defaults {
@@ -2766,5 +2789,219 @@ discovery:
         assert!(Conf::parse_regex("eth0").is_none());
         assert!(Conf::parse_regex("^eth.*$").is_none());
         assert!(Conf::parse_regex("").is_none());
+    }
+
+    #[test]
+    fn loads_selector_relations_config_from_hcl_file() {
+        Jail::expect_with(|jail| {
+            let path = "selector_relations.hcl";
+            jail.create_file(
+                path,
+                r#"
+discovery "informer" "k8s" {
+    selector_relations = [
+        {
+            kind = "NetworkPolicy"
+            to = "Pod"
+            selector_match_labels_field = "spec.podSelector.matchLabels"
+            selector_match_expressions_field = "spec.podSelector.matchExpressions"
+        },
+        {
+            kind = "Service"
+            to = "Pod"
+            selector_match_labels_field = "spec.selector"
+        }
+    ]
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
+
+            // Verify selector_relations configuration is loaded correctly
+            assert!(
+                cfg.discovery.informer.is_some(),
+                "informer config should be present"
+            );
+
+            let k8s_conf = cfg
+                .discovery
+                .informer
+                .as_ref()
+                .and_then(|informer| informer.k8s.as_ref())
+                .expect("k8s informer config should be present");
+
+            assert!(
+                k8s_conf.selector_relations.is_some(),
+                "selector_relations should be present"
+            );
+
+            let selector_relations = k8s_conf.selector_relations.as_ref().unwrap();
+            assert_eq!(
+                selector_relations.len(),
+                2,
+                "should have 2 selector relation rules"
+            );
+
+            // Verify NetworkPolicy rule
+            let networkpolicy_rule = &selector_relations[0];
+            assert_eq!(networkpolicy_rule.kind, "NetworkPolicy");
+            assert_eq!(networkpolicy_rule.to, "Pod");
+            assert_eq!(
+                networkpolicy_rule.selector_match_labels_field.as_deref(),
+                Some("spec.podSelector.matchLabels")
+            );
+            assert_eq!(
+                networkpolicy_rule
+                    .selector_match_expressions_field
+                    .as_deref(),
+                Some("spec.podSelector.matchExpressions")
+            );
+
+            // Verify Service rule
+            let service_rule = &selector_relations[1];
+            assert_eq!(service_rule.kind, "Service");
+            assert_eq!(service_rule.to, "Pod");
+            assert_eq!(
+                service_rule.selector_match_labels_field.as_deref(),
+                Some("spec.selector")
+            );
+            assert!(service_rule.selector_match_expressions_field.is_none());
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn loads_selector_relations_config_from_yaml_file() {
+        Jail::expect_with(|jail| {
+            let path = "selector_relations.yaml";
+            jail.create_file(
+                path,
+                r#"
+discovery:
+  informer:
+    k8s:
+      selector_relations:
+        - kind: NetworkPolicy
+          to: Pod
+          selector_match_labels_field: "spec.podSelector.matchLabels"
+          selector_match_expressions_field: "spec.podSelector.matchExpressions"
+        - kind: Service
+          to: Pod
+          selector_match_labels_field: "spec.selector"
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load from YAML file");
+
+            // Verify selector_relations configuration is loaded correctly
+            assert!(
+                cfg.discovery.informer.is_some(),
+                "informer config should be present"
+            );
+
+            let k8s_conf = cfg
+                .discovery
+                .informer
+                .as_ref()
+                .and_then(|informer| informer.k8s.as_ref())
+                .expect("k8s informer config should be present");
+
+            assert!(
+                k8s_conf.selector_relations.is_some(),
+                "selector_relations should be present"
+            );
+
+            let selector_relations = k8s_conf.selector_relations.as_ref().unwrap();
+            assert_eq!(
+                selector_relations.len(),
+                2,
+                "should have 2 selector relation rules"
+            );
+
+            // Verify NetworkPolicy rule
+            let networkpolicy_rule = &selector_relations[0];
+            assert_eq!(networkpolicy_rule.kind, "NetworkPolicy");
+            assert_eq!(networkpolicy_rule.to, "Pod");
+
+            // Verify Service rule
+            let service_rule = &selector_relations[1];
+            assert_eq!(service_rule.kind, "Service");
+            assert_eq!(service_rule.to, "Pod");
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn config_without_selector_relations() {
+        Jail::expect_with(|jail| {
+            let path = "no_selector_relations.yaml";
+            jail.create_file(
+                path,
+                r#"
+discovery:
+  instrument:
+    interfaces:
+      - eth0
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) =
+                Conf::new(cli).expect("config should load without selector_relations");
+
+            // When selector_relations is not specified, it should be None
+            let k8s_conf = cfg
+                .discovery
+                .informer
+                .as_ref()
+                .and_then(|informer| informer.k8s.as_ref());
+
+            assert!(
+                k8s_conf.is_none(),
+                "k8s config should not be present when not specified"
+            );
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn selector_relations_with_empty_list() {
+        Jail::expect_with(|jail| {
+            let path = "empty_selector_relations.yaml";
+            jail.create_file(
+                path,
+                r#"
+discovery:
+  informer:
+    k8s:
+      selector_relations: []
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load with empty list");
+
+            let k8s_conf = cfg
+                .discovery
+                .informer
+                .as_ref()
+                .and_then(|informer| informer.k8s.as_ref())
+                .expect("k8s informer config should be present");
+
+            let selector_relations = k8s_conf.selector_relations.as_ref().unwrap();
+            assert_eq!(
+                selector_relations.len(),
+                0,
+                "selector_relations should be empty"
+            );
+
+            Ok(())
+        });
     }
 }
