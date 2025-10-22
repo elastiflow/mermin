@@ -58,6 +58,6 @@ exporter "otlp" "main" {
   port    = 4318
 
   tls {
-    insecure    = true
+    insecure_skip_verify = true
   }
 }

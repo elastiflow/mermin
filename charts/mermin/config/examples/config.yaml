@@ -305,7 +305,7 @@ export:
         ca_cert: /etc/certs/ca.crt
         client_cert: /etc/certs/cert.crt
         client_key: /etc/certs/cert.key
-        insecure: false
+        insecure_skip_verify: false
     stdout: ""
 filter:
   destination:
@@ -390,7 +390,7 @@ internal:
         ca_cert: /etc/certs/ca.crt
         client_cert: /etc/certs/cert.crt
         client_key: /etc/certs/cert.key
-        insecure: false
+        insecure_skip_verify: false
     span_format: full
     stdout: ""
 log_level: info

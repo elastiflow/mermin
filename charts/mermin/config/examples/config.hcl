@@ -38,7 +38,7 @@ internal "traces" {
     }
 
     tls = {
-      insecure    = false
+      insecure_skip_verify = false
       ca_cert     = "/etc/certs/ca.crt"
       client_cert = "/etc/certs/cert.crt"
       client_key  = "/etc/certs/cert.key"
@@ -692,7 +692,7 @@ export "traces" {
     }
 
     tls = {
-      insecure    = false
+      insecure_skip_verify = false
       ca_cert     = "/etc/certs/ca.crt"
       client_cert = "/etc/certs/cert.crt"
       client_key  = "/etc/certs/cert.key"
