@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use k8s_openapi::{
     api::{
         apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet},
-        batch::v1::Job,
+        batch::v1::{CronJob, Job},
         core::v1::Pod,
     },
     apimachinery::pkg::apis::meta::v1::OwnerReference,
@@ -229,6 +229,7 @@ impl OwnerRelationsManager {
             WorkloadOwner::StatefulSet(_) => "statefulset",
             WorkloadOwner::DaemonSet(_) => "daemonset",
             WorkloadOwner::Job(_) => "job",
+            WorkloadOwner::CronJob(_) => "cronjob",
         };
 
         // Exclude takes precedence
@@ -300,6 +301,7 @@ impl OwnerRelationsManager {
             "StatefulSet" => find_in_store!(StatefulSet, StatefulSet),
             "DaemonSet" => find_in_store!(DaemonSet, DaemonSet),
             "Job" => find_in_store!(Job, Job),
+            "CronJob" => find_in_store!(CronJob, CronJob),
             _ => {
                 debug!(
                     event.name = "k8s.unsupported_owner_kind",
@@ -331,6 +333,7 @@ impl OwnerRelationsManager {
             WorkloadOwner::StatefulSet(m) => m.namespace.clone(),
             WorkloadOwner::DaemonSet(m) => m.namespace.clone(),
             WorkloadOwner::Job(m) => m.namespace.clone(),
+            WorkloadOwner::CronJob(m) => m.namespace.clone(),
         }
     }
 }
@@ -367,6 +370,7 @@ mod tests {
             "StatefulSet" => WorkloadOwner::StatefulSet(meta),
             "DaemonSet" => WorkloadOwner::DaemonSet(meta),
             "Job" => WorkloadOwner::Job(meta),
+            "CronJob" => WorkloadOwner::CronJob(meta),
             _ => panic!("Unsupported kind: {}", kind),
         }
     }
@@ -524,10 +528,11 @@ mod tests {
             create_test_owner("StatefulSet"),
             create_test_owner("DaemonSet"),
             create_test_owner("Job"),
+            create_test_owner("CronJob"),
         ];
 
         let filtered = manager.filter_owners(owners.clone());
-        assert_eq!(filtered.len(), 5, "All owner types should be supported");
+        assert_eq!(filtered.len(), 6, "All owner types should be supported");
     }
 
     #[test]
@@ -703,13 +708,14 @@ mod tests {
             create_test_owner("ReplicaSet"),
             create_test_owner("StatefulSet"),
             create_test_owner("Job"),
+            create_test_owner("CronJob"),
         ];
 
         let filtered = manager.filter_owners(owners);
 
         assert_eq!(
             filtered.len(),
-            5,
+            6,
             "Default configuration should include all owner types (empty include_kinds = include all)"
         );
 
@@ -735,6 +741,11 @@ mod tests {
                 .any(|o| matches!(o, WorkloadOwner::StatefulSet(_)))
         );
         assert!(filtered.iter().any(|o| matches!(o, WorkloadOwner::Job(_))));
+        assert!(
+            filtered
+                .iter()
+                .any(|o| matches!(o, WorkloadOwner::CronJob(_)))
+        );
     }
 
     #[test]

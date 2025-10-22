@@ -19,7 +19,7 @@ use ip_network::IpNetwork;
 use k8s_openapi::{
     api::{
         apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet},
-        batch::v1::Job,
+        batch::v1::{CronJob, Job},
         core::v1::{Namespace, Node, Pod, Service},
         discovery::v1::EndpointSlice,
         networking::v1::{Ingress, NetworkPolicy, NetworkPolicyPeer, NetworkPolicyPort},
@@ -44,7 +44,9 @@ use crate::{
     k8s::{
         K8sError,
         owner_relations::{OwnerRelationsManager, OwnerRelationsOptions},
+        selector_relations::SelectorRelationsManager,
     },
+    runtime::conf::SelectorRelationRule,
     span::flow::FlowSpan,
 };
 
@@ -90,6 +92,7 @@ pub enum WorkloadOwner {
     StatefulSet(K8sObjectMeta),
     DaemonSet(K8sObjectMeta),
     Job(K8sObjectMeta),
+    CronJob(K8sObjectMeta),
 }
 
 #[derive(Debug, Clone)]
@@ -97,6 +100,9 @@ pub enum DecorationInfo {
     Pod {
         pod: K8sObjectMeta,
         owners: Option<Vec<WorkloadOwner>>,
+        /// Resources that have selectors matching this pod's labels
+        /// (e.g., NetworkPolicies, Services that select this pod)
+        selector_relations: Option<Vec<K8sObjectMeta>>,
     },
     Node {
         node: K8sObjectMeta,
@@ -133,6 +139,7 @@ pub struct ResourceStore {
     pub stateful_sets: reflector::Store<StatefulSet>,
     pub daemon_sets: reflector::Store<DaemonSet>,
     pub jobs: reflector::Store<Job>,
+    pub cron_jobs: reflector::Store<CronJob>,
     pub services: reflector::Store<Service>,
     pub ingresses: reflector::Store<Ingress>,
     pub endpoint_slices: reflector::Store<EndpointSlice>,
@@ -157,6 +164,7 @@ impl_has_store!(ReplicaSet, replica_sets);
 impl_has_store!(StatefulSet, stateful_sets);
 impl_has_store!(DaemonSet, daemon_sets);
 impl_has_store!(Job, jobs);
+impl_has_store!(CronJob, cron_jobs);
 impl_has_store!(Service, services);
 impl_has_store!(Ingress, ingresses);
 impl_has_store!(EndpointSlice, endpoint_slices);
@@ -174,6 +182,7 @@ impl ResourceStore {
             Self::create_resource_store::<StatefulSet>(&client, false),
             Self::create_resource_store::<DaemonSet>(&client, false),
             Self::create_resource_store::<Job>(&client, false),
+            Self::create_resource_store::<CronJob>(&client, false),
             Self::create_resource_store::<Service>(&client, false),
             Self::create_resource_store::<Ingress>(&client, false),
             Self::create_resource_store::<EndpointSlice>(&client, false),
@@ -189,6 +198,7 @@ impl ResourceStore {
             (stateful_sets, stateful_sets_r),
             (daemon_sets, daemon_sets_r),
             (jobs, jobs_r),
+            (cron_jobs, cron_jobs_r),
             (services, services_r),
             (ingresses, ingresses_r),
             (endpoint_slices, endpoint_slices_r),
@@ -204,6 +214,7 @@ impl ResourceStore {
             stateful_sets_r,
             daemon_sets_r,
             jobs_r,
+            cron_jobs_r,
             services_r,
             ingresses_r,
             endpoint_slices_r,
@@ -228,6 +239,7 @@ impl ResourceStore {
             stateful_sets,
             daemon_sets,
             jobs,
+            cron_jobs,
             services,
             ingresses,
             endpoint_slices,
@@ -392,6 +404,7 @@ pub struct Decorator {
     pub client: Client,
     pub resource_store: ResourceStore,
     pub owner_relations_manager: OwnerRelationsManager,
+    pub selector_relations_manager: Option<SelectorRelationsManager>,
 }
 
 impl Decorator {
@@ -399,6 +412,7 @@ impl Decorator {
     pub async fn new(
         health_state: HealthState,
         owner_relations_opts: Option<OwnerRelationsOptions>,
+        selector_relations_opts: Option<Vec<SelectorRelationRule>>,
     ) -> Result<Self, K8sError> {
         let client = Client::try_default()
             .await
@@ -409,10 +423,19 @@ impl Decorator {
         let owner_relations_manager =
             OwnerRelationsManager::new(owner_relations_opts.unwrap_or_default());
 
+        // Create selector relations manager if rules are provided
+        // Note: If selector_relations is None or an empty list, no manager is created.
+        // This is intentional - without rules, selector matching cannot function.
+        // Both states effectively mean "selector relations disabled".
+        let selector_relations_manager = selector_relations_opts
+            .filter(|rules| !rules.is_empty())
+            .map(SelectorRelationsManager::new);
+
         Ok(Self {
             client,
             resource_store,
             owner_relations_manager,
+            selector_relations_manager,
         })
     }
 
@@ -423,6 +446,18 @@ impl Decorator {
     pub fn get_owners(&self, pod: &Pod) -> Option<Vec<WorkloadOwner>> {
         self.owner_relations_manager
             .get_owners(pod, &self.resource_store)
+    }
+
+    /// Given a Pod object, returns metadata for all resources that have selectors matching
+    /// the pod's labels (e.g., NetworkPolicies, Services).
+    ///
+    /// Returns None if selector_relations is not configured or no matches are found.
+    pub fn get_selector_based_metadata(&self, pod: &Pod) -> Option<Vec<K8sObjectMeta>> {
+        let manager = self.selector_relations_manager.as_ref()?;
+        let pod_labels = pod.labels();
+        let pod_namespace = pod.namespace().unwrap_or_default();
+
+        manager.get_related_resources(pod_labels, &pod_namespace, &self.resource_store)
     }
 
     /// Looks up a Pod by its IP address.
@@ -896,4 +931,445 @@ impl Decorator {
 pub enum FlowDirection {
     Ingress,
     Egress,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
+
+    use super::*;
+    use crate::{
+        k8s::{
+            owner_relations::OwnerRelationsOptions, selector_relations::SelectorRelationsManager,
+        },
+        runtime::conf::SelectorRelationRule,
+    };
+
+    /// Creates a test pod with the given name, labels, and owner references
+    fn create_test_pod(
+        name: &str,
+        namespace: &str,
+        labels: BTreeMap<String, String>,
+        owner_refs: Option<Vec<OwnerReference>>,
+    ) -> Pod {
+        Pod {
+            metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+                name: Some(name.to_string()),
+                namespace: Some(namespace.to_string()),
+                labels: Some(labels),
+                owner_references: owner_refs,
+                uid: Some(format!("{}-uid", name)),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Creates a test ReplicaSet that owns pods
+    fn create_test_replicaset(
+        name: &str,
+        namespace: &str,
+        selector_labels: BTreeMap<String, String>,
+        owner_refs: Option<Vec<OwnerReference>>,
+    ) -> ReplicaSet {
+        ReplicaSet {
+            metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+                name: Some(name.to_string()),
+                namespace: Some(namespace.to_string()),
+                owner_references: owner_refs,
+                uid: Some(format!("{}-uid", name)),
+                ..Default::default()
+            },
+            spec: Some(k8s_openapi::api::apps::v1::ReplicaSetSpec {
+                selector: LabelSelector {
+                    match_labels: Some(selector_labels),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// Creates a test Deployment that owns ReplicaSets
+    fn create_test_deployment(
+        name: &str,
+        namespace: &str,
+        selector_labels: BTreeMap<String, String>,
+    ) -> Deployment {
+        Deployment {
+            metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+                name: Some(name.to_string()),
+                namespace: Some(namespace.to_string()),
+                uid: Some(format!("{}-uid", name)),
+                ..Default::default()
+            },
+            spec: Some(k8s_openapi::api::apps::v1::DeploymentSpec {
+                selector: LabelSelector {
+                    match_labels: Some(selector_labels),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// Creates a test Service with a pod selector
+    fn create_test_service(
+        name: &str,
+        namespace: &str,
+        selector_labels: BTreeMap<String, String>,
+    ) -> Service {
+        Service {
+            metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+                name: Some(name.to_string()),
+                namespace: Some(namespace.to_string()),
+                uid: Some(format!("{}-uid", name)),
+                ..Default::default()
+            },
+            spec: Some(k8s_openapi::api::core::v1::ServiceSpec {
+                selector: Some(selector_labels),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// Creates a test NetworkPolicy with a pod selector
+    fn create_test_network_policy(
+        name: &str,
+        namespace: &str,
+        pod_selector_labels: BTreeMap<String, String>,
+    ) -> NetworkPolicy {
+        NetworkPolicy {
+            metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+                name: Some(name.to_string()),
+                namespace: Some(namespace.to_string()),
+                uid: Some(format!("{}-uid", name)),
+                ..Default::default()
+            },
+            spec: Some(k8s_openapi::api::networking::v1::NetworkPolicySpec {
+                pod_selector: LabelSelector {
+                    match_labels: Some(pod_selector_labels),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+        }
+    }
+
+    /// High-level integration test that proves both owner relations and selector relations
+    /// work together in the decoration pipeline.
+    ///
+    /// Test scenario:
+    /// - Pod "web-pod" with labels {app: web, tier: frontend}
+    /// - Owned by ReplicaSet "web-rs" which is owned by Deployment "web-deployment"
+    /// - Selected by Service "web-service"
+    /// - Selected by NetworkPolicy "web-policy"
+    ///
+    /// Expected results:
+    /// - get_owners() should return [ReplicaSet, Deployment] (owner chain)
+    /// - get_selector_based_metadata() should return [Service, NetworkPolicy] (selector matches)
+    #[test]
+    fn test_decoration_with_both_owner_and_selector_relations() {
+        // Setup: Create test data
+        let namespace = "default";
+        let pod_labels = BTreeMap::from([
+            ("app".to_string(), "web".to_string()),
+            ("tier".to_string(), "frontend".to_string()),
+        ]);
+
+        // Create the ownership chain: Deployment -> ReplicaSet -> Pod
+        let deployment = create_test_deployment("web-deployment", namespace, pod_labels.clone());
+
+        let replicaset = create_test_replicaset(
+            "web-rs",
+            namespace,
+            pod_labels.clone(),
+            Some(vec![OwnerReference {
+                api_version: "apps/v1".to_string(),
+                kind: "Deployment".to_string(),
+                name: "web-deployment".to_string(),
+                uid: "web-deployment-uid".to_string(),
+                ..Default::default()
+            }]),
+        );
+
+        let pod = create_test_pod(
+            "web-pod",
+            namespace,
+            pod_labels.clone(),
+            Some(vec![OwnerReference {
+                api_version: "apps/v1".to_string(),
+                kind: "ReplicaSet".to_string(),
+                name: "web-rs".to_string(),
+                uid: "web-rs-uid".to_string(),
+                ..Default::default()
+            }]),
+        );
+
+        // Create resources that select the pod via labels
+        let service = create_test_service("web-service", namespace, pod_labels.clone());
+        let network_policy =
+            create_test_network_policy("web-policy", namespace, pod_labels.clone());
+
+        // Setup: Create ResourceStore with test data
+        // Note: In a real implementation, we would populate actual reflector stores
+        // For this test, we'll create a minimal ResourceStore and manually inject data
+        let (deployments_store, mut deployments_writer) = reflector::store();
+        deployments_writer.apply_watcher_event(&watcher::Event::Apply(deployment));
+
+        let (replicasets_store, mut replicasets_writer) = reflector::store();
+        replicasets_writer.apply_watcher_event(&watcher::Event::Apply(replicaset));
+
+        let (pods_store, mut pods_writer) = reflector::store();
+        pods_writer.apply_watcher_event(&watcher::Event::Apply(pod.clone()));
+
+        let (services_store, mut services_writer) = reflector::store();
+        services_writer.apply_watcher_event(&watcher::Event::Apply(service));
+
+        let (network_policies_store, mut network_policies_writer) = reflector::store();
+        network_policies_writer.apply_watcher_event(&watcher::Event::Apply(network_policy));
+
+        // Create empty stores for other resource types
+        let (nodes_store, _) = reflector::store::<Node>();
+        let (namespaces_store, _) = reflector::store::<Namespace>();
+        let (stateful_sets_store, _) = reflector::store::<StatefulSet>();
+        let (daemon_sets_store, _) = reflector::store::<DaemonSet>();
+        let (jobs_store, _) = reflector::store::<Job>();
+        let (cron_jobs_store, _) = reflector::store::<CronJob>();
+        let (ingresses_store, _) = reflector::store::<Ingress>();
+        let (endpoint_slices_store, _) = reflector::store::<EndpointSlice>();
+
+        let resource_store = ResourceStore {
+            pods: pods_store,
+            nodes: nodes_store,
+            namespaces: namespaces_store,
+            deployments: deployments_store,
+            replica_sets: replicasets_store,
+            stateful_sets: stateful_sets_store,
+            daemon_sets: daemon_sets_store,
+            jobs: jobs_store,
+            cron_jobs: cron_jobs_store,
+            services: services_store,
+            ingresses: ingresses_store,
+            endpoint_slices: endpoint_slices_store,
+            network_policies: network_policies_store,
+        };
+
+        // Setup: Create OwnerRelationsManager with default config (include all)
+        let owner_options = OwnerRelationsOptions {
+            max_depth: 5,
+            include_kinds: vec![], // Empty = include all
+            exclude_kinds: vec![],
+        };
+        let owner_relations_manager = OwnerRelationsManager::new(owner_options);
+
+        // Setup: Create SelectorRelationsManager with rules for Service and NetworkPolicy
+        let selector_rules = vec![
+            SelectorRelationRule {
+                kind: "Service".to_string(),
+                to: "Pod".to_string(),
+                selector_match_labels_field: Some("spec.selector".to_string()),
+                selector_match_expressions_field: None,
+            },
+            SelectorRelationRule {
+                kind: "NetworkPolicy".to_string(),
+                to: "Pod".to_string(),
+                selector_match_labels_field: Some("spec.podSelector.matchLabels".to_string()),
+                selector_match_expressions_field: Some(
+                    "spec.podSelector.matchExpressions".to_string(),
+                ),
+            },
+        ];
+        let selector_relations_manager = Some(SelectorRelationsManager::new(selector_rules));
+
+        // Setup: Create a mock Decorator (we can't use Decorator::new() as it's async and requires a real k8s client)
+        // Instead, we'll manually construct the parts we need and test them directly
+
+        // Test Owner Relations
+        let owners = owner_relations_manager.get_owners(&pod, &resource_store);
+        assert!(owners.is_some(), "Owner relations should return results");
+        let owners = owners.unwrap();
+
+        // Should have 2 owners: ReplicaSet and Deployment
+        assert_eq!(
+            owners.len(),
+            2,
+            "Expected 2 owners (ReplicaSet + Deployment), got {}",
+            owners.len()
+        );
+
+        // Verify ReplicaSet owner
+        let has_replicaset = owners
+            .iter()
+            .any(|o| matches!(o, WorkloadOwner::ReplicaSet(meta) if meta.name == "web-rs"));
+        assert!(
+            has_replicaset,
+            "Owner chain should include ReplicaSet 'web-rs'"
+        );
+
+        // Verify Deployment owner
+        let has_deployment = owners
+            .iter()
+            .any(|o| matches!(o, WorkloadOwner::Deployment(meta) if meta.name == "web-deployment"));
+        assert!(
+            has_deployment,
+            "Owner chain should include Deployment 'web-deployment'"
+        );
+
+        // Test Selector Relations
+        let selector_manager = selector_relations_manager.as_ref().unwrap();
+        let pod_labels = pod.labels();
+        let pod_namespace = pod.namespace().unwrap_or_default();
+
+        let selector_matches =
+            selector_manager.get_related_resources(pod_labels, &pod_namespace, &resource_store);
+
+        assert!(
+            selector_matches.is_some(),
+            "Selector relations should return results"
+        );
+        let selector_matches = selector_matches.unwrap();
+
+        // Should have 2 matches: Service and NetworkPolicy
+        assert_eq!(
+            selector_matches.len(),
+            2,
+            "Expected 2 selector matches (Service + NetworkPolicy), got {}",
+            selector_matches.len()
+        );
+
+        // Verify Service match
+        let has_service = selector_matches
+            .iter()
+            .any(|m| m.kind.to_lowercase() == "service" && m.name == "web-service");
+        assert!(
+            has_service,
+            "Selector matches should include Service 'web-service'"
+        );
+
+        // Verify NetworkPolicy match
+        let has_network_policy = selector_matches
+            .iter()
+            .any(|m| m.kind.to_lowercase() == "networkpolicy" && m.name == "web-policy");
+        assert!(
+            has_network_policy,
+            "Selector matches should include NetworkPolicy 'web-policy'"
+        );
+
+        // Success! Both owner relations and selector relations worked correctly
+        println!(
+            "✓ Owner relations found: {:?}",
+            owners
+                .iter()
+                .map(|o| match o {
+                    WorkloadOwner::ReplicaSet(m) => format!("ReplicaSet/{}", m.name),
+                    WorkloadOwner::Deployment(m) => format!("Deployment/{}", m.name),
+                    WorkloadOwner::StatefulSet(m) => format!("StatefulSet/{}", m.name),
+                    WorkloadOwner::DaemonSet(m) => format!("DaemonSet/{}", m.name),
+                    WorkloadOwner::Job(m) => format!("Job/{}", m.name),
+                    WorkloadOwner::CronJob(m) => format!("CronJob/{}", m.name),
+                })
+                .collect::<Vec<_>>()
+        );
+
+        println!(
+            "✓ Selector relations found: {:?}",
+            selector_matches
+                .iter()
+                .map(|m| format!("{}/{}", m.kind, m.name))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// Test that proves custom field path extraction works with selector relations.
+    /// This is essential for CRD support where selectors may be at non-standard locations.
+    #[test]
+    fn test_generic_field_path_extraction_with_custom_paths() {
+        use serde_json::json;
+
+        // Create a custom resource-like structure with a non-standard selector path
+        let custom_resource = json!({
+            "apiVersion": "example.com/v1",
+            "kind": "CustomResource",
+            "metadata": {
+                "name": "custom-app",
+                "namespace": "default"
+            },
+            "spec": {
+                "application": {
+                    "podSelector": {
+                        "matchLabels": {
+                            "app": "custom",
+                            "version": "v1"
+                        }
+                    }
+                }
+            }
+        });
+
+        // Create a rule with custom field paths
+        let selector_rules = vec![SelectorRelationRule {
+            kind: "CustomResource".to_string(),
+            to: "Pod".to_string(),
+            // Note the non-standard path: spec.application.podSelector.matchLabels
+            selector_match_labels_field: Some(
+                "spec.application.podSelector.matchLabels".to_string(),
+            ),
+            selector_match_expressions_field: None,
+        }];
+
+        let manager = SelectorRelationsManager::new(selector_rules);
+
+        // Extract selector using the generic method
+        let extracted = manager.extract_selector_generic(&custom_resource, &manager.rules[0]);
+
+        assert!(
+            extracted.is_some(),
+            "Generic extraction should find selector at custom path"
+        );
+
+        let selector = extracted.unwrap();
+        assert!(selector.match_labels.is_some());
+
+        let match_labels = selector.match_labels.as_ref().unwrap();
+        assert_eq!(
+            match_labels.get("app"),
+            Some(&"custom".to_string()),
+            "Should extract 'app' label from custom path"
+        );
+        assert_eq!(
+            match_labels.get("version"),
+            Some(&"v1".to_string()),
+            "Should extract 'version' label from custom path"
+        );
+
+        // Verify the selector works for matching
+        let pod_labels = BTreeMap::from([
+            ("app".to_string(), "custom".to_string()),
+            ("version".to_string(), "v1".to_string()),
+        ]);
+
+        assert!(
+            manager.selector_matches(&selector, &pod_labels),
+            "Extracted selector should match pod labels"
+        );
+
+        // Verify non-matching labels don't match
+        let wrong_labels = BTreeMap::from([
+            ("app".to_string(), "other".to_string()),
+            ("version".to_string(), "v1".to_string()),
+        ]);
+
+        assert!(
+            !manager.selector_matches(&selector, &wrong_labels),
+            "Extracted selector should not match wrong labels"
+        );
+
+        println!("✓ Generic field path extraction works with custom paths for CRD-like resources");
+    }
 }
