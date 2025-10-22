@@ -10,6 +10,7 @@ on:
       - alpha
       - beta
     paths-ignore:
+      - 'examples/**/*'
       - 'charts/mermin-netobserv-os-stack/**/*'
 
 
