@@ -23,131 +23,29 @@ env:
 
 
 jobs:
-  # Detect if a commit was made from a release PR with title like '[release v0.1.1] (#49)'
-  release_or_pr:
-    name: Release or Release PR?
+  set_standard_vars:
+    name: Set standard vars
     runs-on: ubuntu-latest
     outputs:
-      is_release: ${{ steps.release_or_pr.outputs.is_release }}
+      tag_prefix: ${{ steps.set_standard_vars.outputs.tag_prefix }}
     steps:
-      - id: release_or_pr
-        env:
-          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+      - uses: actions/checkout@v4
+      - name: set outputs with default values
+        id: set_standard_vars
         run: |
-          cat > /tmp/commit_message <<- EOF
-          ${COMMIT_MESSAGE}
-          EOF
-          cat /tmp/commit_message
-          # https://regex101.com/r/1z85UX/3
-          echo $(grep -Pq '^\[release .+\] \(#[0-9]{1,5}\)$' /tmp/commit_message && echo true || echo false) > /tmp/is_release
-          echo "is_release=$(cat /tmp/is_release)" >> $GITHUB_OUTPUT
+          echo "tag_prefix=${{ fromJson(env.BRANCH_TAG_PREFIXES)[github.ref_name] }}" >> $GITHUB_OUTPUT
 
-  release_pr_create:
-    name: Release PR create
-    needs: [release_or_pr]
-    if: ${{ ! fromJson(needs.release_or_pr.outputs.is_release) }}
-    runs-on: ubuntu-latest
+  release:
+    name: Release mermin-netobserv-os-stack
+    uses: ./.github/workflows/reusable_release_chart.yml
+    needs: [set_standard_vars]
     permissions:
       contents: write
       pull-requests: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - name: Prepare Release
-        id: prepare_release
-        uses: elastiflow/gha-reusable/actions/prepare-release@v0
-        with:
-          tag_prefix: "${{ fromJson(env.BRANCH_TAG_PREFIXES)[github.ref_name] }}"
-          include_paths: "charts/mermin-netobserv-os-stack/**/*"
-          changelog_update: true
-          changelog_path: charts/mermin-netobserv-os-stack/CHANGELOG.md
-          bump_version_yaml: true
-          bump_version_yaml_path: charts/mermin-netobserv-os-stack/Chart.yaml
-          bump_version_yaml_key: '.version,.appVersion'
-      - name: Create Pull Request
-        if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
-        uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e # v7.0.8
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          base: "${{ github.ref_name }}"
-          branch: release-mermin-netobserv-os-stack-from-${{ github.ref_name }}
-          title: '[release ${{ steps.prepare_release.outputs.new_release_git_tag }}]'
-          body: |
-            # Description
-            Release the ${{ steps.prepare_release.outputs.new_release_git_tag }} version
-
-            # Changelog
-            ${{ steps.prepare_release.outputs.new_release_notes }}
-
-  release:
-    name: Release
-    needs: [release_or_pr]
-    if: ${{ fromJson(needs.release_or_pr.outputs.is_release) }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      new_release_version: ${{ steps.prepare_release.outputs.new_release_version }}
-    env:
-      CHARTS_DIR: charts/mermin-netobserv-os-stack
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - name: Prepare Release
-        id: prepare_release
-        uses: elastiflow/gha-reusable/actions/prepare-release@v0
-        with:
-          tag_prefix: "${{ fromJson(env.BRANCH_TAG_PREFIXES)[github.ref_name] }}"
-          include_paths: "charts/mermin-netobserv-os-stack/**/*"
-      - name: Configure Git
-        run: |
-          git config user.name "$GITHUB_ACTOR"
-          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
-      - name: Install Helm
-        uses: azure/setup-helm@v4
-      - name: Install Helm dependencies
-        # TODO(Cleanup for GA): Drop authentication in "helm repo add" once repo is public
-        run: |
-          (helm dependency list ${{ env.CHARTS_DIR }} || true) | grep -E 'https://' | while read -r dep; do
-            helm repo add --username x-access-token --password ${{ secrets.GITHUB_TOKEN }} $(echo ${dep} | awk '{print $1}') $(echo ${dep} | awk '{print $4}')
-          done
-      - name: Install chart-releaser
-        uses: helm/chart-releaser-action@v1.7.0
-        env:
-          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-        with:
-          install_only: true
-      - name: Package helm chart
-        run: |
-          cr package ${{ env.CHARTS_DIR }}
-      - name: Create GH release
-        if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
-        uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8
-        with:
-          name: v${{ steps.prepare_release.outputs.new_release_version }}
-          tag_name: v${{ steps.prepare_release.outputs.new_release_version }}
-          body: |
-            ${{ steps.prepare_release.outputs.new_release_notes }}
-          target_commitish: ${{ github.ref_name }}
-          preserve_order: true
-          make_latest: true
-          files: ".cr-release-packages/*.tgz"
-      # TODO(Cleanup for GA): Once public, no need to push to branches, use releases
-      - name: Push chart to a branch
-        run: |
-          git checkout gh-pages
-          mv .cr-release-packages/*.tgz ./
-          git add *.tgz
-          git commit -m 'chore: Push chart archive'
-          git push origin gh-pages
-          git checkout ${{ github.ref_name }}
-          cr package ${{ env.CHARTS_DIR }}
-      # TODO(Cleanup for GA): Once public, no need for --packages-with-index
-      - name: Update GH pages index
-        run: |
-          mkdir .cr-index
-          cr index --push -t ${{ secrets.GITHUB_TOKEN }} --packages-with-index --owner elastiflow --git-repo mermin
+    with:
+      tag_prefix: ${{ needs.set_standard_vars.outputs.tag_prefix }}
+      chart_name: mermin-netobserv-os-stack
+      chart_dir: charts/mermin-netobserv-os-stack
+      include_paths: "charts/mermin-netobserv-os-stack/**/*"
+      chart_yaml_version_keys: '.version,.appVersion'
+    secrets: inherit
