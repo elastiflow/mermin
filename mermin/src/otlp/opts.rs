@@ -137,7 +137,7 @@ impl std::str::FromStr for StdoutFmt {
 ///       }
 ///     }
 ///     tls = {
-///       insecure = false
+///       insecure_skip_verify = false
 ///       ca_cert = "/etc/certs/ca.crt"
 ///       client_cert = "/etc/certs/cert.crt"
 ///       client_key = "/etc/certs/cert.key"
@@ -247,7 +247,7 @@ pub struct BasicAuthOptions {
 /// - **Custom CA**: Provide a `ca_cert` path to use a custom certificate authority
 ///   instead of system root certificates (useful for private CAs and self-signed certificates).
 /// - **Mutual TLS**: Provide both `client_cert` and `client_key` for mutual TLS authentication.
-/// - **Insecure Mode**: Set `insecure: true` to disable certificate verification entirely.
+/// - **Skip Verification**: Set `insecure_skip_verify: true` to disable certificate verification entirely.
 ///
 /// # Self-Signed Certificates
 ///
@@ -255,23 +255,25 @@ pub struct BasicAuthOptions {
 /// certificate or the CA that signed it. This is the recommended secure approach.
 ///
 /// For development/testing environments where you want to skip verification entirely,
-/// you can use `insecure: true`, but be aware this makes your connection vulnerable to
+/// you can use `insecure_skip_verify: true`, but be aware this makes your connection vulnerable to
 /// man-in-the-middle attacks.
 ///
-/// # Insecure Mode
+/// # Insecure Skip Verify Mode
 ///
-/// WARNING: Setting `insecure: true` disables all certificate verification and should ONLY
+/// WARNING: Setting `insecure_skip_verify: true` disables all certificate verification and should ONLY
 /// be used for development and testing purposes. In production, use the `ca_cert` option instead.
 ///
-/// When insecure mode is enabled:
+/// When insecure skip verify mode is enabled:
+/// - TLS is still used for encryption
 /// - Server certificates are not validated
+/// - Hostname verification is skipped
 /// - Any certificate will be accepted (including invalid, expired, or self-signed certificates)
 /// - The connection is vulnerable to man-in-the-middle attacks
 /// - Cannot be combined with client certificates (mutual TLS)
 /// - A warning will be logged each time a connection is established
 ///
 /// # Fields
-/// - `insecure`: Disable certificate verification (insecure mode). WARNING: Only use for development/testing!
+/// - `insecure_skip_verify`: Skip certificate and hostname verification while maintaining TLS encryption. WARNING: Only use for development/testing!
 /// - `ca_cert`: Optional path to a custom CA certificate file (overrides system root certificates).
 /// - `client_cert`: Optional path to a client certificate file for mutual TLS.
 /// - `client_key`: Optional path to a client private key file for mutual TLS.
@@ -281,34 +283,34 @@ pub struct BasicAuthOptions {
 /// ## Example 1: Custom CA for self-signed certificates (RECOMMENDED)
 /// ```yaml
 /// tls:
-///   insecure: false
+///   insecure_skip_verify: false
 ///   ca_cert: /etc/certs/self-signed-ca.crt  # Add your self-signed cert here
 ///   client_cert: /etc/certs/client.crt      # Optional: for mutual TLS
 ///   client_key: /etc/certs/client.key       # Optional: for mutual TLS
 /// ```
 ///
-/// ## Example 2: Insecure mode for development/testing (NOT for production!)
+/// ## Example 2: Skip verification for development/testing (NOT for production!)
 /// ```yaml
 /// tls:
-///   insecure: true  # Skip all certificate verification
+///   insecure_skip_verify: true  # Skip all certificate verification
 /// ```
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct TlsOptions {
-    /// Disable certificate verification (insecure mode).
+    /// Skip certificate and hostname verification while maintaining TLS encryption.
     /// WARNING: Only use for development/testing! Makes connections vulnerable to MITM attacks.
     /// Cannot be combined with client certificates.
-    pub insecure: bool,
+    pub insecure_skip_verify: Option<bool>,
     /// Path to the CA certificate file for server verification.
     /// When provided, this overrides system root certificates.
     /// Use this for self-signed certificates by specifying your self-signed cert or CA.
     pub ca_cert: Option<String>,
     /// Path to the client certificate file for mutual TLS.
     /// Must be provided together with client_key.
-    /// Cannot be used with insecure mode.
+    /// Cannot be used with insecure_skip_verify mode.
     pub client_cert: Option<String>,
     /// Path to the client private key file for mutual TLS.
     /// Must be provided together with client_cert.
-    /// Cannot be used with insecure mode.
+    /// Cannot be used with insecure_skip_verify mode.
     pub client_key: Option<String>,
 }
 
