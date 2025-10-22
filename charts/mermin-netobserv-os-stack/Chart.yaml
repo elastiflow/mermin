@@ -12,7 +12,7 @@ dependencies:
     # TODO(Cleanup for GA): Should be https://github.com/elastiflow/mermin/, raw.githubusercontent.com... is used whilst repo is private
     # repository: https://github.com/elastiflow/mermin/
     repository: https://raw.githubusercontent.com/elastiflow/mermin/gh-pages
-    version: ">= 0.1.0-beta.6"
+    version: ">= 0.1.0-beta.7"
     condition: mermin.enabled
   - name: netobserv-flow
     repository: https://elastiflow.github.io/helm-chart-netobserv/
@@ -20,7 +20,7 @@ dependencies:
     condition: netobserv-flow.enabled
   - name: opensearch
     repository: https://opensearch-project.github.io/helm-charts/
-    version: ">= 3.3.0"
+    version: ">= 3.3.1"
     condition: opensearch.enabled
   - name: opensearch-dashboards
     repository: https://opensearch-project.github.io/helm-charts/
