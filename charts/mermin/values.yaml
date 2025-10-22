@@ -118,10 +118,3 @@ config:
   # Define config inline:
   # content: |
   #   log_level = "info"
-
-netobserv:
-  enabled: false
-opensearch:
-  enabled: false
-opensearch-dashboards:
-  enabled: false

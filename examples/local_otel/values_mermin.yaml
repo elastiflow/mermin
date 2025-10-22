@@ -1,0 +1,4 @@
+enabled: true
+image:
+  repository: mermin
+  tag: latest

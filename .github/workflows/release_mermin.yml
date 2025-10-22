@@ -10,7 +10,9 @@ on:
       - alpha
       - beta
     paths-ignore:
+      - 'examples/**/*'
       - 'charts/mermin-netobserv-os-stack/**/*'
+      - '.github/workflows/release_mermin-netobserv-os-stack.yml'
 
 
 env:
