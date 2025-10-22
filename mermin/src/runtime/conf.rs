@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{Level, warn};
 
 use crate::{
+    k8s::owner_relations::OwnerRelationsOptions,
     otlp::opts::ExportOptions,
     runtime::{
         conf::conf_serde::{duration, level},
@@ -457,6 +458,8 @@ impl Default for ParserConf {
 pub struct DiscoveryConf {
     /// Instrumentation configuration
     pub instrument: InstrumentConf,
+    /// Informer discovery configuration
+    pub informer: Option<InformerDiscoveryConf>,
 }
 
 /// Instrumentation configuration for network interfaces
@@ -473,6 +476,23 @@ impl Default for InstrumentConf {
             interfaces: vec!["eth0".to_string()],
         }
     }
+}
+
+/// Informer discovery configuration
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct InformerDiscoveryConf {
+    /// Kubernetes informer configuration
+    pub k8s: Option<K8sInformerConf>,
+}
+
+/// Kubernetes informer configuration
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct K8sInformerConf {
+    /// Owner relations configuration
+    pub owner_relations: Option<OwnerRelationsOptions>,
+    // Additional k8s-specific informer config fields can be added here in the future
 }
 
 pub mod defaults {
@@ -2235,6 +2255,210 @@ internal {
 
     // Note: Tests for parse_exporter_reference have been removed as the function
     // and ExporterReference type were never fully implemented or were removed.
+
+    #[test]
+    fn loads_owner_relations_config_from_hcl_file() {
+        Jail::expect_with(|jail| {
+            let path = "owner_relations.hcl";
+            jail.create_file(
+                path,
+                r#"
+discovery "informer" "k8s" {
+    owner_relations = {
+        max_depth = 3
+        include_kinds = ["Deployment", "StatefulSet"]
+        exclude_kinds = ["ReplicaSet"]
+    }
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
+
+            // Verify owner_relations configuration is loaded correctly
+            assert!(
+                cfg.discovery.informer.is_some(),
+                "informer config should be present"
+            );
+
+            let k8s_conf = cfg
+                .discovery
+                .informer
+                .as_ref()
+                .and_then(|informer| informer.k8s.as_ref())
+                .expect("k8s informer config should be present");
+
+            assert!(
+                k8s_conf.owner_relations.is_some(),
+                "owner_relations should be present"
+            );
+
+            let owner_relations = k8s_conf.owner_relations.as_ref().unwrap();
+            assert_eq!(owner_relations.max_depth, 3, "max_depth should be 3");
+            assert_eq!(
+                owner_relations.include_kinds,
+                vec!["Deployment", "StatefulSet"],
+                "include_kinds should match"
+            );
+            assert_eq!(
+                owner_relations.exclude_kinds,
+                vec!["ReplicaSet"],
+                "exclude_kinds should match"
+            );
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn loads_owner_relations_config_from_yaml_file() {
+        Jail::expect_with(|jail| {
+            let path = "owner_relations.yaml";
+            jail.create_file(
+                path,
+                r#"
+discovery:
+  informer:
+    k8s:
+      owner_relations:
+        max_depth: 3
+        include_kinds:
+          - Deployment
+          - StatefulSet
+        exclude_kinds:
+          - ReplicaSet
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load from YAML file");
+
+            // Verify owner_relations configuration is loaded correctly
+            assert!(
+                cfg.discovery.informer.is_some(),
+                "informer config should be present"
+            );
+
+            let k8s_conf = cfg
+                .discovery
+                .informer
+                .as_ref()
+                .and_then(|informer| informer.k8s.as_ref())
+                .expect("k8s informer config should be present");
+
+            assert!(
+                k8s_conf.owner_relations.is_some(),
+                "owner_relations should be present"
+            );
+
+            let owner_relations = k8s_conf.owner_relations.as_ref().unwrap();
+            assert_eq!(owner_relations.max_depth, 3, "max_depth should be 3");
+            assert_eq!(
+                owner_relations.include_kinds,
+                vec!["Deployment", "StatefulSet"],
+                "include_kinds should match"
+            );
+            assert_eq!(
+                owner_relations.exclude_kinds,
+                vec!["ReplicaSet"],
+                "exclude_kinds should match"
+            );
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn owner_relations_config_with_defaults() {
+        Jail::expect_with(|jail| {
+            let path = "owner_relations_defaults.yaml";
+            jail.create_file(
+                path,
+                r#"
+discovery:
+  informer:
+    k8s:
+      owner_relations: {}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load with default values");
+
+            let k8s_conf = cfg
+                .discovery
+                .informer
+                .as_ref()
+                .and_then(|informer| informer.k8s.as_ref())
+                .expect("k8s informer config should be present");
+
+            let owner_relations = k8s_conf.owner_relations.as_ref().unwrap();
+            assert_eq!(
+                owner_relations.max_depth, 5,
+                "default max_depth should be 5"
+            );
+            assert!(
+                owner_relations.include_kinds.is_empty(),
+                "default include_kinds should be empty"
+            );
+            assert!(
+                owner_relations.exclude_kinds.is_empty(),
+                "default exclude_kinds should be empty"
+            );
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn config_without_owner_relations() {
+        Jail::expect_with(|jail| {
+            let path = "no_owner_relations.yaml";
+            jail.create_file(
+                path,
+                r#"
+discovery:
+  instrument:
+    interfaces:
+      - eth0
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load without owner_relations");
+
+            // When owner_relations is not specified, it should be None
+            let k8s_conf = cfg
+                .discovery
+                .informer
+                .as_ref()
+                .and_then(|informer| informer.k8s.as_ref());
+
+            assert!(
+                k8s_conf.is_none(),
+                "k8s config should not be present when not specified"
+            );
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn owner_relations_conf_default_values() {
+        use crate::k8s::owner_relations::OwnerRelationsOptions;
+
+        let conf = OwnerRelationsOptions::default();
+        assert_eq!(conf.max_depth, 5, "Default max_depth should be 5");
+        assert!(
+            conf.include_kinds.is_empty(),
+            "Default include_kinds should be empty"
+        );
+        assert!(
+            conf.exclude_kinds.is_empty(),
+            "Default exclude_kinds should be empty"
+        );
+    }
 
     // Edge case tests for interface resolution
 
