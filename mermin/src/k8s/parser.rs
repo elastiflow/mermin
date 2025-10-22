@@ -66,10 +66,10 @@ impl<'a> SpanDecorator<'a> {
     async fn enrich(&self, pod: &Option<Pod>, ip: IpAddr) -> Option<DecorationInfo> {
         if let Some(pod) = pod {
             let pod_meta = K8sObjectMeta::from(pod);
-            let owner = self.decorator.get_top_level_controller(pod);
+            let owners = self.decorator.get_owners(pod);
             Some(DecorationInfo::Pod {
                 pod: pod_meta,
-                owner,
+                owners,
             })
         } else {
             self.enrich_ip_fallback(ip).await
@@ -85,13 +85,15 @@ impl<'a> SpanDecorator<'a> {
         is_source: bool,
     ) {
         match decoration_info {
-            DecorationInfo::Pod { pod, owner } => {
+            DecorationInfo::Pod { pod, owners } => {
                 self.set_k8s_attr(flow_span, "pod.name", &pod.name, is_source);
                 self.set_k8s_attr_opt(flow_span, "namespace.name", &pod.namespace, is_source);
 
-                // Populate workload controller information if available
-                if let Some(workload_owner) = owner {
-                    self.populate_workload_attributes(flow_span, workload_owner, is_source);
+                // Populate workload controller information for all owners in the chain
+                if let Some(workload_owners) = owners {
+                    for workload_owner in workload_owners {
+                        self.populate_workload_attributes(flow_span, workload_owner, is_source);
+                    }
                 }
             }
             DecorationInfo::Node { node } => {

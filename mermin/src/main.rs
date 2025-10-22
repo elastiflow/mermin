@@ -342,7 +342,16 @@ async fn run() -> Result<()> {
         event.name = "k8s.client_initializing",
         "initializing kubernetes client"
     );
-    let k8s_decorator = match Decorator::new(health_state.clone()).await {
+
+    // Extract owner_relations configuration from discovery.informer.k8s if present
+    let owner_relations_opts = conf
+        .discovery
+        .informer
+        .as_ref()
+        .and_then(|informer| informer.k8s.as_ref())
+        .and_then(|k8s_conf| k8s_conf.owner_relations.clone());
+
+    let k8s_decorator = match Decorator::new(health_state.clone(), owner_relations_opts).await {
         Ok(decorator) => {
             info!(
                 event.name = "k8s.client.init.success",

@@ -25,7 +25,7 @@ use k8s_openapi::{
         networking::v1::{Ingress, NetworkPolicy, NetworkPolicyPeer, NetworkPolicyPort},
     },
     apimachinery::pkg::{
-        apis::meta::v1::{LabelSelector, LabelSelectorRequirement, OwnerReference},
+        apis::meta::v1::{LabelSelector, LabelSelectorRequirement},
         util::intstr::IntOrString,
     },
 };
@@ -39,7 +39,14 @@ use network_types::ip::IpProto;
 use tokio::sync::oneshot;
 use tracing::{debug, error, warn};
 
-use crate::{health::HealthState, k8s::K8sError, span::flow::FlowSpan};
+use crate::{
+    health::HealthState,
+    k8s::{
+        K8sError,
+        owner_relations::{OwnerRelationsManager, OwnerRelationsOptions},
+    },
+    span::flow::FlowSpan,
+};
 
 /// Holds metadata for a single Kubernetes object.
 #[derive(Debug, Clone)]
@@ -89,7 +96,7 @@ pub enum WorkloadOwner {
 pub enum DecorationInfo {
     Pod {
         pod: K8sObjectMeta,
-        owner: Option<WorkloadOwner>,
+        owners: Option<Vec<WorkloadOwner>>,
     },
     Node {
         node: K8sObjectMeta,
@@ -384,96 +391,38 @@ pub struct Decorator {
     #[allow(dead_code)]
     pub client: Client,
     pub resource_store: ResourceStore,
+    pub owner_relations_manager: OwnerRelationsManager,
 }
 
 impl Decorator {
     /// Creates a new Decorator, initializing all resource reflectors concurrently.
-    pub async fn new(health_state: HealthState) -> Result<Self, K8sError> {
+    pub async fn new(
+        health_state: HealthState,
+        owner_relations_opts: Option<OwnerRelationsOptions>,
+    ) -> Result<Self, K8sError> {
         let client = Client::try_default()
             .await
             .map_err(|e| K8sError::ClientInitialization(Box::new(e)))?;
         let resource_store = ResourceStore::new(client.clone(), health_state).await?;
+
+        // Use provided config or defaults
+        let owner_relations_manager =
+            OwnerRelationsManager::new(owner_relations_opts.unwrap_or_default());
+
         Ok(Self {
             client,
             resource_store,
+            owner_relations_manager,
         })
     }
 
-    /// Given a Pod object, traverses its ownerReferences to find its top-level managing controller.
-    pub fn get_top_level_controller(&self, pod: &Pod) -> Option<WorkloadOwner> {
-        let mut current_owners = pod.owner_references().to_vec();
-        let mut namespace = pod.namespace().unwrap_or_default();
-        let mut top_level_owner = None;
-
-        while let Some(owner_ref) = current_owners.pop() {
-            if let Some((owner, next_owners_opt)) = self.get_owner(&owner_ref, &namespace) {
-                top_level_owner = Some(owner);
-
-                if let Some(next_owners) = next_owners_opt {
-                    current_owners = next_owners;
-                    if let Some(Some(ns)) = top_level_owner.as_ref().map(|o| match o {
-                        WorkloadOwner::Deployment(m) => m.namespace.as_ref(),
-                        WorkloadOwner::ReplicaSet(m) => m.namespace.as_ref(),
-                        WorkloadOwner::StatefulSet(m) => m.namespace.as_ref(),
-                        WorkloadOwner::DaemonSet(m) => m.namespace.as_ref(),
-                        WorkloadOwner::Job(m) => m.namespace.as_ref(),
-                    }) {
-                        namespace = ns.clone();
-                    }
-                } else {
-                    break;
-                }
-            } else {
-                debug!(
-                    event.name = "k8s.owner_ref_missing",
-                    k8s.owner.name = %owner_ref.name,
-                    k8s.owner.kind = %owner_ref.kind,
-                    k8s.namespace = %namespace,
-                    "failed to find owner reference in local store"
-                );
-                break;
-            }
-        }
-
-        top_level_owner
-    }
-
-    /// Looks up a single owner reference in the corresponding resource store.
-    fn get_owner(
-        &self,
-        owner_ref: &OwnerReference,
-        namespace: &str,
-    ) -> Option<(WorkloadOwner, Option<Vec<OwnerReference>>)> {
-        let name = &owner_ref.name;
-        macro_rules! find_in_store {
-            ($store_type:ty, $variant:ident) => {
-                self.resource_store
-                    .get_by_namespace::<$store_type>(namespace)
-                    .iter()
-                    .find(|obj| obj.name_any() == *name)
-                    .map(|obj| {
-                        let meta = K8sObjectMeta::from(obj.as_ref());
-                        let next_owners = obj.meta().owner_references.clone();
-                        (WorkloadOwner::$variant(meta), next_owners)
-                    })
-            };
-        }
-
-        match owner_ref.kind.as_str() {
-            "ReplicaSet" => find_in_store!(ReplicaSet, ReplicaSet),
-            "Deployment" => find_in_store!(Deployment, Deployment),
-            "StatefulSet" => find_in_store!(StatefulSet, StatefulSet),
-            "DaemonSet" => find_in_store!(DaemonSet, DaemonSet),
-            "Job" => find_in_store!(Job, Job),
-            _ => {
-                debug!(
-                    event.name = "k8s.unsupported_owner_kind",
-                    k8s.owner.kind = %owner_ref.kind,
-                    "owner lookup for this resource kind is not implemented"
-                );
-                None
-            }
-        }
+    /// Given a Pod object, returns all owners in the ownership chain, filtered according to
+    /// the owner_relations configuration.
+    ///
+    /// Walks the chain up to max_depth and filters based on include/exclude rules.
+    pub fn get_owners(&self, pod: &Pod) -> Option<Vec<WorkloadOwner>> {
+        self.owner_relations_manager
+            .get_owners(pod, &self.resource_store)
     }
 
     /// Looks up a Pod by its IP address.
