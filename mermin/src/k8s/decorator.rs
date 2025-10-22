@@ -36,11 +36,7 @@ use kube::{
 };
 use kube_runtime::watcher;
 use network_types::ip::IpProto;
-use serde_json::{Value, to_value};
-use tokio::{
-    net::lookup_host,
-    sync::{RwLock, oneshot},
-};
+use tokio::sync::{RwLock, oneshot};
 use tracing::{debug, error, warn};
 
 use crate::{
@@ -50,7 +46,7 @@ use crate::{
         owner_relations::{OwnerRelationsManager, OwnerRelationsOptions},
         selector_relations::SelectorRelationsManager,
     },
-    runtime::conf::{AttributesConf, Conf, ObjectAssociationRule, SelectorRelationRule},
+    runtime::conf::{Conf, SelectorRelationRule},
     span::flow::FlowSpan,
 };
 
@@ -119,10 +115,6 @@ pub enum DecorationInfo {
     EndpointSlice {
         slice: K8sObjectMeta,
     },
-    // generic fallback for any other resource type
-    Resource {
-        resource: K8sObjectMeta,
-    },
 }
 
 /// A trait for types that contain a reflector store for a specific Kubernetes resource.
@@ -184,6 +176,7 @@ impl ResourceStore {
         client: Client,
         health_state: HealthState,
         required_kinds: &HashSet<String>,
+        ip_index: Arc<RwLock<HashMap<String, Vec<K8sObjectMeta>>>>,
     ) -> Result<Self, K8sError> {
         let mut readiness_handles = Vec::new();
 
@@ -220,14 +213,7 @@ impl ResourceStore {
         let endpoint_slices = create!("endpointslice", EndpointSlice, false);
         let network_policies = create!("networkpolicy", NetworkPolicy, false);
 
-        // Wait for all *started* reflectors to sync
-        let _ = futures::future::join_all(readiness_handles).await;
-
-        health_state
-            .k8s_caches_synced
-            .store(true, Ordering::Relaxed);
-
-        Ok(Self {
+        let store = Self {
             pods,
             nodes,
             namespaces,
@@ -241,7 +227,26 @@ impl ResourceStore {
             ingresses,
             endpoint_slices,
             network_policies,
-        })
+        };
+
+        // Wait for all *started* reflectors to sync
+        let _ = futures::future::join_all(readiness_handles).await;
+        debug!(
+            event.name = "k8s.reflector.all_synced",
+            "all active kubernetes resource reflectors have synced"
+        );
+
+        debug!(
+            event.name = "k8s.ip_index.initial_build",
+            "caches synced, performing initial ip index build"
+        );
+        update_ip_index(store.clone(), ip_index).await;
+
+        health_state
+            .k8s_caches_synced
+            .store(true, Ordering::Relaxed);
+
+        Ok(store)
     }
 
     /// Helper to create a store for a resource, handling failures gracefully.
@@ -408,7 +413,6 @@ pub struct Decorator {
     pub resource_store: ResourceStore,
     pub owner_relations_manager: OwnerRelationsManager,
     pub selector_relations_manager: Option<SelectorRelationsManager>,
-    pub association_rules: HashMap<String, HashMap<String, AttributesConf>>,
     ip_index: Arc<RwLock<HashMap<String, Vec<K8sObjectMeta>>>>,
 }
 
@@ -453,9 +457,16 @@ impl Decorator {
         required_kinds.insert("statefulset".to_string());
         required_kinds.insert("daemonset".to_string());
         required_kinds.insert("job".to_string());
+        required_kinds.insert("cronjob".to_string());
 
-        let resource_store =
-            ResourceStore::new(client.clone(), health_state, &required_kinds).await?;
+        let ip_index = Arc::new(RwLock::new(HashMap::new()));
+        let resource_store = ResourceStore::new(
+            client.clone(),
+            health_state,
+            &required_kinds,
+            ip_index.clone(),
+        )
+        .await?;
 
         // Use provided config or defaults
         let owner_relations_manager =
@@ -468,9 +479,6 @@ impl Decorator {
         let selector_relations_manager = selector_relations_opts
             .filter(|rules| !rules.is_empty())
             .map(SelectorRelationsManager::new);
-
-        let ip_index = Arc::new(RwLock::new(HashMap::new()));
-        update_ip_index(resource_store.clone(), ip_index.clone()).await;
 
         let resource_store_clone = resource_store.clone();
         let ip_index_clone = ip_index.clone();
@@ -487,7 +495,6 @@ impl Decorator {
             resource_store,
             owner_relations_manager,
             selector_relations_manager,
-            association_rules: conf.attributes.clone(),
             ip_index,
         })
     }
@@ -513,45 +520,40 @@ impl Decorator {
         manager.get_related_resources(pod_labels, &pod_namespace, &self.resource_store)
     }
 
+    /// A generic helper to find the first object of a specific kind for a given IP.
+    /// This is the new internal engine that uses the IP index.
+    async fn get_objects_by_ip<K>(&self, ip: IpAddr) -> Vec<Arc<K>>
+    where
+        K: Resource<DynamicType = ()> + Clone + 'static,
+        ResourceStore: HasStore<K>,
+    {
+        let ip_str = ip.to_string();
+        let index = self.ip_index.read().await;
+        let mut results = Vec::new();
+
+        if let Some(candidates) = index.get(&ip_str) {
+            let store = self.resource_store.store();
+
+            for meta in candidates {
+                if meta.kind == K::kind(&()) {
+                    let key = ObjectRef::new(&meta.name)
+                        .within(meta.namespace.as_deref().unwrap_or_default());
+                    if let Some(obj) = store.get(&key) {
+                        results.push(obj);
+                    }
+                }
+            }
+        }
+        results
+    }
+
     /// Looks up a Pod by its IP address.
     pub async fn get_pod_by_ip(&self, ip: IpAddr) -> Option<Arc<Pod>> {
-        let ip_str = ip.to_string();
-        let target_ip_slice = Some(ip_str.as_str());
-
-        self.resource_store
-            .pods
-            .state()
-            .iter()
-            .find(|pod| {
-                pod.status.as_ref().is_some_and(|status| {
-                    status.pod_ip.as_deref() == target_ip_slice
-                        || status.host_ip.as_deref() == target_ip_slice
-                        || status.pod_ips.as_ref().is_some_and(|ips| {
-                            ips.iter()
-                                .any(|pod_ip_info| pod_ip_info.ip.as_str() == ip_str)
-                        })
-                        || status.host_ips.as_ref().is_some_and(|ips| {
-                            ips.iter()
-                                .any(|host_ip_info| host_ip_info.ip.as_str() == ip_str)
-                        })
-                })
-            })
-            .cloned()
+        self.get_objects_by_ip(ip).await.into_iter().next()
     }
 
     pub async fn get_node_by_ip(&self, ip: IpAddr) -> Option<Arc<Node>> {
-        let ip_str = ip.to_string();
-        self.resource_store
-            .nodes
-            .state()
-            .iter()
-            .find(|node| {
-                node.status
-                    .as_ref()
-                    .and_then(|status| status.addresses.as_ref())
-                    .is_some_and(|addresses| addresses.iter().any(|addr| addr.address == ip_str))
-            })
-            .cloned()
+        self.get_objects_by_ip(ip).await.into_iter().next()
     }
 
     /// Looks up a Service by an IP address.
@@ -562,37 +564,7 @@ impl Decorator {
     /// - `spec.load_balancer_ip` (a user-requested IP)
     /// - `status.load_balancer.ingress` (the actual provisioned IPs)
     pub async fn get_service_by_ip(&self, ip: IpAddr) -> Option<Arc<Service>> {
-        let ip_str = ip.to_string();
-        self.resource_store
-            .services
-            .state()
-            .iter()
-            .find(|service| {
-                let spec_match = service.spec.as_ref().is_some_and(|spec| {
-                    spec.cluster_ip.as_deref() == Some(&ip_str)
-                        || spec
-                            .cluster_ips
-                            .as_ref()
-                            .is_some_and(|ips| ips.contains(&ip_str))
-                        || spec
-                            .external_ips
-                            .as_ref()
-                            .is_some_and(|ips| ips.contains(&ip_str))
-                        || spec.load_balancer_ip.as_deref() == Some(&ip_str)
-                });
-                if spec_match {
-                    return true;
-                }
-
-                // Check the status for provisioned LoadBalancer IPs
-                service
-                    .status
-                    .as_ref()
-                    .and_then(|status| status.load_balancer.as_ref())
-                    .and_then(|lb| lb.ingress.as_ref())
-                    .is_some_and(|ingress| ingress.iter().any(|i| i.ip.as_deref() == Some(&ip_str)))
-            })
-            .cloned()
+        self.get_objects_by_ip(ip).await.into_iter().next()
     }
 
     /// Takes a virtual IP (like a ClusterIP) and resolves it to the list of
@@ -626,19 +598,7 @@ impl Decorator {
 
     /// Looks up an EndpointSlice directly by one of its endpoint IP addresses.
     pub async fn get_endpointslice_by_ip(&self, ip: IpAddr) -> Option<Arc<EndpointSlice>> {
-        let ip_str = ip.to_string();
-        self.resource_store
-            .endpoint_slices
-            .state()
-            .iter()
-            .find(|slice| {
-                // An EndpointSlice contains a list of endpoints.
-                slice.endpoints.iter().any(|endpoint| {
-                    // Each endpoint has a list of IP addresses.
-                    endpoint.addresses.contains(&ip_str)
-                })
-            })
-            .cloned()
+        self.get_objects_by_ip(ip).await.into_iter().next()
     }
 
     /// Finds all EndpointSlices associated with a given Service.
@@ -977,238 +937,6 @@ impl Decorator {
             },
         }
     }
-
-    /// Associates a flow span with Kubernetes objects based on the loaded configuration.
-    /// Returns a map where keys are "source" and "destination" and values are lists of matched objects.
-    pub async fn associate_flow(
-        &self,
-        flow_span: &FlowSpan,
-    ) -> HashMap<String, Vec<K8sObjectMeta>> {
-        let mut results = HashMap::new();
-        let index = self.ip_index.read().await;
-
-        let source_ip = flow_span.attributes.source_address.to_string();
-        if let Some(source_candidates) = index.get(&source_ip) {
-            let mut source_matches = Vec::new();
-            for candidate_meta in source_candidates {
-                if let Some(full_object_json) = self.get_full_object_as_json(candidate_meta) {
-                    if self
-                        .check_secondary_rules(
-                            flow_span,
-                            &full_object_json,
-                            candidate_meta,
-                            "source",
-                        )
-                        .await
-                    {
-                        source_matches.push(candidate_meta.clone());
-                    }
-                }
-            }
-            if !source_matches.is_empty() {
-                results.insert("source".to_string(), source_matches);
-            }
-        }
-
-        let dest_ip = flow_span.attributes.destination_address.to_string();
-        if let Some(dest_candidates) = index.get(&dest_ip) {
-            let mut dest_matches = Vec::new();
-            for candidate_meta in dest_candidates {
-                if let Some(full_object_json) = self.get_full_object_as_json(candidate_meta) {
-                    if self
-                        .check_secondary_rules(
-                            flow_span,
-                            &full_object_json,
-                            candidate_meta,
-                            "destination",
-                        )
-                        .await
-                    {
-                        dest_matches.push(candidate_meta.clone());
-                    }
-                }
-            }
-            if !dest_matches.is_empty() {
-                results.insert("destination".to_string(), dest_matches);
-            }
-        }
-
-        results
-    }
-
-    async fn check_secondary_rules(
-        &self,
-        flow_span: &FlowSpan,
-        full_object_json: &Value,
-        candidate: &K8sObjectMeta,
-        direction: &str,
-    ) -> bool {
-        if let Some(providers) = self.association_rules.get(direction) {
-            if let Some(k8s_conf) = providers.get("k8s") {
-                let rule = match candidate.kind.as_str() {
-                    "Pod" => k8s_conf.association.pod.as_ref(),
-                    "Service" => k8s_conf.association.service.as_ref(),
-                    "Node" => k8s_conf.association.node.as_ref(),
-                    "Ingress" => k8s_conf.association.ingress.as_ref(),
-                    "EndpointSlice" => k8s_conf.association.endpointslice.as_ref(),
-                    "NetworkPolicy" => k8s_conf.association.networkpolicy.as_ref(),
-                    "Gateway" => k8s_conf.association.gateway.as_ref(),
-                    "Endpoint" => k8s_conf.association.endpoint.as_ref(),
-                    _ => None,
-                };
-
-                if let Some(rule) = rule {
-                    for source in &rule.sources {
-                        if source.name.ends_with(".ip") {
-                            continue;
-                        }
-
-                        let Some(flow_value) = get_flow_attribute(flow_span, &source.name) else {
-                            return false;
-                        };
-
-                        let mut rule_matched = false;
-                        for to_path in &source.to {
-                            let k8s_values = extract_k8s_values(full_object_json, to_path);
-                            if k8s_values.is_empty() {
-                                continue;
-                            }
-
-                            if self.values_match(&flow_value, k8s_values, to_path).await {
-                                rule_matched = true;
-                                break;
-                            }
-                        }
-
-                        if !rule_matched {
-                            return false;
-                        }
-                    }
-                }
-            }
-        }
-        true
-    }
-
-    /// Given metadata, fetches the full Kubernetes object from the appropriate cache.
-    /// Returns it as a generic serde_json::Value for easy inspection.
-    fn get_full_object_as_json(&self, meta: &K8sObjectMeta) -> Option<Value> {
-        macro_rules! get_from_store {
-            ($store:expr) => {
-                $store
-                    .get(
-                        &ObjectRef::new(&meta.name)
-                            .within(meta.namespace.as_deref().unwrap_or_default()),
-                    )
-                    .and_then(|obj| to_value(obj.as_ref()).ok())
-            };
-        }
-
-        match meta.kind.as_str() {
-            "Pod" => get_from_store!(self.resource_store.pods),
-            "Service" => get_from_store!(self.resource_store.services),
-            "Node" => get_from_store!(self.resource_store.nodes),
-            "Ingress" => get_from_store!(self.resource_store.ingresses),
-            "EndpointSlice" => get_from_store!(self.resource_store.endpoint_slices),
-            "NetworkPolicy" => get_from_store!(self.resource_store.network_policies),
-            _ => None,
-        }
-    }
-
-    /// The comparison engine. Checks if a flow value matches any of the K8s values,
-    /// handling special logic based on the attribute path.
-    async fn values_match(&self, flow_value: &str, k8s_values: Vec<&Value>, to_path: &str) -> bool {
-        if to_path.ends_with("ipBlock.cidr") {
-            let Ok(flow_ip) = flow_value.parse::<IpAddr>() else {
-                return false;
-            };
-            for k8s_val in k8s_values {
-                if let Some(cidr_str) = k8s_val.as_str() {
-                    if let Ok(network) = cidr_str.parse::<IpNetwork>() {
-                        if network.contains(flow_ip) {
-                            return true;
-                        }
-                    }
-                }
-            }
-            return false;
-        }
-
-        // Check for fields that might contain hostnames and require DNS resolution
-        let resolve_dns = [
-            "status.addresses",            // Used by Node, Gateway
-            "spec.externalName",           // Used by Service
-            "status.loadBalancer.ingress", // Used by Ingress
-        ]
-        .iter()
-        .any(|p| to_path.contains(p));
-
-        for k8s_val in k8s_values {
-            if let Some(k8s_str) = k8s_val.as_str() {
-                if k8s_str == flow_value {
-                    return true;
-                }
-
-                if resolve_dns {
-                    if let Ok(resolved_addrs) = lookup_host(format!("{k8s_str}:0")).await {
-                        for addr in resolved_addrs {
-                            if addr.ip().to_string() == flow_value {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        false
-    }
-}
-
-/// Helper to retrieve an attribute value from a FlowSpan by its name.
-fn get_flow_attribute(flow: &FlowSpan, attribute_name: &str) -> Option<String> {
-    match attribute_name {
-        "source.ip" => Some(flow.attributes.source_address.to_string()),
-        "destination.ip" => Some(flow.attributes.destination_address.to_string()),
-        "source.port" => Some(flow.attributes.source_port.to_string()),
-        "destination.port" => Some(flow.attributes.destination_port.to_string()),
-        "network.transport" => Some(flow.attributes.network_transport.to_string()),
-        "network.type" => Some(
-            if flow.attributes.source_address.is_ipv4() {
-                "ipv4"
-            } else {
-                "ipv6"
-            }
-            .to_string(),
-        ),
-        _ => None,
-    }
-}
-
-/// Extracts values from a serde_json::Value using a dot-notation path with wildcard support.
-fn extract_k8s_values<'a>(object: &'a Value, path: &str) -> Vec<&'a Value> {
-    let mut current_values = vec![object];
-    let parts: Vec<&str> = path.split('.').collect();
-
-    for part in parts {
-        let mut next_values = Vec::new();
-        if part == "[*]" {
-            for val in current_values {
-                if let Some(arr) = val.as_array() {
-                    next_values.extend(arr.iter());
-                }
-            }
-        } else {
-            for val in current_values {
-                if let Some(obj) = val.as_object() {
-                    if let Some(v) = obj.get(part) {
-                        next_values.push(v);
-                    }
-                }
-            }
-        }
-        current_values = next_values;
-    }
-    current_values
 }
 
 /// Scans all relevant Kubernetes objects and builds a lookup map from IP to object metadata.
@@ -1221,54 +949,74 @@ async fn update_ip_index(
     // Index Pods
     for pod in store.pods.state().iter() {
         if let Some(status) = &pod.status {
+            let meta = K8sObjectMeta::from(pod.as_ref());
             if let Some(ip) = &status.pod_ip {
-                new_index
-                    .entry(ip.clone())
-                    .or_default()
-                    .push(K8sObjectMeta::from(pod.as_ref()));
+                new_index.entry(ip.clone()).or_default().push(meta.clone());
             }
             if let Some(ips) = &status.pod_ips {
                 for pod_ip in ips {
                     new_index
                         .entry(pod_ip.ip.clone())
                         .or_default()
-                        .push(K8sObjectMeta::from(pod.as_ref()));
+                        .push(meta.clone());
                 }
+            }
+            if let Some(ip) = &status.host_ip {
+                new_index.entry(ip.clone()).or_default().push(meta.clone());
             }
         }
     }
 
     // Index Nodes
     for node in store.nodes.state().iter() {
-        if let Some(status) = &node.status {
-            if let Some(addresses) = &status.addresses {
-                for addr in addresses {
-                    new_index
-                        .entry(addr.address.clone())
-                        .or_default()
-                        .push(K8sObjectMeta::from(node.as_ref()));
-                }
+        if let Some(status) = &node.status
+            && let Some(addresses) = &status.addresses
+        {
+            for addr in addresses {
+                new_index
+                    .entry(addr.address.clone())
+                    .or_default()
+                    .push(K8sObjectMeta::from(node.as_ref()));
             }
         }
     }
 
     // Index Services
     for service in store.services.state().iter() {
+        let meta = K8sObjectMeta::from(service.as_ref());
+
         if let Some(spec) = &service.spec {
-            if let Some(ip) = &spec.cluster_ip {
-                if *ip != "None" {
-                    new_index
-                        .entry(ip.clone())
-                        .or_default()
-                        .push(K8sObjectMeta::from(service.as_ref()));
-                }
+            // Index `spec.cluster_ip`
+            if let Some(ip) = &spec.cluster_ip
+                && *ip != "None"
+            {
+                new_index.entry(ip.clone()).or_default().push(meta.clone());
             }
+            // Index `spec.cluster_ips`
             if let Some(ips) = &spec.cluster_ips {
                 for ip in ips {
-                    new_index
-                        .entry(ip.clone())
-                        .or_default()
-                        .push(K8sObjectMeta::from(service.as_ref()));
+                    new_index.entry(ip.clone()).or_default().push(meta.clone());
+                }
+            }
+            // Index `spec.external_ips`
+            if let Some(ips) = &spec.external_ips {
+                for ip in ips {
+                    new_index.entry(ip.clone()).or_default().push(meta.clone());
+                }
+            }
+            // Index `spec.load_balancer_ip`
+            if let Some(ip) = &spec.load_balancer_ip {
+                new_index.entry(ip.clone()).or_default().push(meta.clone());
+            }
+        }
+
+        if let Some(status) = &service.status
+            && let Some(lb) = &status.load_balancer
+            && let Some(ingress_points) = &lb.ingress
+        {
+            for point in ingress_points {
+                if let Some(ip) = &point.ip {
+                    new_index.entry(ip.clone()).or_default().push(meta.clone());
                 }
             }
         }
@@ -1276,17 +1024,16 @@ async fn update_ip_index(
 
     // Index Ingresses
     for ingress in store.ingresses.state().iter() {
-        if let Some(status) = &ingress.status {
-            if let Some(lb) = &status.load_balancer {
-                if let Some(ingress_points) = &lb.ingress {
-                    for point in ingress_points {
-                        if let Some(ip) = &point.ip {
-                            new_index
-                                .entry(ip.clone())
-                                .or_default()
-                                .push(K8sObjectMeta::from(ingress.as_ref()));
-                        }
-                    }
+        if let Some(status) = &ingress.status
+            && let Some(lb) = &status.load_balancer
+            && let Some(ingress_points) = &lb.ingress
+        {
+            for point in ingress_points {
+                if let Some(ip) = &point.ip {
+                    new_index
+                        .entry(ip.clone())
+                        .or_default()
+                        .push(K8sObjectMeta::from(ingress.as_ref()));
                 }
             }
         }
