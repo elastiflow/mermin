@@ -8,7 +8,7 @@
 
 ## Overview
 
-This playbook deploys Mermin and NetObserv Flow (as OTel receiver) with OpenSearch as the data platform in a GCP GKE cluster.
+This example deploys Mermin and NetObserv Flow (as OTel receiver) with OpenSearch as the data platform in a GCP GKE cluster.
 This example is intended only for demonstration, testing, or proof-of-concept use, since OpenSearch is deployed in a single-node mode.
 
 Notes on the example deployment:
@@ -98,7 +98,7 @@ Now you can navigate to the obtained IP in your browser (assuming you have acces
 To render and diff Helm templates to Kubernetes manifests, run:
 
 ```sh
-rm -rf helm_rendered/mermin; helm template -n elastiflow \
+rm -rf helm_rendered; helm template -n elastiflow \
   -f examples/netobserv_os_simple_gke_gw/values.yaml \
   --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
   --output-dir helm_rendered \

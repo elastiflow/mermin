@@ -8,7 +8,7 @@
 
 ## Overview
 
-This playbook deploys Mermin and NetObserv Flow (as OTel receiver) with OpenSearch as the data platform. Although local [Kind](https://kind.sigs.k8s.io/) was used for testing, any kubernetes cluster should work if nodes have sufficient resources and don't have any taints that should be tolerated (`tolerations` values may be used)
+This example deploys Mermin and NetObserv Flow (as OTel receiver) with OpenSearch as the data platform. Although local [Kind](https://kind.sigs.k8s.io/) was used for testing, any kubernetes cluster should work if nodes have sufficient resources and don't have any taints that should be tolerated (`tolerations` values may be used)
 This example is intended only for demonstration, testing, or proof-of-concept use, since OpenSearch is deployed in a single-node mode.
 
 Notes on the example deployment:
@@ -54,7 +54,7 @@ Notes on the example deployment:
     mermin mermin/mermin-netobserv-os-stack
   ```
 
-- Optional, install `metrics-server` to get metrics if not installed yet
+- Optionally install `metrics-server` to get metrics if it has not been installed yet
 
   ```sh
   kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.8.0/components.yaml
@@ -77,7 +77,7 @@ Now you can navigate to `http://localhost:5601/` in your browser to open OpenSea
 To render and diff Helm templates to Kubernetes manifests, run:
 
 ```sh
-rm -rf helm_rendered/mermin; helm template -n elastiflow \
+rm -rf helm_rendered; helm template -n elastiflow \
   -f examples/netobserv_os_simple_svc/values.yaml \
   --set-file mermin.config.content=examples/netobserv_os_simple_svc/config.hcl \
   --output-dir helm_rendered \
