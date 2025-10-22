@@ -55,7 +55,7 @@ This installation assumes that no additional DNS controllers are running in the 
     kubectl create namespace elastiflow
 
     # TODO(Cleanup for GA): image pull secrets not needed when going public
-    kubectl create secret docker-registry ghcr \
+    kubectl -n elastiflow create secret docker-registry ghcr \
         --docker-server=ghcr.io \
         --docker-username=elastiflow-ghcr \
         --docker-password=${CLASSIC_GH_TOKEN}
