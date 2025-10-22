@@ -17,7 +17,7 @@ Notes on the example deployment:
 - Allocatable resources needed (mCPU/MiB):
   - OpenSearch `2000m`/`4000Mi`
   - OpenSearch Dashboards `1000m`/`768M`
-  - NetObserv Flow `1000m`/`6144Mi`
+  - NetObserv Flow `1000m`/`6000Mi`
 - You may optionally customize and use `config.hcl` instead of the default config.
 
 ## Install

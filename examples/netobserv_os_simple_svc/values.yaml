@@ -35,10 +35,10 @@ netobserv-flow:
   resources:
     requests:
       cpu: "1000m"
-      memory: "6144Mi"
+      memory: "6000Mi"
     limits:
       cpu: "2000m"
-      memory: "6144Mi"
+      memory: "6000Mi"
 
   autoscaling:
     enabled: true
