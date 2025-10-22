@@ -1,3 +1,21 @@
+## [v0.1.0-beta.7] - 2025-10-22
+
+### Bug Fixes
+
+- **helm:** Wrong changelog path for an umbrella chart (#168)
+- Use correct bump_version_yaml_path for stack chart (#171)
+- **otlp:** Refactor tls implementation with proper rustls integration (#175)
+- **helm:** Add example for simple Mermin with NetObserv and Opensearch deployment (#170)
+### Features
+
+- **agent:** Log cleanup (#159)
+- **k8s:** Add configurable owner reference filtering (#173)
+- **k8s:** Add selector-based resource relations support (#174)
+
+[v0.1.0-beta.6..v0.1.0-beta.7](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.6...v0.1.0-beta.7)
+
+
+
 ## [v0.1.0-beta.6] - 2025-10-21
 
 ### Features
