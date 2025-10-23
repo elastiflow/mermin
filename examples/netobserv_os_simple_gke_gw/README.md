@@ -26,6 +26,7 @@ Notes on the example deployment:
 - You may optionally customize and use `config.hcl` instead of the default config.
 
 ## Install
+<!-- TODO(Cleanup for GA): Once Mermin is GA, drop `--devel` flag -->
 
 The installation process consists of two phases:
 
@@ -51,7 +52,6 @@ This installation assumes that no additional DNS controllers are running in the 
     helm repo add netobserv https://elastiflow.github.io/helm-chart-netobserv/
     helm repo add opensearch https://opensearch-project.github.io/helm-charts/
     helm repo update
-    helm dependency build mermin/mermin-netobserv-os-stack
     kubectl create namespace elastiflow
 
     # TODO(Cleanup for GA): image pull secrets not needed when going public
@@ -64,6 +64,7 @@ This installation assumes that no additional DNS controllers are running in the 
     helm upgrade -i --wait --timeout 15m -n elastiflow \
       -f examples/netobserv_os_simple_gke_gw/values.yaml \
       --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
+      --devel \
       mermin mermin/mermin-netobserv-os-stack
     ```
 
@@ -80,6 +81,7 @@ This installation assumes that no additional DNS controllers are running in the 
     helm upgrade -i --wait --timeout 15m -n elastiflow \
       -f examples/netobserv_os_simple_gke_gw/values.yaml \
       --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
+      --devel \
       mermin mermin/mermin-netobserv-os-stack
     ```
 
@@ -102,6 +104,7 @@ rm -rf helm_rendered; helm template -n elastiflow \
   -f examples/netobserv_os_simple_gke_gw/values.yaml \
   --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
   --output-dir helm_rendered \
+  --devel \
   mermin mermin/mermin-netobserv-os-stack
 
 # Diff with existing K8s resources

@@ -1,7 +1,7 @@
 mermin:
   enabled: true
   image:
-    tag: v0.1.0-beta.6-debug
+    tag: v0.1.0-beta.7-debug
   # TODO(Cleanup for GA): image pull secrets not needed when going public
   imagePullSecrets:
     - name: ghcr

@@ -21,6 +21,7 @@ Notes on the example deployment:
 - You may optionally customize and use `config.hcl` instead of the default config.
 
 ## Install
+<!-- TODO(Cleanup for GA): Once Mermin is GA, drop `--devel` flag -->
 
 <!-- TODO(Cleanup for GA): Once repo is public, this step should become part of the next step without any dependencies -->
 - Add Mermin Helm chart
@@ -38,7 +39,6 @@ Notes on the example deployment:
   helm repo add netobserv https://elastiflow.github.io/helm-chart-netobserv/
   helm repo add opensearch https://opensearch-project.github.io/helm-charts/
   helm repo update
-  helm dependency build mermin/mermin-netobserv-os-stack
   kubectl create namespace elastiflow
 
   # TODO(Cleanup for GA): image pull secrets not needed when going public
@@ -51,6 +51,7 @@ Notes on the example deployment:
   helm upgrade -i --wait --timeout 15m -n elastiflow \
     -f examples/netobserv_os_simple_svc/values.yaml \
     --set-file mermin.config.content=examples/netobserv_os_simple_svc/config.hcl \
+    --devel \
     mermin mermin/mermin-netobserv-os-stack
   ```
 
@@ -81,6 +82,7 @@ rm -rf helm_rendered; helm template -n elastiflow \
   -f examples/netobserv_os_simple_svc/values.yaml \
   --set-file mermin.config.content=examples/netobserv_os_simple_svc/config.hcl \
   --output-dir helm_rendered \
+  --devel \
   mermin mermin/mermin-netobserv-os-stack
 
 # Diff with existing K8s resources
