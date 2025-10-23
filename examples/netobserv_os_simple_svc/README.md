@@ -68,7 +68,7 @@ Notes on the example deployment:
 First, port forward the OpenSearch Dashboards service
 
 ```sh
-kubectl port-forward svc/elastiflow-os-dashboards 5601:5601
+kubectl -n elastiflow port-forward svc/elastiflow-os-dashboards 5601:5601
 ```
 
 Now you can navigate to `http://localhost:5601/` in your browser to open OpenSearch Dashboards, using `admin`/`Elast1flow!` as the user/password. Select "global tenant", and explore the data.
