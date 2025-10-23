@@ -1,0 +1,176 @@
+---
+on:
+  workflow_call:
+    inputs:
+      tag_prefix:
+        type: string
+        required: true
+        description: "Tag prefix for the chart, usually chart name"
+      chart_name:
+        type: string
+        required: true
+        description: "Chart name to release"
+      chart_dir:
+        type: string
+        required: true
+        description: "Chart path to release"
+      include_paths:
+        type: string
+        default: '**/*'
+        description: "Include paths to determine related commits, comma-separated list"
+      exclude_paths:
+        type: string
+        default: ""
+        description: "Exclude paths to determine related commits, comma-separated list"
+      chart_yaml_version_keys:
+        type: string
+        required: true
+        description: "Keys in the Chart.yaml to replace with the new version"
+      repository_owner:
+        type: string
+        default: elastiflow
+        description: "Repository owner to push the Helm registry index"
+      repository_name:
+        type: string
+        default: mermin
+        description: "Repository name to push the Helm registry index"
+      runs-on:
+        type: string
+        default: ubuntu-latest
+        description: "GHA runner for the job (ubuntu-latest, ubuntu-latest-4c, ubuntu-latest-8c)"
+      timeout-minutes:
+        type: number
+        default: 15
+        description: "Job timeout in minutes"
+
+
+jobs:
+  # Detect if a commit was made from a release PR with title like '[release v0.1.1] (#49)'
+  release_or_pr:
+    name: Release or Release PR?
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    outputs:
+      is_release: ${{ steps.release_or_pr.outputs.is_release }}
+    steps:
+      - id: release_or_pr
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          cat > /tmp/commit_message <<- EOF
+          ${COMMIT_MESSAGE}
+          EOF
+          cat /tmp/commit_message
+          # https://regex101.com/r/1z85UX/3
+          echo $(grep -Pq '^\[release .+\] \(#[0-9]{1,5}\)$' /tmp/commit_message && echo true || echo false) > /tmp/is_release
+          echo "is_release=$(cat /tmp/is_release)" >> $GITHUB_OUTPUT
+
+  release_pr_create:
+    name: Release PR create
+    needs: [release_or_pr]
+    if: ${{ ! fromJson(needs.release_or_pr.outputs.is_release) }}
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Prepare Release
+        id: prepare_release
+        uses: elastiflow/gha-reusable/actions/prepare-release@v0
+        with:
+          tag_prefix: "${{ inputs.tag_prefix }}"
+          include_paths: "${{ inputs.include_paths }}"
+          exclude_paths: ${{ inputs.exclude_paths }}
+          changelog_update: true
+          changelog_path: ${{ inputs.chart_dir }}/CHANGELOG.md
+          bump_version_yaml: true
+          bump_version_yaml_path: ${{ inputs.chart_dir }}/Chart.yaml
+          bump_version_yaml_key: "${{ inputs.chart_yaml_version_keys }}"
+      - name: Create Pull Request
+        if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
+        uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e # v7.0.8
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: "${{ github.ref_name }}"
+          branch: release-${{ inputs.chart_name }}-from-${{ github.ref_name }}
+          title: '[release ${{ steps.prepare_release.outputs.new_release_git_tag }}]'
+          body: |
+            # Description
+            Release the ${{ steps.prepare_release.outputs.new_release_git_tag }} version
+
+            # Changelog
+            ${{ steps.prepare_release.outputs.new_release_notes }}
+
+  release:
+    name: Release
+    needs: [release_or_pr]
+    if: ${{ fromJson(needs.release_or_pr.outputs.is_release) }}
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Prepare Release
+        id: prepare_release
+        uses: elastiflow/gha-reusable/actions/prepare-release@v0
+        with:
+          tag_prefix: "${{ inputs.tag_prefix }}"
+          include_paths: "${{ inputs.include_paths }}"
+          exclude_paths: ${{ inputs.exclude_paths }}
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+      - name: Install Helm dependencies
+        # TODO(Cleanup for GA): Drop authentication in "helm repo add" once repo is public
+        run: |
+          (helm dependency list ${{ inputs.chart_dir }} || true) | grep -E 'https://' | while read -r dep; do
+            helm repo add --username x-access-token --password ${{ secrets.GITHUB_TOKEN }} $(echo ${dep} | awk '{print $1}') $(echo ${dep} | awk '{print $4}')
+          done
+      - name: Install chart-releaser
+        uses: helm/chart-releaser-action@v1.7.0
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        with:
+          install_only: true
+      - name: Package helm chart
+        run: |
+          cr package ${{ inputs.chart_dir }}
+      - name: Create GH release
+        if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
+        uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8
+        with:
+          name: ${{ steps.prepare_release.outputs.new_release_git_tag }}
+          tag_name: ${{ steps.prepare_release.outputs.new_release_git_tag }}
+          body: |
+            ${{ steps.prepare_release.outputs.new_release_notes }}
+          target_commitish: ${{ github.ref_name }}
+          preserve_order: true
+          make_latest: true
+          files: ".cr-release-packages/${{ inputs.chart_name }}*.tgz"
+      # TODO(Cleanup for GA): Once public, no need to push to branches, use releases
+      - name: Push chart to a branch
+        run: |
+          git checkout gh-pages
+          mv .cr-release-packages/${{ inputs.chart_name }}*.tgz ./
+          git add ${{ inputs.chart_name }}*.tgz
+          git commit -m 'chore: Push chart archive'
+          git push origin gh-pages
+          git checkout ${{ github.ref_name }}
+          cr package ${{ inputs.chart_dir }}
+      # TODO(Cleanup for GA): Once public, no need for --packages-with-index
+      - name: Update GH pages index
+        run: |
+          mkdir .cr-index
+          cr index --push -t ${{ secrets.GITHUB_TOKEN }} --packages-with-index --owner ${{ github.repository_owner }} --git-repo ${{ inputs.repository_name }}
