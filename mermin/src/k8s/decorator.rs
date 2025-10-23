@@ -184,13 +184,13 @@ impl ResourceStore {
         ip_index: Arc<RwLock<HashMap<String, Vec<K8sObjectMeta>>>>,
         conf: &Conf,
     ) -> Result<Self, K8sError> {
-        let readiness_handles = Vec::new();
+        let mut readiness_handles = Vec::new();
 
         /// Creates a REQUIRED resource store.
         /// This will always attempt creation, and failure is a fatal error.
         macro_rules! create_required_store {
-            ($type:ty, $is_critical:literal) => {{
-                let (store, rx) = Self::create_resource_store::<$type>(&client, is_critical).await?;
+            ($type:ty, $condition:expr) => {{
+                let (store, rx) = Self::create_resource_store::<$type>(&client, $condition).await?;
                 readiness_handles.extend(rx);
                 store
             }};
@@ -200,12 +200,13 @@ impl ResourceStore {
         /// This creates the store only if its kind is listed in `required_kinds`.
         /// Failure to create the store results in a warning, not a fatal error.
         macro_rules! create_optional_store {
-            ($kind:literal, $is_critical:literal, $type:ty) => {{
-                if !required_kinds.contains($kind) {
-                    let (store, _) = reflector::store();
+            ($kind:literal, $condition:expr, $type:ty) => {{
+                if required_kinds.contains($kind) {
+                    create_required_store!($type, $condition)
+                } else {
+                    let (store, _writer) = reflector::store();
                     store
                 }
-                create_required_store!($type, $is_critical)
             }};
         }
 
@@ -215,16 +216,16 @@ impl ResourceStore {
 
         // Dynamic Stores
         let nodes = create_optional_store!("node", false, Node);
-        let deployments = create_optional_store!("deployment",false, Deployment);
-        let replica_sets = create_optional_store!("replicaset",false, ReplicaSet);
-        let stateful_sets = create_optional_store!("statefulset",false, StatefulSet);
-        let daemon_sets = create_optional_store!("daemonset",false, DaemonSet);
-        let jobs = create_optional_store!("job",false, Job);
-        let cron_jobs = create_optional_store!("cronjob",false, CronJob);
-        let services = create_optional_store!("service",false, Service);
-        let ingresses = create_optional_store!("ingress",false, Ingress);
-        let endpoint_slices = create_optional_store!("endpointslice",false, EndpointSlice);
-        let network_policies = create_optional_store!("networkpolicy",false, NetworkPolicy);
+        let deployments = create_optional_store!("deployment", false, Deployment);
+        let replica_sets = create_optional_store!("replicaset", false, ReplicaSet);
+        let stateful_sets = create_optional_store!("statefulset", false, StatefulSet);
+        let daemon_sets = create_optional_store!("daemonset", false, DaemonSet);
+        let jobs = create_optional_store!("job", false, Job);
+        let cron_jobs = create_optional_store!("cronjob", false, CronJob);
+        let services = create_optional_store!("service", false, Service);
+        let ingresses = create_optional_store!("ingress", false, Ingress);
+        let endpoint_slices = create_optional_store!("endpointslice", false, EndpointSlice);
+        let network_policies = create_optional_store!("networkpolicy", false, NetworkPolicy);
 
         let store = Self {
             pods,
