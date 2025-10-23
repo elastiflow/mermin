@@ -186,38 +186,48 @@ impl ResourceStore {
     ) -> Result<Self, K8sError> {
         let mut readiness_handles = Vec::new();
 
-        macro_rules! create {
-            ($kind:literal, $type:ty, $is_critical:expr) => {{
-                let (store, rx) = Self::create_resource_store::<$type>(
-                    &client,
-                    required_kinds.contains($kind),
-                    $is_critical,
-                )
-                .await?;
+        /// Creates a REQUIRED resource store.
+        /// This will always attempt creation, and failure is a fatal error.
+        macro_rules! create_required_store {
+            ($type:ty) => {{
+                let (store, rx) = Self::create_resource_store::<$type>(&client, true).await?;
                 readiness_handles.extend(rx);
                 store
             }};
         }
 
+        /// Creates an OPTIONAL resource store.
+        /// This creates the store only if its kind is listed in `required_kinds`.
+        /// Failure to create the store results in a warning, not a fatal error.
+        macro_rules! create_optional_store {
+            ($kind:literal, $type:ty) => {{
+                if required_kinds.contains($kind) {
+                    let (store, rx) = Self::create_resource_store::<$type>(&client, false).await?;
+                    readiness_handles.extend(rx);
+                    store
+                } else {
+                    let (store, _) = reflector::store();
+                    store
+                }
+            }};
+        }
+
         // Critical stores
-        let (pods, pods_r) = Self::create_resource_store::<Pod>(&client, true, true).await?;
-        readiness_handles.extend(pods_r);
-        let (namespaces, ns_r) =
-            Self::create_resource_store::<Namespace>(&client, true, true).await?;
-        readiness_handles.extend(ns_r);
+        let pods = create_required_store!(Pod);
+        let namespaces = create_required_store!(Namespace);
 
         // Dynamic Stores
-        let nodes = create!("node", Node, false);
-        let deployments = create!("deployment", Deployment, false);
-        let replica_sets = create!("replicaset", ReplicaSet, false);
-        let stateful_sets = create!("statefulset", StatefulSet, false);
-        let daemon_sets = create!("daemonset", DaemonSet, false);
-        let jobs = create!("job", Job, false);
-        let cron_jobs = create!("cronjob", CronJob, false);
-        let services = create!("service", Service, false);
-        let ingresses = create!("ingress", Ingress, false);
-        let endpoint_slices = create!("endpointslice", EndpointSlice, false);
-        let network_policies = create!("networkpolicy", NetworkPolicy, false);
+        let nodes = create_optional_store!("node", Node);
+        let deployments = create_optional_store!("deployment", Deployment);
+        let replica_sets = create_optional_store!("replicaset", ReplicaSet);
+        let stateful_sets = create_optional_store!("statefulset", StatefulSet);
+        let daemon_sets = create_optional_store!("daemonset", DaemonSet);
+        let jobs = create_optional_store!("job", Job);
+        let cron_jobs = create_optional_store!("cronjob", CronJob);
+        let services = create_optional_store!("service", Service);
+        let ingresses = create_optional_store!("ingress", Ingress);
+        let endpoint_slices = create_optional_store!("endpointslice", EndpointSlice);
+        let network_policies = create_optional_store!("networkpolicy", NetworkPolicy);
 
         let store = Self {
             pods,
@@ -246,7 +256,7 @@ impl ResourceStore {
             event.name = "k8s.ip_index.initial_build",
             "caches synced, performing initial ip index build"
         );
-        update_ip_index(store.clone(), ip_index, conf).await;
+        update_ip_index(&store, &ip_index, conf).await;
 
         health_state
             .k8s_caches_synced
@@ -258,18 +268,12 @@ impl ResourceStore {
     /// Helper to create a store for a resource, handling failures gracefully.
     async fn create_resource_store<K>(
         client: &Client,
-        is_required: bool,
         is_critical: bool,
     ) -> Result<(reflector::Store<K>, Option<oneshot::Receiver<()>>), K8sError>
     where
         K: Resource + Clone + Debug + Send + Sync + 'static + for<'de> serde::Deserialize<'de>,
         K::DynamicType: Default + std::hash::Hash + std::cmp::Eq + Clone,
     {
-        if !is_required {
-            let (reader, _) = reflector::store();
-            return Ok((reader, None));
-        }
-
         let resource_name = K::kind(&K::DynamicType::default()).to_string();
         match create_store::<K>(client.clone()).await {
             Ok((store, readiness_rx)) => Ok((store, Some(readiness_rx))),
@@ -494,12 +498,7 @@ impl Decorator {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
             loop {
                 interval.tick().await;
-                update_ip_index(
-                    resource_store_clone.clone(),
-                    ip_index_clone.clone(),
-                    &conf_clone,
-                )
-                .await;
+                update_ip_index(&resource_store_clone, &ip_index_clone, &conf_clone).await;
             }
         });
 
@@ -1044,8 +1043,8 @@ async fn index_resource_by_ip<K>(
 
 /// Scans all relevant Kubernetes objects and builds a lookup map from IP to object metadata.
 async fn update_ip_index(
-    store: ResourceStore,
-    index: Arc<RwLock<HashMap<String, Vec<K8sObjectMeta>>>>,
+    store: &ResourceStore,
+    index: &Arc<RwLock<HashMap<String, Vec<K8sObjectMeta>>>>,
     conf: &Conf,
 ) {
     let mut new_index = HashMap::new();
@@ -1055,19 +1054,19 @@ async fn update_ip_index(
 
         // Dynamically call the generic indexer for each configured object type.
         if let Some(rule) = &assoc.pod {
-            index_resource_by_ip::<Pod>(&store, &mut new_index, rule).await;
+            index_resource_by_ip::<Pod>(store, &mut new_index, rule).await;
         }
         if let Some(rule) = &assoc.node {
-            index_resource_by_ip::<Node>(&store, &mut new_index, rule).await;
+            index_resource_by_ip::<Node>(store, &mut new_index, rule).await;
         }
         if let Some(rule) = &assoc.service {
-            index_resource_by_ip::<Service>(&store, &mut new_index, rule).await;
+            index_resource_by_ip::<Service>(store, &mut new_index, rule).await;
         }
         if let Some(rule) = &assoc.ingress {
-            index_resource_by_ip::<Ingress>(&store, &mut new_index, rule).await;
+            index_resource_by_ip::<Ingress>(store, &mut new_index, rule).await;
         }
         if let Some(rule) = &assoc.endpointslice {
-            index_resource_by_ip::<EndpointSlice>(&store, &mut new_index, rule).await;
+            index_resource_by_ip::<EndpointSlice>(store, &mut new_index, rule).await;
         }
     }
 
