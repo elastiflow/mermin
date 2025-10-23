@@ -16,6 +16,7 @@ use std::{
 
 use futures::TryStreamExt;
 use ip_network::IpNetwork;
+use jsonpath_rust::JsonPath;
 use k8s_openapi::{
     api::{
         apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet},
@@ -36,7 +37,11 @@ use kube::{
 };
 use kube_runtime::watcher;
 use network_types::ip::IpProto;
-use tokio::sync::{RwLock, oneshot};
+use serde_json::Value;
+use tokio::{
+    net::lookup_host,
+    sync::{RwLock, oneshot},
+};
 use tracing::{debug, error, warn};
 
 use crate::{
@@ -46,7 +51,7 @@ use crate::{
         owner_relations::{OwnerRelationsManager, OwnerRelationsOptions},
         selector_relations::SelectorRelationsManager,
     },
-    runtime::conf::{Conf, SelectorRelationRule},
+    runtime::conf::{Conf, ObjectAssociationRule, SelectorRelationRule},
     span::flow::FlowSpan,
 };
 
@@ -177,6 +182,7 @@ impl ResourceStore {
         health_state: HealthState,
         required_kinds: &HashSet<String>,
         ip_index: Arc<RwLock<HashMap<String, Vec<K8sObjectMeta>>>>,
+        conf: &Conf,
     ) -> Result<Self, K8sError> {
         let mut readiness_handles = Vec::new();
 
@@ -240,7 +246,7 @@ impl ResourceStore {
             event.name = "k8s.ip_index.initial_build",
             "caches synced, performing initial ip index build"
         );
-        update_ip_index(store.clone(), ip_index).await;
+        update_ip_index(store.clone(), ip_index, conf).await;
 
         health_state
             .k8s_caches_synced
@@ -465,6 +471,7 @@ impl Decorator {
             health_state,
             &required_kinds,
             ip_index.clone(),
+            conf,
         )
         .await?;
 
@@ -482,11 +489,17 @@ impl Decorator {
 
         let resource_store_clone = resource_store.clone();
         let ip_index_clone = ip_index.clone();
+        let conf_clone = conf.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
             loop {
                 interval.tick().await;
-                update_ip_index(resource_store_clone.clone(), ip_index_clone.clone()).await;
+                update_ip_index(
+                    resource_store_clone.clone(),
+                    ip_index_clone.clone(),
+                    &conf_clone,
+                )
+                .await;
             }
         });
 
@@ -939,115 +952,122 @@ impl Decorator {
     }
 }
 
+/// Extracts string values from a Kubernetes resource using a JSONPath-like expression.
+///
+/// This function serializes the resource to a serde_json::Value and then applies
+/// the path expression to find and return all matching string values.
+fn extract_values_from_resource<K: serde::Serialize>(
+    resource: &K,
+    path: &str,
+) -> Result<Vec<String>, K8sError> {
+    let full_path = format!("$.{path}");
+
+    let json_value = serde_json::to_value(resource)
+        .map_err(|e| K8sError::Attribution(format!("failed to serialize resource to json: {e}")))?;
+
+    let found_values: Vec<&Value> = json_value.query(&full_path).map_err(|e| {
+        K8sError::Attribution(format!(
+            "invalid jsonpath expression '{full_path}' during value extraction: {e}"
+        ))
+    })?;
+
+    let results = found_values
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+
+    Ok(results)
+}
+
+/// (private helper) Resolves a hostname and adds all resulting IPs to the index.
+async fn index_hostname(
+    new_index: &mut HashMap<String, Vec<K8sObjectMeta>>,
+    hostname: &str,
+    meta: &K8sObjectMeta,
+) {
+    if let Ok(resolved_addrs) = lookup_host(format!("{hostname}:0")).await {
+        for resolved in resolved_addrs {
+            new_index
+                .entry(resolved.ip().to_string())
+                .or_default()
+                .push(meta.clone());
+        }
+    }
+}
+
+/// (private helper) Adds an IP address and metadata to the index.
+fn add_to_index(index: &mut HashMap<String, Vec<K8sObjectMeta>>, ip: &str, meta: &K8sObjectMeta) {
+    index.entry(ip.to_string()).or_default().push(meta.clone());
+}
+
+async fn index_resource_by_ip<K>(
+    store: &ResourceStore,
+    new_index: &mut HashMap<String, Vec<K8sObjectMeta>>,
+    association_rule: &ObjectAssociationRule,
+) where
+    K: Resource<DynamicType = ()> + Clone + serde::Serialize + 'static,
+    ResourceStore: HasStore<K>,
+{
+    let ip_source = association_rule
+        .sources
+        .iter()
+        .find(|s| s.from == "flow" && (s.name == "source.ip" || s.name == "destination.ip"));
+
+    if let Some(source) = ip_source {
+        for resource in store.store().state() {
+            let meta = K8sObjectMeta::from(resource.as_ref());
+
+            for path in &source.to {
+                match extract_values_from_resource(resource.as_ref(), path) {
+                    Ok(values) => {
+                        for value in values {
+                            if path.contains("hostname") || path.contains("externalName") {
+                                index_hostname(new_index, &value, &meta).await;
+                            } else {
+                                add_to_index(new_index, &value, &meta);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        debug!(
+                            event.name = "k8s.decorator.value_extraction_failed",
+                            k8s.jsonpath.expression = %path,
+                            error.message = %e,
+                            "failed to extract values for configured jsonpath"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Scans all relevant Kubernetes objects and builds a lookup map from IP to object metadata.
 async fn update_ip_index(
     store: ResourceStore,
     index: Arc<RwLock<HashMap<String, Vec<K8sObjectMeta>>>>,
+    conf: &Conf,
 ) {
-    let mut new_index: HashMap<String, Vec<K8sObjectMeta>> = HashMap::new();
+    let mut new_index = HashMap::new();
 
-    // Index Pods
-    for pod in store.pods.state().iter() {
-        if let Some(status) = &pod.status {
-            let meta = K8sObjectMeta::from(pod.as_ref());
-            if let Some(ip) = &status.pod_ip {
-                new_index.entry(ip.clone()).or_default().push(meta.clone());
-            }
-            if let Some(ips) = &status.pod_ips {
-                for pod_ip in ips {
-                    new_index
-                        .entry(pod_ip.ip.clone())
-                        .or_default()
-                        .push(meta.clone());
-                }
-            }
-            if let Some(ip) = &status.host_ip {
-                new_index.entry(ip.clone()).or_default().push(meta.clone());
-            }
+    if let Some(k8s_conf) = conf.attributes.values().find_map(|p| p.get("k8s")) {
+        let assoc = &k8s_conf.association;
+
+        // Dynamically call the generic indexer for each configured object type.
+        if let Some(rule) = &assoc.pod {
+            index_resource_by_ip::<Pod>(&store, &mut new_index, rule).await;
         }
-    }
-
-    // Index Nodes
-    for node in store.nodes.state().iter() {
-        if let Some(status) = &node.status
-            && let Some(addresses) = &status.addresses
-        {
-            for addr in addresses {
-                new_index
-                    .entry(addr.address.clone())
-                    .or_default()
-                    .push(K8sObjectMeta::from(node.as_ref()));
-            }
+        if let Some(rule) = &assoc.node {
+            index_resource_by_ip::<Node>(&store, &mut new_index, rule).await;
         }
-    }
-
-    // Index Services
-    for service in store.services.state().iter() {
-        let meta = K8sObjectMeta::from(service.as_ref());
-
-        if let Some(spec) = &service.spec {
-            // Index `spec.cluster_ip`
-            if let Some(ip) = &spec.cluster_ip
-                && *ip != "None"
-            {
-                new_index.entry(ip.clone()).or_default().push(meta.clone());
-            }
-            // Index `spec.cluster_ips`
-            if let Some(ips) = &spec.cluster_ips {
-                for ip in ips {
-                    new_index.entry(ip.clone()).or_default().push(meta.clone());
-                }
-            }
-            // Index `spec.external_ips`
-            if let Some(ips) = &spec.external_ips {
-                for ip in ips {
-                    new_index.entry(ip.clone()).or_default().push(meta.clone());
-                }
-            }
-            // Index `spec.load_balancer_ip`
-            if let Some(ip) = &spec.load_balancer_ip {
-                new_index.entry(ip.clone()).or_default().push(meta.clone());
-            }
+        if let Some(rule) = &assoc.service {
+            index_resource_by_ip::<Service>(&store, &mut new_index, rule).await;
         }
-
-        if let Some(status) = &service.status
-            && let Some(lb) = &status.load_balancer
-            && let Some(ingress_points) = &lb.ingress
-        {
-            for point in ingress_points {
-                if let Some(ip) = &point.ip {
-                    new_index.entry(ip.clone()).or_default().push(meta.clone());
-                }
-            }
+        if let Some(rule) = &assoc.ingress {
+            index_resource_by_ip::<Ingress>(&store, &mut new_index, rule).await;
         }
-    }
-
-    // Index Ingresses
-    for ingress in store.ingresses.state().iter() {
-        if let Some(status) = &ingress.status
-            && let Some(lb) = &status.load_balancer
-            && let Some(ingress_points) = &lb.ingress
-        {
-            for point in ingress_points {
-                if let Some(ip) = &point.ip {
-                    new_index
-                        .entry(ip.clone())
-                        .or_default()
-                        .push(K8sObjectMeta::from(ingress.as_ref()));
-                }
-            }
-        }
-    }
-
-    // Index EndpointSlices
-    for slice in store.endpoint_slices.state().iter() {
-        for endpoint in &slice.endpoints {
-            for ip_addr_str in &endpoint.addresses {
-                new_index
-                    .entry(ip_addr_str.clone())
-                    .or_default()
-                    .push(K8sObjectMeta::from(slice.as_ref()));
-            }
+        if let Some(rule) = &assoc.endpointslice {
+            index_resource_by_ip::<EndpointSlice>(&store, &mut new_index, rule).await;
         }
     }
 

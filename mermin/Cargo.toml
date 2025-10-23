@@ -32,6 +32,7 @@ hyper-rustls = { version = "0.27", features = ["http2"] }
 hyper-util = "0.1"
 ip_network = "0.4.1"
 ip_network_table = "0.2.0"
+jsonpath-rust = "1.0.4"
 k8s-openapi = { version = "0.25.0", features = ["v1_30"] }
 kube = { version = "1.1.0", features = ["runtime", "derive", "client"] }
 kube-runtime = "1.1.0"
