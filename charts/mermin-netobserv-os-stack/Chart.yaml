@@ -9,8 +9,8 @@ sources:
   - https://github.com/elastiflow/mermin
 dependencies:
   - name: mermin
-    # TODO(Cleanup for GA): Should be https://github.com/elastiflow/mermin/, raw.githubusercontent.com... is used whilst repo is private
-    # repository: https://github.com/elastiflow/mermin/
+    # TODO(Cleanup for GA): Should be https://elastiflow.github.io/mermin/, raw.githubusercontent.com... is used whilst repo is private
+    # repository: https://elastiflow.github.io/mermin/
     repository: https://raw.githubusercontent.com/elastiflow/mermin/gh-pages
     version: ">= 0.1.0-beta.7"
     condition: mermin.enabled
