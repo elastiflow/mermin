@@ -79,9 +79,6 @@ spec:
                   fieldPath: metadata.namespace
             - name: MERMIN_PLATFORM
               value: "kubernetes"
-            # TODO(mack#LGO-376|2025-10-01): Figure out if option is valid
-            # - name: MERMIN_HOST_PID_ENRICHMENT
-            #   value: {{ .Values.config.hostPidEnrichment | quote }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           resources:
