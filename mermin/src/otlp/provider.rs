@@ -32,7 +32,7 @@ use tracing_subscriber::{
 use crate::{
     otlp::{
         OtlpError,
-        opts::{OtlpExporterOptions, StdoutFmt, defaults},
+        opts::{OtlpExportOptions, StdoutExportOptions, defaults},
     },
     runtime::opts::SpanFmt,
 };
@@ -142,12 +142,12 @@ impl ProviderBuilder {
         }
     }
 
-    pub async fn with_otlp_exporter(self, options: OtlpExporterOptions) -> Result<Self, OtlpError> {
+    pub async fn with_otlp_exporter(self, options: OtlpExportOptions) -> Result<Self, OtlpError> {
         debug!(
             event.name = "exporter.otlp.started",
             "starting otlp exporter"
         );
-        let endpoint = options.build_endpoint();
+        let endpoint = options.endpoint;
         let uri: Uri = endpoint.parse().map_err(|e| {
             OtlpError::invalid_endpoint(&endpoint, format!("failed to parse as uri: {e}"))
         })?;
@@ -416,8 +416,8 @@ impl ProviderBuilder {
 }
 
 pub async fn init_provider(
-    stdout: Option<StdoutFmt>,
-    otlp: Option<OtlpExporterOptions>,
+    stdout: Option<StdoutExportOptions>,
+    otlp: Option<OtlpExportOptions>,
 ) -> Result<SdkTracerProvider, OtlpError> {
     let mut provider = ProviderBuilder::new();
 
@@ -469,8 +469,8 @@ pub async fn init_provider(
 pub async fn init_internal_tracing(
     log_level: Level,
     span_fmt: SpanFmt,
-    stdout: Option<StdoutFmt>,
-    otlp: Option<OtlpExporterOptions>,
+    stdout: Option<StdoutExportOptions>,
+    otlp: Option<OtlpExportOptions>,
 ) -> Result<(), OtlpError> {
     let provider = init_provider(stdout, otlp).await?;
     let mut fmt_layer = Layer::new().with_span_events(FmtSpan::from(span_fmt));
@@ -570,7 +570,7 @@ rstuvwxyz
 
     #[tokio::test]
     async fn test_http_endpoint_no_tls() {
-        let options = OtlpExporterOptions {
+        let options = OtlpExportOptions {
             endpoint: "http://localhost:4317".to_string(),
             protocol: crate::otlp::opts::ExporterProtocol::Grpc,
             timeout: std::time::Duration::from_secs(10),
@@ -592,7 +592,7 @@ rstuvwxyz
 
     #[tokio::test]
     async fn test_https_endpoint_auto_tls() {
-        let options = OtlpExporterOptions {
+        let options = OtlpExportOptions {
             endpoint: "https://localhost:4317".to_string(),
             protocol: crate::otlp::opts::ExporterProtocol::Grpc,
             timeout: std::time::Duration::from_secs(10),
@@ -618,7 +618,7 @@ rstuvwxyz
         // With lazy connection, the channel is created successfully without immediately
         // connecting to the server. The actual connection attempt happens later when
         // data is sent through the channel.
-        let options = OtlpExporterOptions {
+        let options = OtlpExportOptions {
             endpoint: "https://localhost:4317".to_string(),
             protocol: crate::otlp::opts::ExporterProtocol::Grpc,
             timeout: std::time::Duration::from_secs(10),
@@ -655,7 +655,7 @@ rstuvwxyz
         let cert_path = cert_file.path().to_str().unwrap().to_string();
         let key_path = key_file.path().to_str().unwrap().to_string();
 
-        let options = OtlpExporterOptions {
+        let options = OtlpExportOptions {
             endpoint: "https://localhost:4317".to_string(),
             protocol: crate::otlp::opts::ExporterProtocol::Grpc,
             timeout: std::time::Duration::from_secs(10),
@@ -691,7 +691,7 @@ rstuvwxyz
         let cert_file = create_test_cert_file(TEST_CERT_PEM);
         let cert_path = cert_file.path().to_str().unwrap().to_string();
 
-        let options = OtlpExporterOptions {
+        let options = OtlpExportOptions {
             endpoint: "https://localhost:4317".to_string(),
             protocol: crate::otlp::opts::ExporterProtocol::Grpc,
             timeout: std::time::Duration::from_secs(10),
@@ -730,7 +730,7 @@ rstuvwxyz
 
     #[tokio::test]
     async fn test_missing_ca_cert_file() {
-        let options = OtlpExporterOptions {
+        let options = OtlpExportOptions {
             endpoint: "https://localhost:4317".to_string(),
             protocol: crate::otlp::opts::ExporterProtocol::Grpc,
             timeout: std::time::Duration::from_secs(10),
@@ -766,7 +766,7 @@ rstuvwxyz
         let cert_path = cert_file.path().to_str().unwrap().to_string();
         let key_path = key_file.path().to_str().unwrap().to_string();
 
-        let options = OtlpExporterOptions {
+        let options = OtlpExportOptions {
             endpoint: "https://localhost:4317".to_string(),
             protocol: crate::otlp::opts::ExporterProtocol::Grpc,
             timeout: std::time::Duration::from_secs(10),
@@ -806,7 +806,7 @@ rstuvwxyz
         let key_file = create_test_cert_file(TEST_KEY_PEM);
         let key_path = key_file.path().to_str().unwrap().to_string();
 
-        let options = OtlpExporterOptions {
+        let options = OtlpExportOptions {
             endpoint: "https://localhost:4317".to_string(),
             protocol: crate::otlp::opts::ExporterProtocol::Grpc,
             timeout: std::time::Duration::from_secs(10),
@@ -842,7 +842,7 @@ rstuvwxyz
         let cert_file = create_test_cert_file(TEST_CERT_PEM);
         let cert_path = cert_file.path().to_str().unwrap().to_string();
 
-        let options = OtlpExporterOptions {
+        let options = OtlpExportOptions {
             endpoint: "https://localhost:4317".to_string(),
             protocol: crate::otlp::opts::ExporterProtocol::Grpc,
             timeout: std::time::Duration::from_secs(10),
@@ -878,7 +878,7 @@ rstuvwxyz
         let cert_file = create_test_cert_file(TEST_CERT_PEM);
         let cert_path = cert_file.path().to_str().unwrap().to_string();
 
-        let options = OtlpExporterOptions {
+        let options = OtlpExportOptions {
             endpoint: "http://localhost:4317".to_string(),
             protocol: crate::otlp::opts::ExporterProtocol::Grpc,
             timeout: std::time::Duration::from_secs(10),
@@ -922,7 +922,7 @@ rstuvwxyz
         let key_file = create_test_cert_file(TEST_KEY_PEM);
         let key_path = key_file.path().to_str().unwrap().to_string();
 
-        let options = OtlpExporterOptions {
+        let options = OtlpExportOptions {
             endpoint: "https://localhost:4317".to_string(),
             protocol: crate::otlp::opts::ExporterProtocol::Grpc,
             timeout: std::time::Duration::from_secs(10),
@@ -958,7 +958,7 @@ rstuvwxyz
         let cert_file = create_test_cert_file(TEST_CERT_PEM);
         let cert_path = cert_file.path().to_str().unwrap().to_string();
 
-        let options = OtlpExporterOptions {
+        let options = OtlpExportOptions {
             endpoint: "https://localhost:4317".to_string(),
             protocol: crate::otlp::opts::ExporterProtocol::Grpc,
             timeout: std::time::Duration::from_secs(10),

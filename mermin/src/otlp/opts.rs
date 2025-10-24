@@ -33,7 +33,7 @@ use crate::runtime::conf::conf_serde::{duration, exporter_protocol, stdout_fmt};
 /// - `traces`: Trace exporter configuration options.
 #[derive(Debug, Default, Deserialize, Serialize, Clone)]
 pub struct ExportOptions {
-    #[serde(default = "defaults::traces")]
+    /// Trace exporter configuration options.
     pub traces: TracesExportOptions,
 }
 
@@ -42,21 +42,25 @@ pub struct ExportOptions {
 /// # Fields
 /// - `otlp`: Optional OTLP exporter configuration.
 /// - `stdout`: Optional stdout exporter format.
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Default, Deserialize, Serialize, Clone)]
 pub struct TracesExportOptions {
-    /// Defines the format for a stdout exporter.
-    #[serde(with = "stdout_fmt")]
-    pub stdout: Option<StdoutFmt>,
+    /// Stdout exporter configuration options.
+    pub stdout: Option<StdoutExportOptions>,
 
     /// OTLP (OpenTelemetry Protocol) exporter configurations.
-    pub otlp: Option<OtlpExporterOptions>,
+    pub otlp: Option<OtlpExportOptions>,
 }
 
-impl Default for TracesExportOptions {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct StdoutExportOptions {
+    #[serde(with = "stdout_fmt")]
+    pub format: Option<StdoutFmt>,
+}
+
+impl Default for StdoutExportOptions {
     fn default() -> Self {
         Self {
-            stdout: None,
-            otlp: defaults::otlp(),
+            format: Some(StdoutFmt::TextIndent),
         }
     }
 }
@@ -68,7 +72,8 @@ impl Default for TracesExportOptions {
 /// from container or process output.
 ///
 /// Note: Only "text_indent" is supported.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum StdoutFmt {
     // Text,
     TextIndent,
@@ -158,7 +163,7 @@ impl std::str::FromStr for StdoutFmt {
 /// - `max_concurrent_exports`: Maximum number of concurrent exports (default: 1, experimental)
 /// - `max_export_timeout`: Maximum duration to export a batch of data (default: 30s, experimental)
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct OtlpExporterOptions {
+pub struct OtlpExportOptions {
     #[serde(default = "defaults::endpoint")]
     pub endpoint: String,
     #[serde(default = "defaults::protocol", with = "exporter_protocol")]
@@ -177,13 +182,6 @@ pub struct OtlpExporterOptions {
     pub max_export_timeout: Duration,
     pub auth: Option<AuthOptions>,
     pub tls: Option<TlsOptions>,
-}
-
-impl OtlpExporterOptions {
-    /// Builds the full endpoint URL for the OTLP exporter.
-    pub fn build_endpoint(&self) -> String {
-        self.endpoint.clone()
-    }
 }
 
 /// Authentication configuration for exporters.
@@ -392,34 +390,8 @@ impl From<String> for ExporterProtocol {
 pub mod defaults {
     use std::time::Duration;
 
-    use crate::otlp::opts::{
-        ExporterProtocol, OtlpExporterOptions, StdoutFmt, TracesExportOptions,
-    };
+    use crate::otlp::opts::ExporterProtocol;
 
-    pub fn traces() -> TracesExportOptions {
-        TracesExportOptions {
-            otlp: otlp(),
-            stdout: stdout(),
-        }
-    }
-
-    pub fn otlp() -> Option<OtlpExporterOptions> {
-        Some(OtlpExporterOptions {
-            endpoint: endpoint(),
-            protocol: protocol(),
-            timeout: timeout(),
-            auth: None,
-            tls: None,
-            max_batch_size: max_batch_size(),
-            max_batch_interval: max_batch_interval(),
-            max_queue_size: max_queue_size(),
-            max_concurrent_exports: max_concurrent_exports(),
-            max_export_timeout: max_export_timeout(),
-        })
-    }
-    pub fn stdout() -> Option<StdoutFmt> {
-        None
-    }
     pub fn endpoint() -> String {
         "http://localhost:4317".to_string()
     }

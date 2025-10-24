@@ -392,7 +392,8 @@ internal:
         client_key: /etc/certs/cert.key
         insecure_skip_verify: false
     span_format: full
-    stdout: ""
+    stdout:
+      format: "text_indent" # text, text_indent(*new), json, json_indent
 log_level: info
 metrics:
   enabled: true
