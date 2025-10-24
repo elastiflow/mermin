@@ -23,7 +23,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     health::{HealthState, start_api_server},
-    k8s::{decorator::Decorator, parser::decorate_flow_span},
+    k8s::{attributor::Decorator, decorator::decorate_flow_span},
     otlp::{
         provider::{init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
