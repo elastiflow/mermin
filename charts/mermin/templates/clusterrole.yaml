@@ -17,9 +17,9 @@ rules:
     verbs: ["get", "list", "watch"]
 
   # Batch API Group
-  - apiGroups: ["batch"]
-    resources: ["jobs"]
-    verbs: ["get", "list", "watch"]
+  - apiGroups: [ "batch" ]
+    resources: [ "jobs", "cronjobs" ]
+    verbs: [ "get", "list", "watch" ]
 
   # Networking API Group
   - apiGroups: ["networking.k8s.io"]
