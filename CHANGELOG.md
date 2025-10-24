@@ -1,3 +1,18 @@
+## [v0.1.0-beta.8] - 2025-10-24
+
+### Bug Fixes
+
+- **ci:** Dependency install for mermin-netobserv-os-stack (#178)
+- **ci:** Use reusable workflow for non-mermin charts (#180)
+- **k8s:** Prevent span drops on decoration failure with fallback mechanism (#186)
+### Features
+
+- **helm:** Bump mermin-netobserv-os-stack dependencies (#176)
+
+[v0.1.0-beta.7..v0.1.0-beta.8](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.7...v0.1.0-beta.8)
+
+
+
 ## [v0.1.0-beta.7] - 2025-10-22
 
 ### Bug Fixes
