@@ -167,14 +167,17 @@ async fn run() -> Result<()> {
         init_internal_tracing(
             conf.log_level,
             conf.internal.traces.span_fmt,
-            conf.internal.traces.stdout,
+            conf.internal.traces.stdout.clone(),
             conf.internal.traces.otlp.clone(),
         )
         .await?;
 
         if conf.export.traces.stdout.is_some() || conf.export.traces.otlp.is_some() {
-            let app_tracer_provider =
-                init_provider(conf.export.traces.stdout, conf.export.traces.otlp.clone()).await?;
+            let app_tracer_provider = init_provider(
+                conf.export.traces.stdout.clone(),
+                conf.export.traces.otlp.clone(),
+            )
+            .await?;
             info!(
                 event.name = "task.started",
                 task.name = "exporter",

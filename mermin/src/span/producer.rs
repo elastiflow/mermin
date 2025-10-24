@@ -604,9 +604,21 @@ impl PacketWorker {
                     "updating existing flow span with new packet"
                 );
 
-                // Update end time - convert boot-relative timestamp to wall clock time
+                // Update timestamps - packets may arrive out of order from per-CPU ring buffers
+                // Convert boot-relative timestamp to wall clock time
                 let wall_time_nanos = packet.capture_time + self.boot_time_offset_nanos;
-                flow_span.end_time = UNIX_EPOCH + Duration::from_nanos(wall_time_nanos);
+                let packet_time = UNIX_EPOCH + Duration::from_nanos(wall_time_nanos);
+
+                // If this packet is older than our current start time, update start time
+                // This can happen when packets from different CPUs arrive out of order
+                if packet_time < flow_span.start_time {
+                    flow_span.start_time = packet_time;
+                }
+                // If this packet is newer than our current end time, update end time
+                else if packet_time > flow_span.end_time {
+                    flow_span.end_time = packet_time;
+                }
+                // else: packet falls within existing time range, no timestamp update needed
 
                 // Determine if this packet is in the forward or reverse direction
                 let is_forward = flow_span.attributes.source_address == src_addr
