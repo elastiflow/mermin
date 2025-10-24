@@ -23,7 +23,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     health::{HealthState, start_api_server},
-    k8s::{attributor::Decorator, decorator::decorate_flow_span},
+    k8s::{attributor::Attributor, decorator::Decorator},
     otlp::{
         provider::{init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
@@ -283,7 +283,7 @@ async fn run() -> Result<()> {
                 let _ = tc::qdisc_add_clsact(iface);
 
                 program.attach(iface, *attach_type)?;
-                debug!(
+                info!(
                     event.name = "ebpf.program_attached",
                     ebpf.program.direction = attach_type.direction_name(),
                     network.interface.name = %iface,
@@ -298,7 +298,7 @@ async fn run() -> Result<()> {
         .ok_or_else(|| MerminError::ebpf_map("PACKETS_META map not present in the object"))?;
     let ring_buf = RingBuf::try_from(map)?;
 
-    debug!(
+    info!(
         event.name = "source.ringbuf.initialized",
         "ring buffer initialized, waiting for packets"
     );
@@ -339,18 +339,17 @@ async fn run() -> Result<()> {
     )?;
 
     info!(
-        event.name = "k8s.client_initializing",
-        "initializing kubernetes client"
+        event.name = "task.started",
+        task.name = "k8s.decorator",
+        task.description = "decorating flow attributes with kubernetes metadata",
+        "userspace task started"
     );
-
-    // Extract owner_relations and selector_relations configuration from discovery.informer.k8s if present
     let owner_relations_opts = conf
         .discovery
         .informer
         .as_ref()
         .and_then(|informer| informer.k8s.as_ref())
         .and_then(|k8s_conf| k8s_conf.owner_relations.clone());
-
     let selector_relations_opts = conf
         .discovery
         .informer
@@ -358,7 +357,11 @@ async fn run() -> Result<()> {
         .and_then(|informer| informer.k8s.as_ref())
         .and_then(|k8s_conf| k8s_conf.selector_relations.clone());
 
-    let k8s_decorator = match Decorator::new(
+    info!(
+        event.name = "k8s.client_initializing",
+        "initializing kubernetes client"
+    );
+    let k8s_attributor = match Attributor::new(
         health_state.clone(),
         owner_relations_opts,
         selector_relations_opts,
@@ -366,12 +369,12 @@ async fn run() -> Result<()> {
     )
     .await
     {
-        Ok(decorator) => {
+        Ok(attributor) => {
             info!(
                 event.name = "k8s.client.init.success",
                 "kubernetes client initialized successfully and all caches are synced"
             );
-            Some(Arc::new(decorator))
+            Some(attributor)
         }
         Err(e) => {
             error!(
@@ -385,8 +388,6 @@ async fn run() -> Result<()> {
             None
         }
     };
-
-    let k8s_decorator_clone = k8s_decorator.clone();
     tokio::spawn(async move {
         info!(
             event.name = "task.started",
@@ -394,44 +395,58 @@ async fn run() -> Result<()> {
             task.description = "decorating flow attributes with kubernetes metadata",
             "userspace task started"
         );
-        while let Some(flow_span) = flow_span_rx.recv().await {
-            // Attempt K8s decoration for enhanced logging/debugging first
-            if let Some(decorator) = &k8s_decorator_clone {
-                match decorate_flow_span(&flow_span, decorator).await {
-                    Ok(decorated_flow_span) => {
-                        debug!(
-                            event.name = "k8s.decorator.decorated",
-                            flow.community_id = %decorated_flow_span.attributes.flow_community_id,
-                            "successfully decorated flow attributes with kubernetes metadata"
-                        );
-                        if let Err(e) = k8s_decorated_flow_span_tx.send(decorated_flow_span).await {
-                            error!(
-                                event.name = "channel.send_failed",
-                                channel.name = "k8s_decorated_flow_span",
-                                error.message = %e,
-                                "failed to send decorated flow attributes to kubernetes decoration channel"
-                            );
-                        }
-                    }
-                    Err(e) => {
+        // Matching on the attributor early is a performance optimization to avoid having to check to see if the attributor is None per flow_span_rx receive.
+        match k8s_attributor.as_ref().map(Decorator::new) {
+            Some(decorator) => {
+                while let Some(flow_span) = flow_span_rx.recv().await {
+                    let (span, err) = decorator.decorate_or_fallback(flow_span).await;
+
+                    if let Some(e) = &err {
                         debug!(
                             event.name = "k8s.decorator.failed",
-                            flow.community_id = %flow_span.attributes.flow_community_id,
+                            flow.community_id = %span.attributes.flow_community_id,
                             error.message = %e,
-                            "failed to decorate flow attributes with kubernetes metadata"
+                            "failed to decorate flow attributes with kubernetes metadata, sending undecorated span"
+                        );
+                    } else {
+                        trace!(
+                            event.name = "k8s.decorator.decorated",
+                            flow.community_id = %span.attributes.flow_community_id,
+                            "successfully decorated flow attributes with kubernetes metadata"
+                        );
+                    }
+
+                    if let Err(e) = k8s_decorated_flow_span_tx.send(span).await {
+                        error!(
+                            event.name = "channel.send_failed",
+                            channel.name = "k8s_decorated_flow_span",
+                            error.message = %e,
+                            "failed to send flow span to export channel"
                         );
                     }
                 }
-            } else {
-                debug!(
-                    event.name = "k8s.decorator.skipped",
-                    flow.community_id = %flow_span.attributes.flow_community_id,
+            }
+            None => {
+                warn!(
+                    event.name = "k8s.decorator.unavailable",
                     reason = "kubernetes_client_unavailable",
-                    "skipping kubernetes decoration for flow attributes"
+                    "kubernetes decorator unavailable, all spans will be sent undecorated"
                 );
+
+                while let Some(flow_span) = flow_span_rx.recv().await {
+                    if let Err(e) = k8s_decorated_flow_span_tx.send(flow_span).await {
+                        error!(
+                            event.name = "channel.send_failed",
+                            channel.name = "k8s_decorated_flow_span",
+                            error.message = %e,
+                            "failed to send flow span to export channel"
+                        );
+                    }
+                }
             }
         }
-        debug!(
+
+        info!(
             event.name = "task.exited",
             task.name = "k8s.decorator",
             "attributes decoration task exited"
@@ -440,7 +455,7 @@ async fn run() -> Result<()> {
 
     tokio::spawn(async move {
         flow_span_producer.run().await;
-        debug!(
+        info!(
             event.name = "task.exited",
             task.name = "span.producer",
             "flow span producer task exited"
@@ -453,7 +468,7 @@ async fn run() -> Result<()> {
     let ring_buf_reader = RingBufReader::new(ring_buf, packet_filter, packet_meta_tx);
     tokio::spawn(async move {
         ring_buf_reader.run().await;
-        debug!(
+        info!(
             event.name = "task.exited",
             task.name = "source.ringbuf",
             "ring buffer reader task exited"
@@ -466,7 +481,7 @@ async fn run() -> Result<()> {
             trace!(event.name = "flow.exporting", "exporting flow span");
             exporter.export(traceable).await;
         }
-        debug!(
+        info!(
             event.name = "task.exited",
             task.name = "exporter",
             "exporter task exited"

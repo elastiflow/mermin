@@ -1,3 +1,11 @@
+//! decorator.rs - Kubernetes decoration processor
+//!
+//! This module provides a high-level, concurrent, and ergonomic interface for
+//! decorating flow spans with Kubernetes metadata. It features:
+//! - A high-level Decorator client for querying and correlating resources.
+//! - Support for Pods, Nodes, key workload types (Deployments, StatefulSets, etc.).
+//! - Network-related resources like Services, Ingresses and NetworkPolicies.
+
 use std::net::IpAddr;
 
 use k8s_openapi::api::{core::v1::Pod, networking::v1::NetworkPolicySpec};
@@ -7,7 +15,7 @@ use crate::{
     k8s::{
         K8sError,
         attributor::{
-            DecorationInfo, Decorator, FlowContext, FlowDirection, K8sObjectMeta, WorkloadOwner,
+            Attributor, DecorationInfo, FlowContext, FlowDirection, K8sObjectMeta, WorkloadOwner,
         },
     },
     span::flow::FlowSpan,
@@ -22,29 +30,45 @@ pub struct NetworkPolicy {
 
 /// Kubernetes decoration processor that correlates a FlowSpan with Kubernetes metadata
 /// to produce enriched flow attributes containing resource information.
-struct SpanDecorator<'a> {
-    decorator: &'a Decorator,
+pub struct Decorator<'a> {
+    attributor: &'a Attributor,
 }
 
-impl<'a> SpanDecorator<'a> {
-    fn new(decorator: &'a Decorator) -> Self {
-        Self { decorator }
+impl<'a> Decorator<'a> {
+    pub fn new(attributor: &'a Attributor) -> Self {
+        Self { attributor }
+    }
+
+    /// Decorate a flow span with K8s metadata, with automatic fallback to undecorated span on error.
+    ///
+    /// This is the primary method for the K8s decorator pipeline. It ensures that spans are
+    /// NEVER dropped - if decoration fails for any reason, the original undecorated span is returned.
+    ///
+    /// # Returns
+    /// A tuple of (FlowSpan, Option<K8sError>) where:
+    /// - FlowSpan is either decorated (on success) or the original undecorated span (on error)
+    /// - Option<K8sError> is Some(error) if decoration failed, None if successful
+    pub async fn decorate_or_fallback(&self, flow_span: FlowSpan) -> (FlowSpan, Option<K8sError>) {
+        match self.decorate(&flow_span).await {
+            Ok(decorated_span) => (decorated_span, None),
+            Err(e) => (flow_span, Some(e)),
+        }
     }
 
     /// Correlates flow attributes with Kubernetes resources and populates K8s metadata fields.
     /// Returns a cloned FlowSpan with source and destination Kubernetes attributes populated.
     async fn decorate(&self, flow_span: &FlowSpan) -> Result<FlowSpan, K8sError> {
         // Create FlowContext directly for both directions
-        let ctx = FlowContext::from_flow_span(flow_span, self.decorator).await;
+        let ctx = FlowContext::from_flow_span(flow_span, self.attributor).await;
         // Clone the original flow attributes and populate with Kubernetes metadata
         let mut decorated_flow = flow_span.clone();
 
         let src_pod = self
-            .decorator
+            .attributor
             .get_pod_by_ip(flow_span.attributes.source_address)
             .await;
         let dst_pod = self
-            .decorator
+            .attributor
             .get_pod_by_ip(flow_span.attributes.destination_address)
             .await;
 
@@ -80,11 +104,13 @@ impl<'a> SpanDecorator<'a> {
         Ok(decorated_flow)
     }
 
+    /// Resolves a pod and IP address to Kubernetes resource decoration information.
+    /// Returns Pod decoration if available, otherwise attempts IP-based fallback resolution.
     async fn enrich(&self, pod: Option<&Pod>, ip: IpAddr) -> Option<DecorationInfo> {
         if let Some(pod) = pod {
             let pod_meta = K8sObjectMeta::from(pod);
-            let owners = self.decorator.get_owners(pod);
-            let selector_relations = self.decorator.get_selector_based_metadata(pod);
+            let owners = self.attributor.get_owners(pod);
+            let selector_relations = self.attributor.get_selector_based_metadata(pod);
             return Some(DecorationInfo::Pod {
                 pod: pod_meta,
                 owners,
@@ -92,10 +118,10 @@ impl<'a> SpanDecorator<'a> {
             });
         }
 
-        if let Some(service) = self.decorator.get_service_by_ip(ip).await {
+        if let Some(service) = self.attributor.get_service_by_ip(ip).await {
             let service_meta = K8sObjectMeta::from(service.as_ref());
             let backend_ips = self
-                .decorator
+                .attributor
                 .resolve_service_ip_to_backend_ips(ip)
                 .await
                 .unwrap_or_default();
@@ -105,13 +131,13 @@ impl<'a> SpanDecorator<'a> {
             });
         }
 
-        if let Some(node) = self.decorator.get_node_by_ip(ip).await {
+        if let Some(node) = self.attributor.get_node_by_ip(ip).await {
             return Some(DecorationInfo::Node {
                 node: K8sObjectMeta::from(node.as_ref()),
             });
         }
 
-        if let Some(slice) = self.decorator.get_endpointslice_by_ip(ip).await {
+        if let Some(slice) = self.attributor.get_endpointslice_by_ip(ip).await {
             return Some(DecorationInfo::EndpointSlice {
                 slice: K8sObjectMeta::from(slice.as_ref()),
             });
@@ -366,7 +392,7 @@ impl<'a> SpanDecorator<'a> {
         direction: FlowDirection,
     ) -> Result<Vec<NetworkPolicy>, K8sError> {
         let matching_policies = self
-            .decorator
+            .attributor
             .get_matching_network_policies(ctx, policy_pod, direction)?;
 
         Ok(matching_policies
@@ -377,14 +403,4 @@ impl<'a> SpanDecorator<'a> {
             })
             .collect())
     }
-}
-
-/// Public interface for attributing a FlowSpan with Kubernetes metadata.
-/// Creates a SpanDecorator and performs the correlation process.
-pub async fn decorate_flow_span(
-    flow_span: &FlowSpan,
-    decorator: &Decorator,
-) -> Result<FlowSpan, K8sError> {
-    let span_decorator = SpanDecorator::new(decorator);
-    span_decorator.decorate(flow_span).await
 }

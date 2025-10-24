@@ -1,11 +1,11 @@
-// k8s.rs - Kubernetes client and resource management
-//
-// This module provides a high-level, concurrent, and ergonomic interface for
-// interacting with Kubernetes resources. It features:
-// - A ResourceStore for concurrent initialization and caching of resource reflectors.
-// - A high-level Decorator client for querying and correlating resources.
-// - Support for Pods, Nodes, key workload types (Deployments, StatefulSets, etc.).
-// - Network-related resources like Services, Ingresses and NetworkPolicies.
+//! attributor.rs - Kubernetes client and resource management
+//!
+//! This module provides a high-level, concurrent, and ergonomic interface for
+//! interacting with Kubernetes resources. It features:
+//! - A ResourceStore for concurrent initialization and caching of resource reflectors.
+//! - A high-level Decorator client for querying and correlating resources.
+//! - Support for Pods, Nodes, key workload types (Deployments, StatefulSets, etc.).
+//! - Network-related resources like Services, Ingresses and NetworkPolicies.
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -390,7 +390,7 @@ pub struct FlowContext {
 }
 
 impl FlowContext {
-    pub async fn from_flow_span(flow_span: &FlowSpan, decorator: &Decorator) -> Self {
+    pub async fn from_flow_span(flow_span: &FlowSpan, attributor: &Attributor) -> Self {
         // Extract IPs and ports
         let (src_ip, dst_ip, port, protocol) = (
             flow_span.attributes.source_address,
@@ -400,8 +400,8 @@ impl FlowContext {
         );
 
         // Resolve pods
-        let src_pod = decorator.get_pod_by_ip(src_ip).await;
-        let dst_pod = decorator.get_pod_by_ip(dst_ip).await;
+        let src_pod = attributor.get_pod_by_ip(src_ip).await;
+        let dst_pod = attributor.get_pod_by_ip(dst_ip).await;
 
         Self {
             src_pod: src_pod.as_deref().cloned(),
@@ -415,7 +415,7 @@ impl FlowContext {
 }
 
 /// A high-level client for querying Kubernetes resources.
-pub struct Decorator {
+pub struct Attributor {
     #[allow(dead_code)]
     pub client: Client,
     pub resource_store: ResourceStore,
@@ -424,7 +424,7 @@ pub struct Decorator {
     ip_index: Arc<RwLock<HashMap<String, Vec<K8sObjectMeta>>>>,
 }
 
-impl Decorator {
+impl Attributor {
     /// Creates a new Decorator, initializing all resource reflectors concurrently.
     pub async fn new(
         health_state: HealthState,

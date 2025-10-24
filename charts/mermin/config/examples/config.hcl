@@ -77,7 +77,26 @@ informer "k8s" {
 
 discovery "instrument" {
   # Network interfaces to monitor
-  interfaces = ["eth0"]
+  #
+  # Supports literal names, glob patterns (*, ?), and regex (/pattern/)
+  # Default: ["eth*", "ens*", "en*"] - captures most physical interfaces
+  #
+  # Common patterns:
+  # - ["eth*", "ens*", "en*"]     - Physical interfaces (inter-node traffic)
+  # - ["cni*", "cilium_*", "gke*"] - CNI bridge interfaces (intra-node pod-to-pod)
+  # - ["*"]                        - All interfaces (may cause duplication with tunnels/veth)
+  #
+  # For complete visibility in Kubernetes:
+  # - Inter-node traffic: Use physical interface patterns (eth*, ens*)
+  # - Intra-node pod-to-pod: Add CNI-specific patterns based on your CNI
+  #   * Flannel: add "cni*"
+  #   * Calico: add "cali*"
+  #   * Cilium: add "cilium_*"
+  #   * GKE: add "gke*"
+  #
+  # Note: Listening on CNI interfaces may capture duplicate packets
+  # (once on veth, once on physical interface for inter-node traffic)
+  interfaces = ["eth*", "ens*"]
 }
 
 discovery "informer" "k8s" {

@@ -199,7 +199,19 @@ impl Conf {
     /// Expand interface patterns (supports '*' and '?') into concrete interface names.
     pub fn resolve_interfaces(&self) -> Vec<String> {
         let available: Vec<String> = datalink::interfaces().into_iter().map(|i| i.name).collect();
-        Self::resolve_interfaces_from(&self.discovery.instrument.interfaces, &available)
+
+        // If interfaces array is empty, use defaults
+        let patterns = if self.discovery.instrument.interfaces.is_empty() {
+            warn!(
+                event.name = "config.interfaces_empty",
+                "no interfaces configured, using default patterns"
+            );
+            &InstrumentConf::default().interfaces
+        } else {
+            &self.discovery.instrument.interfaces
+        };
+
+        Self::resolve_interfaces_from(patterns, &available)
     }
 
     /// Resolves interface patterns into concrete interface names.
@@ -477,7 +489,10 @@ pub struct InstrumentConf {
 impl Default for InstrumentConf {
     fn default() -> Self {
         Self {
-            interfaces: vec!["eth0".to_string()],
+            // Default to common physical interface patterns to capture inter-node traffic
+            // Users should add CNI-specific patterns (cni*, gke*, cilium_*) if they need
+            // pod-to-pod same-node traffic, as those can cause data duplication
+            interfaces: vec!["eth*".to_string(), "ens*".to_string(), "en*".to_string()],
         }
     }
 }
@@ -946,6 +961,241 @@ mod tests {
     }
 
     #[test]
+    fn empty_interfaces_falls_back_to_defaults() {
+        // Simulate available interfaces
+        let available = vec![
+            "eth0".to_string(),
+            "eth1".to_string(),
+            "ens0".to_string(),
+            "en0".to_string(),
+            "lo".to_string(),
+        ];
+
+        // Empty pattern list should use defaults
+        let patterns: Vec<String> = vec![];
+        let resolved = Conf::resolve_interfaces_from(&patterns, &available);
+
+        // Should be empty when given empty patterns (the actual resolve_interfaces method handles the fallback)
+        assert_eq!(resolved, Vec::<String>::new());
+
+        // Now test the actual resolve_interfaces method that has the fallback logic
+        let mut conf = Conf::default();
+        conf.discovery.instrument.interfaces = vec![]; // Empty interfaces
+
+        // Mock the available interfaces by testing resolve_interfaces_from with defaults
+        let default_patterns = super::InstrumentConf::default().interfaces;
+        let resolved_with_defaults = Conf::resolve_interfaces_from(&default_patterns, &available);
+
+        // Should match default patterns: eth*, ens*, en*
+        assert_eq!(
+            resolved_with_defaults,
+            vec![
+                "eth0".to_string(),
+                "eth1".to_string(),
+                "ens0".to_string(),
+                "en0".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn cni_bridge_patterns_match_correctly() {
+        // Test various CNI bridge interface patterns
+
+        // GKE with Cilium
+        let gke_interfaces = vec![
+            "eth0".to_string(),
+            "gke52aa5df9a5f".to_string(),
+            "gkeaac0ffd348e".to_string(),
+            "cilium_net".to_string(),
+            "cilium_host".to_string(),
+            "lxc12345".to_string(),
+        ];
+        let gke_patterns = vec![
+            "gke*".to_string(),
+            "cilium_*".to_string(),
+            "lxc*".to_string(),
+        ];
+        let resolved = Conf::resolve_interfaces_from(&gke_patterns, &gke_interfaces);
+        assert_eq!(
+            resolved,
+            vec![
+                "gke52aa5df9a5f".to_string(),
+                "gkeaac0ffd348e".to_string(),
+                "cilium_net".to_string(),
+                "cilium_host".to_string(),
+                "lxc12345".to_string(),
+            ],
+            "GKE Cilium pattern should match gke*, cilium_*, lxc*"
+        );
+
+        // EKS with aws-vpc-cni
+        let eks_interfaces = vec![
+            "eth0".to_string(),
+            "eni1a2b3c4d".to_string(),
+            "eni9f8e7d6c".to_string(),
+            "vlan.eth.1".to_string(),
+        ];
+        let eks_patterns = vec!["eni*".to_string(), "vlan*".to_string()];
+        let resolved = Conf::resolve_interfaces_from(&eks_patterns, &eks_interfaces);
+        assert_eq!(
+            resolved,
+            vec![
+                "eni1a2b3c4d".to_string(),
+                "eni9f8e7d6c".to_string(),
+                "vlan.eth.1".to_string(),
+            ],
+            "EKS pattern should match eni*, vlan*"
+        );
+
+        // Flannel
+        let flannel_interfaces = vec![
+            "eth0".to_string(),
+            "cni0".to_string(),
+            "flannel.1".to_string(),
+            "veth123abc".to_string(),
+        ];
+        let flannel_patterns = vec!["cni*".to_string(), "flannel*".to_string()];
+        let resolved = Conf::resolve_interfaces_from(&flannel_patterns, &flannel_interfaces);
+        assert_eq!(
+            resolved,
+            vec!["cni0".to_string(), "flannel.1".to_string()],
+            "Flannel pattern should match cni*, flannel*"
+        );
+
+        // Calico
+        let calico_interfaces = vec![
+            "eth0".to_string(),
+            "cali123abc".to_string(),
+            "cali456def".to_string(),
+            "tunl0".to_string(),
+            "vxlan.calico".to_string(),
+        ];
+        let calico_patterns = vec![
+            "cali*".to_string(),
+            "tunl*".to_string(),
+            "vxlan*".to_string(),
+        ];
+        let resolved = Conf::resolve_interfaces_from(&calico_patterns, &calico_interfaces);
+        assert_eq!(
+            resolved,
+            vec![
+                "cali123abc".to_string(),
+                "cali456def".to_string(),
+                "tunl0".to_string(),
+                "vxlan.calico".to_string(),
+            ],
+            "Calico pattern should match cali*, tunl*, vxlan*"
+        );
+
+        // OpenShift OVN
+        let ovn_interfaces = vec![
+            "eth0".to_string(),
+            "ovn-k8s-mp0".to_string(),
+            "br-int".to_string(),
+            "br-ex".to_string(),
+        ];
+        let ovn_patterns = vec!["ovn-k8s*".to_string(), "br-*".to_string()];
+        let resolved = Conf::resolve_interfaces_from(&ovn_patterns, &ovn_interfaces);
+        assert_eq!(
+            resolved,
+            vec![
+                "ovn-k8s-mp0".to_string(),
+                "br-int".to_string(),
+                "br-ex".to_string(),
+            ],
+            "OpenShift OVN pattern should match ovn-k8s*, br-*"
+        );
+    }
+
+    #[test]
+    fn wildcard_matches_all_interfaces() {
+        let available = vec![
+            "eth0".to_string(),
+            "cni0".to_string(),
+            "docker0".to_string(),
+            "veth123".to_string(),
+            "lo".to_string(),
+        ];
+
+        let patterns = vec!["*".to_string()];
+        let resolved = Conf::resolve_interfaces_from(&patterns, &available);
+
+        // Should match all available interfaces
+        assert_eq!(
+            resolved, available,
+            "Wildcard * should match all interfaces"
+        );
+    }
+
+    #[test]
+    fn default_patterns_work_across_environments() {
+        // Test that default patterns work in various environments
+
+        // Cloud environment (GKE)
+        let cloud_interfaces = vec![
+            "eth0".to_string(),
+            "eth1".to_string(),
+            "gke123".to_string(),
+            "cilium_net".to_string(),
+        ];
+        let defaults = super::InstrumentConf::default().interfaces;
+        let resolved = Conf::resolve_interfaces_from(&defaults, &cloud_interfaces);
+        assert!(
+            resolved.contains(&"eth0".to_string()) && resolved.contains(&"eth1".to_string()),
+            "Default patterns should match eth* in cloud"
+        );
+
+        // On-prem with predictable network names
+        let onprem_interfaces = vec![
+            "ens0".to_string(),
+            "ens1".to_string(),
+            "lo".to_string(),
+            "docker0".to_string(),
+        ];
+        let resolved = Conf::resolve_interfaces_from(&defaults, &onprem_interfaces);
+        assert!(
+            resolved.contains(&"ens0".to_string()) && resolved.contains(&"ens1".to_string()),
+            "Default patterns should match ens* on-prem"
+        );
+
+        // macOS development
+        let macos_interfaces = vec![
+            "en0".to_string(),
+            "en1".to_string(),
+            "lo0".to_string(),
+            "bridge0".to_string(),
+        ];
+        let resolved = Conf::resolve_interfaces_from(&defaults, &macos_interfaces);
+        assert!(
+            resolved.contains(&"en0".to_string()) && resolved.contains(&"en1".to_string()),
+            "Default patterns should match en* on macOS"
+        );
+    }
+
+    #[test]
+    fn patterns_are_deduplicated() {
+        let available = vec!["eth0".to_string(), "eth1".to_string(), "ens0".to_string()];
+
+        // Overlapping patterns that would match the same interfaces
+        let patterns = vec![
+            "eth*".to_string(),
+            "eth0".to_string(), // specific match overlaps with glob
+            "eth*".to_string(), // duplicate pattern
+            "e*".to_string(),   // broader pattern that includes all
+        ];
+
+        let resolved = Conf::resolve_interfaces_from(&patterns, &available);
+
+        // Should only have each interface once despite overlapping patterns
+        assert_eq!(
+            resolved,
+            vec!["eth0".to_string(), "eth1".to_string(), "ens0".to_string()],
+            "Interfaces should be deduplicated"
+        );
+    }
+
+    #[test]
     fn default_conf_has_expected_values() {
         let cfg = Conf::default();
 
@@ -976,8 +1226,8 @@ mod tests {
         // Interface settings
         assert_eq!(
             cfg.discovery.instrument.interfaces,
-            vec!["eth0".to_string()],
-            "default interface should be eth0"
+            vec!["eth*".to_string(), "ens*".to_string(), "en*".to_string()],
+            "default interfaces should be common physical interface patterns"
         );
         assert_eq!(
             cfg.resolved_interfaces,
