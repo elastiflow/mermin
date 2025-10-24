@@ -1,9 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    otlp::opts::{OtlpExporterOptions, StdoutFmt},
-    runtime::conf::conf_serde::stdout_fmt,
-};
+use crate::otlp::opts::{OtlpExportOptions, StdoutExportOptions};
 
 /// Represents the entire top-level `traces` block for internal monitoring.
 #[derive(Default, Debug, Deserialize, Serialize, Clone)]
@@ -23,12 +20,11 @@ pub struct InternalTraceOptions {
     /// - `FmtSpan::ACTIVE`: Only span events for spans that are active (i.e., not closed) are recorded.
     pub span_fmt: SpanFmt,
 
-    /// Defines the format for a stdout exporter.
-    #[serde(with = "stdout_fmt")]
-    pub stdout: Option<StdoutFmt>,
+    /// Stdout exporter configuration options.
+    pub stdout: Option<StdoutExportOptions>,
 
     /// OTLP (OpenTelemetry Protocol) exporter configurations.
-    pub otlp: Option<OtlpExporterOptions>,
+    pub otlp: Option<OtlpExportOptions>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

@@ -725,7 +725,14 @@ pub mod conf_serde {
         {
             let opt = Option::<String>::deserialize(deserializer)?;
             Ok(match opt {
-                Some(s) => Some(s.parse::<StdoutFmt>().map_err(serde::de::Error::custom)?),
+                Some(s) => {
+                    if s.is_empty() {
+                        return Err(serde::de::Error::custom(
+                            "stdout format cannot be an empty string",
+                        ));
+                    }
+                    Some(s.parse::<StdoutFmt>().map_err(serde::de::Error::custom)?)
+                }
                 None => None,
             })
         }
@@ -1315,14 +1322,9 @@ mod tests {
         // the export settings are empty (no OTLP, no stdout) since the serde defaults only apply
         // during config file deserialization
         assert!(
-            cfg.export.traces.otlp.is_some(),
+            cfg.export.traces.otlp.is_none(),
             "default export (via ::default()) should not have OTLP configured"
         );
-        if let Some(otlp) = &cfg.export.traces.otlp {
-            assert_eq!(otlp.endpoint, "http://localhost:4317");
-            assert_eq!(otlp.protocol, ExporterProtocol::Grpc);
-            assert_eq!(otlp.timeout, Duration::from_secs(10));
-        }
         assert!(
             cfg.export.traces.stdout.is_none(),
             "default export should not have stdout enabled"
@@ -2056,12 +2058,8 @@ discovery:
             assert_eq!(cfg.span.tcp_rst_timeout, Duration::from_secs(5));
             assert_eq!(cfg.span.udp_timeout, Duration::from_secs(60));
             assert!(cfg.export.traces.stdout.is_none());
-            assert!(cfg.export.traces.otlp.is_some());
-            if let Some(otlp) = &cfg.export.traces.otlp {
-                assert_eq!(otlp.endpoint, "http://localhost:4317");
-                assert_eq!(otlp.protocol, ExporterProtocol::Grpc);
-                assert_eq!(otlp.timeout, Duration::from_secs(10));
-            }
+            // OTLP should not be configured unless explicitly set
+            assert!(cfg.export.traces.otlp.is_none());
 
             Ok(())
         });
@@ -2200,14 +2198,9 @@ shutdown_timeout: 2min
         // When calling ::default() directly (not via deserialization),
         // both otlp and stdout are None since serde defaults only apply during deserialization
         assert!(
-            export.traces.otlp.is_some(),
+            export.traces.otlp.is_none(),
             "default export (via ::default()) should not have OTLP configured"
         );
-        if let Some(otlp) = &export.traces.otlp {
-            assert_eq!(otlp.endpoint, "http://localhost:4317");
-            assert_eq!(otlp.protocol, ExporterProtocol::Grpc);
-            assert_eq!(otlp.timeout, Duration::from_secs(10));
-        }
         assert!(
             export.traces.stdout.is_none(),
             "default export should not have stdout enabled"
@@ -2237,14 +2230,9 @@ discovery:
             // Verify that defaults are applied for unspecified fields
             // Note: export.traces.otlp is None by default (not configured unless explicitly set)
             assert!(
-                cfg.export.traces.otlp.is_some(),
+                cfg.export.traces.otlp.is_none(),
                 "export OTLP should not be configured unless explicitly set in config"
             );
-            if let Some(otlp) = &cfg.export.traces.otlp {
-                assert_eq!(otlp.endpoint, "http://localhost:4317");
-                assert_eq!(otlp.protocol, ExporterProtocol::Grpc);
-                assert_eq!(otlp.timeout, Duration::from_secs(10));
-            }
             assert!(
                 cfg.export.traces.stdout.is_none(),
                 "export stdout should not be enabled unless explicitly set"
@@ -2277,7 +2265,8 @@ discovery:
                 r#"
 export:
   traces:
-    stdout: "text_indent"
+    stdout:
+      format: "text_indent"
     otlp:
       endpoint: "http://collector:4317"
                 "#,
@@ -2312,12 +2301,8 @@ export:
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config should load");
 
-            assert!(cfg.export.traces.otlp.is_some());
-            if let Some(otlp) = &cfg.export.traces.otlp {
-                assert_eq!(otlp.endpoint, "http://localhost:4317");
-                assert_eq!(otlp.protocol, ExporterProtocol::Grpc);
-                assert_eq!(otlp.timeout, Duration::from_secs(10));
-            }
+            // Empty export block should result in no exporters configured
+            assert!(cfg.export.traces.otlp.is_none());
             assert!(cfg.export.traces.stdout.is_none());
 
             Ok(())
@@ -2485,7 +2470,8 @@ export {
                 r#"
 export:
   traces:
-    stdout: "text_indent"
+    stdout:
+      format: "text_indent"
                 "#,
             )?;
 
@@ -2494,8 +2480,38 @@ export:
 
             assert!(cfg.export.traces.stdout.is_some());
             if let Some(stdout) = &cfg.export.traces.stdout {
-                assert_eq!(stdout.as_str(), "text_indent");
+                assert_eq!(stdout.format.as_ref().unwrap().as_str(), "text_indent");
             }
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn export_stdout_empty_format_rejected() {
+        // Empty string for stdout format should be rejected
+        Jail::expect_with(|jail| {
+            let path = "export_stdout_empty.yaml";
+            jail.create_file(
+                path,
+                r#"
+export:
+  traces:
+    stdout:
+      format: ""
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let result = Conf::new(cli);
+
+            assert!(result.is_err(), "Empty stdout format should be rejected");
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("stdout format cannot be an empty string"),
+                "Error message should mention empty string: {}",
+                err
+            );
 
             Ok(())
         });
@@ -2510,7 +2526,9 @@ export:
                 r#"
 export {
     traces {
-        stdout = "text_indent"
+        stdout = {
+            format = "text_indent"
+        }
     }
 }
                 "#,
@@ -2521,8 +2539,41 @@ export {
 
             assert!(cfg.export.traces.stdout.is_some());
             if let Some(stdout) = &cfg.export.traces.stdout {
-                assert_eq!(stdout.as_str(), "text_indent");
+                assert_eq!(stdout.format.as_ref().unwrap().as_str(), "text_indent");
             }
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn export_stdout_empty_format_rejected_hcl() {
+        // Empty string for stdout format should be rejected in HCL too
+        Jail::expect_with(|jail| {
+            let path = "export_stdout_empty.hcl";
+            jail.create_file(
+                path,
+                r#"
+export {
+    traces {
+        stdout = {
+            format = ""
+        }
+    }
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let result = Conf::new(cli);
+
+            assert!(result.is_err(), "Empty stdout format should be rejected");
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("stdout format cannot be an empty string"),
+                "Error message should mention empty string: {}",
+                err
+            );
 
             Ok(())
         });
@@ -2538,7 +2589,8 @@ export {
 internal:
   traces:
     span_fmt: "full"
-    stdout: "text_indent"
+    stdout:
+      format: "text_indent"
                 "#,
             )?;
 
@@ -2551,7 +2603,7 @@ internal:
             ));
             assert!(cfg.internal.traces.stdout.is_some());
             if let Some(stdout) = &cfg.internal.traces.stdout {
-                assert_eq!(stdout.as_str(), "text_indent");
+                assert_eq!(stdout.format.as_ref().unwrap().as_str(), "text_indent");
             }
 
             Ok(())
@@ -2568,7 +2620,9 @@ internal:
 internal {
     traces {
         span_fmt = "full"
-        stdout = "text_indent"
+        stdout = {
+            format = "text_indent"
+        }
     }
 }
                 "#,
@@ -2583,7 +2637,7 @@ internal {
             ));
             assert!(cfg.internal.traces.stdout.is_some());
             if let Some(stdout) = &cfg.internal.traces.stdout {
-                assert_eq!(stdout.as_str(), "text_indent");
+                assert_eq!(stdout.format.as_ref().unwrap().as_str(), "text_indent");
             }
 
             Ok(())
