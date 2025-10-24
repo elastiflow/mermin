@@ -8,7 +8,7 @@
 //! - Network-related resources like Services, Ingresses and NetworkPolicies.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     fmt::Debug,
     net::IpAddr,
     sync::{Arc, atomic::Ordering},
@@ -16,6 +16,7 @@ use std::{
 
 use futures::TryStreamExt;
 use ip_network::IpNetwork;
+use jsonpath_rust::JsonPath;
 use k8s_openapi::{
     api::{
         apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet},
@@ -32,11 +33,15 @@ use k8s_openapi::{
 use kube::{
     Client,
     api::{Api, ListParams, Resource, ResourceExt},
-    runtime::reflector,
+    runtime::{reflector, reflector::ObjectRef},
 };
 use kube_runtime::watcher;
 use network_types::ip::IpProto;
-use tokio::sync::oneshot;
+use serde_json::Value;
+use tokio::{
+    net::lookup_host,
+    sync::{RwLock, oneshot},
+};
 use tracing::{debug, error, warn};
 
 use crate::{
@@ -46,7 +51,7 @@ use crate::{
         owner_relations::{OwnerRelationsManager, OwnerRelationsOptions},
         selector_relations::SelectorRelationsManager,
     },
-    runtime::conf::SelectorRelationRule,
+    runtime::conf::{Conf, ObjectAssociationRule, SelectorRelationRule},
     span::flow::FlowSpan,
 };
 
@@ -172,65 +177,57 @@ impl_has_store!(NetworkPolicy, network_policies);
 
 impl ResourceStore {
     /// Initializes all resource reflectors concurrently and builds the ResourceStore.
-    pub async fn new(client: Client, health_state: HealthState) -> Result<Self, K8sError> {
-        let all_stores_and_handles = futures::try_join!(
-            Self::create_resource_store::<Pod>(&client, true),
-            Self::create_resource_store::<Node>(&client, false),
-            Self::create_resource_store::<Namespace>(&client, true),
-            Self::create_resource_store::<Deployment>(&client, false),
-            Self::create_resource_store::<ReplicaSet>(&client, false),
-            Self::create_resource_store::<StatefulSet>(&client, false),
-            Self::create_resource_store::<DaemonSet>(&client, false),
-            Self::create_resource_store::<Job>(&client, false),
-            Self::create_resource_store::<CronJob>(&client, false),
-            Self::create_resource_store::<Service>(&client, false),
-            Self::create_resource_store::<Ingress>(&client, false),
-            Self::create_resource_store::<EndpointSlice>(&client, false),
-            Self::create_resource_store::<NetworkPolicy>(&client, false),
-        )?;
+    pub async fn new(
+        client: Client,
+        health_state: HealthState,
+        required_kinds: &HashSet<String>,
+        ip_index: Arc<RwLock<HashMap<String, Vec<K8sObjectMeta>>>>,
+        conf: &Conf,
+    ) -> Result<Self, K8sError> {
+        let mut readiness_handles = Vec::new();
 
-        let (
-            (pods, pods_r),
-            (nodes, nodes_r),
-            (namespaces, namespaces_r),
-            (deployments, deployments_r),
-            (replica_sets, replica_sets_r),
-            (stateful_sets, stateful_sets_r),
-            (daemon_sets, daemon_sets_r),
-            (jobs, jobs_r),
-            (cron_jobs, cron_jobs_r),
-            (services, services_r),
-            (ingresses, ingresses_r),
-            (endpoint_slices, endpoint_slices_r),
-            (network_policies, network_policies_r),
-        ) = all_stores_and_handles;
+        /// Creates a REQUIRED resource store.
+        /// This will always attempt creation, and failure is a fatal error.
+        macro_rules! create_required_store {
+            ($type:ty, $condition:expr) => {{
+                let (store, rx) = Self::create_resource_store::<$type>(&client, $condition).await?;
+                readiness_handles.extend(rx);
+                store
+            }};
+        }
 
-        let readiness_handles: Vec<_> = [
-            pods_r,
-            nodes_r,
-            namespaces_r,
-            deployments_r,
-            replica_sets_r,
-            stateful_sets_r,
-            daemon_sets_r,
-            jobs_r,
-            cron_jobs_r,
-            services_r,
-            ingresses_r,
-            endpoint_slices_r,
-            network_policies_r,
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
+        /// Creates an OPTIONAL resource store.
+        /// This creates the store only if its kind is listed in `required_kinds`.
+        /// Failure to create the store results in a warning, not a fatal error.
+        macro_rules! create_optional_store {
+            ($kind:literal, $condition:expr, $type:ty) => {{
+                if required_kinds.contains($kind) {
+                    create_required_store!($type, $condition)
+                } else {
+                    let (store, _writer) = reflector::store();
+                    store
+                }
+            }};
+        }
 
-        let _ = futures::future::join_all(readiness_handles).await;
+        // Critical stores
+        let pods = create_required_store!(Pod, true);
+        let namespaces = create_required_store!(Namespace, true);
 
-        health_state
-            .k8s_caches_synced
-            .store(true, Ordering::Relaxed);
+        // Dynamic Stores
+        let nodes = create_optional_store!("node", false, Node);
+        let deployments = create_optional_store!("deployment", false, Deployment);
+        let replica_sets = create_optional_store!("replicaset", false, ReplicaSet);
+        let stateful_sets = create_optional_store!("statefulset", false, StatefulSet);
+        let daemon_sets = create_optional_store!("daemonset", false, DaemonSet);
+        let jobs = create_optional_store!("job", false, Job);
+        let cron_jobs = create_optional_store!("cronjob", false, CronJob);
+        let services = create_optional_store!("service", false, Service);
+        let ingresses = create_optional_store!("ingress", false, Ingress);
+        let endpoint_slices = create_optional_store!("endpointslice", false, EndpointSlice);
+        let network_policies = create_optional_store!("networkpolicy", false, NetworkPolicy);
 
-        Ok(Self {
+        let store = Self {
             pods,
             nodes,
             namespaces,
@@ -244,7 +241,26 @@ impl ResourceStore {
             ingresses,
             endpoint_slices,
             network_policies,
-        })
+        };
+
+        // Wait for all *started* reflectors to sync
+        let _ = futures::future::join_all(readiness_handles).await;
+        debug!(
+            event.name = "k8s.reflector.all_synced",
+            "all active kubernetes resource reflectors have synced"
+        );
+
+        debug!(
+            event.name = "k8s.ip_index.initial_build",
+            "caches synced, performing initial ip index build"
+        );
+        update_ip_index(&store, &ip_index, conf).await;
+
+        health_state
+            .k8s_caches_synced
+            .store(true, Ordering::Relaxed);
+
+        Ok(store)
     }
 
     /// Helper to create a store for a resource, handling failures gracefully.
@@ -405,6 +421,7 @@ pub struct Attributor {
     pub resource_store: ResourceStore,
     pub owner_relations_manager: OwnerRelationsManager,
     pub selector_relations_manager: Option<SelectorRelationsManager>,
+    ip_index: Arc<RwLock<HashMap<String, Vec<K8sObjectMeta>>>>,
 }
 
 impl Attributor {
@@ -413,11 +430,52 @@ impl Attributor {
         health_state: HealthState,
         owner_relations_opts: Option<OwnerRelationsOptions>,
         selector_relations_opts: Option<Vec<SelectorRelationRule>>,
+        conf: &Conf,
     ) -> Result<Self, K8sError> {
         let client = Client::try_default()
             .await
             .map_err(|e| K8sError::ClientInitialization(Box::new(e)))?;
-        let resource_store = ResourceStore::new(client.clone(), health_state).await?;
+
+        let mut required_kinds = HashSet::new();
+        for provider_map in conf.attributes.values() {
+            if let Some(k8s_conf) = provider_map.get("k8s") {
+                let assoc = &k8s_conf.association;
+                if assoc.pod.is_some() {
+                    required_kinds.insert("pod".to_string());
+                }
+                if assoc.node.is_some() {
+                    required_kinds.insert("node".to_string());
+                }
+                if assoc.service.is_some() {
+                    required_kinds.insert("service".to_string());
+                }
+                if assoc.ingress.is_some() {
+                    required_kinds.insert("ingress".to_string());
+                }
+                if assoc.endpointslice.is_some() {
+                    required_kinds.insert("endpointslice".to_string());
+                }
+                if assoc.networkpolicy.is_some() {
+                    required_kinds.insert("networkpolicy".to_string());
+                }
+            }
+        }
+        required_kinds.insert("deployment".to_string());
+        required_kinds.insert("replicaset".to_string());
+        required_kinds.insert("statefulset".to_string());
+        required_kinds.insert("daemonset".to_string());
+        required_kinds.insert("job".to_string());
+        required_kinds.insert("cronjob".to_string());
+
+        let ip_index = Arc::new(RwLock::new(HashMap::new()));
+        let resource_store = ResourceStore::new(
+            client.clone(),
+            health_state,
+            &required_kinds,
+            ip_index.clone(),
+            conf,
+        )
+        .await?;
 
         // Use provided config or defaults
         let owner_relations_manager =
@@ -431,11 +489,23 @@ impl Attributor {
             .filter(|rules| !rules.is_empty())
             .map(SelectorRelationsManager::new);
 
+        let resource_store_clone = resource_store.clone();
+        let ip_index_clone = ip_index.clone();
+        let conf_clone = conf.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            loop {
+                interval.tick().await;
+                update_ip_index(&resource_store_clone, &ip_index_clone, &conf_clone).await;
+            }
+        });
+
         Ok(Self {
             client,
             resource_store,
             owner_relations_manager,
             selector_relations_manager,
+            ip_index,
         })
     }
 
@@ -460,45 +530,40 @@ impl Attributor {
         manager.get_related_resources(pod_labels, &pod_namespace, &self.resource_store)
     }
 
+    /// A generic helper to find the first object of a specific kind for a given IP.
+    /// This is the new internal engine that uses the IP index.
+    async fn get_objects_by_ip<K>(&self, ip: IpAddr) -> Vec<Arc<K>>
+    where
+        K: Resource<DynamicType = ()> + Clone + 'static,
+        ResourceStore: HasStore<K>,
+    {
+        let ip_str = ip.to_string();
+        let index = self.ip_index.read().await;
+        let mut results = Vec::new();
+
+        if let Some(candidates) = index.get(&ip_str) {
+            let store = self.resource_store.store();
+
+            for meta in candidates {
+                if meta.kind == K::kind(&()) {
+                    let key = ObjectRef::new(&meta.name)
+                        .within(meta.namespace.as_deref().unwrap_or_default());
+                    if let Some(obj) = store.get(&key) {
+                        results.push(obj);
+                    }
+                }
+            }
+        }
+        results
+    }
+
     /// Looks up a Pod by its IP address.
     pub async fn get_pod_by_ip(&self, ip: IpAddr) -> Option<Arc<Pod>> {
-        let ip_str = ip.to_string();
-        let target_ip_slice = Some(ip_str.as_str());
-
-        self.resource_store
-            .pods
-            .state()
-            .iter()
-            .find(|pod| {
-                pod.status.as_ref().is_some_and(|status| {
-                    status.pod_ip.as_deref() == target_ip_slice
-                        || status.host_ip.as_deref() == target_ip_slice
-                        || status.pod_ips.as_ref().is_some_and(|ips| {
-                            ips.iter()
-                                .any(|pod_ip_info| pod_ip_info.ip.as_str() == ip_str)
-                        })
-                        || status.host_ips.as_ref().is_some_and(|ips| {
-                            ips.iter()
-                                .any(|host_ip_info| host_ip_info.ip.as_str() == ip_str)
-                        })
-                })
-            })
-            .cloned()
+        self.get_objects_by_ip(ip).await.into_iter().next()
     }
 
     pub async fn get_node_by_ip(&self, ip: IpAddr) -> Option<Arc<Node>> {
-        let ip_str = ip.to_string();
-        self.resource_store
-            .nodes
-            .state()
-            .iter()
-            .find(|node| {
-                node.status
-                    .as_ref()
-                    .and_then(|status| status.addresses.as_ref())
-                    .is_some_and(|addresses| addresses.iter().any(|addr| addr.address == ip_str))
-            })
-            .cloned()
+        self.get_objects_by_ip(ip).await.into_iter().next()
     }
 
     /// Looks up a Service by an IP address.
@@ -509,37 +574,7 @@ impl Attributor {
     /// - `spec.load_balancer_ip` (a user-requested IP)
     /// - `status.load_balancer.ingress` (the actual provisioned IPs)
     pub async fn get_service_by_ip(&self, ip: IpAddr) -> Option<Arc<Service>> {
-        let ip_str = ip.to_string();
-        self.resource_store
-            .services
-            .state()
-            .iter()
-            .find(|service| {
-                let spec_match = service.spec.as_ref().is_some_and(|spec| {
-                    spec.cluster_ip.as_deref() == Some(&ip_str)
-                        || spec
-                            .cluster_ips
-                            .as_ref()
-                            .is_some_and(|ips| ips.contains(&ip_str))
-                        || spec
-                            .external_ips
-                            .as_ref()
-                            .is_some_and(|ips| ips.contains(&ip_str))
-                        || spec.load_balancer_ip.as_deref() == Some(&ip_str)
-                });
-                if spec_match {
-                    return true;
-                }
-
-                // Check the status for provisioned LoadBalancer IPs
-                service
-                    .status
-                    .as_ref()
-                    .and_then(|status| status.load_balancer.as_ref())
-                    .and_then(|lb| lb.ingress.as_ref())
-                    .is_some_and(|ingress| ingress.iter().any(|i| i.ip.as_deref() == Some(&ip_str)))
-            })
-            .cloned()
+        self.get_objects_by_ip(ip).await.into_iter().next()
     }
 
     /// Takes a virtual IP (like a ClusterIP) and resolves it to the list of
@@ -573,19 +608,7 @@ impl Attributor {
 
     /// Looks up an EndpointSlice directly by one of its endpoint IP addresses.
     pub async fn get_endpointslice_by_ip(&self, ip: IpAddr) -> Option<Arc<EndpointSlice>> {
-        let ip_str = ip.to_string();
-        self.resource_store
-            .endpoint_slices
-            .state()
-            .iter()
-            .find(|slice| {
-                // An EndpointSlice contains a list of endpoints.
-                slice.endpoints.iter().any(|endpoint| {
-                    // Each endpoint has a list of IP addresses.
-                    endpoint.addresses.contains(&ip_str)
-                })
-            })
-            .cloned()
+        self.get_objects_by_ip(ip).await.into_iter().next()
     }
 
     /// Finds all EndpointSlices associated with a given Service.
@@ -924,6 +947,135 @@ impl Attributor {
             },
         }
     }
+}
+
+/// Extracts string values from a Kubernetes resource using a JSONPath-like expression.
+///
+/// This function serializes the resource to a serde_json::Value and then applies
+/// the path expression to find and return all matching string values.
+fn extract_values_from_resource<K: serde::Serialize>(
+    resource: &K,
+    path: &str,
+) -> Result<Vec<String>, K8sError> {
+    let full_path = format!("$.{path}");
+
+    let json_value = serde_json::to_value(resource)
+        .map_err(|e| K8sError::Attribution(format!("failed to serialize resource to json: {e}")))?;
+
+    let found_values: Vec<&Value> = json_value.query(&full_path).map_err(|e| {
+        K8sError::Attribution(format!(
+            "invalid jsonpath expression '{full_path}' during value extraction: {e}"
+        ))
+    })?;
+
+    let results = found_values
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+
+    Ok(results)
+}
+
+/// (private helper) Resolves a hostname and adds all resulting IPs to the index.
+async fn index_hostname(
+    new_index: &mut HashMap<String, Vec<K8sObjectMeta>>,
+    hostname: &str,
+    meta: &K8sObjectMeta,
+) {
+    if let Ok(resolved_addrs) = lookup_host(format!("{hostname}:0")).await {
+        for resolved in resolved_addrs {
+            new_index
+                .entry(resolved.ip().to_string())
+                .or_default()
+                .push(meta.clone());
+        }
+    }
+}
+
+/// (private helper) Adds an IP address and metadata to the index.
+fn add_to_index(index: &mut HashMap<String, Vec<K8sObjectMeta>>, ip: &str, meta: &K8sObjectMeta) {
+    index.entry(ip.to_string()).or_default().push(meta.clone());
+}
+
+async fn index_resource_by_ip<K>(
+    store: &ResourceStore,
+    new_index: &mut HashMap<String, Vec<K8sObjectMeta>>,
+    association_rule: &ObjectAssociationRule,
+) where
+    K: Resource<DynamicType = ()> + Clone + serde::Serialize + 'static,
+    ResourceStore: HasStore<K>,
+{
+    let ip_source = association_rule
+        .sources
+        .iter()
+        .find(|s| s.from == "flow" && (s.name == "source.ip" || s.name == "destination.ip"));
+
+    if let Some(source) = ip_source {
+        for resource in store.store().state() {
+            let meta = K8sObjectMeta::from(resource.as_ref());
+
+            for path in &source.to {
+                match extract_values_from_resource(resource.as_ref(), path) {
+                    Ok(values) => {
+                        for value in values {
+                            if path.contains("hostname") || path.contains("externalName") {
+                                index_hostname(new_index, &value, &meta).await;
+                            } else {
+                                add_to_index(new_index, &value, &meta);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        debug!(
+                            event.name = "k8s.decorator.value_extraction_failed",
+                            k8s.jsonpath.expression = %path,
+                            error.message = %e,
+                            "failed to extract values for configured jsonpath"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Scans all relevant Kubernetes objects and builds a lookup map from IP to object metadata.
+async fn update_ip_index(
+    store: &ResourceStore,
+    index: &Arc<RwLock<HashMap<String, Vec<K8sObjectMeta>>>>,
+    conf: &Conf,
+) {
+    let mut new_index = HashMap::new();
+
+    if let Some(k8s_conf) = conf.attributes.values().find_map(|p| p.get("k8s")) {
+        let assoc = &k8s_conf.association;
+
+        // Dynamically call the generic indexer for each configured object type.
+        if let Some(rule) = &assoc.pod {
+            index_resource_by_ip::<Pod>(store, &mut new_index, rule).await;
+        }
+        if let Some(rule) = &assoc.node {
+            index_resource_by_ip::<Node>(store, &mut new_index, rule).await;
+        }
+        if let Some(rule) = &assoc.service {
+            index_resource_by_ip::<Service>(store, &mut new_index, rule).await;
+        }
+        if let Some(rule) = &assoc.ingress {
+            index_resource_by_ip::<Ingress>(store, &mut new_index, rule).await;
+        }
+        if let Some(rule) = &assoc.endpointslice {
+            index_resource_by_ip::<EndpointSlice>(store, &mut new_index, rule).await;
+        }
+    }
+
+    let mut writer = index.write().await;
+    *writer = new_index;
+
+    debug!(
+        event.name = "k8s.ip_index.updated",
+        index.size = writer.len(),
+        "ip to object index was updated"
+    );
 }
 
 /// Flow direction for policy evaluation

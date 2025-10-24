@@ -9,7 +9,7 @@
 use std::net::IpAddr;
 
 use k8s_openapi::api::{core::v1::Pod, networking::v1::NetworkPolicySpec};
-use tracing::debug;
+use tracing::{debug, trace};
 
 use crate::{
     k8s::{
@@ -60,26 +60,45 @@ impl<'a> Decorator<'a> {
     async fn decorate(&self, flow_span: &FlowSpan) -> Result<FlowSpan, K8sError> {
         // Create FlowContext directly for both directions
         let ctx = FlowContext::from_flow_span(flow_span, self.attributor).await;
-
-        // Resolve source and destination IPs to Kubernetes resources and evaluate policies
-        let src_decoration: Option<DecorationInfo> = self.enrich(&ctx.src_pod, ctx.src_ip).await;
-        let dst_decoration = self.enrich(&ctx.dst_pod, ctx.dst_ip).await;
-        let (ingress_policies, egress_policies) = self.evaluate_flow_policies(&ctx).await?;
-
         // Clone the original flow attributes and populate with Kubernetes metadata
         let mut decorated_flow = flow_span.clone();
 
-        // Populate source Kubernetes attributes
-        if let Some(src_info) = &src_decoration {
-            self.populate_k8s_attributes(&mut decorated_flow, src_info, true);
+        let src_pod = self
+            .attributor
+            .get_pod_by_ip(flow_span.attributes.source_address)
+            .await;
+        let dst_pod = self
+            .attributor
+            .get_pod_by_ip(flow_span.attributes.destination_address)
+            .await;
+
+        let src_info = self
+            .enrich(src_pod.as_deref(), flow_span.attributes.source_address)
+            .await;
+        if let Some(info) = &src_info {
+            trace!(
+                event.name = "k8s.decorator.associated",
+                flow.community_id = %flow_span.attributes.flow_community_id,
+                k8s.direction = "source",
+                "successfully associated source of flow"
+            );
+            self.populate_k8s_attributes(&mut decorated_flow, info, true);
         }
 
-        // Populate destination Kubernetes attributes
-        if let Some(dst_info) = &dst_decoration {
-            self.populate_k8s_attributes(&mut decorated_flow, dst_info, false);
+        let dst_info = self
+            .enrich(dst_pod.as_deref(), flow_span.attributes.destination_address)
+            .await;
+        if let Some(info) = &dst_info {
+            trace!(
+                event.name = "k8s.decorator.associated",
+                flow.community_id = %flow_span.attributes.flow_community_id,
+                k8s.direction = "destination",
+                "successfully associated destination of flow"
+            );
+            self.populate_k8s_attributes(&mut decorated_flow, info, false);
         }
 
-        // Populate network policy information
+        let (ingress_policies, egress_policies) = self.evaluate_flow_policies(&ctx).await?;
         self.populate_network_policies(&mut decorated_flow, &ingress_policies, &egress_policies);
 
         Ok(decorated_flow)
@@ -87,19 +106,49 @@ impl<'a> Decorator<'a> {
 
     /// Resolves a pod and IP address to Kubernetes resource decoration information.
     /// Returns Pod decoration if available, otherwise attempts IP-based fallback resolution.
-    async fn enrich(&self, pod: &Option<Pod>, ip: IpAddr) -> Option<DecorationInfo> {
+    async fn enrich(&self, pod: Option<&Pod>, ip: IpAddr) -> Option<DecorationInfo> {
         if let Some(pod) = pod {
             let pod_meta = K8sObjectMeta::from(pod);
             let owners = self.attributor.get_owners(pod);
             let selector_relations = self.attributor.get_selector_based_metadata(pod);
-            Some(DecorationInfo::Pod {
+            return Some(DecorationInfo::Pod {
                 pod: pod_meta,
                 owners,
                 selector_relations,
-            })
-        } else {
-            self.enrich_ip_fallback(ip).await
+            });
         }
+
+        if let Some(service) = self.attributor.get_service_by_ip(ip).await {
+            let service_meta = K8sObjectMeta::from(service.as_ref());
+            let backend_ips = self
+                .attributor
+                .resolve_service_ip_to_backend_ips(ip)
+                .await
+                .unwrap_or_default();
+            return Some(DecorationInfo::Service {
+                service: service_meta,
+                backend_ips,
+            });
+        }
+
+        if let Some(node) = self.attributor.get_node_by_ip(ip).await {
+            return Some(DecorationInfo::Node {
+                node: K8sObjectMeta::from(node.as_ref()),
+            });
+        }
+
+        if let Some(slice) = self.attributor.get_endpointslice_by_ip(ip).await {
+            return Some(DecorationInfo::EndpointSlice {
+                slice: K8sObjectMeta::from(slice.as_ref()),
+            });
+        }
+
+        debug!(
+            event.name = "k8s.ip_unattributable",
+            net.ip.address = %ip,
+            "ip could not be attributed to any known kubernetes resource"
+        );
+        None
     }
 
     /// Populates Kubernetes attributes in a FlowSpan based on DecorationInfo.
@@ -353,53 +402,5 @@ impl<'a> Decorator<'a> {
                 spec: p.spec.clone().unwrap_or_default(),
             })
             .collect())
-    }
-
-    /// Attempts to resolve an IP address to Kubernetes resources when no pod is found.
-    /// Tries Node, Service, and EndpointSlice lookups in priority order.
-    async fn enrich_ip_fallback(&self, ip: IpAddr) -> Option<DecorationInfo> {
-        // Try to match against a Node
-        if let Some(node) = self.attributor.get_node_by_ip(ip).await {
-            return Some(DecorationInfo::Node {
-                node: K8sObjectMeta::from(node.as_ref()),
-            });
-        }
-
-        // Try to match against a Service
-        if let Some(service) = self.attributor.get_service_by_ip(ip).await {
-            let service_meta = K8sObjectMeta::from(service.as_ref());
-            let backend_ips = match self.attributor.resolve_service_ip_to_backend_ips(ip).await {
-                Some(ips) => ips,
-                None => {
-                    debug!(
-                        event.name = "k8s.service.backend_resolution_failed",
-                        k8s.service.name = %service_meta.name,
-                        k8s.service.ip = %ip,
-                        "failed to resolve backend ips for service"
-                    );
-                    Vec::new()
-                }
-            };
-
-            return Some(DecorationInfo::Service {
-                service: service_meta,
-                backend_ips,
-            });
-        }
-
-        // Try to match against an EndpointSlice
-        if let Some(slice) = self.attributor.get_endpointslice_by_ip(ip).await {
-            return Some(DecorationInfo::EndpointSlice {
-                slice: K8sObjectMeta::from(slice.as_ref()),
-            });
-        }
-
-        // No Kubernetes resource found for this IP
-        debug!(
-            event.name = "k8s.ip_unattributable",
-            net.ip.address = %ip,
-            "ip could not be attributed to any known kubernetes resource"
-        );
-        None
     }
 }
