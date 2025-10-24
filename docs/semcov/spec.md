@@ -109,16 +109,13 @@ The following symbols are used in the "Required" column to indicate [OpenTelemet
 
 Time-based metrics calculated for the flow, stored in nanoseconds (`ns`).
 
-| Proposed Field Name              | Data Type | Description                                                                                                                     | Notes / Decisions | Std OTel | Required |
-|:---------------------------------|:----------|:--------------------------------------------------------------------------------------------------------------------------------|:------------------|:---------|:---------|
-| `flow.tcp.handshake.snd.latency` | `long`    | The latency of the first part of the TCP handshake (SYN to SYN/ACK), from the **client's perspective**. (Server network delay)  | Unit: `ns`.       |          | ~        |
-| `flow.tcp.handshake.snd.jitter`  | `long`    | The jitter of the first part of the TCP handshake (SYN to SYN/ACK), from the **client's perspective**. (Server network delay)   | Unit: `ns`.       |          | ~        |
-| `flow.tcp.handshake.cnd.latency` | `long`    | The latency of the second part of the TCP handshake (SYN/ACK to ACK), from the **server's perspective**. (Client network delay) | Unit: `ns`.       |          | ~        |
-| `flow.tcp.handshake.cnd.jitter`  | `long`    | The jitter of the second part of the TCP handshake (SYN/ACK to ACK), from the **server's perspective**. (Client network delay)  | Unit: `ns`.       |          | ~        |
-| `flow.tcp.svc.latency`           | `long`    | The application/service processing time, as measured on the **server side**.                                                    | Unit: `ns`.       |          | ~        |
-| `flow.tcp.svc.jitter`            | `long`    | The jitter of the application/service processing time, as measured on the **server side**.                                      | Unit: `ns`.       |          | ~        |
-| `flow.tcp.rndtrip.latency`       | `long`    | The full round-trip time (client to server + app to client), from the **client's perspective**.                                 | Unit: `ns`.       |          | ~        |
-| `flow.tcp.rndtrip.jitter`        | `long`    | The jitter of the full round-trip time, from the **client's perspective**.                                                      | Unit: `ns`.       |          | ~        |
+| Proposed Field Name          | Data Type | Description                                                                                                                    | Notes / Decisions | Std OTel | Required |
+|:-----------------------------|:----------|:-------------------------------------------------------------------------------------------------------------------------------|:------------------|:---------|:---------|
+| `flow.tcp.handshake.latency` | `long`    | The latency of the first part of the TCP handshake (SYN to SYN/ACK), from the **client's perspective**. (Server network delay) | Unit: `ns`.       |          | ~        |
+| `flow.tcp.svc.latency`       | `long`    | The application/service processing time, as measured on the **server side**.                                                   | Unit: `ns`.       |          | ~        |
+| `flow.tcp.svc.jitter`        | `long`    | The jitter of the application/service processing time, as measured on the **server side**.                                     | Unit: `ns`.       |          | ~        |
+| `flow.tcp.rndtrip.latency`   | `long`    | The full round-trip time (client to server + app to client), from the **client's perspective**.                                | Unit: `ns`.       |          | ~        |
+| `flow.tcp.rndtrip.jitter`    | `long`    | The jitter of the full round-trip time, from the **client's perspective**.                                                     | Unit: `ns`.       |          | ~        |
 
 ### Tunnel & Ip-in-Ip & IPSec Attributes
 

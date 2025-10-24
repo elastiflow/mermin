@@ -17,7 +17,7 @@ use kube::{Resource, ResourceExt};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace, warn};
 
-use crate::k8s::decorator::{K8sObjectMeta, ResourceStore, WorkloadOwner};
+use crate::k8s::attributor::{K8sObjectMeta, ResourceStore, WorkloadOwner};
 
 /// Configuration for K8s owner reference walking
 #[derive(Clone, Debug, Deserialize, Serialize)]

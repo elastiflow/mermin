@@ -20,7 +20,7 @@ use serde_json::Value;
 use tracing::{debug, trace, warn};
 
 use crate::{
-    k8s::decorator::{K8sObjectMeta, ResourceStore},
+    k8s::attributor::{K8sObjectMeta, ResourceStore},
     runtime::conf::SelectorRelationRule,
 };
 
