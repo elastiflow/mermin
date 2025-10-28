@@ -1,0 +1,468 @@
+# Network Interface Discovery
+
+This page explains how Mermin discovers and monitors network interfaces on the host. Interface selection is critical for determining what network traffic Mermin captures.
+
+## Overview
+
+Mermin attaches eBPF programs to network interfaces to capture packets. The `discovery.instrument.interfaces` configuration specifies which interfaces to monitor using patterns that are resolved against available host interfaces.
+
+## Configuration
+
+```hcl
+discovery "instrument" {
+  interfaces = ["eth*", "ens*", "en*"]
+}
+```
+
+## Interface Patterns
+
+Mermin supports three pattern types for interface matching:
+
+### 1. Literal Names
+
+Exact interface name matching:
+
+```hcl
+discovery "instrument" {
+  interfaces = ["eth0", "ens32"]
+}
+```
+
+- Matches exactly `eth0` and `ens32`
+- No wildcards or patterns
+- Most explicit, least flexible
+
+### 2. Glob Patterns
+
+Shell-style wildcard matching:
+
+```hcl
+discovery "instrument" {
+  interfaces = ["eth*", "ens?3"]
+}
+```
+
+**Wildcard Characters:**
+- `*`: Matches zero or more characters
+  - `eth*` matches `eth0`, `eth1`, `eth10`, etc.
+- `?`: Matches exactly one character
+  - `ens?3` matches `ens03`, `ens13`, but not `ens3` or `ens123`
+
+**Examples:**
+```hcl
+discovery "instrument" {
+  interfaces = [
+    "eth*",      # Matches eth0, eth1, eth10, etc.
+    "ens*",      # Matches ens32, ens33, ens160, etc.
+    "en?",       # Matches en0, en1, but not en10
+    "cni*",      # Matches cni0, cni1, cniXXXXXXXX
+    "cilium_*",  # Matches cilium_host, cilium_net, etc.
+  ]
+}
+```
+
+### 3. Regex Patterns
+
+Full regular expression matching (enclosed in `/`):
+
+```hcl
+discovery "instrument" {
+  interfaces = ["/^eth[0-9]+$/", "/^ens[0-9]{1,3}$/"]
+}
+```
+
+**Regex syntax:**
+- Pattern must be enclosed in forward slashes: `/pattern/`
+- Supports full regex syntax
+- Maximum pattern length: 256 characters (security limit)
+
+**Examples:**
+```hcl
+discovery "instrument" {
+  interfaces = [
+    "/^eth\\d+$/",              # Matches eth0, eth1, eth123
+    "/^(en|eth)[0-9]+$/",       # Matches en0, en1, eth0, eth1
+    "/^ens[0-9]{1,3}$/",        # Matches ens0-ens999
+    "/^(cni|gke|cilium_).*/",   # Matches CNI interfaces
+  ]
+}
+```
+
+{% hint style="warning" %}
+Regex patterns must escape special characters. Use `\\d` for digits, `\\w` for word characters, etc.
+{% endhint %}
+
+## Pattern Resolution
+
+Mermin resolves patterns at startup and configuration reload:
+
+1. **List available interfaces**: Queries the host's network interfaces
+2. **Apply patterns**: Matches each pattern against available interfaces
+3. **Deduplicate**: Removes duplicate interfaces if matched by multiple patterns
+4. **Attach eBPF programs**: Attaches to all resolved interfaces
+
+### Resolution Example
+
+**Host interfaces:**
+```
+eth0, eth1, ens32, ens33, lo, docker0, cni0, cni123abc
+```
+
+**Configuration:**
+```hcl
+discovery "instrument" {
+  interfaces = ["eth*", "ens*", "cni*"]
+}
+```
+
+**Resolved interfaces:**
+```
+eth0, eth1, ens32, ens33, cni0, cni123abc
+```
+
+**Not included:** `lo` (loopback), `docker0` (not matched)
+
+## Default Configuration
+
+If `interfaces` is empty or not specified, Mermin uses these defaults:
+
+```hcl
+discovery "instrument" {
+  interfaces = ["eth*", "ens*", "en*"]
+}
+```
+
+These patterns capture most physical network interfaces across different Linux distributions and cloud providers.
+
+## Inter-Node vs Intra-Node Traffic
+
+The interfaces you monitor determine what traffic Mermin captures:
+
+### Inter-Node Traffic (Default)
+
+Monitor only physical interfaces:
+
+```hcl
+discovery "instrument" {
+  interfaces = ["eth*", "ens*", "en*"]
+}
+```
+
+**Captures:**
+- ✅ Traffic between nodes
+- ✅ Traffic to/from external networks
+- ✅ Traffic through the node
+- ❌ Pod-to-pod traffic on same node (not on physical interface)
+
+**Use cases:**
+- Standard cluster observability
+- External traffic monitoring
+- No flow duplication
+
+### Intra-Node Traffic (Complete Visibility)
+
+Monitor both physical and CNI interfaces:
+
+```hcl
+discovery "instrument" {
+  interfaces = ["eth*", "ens*", "cni*", "gke*", "cilium_*"]
+}
+```
+
+**Captures:**
+- ✅ All inter-node traffic
+- ✅ All intra-node pod-to-pod traffic
+- ⚠️ **May see duplicate flows** (same traffic captured on multiple interfaces)
+
+**Use cases:**
+- Complete visibility requirements
+- Debugging pod-to-pod communication
+- Compliance or security auditing
+
+{% hint style="info" %}
+For most use cases, monitoring only physical interfaces (default) provides sufficient visibility without flow duplication.
+{% endhint %}
+
+## CNI-Specific Patterns
+
+Different Container Network Interfaces create different interface patterns:
+
+### Flannel
+
+```hcl
+discovery "instrument" {
+  # Physical for inter-node, cni for intra-node
+  interfaces = ["eth*", "ens*", "cni*"]
+}
+```
+
+Flannel typically creates `cni0` bridge interface.
+
+### Calico
+
+```hcl
+discovery "instrument" {
+  # Physical for inter-node, cali for intra-node
+  interfaces = ["eth*", "ens*", "cali*"]
+}
+```
+
+Calico creates `caliXXXXXXXX` interfaces for each pod.
+
+### Cilium
+
+```hcl
+discovery "instrument" {
+  # Physical for inter-node, cilium_ for intra-node
+  interfaces = ["eth*", "ens*", "cilium_*"]
+}
+```
+
+Cilium uses `cilium_host` and `cilium_net` interfaces.
+
+### GKE
+
+```hcl
+discovery "instrument" {
+  # GKE-specific patterns
+  interfaces = ["eth*", "gke*"]
+}
+```
+
+GKE creates `gkeXXXXXXXX` interfaces for pods.
+
+### Weave Net
+
+```hcl
+discovery "instrument" {
+  interfaces = ["eth*", "ens*", "weave"]
+}
+```
+
+Weave Net uses a `weave` interface.
+
+## Cloud Provider Patterns
+
+### AWS (EKS)
+
+```hcl
+discovery "instrument" {
+  # Primary ENI and secondary ENIs
+  interfaces = ["eth*", "eni*"]
+}
+```
+
+### GCP (GKE)
+
+```hcl
+discovery "instrument" {
+  interfaces = ["eth*", "gke*"]
+}
+```
+
+### Azure (AKS)
+
+```hcl
+discovery "instrument" {
+  interfaces = ["eth*"]
+}
+```
+
+### Bare Metal / On-Premises
+
+```hcl
+discovery "instrument" {
+  # Traditional or predictable naming
+  interfaces = ["eth*", "ens*", "eno*", "enp*"]
+}
+```
+
+## Advanced Patterns
+
+### Exclude Specific Interfaces
+
+While Mermin doesn't support exclusion patterns directly, use specific patterns to include only desired interfaces:
+
+```hcl
+discovery "instrument" {
+  # Use regex to exclude
+  interfaces = [
+    "/^eth[0-9]+$/",     # Only eth0-eth9 (not eth10+)
+    "/^ens3[0-9]$/"      # Only ens30-ens39
+  ]
+}
+```
+
+### Dynamic Interface Discovery
+
+Use broad patterns that adapt to host configuration:
+
+```hcl
+discovery "instrument" {
+  interfaces = [
+    "eth*",   # Traditional
+    "ens*",   # Predictable (systemd)
+    "en*",    # macOS/BSD style
+    "eno*",   # Onboard devices
+    "enp*",   # PCI devices
+  ]
+}
+```
+
+## Troubleshooting
+
+### No Interfaces Matched
+
+**Symptom:** Log message "no interfaces matched configured patterns"
+
+**Solutions:**
+
+1. **List available interfaces:**
+   ```bash
+   kubectl exec <pod> -- ip link show
+   # or on host
+   ip link show
+   ```
+
+2. **Test pattern matching:**
+   ```bash
+   # Check if pattern matches
+   ip link show | grep -E "^[0-9]+: eth"
+   ```
+
+3. **Update configuration:**
+   ```hcl
+   discovery "instrument" {
+     interfaces = ["eth0"]  # Use exact name from ip link show
+   }
+   ```
+
+### Interface Not Found
+
+**Symptom:** Warning log "configured interface was not found on the host"
+
+**Causes:**
+- Interface doesn't exist
+- Interface name changed
+- Node has different interface naming
+
+**Solutions:**
+1. Verify interface exists: `ip link show`
+2. Use glob patterns instead of exact names
+3. Check if interface is created after Mermin starts
+
+### Capturing Too Much Traffic
+
+**Symptom:** High CPU/memory usage, too many flows
+
+**Solutions:**
+1. **Reduce monitored interfaces:**
+   ```hcl
+   discovery "instrument" {
+     interfaces = ["eth0"]  # Monitor only primary interface
+   }
+   ```
+
+2. **Remove CNI interfaces:**
+   ```hcl
+   discovery "instrument" {
+     interfaces = ["eth*", "ens*"]  # Remove cni*, cali*, etc.
+   }
+   ```
+
+3. **Add flow filters** (see [Filtering](filtering.md))
+
+### Flow Duplication
+
+**Symptom:** Same flow appears multiple times
+
+**Causes:**
+- Monitoring both physical and virtual interfaces
+- Same packet traverses multiple monitored interfaces
+
+**Solutions:**
+1. **Monitor only physical interfaces:**
+   ```hcl
+   discovery "instrument" {
+     interfaces = ["eth*", "ens*"]  # Don't include CNI interfaces
+   }
+   ```
+
+2. **Deduplicate in backend:**
+   - Use flow fingerprinting (Community ID)
+   - Deduplicate based on 5-tuple + timestamps
+
+## Monitoring Interface Resolution
+
+Check logs to see which interfaces Mermin resolved:
+
+```bash
+kubectl logs <pod> | grep -i interface
+```
+
+Example log output:
+```
+INFO Resolved interfaces interfaces=["eth0","eth1","ens32"]
+INFO eBPF programs attached interfaces=["eth0","eth1","ens32"]
+```
+
+## Best Practices
+
+1. **Start with defaults**: Use default patterns for initial deployment
+2. **Monitor metrics**: Watch packet/flow counts per interface
+3. **Test patterns**: Validate interface resolution in non-production first
+4. **Avoid wildcards for production**: Use specific patterns when possible
+5. **Document choices**: Comment why specific interfaces are monitored
+6. **Review periodically**: Interface naming may change with OS upgrades
+
+## Complete Configuration Examples
+
+### Minimal (Physical Interfaces Only)
+
+```hcl
+discovery "instrument" {
+  interfaces = ["eth0"]
+}
+```
+
+### Standard (Default)
+
+```hcl
+discovery "instrument" {
+  interfaces = ["eth*", "ens*", "en*"]
+}
+```
+
+### Complete Visibility (With CNI)
+
+```hcl
+discovery "instrument" {
+  interfaces = [
+    "eth*",      # Physical interfaces
+    "ens*",      # Predictable naming
+    "cni*",      # Flannel/generic CNI
+    "cali*",     # Calico
+    "cilium_*",  # Cilium
+    "gke*",      # GKE
+  ]
+}
+```
+
+### Regex-Based Selection
+
+```hcl
+discovery "instrument" {
+  interfaces = [
+    "/^eth[0-9]+$/",         # eth0-eth9...
+    "/^ens[0-9]{1,3}$/",     # ens0-ens999
+    "/^(cni|cali|cilium).*/", # Any CNI interface
+  ]
+}
+```
+
+## Next Steps
+
+- **[Parser Configuration](parser.md)**: Configure tunnel protocol detection
+- **[Flow Filtering](filtering.md)**: Filter flows by interface name
+- **[Troubleshooting No Flows](../troubleshooting/no-flows.md)**: Diagnose interface issues
+- **[Advanced Scenarios](../deployment/advanced-scenarios.md)**: CNI-specific configurations
