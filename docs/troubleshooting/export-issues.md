@@ -1,17 +1,20 @@
-# Troubleshooting Export Issues
+# Export Issues
 
 This guide helps resolve problems sending Flow Traces to OTLP endpoints and observability backends.
 
 ## OTLP Connection Failures
 
 ### Symptom
+
 Logs show connection errors:
+
 ```
 ERROR Failed to export traces: connection refused
 ERROR OTLP export timeout
 ```
 
 Metrics show export errors:
+
 ```bash
 curl http://localhost:10250/metrics | grep mermin_export_errors_total
 ```
@@ -19,6 +22,7 @@ curl http://localhost:10250/metrics | grep mermin_export_errors_total
 ### Diagnosis
 
 Test connectivity from Mermin pod:
+
 ```bash
 # Test OTLP gRPC endpoint
 kubectl exec mermin-xxxxx -n mermin -- \
@@ -30,6 +34,7 @@ kubectl exec mermin-xxxxx -n mermin -- \
 ```
 
 Check DNS resolution:
+
 ```bash
 kubectl exec mermin-xxxxx -n mermin -- \
   nslookup otel-collector
@@ -40,6 +45,7 @@ kubectl exec mermin-xxxxx -n mermin -- \
 #### 1. Wrong Endpoint Address
 
 **Solution**: Verify endpoint format and address:
+
 ```hcl
 export "traces" {
   otlp = {
@@ -55,19 +61,22 @@ export "traces" {
 ```
 
 Common mistakes:
-- Using `https://` with `protocol = "grpc"` (should be just hostname:port)
-- Wrong port (4317 for gRPC, 4318 for HTTP)
-- Missing service namespace: `otel-collector.observability.svc.cluster.local`
+
+* Using `https://` with `protocol = "grpc"` (should be just hostname:port)
+* Wrong port (4317 for gRPC, 4318 for HTTP)
+* Missing service namespace: `otel-collector.observability.svc.cluster.local`
 
 #### 2. Network Policy Blocking Egress
 
 **Diagnosis**: Check NetworkPolicies:
+
 ```bash
 kubectl get networkpolicies -n mermin
 kubectl describe networkpolicy <policy-name> -n mermin
 ```
 
 **Solution**: Allow egress to OTLP endpoint:
+
 ```yaml
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -93,6 +102,7 @@ spec:
 #### 3. Service Not Ready
 
 **Diagnosis**: Check OTLP collector status:
+
 ```bash
 kubectl get pods -n observability
 kubectl logs -n observability otel-collector-xxxxx
@@ -105,6 +115,7 @@ kubectl logs -n observability otel-collector-xxxxx
 **Symptom**: Intermittent connection failures or timeouts.
 
 **Solution**: Increase timeout:
+
 ```hcl
 export "traces" {
   otlp = {
@@ -117,7 +128,9 @@ export "traces" {
 ## TLS Certificate Errors
 
 ### Symptom
+
 Logs show TLS errors:
+
 ```
 ERROR OTLP export failed: x509: certificate signed by unknown authority
 ERROR TLS handshake failed: certificate verify failed
@@ -128,6 +141,7 @@ ERROR TLS handshake failed: certificate verify failed
 #### 1. Self-Signed Certificates
 
 **Solution (Insecure - Development Only)**:
+
 ```hcl
 export "traces" {
   otlp = {
@@ -140,6 +154,7 @@ export "traces" {
 ```
 
 **Solution (Production - Use CA Certificate)**:
+
 ```hcl
 export "traces" {
   otlp = {
@@ -152,6 +167,7 @@ export "traces" {
 ```
 
 Mount certificate in Helm deployment:
+
 ```yaml
 # values.yaml
 extraVolumes:
@@ -168,6 +184,7 @@ extraVolumeMounts:
 #### 2. Expired Certificates
 
 **Diagnosis**:
+
 ```bash
 # Check certificate expiry
 kubectl exec mermin-xxxxx -n mermin -- \
@@ -181,6 +198,7 @@ kubectl exec mermin-xxxxx -n mermin -- \
 **Symptom**: Certificate doesn't match endpoint hostname.
 
 **Solution**: Override TLS server name:
+
 ```hcl
 export "traces" {
   otlp = {
@@ -195,6 +213,7 @@ export "traces" {
 ## Mutual TLS (mTLS) Errors
 
 ### Symptom
+
 ```
 ERROR TLS handshake failed: tls: bad certificate
 ERROR Client certificate required
@@ -203,6 +222,7 @@ ERROR Client certificate required
 ### Solution
 
 Configure client certificate and key:
+
 ```hcl
 export "traces" {
   otlp = {
@@ -217,6 +237,7 @@ export "traces" {
 ```
 
 Mount certificates via Kubernetes Secret:
+
 ```yaml
 # values.yaml
 extraVolumes:
@@ -233,6 +254,7 @@ extraVolumeMounts:
 ## Authentication Failures
 
 ### Symptom
+
 ```
 ERROR OTLP export failed: unauthenticated
 ERROR HTTP 401 Unauthorized
@@ -245,6 +267,7 @@ ERROR HTTP 401 Unauthorized
 **Solution**: Configure basic auth or bearer token:
 
 **Basic Auth**:
+
 ```hcl
 export "traces" {
   otlp = {
@@ -260,6 +283,7 @@ export "traces" {
 ```
 
 **Bearer Token** (using custom headers):
+
 ```hcl
 export "traces" {
   otlp = {
@@ -276,6 +300,7 @@ export "traces" {
 **Best Practice**: Don't hardcode credentials in config files.
 
 Use environment variables:
+
 ```bash
 # In Helm values.yaml
 env:
@@ -292,6 +317,7 @@ env:
 ```
 
 Reference in HCL:
+
 ```hcl
 export "traces" {
   otlp = {
@@ -308,12 +334,14 @@ export "traces" {
 ## Batching and Backpressure
 
 ### Symptom
+
 ```
 WARN Export queue full, dropping flows
 ERROR Batch export failed: deadline exceeded
 ```
 
 Metrics show growing queue:
+
 ```bash
 curl http://localhost:10250/metrics | grep mermin_export_queue_size
 ```
@@ -325,6 +353,7 @@ curl http://localhost:10250/metrics | grep mermin_export_queue_size
 Collector/backend can't keep up with Mermin's export rate.
 
 **Solution**: Increase concurrent exports and batch size:
+
 ```hcl
 export "traces" {
   otlp = {
@@ -339,6 +368,7 @@ export "traces" {
 #### 2. Queue Too Small
 
 **Solution**: Increase queue size:
+
 ```hcl
 export "traces" {
   otlp = {
@@ -352,6 +382,7 @@ export "traces" {
 #### 3. Network Latency
 
 **Solution**: Optimize for high-latency networks:
+
 ```hcl
 export "traces" {
   otlp = {
@@ -372,6 +403,7 @@ log_level = "debug"
 ```
 
 Look for detailed export logs:
+
 ```bash
 kubectl logs -f mermin-xxxxx -n mermin | grep -i "export\|otlp"
 ```
@@ -379,6 +411,7 @@ kubectl logs -f mermin-xxxxx -n mermin | grep -i "export\|otlp"
 ### Check Internal Tracing
 
 Mermin can export its own telemetry:
+
 ```hcl
 internal {
   traces = {
@@ -393,6 +426,7 @@ This shows export operations and timings.
 ### Monitor Export Metrics
 
 Key metrics:
+
 ```bash
 # Export success rate
 mermin_flows_exported_total
@@ -425,11 +459,13 @@ opentelemetry.proto.collector.trace.v1.TraceService
 ### Verify Collector Configuration
 
 Check OpenTelemetry Collector logs:
+
 ```bash
 kubectl logs -n observability otel-collector-xxxxx
 ```
 
 Ensure OTLP receiver is configured:
+
 ```yaml
 receivers:
   otlp:
@@ -440,7 +476,7 @@ receivers:
 
 ## Next Steps
 
-- **[Configuration: OTLP Export](../configuration/export-otlp.md)**: Detailed export configuration
-- **[Configuration: TLS](../configuration/export-otlp.md#tls-configuration)**: TLS setup guide
-- **[Integrations](../integrations/README.md)**: Backend-specific integration guides
-- **[Performance Issues](performance.md)**: If export is causing performance problems
+* [**Configuration: OTLP Export**](../configuration/export-otlp.md): Detailed export configuration
+* [**Configuration: TLS**](../configuration/export-otlp.md#tls-configuration): TLS setup guide
+* [**Integrations**](../integrations/integrations.md): Backend-specific integration guides
+* [**Performance Issues**](performance.md): If export is causing performance problems

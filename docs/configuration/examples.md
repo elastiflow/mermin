@@ -785,7 +785,7 @@ export "traces" {
 
 ## Next Steps
 
-- **[Global Options](global-options.md)**: Reference for all global configuration fields
-- **[Discovery Configuration](discovery-interfaces.md)**: Interface selection details
-- **[Export Configuration](export-otlp.md)**: OTLP export options
-- **[Deployment Guide](../deployment/README.md)**: Deploy with your chosen configuration
+* [**Global Options**](global-options.md): Reference for all global configuration fields
+* [**Discovery Configuration**](discovery-interfaces.md): Interface selection details
+* [**Export Configuration**](export-otlp.md): OTLP export options
+* [**Deployment Guide**](../deployment/deployment.md): Deploy with your chosen configuration

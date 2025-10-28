@@ -1,4 +1,4 @@
-# Cloud Platform Deployments
+# Cloud Platforms
 
 This guide provides specific instructions for deploying Mermin on major cloud Kubernetes platforms: Google Kubernetes Engine (GKE), Amazon Elastic Kubernetes Service (EKS), and Azure Kubernetes Service (AKS).
 
@@ -6,9 +6,9 @@ This guide provides specific instructions for deploying Mermin on major cloud Ku
 
 ### Prerequisites
 
-- `gcloud` CLI installed and configured
-- GKE cluster created (Standard or Autopilot)
-- `kubectl` configured for your GKE cluster
+* `gcloud` CLI installed and configured
+* GKE cluster created (Standard or Autopilot)
+* `kubectl` configured for your GKE cluster
 
 ### GKE Standard Clusters
 
@@ -119,10 +119,10 @@ gcloud iam service-accounts add-iam-policy-binding \
 
 ### Prerequisites
 
-- `aws` CLI installed and configured
-- `eksctl` installed (optional but recommended)
-- EKS cluster created
-- `kubectl` configured for your EKS cluster
+* `aws` CLI installed and configured
+* `eksctl` installed (optional but recommended)
+* EKS cluster created
+* `kubectl` configured for your EKS cluster
 
 ### Creating an EKS Cluster
 
@@ -202,9 +202,9 @@ eksctl create iamserviceaccount \
 
 ### Prerequisites
 
-- `az` CLI installed and configured
-- AKS cluster created
-- `kubectl` configured for your AKS cluster
+* `az` CLI installed and configured
+* AKS cluster created
+* `kubectl` configured for your AKS cluster
 
 ### Creating an AKS Cluster
 
@@ -323,6 +323,7 @@ spec:
 If exposing metrics externally:
 
 **GKE:**
+
 ```yaml
 service:
   type: LoadBalancer
@@ -331,6 +332,7 @@ service:
 ```
 
 **EKS:**
+
 ```yaml
 service:
   type: LoadBalancer
@@ -340,6 +342,7 @@ service:
 ```
 
 **AKS:**
+
 ```yaml
 service:
   type: LoadBalancer
@@ -400,21 +403,21 @@ az role assignment create \
 
 ### GKE
 
-- Use **Preemptible/Spot nodes** for non-critical Mermin pods (with PodDisruptionBudget)
-- Use **node autoscaling** to match traffic patterns
-- Consider **regional clusters** for high availability
+* Use **Preemptible/Spot nodes** for non-critical Mermin pods (with PodDisruptionBudget)
+* Use **node autoscaling** to match traffic patterns
+* Consider **regional clusters** for high availability
 
 ### EKS
 
-- Use **Spot instances** for cost savings (with PodDisruptionBudget)
-- Use **Cluster Autoscaler** or **Karpenter** for dynamic scaling
-- Enable **Container Insights** for monitoring
+* Use **Spot instances** for cost savings (with PodDisruptionBudget)
+* Use **Cluster Autoscaler** or **Karpenter** for dynamic scaling
+* Enable **Container Insights** for monitoring
 
 ### AKS
 
-- Use **Spot node pools** for cost savings
-- Use **Cluster Autoscaler** for dynamic scaling
-- Enable **Container Insights** for monitoring
+* Use **Spot node pools** for cost savings
+* Use **Cluster Autoscaler** for dynamic scaling
+* Enable **Container Insights** for monitoring
 
 ## Multi-Region Deployments
 
@@ -445,6 +448,7 @@ export "traces" {
 ### Cloud-Native Monitoring
 
 **GKE - Cloud Monitoring:**
+
 ```bash
 # Enable GKE monitoring
 gcloud container clusters update mermin-cluster \
@@ -453,12 +457,14 @@ gcloud container clusters update mermin-cluster \
 ```
 
 **EKS - Container Insights:**
+
 ```bash
 # Install CloudWatch Container Insights
 curl https://raw.githubusercontent.com/aws-samples/amazon-cloudwatch-container-insights/latest/k8s-deployment-manifest-templates/deployment-mode/daemonset/container-insights-monitoring/quickstart/cwagent-fluentd-quickstart.yaml | kubectl apply -f -
 ```
 
 **AKS - Container Insights:**
+
 ```bash
 # Enable Container Insights
 az aks enable-addons \
@@ -495,7 +501,7 @@ Ensure managed identity has necessary permissions and AAD Pod Identity is config
 
 ## Next Steps
 
-- **[Advanced Scenarios](advanced-scenarios.md)**: Custom CNI, multi-cluster deployments
-- **[Configuration Reference](../configuration/README.md)**: Fine-tune Mermin for your environment
-- **[Integrations](../integrations/README.md)**: Connect to cloud-native observability platforms
-- **[Troubleshooting](../troubleshooting/README.md)**: Solve cloud-specific issues
+* [**Advanced Scenarios**](advanced-scenarios.md): Custom CNI, multi-cluster deployments
+* [**Configuration Reference**](../configuration/configuration.md): Fine-tune Mermin for your environment
+* [**Integrations**](../integrations/integrations.md): Connect to cloud-native observability platforms
+* [**Troubleshooting**](../troubleshooting/troubleshooting.md): Solve cloud-specific issues

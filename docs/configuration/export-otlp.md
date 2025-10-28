@@ -1,4 +1,4 @@
-# OTLP Exporter Configuration
+# OTLP Exporter
 
 This page documents the OpenTelemetry Protocol (OTLP) exporter configuration, which controls how Mermin exports flow records to your observability backend.
 
@@ -41,18 +41,19 @@ export "traces" {
 
 ### `endpoint`
 
-**Type:** String (URL)
-**Default:** `"http://localhost:4317"`
+**Type:** String (URL) **Default:** `"http://localhost:4317"`
 
 OTLP collector endpoint URL.
 
 **Format:**
-- `http://hostname:port` for unencrypted gRPC
-- `https://hostname:port` for TLS-encrypted gRPC
-- Port 4317 is standard for gRPC
-- Port 4318 is standard for HTTP
+
+* `http://hostname:port` for unencrypted gRPC
+* `https://hostname:port` for TLS-encrypted gRPC
+* Port 4317 is standard for gRPC
+* Port 4318 is standard for HTTP
 
 **Examples:**
+
 ```hcl
 export "traces" {
   otlp = {
@@ -69,6 +70,7 @@ export "traces" {
 ```
 
 **Kubernetes Service Discovery:**
+
 ```hcl
 export "traces" {
   otlp = {
@@ -86,16 +88,17 @@ export "traces" {
 
 ### `protocol`
 
-**Type:** String (enum)
-**Default:** `"grpc"`
+**Type:** String (enum) **Default:** `"grpc"`
 
 OTLP transport protocol.
 
 **Valid Values:**
-- `"grpc"`: gRPC protocol (recommended, default)
-- `"http_binary"`: HTTP with binary protobuf payload
+
+* `"grpc"`: gRPC protocol (recommended, default)
+* `"http_binary"`: HTTP with binary protobuf payload
 
 **Examples:**
+
 ```hcl
 export "traces" {
   otlp = {
@@ -110,22 +113,22 @@ export "traces" {
 
 **Protocol Comparison:**
 
-| Feature | gRPC | HTTP |
-|---------|------|------|
-| **Performance** | Higher | Moderate |
-| **Streaming** | Yes | No |
-| **Firewall Friendly** | Less | More |
-| **Standard Port** | 4317 | 4318 |
-| **HTTP/2 Required** | Yes | No |
+| Feature               | gRPC   | HTTP     |
+| --------------------- | ------ | -------- |
+| **Performance**       | Higher | Moderate |
+| **Streaming**         | Yes    | No       |
+| **Firewall Friendly** | Less   | More     |
+| **Standard Port**     | 4317   | 4318     |
+| **HTTP/2 Required**   | Yes    | No       |
 
 ### `timeout`
 
-**Type:** Duration
-**Default:** `"10s"`
+**Type:** Duration **Default:** `"10s"`
 
 Timeout for individual OTLP export requests.
 
 **Examples:**
+
 ```hcl
 export "traces" {
   otlp = {
@@ -141,9 +144,10 @@ export "traces" {
 ```
 
 **Tuning:**
-- **Fast networks**: 5s-10s
-- **WAN/Internet**: 15s-30s
-- **High latency**: 30s-60s
+
+* **Fast networks**: 5s-10s
+* **WAN/Internet**: 15s-30s
+* **High latency**: 30s-60s
 
 ## Batching Configuration
 
@@ -151,12 +155,12 @@ Mermin batches flow records before export to reduce network overhead and improve
 
 ### `max_batch_size`
 
-**Type:** Integer
-**Default:** `512`
+**Type:** Integer **Default:** `512`
 
 Maximum number of spans (flow records) per batch.
 
 **Examples:**
+
 ```hcl
 export "traces" {
   otlp = {
@@ -172,17 +176,18 @@ export "traces" {
 ```
 
 **Trade-offs:**
-- **Larger batches**: Better efficiency, higher latency
-- **Smaller batches**: Lower latency, more requests
+
+* **Larger batches**: Better efficiency, higher latency
+* **Smaller batches**: Lower latency, more requests
 
 ### `max_batch_interval`
 
-**Type:** Duration
-**Default:** `"5s"`
+**Type:** Duration **Default:** `"5s"`
 
 Maximum time to wait before exporting a partial batch.
 
 **Examples:**
+
 ```hcl
 export "traces" {
   otlp = {
@@ -198,17 +203,18 @@ export "traces" {
 ```
 
 **Behavior:**
-- Batch is exported when it reaches `max_batch_size` OR `max_batch_interval` (whichever comes first)
-- Prevents indefinite waiting for partial batches
+
+* Batch is exported when it reaches `max_batch_size` OR `max_batch_interval` (whichever comes first)
+* Prevents indefinite waiting for partial batches
 
 ### `max_queue_size`
 
-**Type:** Integer
-**Default:** `2048`
+**Type:** Integer **Default:** `2048`
 
 Maximum number of spans queued for export.
 
 **Examples:**
+
 ```hcl
 export "traces" {
   otlp = {
@@ -224,19 +230,19 @@ export "traces" {
 ```
 
 **Queue Behavior:**
-- Acts as buffer during temporary collector unavailability
-- When full, oldest spans are dropped (not newest)
-- Monitor `mermin_export_queue_size` and `mermin_export_drops_total` metrics
+
+* Acts as buffer during temporary collector unavailability
+* When full, oldest spans are dropped (not newest)
+* Monitor `mermin_export_queue_size` and `mermin_export_drops_total` metrics
 
 ### `max_concurrent_exports`
 
-**Type:** Integer
-**Default:** `1`
-**Status:** Experimental
+**Type:** Integer **Default:** `1` **Status:** Experimental
 
 Maximum number of concurrent export requests.
 
 **Examples:**
+
 ```hcl
 export "traces" {
   otlp = {
@@ -254,13 +260,12 @@ Values > 1 are experimental. Use with caution and monitor for ordering issues.
 
 ### `max_export_timeout`
 
-**Type:** Duration
-**Default:** `"30s"`
-**Status:** Experimental
+**Type:** Duration **Default:** `"30s"` **Status:** Experimental
 
 Maximum time for export operation including retries.
 
 **Examples:**
+
 ```hcl
 export "traces" {
   otlp = {
@@ -589,10 +594,10 @@ histogram_quantile(0.95, mermin_export_latency_seconds_bucket)
 
 ### Healthy Indicators
 
-- Zero or minimal export errors
-- Queue size well below max
-- Export latency < timeout
-- No dropped spans
+* Zero or minimal export errors
+* Queue size well below max
+* Export latency < timeout
+* No dropped spans
 
 ## Troubleshooting
 
@@ -601,6 +606,7 @@ histogram_quantile(0.95, mermin_export_latency_seconds_bucket)
 **Symptoms:** `connection refused` errors
 
 **Solutions:**
+
 1. Verify collector is running: `kubectl get pods -l app=otel-collector`
 2. Check endpoint URL and port
 3. Verify network policies allow egress
@@ -611,6 +617,7 @@ histogram_quantile(0.95, mermin_export_latency_seconds_bucket)
 **Symptoms:** `certificate verify failed`, `x509` errors
 
 **Solutions:**
+
 1. Verify CA certificate is correct
 2. Check certificate hasn't expired
 3. Ensure hostname matches certificate CN/SAN
@@ -621,6 +628,7 @@ histogram_quantile(0.95, mermin_export_latency_seconds_bucket)
 **Symptoms:** `context deadline exceeded`, timeout errors
 
 **Solutions:**
+
 1. Increase `timeout` value
 2. Check collector performance
 3. Reduce `max_batch_size`
@@ -631,6 +639,7 @@ histogram_quantile(0.95, mermin_export_latency_seconds_bucket)
 **Symptoms:** `mermin_export_drops_total` increasing
 
 **Solutions:**
+
 1. Increase `max_queue_size`
 2. Increase collector capacity
 3. Reduce `max_batch_interval` for faster export
@@ -638,7 +647,7 @@ histogram_quantile(0.95, mermin_export_latency_seconds_bucket)
 
 ## Next Steps
 
-- **[Stdout Exporter](export-stdout.md)**: Configure console output for debugging
-- **[Integration Guides](../integrations/README.md)**: Connect to specific backends
-- **[Troubleshooting Export Issues](../troubleshooting/export-issues.md)**: Diagnose problems
-- **[OpenTelemetry Collector](../integrations/opentelemetry-collector.md)**: Set up collector
+* [**Stdout Exporter**](export-stdout.md): Configure console output for debugging
+* [**Integration Guides**](../integrations/integrations.md): Connect to specific backends
+* [**Troubleshooting Export Issues**](../troubleshooting/export-issues.md): Diagnose problems
+* [**OpenTelemetry Collector**](../integrations/opentelemetry-collector.md): Set up collector

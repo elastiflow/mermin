@@ -1,4 +1,4 @@
-# Advanced Deployment Scenarios
+# Advanced Scenarios
 
 This guide covers advanced Mermin deployment scenarios including custom CNI configurations, multi-cluster deployments, high-availability setups, and performance tuning for high-throughput environments.
 
@@ -18,10 +18,11 @@ discovery "instrument" {
 ```
 
 **Considerations:**
-- Cilium's eBPF datapath is separate from Mermin's monitoring
-- Monitor physical interfaces for inter-node traffic
-- Monitor `cilium_*` for intra-node pod-to-pod traffic
-- May see duplicate flows for traffic that crosses nodes
+
+* Cilium's eBPF datapath is separate from Mermin's monitoring
+* Monitor physical interfaces for inter-node traffic
+* Monitor `cilium_*` for intra-node pod-to-pod traffic
+* May see duplicate flows for traffic that crosses nodes
 
 **Cilium-specific configuration:**
 
@@ -57,10 +58,11 @@ discovery "instrument" {
 ```
 
 **Considerations:**
-- Calico interfaces are `califxxxxxxxx` format
-- Monitor physical interfaces for most traffic
-- Add `cali*` for intra-node pod-to-pod visibility
-- Be aware of potential flow duplication
+
+* Calico interfaces are `califxxxxxxxx` format
+* Monitor physical interfaces for most traffic
+* Add `cali*` for intra-node pod-to-pod visibility
+* Be aware of potential flow duplication
 
 ### Flannel
 
@@ -102,6 +104,7 @@ For observability across multiple Kubernetes clusters:
 Deploy Mermin in each cluster with cluster-specific configuration:
 
 **Cluster 1 (us-west):**
+
 ```hcl
 export "traces" {
   otlp = {
@@ -118,6 +121,7 @@ export "traces" {
 ```
 
 **Cluster 2 (eu-west):**
+
 ```hcl
 export "traces" {
   otlp = {
@@ -222,10 +226,10 @@ export "traces" {
 
 Mermin agents are resilient by design:
 
-- **DaemonSet**: Automatically restarts failed pods
-- **Node-local**: Failure of one agent doesn't affect others
-- **Stateless**: No data loss on restart (flows are regenerated)
-- **Queue-based**: Buffers flows during temporary collector outages
+* **DaemonSet**: Automatically restarts failed pods
+* **Node-local**: Failure of one agent doesn't affect others
+* **Stateless**: No data loss on restart (flows are regenerated)
+* **Queue-based**: Buffers flows during temporary collector outages
 
 Configure aggressive restart policy:
 
@@ -376,13 +380,15 @@ discovery "instrument" {
 ```
 
 **Advantages:**
-- No flow duplication
-- Lower resource usage
-- Clearer network topology
+
+* No flow duplication
+* Lower resource usage
+* Clearer network topology
 
 **Limitations:**
-- Misses pod-to-pod traffic on same node
-- Misses loopback traffic
+
+* Misses pod-to-pod traffic on same node
+* Misses loopback traffic
 
 ### Complete Visibility (All Traffic)
 
@@ -396,13 +402,15 @@ discovery "instrument" {
 ```
 
 **Advantages:**
-- Complete network visibility
-- Captures all pod-to-pod traffic
+
+* Complete network visibility
+* Captures all pod-to-pod traffic
 
 **Limitations:**
-- Flow duplication for inter-node traffic
-- Higher resource usage
-- Requires deduplication in backend
+
+* Flow duplication for inter-node traffic
+* Higher resource usage
+* Requires deduplication in backend
 
 ### Selective Monitoring
 
@@ -440,27 +448,31 @@ podAnnotations:
 ```
 
 Key metrics:
-- `mermin_flows_total`: Total flows processed
-- `mermin_packets_total`: Total packets captured
-- `mermin_drops_total`: Packets dropped due to overload
-- `mermin_export_errors_total`: OTLP export failures
-- `mermin_flow_table_size`: Current number of active flows
+
+* `mermin_flows_total`: Total flows processed
+* `mermin_packets_total`: Total packets captured
+* `mermin_drops_total`: Packets dropped due to overload
+* `mermin_export_errors_total`: OTLP export failures
+* `mermin_flow_table_size`: Current number of active flows
 
 ### Tuning Guidelines
 
 **If you see packet drops:**
+
 1. Increase `packet_channel_capacity`
 2. Increase `packet_worker_count`
 3. Add more CPU resources
 4. Reduce monitored interfaces
 
 **If you see high memory usage:**
+
 1. Decrease flow timeouts
 2. Increase export frequency
 3. Add flow filters to reduce processed flows
 4. Add more memory resources
 
 **If you see export errors:**
+
 1. Check collector connectivity
 2. Increase `max_queue_size`
 3. Increase `max_export_timeout`
@@ -578,7 +590,7 @@ export "traces" {
 
 ## Next Steps
 
-- **[Configuration Reference](../configuration/README.md)**: Deep dive into all configuration options
-- **[Filtering](../configuration/filtering.md)**: Configure flow filters for security and performance
-- **[Integration Guides](../integrations/README.md)**: Connect to your observability backend
-- **[Troubleshooting Performance](../troubleshooting/performance.md)**: Diagnose and resolve performance issues
+* [**Configuration Reference**](../configuration/configuration.md): Deep dive into all configuration options
+* [**Filtering**](../configuration/filtering.md): Configure flow filters for security and performance
+* [**Integration Guides**](../integrations/integrations.md): Connect to your observability backend
+* [**Troubleshooting Performance**](../troubleshooting/performance.md): Diagnose and resolve performance issues

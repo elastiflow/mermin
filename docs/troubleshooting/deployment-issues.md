@@ -1,21 +1,24 @@
-# Troubleshooting Deployment Issues
+# Deployment Issues
 
 This guide helps resolve issues preventing Mermin pods from starting or running correctly.
 
 ## Pod Not Starting
 
 ### Symptom
+
 Mermin pods stuck in `Pending`, `CrashLoopBackOff`, or `Error` state.
 
 ### Diagnosis
 
 Check pod status:
+
 ```bash
 kubectl get pods -l app.kubernetes.io/name=mermin -n mermin
 kubectl describe pod mermin-xxxxx -n mermin
 ```
 
 Check pod events:
+
 ```bash
 kubectl get events -n mermin --field-selector involvedObject.name=mermin-xxxxx
 ```
@@ -27,6 +30,7 @@ kubectl get events -n mermin --field-selector involvedObject.name=mermin-xxxxx
 **Symptom**: Pod stuck in `Pending` state with event: `Insufficient cpu` or `Insufficient memory`
 
 **Solution**: Adjust resource requests or add more nodes:
+
 ```yaml
 # In values.yaml
 resources:
@@ -49,6 +53,7 @@ resources:
 **Symptom**: `ImagePullBackOff` or `ErrImagePull`
 
 **Solution**:
+
 ```bash
 # Check image pull status
 kubectl describe pod mermin-xxxxx -n mermin | grep -A5 Events
@@ -63,7 +68,9 @@ kubectl get secrets -n mermin
 ## eBPF Program Loading Failures
 
 ### Symptom
+
 Pod starts but logs show eBPF loading errors:
+
 ```
 ERROR Failed to load eBPF program: Operation not permitted
 ```
@@ -71,6 +78,7 @@ ERROR Failed to load eBPF program: Operation not permitted
 ### Diagnosis
 
 Check pod logs:
+
 ```bash
 kubectl logs mermin-xxxxx -n mermin | grep -i ebpf
 ```
@@ -82,6 +90,7 @@ kubectl logs mermin-xxxxx -n mermin | grep -i ebpf
 **Symptom**: `Operation not permitted` when loading eBPF
 
 **Solution**: Verify privileged mode and capabilities in DaemonSet:
+
 ```yaml
 securityContext:
   privileged: true
@@ -99,6 +108,7 @@ securityContext:
 **Requirements**: Linux kernel 4.9+ (5.4+ recommended)
 
 **Check kernel version**:
+
 ```bash
 kubectl debug node/worker-node -it --image=ubuntu -- uname -r
 ```
@@ -110,6 +120,7 @@ kubectl debug node/worker-node -it --image=ubuntu -- uname -r
 **Symptom**: `BTF is not supported`
 
 **Check BTF availability**:
+
 ```bash
 kubectl debug node/worker-node -it --image=ubuntu -- ls /sys/kernel/btf/vmlinux
 ```
@@ -121,11 +132,13 @@ kubectl debug node/worker-node -it --image=ubuntu -- ls /sys/kernel/btf/vmlinux
 **Symptom**: `No such file or directory: /sys/fs/bpf`
 
 **Solution**: Ensure eBPF filesystem is mounted on nodes:
+
 ```bash
 mount -t bpf bpf /sys/fs/bpf
 ```
 
 For persistent mounting, add to `/etc/fstab`:
+
 ```
 bpf /sys/fs/bpf bpf defaults 0 0
 ```
@@ -133,7 +146,9 @@ bpf /sys/fs/bpf bpf defaults 0 0
 ## Permission Errors
 
 ### Symptom
+
 Logs show Kubernetes API permission errors:
+
 ```
 ERROR Failed to list pods: pods is forbidden: User "system:serviceaccount:mermin:mermin" cannot list resource "pods"
 ```
@@ -154,6 +169,7 @@ kubectl get clusterrolebinding mermin
 ```
 
 Ensure Mermin has required permissions:
+
 ```yaml
 rules:
   - apiGroups: [""]
@@ -167,11 +183,13 @@ rules:
 ## CNI Conflicts
 
 ### Symptom
+
 Mermin starts but cannot attach to network interfaces, or network connectivity issues occur.
 
 ### Diagnosis
 
 Check which CNI you're using:
+
 ```bash
 kubectl get pods -n kube-system | grep -i cni
 ```
@@ -181,6 +199,7 @@ kubectl get pods -n kube-system | grep -i cni
 Configure Mermin to monitor the correct interfaces for your CNI:
 
 **Cilium**:
+
 ```hcl
 discovery "instrument" {
   interfaces = ["eth*", "cilium_*"]
@@ -188,6 +207,7 @@ discovery "instrument" {
 ```
 
 **Calico**:
+
 ```hcl
 discovery "instrument" {
   interfaces = ["eth*", "cali*"]
@@ -195,6 +215,7 @@ discovery "instrument" {
 ```
 
 **Flannel**:
+
 ```hcl
 discovery "instrument" {
   interfaces = ["eth*", "cni*", "flannel*"]
@@ -206,7 +227,9 @@ See [Advanced Scenarios](../deployment/advanced-scenarios.md#custom-cni-configur
 ## Configuration Syntax Errors
 
 ### Symptom
+
 Pod crashes immediately with configuration parsing error:
+
 ```
 ERROR Failed to parse configuration: unexpected token at line 10
 ```
@@ -214,20 +237,20 @@ ERROR Failed to parse configuration: unexpected token at line 10
 ### Solution
 
 1. Validate HCL syntax:
+
 ```bash
 # Use an HCL formatter/validator
 terraform fmt -check config.hcl
 ```
 
 2. Check for common syntax mistakes:
-   - Missing closing braces `}`
-   - Mismatched quotes
-   - Invalid key names (use underscores, not hyphens)
-
+   * Missing closing braces `}`
+   * Mismatched quotes
+   * Invalid key names (use underscores, not hyphens)
 3. Enable debug logging to see full config parsing output.
 
 ## Next Steps
 
-- **[No Flow Traces](no-flows.md)**: If pods are running but not capturing flows
-- **[Performance Issues](performance.md)**: If Mermin is using too many resources
-- **[Configuration Reference](../configuration/README.md)**: Review configuration options
+* [**No Flow Traces**](no-flows.md): If pods are running but not capturing flows
+* [**Performance Issues**](performance.md): If Mermin is using too many resources
+* [**Configuration Reference**](../configuration/configuration.md): Review configuration options
