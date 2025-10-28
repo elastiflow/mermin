@@ -12,10 +12,12 @@ The OpenTelemetry Collector's output is set to `debug` (`stdout`), and has been 
 
 Notes on the example deployment:
 
+- Deployment happens in the "current" namespace
 - You may optionally customize and use `config.hcl` instead of the default config.
 - Mermin values use `mermin:latest` image, it is expected you build it and load to your K8s cluster
 
 ## Install
+<!-- TODO(Cleanup for GA): Once Mermin is GA, drop `--devel` flag -->
 
 - Deploy the chart
 
@@ -34,7 +36,7 @@ Notes on the example deployment:
   helm upgrade -i --wait --timeout 15m \
     -f examples/local_otel/values_mermin.yaml \
     --set-file config.content=examples/local_otel/config.hcl \
-    mermin charts/mermin
+    mermin mermin/mermin --devel
   ```
 
 - Optionally install `metrics-server` to get metrics if it has not been installed yet
@@ -65,5 +67,5 @@ In order to render K8s manifests you may use following commands
     -f examples/local_otel/values.yaml \
     --set-file config.content=examples/local_otel/config.hcl \
     --output-dir helm_rendered \
-    mermin charts/mermin
+    mermin mermin/mermin --devel
   ```
