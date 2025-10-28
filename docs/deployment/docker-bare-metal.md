@@ -10,11 +10,11 @@ Kubernetes metadata enrichment is not available in bare metal deployments. Flows
 
 Before deploying on bare metal:
 
-- **Linux OS**: RHEL/CentOS 7+, Ubuntu 18.04+, Debian 10+, or similar
-- **Linux Kernel**: Version 4.18 or newer with eBPF support
-- **Docker**: Version 19.03 or newer, or containerd/Podman as alternative
-- **Root Access**: Required to run privileged containers
-- **Network Access**: To OTLP collector endpoint
+* **Linux OS**: RHEL/CentOS 7+, Ubuntu 18.04+, Debian 10+, or similar
+* **Linux Kernel**: Version 4.18 or newer with eBPF support
+* **Docker**: Version 19.03 or newer, or containerd/Podman as alternative
+* **Root Access**: Required to run privileged containers
+* **Network Access**: To OTLP collector endpoint
 
 ### Verify eBPF Support
 
@@ -144,13 +144,13 @@ docker run -d \
 
 **Flags explained:**
 
-- `--privileged`: Required for eBPF program loading
-- `--network host`: Access host network interfaces
-- `--pid host`: Access host process information (optional)
-- `--cap-add`: Explicit capabilities for eBPF and networking
-- `-v /sys/kernel/debug`: Debug filesystem for eBPF (read-only)
-- `-v /sys/fs/bpf`: BPF filesystem for program management
-- `-v config.hcl`: Mount configuration file
+* `--privileged`: Required for eBPF program loading
+* `--network host`: Access host network interfaces
+* `--pid host`: Access host process information (optional)
+* `--cap-add`: Explicit capabilities for eBPF and networking
+* `-v /sys/kernel/debug`: Debug filesystem for eBPF (read-only)
+* `-v /sys/fs/bpf`: BPF filesystem for program management
+* `-v config.hcl`: Mount configuration file
 
 ### Verify Deployment
 
@@ -282,9 +282,10 @@ ip link show
 ```
 
 Common interface naming:
-- **Traditional**: `eth0`, `eth1`
-- **Predictable**: `ens32`, `eno1`, `enp0s3`
-- **Virtual**: `docker0`, `veth*`, `br-*`
+
+* **Traditional**: `eth0`, `eth1`
+* **Predictable**: `ens32`, `eno1`, `enp0s3`
+* **Virtual**: `docker0`, `veth*`, `br-*`
 
 Update your configuration:
 
@@ -303,6 +304,7 @@ discovery "instrument" {
 Deploy Mermin on multiple hosts for fleet-wide observability:
 
 **Host 1:**
+
 ```hcl
 export "traces" {
   otlp = {
@@ -320,6 +322,7 @@ export "traces" {
 ```
 
 **Host 2:**
+
 ```hcl
 export "traces" {
   otlp = {
@@ -383,15 +386,15 @@ sudo systemctl restart mermin
 
 Bare metal deployments have these limitations:
 
-| Feature | Kubernetes | Bare Metal |
-|---------|------------|------------|
-| **Pod Metadata** | ✅ Full | ❌ Not Available |
-| **Service Mapping** | ✅ Yes | ❌ No |
-| **Owner References** | ✅ Yes | ❌ No |
-| **Network Policies** | ✅ Yes | ❌ No |
-| **Auto-Discovery** | ✅ Informers | ❌ Manual Config |
-| **Flow Traces** | ✅ Available | ✅ Available |
-| **Protocol Analysis** | ✅ Available | ✅ Available |
+| Feature               | Kubernetes  | Bare Metal      |
+| --------------------- | ----------- | --------------- |
+| **Pod Metadata**      | ✅ Full      | ❌ Not Available |
+| **Service Mapping**   | ✅ Yes       | ❌ No            |
+| **Owner References**  | ✅ Yes       | ❌ No            |
+| **Network Policies**  | ✅ Yes       | ❌ No            |
+| **Auto-Discovery**    | ✅ Informers | ❌ Manual Config |
+| **Flow Traces**       | ✅ Available | ✅ Available     |
+| **Protocol Analysis** | ✅ Available | ✅ Available     |
 
 Bare metal deployments capture raw network flows without Kubernetes context.
 
@@ -399,11 +402,11 @@ Bare metal deployments capture raw network flows without Kubernetes context.
 
 Bare metal deployments are suitable for:
 
-- **Non-Kubernetes Environments**: Traditional VMs or physical servers
-- **Host-Level Monitoring**: Monitor host OS network activity
-- **Hybrid Environments**: Bridge Kubernetes and non-Kubernetes infrastructure
-- **Edge Deployments**: Lightweight observability at edge locations
-- **Testing and Development**: Quick setup for experimentation
+* **Non-Kubernetes Environments**: Traditional VMs or physical servers
+* **Host-Level Monitoring**: Monitor host OS network activity
+* **Hybrid Environments**: Bridge Kubernetes and non-Kubernetes infrastructure
+* **Edge Deployments**: Lightweight observability at edge locations
+* **Testing and Development**: Quick setup for experimentation
 
 ## Troubleshooting
 
@@ -416,9 +419,10 @@ docker logs mermin
 ```
 
 Common causes:
-- Missing configuration file
-- Invalid configuration syntax
-- Interface not found
+
+* Missing configuration file
+* Invalid configuration syntax
+* Interface not found
 
 ### "Operation not permitted" Errors
 
@@ -507,9 +511,9 @@ sudo systemctl start mermin
 
 ## Next Steps
 
-- **[Configuration Reference](../configuration/README.md)**: Optimize for bare metal
-- **[OTLP Export](../configuration/export-otlp.md)**: Configure secure export
-- **[Integrations](../integrations/README.md)**: Send data to observability backends
-- **[Troubleshooting](../troubleshooting/README.md)**: Solve common issues
+* [**Configuration Reference**](../configuration/configuration.md): Optimize for bare metal
+* [**OTLP Export**](../configuration/export-otlp.md): Configure secure export
+* [**Integrations**](../integrations/integrations.md): Send data to observability backends
+* [**Troubleshooting**](../troubleshooting/troubleshooting.md): Solve common issues
 
-For Kubernetes deployments with full metadata enrichment, see **[Kubernetes with Helm](kubernetes-helm.md)**.
+For Kubernetes deployments with full metadata enrichment, see [**Kubernetes with Helm**](kubernetes-helm.md).

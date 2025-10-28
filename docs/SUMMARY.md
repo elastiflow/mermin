@@ -1,14 +1,15 @@
-# Table of Contents
+# Table of contents
+
+* [Welcome](README.md)
 
 ## Getting Started
 
-* [Introduction](README.md)
-* [Quick Start](quickstart.md)
-* [Architecture](architecture.md)
+* [Quick Start](getting-started/quickstart.md)
+* [Architecture](getting-started/architecture.md)
 
 ## Deployment
 
-* [Deployment Overview](deployment/README.md)
+* [Deployment Overview](deployment/deployment.md)
 * [Kubernetes with Helm](deployment/kubernetes-helm.md)
 * [Cloud Platforms](deployment/cloud-platforms.md)
 * [Advanced Scenarios](deployment/advanced-scenarios.md)
@@ -16,7 +17,7 @@
 
 ## Configuration
 
-* [Configuration Overview](configuration/README.md)
+* [Configuration Overview](configuration/configuration.md)
 * [Global Options](configuration/global-options.md)
 * [API and Metrics](configuration/api-metrics.md)
 * [Parser Configuration](configuration/parser.md)
@@ -34,7 +35,7 @@
 
 ## Integrations
 
-* [Integration Overview](integrations/README.md)
+* [Integration Overview](integrations/integrations.md)
 * [OpenTelemetry Collector](integrations/opentelemetry-collector.md)
 * [Elastic Stack](integrations/elastic.md)
 * [OpenSearch](integrations/opensearch.md)
@@ -44,7 +45,7 @@
 
 ## Troubleshooting
 
-* [Troubleshooting Overview](troubleshooting/README.md)
+* [Troubleshooting Overview](troubleshooting/troubleshooting.md)
 * [Deployment Issues](troubleshooting/deployment-issues.md)
 * [No Flow Traces](troubleshooting/no-flows.md)
 * [Performance Issues](troubleshooting/performance.md)

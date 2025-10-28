@@ -1,4 +1,4 @@
-# Stdout Exporter Configuration
+# Stdout Exporter
 
 The stdout exporter outputs flow records directly to the console (standard output), making it ideal for development, debugging, and initial testing of Mermin.
 
@@ -18,18 +18,19 @@ export "traces" {
 
 ### `stdout`
 
-**Type:** String (enum) or null
-**Default:** `null` (disabled)
+**Type:** String (enum) or null **Default:** `null` (disabled)
 
 Output format for stdout exporter.
 
 **Valid Values:**
-- `"text_indent"`: Human-readable, indented text format (recommended)
-- `null`: Disable stdout export
+
+* `"text_indent"`: Human-readable, indented text format (recommended)
+* `null`: Disable stdout export
 
 **Examples:**
 
 Enable stdout exporter:
+
 ```hcl
 export "traces" {
   stdout = "text_indent"
@@ -37,6 +38,7 @@ export "traces" {
 ```
 
 Disable stdout exporter:
+
 ```hcl
 export "traces" {
   # stdout export disabled
@@ -108,10 +110,11 @@ export "traces" {
 ```
 
 **Benefits:**
-- No external dependencies
-- Immediate feedback
-- Easy debugging
-- Simple setup
+
+* No external dependencies
+* Immediate feedback
+* Easy debugging
+* Simple setup
 
 ### Debugging Flow Issues
 
@@ -129,6 +132,7 @@ export "traces" {
 ```
 
 **Workflow:**
+
 1. Enable stdout exporter
 2. Deploy or reload configuration
 3. View logs: `kubectl logs -f <pod-name>`
@@ -187,10 +191,11 @@ export "traces" {
 ```
 
 **When to use both:**
-- Debugging export issues
-- Comparing local vs. exported data
-- Validating flow enrichment
-- Troubleshooting transformations
+
+* Debugging export issues
+* Comparing local vs. exported data
+* Validating flow enrichment
+* Troubleshooting transformations
 
 ## Viewing Stdout Output
 
@@ -267,7 +272,7 @@ kubectl logs <pod> | grep "nginx-deployment"
 
 ### Using jq (if JSON format available)
 
-While Mermin currently supports text_indent format, future JSON support would enable:
+While Mermin currently supports text\_indent format, future JSON support would enable:
 
 ```bash
 # Example for future JSON support
@@ -280,20 +285,20 @@ kubectl logs <pod> | jq 'select(.source.port == 443)'
 
 Stdout output can generate significant log volume:
 
-**Typical flow rate:** 1,000 flows/second
-**Text indent size:** ~500 bytes per flow
-**Log rate:** ~500 KB/second = ~1.8 GB/hour
+**Typical flow rate:** 1,000 flows/second **Text indent size:** \~500 bytes per flow **Log rate:** \~500 KB/second = \~1.8 GB/hour
 
 **Recommendations:**
-- Use stdout only for development/debugging
-- Disable for production environments
-- Configure log rotation if enabled long-term
+
+* Use stdout only for development/debugging
+* Disable for production environments
+* Configure log rotation if enabled long-term
 
 ### CPU Impact
 
 Formatting flow records for stdout has minimal CPU overhead:
-- Text formatting: < 1% CPU
-- Logging I/O: < 2% CPU
+
+* Text formatting: < 1% CPU
+* Logging I/O: < 2% CPU
 
 Enable stdout without significant performance impact for debugging.
 
@@ -302,6 +307,7 @@ Enable stdout without significant performance impact for debugging.
 Configure log rotation to prevent disk filling:
 
 **Docker:**
+
 ```json
 {
   "log-driver": "json-file",
@@ -313,6 +319,7 @@ Configure log rotation to prevent disk filling:
 ```
 
 **Kubernetes:**
+
 ```yaml
 # Relies on node-level log rotation
 # Typically handled by kubelet
@@ -326,6 +333,7 @@ Configure log rotation to prevent disk filling:
 **Symptoms:** Stdout exporter enabled but no flow records in logs
 
 **Solutions:**
+
 1. Verify `stdout = "text_indent"` is set
 2. Check log level includes info: `log_level = "info"`
 3. Verify flows are being captured: check metrics
@@ -336,6 +344,7 @@ Configure log rotation to prevent disk filling:
 **Symptoms:** Logs filling up quickly, hard to read
 
 **Solutions:**
+
 1. Add flow filters (see [Filtering](filtering.md))
 2. Reduce monitored interfaces
 3. Use grep to filter relevant flows
@@ -346,6 +355,7 @@ Configure log rotation to prevent disk filling:
 **Symptoms:** Truncated or malformed output
 
 **Solutions:**
+
 1. Check log collection limits
 2. Verify container logs aren't being truncated
 3. Increase log line length limits if needed
@@ -402,19 +412,19 @@ export "traces" {
 
 ## Comparison with OTLP
 
-| Feature | Stdout | OTLP |
-|---------|--------|------|
-| **Setup Complexity** | None | Requires collector |
-| **Storage** | Logs/ephemeral | Persistent backend |
-| **Query Capability** | grep only | Full query language |
-| **Production Ready** | No | Yes |
-| **Resource Usage** | Low | Moderate |
-| **Scalability** | Poor | Excellent |
-| **Visualization** | None | Dashboards available |
+| Feature              | Stdout         | OTLP                 |
+| -------------------- | -------------- | -------------------- |
+| **Setup Complexity** | None           | Requires collector   |
+| **Storage**          | Logs/ephemeral | Persistent backend   |
+| **Query Capability** | grep only      | Full query language  |
+| **Production Ready** | No             | Yes                  |
+| **Resource Usage**   | Low            | Moderate             |
+| **Scalability**      | Poor           | Excellent            |
+| **Visualization**    | None           | Dashboards available |
 
 ## Next Steps
 
-- **[OTLP Exporter](export-otlp.md)**: Configure production export
-- **[Flow Filtering](filtering.md)**: Reduce log volume
-- **[Internal Tracing](internal-tracing.md)**: Monitor Mermin itself
-- **[Integration Guides](../integrations/README.md)**: Set up observability backends
+* [**OTLP Exporter**](export-otlp.md): Configure production export
+* [**Flow Filtering**](filtering.md): Reduce log volume
+* [**Internal Tracing**](internal-tracing.md): Monitor Mermin itself
+* [**Integration Guides**](../integrations/integrations.md): Set up observability backends

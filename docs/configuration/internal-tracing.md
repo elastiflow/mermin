@@ -1,14 +1,15 @@
-# Internal Tracing Configuration
+# Internal Tracing
 
 This page documents the `internal.traces` configuration, which controls how Mermin exports its own telemetry data for self-monitoring and debugging.
 
 ## Overview
 
 Mermin can export traces about its own operation, enabling you to:
-- Monitor Mermin's internal performance
-- Debug issues with flow processing
-- Track eBPF program execution
-- Observe internal component interactions
+
+* Monitor Mermin's internal performance
+* Debug issues with flow processing
+* Track eBPF program execution
+* Observe internal component interactions
 
 This is separate from network flow export and is primarily used for Mermin development and advanced troubleshooting.
 
@@ -33,15 +34,16 @@ internal "traces" {
 
 ### `span_fmt`
 
-**Type:** String (enum)
-**Default:** `"full"`
+**Type:** String (enum) **Default:** `"full"`
 
 Span event format for internal traces.
 
 **Valid Values:**
-- `"full"`: Record all span events (enter, exit, close)
+
+* `"full"`: Record all span events (enter, exit, close)
 
 **Example:**
+
 ```hcl
 internal "traces" {
   span_fmt = "full"  # Complete span lifecycle
@@ -50,8 +52,7 @@ internal "traces" {
 
 ### `stdout`
 
-**Type:** Object
-**Default:** `null` (disabled)
+**Type:** Object **Default:** `null` (disabled)
 
 Stdout exporter configuration for internal traces.
 
@@ -59,10 +60,10 @@ Stdout exporter configuration for internal traces.
 
 #### `format`
 
-**Type:** String (enum)
-**Valid Values:** `"text_indent"`
+**Type:** String (enum) **Valid Values:** `"text_indent"`
 
 **Example:**
+
 ```hcl
 internal "traces" {
   stdout = {
@@ -73,14 +74,14 @@ internal "traces" {
 
 ### `otlp`
 
-**Type:** Object
-**Default:** `null` (disabled)
+**Type:** Object **Default:** `null` (disabled)
 
 OTLP exporter configuration for internal traces.
 
 Uses same configuration options as main OTLP exporter (see [OTLP Exporter](export-otlp.md)).
 
 **Example:**
+
 ```hcl
 internal "traces" {
   otlp = {
@@ -118,10 +119,11 @@ internal "traces" {
 ```
 
 **Useful for:**
-- eBPF program loading issues
-- Flow processing bottlenecks
-- Informer synchronization problems
-- Export pipeline issues
+
+* eBPF program loading issues
+* Flow processing bottlenecks
+* Informer synchronization problems
+* Export pipeline issues
 
 ### Performance Analysis
 
@@ -138,9 +140,10 @@ internal "traces" {
 ```
 
 **Analyze:**
-- Span duration for operations
-- Bottlenecks in processing pipeline
-- Resource usage patterns
+
+* Span duration for operations
+* Bottlenecks in processing pipeline
+* Resource usage patterns
 
 ### Mermin Development
 
@@ -229,21 +232,24 @@ internal "traces" {
 ```
 
 **Benefits:**
-- Separate production Flow Traces from debug data
-- Different retention policies
-- Isolate development traffic
+
+* Separate production Flow Traces from debug data
+* Different retention policies
+* Isolate development traffic
 
 ## Performance Impact
 
 Internal tracing has minimal performance overhead:
 
 **Stdout only:**
-- CPU: < 1%
-- Memory: Negligible
+
+* CPU: < 1%
+* Memory: Negligible
 
 **OTLP export:**
-- CPU: < 2%
-- Memory: ~10-20 MB (for buffering)
+
+* CPU: < 2%
+* Memory: \~10-20 MB (for buffering)
 
 Safe to enable in production for troubleshooting.
 
@@ -266,6 +272,7 @@ This is the default and recommended for most deployments.
 **Symptoms:** No internal trace data visible
 
 **Solutions:**
+
 1. Verify `internal "traces"` block is configured
 2. Check exporter configuration (stdout or otlp)
 3. Ensure log level is sufficient: `log_level = "debug"`
@@ -276,6 +283,7 @@ This is the default and recommended for most deployments.
 **Symptoms:** Overwhelming volume of internal traces
 
 **Solutions:**
+
 1. Disable internal traces if not needed
 2. Send to separate collector
 3. Use sampling (if supported)
@@ -286,6 +294,7 @@ This is the default and recommended for most deployments.
 **Symptoms:** Internal traces mixed with network Flow Traces
 
 **Solutions:**
+
 1. Send internal traces to different endpoint
 2. Use different collector instances
 3. Filter by service name in backend
@@ -366,12 +375,13 @@ Query internal traces in Tempo:
 ### Jaeger
 
 Filter internal traces:
-- Service: `mermin-internal`
-- Operation: `process_packet`, `sync_k8s_informers`, etc.
+
+* Service: `mermin-internal`
+* Operation: `process_packet`, `sync_k8s_informers`, etc.
 
 ## Next Steps
 
-- **[Global Options](global-options.md)**: Configure logging levels
-- **[API and Metrics](api-metrics.md)**: Monitor Mermin with Prometheus
-- **[Troubleshooting](../troubleshooting/README.md)**: Debug common issues
-- **[OTLP Exporter](export-otlp.md)**: Configure trace export
+* [**Global Options**](global-options.md): Configure logging levels
+* [**API and Metrics**](api-metrics.md): Monitor Mermin with Prometheus
+* [**Troubleshooting**](../troubleshooting/troubleshooting.md): Debug common issues
+* [**OTLP Exporter**](export-otlp.md): Configure trace export

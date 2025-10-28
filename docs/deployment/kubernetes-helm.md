@@ -6,10 +6,10 @@ This guide covers deploying Mermin to a Kubernetes cluster using Helm, the recom
 
 Before you begin, ensure you have:
 
-- **Kubernetes cluster**: Version 1.20 or newer, with `kubectl` configured
-- **Helm**: Version 3.x installed ([installation guide](https://helm.sh/docs/intro/install/))
-- **Cluster permissions**: Ability to create ClusterRole, ClusterRoleBinding, and DaemonSets
-- **OTLP endpoint**: An OpenTelemetry Collector or compatible backend to receive flows
+* **Kubernetes cluster**: Version 1.20 or newer, with `kubectl` configured
+* **Helm**: Version 3.x installed ([installation guide](https://helm.sh/docs/intro/install/))
+* **Cluster permissions**: Ability to create ClusterRole, ClusterRoleBinding, and DaemonSets
+* **OTLP endpoint**: An OpenTelemetry Collector or compatible backend to receive flows
 
 ## Installation
 
@@ -319,10 +319,10 @@ The HCL file takes precedence over inline configuration in `values.yaml`.
 
 Mermin is deployed as a DaemonSet, which means:
 
-- **Automatic Node Coverage**: Every node gets a Mermin pod
-- **Node Addition**: New nodes automatically get Mermin pods
-- **Node Removal**: Pods are removed when nodes are drained
-- **Rolling Updates**: Updates happen one node at a time (configurable)
+* **Automatic Node Coverage**: Every node gets a Mermin pod
+* **Node Addition**: New nodes automatically get Mermin pods
+* **Node Removal**: Pods are removed when nodes are drained
+* **Rolling Updates**: Updates happen one node at a time (configurable)
 
 The DaemonSet spec includes:
 
@@ -341,6 +341,7 @@ This ensures zero downtime during updates, with only one node's Mermin pod down 
 Set appropriate resource limits based on your traffic:
 
 **Low Traffic** (< 1,000 flows/second):
+
 ```yaml
 resources:
   requests:
@@ -352,6 +353,7 @@ resources:
 ```
 
 **Medium Traffic** (1,000-10,000 flows/second):
+
 ```yaml
 resources:
   requests:
@@ -363,6 +365,7 @@ resources:
 ```
 
 **High Traffic** (> 10,000 flows/second):
+
 ```yaml
 resources:
   requests:
@@ -431,9 +434,10 @@ helm uninstall mermin
 ```
 
 This removes all Mermin resources except:
-- Custom resource definitions (if any)
-- Persistent volumes (if any)
-- Namespace (if created by you)
+
+* Custom resource definitions (if any)
+* Persistent volumes (if any)
+* Namespace (if created by you)
 
 To fully clean up:
 
@@ -500,45 +504,51 @@ This allows Mermin to map network flows to specific processes on the host.
 ### Pods Not Starting
 
 Check events:
+
 ```bash
 kubectl describe pod <pod-name>
 ```
 
 Common issues:
-- Insufficient privileges: Ensure `privileged: true` is set
-- Image pull errors: Check `imagePullSecrets` and registry access
-- Resource limits: Ensure nodes have sufficient CPU/memory
+
+* Insufficient privileges: Ensure `privileged: true` is set
+* Image pull errors: Check `imagePullSecrets` and registry access
+* Resource limits: Ensure nodes have sufficient CPU/memory
 
 ### No Flow Traces
 
 Check logs for errors:
+
 ```bash
 kubectl logs <pod-name> | grep -i error
 ```
 
 Common issues:
-- No matching interfaces: Check `discovery.instrument.interfaces` configuration
-- eBPF load failure: Ensure kernel version >= 4.18 with eBPF support
-- OTLP connection failure: Verify collector endpoint and network policies
+
+* No matching interfaces: Check `discovery.instrument.interfaces` configuration
+* eBPF load failure: Ensure kernel version >= 4.18 with eBPF support
+* OTLP connection failure: Verify collector endpoint and network policies
 
 ### High Resource Usage
 
 Monitor metrics:
+
 ```bash
 kubectl port-forward <pod-name> 10250:10250
 curl http://localhost:10250/metrics
 ```
 
 Adjust configuration:
-- Increase flow timeouts to reduce flow table size
-- Decrease batch frequency to reduce CPU
-- Add flow filters to reduce processed flows
 
-See [Troubleshooting Guide](../troubleshooting/README.md) for more solutions.
+* Increase flow timeouts to reduce flow table size
+* Decrease batch frequency to reduce CPU
+* Add flow filters to reduce processed flows
+
+See [Troubleshooting Guide](../troubleshooting/troubleshooting.md) for more solutions.
 
 ## Next Steps
 
-- **[Configure OTLP Export](../configuration/export-otlp.md)**: Set up authentication and TLS
-- **[Customize Filters](../configuration/filtering.md)**: Filter flows before export
-- **[Integration Guides](../integrations/README.md)**: Connect to your observability backend
-- **[Monitor Mermin](../configuration/api-metrics.md)**: Set up Prometheus scraping
+* [**Configure OTLP Export**](../configuration/export-otlp.md): Set up authentication and TLS
+* [**Customize Filters**](../configuration/filtering.md): Filter flows before export
+* [**Integration Guides**](../integrations/integrations.md): Connect to your observability backend
+* [**Monitor Mermin**](../configuration/api-metrics.md): Set up Prometheus scraping
