@@ -1,3 +1,13 @@
+## [mermin-netobserv-os-stack-0.1.0-beta.2] - 2025-10-28
+
+### Bug Fixes
+
+- **helm:** Bump Mermin dependency in Composite chart (#190)
+
+[mermin-netobserv-os-stack-0.1.0-beta.1..mermin-netobserv-os-stack-0.1.0-beta.2](https://github.com/elastiflow/mermin/compare/mermin-netobserv-os-stack-0.1.0-beta.1...mermin-netobserv-os-stack-0.1.0-beta.2)
+
+
+
 ## [mermin-netobserv-os-stack-0.1.0-beta.1] - 2025-10-23
 
 ### Bug Fixes
