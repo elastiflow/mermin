@@ -1,3 +1,16 @@
+## [v0.1.0-beta.9] - 2025-10-28
+
+### Bug Fixes
+
+- Flow timestamp ordering and refactor export config structure (#188)
+### Features
+
+- **config:** Flow to k8s object association (#181)
+
+[v0.1.0-beta.8..v0.1.0-beta.9](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.8...v0.1.0-beta.9)
+
+
+
 ## [v0.1.0-beta.8] - 2025-10-24
 
 ### Bug Fixes
