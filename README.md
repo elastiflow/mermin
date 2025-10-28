@@ -15,6 +15,7 @@ observability platforms.
   - [Prerequisites](#prerequisites-1)
   - [Build and Run Locally](#build-and-run-locally)
     - [1. Build the `mermin` agent](#1-build-the-mermin-agent)
+      - [Pull](#pull)
     - [2. Configuration Files](#2-configuration-files)
     - [3. Run the agent](#3-run-the-agent)
     - [4. Generate Traffic](#4-generate-traffic)
@@ -186,6 +187,22 @@ cargo build --release
 ```
 
 The build script automatically compiles the eBPF program and embeds it into the final binary.
+
+##### Pull
+
+<!-- TODO(Cleanup for GA): Drop authentication to docker registry once repo is public -->
+You may optionally pull the existing image for testing purposes:
+
+```sh
+# Authenticate to the docker registry
+echo 'GH_CLASSIC_TOKEN' | docker login ghcr.io -u elastiflow-ghcr --password-stdin
+
+# Check the latest image in the https://github.com/elastiflow/mermin/pkgs/container/mermin
+# Pull the image
+docker pull ghcr.io/elastiflow/mermin:v0.1.0-beta.9
+# Pull the debug image (has shell)
+docker pull ghcr.io/elastiflow/mermin:v0.1.0-beta.9-debug
+```
 
 #### 2. Configuration Files
 

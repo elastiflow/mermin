@@ -18,7 +18,9 @@ packet_worker_count     = 2
 internal "traces" {
   span_format = "full"
 
-  stdout = "" // text, text_indent(*new), json, json_indent
+  # stdout = {
+  #   format = "text_indent" // text_indent
+  # }
 
   otlp = {
     endpoint               = "http://otelcol:4317"
