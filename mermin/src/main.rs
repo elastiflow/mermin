@@ -381,7 +381,7 @@ async fn run() -> Result<()> {
         }
         Err(e) => {
             error!(
-                event.name = "k8s.client_init_failed",
+                event.name = "k8s.client.init.failed",
                 error.message = %e,
                 "failed to initialize kubernetes client; metadata lookup will be unavailable"
             );
