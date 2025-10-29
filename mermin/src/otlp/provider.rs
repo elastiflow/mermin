@@ -32,6 +32,7 @@ use tracing_subscriber::{
 use crate::{
     otlp::{
         OtlpError,
+        log_interceptor::{ExportFailureTracker, LogInterceptorLayer, LogPattern},
         opts::{OtlpExportOptions, StdoutExportOptions, defaults},
     },
     runtime::opts::SpanFmt,
@@ -501,7 +502,10 @@ pub async fn init_internal_tracing(
         }
     }
 
-    let filter = EnvFilter::new(format!("warn,mermin={log_level}"));
+    let filter = EnvFilter::new(format!(
+        "warn,mermin={log_level},opentelemetry_sdk={log_level},opentelemetry={log_level},opentelemetry_otlp={log_level}"
+    ));
+
     tracing_subscriber::registry()
         .with(filter)
         .with(fmt_layer)
