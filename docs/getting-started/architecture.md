@@ -11,32 +11,32 @@ This page explains how Mermin works, its architecture, and the flow of data from
 * **Rich Metadata**: Includes Kubernetes context (pods, services, deployments, labels)
 * **Standardized Format**: Works with any OTLP-compatible observability platform
 
-Mermin generates Flow Traces by capturing network packets, aggregating them into flows, enriching with Kubernetes metadata, and exporting as OpenTelemetry spans.
+Mermin generates Flow Traces by capturing network packets, aggregating them into flows, decorating with Kubernetes metadata, and exporting as OpenTelemetry spans.
 
 ## High-Level Architecture
 
 Mermin is deployed as a DaemonSet in Kubernetes, with one agent instance running on each node in your cluster. Each agent independently captures and processes network traffic from its host node.
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Kubernetes Cluster                       │
-│                                                                  │
-│  ┌──────────────┐         ┌──────────────┐                     │
-│  │    Node 1    │         │    Node 2    │                     │
-│  │              │         │              │                     │
-│  │  ┌────────┐  │         │  ┌────────┐  │                     │
-│  │  │ Mermin │  │         │  │ Mermin │  │                     │
-│  │  │ Agent  │  │         │  │ Agent  │  │                     │
-│  │  └───┬────┘  │         │  └───┬────┘  │                     │
-│  │      │ eBPF  │         │      │ eBPF  │                     │
-│  │      ↓       │         │      ↓       │                     │
-│  │  [Network]   │         │  [Network]   │                     │
-│  │  [Packets]   │         │  [Packets]   │                     │
-│  └──────────────┘         └──────────────┘                     │
-│         │                        │                              │
-│         └────────────┬───────────┘                              │
-│                      │ OTLP                                     │
-└──────────────────────┼──────────────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│             Kubernetes Cluster              │
+│                                             │
+│  ┌──────────────┐         ┌──────────────┐  │
+│  │    Node 1    │         │    Node 2    │  │
+│  │              │         │              │  │
+│  │  ┌────────┐  │         │  ┌────────┐  │  │
+│  │  │ Mermin │  │         │  │ Mermin │  │  │
+│  │  │ Agent  │  │         │  │ Agent  │  │  │
+│  │  └───┬────┘  │         │  └───┬────┘  │  │
+│  │      │ eBPF  │         │      │ eBPF  │  │
+│  │      ↓       │         │      ↓       │  │
+│  │  [Network]   │         │  [Network]   │  │
+│  │  [Packets]   │         │  [Packets]   │  │
+│  └──────────────┘         └──────────────┘  │
+│         │                        │          │
+│         └────────────┬───────────┘          │
+│                      │ OTLP                 │
+└──────────────────────┼──────────────────────┘
                        ↓
               ┌─────────────────┐
               │ OpenTelemetry   │
@@ -79,7 +79,7 @@ The userspace Mermin agent receives packets from eBPF and aggregates them into n
 * **Protocol Parsing**: Deep packet inspection for tunneling protocols (VXLAN, Geneve, WireGuard)
 * **Community ID**: Generates standard Community ID hashes for flow correlation
 
-A flow record includes:
+A Flow Trace includes:
 
 * Source and destination IP addresses and ports
 * Network protocol (TCP, UDP, ICMP, etc.)
@@ -88,9 +88,11 @@ A flow record includes:
 * Flow start and end timestamps
 * Community ID hash
 
+// TODO: LINK TO FLOW TRACE SPEC
+
 ### Kubernetes Integration
 
-Mermin deeply integrates with Kubernetes to enrich flows with contextual metadata:
+Mermin deeply integrates with Kubernetes to decorate flows with contextual metadata:
 
 #### Informers
 
@@ -110,13 +112,13 @@ For each network flow, Mermin:
 2. **Extracts Metadata**: Retrieves pod name, namespace, labels, annotations
 3. **Walks Owner References**: Follows ownerReferences from Pod → ReplicaSet → Deployment
 4. **Selector Matching**: Finds Services and NetworkPolicies that select the pod
-5. **Enriches Flows**: Attaches all relevant metadata to the flow record
+5. **Decorates Traces**: Attaches all relevant metadata to the Flow Trace
 
 This provides full context for each network flow, enabling powerful filtering and analysis.
 
 ### OTLP Exporter
 
-Mermin exports enriched flows as **Flow Traces** using the OpenTelemetry Protocol (OTLP):
+Mermin exports flows as **Flow Traces** using the OpenTelemetry Protocol (OTLP):
 
 * **Flow Traces as Spans**: Each network flow becomes an OpenTelemetry trace span
 * **Standard Protocol**: OTLP is an industry-standard telemetry protocol
@@ -166,7 +168,7 @@ Ring Buffer Reader
 * Updates packet/byte counters, flags, timestamps
 * Checks if flow should be exported (timeout, connection close, max duration)
 
-### 3. Kubernetes Enrichment
+### 3. Kubernetes Decoration
 
 ```
 Flow Ready for Export
@@ -179,7 +181,7 @@ Flow Ready for Export
          ↓
    Match Selectors
          ↓
-   Enriched Flow Record
+   Decorate Trace Record
 ```
 
 * Source IP: `10.244.1.5` → Pod: `nginx-abc123` → ReplicaSet: `nginx-xyz` → Deployment: `nginx`
@@ -189,7 +191,7 @@ Flow Ready for Export
 ### 4. OTLP Export
 
 ```
-Enriched Flow
+Trace Flow
          ↓
    Batch Accumulator
          ↓
@@ -251,7 +253,7 @@ These privileges are necessary for eBPF and cannot be reduced.
 
 * **No Payload Capture**: Mermin only captures packet headers, not application data
 * **Metadata Only**: Flow records contain IPs, ports, protocols – not packet contents
-* **Configurable Filtering**: Filter out sensitive traffic before export
+* **Configurable Filtering**: Filter out sensitive or noisy traffic before export
 * **TLS Transport**: All OTLP exports can be encrypted with TLS
 
 ### RBAC
