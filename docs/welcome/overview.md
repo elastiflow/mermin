@@ -28,7 +28,7 @@ This documentation is designed to help you successfully deploy, configure, and o
 * [**Architecture Overview**](getting-started/architecture.md): Understand how Mermin works and its data flow
 * [**Deployment Guides**](deployment/deployment.md): Detailed instructions for various deployment scenarios (Kubernetes, cloud platforms, bare metal)
 * [**Configuration Reference**](configuration/configuration.md): Comprehensive documentation of all configuration options
-* [**Integration Guides**](integrations/integrations.md): Connect Mermin to popular observability backends (Elastic, Grafana, Jaeger, and more)
+* [**Observability Backends**](observability/backends.md): Send Flow Traces to Elastic, Grafana Tempo, Jaeger, and other OTLP-compatible platforms
 * [**Troubleshooting**](troubleshooting/troubleshooting.md): Solutions to common issues and diagnostic approaches
 
 ## System Requirements
