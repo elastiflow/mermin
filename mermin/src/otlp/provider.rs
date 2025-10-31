@@ -32,7 +32,6 @@ use tracing_subscriber::{
 use crate::{
     otlp::{
         OtlpError,
-        log_interceptor::{ExportFailureTracker, LogInterceptorLayer, LogPattern},
         opts::{OtlpExportOptions, StdoutExportOptions, defaults},
     },
     runtime::opts::SpanFmt,
