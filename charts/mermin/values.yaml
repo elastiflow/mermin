@@ -104,6 +104,9 @@ tolerations:
 
 affinity: {}
 
+# Enable host networking mode for the pod
+hostNetwork: false
+
 config:
   # Inject config hash to the pod label to force pod restart
   restartOnConfigChange: true
