@@ -1,3 +1,17 @@
+## [v0.1.0-beta.10] - 2025-11-03
+
+### Bug Fixes
+
+- **helm:** Bump Mermin dependency in Composite chart (#190)
+### Features
+
+- Subscribe to opentelemetry logs (#194)
+- **chart:** Add optional host networking in daemonset (#196)
+
+[v0.1.0-beta.9..v0.1.0-beta.10](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.9...v0.1.0-beta.10)
+
+
+
 ## [v0.1.0-beta.9] - 2025-10-28
 
 ### Bug Fixes
