@@ -36,6 +36,7 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      hostNetwork: {{ .Values.hostNetwork }}
       hostPID: {{ .Values.config.hostPidEnrichment }}
       {{- if .Values.serviceAccount.create }}
       serviceAccountName: {{ include "mermin.serviceAccountName" . }}
