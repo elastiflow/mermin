@@ -49,6 +49,7 @@ podLabels: {}
 # TODO(mack#lgo-406|2025-11-04): Check if eBPF program can switch namespaces
 hostNetwork: false
 dnsPolicy: ClusterFirstWithHostNet
+hostPID: false
 
 # TODO(mack#lgo-406|2025-11-04): Reiterate on defaults
 podSecurityContext:

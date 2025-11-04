@@ -36,6 +36,7 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      hostPID: {{ .Values.hostPID }}
       hostNetwork: {{ .Values.hostNetwork }}
       dnsPolicy: {{ .Values.dnsPolicy }}
       {{- if .Values.serviceAccount.create }}
