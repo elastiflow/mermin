@@ -74,6 +74,11 @@ impl NetnsSwitch {
     /// 2. Executes the provided closure
     /// 3. Always switches back to the original namespace (even on error)
     ///
+    /// # Arguments
+    ///
+    /// * `context` - Optional context string (e.g., interface name) for logging
+    /// * `f` - Closure to execute in the host network namespace
+    ///
     /// # Errors
     ///
     /// Returns an error if:
@@ -85,16 +90,19 @@ impl NetnsSwitch {
     ///
     /// ```rust,no_run
     /// let netns = NetnsSwitch::new()?;
-    /// let link_id = netns.in_host_namespace(|| {
+    /// let link_id = netns.in_host_namespace(Some("cni0"), || {
     ///     program.attach("cni0", TcAttachType::Ingress)
     /// })?;
     /// ```
-    pub fn in_host_namespace<F, R>(&self, f: F) -> Result<R>
+    pub fn in_host_namespace<F, R>(&self, context: Option<&str>, f: F) -> Result<R>
     where
         F: FnOnce() -> Result<R>,
     {
+        let ctx = context.unwrap_or("unknown");
+
         debug!(
             event.name = "netns.switch.to_host",
+            context = ctx,
             "switching to host network namespace"
         );
 
@@ -107,6 +115,7 @@ impl NetnsSwitch {
 
         info!(
             event.name = "netns.switch.in_host",
+            context = ctx,
             "now operating in host network namespace"
         );
 
@@ -114,6 +123,7 @@ impl NetnsSwitch {
 
         debug!(
             event.name = "netns.switch.to_original",
+            context = ctx,
             "switching back to original network namespace"
         );
 
@@ -122,6 +132,7 @@ impl NetnsSwitch {
             Ok(_) => {
                 info!(
                     event.name = "netns.switch.restored",
+                    context = ctx,
                     "restored to original network namespace"
                 );
                 result
@@ -132,6 +143,7 @@ impl NetnsSwitch {
                 ));
                 error!(
                     event.name = "netns.switch.restore_failed",
+                    context = ctx,
                     error = %e,
                     "failed to restore original network namespace"
                 );
@@ -160,7 +172,7 @@ mod tests {
         // This test only works in a properly configured environment
         // with CAP_SYS_ADMIN and hostPID: true
         let netns = NetnsSwitch::new().unwrap();
-        let result = netns.in_host_namespace(|| Ok(()));
+        let result = netns.in_host_namespace(Some("test"), || Ok(()));
         assert!(result.is_ok());
     }
 
@@ -170,8 +182,9 @@ mod tests {
         // This test only works in a properly configured environment
         // with CAP_SYS_ADMIN and hostPID: true
         let netns = NetnsSwitch::new().unwrap();
-        let result =
-            netns.in_host_namespace(|| Err::<(), MerminError>(MerminError::internal("test error")));
+        let result = netns.in_host_namespace(None, || {
+            Err::<(), MerminError>(MerminError::internal("test error"))
+        });
         assert!(result.is_err());
     }
 }

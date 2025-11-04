@@ -333,8 +333,9 @@ async fn run() -> Result<()> {
                     );
                 }
 
+                let context = format!("{} ({})", iface, attach_type.direction_name());
                 let link_id = netns_switch
-                    .in_host_namespace(|| {
+                    .in_host_namespace(Some(&context), || {
                         program.attach(iface, *attach_type).map_err(|e| {
                             MerminError::internal(format!(
                                 "failed to attach eBPF program to interface {iface}: {e}"
