@@ -492,7 +492,21 @@ impl Default for InstrumentConf {
             // Default to common physical interface patterns to capture inter-node traffic
             // Users should add CNI-specific patterns (cni*, gke*, cilium_*) if they need
             // pod-to-pod same-node traffic, as those can cause data duplication
-            interfaces: vec!["eth*".to_string(), "ens*".to_string(), "en*".to_string()],
+            interfaces: vec![
+                "cni*".to_string(),
+                "flannel*".to_string(),
+                "cali*".to_string(),
+                "tunl*".to_string(),
+                "cilium_*".to_string(),
+                "lxc*".to_string(),
+                "gke*".to_string(),
+                "eni*".to_string(),
+                "vlan*".to_string(),
+                "br*".to_string(),
+                "tun*".to_string(),
+                "ovn-k8s*".to_string(),
+                "br-*".to_string(),
+            ],
         }
     }
 }
@@ -1132,6 +1146,38 @@ mod tests {
         assert_eq!(
             resolved, available,
             "Wildcard * should match all interfaces"
+        );
+    }
+
+    #[test]
+    fn wildcard_matches_all_cni_interfaces() {
+        // Test that wildcard "*" pattern matches all CNI/Kubernetes interface patterns
+        let available = vec![
+            "cni0".to_string(),
+            "flannel.1".to_string(),
+            "cali123abc".to_string(),
+            "tunl0".to_string(),
+            "cilium_net".to_string(),
+            "lxc12345".to_string(),
+            "gke52aa5df9a5f".to_string(),
+            "eni1a2b3c4d".to_string(),
+            "vlan.eth.1".to_string(),
+            "br-int".to_string(),
+            "tun0".to_string(),
+            "ovn-k8s-mp0".to_string(),
+            "br-ex".to_string(),
+        ];
+
+        let pattern = "*";
+        let resolved = Conf::find_matches(pattern, &available);
+
+        // Convert Vec<&str> to Vec<String> for comparison
+        let resolved_owned: Vec<String> = resolved.iter().map(|s| s.to_string()).collect();
+
+        // Wildcard should match all CNI interfaces
+        assert_eq!(
+            resolved_owned, available,
+            "Wildcard * should match all CNI/Kubernetes interfaces"
         );
     }
 
