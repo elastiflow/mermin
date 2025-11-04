@@ -1,3 +1,13 @@
+## [mermin-netobserv-os-stack-0.1.0-beta.3] - 2025-11-04
+
+### Features
+
+- **helm:** Bump mermin chart version in stack chart (#203)
+
+[mermin-netobserv-os-stack-0.1.0-beta.2..mermin-netobserv-os-stack-0.1.0-beta.3](https://github.com/elastiflow/mermin/compare/mermin-netobserv-os-stack-0.1.0-beta.2...mermin-netobserv-os-stack-0.1.0-beta.3)
+
+
+
 ## [mermin-netobserv-os-stack-0.1.0-beta.2] - 2025-10-28
 
 ### Bug Fixes
