@@ -23,7 +23,6 @@ extraArgs: []
   # - "--foo"
   # - "bar"
 
-
 serviceAccount:
   # Specifies whether a service account should be created
   create: true
@@ -57,11 +56,17 @@ podSecurityContext:
 
 # TODO(mack#lgo-406|2025-11-04): Reiterate on defaults
 securityContext:
-  # privileged mode is required for mermin to interact with the kernel and eBPF.
-  privileged: true
+  # namespace switching requires specific capabilities but not full privileged mode
+  privileged: false
   capabilities:
     drop:
       - ALL
+    add:
+      - NET_ADMIN
+      - BPF
+      - PERFMON
+      - SYS_ADMIN
+      - SYS_RESOURCE
   readOnlyRootFilesystem: true
   runAsNonRoot: false
 

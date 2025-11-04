@@ -30,10 +30,11 @@ mermin:
       drop:
         - ALL
       add:
-        - BPF
         - NET_ADMIN
-        - SYS_RESOURCE
+        - BPF
+        - PERFMON
         - SYS_ADMIN
+        - SYS_RESOURCE
 
 netobserv-flow:
   enabled: true

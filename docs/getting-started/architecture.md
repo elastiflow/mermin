@@ -243,11 +243,29 @@ See [Configuration Reference](../configuration/configuration.md) for details.
 
 Mermin requires elevated privileges to operate:
 
-* **Privileged Container**: Needed to load eBPF programs
-* **Host Network**: Must access host network interfaces
-* **Capabilities**: Requires `CAP_SYS_ADMIN`, `CAP_NET_ADMIN`, `CAP_BPF`
+* **Host PID Namespace**: Required to access `/proc/1/ns/net` for namespace switching
+* **Linux Capabilities**: Requires specific capabilities instead of full privileged mode:
+  * `CAP_NET_ADMIN` - Attach TC (traffic control) programs to network interfaces
+  * `CAP_BPF` - Load eBPF programs (kernel 5.8+)
+  * `CAP_PERFMON` - Access eBPF ring buffers (kernel 5.8+)
+  * `CAP_SYS_ADMIN` - Switch network namespaces and access BPF filesystem
+  * `CAP_SYS_RESOURCE` - Increase memlock limits for eBPF maps
 
-These privileges are necessary for eBPF and cannot be reduced.
+#### Network Namespace Switching
+
+Mermin uses a sophisticated approach to monitor host network interfaces without requiring `hostNetwork: true`:
+
+1. **Startup**: Mermin starts in its own pod network namespace
+2. **Attachment**: Temporarily switches to host network namespace to attach eBPF programs
+3. **Operation**: Switches back to pod namespace for all other operations
+
+This approach provides:
+
+* **Network isolation**: Pod has its own network namespace
+* **Kubernetes DNS**: Can resolve service names for OTLP endpoints
+* **Host monitoring**: eBPF programs remain attached to host interfaces
+
+The eBPF programs execute in kernel space and remain attached regardless of the userspace process's namespace.
 
 ### Data Privacy
 

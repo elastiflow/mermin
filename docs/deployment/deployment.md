@@ -80,6 +80,53 @@ Includes CNI bridge interfaces but may cause duplicate flow records for inter-no
 
 See [Network Interface Discovery](../configuration/discovery-interfaces.md) for details.
 
+### Network Namespace Switching
+
+Mermin uses an advanced technique to monitor host network interfaces without requiring `hostNetwork: true`. This provides better network isolation while maintaining full monitoring capabilities.
+
+**How it works:**
+
+1. Mermin starts in its own pod network namespace
+2. During eBPF program attachment, it temporarily switches to the host network namespace
+3. After attachment, it switches back to the pod namespace
+4. eBPF programs remain attached in the host namespace (kernel space)
+5. Mermin operates normally in pod namespace (userspace)
+
+**Benefits:**
+
+* **Network Isolation**: Pod has its own network namespace, separate from the host
+* **Kubernetes DNS**: Can resolve service names for OTLP endpoints (e.g., `http://otel-collector.observability:4317`)
+* **Service Communication**: Other pods can communicate with Mermin on predictable IP addresses
+* **Better Security**: Doesn't expose host network interfaces to the pod
+
+**Requirements:**
+
+* `hostPID: true` - Required to access `/proc/1/ns/net` (host network namespace)
+* `CAP_SYS_ADMIN` - Required for `setns()` syscall to switch namespaces
+* Automatic DNS Policy - Helm chart sets `dnsPolicy: ClusterFirstWithHostNet` when `hostNetwork: false`
+
+**Configuration:**
+
+The default Helm chart configuration uses namespace switching:
+
+```yaml
+# values.yaml
+hostNetwork: false  # Use pod namespace (not host)
+hostPidEnrichment: true  # Required for namespace switching
+
+securityContext:
+  privileged: false  # No longer requires full privileged mode
+  capabilities:
+    add:
+      - NET_ADMIN    # TC attachment
+      - BPF          # eBPF operations
+      - PERFMON      # Ring buffers
+      - SYS_ADMIN    # Namespace switching
+      - SYS_RESOURCE # Memory limits
+```
+
+The DaemonSet automatically sets the appropriate DNS policy to enable Kubernetes service resolution.
+
 ## Prerequisites by Environment
 
 ### All Environments
@@ -134,9 +181,11 @@ securityContext:
   privileged: true
   capabilities:
     add:
-      - SYS_ADMIN
-      - NET_ADMIN
-      - BPF
+      - NET_ADMIN    # TC attachment
+      - BPF          # eBPF operations (kernel 5.8+)
+      - PERFMON      # Ring buffers (kernel 5.8+)
+      - SYS_ADMIN    # Namespace switching and BPF filesystem access
+      - SYS_RESOURCE # memlock limits
 ```
 
 This is necessary to:
@@ -144,6 +193,7 @@ This is necessary to:
 * Load eBPF programs into the kernel
 * Attach to network interfaces
 * Access the host network namespace
+* Switch between network namespaces
 
 {% hint style="warning" %}
 Never reduce these privileges. Mermin will fail to start without them.
