@@ -43,23 +43,22 @@ podAnnotations: {}
 podLabels: {}
 
 # Enable host networking mode for the pod, incompatible with surge upgrades
-hostNetwork: true
+# TODO(mack#lgo-406|2025-11-04): Check if eBPF program can switch namespaces
+hostNetwork: false
 
+# TODO(mack#lgo-406|2025-11-04): Reiterate on defaults
 podSecurityContext:
-  runAsNonRoot: true
-
-securityContext:
   runAsNonRoot: false
-  runAsUser: 0
-  runAsGroup: 0
+
+# TODO(mack#lgo-406|2025-11-04): Reiterate on defaults
+securityContext:
+  # privileged mode is required for mermin to interact with the kernel and eBPF.
+  privileged: true
   capabilities:
     drop:
       - ALL
-    add:
-      - BPF
-      - NET_ADMIN
-      - SYS_RESOURCE
-      - SYS_ADMIN
+  readOnlyRootFilesystem: true
+  runAsNonRoot: false
 
 resources: {}
   # TODO(mack#ENG-123|2025-09-29): Set default resources relative to the flows per second

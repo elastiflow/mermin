@@ -1,10 +1,39 @@
 mermin:
   enabled: true
+  # TODO(mack#lgo-406|2025-11-04): Should be remove and defaults to be used
   image:
-    tag: v0.1.0-beta.9-debug
+    tag: v0.1.0-beta.12-debug
   # TODO(Cleanup for GA): image pull secrets not needed when going public
   imagePullSecrets:
     - name: ghcr
+
+  # TODO(mack#lgo-406|2025-11-04): Should be remove and defaults to be used
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+
+  # TODO(mack#lgo-406|2025-11-04): Should be remove and defaults to be used
+  hostNetwork: true
+
+  # TODO(mack#lgo-406|2025-11-04): Should be remove and defaults to be used
+  podSecurityContext:
+    runAsNonRoot: true
+
+  # TODO(mack#lgo-406|2025-11-04): Should be remove and defaults to be used
+  securityContext:
+    runAsNonRoot: false
+    runAsUser: 0
+    runAsGroup: 0
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - BPF
+        - NET_ADMIN
+        - SYS_RESOURCE
+        - SYS_ADMIN
 
 netobserv-flow:
   enabled: true
@@ -85,14 +114,14 @@ netobserv-flow:
 
   outputOpenSearch:
     enable: true
-    addresses: opensearch-cluster-master.elastiflow.svc.cluster.local:9200
+    addresses: opensearch-cluster-master.elastiflow.svc:9200
     password: Elast1flow! # Insecure
     tls:
       enable: true
       skipVerification: true
     dashboards:
       provision: true
-      dashboards_url: http://elastiflow-os-dashboards.elastiflow.svc.cluster.local:5601
+      dashboards_url: http://elastiflow-os-dashboards.elastiflow.svc:5601
 
   extraVolumes:
     - name: netobserv-tls
@@ -143,7 +172,7 @@ opensearch:
 opensearch-dashboards:
   enabled: true
   fullnameOverride: elastiflow-os-dashboards
-  opensearchHosts: https://opensearch-cluster-master.elastiflow.svc.cluster.local:9200
+  opensearchHosts: https://opensearch-cluster-master.elastiflow.svc:9200
   resources:
     requests:
       cpu: "1000m"
