@@ -1,8 +1,8 @@
 log_level = "debug"
-discovery "instrument" {
-  # Network interfaces to monitor
-  interfaces = ["eth0", "veth*"]
-}
+# discovery "instrument" {
+#   # Network interfaces to monitor
+#   interfaces = ["*"]
+# }
 
 # OTLP exporter configuration
 # See OBI export concepts: https://opentelemetry.io/docs/zero-code/obi/configure/export-data/
