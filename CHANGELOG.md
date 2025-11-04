@@ -1,3 +1,14 @@
+## [v0.1.0-beta.13] - 2025-11-04
+
+### Bug Fixes
+
+- Fix ring buffer initialization timing to prevent write failures (#205)
+- **helm:** Re-iterate on the example deployments (#207)
+
+[v0.1.0-beta.12..v0.1.0-beta.13](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.12...v0.1.0-beta.13)
+
+
+
 ## [v0.1.0-beta.12] - 2025-11-04
 
 ### Features
