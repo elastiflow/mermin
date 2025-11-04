@@ -14,6 +14,9 @@ updateStrategy:
   rollingUpdate:
     maxUnavailable: 1
     maxSurge: 0
+    # TODO(mack#lgo-406|2025-11-04): If hostNetwork: false, following may be used
+    # maxUnavailable: 0
+    # maxSurge: "10%"
 
 # Mermin container extra args
 extraArgs: []
