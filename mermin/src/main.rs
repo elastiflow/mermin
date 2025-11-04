@@ -281,9 +281,16 @@ async fn run() -> Result<()> {
         conf.resolved_interfaces
             .iter()
             .try_for_each(|iface| -> Result<()> {
-                // error adding clsact to the interface if it is already added is harmless
-                // the full cleanup can be done with 'sudo tc qdisc del dev eth0 clsact'.
-                let _ = tc::qdisc_add_clsact(iface);
+                // Attempt to add clsact qdisc to the interface
+                // It's safe to ignore if it already exists, but we log other errors
+                if let Err(e) = tc::qdisc_add_clsact(iface) {
+                    warn!(
+                        event.name = "ebpf.qdisc_add_clsact.error",
+                        network.interface.name = %iface,
+                        error = %e,
+                        "failed to add clsact qdisc (may already exist, continuing)"
+                    );
+                }
 
                 program.attach(iface, *attach_type)?;
                 info!(
