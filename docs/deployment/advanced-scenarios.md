@@ -592,5 +592,5 @@ export "traces" {
 
 * [**Configuration Reference**](../configuration/configuration.md): Deep dive into all configuration options
 * [**Filtering**](../configuration/filtering.md): Configure flow filters for security and performance
-* [**Integration Guides**](../integrations/integrations.md): Connect to your observability backend
+* [**Observability Backends**](../observability/backends.md): Send Flow Traces to your observability backend
 * [**Troubleshooting Performance**](../troubleshooting/performance.md): Diagnose and resolve performance issues

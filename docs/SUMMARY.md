@@ -2,7 +2,7 @@
 
 ## Welcome
 
-* [Overview](README.md)
+* [Overview](welcome/overview.md)
 * [Beta Program](welcome/beta-program.md)
 
 ## Getting Started
@@ -17,6 +17,10 @@
 * [Cloud Platforms](deployment/cloud-platforms.md)
 * [Advanced Scenarios](deployment/advanced-scenarios.md)
 * [Docker on Bare Metal](deployment/docker-bare-metal.md)
+
+## Observability
+
+* [Backends](observability/backends.md)
 
 ## Configuration
 
@@ -35,16 +39,6 @@
 * [Stdout Exporter](configuration/export-stdout.md)
 * [Internal Tracing](configuration/internal-tracing.md)
 * [Configuration Examples](configuration/examples.md)
-
-## Integrations
-
-* [Integration Overview](integrations/integrations.md)
-* [OpenTelemetry Collector](integrations/opentelemetry-collector.md)
-* [Elastic Stack](integrations/elastic.md)
-* [OpenSearch](integrations/opensearch.md)
-* [Grafana](integrations/grafana.md)
-* [Grafana Tempo](integrations/tempo.md)
-* [Jaeger](integrations/jaeger.md)
 
 ## Troubleshooting
 

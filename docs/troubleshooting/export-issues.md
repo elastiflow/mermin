@@ -478,5 +478,5 @@ receivers:
 
 * [**Configuration: OTLP Export**](../configuration/export-otlp.md): Detailed export configuration
 * [**Configuration: TLS**](../configuration/export-otlp.md#tls-configuration): TLS setup guide
-* [**Integrations**](../integrations/integrations.md): Backend-specific integration guides
+* [**Integrations**](../observability/backends.md): Backend-specific integration guides
 * [**Performance Issues**](performance.md): If export is causing performance problems

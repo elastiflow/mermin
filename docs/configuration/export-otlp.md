@@ -648,6 +648,6 @@ histogram_quantile(0.95, mermin_export_latency_seconds_bucket)
 ## Next Steps
 
 * [**Stdout Exporter**](export-stdout.md): Configure console output for debugging
-* [**Integration Guides**](../integrations/integrations.md): Connect to specific backends
+* [**Integration Guides**](../observability/backends.md): Connect to specific backends
 * [**Troubleshooting Export Issues**](../troubleshooting/export-issues.md): Diagnose problems
 * [**OpenTelemetry Collector**](../integrations/opentelemetry-collector.md): Set up collector

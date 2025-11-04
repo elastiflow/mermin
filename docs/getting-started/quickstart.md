@@ -231,7 +231,7 @@ To use Mermin in production:
 1. [**Review the Architecture**](architecture.md) to understand how Mermin works
 2. [**Explore Deployment Options**](../deployment/deployment.md) for production-ready configurations
 3. [**Configure OTLP Export**](../configuration/export-otlp.md) to send flows to your observability backend
-4. [**Set Up Integrations**](../integrations/integrations.md) with Grafana, Elastic, or other platforms
+4. [**Set Up Integrations**](../observability/backends.md) with Grafana, Elastic, or other platforms
 5. [**Customize Configuration**](../configuration/configuration.md) to match your environment and requirements
 
 ## Troubleshooting

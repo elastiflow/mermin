@@ -294,25 +294,102 @@ If the OTLP backend is unavailable:
 
 ## Comparison with Alternatives
 
-### vs. Packet Capture Tools (tcpdump, Wireshark)
+### vs. eBPF Observability Tools (Cilium Hubble, Pixie)
 
-* **Mermin**: Continuous, structured flow records with K8s metadata
-* **tcpdump**: Manual, per-packet capture without flow aggregation
+**Mermin provides:**
 
-### vs. Service Mesh (Istio, Linkerd)
+* **Flow-level granularity**: Every individual network flow exported as a Flow Trace with full metadata
+* **CNI Agnostic**: Not tied to a specific CNI implementation (works with Cilium, Calico, Flannel, etc.)
+* Pure OTLP export to any OpenTelemetry-compatible backend
+* Lightweight, focused solely on network flow observability
+* No vendor lock-in or platform dependencies
+* Flexible backend choice (Elastic, Grafana, Jaeger, cloud providers)
+* Historical flow analysis and long-term storage in your observability backend
 
-* **Mermin**: No application changes, captures all traffic (including host network)
-* **Service Mesh**: Requires sidecar injection, limited to mesh traffic
+**Cilium Hubble provides:**
+
+* Aggregated network metrics (connection rates, error rates, latencies)
+* Deep integration with Cilium CNI and network policies
+* Service map visualization with Hubble UI
+* Layer 7 protocol visibility (HTTP, gRPC, Kafka, DNS)
+* Requires Cilium as the CNI
+* Limited historical data retention (ephemeral, in-memory)
+
+**Pixie provides:**
+
+* Aggregated network metrics with short-term retention
+* Full application observability (traces, logs, metrics, profiling)
+* Auto-instrumentation for multiple languages
+* In-cluster data processing and querying
+* Requires Pixie platform deployment
+* Limited long-term storage (auto-deletes data after hours/days)
+
+**Key Insight:** **Mermin is the only tool that provides flow-level granularity** - each individual network flow becomes a Flow Trace with complete metadata (source/dest pods, services, deployments, labels, packet/byte counts, TCP flags, etc.). Hubble and Pixie provide aggregated network metrics (requests/sec, error rates), which are useful for dashboards but don't give you the raw flow data needed for deep investigation, compliance, or security forensics.
+
+**Trade-off:** Hubble and Pixie offer broader observability features (L7 protocols, application tracing) but with platform coupling and metric aggregation. Mermin prioritizes CNI/backend flexibility and flow-level detail, enabling long-term storage and granular analysis of every network connection.
 
 ### vs. NetFlow/IPFIX Exporters
 
-* **Mermin Flow Traces**: OpenTelemetry spans with K8s metadata, OTLP export, modern observability stack integration
-* **Traditional NetFlow/IPFIX**: Legacy protocols, no K8s metadata, requires specialized collectors, limited backend options
+**Mermin Flow Traces provide:**
 
-### vs. eBPF Observability Tools (Cilium Hubble, Pixie)
+* OpenTelemetry-native format (OTLP trace spans)
+* Kubernetes metadata: pods, services, deployments, labels, owner references
+* Modern observability backend integration (Tempo, Jaeger, Elastic, OpenSearch)
+* No specialized NetFlow collectors required
+* **CNI Agnostic**: Captures flows regardless of CNI implementation
+* Cloud-native architecture (DaemonSet, Helm charts)
 
-* **Mermin**: Lightweight, OTLP-focused, flexible backend integration
-* **Others**: Often tightly coupled to specific platforms or backends
+**Traditional NetFlow/IPFIX provides:**
+
+* Established protocol with decades of tooling
+* Hardware switch/router support
+* Legacy network monitoring platform compatibility
+* SNMP integration for traditional network management
+
+**Trade-off:** NetFlow/IPFIX is ideal for traditional network infrastructure. Mermin is purpose-built for cloud-native Kubernetes environments with modern observability stacks.
+
+### vs. Packet Capture Tools (tcpdump, Wireshark)
+
+**Mermin provides:**
+
+* Continuous, automated flow capture without manual intervention
+* Bidirectional flow aggregation with packet/byte counters
+* Kubernetes metadata enrichment (pods, services, deployments)
+* Efficient OTLP export to any observability backend
+* Production-ready with minimal performance overhead
+
+**tcpdump/Wireshark provide:**
+
+* Full packet payload capture for deep inspection
+* Interactive analysis and filtering (Wireshark GUI)
+* Protocol dissection for debugging specific issues
+* Manual, on-demand troubleshooting
+
+**Trade-off:** Use Mermin for continuous observability; use packet capture tools for deep troubleshooting of specific issues.
+
+### vs. Service Mesh (Istio, Linkerd)
+
+> **Note:** These are fundamentally different tools for different jobs. **Service meshes are for traffic management and security**. **Mermin is for network observability**. They are complementary, not alternatives.
+
+**Mermin provides (Observability):**
+
+* Network flow visibility across your entire cluster
+* Zero application changes or sidecar injection required
+* Captures all traffic: pod-to-pod, pod-to-external, host network, non-mesh workloads
+* **CNI Agnostic**: Works with any CNI (Cilium, Calico, Flannel, cloud-native CNIs)
+* Lower resource overhead (no sidecar per pod)
+* Network-layer (L3/L4) flow telemetry
+
+**Service Mesh provides (Traffic Management & Security):**
+
+* Layer 7 (HTTP, gRPC) traffic control and policy enforcement
+* Traffic management (retries, timeouts, circuit breaking, canary deployments)
+* Mutual TLS encryption between services
+* Service-to-service authorization and authentication
+* Request routing and load balancing strategies
+* (Also includes L7 observability metrics as a side benefit)
+
+**Key Insight:** You can run Mermin alongside a service mesh. Mermin observes network flows (L3/L4) across all workloads, while the service mesh manages application traffic (L7) for enrolled services. Many organizations use both together.
 
 ## Next Steps
 
@@ -320,5 +397,5 @@ Now that you understand how Mermin generates Flow Traces:
 
 1. [**Deploy to Production**](../deployment/deployment.md): Choose your deployment model
 2. [**Configure Mermin**](../configuration/configuration.md): Customize for your environment
-3. [**Integrate with Backends**](../integrations/integrations.md): Send Flow Traces to your observability platform
+3. [**Choose Your Backend**](../observability/backends.md): Send Flow Traces to your observability platform
 4. [**Troubleshoot Issues**](../troubleshooting/troubleshooting.md): Diagnose and resolve problems
