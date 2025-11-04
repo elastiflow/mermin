@@ -37,7 +37,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       hostNetwork: {{ .Values.hostNetwork }}
-      hostPID: {{ .Values.config.hostPidEnrichment }}
+      dnsPolicy: {{ .Values.dnsPolicy }}
       {{- if .Values.serviceAccount.create }}
       serviceAccountName: {{ include "mermin.serviceAccountName" . }}
       {{- end }}

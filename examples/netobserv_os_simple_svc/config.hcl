@@ -11,9 +11,7 @@ export "traces" {
   # }
 
   otlp = {
-    # TODO(mack#lgo-406|2025-11-04): Should use DNS
-    # endpoint = "https://netobserv-flow.elastiflow.svc:4317"
-    endpoint = "https://10.244.1.21:4317"
+    endpoint = "https://netobserv-flow.elastiflow.svc:4317"
 
     tls = {
       insecure_skip_verify = true
