@@ -16,7 +16,7 @@ dependencies:
     condition: mermin.enabled
   - name: netobserv-flow
     repository: https://elastiflow.github.io/helm-chart-netobserv/
-    version: ">= 0.4.0"
+    version: ">= 0.5.0"
     condition: netobserv-flow.enabled
   - name: opensearch
     repository: https://opensearch-project.github.io/helm-charts/
