@@ -1,3 +1,14 @@
+## [mermin-netobserv-os-stack-0.1.0-beta.4] - 2025-11-04
+
+### Bug Fixes
+
+- **helm:** Re-iterate on the example deployments (#207)
+- Bump the mermin dependency in the "mermin-netobserv-os-stack" (#210)
+
+[mermin-netobserv-os-stack-0.1.0-beta.3..mermin-netobserv-os-stack-0.1.0-beta.4](https://github.com/elastiflow/mermin/compare/mermin-netobserv-os-stack-0.1.0-beta.3...mermin-netobserv-os-stack-0.1.0-beta.4)
+
+
+
 ## [mermin-netobserv-os-stack-0.1.0-beta.3] - 2025-11-04
 
 ### Features
