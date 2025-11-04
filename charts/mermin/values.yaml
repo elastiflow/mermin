@@ -117,8 +117,6 @@ affinity: {}
 config:
   # Inject config hash to the pod label to force pod restart
   restartOnConfigChange: true
-  # Set to true to allow enable host's process list (/proc) for mapping kernel events to specific processes.
-  hostPidEnrichment: true
 
   # If "content" is undefined, default config values are used (empty config)
   # Examples of how to define a custom config:
