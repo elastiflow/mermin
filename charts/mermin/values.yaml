@@ -12,8 +12,8 @@ imagePullSecrets: []
 updateStrategy:
   type: RollingUpdate
   rollingUpdate:
-    maxUnavailable: 0
-    maxSurge: "10%"
+    maxUnavailable: 1
+    maxSurge: 0
 
 # Mermin container extra args
 extraArgs: []
@@ -42,17 +42,24 @@ commonLabels: {}
 podAnnotations: {}
 podLabels: {}
 
+# Enable host networking mode for the pod, incompatible with surge upgrades
+hostNetwork: true
+
 podSecurityContext:
-  runAsNonRoot: false
+  runAsNonRoot: true
 
 securityContext:
-  # privileged mode is required for mermin to interact with the kernel and eBPF.
-  privileged: true
+  runAsNonRoot: false
+  runAsUser: 0
+  runAsGroup: 0
   capabilities:
     drop:
       - ALL
-  readOnlyRootFilesystem: true
-  runAsNonRoot: false
+    add:
+      - BPF
+      - NET_ADMIN
+      - SYS_RESOURCE
+      - SYS_ADMIN
 
 resources: {}
   # TODO(mack#ENG-123|2025-09-29): Set default resources relative to the flows per second
@@ -103,9 +110,6 @@ tolerations:
     operator: Exists
 
 affinity: {}
-
-# Enable host networking mode for the pod
-hostNetwork: false
 
 config:
   # Inject config hash to the pod label to force pod restart
