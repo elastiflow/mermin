@@ -1,3 +1,13 @@
+## [v0.1.0-beta.12] - 2025-11-04
+
+### Features
+
+- Add kernel-aware tc attachment and graceful ebpf shutdown (#199)
+
+[v0.1.0-beta.11..v0.1.0-beta.12](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.11...v0.1.0-beta.12)
+
+
+
 ## [v0.1.0-beta.11] - 2025-11-04
 
 ### Features
