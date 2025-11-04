@@ -244,4 +244,4 @@ After deploying, configure Mermin for your environment:
 
 * [Configuration Overview](../configuration/configuration.md)
 * [OTLP Export Configuration](../configuration/export-otlp.md)
-* [Integration Guides](../integrations/integrations.md)
+* [Observability Backends](../observability/backends.md)
