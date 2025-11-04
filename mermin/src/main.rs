@@ -320,22 +320,22 @@ async fn run() -> Result<()> {
         conf.resolved_interfaces
             .iter()
             .try_for_each(|iface| -> Result<()> {
-                // Only add clsact qdisc for netlink-based attachments (kernel < 6.6)
-                // TCX-based attachments (kernel >= 6.6) don't require it
-                if !use_tcx && let Err(e) = tc::qdisc_add_clsact(iface) {
-                    // This is often benign - qdisc may already exist from previous run
-                    // or another program. We log at debug level and continue.
-                    debug!(
-                        event.name = "ebpf.qdisc_add_clsact.skipped",
-                        network.interface.name = %iface,
-                        error = %e,
-                        "clsact qdisc add failed (likely already exists)"
-                    );
-                }
-
                 let context = format!("{} ({})", iface, attach_type.direction_name());
                 let link_id = netns_switch
                     .in_host_namespace(Some(&context), || {
+                        // Only add clsact qdisc for netlink-based attachments (kernel < 6.6)
+                        // TCX-based attachments (kernel >= 6.6) don't require it
+                        if !use_tcx && let Err(e) = tc::qdisc_add_clsact(iface) {
+                            // This is often benign - qdisc may already exist from previous run
+                            // or another program. We log at debug level and continue.
+                            debug!(
+                                event.name = "ebpf.qdisc_add_clsact.skipped",
+                                network.interface.name = %iface,
+                                error = %e,
+                                "clsact qdisc add failed (likely already exists)"
+                            );
+                        }
+
                         program.attach(iface, *attach_type).map_err(|e| {
                             MerminError::internal(format!(
                                 "failed to attach eBPF program to interface {iface}: {e}"
@@ -374,12 +374,23 @@ async fn run() -> Result<()> {
 
     let iface_map: HashMap<u32, String> = {
         let mut map = HashMap::new();
-        for iface in datalink::interfaces() {
-            if conf.resolved_interfaces.contains(&iface.name) {
-                map.insert(iface.index, iface.name.clone());
-            }
-        }
-        map
+        netns_switch
+            .in_host_namespace(Some("interface_map"), || {
+                for iface in datalink::interfaces() {
+                    if conf.resolved_interfaces.contains(&iface.name) {
+                        map.insert(iface.index, iface.name.clone());
+                    }
+                }
+                Ok(map)
+            })
+            .map_err(|e| {
+                error!(
+                    event.name = "netns.switch.interface_map_failed",
+                    error = %e,
+                    "failed to build interface map"
+                );
+                e
+            })?
     };
     info!(
         event.name = "system.config_loaded",
