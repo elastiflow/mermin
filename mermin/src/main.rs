@@ -281,6 +281,16 @@ async fn run() -> Result<()> {
         "determined TC attachment method based on kernel version"
     );
 
+    // Create ring buffer BEFORE attaching programs to avoid write failures
+    let map = ebpf
+        .take_map("PACKETS_META")
+        .ok_or_else(|| MerminError::ebpf_map("PACKETS_META map not present in the object"))?;
+    let ring_buf = RingBuf::try_from(map)?;
+    info!(
+        event.name = "source.ringbuf.initialized",
+        "ring buffer initialized and ready to receive packets"
+    );
+
     let programs = [TcAttachType::Ingress, TcAttachType::Egress];
     programs.iter().try_for_each(|attach_type| -> Result<()> {
         let program: &mut SchedClassifier = ebpf
@@ -334,15 +344,6 @@ async fn run() -> Result<()> {
             })
     })?;
 
-    let map = ebpf
-        .take_map("PACKETS_META")
-        .ok_or_else(|| MerminError::ebpf_map("PACKETS_META map not present in the object"))?;
-    let ring_buf = RingBuf::try_from(map)?;
-
-    info!(
-        event.name = "source.ringbuf.initialized",
-        "ring buffer initialized, waiting for packets"
-    );
     info!(
         event.name = "ebpf.ready",
         "ebpf program loaded and ready to process network traffic"
