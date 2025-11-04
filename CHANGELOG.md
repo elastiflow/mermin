@@ -1,3 +1,13 @@
+## [v0.1.0-beta.11] - 2025-11-04
+
+### Features
+
+- Change default interface discovery to cni/k8s patterns (#197)
+
+[v0.1.0-beta.10..v0.1.0-beta.11](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.10...v0.1.0-beta.11)
+
+
+
 ## [v0.1.0-beta.10] - 2025-11-03
 
 ### Bug Fixes
