@@ -5,10 +5,11 @@ use hcl::eval::Context;
 use pnet::datalink;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use tracing::{Level, warn};
+use tracing::{Level, debug, info, warn};
 
 use crate::{
     k8s::owner_relations::OwnerRelationsOptions,
+    netns::NetnsSwitch,
     otlp::opts::ExportOptions,
     runtime::{
         conf::conf_serde::{duration, level},
@@ -197,12 +198,39 @@ impl Conf {
     }
 
     /// Expand interface patterns (supports '*' and '?') into concrete interface names.
+    ///
+    /// This method lists interfaces from the host network namespace to ensure
+    /// proper interface discovery when running in a pod with its own network namespace.
+    /// Requires hostPID: true and CAP_SYS_ADMIN capability.
+    ///
+    /// # Panics
+    ///
+    /// Panics if namespace switching fails. This is intentional to fail fast if:
+    /// - hostPID: true is not set in pod spec
+    /// - CAP_SYS_ADMIN capability is not granted
+    /// - /proc/1/ns/net is not accessible
     pub fn resolve_interfaces(&self) -> Vec<String> {
-        let available: Vec<String> = datalink::interfaces().into_iter().map(|i| i.name).collect();
+        let netns_switch = NetnsSwitch::new().expect(
+            "failed to initialize network namespace switching - ensure hostPID: true is set and CAP_SYS_ADMIN capability is granted",
+        );
 
-        // If interfaces array is empty, use defaults
+        let available: Vec<String> = netns_switch
+            .in_host_namespace(Some("interface_discovery"), || {
+                Ok(datalink::interfaces()
+                    .into_iter()
+                    .map(|i| i.name)
+                    .collect::<Vec<String>>())
+            })
+            .expect("failed to list interfaces from host network namespace");
+
+        debug!(
+            event.name = "config.interfaces_resolved_from_host",
+            interface_count = available.len(),
+            "resolved interfaces from host network namespace"
+        );
+
         let patterns = if self.discovery.instrument.interfaces.is_empty() {
-            warn!(
+            info!(
                 event.name = "config.interfaces_empty",
                 "no interfaces configured, using default patterns"
             );
