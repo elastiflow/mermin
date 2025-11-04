@@ -14,7 +14,8 @@ use std::{
 
 use aya::{
     maps::{Array, RingBuf},
-    programs::{SchedClassifier, TcAttachType, tc},
+    programs::{SchedClassifier, TcAttachType, tc, tc::SchedClassifierLinkId},
+    util::KernelVersion,
 };
 use error::{MerminError, Result};
 use pnet::datalink;
@@ -265,6 +266,21 @@ async fn run() -> Result<()> {
     }
 
     // Load and attach both ingress and egress programs
+    // Track link IDs for graceful cleanup on shutdown
+    let mut tc_links: HashMap<(String, &'static str), SchedClassifierLinkId> = HashMap::new();
+
+    // Determine attachment method based on kernel version
+    let kernel_version = KernelVersion::current().unwrap_or(KernelVersion::new(0, 0, 0));
+    let use_tcx = kernel_version >= KernelVersion::new(6, 6, 0);
+    let attach_method = if use_tcx { "TCX" } else { "netlink" };
+
+    debug!(
+        event.name = "ebpf.attach_method_determined",
+        ebpf.attach_method = attach_method,
+        system.kernel.version = %kernel_version,
+        "determined TC attachment method based on kernel version"
+    );
+
     let programs = [TcAttachType::Ingress, TcAttachType::Egress];
     programs.iter().try_for_each(|attach_type| -> Result<()> {
         let program: &mut SchedClassifier = ebpf
@@ -281,21 +297,38 @@ async fn run() -> Result<()> {
         conf.resolved_interfaces
             .iter()
             .try_for_each(|iface| -> Result<()> {
-                // Attempt to add clsact qdisc to the interface
-                // It's safe to ignore if it already exists, but we log other errors
-                if let Err(e) = tc::qdisc_add_clsact(iface) {
-                    warn!(
-                        event.name = "ebpf.qdisc_add_clsact.error",
-                        network.interface.name = %iface,
-                        error = %e,
-                        "failed to add clsact qdisc (may already exist, continuing)"
-                    );
+                // Only add clsact qdisc for netlink-based attachments (kernel < 6.6)
+                // TCX-based attachments (kernel >= 6.6) don't require it
+                if !use_tcx {
+                    if let Err(e) = tc::qdisc_add_clsact(iface) {
+                        // This is often benign - qdisc may already exist from previous run
+                        // or another program. We log at debug level and continue.
+                        debug!(
+                            event.name = "ebpf.qdisc_add_clsact.skipped",
+                            network.interface.name = %iface,
+                            error = %e,
+                            "clsact qdisc add failed (likely already exists)"
+                        );
+                    }
                 }
 
-                program.attach(iface, *attach_type)?;
+                let link_id = program.attach(iface, *attach_type).map_err(|e| {
+                    error!(
+                        event.name = "ebpf.program_attach_failed",
+                        ebpf.program.direction = attach_type.direction_name(),
+                        ebpf.attach_method = attach_method,
+                        network.interface.name = %iface,
+                        error = %e,
+                        "failed to attach ebpf program to interface"
+                    );
+                    e
+                })?;
+                tc_links.insert((iface.clone(), attach_type.direction_name()), link_id);
+
                 info!(
                     event.name = "ebpf.program_attached",
                     ebpf.program.direction = attach_type.direction_name(),
+                    ebpf.attach_method = attach_method,
                     network.interface.name = %iface,
                     "ebpf program attached to interface"
                 );
@@ -522,6 +555,73 @@ async fn run() -> Result<()> {
 
     info!("waiting for ctrl+c");
     signal::ctrl_c().await?;
+
+    info!(
+        event.name = "application.shutdown_initiated",
+        "received shutdown signal, starting graceful cleanup"
+    );
+
+    // Gracefully detach all TC programs
+    let total_links = tc_links.len();
+    let mut detached_count = 0;
+    let mut failed_count = 0;
+
+    for ((iface, direction), link_id) in tc_links {
+        let program_name = format!("mermin_{}", direction);
+        match ebpf.program_mut(&program_name) {
+            Some(program) => match <&mut SchedClassifier>::try_from(program) {
+                Ok(prog) => match prog.detach(link_id) {
+                    Ok(_) => {
+                        detached_count += 1;
+                        info!(
+                            event.name = "ebpf.program_detached",
+                            network.interface.name = %iface,
+                            ebpf.program.direction = direction,
+                            "successfully detached ebpf program"
+                        );
+                    }
+                    Err(e) => {
+                        failed_count += 1;
+                        warn!(
+                            event.name = "ebpf.detach_failed",
+                            network.interface.name = %iface,
+                            ebpf.program.direction = direction,
+                            error = %e,
+                            "failed to detach ebpf program"
+                        );
+                    }
+                },
+                Err(e) => {
+                    failed_count += 1;
+                    warn!(
+                        event.name = "ebpf.detach_program_cast_failed",
+                        network.interface.name = %iface,
+                        ebpf.program.direction = direction,
+                        error = %e,
+                        "failed to cast program for detachment"
+                    );
+                }
+            },
+            None => {
+                failed_count += 1;
+                warn!(
+                    event.name = "ebpf.detach_program_not_found",
+                    network.interface.name = %iface,
+                    ebpf.program.direction = direction,
+                    "program not found for detachment"
+                );
+            }
+        }
+    }
+
+    info!(
+        event.name = "application.cleanup_complete",
+        ebpf.cleanup.total = total_links,
+        ebpf.cleanup.detached = detached_count,
+        ebpf.cleanup.failed = failed_count,
+        "ebpf cleanup completed"
+    );
+
     info!("exiting");
 
     Ok(())
