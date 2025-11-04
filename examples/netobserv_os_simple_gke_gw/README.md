@@ -46,7 +46,7 @@ This installation assumes that no additional DNS controllers are running in the 
       mermin https://raw.githubusercontent.com/elastiflow/mermin/gh-pages
     ```
 
-  - Change `gke-main-a.us-east1` in the `values.yaml` to your Kubernetes Default Domain (`cluster.local` by default) and deploy the chart
+  - Deploy the chart
 
     ```sh
     helm repo add netobserv https://elastiflow.github.io/helm-chart-netobserv/

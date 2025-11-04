@@ -1,7 +1,6 @@
+# TODO(mack#lgo-406|2025-11-04): Re-iterate on the example, values must be aligned with "examples/netobserv_os_simple_svc"
 mermin:
   enabled: true
-  image:
-    tag: v0.1.0-beta.9-debug
   # TODO(Cleanup for GA): image pull secrets not needed when going public
   imagePullSecrets:
     - name: ghcr
