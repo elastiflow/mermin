@@ -1,6 +1,9 @@
 # Table of contents
 
-* [Welcome](README.md)
+## Welcome
+
+* [Overview](README.md)
+* [Beta Program](welcome/beta-program.md)
 
 ## Getting Started
 

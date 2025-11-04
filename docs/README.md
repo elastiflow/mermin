@@ -1,4 +1,4 @@
-# Welcome
+# Overview
 
 Welcome to the Mermin documentation! Mermin is a powerful, Kubernetes-native network traffic observability tool that uses eBPF technology to efficiently capture network traffic and export it as **Flow Traces** using the OpenTelemetry Protocol (OTLP).
 
