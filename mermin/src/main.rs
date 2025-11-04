@@ -299,17 +299,15 @@ async fn run() -> Result<()> {
             .try_for_each(|iface| -> Result<()> {
                 // Only add clsact qdisc for netlink-based attachments (kernel < 6.6)
                 // TCX-based attachments (kernel >= 6.6) don't require it
-                if !use_tcx {
-                    if let Err(e) = tc::qdisc_add_clsact(iface) {
-                        // This is often benign - qdisc may already exist from previous run
-                        // or another program. We log at debug level and continue.
-                        debug!(
-                            event.name = "ebpf.qdisc_add_clsact.skipped",
-                            network.interface.name = %iface,
-                            error = %e,
-                            "clsact qdisc add failed (likely already exists)"
-                        );
-                    }
+                if !use_tcx && let Err(e) = tc::qdisc_add_clsact(iface) {
+                    // This is often benign - qdisc may already exist from previous run
+                    // or another program. We log at debug level and continue.
+                    debug!(
+                        event.name = "ebpf.qdisc_add_clsact.skipped",
+                        network.interface.name = %iface,
+                        error = %e,
+                        "clsact qdisc add failed (likely already exists)"
+                    );
                 }
 
                 let link_id = program.attach(iface, *attach_type).map_err(|e| {
@@ -567,7 +565,7 @@ async fn run() -> Result<()> {
     let mut failed_count = 0;
 
     for ((iface, direction), link_id) in tc_links {
-        let program_name = format!("mermin_{}", direction);
+        let program_name = format!("mermin_{direction}");
         match ebpf.program_mut(&program_name) {
             Some(program) => match <&mut SchedClassifier>::try_from(program) {
                 Ok(prog) => match prog.detach(link_id) {

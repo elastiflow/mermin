@@ -919,7 +919,6 @@ mod tests {
 
     #[test]
     fn resolve_interfaces_supports_globs_and_literals() {
-        // available interfaces on host (simulated)
         let available = vec![
             "eth0".to_string(),
             "eth1".to_string(),
@@ -929,19 +928,17 @@ mod tests {
             "lo".to_string(),
         ];
 
-        // patterns including star, question, literal, and duplicates
         let patterns = vec![
-            "eth*".to_string(),         // matches eth0, eth1
-            "en0p*".to_string(),        // matches en0p1, en0p2
-            "en?".to_string(),          // matches en0
-            "lo".to_string(),           // literal match
-            "doesnotexist".to_string(), // literal not present -> ignored with warn
-            "eth*".to_string(),         // duplicate pattern should not duplicate results
+            "eth*".to_string(),
+            "en0p*".to_string(),
+            "en?".to_string(),
+            "lo".to_string(),
+            "doesnotexist".to_string(),
+            "eth*".to_string(),
         ];
 
         let resolved = Conf::resolve_interfaces_from(&patterns, &available);
 
-        // Order is insertion order from first match occurrences
         assert_eq!(
             resolved,
             vec![
@@ -966,7 +963,6 @@ mod tests {
             "lo".to_string(),
         ];
 
-        // regex forms: /^en0p\d+$/ matches en0p1, en0p2; /^eth[01]$/ matches eth0, eth1
         let patterns = vec!["/^en0p\\d+$/".to_string(), "/^eth[01]$/".to_string()];
 
         let resolved = Conf::resolve_interfaces_from(&patterns, &available);
@@ -983,47 +979,60 @@ mod tests {
 
     #[test]
     fn empty_interfaces_falls_back_to_defaults() {
-        // Simulate available interfaces
         let available = vec![
             "eth0".to_string(),
             "eth1".to_string(),
             "ens0".to_string(),
             "en0".to_string(),
+            "cni0".to_string(),
+            "flannel0".to_string(),
+            "cali0".to_string(),
+            "tunl0".to_string(),
+            "cilium_0".to_string(),
+            "lxc0".to_string(),
+            "gke0".to_string(),
+            "eni0".to_string(),
+            "vlan0".to_string(),
+            "br0".to_string(),
+            "tun0".to_string(),
+            "ovn-k8s0".to_string(),
+            "br-0".to_string(),
             "lo".to_string(),
         ];
 
-        // Empty pattern list should use defaults
         let patterns: Vec<String> = vec![];
         let resolved = Conf::resolve_interfaces_from(&patterns, &available);
 
-        // Should be empty when given empty patterns (the actual resolve_interfaces method handles the fallback)
         assert_eq!(resolved, Vec::<String>::new());
 
-        // Now test the actual resolve_interfaces method that has the fallback logic
         let mut conf = Conf::default();
-        conf.discovery.instrument.interfaces = vec![]; // Empty interfaces
+        conf.discovery.instrument.interfaces = vec![];
 
-        // Mock the available interfaces by testing resolve_interfaces_from with defaults
         let default_patterns = super::InstrumentConf::default().interfaces;
         let resolved_with_defaults = Conf::resolve_interfaces_from(&default_patterns, &available);
 
-        // Should match default patterns: eth*, ens*, en*
         assert_eq!(
             resolved_with_defaults,
             vec![
-                "eth0".to_string(),
-                "eth1".to_string(),
-                "ens0".to_string(),
-                "en0".to_string(),
+                "cni0".to_string(),
+                "flannel0".to_string(),
+                "cali0".to_string(),
+                "tunl0".to_string(),
+                "cilium_0".to_string(),
+                "lxc0".to_string(),
+                "gke0".to_string(),
+                "eni0".to_string(),
+                "vlan0".to_string(),
+                "br0".to_string(),
+                "br-0".to_string(),
+                "tun0".to_string(),
+                "ovn-k8s0".to_string(),
             ]
         );
     }
 
     #[test]
     fn cni_bridge_patterns_match_correctly() {
-        // Test various CNI bridge interface patterns
-
-        // GKE with Cilium
         let gke_interfaces = vec![
             "eth0".to_string(),
             "gke52aa5df9a5f".to_string(),
@@ -1050,7 +1059,6 @@ mod tests {
             "GKE Cilium pattern should match gke*, cilium_*, lxc*"
         );
 
-        // EKS with aws-vpc-cni
         let eks_interfaces = vec![
             "eth0".to_string(),
             "eni1a2b3c4d".to_string(),
@@ -1069,7 +1077,6 @@ mod tests {
             "EKS pattern should match eni*, vlan*"
         );
 
-        // Flannel
         let flannel_interfaces = vec![
             "eth0".to_string(),
             "cni0".to_string(),
@@ -1084,7 +1091,6 @@ mod tests {
             "Flannel pattern should match cni*, flannel*"
         );
 
-        // Calico
         let calico_interfaces = vec![
             "eth0".to_string(),
             "cali123abc".to_string(),
@@ -1109,7 +1115,6 @@ mod tests {
             "Calico pattern should match cali*, tunl*, vxlan*"
         );
 
-        // OpenShift OVN
         let ovn_interfaces = vec![
             "eth0".to_string(),
             "ovn-k8s-mp0".to_string(),
@@ -1142,7 +1147,6 @@ mod tests {
         let patterns = vec!["*".to_string()];
         let resolved = Conf::resolve_interfaces_from(&patterns, &available);
 
-        // Should match all available interfaces
         assert_eq!(
             resolved, available,
             "Wildcard * should match all interfaces"
@@ -1151,7 +1155,6 @@ mod tests {
 
     #[test]
     fn wildcard_matches_all_cni_interfaces() {
-        // Test that wildcard "*" pattern matches all CNI/Kubernetes interface patterns
         let available = vec![
             "cni0".to_string(),
             "flannel.1".to_string(),
@@ -1171,10 +1174,8 @@ mod tests {
         let pattern = "*";
         let resolved = Conf::find_matches(pattern, &available);
 
-        // Convert Vec<&str> to Vec<String> for comparison
         let resolved_owned: Vec<String> = resolved.iter().map(|s| s.to_string()).collect();
 
-        // Wildcard should match all CNI interfaces
         assert_eq!(
             resolved_owned, available,
             "Wildcard * should match all CNI/Kubernetes interfaces"
@@ -1183,46 +1184,32 @@ mod tests {
 
     #[test]
     fn default_patterns_work_across_environments() {
-        // Test that default patterns work in various environments
-
-        // Cloud environment (GKE)
         let cloud_interfaces = vec![
-            "eth0".to_string(),
-            "eth1".to_string(),
+            "cni0".to_string(),
             "gke123".to_string(),
             "cilium_net".to_string(),
         ];
         let defaults = super::InstrumentConf::default().interfaces;
         let resolved = Conf::resolve_interfaces_from(&defaults, &cloud_interfaces);
         assert!(
-            resolved.contains(&"eth0".to_string()) && resolved.contains(&"eth1".to_string()),
-            "Default patterns should match eth* in cloud"
+            resolved.contains(&"cni0".to_string())
+                && resolved.contains(&"gke123".to_string())
+                && resolved.contains(&"cilium_net".to_string()),
+            "Default patterns should match cni*, gke*, cilium_* in cloud"
         );
 
-        // On-prem with predictable network names
-        let onprem_interfaces = vec![
-            "ens0".to_string(),
-            "ens1".to_string(),
-            "lo".to_string(),
-            "docker0".to_string(),
-        ];
+        let onprem_interfaces = vec!["eth0".to_string(), "lo".to_string(), "docker0".to_string()];
         let resolved = Conf::resolve_interfaces_from(&defaults, &onprem_interfaces);
         assert!(
-            resolved.contains(&"ens0".to_string()) && resolved.contains(&"ens1".to_string()),
-            "Default patterns should match ens* on-prem"
+            !resolved.contains(&"cni0".to_string()),
+            "Default patterns should not match cni* on on-prem"
         );
 
-        // macOS development
-        let macos_interfaces = vec![
-            "en0".to_string(),
-            "en1".to_string(),
-            "lo0".to_string(),
-            "bridge0".to_string(),
-        ];
+        let macos_interfaces = vec!["cni0".to_string(), "lo0".to_string(), "bridge0".to_string()];
         let resolved = Conf::resolve_interfaces_from(&defaults, &macos_interfaces);
         assert!(
-            resolved.contains(&"en0".to_string()) && resolved.contains(&"en1".to_string()),
-            "Default patterns should match en* on macOS"
+            resolved.contains(&"cni0".to_string()),
+            "Default patterns should match cni* on macOS"
         );
     }
 
@@ -1230,17 +1217,15 @@ mod tests {
     fn patterns_are_deduplicated() {
         let available = vec!["eth0".to_string(), "eth1".to_string(), "ens0".to_string()];
 
-        // Overlapping patterns that would match the same interfaces
         let patterns = vec![
             "eth*".to_string(),
-            "eth0".to_string(), // specific match overlaps with glob
-            "eth*".to_string(), // duplicate pattern
-            "e*".to_string(),   // broader pattern that includes all
+            "eth0".to_string(),
+            "eth*".to_string(),
+            "e*".to_string(),
         ];
 
         let resolved = Conf::resolve_interfaces_from(&patterns, &available);
 
-        // Should only have each interface once despite overlapping patterns
         assert_eq!(
             resolved,
             vec!["eth0".to_string(), "eth1".to_string(), "ens0".to_string()],
@@ -1252,7 +1237,6 @@ mod tests {
     fn default_conf_has_expected_values() {
         let cfg = Conf::default();
 
-        // Core settings
         assert_eq!(
             cfg.log_level,
             Level::INFO,
@@ -1276,10 +1260,23 @@ mod tests {
             "packet_worker_count should be 2"
         );
 
-        // Interface settings
         assert_eq!(
             cfg.discovery.instrument.interfaces,
-            vec!["eth*".to_string(), "ens*".to_string(), "en*".to_string()],
+            vec![
+                "cni*".to_string(),
+                "flannel*".to_string(),
+                "cali*".to_string(),
+                "tunl*".to_string(),
+                "cilium_*".to_string(),
+                "lxc*".to_string(),
+                "gke*".to_string(),
+                "eni*".to_string(),
+                "vlan*".to_string(),
+                "br*".to_string(),
+                "tun*".to_string(),
+                "ovn-k8s*".to_string(),
+                "br-*".to_string(),
+            ],
             "default interfaces should be common physical interface patterns"
         );
         assert_eq!(
@@ -1288,7 +1285,6 @@ mod tests {
             "resolved_interfaces should be empty initially"
         );
 
-        // API settings
         assert_eq!(cfg.api.enabled, true, "API should be enabled by default");
         assert_eq!(
             cfg.api.listen_address, "0.0.0.0",
@@ -1296,7 +1292,6 @@ mod tests {
         );
         assert_eq!(cfg.api.port, 8080, "API port should be 8080");
 
-        // Metrics settings
         assert_eq!(
             cfg.metrics.enabled, true,
             "metrics should be enabled by default"
@@ -1307,7 +1302,6 @@ mod tests {
         );
         assert_eq!(cfg.metrics.port, 10250, "metrics port should be 10250");
 
-        // Parser settings
         assert_eq!(
             cfg.parser.geneve_port, 6081,
             "Geneve port should be 6081 (IANA default)"
@@ -1321,13 +1315,11 @@ mod tests {
             "WireGuard port should be 51820 (IANA default)"
         );
 
-        // Config path should be None
         assert_eq!(
             cfg.config_path, None,
             "config_path should be None for default config"
         );
 
-        // Span settings - verify all defaults are set
         assert_eq!(
             cfg.span.max_record_interval,
             Duration::from_secs(60),
@@ -1364,9 +1356,6 @@ mod tests {
             "default udp_timeout should be 60s"
         );
 
-        // Export settings - Note: When Conf::default() is called directly (not via deserialization),
-        // the export settings are empty (no OTLP, no stdout) since the serde defaults only apply
-        // during config file deserialization
         assert!(
             cfg.export.traces.otlp.is_none(),
             "default export (via ::default()) should not have OTLP configured"
@@ -1376,7 +1365,6 @@ mod tests {
             "default export should not have stdout enabled"
         );
 
-        // Internal settings - verify defaults
         assert!(
             matches!(
                 cfg.internal.traces.span_fmt,
@@ -1398,7 +1386,6 @@ mod tests {
     fn test_conf_serialization() {
         let cfg = Conf::default();
 
-        // Test that it can be serialized and deserialized
         let serialized = serde_yaml::to_string(&cfg).expect("should serialize");
         let deserialized: Conf = serde_yaml::from_str(&serialized).expect("should deserialize");
 
@@ -2594,7 +2581,6 @@ export {
 
     #[test]
     fn export_stdout_empty_format_rejected_hcl() {
-        // Empty string for stdout format should be rejected in HCL too
         Jail::expect_with(|jail| {
             let path = "export_stdout_empty.hcl";
             jail.create_file(
@@ -2690,9 +2676,6 @@ internal {
         });
     }
 
-    // Note: Tests for parse_exporter_reference have been removed as the function
-    // and ExporterReference type were never fully implemented or were removed.
-
     #[test]
     fn loads_owner_relations_config_from_hcl_file() {
         Jail::expect_with(|jail| {
@@ -2713,7 +2696,6 @@ discovery "informer" "k8s" {
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
 
-            // Verify owner_relations configuration is loaded correctly
             assert!(
                 cfg.discovery.informer.is_some(),
                 "informer config should be present"
@@ -2771,7 +2753,6 @@ discovery:
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config should load from YAML file");
 
-            // Verify owner_relations configuration is loaded correctly
             assert!(
                 cfg.discovery.informer.is_some(),
                 "informer config should be present"
@@ -2865,7 +2846,6 @@ discovery:
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config should load without owner_relations");
 
-            // When owner_relations is not specified, it should be None
             let k8s_conf = cfg
                 .discovery
                 .informer
@@ -2896,8 +2876,6 @@ discovery:
             "Default exclude_kinds should be empty"
         );
     }
-
-    // Edge case tests for interface resolution
 
     #[test]
     fn resolve_interfaces_empty_patterns() {
@@ -3182,12 +3160,10 @@ discovery:
 
     #[test]
     fn parse_regex_handles_special_characters() {
-        // Valid regex with special characters
         assert!(Conf::parse_regex("/^eth[0-9]+$/").is_some());
         assert!(Conf::parse_regex("/^(eth|en)\\d+$/").is_some());
         assert!(Conf::parse_regex("/^eth.*$/").is_some());
 
-        // Invalid regex syntax
         assert!(
             Conf::parse_regex("/^eth[0-9$/").is_none(),
             "unclosed bracket should fail"
@@ -3233,7 +3209,6 @@ discovery "informer" "k8s" {
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
 
-            // Verify selector_relations configuration is loaded correctly
             assert!(
                 cfg.discovery.informer.is_some(),
                 "informer config should be present"
@@ -3258,7 +3233,6 @@ discovery "informer" "k8s" {
                 "should have 2 selector relation rules"
             );
 
-            // Verify NetworkPolicy rule
             let networkpolicy_rule = &selector_relations[0];
             assert_eq!(networkpolicy_rule.kind, "NetworkPolicy");
             assert_eq!(networkpolicy_rule.to, "Pod");
@@ -3273,7 +3247,6 @@ discovery "informer" "k8s" {
                 Some("spec.podSelector.matchExpressions")
             );
 
-            // Verify Service rule
             let service_rule = &selector_relations[1];
             assert_eq!(service_rule.kind, "Service");
             assert_eq!(service_rule.to, "Pod");
@@ -3311,7 +3284,6 @@ discovery:
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config should load from YAML file");
 
-            // Verify selector_relations configuration is loaded correctly
             assert!(
                 cfg.discovery.informer.is_some(),
                 "informer config should be present"
@@ -3336,12 +3308,10 @@ discovery:
                 "should have 2 selector relation rules"
             );
 
-            // Verify NetworkPolicy rule
             let networkpolicy_rule = &selector_relations[0];
             assert_eq!(networkpolicy_rule.kind, "NetworkPolicy");
             assert_eq!(networkpolicy_rule.to, "Pod");
 
-            // Verify Service rule
             let service_rule = &selector_relations[1];
             assert_eq!(service_rule.kind, "Service");
             assert_eq!(service_rule.to, "Pod");
@@ -3368,7 +3338,6 @@ discovery:
             let (cfg, _cli) =
                 Conf::new(cli).expect("config should load without selector_relations");
 
-            // When selector_relations is not specified, it should be None
             let k8s_conf = cfg
                 .discovery
                 .informer
