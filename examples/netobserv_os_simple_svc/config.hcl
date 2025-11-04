@@ -1,14 +1,15 @@
+log_level = "debug"
 discovery "instrument" {
   # Network interfaces to monitor
-  interfaces = ["*"]
+  interfaces = ["eth0", "veth*"]
 }
 
 # OTLP exporter configuration
 # See OBI export concepts: https://opentelemetry.io/docs/zero-code/obi/configure/export-data/
 export "traces" {
-  # stdout = {
-  #   format = "text_indent" // text, text_indent(*new), json, json_indent
-  # }
+  stdout = {
+    format = "text_indent" // text, text_indent(*new), json, json_indent
+  }
 
   otlp = {
     endpoint = "https://netobserv-flow.elastiflow.svc:4317"
