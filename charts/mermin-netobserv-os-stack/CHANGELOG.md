@@ -1,3 +1,13 @@
+## [mermin-netobserv-os-stack-0.1.0-beta.5] - 2025-11-05
+
+### Features
+
+- Bump NetObserv Flow to 7.19.1 (chart is 0.5.1) (#215)
+
+[mermin-netobserv-os-stack-0.1.0-beta.4..mermin-netobserv-os-stack-0.1.0-beta.5](https://github.com/elastiflow/mermin/compare/mermin-netobserv-os-stack-0.1.0-beta.4...mermin-netobserv-os-stack-0.1.0-beta.5)
+
+
+
 ## [mermin-netobserv-os-stack-0.1.0-beta.4] - 2025-11-04
 
 ### Bug Fixes
