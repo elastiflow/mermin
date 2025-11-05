@@ -4,12 +4,12 @@ dependencies:
   version: 0.1.0-beta.13
 - name: netobserv-flow
   repository: https://elastiflow.github.io/helm-chart-netobserv/
-  version: 0.5.0
+  version: 0.5.1
 - name: opensearch
   repository: https://opensearch-project.github.io/helm-charts/
   version: 3.3.2
 - name: opensearch-dashboards
   repository: https://opensearch-project.github.io/helm-charts/
   version: 3.3.0
-digest: sha256:7e1c8c886d319b52823ad48d98cc5ffb3db9c2f1895edd95eb5504c8356ae55d
-generated: "2025-11-04T23:11:24.162864+02:00"
+digest: sha256:4726aff0f67950702fdb91abeed0ae9cab413ba082ed30b4f276864e41b7eac2
+generated: "2025-11-05T14:44:40.576985+02:00"
