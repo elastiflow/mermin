@@ -56,29 +56,37 @@ Start with recommended resources and adjust based on observed CPU and memory usa
 
 ### Network Interface Selection
 
-Mermin captures traffic from network interfaces matching your configured patterns. Choose interfaces based on your observability goals:
+Mermin captures traffic from network interfaces matching your configured patterns. The default configuration provides complete visibility without flow duplication:
 
-**Inter-Node Traffic** (default):
-
-```hcl
-discovery "instrument" {
-  interfaces = ["eth*", "ens*", "en*"]
-}
-```
-
-Captures traffic between nodes, to/from external networks, and through the node.
-
-**Intra-Node Traffic** (pod-to-pod on same node):
+**Complete Visibility** (default):
 
 ```hcl
 discovery "instrument" {
-  interfaces = ["eth*", "ens*", "cni*", "gke*", "cilium_*"]
+  interfaces = [
+    "veth*",      # Same-node pod-to-pod traffic
+    "tunl*",      # Calico IPIP tunnels (IPv4)
+    "ip6tnl*",    # IPv6 tunnels (dual-stack)
+    "flannel*",   # Flannel interfaces
+    "cali*",      # Calico interfaces
+    "cilium_*",   # Cilium overlays
+    # ... additional CNI-specific patterns
+  ]
 }
 ```
 
-Includes CNI bridge interfaces but may cause duplicate flow records for inter-node traffic.
+Captures all traffic (same-node + inter-node, IPv4 + IPv6) without duplication. Works with most CNIs including Flannel, Calico, Cilium, kindnetd, and cloud providers. Supports dual-stack clusters.
 
-See [Network Interface Discovery](../configuration/discovery-interfaces.md) for details.
+**Lower Overhead** (inter-node only):
+
+```hcl
+discovery "instrument" {
+  interfaces = ["eth*", "ens*"]
+}
+```
+
+Captures only inter-node traffic. Misses same-node pod-to-pod communication but monitors fewer interfaces.
+
+See [Network Interface Discovery](../configuration/discovery-interfaces.md) for detailed strategies and CNI-specific patterns.
 
 ### Network Namespace Switching
 
