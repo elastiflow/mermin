@@ -52,7 +52,7 @@ impl NetnsSwitch {
 
         let host_netns = File::open("/proc/1/ns/net").map_err(|e| {
             MerminError::internal(format!(
-                "failed to open host network namespace (/proc/1/ns/net): {e} - ensure hostPID: true is set in pod spec and CAP_SYS_ADMIN capability is granted"
+                "failed to open host network namespace (/proc/1/ns/net): {e} - ensure hostPID: true is set in pod spec and CAP_SYS_PTRACE capability is granted"
             ))
         })?;
 

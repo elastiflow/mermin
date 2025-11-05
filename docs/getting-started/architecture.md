@@ -249,6 +249,7 @@ Mermin requires elevated privileges to operate:
   * `CAP_BPF` - Load eBPF programs (kernel 5.8+)
   * `CAP_PERFMON` - Access eBPF ring buffers (kernel 5.8+)
   * `CAP_SYS_ADMIN` - Switch network namespaces and access BPF filesystem
+  * `CAP_SYS_PTRACE` - Access other processes' namespace files (`/proc/1/ns/net`)
   * `CAP_SYS_RESOURCE` - Increase memlock limits for eBPF maps
 
 #### Network Namespace Switching
