@@ -1,0 +1,59 @@
+# Option 1: Simple Load Generator
+# Deploys a continuous curl-based client in a separate namespace
+# Best for: Quick demos, namespace visibility focus
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: client-app
+  labels:
+    app: load-generator
+    environment: client
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: load-generator
+  namespace: client-app
+  labels:
+    app: load-generator
+    tier: client
+spec:
+  containers:
+  - name: curl
+    image: curlimages/curl:latest
+    command:
+      - /bin/sh
+      - -c
+      - |
+        echo "Starting load generator..."
+        echo "Target: http://otel-demo-frontendproxy.demo-app.svc.cluster.local:8080"
+        echo ""
+        
+        while true; do
+          echo "[$(date +%H:%M:%S)] Calling frontend service in demo-app namespace..."
+          
+          # Make request and capture response code
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            http://otel-demo-frontendproxy.demo-app.svc.cluster.local:8080 \
+            --max-time 10)
+          
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "[$(date +%H:%M:%S)] ✓ Response: HTTP $HTTP_CODE - Success"
+          else
+            echo "[$(date +%H:%M:%S)] ✗ Response: HTTP $HTTP_CODE - Check if frontend is running"
+          fi
+          
+          echo "[$(date +%H:%M:%S)] Sleeping 5 seconds..."
+          echo ""
+          sleep 5
+        done
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 50m
+        memory: 64Mi
+

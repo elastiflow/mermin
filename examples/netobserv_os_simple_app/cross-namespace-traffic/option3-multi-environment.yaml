@@ -1,0 +1,159 @@
+# Option 3: Multi-Environment Clients
+# Deploys production and development client namespaces
+# Best for: Security demos, compliance validation, network isolation testing
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production-clients
+  labels:
+    environment: production
+    security-zone: dmz
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: development-clients
+  labels:
+    environment: development
+    security-zone: internal
+---
+# Production client deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prod-client
+  namespace: production-clients
+  labels:
+    app: prod-client
+    environment: production
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: prod-client
+  template:
+    metadata:
+      labels:
+        app: prod-client
+        environment: production
+    spec:
+      containers:
+      - name: curl
+        image: curlimages/curl:latest
+        command:
+          - /bin/sh
+          - -c
+          - |
+            echo "[PROD] Starting production client..."
+            echo "[PROD] Target: http://otel-demo-frontendproxy.demo-app.svc.cluster.local:8080"
+            echo ""
+            
+            while true; do
+              echo "[PROD][$(date +%H:%M:%S)] Calling demo-app from PRODUCTION namespace..."
+              
+              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                http://otel-demo-frontendproxy.demo-app.svc.cluster.local:8080 \
+                --max-time 10)
+              
+              if [ "$HTTP_CODE" = "200" ]; then
+                echo "[PROD][$(date +%H:%M:%S)] ✓ HTTP $HTTP_CODE"
+              else
+                echo "[PROD][$(date +%H:%M:%S)] ✗ HTTP $HTTP_CODE"
+              fi
+              
+              sleep 8
+            done
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 50m
+            memory: 64Mi
+---
+# Development client deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dev-client
+  namespace: development-clients
+  labels:
+    app: dev-client
+    environment: development
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dev-client
+  template:
+    metadata:
+      labels:
+        app: dev-client
+        environment: development
+    spec:
+      containers:
+      - name: curl
+        image: curlimages/curl:latest
+        command:
+          - /bin/sh
+          - -c
+          - |
+            echo "[DEV] Starting development client..."
+            echo "[DEV] Target: http://otel-demo-frontendproxy.demo-app.svc.cluster.local:8080"
+            echo ""
+            
+            while true; do
+              echo "[DEV][$(date +%H:%M:%S)] Calling demo-app from DEVELOPMENT namespace..."
+              
+              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                http://otel-demo-frontendproxy.demo-app.svc.cluster.local:8080 \
+                --max-time 10)
+              
+              if [ "$HTTP_CODE" = "200" ]; then
+                echo "[DEV][$(date +%H:%M:%S)] ✓ HTTP $HTTP_CODE"
+              else
+                echo "[DEV][$(date +%H:%M:%S)] ✗ HTTP $HTTP_CODE"
+              fi
+              
+              sleep 12
+            done
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 50m
+            memory: 64Mi
+---
+# Example NetworkPolicy for production namespace (commented out - enable to test isolation)
+# apiVersion: networking.k8s.io/v1
+# kind: NetworkPolicy
+# metadata:
+#   name: prod-client-egress
+#   namespace: production-clients
+# spec:
+#   podSelector:
+#     matchLabels:
+#       app: prod-client
+#   policyTypes:
+#   - Egress
+#   egress:
+#   # Allow DNS
+#   - to:
+#     - namespaceSelector:
+#         matchLabels:
+#           kubernetes.io/metadata.name: kube-system
+#     ports:
+#     - protocol: UDP
+#       port: 53
+#   # Allow access to demo-app namespace only
+#   - to:
+#     - namespaceSelector:
+#         matchLabels:
+#           kubernetes.io/metadata.name: demo-app
+#     ports:
+#     - protocol: TCP
+#       port: 8080
+
