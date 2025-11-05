@@ -96,9 +96,11 @@ securityContext:
   privileged: true
   capabilities:
     add:
-      - SYS_ADMIN
-      - SYS_RESOURCE
-      - NET_ADMIN
+      - NET_ADMIN    # TC attachment
+      - BPF          # eBPF operations (kernel 5.8+)
+      - PERFMON      # Ring buffers (kernel 5.8+)
+      - SYS_ADMIN    # Namespace switching and BPF filesystem access
+      - SYS_RESOURCE # memlock limits
 ```
 
 #### 2. Kernel Version Too Old

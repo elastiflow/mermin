@@ -5,10 +5,11 @@ use hcl::eval::Context;
 use pnet::datalink;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use tracing::{Level, warn};
+use tracing::{Level, info, warn};
 
 use crate::{
     k8s::owner_relations::OwnerRelationsOptions,
+    netns::NetnsSwitch,
     otlp::opts::ExportOptions,
     runtime::{
         conf::conf_serde::{duration, level},
@@ -197,12 +198,97 @@ impl Conf {
     }
 
     /// Expand interface patterns (supports '*' and '?') into concrete interface names.
+    ///
+    /// This method lists interfaces from the host network namespace when running in
+    /// a Kubernetes pod. Requires hostPID: true and CAP_SYS_ADMIN capability.
+    ///
+    /// # Panics (production only)
+    ///
+    /// In non-test builds, panics if namespace switching fails to ensure proper
+    /// configuration. This is intentional to fail fast if:
+    /// - hostPID: true is not set in pod spec
+    /// - CAP_SYS_ADMIN capability is not granted
+    /// - /proc/1/ns/net is not accessible
+    ///
+    /// In test builds, gracefully falls back to current namespace.
     pub fn resolve_interfaces(&self) -> Vec<String> {
-        let available: Vec<String> = datalink::interfaces().into_iter().map(|i| i.name).collect();
+        let available: Vec<String> = {
+            #[cfg(not(test))]
+            {
+                // Production: fail fast if namespace switching doesn't work
+                let netns_switch = NetnsSwitch::new().expect(
+                    "failed to initialize network namespace switching - ensure hostPID: true is set and CAP_SYS_ADMIN capability is granted",
+                );
 
-        // If interfaces array is empty, use defaults
+                let available: Vec<String> = netns_switch
+                    .in_host_namespace(Some("interface_discovery"), || {
+                        Ok(datalink::interfaces()
+                            .into_iter()
+                            .map(|i| i.name)
+                            .collect::<Vec<String>>())
+                    })
+                    .expect("failed to list interfaces from host network namespace");
+
+                info!(
+                    event.name = "config.interfaces_available",
+                    interface_count = available.len(),
+                    interfaces = ?available,
+                    namespace = "host",
+                    "available interfaces in host network namespace"
+                );
+
+                available
+            }
+
+            #[cfg(test)]
+            {
+                // Tests: gracefully fall back to current namespace
+                match NetnsSwitch::new() {
+                    Ok(netns_switch) => {
+                        match netns_switch.in_host_namespace(Some("interface_discovery"), || {
+                            Ok(datalink::interfaces()
+                                .into_iter()
+                                .map(|i| i.name)
+                                .collect::<Vec<String>>())
+                        }) {
+                            Ok(interfaces) => {
+                                info!(
+                                    event.name = "config.interfaces_available",
+                                    interface_count = interfaces.len(),
+                                    interfaces = ?interfaces,
+                                    namespace = "host",
+                                    "[TEST] available interfaces in host network namespace"
+                                );
+                                interfaces
+                            }
+                            Err(_) => {
+                                let interfaces =
+                                    datalink::interfaces().into_iter().map(|i| i.name).collect();
+                                interfaces
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // Expected in tests - use current namespace
+                        let interfaces = datalink::interfaces()
+                            .into_iter()
+                            .map(|i| i.name)
+                            .collect::<Vec<String>>();
+                        info!(
+                            event.name = "config.interfaces_available",
+                            interface_count = interfaces.len(),
+                            interfaces = ?interfaces,
+                            namespace = "current",
+                            "[TEST] available interfaces in current network namespace"
+                        );
+                        interfaces
+                    }
+                }
+            }
+        };
+
         let patterns = if self.discovery.instrument.interfaces.is_empty() {
-            warn!(
+            info!(
                 event.name = "config.interfaces_empty",
                 "no interfaces configured, using default patterns"
             );
@@ -211,7 +297,17 @@ impl Conf {
             &self.discovery.instrument.interfaces
         };
 
-        Self::resolve_interfaces_from(patterns, &available)
+        let resolved = Self::resolve_interfaces_from(patterns, &available);
+
+        info!(
+            event.name = "config.interfaces_resolved",
+            interface_count = resolved.len(),
+            interfaces = ?resolved,
+            patterns = ?patterns,
+            "resolved interfaces from patterns"
+        );
+
+        resolved
     }
 
     /// Resolves interface patterns into concrete interface names.
@@ -489,23 +585,36 @@ pub struct InstrumentConf {
 impl Default for InstrumentConf {
     fn default() -> Self {
         Self {
-            // Default to common physical interface patterns to capture inter-node traffic
-            // Users should add CNI-specific patterns (cni*, gke*, cilium_*) if they need
-            // pod-to-pod same-node traffic, as those can cause data duplication
+            // Default strategy: complete visibility without flow duplication
+            //
+            // Approach:
+            // 1. Monitor veth* for same-node pod-to-pod traffic (all bridge-based CNIs)
+            // 2. Monitor tunnel/overlay interfaces for inter-node traffic
+            //    - These don't overlap with veth (separate packet paths)
+            //    - Avoids duplication from monitoring physical interfaces (eth*, ens*)
+            //
+            // Coverage:
+            // - Bridge-based CNIs (Flannel host-gw, Calico BGP, kindnetd): veth* captures all
+            // - Overlay CNIs (Flannel VXLAN, Calico IPIP): veth* + tunnel interfaces
+            // - Cilium: lxc*/cilium_* interfaces with native eBPF integration
+            // - Cloud CNIs (GKE, AWS, Azure): provider-specific interfaces
+            //
+            // Note: Does NOT monitor physical interfaces (eth*, ens*) by default to avoid:
+            // - Flow duplication (seeing same packet on veth AND eth)
+            // - Missing same-node traffic (never hits physical interface)
             interfaces: vec![
-                "cni*".to_string(),
-                "flannel*".to_string(),
-                "cali*".to_string(),
-                "tunl*".to_string(),
-                "cilium_*".to_string(),
-                "lxc*".to_string(),
-                "gke*".to_string(),
-                "eni*".to_string(),
-                "vlan*".to_string(),
-                "br*".to_string(),
-                "tun*".to_string(),
-                "ovn-k8s*".to_string(),
-                "br-*".to_string(),
+                "veth*".to_string(),    // All bridge-based CNI same-node traffic
+                "tunl*".to_string(),    // Calico IPIP tunnels (IPv4 inter-node)
+                "ip6tnl*".to_string(),  // IPv6 tunnels (Calico IPv6, dual-stack)
+                "vxlan*".to_string(),   // Flannel/generic VXLAN (inter-node)
+                "flannel*".to_string(), // Flannel interfaces
+                "cali*".to_string(),    // Calico workload interfaces
+                "cilium_*".to_string(), // Cilium overlay interfaces
+                "lxc*".to_string(),     // Cilium pod interfaces
+                "gke*".to_string(),     // GKE-specific interfaces
+                "eni*".to_string(),     // AWS VPC CNI interfaces
+                "azure*".to_string(),   // Azure CNI interfaces
+                "ovn-k8s*".to_string(), // OVN-Kubernetes interfaces
             ],
         }
     }
@@ -998,6 +1107,7 @@ mod tests {
             "ovn-k8s0".to_string(),
             "br-0".to_string(),
             "lo".to_string(),
+            "ip6tnl0".to_string(),
         ];
 
         let patterns: Vec<String> = vec![];
@@ -1014,18 +1124,14 @@ mod tests {
         assert_eq!(
             resolved_with_defaults,
             vec![
-                "cni0".to_string(),
+                "tunl0".to_string(),
+                "ip6tnl0".to_string(),
                 "flannel0".to_string(),
                 "cali0".to_string(),
-                "tunl0".to_string(),
                 "cilium_0".to_string(),
                 "lxc0".to_string(),
                 "gke0".to_string(),
                 "eni0".to_string(),
-                "vlan0".to_string(),
-                "br0".to_string(),
-                "br-0".to_string(),
-                "tun0".to_string(),
                 "ovn-k8s0".to_string(),
             ]
         );
@@ -1192,8 +1298,7 @@ mod tests {
         let defaults = super::InstrumentConf::default().interfaces;
         let resolved = Conf::resolve_interfaces_from(&defaults, &cloud_interfaces);
         assert!(
-            resolved.contains(&"cni0".to_string())
-                && resolved.contains(&"gke123".to_string())
+            resolved.contains(&"gke123".to_string())
                 && resolved.contains(&"cilium_net".to_string()),
             "Default patterns should match cni*, gke*, cilium_* in cloud"
         );
@@ -1203,13 +1308,6 @@ mod tests {
         assert!(
             !resolved.contains(&"cni0".to_string()),
             "Default patterns should not match cni* on on-prem"
-        );
-
-        let macos_interfaces = vec!["cni0".to_string(), "lo0".to_string(), "bridge0".to_string()];
-        let resolved = Conf::resolve_interfaces_from(&defaults, &macos_interfaces);
-        assert!(
-            resolved.contains(&"cni0".to_string()),
-            "Default patterns should match cni* on macOS"
         );
     }
 
@@ -1263,19 +1361,18 @@ mod tests {
         assert_eq!(
             cfg.discovery.instrument.interfaces,
             vec![
-                "cni*".to_string(),
+                "veth*".to_string(),
+                "tunl*".to_string(),
+                "ip6tnl*".to_string(),
+                "vxlan*".to_string(),
                 "flannel*".to_string(),
                 "cali*".to_string(),
-                "tunl*".to_string(),
                 "cilium_*".to_string(),
                 "lxc*".to_string(),
                 "gke*".to_string(),
                 "eni*".to_string(),
-                "vlan*".to_string(),
-                "br*".to_string(),
-                "tun*".to_string(),
-                "ovn-k8s*".to_string(),
-                "br-*".to_string(),
+                "azure*".to_string(),
+                "ovn-k8s*".to_string()
             ],
             "default interfaces should be common physical interface patterns"
         );

@@ -2,6 +2,7 @@ mod error;
 mod health;
 mod ip;
 mod k8s;
+mod netns;
 mod otlp;
 mod runtime;
 mod source;
@@ -25,6 +26,7 @@ use tracing::{debug, error, info, trace, warn};
 use crate::{
     health::{HealthState, start_api_server},
     k8s::{attributor::Attributor, decorator::Decorator},
+    netns::NetnsSwitch,
     otlp::{
         provider::{init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
@@ -291,6 +293,17 @@ async fn run() -> Result<()> {
         "ring buffer initialized and ready to receive packets"
     );
 
+    // Initialize namespace switcher for attaching to host network interfaces
+    // This allows us to monitor host interfaces without hostNetwork: true
+    let netns_switch = NetnsSwitch::new().map_err(|e| {
+        error!(
+            event.name = "netns.switch.init_failed",
+            error = %e,
+            "failed to initialize network namespace switching"
+        );
+        e
+    })?;
+
     let programs = [TcAttachType::Ingress, TcAttachType::Egress];
     programs.iter().try_for_each(|attach_type| -> Result<()> {
         let program: &mut SchedClassifier = ebpf
@@ -307,30 +320,39 @@ async fn run() -> Result<()> {
         conf.resolved_interfaces
             .iter()
             .try_for_each(|iface| -> Result<()> {
-                // Only add clsact qdisc for netlink-based attachments (kernel < 6.6)
-                // TCX-based attachments (kernel >= 6.6) don't require it
-                if !use_tcx && let Err(e) = tc::qdisc_add_clsact(iface) {
-                    // This is often benign - qdisc may already exist from previous run
-                    // or another program. We log at debug level and continue.
-                    debug!(
-                        event.name = "ebpf.qdisc_add_clsact.skipped",
-                        network.interface.name = %iface,
-                        error = %e,
-                        "clsact qdisc add failed (likely already exists)"
-                    );
-                }
+                let context = format!("{} ({})", iface, attach_type.direction_name());
+                let link_id = netns_switch
+                    .in_host_namespace(Some(&context), || {
+                        // Only add clsact qdisc for netlink-based attachments (kernel < 6.6)
+                        // TCX-based attachments (kernel >= 6.6) don't require it
+                        if !use_tcx && let Err(e) = tc::qdisc_add_clsact(iface) {
+                            // This is often benign - qdisc may already exist from previous run
+                            // or another program. We log at debug level and continue.
+                            debug!(
+                                event.name = "ebpf.qdisc_add_clsact.skipped",
+                                network.interface.name = %iface,
+                                error = %e,
+                                "clsact qdisc add failed (likely already exists)"
+                            );
+                        }
 
-                let link_id = program.attach(iface, *attach_type).map_err(|e| {
-                    error!(
-                        event.name = "ebpf.program_attach_failed",
-                        ebpf.program.direction = attach_type.direction_name(),
-                        ebpf.attach_method = attach_method,
-                        network.interface.name = %iface,
-                        error = %e,
-                        "failed to attach ebpf program to interface"
-                    );
-                    e
-                })?;
+                        program.attach(iface, *attach_type).map_err(|e| {
+                            MerminError::internal(format!(
+                                "failed to attach eBPF program to interface {iface}: {e}"
+                            ))
+                        })
+                    })
+                    .map_err(|e| {
+                        error!(
+                            event.name = "ebpf.program_attach_failed",
+                            ebpf.program.direction = attach_type.direction_name(),
+                            ebpf.attach_method = attach_method,
+                            network.interface.name = %iface,
+                            error = %e,
+                            "failed to attach ebpf program (namespace switch or attach failed)"
+                        );
+                        e
+                    })?;
                 tc_links.insert((iface.clone(), attach_type.direction_name()), link_id);
 
                 info!(
@@ -352,12 +374,23 @@ async fn run() -> Result<()> {
 
     let iface_map: HashMap<u32, String> = {
         let mut map = HashMap::new();
-        for iface in datalink::interfaces() {
-            if conf.resolved_interfaces.contains(&iface.name) {
-                map.insert(iface.index, iface.name.clone());
-            }
-        }
-        map
+        netns_switch
+            .in_host_namespace(Some("interface_map"), || {
+                for iface in datalink::interfaces() {
+                    if conf.resolved_interfaces.contains(&iface.name) {
+                        map.insert(iface.index, iface.name.clone());
+                    }
+                }
+                Ok(map)
+            })
+            .map_err(|e| {
+                error!(
+                    event.name = "netns.switch.interface_map_failed",
+                    error = %e,
+                    "failed to build interface map"
+                );
+                e
+            })?
     };
     info!(
         event.name = "system.config_loaded",

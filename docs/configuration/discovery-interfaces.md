@@ -128,38 +128,91 @@ If `interfaces` is empty or not specified, Mermin uses these defaults:
 
 ```hcl
 discovery "instrument" {
-  interfaces = ["eth*", "ens*", "en*"]
+  interfaces = [
+    "veth*",      # Same-node pod-to-pod traffic
+    "tunl*",      # Calico IPIP tunnels (IPv4)
+    "ip6tnl*",    # IPv6 tunnels (Calico, dual-stack)
+    "vxlan*",     # VXLAN overlays
+    "flannel*",   # Flannel interfaces
+    "cali*",      # Calico interfaces
+    "cilium_*",   # Cilium overlays
+    "lxc*",       # Cilium pod interfaces
+    "gke*",       # GKE interfaces
+    "eni*",       # AWS VPC CNI
+    "azure*",     # Azure CNI
+    "ovn-k8s*",   # OVN-Kubernetes
+  ]
 }
 ```
 
-These patterns capture most physical network interfaces across different Linux distributions and cloud providers.
+**Strategy**: Complete visibility without flow duplication
 
-## Inter-Node vs Intra-Node Traffic
+- **`veth*`** captures all same-node pod-to-pod traffic (works with all bridge-based CNIs)
+- **Tunnel/overlay interfaces** (`tunl*`, `ip6tnl*`, `vxlan*`, `flannel*`) capture inter-node traffic for both IPv4 and IPv6
+- **CNI-specific interfaces** (`cali*`, `cilium_*`, `lxc*`, `gke*`, `eni*`, `azure*`, `ovn-k8s*`) for various network plugins
+- **No physical interfaces** (`eth*`, `ens*`) or bridge interfaces (`cni0`, `docker0`) to avoid duplication or missing same-node traffic
+
+This works for most CNI configurations including Flannel, Calico, Cilium, kindnetd, and cloud providers. Supports dual-stack (IPv4+IPv6) clusters.
+
+## Traffic Visibility Strategies
 
 The interfaces you monitor determine what traffic Mermin captures:
 
-### Inter-Node Traffic (Default)
+### Complete Visibility (Default)
+
+Monitor veth pairs and tunnel/overlay interfaces:
+
+```hcl
+discovery "instrument" {
+  interfaces = [
+    "veth*",      # Same-node traffic
+    "tunl*",      # Inter-node tunnels (Calico)
+    "flannel*",   # Inter-node (Flannel)
+    # ... other CNI-specific patterns
+  ]
+}
+```
+
+**Captures:**
+- ✅ Same-node pod-to-pod traffic (via veth)
+- ✅ Inter-node traffic (via tunnel/overlay interfaces)
+- ✅ No flow duplication (separate packet paths)
+
+**Trade-offs:**
+- ⚠️ Higher overhead (monitors many veth interfaces in large clusters)
+- ⚠️ Veth interfaces churn (created/destroyed with pods)
+
+**Use cases:**
+- Complete network observability
+- Debugging same-node communication
+- Most production deployments
+
+### Inter-Node Only (Lower Overhead)
 
 Monitor only physical interfaces:
 
 ```hcl
 discovery "instrument" {
-  interfaces = ["eth*", "ens*", "en*"]
+  interfaces = ["eth*", "ens*"]
 }
 ```
 
 **Captures:**
 - ✅ Traffic between nodes
 - ✅ Traffic to/from external networks
-- ✅ Traffic through the node
-- ❌ Pod-to-pod traffic on same node (not on physical interface)
+- ❌ **Misses same-node pod-to-pod traffic**
+
+**Trade-offs:**
+- ✅ Low overhead (few interfaces)
+- ❌ Incomplete visibility
+- ⚠️ May cause duplication with veth monitoring
 
 **Use cases:**
-- Standard cluster observability
-- External traffic monitoring
-- No flow duplication
+- Clusters with minimal same-node communication
+- Cost-sensitive deployments
+- External traffic focus
 
-### Intra-Node Traffic (Complete Visibility)
+### Intra-Node Traffic Only
 
 Monitor both physical and CNI interfaces:
 
@@ -180,7 +233,7 @@ discovery "instrument" {
 - Compliance or security auditing
 
 {% hint style="info" %}
-For most use cases, monitoring only physical interfaces (default) provides sufficient visibility without flow duplication.
+For most use cases, the default configuration (complete visibility with veth + tunnel interfaces) provides comprehensive observability without duplication.
 {% endhint %}
 
 ## CNI-Specific Patterns
