@@ -103,6 +103,8 @@ nodes:
 - role: control-plane
 - role: worker${mounts:-}
 EOF
+  # Explicitly set kubectl context to ensure it's configured correctly
+  kubectl config use-context "kind-${CLUSTER_NAME}"
 }
 
 load_image_into_kind() {
@@ -119,7 +121,7 @@ deploy_helm_chart() {
     HELM_CHART="$HELM_CHART_PATH" \
     HELM_NAMESPACE="$NAMESPACE" \
     HELM_VALUES="$VALUES_FILE" \
-    EXTRA_HELM_ARGS="--set image.repository=$DOCKER_REPOSITORY --set image.tag=$DOCKER_IMAGE_TAG --set-file config.content=$MERMIN_CONFIG_PATH --wait --timeout=3m --create-namespace"
+    EXTRA_HELM_ARGS="--set image.repository=$DOCKER_REPOSITORY --set image.tag=$DOCKER_IMAGE_TAG --set-file config.content=$MERMIN_CONFIG_PATH --wait --timeout=10m --create-namespace"
 }
 
 # --- Main Execution ---
@@ -129,6 +131,8 @@ echo "==================================="
 
 create_kind_cluster "${CNI}"
 install_cni "${CNI}"
+# Ensure kubectl context is set before waiting for nodes
+kubectl config use-context "kind-${CLUSTER_NAME}" || true
 kubectl wait --for=condition=Ready nodes --all --timeout=3m
 load_image_into_kind
 deploy_helm_chart
