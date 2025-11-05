@@ -5,7 +5,7 @@ use hcl::eval::Context;
 use pnet::datalink;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use tracing::{Level, debug, info, warn};
+use tracing::{Level, info, warn};
 
 use crate::{
     k8s::owner_relations::OwnerRelationsOptions,
@@ -223,10 +223,11 @@ impl Conf {
             })
             .expect("failed to list interfaces from host network namespace");
 
-        debug!(
-            event.name = "config.interfaces_resolved_from_host",
+        info!(
+            event.name = "config.interfaces_available",
             interface_count = available.len(),
-            "resolved interfaces from host network namespace"
+            interfaces = ?available,
+            "available interfaces in host network namespace"
         );
 
         let patterns = if self.discovery.instrument.interfaces.is_empty() {
@@ -239,7 +240,17 @@ impl Conf {
             &self.discovery.instrument.interfaces
         };
 
-        Self::resolve_interfaces_from(patterns, &available)
+        let resolved = Self::resolve_interfaces_from(patterns, &available);
+
+        info!(
+            event.name = "config.interfaces_resolved",
+            interface_count = resolved.len(),
+            interfaces = ?resolved,
+            patterns = ?patterns,
+            "resolved interfaces from patterns"
+        );
+
+        resolved
     }
 
     /// Resolves interface patterns into concrete interface names.
