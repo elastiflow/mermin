@@ -100,6 +100,7 @@ securityContext:
       - BPF          # eBPF operations (kernel 5.8+)
       - PERFMON      # Ring buffers (kernel 5.8+)
       - SYS_ADMIN    # Namespace switching and BPF filesystem access
+      - SYS_PTRACE   # Access process namespaces (/proc/1/ns/net)
       - SYS_RESOURCE # memlock limits
 ```
 

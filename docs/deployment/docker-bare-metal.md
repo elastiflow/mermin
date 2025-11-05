@@ -133,6 +133,7 @@ docker run -d \
   --network host \
   --pid host \
   --cap-add SYS_ADMIN \
+  --cap-add SYS_PTRACE \
   --cap-add NET_ADMIN \
   --cap-add BPF \
   -v /sys/kernel/debug:/sys/kernel/debug:ro \
@@ -205,6 +206,7 @@ ExecStart=/usr/bin/docker run --rm \
   --network host \
   --pid host \
   --cap-add SYS_ADMIN \
+  --cap-add SYS_PTRACE \
   --cap-add NET_ADMIN \
   --cap-add BPF \
   -v /sys/kernel/debug:/sys/kernel/debug:ro \
@@ -253,6 +255,7 @@ podman run -d \
   --network host \
   --pid host \
   --cap-add SYS_ADMIN \
+  --cap-add SYS_PTRACE \
   --cap-add NET_ADMIN \
   --cap-add BPF \
   -v /sys/kernel/debug:/sys/kernel/debug:ro \
@@ -431,6 +434,7 @@ Ensure container has necessary privileges:
 ```bash
 docker run --privileged \
   --cap-add SYS_ADMIN \
+  --cap-add SYS_PTRACE \
   --cap-add NET_ADMIN \
   --cap-add BPF \
   ...
