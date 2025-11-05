@@ -40,6 +40,7 @@ libc = { workspace = true }
 log = { workspace = true }
 mermin-common = { path = "../mermin-common" }
 network-types = { path = "../network-types" }
+nix = { version = "0.30.1", features = ["sched"] }
 num-iter = "0.1.45"
 num-traits = "0.2.19"
 opentelemetry = { version = "0.31.0" }

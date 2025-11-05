@@ -81,24 +81,47 @@ discovery "instrument" {
   # Network interfaces to monitor
   #
   # Supports literal names, glob patterns (*, ?), and regex (/pattern/)
-  # Default: ["eth*", "ens*", "en*"] - captures most physical interfaces
   #
-  # Common patterns:
-  # - ["eth*", "ens*", "en*"]     - Physical interfaces (inter-node traffic)
-  # - ["cni*", "cilium_*", "gke*"] - CNI bridge interfaces (intra-node pod-to-pod)
-  # - ["*"]                        - All interfaces (may cause duplication with tunnels/veth)
+  # Default strategy (if not specified): Complete visibility without duplication
+  # - veth* for same-node pod-to-pod traffic
+  # - CNI-specific tunnel/overlay interfaces for inter-node traffic
+  # - Does NOT monitor physical interfaces (eth*, ens*) to avoid duplication
   #
-  # For complete visibility in Kubernetes:
-  # - Inter-node traffic: Use physical interface patterns (eth*, ens*)
-  # - Intra-node pod-to-pod: Add CNI-specific patterns based on your CNI
-  #   * Flannel: add "cni*"
-  #   * Calico: add "cali*"
-  #   * Cilium: add "cilium_*"
-  #   * GKE: add "gke*"
+  # Visibility strategies:
   #
-  # Note: Listening on CNI interfaces may capture duplicate packets
-  # (once on veth, once on physical interface for inter-node traffic)
-  interfaces = ["eth*", "ens*"]
+  # 1. Complete visibility (DEFAULT - recommended for most deployments):
+  #    interfaces = ["veth*", "tunl*", "ip6tnl*", "vxlan*", "flannel*", "cali*", "cilium_*", "lxc*"]
+  #    ✅ Captures all traffic (same-node + inter-node, IPv4 + IPv6)
+  #    ✅ No flow duplication (avoids bridges and physical interfaces)
+  #    ⚠️  Higher overhead (many veth interfaces in large clusters)
+  #
+  # 2. Inter-node only (lower overhead, incomplete visibility):
+  #    interfaces = ["eth*", "ens*"]
+  #    ✅ Low overhead (few interfaces)
+  #    ❌ Misses same-node pod-to-pod traffic
+  #
+  # 3. Custom CNI-specific patterns:
+  #    - Flannel: ["veth*", "flannel*", "cni*"]
+  #    - Calico:  ["veth*", "cali*", "tunl*", "ip6tnl*"]
+  #    - Cilium:  ["lxc*", "cilium_*"]
+  #    - GKE:     ["veth*", "gke*"]
+  #    - Dual-stack: Add "ip6tnl*" to any of the above
+  #
+  # Leave empty or comment out to use defaults
+  # interfaces = [
+  #   "veth*",      # Same-node pod-to-pod traffic
+  #   "tunl*",      # Calico IPIP tunnels (IPv4)
+  #   "ip6tnl*",    # IPv6 tunnels (Calico, dual-stack)
+  #   "vxlan*",     # VXLAN overlays
+  #   "flannel*",   # Flannel interfaces
+  #   "cali*",      # Calico interfaces
+  #   "cilium_*",   # Cilium overlays
+  #   "lxc*",       # Cilium pod interfaces
+  #   "gke*",       # GKE interfaces
+  #   "eni*",       # AWS VPC CNI
+  #   "azure*",     # Azure CNI
+  #   "ovn-k8s*",   # OVN-Kubernetes
+  # ]
 }
 
 discovery "informer" "k8s" {

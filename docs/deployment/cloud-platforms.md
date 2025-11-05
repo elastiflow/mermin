@@ -62,9 +62,11 @@ securityContext:
   privileged: false
   capabilities:
     add:
-      - BPF
-      - NET_ADMIN
-      - SYS_ADMIN
+      - NET_ADMIN    # TC attachment
+      - BPF          # eBPF operations (kernel 5.8+)
+      - PERFMON      # Ring buffers (kernel 5.8+)
+      - SYS_ADMIN    # Namespace switching and BPF filesystem access
+      - SYS_RESOURCE # memlock limits
   allowPrivilegeEscalation: true
 
 resources:
@@ -483,7 +485,7 @@ Ensure you're using capabilities instead of `privileged: true`:
 securityContext:
   privileged: false
   capabilities:
-    add: [BPF, NET_ADMIN, SYS_ADMIN]
+    add: [NET_ADMIN, BPF, PERFMON, SYS_ADMIN, SYS_RESOURCE]
 ```
 
 ### EKS: "Cannot load eBPF program"

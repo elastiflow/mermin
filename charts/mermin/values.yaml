@@ -12,17 +12,13 @@ imagePullSecrets: []
 updateStrategy:
   type: RollingUpdate
   rollingUpdate:
-    maxUnavailable: 1
-    maxSurge: 0
-    # TODO(mack#lgo-406|2025-11-04): If hostNetwork: false, following may be used
-    # maxUnavailable: 0
-    # maxSurge: "10%"
+    maxUnavailable: 0
+    maxSurge: "10%"
 
 # Mermin container extra args
 extraArgs: []
   # - "--foo"
   # - "bar"
-
 
 serviceAccount:
   # Specifies whether a service account should be created
@@ -45,25 +41,26 @@ commonLabels: {}
 podAnnotations: {}
 podLabels: {}
 
-# Enable host networking mode for the pod, incompatible with surge upgrades
-# TODO(mack#lgo-406|2025-11-04): Check if eBPF program can switch namespaces
+# Enable host networking mode for the pod, incompatible with surge upgrades, may require "dnsPolicy: ClusterFirstWithHostNet"
 hostNetwork: false
-dnsPolicy: ClusterFirstWithHostNet
-hostPID: false
+dnsPolicy: ClusterFirst
+hostPID: true
 
-# TODO(mack#lgo-406|2025-11-04): Reiterate on defaults
 podSecurityContext:
-  runAsNonRoot: false
+  runAsNonRoot: true
 
-# TODO(mack#lgo-406|2025-11-04): Reiterate on defaults
 securityContext:
-  # privileged mode is required for mermin to interact with the kernel and eBPF.
-  privileged: true
+  readOnlyRootFilesystem: true
+  runAsNonRoot: false
   capabilities:
     drop:
       - ALL
-  readOnlyRootFilesystem: true
-  runAsNonRoot: false
+    add:
+      - NET_ADMIN
+      - BPF
+      - PERFMON
+      - SYS_ADMIN
+      - SYS_RESOURCE
 
 resources: {}
   # TODO(mack#ENG-123|2025-09-29): Set default resources relative to the flows per second
