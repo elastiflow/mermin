@@ -66,6 +66,7 @@ securityContext:
       - BPF          # eBPF operations (kernel 5.8+)
       - PERFMON      # Ring buffers (kernel 5.8+)
       - SYS_ADMIN    # Namespace switching and BPF filesystem access
+      - SYS_PTRACE   # Access process namespaces (/proc/1/ns/net)
       - SYS_RESOURCE # memlock limits
   allowPrivilegeEscalation: true
 
@@ -485,7 +486,7 @@ Ensure you're using capabilities instead of `privileged: true`:
 securityContext:
   privileged: false
   capabilities:
-    add: [NET_ADMIN, BPF, PERFMON, SYS_ADMIN, SYS_RESOURCE]
+    add: [NET_ADMIN, BPF, PERFMON, SYS_ADMIN, SYS_PTRACE, SYS_RESOURCE]
 ```
 
 ### EKS: "Cannot load eBPF program"

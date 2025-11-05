@@ -111,6 +111,7 @@ Mermin uses an advanced technique to monitor host network interfaces without req
 
 * `hostPID: true` - Required to access `/proc/1/ns/net` (host network namespace)
 * `CAP_SYS_ADMIN` - Required for `setns()` syscall to switch namespaces
+* `CAP_SYS_PTRACE` - Required to open namespace files of other processes (`/proc/1/ns/net`)
 * Automatic DNS Policy - Helm chart sets `dnsPolicy: ClusterFirstWithHostNet` when `hostNetwork: false`
 
 **Configuration:**
@@ -130,6 +131,7 @@ securityContext:
       - BPF          # eBPF operations
       - PERFMON      # Ring buffers
       - SYS_ADMIN    # Namespace switching
+      - SYS_PTRACE   # Access process namespaces
       - SYS_RESOURCE # Memory limits
 ```
 
