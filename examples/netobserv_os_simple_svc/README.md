@@ -55,25 +55,6 @@ Notes on the example deployment:
     mermin mermin/mermin-netobserv-os-stack
   ```
 
-```sh
-# mack testing
-docker build -t mermin:latest --target runner-debug .
-kind load docker-image -n atlantis mermin:latest
-
-helm upgrade -i --wait --timeout 15m -n elastiflow \
-  -f examples/netobserv_os_simple_svc/values.yaml \
-  --set-file mermin.config.content=examples/netobserv_os_simple_svc/config.hcl \
-  --devel \
-  mermin mermin/mermin-netobserv-os-stack
-
-rm -rf helm_rendered; helm template -n elastiflow \
-  -f examples/netobserv_os_simple_svc/values.yaml \
-  --set-file mermin.config.content=examples/netobserv_os_simple_svc/config.hcl \
-  --output-dir helm_rendered \
-  --devel \
-  mermin mermin/mermin-netobserv-os-stack  
-```
-
 - Optionally install `metrics-server` to get metrics if it has not been installed yet
 
   ```sh

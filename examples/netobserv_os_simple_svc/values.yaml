@@ -1,47 +1,8 @@
 mermin:
   enabled: true
-  # TODO(mack#lgo-406|2025-11-04): Should be remove and defaults to be used
-  image:
-    repository: mermin
-    tag: latest
   # TODO(Cleanup for GA): image pull secrets not needed when going public
   imagePullSecrets:
     - name: ghcr
-
-  updateStrategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 1
-      maxSurge: 0
-
-  # Enable host networking mode for the pod, incompatible with surge upgrades
-  # TODO(mack#lgo-406|2025-11-04): Check if eBPF program can switch namespaces
-  hostNetwork: false
-  dnsPolicy: ClusterFirst
-  hostPID: true
-
-  # TODO(mack#lgo-406|2025-11-04): Reiterate on defaults
-  podSecurityContext:
-    runAsNonRoot: true
-
-  # TODO(mack#lgo-406|2025-11-04): Reiterate on defaults
-  securityContext:
-    readOnlyRootFilesystem: true
-    runAsNonRoot: false
-    capabilities:
-      drop:
-        - ALL
-      add:
-        # TC attachment
-        - NET_ADMIN
-        # eBPF operations (kernel 5.8+)
-        - BPF
-        # Ring buffers (kernel 5.8+)
-        - PERFMON
-        # setns() and BPF filesystem access
-        - SYS_ADMIN
-        # memlock limits
-        - SYS_RESOURCE
 
 netobserv-flow:
   enabled: true

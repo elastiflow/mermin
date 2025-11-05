@@ -35,14 +35,14 @@ EXTRA_HELM_ARGS?=
 
 .PHONY: helm-template
 helm-template:
-	rm -rf ${HELM_OUTPUT_DIR}
+	rm -rf ${HELM_OUTPUT_DIR_PREFIX}
 	helm template ${APP} ${HELM_CHART} \
 		--output-dir ${HELM_OUTPUT_DIR_PREFIX} \
 		${HELM_ARGS} ${EXTRA_HELM_ARGS}
 
 .PHONY: helm-template-silent
 helm-template-silent:
-	@rm -rf ${HELM_OUTPUT_DIR} > /dev/null
+	@rm -rf ${HELM_OUTPUT_DIR_PREFIX} > /dev/null
 	@helm template ${APP} ${HELM_CHART} \
 		--output-dir ${HELM_OUTPUT_DIR_PREFIX} \
 		${HELM_ARGS} ${EXTRA_HELM_ARGS} > /dev/null
