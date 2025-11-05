@@ -1,3 +1,16 @@
+## [v0.1.0-beta.14] - 2025-11-05
+
+### Bug Fixes
+
+- Docker tags should not have  prefix (#211)
+- Add "v" prefix back to the docker tags (#217)
+- Add host network namespace switching for ebpf attachment (#209)
+- Add new  cap (#219)
+
+[v0.1.0-beta.13..v0.1.0-beta.14](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.13...v0.1.0-beta.14)
+
+
+
 ## [v0.1.0-beta.13] - 2025-11-04
 
 ### Bug Fixes
