@@ -90,6 +90,7 @@ jobs:
       contents: write
     outputs:
       new_release_published: ${{ steps.prepare_release.outputs.new_release_published }}
+      new_release_version: ${{ steps.prepare_release.outputs.new_release_version }}
       new_release_git_tag: ${{ steps.prepare_release.outputs.new_release_git_tag }}
       new_release_notes: ${{ steps.prepare_release.outputs.new_release_notes }}
     env:
@@ -211,8 +212,8 @@ jobs:
         if: ${{ fromJson(needs.release.outputs.new_release_published) }}
         uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8
         with:
-          name: mermin-${{ needs.release.outputs.new_release_git_tag }}
-          tag_name: mermin-${{ needs.release.outputs.new_release_git_tag }}
+          name: mermin-${{ needs.release.outputs.new_release_version }}
+          tag_name: mermin-${{ needs.release.outputs.new_release_version }}
           body: |
             ${{ needs.release.outputs.new_release_notes }}
           target_commitish: ${{ github.ref_name }}
