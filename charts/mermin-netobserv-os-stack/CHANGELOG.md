@@ -1,3 +1,13 @@
+## [mermin-netobserv-os-stack-0.1.0-beta.6] - 2025-11-06
+
+### Bug Fixes
+
+- **helm:** Invalid tag mermin Helm chart (#222)
+
+[mermin-netobserv-os-stack-0.1.0-beta.5..mermin-netobserv-os-stack-0.1.0-beta.6](https://github.com/elastiflow/mermin/compare/mermin-netobserv-os-stack-0.1.0-beta.5...mermin-netobserv-os-stack-0.1.0-beta.6)
+
+
+
 ## [mermin-netobserv-os-stack-0.1.0-beta.5] - 2025-11-05
 
 ### Features
