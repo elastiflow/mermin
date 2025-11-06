@@ -7,12 +7,8 @@ observability platforms.
 -----
 
 - [🚀 Quick Start: Deploying to Kubernetes with `kind`](#-quick-start-deploying-to-kubernetes-with-kind)
-  - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
-  - [Verifying the Deployment](#verifying-the-deployment)
-  - [Cleanup](#cleanup)
 - [🧑‍💻 Local Development and Contribution](#-local-development-and-contribution)
-  - [Prerequisites](#prerequisites-1)
+  - [Prerequisites](#prerequisites)
   - [Build and Run Locally](#build-and-run-locally)
     - [1. Build the `mermin` agent](#1-build-the-mermin-agent)
       - [Pull](#pull)
@@ -26,15 +22,16 @@ observability platforms.
   - [Using a Dockerized Build Environment](#using-a-dockerized-build-environment)
     - [1. Build the containerized environment](#1-build-the-containerized-environment)
     - [2. Run commands inside the container](#2-run-commands-inside-the-container)
+  - [Testing on local Kind K8s cluster](#testing-on-local-kind-k8s-cluster)
   - [Cross-Compiling](#cross-compiling)
   - [Debugging with Wireshark](#debugging-with-wireshark)
-    - [Prerequisites](#prerequisites-2)
+    - [Prerequisites](#prerequisites-1)
     - [1. Identify Your Target Pod](#1-identify-your-target-pod)
     - [2. Start the Live Capture](#2-start-the-live-capture)
     - [3. Generate Network Traffic](#3-generate-network-traffic)
     - [4. Inspect the Packets](#4-inspect-the-packets)
 - [🔍 Debugging eBPF Programs with bpftool](#-debugging-ebpf-programs-with-bpftool)
-  - [Prerequisites](#prerequisites-3)
+  - [Prerequisites](#prerequisites-2)
     - [1. Build the containerized environment (if not already built)](#1-build-the-containerized-environment-if-not-already-built)
     - [2. Access the container with bpftool](#2-access-the-container-with-bpftool)
   - [Basic eBPF Program Inspection](#basic-ebpf-program-inspection)
@@ -54,7 +51,7 @@ observability platforms.
     - [Memory issues](#memory-issues)
   - [Integration with Development Workflow](#integration-with-development-workflow)
 - [🔍 Inspecting eBPF Programs for Network-Types Integration Tests](#-inspecting-ebpf-programs-for-network-types-integration-tests)
-  - [Prerequisites](#prerequisites-4)
+  - [Prerequisites](#prerequisites-3)
   - [Building the Integration Test eBPF Programs](#building-the-integration-test-ebpf-programs)
   - [Inspecting eBPF Programs Using bpftool](#inspecting-ebpf-programs-using-bpftool)
     - [Method 1: Direct Binary Analysis (Recommended)](#method-1-direct-binary-analysis-recommended)
@@ -91,77 +88,9 @@ observability platforms.
 - [📜 License](#-license)
   - [eBPF](#ebpf)
 
-
 ## 🚀 Quick Start: Deploying to Kubernetes with `kind`
 
-Mermin is distributed using Helm charts, examples for various deployments may be found in the `examples/` directory.
-This guide will get you running Mermin on a local **Kubernetes*- cluster using [kind](https://kind.sigs.k8s.io/).
-
-### Prerequisites
-
-You'll need the following tools installed on your machine:
-
-- [Docker](https://docs.docker.com/get-docker/)
-- [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
-- [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
-- [Helm](https://helm.sh/docs/intro/install/)
-
-### Installation
-
-Once the prerequisites are met, you can create a local cluster, build the Mermin image, and deploy it with a single
-command sequence:
-
-```shell
-# 1. Create the kind cluster
-kind create cluster --config examples/local/kind-config.yaml
-
-# 2. Build the mermin image and load it into the cluster
-docker build -t mermin:latest --target runner-debug .
-kind load docker-image -n atlantis mermin:latest
-
-# 3. (optional) if you already have a Helm release, uninstall it first
-helm uninstall mermin
-
-# 4b. Deploy mermin using Helm
-make helm-upgrade
-# 4c. Or deploy mermin using Helm with a non-default config (create config first)
-make helm-upgrade EXTRA_HELM_ARGS='--set-file config.content=examples/local/config.hcl'
-# 4d. Or deploy using raw Helm cli
-helm upgrade -i mermin charts/mermin --values examples/local/values.yaml --wait --timeout 10m
-```
-
-> **Note**: The repository includes a `Makefile` with convenience targets (`make k8s-get`, `make k8s-diff`) for some of
-> these commands.
-
-### Verifying the Deployment
-
-1. **Check that the `mermin` pods are running*- on each node. You should see one pod per worker node.
-
-   ```shell
-   kubectl get pods -l app.kubernetes.io/name=mermin
-   ```
-
-2. **View the logs*- from any of the Mermin pods to see network flow data.
-
-   ```shell
-   kubectl logs -l app.kubernetes.io/name=mermin -f
-   ```
-
-   To generate some network traffic, try pinging between pods in your cluster.
-
-### Cleanup
-
-To remove Mermin from your cluster, uninstall the Helm chart. To tear down the entire cluster, use `kind delete`.
-
-```shell
-# Uninstall the mermin Helm release
-helm uninstall mermin
-
-# Delete the kind cluster
-kind delete cluster
-```
-
------
+<!-- TODO(Cleanup for GA): Add link to docs/getting-started/quickstart.md -->
 
 ## 🧑‍💻 Local Development and Contribution
 
@@ -177,6 +106,11 @@ Ensure you have the following installed:
 4. (if cross-compiling) **rustup target**: `rustup target add ${ARCH}-unknown-linux-musl`
 5. (if cross-compiling) **LLVM**: (e.g.) `brew install llvm` (on macOS)
 6. (if cross-compiling) **C toolchain**: (e.g.) [`brew install filosottile/musl-cross/musl-cross`](https://github.com/FiloSottile/homebrew-musl-cross) (on macOS)
+7. Required software to run Mermin locally:
+   - [**Docker**](https://docs.docker.com/get-docker/): Container runtime
+   - [**kind**](https://kind.sigs.k8s.io/docs/user/quick-start/#installation): Kubernetes in Docker
+   - [**kubectl**](https://kubernetes.io/docs/tasks/tools/): Kubernetes command-line tool
+   - [**Helm**](https://helm.sh/docs/intro/install/): Kubernetes package manager (version 3.x)
 
 ### Build and Run Locally
 
@@ -206,7 +140,7 @@ docker pull ghcr.io/elastiflow/mermin:v0.1.0-beta.9-debug
 
 #### 2. Configuration Files
 
-Mermin supports configuration in both **YAML*- and **HCL*- formats. Default configuration file for local development is provided in the project root: `config.hcl`.
+Mermin supports configuration in both **YAML** and **HCL** formats. Default configuration file for local development is provided in the project root: `config.hcl`.
 
 File contain sensible defaults for local development, including:
 
@@ -300,10 +234,62 @@ docker build -t mermin-builder:latest --target builder .
 This mounts your local repository into the container at `/app`.
 
 ```shell
-docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash
+docker run -it --privileged -v `pwd`:/app mermin-builder:latest /bin/bash
 ```
 
 Inside the container's shell, you can now run any of the `cargo` build or test commands mentioned above.
+
+### Testing on local Kind K8s cluster
+
+You can create a local cluster, build the Mermin image, and deploy it with a single command sequence:
+
+```shell
+# 1. Create the kind cluster
+kind create cluster --config examples/local/kind-config.yaml
+
+# 2. Build the mermin image and load it into the cluster
+docker build -t mermin:latest --target runner-debug .
+kind load docker-image -n atlantis mermin:latest
+
+# 3. (optional) if you already have a Helm release, uninstall it first
+helm uninstall mermin
+
+# 4b. Deploy mermin using Helm
+make helm-upgrade
+# 4c. Or deploy mermin using Helm with a non-default config (create config first)
+make helm-upgrade EXTRA_HELM_ARGS='--set-file config.content=examples/local/config.hcl'
+# 4d. Or deploy using raw Helm cli
+helm upgrade -i mermin charts/mermin --values examples/local/values.yaml --wait --timeout 10m
+```
+
+> **Note**: The repository includes a `Makefile` with convenience targets (`make k8s-get`, `make k8s-diff`) for some of
+> these commands.
+
+Verifying the Deployment
+
+- Check that the `mermin` pods are running on each node. You should see one pod per worker node.
+
+   ```shell
+   kubectl get pods -l app.kubernetes.io/name=mermin
+   ```
+
+- View the logs from any of the Mermin pods to see network flow data.
+
+   ```shell
+   kubectl logs -l app.kubernetes.io/name=mermin -f
+   ```
+
+   To generate some network traffic, try pinging between pods in your cluster.
+
+To remove Mermin from your cluster, uninstall the Helm chart. To tear down the entire cluster, use `kind delete`.
+
+```shell
+# Uninstall the mermin Helm release
+helm uninstall mermin
+
+# Delete the kind cluster
+kind delete cluster atlantis
+```
 
 ### Cross-Compiling
 
