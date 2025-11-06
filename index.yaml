@@ -7,6 +7,32 @@ entries:
         - name: Chart Source
           url: https://github.com/elastiflow/mermin
     apiVersion: v2
+    appVersion: 0.1.0-beta.15
+    created: "2025-11-06T16:45:13.523265074Z"
+    description: A Helm chart for deploying the Mermin eBPF agent
+    digest: ffd809e5d7ca89d01eb80f69253e55cd2e9f788b6697a86a4c2db3609e86aa5c
+    icon: https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1746227898/mermin-horizontal_kxhvzo.png
+    keywords:
+    - netflow
+    - network
+    - flow
+    - observability
+    maintainers:
+    - email: engineering@elastiflow.com
+      name: ElastiFlow Engineering Team
+    name: mermin
+    sources:
+    - https://github.com/elastiflow/mermin
+    type: application
+    urls:
+    - mermin-0.1.0-beta.15.tgz
+    version: 0.1.0-beta.15
+  - annotations:
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: Chart Source
+          url: https://github.com/elastiflow/mermin
+    apiVersion: v2
     appVersion: 0.1.0-beta.14
     created: "2025-11-06T10:42:48.266497997Z"
     description: A Helm chart for deploying the Mermin eBPF agent
@@ -190,9 +216,9 @@ entries:
           url: https://github.com/elastiflow/mermin
     apiVersion: v2
     appVersion: 0.1.0-beta.7
-    created: "2025-10-22T19:43:45.000301781Z"
+    created: "2025-10-22T17:17:19.033073579Z"
     description: A Helm chart for deploying the Mermin eBPF agent
-    digest: 3745477551f4c991857f6a7bc356222858065fcbc158dc0ac0325aacdeebc808
+    digest: 2e98144fd587753341ac34c94d3c2e03d812d9050c0ae39b8f1889fe3490ad99
     icon: https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1746227898/mermin-horizontal_kxhvzo.png
     keywords:
     - netflow
@@ -216,9 +242,9 @@ entries:
           url: https://github.com/elastiflow/mermin
     apiVersion: v2
     appVersion: 0.1.0-beta.7
-    created: "2025-10-22T17:17:19.033073579Z"
+    created: "2025-10-22T19:43:45.000301781Z"
     description: A Helm chart for deploying the Mermin eBPF agent
-    digest: 2e98144fd587753341ac34c94d3c2e03d812d9050c0ae39b8f1889fe3490ad99
+    digest: 3745477551f4c991857f6a7bc356222858065fcbc158dc0ac0325aacdeebc808
     icon: https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1746227898/mermin-horizontal_kxhvzo.png
     keywords:
     - netflow
@@ -581,4 +607,4 @@ entries:
     urls:
     - mermin-netobserv-os-stack-0.1.0-beta.1.tgz
     version: 0.1.0-beta.1
-generated: "2025-11-06T10:42:48.266734049Z"
+generated: "2025-11-06T16:45:13.5234718Z"
