@@ -46,7 +46,7 @@ verify_agent_logs() {
     (
       local counter=0
       while [ $counter -lt 30 ]; do
-        if grep -q --color=never "community_id" <(kubectl logs -n "${NAMESPACE}" "$pod" --tail=50); then
+        if grep --color=never 'destination.k8s.pod.name: String(Owned("coredns' <(kubectl logs -n "${NAMESPACE}" "$pod" --tail=500); then
           exit 0
         fi
         counter=$((counter + 1))
@@ -91,6 +91,6 @@ echo "==============================="
 
 bash ./mermin/tests/e2e/common/setup.sh
 verify_deployment || { dump_debug_info; exit 1; }
-verify_agent_logs
+verify_agent_logs || { dump_debug_info; exit 1; }
 
 echo "Test succeeded with CNI: $CNI"
