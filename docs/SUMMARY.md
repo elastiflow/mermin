@@ -2,7 +2,7 @@
 
 ## Welcome
 
-* [Overview](welcome/overview.md)
+* [Overview](README.md)
 * [Beta Program](welcome/beta-program.md)
 
 ## Getting Started
