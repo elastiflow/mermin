@@ -608,7 +608,6 @@ impl Default for InstrumentConf {
                 "ip6tnl*".to_string(),  // IPv6 tunnels (Calico IPv6, dual-stack)
                 "vxlan*".to_string(),   // Flannel/generic VXLAN (inter-node)
                 "flannel*".to_string(), // Flannel interfaces
-                "cni*".to_string(),     // Flannel interfaces
                 "cali*".to_string(),    // Calico workload interfaces
                 "cilium_*".to_string(), // Cilium overlay interfaces
                 "lxc*".to_string(),     // Cilium pod interfaces
@@ -1094,8 +1093,8 @@ mod tests {
             "eth1".to_string(),
             "ens0".to_string(),
             "en0".to_string(),
-            "flannel0".to_string(),
             "cni0".to_string(),
+            "flannel0".to_string(),
             "cali0".to_string(),
             "tunl0".to_string(),
             "cilium_0".to_string(),
@@ -1128,7 +1127,6 @@ mod tests {
                 "tunl0".to_string(),
                 "ip6tnl0".to_string(),
                 "flannel0".to_string(),
-                "cni0".to_string(),
                 "cali0".to_string(),
                 "cilium_0".to_string(),
                 "lxc0".to_string(),
@@ -1368,7 +1366,6 @@ mod tests {
                 "ip6tnl*".to_string(),
                 "vxlan*".to_string(),
                 "flannel*".to_string(),
-                "cni*".to_string(),
                 "cali*".to_string(),
                 "cilium_*".to_string(),
                 "lxc*".to_string(),
