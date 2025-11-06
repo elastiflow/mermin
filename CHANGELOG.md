@@ -1,3 +1,13 @@
+## [v0.1.0-beta.15] - 2025-11-06
+
+### Bug Fixes
+
+- **helm:** Invalid tag mermin Helm chart (#222)
+
+[v0.1.0-beta.14..v0.1.0-beta.15](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.14...v0.1.0-beta.15)
+
+
+
 ## [v0.1.0-beta.14] - 2025-11-05
 
 ### Bug Fixes
