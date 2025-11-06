@@ -1,9 +1,8 @@
 mod error;
 mod health;
-mod interface_controller;
+mod iface;
 mod ip;
 mod k8s;
-mod netns;
 mod otlp;
 mod runtime;
 mod source;
@@ -21,12 +20,13 @@ use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     health::{HealthState, start_api_server},
+    iface::controller::IfaceController,
     k8s::{attributor::Attributor, decorator::Decorator},
     otlp::{
         provider::{init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
     },
-    runtime::context::Context,
+    runtime::{capabilities, context::Context},
     source::{filter::PacketFilter, ringbuf::RingBufReader},
     span::producer::FlowSpanProducer,
 };
@@ -50,6 +50,8 @@ async fn run() -> Result<()> {
 
     // If a provider is already installed, install_default() returns Err, which we can safely ignore.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+    capabilities::check_required_capabilities()?;
 
     let exporter: Arc<dyn TraceableExporter> = {
         init_internal_tracing(
@@ -88,6 +90,8 @@ async fn run() -> Result<()> {
         rlim_cur: libc::RLIM_INFINITY,
         rlim_max: libc::RLIM_INFINITY,
     };
+    // SAFETY: setrlimit with RLIMIT_MEMLOCK is safe to call with a valid rlimit struct.
+    // We're passing a stack-allocated rlimit with valid values (RLIM_INFINITY).
     let ret = unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &rlim) };
     if ret != 0 {
         warn!(
@@ -189,10 +193,9 @@ async fn run() -> Result<()> {
         conf.discovery.instrument.interfaces.clone()
     };
 
-    let mut interface_controller =
-        interface_controller::InterfaceController::new(patterns, Arc::clone(&ebpf), use_tcx)?;
+    let mut iface_controller = IfaceController::new(patterns, Arc::clone(&ebpf), use_tcx)?;
 
-    interface_controller.initialize().await?;
+    iface_controller.initialize().await?;
 
     info!(
         event.name = "ebpf.ready",
@@ -201,10 +204,10 @@ async fn run() -> Result<()> {
     health_state.ebpf_loaded.store(true, Ordering::Relaxed);
 
     // Shared across reconciliation loop and flow producer for concurrent access
-    let interface_controller = Arc::new(tokio::sync::Mutex::new(interface_controller));
+    let iface_controller = Arc::new(tokio::sync::Mutex::new(iface_controller));
 
     // DashMap allows lock-free reads during packet processing while controller updates it dynamically
-    let iface_map = interface_controller.lock().await.iface_map();
+    let iface_map = iface_controller.lock().await.iface_map();
 
     let (packet_meta_tx, packet_meta_rx) = mpsc::channel(conf.packet_channel_capacity);
     let (flow_span_tx, mut flow_span_rx) = mpsc::channel(conf.packet_channel_capacity);
@@ -394,18 +397,16 @@ async fn run() -> Result<()> {
 
     let controller_handle = if conf.discovery.instrument.auto_discover_interfaces {
         info!(
-            event.name = "interface_controller.starting",
+            event.name = "iface_controller.starting",
             "starting interface controller reconciliation loop"
         );
 
-        Some(
-            interface_controller::InterfaceController::start_reconciliation_loop(Arc::clone(
-                &interface_controller,
-            )),
-        )
+        Some(IfaceController::start_reconciliation_loop(Arc::clone(
+            &iface_controller,
+        )))
     } else {
         info!(
-            event.name = "interface_controller.disabled",
+            event.name = "iface_controller.disabled",
             "interface controller reconciliation loop disabled"
         );
         None
@@ -423,7 +424,7 @@ async fn run() -> Result<()> {
     // Stop reconciliation loop before detaching programs
     if let Some(handle) = controller_handle {
         info!(
-            event.name = "interface_controller.stopping",
+            event.name = "iface_controller.stopping",
             "stopping reconciliation loop"
         );
         handle.abort();
@@ -431,7 +432,7 @@ async fn run() -> Result<()> {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(2), handle).await;
     }
 
-    interface_controller.lock().await.shutdown().await?;
+    iface_controller.lock().await.shutdown().await?;
 
     info!(
         event.name = "application.cleanup_complete",

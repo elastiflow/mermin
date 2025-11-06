@@ -1,13 +1,14 @@
 //! Controller for network interface lifecycle management.
 //!
 //! Implements reconciliation pattern: watches netlink events (RTM_NEWLINK/RTM_DELLINK),
-//! compares desired state (interface patterns) vs actual state (active interfaces),
+//! compares desired state (interface patterns) vs actual state (active interface),
 //! and reconciles by attaching/detaching eBPF TC programs. Maintains dynamic interface
 //! index → name mapping for flow decoration via lock-free DashMap.
 
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
+    time::Duration,
 };
 
 use aya::{
@@ -16,18 +17,18 @@ use aya::{
 };
 use dashmap::DashMap;
 use futures::stream::{Stream, StreamExt};
+use globset::Glob;
 use netlink_packet_core::NetlinkPayload;
 use netlink_packet_route::{
     RouteNetlinkMessage,
     link::{LinkAttribute, LinkFlags},
 };
 use pnet::datalink;
-use regex::{Regex, escape};
 use rtnetlink::new_connection;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
-use crate::{error::MerminError, netns::NetnsSwitch};
+use crate::{error::MerminError, iface::netns::NetnsSwitch};
 
 /// Extension trait for TcAttachType to provide direction and program names
 pub trait TcAttachTypeExt {
@@ -57,19 +58,29 @@ impl TcAttachTypeExt for TcAttachType {
 /// Currently unused as controller handles attachment/detachment internally.
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub enum InterfaceEvent {
+pub enum IfaceEvent {
     Added(String),
     Removed(String),
 }
 
-/// Controller for network interface lifecycle.
+/// Controller for network iface lifecycle.
 ///
-/// Reconciles desired state (patterns) with actual state (active_interfaces, tc_links)
+/// Reconciles desired state (patterns) with actual state (active_ifaces, tc_links)
 /// by attaching/detaching eBPF TC programs. Owns all interface management including
 /// initial attachment, dynamic reconciliation, iface_map updates, and graceful shutdown.
-pub struct InterfaceController {
+///
+/// # Lock Ordering
+///
+/// When locks are acquired, they must follow this order to prevent deadlocks:
+/// 1. IfaceController mutex (acquired in reconciliation loop)
+/// 2. ebpf mutex (acquired during attach/detach operations)
+///
+/// The `attach_to_iface` method uses `blocking_lock()` because it performs
+/// FFI/syscalls within the critical section via `in_host_namespace`, which is
+/// inherently blocking. The critical section is kept minimal.
+pub struct IfaceController {
     patterns: Vec<String>,
-    active_interfaces: HashSet<String>,
+    active_ifaces: HashSet<String>,
     tc_links: HashMap<(String, &'static str), SchedClassifierLinkId>,
     /// DashMap for lock-free reads during packet processing while controller updates dynamically
     iface_map: Arc<DashMap<u32, String>>,
@@ -79,11 +90,14 @@ pub struct InterfaceController {
     use_tcx: bool,
 }
 
-/// TC attachment directions
+/// TC attachment directions used for iterating over all attach types
 const DIRECTIONS: &[&str] = &["ingress", "egress"];
 
-impl InterfaceController {
-    /// Create controller, initialize netns switcher, and resolve interface patterns.
+/// Timeout for netlink connection cleanup during reconciliation loop shutdown
+const NETLINK_CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
+
+impl IfaceController {
+    /// Create controller, initialize netns switcher and resolve interface patterns.
     /// Requires hostPID: true and CAP_SYS_ADMIN for host namespace access.
     pub fn new(
         patterns: Vec<String>,
@@ -96,17 +110,17 @@ impl InterfaceController {
             ))
         })?;
 
-        let initial_interfaces = Self::resolve_interfaces(&patterns, &netns_switch)?;
+        let initial_ifaces = Self::resolve_ifaces(&patterns, &netns_switch)?;
 
         info!(
-            event.name = "interface_controller.created",
-            interface_count = initial_interfaces.len(),
-            "interface controller created with resolved interfaces"
+            event.name = "iface_controller.created",
+            iface_count = initial_ifaces.len(),
+            "interface controller created with resolved ifaces"
         );
 
         Ok(Self {
             patterns,
-            active_interfaces: initial_interfaces,
+            active_ifaces: initial_ifaces,
             tc_links: HashMap::new(),
             iface_map: Arc::new(DashMap::new()),
             ebpf,
@@ -116,10 +130,10 @@ impl InterfaceController {
     }
 
     /// Resolve patterns to concrete interface names from host namespace.
-    fn resolve_interfaces(
+    fn resolve_ifaces(
         patterns: &[String],
-        netns_switch: &crate::netns::NetnsSwitch,
-    ) -> Result<HashSet<String>, crate::error::MerminError> {
+        netns_switch: &NetnsSwitch,
+    ) -> Result<HashSet<String>, MerminError> {
         let available: Vec<String> =
             netns_switch.in_host_namespace(Some("interface_discovery"), || {
                 Ok(datalink::interfaces()
@@ -129,43 +143,43 @@ impl InterfaceController {
             })?;
 
         info!(
-            event.name = "interface_controller.interfaces_discovered",
-            interface_count = available.len(),
-            interfaces = ?available,
-            "discovered interfaces from host namespace"
+            event.name = "iface_controller.ifaces_discovered",
+            iface_count = available.len(),
+            ifaces = ?available,
+            "discovered interface from host namespace"
         );
 
         let mut resolved = HashSet::new();
         for pattern in patterns {
             for iface in &available {
-                if Self::matches_any_pattern(iface, std::slice::from_ref(pattern)) {
+                if Self::matches_pattern(iface, std::slice::from_ref(pattern)) {
                     resolved.insert(iface.clone());
                 }
             }
         }
 
         info!(
-            event.name = "interface_controller.interfaces_resolved",
-            interface_count = resolved.len(),
-            interfaces = ?resolved,
-            "resolved interfaces from patterns"
+            event.name = "iface_controller.ifaces_resolved",
+            iface_count = resolved.len(),
+            ifaces = ?resolved,
+            "resolved interface from patterns"
         );
 
         Ok(resolved)
     }
 
-    fn matches_any_pattern(name: &str, patterns: &[String]) -> bool {
+    fn matches_pattern(name: &str, patterns: &[String]) -> bool {
         patterns
             .iter()
             .any(|pattern| Self::glob_matches(pattern, name))
     }
 
-    /// Attach eBPF programs to all active interfaces and build initial iface_map.
+    /// Attach eBPF programs to all active interface and build initial iface_map.
     /// Should be called once after controller creation.
     pub async fn initialize(&mut self) -> Result<(), MerminError> {
         info!(
-            event.name = "interface_controller.initializing",
-            interface_count = self.active_interfaces.len(),
+            event.name = "iface_controller.initializing",
+            iface_count = self.active_ifaces.len(),
             "initializing controller and attaching eBPF programs"
         );
 
@@ -173,18 +187,20 @@ impl InterfaceController {
 
         let programs = [TcAttachType::Ingress, TcAttachType::Egress];
 
-        // Clone to avoid borrowing self immutably and mutably in the same loop
-        let interfaces: Vec<String> = self.active_interfaces.iter().cloned().collect();
+        // Collect interface names as owned strings to avoid borrow checker issues
+        // (cannot borrow self immutably while calling mutable attach_to_iface)
+        // This is acceptable as it only happens once at initialization with a small set.
+        let ifaces: Vec<String> = self.active_ifaces.iter().cloned().collect();
 
         for attach_type in &programs {
-            for iface in &interfaces {
-                self.attach_to_interface(iface, *attach_type).await?;
+            for iface in &ifaces {
+                self.attach_to_iface(iface, *attach_type).await?;
             }
         }
 
         info!(
-            event.name = "interface_controller.initialized",
-            interface_count = self.active_interfaces.len(),
+            event.name = "iface_controller.initialized",
+            iface_count = self.active_ifaces.len(),
             tc_links = self.tc_links.len(),
             "controller initialized successfully"
         );
@@ -194,6 +210,7 @@ impl InterfaceController {
 
     /// Get shared iface_map for flow decoration. DashMap allows lock-free reads
     /// while controller updates it dynamically.
+    #[must_use]
     pub fn iface_map(&self) -> Arc<DashMap<u32, String>> {
         Arc::clone(&self.iface_map)
     }
@@ -205,7 +222,7 @@ impl InterfaceController {
         let mut failed_count = 0;
 
         info!(
-            event.name = "interface_controller.shutdown_started",
+            event.name = "iface_controller.shutdown_started",
             total_links = total_links,
             "starting graceful shutdown and eBPF program detachment"
         );
@@ -217,7 +234,7 @@ impl InterfaceController {
                 Ok(_) => {
                     detached_count += 1;
                     info!(
-                        event.name = "interface_controller.program_detached",
+                        event.name = "iface_controller.program_detached",
                         network.interface.name = %iface,
                         ebpf.program.direction = %direction,
                         "successfully detached ebpf program"
@@ -226,7 +243,7 @@ impl InterfaceController {
                 Err(e) => {
                     failed_count += 1;
                     warn!(
-                        event.name = "interface_controller.detach_failed",
+                        event.name = "iface_controller.detach_failed",
                         network.interface.name = %iface,
                         ebpf.program.direction = %direction,
                         error = %e,
@@ -237,53 +254,56 @@ impl InterfaceController {
         }
 
         info!(
-            event.name = "interface_controller.shutdown_completed",
+            event.name = "iface_controller.shutdown_completed",
             total_links = total_links,
             detached_count = detached_count,
             failed_count = failed_count,
             "controller shutdown completed"
         );
 
+        // Always return Ok during shutdown. The kernel will clean up eBPF programs
+        // when the process exits, and some failures are expected if interfaces
+        // disappeared before shutdown. Failed detachments are already logged as warnings.
         if failed_count > 0 {
-            Err(MerminError::internal(format!(
-                "failed to detach {failed_count} out of {total_links} eBPF programs",
-            )))
-        } else {
-            Ok(())
+            warn!(
+                event.name = "iface_controller.shutdown_partial",
+                failed_count = failed_count,
+                total_links = total_links,
+                "some eBPF programs failed to detach, but kernel will clean them up on process exit"
+            );
         }
+        Ok(())
     }
 
     /// Register TC link for tracking.
     pub fn register_tc_link(
         &mut self,
-        interface: String,
+        iface: String,
         direction: &'static str,
         link_id: SchedClassifierLinkId,
     ) {
         debug!(
-            event.name = "interface_controller.tc_link_registered",
-            interface = %interface,
+            event.name = "iface_controller.tc_link_registered",
+            iface = %iface,
             direction = %direction,
             "TC link registered"
         );
-        self.tc_links.insert((interface, direction), link_id);
+        self.tc_links.insert((iface, direction), link_id);
     }
 
     /// Unregister TC link and return for detachment.
     pub fn unregister_tc_link(
         &mut self,
-        interface: &str,
+        iface: &str,
         direction: &str,
     ) -> Option<SchedClassifierLinkId> {
-        let static_direction = Self::direction_to_static(direction)?;
+        let static_direction = Self::to_static_direction(direction)?;
 
-        let link_id = self
-            .tc_links
-            .remove(&(interface.to_string(), static_direction));
+        let link_id = self.tc_links.remove(&(iface.to_string(), static_direction));
         if link_id.is_some() {
             debug!(
-                event.name = "interface_controller.tc_link_unregistered",
-                interface = %interface,
+                event.name = "iface_controller.tc_link_unregistered",
+                iface = %iface,
                 direction = %direction,
                 "TC link unregistered"
             );
@@ -292,7 +312,7 @@ impl InterfaceController {
     }
 
     /// Convert direction string to static lifetime for HashMap key.
-    fn direction_to_static(direction: &str) -> Option<&'static str> {
+    fn to_static_direction(direction: &str) -> Option<&'static str> {
         match direction {
             "ingress" => Some("ingress"),
             "egress" => Some("egress"),
@@ -307,7 +327,7 @@ impl InterfaceController {
         self.netns_switch
             .in_host_namespace(Some("build_iface_map"), || {
                 for iface in datalink::interfaces() {
-                    if self.active_interfaces.contains(&iface.name) {
+                    if self.active_ifaces.contains(&iface.name) {
                         self.iface_map.insert(iface.index, iface.name.clone());
                     }
                 }
@@ -315,7 +335,7 @@ impl InterfaceController {
             })?;
 
         debug!(
-            event.name = "interface_controller.iface_map_built",
+            event.name = "iface_controller.iface_map_built",
             entry_count = self.iface_map.len(),
             "built interface index → name mapping"
         );
@@ -324,43 +344,58 @@ impl InterfaceController {
     }
 
     /// Add newly discovered interface to iface_map.
-    fn update_iface_map_for_added(&mut self, iface_name: &str) -> Result<(), MerminError> {
+    fn iface_map_add(&mut self, iface_name: &str) -> Result<(), MerminError> {
         self.netns_switch
-            .in_host_namespace(Some("update_iface_map"), || {
+            .in_host_namespace(Some("interface_map_add"), || {
                 for iface in datalink::interfaces() {
                     if iface.name == iface_name {
                         self.iface_map.insert(iface.index, iface.name.clone());
                         debug!(
-                            event.name = "interface_controller.iface_map_updated",
-                            interface = %iface_name,
+                            event.name = "iface_controller.iface_map_updated",
+                            iface = %iface_name,
                             index = iface.index,
                             "added interface to iface_map"
                         );
-                        break;
+                        return Ok(());
                     }
                 }
-                Ok(())
+                // Iface not found - this is an error condition
+                Err(MerminError::internal(format!(
+                    "interface '{iface_name}' not found in datalink::interfaces()",
+                )))
             })
     }
 
     /// Remove interface from iface_map.
-    fn update_iface_map_for_removed(&mut self, iface_name: &str) {
-        self.iface_map.retain(|_index, name| {
-            if name == iface_name {
+    /// Collects all indices for the interface name first to prevent issues
+    /// with kernel index reuse (where a new interface gets the same index).
+    fn iface_map_remove(&mut self, iface_name: &str) {
+        let removed_indices: Vec<u32> = self
+            .iface_map
+            .iter()
+            .filter_map(|entry| {
+                if entry.value() == iface_name {
+                    Some(*entry.key())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for idx in removed_indices {
+            if let Some((_, name)) = self.iface_map.remove(&idx) {
                 debug!(
-                    event.name = "interface_controller.iface_map_updated",
-                    interface = %iface_name,
+                    event.name = "iface_controller.iface_map_updated",
+                    iface = %name,
+                    index = idx,
                     "removed interface from iface_map"
                 );
-                false
-            } else {
-                true
             }
-        });
+        }
     }
 
     /// Attach eBPF program to interface in host namespace.
-    async fn attach_to_interface(
+    async fn attach_to_iface(
         &mut self,
         iface: &str,
         attach_type: TcAttachType,
@@ -379,7 +414,7 @@ impl InterfaceController {
             self.netns_switch.in_host_namespace(Some(&context), || {
                 if let Err(e) = tc::qdisc_add_clsact(&iface_owned) {
                     debug!(
-                        event.name = "interface_controller.qdisc_add_skipped",
+                        event.name = "iface_controller.qdisc_add_skipped",
                         network.interface.name = %iface_owned,
                         error = %e,
                         "clsact qdisc add failed (likely already exists)"
@@ -414,7 +449,7 @@ impl InterfaceController {
         self.register_tc_link(iface.to_string(), attach_type.direction_name(), link_id);
 
         info!(
-            event.name = "interface_controller.program_attached",
+            event.name = "iface_controller.program_attached",
             ebpf.program.direction = attach_type.direction_name(),
             network.interface.name = %iface,
             "ebpf program attached to interface"
@@ -430,11 +465,15 @@ impl InterfaceController {
         direction: &'static str,
         link_id: SchedClassifierLinkId,
     ) -> Result<(), MerminError> {
-        let program_name = format!("mermin_{direction}");
+        let program_name = match direction {
+            "ingress" => "mermin_ingress",
+            "egress" => "mermin_egress",
+            _ => unreachable!("to_static_direction ensures only ingress/egress"),
+        };
         let mut ebpf_guard = self.ebpf.lock().await;
 
         let program: &mut SchedClassifier = ebpf_guard
-            .program_mut(&program_name)
+            .program_mut(program_name)
             .ok_or_else(|| {
                 MerminError::internal(format!(
                     "eBPF program '{program_name}' not found for detachment",
@@ -459,7 +498,7 @@ impl InterfaceController {
 
         tokio::spawn(async move {
             info!(
-                event.name = "interface_controller.reconciliation_started",
+                event.name = "iface_controller.reconciliation_started",
                 "started reconciliation loop via netlink (RTM_NEWLINK/RTM_DELLINK multicast)"
             );
 
@@ -468,7 +507,7 @@ impl InterfaceController {
                 Ok(conn) => conn,
                 Err(e) => {
                     error!(
-                        event.name = "interface_controller.connection_failed",
+                        event.name = "iface_controller.connection_failed",
                         error = %e,
                         "failed to create netlink connection"
                     );
@@ -483,21 +522,21 @@ impl InterfaceController {
                 .await
             {
                 error!(
-                    event.name = "interface_controller.reconciliation_failed",
+                    event.name = "iface_controller.reconciliation_failed",
                     error = %e,
                     "reconciliation loop failed"
                 );
             }
 
             info!(
-                event.name = "interface_controller.reconciliation_stopped",
+                event.name = "iface_controller.reconciliation_stopped",
                 "reconciliation loop stopped"
             );
         })
     }
 
     /// Core reconciliation loop: watch RTM_NEWLINK/RTM_DELLINK, compare with
-    /// active_interfaces, and attach/detach eBPF programs when state differs.
+    /// active_ifaces, and attach/detach eBPF programs when state differs.
     async fn watch_and_reconcile<M>(
         &mut self,
         connection: impl std::future::Future<Output = ()> + Send + 'static,
@@ -514,17 +553,16 @@ impl InterfaceController {
         let connection_handle = tokio::spawn(connection);
 
         while let Some((message, _)) = messages.next().await {
-            let rtnl_msg = match message.payload {
-                NetlinkPayload::InnerMessage(msg) => msg,
-                _ => continue,
+            let NetlinkPayload::InnerMessage(rtnl_msg) = message.payload else {
+                continue;
             };
 
             match rtnl_msg {
                 RouteNetlinkMessage::NewLink(link_msg) | RouteNetlinkMessage::SetLink(link_msg) => {
-                    self.reconcile_link_change(&link_msg, true).await?;
+                    self.reconcile_link(&link_msg, true).await?;
                 }
                 RouteNetlinkMessage::DelLink(link_msg) => {
-                    self.reconcile_link_change(&link_msg, false).await?;
+                    self.reconcile_link(&link_msg, false).await?;
                 }
                 _ => {}
             }
@@ -532,13 +570,68 @@ impl InterfaceController {
 
         connection_handle.abort();
         // Give connection handle time to clean up gracefully
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(1), connection_handle).await;
+        if tokio::time::timeout(NETLINK_CLEANUP_TIMEOUT, connection_handle)
+            .await
+            .is_err()
+        {
+            warn!(
+                event.name = "iface_controller.connection_cleanup_timeout",
+                timeout_secs = NETLINK_CLEANUP_TIMEOUT.as_secs(),
+                "netlink connection cleanup timed out"
+            );
+        }
         Ok(())
     }
 
-    /// Reconcile link change event by comparing desired vs actual state and
+    /// Attach all eBPF programs (ingress and egress) to an interface.
+    /// Rolls back on failure by detaching any successfully attached programs.
+    async fn attach_all_programs(&mut self, if_name: &str) -> Result<(), MerminError> {
+        let mut attached_programs = Vec::new();
+
+        for attach_type in &[TcAttachType::Ingress, TcAttachType::Egress] {
+            match self.attach_to_iface(if_name, *attach_type).await {
+                Ok(_) => {
+                    attached_programs.push(*attach_type);
+                }
+                Err(e) => {
+                    error!(
+                        event.name = "iface_controller.attach_failed",
+                        iface = %if_name,
+                        direction = attach_type.direction_name(),
+                        error = %e,
+                        "failed to attach eBPF program to new interface, rolling back"
+                    );
+                    self.rollback_attachments(if_name, attached_programs).await;
+                    return Err(e);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Rollback partial attachments by detaching all successfully attached programs.
+    async fn rollback_attachments(&mut self, if_name: &str, programs: Vec<TcAttachType>) {
+        for attach_type in programs {
+            let direction = attach_type.direction_name();
+            if let Some(link_id) = self.unregister_tc_link(if_name, direction)
+                && let Err(e) = self.detach_program(if_name, direction, link_id).await
+            {
+                warn!(
+                    event.name = "iface_controller.rollback_failed",
+                    iface = %if_name,
+                    direction = %direction,
+                    error = %e,
+                    "failed to detach during rollback"
+                );
+            }
+        }
+    }
+
+    /// Reconcile link event by comparing desired vs actual state and
     /// attaching/detaching eBPF programs when they differ.
-    async fn reconcile_link_change(
+    /// Note: There is an inherent TOCTOU race between checking interface state
+    /// and performing operations, but the rollback logic handles failures gracefully.
+    async fn reconcile_link(
         &mut self,
         link_msg: &netlink_packet_route::link::LinkMessage,
         is_new_or_set: bool,
@@ -552,7 +645,7 @@ impl InterfaceController {
             })
             .ok_or_else(|| MerminError::internal("interface name not found in link message"))?;
 
-        if !Self::matches_any_pattern(&if_name, &self.patterns) {
+        if !Self::matches_pattern(&if_name, &self.patterns) {
             return Ok(());
         }
 
@@ -562,95 +655,67 @@ impl InterfaceController {
             false
         };
 
-        let is_active = self.active_interfaces.contains(&if_name);
+        let is_active = self.active_ifaces.contains(&if_name);
 
         if is_up && !is_active {
             info!(
-                event.name = "interface_controller.reconcile_add",
-                interface = %if_name,
+                event.name = "iface_controller.reconcile_add",
+                iface = %if_name,
                 "interface should be active, reconciling by attaching eBPF programs"
             );
 
-            if let Err(e) = self.update_iface_map_for_added(&if_name) {
+            if let Err(e) = self.iface_map_add(&if_name) {
                 error!(
-                    event.name = "interface_controller.iface_map_update_failed",
-                    interface = %if_name,
+                    event.name = "iface_controller.iface_map_update_failed",
+                    iface = %if_name,
                     error = %e,
                     "failed to update iface_map for added interface, will retry on next event"
                 );
                 return Ok(());
             }
 
-            // Track successfully attached programs for rollback if needed
-            let mut attached_programs = Vec::new();
-
-            // Attempt to attach both ingress and egress programs
-            for attach_type in &[TcAttachType::Ingress, TcAttachType::Egress] {
-                match self.attach_to_interface(&if_name, *attach_type).await {
-                    Ok(_) => {
-                        attached_programs.push(*attach_type);
-                    }
-                    Err(e) => {
-                        error!(
-                            event.name = "interface_controller.attach_failed",
-                            interface = %if_name,
-                            direction = attach_type.direction_name(),
-                            error = %e,
-                            "failed to attach eBPF program to new interface, rolling back"
-                        );
-
-                        // Rollback: detach any programs that were successfully attached
-                        for prev_attach_type in attached_programs {
-                            let direction = prev_attach_type.direction_name();
-                            if let Some(link_id) = self.unregister_tc_link(&if_name, direction)
-                                && let Err(detach_err) =
-                                    self.detach_program(&if_name, direction, link_id).await
-                            {
-                                warn!(
-                                    event.name = "interface_controller.rollback_failed",
-                                    interface = %if_name,
-                                    direction = %direction,
-                                    error = %detach_err,
-                                    "failed to detach during rollback"
-                                );
-                            }
-                        }
-
-                        // Remove from iface_map since we're not proceeding
-                        self.update_iface_map_for_removed(&if_name);
-
-                        return Ok(());
-                    }
-                }
+            // Attempt to attach both ingress and egress programs with automatic rollback on failure
+            if let Err(e) = self.attach_all_programs(&if_name).await {
+                // Rollback already performed by attach_all_programs
+                // Remove from iface_map since we're not proceeding
+                self.iface_map_remove(&if_name);
+                // Log error but don't fail - will retry on next netlink event
+                error!(
+                    event.name = "iface_controller.attach_all_failed",
+                    iface = %if_name,
+                    error = %e,
+                    "failed to attach programs to interface, will retry on next event"
+                );
+                return Ok(());
             }
 
             // Only mark as active if ALL operations succeeded
-            self.active_interfaces.insert(if_name);
+            self.active_ifaces.insert(if_name);
         } else if !is_up && is_active {
             info!(
-                event.name = "interface_controller.reconcile_remove",
-                interface = %if_name,
+                event.name = "iface_controller.reconcile_remove",
+                iface = %if_name,
                 "interface should not be active, reconciling by detaching eBPF programs"
             );
 
-            self.active_interfaces.remove(&if_name);
+            self.active_ifaces.remove(&if_name);
 
-            self.update_iface_map_for_removed(&if_name);
+            self.iface_map_remove(&if_name);
 
             for direction in DIRECTIONS {
                 if let Some(link_id) = self.unregister_tc_link(&if_name, direction) {
                     if let Err(e) = self.detach_program(&if_name, direction, link_id).await {
                         warn!(
-                            event.name = "interface_controller.detach_failed",
-                            interface = %if_name,
+                            event.name = "iface_controller.detach_failed",
+                            iface = %if_name,
                             direction = %direction,
                             error = %e,
                             "failed to detach eBPF program from removed interface"
                         );
                     } else {
                         info!(
-                            event.name = "interface_controller.program_detached",
-                            interface = %if_name,
+                            event.name = "iface_controller.program_detached",
+                            iface = %if_name,
                             direction = %direction,
                             "eBPF program detached from removed interface"
                         );
@@ -663,32 +728,30 @@ impl InterfaceController {
     }
 
     fn glob_matches(pattern: &str, text: &str) -> bool {
-        if let Some(regex_pattern) = Self::glob_to_regex(pattern) {
-            regex_pattern.is_match(text)
-        } else {
-            pattern == text
-        }
-    }
-
-    fn glob_to_regex(pattern: &str) -> Option<Regex> {
         const MAX_PATTERN_LEN: usize = 256;
 
         if pattern.len() > MAX_PATTERN_LEN {
             warn!(
-                event.name = "interface_controller.pattern_too_long",
+                event.name = "iface_controller.pattern_too_long",
                 pattern_length = pattern.len(),
-                "pattern exceeds maximum length, ignoring"
+                "pattern exceeds maximum length, rejecting"
             );
-            return None;
+            return false;
         }
 
-        let regex_pattern = pattern
-            .split('*')
-            .map(escape)
-            .collect::<Vec<_>>()
-            .join(".*");
-
-        Regex::new(&format!("^{regex_pattern}$")).ok()
+        match Glob::new(pattern) {
+            Ok(glob) => glob.compile_matcher().is_match(text),
+            Err(e) => {
+                warn!(
+                    event.name = "iface_controller.invalid_pattern",
+                    pattern = %pattern,
+                    error = %e,
+                    "invalid glob pattern, treating as literal match"
+                );
+                // Fall back to literal match if pattern is invalid
+                pattern == text
+            }
+        }
     }
 }
 
@@ -699,15 +762,15 @@ mod tests {
     // Lightweight test struct to avoid unsafe initialization of eBPF/netns resources
     struct TestController {
         patterns: Vec<String>,
-        active_interfaces: HashSet<String>,
+        active_ifaces: HashSet<String>,
         tc_links: HashMap<(String, &'static str), u32>, // u32 as LinkId placeholder since real LinkId can't be created in tests
     }
 
     impl TestController {
-        fn new(patterns: Vec<String>, initial_interfaces: HashSet<String>) -> Self {
+        fn new(patterns: Vec<String>, initial_ifaces: HashSet<String>) -> Self {
             Self {
                 patterns,
-                active_interfaces: initial_interfaces,
+                active_ifaces: initial_ifaces,
                 tc_links: HashMap::new(),
             }
         }
@@ -721,77 +784,71 @@ mod tests {
         let controller = TestController::new(patterns.clone(), initial.clone());
 
         assert_eq!(controller.patterns, patterns);
-        assert_eq!(controller.active_interfaces, initial);
+        assert_eq!(controller.active_ifaces, initial);
         assert!(controller.tc_links.is_empty());
     }
 
     #[test]
     fn test_glob_matches_wildcard() {
-        assert!(InterfaceController::glob_matches("veth*", "veth0"));
-        assert!(InterfaceController::glob_matches("veth*", "veth12345"));
-        assert!(!InterfaceController::glob_matches("veth*", "eth0"));
-        assert!(!InterfaceController::glob_matches("veth*", "tunl0"));
+        assert!(IfaceController::glob_matches("veth*", "veth0"));
+        assert!(IfaceController::glob_matches("veth*", "veth12345"));
+        assert!(!IfaceController::glob_matches("veth*", "eth0"));
+        assert!(!IfaceController::glob_matches("veth*", "tunl0"));
     }
 
     #[test]
     fn test_glob_matches_exact() {
-        assert!(InterfaceController::glob_matches("eth0", "eth0"));
-        assert!(!InterfaceController::glob_matches("eth0", "eth1"));
-        assert!(!InterfaceController::glob_matches("eth0", "veth0"));
+        assert!(IfaceController::glob_matches("eth0", "eth0"));
+        assert!(!IfaceController::glob_matches("eth0", "eth1"));
+        assert!(!IfaceController::glob_matches("eth0", "veth0"));
     }
 
     #[test]
     fn test_glob_matches_multiple_wildcards() {
-        assert!(InterfaceController::glob_matches("*eth*", "veth0"));
-        assert!(InterfaceController::glob_matches("*eth*", "eth0"));
-        assert!(InterfaceController::glob_matches("*eth*", "lxceth123"));
-        assert!(!InterfaceController::glob_matches("*eth*", "tunl0"));
+        assert!(IfaceController::glob_matches("*eth*", "veth0"));
+        assert!(IfaceController::glob_matches("*eth*", "eth0"));
+        assert!(IfaceController::glob_matches("*eth*", "lxceth123"));
+        assert!(!IfaceController::glob_matches("*eth*", "tunl0"));
     }
 
     #[test]
     fn test_glob_matches_prefix_suffix() {
-        assert!(InterfaceController::glob_matches("eth*", "eth0"));
-        assert!(InterfaceController::glob_matches("eth*", "eth1"));
-        assert!(!InterfaceController::glob_matches("eth*", "veth0"));
+        assert!(IfaceController::glob_matches("eth*", "eth0"));
+        assert!(IfaceController::glob_matches("eth*", "eth1"));
+        assert!(!IfaceController::glob_matches("eth*", "veth0"));
 
-        assert!(InterfaceController::glob_matches("*0", "eth0"));
-        assert!(InterfaceController::glob_matches("*0", "veth0"));
-        assert!(!InterfaceController::glob_matches("*0", "eth1"));
+        assert!(IfaceController::glob_matches("*0", "eth0"));
+        assert!(IfaceController::glob_matches("*0", "veth0"));
+        assert!(!IfaceController::glob_matches("*0", "eth1"));
     }
 
     #[test]
-    fn test_matches_any_pattern_single() {
+    fn test_matches_pattern_single() {
         let patterns = vec!["veth*".to_string()];
 
-        assert!(InterfaceController::matches_any_pattern("veth0", &patterns));
-        assert!(InterfaceController::matches_any_pattern(
-            "veth123", &patterns
-        ));
-        assert!(!InterfaceController::matches_any_pattern("eth0", &patterns));
+        assert!(IfaceController::matches_pattern("veth0", &patterns));
+        assert!(IfaceController::matches_pattern("veth123", &patterns));
+        assert!(!IfaceController::matches_pattern("eth0", &patterns));
     }
 
     #[test]
-    fn test_matches_any_pattern_multiple() {
+    fn test_matches_pattern_multiple() {
         let patterns = vec!["veth*".to_string(), "tunl*".to_string(), "eth0".to_string()];
 
-        assert!(InterfaceController::matches_any_pattern("veth0", &patterns));
-        assert!(InterfaceController::matches_any_pattern("tunl0", &patterns));
-        assert!(InterfaceController::matches_any_pattern("eth0", &patterns));
-        assert!(!InterfaceController::matches_any_pattern("eth1", &patterns));
-        assert!(!InterfaceController::matches_any_pattern(
-            "wlan0", &patterns
-        ));
+        assert!(IfaceController::matches_pattern("veth0", &patterns));
+        assert!(IfaceController::matches_pattern("tunl0", &patterns));
+        assert!(IfaceController::matches_pattern("eth0", &patterns));
+        assert!(!IfaceController::matches_pattern("eth1", &patterns));
+        assert!(!IfaceController::matches_pattern("wlan0", &patterns));
     }
 
     #[test]
-    fn test_matches_any_pattern_no_match() {
+    fn test_matches_pattern_no_match() {
         let patterns = vec!["veth*".to_string()];
 
-        assert!(!InterfaceController::matches_any_pattern("eth0", &patterns));
-        assert!(!InterfaceController::matches_any_pattern(
-            "tunl0", &patterns
-        ));
-        assert!(!InterfaceController::matches_any_pattern("lo", &patterns));
+        assert!(!IfaceController::matches_pattern("eth0", &patterns));
+        assert!(!IfaceController::matches_pattern("tunl0", &patterns));
+        assert!(!IfaceController::matches_pattern("lo", &patterns));
     }
 
     // Note: TC link tests are skipped because SchedClassifierLinkId cannot be created
@@ -799,22 +856,22 @@ mod tests {
     // logic is tested via integration tests when the full eBPF stack is running.
 
     #[test]
-    fn test_active_interfaces_tracking() {
+    fn test_active_ifaces_tracking() {
         let initial = HashSet::from(["eth0".to_string()]);
         let mut controller = TestController::new(vec![], initial);
 
-        assert!(controller.active_interfaces.contains("eth0"));
-        assert_eq!(controller.active_interfaces.len(), 1);
+        assert!(controller.active_ifaces.contains("eth0"));
+        assert_eq!(controller.active_ifaces.len(), 1);
 
-        // Simulate adding a new interface
-        controller.active_interfaces.insert("veth0".to_string());
-        assert!(controller.active_interfaces.contains("veth0"));
-        assert_eq!(controller.active_interfaces.len(), 2);
+        // Simulate adding a new iface
+        controller.active_ifaces.insert("veth0".to_string());
+        assert!(controller.active_ifaces.contains("veth0"));
+        assert_eq!(controller.active_ifaces.len(), 2);
 
-        // Simulate removing an interface
-        controller.active_interfaces.remove("eth0");
-        assert!(!controller.active_interfaces.contains("eth0"));
-        assert_eq!(controller.active_interfaces.len(), 1);
+        // Simulate removing an iface
+        controller.active_ifaces.remove("eth0");
+        assert!(!controller.active_ifaces.contains("eth0"));
+        assert_eq!(controller.active_ifaces.len(), 1);
     }
 
     #[test]
@@ -831,29 +888,7 @@ mod tests {
     }
 
     #[test]
-    fn test_glob_to_regex() {
-        // Test simple wildcard
-        let regex = InterfaceController::glob_to_regex("veth*").unwrap();
-        assert!(regex.is_match("veth0"));
-        assert!(regex.is_match("veth12345"));
-        assert!(!regex.is_match("eth0"));
-
-        // Test multiple wildcards
-        let regex = InterfaceController::glob_to_regex("*eth*").unwrap();
-        assert!(regex.is_match("veth0"));
-        assert!(regex.is_match("eth0"));
-        assert!(regex.is_match("something_eth_else"));
-        assert!(!regex.is_match("tunl0"));
-
-        // Test exact match (no wildcards)
-        let regex = InterfaceController::glob_to_regex("eth0").unwrap();
-        assert!(regex.is_match("eth0"));
-        assert!(!regex.is_match("eth1"));
-        assert!(!regex.is_match("eth0_suffix"));
-    }
-
-    #[test]
-    fn test_pattern_matching_realistic_interfaces() {
+    fn test_pattern_matching_realistic_ifaces() {
         let patterns = vec![
             "veth*".to_string(),
             "tunl*".to_string(),
@@ -863,65 +898,37 @@ mod tests {
         ];
 
         // Should match
-        assert!(InterfaceController::matches_any_pattern(
-            "veth123abc",
-            &patterns
-        ));
-        assert!(InterfaceController::matches_any_pattern("tunl0", &patterns));
-        assert!(InterfaceController::matches_any_pattern(
-            "ip6tnl0", &patterns
-        ));
-        assert!(InterfaceController::matches_any_pattern(
-            "flannel.1",
-            &patterns
-        ));
-        assert!(InterfaceController::matches_any_pattern(
-            "cali123abc",
-            &patterns
-        ));
+        assert!(IfaceController::matches_pattern("veth123abc", &patterns));
+        assert!(IfaceController::matches_pattern("tunl0", &patterns));
+        assert!(IfaceController::matches_pattern("ip6tnl0", &patterns));
+        assert!(IfaceController::matches_pattern("flannel.1", &patterns));
+        assert!(IfaceController::matches_pattern("cali123abc", &patterns));
 
         // Should not match
-        assert!(!InterfaceController::matches_any_pattern("eth0", &patterns));
-        assert!(!InterfaceController::matches_any_pattern("lo", &patterns));
-        assert!(!InterfaceController::matches_any_pattern(
-            "docker0", &patterns
-        ));
-        assert!(!InterfaceController::matches_any_pattern(
-            "br-123", &patterns
-        ));
+        assert!(!IfaceController::matches_pattern("eth0", &patterns));
+        assert!(!IfaceController::matches_pattern("lo", &patterns));
+        assert!(!IfaceController::matches_pattern("docker0", &patterns));
+        assert!(!IfaceController::matches_pattern("br-123", &patterns));
     }
 
     #[test]
     fn test_empty_patterns() {
         let patterns: Vec<String> = vec![];
 
-        assert!(!InterfaceController::matches_any_pattern(
-            "veth0", &patterns
-        ));
-        assert!(!InterfaceController::matches_any_pattern("eth0", &patterns));
-        assert!(!InterfaceController::matches_any_pattern(
-            "anything", &patterns
-        ));
+        assert!(!IfaceController::matches_pattern("veth0", &patterns));
+        assert!(!IfaceController::matches_pattern("eth0", &patterns));
+        assert!(!IfaceController::matches_pattern("anything", &patterns));
     }
 
     #[test]
-    fn test_special_characters_in_interface_names() {
+    fn test_special_characters_in_iface_names() {
         let patterns = vec!["flannel.*".to_string()];
 
         // The dot should be treated literally in glob, not as regex "any character"
-        assert!(InterfaceController::matches_any_pattern(
-            "flannel.1",
-            &patterns
-        ));
-        assert!(InterfaceController::matches_any_pattern(
-            "flannel.100",
-            &patterns
-        ));
+        assert!(IfaceController::matches_pattern("flannel.1", &patterns));
+        assert!(IfaceController::matches_pattern("flannel.100", &patterns));
         // This actually matches because we escape special chars, so the literal "." is expected
-        assert!(!InterfaceController::matches_any_pattern(
-            "flannel-1",
-            &patterns
-        ));
+        assert!(!IfaceController::matches_pattern("flannel-1", &patterns));
     }
 
     #[test]
