@@ -8,9 +8,53 @@ Mermin attaches eBPF programs to network interfaces to capture packets. The `dis
 
 ## Configuration
 
+<!-- Source: charts/mermin/config/examples/config.hcl -->
 ```hcl
 discovery "instrument" {
-  interfaces = ["eth*", "ens*", "en*"]
+  # Network interfaces to monitor
+  #
+  # Supports literal names, glob patterns (*, ?), and regex (/pattern/)
+  #
+  # Default strategy (if not specified): Complete visibility without duplication
+  # - veth* for same-node pod-to-pod traffic
+  # - CNI-specific tunnel/overlay interfaces for inter-node traffic
+  # - Does NOT monitor physical interfaces (eth*, ens*) to avoid duplication
+  #
+  # Visibility strategies:
+  #
+  # 1. Complete visibility (DEFAULT - recommended for most deployments):
+  #    interfaces = ["veth*", "tunl*", "ip6tnl*", "vxlan*", "flannel*", "cali*", "cilium_*", "lxc*"]
+  #    ✅ Captures all traffic (same-node + inter-node, IPv4 + IPv6)
+  #    ✅ No flow duplication (avoids bridges and physical interfaces)
+  #    ⚠️  Higher overhead (many veth interfaces in large clusters)
+  #
+  # 2. Inter-node only (lower overhead, incomplete visibility):
+  #    interfaces = ["eth*", "ens*"]
+  #    ✅ Low overhead (few interfaces)
+  #    ❌ Misses same-node pod-to-pod traffic
+  #
+  # 3. Custom CNI-specific patterns:
+  #    - Flannel: ["veth*", "flannel*", "cni*"]
+  #    - Calico:  ["veth*", "cali*", "tunl*", "ip6tnl*"]
+  #    - Cilium:  ["lxc*", "cilium_*"]
+  #    - GKE:     ["veth*", "gke*"]
+  #    - Dual-stack: Add "ip6tnl*" to any of the above
+  #
+  # Leave empty or comment out to use defaults
+  # interfaces = [
+  #   "veth*",      # Same-node pod-to-pod traffic
+  #   "tunl*",      # Calico IPIP tunnels (IPv4)
+  #   "ip6tnl*",    # IPv6 tunnels (Calico, dual-stack)
+  #   "vxlan*",     # VXLAN overlays
+  #   "flannel*",   # Flannel interfaces
+  #   "cali*",      # Calico interfaces
+  #   "cilium_*",   # Cilium overlays
+  #   "lxc*",       # Cilium pod interfaces
+  #   "gke*",       # GKE interfaces
+  #   "eni*",       # AWS VPC CNI
+  #   "azure*",     # Azure CNI
+  #   "ovn-k8s*",   # OVN-Kubernetes
+  # ]
 }
 ```
 
@@ -83,6 +127,7 @@ discovery "instrument" {
     "/^eth\\d+$/",              # Matches eth0, eth1, eth123
     "/^(en|eth)[0-9]+$/",       # Matches en0, en1, eth0, eth1
     "/^ens[0-9]{1,3}$/",        # Matches ens0-ens999
+    "/^ens3[0-9]$/"             # Only ens30-ens39    
     "/^(cni|gke|cilium_).*/",   # Matches CNI interfaces
   ]
 }
@@ -104,7 +149,7 @@ Mermin resolves patterns at startup and configuration reload:
 ### Resolution Example
 
 **Host interfaces:**
-```
+```text
 eth0, eth1, ens32, ens33, lo, docker0, cni0, cni123abc
 ```
 
@@ -455,22 +500,26 @@ discovery "instrument" {
 **Solutions:**
 
 1. **List available interfaces:**
+   Using kubectl debug command
    ```bash
-   kubectl exec <pod> -- ip link show
-   # or on host
+   kubectl debug node/${NODE_NAME} -it --image=busybox --profile=sysadmin
    ip link show
+   # or
+   ls -1 /sys/class/net/
    ```
 
 2. **Test pattern matching:**
    ```bash
    # Check if pattern matches
-   ip link show | grep -E "^[0-9]+: eth"
+   ls -1 /sys/class/net/ | grep -E '${INTERFACE_PATTERN}'
+   # For example
+   ls -1 /sys/class/net/ | grep -E '^(cni|gke|cilium_).*'
    ```
 
 3. **Update configuration:**
    ```hcl
    discovery "instrument" {
-     interfaces = ["eth0"]  # Use exact name from ip link show
+     interfaces = ["cilium_host", "cilium_name", "gkef0b001f9234"]  # Use exact name from ip link show
    }
    ```
 
@@ -525,10 +574,6 @@ discovery "instrument" {
    }
    ```
 
-2. **Deduplicate in backend:**
-   - Use flow fingerprinting (Community ID)
-   - Deduplicate based on 5-tuple + timestamps
-
 ## Monitoring Interface Resolution
 
 Check logs to see which interfaces Mermin resolved:
@@ -551,51 +596,6 @@ INFO eBPF programs attached interfaces=["eth0","eth1","ens32"]
 4. **Avoid wildcards for production**: Use specific patterns when possible
 5. **Document choices**: Comment why specific interfaces are monitored
 6. **Review periodically**: Interface naming may change with OS upgrades
-
-## Complete Configuration Examples
-
-### Minimal (Physical Interfaces Only)
-
-```hcl
-discovery "instrument" {
-  interfaces = ["eth0"]
-}
-```
-
-### Standard (Default)
-
-```hcl
-discovery "instrument" {
-  interfaces = ["eth*", "ens*", "en*"]
-}
-```
-
-### Complete Visibility (With CNI)
-
-```hcl
-discovery "instrument" {
-  interfaces = [
-    "eth*",      # Physical interfaces
-    "ens*",      # Predictable naming
-    "cni*",      # Flannel/generic CNI
-    "cali*",     # Calico
-    "cilium_*",  # Cilium
-    "gke*",      # GKE
-  ]
-}
-```
-
-### Regex-Based Selection
-
-```hcl
-discovery "instrument" {
-  interfaces = [
-    "/^eth[0-9]+$/",         # eth0-eth9...
-    "/^ens[0-9]{1,3}$/",     # ens0-ens999
-    "/^(cni|cali|cilium).*/", # Any CNI interface
-  ]
-}
-```
 
 ## Next Steps
 
