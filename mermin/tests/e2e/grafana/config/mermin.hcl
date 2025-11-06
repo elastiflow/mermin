@@ -1,6 +1,4 @@
 # Logging configuration
-log_level = "debug"
-
 # Automatic configuration reloading
 auto_reload = false
 
