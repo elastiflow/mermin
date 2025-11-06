@@ -39,7 +39,7 @@ verify_agent_logs() {
   done < <(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=${RELEASE_NAME}" -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}')
 
   if [ ${#pods[@]} -eq 0 ]; then
-    echo "No mermin pods found to test." && exit 1
+    echo "No mermin pods found to test." && return 1
   fi
 
   for pod in "${pods[@]}"; do
@@ -52,7 +52,7 @@ verify_agent_logs() {
         counter=$((counter + 1))
         sleep 2
       done
-      exit 1
+      return 1
     ) &
   done
 
