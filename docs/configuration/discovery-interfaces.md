@@ -238,7 +238,7 @@ For most use cases, the default configuration (complete visibility with veth + t
 
 ## Dynamic Interface Discovery
 
-Mermin includes an **Interface Controller** that automatically discovers and manages network interfaces using a Kubernetes-style controller pattern. The controller continuously reconciles desired state (configured patterns) with actual state (active interfaces), attaching/detaching eBPF programs as interfaces are created and destroyed. This is particularly useful for ephemeral interfaces like veth pairs that come and go with pods.
+Mermin includes an **Interface Controller** that automatically discovers and manages network interfaces. The controller continuously watches for interface changes and synchronizes the configured patterns with active interfaces, attaching/detaching eBPF programs as interfaces are created and destroyed. This is particularly useful for ephemeral interfaces like veth pairs that come and go with pods.
 
 ### Configuration
 
@@ -246,26 +246,26 @@ Mermin includes an **Interface Controller** that automatically discovers and man
 discovery "instrument" {
   interfaces = ["veth*", "tunl*", "flannel*"]
 
-  # Enable the interface controller for automatic reconciliation (default: true)
+  # Enable the interface controller for automatic monitoring (default: true)
   auto_discover_interfaces = true
 }
 ```
 
 ### How It Works
 
-**Controller Pattern (Kubernetes-style):**
+**Continuous Synchronization:**
 - Maintains desired state (configured interface patterns)
 - Tracks actual state (active interfaces, attached eBPF programs)
-- Reconciles differences by attaching/detaching programs
+- Synchronizes state by attaching/detaching programs when changes are detected
 
 **Real-Time Netlink Events:**
 - Watches for Linux netlink RTM_NEWLINK/RTM_DELLINK events
 - Detects interface state changes (UP/DOWN)
-- Triggers reconciliation when interfaces are created or destroyed
+- Automatically syncs when interfaces are created or destroyed
 
 **Interface Lifecycle (with Controller):**
-1. **Pod created** → veth pair created → Controller detects RTM_NEWLINK → Reconciles by attaching eBPF programs
-2. **Pod deleted** → veth pair removed → Controller detects RTM_DELLINK → Reconciles by detaching eBPF programs
+1. **Pod created** → veth pair created → Controller detects RTM_NEWLINK → Attaches eBPF programs
+2. **Pod deleted** → veth pair removed → Controller detects RTM_DELLINK → Detaches eBPF programs
 
 **State Management:**
 - Controller owns all interface-related state
@@ -286,8 +286,8 @@ discovery "instrument" {
 ### Performance Considerations
 
 **Overhead:**
-- Controller pattern has zero CPU overhead when no changes occur
-- Reconciliation (attach/detach) operations are fast (<10ms per interface)
+- Controller has zero CPU overhead when no changes occur
+- Sync operations (attach/detach) are fast (<10ms per interface)
 - No impact on packet processing performance
 - State management happens off the data path
 
@@ -299,7 +299,7 @@ discovery "instrument" {
 
 **Scaling:**
 - Tested with 10,000+ veth interfaces without performance degradation
-- Controller reconciliation happens asynchronously, doesn't block packets
+- Controller syncing happens asynchronously, doesn't block packets
 - Event-driven architecture scales efficiently with high pod churn
 - O(1) lookups for interface state and TC link management
 
@@ -314,7 +314,7 @@ discovery "instrument" {
 }
 ```
 
-This disables the controller's reconciliation loop and monitors only interfaces present at startup. Note: With the controller pattern, there's no performance reason to disable this feature - the overhead is negligible.
+This disables the controller's synchronization and watches only interfaces present at startup. Note: With the interface controller enabled, there's no performance reason to disable this feature - the overhead is negligible.
 
 {% hint style="warning" %}
 When `auto_discover_interfaces` is disabled, the Interface Controller does not run. Mermin only attaches to interfaces present at startup. New interfaces created after startup will not be monitored until Mermin is restarted.

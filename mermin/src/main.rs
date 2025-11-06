@@ -206,6 +206,23 @@ async fn run() -> Result<()> {
     // Shared across reconciliation loop and flow producer for concurrent access
     let iface_controller = Arc::new(tokio::sync::Mutex::new(iface_controller));
 
+    // Start reconciliation loop immediately to minimize window for missed interface events
+    let controller_handle = if conf.discovery.instrument.auto_discover_interfaces {
+        info!(
+            event.name = "iface_controller.starting",
+            "starting interface controller"
+        );
+        Some(IfaceController::start_reconciliation_loop(Arc::clone(
+            &iface_controller,
+        )))
+    } else {
+        info!(
+            event.name = "iface_controller.disabled",
+            "interface controller disabled, monitoring only startup interfaces"
+        );
+        None
+    };
+
     // DashMap allows lock-free reads during packet processing while controller updates it dynamically
     let iface_map = iface_controller.lock().await.iface_map();
 
@@ -395,23 +412,6 @@ async fn run() -> Result<()> {
         );
     }
 
-    let controller_handle = if conf.discovery.instrument.auto_discover_interfaces {
-        info!(
-            event.name = "iface_controller.starting",
-            "starting interface controller reconciliation loop"
-        );
-
-        Some(IfaceController::start_reconciliation_loop(Arc::clone(
-            &iface_controller,
-        )))
-    } else {
-        info!(
-            event.name = "iface_controller.disabled",
-            "interface controller reconciliation loop disabled"
-        );
-        None
-    };
-
     info!("waiting for ctrl+c");
 
     signal::ctrl_c().await?;
@@ -425,7 +425,7 @@ async fn run() -> Result<()> {
     if let Some(handle) = controller_handle {
         info!(
             event.name = "iface_controller.stopping",
-            "stopping reconciliation loop"
+            "stopping interface syncing"
         );
         handle.abort();
         // Give the task a moment to clean up

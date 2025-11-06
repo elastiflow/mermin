@@ -4,6 +4,115 @@
 //! compares desired state (interface patterns) vs actual state (active interface),
 //! and reconciles by attaching/detaching eBPF TC programs. Maintains dynamic interface
 //! index → name mapping for flow decoration via lock-free DashMap.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────────┐
+//! │                          Main Application                                │
+//! └─────────────────────────────────────────────────────────────────────────┘
+//!                                    │
+//!                    ┌───────────────┴───────────────┐
+//!                    │                               │
+//!                    ▼                               ▼
+//!          ┌──────────────────┐            ┌─────────────────┐
+//!          │ IfaceController  │            │ Packet Pipeline │
+//!          │    (Control)     │            │  (Hot Path)     │
+//!          └──────────────────┘            └─────────────────┘
+//!                    │                               │
+//!                    │                               │ lock-free reads
+//!                    │ owns & updates                │
+//!                    ▼                               ▼
+//!          ┌─────────────────────────────────────────────────┐
+//!          │   Arc<DashMap<u32, String>> (iface_map)         │
+//!          │   iface_index → iface_name mapping              │
+//!          └─────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Usage Flow
+//!
+//! ```text
+//! 1. INITIALIZATION
+//!    ┌─────────────────────────────────────────────────────────┐
+//!    │ new(patterns, ebpf, use_tcx)                            │
+//!    │   ├─ Initialize NetnsSwitch                             │
+//!    │   └─ Resolve patterns → initial active_ifaces           │
+//!    └─────────────────────────────────────────────────────────┘
+//!                           │
+//!                           ▼
+//!    ┌─────────────────────────────────────────────────────────┐
+//!    │ initialize().await                                      │
+//!    │   ├─ Build iface_map (index → name) in host namespace   │
+//!    │   └─ Attach eBPF programs (ingress & egress) to all     │
+//!    └─────────────────────────────────────────────────────────┘
+//!                           │
+//!                           ▼
+//!    ┌─────────────────────────────────────────────────────────┐
+//!    │ start_reconciliation_loop(Arc<Mutex<Self>>)             │
+//!    │   └─ Spawns background task                             │
+//!    └─────────────────────────────────────────────────────────┘
+//!
+//! 2. RECONCILIATION LOOP (Background Task)
+//!    ┌─────────────────────────────────────────────────────────┐
+//!    │ Netlink Events (RTM_NEWLINK/RTM_DELLINK)                │
+//!    └─────────────────────────────────────────────────────────┘
+//!                           │
+//!                           ▼
+//!    ┌─────────────────────────────────────────────────────────┐
+//!    │ reconcile_link(&link_msg, is_new_or_set)                │
+//!    │   ├─ Extract interface name & state (UP/DOWN)           │
+//!    │   ├─ Match against patterns                             │
+//!    │   └─ Compare with active_ifaces (desired state)         │
+//!    └─────────────────────────────────────────────────────────┘
+//!                           │
+//!            ┌──────────────┴──────────────┐
+//!            ▼                             ▼
+//!     ┌─────────────┐             ┌─────────────────┐
+//!     │ ADD PATH    │             │ REMOVE PATH     │
+//!     │ (UP & !act) │             │ (!UP & active)  │
+//!     └─────────────┘             └─────────────────┘
+//!            │                             │
+//!            ▼                             ▼
+//!  iface_map_add()              active_ifaces.remove()
+//!            │                   iface_map_remove()
+//!            ▼                             │
+//!  attach_all_programs()                   ▼
+//!            │                   unregister_tc_link() x2
+//!            ▼                             │
+//!  active_ifaces.insert()                  ▼
+//!                                 detach_program() x2
+//!
+//!    [On failure: rollback via iface_map_remove() + detach]
+//!
+//! 3. SHUTDOWN
+//!    ┌─────────────────────────────────────────────────────────┐
+//!    │ shutdown().await                                        │
+//!    │   ├─ Abort reconciliation loop                          │
+//!    │   └─ Detach all eBPF programs from all interfaces       │
+//!    └─────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! # Network Namespace Switching
+//!
+//! All interface operations (discovery, attachment, detachment) execute in the
+//! host network namespace via `NetnsSwitch::in_host_namespace()`:
+//!
+//! ```text
+//! ┌─────────────────┐        ┌──────────────────┐        ┌─────────────────┐
+//! │   Pod Netns     │  ────► │   Host Netns     │  ────► │   Pod Netns     │
+//! │  (container)    │ switch │ (iface ops here) │ switch │  (restored)     │
+//! └─────────────────┘        └──────────────────┘  back  └─────────────────┘
+//! ```
+//!
+//! # State Invariant
+//!
+//! The controller maintains this invariant across all operations:
+//!
+//! ```text
+//! interface ∈ active_ifaces  ⟺  programs attached  ⟺  interface ∈ iface_map
+//! ```
+//!
+//! If any operation fails, the entire transaction is rolled back to maintain consistency.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -79,12 +188,20 @@ pub enum IfaceEvent {
 /// FFI/syscalls within the critical section via `in_host_namespace`, which is
 /// inherently blocking. The critical section is kept minimal.
 pub struct IfaceController {
+    /// Glob patterns for matching interface names
     patterns: Vec<String>,
+    /// Desired state: interfaces that should have eBPF programs attached
     active_ifaces: HashSet<String>,
+    /// Actual state: link handles for attached programs, keyed by (iface_name, direction).
+    /// Used to track what's actually attached and provides handles for detachment.
     tc_links: HashMap<(String, &'static str), SchedClassifierLinkId>,
-    /// DashMap for lock-free reads during packet processing while controller updates dynamically
+    /// Shared map for packet decoration (iface_index → iface_name).
+    /// Separate from controller state because it uses different key type (u32 vs String),
+    /// requires concurrent access from packet processing hot path, and is shared via Arc.
     iface_map: Arc<DashMap<u32, String>>,
+    /// Shared eBPF program object for attach/detach operations
     ebpf: Arc<tokio::sync::Mutex<Ebpf>>,
+    /// Network namespace switcher for host namespace operations
     netns_switch: NetnsSwitch,
     /// TCX (kernel >= 6.6) vs netlink-based attachment
     use_tcx: bool,
@@ -106,16 +223,16 @@ impl IfaceController {
     ) -> Result<Self, MerminError> {
         let netns_switch = NetnsSwitch::new().map_err(|e| {
             MerminError::internal(format!(
-                "failed to initialize network namespace switching: {e} - ensure hostPID: true is set and CAP_SYS_ADMIN capability is granted",
+                "failed to initialize network namespace switching: {e} - ensure hostPID: true is set, CAP_SYS_PTRACE, and CAP_SYS_ADMIN capabilities are granted",
             ))
         })?;
 
         let initial_ifaces = Self::resolve_ifaces(&patterns, &netns_switch)?;
 
         info!(
-            event.name = "iface_controller.created",
+            event.name = "interface_controller.created",
             iface_count = initial_ifaces.len(),
-            "interface controller created with resolved ifaces"
+            "interface controller created with resolved interfaces"
         );
 
         Ok(Self {
@@ -142,8 +259,8 @@ impl IfaceController {
                     .collect::<Vec<String>>())
             })?;
 
-        info!(
-            event.name = "iface_controller.ifaces_discovered",
+        debug!(
+            event.name = "interface_controller.interfaces_discovered",
             iface_count = available.len(),
             ifaces = ?available,
             "discovered interface from host namespace"
@@ -158,8 +275,8 @@ impl IfaceController {
             }
         }
 
-        info!(
-            event.name = "iface_controller.ifaces_resolved",
+        debug!(
+            event.name = "interface_controller.interfaces_resolved",
             iface_count = resolved.len(),
             ifaces = ?resolved,
             "resolved interface from patterns"
@@ -178,9 +295,9 @@ impl IfaceController {
     /// Should be called once after controller creation.
     pub async fn initialize(&mut self) -> Result<(), MerminError> {
         info!(
-            event.name = "iface_controller.initializing",
+            event.name = "interface_controller.initializing",
             iface_count = self.active_ifaces.len(),
-            "initializing controller and attaching eBPF programs"
+            "initializing controller and attaching ebpf programs"
         );
 
         self.build_iface_map()?;
@@ -199,7 +316,7 @@ impl IfaceController {
         }
 
         info!(
-            event.name = "iface_controller.initialized",
+            event.name = "interface_controller.initialized",
             iface_count = self.active_ifaces.len(),
             tc_links = self.tc_links.len(),
             "controller initialized successfully"
@@ -222,9 +339,9 @@ impl IfaceController {
         let mut failed_count = 0;
 
         info!(
-            event.name = "iface_controller.shutdown_started",
+            event.name = "interface_controller.shutdown_started",
             total_links = total_links,
-            "starting graceful shutdown and eBPF program detachment"
+            "starting graceful shutdown and ebpf program detachment"
         );
 
         let tc_links = std::mem::take(&mut self.tc_links);
@@ -233,8 +350,8 @@ impl IfaceController {
             match self.detach_program(&iface, direction, link_id).await {
                 Ok(_) => {
                     detached_count += 1;
-                    info!(
-                        event.name = "iface_controller.program_detached",
+                    debug!(
+                        event.name = "interface_controller.program_detached",
                         network.interface.name = %iface,
                         ebpf.program.direction = %direction,
                         "successfully detached ebpf program"
@@ -243,7 +360,7 @@ impl IfaceController {
                 Err(e) => {
                     failed_count += 1;
                     warn!(
-                        event.name = "iface_controller.detach_failed",
+                        event.name = "interface_controller.detach_failed",
                         network.interface.name = %iface,
                         ebpf.program.direction = %direction,
                         error = %e,
@@ -254,7 +371,7 @@ impl IfaceController {
         }
 
         info!(
-            event.name = "iface_controller.shutdown_completed",
+            event.name = "interface_controller.shutdown_completed",
             total_links = total_links,
             detached_count = detached_count,
             failed_count = failed_count,
@@ -266,10 +383,10 @@ impl IfaceController {
         // disappeared before shutdown. Failed detachments are already logged as warnings.
         if failed_count > 0 {
             warn!(
-                event.name = "iface_controller.shutdown_partial",
+                event.name = "interface_controller.shutdown_partial",
                 failed_count = failed_count,
                 total_links = total_links,
-                "some eBPF programs failed to detach, but kernel will clean them up on process exit"
+                "some ebpf programs failed to detach, but kernel will clean them up on process exit"
             );
         }
         Ok(())
@@ -283,7 +400,7 @@ impl IfaceController {
         link_id: SchedClassifierLinkId,
     ) {
         debug!(
-            event.name = "iface_controller.tc_link_registered",
+            event.name = "interface_controller.tc_link_registered",
             iface = %iface,
             direction = %direction,
             "TC link registered"
@@ -302,7 +419,7 @@ impl IfaceController {
         let link_id = self.tc_links.remove(&(iface.to_string(), static_direction));
         if link_id.is_some() {
             debug!(
-                event.name = "iface_controller.tc_link_unregistered",
+                event.name = "interface_controller.tc_link_unregistered",
                 iface = %iface,
                 direction = %direction,
                 "TC link unregistered"
@@ -325,7 +442,7 @@ impl IfaceController {
         self.iface_map.clear();
 
         self.netns_switch
-            .in_host_namespace(Some("build_iface_map"), || {
+            .in_host_namespace(Some("build_interface_map"), || {
                 for iface in datalink::interfaces() {
                     if self.active_ifaces.contains(&iface.name) {
                         self.iface_map.insert(iface.index, iface.name.clone());
@@ -335,7 +452,7 @@ impl IfaceController {
             })?;
 
         debug!(
-            event.name = "iface_controller.iface_map_built",
+            event.name = "interface_controller.interface_map_built",
             entry_count = self.iface_map.len(),
             "built interface index → name mapping"
         );
@@ -351,10 +468,10 @@ impl IfaceController {
                     if iface.name == iface_name {
                         self.iface_map.insert(iface.index, iface.name.clone());
                         debug!(
-                            event.name = "iface_controller.iface_map_updated",
+                            event.name = "interface_controller.interface_map_updated",
                             iface = %iface_name,
                             index = iface.index,
-                            "added interface to iface_map"
+                            "added interface to interface_map"
                         );
                         return Ok(());
                     }
@@ -385,10 +502,10 @@ impl IfaceController {
         for idx in removed_indices {
             if let Some((_, name)) = self.iface_map.remove(&idx) {
                 debug!(
-                    event.name = "iface_controller.iface_map_updated",
+                    event.name = "interface_controller.interface_map_updated",
                     iface = %name,
                     index = idx,
-                    "removed interface from iface_map"
+                    "removed interface from interface_map"
                 );
             }
         }
@@ -400,8 +517,6 @@ impl IfaceController {
         iface: &str,
         attach_type: TcAttachType,
     ) -> Result<(), MerminError> {
-        use TcAttachTypeExt;
-
         let context = format!("{} ({})", iface, attach_type.direction_name());
         let iface_owned = iface.to_string();
         let use_tcx = self.use_tcx;
@@ -414,7 +529,7 @@ impl IfaceController {
             self.netns_switch.in_host_namespace(Some(&context), || {
                 if let Err(e) = tc::qdisc_add_clsact(&iface_owned) {
                     debug!(
-                        event.name = "iface_controller.qdisc_add_skipped",
+                        event.name = "interface_controller.qdisc_add_skipped",
                         network.interface.name = %iface_owned,
                         error = %e,
                         "clsact qdisc add failed (likely already exists)"
@@ -432,7 +547,7 @@ impl IfaceController {
                     .program_mut(program_name)
                     .ok_or_else(|| {
                         MerminError::internal(format!(
-                            "eBPF program '{program_name}' not found in loaded object",
+                            "ebpf program '{program_name}' not found in loaded object",
                         ))
                     })?
                     .try_into()
@@ -440,7 +555,7 @@ impl IfaceController {
 
                 program.attach(&iface_owned, attach_type).map_err(|e| {
                     MerminError::internal(format!(
-                        "failed to attach eBPF program to interface {iface}: {e}",
+                        "failed to attach ebpf program to interface {iface}: {e}",
                     ))
                 })
             })?
@@ -448,8 +563,8 @@ impl IfaceController {
 
         self.register_tc_link(iface.to_string(), attach_type.direction_name(), link_id);
 
-        info!(
-            event.name = "iface_controller.program_attached",
+        debug!(
+            event.name = "interface_controller.program_attached",
             ebpf.program.direction = attach_type.direction_name(),
             network.interface.name = %iface,
             "ebpf program attached to interface"
@@ -470,22 +585,28 @@ impl IfaceController {
             "egress" => "mermin_egress",
             _ => unreachable!("to_static_direction ensures only ingress/egress"),
         };
+
+        let iface_owned = iface.to_string();
+        let context = format!("{} ({})", iface, direction);
+
         let mut ebpf_guard = self.ebpf.lock().await;
 
-        let program: &mut SchedClassifier = ebpf_guard
-            .program_mut(program_name)
-            .ok_or_else(|| {
-                MerminError::internal(format!(
-                    "eBPF program '{program_name}' not found for detachment",
-                ))
-            })?
-            .try_into()
-            .map_err(|e| MerminError::internal(format!("failed to cast program: {e}")))?;
+        self.netns_switch.in_host_namespace(Some(&context), || {
+            let program: &mut SchedClassifier = ebpf_guard
+                .program_mut(program_name)
+                .ok_or_else(|| {
+                    MerminError::internal(format!(
+                        "ebpf program '{program_name}' not found for detachment",
+                    ))
+                })?
+                .try_into()
+                .map_err(|e| MerminError::internal(format!("failed to cast program: {e}")))?;
 
-        program.detach(link_id).map_err(|e| {
-            MerminError::internal(format!(
-                "failed to detach eBPF program from interface {iface}: {e}"
-            ))
+            program.detach(link_id).map_err(|e| {
+                MerminError::internal(format!(
+                    "failed to detach ebpf program from interface {iface_owned}: {e}"
+                ))
+            })
         })?;
 
         Ok(())
@@ -498,8 +619,8 @@ impl IfaceController {
 
         tokio::spawn(async move {
             info!(
-                event.name = "iface_controller.reconciliation_started",
-                "started reconciliation loop via netlink (RTM_NEWLINK/RTM_DELLINK multicast)"
+                event.name = "interface_controller.syncing_started",
+                "watching for network interface changes via netlink (RTM_NEWLINK/RTM_DELLINK)"
             );
 
             // Create netlink connection with message stream
@@ -507,7 +628,7 @@ impl IfaceController {
                 Ok(conn) => conn,
                 Err(e) => {
                     error!(
-                        event.name = "iface_controller.connection_failed",
+                        event.name = "interface_controller.connection_failed",
                         error = %e,
                         "failed to create netlink connection"
                     );
@@ -522,15 +643,15 @@ impl IfaceController {
                 .await
             {
                 error!(
-                    event.name = "iface_controller.reconciliation_failed",
+                    event.name = "interface_controller.sync_error",
                     error = %e,
-                    "reconciliation loop failed"
+                    "interface syncing encountered an error"
                 );
             }
 
             info!(
-                event.name = "iface_controller.reconciliation_stopped",
-                "reconciliation loop stopped"
+                event.name = "interface_controller.watching_stopped",
+                "interface syncing stopped"
             );
         })
     }
@@ -575,7 +696,7 @@ impl IfaceController {
             .is_err()
         {
             warn!(
-                event.name = "iface_controller.connection_cleanup_timeout",
+                event.name = "interface_controller.connection_cleanup_timeout",
                 timeout_secs = NETLINK_CLEANUP_TIMEOUT.as_secs(),
                 "netlink connection cleanup timed out"
             );
@@ -595,11 +716,11 @@ impl IfaceController {
                 }
                 Err(e) => {
                     error!(
-                        event.name = "iface_controller.attach_failed",
+                        event.name = "interface_controller.attach_failed",
                         iface = %if_name,
                         direction = attach_type.direction_name(),
                         error = %e,
-                        "failed to attach eBPF program to new interface, rolling back"
+                        "failed to attach ebpf program to new interface, rolling back"
                     );
                     self.rollback_attachments(if_name, attached_programs).await;
                     return Err(e);
@@ -617,7 +738,7 @@ impl IfaceController {
                 && let Err(e) = self.detach_program(if_name, direction, link_id).await
             {
                 warn!(
-                    event.name = "iface_controller.rollback_failed",
+                    event.name = "interface_controller.rollback_failed",
                     iface = %if_name,
                     direction = %direction,
                     error = %e,
@@ -659,17 +780,17 @@ impl IfaceController {
 
         if is_up && !is_active {
             info!(
-                event.name = "iface_controller.reconcile_add",
+                event.name = "interface_controller.interface_added",
                 iface = %if_name,
-                "interface should be active, reconciling by attaching eBPF programs"
+                "detected new interface, attaching ebpf programs"
             );
 
             if let Err(e) = self.iface_map_add(&if_name) {
                 error!(
-                    event.name = "iface_controller.iface_map_update_failed",
+                    event.name = "interface_controller.interface_map_update_failed",
                     iface = %if_name,
                     error = %e,
-                    "failed to update iface_map for added interface, will retry on next event"
+                    "failed to update interface map for added interface, will retry on next event"
                 );
                 return Ok(());
             }
@@ -681,7 +802,7 @@ impl IfaceController {
                 self.iface_map_remove(&if_name);
                 // Log error but don't fail - will retry on next netlink event
                 error!(
-                    event.name = "iface_controller.attach_all_failed",
+                    event.name = "interface_controller.attach_all_failed",
                     iface = %if_name,
                     error = %e,
                     "failed to attach programs to interface, will retry on next event"
@@ -693,9 +814,9 @@ impl IfaceController {
             self.active_ifaces.insert(if_name);
         } else if !is_up && is_active {
             info!(
-                event.name = "iface_controller.reconcile_remove",
+                event.name = "interface_controller.interface_removed",
                 iface = %if_name,
-                "interface should not be active, reconciling by detaching eBPF programs"
+                "detected interface removal, detaching ebpf programs"
             );
 
             self.active_ifaces.remove(&if_name);
@@ -706,18 +827,18 @@ impl IfaceController {
                 if let Some(link_id) = self.unregister_tc_link(&if_name, direction) {
                     if let Err(e) = self.detach_program(&if_name, direction, link_id).await {
                         warn!(
-                            event.name = "iface_controller.detach_failed",
+                            event.name = "interface_controller.detach_failed",
                             iface = %if_name,
                             direction = %direction,
                             error = %e,
-                            "failed to detach eBPF program from removed interface"
+                            "failed to detach ebpf program from removed interface"
                         );
                     } else {
-                        info!(
-                            event.name = "iface_controller.program_detached",
+                        debug!(
+                            event.name = "interface_controller.program_detached",
                             iface = %if_name,
                             direction = %direction,
-                            "eBPF program detached from removed interface"
+                            "ebpf program detached from removed interface"
                         );
                     }
                 }
@@ -732,7 +853,7 @@ impl IfaceController {
 
         if pattern.len() > MAX_PATTERN_LEN {
             warn!(
-                event.name = "iface_controller.pattern_too_long",
+                event.name = "interface_controller.pattern_too_long",
                 pattern_length = pattern.len(),
                 "pattern exceeds maximum length, rejecting"
             );
@@ -743,7 +864,7 @@ impl IfaceController {
             Ok(glob) => glob.compile_matcher().is_match(text),
             Err(e) => {
                 warn!(
-                    event.name = "iface_controller.invalid_pattern",
+                    event.name = "interface_controller.invalid_pattern",
                     pattern = %pattern,
                     error = %e,
                     "invalid glob pattern, treating as literal match"
