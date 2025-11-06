@@ -90,7 +90,7 @@ observability platforms.
 
 ## 🚀 Quick Start: Deploying to Kubernetes with `kind`
 
-Follow the [quickstart guide](docs/getting-started/quickstart.md) in our docs.
+<!-- TODO(Cleanup for GA): Add link to docs/getting-started/quickstart.md -->
 
 ## 🧑‍💻 Local Development and Contribution
 
