@@ -12,6 +12,7 @@ use std::sync::{Arc, atomic::Ordering};
 
 use aya::{
     maps::{Array, RingBuf},
+    programs::{SchedClassifier, TcAttachType},
     util::KernelVersion,
 };
 use error::{MerminError, Result};
@@ -139,6 +140,28 @@ async fn run() -> Result<()> {
         "configured ebpf tunnel ports"
     );
 
+    let programs = [TcAttachType::Ingress, TcAttachType::Egress];
+    programs.iter().try_for_each(|attach_type| -> Result<()> {
+        let program: &mut SchedClassifier = ebpf
+            .program_mut(match attach_type {
+                TcAttachType::Ingress => "mermin_ingress",
+                TcAttachType::Egress => "mermin_egress",
+                _ => unreachable!("only ingress and egress are used"),
+            })
+            .ok_or_else(|| {
+                MerminError::internal(format!(
+                    "ebpf program for {attach_type:?} not found in loaded object",
+                ))
+            })?
+            .try_into()?;
+        program.load()?;
+        Ok(())
+    })?;
+    info!(
+        event.name = "ebpf.programs_loaded",
+        "tc programs loaded into kernel"
+    );
+
     let health_state = HealthState::default();
 
     if conf.api.enabled {
@@ -195,6 +218,23 @@ async fn run() -> Result<()> {
 
     let mut iface_controller = IfaceController::new(patterns, Arc::clone(&ebpf), use_tcx)?;
 
+    // DashMap allows lock-free reads during packet processing while controller updates it dynamically
+    let iface_map = iface_controller.iface_map();
+
+    let (packet_meta_tx, packet_meta_rx) = mpsc::channel(conf.packet_channel_capacity);
+
+    // Start ring buffer reader BEFORE attaching eBPF programs to avoid packet loss
+    let packet_filter = Arc::new(PacketFilter::new(&conf, Arc::clone(&iface_map)));
+    let ring_buf_reader = RingBufReader::new(ring_buf, packet_filter, packet_meta_tx);
+    tokio::spawn(async move {
+        ring_buf_reader.run().await;
+        info!(
+            event.name = "task.exited",
+            task.name = "source.ringbuf",
+            "ring buffer reader task exited"
+        );
+    });
+
     iface_controller.initialize().await?;
 
     info!(
@@ -209,7 +249,7 @@ async fn run() -> Result<()> {
     // Start reconciliation loop immediately to minimize window for missed interface events
     let controller_handle = if conf.discovery.instrument.auto_discover_interfaces {
         info!(
-            event.name = "iface_controller.starting",
+            event.name = "interface_controller.starting",
             "starting interface controller"
         );
         Some(IfaceController::start_reconciliation_loop(Arc::clone(
@@ -217,16 +257,12 @@ async fn run() -> Result<()> {
         )))
     } else {
         info!(
-            event.name = "iface_controller.disabled",
+            event.name = "interface_controller.disabled",
             "interface controller disabled, monitoring only startup interfaces"
         );
         None
     };
 
-    // DashMap allows lock-free reads during packet processing while controller updates it dynamically
-    let iface_map = iface_controller.lock().await.iface_map();
-
-    let (packet_meta_tx, packet_meta_rx) = mpsc::channel(conf.packet_channel_capacity);
     let (flow_span_tx, mut flow_span_rx) = mpsc::channel(conf.packet_channel_capacity);
     let (k8s_decorated_flow_span_tx, mut k8s_decorated_flow_span_rx) =
         mpsc::channel(conf.packet_channel_capacity);
@@ -365,18 +401,6 @@ async fn run() -> Result<()> {
     });
     health_state.ready_to_process.store(true, Ordering::Relaxed);
 
-    let packet_filter = Arc::new(PacketFilter::new(&conf, Arc::clone(&iface_map)));
-
-    let ring_buf_reader = RingBufReader::new(ring_buf, packet_filter, packet_meta_tx);
-    tokio::spawn(async move {
-        ring_buf_reader.run().await;
-        info!(
-            event.name = "task.exited",
-            task.name = "source.ringbuf",
-            "ring buffer reader task exited"
-        );
-    });
-
     tokio::spawn(async move {
         while let Some(k8s_decorated_flow_span) = k8s_decorated_flow_span_rx.recv().await {
             let traceable: TraceableRecord = Arc::new(k8s_decorated_flow_span);
@@ -424,7 +448,7 @@ async fn run() -> Result<()> {
     // Stop reconciliation loop before detaching programs
     if let Some(handle) = controller_handle {
         info!(
-            event.name = "iface_controller.stopping",
+            event.name = "interface_controller.stopping",
             "stopping interface syncing"
         );
         handle.abort();

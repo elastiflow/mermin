@@ -52,17 +52,22 @@
 //!    │   └─ Spawns background task                             │
 //!    └─────────────────────────────────────────────────────────┘
 //!
-//! 2. RECONCILIATION LOOP (Background Task)
+//! 2. RECONCILIATION LOOP (Dual-Thread Architecture)
 //!    ┌─────────────────────────────────────────────────────────┐
-//!    │ Netlink Events (RTM_NEWLINK/RTM_DELLINK)                │
+//!    │ Blocking Thread (permanently in host namespace)         │
+//!    │   ├─ Raw libc netlink socket (RTNLGRP_LINK multicast)   │
+//!    │   ├─ Blocking recv() loop                               │
+//!    │   └─ Parses RTM_NEWLINK/RTM_DELLINK messages            │
 //!    └─────────────────────────────────────────────────────────┘
 //!                           │
+//!                           │ mpsc::unbounded_channel
 //!                           ▼
 //!    ┌─────────────────────────────────────────────────────────┐
-//!    │ reconcile_link(&link_msg, is_new_or_set)                │
-//!    │   ├─ Extract interface name & state (UP/DOWN)           │
-//!    │   ├─ Match against patterns                             │
-//!    │   └─ Compare with active_ifaces (desired state)         │
+//!    │ Async Task (tokio)                                      │
+//!    │   └─ reconcile_link(&link_msg, is_new_or_set)           │
+//!    │       ├─ Extract interface name & state (UP/DOWN)       │
+//!    │       ├─ Match against patterns                         │
+//!    │       └─ Compare with active_ifaces (desired state)     │
 //!    └─────────────────────────────────────────────────────────┘
 //!                           │
 //!            ┌──────────────┴──────────────┐
@@ -104,6 +109,16 @@
 //! └─────────────────┘        └──────────────────┘  back  └─────────────────┘
 //! ```
 //!
+//! The reconciliation loop's blocking thread uses `setns()` once at startup to permanently
+//! enter the host namespace, avoiding repeated namespace switches on every netlink event.
+//!
+//! # Netlink Socket Implementation
+//!
+//! Uses raw `libc` socket syscalls instead of `rtnetlink` or `netlink-sys` crates because:
+//! - `rtnetlink::new_connection()` doesn't subscribe to multicast groups
+//! - `netlink-sys::Socket::recv()` has buffering issues (returns positive byte count but doesn't fill buffer)
+//! - Direct syscalls ensure correct multicast subscription via `setsockopt(NETLINK_ADD_MEMBERSHIP)`
+//!
 //! # State Invariant
 //!
 //! The controller maintains this invariant across all operations:
@@ -116,8 +131,8 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    os::fd::{AsRawFd, FromRawFd, OwnedFd},
     sync::Arc,
-    time::Duration,
 };
 
 use aya::{
@@ -125,17 +140,17 @@ use aya::{
     programs::{SchedClassifier, TcAttachType, tc, tc::SchedClassifierLinkId},
 };
 use dashmap::DashMap;
-use futures::stream::{Stream, StreamExt};
 use globset::Glob;
-use netlink_packet_core::NetlinkPayload;
+use netlink_packet_core::{NetlinkBuffer, NetlinkMessage, NetlinkPayload};
 use netlink_packet_route::{
     RouteNetlinkMessage,
     link::{LinkAttribute, LinkFlags},
 };
+use netlink_sys::protocols::NETLINK_ROUTE;
+use nix::sched::{CloneFlags, setns};
 use pnet::datalink;
-use rtnetlink::new_connection;
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::{error::MerminError, iface::netns::NetnsSwitch};
 
@@ -184,9 +199,9 @@ pub enum IfaceEvent {
 /// 1. IfaceController mutex (acquired in reconciliation loop)
 /// 2. ebpf mutex (acquired during attach/detach operations)
 ///
-/// The `attach_to_iface` method uses `blocking_lock()` because it performs
-/// FFI/syscalls within the critical section via `in_host_namespace`, which is
-/// inherently blocking. The critical section is kept minimal.
+/// The `attach_to_iface` method acquires the ebpf mutex and performs synchronous
+/// FFI/syscalls within the critical section via `in_host_namespace`. The critical
+/// section is kept minimal to avoid blocking other operations.
 pub struct IfaceController {
     /// Glob patterns for matching interface names
     patterns: Vec<String>,
@@ -209,9 +224,6 @@ pub struct IfaceController {
 
 /// TC attachment directions used for iterating over all attach types
 const DIRECTIONS: &[&str] = &["ingress", "egress"];
-
-/// Timeout for netlink connection cleanup during reconciliation loop shutdown
-const NETLINK_CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
 
 impl IfaceController {
     /// Create controller, initialize netns switcher and resolve interface patterns.
@@ -304,9 +316,7 @@ impl IfaceController {
 
         let programs = [TcAttachType::Ingress, TcAttachType::Egress];
 
-        // Collect interface names as owned strings to avoid borrow checker issues
-        // (cannot borrow self immutably while calling mutable attach_to_iface)
-        // This is acceptable as it only happens once at initialization with a small set.
+        // Clone to avoid borrow checker conflict (can't borrow self immutably while calling mutable methods)
         let ifaces: Vec<String> = self.active_ifaces.iter().cloned().collect();
 
         for attach_type in &programs {
@@ -378,9 +388,7 @@ impl IfaceController {
             "controller shutdown completed"
         );
 
-        // Always return Ok during shutdown. The kernel will clean up eBPF programs
-        // when the process exits, and some failures are expected if interfaces
-        // disappeared before shutdown. Failed detachments are already logged as warnings.
+        // Always return Ok - kernel will clean up remaining programs on process exit
         if failed_count > 0 {
             warn!(
                 event.name = "interface_controller.shutdown_partial",
@@ -476,7 +484,6 @@ impl IfaceController {
                         return Ok(());
                     }
                 }
-                // Iface not found - this is an error condition
                 Err(MerminError::internal(format!(
                     "interface '{iface_name}' not found in datalink::interfaces()",
                 )))
@@ -540,7 +547,7 @@ impl IfaceController {
         }
 
         let link_id = {
-            let mut ebpf_guard = self.ebpf.blocking_lock();
+            let mut ebpf_guard = self.ebpf.lock().await;
 
             self.netns_switch.in_host_namespace(Some(&context), || {
                 let program: &mut SchedClassifier = ebpf_guard
@@ -587,7 +594,7 @@ impl IfaceController {
         };
 
         let iface_owned = iface.to_string();
-        let context = format!("{} ({})", iface, direction);
+        let context = format!("{iface_owned} ({direction})");
 
         let mut ebpf_guard = self.ebpf.lock().await;
 
@@ -614,6 +621,10 @@ impl IfaceController {
 
     /// Start reconciliation loop via netlink multicast (RTNLGRP_LINK).
     /// Controller handles all attachment/detachment internally.
+    ///
+    /// Uses a dedicated blocking thread that permanently runs in the host network
+    /// namespace to receive netlink events, then sends them via channel to the
+    /// async task for processing.
     pub fn start_reconciliation_loop(controller: Arc<tokio::sync::Mutex<Self>>) -> JoinHandle<()> {
         let ctrl = Arc::clone(&controller);
 
@@ -623,85 +634,244 @@ impl IfaceController {
                 "watching for network interface changes via netlink (RTM_NEWLINK/RTM_DELLINK)"
             );
 
-            // Create netlink connection with message stream
-            let (connection, _handle, messages) = match new_connection() {
-                Ok(conn) => conn,
-                Err(e) => {
+            // Get netns file descriptor for host namespace
+            let host_netns_fd = {
+                let controller_guard = ctrl.lock().await;
+                controller_guard.netns_switch.host_netns.as_raw_fd()
+            };
+
+            let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+
+            // Spawn dedicated blocking thread in host namespace for netlink recv (can't use tokio async here)
+            std::thread::spawn(move || {
+                // CRITICAL: Enter host namespace and stay there for entire thread lifetime
+                let host_fd = unsafe { OwnedFd::from_raw_fd(host_netns_fd) };
+                if let Err(e) = setns(&host_fd, CloneFlags::CLONE_NEWNET) {
                     error!(
-                        event.name = "interface_controller.connection_failed",
+                        event.name = "interface_controller.netns_switch_failed",
                         error = %e,
-                        "failed to create netlink connection"
+                        "failed to switch blocking thread to host network namespace"
                     );
                     return;
                 }
-            };
 
-            if let Err(e) = ctrl
-                .lock()
-                .await
-                .watch_and_reconcile(connection, messages)
-                .await
-            {
-                error!(
-                    event.name = "interface_controller.sync_error",
-                    error = %e,
-                    "interface syncing encountered an error"
+                debug!(
+                    event.name = "interface_controller.blocking_thread_in_host_ns",
+                    "netlink blocking thread permanently in host network namespace"
                 );
+
+                // Create netlink socket using raw libc (netlink-sys Socket has issues with recv)
+                use std::mem;
+
+                use libc::{
+                    AF_NETLINK, NETLINK_ADD_MEMBERSHIP, SOCK_RAW, SOL_NETLINK, bind, c_void, recv,
+                    setsockopt, sockaddr_nl, socket,
+                };
+
+                let sock_fd = unsafe { socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE as i32) };
+                if sock_fd < 0 {
+                    let err = std::io::Error::last_os_error();
+                    error!(
+                        event.name = "interface_controller.socket_creation_failed",
+                        error = %err,
+                        "failed to create netlink socket"
+                    );
+                    return;
+                }
+
+                // Bind with kernel-assigned PID and no groups (will subscribe via setsockopt instead)
+                let mut addr: sockaddr_nl = unsafe { mem::zeroed() };
+                addr.nl_family = AF_NETLINK as u16;
+                addr.nl_pid = 0;
+                addr.nl_groups = 0;
+
+                let ret = unsafe {
+                    bind(
+                        sock_fd,
+                        &addr as *const sockaddr_nl as *const libc::sockaddr,
+                        mem::size_of::<sockaddr_nl>() as u32,
+                    )
+                };
+
+                if ret < 0 {
+                    let err = std::io::Error::last_os_error();
+                    error!(
+                        event.name = "interface_controller.socket_bind_failed",
+                        error = %err,
+                        "failed to bind netlink socket"
+                    );
+                    unsafe { libc::close(sock_fd) };
+                    return;
+                }
+
+                // Add multicast group membership using setsockopt
+                let group_id: i32 = 1; // RTNLGRP_LINK = 1
+                let ret = unsafe {
+                    setsockopt(
+                        sock_fd,
+                        SOL_NETLINK,
+                        NETLINK_ADD_MEMBERSHIP,
+                        &group_id as *const i32 as *const c_void,
+                        mem::size_of::<i32>() as u32,
+                    )
+                };
+
+                if ret < 0 {
+                    let err = std::io::Error::last_os_error();
+                    error!(
+                        event.name = "interface_controller.setsockopt_failed",
+                        error = %err,
+                        group_id = group_id,
+                        "failed to add netlink multicast group membership"
+                    );
+                    unsafe { libc::close(sock_fd) };
+                    return;
+                }
+
+                debug!(
+                    event.name = "interface_controller.subscribed_to_link_events",
+                    group_id = group_id,
+                    socket_fd = sock_fd,
+                    "successfully subscribed to RTNLGRP_LINK multicast group in host namespace"
+                );
+
+                let mut buf = vec![0u8; 8192];
+                loop {
+                    // Use raw libc recv (netlink-sys has buffering issues)
+                    let n = unsafe { recv(sock_fd, buf.as_mut_ptr() as *mut c_void, buf.len(), 0) };
+
+                    if n < 0 {
+                        let err = std::io::Error::last_os_error();
+                        error!(
+                            event.name = "interface_controller.socket_recv_error",
+                            error = %err,
+                            "error receiving from netlink socket"
+                        );
+                        break;
+                    }
+
+                    let n = n as usize;
+                    if n > 0 {
+                        trace!(
+                            event.name = "interface_controller.netlink_data_received",
+                            bytes = n,
+                            "received netlink data"
+                        );
+                        // Parse all messages in buffer
+                        let mut offset = 0;
+                        while offset < n {
+                            let bytes = &buf[offset..n];
+                            match NetlinkBuffer::new_checked(bytes) {
+                                Ok(nl_buf) => {
+                                    match NetlinkMessage::<RouteNetlinkMessage>::deserialize(bytes)
+                                    {
+                                        Ok(msg) => {
+                                            let msg_len = nl_buf.length() as usize;
+                                            offset += (msg_len + 3) & !3; // NLMSG_ALIGN
+
+                                            // Extract link messages and send via channel
+                                            if let NetlinkPayload::InnerMessage(rtnl_msg) =
+                                                msg.payload
+                                            {
+                                                match rtnl_msg {
+                                                    RouteNetlinkMessage::NewLink(link_msg)
+                                                    | RouteNetlinkMessage::SetLink(link_msg) => {
+                                                        trace!(
+                                                            event.name = "interface_controller.newlink_parsed",
+                                                            "parsed NewLink/SetLink message, sending to async task"
+                                                        );
+                                                        if event_tx.send((link_msg, true)).is_err()
+                                                        {
+                                                            error!(
+                                                                event.name = "interface_controller.channel_send_failed",
+                                                                "failed to send NewLink event, receiver dropped"
+                                                            );
+                                                            return;
+                                                        }
+                                                    }
+                                                    RouteNetlinkMessage::DelLink(link_msg) => {
+                                                        trace!(
+                                                            event.name = "interface_controller.dellink_parsed",
+                                                            "parsed DelLink message, sending to async task"
+                                                        );
+                                                        if event_tx.send((link_msg, false)).is_err()
+                                                        {
+                                                            error!(
+                                                                event.name = "interface_controller.channel_send_failed",
+                                                                "failed to send DelLink event, receiver dropped"
+                                                            );
+                                                            return;
+                                                        }
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            warn!(
+                                                event.name = "interface_controller.message_parse_error",
+                                                error = %e,
+                                                "failed to parse netlink message"
+                                            );
+                                            break;
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    trace!(
+                                        event.name = "interface_controller.buffer_check_failed",
+                                        error = ?e,
+                                        offset = offset,
+                                        remaining = n - offset,
+                                        "not enough bytes for complete message, ending parse loop"
+                                    );
+                                    break;
+                                }
+                            }
+                        }
+
+                        trace!(
+                            event.name = "interface_controller.parse_loop_completed",
+                            bytes_processed = n,
+                            "completed parsing netlink data"
+                        );
+                    }
+                }
+
+                unsafe { libc::close(sock_fd) };
+                info!(
+                    event.name = "interface_controller.socket_closed",
+                    "netlink socket closed, exiting recv loop"
+                );
+            });
+
+            trace!(
+                event.name = "interface_controller.event_loop_started",
+                "starting async event processing loop"
+            );
+
+            while let Some((link_msg, is_new_or_set)) = event_rx.recv().await {
+                trace!(
+                    event.name = "interface_controller.event_received_from_channel",
+                    is_new_or_set = is_new_or_set,
+                    "received link event from blocking thread channel"
+                );
+
+                let mut controller = ctrl.lock().await;
+                if let Err(e) = controller.reconcile_link(&link_msg, is_new_or_set).await {
+                    error!(
+                        event.name = "interface_controller.reconcile_error",
+                        error = %e,
+                        "error reconciling link event"
+                    );
+                }
             }
 
             info!(
                 event.name = "interface_controller.watching_stopped",
-                "interface syncing stopped"
+                "interface syncing stopped (channel closed)"
             );
         })
-    }
-
-    /// Core reconciliation loop: watch RTM_NEWLINK/RTM_DELLINK, compare with
-    /// active_ifaces, and attach/detach eBPF programs when state differs.
-    async fn watch_and_reconcile<M>(
-        &mut self,
-        connection: impl std::future::Future<Output = ()> + Send + 'static,
-        mut messages: M,
-    ) -> Result<(), MerminError>
-    where
-        M: Stream<
-                Item = (
-                    netlink_packet_core::NetlinkMessage<netlink_packet_route::RouteNetlinkMessage>,
-                    netlink_sys::SocketAddr,
-                ),
-            > + Unpin,
-    {
-        let connection_handle = tokio::spawn(connection);
-
-        while let Some((message, _)) = messages.next().await {
-            let NetlinkPayload::InnerMessage(rtnl_msg) = message.payload else {
-                continue;
-            };
-
-            match rtnl_msg {
-                RouteNetlinkMessage::NewLink(link_msg) | RouteNetlinkMessage::SetLink(link_msg) => {
-                    self.reconcile_link(&link_msg, true).await?;
-                }
-                RouteNetlinkMessage::DelLink(link_msg) => {
-                    self.reconcile_link(&link_msg, false).await?;
-                }
-                _ => {}
-            }
-        }
-
-        connection_handle.abort();
-        // Give connection handle time to clean up gracefully
-        if tokio::time::timeout(NETLINK_CLEANUP_TIMEOUT, connection_handle)
-            .await
-            .is_err()
-        {
-            warn!(
-                event.name = "interface_controller.connection_cleanup_timeout",
-                timeout_secs = NETLINK_CLEANUP_TIMEOUT.as_secs(),
-                "netlink connection cleanup timed out"
-            );
-        }
-        Ok(())
     }
 
     /// Attach all eBPF programs (ingress and egress) to an interface.
@@ -766,7 +936,20 @@ impl IfaceController {
             })
             .ok_or_else(|| MerminError::internal("interface name not found in link message"))?;
 
+        trace!(
+            event.name = "interface_controller.link_event_received",
+            iface = %if_name,
+            is_new_or_set = is_new_or_set,
+            flags = ?link_msg.header.flags,
+            "received netlink link event"
+        );
+
         if !Self::matches_pattern(&if_name, &self.patterns) {
+            debug!(
+                event.name = "interface_controller.link_event_filtered",
+                iface = %if_name,
+                "interface does not match configured patterns"
+            );
             return Ok(());
         }
 
@@ -984,12 +1167,10 @@ mod tests {
         assert!(controller.active_ifaces.contains("eth0"));
         assert_eq!(controller.active_ifaces.len(), 1);
 
-        // Simulate adding a new iface
         controller.active_ifaces.insert("veth0".to_string());
         assert!(controller.active_ifaces.contains("veth0"));
         assert_eq!(controller.active_ifaces.len(), 2);
 
-        // Simulate removing an iface
         controller.active_ifaces.remove("eth0");
         assert!(!controller.active_ifaces.contains("eth0"));
         assert_eq!(controller.active_ifaces.len(), 1);
@@ -997,13 +1178,9 @@ mod tests {
 
     #[test]
     fn test_tc_links_map_structure() {
-        // Test the HashMap structure without actual link IDs
         let controller = TestController::new(vec![], HashSet::new());
-
-        // Verify initial state
         assert!(controller.tc_links.is_empty());
 
-        // Verify the map accepts the expected key types
         let key = ("veth0".to_string(), "ingress");
         assert!(!controller.tc_links.contains_key(&key));
     }
@@ -1018,14 +1195,12 @@ mod tests {
             "cali*".to_string(),
         ];
 
-        // Should match
         assert!(IfaceController::matches_pattern("veth123abc", &patterns));
         assert!(IfaceController::matches_pattern("tunl0", &patterns));
         assert!(IfaceController::matches_pattern("ip6tnl0", &patterns));
         assert!(IfaceController::matches_pattern("flannel.1", &patterns));
         assert!(IfaceController::matches_pattern("cali123abc", &patterns));
 
-        // Should not match
         assert!(!IfaceController::matches_pattern("eth0", &patterns));
         assert!(!IfaceController::matches_pattern("lo", &patterns));
         assert!(!IfaceController::matches_pattern("docker0", &patterns));
@@ -1056,14 +1231,10 @@ mod tests {
     fn test_take_tc_links_leaves_empty_map() {
         let mut controller = TestController::new(vec![], HashSet::new());
 
-        // Take from empty controller using std::mem::take
         let empty = std::mem::take(&mut controller.tc_links);
         assert!(empty.is_empty());
-
-        // Controller should still have empty tc_links
         assert!(controller.tc_links.is_empty());
 
-        // Taking again should still yield empty map
         let still_empty = std::mem::take(&mut controller.tc_links);
         assert!(still_empty.is_empty());
     }

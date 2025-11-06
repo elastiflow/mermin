@@ -18,7 +18,9 @@ use crate::error::{MerminError, Result};
 /// and the host network namespace, allowing safe switching between them.
 pub struct NetnsSwitch {
     original_netns: File,
-    host_netns: File,
+    /// File descriptor for host network namespace (/proc/1/ns/net)
+    /// Made public to allow blocking threads to enter host namespace permanently
+    pub host_netns: File,
 }
 
 impl NetnsSwitch {

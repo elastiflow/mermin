@@ -129,6 +129,9 @@ impl RingBufReader {
                         warn!(
                             event.name = "packet.filter_error",
                             error.message = %e,
+                            network.interface.index = packet_meta.ifindex,
+                            network.type = packet_meta.ether_type.as_str(),
+                            network.transport = %packet_meta.proto,
                             "failed to parse packet metadata for filtering; skipping"
                         );
                     }
