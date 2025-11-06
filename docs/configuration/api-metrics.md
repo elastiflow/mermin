@@ -76,6 +76,8 @@ api {
 
 ## Health Check Endpoints
 
+Mermin provides both HTTP health check endpoints (for Kubernetes probes) and Prometheus health metrics (for monitoring). The HTTP endpoints return simple HTTP status codes, while the health metrics provide more granular component-level status information.
+
 ### `/livez` - Liveness Probe
 
 Indicates whether Mermin is alive and running.
@@ -183,6 +185,111 @@ startupProbe:
   failureThreshold: 30  # Allow up to 150s for startup
 ```
 
+### Health Status Metrics
+
+In addition to the HTTP health check endpoints above, Mermin exposes detailed health status metrics via the `/metrics` endpoint. These metrics provide component-level health information for monitoring and alerting.
+
+{% hint style="info" %}
+Health metrics are gauges where `1` indicates healthy and `0` indicates unhealthy. These complement the HTTP health check endpoints by providing more granular status information to Prometheus.
+{% endhint %}
+
+#### `mermin_health_overall`
+
+A combined health status gauge for the entire application.
+
+**Type:** Gauge
+**Values:** `1` (healthy) or `0` (unhealthy)
+
+**Use Case:**
+- Overall application health monitoring
+- Top-level alerting on application status
+- Quick health check via metrics
+
+**Prometheus Alert Example:**
+```yaml
+alert: MerminDown
+expr: mermin_health_overall == 0
+for: 1m
+labels:
+  severity: critical
+annotations:
+  summary: "Mermin instance is unhealthy"
+```
+
+#### `mermin_health_ebpf_loaded`
+
+Indicates if the eBPF programs are successfully loaded and attached.
+
+**Type:** Gauge
+**Values:** `1` (loaded) or `0` (not loaded)
+
+**Use Case:**
+- Verify eBPF program initialization
+- Alert on eBPF program load failures
+- Troubleshoot packet capture issues
+
+**Prometheus Alert Example:**
+```yaml
+alert: MerminEBPFNotLoaded
+expr: mermin_health_ebpf_loaded == 0
+for: 30s
+labels:
+  severity: critical
+annotations:
+  summary: "Mermin eBPF programs failed to load"
+```
+
+#### `mermin_health_k8s`
+
+Indicates if the Kubernetes informer caches are synced and ready.
+
+**Type:** Gauge
+**Values:** `1` (synced) or `0` (not synced)
+
+**Use Case:**
+- Monitor Kubernetes API connection health
+- Verify metadata enrichment is available
+- Alert on K8s integration issues
+
+**Prometheus Alert Example:**
+```yaml
+alert: MerminK8sCachesNotSynced
+expr: mermin_health_k8s == 0
+for: 2m
+labels:
+  severity: warning
+annotations:
+  summary: "Mermin Kubernetes caches not synced"
+  description: "Flow spans may lack Kubernetes metadata"
+```
+
+#### `mermin_health_ready_to_process`
+
+Indicates if Mermin is fully initialized and ready to process network data.
+
+**Type:** Gauge
+**Values:** `1` (ready) or `0` (not ready)
+
+**Use Case:**
+- Verify complete initialization
+- Coordinate deployments with other systems
+- Monitor readiness for data processing
+
+**Prometheus Alert Example:**
+```yaml
+alert: MerminNotReady
+expr: mermin_health_ready_to_process == 0
+for: 5m
+labels:
+  severity: warning
+annotations:
+  summary: "Mermin not ready to process data"
+```
+
+{% hint style="warning" %}
+The `/readyz` HTTP endpoint and `mermin_health_ready_to_process` metric serve similar purposes but for different systems. Use the HTTP endpoint for Kubernetes readiness probes and the metric for Prometheus monitoring and alerting.
+{% endhint %}
+
 ## Metrics Server Configuration
 
 The metrics server exposes Prometheus-compatible metrics for monitoring Mermin's performance and health.
@@ -251,6 +358,25 @@ Port 10250 is chosen to align with kubelet metrics port, making it familiar to K
 
 Exposes Prometheus-compatible metrics in text format.
 
+**Naming Convention:**
+
+Metrics follow the pattern: `mermin_<subsystem>_<name>_<type>`
+
+**Metric Subsystems:**
+
+- **Application** (`mermin_*`): Build info and overall health
+- **eBPF** (`mermin_ebpf_*`): Kernel-level packet capture
+- **Userspace** (`mermin_userspace_*`): Ring buffer and channel processing  
+- **Span** (`mermin_span_*`): Flow span generation and lifecycle
+- **Kubernetes** (`mermin_k8s_*`): K8s API integration and metadata enrichment
+- **Export** (`mermin_export_*`): OTLP and other exporter performance
+
+**Metric Types:**
+
+- `_total`: Counters that only increase
+- `_bytes`: Byte counters
+- `_seconds`: Duration histograms
+
 **Request:**
 
 ```bash
@@ -262,33 +388,62 @@ curl http://localhost:10250/metrics
 **Example Metrics:**
 
 ```prometheus
-# HELP mermin_flows_total Total number of flows processed
-# TYPE mermin_flows_total counter
-mermin_flows_total{direction="ingress"} 12543
+# HELP mermin_build_info Build information
+# TYPE mermin_build_info gauge
+mermin_build_info{version="0.1.0",git_sha="abc123"} 1
 
-# HELP mermin_packets_total Total number of packets captured
-# TYPE mermin_packets_total counter
-mermin_packets_total{interface="eth0"} 98234
+# HELP mermin_ebpf_programs_loaded eBPF program loaded status
+# TYPE mermin_ebpf_programs_loaded gauge
+mermin_ebpf_programs_loaded{program="ingress"} 1
+mermin_ebpf_programs_loaded{program="egress"} 1
 
-# HELP mermin_packets_dropped_total Total number of packets dropped
-# TYPE mermin_packets_dropped_total counter
-mermin_packets_dropped_total{reason="channel_full"} 12
+# HELP mermin_ebpf_ringbuf_packets_total Total packets from eBPF ring buffer
+# TYPE mermin_ebpf_ringbuf_packets_total counter
+mermin_ebpf_ringbuf_packets_total{type="received",interface="eth0"} 98234
+mermin_ebpf_ringbuf_packets_total{type="malformed",interface="eth0"} 12
 
-# HELP mermin_flow_table_size Current number of active flows
-# TYPE mermin_flow_table_size gauge
-mermin_flow_table_size 456
+# HELP mermin_userspace_ringbuf_packets_total Total packets in userspace ring buffer
+# TYPE mermin_userspace_ringbuf_packets_total counter
+mermin_userspace_ringbuf_packets_total{type="received"} 98000
+mermin_userspace_ringbuf_packets_total{type="dropped"} 12
+mermin_userspace_ringbuf_packets_total{type="filtered"} 200
 
-# HELP mermin_export_errors_total Total number of export errors
-# TYPE mermin_export_errors_total counter
-mermin_export_errors_total{exporter="otlp"} 3
+# HELP mermin_span_active Currently active flows
+# TYPE mermin_span_active gauge
+mermin_span_active 456
 
-# HELP mermin_export_latency_seconds Export latency in seconds
-# TYPE mermin_export_latency_seconds histogram
-mermin_export_latency_seconds_bucket{le="0.01"} 1234
-mermin_export_latency_seconds_bucket{le="0.05"} 2345
-mermin_export_latency_seconds_bucket{le="0.1"} 3456
-mermin_export_latency_seconds_sum 456.78
-mermin_export_latency_seconds_count 3456
+# HELP mermin_span_processed_total Total flows processed and expired
+# TYPE mermin_span_processed_total counter
+mermin_span_processed_total{reason="idle"} 8234
+mermin_span_processed_total{reason="fin"} 3210
+mermin_span_processed_total{reason="rst"} 89
+
+# HELP mermin_span_sent_total Total spans sent to exporters
+# TYPE mermin_span_sent_total counter
+mermin_span_sent_total{status="sent",exporter="otlp"} 11533
+mermin_span_sent_total{status="failed",exporter="otlp"} 3
+
+# HELP mermin_k8s_informer_object_total Number of objects in informer cache
+# TYPE mermin_k8s_informer_object_total gauge
+mermin_k8s_informer_object_total{kind="Pod"} 145
+mermin_k8s_informer_object_total{kind="Service"} 32
+
+# HELP mermin_export_otlp_spans_sent_total Total OTLP spans sent
+# TYPE mermin_export_otlp_spans_sent_total counter
+mermin_export_otlp_spans_sent_total{status="success"} 11533
+mermin_export_otlp_spans_sent_total{status="error"} 3
+
+# HELP mermin_export_otlp_duration_seconds Export latency in seconds
+# TYPE mermin_export_otlp_duration_seconds histogram
+mermin_export_otlp_duration_seconds_bucket{le="0.01"} 1234
+mermin_export_otlp_duration_seconds_bucket{le="0.05"} 2345
+mermin_export_otlp_duration_seconds_bucket{le="0.1"} 3456
+mermin_export_otlp_duration_seconds_sum 456.78
+mermin_export_otlp_duration_seconds_count 3456
+
+# HELP mermin_export_queue_size Current size of export queue
+# TYPE mermin_export_queue_size gauge
+mermin_export_queue_size{exporter="otlp"} 23
 ```
 
 ## Prometheus Integration
@@ -342,29 +497,51 @@ scrape_configs:
 
 ### Key Metrics to Monitor
 
-**Flow Processing:**
+{% hint style="success" %}
+Monitor these key metrics to ensure Mermin is operating correctly. Metrics are organized by subsystem for easier troubleshooting.
+{% endhint %}
 
-* `rate(mermin_flows_total[5m])`: Flows per second
-* `rate(mermin_packets_total[5m])`: Packets per second
-* `mermin_flow_table_size`: Active flow count
+**eBPF Layer:**
+- `mermin_ebpf_programs_loaded{program}`: eBPF program status (should be 1)
+- `rate(mermin_ebpf_ringbuf_packets_total{type="received"}[5m])`: Packets captured per second
+- `rate(mermin_ebpf_ringbuf_packets_total{type="malformed"}[5m])`: Malformed packet rate
 
-**Performance:**
+**Userspace Processing:**
+- `rate(mermin_userspace_ringbuf_packets_total{type="received"}[5m])`: Packets received per second
+- `rate(mermin_userspace_ringbuf_packets_total{type="dropped"}[5m])`: Packet drop rate (should be near zero)
+- `mermin_userspace_channel_size{channel} / mermin_userspace_channel_capacity{channel}`: Channel utilization
 
-* `rate(mermin_packets_dropped_total[5m])`: Packet drop rate
-* `mermin_export_latency_seconds`: Export latency
-* CPU and memory usage from container metrics
+**Flow Span Generation:**
+- `mermin_span_active`: Currently active flows
+- `rate(mermin_span_processed_total[5m])`: Flows expired per second
+- `rate(mermin_span_sent_total{status="sent"}[5m])`: Spans exported per second
+- `rate(mermin_span_sent_total{status="failed"}[5m])`: Failed span exports (should be near zero)
 
-**Errors:**
+**Kubernetes Integration:**
+- `mermin_k8s_client_up`: Kubernetes API connection status (should be 1)
+- `mermin_k8s_informer_object_total{kind}`: Number of cached Kubernetes objects
+- `mermin_k8s_decorator_lookup_duration_seconds`: K8s metadata lookup latency
+- `rate(mermin_k8s_decorator_spans_processed_total{status="fail"}[5m])`: Failed decoration rate
 
-* `rate(mermin_export_errors_total[5m])`: Export failure rate
-* Log error count from log aggregation
+**Export Performance:**
+- `rate(mermin_export_otlp_spans_sent_total{status="success"}[5m])`: Successful OTLP exports per second
+- `rate(mermin_export_otlp_spans_sent_total{status="error"}[5m])`: Export errors (should be near zero)
+- `mermin_export_otlp_duration_seconds`: Export latency histogram
+- `mermin_export_queue_size{exporter}`: Export queue depth
+
+**Application Health:**
+- `mermin_build_info`: Build version and Git SHA
+- `mermin_health_overall`: Overall health status (should be 1)
 
 **Resource Usage:**
-
-* `container_cpu_usage_seconds_total`: CPU usage
-* `container_memory_working_set_bytes`: Memory usage
+- `container_cpu_usage_seconds_total`: CPU usage from container metrics
+- `container_memory_working_set_bytes`: Memory usage from container metrics
 
 ### Grafana Dashboard Example
+
+{% hint style="info" %}
+This example demonstrates a basic Grafana dashboard for monitoring Mermin. Consider organizing panels by subsystem (eBPF, Userspace, Span, K8s, Export) for easier troubleshooting.
+{% endhint %}
 
 ```json
 {
@@ -372,18 +549,18 @@ scrape_configs:
     "title": "Mermin Network Flows",
     "panels": [
       {
-        "title": "Flows per Second",
+        "title": "Packet Capture Rate (eBPF)",
         "targets": [
           {
-            "expr": "rate(mermin_flows_total[5m])"
+            "expr": "rate(mermin_ebpf_ringbuf_packets_total{type=\"received\"}[5m])"
           }
         ]
       },
       {
-        "title": "Packet Drop Rate",
+        "title": "Packet Drop Rate (Userspace)",
         "targets": [
           {
-            "expr": "rate(mermin_packets_dropped_total[5m])"
+            "expr": "rate(mermin_userspace_ringbuf_packets_total{type=\"dropped\"}[5m])"
           }
         ]
       },
@@ -391,7 +568,47 @@ scrape_configs:
         "title": "Active Flows",
         "targets": [
           {
-            "expr": "mermin_flow_table_size"
+            "expr": "mermin_span_active"
+          }
+        ]
+      },
+      {
+        "title": "Flow Processing Rate",
+        "targets": [
+          {
+            "expr": "rate(mermin_span_processed_total[5m])"
+          }
+        ]
+      },
+      {
+        "title": "Span Export Success Rate",
+        "targets": [
+          {
+            "expr": "rate(mermin_span_sent_total{status=\"sent\"}[5m])"
+          }
+        ]
+      },
+      {
+        "title": "OTLP Export Latency (p95)",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(mermin_export_otlp_duration_seconds_bucket[5m]))"
+          }
+        ]
+      },
+      {
+        "title": "K8s Objects Cached",
+        "targets": [
+          {
+            "expr": "mermin_k8s_informer_object_total"
+          }
+        ]
+      },
+      {
+        "title": "Export Queue Depth",
+        "targets": [
+          {
+            "expr": "mermin_export_queue_size"
           }
         ]
       }
@@ -489,13 +706,16 @@ metrics {
 
 ### High Metrics Cardinality
 
-**Symptoms:** Too many unique metric series
+**Symptoms:** Too many unique metric series, Prometheus performance degradation
+
+{% hint style="warning" %}
+High cardinality can occur if labels have too many unique values. Mermin's metrics use bounded label sets (e.g., `program`, `status`, `reason`, `exporter`) to prevent cardinality explosion. Avoid adding custom high-cardinality labels like IP addresses or pod names in PromQL queries.
+{% endhint %}
 
 **Solutions:**
-
-1. Limit labels in metrics
-2. Use aggregation in queries
-3. Adjust Prometheus retention
+1. Use label aggregation in queries: `sum by (status) (rate(mermin_span_sent_total[5m]))`
+2. Adjust Prometheus retention policies
+3. Review metric recording rules to pre-aggregate high-frequency queries
 
 ## Next Steps
 
