@@ -24,12 +24,12 @@ Flow Traces are OpenTelemetry trace spans that represent network flows with NetF
 
 This documentation is designed to help you successfully deploy, configure, and operate Mermin in your environment. You'll find:
 
-* [**Quick Start Guide**](welcome/getting-started/quickstart.md): Get Mermin running in minutes on a local Kubernetes cluster
-* [**Architecture Overview**](welcome/getting-started/architecture.md): Understand how Mermin works and its data flow
-* [**Deployment Guides**](welcome/deployment/deployment.md): Detailed instructions for various deployment scenarios (Kubernetes, cloud platforms, bare metal)
-* [**Configuration Reference**](welcome/configuration/configuration.md): Comprehensive documentation of all configuration options
-* [**Observability Backends**](welcome/observability/backends.md): Send Flow Traces to Elastic, Grafana Tempo, Jaeger, and other OTLP-compatible platforms
-* [**Troubleshooting**](welcome/troubleshooting/troubleshooting.md): Solutions to common issues and diagnostic approaches
+* [**Quick Start Guide**](getting-started/quickstart.md): Get Mermin running in minutes on a local Kubernetes cluster
+* [**Architecture Overview**](getting-started/architecture.md): Understand how Mermin works and its data flow
+* [**Deployment Guides**](deployment/deployment.md): Detailed instructions for various deployment scenarios (Kubernetes, cloud platforms, bare metal)
+* [**Configuration Reference**](configuration/configuration.md): Comprehensive documentation of all configuration options
+* [**Observability Backends**](observability/backends.md): Send Flow Traces to Elastic, Grafana Tempo, Jaeger, and other OTLP-compatible platforms
+* [**Troubleshooting**](troubleshooting/troubleshooting.md): Solutions to common issues and diagnostic approaches
 
 ## System Requirements
 
@@ -56,10 +56,10 @@ If you encounter issues or have questions:
 
 * [**GitHub Issues**](https://github.com/elastiflow/mermin/issues): Report bugs or request features
 * [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions and engage with the community
-* [**Troubleshooting Guide**](welcome/troubleshooting/troubleshooting.md): Check common issues and solutions
+* [**Troubleshooting Guide**](troubleshooting/troubleshooting.md): Check common issues and solutions
 
 ## Next Steps
 
-Ready to get started? Follow our [**Quick Start Guide**](welcome/getting-started/quickstart.md) to deploy Mermin on a local Kubernetes cluster in minutes.
+Ready to get started? Follow our [**Quick Start Guide**](getting-started/quickstart.md) to deploy Mermin on a local Kubernetes cluster in minutes.
 
-For production deployments, review the [**Deployment Overview**](welcome/deployment/deployment.md) to understand your deployment options and best practices.
+For production deployments, review the [**Deployment Overview**](deployment/deployment.md) to understand your deployment options and best practices.
