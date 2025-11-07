@@ -59,258 +59,25 @@ discovery "instrument" {
   #   "azure*",     # Azure CNI
   #   "ovn-k8s*",   # OVN-Kubernetes
   # ]
+
+  # Automatically discover and attach to new interfaces matching patterns
+  # Recommended for ephemeral interfaces like veth* (created/destroyed with pods)
+  # Default: true
+  # auto_discover_interfaces = true
 }
 ```
-
-## Interface Patterns
-
-Mermin supports three pattern types for interface matching:
-
-### 1. Literal Names
-
-Exact interface name matching:
-
-```hcl
-discovery "instrument" {
-  interfaces = ["eth0", "ens32"]
-}
-```
-
-* Matches exactly `eth0` and `ens32`
-* No wildcards or patterns
-* Most explicit, least flexible
-
-### 2. Glob Patterns
-
-Shell-style wildcard matching:
-
-```hcl
-discovery "instrument" {
-  interfaces = ["eth*", "ens?3"]
-}
-```
-
-**Wildcard Characters:**
-
-* `*`: Matches zero or more characters
-  * `eth*` matches `eth0`, `eth1`, `eth10`, etc.
-* `?`: Matches exactly one character
-  * `ens?3` matches `ens03`, `ens13`, but not `ens3` or `ens123`
-
-**Examples:**
-
-```hcl
-discovery "instrument" {
-  interfaces = [
-    "eth*",      # Matches eth0, eth1, eth10, etc.
-    "ens*",      # Matches ens32, ens33, ens160, etc.
-    "en?",       # Matches en0, en1, but not en10
-    "cni*",      # Matches cni0, cni1, cniXXXXXXXX
-    "cilium_*",  # Matches cilium_host, cilium_net, etc.
-  ]
-}
-```
-
-### 3. Regex Patterns
-
-Full regular expression matching (enclosed in `/`):
-
-```hcl
-discovery "instrument" {
-  interfaces = ["/^eth[0-9]+$/", "/^ens[0-9]{1,3}$/"]
-}
-```
-
-**Regex syntax:**
-
-* Pattern must be enclosed in forward slashes: `/pattern/`
-* Supports full regex syntax
-* Maximum pattern length: 256 characters (security limit)
-
-**Examples:**
-
-```hcl
-discovery "instrument" {
-  interfaces = [
-    "/^eth\\d+$/",              # Matches eth0, eth1, eth123
-    "/^(en|eth)[0-9]+$/",       # Matches en0, en1, eth0, eth1
-    "/^ens[0-9]{1,3}$/",        # Matches ens0-ens999
-    "/^ens3[0-9]$/"             # Only ens30-ens39    
-    "/^(cni|gke|cilium_).*/",   # Matches CNI interfaces
-  ]
-}
-```
-
-{% hint style="warning" %}
-Regex patterns must escape special characters. Use `\\d` for digits, `\\w` for word characters, etc.
-{% endhint %}
-
-## Pattern Resolution
-
-Mermin resolves patterns at startup and configuration reload:
-
-1. **List available interfaces**: Queries the host's network interfaces
-2. **Apply patterns**: Matches each pattern against available interfaces
-3. **Deduplicate**: Removes duplicate interfaces if matched by multiple patterns
-4. **Attach eBPF programs**: Attaches to all resolved interfaces
-
-### Resolution Example
-
-**Host interfaces:**
-
-```
-eth0, eth1, ens32, ens33, lo, docker0, cni0, cni123abc
-```
-
-**Configuration:**
-
-```hcl
-discovery "instrument" {
-  interfaces = ["eth*", "ens*", "cni*"]
-}
-```
-
-**Resolved interfaces:**
-
-```
-eth0, eth1, ens32, ens33, cni0, cni123abc
-```
-
-**Not included:** `lo` (loopback), `docker0` (not matched)
-
-## Default Configuration
-
-If `interfaces` is empty or not specified, Mermin uses these defaults:
-
-```hcl
-discovery "instrument" {
-  interfaces = [
-    "veth*",      # Same-node pod-to-pod traffic
-    "tunl*",      # Calico IPIP tunnels (IPv4)
-    "ip6tnl*",    # IPv6 tunnels (Calico, dual-stack)
-    "vxlan*",     # VXLAN overlays
-    "flannel*",   # Flannel interfaces
-    "cali*",      # Calico interfaces
-    "cilium_*",   # Cilium overlays
-    "lxc*",       # Cilium pod interfaces
-    "gke*",       # GKE interfaces
-    "eni*",       # AWS VPC CNI
-    "azure*",     # Azure CNI
-    "ovn-k8s*",   # OVN-Kubernetes
-  ]
-}
-```
-
-**Strategy**: Complete visibility without flow duplication
-
-* **`veth*`** captures all same-node pod-to-pod traffic (works with all bridge-based CNIs)
-* **Tunnel/overlay interfaces** (`tunl*`, `ip6tnl*`, `vxlan*`, `flannel*`) capture inter-node traffic for both IPv4 and IPv6
-* **CNI-specific interfaces** (`cali*`, `cilium_*`, `lxc*`, `gke*`, `eni*`, `azure*`, `ovn-k8s*`) for various network plugins
-* **No physical interfaces** (`eth*`, `ens*`) or bridge interfaces (`cni0`, `docker0`) to avoid duplication or missing same-node traffic
-
-This works for most CNI configurations including Flannel, Calico, Cilium, kindnetd, and cloud providers. Supports dual-stack (IPv4+IPv6) clusters.
-
-## Traffic Visibility Strategies
-
-The interfaces you monitor determine what traffic Mermin captures:
-
-### Complete Visibility (Default)
-
-Monitor veth pairs and tunnel/overlay interfaces:
-
-```hcl
-discovery "instrument" {
-  interfaces = [
-    "veth*",      # Same-node traffic
-    "tunl*",      # Inter-node tunnels (Calico)
-    "flannel*",   # Inter-node (Flannel)
-    # ... other CNI-specific patterns
-  ]
-}
-```
-
-**Captures:**
-
-* ✅ Same-node pod-to-pod traffic (via veth)
-* ✅ Inter-node traffic (via tunnel/overlay interfaces)
-* ✅ No flow duplication (separate packet paths)
-
-**Trade-offs:**
-
-* ⚠️ Higher overhead (monitors many veth interfaces in large clusters)
-* ⚠️ Veth interfaces churn (created/destroyed with pods)
-
-**Use cases:**
-
-* Complete network observability
-* Debugging same-node communication
-* Most production deployments
-
-### Inter-Node Only (Lower Overhead)
-
-Monitor only physical interfaces:
-
-```hcl
-discovery "instrument" {
-  interfaces = ["eth*", "ens*"]
-}
-```
-
-**Captures:**
-
-* ✅ Traffic between nodes
-* ✅ Traffic to/from external networks
-* ❌ **Misses same-node pod-to-pod traffic**
-
-**Trade-offs:**
-
-* ✅ Low overhead (few interfaces)
-* ❌ Incomplete visibility
-* ⚠️ May cause duplication with veth monitoring
-
-**Use cases:**
-
-* Clusters with minimal same-node communication
-* Cost-sensitive deployments
-* External traffic focus
-
-### Intra-Node Traffic Only
-
-Monitor both physical and CNI interfaces:
-
-```hcl
-discovery "instrument" {
-  interfaces = ["eth*", "ens*", "cni*", "gke*", "cilium_*"]
-}
-```
-
-**Captures:**
-
-* ✅ All inter-node traffic
-* ✅ All intra-node pod-to-pod traffic
-* ⚠️ **May see duplicate flows** (same traffic captured on multiple interfaces)
-
-**Use cases:**
-
-* Complete visibility requirements
-* Debugging pod-to-pod communication
-* Compliance or security auditing
-
-{% hint style="info" %}
-For most use cases, the default configuration (complete visibility with veth + tunnel interfaces) provides comprehensive observability without duplication.
-{% endhint %}
 
 ## Dynamic Interface Discovery
 
 Mermin includes an **Interface Controller** that automatically discovers and manages network interfaces. The controller continuously watches for interface changes and synchronizes the configured patterns with active interfaces, attaching/detaching eBPF programs as interfaces are created and destroyed. This is particularly useful for ephemeral interfaces like veth pairs that come and go with pods.
 
-### Configuration
+Configuration:
 
 ```hcl
 discovery "instrument" {
   interfaces = ["veth*", "tunl*", "flannel*"]
 
-  # Enable the interface controller for automatic monitoring (default: true)
+  # Enable the interface controller for dynamic interface attachment (default: true)
   auto_discover_interfaces = true
 }
 ```
@@ -340,7 +107,7 @@ discovery "instrument" {
 * TC link IDs tracked for clean detachment
 * Pattern matching happens once during discovery, not per-packet
 
-### Static vs. Dynamic Interfaces
+### Static vs. Dynamic Interfaces examples
 
 **Static interfaces** (attached at startup only):
 
@@ -370,224 +137,40 @@ discovery "instrument" {
 * Netlink socket overhead is negligible (<100KB)
 
 **Scaling:**
-
-* Tested with 10,000+ veth interfaces without performance degradation
-* Controller syncing happens asynchronously, doesn't block packets
-* Event-driven architecture scales efficiently with high pod churn
-* O(1) lookups for interface state and TC link management
+- Controller syncing happens asynchronously, doesn't block packets
+- Event-driven architecture scales efficiently with high pod churn
+- O(1) lookups for interface state and TC link management
 
 ### Disabling the Interface Controller
 
-For specialized scenarios where you only want static interface monitoring:
-
-```hcl
-discovery "instrument" {
-  interfaces = ["tunl*", "flannel*"]  # Exclude veth*
-  auto_discover_interfaces = false
-}
-```
+For specialized scenarios where you only want static interface monitoring you may set `auto_discover_interfaces = false`
 
 This disables the controller's synchronization and watches only interfaces present at startup. Note: With the interface controller enabled, there's no performance reason to disable this feature - the overhead is negligible.
-
-{% hint style="warning" %}
-When `auto_discover_interfaces` is disabled, the Interface Controller does not run. Mermin only attaches to interfaces present at startup. New interfaces created after startup will not be monitored until Mermin is restarted.
-{% endhint %}
-
-## CNI-Specific Patterns
-
-Different Container Network Interfaces create different interface patterns:
-
-### Flannel
-
-```hcl
-discovery "instrument" {
-  # Physical for inter-node, cni for intra-node
-  interfaces = ["eth*", "ens*", "cni*"]
-}
-```
-
-Flannel typically creates `cni0` bridge interface.
-
-### Calico
-
-```hcl
-discovery "instrument" {
-  # Physical for inter-node, cali for intra-node
-  interfaces = ["eth*", "ens*", "cali*"]
-}
-```
-
-Calico creates `caliXXXXXXXX` interfaces for each pod.
-
-### Cilium
-
-```hcl
-discovery "instrument" {
-  # Physical for inter-node, cilium_ for intra-node
-  interfaces = ["eth*", "ens*", "cilium_*"]
-}
-```
-
-Cilium uses `cilium_host` and `cilium_net` interfaces.
-
-### GKE
-
-```hcl
-discovery "instrument" {
-  # GKE-specific patterns
-  interfaces = ["eth*", "gke*"]
-}
-```
-
-GKE creates `gkeXXXXXXXX` interfaces for pods.
-
-### Weave Net
-
-```hcl
-discovery "instrument" {
-  interfaces = ["eth*", "ens*", "weave"]
-}
-```
-
-Weave Net uses a `weave` interface.
-
-## Cloud Provider Patterns
-
-### AWS (EKS)
-
-```hcl
-discovery "instrument" {
-  # Primary ENI and secondary ENIs
-  interfaces = ["eth*", "eni*"]
-}
-```
-
-### GCP (GKE)
-
-```hcl
-discovery "instrument" {
-  interfaces = ["eth*", "gke*"]
-}
-```
-
-### Azure (AKS)
-
-```hcl
-discovery "instrument" {
-  interfaces = ["eth*"]
-}
-```
-
-### Bare Metal / On-Premises
-
-```hcl
-discovery "instrument" {
-  # Traditional or predictable naming
-  interfaces = ["eth*", "ens*", "eno*", "enp*"]
-}
-```
-
-## Advanced Patterns
-
-### Exclude Specific Interfaces
-
-While Mermin doesn't support exclusion patterns directly, use specific patterns to include only desired interfaces:
-
-```hcl
-discovery "instrument" {
-  # Use regex to exclude
-  interfaces = [
-    "/^eth[0-9]+$/",     # Only eth0-eth9 (not eth10+)
-    "/^ens3[0-9]$/"      # Only ens30-ens39
-  ]
-}
-```
-
-### Dynamic Interface Discovery
-
-Use broad patterns that adapt to host configuration:
-
-```hcl
-discovery "instrument" {
-  interfaces = [
-    "eth*",   # Traditional
-    "ens*",   # Predictable (systemd)
-    "en*",    # macOS/BSD style
-    "eno*",   # Onboard devices
-    "enp*",   # PCI devices
-  ]
-}
-```
 
 ## Troubleshooting
 
 ### No Interfaces Matched
 
-**Symptom:** Log message "no interfaces matched configured patterns"
+**Symptom:** No flow are showing for expected interfaces
 
 **Solutions:**
 
 1. **List available interfaces:**
-   Using kubectl debug command
-   ```bash
-   kubectl debug node/${NODE_NAME} -it --image=busybox --profile=sysadmin
-   ip link show
-   # or
-   ls -1 /sys/class/net/
-   ```
+    Using kubectl debug command
+    ```bash
+    kubectl debug node/${NODE_NAME} -it --image=busybox --profile=sysadmin
+    ip link show
+    # or
+    ls -1 /sys/class/net/
+    ```
 
 2. **Test pattern matching:**
-   ```bash
-   # Check if pattern matches
-   ls -1 /sys/class/net/ | grep -E '${INTERFACE_PATTERN}'
-   # For example
-   ls -1 /sys/class/net/ | grep -E '^(cni|gke|cilium_).*'
-   ```
-
-3. **Update configuration:**
-   ```hcl
-   discovery "instrument" {
-     interfaces = ["cilium_host", "cilium_name", "gkef0b001f9234"]  # Use exact name from ip link show
-   }
-   ```
-
-### Interface Not Found
-
-**Symptom:** Warning log "configured interface was not found on the host"
-
-**Causes:**
-
-* Interface doesn't exist
-* Interface name changed
-* Node has different interface naming
-
-**Solutions:**
-
-1. Verify interface exists: `ip link show`
-2. Use glob patterns instead of exact names
-3. Check if interface is created after Mermin starts
-
-### Capturing Too Much Traffic
-
-**Symptom:** High CPU/memory usage, too many flows
-
-**Solutions:**
-
-1.  **Reduce monitored interfaces:**
-
-    ```hcl
-    discovery "instrument" {
-      interfaces = ["eth0"]  # Monitor only primary interface
-    }
+    ```bash
+    # Check if pattern matches
+    ls -1 /sys/class/net/ | grep '${INTERFACE_PATTERN}'
+    # For example
+    ls -1 /sys/class/net/ | grep 'gke*'
     ```
-2.  **Remove CNI interfaces:**
-
-    ```hcl
-    discovery "instrument" {
-      interfaces = ["eth*", "ens*"]  # Remove cni*, cali*, etc.
-    }
-    ```
-3. **Add flow filters** (see [Filtering](filtering.md))
 
 ### Flow Duplication
 
@@ -598,21 +181,26 @@ discovery "instrument" {
 * Monitoring both physical and virtual interfaces
 * Same packet traverses multiple monitored interfaces
 
-**Solutions:**
+**Solution:**
+  Tweak the monitored interfaces, you may need to experiment with interface match patterns, for example:
+  ```hcl
+  discovery "instrument" {
+    interfaces = ["veth*"]  # include only veth interfaces
+  }
+  ```
 
-## Monitoring Interface Resolution
+### Monitoring Interface Resolution
 
-Check logs to see which interfaces Mermin resolved:
+You can see which interfaces were resolved by Mermin in logs:
 
 ```bash
-kubectl logs <pod> | grep -i interface
+kubectl logs <pod> | grep -E '(discovered|resolved).+ interface'
 ```
 
 Example log output:
-
-```
-INFO Resolved interfaces interfaces=["eth0","eth1","ens32"]
-INFO eBPF programs attached interfaces=["eth0","eth1","ens32"]
+```text
+... discovered interface from host namespace ... [ INTERFACE_LIST ]
+... resolved interface from patterns ... [ INTERFACE_LIST ]
 ```
 
 ## Best Practices
@@ -620,9 +208,8 @@ INFO eBPF programs attached interfaces=["eth0","eth1","ens32"]
 1. **Start with defaults**: Use default patterns for initial deployment
 2. **Monitor metrics**: Watch packet/flow counts per interface
 3. **Test patterns**: Validate interface resolution in non-production first
-4. **Avoid wildcards for production**: Use specific patterns when possible
-5. **Document choices**: Comment why specific interfaces are monitored
-6. **Review periodically**: Interface naming may change with OS upgrades
+4. **Document choices**: Comment why specific interfaces are monitored
+5. **Review periodically**: Interface naming may change with OS/CNI/K8s upgrades
 
 ## Next Steps
 
