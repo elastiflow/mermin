@@ -54,29 +54,16 @@ You should see three nodes in the `Ready` state.
 
 Deploy Mermin using the Helm chart with a configuration that outputs flows to stdout (for easy viewing):
 
-<!-- TODO(Cleanup for GA): Should be https://elastiflow.github.io/mermin/ instead of raw.githubusercontent.com..., it is used whilst repo is private -->
-<!-- TODO(Cleanup for GA): Once repo is public, no auth to helm should be needed -->
-<!-- TODO(Cleanup for GA): Review stopped here, everything below was not "dumb-tested" -->
 ```bash
 # Add Mermin Helm registry
-helm repo add \
-  --username x-access-token \
-  --password ${GH_PAT} \
-  mermin https://raw.githubusercontent.com/elastiflow/mermin/gh-pages
+helm repo add mermin https://elastiflow.github.io/mermin
 helm repo update
-
-# Login to GH Docker registry
-kubectl create secret docker-registry ghcr \
-    --docker-server=ghcr.io \
-    --docker-username=elastiflow-ghcr \
-    --docker-password=${GH_CLASSIC_TOKEN}
 
 # Deploy Mermin using Helm
 helm upgrade --install mermin mermin/mermin \
   --set-file config.content=examples/local/config.example.hcl \
   --wait \
-  --timeout 5m \
-  --devel
+  --timeout 5m
 ```
 
 ## Step 3: Verify the Deployment

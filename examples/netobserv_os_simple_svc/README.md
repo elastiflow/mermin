@@ -21,37 +21,18 @@ Notes on the example deployment:
 - You may optionally customize and use `config.hcl` instead of the default config.
 
 ## Install
-<!-- TODO(Cleanup for GA): Once Mermin is GA, drop `--devel` flag -->
 
-<!-- TODO(Cleanup for GA): Once repo is public, this step should become part of the next step without any dependencies -->
-- Add Mermin Helm chart
+- Add Helm charts and Deploy
 
   ```sh
-  helm repo add \
-    --username x-access-token \
-    --password ${GH_PAT} \
-    mermin https://raw.githubusercontent.com/elastiflow/mermin/gh-pages
-  ```
-
-- Deploy the chart
-
-  ```sh
+  helm repo add mermin https://elastiflow.github.io/mermin/
   helm repo add netobserv https://elastiflow.github.io/helm-chart-netobserv/
   helm repo add opensearch https://opensearch-project.github.io/helm-charts/
   helm repo update
-  kubectl create namespace elastiflow
-
-  # TODO(Cleanup for GA): image pull secrets not needed when going public
-  kubectl -n elastiflow create secret docker-registry ghcr \
-      --docker-server=ghcr.io \
-      --docker-username=elastiflow-ghcr \
-      --docker-password=${CLASSIC_GH_TOKEN}
-
   # Deploy
   helm upgrade -i --wait --timeout 15m -n elastiflow \
     -f examples/netobserv_os_simple_svc/values.yaml \
     --set-file mermin.config.content=examples/netobserv_os_simple_svc/config.hcl \
-    --devel \
     mermin mermin/mermin-netobserv-os-stack
   ```
 

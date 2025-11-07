@@ -26,7 +26,6 @@ Notes on the example deployment:
 - You may optionally customize and use `config.hcl` instead of the default config.
 
 ## Install
-<!-- TODO(Cleanup for GA): Once Mermin is GA, drop `--devel` flag -->
 
 The installation process consists of two phases:
 
@@ -36,35 +35,17 @@ The installation process consists of two phases:
 This installation assumes that no additional DNS controllers are running in the cluster. Therefore, it is not possible to know the IP address of the NetObserv gRPC load balancer without extra GCP actions before the NetObserv chart (dependency) is ready.
 
 - Phase 1
-  <!-- TODO(Cleanup for GA): Once repo is public, this step should become part of the next step without any dependencies -->
-  - Add Mermin Helm chart
+  - Add Helm charts and Deploy
 
     ```sh
-    helm repo add \
-      --username x-access-token \
-      --password ${GH_PAT} \
-      mermin https://raw.githubusercontent.com/elastiflow/mermin/gh-pages
-    ```
-
-  - Deploy the chart
-
-    ```sh
+    helm repo add mermin https://elastiflow.github.io/mermin/
     helm repo add netobserv https://elastiflow.github.io/helm-chart-netobserv/
     helm repo add opensearch https://opensearch-project.github.io/helm-charts/
     helm repo update
-    kubectl create namespace elastiflow
-
-    # TODO(Cleanup for GA): image pull secrets not needed when going public
-    kubectl -n elastiflow create secret docker-registry ghcr \
-        --docker-server=ghcr.io \
-        --docker-username=elastiflow-ghcr \
-        --docker-password=${CLASSIC_GH_TOKEN}
-
     # Deploy
     helm upgrade -i --wait --timeout 15m -n elastiflow \
       -f examples/netobserv_os_simple_gke_gw/values.yaml \
       --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
-      --devel \
       mermin mermin/mermin-netobserv-os-stack
     ```
 
@@ -81,7 +62,6 @@ This installation assumes that no additional DNS controllers are running in the 
     helm upgrade -i --wait --timeout 15m -n elastiflow \
       -f examples/netobserv_os_simple_gke_gw/values.yaml \
       --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
-      --devel \
       mermin mermin/mermin-netobserv-os-stack
     ```
 
@@ -104,7 +84,6 @@ rm -rf helm_rendered; helm template -n elastiflow \
   -f examples/netobserv_os_simple_gke_gw/values.yaml \
   --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
   --output-dir helm_rendered \
-  --devel \
   mermin mermin/mermin-netobserv-os-stack
 
 # Diff with existing K8s resources
