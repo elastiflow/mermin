@@ -240,7 +240,7 @@ impl PacketMeta {
     }
 }
 
-/// Parser options for configuring tunnel port detection in eBPF
+/// Parser options for configuring tunnel port detection and protocol parsing in eBPF
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct ParserOptions {
@@ -253,6 +253,12 @@ pub struct ParserOptions {
     /// The port number to use for WireGuard tunnel detection
     /// Default is 51820 as per IANA assignment
     pub wireguard_port: u16,
+    /// Bit flags for protocol parsing (see PARSE_* constants in eBPF code)
+    /// Default is 0x0000 (all optional protocols disabled)
+    pub protocol_flags: u16,
+    /// Maximum header parse depth (number of nested headers to parse)
+    /// Default is 6, range: 1-8
+    pub max_header_depth: u16,
 }
 
 impl Default for ParserOptions {
@@ -261,6 +267,8 @@ impl Default for ParserOptions {
             geneve_port: 6081,
             vxlan_port: 4789,
             wireguard_port: 51820,
+            protocol_flags: 0x0000, // all optional protocols disabled by default
+            max_header_depth: 6,
         }
     }
 }

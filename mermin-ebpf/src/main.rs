@@ -209,6 +209,12 @@ use network_types::{
     },
 };
 
+// Parser configuration bit flags (stored in PARSER_OPTIONS[3] as u16)
+const PARSE_IPV6_HOPOPT: u16 = 1 << 0; // IPv6 Hop-by-Hop Options
+const PARSE_IPV6_FRAG: u16 = 1 << 1; // IPv6 Fragment Header
+const PARSE_IPV6_ROUTE: u16 = 1 << 2; // IPv6 Routing Header
+const PARSE_IPV6_OPTS: u16 = 1 << 3; // IPv6 Destination Options
+
 // todo: verify buffer size
 #[cfg(not(feature = "test"))]
 #[map]
@@ -238,12 +244,13 @@ fn get_packet_meta(ctx: &TcContext) -> Result<&mut PacketMeta, Error> {
 
 #[cfg(not(feature = "test"))]
 #[map]
-static PARSER_OPTIONS: Array<u16> = Array::with_max_entries(3, 0);
+static PARSER_OPTIONS: Array<u16> = Array::with_max_entries(5, 0);
 
 #[cfg(not(feature = "test"))]
 #[inline(always)]
 fn get_parser_options(_ctx: &TcContext) -> Result<ParserOptions, Error> {
-    // Get tunnel ports from Array map (indices: 0=geneve, 1=vxlan, 2=wireguard)
+    // Get configuration from Array map
+    // Indices: 0=geneve, 1=vxlan, 2=wireguard, 3=protocol_flags, 4=max_header_depth
     // NOTE: Changes to these settings require a full restart
     #[allow(static_mut_refs)]
     let geneve_port = PARSER_OPTIONS.get(0).copied().unwrap_or(6081);
@@ -254,11 +261,25 @@ fn get_parser_options(_ctx: &TcContext) -> Result<ParserOptions, Error> {
     #[allow(static_mut_refs)]
     let wireguard_port = PARSER_OPTIONS.get(2).copied().unwrap_or(51820);
 
+    #[allow(static_mut_refs)]
+    let protocol_flags = PARSER_OPTIONS.get(3).copied().unwrap_or(0x0000); // all optional protocols disabled by default
+
+    #[allow(static_mut_refs)]
+    let max_header_depth = PARSER_OPTIONS.get(4).copied().unwrap_or(6);
+
     Ok(ParserOptions {
         geneve_port,
         vxlan_port,
         wireguard_port,
+        protocol_flags,
+        max_header_depth,
     })
+}
+
+/// Check if a protocol is enabled based on bit flags
+#[inline(always)]
+fn is_protocol_enabled(flags: u16, protocol_bit: u16) -> bool {
+    flags & protocol_bit != 0
 }
 
 // Defines what kind of header we expect to process in the current iteration.
@@ -291,9 +312,6 @@ pub enum Error {
     Unsupported,
     InternalError,
 }
-
-#[cfg(not(feature = "test"))]
-const MAX_HEADER_PARSE_DEPTH: usize = 8;
 
 #[cfg(not(feature = "test"))]
 #[classifier]
@@ -373,7 +391,13 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
     meta.tunnel_id = 0;
     meta.tunnel_ipsec_ah_spi = 0;
 
-    for _ in 0..MAX_HEADER_PARSE_DEPTH {
+    // Get parser configuration (protocol flags and max depth)
+    let options = match get_parser_options(&ctx) {
+        Ok(opts) => opts,
+        Err(_) => return TC_ACT_PIPE,
+    };
+
+    for _ in 0..options.max_header_depth as usize {
         let result: Result<(), Error> = match parser.next_hdr {
             HeaderType::Ethernet => parser.parse_ethernet_header(&ctx),
             HeaderType::Ipv4 => parser.parse_ipv4_header(&ctx),
@@ -381,7 +405,13 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             HeaderType::Geneve => parser.parse_geneve_header(&ctx),
             HeaderType::Vxlan => parser.parse_vxlan_header(&ctx),
             HeaderType::Wireguard => parser.parse_wireguard_header(&ctx),
-            HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(&ctx),
+            HeaderType::Proto(IpProto::HopOpt) => {
+                if is_protocol_enabled(options.protocol_flags, PARSE_IPV6_HOPOPT) {
+                    parser.parse_hopopt_header(&ctx)
+                } else {
+                    break;
+                }
+            }
             HeaderType::Proto(IpProto::Gre) => parser.parse_gre_header(&ctx),
             HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx),
             HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx),
@@ -389,14 +419,29 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             HeaderType::Proto(IpProto::Ipv6) => parser.parse_ipv6_encap(&ctx),
             HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx),
             HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx),
-            HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_route_header(&ctx),
-            HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Route) => {
+                if is_protocol_enabled(options.protocol_flags, PARSE_IPV6_ROUTE) {
+                    parser.parse_generic_route_header(&ctx)
+                } else {
+                    break;
+                }
+            }
+            HeaderType::Proto(IpProto::Ipv6Frag) => {
+                if is_protocol_enabled(options.protocol_flags, PARSE_IPV6_FRAG) {
+                    parser.parse_fragment_header(&ctx)
+                } else {
+                    break;
+                }
+            }
             HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
             HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
-            HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx),
-            HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx),
-            HeaderType::Proto(IpProto::Hip) => parser.parse_hip_header(&ctx),
-            HeaderType::Proto(IpProto::Shim6) => parser.parse_shim6_header(&ctx),
+            HeaderType::Proto(IpProto::Ipv6Opts) => {
+                if is_protocol_enabled(options.protocol_flags, PARSE_IPV6_OPTS) {
+                    parser.parse_destopts_header(&ctx)
+                } else {
+                    break;
+                }
+            }
             HeaderType::Proto(_) => {
                 break;
             }
@@ -539,35 +584,6 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
                     err_msg!("ah", malformed)
                 }
                 (HeaderType::Proto(IpProto::Ah), _) => error!(&ctx, "parser failed - ah error"),
-
-                // Other extension headers
-                (HeaderType::Proto(IpProto::MobilityHeader), Error::OutOfBounds) => {
-                    err_msg!("mobility", out_of_bounds)
-                }
-                (HeaderType::Proto(IpProto::MobilityHeader), Error::MalformedHeader) => {
-                    err_msg!("mobility", malformed)
-                }
-                (HeaderType::Proto(IpProto::MobilityHeader), _) => {
-                    error!(&ctx, "parser failed - mobility error")
-                }
-
-                (HeaderType::Proto(IpProto::Hip), Error::OutOfBounds) => {
-                    err_msg!("hip", out_of_bounds)
-                }
-                (HeaderType::Proto(IpProto::Hip), Error::MalformedHeader) => {
-                    err_msg!("hip", malformed)
-                }
-                (HeaderType::Proto(IpProto::Hip), _) => error!(&ctx, "parser failed - hip error"),
-
-                (HeaderType::Proto(IpProto::Shim6), Error::OutOfBounds) => {
-                    err_msg!("shim6", out_of_bounds)
-                }
-                (HeaderType::Proto(IpProto::Shim6), Error::MalformedHeader) => {
-                    err_msg!("shim6", malformed)
-                }
-                (HeaderType::Proto(IpProto::Shim6), _) => {
-                    error!(&ctx, "parser failed - shim6 error")
-                }
 
                 (HeaderType::Proto(IpProto::Gre), Error::OutOfBounds) => {
                     err_msg!("gre", out_of_bounds)
@@ -818,10 +834,7 @@ impl Parser {
             | IpProto::HopOpt
             | IpProto::Ipv6Route
             | IpProto::Ipv6Frag
-            | IpProto::Ipv6Opts
-            | IpProto::MobilityHeader
-            | IpProto::Hip
-            | IpProto::Shim6 => HeaderType::Proto(meta.proto),
+            | IpProto::Ipv6Opts => HeaderType::Proto(meta.proto),
             unsupported => {
                 debug!(
                     ctx,
@@ -867,10 +880,7 @@ impl Parser {
             | IpProto::HopOpt
             | IpProto::Ipv6Route
             | IpProto::Ipv6Frag
-            | IpProto::Ipv6Opts
-            | IpProto::MobilityHeader
-            | IpProto::Hip
-            | IpProto::Shim6 => HeaderType::Proto(meta.proto),
+            | IpProto::Ipv6Opts => HeaderType::Proto(meta.proto),
             unsupported => {
                 debug!(
                     ctx,
@@ -1364,6 +1374,7 @@ impl Parser {
 
     /// Parses the IPv6 Mobility header and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
+    #[allow(dead_code)]
     fn parse_mobility_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + MOBILITY_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
@@ -1382,6 +1393,7 @@ impl Parser {
 
     /// Parses the HIP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
+    #[allow(dead_code)]
     fn parse_hip_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + HIP_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
@@ -1409,6 +1421,7 @@ impl Parser {
 
     /// Parses the Shim6 header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded or is malformed.
+    #[allow(dead_code)]
     fn parse_shim6_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
         if self.offset + SHIM6_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
@@ -1658,6 +1671,8 @@ fn get_parser_options(_ctx: &TcContext) -> Result<ParserOptions, Error> {
         geneve_port: 6081,
         vxlan_port: 4789,
         wireguard_port: 51820,
+        protocol_flags: 0x0000, // all optional protocols disabled by default
+        max_header_depth: 6,
     })
 }
 
@@ -2321,9 +2336,10 @@ mod tests {
         meta.tunnel_id = 0;
         meta.tunnel_ipsec_ah_spi = 0;
 
-        const MAX_HEADER_PARSE_DEPTH: usize = 8;
+        // Get parser configuration (protocol flags and max depth)
+        let options = get_parser_options(&ctx)?;
 
-        for _ in 0..MAX_HEADER_PARSE_DEPTH {
+        for _ in 0..options.max_header_depth as usize {
             let result: Result<(), Error> = match parser.next_hdr {
                 HeaderType::Ethernet => parser.parse_ethernet_header(&ctx),
                 HeaderType::Ipv4 => parser.parse_ipv4_header(&ctx),
@@ -2331,7 +2347,13 @@ mod tests {
                 HeaderType::Geneve => parser.parse_geneve_header(&ctx),
                 HeaderType::Vxlan => parser.parse_vxlan_header(&ctx),
                 HeaderType::Wireguard => parser.parse_wireguard_header(&ctx),
-                HeaderType::Proto(IpProto::HopOpt) => parser.parse_hopopt_header(&ctx),
+                HeaderType::Proto(IpProto::HopOpt) => {
+                    if is_protocol_enabled(options.protocol_flags, PARSE_IPV6_HOPOPT) {
+                        parser.parse_hopopt_header(&ctx)
+                    } else {
+                        break;
+                    }
+                }
                 HeaderType::Proto(IpProto::Gre) => parser.parse_gre_header(&ctx),
                 HeaderType::Proto(IpProto::Icmp) => parser.parse_icmp_header(&ctx),
                 HeaderType::Proto(IpProto::Ipv6Icmp) => parser.parse_icmp_header(&ctx),
@@ -2339,14 +2361,29 @@ mod tests {
                 HeaderType::Proto(IpProto::Ipv6) => parser.parse_ipv6_encap(&ctx),
                 HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx),
                 HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx),
-                HeaderType::Proto(IpProto::Ipv6Route) => parser.parse_generic_route_header(&ctx),
-                HeaderType::Proto(IpProto::Ipv6Frag) => parser.parse_fragment_header(&ctx),
+                HeaderType::Proto(IpProto::Ipv6Route) => {
+                    if is_protocol_enabled(options.protocol_flags, PARSE_IPV6_ROUTE) {
+                        parser.parse_generic_route_header(&ctx)
+                    } else {
+                        break;
+                    }
+                }
+                HeaderType::Proto(IpProto::Ipv6Frag) => {
+                    if is_protocol_enabled(options.protocol_flags, PARSE_IPV6_FRAG) {
+                        parser.parse_fragment_header(&ctx)
+                    } else {
+                        break;
+                    }
+                }
                 HeaderType::Proto(IpProto::Esp) => parser.parse_esp_header(&ctx),
                 HeaderType::Proto(IpProto::Ah) => parser.parse_ah_header(&ctx),
-                HeaderType::Proto(IpProto::Ipv6Opts) => parser.parse_destopts_header(&ctx),
-                HeaderType::Proto(IpProto::MobilityHeader) => parser.parse_mobility_header(&ctx),
-                HeaderType::Proto(IpProto::Hip) => parser.parse_hip_header(&ctx),
-                HeaderType::Proto(IpProto::Shim6) => parser.parse_shim6_header(&ctx),
+                HeaderType::Proto(IpProto::Ipv6Opts) => {
+                    if is_protocol_enabled(options.protocol_flags, PARSE_IPV6_OPTS) {
+                        parser.parse_destopts_header(&ctx)
+                    } else {
+                        break;
+                    }
+                }
                 HeaderType::Proto(_) => {
                     break;
                 }
@@ -2444,6 +2481,8 @@ mod tests {
             geneve_port: 8080,
             vxlan_port: 8081,
             wireguard_port: 8082,
+            protocol_flags: 0x0000,
+            max_header_depth: 6,
         };
 
         // Verify custom options are set
