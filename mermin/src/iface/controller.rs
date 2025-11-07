@@ -295,10 +295,13 @@ impl IfaceController {
             }
         }
 
+        // Convert to sorted Vec for consistent, readable logging
+        let mut resolved_list: Vec<_> = resolved.iter().collect();
+        resolved_list.sort();
         info!(
             event.name = "interface_controller.interfaces_resolved",
             interfaces_count = resolved.len(),
-            interfaces = ?resolved,
+            interfaces = ?resolved_list,
             "resolved interface from patterns"
         );
 
