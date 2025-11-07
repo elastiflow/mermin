@@ -20,6 +20,9 @@ Notes on the example deployment:
   - NetObserv Flow `1000m`/`6144Mi`
 - You may optionally customize and use `config.hcl` instead of the default config.
 
+{% include "docs/deployment/examples/netobserv_os_simple_svc/values.yaml" %}
+
+
 ## Install
 <!-- TODO(Cleanup for GA): Once Mermin is GA, drop `--devel` flag -->
 
