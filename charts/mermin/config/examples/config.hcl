@@ -122,6 +122,11 @@ discovery "instrument" {
   #   "azure*",     # Azure CNI
   #   "ovn-k8s*",   # OVN-Kubernetes
   # ]
+
+  # Automatically discover and attach to new interfaces matching patterns
+  # Recommended for ephemeral interfaces like veth* (created/destroyed with pods)
+  # Default: true
+  # auto_discover_interfaces = true
 }
 
 discovery "informer" "k8s" {

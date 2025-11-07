@@ -20,5 +20,6 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "net", "signal", "sync", "time"] }
 
 [build-dependencies]
+anyhow = { workspace = true }
 aya-build = { workspace = true }
 common-build = { path = "../../../common-build" }

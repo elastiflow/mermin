@@ -107,7 +107,6 @@ jobs:
         run: |
           cd network-types/tests
           make test-ci
-        continue-on-error: true
 
   helm_checks:
     name: Run Helm sanity checks
@@ -203,9 +202,8 @@ jobs:
       id-token: write
     uses: ./.github/workflows/reusable-e2e-tests.yml
     with:
-      test-path: './mermin/tests/e2e/cni/test.sh'
-      image-tag: 'cni-e2e-test'
-
+      test-path: "./mermin/tests/e2e/cni/test.sh"
+      image-tag: "cni-e2e-test"
 
   all_checks:
     name: All Checks
