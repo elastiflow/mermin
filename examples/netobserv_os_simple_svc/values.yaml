@@ -1,8 +1,5 @@
 mermin:
   enabled: true
-  # TODO(Cleanup for GA): image pull secrets not needed when going public
-  imagePullSecrets:
-    - name: ghcr
 
 netobserv-flow:
   enabled: true

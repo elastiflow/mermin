@@ -11,9 +11,9 @@ Mermin is a suite of Kubernetes native network traffic observability tools. It i
 ## Installation
 
 ```sh
-helm repo add elastiflow https://elastiflow.github.io/mermin/
+helm repo add mermin https://elastiflow.github.io/mermin/
 helm repo update
-helm install mermin elastiflow/mermin
+helm install mermin mermin/mermin
 ```
 
 ## Configuration

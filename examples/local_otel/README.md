@@ -17,7 +17,6 @@ Notes on the example deployment:
 - Mermin values use `mermin:latest` image, it is expected you build it and load to your K8s cluster
 
 ## Install
-<!-- TODO(Cleanup for GA): Once Mermin is GA, drop `--devel` flag -->
 
 - Deploy the chart
 
@@ -36,7 +35,7 @@ Notes on the example deployment:
   helm upgrade -i --wait --timeout 15m \
     -f examples/local_otel/values_mermin.yaml \
     --set-file config.content=examples/local_otel/config.hcl \
-    mermin mermin/mermin --devel
+    mermin mermin/mermin
   ```
 
 - Optionally install `metrics-server` to get metrics if it has not been installed yet
