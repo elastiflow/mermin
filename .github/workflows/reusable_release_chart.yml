@@ -158,16 +158,6 @@ jobs:
           preserve_order: true
           make_latest: true
           files: ".cr-release-packages/${{ inputs.chart_name }}*.tgz"
-      # TODO(Cleanup for GA): Once public, no need to push to branches, use releases
-      - name: Push chart to a branch
-        run: |
-          git checkout gh-pages
-          mv .cr-release-packages/${{ inputs.chart_name }}*.tgz ./
-          git add ${{ inputs.chart_name }}*.tgz
-          git commit -m 'chore: Push chart archive'
-          git push origin gh-pages
-          git checkout ${{ github.ref_name }}
-          cr package ${{ inputs.chart_dir }}
       - name: Update GH pages index
         run: |
           mkdir .cr-index
