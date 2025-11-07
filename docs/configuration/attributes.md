@@ -1,10 +1,15 @@
-# Flow Attributes Configuration
+---
+hidden: true
+---
+
+# Flow Attributes
 
 Flow attributes define which Kubernetes metadata to extract and how to associate it with network flows.
 
 ## Overview
 
 The `attributes` configuration has two main components:
+
 1. **Extract**: Which metadata fields to extract from Kubernetes resources
 2. **Association**: How to map flow attributes (IPs, ports) to Kubernetes object fields
 
@@ -56,6 +61,7 @@ attributes "source" "k8s" {
 Array of JSON paths to extract from Kubernetes resources.
 
 **Common extractions:**
+
 ```hcl
 extract {
   metadata = [
@@ -67,9 +73,10 @@ extract {
 ```
 
 **Syntax:**
-- `[*]`: Applies to all resource kinds
-- `pod.metadata.name`: Specific to pods
-- `[*].metadata.labels`: Extract labels
+
+* `[*]`: Applies to all resource kinds
+* `pod.metadata.name`: Specific to pods
+* `[*].metadata.labels`: Extract labels
 
 ## Association Configuration
 
@@ -137,6 +144,6 @@ See `examples/local/config.hcl` in the repository for a complete, working config
 
 ## Next Steps
 
-- **[Kubernetes Informers](kubernetes-informers.md)**: Configure resource watching
-- **[Owner Relations](owner-relations.md)**: Add owner metadata
-- **[Configuration Examples](examples.md)**: See complete configurations
+* [**Kubernetes Informers**](kubernetes-informers.md): Configure resource watching
+* [**Owner Relations**](owner-relations.md): Add owner metadata
+* [**Configuration Examples**](examples.md): See complete configurations

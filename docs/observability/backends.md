@@ -1,4 +1,8 @@
-# Observability Backends
+---
+hidden: true
+---
+
+# Backends
 
 Mermin exports Flow Traces via the **OpenTelemetry Protocol (OTLP)**, which means it works with any OTLP-enabled observability backend or collector.
 
@@ -42,6 +46,7 @@ Elasticsearch with APM Server or OpenTelemetry Collector can ingest OTLP traces.
 **Use Case:** Full-text search, complex aggregations, APM integration, machine learning
 
 **How to Connect:**
+
 * Point Mermin → OpenTelemetry Collector → Elasticsearch exporter
 * Or point Mermin → Elastic APM Server (OTLP endpoint)
 
@@ -54,6 +59,7 @@ Open-source alternative to Elasticsearch with native OTLP support via OpenTeleme
 **Use Case:** Open-source search and analytics, cost-effective storage
 
 **Examples:**
+
 * [`examples/netobserv_os_simple_svc/`](../../examples/netobserv_os_simple_svc/) - Basic OpenSearch setup
 * [`examples/netobserv_os_simple_gke_gw/`](../../examples/netobserv_os_simple_gke_gw/) - GKE deployment with Gateway API
 
@@ -150,6 +156,7 @@ export "traces" {
 ```
 
 View traces in Mermin logs:
+
 ```bash
 kubectl logs -f -l app.kubernetes.io/name=mermin
 ```

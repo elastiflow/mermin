@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Configuration Overview
 
 Mermin uses HCL (HashiCorp Configuration Language) as its primary configuration format, providing a human-readable and flexible way to configure all aspects of the observability agent.

@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Deployment Overview
 
 This section provides comprehensive guidance for deploying Mermin in various environments, from local development to production Kubernetes clusters.

@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Network Interface Discovery
 
 This page explains how Mermin discovers and monitors network interfaces on the host. Interface selection is critical for determining what network traffic Mermin captures.
@@ -28,9 +32,9 @@ discovery "instrument" {
 }
 ```
 
-- Matches exactly `eth0` and `ens32`
-- No wildcards or patterns
-- Most explicit, least flexible
+* Matches exactly `eth0` and `ens32`
+* No wildcards or patterns
+* Most explicit, least flexible
 
 ### 2. Glob Patterns
 
@@ -43,12 +47,14 @@ discovery "instrument" {
 ```
 
 **Wildcard Characters:**
-- `*`: Matches zero or more characters
-  - `eth*` matches `eth0`, `eth1`, `eth10`, etc.
-- `?`: Matches exactly one character
-  - `ens?3` matches `ens03`, `ens13`, but not `ens3` or `ens123`
+
+* `*`: Matches zero or more characters
+  * `eth*` matches `eth0`, `eth1`, `eth10`, etc.
+* `?`: Matches exactly one character
+  * `ens?3` matches `ens03`, `ens13`, but not `ens3` or `ens123`
 
 **Examples:**
+
 ```hcl
 discovery "instrument" {
   interfaces = [
@@ -72,11 +78,13 @@ discovery "instrument" {
 ```
 
 **Regex syntax:**
-- Pattern must be enclosed in forward slashes: `/pattern/`
-- Supports full regex syntax
-- Maximum pattern length: 256 characters (security limit)
+
+* Pattern must be enclosed in forward slashes: `/pattern/`
+* Supports full regex syntax
+* Maximum pattern length: 256 characters (security limit)
 
 **Examples:**
+
 ```hcl
 discovery "instrument" {
   interfaces = [
@@ -104,11 +112,13 @@ Mermin resolves patterns at startup and configuration reload:
 ### Resolution Example
 
 **Host interfaces:**
+
 ```
 eth0, eth1, ens32, ens33, lo, docker0, cni0, cni123abc
 ```
 
 **Configuration:**
+
 ```hcl
 discovery "instrument" {
   interfaces = ["eth*", "ens*", "cni*"]
@@ -116,6 +126,7 @@ discovery "instrument" {
 ```
 
 **Resolved interfaces:**
+
 ```
 eth0, eth1, ens32, ens33, cni0, cni123abc
 ```
@@ -147,10 +158,10 @@ discovery "instrument" {
 
 **Strategy**: Complete visibility without flow duplication
 
-- **`veth*`** captures all same-node pod-to-pod traffic (works with all bridge-based CNIs)
-- **Tunnel/overlay interfaces** (`tunl*`, `ip6tnl*`, `vxlan*`, `flannel*`) capture inter-node traffic for both IPv4 and IPv6
-- **CNI-specific interfaces** (`cali*`, `cilium_*`, `lxc*`, `gke*`, `eni*`, `azure*`, `ovn-k8s*`) for various network plugins
-- **No physical interfaces** (`eth*`, `ens*`) or bridge interfaces (`cni0`, `docker0`) to avoid duplication or missing same-node traffic
+* **`veth*`** captures all same-node pod-to-pod traffic (works with all bridge-based CNIs)
+* **Tunnel/overlay interfaces** (`tunl*`, `ip6tnl*`, `vxlan*`, `flannel*`) capture inter-node traffic for both IPv4 and IPv6
+* **CNI-specific interfaces** (`cali*`, `cilium_*`, `lxc*`, `gke*`, `eni*`, `azure*`, `ovn-k8s*`) for various network plugins
+* **No physical interfaces** (`eth*`, `ens*`) or bridge interfaces (`cni0`, `docker0`) to avoid duplication or missing same-node traffic
 
 This works for most CNI configurations including Flannel, Calico, Cilium, kindnetd, and cloud providers. Supports dual-stack (IPv4+IPv6) clusters.
 
@@ -174,18 +185,21 @@ discovery "instrument" {
 ```
 
 **Captures:**
-- ✅ Same-node pod-to-pod traffic (via veth)
-- ✅ Inter-node traffic (via tunnel/overlay interfaces)
-- ✅ No flow duplication (separate packet paths)
+
+* ✅ Same-node pod-to-pod traffic (via veth)
+* ✅ Inter-node traffic (via tunnel/overlay interfaces)
+* ✅ No flow duplication (separate packet paths)
 
 **Trade-offs:**
-- ⚠️ Higher overhead (monitors many veth interfaces in large clusters)
-- ⚠️ Veth interfaces churn (created/destroyed with pods)
+
+* ⚠️ Higher overhead (monitors many veth interfaces in large clusters)
+* ⚠️ Veth interfaces churn (created/destroyed with pods)
 
 **Use cases:**
-- Complete network observability
-- Debugging same-node communication
-- Most production deployments
+
+* Complete network observability
+* Debugging same-node communication
+* Most production deployments
 
 ### Inter-Node Only (Lower Overhead)
 
@@ -198,19 +212,22 @@ discovery "instrument" {
 ```
 
 **Captures:**
-- ✅ Traffic between nodes
-- ✅ Traffic to/from external networks
-- ❌ **Misses same-node pod-to-pod traffic**
+
+* ✅ Traffic between nodes
+* ✅ Traffic to/from external networks
+* ❌ **Misses same-node pod-to-pod traffic**
 
 **Trade-offs:**
-- ✅ Low overhead (few interfaces)
-- ❌ Incomplete visibility
-- ⚠️ May cause duplication with veth monitoring
+
+* ✅ Low overhead (few interfaces)
+* ❌ Incomplete visibility
+* ⚠️ May cause duplication with veth monitoring
 
 **Use cases:**
-- Clusters with minimal same-node communication
-- Cost-sensitive deployments
-- External traffic focus
+
+* Clusters with minimal same-node communication
+* Cost-sensitive deployments
+* External traffic focus
 
 ### Intra-Node Traffic Only
 
@@ -223,14 +240,16 @@ discovery "instrument" {
 ```
 
 **Captures:**
-- ✅ All inter-node traffic
-- ✅ All intra-node pod-to-pod traffic
-- ⚠️ **May see duplicate flows** (same traffic captured on multiple interfaces)
+
+* ✅ All inter-node traffic
+* ✅ All intra-node pod-to-pod traffic
+* ⚠️ **May see duplicate flows** (same traffic captured on multiple interfaces)
 
 **Use cases:**
-- Complete visibility requirements
-- Debugging pod-to-pod communication
-- Compliance or security auditing
+
+* Complete visibility requirements
+* Debugging pod-to-pod communication
+* Compliance or security auditing
 
 {% hint style="info" %}
 For most use cases, the default configuration (complete visibility with veth + tunnel interfaces) provides comprehensive observability without duplication.
@@ -254,54 +273,63 @@ discovery "instrument" {
 ### How It Works
 
 **Continuous Synchronization:**
-- Maintains desired state (configured interface patterns)
-- Tracks actual state (active interfaces, attached eBPF programs)
-- Synchronizes state by attaching/detaching programs when changes are detected
+
+* Maintains desired state (configured interface patterns)
+* Tracks actual state (active interfaces, attached eBPF programs)
+* Synchronizes state by attaching/detaching programs when changes are detected
 
 **Real-Time Netlink Events:**
-- Watches for Linux netlink RTM_NEWLINK/RTM_DELLINK events
-- Detects interface state changes (UP/DOWN)
-- Automatically syncs when interfaces are created or destroyed
+
+* Watches for Linux netlink RTM\_NEWLINK/RTM\_DELLINK events
+* Detects interface state changes (UP/DOWN)
+* Automatically syncs when interfaces are created or destroyed
 
 **Interface Lifecycle (with Controller):**
-1. **Pod created** → veth pair created → Controller detects RTM_NEWLINK → Attaches eBPF programs
-2. **Pod deleted** → veth pair removed → Controller detects RTM_DELLINK → Detaches eBPF programs
+
+1. **Pod created** → veth pair created → Controller detects RTM\_NEWLINK → Attaches eBPF programs
+2. **Pod deleted** → veth pair removed → Controller detects RTM\_DELLINK → Detaches eBPF programs
 
 **State Management:**
-- Controller owns all interface-related state
-- TC link IDs tracked for clean detachment
-- Pattern matching happens once during discovery, not per-packet
+
+* Controller owns all interface-related state
+* TC link IDs tracked for clean detachment
+* Pattern matching happens once during discovery, not per-packet
 
 ### Static vs. Dynamic Interfaces
 
 **Static interfaces** (attached at startup only):
-- Physical interfaces: `eth0`, `ens32`, `eno1`
-- Tunnel interfaces: `tunl0`, `flannel.1`
-- Bridge interfaces: `cni0`, `docker0`
+
+* Physical interfaces: `eth0`, `ens32`, `eno1`
+* Tunnel interfaces: `tunl0`, `flannel.1`
+* Bridge interfaces: `cni0`, `docker0`
 
 **Dynamic interfaces** (continuously monitored):
-- Veth pairs: `vethXXXXXXXX` (created/destroyed with pods)
-- Temporary interfaces created by CNI plugins
+
+* Veth pairs: `vethXXXXXXXX` (created/destroyed with pods)
+* Temporary interfaces created by CNI plugins
 
 ### Performance Considerations
 
 **Overhead:**
-- Controller has zero CPU overhead when no changes occur
-- Sync operations (attach/detach) are fast (<10ms per interface)
-- No impact on packet processing performance
-- State management happens off the data path
+
+* Controller has zero CPU overhead when no changes occur
+* Sync operations (attach/detach) are fast (<10ms per interface)
+* No impact on packet processing performance
+* State management happens off the data path
 
 **Memory:**
-- Each monitored interface adds ~1KB to memory usage
-- Controller state: patterns, active interfaces, TC links (~100KB baseline)
-- In clusters with 1000 pods (2000 veth interfaces), total is ~2.1MB
-- Netlink socket overhead is negligible (<100KB)
+
+* Each monitored interface adds \~1KB to memory usage
+* Controller state: patterns, active interfaces, TC links (\~100KB baseline)
+* In clusters with 1000 pods (2000 veth interfaces), total is \~2.1MB
+* Netlink socket overhead is negligible (<100KB)
 
 **Scaling:**
-- Tested with 10,000+ veth interfaces without performance degradation
-- Controller syncing happens asynchronously, doesn't block packets
-- Event-driven architecture scales efficiently with high pod churn
-- O(1) lookups for interface state and TC link management
+
+* Tested with 10,000+ veth interfaces without performance degradation
+* Controller syncing happens asynchronously, doesn't block packets
+* Event-driven architecture scales efficiently with high pod churn
+* O(1) lookups for interface state and TC link management
 
 ### Disabling the Interface Controller
 
@@ -454,36 +482,39 @@ discovery "instrument" {
 
 **Solutions:**
 
-1. **List available interfaces:**
-   ```bash
-   kubectl exec <pod> -- ip link show
-   # or on host
-   ip link show
-   ```
+1.  **List available interfaces:**
 
-2. **Test pattern matching:**
-   ```bash
-   # Check if pattern matches
-   ip link show | grep -E "^[0-9]+: eth"
-   ```
+    ```bash
+    kubectl exec <pod> -- ip link show
+    # or on host
+    ip link show
+    ```
+2.  **Test pattern matching:**
 
-3. **Update configuration:**
-   ```hcl
-   discovery "instrument" {
-     interfaces = ["eth0"]  # Use exact name from ip link show
-   }
-   ```
+    ```bash
+    # Check if pattern matches
+    ip link show | grep -E "^[0-9]+: eth"
+    ```
+3.  **Update configuration:**
+
+    ```hcl
+    discovery "instrument" {
+      interfaces = ["eth0"]  # Use exact name from ip link show
+    }
+    ```
 
 ### Interface Not Found
 
 **Symptom:** Warning log "configured interface was not found on the host"
 
 **Causes:**
-- Interface doesn't exist
-- Interface name changed
-- Node has different interface naming
+
+* Interface doesn't exist
+* Interface name changed
+* Node has different interface naming
 
 **Solutions:**
+
 1. Verify interface exists: `ip link show`
 2. Use glob patterns instead of exact names
 3. Check if interface is created after Mermin starts
@@ -493,20 +524,21 @@ discovery "instrument" {
 **Symptom:** High CPU/memory usage, too many flows
 
 **Solutions:**
-1. **Reduce monitored interfaces:**
-   ```hcl
-   discovery "instrument" {
-     interfaces = ["eth0"]  # Monitor only primary interface
-   }
-   ```
 
-2. **Remove CNI interfaces:**
-   ```hcl
-   discovery "instrument" {
-     interfaces = ["eth*", "ens*"]  # Remove cni*, cali*, etc.
-   }
-   ```
+1.  **Reduce monitored interfaces:**
 
+    ```hcl
+    discovery "instrument" {
+      interfaces = ["eth0"]  # Monitor only primary interface
+    }
+    ```
+2.  **Remove CNI interfaces:**
+
+    ```hcl
+    discovery "instrument" {
+      interfaces = ["eth*", "ens*"]  # Remove cni*, cali*, etc.
+    }
+    ```
 3. **Add flow filters** (see [Filtering](filtering.md))
 
 ### Flow Duplication
@@ -514,20 +546,22 @@ discovery "instrument" {
 **Symptom:** Same flow appears multiple times
 
 **Causes:**
-- Monitoring both physical and virtual interfaces
-- Same packet traverses multiple monitored interfaces
+
+* Monitoring both physical and virtual interfaces
+* Same packet traverses multiple monitored interfaces
 
 **Solutions:**
-1. **Monitor only physical interfaces:**
-   ```hcl
-   discovery "instrument" {
-     interfaces = ["eth*", "ens*"]  # Don't include CNI interfaces
-   }
-   ```
 
+1.  **Monitor only physical interfaces:**
+
+    ```hcl
+    discovery "instrument" {
+      interfaces = ["eth*", "ens*"]  # Don't include CNI interfaces
+    }
+    ```
 2. **Deduplicate in backend:**
-   - Use flow fingerprinting (Community ID)
-   - Deduplicate based on 5-tuple + timestamps
+   * Use flow fingerprinting (Community ID)
+   * Deduplicate based on 5-tuple + timestamps
 
 ## Monitoring Interface Resolution
 
@@ -538,6 +572,7 @@ kubectl logs <pod> | grep -i interface
 ```
 
 Example log output:
+
 ```
 INFO Resolved interfaces interfaces=["eth0","eth1","ens32"]
 INFO eBPF programs attached interfaces=["eth0","eth1","ens32"]
@@ -599,7 +634,7 @@ discovery "instrument" {
 
 ## Next Steps
 
-- **[Parser Configuration](parser.md)**: Configure tunnel protocol detection
-- **[Flow Filtering](filtering.md)**: Filter flows by interface name
-- **[Troubleshooting No Flows](../troubleshooting/no-flows.md)**: Diagnose interface issues
-- **[Advanced Scenarios](../deployment/advanced-scenarios.md)**: CNI-specific configurations
+* [**Parser Configuration**](parser.md): Configure tunnel protocol detection
+* [**Flow Filtering**](filtering.md): Filter flows by interface name
+* [**Troubleshooting No Flows**](../troubleshooting/no-flows.md): Diagnose interface issues
+* [**Advanced Scenarios**](../deployment/advanced-scenarios.md): CNI-specific configurations

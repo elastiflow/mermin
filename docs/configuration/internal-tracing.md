@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Internal Tracing
 
 This page documents the `internal.traces` configuration, which controls how Mermin exports its own telemetry data for self-monitoring and debugging.

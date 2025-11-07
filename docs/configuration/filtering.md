@@ -1,14 +1,19 @@
-# Flow Filtering Configuration
+---
+hidden: true
+---
+
+# Flow Filtering
 
 Flow filtering allows you to include or exclude network flows based on various criteria before they are exported, reducing data volume and focusing on relevant traffic.
 
 ## Overview
 
 Mermin supports filtering flows by:
-- Source/destination IP addresses and ports
-- Network protocols and interface names
-- TCP flags, ICMP types
-- Connection states
+
+* Source/destination IP addresses and ports
+* Network protocols and interface names
+* TCP flags, ICMP types
+* Connection states
 
 Filters use glob patterns aligned with OpenTelemetry Binary Instrumentation (OBI) conventions.
 
@@ -68,24 +73,27 @@ filter "flow" {
 
 ### Match Patterns
 
-- **`match`**: Include flows matching this pattern (empty = match all)
-- **`not_match`**: Exclude flows matching this pattern (takes precedence)
+* **`match`**: Include flows matching this pattern (empty = match all)
+* **`not_match`**: Exclude flows matching this pattern (takes precedence)
 
 ### Glob Patterns
 
 **IP addresses and CIDRs:**
-- `10.0.0.0/8`: CIDR notation
-- `192.168.1.*`: Glob wildcard
-- `10.0.0.1,10.0.0.2`: Comma-separated list
+
+* `10.0.0.0/8`: CIDR notation
+* `192.168.1.*`: Glob wildcard
+* `10.0.0.1,10.0.0.2`: Comma-separated list
 
 **Ports:**
-- `80`: Single port
-- `80,443,8080`: Multiple ports
-- `8000-8999`: Port range
+
+* `80`: Single port
+* `80,443,8080`: Multiple ports
+* `8000-8999`: Port range
 
 **Protocols:**
-- `tcp,udp`: Protocol names
-- `established,close_wait`: Connection states
+
+* `tcp,udp`: Protocol names
+* `established,close_wait`: Connection states
 
 ## Source and Destination Filters
 
@@ -94,6 +102,7 @@ filter "flow" {
 Filter by IP address.
 
 **Examples:**
+
 ```hcl
 filter "source" {
   address = {
@@ -108,6 +117,7 @@ filter "source" {
 Filter by port number.
 
 **Examples:**
+
 ```hcl
 filter "source" {
   port = {
@@ -136,6 +146,7 @@ Filter by IP version.
 Filter by network interface.
 
 **Example:**
+
 ```hcl
 filter "network" {
   interface_name = {
@@ -161,11 +172,11 @@ Filter by TCP flags.
 
 ### Other Flow Attributes
 
-- `ip_dscp_name`: DSCP value
-- `ip_ecn_name`: ECN value
-- `ip_ttl`: TTL value
-- `icmp_type_name`: ICMP type
-- `icmp_code_name`: ICMP code
+* `ip_dscp_name`: DSCP value
+* `ip_ecn_name`: ECN value
+* `ip_ttl`: TTL value
+* `icmp_type_name`: ICMP type
+* `icmp_code_name`: ICMP code
 
 ## Common Filtering Scenarios
 
@@ -248,6 +259,6 @@ filter "flow" {
 
 ## Next Steps
 
-- **[Configuration Examples](examples.md)**: See complete filter configurations
-- **[Flow Span Options](span-options.md)**: Configure flow generation
-- **[OTLP Export](export-otlp.md)**: Configure export options
+* [**Configuration Examples**](examples.md): See complete filter configurations
+* [**Flow Span Options**](span-options.md): Configure flow generation
+* [**OTLP Export**](export-otlp.md): Configure export options

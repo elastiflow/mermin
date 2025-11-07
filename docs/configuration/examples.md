@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Configuration Examples
 
 This page provides complete, real-world configuration examples for common Mermin deployment scenarios.

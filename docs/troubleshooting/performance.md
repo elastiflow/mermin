@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Performance Issues
 
 ## Performance Troubleshooting

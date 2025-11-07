@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Architecture
 
 This page explains how Mermin works, its architecture, and the flow of data from network packets to Flow Traces in your observability backend.

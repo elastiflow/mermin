@@ -1,20 +1,27 @@
-# Troubleshooting Kubernetes Metadata Issues
+---
+hidden: true
+---
+
+# Kubernetes Metadata Issues
 
 This guide helps resolve problems with missing or incomplete Kubernetes metadata in network flows.
 
 ## Missing Pod Metadata
 
 ### Symptom
+
 Flows are captured but don't include pod names, namespaces, or labels.
 
 ### Diagnosis
 
 Check if Kubernetes informer is enabled:
+
 ```bash
 kubectl logs mermin-xxxxx -n mermin | grep -i "informer\|kubernetes"
 ```
 
 Expected output:
+
 ```
 INFO Starting Kubernetes informers
 INFO Synced Pod informer
@@ -22,6 +29,7 @@ INFO Synced Service informer
 ```
 
 Check metrics:
+
 ```bash
 curl http://localhost:10250/metrics | grep mermin_kubernetes_objects
 ```
@@ -33,6 +41,7 @@ If object counts are 0, informers aren't working.
 #### 1. Informer Not Configured
 
 **Solution**: Ensure informer is enabled in configuration:
+
 ```hcl
 informer "k8s" {
   # Use in-cluster config (default in Kubernetes)
@@ -52,6 +61,7 @@ informer "k8s" {
 #### 2. RBAC Permissions Missing
 
 **Symptom**: Logs show permission errors:
+
 ```
 ERROR Failed to list pods: pods is forbidden
 ```
@@ -63,6 +73,7 @@ kubectl describe clusterrole mermin
 ```
 
 Required permissions:
+
 ```yaml
 rules:
   - apiGroups: [""]
@@ -80,6 +91,7 @@ rules:
 ```
 
 Apply fix:
+
 ```bash
 kubectl apply -f https://raw.githubusercontent.com/elastiflow/mermin/main/charts/mermin/templates/clusterrole.yaml
 ```
@@ -87,11 +99,13 @@ kubectl apply -f https://raw.githubusercontent.com/elastiflow/mermin/main/charts
 #### 3. Informer Sync Timeout
 
 **Symptom**: Logs show:
+
 ```
 WARN Kubernetes informers did not sync within 30s
 ```
 
 **Solution**: Increase sync timeout for large clusters:
+
 ```hcl
 informer "k8s" {
   informers_sync_timeout = "60s"  # Increase from 30s
@@ -103,6 +117,7 @@ informer "k8s" {
 If namespace filtering is configured, pods outside those namespaces won't have metadata.
 
 **Check configuration**:
+
 ```hcl
 informer "k8s" {
   resources {
@@ -114,6 +129,7 @@ informer "k8s" {
 ```
 
 **Solution**: Add missing namespaces or remove filter:
+
 ```hcl
 informer "k8s" {
   resources {
@@ -125,11 +141,13 @@ informer "k8s" {
 ## Incomplete Owner Information
 
 ### Symptom
+
 Flows show pod information but not deployment, statefulset, or other owner metadata.
 
 ### Diagnosis
 
 Check logs for owner resolution:
+
 ```bash
 kubectl logs mermin-xxxxx -n mermin -grep -i owner
 ```
@@ -139,6 +157,7 @@ kubectl logs mermin-xxxxx -n mermin -grep -i owner
 #### 1. Owner Relations Not Configured
 
 **Solution**: Enable owner relations:
+
 ```hcl
 discovery "owners" {
   max_depth = 5  # Walk up to 5 levels (Pod -> ReplicaSet -> Deployment)
@@ -153,6 +172,7 @@ discovery "owners" {
 **Symptom**: Shows ReplicaSet but not Deployment.
 
 **Solution**: Increase `max_depth`:
+
 ```hcl
 discovery "owners" {
   max_depth = 10  # Increase to walk deeper owner chains
@@ -164,6 +184,7 @@ discovery "owners" {
 **Symptom**: Owner metadata missing for Deployments/StatefulSets but Pod metadata present.
 
 **Solution**: Ensure RBAC includes workload controllers:
+
 ```yaml
 rules:
   - apiGroups: ["apps"]
@@ -174,7 +195,9 @@ rules:
 ## Informer Sync Failures
 
 ### Symptom
+
 Logs repeatedly show:
+
 ```
 ERROR Failed to sync Pod informer: connection refused
 ERROR List operation timeout
@@ -185,6 +208,7 @@ ERROR List operation timeout
 #### 1. Can't Reach Kubernetes API
 
 **Diagnosis**:
+
 ```bash
 # From within Mermin pod
 kubectl exec mermin-xxxxx -n mermin -- curl -k https://kubernetes.default.svc
@@ -197,6 +221,7 @@ kubectl exec mermin-xxxxx -n mermin -- curl -k https://kubernetes.default.svc
 Large clusters with many watchers can overload API server.
 
 **Solution**: Reduce watch load:
+
 ```hcl
 informer "k8s" {
   # Increase resync period (less frequent full list)
@@ -218,6 +243,7 @@ informer "k8s" {
 If running outside Kubernetes (Docker bare metal), kubeconfig is required.
 
 **Solution**:
+
 ```hcl
 informer "k8s" {
   kubeconfig_path = "/etc/kubernetes/admin.conf"
@@ -229,6 +255,7 @@ Ensure kubeconfig is mounted and accessible.
 ## Missing Service or Endpoint Metadata
 
 ### Symptom
+
 Flows show destination pod but not service name.
 
 ### Common Causes
@@ -236,6 +263,7 @@ Flows show destination pod but not service name.
 #### 1. Service Informer Not Enabled
 
 **Solution**:
+
 ```hcl
 informer "k8s" {
   resources {
@@ -251,6 +279,7 @@ informer "k8s" {
 Service metadata only appears if service endpoints exist.
 
 **Diagnosis**:
+
 ```bash
 kubectl get endpoints <service-name> -n <namespace>
 ```
@@ -260,6 +289,7 @@ If endpoints are empty, service won't be associated with flows.
 ## Missing NetworkPolicy Metadata
 
 ### Symptom
+
 No NetworkPolicy information in flows.
 
 ### Solution
@@ -282,6 +312,7 @@ discovery "selector_relations" {
 ## Label and Annotation Filtering
 
 ### Symptom
+
 Some labels/annotations are missing from flows.
 
 Mermin extracts all labels and annotations by default, but you can filter:
@@ -304,17 +335,20 @@ attributes {
 ### Test Flow with Known Pod
 
 1. **Generate traffic from a known pod**:
+
 ```bash
 kubectl run test-client --image=curlimages/curl --labels="app=test" \
   --rm -it -- curl http://kubernetes.default.svc
 ```
 
 2. **Check Mermin logs** for flow with pod metadata:
+
 ```bash
 kubectl logs mermin-xxxxx -n mermin | grep "test-client"
 ```
 
 Expected output includes:
+
 ```
 source.pod.name: test-client
 source.pod.labels.app: test
@@ -323,7 +357,7 @@ source.namespace: default
 
 ## Next Steps
 
-- **[Configuration: Kubernetes Informers](../configuration/kubernetes-informers.md)**: Detailed informer configuration
-- **[Configuration: Owner Relations](../configuration/kubernetes-owner-relations.md)**: Owner reference configuration
-- **[Configuration: Attributes](../configuration/attributes-source-k8s.md)**: Flow attribute extraction
-- **[Deployment Issues](deployment-issues.md)**: RBAC configuration
+* [**Configuration: Kubernetes Informers**](../configuration/kubernetes-informers.md): Detailed informer configuration
+* [**Configuration: Owner Relations**](../configuration/kubernetes-owner-relations.md): Owner reference configuration
+* [**Configuration: Attributes**](../configuration/attributes-source-k8s.md): Flow attribute extraction
+* [**Deployment Issues**](deployment-issues.md): RBAC configuration

@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Kubernetes with Helm
 
 This guide covers deploying Mermin to a Kubernetes cluster using Helm, the recommended method for production deployments.
