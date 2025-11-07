@@ -5,7 +5,10 @@
 //! mermin to attach to host network interfaces without requiring `hostNetwork: true`,
 //! enabling better network isolation while maintaining full monitoring capabilities.
 
-use std::{fs::File, os::fd::AsFd};
+use std::{
+    fs::File,
+    os::fd::{AsFd, AsRawFd, RawFd},
+};
 
 use nix::sched::{CloneFlags, setns};
 use tracing::{debug, error, info};
@@ -19,8 +22,7 @@ use crate::error::{MerminError, Result};
 pub struct NetnsSwitch {
     original_netns: File,
     /// File descriptor for host network namespace (/proc/1/ns/net)
-    /// Made public to allow blocking threads to enter host namespace permanently
-    pub host_netns: File,
+    host_netns: File,
 }
 
 impl NetnsSwitch {
@@ -67,6 +69,20 @@ impl NetnsSwitch {
             original_netns,
             host_netns,
         })
+    }
+
+    /// Get the raw file descriptor for the host network namespace.
+    ///
+    /// This is useful for blocking threads that need to permanently enter
+    /// the host namespace using `setns()`.
+    ///
+    /// # Safety
+    ///
+    /// The returned file descriptor is valid for the lifetime of this `NetnsSwitch`.
+    /// The caller must ensure the file descriptor is not closed while in use, and
+    /// must not close it (the `NetnsSwitch` owns it).
+    pub fn host_netns_fd(&self) -> RawFd {
+        self.host_netns.as_raw_fd()
     }
 
     /// Execute a function in the host network namespace

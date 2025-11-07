@@ -131,7 +131,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    os::fd::{AsRawFd, FromRawFd, OwnedFd},
+    os::fd::{FromRawFd, OwnedFd},
     sync::Arc,
 };
 
@@ -196,12 +196,13 @@ pub enum IfaceEvent {
 /// # Lock Ordering
 ///
 /// When locks are acquired, they must follow this order to prevent deadlocks:
-/// 1. IfaceController mutex (acquired in reconciliation loop)
-/// 2. ebpf mutex (acquired during attach/detach operations)
+/// 1. IfaceController mutex (acquired in reconciliation loop with `.lock().await`)
+/// 2. ebpf mutex (acquired during attach/detach operations with `.lock().await`)
 ///
-/// The `attach_to_iface` method acquires the ebpf mutex and performs synchronous
-/// FFI/syscalls within the critical section via `in_host_namespace`. The critical
-/// section is kept minimal to avoid blocking other operations.
+/// The `attach_to_iface` method acquires the ebpf mutex asynchronously and performs
+/// synchronous FFI/syscalls within the critical section via `in_host_namespace`.
+/// The critical section is kept minimal to avoid blocking other operations. Lock
+/// scopes are explicitly limited to reduce contention.
 pub struct IfaceController {
     /// Glob patterns for matching interface names
     patterns: Vec<String>,
@@ -224,6 +225,13 @@ pub struct IfaceController {
 
 /// TC attachment directions used for iterating over all attach types
 const DIRECTIONS: &[&str] = &["ingress", "egress"];
+
+/// Netlink multicast group ID for link events (RTNLGRP_LINK)
+const RTNLGRP_LINK: i32 = 1;
+
+/// Maximum netlink message size for kernel multicast messages.
+/// 8KB is sufficient for typical netlink messages (2x standard page size).
+const NETLINK_RECV_BUFFER_SIZE: usize = 8192;
 
 impl IfaceController {
     /// Create controller, initialize netns switcher and resolve interface patterns.
@@ -637,7 +645,7 @@ impl IfaceController {
             // Get netns file descriptor for host namespace
             let host_netns_fd = {
                 let controller_guard = ctrl.lock().await;
-                controller_guard.netns_switch.host_netns.as_raw_fd()
+                controller_guard.netns_switch.host_netns_fd()
             };
 
             let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -645,6 +653,10 @@ impl IfaceController {
             // Spawn dedicated blocking thread in host namespace for netlink recv (can't use tokio async here)
             std::thread::spawn(move || {
                 // CRITICAL: Enter host namespace and stay there for entire thread lifetime
+                // SAFETY: host_netns_fd is a valid file descriptor obtained from
+                // NetnsSwitch.host_netns.as_raw_fd() which is guaranteed to outlive
+                // this thread. OwnedFd takes ownership but we're creating a new owned
+                // reference for this thread's lifetime.
                 let host_fd = unsafe { OwnedFd::from_raw_fd(host_netns_fd) };
                 if let Err(e) = setns(&host_fd, CloneFlags::CLONE_NEWNET) {
                     error!(
@@ -668,6 +680,7 @@ impl IfaceController {
                     setsockopt, sockaddr_nl, socket,
                 };
 
+                // SAFETY: socket() syscall is safe to call. We check the return value for errors.
                 let sock_fd = unsafe { socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE as i32) };
                 if sock_fd < 0 {
                     let err = std::io::Error::last_os_error();
@@ -680,11 +693,14 @@ impl IfaceController {
                 }
 
                 // Bind with kernel-assigned PID and no groups (will subscribe via setsockopt instead)
+                // SAFETY: sockaddr_nl is a C-compatible struct that is safe to zero-initialize.
                 let mut addr: sockaddr_nl = unsafe { mem::zeroed() };
                 addr.nl_family = AF_NETLINK as u16;
                 addr.nl_pid = 0;
                 addr.nl_groups = 0;
 
+                // SAFETY: sock_fd is a valid socket descriptor, addr is properly initialized,
+                // and we're passing the correct size. Return value is checked for errors.
                 let ret = unsafe {
                     bind(
                         sock_fd,
@@ -700,18 +716,20 @@ impl IfaceController {
                         error = %err,
                         "failed to bind netlink socket"
                     );
+                    // SAFETY: sock_fd is a valid file descriptor that we own.
                     unsafe { libc::close(sock_fd) };
                     return;
                 }
 
                 // Add multicast group membership using setsockopt
-                let group_id: i32 = 1; // RTNLGRP_LINK = 1
+                // SAFETY: sock_fd is a valid socket, RTNLGRP_LINK is a valid i32 constant,
+                // and we're passing the correct size for the option value.
                 let ret = unsafe {
                     setsockopt(
                         sock_fd,
                         SOL_NETLINK,
                         NETLINK_ADD_MEMBERSHIP,
-                        &group_id as *const i32 as *const c_void,
+                        &RTNLGRP_LINK as *const i32 as *const c_void,
                         mem::size_of::<i32>() as u32,
                     )
                 };
@@ -721,23 +739,26 @@ impl IfaceController {
                     error!(
                         event.name = "interface_controller.setsockopt_failed",
                         error = %err,
-                        group_id = group_id,
+                        group_id = RTNLGRP_LINK,
                         "failed to add netlink multicast group membership"
                     );
+                    // SAFETY: sock_fd is a valid file descriptor that we own.
                     unsafe { libc::close(sock_fd) };
                     return;
                 }
 
                 debug!(
                     event.name = "interface_controller.subscribed_to_link_events",
-                    group_id = group_id,
+                    group_id = RTNLGRP_LINK,
                     socket_fd = sock_fd,
                     "successfully subscribed to RTNLGRP_LINK multicast group in host namespace"
                 );
 
-                let mut buf = vec![0u8; 8192];
+                let mut buf = vec![0u8; NETLINK_RECV_BUFFER_SIZE];
                 loop {
                     // Use raw libc recv (netlink-sys has buffering issues)
+                    // SAFETY: sock_fd is valid, buf is properly sized and mutable,
+                    // and we pass the correct buffer length. Return value checked for errors.
                     let n = unsafe { recv(sock_fd, buf.as_mut_ptr() as *mut c_void, buf.len(), 0) };
 
                     if n < 0 {
@@ -838,6 +859,7 @@ impl IfaceController {
                     }
                 }
 
+                // SAFETY: sock_fd is a valid file descriptor that we own and are done using.
                 unsafe { libc::close(sock_fd) };
                 info!(
                     event.name = "interface_controller.socket_closed",
@@ -857,8 +879,13 @@ impl IfaceController {
                     "received link event from blocking thread channel"
                 );
 
-                let mut controller = ctrl.lock().await;
-                if let Err(e) = controller.reconcile_link(&link_msg, is_new_or_set).await {
+                // Explicitly scope the lock to minimize hold time during reconciliation
+                let result = {
+                    let mut controller = ctrl.lock().await;
+                    controller.reconcile_link(&link_msg, is_new_or_set).await
+                };
+
+                if let Err(e) = result {
                     error!(
                         event.name = "interface_controller.reconcile_error",
                         error = %e,
