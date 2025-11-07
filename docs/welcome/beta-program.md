@@ -8,10 +8,7 @@ Before starting, configure access to the beta Helm charts and container images:
 
 ```bash
 # Add Helm repositories
-helm repo add \
-  --username x-access-token \
-  --password ${GH_PAT} \
-  mermin https://raw.githubusercontent.com/elastiflow/mermin/gh-pages
+helm repo add mermin https://raw.githubusercontent.com/elastiflow/mermin/gh-pages
 
 helm repo add netobserv https://elastiflow.github.io/helm-chart-netobserv/
 helm repo add opensearch https://opensearch-project.github.io/helm-charts/
@@ -19,17 +16,7 @@ helm repo update
 
 # Create namespace and image pull secret
 kubectl create namespace elastiflow
-
-kubectl -n elastiflow create secret docker-registry ghcr \
-    --docker-server=ghcr.io \
-    --docker-username=elastiflow-ghcr \
-    --docker-password=${CLASSIC_GH_TOKEN}
 ```
-
-**Required credentials:**
-
-* `GH_PAT`: Your GitHub Personal Access Token
-* `CLASSIC_GH_TOKEN`: Provided GitHub token for ghcr.io access
 
 ### Configuration Essentials
 
