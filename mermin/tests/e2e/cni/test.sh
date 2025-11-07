@@ -8,8 +8,8 @@ trap 'cleanup' EXIT
 # These variables will be used by the setup script and verification steps
 CLUSTER_NAME="${CLUSTER_NAME:-mermin-cni-test}"
 RELEASE_NAME="${RELEASE_NAME:-mermin}"
-NAMESPACE="${NAMESPACE:-atlantis}"
-DOCKER_IMAGE_NAME="${DOCKER_IMAGE_NAME:-mermin}"
+NAMESPACE="${NAMESPACE:-default}"
+DOCKER_REPOSITORY="${DOCKER_REPOSITORY:-mermin}"
 DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-latest}"
 VALUES_FILE="${VALUES_FILE:-local/values.yaml}"
 CNI="${CNI:-calico}"
@@ -29,6 +29,16 @@ verify_deployment() {
 }
 
 verify_agent_logs() {
+  echo "Creating flows generator (pinger)..."
+  kubectl -n "${NAMESPACE}" run ping-receiver --grace-period=1 --image=alpine --command -- sleep 3600
+  local counter=0
+  while [ $counter -lt 30 ]; do
+    ping_receiver_ip=$(kubectl -n "${NAMESPACE}" get pod ping-receiver -o 'jsonpath={.status.podIP}')
+    counter=$((counter + 1))
+    sleep 0.5
+  done
+  kubectl -n "${NAMESPACE}" run pinger --grace-period=1 --image=alpine --command -- ping "${ping_receiver_ip}"
+
   echo "Verifying mermin agent logs are enriching data..."
   export NAMESPACE RELEASE_NAME
   local pods=()
@@ -45,8 +55,7 @@ verify_agent_logs() {
   for pod in "${pods[@]}"; do
     (
       local counter=0
-      while [ $counter -lt 30 ]; do
-        if grep --color=never 'destination.k8s.pod.name: String(Owned("coredns' <(kubectl logs -n "${NAMESPACE}" "$pod" --tail=500); then
+      while [ $counter -lt 60 ]; do if grep --color=never -B 35 -e 'source.k8s.pod.name: String(Owned("pinger"))' -e 'destination.k8s.pod.name: String(Owned("ping-receiver"))' <(kubectl logs -n "${NAMESPACE}" "$pod" --tail=500); then
           exit 0
         fi
         counter=$((counter + 1))
