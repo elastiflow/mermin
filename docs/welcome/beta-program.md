@@ -247,8 +247,6 @@ helm upgrade -i mermin mermin/mermin \
 kubectl -n elastiflow get pods -l app.kubernetes.io/name=mermin
 ```
 
-
-
 ### See Your First Flows
 
 View network flows captured by Mermin:
