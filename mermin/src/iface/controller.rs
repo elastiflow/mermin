@@ -279,10 +279,10 @@ impl IfaceController {
                     .collect::<Vec<String>>())
             })?;
 
-        debug!(
+        info!(
             event.name = "interface_controller.interfaces_discovered",
             iface_count = available.len(),
-            ifaces = ?available,
+            interfaces = ?available,
             "discovered interface from host namespace"
         );
 
@@ -295,10 +295,10 @@ impl IfaceController {
             }
         }
 
-        debug!(
+        info!(
             event.name = "interface_controller.interfaces_resolved",
-            iface_count = resolved.len(),
-            ifaces = ?resolved,
+            interfaces_count = resolved.len(),
+            interfaces = ?resolved,
             "resolved interface from patterns"
         );
 
