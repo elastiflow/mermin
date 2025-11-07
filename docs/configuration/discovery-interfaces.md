@@ -194,13 +194,13 @@ This disables the controller's synchronization and watches only interfaces prese
 You can see which interfaces were resolved by Mermin in logs:
 
 ```bash
-kubectl logs <pod> | grep -E '(discovered|resolved).+ interface'
+kubectl logs <pod> | grep -E '(discovered|resolved) interface'
 ```
 
 Example log output:
 ```text
-... discovered interface from host namespace ... [ INTERFACE_LIST ]
-... resolved interface from patterns ... [ INTERFACE_LIST ]
+...  discovered interface from host namespace event.name="interface_controller.interfaces_discovered" iface_count=16 interfaces=["lo", "tunl0", "gre0", "gretap0", "veth79e0143a", "vethb976f1a9", ...]
+... resolved interface from patterns event.name="interface_controller.interfaces_resolved" interfaces_count=7 interfaces=["tunl0", "vethb976f1a9", "veth697a5119", ...]
 ```
 
 ## Best Practices
