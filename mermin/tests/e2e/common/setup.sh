@@ -9,10 +9,10 @@ NAMESPACE="${NAMESPACE:-atlantis}"
 DOCKER_IMAGE_NAME="${DOCKER_IMAGE_NAME:-mermin}"
 DOCKER_REPOSITORY="${DOCKER_REPOSITORY:-mermin}"
 DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-latest}"
-VALUES_FILE="${VALUES_FILE:-examples/local/values.yaml}"
+VALUES_FILE="${VALUES_FILE:-docs/deployment/examples/local/values.yaml}"
 CNI="${CNI:-calico}"
 HOST_CNI_PATH="$HOME/cni-plugins-for-kind"
-MERMIN_CONFIG_PATH="${MERMIN_CONFIG_PATH:-examples/local/config.hcl}"
+MERMIN_CONFIG_PATH="${MERMIN_CONFIG_PATH:-docs/deployment/examples/local/config.hcl}"
 
 # --- CNI Installation Functions ---
 install_calico() {

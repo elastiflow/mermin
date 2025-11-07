@@ -485,7 +485,7 @@ fn display_error(error: &MerminError) {
                 eprintln!("   2. Run without --config flag to use defaults, or");
                 eprintln!("   3. Unset MERMIN_CONFIG_PATH environment variable\n");
                 eprintln!("📖 Example configs:");
-                eprintln!("   - charts/mermin/config/examples/");
+                eprintln!("   - charts/mermin/config/docs/deployment/examples/");
             } else if err_msg.contains("invalid file extension") {
                 eprintln!("💡 Solution:");
                 eprintln!("   Use a config file with .hcl extension");
