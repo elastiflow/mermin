@@ -354,8 +354,7 @@ discovery "informer" "k8s" {
 // }
 
 /*
-  How to associate the flow data to a K8s object.
-  Association config of type "k8s_flow_attributes" with name "main_src"
+  Maps flow data (source IPs, ports) to Kubernetes resources:
 */
 attributes "source" "k8s" {
   /*
@@ -506,8 +505,7 @@ attributes "source" "k8s" {
 }
 
 /*
-  How to associate the flow data to a K8s object
-  Association config of type "k8s_flow_attributes" with name "main_src"
+  Maps flow data (destination IPs, ports) to Kubernetes resources:
 */
 attributes "destination" "k8s" {
   extract {
