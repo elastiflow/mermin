@@ -1,6 +1,6 @@
 # Beta Program
 
-> **Version Requirement**: v0.1.0-beta.15 or higher
+> **Version Requirement**: v0.1.0-beta.16 or higher
 
 ### Accessing Beta Image
 
