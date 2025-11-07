@@ -59,7 +59,7 @@ spec:
             - "--config"
             - "/etc/mermin/config.hcl"
             {{- end }}
-            {{- with .Values.extraArgs }}
+            {{- with .Values.extraArgs -}}
             {{ toYaml . | nindent 12 }}
             {{- end }}
           {{- end }}

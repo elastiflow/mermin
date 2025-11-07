@@ -41,7 +41,7 @@ Configure which network interfaces Mermin monitors. Choose based on your visibil
 
 **Recommended: CNI Bridge Interfaces (Pod-Focused)**
 
-**Best for application monitoring** - Captures all pod-to-pod traffic including intra-node communication:
+**Best for application monitoring** - Captures all pod-to-pod traffic, including intra-node communication:
 
 ```hcl
 discovery "instrument" {
@@ -88,7 +88,7 @@ discovery "instrument" {
 
 **What you'll see**: Inter-node pod traffic, node-to-node traffic, host network pods\
 **What you'll miss**: Intra-node pod-to-pod communication\
-**Note**: Generates 2 flow records per flow (one at source node, one at destination)
+**Note**: Generates 2 flow records per flow (one at the source node, one at the destination node)
 
 > **For more information please reference**:  [Network Interface Discovery](../configuration/discovery-interfaces.md)
 
@@ -283,4 +283,6 @@ Flow Span:
 
 ### Providing Feedback
 
-* **Email**: \[Support contact - add email address]
+* **Email**: [merminbeta@elastiflow.com](mailto:merminbeta@elastiflow.com)
+* **Slack:** [**https://elastiflowcommunity.slack.com/archives/C09MANJTSP3**](https://elastiflowcommunity.slack.com/archives/C09MANJTSP3)
+
