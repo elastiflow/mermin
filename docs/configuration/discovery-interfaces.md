@@ -12,7 +12,7 @@ Mermin attaches eBPF programs to network interfaces to capture packets. The `dis
 
 ## Configuration
 
-<!-- Source: charts/mermin/config/examples/config.hcl -->
+<!-- Source: charts/mermin/config/docs/deployment/examples/config.hcl -->
 ```hcl
 discovery "instrument" {
   # Network interfaces to monitor

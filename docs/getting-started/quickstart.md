@@ -23,7 +23,7 @@ This quick start is designed for local testing and development. For production d
 
 Create a local Kubernetes cluster using kind:
 
-<!-- Source: examples/local/kind-config.yaml -->
+<!-- Source: docs/deployment/examples/local/kind-config.yaml -->
 ```bash
 # Create a kind configuration file
 cat <<EOF > kind-config.yaml
@@ -73,7 +73,7 @@ kubectl create secret docker-registry ghcr \
 
 # Deploy Mermin using Helm
 helm upgrade --install mermin mermin/mermin \
-  --set-file config.content=examples/local/config.example.hcl \
+  --set-file config.content=docs/deployment/examples/local/config.example.hcl \
   --wait \
   --timeout 5m \
   --devel
