@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     net::{Ipv4Addr, Ipv6Addr},
     sync::Arc,
     time::{Duration, UNIX_EPOCH},
@@ -103,7 +102,7 @@ pub struct FlowSpanProducer {
     packet_channel_capacity: usize,
     packet_worker_count: usize,
     boot_time_offset_nanos: u64,
-    iface_map: HashMap<u32, String>,
+    iface_map: Arc<DashMap<u32, String>>,
     flow_span_map: FlowSpanMap,
     community_id_generator: CommunityIdGenerator,
     packet_meta_rx: mpsc::Receiver<PacketMeta>,
@@ -115,7 +114,7 @@ impl FlowSpanProducer {
         span_opts: SpanOptions,
         packet_channel_capacity: usize,
         packet_worker_count: usize,
-        iface_map: HashMap<u32, String>,
+        iface_map: Arc<DashMap<u32, String>>,
         packet_meta_rx: mpsc::Receiver<PacketMeta>,
         flow_span_tx: mpsc::Sender<FlowSpan>,
     ) -> Result<Self, BootTimeError> {
@@ -164,7 +163,7 @@ impl FlowSpanProducer {
                 self.span_opts.clone(),
                 self.boot_time_offset_nanos,
                 self.community_id_generator.clone(),
-                self.iface_map.clone(),
+                Arc::clone(&self.iface_map),
                 Arc::clone(&self.flow_span_map),
                 worker_rx,
                 self.flow_span_tx.clone(),
@@ -226,7 +225,7 @@ pub struct PacketWorker {
     udp_timeout: Duration,
     boot_time_offset_nanos: u64,
     community_id_generator: CommunityIdGenerator,
-    iface_map: HashMap<u32, String>,
+    iface_map: Arc<DashMap<u32, String>>,
     flow_span_map: FlowSpanMap,
     packet_meta_rx: mpsc::Receiver<PacketMeta>,
     flow_span_tx: mpsc::Sender<FlowSpan>,
@@ -237,7 +236,7 @@ impl PacketWorker {
         span_opts: SpanOptions,
         boot_time_offset_nanos: u64,
         community_id_generator: CommunityIdGenerator,
-        iface_map: HashMap<u32, String>,
+        iface_map: Arc<DashMap<u32, String>>,
         flow_span_map: FlowSpanMap,
         packet_meta_rx: mpsc::Receiver<PacketMeta>,
         flow_span_tx: mpsc::Sender<FlowSpan>,
@@ -330,13 +329,16 @@ impl PacketWorker {
             community_dst_port,
             packet.proto,
         );
-        let iface_name = self.iface_map.get(&packet.ifindex);
+        let iface_name = self
+            .iface_map
+            .get(&packet.ifindex)
+            .map(|r| r.value().clone());
 
         // Log packet details if debug logging is enabled
         trace!(
             event.name = "packet.observed",
             flow.community_id = %community_id,
-            network.interface.name = iface_name.map(String::as_str).unwrap_or(""),
+            network.interface.name = iface_name.as_deref().unwrap_or(""),
             source.address = %src_addr,
             source.port = src_port,
             destination.address = %dst_addr,
@@ -417,7 +419,7 @@ impl PacketWorker {
                         network_transport: packet.proto,
                         network_type: packet.ether_type,
                         network_interface_index: Some(packet.ifindex),
-                        network_interface_name: iface_name.cloned(),
+                        network_interface_name: iface_name,
                         network_interface_mac: has_mac.then_some(MacAddr::new(
                             packet.src_mac_addr[0],
                             packet.src_mac_addr[1],
@@ -941,7 +943,7 @@ mod tests {
             FxBuildHasher::default(),
         ));
         let community_id_generator = CommunityIdGenerator::new(span_opts.community_id_seed);
-        let iface_map = HashMap::new();
+        let iface_map = Arc::new(DashMap::new());
 
         let worker = PacketWorker {
             max_record_interval: span_opts.max_record_interval,
@@ -2122,7 +2124,7 @@ mod tests {
             FxBuildHasher::default(),
         ));
         let community_id_generator = CommunityIdGenerator::new(span_opts.community_id_seed);
-        let iface_map = HashMap::new();
+        let iface_map = Arc::new(DashMap::new());
 
         // Create the packet worker
         let worker = PacketWorker {

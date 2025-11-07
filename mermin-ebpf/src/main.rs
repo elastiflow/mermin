@@ -179,7 +179,7 @@ use aya_ebpf::{
     programs::TcContext,
 };
 #[cfg(not(feature = "test"))]
-use aya_log_ebpf::{error, warn};
+use aya_log_ebpf::{debug, error};
 use mermin_common::{Direction, IpAddrType, PacketMeta, ParserOptions, TunnelType};
 use network_types::{
     ah::{self, AH_LEN},
@@ -425,6 +425,9 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
                 // Layer 2/3 protocols
                 (HeaderType::Ethernet, Error::OutOfBounds) => err_msg!("ethernet", out_of_bounds),
                 (HeaderType::Ethernet, Error::MalformedHeader) => err_msg!("ethernet", malformed),
+                (HeaderType::Ethernet, Error::Unsupported) => {
+                    debug!(&ctx, "parser stopped - unsupported ether type")
+                }
                 (HeaderType::Ethernet, Error::InternalError) => err_msg!("ethernet", internal),
 
                 (HeaderType::Ipv4, Error::OutOfBounds) => err_msg!("ipv4", out_of_bounds),
@@ -579,7 +582,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
                     error!(&ctx, "parser failed - packet data out of bounds")
                 }
                 (_, Error::MalformedHeader) => error!(&ctx, "parser failed - malformed header"),
-                (_, Error::Unsupported) => error!(&ctx, "parser failed - unsupported protocol"),
+                (_, Error::Unsupported) => debug!(&ctx, "parser failed - unsupported protocol"),
                 (_, Error::InternalError) => error!(&ctx, "parser failed - internal error"),
             }
             return TC_ACT_PIPE;
@@ -634,12 +637,12 @@ impl Parser {
             EtherType::Ipv4 => HeaderType::Ipv4,
             EtherType::Ipv6 => HeaderType::Ipv6,
             unsupported => {
-                warn!(
+                debug!(
                     ctx,
                     "parser stopped - unsupported ether_type: 0x{:x}",
                     u16::from_be(unsupported as u16)
                 );
-                HeaderType::StopProcessing
+                return Err(Error::Unsupported);
             }
         };
 
@@ -703,7 +706,7 @@ impl Parser {
             | IpProto::Ah
             | IpProto::Hip => HeaderType::Proto(meta.proto),
             unsupported => {
-                warn!(
+                debug!(
                     ctx,
                     "parser stopped - unsupported ip protocol in ipv4 header: {}",
                     unsupported as u8
@@ -752,7 +755,7 @@ impl Parser {
             | IpProto::Ah
             | IpProto::Hip => HeaderType::Proto(meta.proto),
             unsupported => {
-                warn!(
+                debug!(
                     ctx,
                     "parser stopped - unsupported ip protocol in ipv4 header: {}",
                     unsupported as u8
@@ -820,7 +823,7 @@ impl Parser {
             | IpProto::Hip
             | IpProto::Shim6 => HeaderType::Proto(meta.proto),
             unsupported => {
-                warn!(
+                debug!(
                     ctx,
                     "parser stopped - unsupported ip protocol in ipv6 header: {}",
                     unsupported as u8
@@ -869,7 +872,7 @@ impl Parser {
             | IpProto::Hip
             | IpProto::Shim6 => HeaderType::Proto(meta.proto),
             unsupported => {
-                warn!(
+                debug!(
                     ctx,
                     "parser stopped - unsupported ip protocol in ipv6 header: {}",
                     unsupported as u8
@@ -961,7 +964,7 @@ impl Parser {
             WireGuardType::CookieReply => self.parse_wireguard_cookie_reply(ctx),
             WireGuardType::TransportData => self.parse_wireguard_transport_data(ctx),
             _ => {
-                warn!(
+                debug!(
                     ctx,
                     "parser stopped - unsupported wireguard message type: {}", wireguard_type
                 );
@@ -1561,7 +1564,7 @@ mod host_test_shim {
 
     #[cfg(feature = "test")]
     #[macro_export]
-    macro_rules! warn {
+    macro_rules! debug {
         ($ctx:expr, $($arg:tt)*) => {{
             let _ = &$ctx;
             let _ = format_args!($($arg)*);
@@ -2497,9 +2500,8 @@ mod tests {
 
         let result = parser.parse_ethernet_header(&ctx);
 
-        assert!(result.is_ok());
-        assert_eq!(parser.offset, ETH_LEN);
-        assert!(matches!(parser.next_hdr, HeaderType::StopProcessing));
+        assert!(result.is_err());
+        assert!(matches!(result, Err(Error::Unsupported)));
     }
 
     #[test]

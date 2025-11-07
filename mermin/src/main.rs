@@ -1,149 +1,36 @@
 mod error;
 mod health;
+mod iface;
 mod ip;
 mod k8s;
-mod netns;
 mod otlp;
 mod runtime;
 mod source;
 mod span;
 
-use std::{
-    collections::HashMap,
-    sync::{Arc, atomic::Ordering},
-};
+use std::sync::{Arc, atomic::Ordering};
 
 use aya::{
     maps::{Array, RingBuf},
-    programs::{SchedClassifier, TcAttachType, tc, tc::SchedClassifierLinkId},
+    programs::{SchedClassifier, TcAttachType},
     util::KernelVersion,
 };
 use error::{MerminError, Result};
-use pnet::datalink;
 use tokio::{signal, sync::mpsc};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     health::{HealthState, start_api_server},
+    iface::controller::IfaceController,
     k8s::{attributor::Attributor, decorator::Decorator},
-    netns::NetnsSwitch,
     otlp::{
         provider::{init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
     },
-    runtime::context::Context,
+    runtime::{capabilities, context::Context},
     source::{filter::PacketFilter, ringbuf::RingBufReader},
     span::producer::FlowSpanProducer,
 };
-
-/// Display user-friendly error messages with helpful hints
-fn display_error(error: &MerminError) {
-    eprintln!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-
-    match error {
-        MerminError::Context(ctx_err) => {
-            eprintln!("❌ Configuration Error");
-            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-            eprintln!("{ctx_err}\n");
-
-            let err_msg = ctx_err.to_string();
-            if err_msg.contains("no config file provided") {
-                eprintln!("💡 Solution:");
-                eprintln!("   1. Create the config file at the specified path, or");
-                eprintln!("   2. Run without --config flag to use defaults, or");
-                eprintln!("   3. Unset MERMIN_CONFIG_PATH environment variable\n");
-                eprintln!("📖 Example configs:");
-                eprintln!("   - charts/mermin/config/examples/");
-            } else if err_msg.contains("invalid file extension") {
-                eprintln!("💡 Solution:");
-                eprintln!("   Use a config file with .hcl extension");
-            } else if err_msg.contains("is not a valid file") {
-                eprintln!("💡 Solution:");
-                eprintln!("   Provide a file path, not a directory");
-            } else if err_msg.contains("configuration error") {
-                eprintln!("💡 Tip:");
-                eprintln!("   Check your config file syntax and values");
-            }
-        }
-
-        MerminError::EbpfLoad(e) => {
-            eprintln!("❌ eBPF Loading Error");
-            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-            eprintln!("Failed to load eBPF program: {e}\n");
-            eprintln!("💡 Common causes:");
-            eprintln!("   - Insufficient privileges (needs root/CAP_BPF)");
-            eprintln!("   - Kernel doesn't support eBPF");
-            eprintln!("   - Incompatible kernel version");
-            eprintln!("\n💡 Solution:");
-            eprintln!("   Run with elevated privileges: sudo mermin");
-            eprintln!("   Or in Docker with --privileged flag");
-        }
-
-        MerminError::EbpfProgram(e) => {
-            eprintln!("❌ eBPF Program Error");
-            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-            eprintln!("{e}\n");
-            eprintln!("💡 Common causes:");
-            eprintln!("   - Interface doesn't exist");
-            eprintln!("   - Interface is down");
-            eprintln!("   - Insufficient privileges");
-            eprintln!("\n💡 Solution:");
-            eprintln!("   - Check interface names: ip link show");
-            eprintln!("   - Verify interfaces in config match host interfaces");
-            eprintln!("   - Run with elevated privileges");
-        }
-
-        MerminError::EbpfMap(msg) => {
-            eprintln!("❌ eBPF Map Error");
-            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-            eprintln!("{msg}\n");
-            eprintln!("💡 This is likely a compilation or loading issue.");
-            eprintln!("   Try rebuilding the project.");
-        }
-
-        MerminError::Otlp(e) => {
-            eprintln!("❌ OpenTelemetry Error");
-            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-            eprintln!("{e}\n");
-            eprintln!("💡 Common causes:");
-            eprintln!("   - OTLP endpoint is unreachable");
-            eprintln!("   - Invalid endpoint configuration");
-            eprintln!("   - Network connectivity issues");
-            eprintln!("\n💡 Solution:");
-            eprintln!("   - Verify export.traces.otlp.endpoint in config");
-            eprintln!("   - Check if the OTLP collector is running");
-            eprintln!("   - Use export.traces.stdout for local debugging");
-        }
-
-        MerminError::Health(e) => {
-            eprintln!("❌ Health/API Server Error");
-            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-            eprintln!("{e}\n");
-            eprintln!("💡 Common causes:");
-            eprintln!("   - Port already in use");
-            eprintln!("   - Invalid listen address");
-            eprintln!("\n💡 Solution:");
-            eprintln!("   - Check api.port and metrics.port in config");
-            eprintln!("   - Set api.enabled=false to disable API server");
-        }
-
-        MerminError::Signal(e) => {
-            eprintln!("❌ Signal Handling Error");
-            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-            eprintln!("{e}\n");
-        }
-
-        _ => {
-            eprintln!("❌ Error");
-            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-            eprintln!("{error}\n");
-        }
-    }
-
-    eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-    eprintln!("For more information, run with: --log-level debug");
-    eprintln!("Documentation: https://github.com/elastiflow/mermin\n");
-}
 
 #[tokio::main]
 async fn main() {
@@ -156,7 +43,6 @@ async fn main() {
 async fn run() -> Result<()> {
     // TODO: runtime should be aware of all threads and tasks spawned by the eBPF program so that they can be gracefully shutdown and restarted.
     // TODO: listen for SIGUP `kill -HUP $(pidof mermin)` to reload the eBPF program and all configuration
-    // TODO: API will come once we have an API server
     // TODO: listen for SIGTERM `kill -TERM $(pidof mermin)` to gracefully shutdown the eBPF program and all configuration.
     // TODO: do not reload global configuration found in CLI
 
@@ -165,6 +51,8 @@ async fn run() -> Result<()> {
 
     // If a provider is already installed, install_default() returns Err, which we can safely ignore.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+    capabilities::check_required_capabilities()?;
 
     let exporter: Arc<dyn TraceableExporter> = {
         init_internal_tracing(
@@ -203,6 +91,8 @@ async fn run() -> Result<()> {
         rlim_cur: libc::RLIM_INFINITY,
         rlim_max: libc::RLIM_INFINITY,
     };
+    // SAFETY: setrlimit with RLIMIT_MEMLOCK is safe to call with a valid rlimit struct.
+    // We're passing a stack-allocated rlimit with valid values (RLIM_INFINITY).
     let ret = unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &rlim) };
     if ret != 0 {
         warn!(
@@ -250,6 +140,28 @@ async fn run() -> Result<()> {
         "configured ebpf tunnel ports"
     );
 
+    let programs = [TcAttachType::Ingress, TcAttachType::Egress];
+    programs.iter().try_for_each(|attach_type| -> Result<()> {
+        let program: &mut SchedClassifier = ebpf
+            .program_mut(match attach_type {
+                TcAttachType::Ingress => "mermin_ingress",
+                TcAttachType::Egress => "mermin_egress",
+                _ => unreachable!("only ingress and egress are used"),
+            })
+            .ok_or_else(|| {
+                MerminError::internal(format!(
+                    "ebpf program for {attach_type:?} not found in loaded object",
+                ))
+            })?
+            .try_into()?;
+        program.load()?;
+        Ok(())
+    })?;
+    info!(
+        event.name = "ebpf.programs_loaded",
+        "tc programs loaded into kernel"
+    );
+
     let health_state = HealthState::default();
 
     if conf.api.enabled {
@@ -267,11 +179,6 @@ async fn run() -> Result<()> {
         });
     }
 
-    // Load and attach both ingress and egress programs
-    // Track link IDs for graceful cleanup on shutdown
-    let mut tc_links: HashMap<(String, &'static str), SchedClassifierLinkId> = HashMap::new();
-
-    // Determine attachment method based on kernel version
     let kernel_version = KernelVersion::current().unwrap_or(KernelVersion::new(0, 0, 0));
     let use_tcx = kernel_version >= KernelVersion::new(6, 6, 0);
     let attach_method = if use_tcx { "TCX" } else { "netlink" };
@@ -283,88 +190,52 @@ async fn run() -> Result<()> {
         "determined TC attachment method based on kernel version"
     );
 
-    // Create ring buffer BEFORE attaching programs to avoid write failures
-    let map = ebpf
+    // Shared ownership for concurrent access from controller and flow producer
+    let ebpf = Arc::new(tokio::sync::Mutex::new(ebpf));
+
+    // Ring buffer must be created before program attachment to avoid eBPF write failures
+    let mut ebpf_guard = ebpf.lock().await;
+    let map = ebpf_guard
         .take_map("PACKETS_META")
         .ok_or_else(|| MerminError::ebpf_map("PACKETS_META map not present in the object"))?;
+    drop(ebpf_guard); // Avoid holding lock during RingBuf construction
+
     let ring_buf = RingBuf::try_from(map)?;
     info!(
         event.name = "source.ringbuf.initialized",
         "ring buffer initialized and ready to receive packets"
     );
 
-    // Initialize namespace switcher for attaching to host network interfaces
-    // This allows us to monitor host interfaces without hostNetwork: true
-    let netns_switch = NetnsSwitch::new().map_err(|e| {
-        error!(
-            event.name = "netns.switch.init_failed",
-            error = %e,
-            "failed to initialize network namespace switching"
+    let patterns = if conf.discovery.instrument.interfaces.is_empty() {
+        info!(
+            event.name = "config.interfaces_empty",
+            "no interfaces configured, using default patterns"
         );
-        e
-    })?;
+        runtime::conf::InstrumentConf::default().interfaces
+    } else {
+        conf.discovery.instrument.interfaces.clone()
+    };
 
-    let programs = [TcAttachType::Ingress, TcAttachType::Egress];
-    programs.iter().try_for_each(|attach_type| -> Result<()> {
-        let program: &mut SchedClassifier = ebpf
-            .program_mut(attach_type.program_name())
-            .ok_or_else(|| {
-                MerminError::internal(format!(
-                    "eBPF program '{}' not found in loaded object",
-                    attach_type.program_name()
-                ))
-            })?
-            .try_into()?;
-        program.load()?;
+    let mut iface_controller = IfaceController::new(patterns, Arc::clone(&ebpf), use_tcx)?;
 
-        conf.resolved_interfaces
-            .iter()
-            .try_for_each(|iface| -> Result<()> {
-                let context = format!("{} ({})", iface, attach_type.direction_name());
-                let link_id = netns_switch
-                    .in_host_namespace(Some(&context), || {
-                        // Only add clsact qdisc for netlink-based attachments (kernel < 6.6)
-                        // TCX-based attachments (kernel >= 6.6) don't require it
-                        if !use_tcx && let Err(e) = tc::qdisc_add_clsact(iface) {
-                            // This is often benign - qdisc may already exist from previous run
-                            // or another program. We log at debug level and continue.
-                            debug!(
-                                event.name = "ebpf.qdisc_add_clsact.skipped",
-                                network.interface.name = %iface,
-                                error = %e,
-                                "clsact qdisc add failed (likely already exists)"
-                            );
-                        }
+    // DashMap allows lock-free reads during packet processing while controller updates it dynamically
+    let iface_map = iface_controller.iface_map();
 
-                        program.attach(iface, *attach_type).map_err(|e| {
-                            MerminError::internal(format!(
-                                "failed to attach eBPF program to interface {iface}: {e}"
-                            ))
-                        })
-                    })
-                    .map_err(|e| {
-                        error!(
-                            event.name = "ebpf.program_attach_failed",
-                            ebpf.program.direction = attach_type.direction_name(),
-                            ebpf.attach_method = attach_method,
-                            network.interface.name = %iface,
-                            error = %e,
-                            "failed to attach ebpf program (namespace switch or attach failed)"
-                        );
-                        e
-                    })?;
-                tc_links.insert((iface.clone(), attach_type.direction_name()), link_id);
+    let (packet_meta_tx, packet_meta_rx) = mpsc::channel(conf.packet_channel_capacity);
 
-                info!(
-                    event.name = "ebpf.program_attached",
-                    ebpf.program.direction = attach_type.direction_name(),
-                    ebpf.attach_method = attach_method,
-                    network.interface.name = %iface,
-                    "ebpf program attached to interface"
-                );
-                Ok(())
-            })
-    })?;
+    // Start ring buffer reader BEFORE attaching eBPF programs to avoid packet loss
+    let packet_filter = Arc::new(PacketFilter::new(&conf, Arc::clone(&iface_map)));
+    let ring_buf_reader = RingBufReader::new(ring_buf, packet_filter, packet_meta_tx);
+    tokio::spawn(async move {
+        ring_buf_reader.run().await;
+        info!(
+            event.name = "task.exited",
+            task.name = "source.ringbuf",
+            "ring buffer reader task exited"
+        );
+    });
+
+    iface_controller.initialize().await?;
 
     info!(
         event.name = "ebpf.ready",
@@ -372,34 +243,26 @@ async fn run() -> Result<()> {
     );
     health_state.ebpf_loaded.store(true, Ordering::Relaxed);
 
-    let iface_map: HashMap<u32, String> = {
-        let mut map = HashMap::new();
-        netns_switch
-            .in_host_namespace(Some("interface_map"), || {
-                for iface in datalink::interfaces() {
-                    if conf.resolved_interfaces.contains(&iface.name) {
-                        map.insert(iface.index, iface.name.clone());
-                    }
-                }
-                Ok(map)
-            })
-            .map_err(|e| {
-                error!(
-                    event.name = "netns.switch.interface_map_failed",
-                    error = %e,
-                    "failed to build interface map"
-                );
-                e
-            })?
-    };
-    info!(
-        event.name = "system.config_loaded",
-        system.config.type = "interface_map",
-        system.config.interface_count = iface_map.len(),
-        "built interface map from configuration"
-    );
+    // Shared across reconciliation loop and flow producer for concurrent access
+    let iface_controller = Arc::new(tokio::sync::Mutex::new(iface_controller));
 
-    let (packet_meta_tx, packet_meta_rx) = mpsc::channel(conf.packet_channel_capacity);
+    // Start reconciliation loop immediately to minimize window for missed interface events
+    let controller_handle = if conf.discovery.instrument.auto_discover_interfaces {
+        info!(
+            event.name = "interface_controller.starting",
+            "starting interface controller"
+        );
+        Some(IfaceController::start_reconciliation_loop(Arc::clone(
+            &iface_controller,
+        )))
+    } else {
+        info!(
+            event.name = "interface_controller.disabled",
+            "interface controller disabled, monitoring only startup interfaces"
+        );
+        None
+    };
+
     let (flow_span_tx, mut flow_span_rx) = mpsc::channel(conf.packet_channel_capacity);
     let (k8s_decorated_flow_span_tx, mut k8s_decorated_flow_span_rx) =
         mpsc::channel(conf.packet_channel_capacity);
@@ -538,18 +401,6 @@ async fn run() -> Result<()> {
     });
     health_state.ready_to_process.store(true, Ordering::Relaxed);
 
-    let packet_filter = Arc::new(PacketFilter::new(&conf, iface_map.clone()));
-
-    let ring_buf_reader = RingBufReader::new(ring_buf, packet_filter, packet_meta_tx);
-    tokio::spawn(async move {
-        ring_buf_reader.run().await;
-        info!(
-            event.name = "task.exited",
-            task.name = "source.ringbuf",
-            "ring buffer reader task exited"
-        );
-    });
-
     tokio::spawn(async move {
         while let Some(k8s_decorated_flow_span) = k8s_decorated_flow_span_rx.recv().await {
             let traceable: TraceableRecord = Arc::new(k8s_decorated_flow_span);
@@ -586,6 +437,7 @@ async fn run() -> Result<()> {
     }
 
     info!("waiting for ctrl+c");
+
     signal::ctrl_c().await?;
 
     info!(
@@ -593,65 +445,22 @@ async fn run() -> Result<()> {
         "received shutdown signal, starting graceful cleanup"
     );
 
-    // Gracefully detach all TC programs
-    let total_links = tc_links.len();
-    let mut detached_count = 0;
-    let mut failed_count = 0;
-
-    for ((iface, direction), link_id) in tc_links {
-        let program_name = format!("mermin_{direction}");
-        match ebpf.program_mut(&program_name) {
-            Some(program) => match <&mut SchedClassifier>::try_from(program) {
-                Ok(prog) => match prog.detach(link_id) {
-                    Ok(_) => {
-                        detached_count += 1;
-                        info!(
-                            event.name = "ebpf.program_detached",
-                            network.interface.name = %iface,
-                            ebpf.program.direction = direction,
-                            "successfully detached ebpf program"
-                        );
-                    }
-                    Err(e) => {
-                        failed_count += 1;
-                        warn!(
-                            event.name = "ebpf.detach_failed",
-                            network.interface.name = %iface,
-                            ebpf.program.direction = direction,
-                            error = %e,
-                            "failed to detach ebpf program"
-                        );
-                    }
-                },
-                Err(e) => {
-                    failed_count += 1;
-                    warn!(
-                        event.name = "ebpf.detach_program_cast_failed",
-                        network.interface.name = %iface,
-                        ebpf.program.direction = direction,
-                        error = %e,
-                        "failed to cast program for detachment"
-                    );
-                }
-            },
-            None => {
-                failed_count += 1;
-                warn!(
-                    event.name = "ebpf.detach_program_not_found",
-                    network.interface.name = %iface,
-                    ebpf.program.direction = direction,
-                    "program not found for detachment"
-                );
-            }
-        }
+    // Stop reconciliation loop before detaching programs
+    if let Some(handle) = controller_handle {
+        info!(
+            event.name = "interface_controller.stopping",
+            "stopping interface syncing"
+        );
+        handle.abort();
+        // Give the task a moment to clean up
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), handle).await;
     }
+
+    iface_controller.lock().await.shutdown().await?;
 
     info!(
         event.name = "application.cleanup_complete",
-        ebpf.cleanup.total = total_links,
-        ebpf.cleanup.detached = detached_count,
-        ebpf.cleanup.failed = failed_count,
-        "ebpf cleanup completed"
+        "graceful cleanup completed"
     );
 
     info!("exiting");
@@ -659,26 +468,111 @@ async fn run() -> Result<()> {
     Ok(())
 }
 
-/// Extension trait for TcAttachType to provide direction name
-trait TcAttachTypeExt {
-    fn direction_name(&self) -> &'static str;
-    fn program_name(&self) -> &'static str;
-}
+/// Display user-friendly error messages with helpful hints
+fn display_error(error: &MerminError) {
+    eprintln!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
-impl TcAttachTypeExt for TcAttachType {
-    fn direction_name(&self) -> &'static str {
-        match self {
-            TcAttachType::Ingress => "ingress",
-            TcAttachType::Egress => "egress",
-            TcAttachType::Custom(_) => "custom",
+    match error {
+        MerminError::Context(ctx_err) => {
+            eprintln!("❌ Configuration Error");
+            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+            eprintln!("{ctx_err}\n");
+
+            let err_msg = ctx_err.to_string();
+            if err_msg.contains("no config file provided") {
+                eprintln!("💡 Solution:");
+                eprintln!("   1. Create the config file at the specified path, or");
+                eprintln!("   2. Run without --config flag to use defaults, or");
+                eprintln!("   3. Unset MERMIN_CONFIG_PATH environment variable\n");
+                eprintln!("📖 Example configs:");
+                eprintln!("   - charts/mermin/config/examples/");
+            } else if err_msg.contains("invalid file extension") {
+                eprintln!("💡 Solution:");
+                eprintln!("   Use a config file with .hcl extension");
+            } else if err_msg.contains("is not a valid file") {
+                eprintln!("💡 Solution:");
+                eprintln!("   Provide a file path, not a directory");
+            } else if err_msg.contains("configuration error") {
+                eprintln!("💡 Tip:");
+                eprintln!("   Check your config file syntax and values");
+            }
+        }
+
+        MerminError::EbpfLoad(e) => {
+            eprintln!("❌ eBPF Loading Error");
+            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+            eprintln!("Failed to load eBPF program: {e}\n");
+            eprintln!("💡 Common causes:");
+            eprintln!("   - Insufficient privileges (needs root/CAP_BPF)");
+            eprintln!("   - Kernel doesn't support eBPF");
+            eprintln!("   - Incompatible kernel version");
+            eprintln!("\n💡 Solution:");
+            eprintln!("   Run with elevated privileges: sudo mermin");
+            eprintln!("   Or in Docker with --privileged flag");
+        }
+
+        MerminError::EbpfProgram(e) => {
+            eprintln!("❌ eBPF Program Error");
+            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+            eprintln!("{e}\n");
+            eprintln!("💡 Common causes:");
+            eprintln!("   - Interface doesn't exist");
+            eprintln!("   - Interface is down");
+            eprintln!("   - Insufficient privileges");
+            eprintln!("\n💡 Solution:");
+            eprintln!("   - Check interface names: ip link show");
+            eprintln!("   - Verify interfaces in config match host interfaces");
+            eprintln!("   - Run with elevated privileges");
+        }
+
+        MerminError::EbpfMap(msg) => {
+            eprintln!("❌ eBPF Map Error");
+            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+            eprintln!("{msg}\n");
+            eprintln!("💡 This is likely a compilation or loading issue.");
+            eprintln!("   Try rebuilding the project.");
+        }
+
+        MerminError::Otlp(e) => {
+            eprintln!("❌ OpenTelemetry Error");
+            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+            eprintln!("{e}\n");
+            eprintln!("💡 Common causes:");
+            eprintln!("   - OTLP endpoint is unreachable");
+            eprintln!("   - Invalid endpoint configuration");
+            eprintln!("   - Network connectivity issues");
+            eprintln!("\n💡 Solution:");
+            eprintln!("   - Verify export.traces.otlp.endpoint in config");
+            eprintln!("   - Check if the OTLP collector is running");
+            eprintln!("   - Use export.traces.stdout for local debugging");
+        }
+
+        MerminError::Health(e) => {
+            eprintln!("❌ Health/API Server Error");
+            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+            eprintln!("{e}\n");
+            eprintln!("💡 Common causes:");
+            eprintln!("   - Port already in use");
+            eprintln!("   - Invalid listen address");
+            eprintln!("\n💡 Solution:");
+            eprintln!("   - Check api.port and metrics.port in config");
+            eprintln!("   - Set api.enabled=false to disable API server");
+        }
+
+        MerminError::Signal(e) => {
+            eprintln!("❌ Signal Handling Error");
+            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+            eprintln!("{e}\n");
+        }
+
+        _ => {
+            eprintln!("❌ Error");
+            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+            eprintln!("{error}\n");
         }
     }
 
-    fn program_name(&self) -> &'static str {
-        match self {
-            TcAttachType::Ingress => "mermin_ingress",
-            TcAttachType::Egress => "mermin_egress",
-            TcAttachType::Custom(_) => "mermin_custom",
-        }
-    }
+    eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    eprintln!("For more information, run with: --log-level debug");
+    eprintln!("Documentation: https://github.com/elastiflow/mermin\n");
 }
