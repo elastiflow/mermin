@@ -125,12 +125,11 @@ jobs:
       - name: Set up chart-testing
         uses: helm/chart-testing-action@v2.7.0
       - name: Install Helm dependencies
-        # TODO(Cleanup for GA): Drop authentication in "helm repo add" once repo is public
         run: |
           find charts -mindepth 1 -maxdepth 1 -type d | while read -r chart; do
             echo Building for ${chart}
             (helm dependency list ${chart} || true) | grep -E 'https://' | while read -r dep; do
-              helm repo add --username x-access-token --password ${{ secrets.GITHUB_TOKEN }} $(echo ${dep} | awk '{print $1}') $(echo ${dep} | awk '{print $4}')
+              helm repo add $(echo ${dep} | awk '{print $1}') $(echo ${dep} | awk '{print $4}')
             done
 
             helm dependency build ${chart}
