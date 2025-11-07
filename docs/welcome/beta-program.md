@@ -1,6 +1,6 @@
 # Beta Program
 
-> **Version Requirement**: v0.1.0-beta.11 or higher
+{% include "../.gitbook/includes/version-requirement-v0.1.0... (2).md" %}
 
 ### Accessing Beta Image
 
@@ -41,7 +41,7 @@ Configure which network interfaces Mermin monitors. Choose based on your visibil
 
 **Recommended: CNI Bridge Interfaces (Pod-Focused)**
 
-**Best for application monitoring** - Captures all pod-to-pod traffic including intra-node communication:
+**Best for application monitoring** - Captures all pod-to-pod traffic, including intra-node communication:
 
 ```hcl
 discovery "instrument" {
@@ -85,7 +85,7 @@ discovery "instrument" {
 
 **What you'll see**: Inter-node pod traffic, node-to-node traffic, host network pods\
 **What you'll miss**: Intra-node pod-to-pod communication\
-**Note**: Generates 2 flow records per flow (one at source node, one at destination)
+**Note**: Generates 2 flow records per flow (one at the source node, one at the destination node)
 
 > **For more information please reference**:  [Network Interface Discovery](../configuration/discovery-interfaces.md)
 
@@ -190,21 +190,11 @@ attributes "destination" "k8s" {
 
 > **For more information please reference:** [Flow Attributes](../configuration/attributes.md)
 
-A fleshed out config is available here: [Examples](../../charts/mermin/config/examples/config.hcl). Once the config is in a good place you cana deploy it with the below command
+### Running Mermin With Configuration
 
-```
-helm install mermin mermin/mermin \
-  --namespace elastiflow \
-  --version 0.1.0-beta.11 \
-  --set image.repository=ghcr.io/elastiflow/mermin \
-  --set image.tag=v0.1.0-beta.11 \
-  --set imagePullSecrets[0].name=ghcr \
-  --set-file config.content=mermin-config.hcl \
-  --wait
+A fleshed-out config is available here: [Examples](../../charts/mermin/config/examples/config.hcl). Once the config is ready, you can deploy it with the following command.
 
-# Verify deployment
-kubectl -n elastiflow get pods -l app.kubernetes.io/name=mermin
-```
+{% include "../.gitbook/includes/helm-install-mermin-mermin-....md" %}
 
 ### See Your First Flows
 
@@ -242,4 +232,6 @@ Flow Span:
 
 ### Providing Feedback
 
-* **Email**: \[Support contact - add email address]
+* **Email**: [merminbeta@elastiflow.com](mailto:merminbeta@elastiflow.com)
+* **Slack:** [**https://elastiflowcommunity.slack.com/archives/C09MANJTSP3**](https://elastiflowcommunity.slack.com/archives/C09MANJTSP3)
+
