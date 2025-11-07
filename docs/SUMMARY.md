@@ -12,15 +12,16 @@
 
 ## Deployment
 
-* [Deployment Overview](deployment/deployment.md)
+<!-- TODO(Cleanup for GA): Iterate on deployment docs -->
+<!-- * [Deployment Overview](deployment/deployment.md)
 * [Kubernetes with Helm](deployment/kubernetes-helm.md)
 * [Cloud Platforms](deployment/cloud-platforms.md)
 * [Advanced Scenarios](deployment/advanced-scenarios.md)
-* [Docker on Bare Metal](deployment/docker-bare-metal.md)
+* [Docker on Bare Metal](deployment/docker-bare-metal.md) -->
 * Helm Examples
-  * [Deployment with otel collector](docs/deployment/examples/local_otel/README.md)
-  * [Simple deployment NetObserv and OpenSearch](docs/deployment/examples/netobserv_os_simple_svc/README.md)
-  * [Simple deployment NetObserv and OpenSearch in GKE with Gateway](docs/deployment/examples/netobserv_os_simple_gke_gw/README.md)
+  * [Deployment with otel collector](deployment/examples/local_otel/README.md)
+  * [Simple deployment NetObserv and OpenSearch](deployment/examples/netobserv_os_simple_svc/README.md)
+  * [Simple deployment NetObserv and OpenSearch in GKE with Gateway](deployment/examples/netobserv_os_simple_gke_gw/README.md)
 
 ## Observability
 
