@@ -10,6 +10,10 @@ Before starting, ensure you have the following tools installed:
 * [**kind**](https://kind.sigs.k8s.io/docs/user/quick-start/#installation): Kubernetes in Docker
 * [**kubectl**](https://kubernetes.io/docs/tasks/tools/): Kubernetes command-line tool
 * [**Helm**](https://helm.sh/docs/intro/install/): Kubernetes package manager (version 3.x)
+* **Make**:
+  * On Mac systems `make` is available via "Xcode Command Line Tools" - `xcode-select --install`
+  * On Ubuntu/Debian run `sudo apt-get update && sudo apt-get install --no-install-recommends make`
+  * On RedHat-based systems run `sudo yum install make`
 
 {% hint style="info" %}
 This quick start is designed for local testing and development. For production deployments, see the [Deployment Guide](../deployment/deployment.md).
@@ -17,14 +21,15 @@ This quick start is designed for local testing and development. For production d
 
 ## Step 1: Create a kind Cluster
 
-First, create a local Kubernetes cluster using kind:
+Create a local Kubernetes cluster using kind:
 
+<!-- Source: examples/local/kind-config.yaml -->
 ```bash
 # Create a kind configuration file
 cat <<EOF > kind-config.yaml
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
-name: mermin-demo
+name: atlantis
 nodes:
   - role: control-plane
   - role: worker
@@ -45,72 +50,36 @@ kubectl get nodes
 
 You should see three nodes in the `Ready` state.
 
-## Step 2: Build and Load the Mermin Image
-
-Build the Mermin container image and load it into the kind cluster:
-
-// TODO: REPLACE WITH DOCKER PULL COMMAND
-
-```bash
-# Clone the repository (if you haven't already)
-git clone https://github.com/elastiflow/mermin.git
-cd mermin
-
-# Build the Mermin image
-docker build -t mermin:latest --target runner-debug .
-
-# Load the image into kind
-kind load docker-image mermin:latest --name mermin-demo
-```
-
-{% hint style="warning" %}
-Building the image may take several minutes on the first run as it compiles the eBPF programs and Rust binaries.
-{% endhint %}
-
-## Step 3: Deploy Mermin with Helm
+## Step 2: Deploy Mermin with Helm
 
 Deploy Mermin using the Helm chart with a configuration that outputs flows to stdout (for easy viewing):
 
+<!-- TODO(Cleanup for GA): Should be https://elastiflow.github.io/mermin/ instead of raw.githubusercontent.com..., it is used whilst repo is private -->
+<!-- TODO(Cleanup for GA): Once repo is public, no auth to helm should be needed -->
+<!-- TODO(Cleanup for GA): Review stopped here, everything below was not "dumb-tested" -->
 ```bash
-# Create a basic configuration file
-cat <<EOF > mermin-config.hcl
-# Logging configuration
-log_level = "info"
+# Add Mermin Helm registry
+helm repo add \
+  --username x-access-token \
+  --password ${GH_PAT} \
+  mermin https://raw.githubusercontent.com/elastiflow/mermin/gh-pages
+helm repo update
 
-# Network interfaces to monitor (default patterns for kind)
-discovery "instrument" {
-  interfaces = ["eth*", "ens*"]
-}
-
-# Export configuration - output to stdout for easy viewing
-export "traces" {
-  stdout = "text_indent"
-}
-
-# API and metrics configuration
-api {
-  enabled = true
-  listen_address = "0.0.0.0"
-  port = 8080
-}
-
-metrics {
-  enabled = true
-  listen_address = "0.0.0.0"
-  port = 10250
-}
-EOF
+# Login to GH Docker registry
+kubectl create secret docker-registry ghcr \
+    --docker-server=ghcr.io \
+    --docker-username=elastiflow-ghcr \
+    --docker-password=${GH_CLASSIC_TOKEN}
 
 # Deploy Mermin using Helm
-helm upgrade --install mermin ./charts/mermin \
-  --set image.tag=latest \
-  --set image.pullPolicy=Never \
-  --set-file config.content=mermin-config.hcl \
+helm upgrade --install mermin mermin/mermin \
+  --set-file config.content=examples/local/config.example.hcl \
   --wait \
-  --timeout 10m
+  --timeout 5m \
+  --devel
 ```
 
-## Step 4: Verify the Deployment
+## Step 3: Verify the Deployment
 
 Check that the Mermin pods are running:
 
@@ -120,26 +89,13 @@ kubectl get pods -l app.kubernetes.io/name=mermin
 
 You should see one Mermin pod per worker node, all in the `Running` state:
 
-```
+```text
 NAME           READY   STATUS    RESTARTS   AGE
 mermin-abc123  1/1     Running   0          2m
 mermin-def456  1/1     Running   0          2m
 ```
 
-Check the health of a Mermin pod:
-
-```bash
-# Get pod name
-POD_NAME=$(kubectl get pods -l app.kubernetes.io/name=mermin -o jsonpath='{.items[0].metadata.name}')
-
-# Check health endpoints
-kubectl exec $POD_NAME -- wget -q -O- http://localhost:8080/livez
-kubectl exec $POD_NAME -- wget -q -O- http://localhost:8080/readyz
-```
-
-Both should return `ok`.
-
-## Step 5: View Network Flow Data
+## Step 4: View Network Flow Data
 
 Now let's view the network flows Mermin is capturing:
 
@@ -152,7 +108,7 @@ You should see flow records in a human-readable format. Let's generate some traf
 
 ```bash
 # In a new terminal, create a test pod
-kubectl run test-pod --image=nicolaka/netshoot -it --rm -- bash
+kubectl run --rm -it --image=busybox test-pod -- bash
 
 # Inside the test pod, generate traffic
 ping -c 10 8.8.8.8
