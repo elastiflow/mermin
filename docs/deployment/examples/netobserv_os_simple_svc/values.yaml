@@ -30,14 +30,6 @@ netobserv-flow:
     - name: EF_OUTPUT_STDOUT_ENABLE
       value: "false" # `false` is the default, keeping for ease of updating for testing
 
-  resources:
-    requests:
-      cpu: "1000m"
-      memory: "6000Mi"
-    limits:
-      cpu: "2000m"
-      memory: "6000Mi"
-
   autoscaling:
     enabled: true
     minReplicas: 1

@@ -17,13 +17,14 @@ Notes on the example deployment:
 - Allocatable resources needed (mCPU/MiB):
   - OpenSearch `2000m`/`4000Mi`
   - OpenSearch Dashboards `1000m`/`768M`
-  - NetObserv Flow `1000m`/`6000Mi`
+  - NetObserv Flow `1000m`/`6144Mi`
 - You may optionally customize and use `config.hcl` instead of the default config.
 
 ## Install
 <!-- TODO(Cleanup for GA): Once Mermin is GA, drop `--devel` flag -->
 
-<!-- TODO(Cleanup for GA): Once repo is public, this step should become part of the next step without any dependencies -->
+<!-- TODO(Cleanup for GA): Should be https://elastiflow.github.io/mermin/ instead of raw.githubusercontent.com..., it is used whilst repo is private -->
+<!-- TODO(Cleanup for GA): Once repo is public, no auth to helm should be needed -->
 - Add Mermin Helm chart
 
   ```sh
@@ -45,12 +46,12 @@ Notes on the example deployment:
   kubectl -n elastiflow create secret docker-registry ghcr \
       --docker-server=ghcr.io \
       --docker-username=elastiflow-ghcr \
-      --docker-password=${CLASSIC_GH_TOKEN}
+      --docker-password=${GH_CLASSIC_TOKEN}
 
   # Deploy
   helm upgrade -i --wait --timeout 15m -n elastiflow \
-    -f examples/netobserv_os_simple_svc/values.yaml \
-    --set-file mermin.config.content=examples/netobserv_os_simple_svc/config.hcl \
+    -f docs/deployment/examples/netobserv_os_simple_svc/values.yaml \
+    --set-file mermin.config.content=docs/deployment/examples/netobserv_os_simple_svc/config.hcl \
     --devel \
     mermin mermin/mermin-netobserv-os-stack
   ```
@@ -79,8 +80,8 @@ To render and diff Helm templates to Kubernetes manifests, run:
 
 ```sh
 rm -rf helm_rendered; helm template -n elastiflow \
-  -f examples/netobserv_os_simple_svc/values.yaml \
-  --set-file mermin.config.content=examples/netobserv_os_simple_svc/config.hcl \
+  -f docs/deployment/examples/netobserv_os_simple_svc/values.yaml \
+  --set-file mermin.config.content=docs/deployment/examples/netobserv_os_simple_svc/config.hcl \
   --output-dir helm_rendered \
   --devel \
   mermin mermin/mermin-netobserv-os-stack
