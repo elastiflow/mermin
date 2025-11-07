@@ -198,7 +198,7 @@ discovery "informer" "k8s" {
 
 #### Flow-to-Kubernetes Attribute Mapping
 
-Maps flow data (IPs, ports) to Kubernetes resources below:
+Maps flow data (IPs, ports) to Kubernetes resources, in other word defines how to map flow record to the K8s resource:
 
 <details>
 <summary>attributes source/destination</summary>
