@@ -1,4 +1,5 @@
 mod community_id;
+mod error;
 mod flow;
 mod iface;
 mod k8s;

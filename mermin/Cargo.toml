@@ -52,6 +52,8 @@ sha1 = "0.10"
 pnet = "0.34"
 dashmap = "6.0"
 fxhash = "0.2"
+globset = "0.4"
+nix = { version = "0.29", features = ["process"] }
 [build-dependencies]
 anyhow = { workspace = true }
 aya-build = { workspace = true }

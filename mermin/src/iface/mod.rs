@@ -4,7 +4,10 @@
 // changes using the netlink protocol. It replaces raw libc syscalls with the
 // netlink-sys crate while maintaining compatibility with namespace switching.
 
+pub mod controller;
 pub mod netlink_monitor;
+pub mod netns;
 
 // Re-export key types for convenience
-pub use netlink_monitor::{NetlinkMonitor, LinkEvent};
+pub use controller::IfaceController;
+pub use netlink_monitor::{LinkEvent, NetlinkMonitor};
