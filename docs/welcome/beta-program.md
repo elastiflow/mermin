@@ -1,6 +1,6 @@
 # Beta Program
 
-{% include "../.gitbook/includes/version-requirement-v0.1.0... (2).md" %}
+> **Version Requirement**: v0.1.0-beta.16 or higher
 
 ### Accessing Beta Image
 
@@ -47,22 +47,25 @@ Configure which network interfaces Mermin monitors. Choose based on your visibil
 discovery "instrument" {
   # CNI bridge interfaces - captures all pod traffic
   # Choose patterns matching your CNI:
-  
+
+  # Kindnet (Kind cluster)
+  interfaces = ["veth*"]
+
   # Flannel
-  interfaces = ["cni*", "flannel*"]
-  
+  # interfaces = ["cni*", "flannel*"]
+
   # Calico
   # interfaces = ["cali*", "tunl*"]
-  
+
   # Cilium
   # interfaces = ["cilium_*", "lxc*"]
-  
+
   # GKE
   # interfaces = ["gke*"]
-  
+
   # AWS VPC CNI
   # interfaces = ["eni*"]
-  
+
   # Multi-CNI (comprehensive)
   # interfaces = ["cni*", "flannel*", "cali*", "tunl*", "cilium_*", "lxc*", "gke*", "eni*"]
 }
@@ -190,11 +193,59 @@ attributes "destination" "k8s" {
 
 > **For more information please reference:** [Flow Attributes](../configuration/attributes.md)
 
-### Running Mermin With Configuration
+#### Export
 
-A fleshed-out config is available here: [Examples](../../charts/mermin/config/examples/config.hcl). Once the config is ready, you can deploy it with the following command.
+Configure the OTLP export
 
-{% include "../.gitbook/includes/helm-install-mermin-mermin-....md" %}
+```hcl
+export "traces" {
+  # Export to stdout (logs)
+  stdout = {
+    format = "text_indent" // text, text_indent(*new), json, json_indent
+  }
+
+  # Configure exporting to an OTLP receiver
+  # otlp = {
+  #   endpoint               = "http://otelcol:4317"
+  #   protocol               = "grpc"
+  #   timeout                = "10s"
+  #   max_batch_size         = 512
+  #   max_batch_interval     = "5s"
+  #   max_queue_size         = 2048
+  #   max_concurrent_exports = 1
+  #   max_export_timeout     = "30s"
+
+  #   auth = {
+  #     basic = {
+  #       user = "USERNAME"
+  #       pass = "PASSWORD"
+  #     }
+  #   }
+
+  #   tls = {
+  #     insecure_skip_verify = false
+  #     ca_cert              = "/etc/certs/ca.crt"
+  #     client_cert          = "/etc/certs/cert.crt"
+  #     client_key           = "/etc/certs/cert.key"
+  #   }
+  # }
+}
+```
+
+A fleshed out config is available here: [Examples](../../charts/mermin/config/examples/config.hcl). Once the config is in a good place you cana deploy it with the below command
+
+```
+helm upgrade -i mermin mermin/mermin \
+  --namespace elastiflow \
+  --version 0.1.0-beta.15 \
+  --set image.tag=v0.1.0-beta.15 \
+  --set 'imagePullSecrets[0].name=ghcr' \
+  --set-file config.content=mermin-config.hcl \
+  --wait
+
+# Verify deployment
+kubectl -n elastiflow get pods -l app.kubernetes.io/name=mermin
+```
 
 ### See Your First Flows
 
