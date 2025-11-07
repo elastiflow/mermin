@@ -131,7 +131,7 @@ discovery "instrument" {
 
 **Memory:**
 
-* Each monitored interface adds \~1KB to memory usage
+* Each monitored interface adds ~1KB to memory usage
 * Controller state: patterns, active interfaces, TC links (\~100KB baseline)
 * In clusters with 1000 pods (2000 veth interfaces), total is \~2.1MB
 * Netlink socket overhead is negligible (<100KB)
