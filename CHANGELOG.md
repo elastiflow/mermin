@@ -1,3 +1,14 @@
+## [v0.1.0-beta.16] - 2025-11-07
+
+### Bug Fixes
+
+- Docs links in main docs page (#226)
+- CNI tests (#229)
+
+[v0.1.0-beta.15..v0.1.0-beta.16](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.15...v0.1.0-beta.16)
+
+
+
 ## [v0.1.0-beta.15] - 2025-11-06
 
 ### Bug Fixes
