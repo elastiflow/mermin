@@ -1,4 +1,8 @@
-# Selector Relations Configuration
+---
+hidden: true
+---
+
+# Selector Relations
 
 Selector relations enable matching Kubernetes resources based on label selectors, such as NetworkPolicy → Pod or Service → Pod associations.
 
@@ -118,5 +122,5 @@ discovery "informer" "k8s" {
 
 ## Next Steps
 
-- **[Flow Attributes](attributes.md)**: Configure metadata extraction
-- **[Owner Relations](owner-relations.md)**: Configure owner reference walking
+* [**Flow Attributes**](attributes.md): Configure metadata extraction
+* [**Owner Relations**](owner-relations.md): Configure owner reference walking

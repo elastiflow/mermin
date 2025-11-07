@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Docker on Bare Metal
 
 This guide covers deploying Mermin as a Docker container on bare metal or virtual machines without Kubernetes. This is useful for monitoring standalone Linux hosts or environments where Kubernetes is not available.

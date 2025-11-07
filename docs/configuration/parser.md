@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Parser Configuration
 
 The parser configuration controls how Mermin's eBPF programs parse network packets, specifically for detecting and processing tunneling protocols.
@@ -20,22 +24,24 @@ parser {
 
 ### `geneve_port`
 
-**Type:** Integer (port number)
-**Default:** `6081`
+**Type:** Integer (port number) **Default:** `6081`
 
 UDP port number for Geneve tunnel detection.
 
 **Description:**
-- [Geneve](https://datatracker.ietf.org/doc/html/rfc8926) (Generic Network Virtualization Encapsulation) is a tunneling protocol
-- IANA assigned port: 6081
-- Used by various cloud networking solutions and SDN controllers
+
+* [Geneve](https://datatracker.ietf.org/doc/html/rfc8926) (Generic Network Virtualization Encapsulation) is a tunneling protocol
+* IANA assigned port: 6081
+* Used by various cloud networking solutions and SDN controllers
 
 **When to customize:**
-- Your environment uses non-standard Geneve port
-- Network policy requires specific port assignment
-- Conflict with other services on standard port
+
+* Your environment uses non-standard Geneve port
+* Network policy requires specific port assignment
+* Conflict with other services on standard port
 
 **Example:**
+
 ```hcl
 parser {
   geneve_port = 6081  # IANA standard (default)
@@ -43,6 +49,7 @@ parser {
 ```
 
 **Custom port example:**
+
 ```hcl
 parser {
   geneve_port = 7081  # Custom port
@@ -51,22 +58,24 @@ parser {
 
 ### `vxlan_port`
 
-**Type:** Integer (port number)
-**Default:** `4789`
+**Type:** Integer (port number) **Default:** `4789`
 
 UDP port number for VXLAN tunnel detection.
 
 **Description:**
-- [VXLAN](https://datatracker.ietf.org/doc/html/rfc7348) (Virtual Extensible LAN) is a network virtualization technology
-- IANA assigned port: 4789
-- Commonly used in Kubernetes networking (Flannel, Calico, NSX-T)
+
+* [VXLAN](https://datatracker.ietf.org/doc/html/rfc7348) (Virtual Extensible LAN) is a network virtualization technology
+* IANA assigned port: 4789
+* Commonly used in Kubernetes networking (Flannel, Calico, NSX-T)
 
 **When to customize:**
-- Your CNI or network plugin uses non-standard VXLAN port
-- Legacy VXLAN deployments using older port assignments
-- Custom overlay network configuration
+
+* Your CNI or network plugin uses non-standard VXLAN port
+* Legacy VXLAN deployments using older port assignments
+* Custom overlay network configuration
 
 **Example:**
+
 ```hcl
 parser {
   vxlan_port = 4789  # IANA standard (default)
@@ -74,6 +83,7 @@ parser {
 ```
 
 **Custom port example:**
+
 ```hcl
 parser {
   vxlan_port = 8472  # Flannel's default in older versions
@@ -82,22 +92,24 @@ parser {
 
 ### `wireguard_port`
 
-**Type:** Integer (port number)
-**Default:** `51820`
+**Type:** Integer (port number) **Default:** `51820`
 
 UDP port number for WireGuard tunnel detection.
 
 **Description:**
-- [WireGuard](https://www.wireguard.com/) is a modern VPN protocol
-- Default port: 51820 (not IANA assigned, but widely adopted)
-- Used for secure site-to-site or pod-to-pod encrypted connections
+
+* [WireGuard](https://www.wireguard.com/) is a modern VPN protocol
+* Default port: 51820 (not IANA assigned, but widely adopted)
+* Used for secure site-to-site or pod-to-pod encrypted connections
 
 **When to customize:**
-- WireGuard configured with custom listen port
-- Multiple WireGuard tunnels with different ports
-- Security requirements for non-default ports
+
+* WireGuard configured with custom listen port
+* Multiple WireGuard tunnels with different ports
+* Security requirements for non-default ports
 
 **Example:**
+
 ```hcl
 parser {
   wireguard_port = 51820  # Default WireGuard port
@@ -105,6 +117,7 @@ parser {
 ```
 
 **Custom port example:**
+
 ```hcl
 parser {
   wireguard_port = 51821  # Custom WireGuard port
@@ -116,35 +129,34 @@ parser {
 ### Packet Processing Flow
 
 1. **Outer Header Parsing**:
-   - Mermin's eBPF program examines the outer IP header
-   - Checks UDP destination port against configured tunnel ports
-
+   * Mermin's eBPF program examines the outer IP header
+   * Checks UDP destination port against configured tunnel ports
 2. **Tunnel Type Detection**:
-   - If port matches `vxlan_port` → Parse as VXLAN
-   - If port matches `geneve_port` → Parse as Geneve
-   - If port matches `wireguard_port` → Parse as WireGuard
-
+   * If port matches `vxlan_port` → Parse as VXLAN
+   * If port matches `geneve_port` → Parse as Geneve
+   * If port matches `wireguard_port` → Parse as WireGuard
 3. **Inner Header Parsing**:
-   - Extract encapsulated packet
-   - Parse inner IP, TCP/UDP headers
-   - Generate flow records using inner headers
-
+   * Extract encapsulated packet
+   * Parse inner IP, TCP/UDP headers
+   * Generate flow records using inner headers
 4. **Flow Attributes**:
-   - Flow records contain both outer and inner header information
-   - Tunnel type is recorded in flow metadata
-   - Enables tracking of overlay network traffic
+   * Flow records contain both outer and inner header information
+   * Tunnel type is recorded in flow metadata
+   * Enables tracking of overlay network traffic
 
 ### Tunnel Detection Benefits
 
 **Without tunnel parsing:**
-- Flows show only tunnel endpoints (node IPs)
-- Cannot see actual source/destination of encapsulated traffic
-- Limited visibility into overlay network communication
+
+* Flows show only tunnel endpoints (node IPs)
+* Cannot see actual source/destination of encapsulated traffic
+* Limited visibility into overlay network communication
 
 **With tunnel parsing:**
-- Flows show inner source/destination (pod IPs)
-- Complete visibility into overlay traffic
-- Accurate flow accounting for containerized workloads
+
+* Flows show inner source/destination (pod IPs)
+* Complete visibility into overlay traffic
+* Accurate flow accounting for containerized workloads
 
 ## CNI-Specific Configurations
 
@@ -204,6 +216,7 @@ parser {
 ### Identifying VXLAN Port
 
 **Flannel:**
+
 ```bash
 # Check Flannel configuration
 kubectl -n kube-system get configmap kube-flannel-cfg -o yaml | grep -i port
@@ -213,6 +226,7 @@ kubectl -n kube-system get pod -l app=flannel -o yaml | grep -i port
 ```
 
 **Calico:**
+
 ```bash
 # Check Calico configuration
 kubectl get felixconfiguration default -o yaml | grep -i vxlan
@@ -221,12 +235,14 @@ kubectl get felixconfiguration default -o yaml | grep -i vxlan
 ### Identifying Geneve Port
 
 **Cilium:**
+
 ```bash
 # Check Cilium config
 kubectl -n kube-system get configmap cilium-config -o yaml | grep -i geneve
 ```
 
 **NSX-T:**
+
 ```bash
 # Typically uses default Geneve port 6081
 # Check NSX-T configuration documentation
@@ -263,16 +279,17 @@ parser {
 
 ### Impact of Tunnel Parsing
 
-- **CPU Usage**: Minimal overhead for tunnel header parsing
-- **Memory**: No additional memory required
-- **Accuracy**: Significantly improves flow accuracy in overlay networks
+* **CPU Usage**: Minimal overhead for tunnel header parsing
+* **Memory**: No additional memory required
+* **Accuracy**: Significantly improves flow accuracy in overlay networks
 
 ### When to Disable
 
 Tunnel parsing cannot be disabled, but misconfigured ports may cause:
-- Incorrect tunnel detection
-- Flows attributed to wrong source/destination
-- Missing inner packet information
+
+* Incorrect tunnel detection
+* Flows attributed to wrong source/destination
+* Missing inner packet information
 
 ## Validation
 
@@ -291,14 +308,16 @@ kubectl logs -l app.kubernetes.io/name=mermin --tail=20
 ### Compare With/Without Tunnel Parsing
 
 **Without proper configuration:**
-- Flows show: Node IP A → Node IP B (outer headers only)
-- Protocol: UDP (tunnel protocol)
-- Ports: tunnel ports (4789, 6081, etc.)
+
+* Flows show: Node IP A → Node IP B (outer headers only)
+* Protocol: UDP (tunnel protocol)
+* Ports: tunnel ports (4789, 6081, etc.)
 
 **With proper configuration:**
-- Flows show: Pod IP X → Pod IP Y (inner headers)
-- Protocol: TCP/UDP/ICMP (actual application protocol)
-- Ports: application ports (80, 443, etc.)
+
+* Flows show: Pod IP X → Pod IP Y (inner headers)
+* Protocol: TCP/UDP/ICMP (actual application protocol)
+* Ports: application ports (80, 443, etc.)
 
 ## Complete Configuration Example
 
@@ -323,6 +342,7 @@ parser {
 **Symptoms:** Flows show node IPs instead of pod IPs
 
 **Solutions:**
+
 1. Verify tunnel port configuration matches your CNI
 2. Check CNI documentation for port settings
 3. Inspect actual tunnel traffic: `tcpdump -i any -n udp port 4789`
@@ -332,6 +352,7 @@ parser {
 **Symptoms:** Flows misattributed or missing
 
 **Solutions:**
+
 1. Confirm tunnel ports with CNI configuration
 2. Check for port conflicts with other services
 3. Review eBPF program logs for parsing errors
@@ -350,7 +371,7 @@ If your environment uses multiple ports for the same tunnel protocol (e.g., mult
 
 ## Next Steps
 
-- **[Network Interface Discovery](discovery-interfaces.md)**: Configure which interfaces to monitor
-- **[Flow Filtering](filtering.md)**: Filter flows based on protocols and ports
-- **[Troubleshooting No Flow Data](../troubleshooting/no-flows.md)**: Diagnose flow capture issues
-- **[Advanced Scenarios](../deployment/advanced-scenarios.md)**: CNI-specific deployment guides
+* [**Network Interface Discovery**](discovery-interfaces.md): Configure which interfaces to monitor
+* [**Flow Filtering**](filtering.md): Filter flows based on protocols and ports
+* [**Troubleshooting No Flow Data**](../troubleshooting/no-flows.md): Diagnose flow capture issues
+* [**Advanced Scenarios**](../deployment/advanced-scenarios.md): CNI-specific deployment guides

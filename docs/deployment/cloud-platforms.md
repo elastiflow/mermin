@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Cloud Platforms
 
 This guide provides specific instructions for deploying Mermin on major cloud Kubernetes platforms: Google Kubernetes Engine (GKE), Amazon Elastic Kubernetes Service (EKS), and Azure Kubernetes Service (AKS).

@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Export Issues
 
 This guide helps resolve problems sending Flow Traces to OTLP endpoints and observability backends.

@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Advanced Scenarios
 
 This guide covers advanced Mermin deployment scenarios including custom CNI configurations, multi-cluster deployments, high-availability setups, and performance tuning for high-throughput environments.

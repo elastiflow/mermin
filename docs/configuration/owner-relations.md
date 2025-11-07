@@ -1,4 +1,8 @@
-# Owner Relations Configuration
+---
+hidden: true
+---
+
+# Owner Relations
 
 Owner relations control how Mermin walks Kubernetes owner references to enrich flows with workload controller metadata (Deployment, StatefulSet, etc.).
 
@@ -22,12 +26,12 @@ discovery "informer" "k8s" {
 
 ### `max_depth`
 
-**Type:** Integer
-**Default:** `5`
+**Type:** Integer **Default:** `5`
 
 Maximum depth to walk owner reference chain.
 
 **Example:**
+
 ```hcl
 owner_relations = {
   max_depth = 5  # Pod → RS → Deploy → ... (up to 5 levels)
@@ -36,14 +40,14 @@ owner_relations = {
 
 ### `include_kinds`
 
-**Type:** Array of strings
-**Default:** `[]` (include all)
+**Type:** Array of strings **Default:** `[]` (include all)
 
 Only include these owner kinds in flow metadata. Empty array means include all.
 
 **Valid kinds:** Deployment, ReplicaSet, StatefulSet, DaemonSet, Job, CronJob
 
 **Example:**
+
 ```hcl
 owner_relations = {
   include_kinds = ["Deployment", "StatefulSet"]
@@ -52,12 +56,12 @@ owner_relations = {
 
 ### `exclude_kinds`
 
-**Type:** Array of strings
-**Default:** `[]` (exclude none)
+**Type:** Array of strings **Default:** `[]` (exclude none)
 
 Exclude these owner kinds from flow metadata. Takes precedence over `include_kinds`.
 
 **Example:**
+
 ```hcl
 owner_relations = {
   exclude_kinds = ["ReplicaSet"]
@@ -69,10 +73,12 @@ owner_relations = {
 **Example chain:** Pod `nginx-abc123` → ReplicaSet `nginx-xyz` → Deployment `nginx`
 
 **Without owner relations:**
-- Flow shows only: Pod name, namespace, labels
+
+* Flow shows only: Pod name, namespace, labels
 
 **With owner relations:**
-- Flow shows: Pod + ReplicaSet + Deployment metadata
+
+* Flow shows: Pod + ReplicaSet + Deployment metadata
 
 ## Complete Example
 
@@ -93,5 +99,5 @@ discovery "informer" "k8s" {
 
 ## Next Steps
 
-- **[Selector Relations](selector-relations.md)**: Configure selector-based matching
-- **[Flow Attributes](attributes.md)**: Configure metadata extraction
+* [**Selector Relations**](selector-relations.md): Configure selector-based matching
+* [**Flow Attributes**](attributes.md): Configure metadata extraction

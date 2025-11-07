@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Troubleshooting Overview
 
 This section helps you diagnose and resolve common issues when deploying and operating Mermin.

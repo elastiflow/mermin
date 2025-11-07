@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Deployment Issues
 
 This guide helps resolve issues preventing Mermin pods from starting or running correctly.

@@ -1,4 +1,8 @@
-# Kubernetes Informer Configuration
+---
+hidden: true
+---
+
+# Kubernetes Informers
 
 This page documents how to configure Mermin's Kubernetes informers, which watch and cache Kubernetes resources for flow metadata enrichment.
 
@@ -38,12 +42,12 @@ discovery "informer" "k8s" {
 
 ### `kubeconfig_path`
 
-**Type:** String (file path)
-**Default:** `""` (uses in-cluster config)
+**Type:** String (file path) **Default:** `""` (uses in-cluster config)
 
 Path to kubeconfig file for API server connection.
 
 **Examples:**
+
 ```hcl
 informer "k8s" {
   # Use in-cluster config (default for pods)
@@ -55,23 +59,25 @@ informer "k8s" {
 ```
 
 **When to set:**
-- Testing locally outside cluster
-- Using specific service account
-- Multi-cluster scenarios
+
+* Testing locally outside cluster
+* Using specific service account
+* Multi-cluster scenarios
 
 ### `informers_sync_timeout`
 
-**Type:** Duration
-**Default:** `"30s"`
+**Type:** Duration **Default:** `"30s"`
 
 Timeout for initial informer synchronization.
 
 **Description:**
-- Maximum time to wait for informers to complete initial sync
-- Mermin won't be ready until sync completes
-- Large clusters may need longer timeout
+
+* Maximum time to wait for informers to complete initial sync
+* Mermin won't be ready until sync completes
+* Large clusters may need longer timeout
 
 **Examples:**
+
 ```hcl
 informer "k8s" {
   # Default
@@ -84,17 +90,18 @@ informer "k8s" {
 
 ### `informers_resync_period`
 
-**Type:** Duration
-**Default:** `"30m"`
+**Type:** Duration **Default:** `"30m"`
 
 Periodic full resynchronization interval.
 
 **Description:**
-- Forces complete refresh of cached data
-- Helps recover from missed watch events
-- Balances freshness vs. API server load
+
+* Forces complete refresh of cached data
+* Helps recover from missed watch events
+* Balances freshness vs. API server load
 
 **Examples:**
+
 ```hcl
 informer "k8s" {
   # Default
@@ -203,10 +210,11 @@ discovery "informer" "k8s" {
 ```
 
 **Operators:**
-- `In`: Label value in list
-- `NotIn`: Label value not in list
-- `Exists`: Label key exists
-- `DoesNotExist`: Label key doesn't exist
+
+* `In`: Label value in list
+* `NotIn`: Label value not in list
+* `Exists`: Label key exists
+* `DoesNotExist`: Label key doesn't exist
 
 ### Exclusion
 
@@ -232,21 +240,21 @@ discovery "informer" "k8s" {
 
 Mermin supports watching these Kubernetes resources:
 
-| Kind | Purpose |
-|------|---------|
-| `Pod` | Primary source for flow attribution |
-| `Service` | Service endpoints and selectors |
-| `Endpoint` | (Deprecated) Service endpoints |
-| `EndpointSlice` | Modern service endpoints |
-| `ReplicaSet` | Owner reference walking |
-| `Deployment` | Owner reference walking |
-| `DaemonSet` | Owner reference walking |
-| `StatefulSet` | Owner reference walking |
-| `Job` | Owner reference walking |
-| `CronJob` | Owner reference walking |
-| `NetworkPolicy` | Network policy association |
-| `Ingress` | Ingress controller flows |
-| `Gateway` | Gateway API flows |
+| Kind            | Purpose                             |
+| --------------- | ----------------------------------- |
+| `Pod`           | Primary source for flow attribution |
+| `Service`       | Service endpoints and selectors     |
+| `Endpoint`      | (Deprecated) Service endpoints      |
+| `EndpointSlice` | Modern service endpoints            |
+| `ReplicaSet`    | Owner reference walking             |
+| `Deployment`    | Owner reference walking             |
+| `DaemonSet`     | Owner reference walking             |
+| `StatefulSet`   | Owner reference walking             |
+| `Job`           | Owner reference walking             |
+| `CronJob`       | Owner reference walking             |
+| `NetworkPolicy` | Network policy association          |
+| `Ingress`       | Ingress controller flows            |
+| `Gateway`       | Gateway API flows                   |
 
 **Case insensitive**: `"Pod"`, `"pod"`, and `"POD"` are equivalent.
 
@@ -300,31 +308,33 @@ discovery "informer" "k8s" {
 
 Memory usage scales with number of watched resources:
 
-**Estimate:** ~1 KB per resource
-**10,000 pods:** ~10 MB
-**100,000 pods:** ~100 MB
+**Estimate:** \~1 KB per resource **10,000 pods:** \~10 MB **100,000 pods:** \~100 MB
 
 ### API Server Load
 
 Informers use Kubernetes watch API:
-- Initial LIST operation per resource type
-- WATCH for ongoing updates
-- Periodic resync (controlled by `informers_resync_period`)
+
+* Initial LIST operation per resource type
+* WATCH for ongoing updates
+* Periodic resync (controlled by `informers_resync_period`)
 
 **Reduce load:**
-- Use namespace filtering
-- Use label selectors
-- Increase `informers_resync_period`
+
+* Use namespace filtering
+* Use label selectors
+* Increase `informers_resync_period`
 
 ### Sync Time
 
 Initial sync time depends on:
-- Cluster size
-- Number of resource types
-- API server performance
-- Network latency
+
+* Cluster size
+* Number of resource types
+* API server performance
+* Network latency
 
 **Large cluster tuning:**
+
 ```hcl
 informer "k8s" {
   # Longer timeout for large clusters
@@ -342,6 +352,7 @@ informer "k8s" {
 **Symptoms:** `informer sync timeout exceeded`
 
 **Solutions:**
+
 1. Increase `informers_sync_timeout`
 2. Check API server responsiveness
 3. Verify RBAC permissions
@@ -352,6 +363,7 @@ informer "k8s" {
 **Symptoms:** Flows missing pod/service names
 
 **Solutions:**
+
 1. Verify resource kinds are in selectors
 2. Check namespace filters
 3. Verify label selectors
@@ -362,6 +374,7 @@ informer "k8s" {
 **Symptoms:** Mermin using excessive memory
 
 **Solutions:**
+
 1. Add namespace filtering
 2. Add label selectors
 3. Remove unnecessary resource types
@@ -377,7 +390,7 @@ informer "k8s" {
 
 ## Next Steps
 
-- **[Owner Relations](owner-relations.md)**: Configure owner reference walking
-- **[Selector Relations](selector-relations.md)**: Configure selector-based matching
-- **[Flow Attributes](attributes.md)**: Configure metadata extraction
-- **[Troubleshooting Metadata](../troubleshooting/kubernetes-metadata.md)**: Debug missing metadata
+* [**Owner Relations**](owner-relations.md): Configure owner reference walking
+* [**Selector Relations**](selector-relations.md): Configure selector-based matching
+* [**Flow Attributes**](attributes.md): Configure metadata extraction
+* [**Troubleshooting Metadata**](../troubleshooting/kubernetes-metadata.md): Debug missing metadata

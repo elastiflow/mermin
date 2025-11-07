@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Stdout Exporter
 
 The stdout exporter outputs flow records directly to the console (standard output), making it ideal for development, debugging, and initial testing of Mermin.
