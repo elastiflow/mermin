@@ -16,6 +16,9 @@ socket2 = "0.5"
 [dependencies]
 mermin-common = { path = "../mermin-common", features = [] }
 network-types = { path = "../network-types" }
+netlink-sys = "0.8"
+netlink-packet-core = "0.7"
+netlink-packet-route = "0.21"
 
 anyhow = { workspace = true, default-features = true }
 aya = { workspace = true, features = ["async_tokio"] }
