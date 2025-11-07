@@ -36,6 +36,7 @@ The installation process consists of two phases:
 This installation assumes that no additional DNS controllers are running in the cluster. Therefore, it is not possible to know the IP address of the NetObserv gRPC load balancer without extra GCP actions before the NetObserv chart (dependency) is ready.
 
 - Phase 1
+  <!-- TODO(Cleanup for GA): Should be https://elastiflow.github.io/mermin/ instead of raw.githubusercontent.com..., it is used whilst repo is private -->
   <!-- TODO(Cleanup for GA): Once repo is public, this step should become part of the next step without any dependencies -->
   - Add Mermin Helm chart
 
@@ -58,12 +59,12 @@ This installation assumes that no additional DNS controllers are running in the 
     kubectl -n elastiflow create secret docker-registry ghcr \
         --docker-server=ghcr.io \
         --docker-username=elastiflow-ghcr \
-        --docker-password=${CLASSIC_GH_TOKEN}
+        --docker-password=${GH_CLASSIC_TOKEN}
 
     # Deploy
     helm upgrade -i --wait --timeout 15m -n elastiflow \
-      -f examples/netobserv_os_simple_gke_gw/values.yaml \
-      --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
+      -f docs/deployment/examples/netobserv_os_simple_gke_gw/values.yaml \
+      --set-file mermin.config.content=docs/deployment/examples/netobserv_os_simple_gke_gw/config.hcl \
       --devel \
       mermin mermin/mermin-netobserv-os-stack
     ```
@@ -75,12 +76,12 @@ This installation assumes that no additional DNS controllers are running in the 
     kubectl get gtw netobserv-flow -o=jsonpath='{.status.addresses[0].value}'
     ```
 
-  - Modify `export.traces.otlp.endpoint` in the `config.hcl` to the value from the previous step and redeploy the chart
+  - **important:** Modify `export.traces.otlp.endpoint` in the `config.hcl` to the value from the previous step and redeploy the chart
 
     ```sh
     helm upgrade -i --wait --timeout 15m -n elastiflow \
-      -f examples/netobserv_os_simple_gke_gw/values.yaml \
-      --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
+      -f docs/deployment/examples/netobserv_os_simple_gke_gw/values.yaml \
+      --set-file mermin.config.content=docs/deployment/examples/netobserv_os_simple_gke_gw/config.hcl \
       --devel \
       mermin mermin/mermin-netobserv-os-stack
     ```
@@ -101,8 +102,8 @@ To render and diff Helm templates to Kubernetes manifests, run:
 
 ```sh
 rm -rf helm_rendered; helm template -n elastiflow \
-  -f examples/netobserv_os_simple_gke_gw/values.yaml \
-  --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
+  -f docs/deployment/examples/netobserv_os_simple_gke_gw/values.yaml \
+  --set-file mermin.config.content=docs/deployment/examples/netobserv_os_simple_gke_gw/config.hcl \
   --output-dir helm_rendered \
   --devel \
   mermin mermin/mermin-netobserv-os-stack

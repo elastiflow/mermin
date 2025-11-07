@@ -1,4 +1,4 @@
-# TODO(mack#lgo-406|2025-11-04): Re-iterate on the example, values must be aligned with "examples/netobserv_os_simple_svc"
+# TODO(mack#lgo-406|2025-11-04): Re-iterate on the example, values must be aligned with "docs/deployment/examples/netobserv_os_simple_svc"
 mermin:
   enabled: true
   # TODO(Cleanup for GA): image pull secrets not needed when going public
@@ -129,14 +129,14 @@ netobserv-flow:
 
   outputOpenSearch:
     enable: true
-    addresses: opensearch-cluster-master.elastiflow.svc.gke-main-a.us-east1:9200
+    addresses: opensearch-cluster-master.elastiflow.svc:9200
     password: Elast1flow! # Insecure
     tls:
       enable: true
       skipVerification: true
     dashboards:
       provision: true
-      dashboards_url: http://elastiflow-os-dashboards.elastiflow.svc.gke-main-a.us-east1:5601
+      dashboards_url: http://elastiflow-os-dashboards.elastiflow.svc:5601
 
   extraVolumes:
     - name: netobserv-tls
@@ -251,7 +251,7 @@ opensearch:
 opensearch-dashboards:
   enabled: true
   fullnameOverride: elastiflow-os-dashboards
-  opensearchHosts: https://opensearch-cluster-master.elastiflow.svc.gke-main-a.us-east1:9200
+  opensearchHosts: https://opensearch-cluster-master.elastiflow.svc:9200
   resources:
     requests:
       cpu: "1000m"
