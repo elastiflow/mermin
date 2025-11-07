@@ -115,9 +115,8 @@ jobs:
       - name: Run E2E Test for ${{ matrix.cni }}
         env:
           CNI: ${{ matrix.cni }}
-          DOCKER_IMAGE_NAME: not-exists.elastiflow.com/mermin:${{ inputs.image-tag }}
-          DOCKER_IMAGE_TAG: ${{ inputs.image-tag }}
           DOCKER_REPOSITORY: not-exists.elastiflow.com/mermin
+          DOCKER_IMAGE_TAG: ${{ inputs.image-tag }}
           HOST_DOCKER_INTERNAL_ADDR: 172.17.0.1
           MERMIN_CONFIG_PATH: examples/local/config.example.hcl
         run: ${{ inputs.test-path }}
