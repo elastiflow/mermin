@@ -1,15 +1,15 @@
 dependencies:
 - name: mermin
   repository: https://raw.githubusercontent.com/elastiflow/mermin/gh-pages
-  version: 0.1.0-beta.14
+  version: 0.1.0-beta.16
 - name: netobserv-flow
   repository: https://elastiflow.github.io/helm-chart-netobserv/
-  version: 0.5.1
+  version: 0.5.2
 - name: opensearch
   repository: https://opensearch-project.github.io/helm-charts/
   version: 3.3.2
 - name: opensearch-dashboards
   repository: https://opensearch-project.github.io/helm-charts/
   version: 3.3.0
-digest: sha256:1c2e252b5882490848ece4084df56d9afa8dc470a2b62c7dfe8e0a1bb361c444
-generated: "2025-11-06T13:07:29.81052+02:00"
+digest: sha256:8d944ec96630505f167e6ac7b6a1e6bdc11c980b781e11df1c5fb91502f79482
+generated: "2025-11-07T11:14:17.216219-05:00"
