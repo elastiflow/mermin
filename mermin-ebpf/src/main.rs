@@ -180,7 +180,7 @@ use aya_ebpf::{
 };
 #[cfg(not(feature = "test"))]
 use aya_log_ebpf::{debug, error};
-use mermin_common::{Direction, IpAddrType, PacketMeta, ParserOptions, TunnelType};
+use mermin_common::{Direction, IpAddrType, PacketMeta, ParserOptions, TunnelPorts, TunnelType};
 use network_types::{
     ah::{self, AH_LEN},
     destopts::{self},
@@ -244,33 +244,47 @@ fn get_packet_meta(ctx: &TcContext) -> Result<&mut PacketMeta, Error> {
 
 #[cfg(not(feature = "test"))]
 #[map]
-static PARSER_OPTIONS: Array<u16> = Array::with_max_entries(5, 0);
+static TUNNEL_PORTS: Array<u16> = Array::with_max_entries(3, 0);
+
+#[cfg(not(feature = "test"))]
+#[map]
+static PARSER_OPTIONS: Array<u16> = Array::with_max_entries(2, 0);
+
+#[cfg(not(feature = "test"))]
+#[inline(always)]
+fn get_tunnel_ports(_ctx: &TcContext) -> Result<TunnelPorts, Error> {
+    // Get tunnel ports from TUNNEL_PORTS map
+    // Indices: 0=geneve, 1=vxlan, 2=wireguard
+    // NOTE: Changes to these settings require a full restart
+    #[allow(static_mut_refs)]
+    let geneve_port = TUNNEL_PORTS.get(0).copied().unwrap_or(6081);
+
+    #[allow(static_mut_refs)]
+    let vxlan_port = TUNNEL_PORTS.get(1).copied().unwrap_or(4789);
+
+    #[allow(static_mut_refs)]
+    let wireguard_port = TUNNEL_PORTS.get(2).copied().unwrap_or(51820);
+
+    Ok(TunnelPorts {
+        geneve_port,
+        vxlan_port,
+        wireguard_port,
+    })
+}
 
 #[cfg(not(feature = "test"))]
 #[inline(always)]
 fn get_parser_options(_ctx: &TcContext) -> Result<ParserOptions, Error> {
-    // Get configuration from Array map
-    // Indices: 0=geneve, 1=vxlan, 2=wireguard, 3=protocol_flags, 4=max_header_depth
+    // Get parser options from PARSER_OPTIONS map
+    // Indices: 0=protocol_flags, 1=max_header_depth
     // NOTE: Changes to these settings require a full restart
     #[allow(static_mut_refs)]
-    let geneve_port = PARSER_OPTIONS.get(0).copied().unwrap_or(6081);
+    let protocol_flags = PARSER_OPTIONS.get(0).copied().unwrap_or(0x0000); // all optional protocols disabled by default
 
     #[allow(static_mut_refs)]
-    let vxlan_port = PARSER_OPTIONS.get(1).copied().unwrap_or(4789);
-
-    #[allow(static_mut_refs)]
-    let wireguard_port = PARSER_OPTIONS.get(2).copied().unwrap_or(51820);
-
-    #[allow(static_mut_refs)]
-    let protocol_flags = PARSER_OPTIONS.get(3).copied().unwrap_or(0x0000); // all optional protocols disabled by default
-
-    #[allow(static_mut_refs)]
-    let max_header_depth = PARSER_OPTIONS.get(4).copied().unwrap_or(6);
+    let max_header_depth = PARSER_OPTIONS.get(1).copied().unwrap_or(6);
 
     Ok(ParserOptions {
-        geneve_port,
-        vxlan_port,
-        wireguard_port,
         protocol_flags,
         max_header_depth,
     })
@@ -300,7 +314,8 @@ enum HeaderType {
 /// Error logs are emitted with human-readable descriptions including the specific header type
 /// and error reason (e.g., "parser failed: IPv4 header out of bounds").
 ///
-/// **Error Types:**
+/// ## Error Types
+///
 /// - **OutOfBounds** - Packet data access beyond available length
 /// - **MalformedHeader** - Header structure is invalid or corrupted
 /// - **Unsupported** - Protocol/header type not currently supported
@@ -397,7 +412,15 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
         Err(_) => return TC_ACT_PIPE,
     };
 
-    for _ in 0..options.max_header_depth as usize {
+    // Clamp max_header_depth to ensure the verifier can prove loop bounds
+    // Cap at 8 to give the verifier a compile-time upper bound
+    let max_depth = if options.max_header_depth > 8 {
+        8
+    } else {
+        options.max_header_depth
+    };
+
+    for _ in 0..max_depth as usize {
         let result: Result<(), Error> = match parser.next_hdr {
             HeaderType::Ethernet => parser.parse_ethernet_header(&ctx),
             HeaderType::Ipv4 => parser.parse_ipv4_header(&ctx),
@@ -1229,14 +1252,14 @@ impl Parser {
 
         let dst_port = meta.dst_port();
 
-        let opts = get_parser_options(ctx)?;
+        let tunnel_ports = get_tunnel_ports(ctx)?;
         // IANA has assigned port 6081 as the fixed well-known destination port for Geneve and port 4789 as the fixed well-known destination port for Vxlan.
         // Although the well-known value should be used by default, it is RECOMMENDED that implementations make these configurable.
-        self.next_hdr = if dst_port == opts.geneve_port {
+        self.next_hdr = if dst_port == tunnel_ports.geneve_port {
             HeaderType::Geneve
-        } else if dst_port == opts.vxlan_port {
+        } else if dst_port == tunnel_ports.vxlan_port {
             HeaderType::Vxlan
-        } else if dst_port == opts.wireguard_port {
+        } else if dst_port == tunnel_ports.wireguard_port {
             HeaderType::Wireguard
         } else {
             HeaderType::StopProcessing
@@ -1666,13 +1689,20 @@ fn get_packet_meta(_ctx: &TcContext) -> Result<&'static mut PacketMeta, Error> {
 
 #[cfg(feature = "test")]
 #[inline(always)]
-fn get_parser_options(_ctx: &TcContext) -> Result<ParserOptions, Error> {
-    Ok(ParserOptions {
+fn get_tunnel_ports(_ctx: &TcContext) -> Result<TunnelPorts, Error> {
+    Ok(TunnelPorts {
         geneve_port: 6081,
         vxlan_port: 4789,
         wireguard_port: 51820,
+    })
+}
+
+#[cfg(feature = "test")]
+#[inline(always)]
+fn get_parser_options(_ctx: &TcContext) -> Result<ParserOptions, Error> {
+    Ok(ParserOptions {
         protocol_flags: 0x0000, // all optional protocols disabled by default
-        max_header_depth: 6,
+        max_header_depth: 8,    // increased for nested tunnel tests
     })
 }
 
@@ -2339,7 +2369,15 @@ mod tests {
         // Get parser configuration (protocol flags and max depth)
         let options = get_parser_options(&ctx)?;
 
-        for _ in 0..options.max_header_depth as usize {
+        // Clamp max_header_depth to ensure the verifier can prove loop bounds
+        // Cap at 8 to give the verifier a compile-time upper bound
+        let max_depth = if options.max_header_depth > 8 {
+            8
+        } else {
+            options.max_header_depth
+        };
+
+        for _ in 0..max_depth as usize {
             let result: Result<(), Error> = match parser.next_hdr {
                 HeaderType::Ethernet => parser.parse_ethernet_header(&ctx),
                 HeaderType::Ipv4 => parser.parse_ipv4_header(&ctx),
@@ -2477,18 +2515,28 @@ mod tests {
     #[test]
     fn test_parser_with_options() {
         let parser = Parser::default();
-        let options = ParserOptions {
+
+        // Test TunnelPorts
+        let tunnel_ports = TunnelPorts {
             geneve_port: 8080,
             vxlan_port: 8081,
             wireguard_port: 8082,
+        };
+
+        // Test ParserOptions
+        let options = ParserOptions {
             protocol_flags: 0x0000,
             max_header_depth: 6,
         };
 
-        // Verify custom options are set
-        assert_eq!(options.geneve_port, 8080);
-        assert_eq!(options.vxlan_port, 8081);
-        assert_eq!(options.wireguard_port, 8082);
+        // Verify custom tunnel ports are set
+        assert_eq!(tunnel_ports.geneve_port, 8080);
+        assert_eq!(tunnel_ports.vxlan_port, 8081);
+        assert_eq!(tunnel_ports.wireguard_port, 8082);
+
+        // Verify parser options are set
+        assert_eq!(options.protocol_flags, 0x0000);
+        assert_eq!(options.max_header_depth, 6);
 
         // Verify other fields have default values
         assert_eq!(parser.offset, 0);
@@ -2501,11 +2549,16 @@ mod tests {
         assert_eq!(packet_meta.src_port, [0, 0]);
         assert_eq!(packet_meta.dst_port, [0, 0]);
 
-        // Test with default port as well
+        // Test with default ports as well
+        let default_tunnel_ports = TunnelPorts::default();
+        assert_eq!(default_tunnel_ports.geneve_port, 6081);
+        assert_eq!(default_tunnel_ports.vxlan_port, 4789);
+        assert_eq!(default_tunnel_ports.wireguard_port, 51820);
+
+        // Test with default parser options
         let default_options = ParserOptions::default();
-        assert_eq!(default_options.geneve_port, 6081);
-        assert_eq!(default_options.vxlan_port, 4789);
-        assert_eq!(default_options.wireguard_port, 51820);
+        assert_eq!(default_options.protocol_flags, 0x0000);
+        assert_eq!(default_options.max_header_depth, 6);
     }
 
     #[test]

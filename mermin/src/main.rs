@@ -120,37 +120,28 @@ async fn run() -> Result<()> {
         );
     }
 
-    // Helper function to convert boolean flags to u16 bitfield
-    fn parser_flags_to_bitfield(conf: &runtime::conf::ParserConf) -> u16 {
-        let mut flags: u16 = 0;
-        if conf.parse_ipv6_hopopt {
-            flags |= 1 << 0;
-        }
-        if conf.parse_ipv6_fragment {
-            flags |= 1 << 1;
-        }
-        if conf.parse_ipv6_routing {
-            flags |= 1 << 2;
-        }
-        if conf.parse_ipv6_dest_opts {
-            flags |= 1 << 3;
-        }
-        flags
-    }
+    // Configure tunnel ports map
+    let mut tunnel_ports_map: Array<_, u16> = ebpf
+        .take_map("TUNNEL_PORTS")
+        .ok_or_else(|| MerminError::ebpf_map("TUNNEL_PORTS map not present in the object"))?
+        .try_into()?;
 
-    // Configure parser options for tunnel port detection and protocol parsing
+    // Set tunnel port configuration in the map
+    // Indices: 0=geneve, 1=vxlan, 2=wireguard
+    tunnel_ports_map.set(0, conf.parser.geneve_port, 0)?;
+    tunnel_ports_map.set(1, conf.parser.vxlan_port, 0)?;
+    tunnel_ports_map.set(2, conf.parser.wireguard_port, 0)?;
+
+    // Configure parser options map (protocol flags and max depth)
     let mut parser_options_map: Array<_, u16> = ebpf
         .take_map("PARSER_OPTIONS")
         .ok_or_else(|| MerminError::ebpf_map("PARSER_OPTIONS map not present in the object"))?
         .try_into()?;
 
-    // Set configuration in the map
-    // Indices: 0=geneve, 1=vxlan, 2=wireguard, 3=protocol_flags, 4=max_header_depth
-    parser_options_map.set(0, conf.parser.geneve_port, 0)?;
-    parser_options_map.set(1, conf.parser.vxlan_port, 0)?;
-    parser_options_map.set(2, conf.parser.wireguard_port, 0)?;
-    parser_options_map.set(3, parser_flags_to_bitfield(&conf.parser), 0)?;
-    parser_options_map.set(4, conf.parser.max_header_depth, 0)?;
+    // Set parser configuration in the map
+    // Indices: 0=protocol_flags, 1=max_header_depth
+    parser_options_map.set(0, parser_flags_to_bitfield(&conf.parser), 0)?;
+    parser_options_map.set(1, conf.parser.max_header_depth, 0)?;
 
     info!(
         event.name = "ebpf.config_applied",
@@ -492,6 +483,24 @@ async fn run() -> Result<()> {
     info!("exiting");
 
     Ok(())
+}
+
+/// Helper function to convert boolean parser flags to u16 bitfield
+fn parser_flags_to_bitfield(conf: &runtime::conf::ParserConf) -> u16 {
+    let mut flags: u16 = 0;
+    if conf.parse_ipv6_hopopt {
+        flags |= 1 << 0;
+    }
+    if conf.parse_ipv6_fragment {
+        flags |= 1 << 1;
+    }
+    if conf.parse_ipv6_routing {
+        flags |= 1 << 2;
+    }
+    if conf.parse_ipv6_dest_opts {
+        flags |= 1 << 3;
+    }
+    flags
 }
 
 /// Display user-friendly error messages with helpful hints
