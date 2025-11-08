@@ -5,6 +5,33 @@ use hcl::eval::Context;
 use serde::{Deserialize, Serialize};
 use tracing::{Level, warn};
 
+/// TCX ordering strategy for kernel >= 6.6
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TcxOrderStrategy {
+    /// Attach at the tail of the TCX chain (runs after all existing programs)
+    /// Recommended for observability tools - runs after Cilium/CNI programs
+    Last,
+    /// Attach at the head of the TCX chain (runs before all existing programs)
+    /// Use with caution - may interfere with CNI functionality
+    First,
+}
+
+impl Default for TcxOrderStrategy {
+    fn default() -> Self {
+        Self::Last
+    }
+}
+
+impl fmt::Display for TcxOrderStrategy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Last => write!(f, "last"),
+            Self::First => write!(f, "first"),
+        }
+    }
+}
+
 use crate::{
     k8s::owner_relations::OwnerRelationsOptions,
     otlp::opts::ExportOptions,
@@ -274,6 +301,11 @@ pub struct InstrumentConf {
     /// Default: 50 (runs after most CNI programs like Cilium)
     /// Range: 1-32767 (values < 30 will log warning - may conflict with CNI programs)
     pub tc_priority: u16,
+    /// TCX ordering strategy (TCX only, kernel >= 6.6)
+    /// Controls where mermin attaches in the TCX program chain
+    /// Options: "last" (default, runs after all programs), "first" (runs before all programs)
+    /// Default: "last" (recommended for observability - runs after Cilium/CNI)
+    pub tcx_order: TcxOrderStrategy,
 }
 
 impl Default for InstrumentConf {
@@ -312,17 +344,19 @@ impl Default for InstrumentConf {
             ],
             auto_discover_interfaces: true,
             tc_priority: 50,
+            tcx_order: TcxOrderStrategy::default(),
         }
     }
 }
 
 impl InstrumentConf {
-    /// Validate tc_priority is in safe range
+    /// Validate tc_priority and tcx_order settings
     pub fn validate(&self) -> Result<(), String> {
         const MIN_PRIORITY: u16 = 1;
         const SAFE_MIN_PRIORITY: u16 = 30;
         const MAX_PRIORITY: u16 = 32767;
 
+        // Validate TC priority (netlink mode, kernel < 6.6)
         if self.tc_priority < MIN_PRIORITY {
             return Err(format!(
                 "tc_priority {} is too low (min: {})",
@@ -344,6 +378,16 @@ impl InstrumentConf {
                 "tc_priority {} exceeds netlink limit (max: {})",
                 self.tc_priority, MAX_PRIORITY
             ));
+        }
+
+        // Validate TCX ordering (TCX mode, kernel >= 6.6)
+        if self.tcx_order == TcxOrderStrategy::First {
+            warn!(
+                "tcx_order is set to 'first' which attaches at the head of the tcx chain. \
+                 this may run before cni programs (like cilium) and break service resolution/networking. \
+                 recommended: use 'last' (default) for observability tools. \
+                 only use 'first' if you understand tcx program ordering!"
+            );
         }
 
         Ok(())

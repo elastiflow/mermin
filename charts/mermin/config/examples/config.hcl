@@ -142,8 +142,15 @@ discovery "instrument" {
   # Higher values = lower priority = runs later in TC chain
   # Default: 50 (runs after most CNI programs like Cilium which use 1-20)
   # Range: 1-32767 (values < 30 will log warning - may conflict with CNI programs)
-  # On kernel >= 6.6, TCX is used automatically (no priority needed)
   tc_priority = 50
+
+  # TCX ordering strategy (TCX only, kernel >= 6.6)
+  # Controls where mermin attaches in the TCX program chain
+  # Options:
+  #   "last"  (default) - Attach at tail, runs after all programs (recommended for observability)
+  #   "first"           - Attach at head, runs before all programs (use with caution!)
+  # Default: "last" (ensures mermin runs after Cilium's service load balancing)
+  tcx_order = "last"
 
   # Automatically discover and attach to new interfaces matching patterns
   # Recommended for ephemeral interfaces like veth* (created/destroyed with pods)
