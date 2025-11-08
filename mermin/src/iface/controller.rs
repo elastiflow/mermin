@@ -138,7 +138,7 @@ use std::{
 use aya::{
     Ebpf,
     programs::{
-        SchedClassifier, TcAttachType,
+        LinkOrder, SchedClassifier, TcAttachType,
         tc::{self, NlOptions, SchedClassifierLinkId, TcAttachOptions},
     },
 };
@@ -155,7 +155,7 @@ use pnet::datalink;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::{error::MerminError, iface::netns::NetnsSwitch};
+use crate::{error::MerminError, iface::netns::NetnsSwitch, runtime::conf::TcxOrderStrategy};
 
 /// Extension trait for TcAttachType to provide direction and program names
 pub trait TcAttachTypeExt {
@@ -227,6 +227,9 @@ pub struct IfaceController {
     /// TC priority for netlink attachment (kernel < 6.6)
     /// Higher values = lower priority = runs later in chain
     tc_priority: u16,
+    /// TCX ordering strategy (kernel >= 6.6)
+    /// Controls where programs attach in TCX chain (first/last)
+    tcx_order: TcxOrderStrategy,
 }
 
 /// TC attachment directions used for iterating over all attach types
@@ -247,6 +250,7 @@ impl IfaceController {
         ebpf: Arc<tokio::sync::Mutex<Ebpf>>,
         use_tcx: bool,
         tc_priority: u16,
+        tcx_order: TcxOrderStrategy,
     ) -> Result<Self, MerminError> {
         let netns_switch = NetnsSwitch::new().map_err(|e| {
             MerminError::internal(format!(
@@ -271,6 +275,7 @@ impl IfaceController {
             netns_switch,
             use_tcx,
             tc_priority,
+            tcx_order,
         })
     }
 
@@ -631,17 +636,25 @@ impl IfaceController {
                 // On older kernels, we explicitly use netlink with our configured priority.
 
                 if use_tcx {
-                    // TCX mode: kernel >= 6.6, no priority needed (uses LinkOrder instead)
+                    // TCX mode: kernel >= 6.6, attach with configured ordering
+                    let link_order = match self.tcx_order {
+                        TcxOrderStrategy::Last => LinkOrder::last(),
+                        TcxOrderStrategy::First => LinkOrder::first(),
+                    };
+
                     debug!(
                         event.name = "interface_controller.attaching_tcx",
                         network.interface.name = %iface_owned,
                         ebpf.program.direction = attach_type.direction_name(),
-                        "attaching ebpf program (TCX mode)"
+                        ebpf.tcx.order = %self.tcx_order,
+                        "attaching ebpf program with tcx ordering"
                     );
 
-                    program.attach(&iface_owned, attach_type).map_err(|e| {
+                    let options = TcAttachOptions::TcxOrder(link_order);
+                    program.attach_with_options(&iface_owned, attach_type, options).map_err(|e| {
                         MerminError::internal(format!(
-                            "failed to attach ebpf program to interface {iface} (TCX mode): {e}",
+                            "failed to attach ebpf program to interface {iface} (tcx mode, order={}): {e}",
+                            self.tcx_order
                         ))
                     })
                 } else {

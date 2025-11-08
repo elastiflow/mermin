@@ -406,9 +406,12 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
     meta.tunnel_id = 0;
     meta.tunnel_ipsec_ah_spi = 0;
 
-    // Get parser configuration (protocol flags and max depth)
     let options = match get_parser_options(&ctx) {
         Ok(opts) => opts,
+        Err(_) => return TC_ACT_PIPE,
+    };
+    let tunnel_ports = match get_tunnel_ports(&ctx) {
+        Ok(ports) => ports,
         Err(_) => return TC_ACT_PIPE,
     };
 
@@ -441,7 +444,7 @@ fn try_mermin(ctx: TcContext, direction: Direction) -> i32 {
             HeaderType::Proto(IpProto::Ipv4) => parser.parse_ipv4_encap(&ctx),
             HeaderType::Proto(IpProto::Ipv6) => parser.parse_ipv6_encap(&ctx),
             HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx),
-            HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx),
+            HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx, &tunnel_ports),
             HeaderType::Proto(IpProto::Ipv6Route) => {
                 if is_protocol_enabled(options.protocol_flags, PARSE_IPV6_ROUTE) {
                     parser.parse_generic_route_header(&ctx)
@@ -1241,7 +1244,11 @@ impl Parser {
 
     /// Parses the UDP header in the packet and updates the parser state accordingly.
     /// Returns an error if the header cannot be loaded.
-    fn parse_udp_header(&mut self, ctx: &TcContext) -> Result<(), Error> {
+    fn parse_udp_header(
+        &mut self,
+        ctx: &TcContext,
+        tunnel_ports: &TunnelPorts,
+    ) -> Result<(), Error> {
         if self.offset + UDP_LEN > ctx.len() as usize {
             return Err(Error::OutOfBounds);
         }
@@ -1251,8 +1258,6 @@ impl Parser {
         meta.dst_port = ctx.load(self.offset + 2).map_err(|_| Error::OutOfBounds)?;
 
         let dst_port = meta.dst_port();
-
-        let tunnel_ports = get_tunnel_ports(ctx)?;
         // IANA has assigned port 6081 as the fixed well-known destination port for Geneve and port 4789 as the fixed well-known destination port for Vxlan.
         // Although the well-known value should be used by default, it is RECOMMENDED that implementations make these configurable.
         self.next_hdr = if dst_port == tunnel_ports.geneve_port {
@@ -2369,6 +2374,9 @@ mod tests {
         // Get parser configuration (protocol flags and max depth)
         let options = get_parser_options(&ctx)?;
 
+        // Get tunnel ports configuration (cached to avoid repeated map lookups)
+        let tunnel_ports = get_tunnel_ports(&ctx)?;
+
         // Clamp max_header_depth to ensure the verifier can prove loop bounds
         // Cap at 8 to give the verifier a compile-time upper bound
         let max_depth = if options.max_header_depth > 8 {
@@ -2398,7 +2406,7 @@ mod tests {
                 HeaderType::Proto(IpProto::Ipv4) => parser.parse_ipv4_encap(&ctx),
                 HeaderType::Proto(IpProto::Ipv6) => parser.parse_ipv6_encap(&ctx),
                 HeaderType::Proto(IpProto::Tcp) => parser.parse_tcp_header(&ctx),
-                HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx),
+                HeaderType::Proto(IpProto::Udp) => parser.parse_udp_header(&ctx, &tunnel_ports),
                 HeaderType::Proto(IpProto::Ipv6Route) => {
                     if is_protocol_enabled(options.protocol_flags, PARSE_IPV6_ROUTE) {
                         parser.parse_generic_route_header(&ctx)
@@ -2656,8 +2664,13 @@ mod tests {
         parser.next_hdr = HeaderType::Proto(IpProto::Udp);
         let packet = create_udp_test_packet();
         let ctx = TcContext::new(packet);
+        let tunnel_ports = TunnelPorts {
+            geneve_port: 6081,
+            vxlan_port: 4789,
+            wireguard_port: 51820,
+        };
 
-        let result = parser.parse_udp_header(&ctx);
+        let result = parser.parse_udp_header(&ctx, &tunnel_ports);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, UDP_LEN);
@@ -2670,8 +2683,13 @@ mod tests {
         parser.next_hdr = HeaderType::Proto(IpProto::Udp);
         let packet = create_udp_geneve_test_packet();
         let ctx = TcContext::new(packet);
+        let tunnel_ports = TunnelPorts {
+            geneve_port: 6081,
+            vxlan_port: 4789,
+            wireguard_port: 51820,
+        };
 
-        let result = parser.parse_udp_header(&ctx);
+        let result = parser.parse_udp_header(&ctx, &tunnel_ports);
 
         assert!(result.is_ok());
         assert_eq!(parser.offset, UDP_LEN);
