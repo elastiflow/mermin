@@ -50,20 +50,11 @@ podSecurityContext:
   runAsNonRoot: true
 
 securityContext:
+  privileged: true
   readOnlyRootFilesystem: true
   runAsNonRoot: false
   runAsUser: 0
   runAsGroup: 0
-  capabilities:
-    drop:
-      - ALL
-    add:
-      - NET_ADMIN
-      - BPF
-      - PERFMON
-      - SYS_ADMIN
-      - SYS_PTRACE
-      - SYS_RESOURCE
 
 resources: {}
   # TODO(mack#ENG-123|2025-09-29): Set default resources relative to the flows per second
