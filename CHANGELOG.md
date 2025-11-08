@@ -1,3 +1,17 @@
+## [v0.1.0-beta.17] - 2025-11-08
+
+### Bug Fixes
+
+- **cni tests:** Add flow generator (#231)
+### Features
+
+- Log the resolved interfaces on startup at info level (#236)
+- Add tc priority support for safe multi-program coexistence (#246)
+
+[v0.1.0-beta.16..v0.1.0-beta.17](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.16...v0.1.0-beta.17)
+
+
+
 ## [v0.1.0-beta.16] - 2025-11-07
 
 ### Bug Fixes
