@@ -3,7 +3,7 @@ use std::{collections::HashMap, error::Error, fmt, net::Ipv4Addr, path::Path, ti
 use figment::providers::Format;
 use hcl::eval::Context;
 use serde::{Deserialize, Serialize};
-use tracing::Level;
+use tracing::{Level, warn};
 
 use crate::{
     k8s::owner_relations::OwnerRelationsOptions,
@@ -133,6 +133,12 @@ impl Conf {
 
         conf.config_path = config_path_to_store;
 
+        // Validate discovery.instrument configuration
+        conf.discovery
+            .instrument
+            .validate()
+            .map_err(|e| ConfError::InvalidConfiguration(format!("discovery.instrument: {e}")))?;
+
         Ok((conf, cli))
     }
 
@@ -175,6 +181,12 @@ impl Conf {
 
         let mut conf: Conf = figment.extract()?;
         conf.config_path = self.config_path.clone();
+
+        // Validate discovery.instrument configuration
+        conf.discovery
+            .instrument
+            .validate()
+            .map_err(|e| ConfError::InvalidConfiguration(format!("discovery.instrument: {e}")))?;
 
         Ok(conf)
     }
@@ -236,6 +248,11 @@ pub struct InstrumentConf {
     /// Recommended for ephemeral interfaces like veth* (created/destroyed with pods).
     /// Default: true
     pub auto_discover_interfaces: bool,
+    /// TC priority for program attachment (netlink only, kernel < 6.6)
+    /// Higher values = lower priority = runs later in TC chain
+    /// Default: 50 (runs after most CNI programs like Cilium)
+    /// Range: 1-32767 (values < 30 will log warning - may conflict with CNI programs)
+    pub tc_priority: u16,
 }
 
 impl Default for InstrumentConf {
@@ -273,7 +290,42 @@ impl Default for InstrumentConf {
                 "ovn-k8s*".to_string(), // OVN-Kubernetes interfaces
             ],
             auto_discover_interfaces: true,
+            tc_priority: 50,
         }
+    }
+}
+
+impl InstrumentConf {
+    /// Validate tc_priority is in safe range
+    pub fn validate(&self) -> Result<(), String> {
+        const MIN_PRIORITY: u16 = 1;
+        const SAFE_MIN_PRIORITY: u16 = 30;
+        const MAX_PRIORITY: u16 = 32767;
+
+        if self.tc_priority < MIN_PRIORITY {
+            return Err(format!(
+                "tc_priority {} is too low (min: {})",
+                self.tc_priority, MIN_PRIORITY
+            ));
+        }
+
+        if self.tc_priority < SAFE_MIN_PRIORITY {
+            warn!(
+                "tc_priority {} is below recommended minimum ({}). \
+                 Values < {} may run before CNI programs (like Cilium which uses 1-20) and break networking. \
+                 Only use lower priorities if you understand TC program ordering!",
+                self.tc_priority, SAFE_MIN_PRIORITY, SAFE_MIN_PRIORITY
+            );
+        }
+
+        if self.tc_priority > MAX_PRIORITY {
+            return Err(format!(
+                "tc_priority {} exceeds netlink limit (max: {})",
+                self.tc_priority, MAX_PRIORITY
+            ));
+        }
+
+        Ok(())
     }
 }
 
@@ -379,6 +431,8 @@ pub enum ConfError {
     InvalidConfigPath(String),
     /// Error: The file has an unsupported extension.
     InvalidExtension(String),
+    /// Error: Configuration validation failed.
+    InvalidConfiguration(String),
     /// An error occurred during deserialization or processing.
     Extraction(Box<figment::Error>),
 }
@@ -393,6 +447,9 @@ impl fmt::Display for ConfError {
                     f,
                     "invalid file extension '.{ext}' — expected 'yaml', 'yml', or 'hcl'"
                 )
+            }
+            ConfError::InvalidConfiguration(msg) => {
+                write!(f, "configuration validation failed: {msg}")
             }
             ConfError::Extraction(e) => write!(f, "configuration error: {e}"),
         }
@@ -676,7 +733,7 @@ mod tests {
     use figment::Jail;
     use tracing::Level;
 
-    use super::{ApiConf, Conf, MetricsConf, ParserConf};
+    use super::{ApiConf, Conf, InstrumentConf, MetricsConf, ParserConf};
     use crate::{
         otlp::opts::{ExportOptions, ExporterProtocol},
         runtime::{cli::Cli, opts::InternalOptions},
@@ -2526,5 +2583,104 @@ discovery:
 
             Ok(())
         });
+    }
+
+    #[test]
+    fn test_tc_priority_validation_valid_range() {
+        let conf = InstrumentConf {
+            tc_priority: 50,
+            ..Default::default()
+        };
+        assert!(conf.validate().is_ok());
+    }
+
+    #[test]
+    fn test_tc_priority_validation_min_boundary() {
+        let conf = InstrumentConf {
+            tc_priority: 1,
+            ..Default::default()
+        };
+        assert!(conf.validate().is_ok());
+    }
+
+    #[test]
+    fn test_tc_priority_validation_max_boundary() {
+        let conf = InstrumentConf {
+            tc_priority: 32767,
+            ..Default::default()
+        };
+        assert!(conf.validate().is_ok());
+    }
+
+    #[test]
+    fn test_tc_priority_validation_below_min() {
+        let conf = InstrumentConf {
+            tc_priority: 0,
+            ..Default::default()
+        };
+        let result = conf.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("too low"));
+    }
+
+    #[test]
+    fn test_tc_priority_validation_above_max() {
+        let conf = InstrumentConf {
+            tc_priority: 32768,
+            ..Default::default()
+        };
+        let result = conf.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("exceeds netlink limit"));
+    }
+
+    #[test]
+    fn test_tc_priority_validation_safe_range() {
+        // Test that values in safe range don't error
+        for priority in [30, 50, 100, 1000, 32767] {
+            let conf = InstrumentConf {
+                tc_priority: priority,
+                ..Default::default()
+            };
+            assert!(conf.validate().is_ok(), "Failed for priority {}", priority);
+        }
+    }
+
+    #[test]
+    fn test_tc_priority_default_is_valid() {
+        let conf = InstrumentConf::default();
+        assert!(conf.validate().is_ok());
+        assert_eq!(conf.tc_priority, 50);
+    }
+
+    #[test]
+    fn test_tc_priority_boundary_values() {
+        // Test edge cases around the boundaries
+        let valid_priorities = [1, 2, 29, 30, 31, 49, 50, 51, 32766, 32767];
+        for priority in valid_priorities {
+            let conf = InstrumentConf {
+                tc_priority: priority,
+                ..Default::default()
+            };
+            assert!(
+                conf.validate().is_ok(),
+                "Priority {} should be valid",
+                priority
+            );
+        }
+
+        // Test invalid values
+        let invalid_priorities = [0u16, 32768u16, 65535u16];
+        for priority in invalid_priorities {
+            let conf = InstrumentConf {
+                tc_priority: priority,
+                ..Default::default()
+            };
+            assert!(
+                conf.validate().is_err(),
+                "Priority {} should be invalid",
+                priority
+            );
+        }
     }
 }

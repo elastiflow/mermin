@@ -10,9 +10,9 @@ This guide provides specific instructions for deploying Mermin on major cloud Ku
 
 ### Prerequisites
 
-* `gcloud` CLI installed and configured
-* GKE cluster created (Standard or Autopilot)
-* `kubectl` configured for your GKE cluster
+- `gcloud` CLI installed and configured
+- GKE cluster created (Standard or Autopilot)
+- `kubectl` configured for your GKE cluster
 
 ### GKE Standard Clusters
 
@@ -122,14 +122,57 @@ gcloud iam service-accounts add-iam-policy-binding \
   --member "serviceAccount:PROJECT_ID.svc.id.goog[default/mermin]"
 ```
 
+### GKE with Dataplane V2 (Cilium)
+
+GKE Dataplane V2 uses Cilium for advanced networking features.
+
+{% hint style="success" %}
+**✅ Implemented:** TC priority-aware attachment is now fully supported! mermin can safely monitor `gke*` interfaces on GKE Dataplane V2 clusters.
+{% endhint %}
+
+**How it works:**
+
+- **Kernel >= 6.6**: Uses TCX (Traffic Control eXpress) with automatic multi-program support
+- **Kernel < 6.6**: Uses netlink with configurable priority (default 50, runs after Cilium)
+
+**Observability characteristics:**
+
+Mermin observes packets **after** Cilium's processing, meaning:
+
+- ✅ All traffic flows are captured
+- ✅ Network policies are already applied
+- ℹ️ IP addresses may be NATed (post-SNAT/DNAT)
+- ℹ️ Packets may be encapsulated (if using overlays)
+
+This provides accurate flow visibility for monitoring and troubleshooting while maintaining cluster stability.
+
+**Verification:**
+
+After deployment, verify TC priority using:
+
+```bash
+# Check TC filters on a gke interface
+kubectl exec -it mermin-xxxxx -- tc filter show dev gke<xyz> ingress
+
+# You should see mermin's filter with priority 50
+```
+
+{% hint style="info" %}
+**Priority Tuning:** If you experience conflicts with other TC programs, adjust `tc_priority`:
+
+- Increase (e.g., 100) to run later in the chain
+- Decrease (min: 30) for earlier visibility
+- Default (50) works for most GKE Dataplane V2 setups
+{% endhint %}
+
 ## Amazon Elastic Kubernetes Service (EKS)
 
 ### Prerequisites
 
-* `aws` CLI installed and configured
-* `eksctl` installed (optional but recommended)
-* EKS cluster created
-* `kubectl` configured for your EKS cluster
+- `aws` CLI installed and configured
+- `eksctl` installed (optional but recommended)
+- EKS cluster created
+- `kubectl` configured for your EKS cluster
 
 ### Creating an EKS Cluster
 
@@ -209,9 +252,9 @@ eksctl create iamserviceaccount \
 
 ### Prerequisites
 
-* `az` CLI installed and configured
-* AKS cluster created
-* `kubectl` configured for your AKS cluster
+- `az` CLI installed and configured
+- AKS cluster created
+- `kubectl` configured for your AKS cluster
 
 ### Creating an AKS Cluster
 
@@ -410,21 +453,21 @@ az role assignment create \
 
 ### GKE
 
-* Use **Preemptible/Spot nodes** for non-critical Mermin pods (with PodDisruptionBudget)
-* Use **node autoscaling** to match traffic patterns
-* Consider **regional clusters** for high availability
+- Use **Preemptible/Spot nodes** for non-critical Mermin pods (with PodDisruptionBudget)
+- Use **node autoscaling** to match traffic patterns
+- Consider **regional clusters** for high availability
 
 ### EKS
 
-* Use **Spot instances** for cost savings (with PodDisruptionBudget)
-* Use **Cluster Autoscaler** or **Karpenter** for dynamic scaling
-* Enable **Container Insights** for monitoring
+- Use **Spot instances** for cost savings (with PodDisruptionBudget)
+- Use **Cluster Autoscaler** or **Karpenter** for dynamic scaling
+- Enable **Container Insights** for monitoring
 
 ### AKS
 
-* Use **Spot node pools** for cost savings
-* Use **Cluster Autoscaler** for dynamic scaling
-* Enable **Container Insights** for monitoring
+- Use **Spot node pools** for cost savings
+- Use **Cluster Autoscaler** for dynamic scaling
+- Enable **Container Insights** for monitoring
 
 ## Multi-Region Deployments
 
@@ -508,7 +551,7 @@ Ensure managed identity has necessary permissions and AAD Pod Identity is config
 
 ## Next Steps
 
-* [**Advanced Scenarios**](advanced-scenarios.md): Custom CNI, multi-cluster deployments
-* [**Configuration Reference**](../configuration/configuration.md): Fine-tune Mermin for your environment
-* [**Observability Backends**](../observability/backends.md): Send Flow Traces to cloud-native observability platforms
-* [**Troubleshooting**](../troubleshooting/troubleshooting.md): Solve cloud-specific issues
+- [**Advanced Scenarios**](advanced-scenarios.md): Custom CNI, multi-cluster deployments
+- [**Configuration Reference**](../configuration/configuration.md): Fine-tune Mermin for your environment
+- [**Observability Backends**](../observability/backends.md): Send Flow Traces to cloud-native observability platforms
+- [**Troubleshooting**](../troubleshooting/troubleshooting.md): Solve cloud-specific issues
