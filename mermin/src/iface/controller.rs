@@ -137,7 +137,10 @@ use std::{
 
 use aya::{
     Ebpf,
-    programs::{SchedClassifier, TcAttachType, tc, tc::SchedClassifierLinkId},
+    programs::{
+        SchedClassifier, TcAttachType,
+        tc::{self, NlOptions, SchedClassifierLinkId, TcAttachOptions},
+    },
 };
 use dashmap::DashMap;
 use globset::Glob;
@@ -221,6 +224,9 @@ pub struct IfaceController {
     netns_switch: NetnsSwitch,
     /// TCX (kernel >= 6.6) vs netlink-based attachment
     use_tcx: bool,
+    /// TC priority for netlink attachment (kernel < 6.6)
+    /// Higher values = lower priority = runs later in chain
+    tc_priority: u16,
 }
 
 /// TC attachment directions used for iterating over all attach types
@@ -240,6 +246,7 @@ impl IfaceController {
         patterns: Vec<String>,
         ebpf: Arc<tokio::sync::Mutex<Ebpf>>,
         use_tcx: bool,
+        tc_priority: u16,
     ) -> Result<Self, MerminError> {
         let netns_switch = NetnsSwitch::new().map_err(|e| {
             MerminError::internal(format!(
@@ -263,6 +270,7 @@ impl IfaceController {
             ebpf,
             netns_switch,
             use_tcx,
+            tc_priority,
         })
     }
 
@@ -529,6 +537,47 @@ impl IfaceController {
         }
     }
 
+    /// Attach eBPF TC program with specified priority (netlink-based).
+    ///
+    /// Uses aya's built-in `attach_with_options()` method with `NlOptions` to set priority.
+    /// This allows mermin to coexist with other TC programs like Cilium by controlling
+    /// execution order through priority values.
+    ///
+    /// ## Priority Semantics
+    /// - Lower numeric values = higher priority = runs earlier in TC chain
+    /// - Cilium typically uses priorities 1-20
+    /// - mermin default is 50 (runs after Cilium)
+    /// - Valid range: 1-65535 (we validate 30-32767 in config)
+    ///
+    /// ## Parameters
+    /// - `program`: Mutable reference to the SchedClassifier program
+    /// - `iface`: Interface name to attach to
+    /// - `attach_type`: TC attach type (ingress/egress)
+    /// - `priority`: TC priority value (higher = lower priority = runs later)
+    ///
+    /// ## Returns
+    /// - `Ok(SchedClassifierLinkId)` on success
+    /// - `Err(MerminError)` if attachment fails
+    fn attach_tc_with_priority(
+        program: &mut SchedClassifier,
+        iface: &str,
+        attach_type: TcAttachType,
+        priority: u16,
+    ) -> Result<SchedClassifierLinkId, MerminError> {
+        let options = TcAttachOptions::Netlink(NlOptions {
+            priority,
+            handle: 0, // Let system choose handle
+        });
+
+        program
+            .attach_with_options(iface, attach_type, options)
+            .map_err(|e| {
+                MerminError::internal(format!(
+                    "failed to attach ebpf program to interface {iface} with priority {priority}: {e}",
+                ))
+            })
+    }
+
     /// Attach eBPF program to interface in host namespace.
     async fn attach_to_iface(
         &mut self,
@@ -538,6 +587,7 @@ impl IfaceController {
         let context = format!("{} ({})", iface, attach_type.direction_name());
         let iface_owned = iface.to_string();
         let use_tcx = self.use_tcx;
+        let tc_priority = self.tc_priority;
 
         // Closure cannot capture self, so get program name before entering
         let program_name = attach_type.program_name();
@@ -571,11 +621,41 @@ impl IfaceController {
                     .try_into()
                     .map_err(|e| MerminError::internal(format!("failed to cast program: {e}")))?;
 
-                program.attach(&iface_owned, attach_type).map_err(|e| {
-                    MerminError::internal(format!(
-                        "failed to attach ebpf program to interface {iface}: {e}",
-                    ))
-                })
+                // TC Priority-Aware Attachment
+                //
+                // For TCX (kernel >= 6.6): use default attach() which auto-selects TCX
+                // For Netlink (kernel < 6.6): use priority-aware attachment
+                //
+                // Note: program.attach() on kernel >= 6.6 will use TCX by default,
+                // which provides better multi-program support without priority conflicts.
+                // On older kernels, we explicitly use netlink with our configured priority.
+
+                if use_tcx {
+                    // TCX mode: kernel >= 6.6, no priority needed (uses LinkOrder instead)
+                    debug!(
+                        event.name = "interface_controller.attaching_tcx",
+                        network.interface.name = %iface_owned,
+                        ebpf.program.direction = attach_type.direction_name(),
+                        "attaching ebpf program (TCX mode)"
+                    );
+
+                    program.attach(&iface_owned, attach_type).map_err(|e| {
+                        MerminError::internal(format!(
+                            "failed to attach ebpf program to interface {iface} (TCX mode): {e}",
+                        ))
+                    })
+                } else {
+                    // Netlink mode: kernel < 6.6, use priority
+                    debug!(
+                        event.name = "interface_controller.attaching_with_priority",
+                        network.interface.name = %iface_owned,
+                        ebpf.program.priority = tc_priority,
+                        ebpf.program.direction = attach_type.direction_name(),
+                        "attaching ebpf program with TC priority (netlink mode)"
+                    );
+
+                    Self::attach_tc_with_priority(program, &iface_owned, attach_type, tc_priority)
+                }
             })?
         };
 
@@ -584,6 +664,7 @@ impl IfaceController {
         debug!(
             event.name = "interface_controller.program_attached",
             ebpf.program.direction = attach_type.direction_name(),
+            ebpf.program.priority = tc_priority,
             network.interface.name = %iface,
             "ebpf program attached to interface"
         );

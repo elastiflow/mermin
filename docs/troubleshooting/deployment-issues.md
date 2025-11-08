@@ -229,7 +229,121 @@ discovery "instrument" {
 }
 ```
 
+**GKE Dataplane V2 (Cilium)**:
+
+```hcl
+discovery "instrument" {
+  # Recommended configuration for Dataplane V2
+  interfaces = ["gke*", "cilium_*", "lxc*"]
+
+  # TC priority - runs after Cilium (priority 1-20)
+  tc_priority = 50  # Default, adjust if needed (range: 1-32767, < 30 warns)
+}
+```
+
+For more details and future updates, see [GKE with Dataplane V2](../deployment/cloud-platforms.md#gke-with-dataplane-v2-cilium).
+
 See [Advanced Scenarios](../deployment/advanced-scenarios.md#custom-cni-configurations) for more CNI-specific configurations.
+
+## Verifying TC Priority
+
+### Overview
+
+When running on kernels < 6.6 (using netlink-based TC attachment), Mermin uses configurable priority to control its position in the TC (Traffic Control) program execution chain. This verification helps ensure Mermin is attached correctly and won't conflict with other TC programs.
+
+### How to Check TC Priority
+
+To verify that Mermin is attached with the correct priority:
+
+```bash
+# Get a Mermin pod name
+MERMIN_POD=$(kubectl get pods -l app=mermin -o jsonpath='{.items[0].metadata.name}')
+
+# Check TC filters on an interface (replace gke0 with your interface name)
+kubectl exec -it $MERMIN_POD -- tc filter show dev gke0 ingress
+```
+
+**Expected output:**
+
+```
+filter protocol all pref 50 bpf chain 0
+filter protocol all pref 50 bpf chain 0 handle 0x1 mermin_ingress direct-action not_in_hw id 123 tag abc123def456
+```
+
+The `pref 50` value indicates Mermin's priority. Lower values run first (e.g., Cilium typically uses `pref 1`).
+
+### Understanding Priority Values
+
+- **Lower number = Higher priority = Runs earlier** in the TC chain
+- **Higher number = Lower priority = Runs later** in the TC chain
+
+**Common priority ranges:**
+
+| Program Type | Typical Priority | Purpose |
+|-------------|-----------------|---------|
+| CNI programs (Cilium, Calico) | 1-20 | Network policy enforcement, routing |
+| Observability tools (Mermin) | 50-100 | Passive monitoring, don't modify traffic |
+| Custom filters | 100+ | Application-specific filtering |
+
+### Adjusting TC Priority
+
+If you need to change Mermin's priority (default: 50):
+
+```hcl
+discovery "instrument" {
+  # Increase to run later (after more programs)
+  tc_priority = 100
+
+  # Or decrease to run earlier (minimum safe value: 30)
+  # tc_priority = 30
+
+  # Valid range: 1-32767
+  # Warning: Values < 30 may conflict with CNI programs
+}
+```
+
+### Troubleshooting Priority Conflicts
+
+**Symptom**: Network connectivity issues after deploying Mermin
+
+**Potential causes:**
+1. TC priority is too low (< 30), causing Mermin to run before CNI programs
+2. Multiple programs are using the same priority
+3. CNI is using non-standard priority values
+
+**Solutions:**
+
+1. **Check current priorities on all interfaces:**
+
+```bash
+# List all TC filters with priorities
+kubectl exec -it $MERMIN_POD -- sh -c 'for iface in $(ip -o link show | awk -F: "{print \$2}" | tr -d " "); do echo "=== $iface ==="; tc filter show dev $iface ingress 2>/dev/null; done'
+```
+
+2. **Adjust Mermin's priority** to run after all CNI programs:
+
+```hcl
+discovery "instrument" {
+  tc_priority = 100  # Safely after most CNI programs
+}
+```
+
+3. **On kernel >= 6.6**: TCX mode is used automatically (no priority conflicts)
+
+Check your kernel version:
+
+```bash
+kubectl exec -it $MERMIN_POD -- uname -r
+```
+
+If version is >= 6.6.0, you'll see log messages indicating TCX mode is active, and `tc_priority` is ignored.
+
+### Additional Notes
+
+- **TCX mode (kernel >= 6.6)**: Multiple programs can coexist without priority conflicts using link ordering
+- **Netlink mode (kernel < 6.6)**: Requires manual priority management
+- Priority only affects attachment order, not performance
+- Mermin operates passively (read-only observation), so running later in the chain is typically safe
 
 ## Configuration Syntax Errors
 

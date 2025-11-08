@@ -104,7 +104,8 @@ discovery "instrument" {
   #    - Flannel: ["veth*", "flannel*", "cni*"]
   #    - Calico:  ["veth*", "cali*", "tunl*", "ip6tnl*"]
   #    - Cilium:  ["lxc*", "cilium_*"]
-  #    - GKE:     ["veth*", "gke*"]
+  #    - GKE:     ["gke*", "cilium_*", "lxc*"]
+  #    - GKE Dataplane V2: ["gke*", "cilium_*", "lxc*"]
   #    - Dual-stack: Add "ip6tnl*" to any of the above
   #
   # Leave empty or comment out to use defaults
@@ -122,6 +123,13 @@ discovery "instrument" {
   #   "azure*",     # Azure CNI
   #   "ovn-k8s*",   # OVN-Kubernetes
   # ]
+
+  # TC priority for program attachment (netlink only, kernel < 6.6)
+  # Higher values = lower priority = runs later in TC chain
+  # Default: 50 (runs after most CNI programs like Cilium which use 1-20)
+  # Range: 1-32767 (values < 30 will log warning - may conflict with CNI programs)
+  # On kernel >= 6.6, TCX is used automatically (no priority needed)
+  tc_priority = 50
 
   # Automatically discover and attach to new interfaces matching patterns
   # Recommended for ephemeral interfaces like veth* (created/destroyed with pods)

@@ -1,4 +1,10 @@
-<h1 align="center"><a href="https://www.elastiflow.com" target="_blank"><img src="https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1746227898/mermin-horizontal_kxhvzo.png" width="400" alt="Mermin Logo"></a></h1>
+<h2 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1762568258/mermin/Mermin_Primary_Logo_Gradient_Light_uljb3t.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1762568258/mermin/Mermin_Primary_Logo_Gradient_Dark_vmjdoq.png">
+    <img alt="Fallback image description" src="https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1762568258/mermin/Mermin_Primary_Logo_Gradient_Dark_vmjdoq.png">
+  </picture>
+</h2>
 
 Mermin is a powerful, Kubernetes-native network traffic observability tool. 🔭 It uses an **eBPF*- agent to efficiently
 capture network flow data and sends it via the **OpenTelemetry** Collector protocol for easy integration with modern

@@ -185,9 +185,10 @@ async fn run() -> Result<()> {
 
     debug!(
         event.name = "ebpf.attach_method_determined",
-        ebpf.attach_method = attach_method,
+        ebpf.attach.method = attach_method,
+        ebpf.attach.priority = conf.discovery.instrument.tc_priority,
         system.kernel.version = %kernel_version,
-        "determined TC attachment method based on kernel version"
+        "determined TC attachment method and priority"
     );
 
     // Shared ownership for concurrent access from controller and flow producer
@@ -216,7 +217,12 @@ async fn run() -> Result<()> {
         conf.discovery.instrument.interfaces.clone()
     };
 
-    let mut iface_controller = IfaceController::new(patterns, Arc::clone(&ebpf), use_tcx)?;
+    let mut iface_controller = IfaceController::new(
+        patterns,
+        Arc::clone(&ebpf),
+        use_tcx,
+        conf.discovery.instrument.tc_priority,
+    )?;
 
     // DashMap allows lock-free reads during packet processing while controller updates it dynamically
     let iface_map = iface_controller.iface_map();
