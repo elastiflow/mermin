@@ -204,6 +204,7 @@ async fn run() -> Result<()> {
         event.name = "ebpf.attach_method_determined",
         ebpf.attach.method = attach_method,
         ebpf.attach.priority = conf.discovery.instrument.tc_priority,
+        ebpf.attach.tcx_order = %conf.discovery.instrument.tcx_order,
         system.kernel.version = %kernel_version,
         "determined TC attachment method and priority"
     );
@@ -239,6 +240,7 @@ async fn run() -> Result<()> {
         Arc::clone(&ebpf),
         use_tcx,
         conf.discovery.instrument.tc_priority,
+        conf.discovery.instrument.tcx_order.clone(),
     )?;
 
     // DashMap allows lock-free reads during packet processing while controller updates it dynamically
