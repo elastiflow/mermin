@@ -150,6 +150,99 @@ For persistent mounting, add to `/etc/fstab`:
 bpf /sys/fs/bpf bpf defaults 0 0
 ```
 
+#### 5. eBPF Verifier Rejection (Program Too Large)
+
+**Symptom**: Pod starts but eBPF program fails to load with:
+
+```
+BPF program is too large. Processed 1000001 insn
+verification time 3775231 usec
+stack depth 0+144+0+0+0+0+32 processed 1000001 insns (limit 1000000)
+```
+
+**Root Cause**: The eBPF verifier analyzes all possible execution paths in the program. Complex packet parsing with deep header nesting can exceed the verifier's instruction limit, even though the static program size is small.
+
+**Diagnosis**:
+
+Check pod logs for verifier errors:
+
+```bash
+kubectl logs mermin-xxxxx -n mermin | grep -A20 "BPF program is too large"
+```
+
+This typically occurs in:
+- K3s or other lightweight Kubernetes distributions
+- Older kernel versions (<5.8)
+- Complex networking with many encapsulation layers
+
+**Solution**:
+
+**Option 1 - Reduce parser depth** (most effective):
+
+```hcl
+parser {
+  max_header_depth = 5  # Default is 6, reduce to 4-5
+}
+```
+
+This limits how many nested protocol headers (e.g., Ethernet → IPv6 → UDP → VXLAN → Ethernet → IPv4 → TCP) the eBPF program will parse. Most Kubernetes environments work fine with depth 4-6.
+
+**Option 2 - Verify IPv6 options are disabled** (default, but confirm):
+
+```hcl
+parser {
+  # These should be false (default) unless specifically needed
+  parse_ipv6_hopopt = false
+  parse_ipv6_fragment = false
+  parse_ipv6_routing = false
+  parse_ipv6_dest_opts = false
+}
+```
+
+**Option 3 - Upgrade kernel** (if possible):
+
+Newer kernels (5.10+) have significantly improved verifier efficiency and higher instruction limits:
+
+```bash
+# Check current kernel version
+kubectl debug node/worker-node -it --image=ubuntu -- uname -r
+```
+
+**Validation**:
+
+After applying configuration changes and restarting:
+
+```bash
+# Pod should start successfully
+kubectl get pods -l app.kubernetes.io/name=mermin -n mermin
+
+# Check logs for successful eBPF load
+kubectl logs mermin-xxxxx -n mermin | grep -i "ebpf.*loaded\|configured ebpf"
+```
+
+**Environment-Specific Recommendations**:
+
+| Environment | Recommended `max_header_depth` | Notes |
+|-------------|-------------------------------|-------|
+| Standard K8s (Kind, cloud) | 6 (default) | Handles most scenarios |
+| K3s | 4-5 | Lightweight, may need reduced depth |
+| Edge/IoT | 4 | Minimal complexity |
+| Complex multi-tunnel | 7-8 | May require kernel 5.10+ |
+
+**Prevention**:
+
+Test eBPF loading in target environment during development:
+
+```bash
+# Deploy to test cluster first
+helm install mermin-test ./charts/mermin -n mermin-test --create-namespace
+
+# Verify eBPF loads successfully
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=mermin -n mermin-test --timeout=60s
+```
+
+See [Parser Configuration](../configuration/parser.md#ebpf-verifier-considerations) for detailed information on tuning parser settings.
+
 ## Permission Errors
 
 ### Symptom
