@@ -1,3 +1,13 @@
+## [v0.1.0-beta.19] - 2025-11-08
+
+### Features
+
+- Add configurable TCX ordering and optimize tunnel port lookups (#248)
+
+[v0.1.0-beta.18..v0.1.0-beta.19](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.18...v0.1.0-beta.19)
+
+
+
 ## [v0.1.0-beta.18] - 2025-11-08
 
 ### Features
