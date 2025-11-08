@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Quick Start
 
 This guide will help you deploy Mermin on a local Kubernetes cluster using `kind` (Kubernetes in Docker) in just a few minutes. By the end, you'll have Mermin capturing network flows and displaying them in your terminal.
@@ -23,7 +27,6 @@ This quick start is designed for local testing and development. For production d
 
 Create a local Kubernetes cluster using kind:
 
-<!-- Source: examples/local/kind-config.yaml -->
 ```bash
 # Create a kind configuration file
 cat <<EOF > kind-config.yaml
@@ -76,7 +79,7 @@ kubectl get pods -l app.kubernetes.io/name=mermin
 
 You should see one Mermin pod per worker node, all in the `Running` state:
 
-```text
+```
 NAME           READY   STATUS    RESTARTS   AGE
 mermin-abc123  1/1     Running   0          2m
 mermin-def456  1/1     Running   0          2m
