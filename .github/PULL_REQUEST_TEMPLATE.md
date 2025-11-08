@@ -1,51 +1,32 @@
-## Description
+## Changes
 
-<!-- Please describe the purpose of this pull request and what changes it introduces. Include:
-- What problem it solves or what feature it adds.
-- Any relevant context or background information.
-- If applicable, link to related issues (e.g., Fixes #123). -->
+<!-- Briefly describe what changes this introduces and why -->
 
-## Type of Change
+Fixes #(issue)
 
-<!-- Please check the box that applies to this pull request. -->
+### Type of change
 
-- [ ] Bug fix (non-breaking change that resolves an issue)
-- [ ] New feature (non-breaking change that adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to change)
-- [ ] Documentation update
-- [ ] Refactoring (no functional changes, just code improvements)
-- [ ] Other (please describe):
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Breaking change
+- [ ] Documentation
+- [ ] Other:
 
-## How Has This Been Tested?
+## Testing
 
-<!-- Describe how you tested the changes to ensure they work as expected. Include:
-- Tests added or updated (e.g., unit tests, integration tests).
-- Manual testing steps, if applicable.
-- Any specific environment details (e.g., OS, browser, Node.js version). -->
+<!-- How did you test this? What environment did you use? -->
 
-- **Environment**:
-    - OS: Debian 12
-    - Rust: 1.88.0
+## Proof it works
+
+<!-- Screenshots, logs, test output, or other evidence showing your changes work as expected -->
 
 ## Checklist
 
-<!-- Confirm the following by checking the boxes. -->
+- [ ] I've tested my changes
+- [ ] I've updated relevant documentation
+- [ ] My code follows the project's style (run `cargo fmt` and `cargo clippy`)
+- [ ] All tests pass
 
-- [ ] My code follows the project's coding style guidelines.
-- [ ] I have performed a self-review of my code.
-- [ ] I have commented my code, particularly in hard-to-understand areas.
-- [ ] I have updated the documentation where necessary.
-- [ ] My changes generate no new warnings or errors.
-- [ ] I have added or updated tests that verify my changes.
-- [ ] All new and existing tests pass.
+## Notes
 
-## Screenshots (if applicable)
-
-<!-- If your changes involve UI updates, please include screenshots or GIFs to demonstrate the changes. -->
-
-## Additional Notes
-
-<!-- Any additional information for reviewers, such as:
-- Potential risks or trade-offs.
-- Areas where you'd like specific feedback.
-- Dependencies or prerequisites for this change. -->
+<!-- Anything else reviewers should know? Areas where you'd like feedback? -->
