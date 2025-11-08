@@ -1,3 +1,13 @@
+## [v0.1.0-beta.18] - 2025-11-08
+
+### Features
+
+- Add configurable ebpf parser to reduce verifier complexity (#245)
+
+[v0.1.0-beta.17..v0.1.0-beta.18](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.17...v0.1.0-beta.18)
+
+
+
 ## [v0.1.0-beta.17] - 2025-11-08
 
 ### Bug Fixes
