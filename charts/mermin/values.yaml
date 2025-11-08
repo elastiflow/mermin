@@ -38,9 +38,7 @@ rbac:
 # global common labels, applied to all ressources
 commonLabels: {}
 
-podAnnotations:
-  # Allow unconfined apparmor profile for the mermin container to allow ptrace access to the host network namespace
-  container.apparmor.security.beta.kubernetes.io/mermin: unconfined
+podAnnotations: {}
 podLabels: {}
 
 # Enable host networking mode for the pod, incompatible with surge upgrades, may require "dnsPolicy: ClusterFirstWithHostNet"
@@ -50,25 +48,13 @@ hostPID: true
 
 podSecurityContext:
   runAsNonRoot: true
-  # Allow unconfined seccomp profile for the mermin container to allow BPF syscalls and ring buffer writes
-  seccompProfile:
-    type: Unconfined
 
 securityContext:
+  privileged: true
   readOnlyRootFilesystem: true
   runAsNonRoot: false
   runAsUser: 0
   runAsGroup: 0
-  capabilities:
-    drop:
-      - ALL
-    add:
-      - NET_ADMIN
-      - BPF
-      - PERFMON
-      - SYS_ADMIN
-      - SYS_PTRACE
-      - SYS_RESOURCE
 
 resources: {}
   # TODO(mack#ENG-123|2025-09-29): Set default resources relative to the flows per second
