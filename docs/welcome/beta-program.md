@@ -1,6 +1,6 @@
 # Beta Program
 
-> **Version Requirement**: v0.1.0-beta.16 or higher
+> **Version Requirement**: v0.1.0-beta.18 or higher
 
 ### Accessing Beta Image
 
@@ -77,7 +77,7 @@ discovery "instrument" {
 **What you'll miss**: Intra-node pod-to-pod communication\
 **Note**: Generates 2 flow records per flow (one at the source node, one at the destination node)
 
-> **For more information please reference**:  [Network Interface Discovery](../configuration/discovery-interfaces.md)
+> **For more information please reference**: [Network Interface Discovery](../configuration/discovery-interfaces.md)
 
 #### Kubernetes Informer Discovery
 
@@ -118,7 +118,7 @@ discovery "informer" "k8s" {
 }
 ```
 
-> **For more information please reference:** [Owner Relations](../configuration/owner-relations.md) **&**  [Selector Relations](../configuration/selector-relations.md)&#x20;
+> **For more information please reference:** [Owner Relations](../configuration/owner-relations.md) **&** [Selector Relations](../configuration/selector-relations.md)
 
 #### Flow-to-Kubernetes Attribute Mapping
 
@@ -272,4 +272,3 @@ Flow Span:
 
 * **Email**: [merminbeta@elastiflow.com](mailto:merminbeta@elastiflow.com)
 * **Slack:** [**https://elastiflowcommunity.slack.com/archives/C09MANJTSP3**](https://elastiflowcommunity.slack.com/archives/C09MANJTSP3)
-
