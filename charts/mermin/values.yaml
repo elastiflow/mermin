@@ -38,7 +38,9 @@ rbac:
 # global common labels, applied to all ressources
 commonLabels: {}
 
-podAnnotations: {}
+podAnnotations:
+  # Allow unconfined apparmor profile for the mermin container to allow ptrace access to the host network namespace
+  container.apparmor.security.beta.kubernetes.io/mermin: unconfined
 podLabels: {}
 
 # Enable host networking mode for the pod, incompatible with surge upgrades, may require "dnsPolicy: ClusterFirstWithHostNet"
@@ -48,6 +50,9 @@ hostPID: true
 
 podSecurityContext:
   runAsNonRoot: true
+  # Allow unconfined seccomp profile for the mermin container to allow BPF syscalls and ring buffer writes
+  seccompProfile:
+    type: Unconfined
 
 securityContext:
   readOnlyRootFilesystem: true
