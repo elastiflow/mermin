@@ -216,6 +216,21 @@ pub struct ParserConf {
     pub vxlan_port: u16,
     /// Port number for WireGuard tunnel detection (IANA default: 51820)
     pub wireguard_port: u16,
+    /// Maximum header parse depth (default: 6, range: 1-8)
+    /// Lower values reduce eBPF verifier complexity
+    pub max_header_depth: u16,
+    /// Enable parsing of IPv6 Hop-by-Hop Options
+    /// Disabled by default as it's rarely used in Kubernetes
+    pub parse_ipv6_hopopt: bool,
+    /// Enable parsing of IPv6 Fragment Header
+    /// Disabled by default to reduce verifier complexity
+    pub parse_ipv6_fragment: bool,
+    /// Enable parsing of IPv6 Routing Header
+    /// Disabled by default to reduce verifier complexity
+    pub parse_ipv6_routing: bool,
+    /// Enable parsing of IPv6 Destination Options
+    /// Disabled by default to reduce verifier complexity
+    pub parse_ipv6_dest_opts: bool,
 }
 
 impl Default for ParserConf {
@@ -224,6 +239,12 @@ impl Default for ParserConf {
             geneve_port: 6081,
             vxlan_port: 4789,
             wireguard_port: 51820,
+            max_header_depth: 6,
+            // Kubernetes-friendly defaults: disable advanced IPv6 protocols
+            parse_ipv6_hopopt: false,
+            parse_ipv6_fragment: false,
+            parse_ipv6_routing: false,
+            parse_ipv6_dest_opts: false,
         }
     }
 }

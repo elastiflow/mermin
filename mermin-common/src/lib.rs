@@ -240,10 +240,11 @@ impl PacketMeta {
     }
 }
 
-/// Parser options for configuring tunnel port detection in eBPF
+/// Parser options for configuring tunnel port detection and protocol parsing in eBPF
+/// Configuration for tunnel port detection
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-pub struct ParserOptions {
+pub struct TunnelPorts {
     /// The port number to use for Geneve tunnel detection
     /// Default is 6081 as per IANA assignment
     pub geneve_port: u16,
@@ -255,12 +256,33 @@ pub struct ParserOptions {
     pub wireguard_port: u16,
 }
 
-impl Default for ParserOptions {
+impl Default for TunnelPorts {
     fn default() -> Self {
-        ParserOptions {
+        TunnelPorts {
             geneve_port: 6081,
             vxlan_port: 4789,
             wireguard_port: 51820,
+        }
+    }
+}
+
+/// Configuration for protocol parsing behavior
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ParserOptions {
+    /// Bit flags for protocol parsing (see PARSE_* constants in eBPF code)
+    /// Default is 0x0000 (all optional protocols disabled)
+    pub protocol_flags: u16,
+    /// Maximum header parse depth (number of nested headers to parse)
+    /// Default is 6, range: 1-8
+    pub max_header_depth: u16,
+}
+
+impl Default for ParserOptions {
+    fn default() -> Self {
+        ParserOptions {
+            protocol_flags: 0x0000, // all optional protocols disabled by default
+            max_header_depth: 6,
         }
     }
 }

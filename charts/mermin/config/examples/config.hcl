@@ -63,11 +63,25 @@ metrics {
 }
 
 # Parser configuration for eBPF packet parsing
-# Configure tunnel port detection (defaults shown)
+# Configure tunnel port detection and protocol parsing options
 parser {
+  # Tunnel port detection (IANA defaults shown)
   geneve_port    = 6081  # IANA default for Geneve
   vxlan_port     = 4789  # IANA default for VXLAN
   wireguard_port = 51820 # IANA default for WireGuard
+
+  # Maximum nested header depth (default: 6, range: 1-8)
+  # Lower values reduce eBPF verifier complexity, which helps in constrained environments
+  # Typical Kubernetes traffic rarely exceeds 6 layers of encapsulation
+  max_header_depth = 6
+
+  # Protocol parsing flags (defaults optimized for Kubernetes environments)
+  # Disabling unused protocols reduces eBPF verifier instruction count
+  # Enable only if your network infrastructure uses these protocols
+  parse_ipv6_hopopt    = false  # IPv6 Hop-by-Hop Options (rarely used in K8s)
+  parse_ipv6_fragment  = false  # IPv6 Fragment Header (disabled to reduce complexity)
+  parse_ipv6_routing   = false  # IPv6 Routing Header (disabled to reduce complexity)
+  parse_ipv6_dest_opts = false  # IPv6 Destination Options (disabled to reduce complexity)
 }
 
 # K8s informer configuration
