@@ -54,14 +54,14 @@ verify_agent_logs() {
     return 1
   fi
   
-  kubectl -n "${NAMESPACE}" run pinger --grace-period=1 --image=alpine --command -- ping "${ping_receiver_ip}"  
+  kubectl -n "${NAMESPACE}" run pinger --grace-period=1 --image=alpine --command -- ping "${ping_receiver_ip}"
   echo "Waiting for pinger pod to be ready..."
   kubectl wait --for=condition=ready pod/pinger -n "${NAMESPACE}" --timeout=60s || {
     echo "WARNING: pinger pod failed to become ready. Continuing..."
   }
 
-  # Give pinger a moment to start generating traffic
-  sleep 3
+  # Give pinger enough time to generate traffic and for spans to be recorded
+  sleep 10
 
   echo "Verifying mermin agent logs are enriching data..."
   export NAMESPACE RELEASE_NAME
@@ -79,7 +79,7 @@ verify_agent_logs() {
   for pod in "${pods[@]}"; do
     (
       local counter=0
-      while [ $counter -lt 60 ]; do
+      while [ $counter -lt 120 ]; do
         if kubectl logs -n "${NAMESPACE}" "$pod" --tail=500 2>/dev/null | grep --color=never -E '(source\.k8s\.pod\.name.*pinger|destination\.k8s\.pod\.name.*ping-receiver|source\.k8s\.pod\.name.*String\(Owned\("pinger"\)|destination\.k8s\.pod\.name.*String\(Owned\("ping-receiver"\))' >/dev/null; then
           exit 0
         fi
