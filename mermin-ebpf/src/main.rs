@@ -278,7 +278,6 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
                 if let Ok(byte) = ctx.load::<u8>(offset) {
                     flow_event.packet_data[i as usize] = byte;
                 } else {
-                    // Reached end of packet or error - stop reading
                     break;
                 }
             }
