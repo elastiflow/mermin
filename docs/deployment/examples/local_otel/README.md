@@ -12,7 +12,7 @@ The OpenTelemetry Collector's output is set to `debug` (`stdout`), and has been 
 
 Notes on the example deployment:
 
-- [Location in the repository](https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/local_otel/)
+- [Location in the repository](https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/local_otel/) - `docs/deployment/examples/local_otel`
 - Deployment happens in the "current" namespace
 - You may optionally customize and use `config.hcl` instead of the default config.
 - Mermin values use `mermin:latest` image, it is expected you build it and load to your K8s cluster
@@ -24,7 +24,7 @@ Notes on the example deployment:
   <details>
   <summary>values_otel.yaml</summary>
 
-  {% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/local_otel/values_otel.yaml" %}
+  <!-- {% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/local_otel/values_otel.yaml" %} -->
 
   </details>
 
