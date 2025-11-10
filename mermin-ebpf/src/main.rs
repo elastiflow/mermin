@@ -278,12 +278,15 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
                 let mut len = ctx.len() - parsed_offset as u32;
                 // Mask to bounded unsigned range
                 len &= 0xFF;
-                // Explicit clamp to max
+                // Explicit clamp to range [1, 192] for verifier
+                if len < 1 {
+                    len = 1;
+                }
                 if len > 192 {
                     len = 192;
                 }
                 // Separate check for non-zero - verifier tracks this better
-                if len >= 1 {
+                if len >= 1 && len <= 192 {
                     let ret = unsafe {
                         bpf_skb_load_bytes(
                             ctx.skb.skb as *const _,
@@ -293,7 +296,6 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
                         )
                     };
                     if ret != 0 {
-                        // Must discard the ring buffer reservation before returning error
                         event.discard(0);
                         return Err(Error::InternalError);
                     }
