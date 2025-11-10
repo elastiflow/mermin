@@ -24,7 +24,7 @@ Notes on the example deployment:
   # Deploy OpenTelemetry Collector
   helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
   helm upgrade -i \
-    -f docs/deployment/examples/local_otel/values_otel.yaml \
+    -f values_otel.yaml \
     otel-collector open-telemetry/opentelemetry-collector
 
   # Build Mermin image and load to the Kind cluster
@@ -33,8 +33,8 @@ Notes on the example deployment:
 
   # Deploy Mermin
   helm upgrade -i --wait --timeout 15m \
-    -f docs/deployment/examples/local_otel/values_mermin.yaml \
-    --set-file config.content=docs/deployment/examples/local_otel/config.hcl \
+    -f values_mermin.yaml \
+    --set-file config.content=config.hcl \
     --devel \
     mermin charts/mermin
   ```
@@ -55,7 +55,7 @@ In order to render K8s manifests you may use following commands
 
   ```sh
   rm -rf helm_rendered; helm template otel-collector \
-    -f docs/deployment/examples/local_otel/values_otel.yaml \
+    -f values_otel.yaml \
     open-telemetry/opentelemetry-collector \
     --output-dir helm_rendered
   ```
@@ -64,8 +64,8 @@ In order to render K8s manifests you may use following commands
 
   ```sh
   rm -rf helm_rendered; helm template \
-    -f docs/deployment/examples/local_otel/values_mermin.yaml \
-    --set-file config.content=docs/deployment/examples/local_otel/config.hcl \
+    -f values_mermin.yaml \
+    --set-file config.content=config.hcl \
     --devel \
     mermin charts/mermin \
     --output-dir helm_rendered
