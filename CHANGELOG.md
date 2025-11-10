@@ -1,3 +1,13 @@
+## [v0.1.0-beta.21] - 2025-11-10
+
+### Bug Fixes
+
+- Trying to fix verifier issue for old kernels (#253)
+
+[v0.1.0-beta.20..v0.1.0-beta.21](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.20...v0.1.0-beta.21)
+
+
+
 ## [v0.1.0-beta.20] - 2025-11-10
 
 ### Bug Fixes
