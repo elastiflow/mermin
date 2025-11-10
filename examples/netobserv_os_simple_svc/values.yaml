@@ -39,6 +39,9 @@ netobserv-flow:
     enabled: true
     minReplicas: 1
     maxReplicas: 1
+  pdb:
+    minAvailable: null
+    maxUnavailable: 10%
 
   # Discourage to colocate the collector with opensearch
   topologySpreadConstraints:
