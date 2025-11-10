@@ -1,3 +1,13 @@
+## [v0.1.0-beta.22] - 2025-11-10
+
+### Bug Fixes
+
+- Simple reader for remaining bytes (#256)
+
+[v0.1.0-beta.21..v0.1.0-beta.22](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.21...v0.1.0-beta.22)
+
+
+
 ## [v0.1.0-beta.21] - 2025-11-10
 
 ### Bug Fixes
