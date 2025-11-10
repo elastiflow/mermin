@@ -1,3 +1,13 @@
+## [v0.1.0-beta.20] - 2025-11-10
+
+### Bug Fixes
+
+- Set security context to privileged mode (#250)
+
+[v0.1.0-beta.19..v0.1.0-beta.20](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.19...v0.1.0-beta.20)
+
+
+
 ## [v0.1.0-beta.19] - 2025-11-08
 
 ### Features
