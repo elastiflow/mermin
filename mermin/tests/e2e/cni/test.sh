@@ -81,7 +81,7 @@ verify_agent_logs() {
       local counter=0
       while [ $counter -lt 120 ]; do
         # examples: https://regex101.com/r/rYbX7m/1
-        if kubectl logs -n "${NAMESPACE}" "$pod" --tail=1000 2>/dev/null | grep --color=never -E '(source\.k8s\.pod\.name.*String\(Owned\("pinger"\)|destination\.k8s\.pod\.name.*String\(Owned\("ping-receiver"\))' >/dev/null; then
+        if kubectl logs -n "${NAMESPACE}" "$pod" --tail=1000 2>/dev/null | grep --color=never -E '(source\.k8s\.pod\.name.*String\(Owned\("(pinger|ping-receiver)"\)|destination\.k8s\.pod\.name.*String\(Owned\("(pinger|ping-receiver)"\))' >/dev/null; then
           exit 0
         fi
         counter=$((counter + 1))
