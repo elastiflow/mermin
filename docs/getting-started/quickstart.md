@@ -64,7 +64,7 @@ helm repo update
 
 # Deploy Mermin using Helm
 helm upgrade --install mermin mermin/mermin \
-  --set-file config.content=examples/local/config.example.hcl \
+  --set-file config.content=docs/deployment/examples/local/config.example.hcl \
   --wait \
   --timeout 5m
 ```

@@ -22,7 +22,7 @@ The OpenTelemetry Collector is the most flexible option:
 * Exports to multiple backends simultaneously
 * Provides buffering and retry logic
 
-**Example Configuration:** See [`examples/local_otel/`](../../examples/local_otel/) for a complete setup with OpenTelemetry Collector, including Mermin configuration and collector pipeline.
+**Example Configuration:** See [`docs/deployment/examples/local_otel/`](../../docs/deployment/examples/local_otel/) for a complete setup with OpenTelemetry Collector, including Mermin configuration and collector pipeline.
 
 ### Basic Mermin Configuration
 
@@ -50,7 +50,7 @@ Elasticsearch with APM Server or OpenTelemetry Collector can ingest OTLP traces.
 * Point Mermin → OpenTelemetry Collector → Elasticsearch exporter
 * Or point Mermin → Elastic APM Server (OTLP endpoint)
 
-**Example:** See [`examples/netobserv_os_simple_svc/`](../../examples/netobserv_os_simple_svc/) for OpenSearch (Elastic-compatible) deployment
+**Example:** See [`docs/deployment/examples/netobserv_os_simple_svc/`](../../docs/deployment/examples/netobserv_os_simple_svc/) for OpenSearch (Elastic-compatible) deployment
 
 ### OpenSearch
 
@@ -60,8 +60,8 @@ Open-source alternative to Elasticsearch with native OTLP support via OpenTeleme
 
 **Examples:**
 
-* [`examples/netobserv_os_simple_svc/`](../../examples/netobserv_os_simple_svc/) - Basic OpenSearch setup
-* [`examples/netobserv_os_simple_gke_gw/`](../../examples/netobserv_os_simple_gke_gw/) - GKE deployment with Gateway API
+* [`docs/deployment/examples/netobserv_os_simple_svc/`](../../docs/deployment/examples/netobserv_os_simple_svc/) - Basic OpenSearch setup
+* [`docs/deployment/examples/netobserv_os_simple_gke_gw/`](../../docs/deployment/examples/netobserv_os_simple_gke_gw/) - GKE deployment with Gateway API
 
 ### Grafana Tempo
 

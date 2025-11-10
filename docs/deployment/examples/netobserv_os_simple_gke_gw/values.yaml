@@ -1,4 +1,4 @@
-# TODO(mack#lgo-406|2025-11-04): Re-iterate on the example, values must be aligned with "examples/netobserv_os_simple_svc"
+# TODO(mack#lgo-406|2025-11-04): Re-iterate on the example, values must be aligned with "docs/deployment/examples/netobserv_os_simple_svc"
 mermin:
   enabled: true
 

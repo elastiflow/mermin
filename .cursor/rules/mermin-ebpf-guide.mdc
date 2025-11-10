@@ -155,14 +155,14 @@ docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builde
 
 ```bash
 # Create cluster
-kind create cluster --config examples/local/kind-config.yaml
+kind create cluster --config docs/deployment/examples/local/kind-config.yaml
 
 # Build and load image
 docker build -t mermin:latest --target runner-debug .
 kind load docker-image -n atlantis mermin:latest
 
 # Deploy with Helm
-helm upgrade -i mermin charts/mermin --values examples/local/values.yaml
+helm upgrade -i mermin charts/mermin --values docs/deployment/examples/local/values.yaml
 
 # Check deployment
 kubectl get pods -l app.kubernetes.io/name=mermin

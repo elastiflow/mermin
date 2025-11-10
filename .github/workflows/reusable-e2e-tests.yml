@@ -118,5 +118,5 @@ jobs:
           DOCKER_REPOSITORY: not-exists.elastiflow.com/mermin
           DOCKER_IMAGE_TAG: ${{ inputs.image-tag }}
           HOST_DOCKER_INTERNAL_ADDR: 172.17.0.1
-          MERMIN_CONFIG_PATH: examples/local/config.example.hcl
+          MERMIN_CONFIG_PATH: docs/deployment/examples/local/config.example.hcl
         run: ${{ inputs.test-path }}
