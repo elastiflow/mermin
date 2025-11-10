@@ -32,6 +32,17 @@
 /// The length of the TCP header base structure.
 pub const TCP_LEN: usize = 20;
 
+pub const TCP_SRC_PORT_OFFSET: usize = 0;
+pub const TCP_DST_PORT_OFFSET: usize = 2;
+pub const TCP_SEQ_NUM_OFFSET: usize = 4;
+pub const TCP_ACK_SEQ_OFFSET: usize = 8;
+pub const TCP_OFF_RES_OFFSET: usize = 12;
+pub const TCP_FLAGS_OFFSET: usize = 13;
+pub const TCP_WINDOW_OFFSET: usize = 14;
+pub const TCP_CHECKSUM_OFFSET: usize = 16;
+pub const TCP_URG_PTR_OFFSET: usize = 18;
+pub const TCP_OPTIONS_OFFSET: usize = 20;
+
 /// Source port field (16 bits).
 pub type SrcPort = [u8; 2];
 /// Destination port field (16 bits).
@@ -40,8 +51,10 @@ pub type DstPort = [u8; 2];
 pub type SeqNum = [u8; 4];
 /// Acknowledgment sequence number field (32 bits).
 pub type AckSeq = [u8; 4];
-/// Combined field: Data offset (4 bits), Reserved (3 bits), Flags (9 bits).
-pub type OffResFlags = [u8; 2];
+/// Combined field: Data offset (4 bits), Reserved (4 bits)
+pub type OffRes = u8;
+/// Flags field
+pub type Flags = u8;
 /// Window size field (16 bits).
 pub type Window = [u8; 2];
 /// Checksum field (16 bits).
@@ -103,68 +116,62 @@ pub fn urg_ptr(urg_ptr: UrgPtr) -> u16 {
 
 /// Returns the data offset value (header length in 32-bit words).
 #[inline]
-pub fn data_offset(off_res_flags: OffResFlags) -> u8 {
-    (off_res_flags[0] >> 4) & 0x0F
+pub fn data_offset(off_res: OffRes) -> u8 {
+    (off_res >> 4) & 0x0F
 }
 
 /// Returns the header length in bytes.
 #[inline]
-pub fn hdr_len(off_res_flags: OffResFlags) -> usize {
-    (data_offset(off_res_flags) as usize) * 4
-}
-
-/// Returns the TCP flags.
-#[inline]
-pub fn tcp_flags(off_res_flags: OffResFlags) -> u8 {
-    off_res_flags[1]
+pub fn hdr_len(off_res: OffRes) -> usize {
+    (data_offset(off_res) as usize) * 4
 }
 
 /// Returns true if the FIN flag is set.
 #[inline]
-pub fn fin_flag(off_res_flags: OffResFlags) -> bool {
-    (off_res_flags[1] & TCP_FLAG_FIN) != 0
+pub fn fin_flag(flags: Flags) -> bool {
+    (flags & TCP_FLAG_FIN) != 0
 }
 
 /// Returns true if the SYN flag is set.
 #[inline]
-pub fn syn_flag(off_res_flags: OffResFlags) -> bool {
-    (off_res_flags[1] & TCP_FLAG_SYN) != 0
+pub fn syn_flag(flags: Flags) -> bool {
+    (flags & TCP_FLAG_SYN) != 0
 }
 
 /// Returns true if the RST flag is set.
 #[inline]
-pub fn rst_flag(off_res_flags: OffResFlags) -> bool {
-    (off_res_flags[1] & TCP_FLAG_RST) != 0
+pub fn rst_flag(flags: Flags) -> bool {
+    (flags & TCP_FLAG_RST) != 0
 }
 
 /// Returns true if the PSH flag is set.
 #[inline]
-pub fn psh_flag(off_res_flags: OffResFlags) -> bool {
-    (off_res_flags[1] & TCP_FLAG_PSH) != 0
+pub fn psh_flag(flags: Flags) -> bool {
+    (flags & TCP_FLAG_PSH) != 0
 }
 
 /// Returns true if the ACK flag is set.
 #[inline]
-pub fn ack_flag(off_res_flags: OffResFlags) -> bool {
-    (off_res_flags[1] & TCP_FLAG_ACK) != 0
+pub fn ack_flag(flags: Flags) -> bool {
+    (flags & TCP_FLAG_ACK) != 0
 }
 
 /// Returns true if the URG flag is set.
 #[inline]
-pub fn urg_flag(off_res_flags: OffResFlags) -> bool {
-    (off_res_flags[1] & TCP_FLAG_URG) != 0
+pub fn urg_flag(flags: Flags) -> bool {
+    (flags & TCP_FLAG_URG) != 0
 }
 
 /// Returns true if the ECE flag is set.
 #[inline]
-pub fn ece_flag(off_res_flags: OffResFlags) -> bool {
-    (off_res_flags[1] & TCP_FLAG_ECE) != 0
+pub fn ece_flag(flags: Flags) -> bool {
+    (flags & TCP_FLAG_ECE) != 0
 }
 
 /// Returns true if the CWR flag is set.
 #[inline]
-pub fn cwr_flag(off_res_flags: OffResFlags) -> bool {
-    (off_res_flags[1] & TCP_FLAG_CWR) != 0
+pub fn cwr_flag(flags: Flags) -> bool {
+    (flags & TCP_FLAG_CWR) != 0
 }
 
 #[cfg(test)]
@@ -246,106 +253,97 @@ mod test {
     #[test]
     fn test_data_offset() {
         // Data offset 5 (minimum valid - 20 bytes header)
-        assert_eq!(data_offset([0x50, 0x00]), 5);
+        assert_eq!(data_offset(0x50), 5);
         // Data offset 6 (24 bytes header)
-        assert_eq!(data_offset([0x60, 0x00]), 6);
+        assert_eq!(data_offset(0x60), 6);
         // Data offset 15 (maximum - 60 bytes header)
-        assert_eq!(data_offset([0xF0, 0x00]), 15);
-        // Data offset with flags set
-        assert_eq!(data_offset([0x50, 0xFF]), 5);
+        assert_eq!(data_offset(0xF0), 15);
     }
 
     #[test]
     fn test_hdr_len() {
         // Minimum header length (5 * 4 = 20 bytes)
-        assert_eq!(hdr_len([0x50, 0x00]), 20);
+        assert_eq!(hdr_len(0x50), 20);
         // Header with options (6 * 4 = 24 bytes)
-        assert_eq!(hdr_len([0x60, 0x00]), 24);
+        assert_eq!(hdr_len(0x60), 24);
         // Maximum header length (15 * 4 = 60 bytes)
-        assert_eq!(hdr_len([0xF0, 0x00]), 60);
-    }
-
-    #[test]
-    fn test_tcp_flags() {
-        assert_eq!(tcp_flags([0x50, 0x00]), 0x00);
-        assert_eq!(tcp_flags([0x50, 0x12]), 0x12); // SYN+ACK
-        assert_eq!(tcp_flags([0x50, 0xFF]), 0xFF); // All flags
+        assert_eq!(hdr_len(0xF0), 60);
     }
 
     #[test]
     fn test_fin_flag() {
-        assert_eq!(fin_flag([0x50, 0x01]), true);
-        assert_eq!(fin_flag([0x50, 0x00]), false);
-        assert_eq!(fin_flag([0x50, 0xFE]), false);
+        assert_eq!(fin_flag(0x01), true);
+        assert_eq!(fin_flag(0x00), false);
+        assert_eq!(fin_flag(0xFE), false);
     }
 
     #[test]
     fn test_syn_flag() {
-        assert_eq!(syn_flag([0x50, 0x02]), true);
-        assert_eq!(syn_flag([0x50, 0x00]), false);
-        assert_eq!(syn_flag([0x50, 0xFD]), false);
+        assert_eq!(syn_flag(0x02), true);
+        assert_eq!(syn_flag(0x00), false);
+        assert_eq!(syn_flag(0xFD), false);
     }
 
     #[test]
     fn test_rst_flag() {
-        assert_eq!(rst_flag([0x50, 0x04]), true);
-        assert_eq!(rst_flag([0x50, 0x00]), false);
-        assert_eq!(rst_flag([0x50, 0xFB]), false);
+        assert_eq!(rst_flag(0x04), true);
+        assert_eq!(rst_flag(0x00), false);
+        assert_eq!(rst_flag(0xFB), false);
     }
 
     #[test]
     fn test_psh_flag() {
-        assert_eq!(psh_flag([0x50, 0x08]), true);
-        assert_eq!(psh_flag([0x50, 0x00]), false);
-        assert_eq!(psh_flag([0x50, 0xF7]), false);
+        assert_eq!(psh_flag(0x08), true);
+        assert_eq!(psh_flag(0x00), false);
+        assert_eq!(psh_flag(0xF7), false);
     }
 
     #[test]
     fn test_ack_flag() {
-        assert_eq!(ack_flag([0x50, 0x10]), true);
-        assert_eq!(ack_flag([0x50, 0x00]), false);
-        assert_eq!(ack_flag([0x50, 0xEF]), false);
+        assert_eq!(ack_flag(0x10), true);
+        assert_eq!(ack_flag(0x00), false);
+        assert_eq!(ack_flag(0xEF), false);
     }
 
     #[test]
     fn test_urg_flag() {
-        assert_eq!(urg_flag([0x50, 0x20]), true);
-        assert_eq!(urg_flag([0x50, 0x00]), false);
-        assert_eq!(urg_flag([0x50, 0xDF]), false);
+        assert_eq!(urg_flag(0x20), true);
+        assert_eq!(urg_flag(0x00), false);
+        assert_eq!(urg_flag(0xDF), false);
     }
 
     #[test]
     fn test_ece_flag() {
-        assert_eq!(ece_flag([0x50, 0x40]), true);
-        assert_eq!(ece_flag([0x50, 0x00]), false);
-        assert_eq!(ece_flag([0x50, 0xBF]), false);
+        assert_eq!(ece_flag(0x40), true);
+        assert_eq!(ece_flag(0x00), false);
+        assert_eq!(ece_flag(0xBF), false);
     }
 
     #[test]
     fn test_cwr_flag() {
-        assert_eq!(cwr_flag([0x50, 0x80]), true);
-        assert_eq!(cwr_flag([0x50, 0x00]), false);
-        assert_eq!(cwr_flag([0x50, 0x7F]), false);
+        assert_eq!(cwr_flag(0x80), true);
+        assert_eq!(cwr_flag(0x00), false);
+        assert_eq!(cwr_flag(0x7F), false);
     }
 
     #[test]
     fn test_multiple_flags() {
-        // SYN+ACK
-        let off_res_flags: OffResFlags = [0x50, 0x12];
-        assert_eq!(syn_flag(off_res_flags), true);
-        assert_eq!(ack_flag(off_res_flags), true);
-        assert_eq!(fin_flag(off_res_flags), false);
+        // SYN+ACK (flags byte = 0x12)
+        let flags: Flags = 0x12;
+        assert_eq!(syn_flag(flags), true);
+        assert_eq!(ack_flag(flags), true);
+        assert_eq!(fin_flag(flags), false);
 
         // All flags set
-        let off_res_flags: OffResFlags = [0x50, 0xFF];
-        assert_eq!(fin_flag(off_res_flags), true);
-        assert_eq!(syn_flag(off_res_flags), true);
-        assert_eq!(rst_flag(off_res_flags), true);
-        assert_eq!(psh_flag(off_res_flags), true);
-        assert_eq!(ack_flag(off_res_flags), true);
-        assert_eq!(urg_flag(off_res_flags), true);
-        assert_eq!(ece_flag(off_res_flags), true);
-        assert_eq!(cwr_flag(off_res_flags), true);
+        let flags: Flags = 0xFF;
+        assert_eq!(fin_flag(flags), true);
+        assert_eq!(syn_flag(flags), true);
+        assert_eq!(rst_flag(flags), true);
+        assert_eq!(psh_flag(flags), true);
+        assert_eq!(ack_flag(flags), true);
+        assert_eq!(urg_flag(flags), true);
+        assert_eq!(ece_flag(flags), true);
+        assert_eq!(cwr_flag(flags), true);
     }
 
     #[test]
@@ -366,9 +364,13 @@ mod test {
         let ack: AckSeq = [0x87, 0x65, 0x43, 0x21];
         assert_eq!(ack, [0x87, 0x65, 0x43, 0x21]);
 
-        // Test OffResFlags type alias
-        let off_res_flags: OffResFlags = [0x50, 0x18];
-        assert_eq!(off_res_flags, [0x50, 0x18]);
+        // Test OffRes type alias
+        let off_res: OffRes = 0x50;
+        assert_eq!(off_res, 0x50);
+
+        // Test Flags type alias
+        let flags: Flags = 0x18;
+        assert_eq!(flags, 0x18);
 
         // Test Window type alias
         let win: Window = [0x20, 0x00];

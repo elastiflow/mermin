@@ -18,6 +18,11 @@
 /// The length of the UDP header in bytes.
 pub const UDP_LEN: usize = 8;
 
+pub const UDP_SRC_PORT_OFFSET: usize = 0;
+pub const UDP_DST_PORT_OFFSET: usize = 2;
+pub const UDP_LEN_OFFSET: usize = 4;
+pub const UDP_CHECKSUM_OFFSET: usize = 6;
+
 /// Source port field (16 bits).
 pub type SrcPort = [u8; 2];
 /// Destination port field (16 bits).

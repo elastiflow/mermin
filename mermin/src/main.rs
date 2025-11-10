@@ -1,17 +1,17 @@
 mod error;
+mod filter;
 mod health;
 mod iface;
 mod ip;
 mod k8s;
 mod otlp;
+mod packet;
 mod runtime;
-mod source;
 mod span;
 
 use std::sync::{Arc, atomic::Ordering};
 
 use aya::{
-    maps::{Array, RingBuf},
     programs::{SchedClassifier, TcAttachType},
     util::KernelVersion,
 };
@@ -28,7 +28,6 @@ use crate::{
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
     },
     runtime::{capabilities, context::Context},
-    source::{filter::PacketFilter, ringbuf::RingBufReader},
     span::producer::FlowSpanProducer,
 };
 
@@ -120,49 +119,12 @@ async fn run() -> Result<()> {
         );
     }
 
-    // Configure tunnel ports map
-    let mut tunnel_ports_map: Array<_, u16> = ebpf
-        .take_map("TUNNEL_PORTS")
-        .ok_or_else(|| MerminError::ebpf_map("TUNNEL_PORTS map not present in the object"))?
-        .try_into()?;
-
-    // Set tunnel port configuration in the map
-    // Indices: 0=geneve, 1=vxlan, 2=wireguard
-    tunnel_ports_map.set(0, conf.parser.geneve_port, 0)?;
-    tunnel_ports_map.set(1, conf.parser.vxlan_port, 0)?;
-    tunnel_ports_map.set(2, conf.parser.wireguard_port, 0)?;
-
-    // Configure parser options map (protocol flags and max depth)
-    let mut parser_options_map: Array<_, u16> = ebpf
-        .take_map("PARSER_OPTIONS")
-        .ok_or_else(|| MerminError::ebpf_map("PARSER_OPTIONS map not present in the object"))?
-        .try_into()?;
-
-    // Set parser configuration in the map
-    // Indices: 0=protocol_flags, 1=max_header_depth
-    parser_options_map.set(0, parser_flags_to_bitfield(&conf.parser), 0)?;
-    parser_options_map.set(1, conf.parser.max_header_depth, 0)?;
-
-    info!(
-        event.name = "ebpf.config_applied",
-        ebpf.config.type = "parser_options",
-        parser.geneve_port = conf.parser.geneve_port,
-        parser.vxlan_port = conf.parser.vxlan_port,
-        parser.wireguard_port = conf.parser.wireguard_port,
-        parser.max_header_depth = conf.parser.max_header_depth,
-        parser.parse_ipv6_hopopt = conf.parser.parse_ipv6_hopopt,
-        parser.parse_ipv6_fragment = conf.parser.parse_ipv6_fragment,
-        parser.parse_ipv6_routing = conf.parser.parse_ipv6_routing,
-        parser.parse_ipv6_dest_opts = conf.parser.parse_ipv6_dest_opts,
-        "configured ebpf parser options"
-    );
-
     let programs = [TcAttachType::Ingress, TcAttachType::Egress];
     programs.iter().try_for_each(|attach_type| -> Result<()> {
         let program: &mut SchedClassifier = ebpf
             .program_mut(match attach_type {
-                TcAttachType::Ingress => "mermin_ingress",
-                TcAttachType::Egress => "mermin_egress",
+                TcAttachType::Ingress => "mermin_flow_ingress",
+                TcAttachType::Egress => "mermin_flow_egress",
                 _ => unreachable!("only ingress and egress are used"),
             })
             .ok_or_else(|| {
@@ -180,7 +142,6 @@ async fn run() -> Result<()> {
     );
 
     let health_state = HealthState::default();
-
     if conf.api.enabled {
         let health_state_clone = health_state.clone();
         let api_conf = conf.api.clone();
@@ -199,7 +160,6 @@ async fn run() -> Result<()> {
     let kernel_version = KernelVersion::current().unwrap_or(KernelVersion::new(0, 0, 0));
     let use_tcx = kernel_version >= KernelVersion::new(6, 6, 0);
     let attach_method = if use_tcx { "TCX" } else { "netlink" };
-
     debug!(
         event.name = "ebpf.attach_method_determined",
         ebpf.attach.method = attach_method,
@@ -210,19 +170,11 @@ async fn run() -> Result<()> {
     );
 
     // Shared ownership for concurrent access from controller and flow producer
+    // NOTE: eBPF maps (FLOW_STATS_MAPS, FLOW_EVENTS) will be accessed by FlowSpanProducer
     let ebpf = Arc::new(tokio::sync::Mutex::new(ebpf));
-
-    // Ring buffer must be created before program attachment to avoid eBPF write failures
-    let mut ebpf_guard = ebpf.lock().await;
-    let map = ebpf_guard
-        .take_map("PACKETS_META")
-        .ok_or_else(|| MerminError::ebpf_map("PACKETS_META map not present in the object"))?;
-    drop(ebpf_guard); // Avoid holding lock during RingBuf construction
-
-    let ring_buf = RingBuf::try_from(map)?;
     info!(
-        event.name = "source.ringbuf.initialized",
-        "ring buffer initialized and ready to receive packets"
+        event.name = "ebpf.shared",
+        "eBPF object prepared for concurrent access, maps will be accessed on-demand"
     );
 
     let patterns = if conf.discovery.instrument.interfaces.is_empty() {
@@ -245,23 +197,7 @@ async fn run() -> Result<()> {
 
     // DashMap allows lock-free reads during packet processing while controller updates it dynamically
     let iface_map = iface_controller.iface_map();
-
-    let (packet_meta_tx, packet_meta_rx) = mpsc::channel(conf.packet_channel_capacity);
-
-    // Start ring buffer reader BEFORE attaching eBPF programs to avoid packet loss
-    let packet_filter = Arc::new(PacketFilter::new(&conf, Arc::clone(&iface_map)));
-    let ring_buf_reader = RingBufReader::new(ring_buf, packet_filter, packet_meta_tx);
-    tokio::spawn(async move {
-        ring_buf_reader.run().await;
-        info!(
-            event.name = "task.exited",
-            task.name = "source.ringbuf",
-            "ring buffer reader task exited"
-        );
-    });
-
     iface_controller.initialize().await?;
-
     info!(
         event.name = "ebpf.ready",
         "ebpf program loaded and ready to process network traffic"
@@ -297,8 +233,9 @@ async fn run() -> Result<()> {
         conf.packet_channel_capacity,
         conf.packet_worker_count,
         iface_map.clone(),
-        packet_meta_rx,
+        Arc::clone(&ebpf),
         flow_span_tx,
+        &conf,
     )?;
 
     info!(
@@ -491,24 +428,6 @@ async fn run() -> Result<()> {
     info!("exiting");
 
     Ok(())
-}
-
-/// Helper function to convert boolean parser flags to u16 bitfield
-fn parser_flags_to_bitfield(conf: &runtime::conf::ParserConf) -> u16 {
-    let mut flags: u16 = 0;
-    if conf.parse_ipv6_hopopt {
-        flags |= 1 << 0;
-    }
-    if conf.parse_ipv6_fragment {
-        flags |= 1 << 1;
-    }
-    if conf.parse_ipv6_routing {
-        flags |= 1 << 2;
-    }
-    if conf.parse_ipv6_dest_opts {
-        flags |= 1 << 3;
-    }
-    flags
 }
 
 /// Display user-friendly error messages with helpful hints

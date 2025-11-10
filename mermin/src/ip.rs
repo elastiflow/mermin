@@ -5,24 +5,25 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-use mermin_common::IpAddrType;
+use mermin_common::IpVersion;
 
 /// Resolve IP addresses from raw byte arrays based on the provided IP address type.
+#[allow(dead_code)]
 pub fn resolve_addrs(
-    ip_addr_type: IpAddrType,
+    ip_addr_type: IpVersion,
     src_ipv4_addr: [u8; 4],
     dst_ipv4_addr: [u8; 4],
     src_ipv6_addr: [u8; 16],
     dst_ipv6_addr: [u8; 16],
 ) -> Result<(IpAddr, IpAddr), Error> {
     match ip_addr_type {
-        IpAddrType::Unknown => Err(Error::UnknownIpAddrType),
-        IpAddrType::Ipv4 => {
+        IpVersion::Unknown => Err(Error::UnknownIpAddrType),
+        IpVersion::V4 => {
             let src = IpAddr::V4(Ipv4Addr::from(src_ipv4_addr));
             let dst = IpAddr::V4(Ipv4Addr::from(dst_ipv4_addr));
             Ok((src, dst))
         }
-        IpAddrType::Ipv6 => {
+        IpVersion::V6 => {
             let src = IpAddr::V6(Ipv6Addr::from(src_ipv6_addr));
             let dst = IpAddr::V6(Ipv6Addr::from(dst_ipv6_addr));
             Ok((src, dst))
@@ -34,12 +35,14 @@ pub fn resolve_addrs(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
     UnknownIpAddrType,
+    FlowNotFound,
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::UnknownIpAddrType => write!(f, "unknown ip address type"),
+            Error::FlowNotFound => write!(f, "flow not found in ebpf map"),
         }
     }
 }
@@ -50,14 +53,14 @@ impl std::error::Error for Error {}
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
-    use mermin_common::IpAddrType;
+    use mermin_common::IpVersion;
 
     use crate::ip::{Error, resolve_addrs};
 
     #[test]
     fn test_resolve_addrs_ipv4() {
         let result = resolve_addrs(
-            IpAddrType::Ipv4,
+            IpVersion::V4,
             [192, 168, 1, 1],
             [192, 168, 1, 2],
             [0; 16],
@@ -73,7 +76,7 @@ mod tests {
     #[test]
     fn test_resolve_addrs_ipv6() {
         let result = resolve_addrs(
-            IpAddrType::Ipv6,
+            IpVersion::V6,
             [0; 4],
             [0; 4],
             [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
@@ -95,7 +98,7 @@ mod tests {
     #[test]
     fn test_resolve_addrs_unknown() {
         let result = resolve_addrs(
-            IpAddrType::Unknown,
+            IpVersion::Unknown,
             [192, 168, 1, 1],
             [192, 168, 1, 2],
             [0; 16],

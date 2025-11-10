@@ -16,6 +16,9 @@
 /// The length of the Ethernet header.
 pub const ETH_LEN: usize = 14;
 
+pub const ETH_ETHER_TYPE_OFFSET: usize = 12;
+pub const ETH_SRC_MAC_ADDR_OFFSET: usize = 6;
+
 /// Destination MAC address.
 pub type DstMacAddr = [u8; 6];
 
