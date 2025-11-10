@@ -452,6 +452,8 @@ kubectl delete clusterrolebinding mermin
 kubectl delete serviceaccount mermin -n default
 ```
 
+{% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/charts/mermin/Chart.yaml" %}
+
 ## Advanced Configuration
 
 ### Custom Image Repository
