@@ -1,4 +1,3 @@
-fullNameOverride: mermin
 image:
   repository: mermin
   tag: latest
