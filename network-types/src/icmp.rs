@@ -15,6 +15,11 @@
 /// The size of the ICMP header in bytes.
 pub const ICMP_LEN: usize = 8;
 
+pub const ICMP_TYPE_OFFSET: usize = 0;
+pub const ICMP_CODE_OFFSET: usize = 1;
+pub const ICMP_CHECKSUM_OFFSET: usize = 2;
+pub const ICMP_DATA_OFFSET: usize = 4;
+
 /// ICMP message type (8 bits)
 pub type Type = u8;
 /// ICMP message code (8 bits)

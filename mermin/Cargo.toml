@@ -38,7 +38,7 @@ kube = { version = "1.1.0", features = ["runtime", "derive", "client"] }
 kube-runtime = "1.1.0"
 libc = { workspace = true }
 log = { workspace = true }
-mermin-common = { path = "../mermin-common" }
+mermin-common = { path = "../mermin-common", features = ["user"] }
 network-types = { path = "../network-types" }
 netlink-packet-core = "0.8.1"
 netlink-packet-route = "0.25.1"

@@ -10,6 +10,8 @@ path = "src/lib.rs"
 
 [features]
 default = []
+user = ["aya"]
 
 [dependencies]
 network-types = { path = "../network-types" }
+aya = { version = "0.13", optional = true }

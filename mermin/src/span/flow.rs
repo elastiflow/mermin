@@ -79,6 +79,21 @@ pub struct FlowSpan {
     #[serde(serialize_with = "serialize_span_kind")]
     pub span_kind: SpanKind,
     pub attributes: SpanAttributes,
+
+    // NEW: For eBPF map aggregation architecture
+    #[serde(skip)]
+    pub flow_key: Option<mermin_common::FlowKey>,
+    #[serde(skip)]
+    pub last_recorded_packets: u64,
+    #[serde(skip)]
+    pub last_recorded_bytes: u64,
+    #[serde(skip)]
+    pub last_recorded_reverse_packets: u64,
+    #[serde(skip)]
+    pub last_recorded_reverse_bytes: u64,
+    #[serde(skip)]
+    #[allow(dead_code)]
+    pub boot_time_offset: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -967,6 +982,12 @@ mod tests {
             end_time: std::time::UNIX_EPOCH + Duration::from_secs(200),
             span_kind: SpanKind::Internal,
             attributes: SpanAttributes::default(),
+            flow_key: None,
+            last_recorded_packets: 0,
+            last_recorded_bytes: 0,
+            last_recorded_reverse_packets: 0,
+            last_recorded_reverse_bytes: 0,
+            boot_time_offset: 0,
         };
 
         assert_eq!(
@@ -982,6 +1003,12 @@ mod tests {
             end_time: std::time::UNIX_EPOCH + Duration::from_secs(200),
             span_kind: SpanKind::Internal,
             attributes: SpanAttributes::default(),
+            flow_key: None,
+            last_recorded_packets: 0,
+            last_recorded_bytes: 0,
+            last_recorded_reverse_packets: 0,
+            last_recorded_reverse_bytes: 0,
+            boot_time_offset: 0,
         };
 
         assert_eq!(
@@ -997,6 +1024,12 @@ mod tests {
             end_time: std::time::UNIX_EPOCH,
             span_kind: SpanKind::Internal,
             attributes: SpanAttributes::default(),
+            flow_key: None,
+            last_recorded_packets: 0,
+            last_recorded_bytes: 0,
+            last_recorded_reverse_packets: 0,
+            last_recorded_reverse_bytes: 0,
+            boot_time_offset: 0,
         };
         flow_span.attributes.network_type = EtherType::Ipv4;
         flow_span.attributes.network_transport = IpProto::Tcp;
@@ -1012,6 +1045,12 @@ mod tests {
             end_time: std::time::UNIX_EPOCH,
             span_kind: SpanKind::Internal,
             attributes: SpanAttributes::default(),
+            flow_key: None,
+            last_recorded_packets: 0,
+            last_recorded_bytes: 0,
+            last_recorded_reverse_packets: 0,
+            last_recorded_reverse_bytes: 0,
+            boot_time_offset: 0,
         };
         flow_span.attributes.network_type = EtherType::Ipv6;
         flow_span.attributes.network_transport = IpProto::Udp;
@@ -1214,6 +1253,12 @@ mod tests {
             end_time: std::time::UNIX_EPOCH + Duration::from_secs(10),
             span_kind: SpanKind::Internal,
             attributes: SpanAttributes::default(),
+            flow_key: None,
+            last_recorded_packets: 0,
+            last_recorded_bytes: 0,
+            last_recorded_reverse_packets: 0,
+            last_recorded_reverse_bytes: 0,
+            boot_time_offset: 0,
         };
 
         let cloned = flow_span.clone();
@@ -1248,6 +1293,12 @@ mod tests {
             end_time: std::time::UNIX_EPOCH + Duration::from_secs(10),
             span_kind: SpanKind::Internal,
             attributes: SpanAttributes::default(),
+            flow_key: None,
+            last_recorded_packets: 0,
+            last_recorded_bytes: 0,
+            last_recorded_reverse_packets: 0,
+            last_recorded_reverse_bytes: 0,
+            boot_time_offset: 0,
         };
 
         let json = serde_json::to_string(&flow_span);

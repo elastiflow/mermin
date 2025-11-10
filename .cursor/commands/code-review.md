@@ -82,11 +82,11 @@ Review the code changes compared to the `{{base_branch}}` branch with particular
 
 - [ ] All public functions have `///` doc comments with:
   - Description of what the function does
-  - `# Arguments` section for parameters
-  - `# Returns` section for return values
-  - `# Errors` section if returning `Result`
-  - `# Panics` section if function can panic
-  - `# Examples` for non-obvious usage
+  - `Arguments` section for parameters
+  - `Returns` section for return values
+  - `Errors` section if returning `Result`
+  - `Panics` section if function can panic
+  - `Examples` for non-obvious usage
 - [ ] All public structs and enums are documented
 - [ ] All public fields on structs are documented
 - [ ] Module-level documentation (`//!`) provides overview

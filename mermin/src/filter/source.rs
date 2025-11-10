@@ -1,32 +1,7 @@
-//! Packet filtering based on user-configured rules.
+//! Filtering infrastructure with pre-compiled rules for efficient lookups.
 //!
-//! This module provides high-performance packet filtering capabilities by pre-compiling
-//! filter rules at initialization time. Rules are organized into four dimensions:
-//! - `source`: Source IP address and port filtering
-//! - `destination`: Destination IP address and port filtering
-//! - `network`: Network-level filtering (transport protocol, interface, MAC address)
-//! - `flow`: Flow-level filtering (TCP state, DSCP, ECN, TTL, ICMP types, TCP flags)
-//!
-//! # Performance
-//!
-//! Filter rules are pre-compiled into efficient data structures:
-//! - IP addresses/CIDRs use trie-based `IpNetworkTable` for O(log n) lookups
-//! - Port numbers and numeric values use `HashSet` for O(1) lookups
-//! - String patterns use `GlobSet` for efficient pattern matching
-//!
-//! # Example
-//!
-//! ```ignore
-//! use mermin::source::filter::PacketFilter;
-//! use mermin::runtime::conf::Conf;
-//!
-//! let conf = Conf::load_from_file("config.hcl")?;
-//! let filter = PacketFilter::new(&conf, iface_map);
-//!
-//! if filter.should_process(&packet)? {
-//!     // Process the packet
-//! }
-//! ```
+//! Provides IP tables, port sets, and glob matching for flow filtering.
+//! Rules are organized by source, destination, network, and flow dimensions.
 
 use std::{collections::HashSet, net::IpAddr, str::FromStr, sync::Arc};
 
@@ -34,11 +9,7 @@ use dashmap::DashMap;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use ip_network::IpNetwork;
 use ip_network_table::IpNetworkTable;
-use mermin_common::PacketMeta;
-use network_types::{
-    icmp,
-    ip::{IpDscp, IpEcn, IpProto},
-};
+use network_types::ip::IpProto;
 use num_iter::range_inclusive;
 use num_traits::PrimInt;
 use pnet::datalink::MacAddr;
@@ -47,13 +18,13 @@ use tracing::{error, warn};
 use crate::{
     ip::{Error as IpError, resolve_addrs},
     runtime::conf::{Conf, FilteringOptions, FilteringPair},
-    span::tcp::{ConnectionState, TcpFlags},
+    span::tcp::TcpFlags,
 };
 
-/// Helper macro to check if a packet passes a filter rule.
+/// Helper macro to check if a packet/flow passes a filter rule.
 ///
 /// Returns early with `Ok(false)` if the filter exists and the value is not allowed.
-/// This reduces boilerplate in the `should_process` method.
+/// This reduces boilerplate in filtering methods.
 macro_rules! check_filter {
     ($rules:expr, $value:expr) => {
         if let Some(rules) = $rules {
@@ -74,6 +45,7 @@ struct CompiledRules {
     interface_name: Option<CompiledRuleSet<GlobSet>>,
     interface_index: Option<CompiledRuleSet<HashSet<u32>>>,
     interface_mac: Option<CompiledRuleSet<GlobSet>>,
+    #[allow(dead_code)] // TODO: Implement when we add flow-level TCP state tracking
     connection_state: Option<CompiledRuleSet<GlobSet>>,
     ip_dscp_name: Option<CompiledRuleSet<GlobSet>>,
     ip_ecn_name: Option<CompiledRuleSet<GlobSet>>,
@@ -350,74 +322,39 @@ impl PacketFilter {
         }
     }
 
-    /// Determines if a packet should be processed based on configured filter rules.
+    /// Determines if a flow should be tracked based on configured filter rules.
     ///
-    /// This is the core filtering method called for every packet in the hot path.
-    /// Filters are evaluated in a specific order to optimize for early rejection
-    /// of unwanted packets.
+    /// This is an adapter method that evaluates flow-level filtering using `FlowKey` and `FlowStats`
+    /// from the eBPF layer, rather than requiring full packet metadata.
     ///
     /// # Arguments
     ///
-    /// - `packet` - The packet metadata to evaluate against filter rules
+    /// - `flow_key` - The normalized flow key from eBPF
+    /// - `stats` - The flow statistics from eBPF (contains MACs, DSCP, TTL, etc.)
     ///
     /// # Returns
     ///
-    /// - `Ok(true)` - Packet matches all applicable filters and should be processed
-    /// - `Ok(false)` - Packet does not match filter criteria and should be dropped
-    /// - `Err(IpError)` - Failed to parse IP addresses from packet metadata
-    ///
-    /// # Filter Evaluation Order
-    ///
-    /// Filters are evaluated in the following order for optimal performance
-    /// (evaluation short-circuits on the first mismatch):
-    ///
-    /// 1. **Network filters** (cheap to evaluate, high rejection rate):
-    ///    - Transport protocol (TCP, UDP, ICMP, etc.)
-    ///    - Network type (IPv4, IPv6)
-    ///    - Interface index, name, MAC address
-    ///
-    /// 2. **Flow filters** (protocol-specific, moderate cost):
-    ///    - TCP connection state (for TCP packets only)
-    ///    - IP DSCP and ECN values
-    ///    - IP TTL and flow label
-    ///    - ICMP type/code (for ICMP packets only)
-    ///    - TCP flags (for TCP packets only)
-    ///
-    /// 3. **Address/Port filters** (requires IP parsing, evaluated last):
-    ///    - Source IP address and port
-    ///    - Destination IP address and port
-    ///
-    /// # Performance
-    ///
-    /// This method is highly optimized for the hot path:
-    /// - Pre-compiled filter rules enable O(1) or O(log n) lookups
-    /// - Early short-circuit evaluation minimizes unnecessary checks
-    /// - IP address parsing only occurs after cheaper filters pass
-    ///
-    /// # Filter Semantics
-    ///
-    /// Each filter dimension supports both positive (`match`) and negative (`not_match`) rules:
-    /// - If `not_match` rules are present and match: packet is **rejected**
-    /// - If `match` rules are present and don't match: packet is **rejected**
-    /// - If neither set of rules is present for a filter: packet **passes** that filter
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// // Filter configuration allows only TCP traffic on port 443
-    /// if filter.should_process(&packet)? {
-    ///     process_packet(packet);
-    /// } else {
-    ///     // Packet filtered out - no processing needed
-    /// }
-    /// ```
-    pub fn should_process(&self, packet: &PacketMeta) -> Result<bool, IpError> {
-        // Network-level filters (cheap checks first)
-        check_filter!(&self.network.transport, &packet.proto.to_string());
-        check_filter!(&self.network.type_, packet.ether_type.as_str());
-        check_filter!(&self.network.interface_index, &packet.ifindex);
+    /// - `Ok(true)` - Flow matches all applicable filters and should be tracked
+    /// - `Ok(false)` - Flow does not match filter criteria and should be filtered out
+    /// - `Err(IpError)` - Failed to parse IP addresses from flow key
+    pub fn should_track_flow(
+        &self,
+        flow_key: &mermin_common::FlowKey,
+        stats: &mermin_common::FlowStats,
+    ) -> Result<bool, IpError> {
+        // Network-level filters
+        check_filter!(&self.network.transport, &flow_key.protocol.to_string());
+
+        let ip_version_str = match flow_key.ip_version {
+            mermin_common::IpVersion::V4 => "ipv4",
+            mermin_common::IpVersion::V6 => "ipv6",
+            _ => return Ok(false),
+        };
+        check_filter!(&self.network.type_, ip_version_str);
+        check_filter!(&self.network.interface_index, &stats.ifindex);
+
         if let Some(rules) = &self.network.interface_name {
-            if let Some(iface_name_ref) = self.iface_map.get(&packet.ifindex) {
+            if let Some(iface_name_ref) = self.iface_map.get(&stats.ifindex) {
                 if !rules.is_allowed(iface_name_ref.value().as_str()) {
                     return Ok(false);
                 }
@@ -425,109 +362,95 @@ impl PacketFilter {
                 return Ok(false);
             }
         }
+
         if let Some(rules) = &self.network.interface_mac {
             let mac = MacAddr::new(
-                packet.src_mac_addr[0],
-                packet.src_mac_addr[1],
-                packet.src_mac_addr[2],
-                packet.src_mac_addr[3],
-                packet.src_mac_addr[4],
-                packet.src_mac_addr[5],
+                stats.src_mac[0],
+                stats.src_mac[1],
+                stats.src_mac[2],
+                stats.src_mac[3],
+                stats.src_mac[4],
+                stats.src_mac[5],
             );
             if !rules.is_allowed(&mac.to_string()) {
                 return Ok(false);
             }
         }
 
-        if let Some(rules) = &self.flow.connection_state {
-            if packet.proto == IpProto::Tcp {
-                if let Some(state) = ConnectionState::from_packet(packet) {
-                    if !rules.is_allowed(state.as_str()) {
-                        return Ok(false);
-                    }
-                } else {
-                    return Ok(false);
-                }
-            } else if !rules.match_rules.is_empty() {
-                return Ok(false);
-            }
-        }
-        if let Some(rules) = &self.flow.ip_dscp_name {
-            let name = IpDscp::try_from_u8(packet.ip_dscp_id)
-                .unwrap_or_default()
-                .as_str();
-            if !rules.is_allowed(name) {
-                return Ok(false);
-            }
-        }
-        if let Some(rules) = &self.flow.ip_ecn_name {
-            let name = IpEcn::try_from_u8(packet.ip_ecn_id)
-                .unwrap_or_default()
-                .as_str();
-            if !rules.is_allowed(name) {
-                return Ok(false);
-            }
-        }
-        check_filter!(&self.flow.ip_ttl, &packet.ip_ttl);
-        check_filter!(&self.flow.ip_flow_label, &packet.ip_flow_label);
+        // Flow-level filters
+        // Use numeric DSCP/ECN values for filtering
+        let dscp_str = stats.ip_dscp.to_string();
+        let ecn_str = stats.ip_ecn.to_string();
+        check_filter!(&self.flow.ip_dscp_name, dscp_str.as_str());
+        check_filter!(&self.flow.ip_ecn_name, ecn_str.as_str());
+        check_filter!(&self.flow.ip_ttl, &stats.ip_ttl);
 
-        if packet.proto == IpProto::Icmp || packet.proto == IpProto::Ipv6Icmp {
-            if let Some(rules) = &self.flow.icmp_type_name {
-                let name = if packet.proto == IpProto::Icmp {
-                    icmp::get_icmpv4_type_name(packet.icmp_type_id)
-                } else {
-                    icmp::get_icmpv6_type_name(packet.icmp_type_id)
-                };
-                if !rules.is_allowed(name.unwrap_or_default()) {
-                    return Ok(false);
-                }
-            }
-            if let Some(rules) = &self.flow.icmp_code_name {
-                let name = if packet.proto == IpProto::Icmp {
-                    icmp::get_icmpv4_code_name(packet.icmp_type_id, packet.icmp_code_id)
-                } else {
-                    icmp::get_icmpv6_code_name(packet.icmp_type_id, packet.icmp_code_id)
-                };
-                if !rules.is_allowed(name.unwrap_or_default()) {
-                    return Ok(false);
-                }
-            }
+        if flow_key.ip_version == mermin_common::IpVersion::V6 {
+            check_filter!(&self.flow.ip_flow_label, &stats.ip_flow_label);
         }
 
-        if packet.proto == IpProto::Tcp
+        if matches!(flow_key.protocol, IpProto::Icmp | IpProto::Ipv6Icmp) {
+            // Use numeric ICMP type/code for filtering since the types don't implement Display
+            let icmp_type_str = stats.icmp_type.to_string();
+            let icmp_code_str = stats.icmp_code.to_string();
+            check_filter!(&self.flow.icmp_type_name, icmp_type_str.as_str());
+            check_filter!(&self.flow.icmp_code_name, icmp_code_str.as_str());
+        }
+
+        if flow_key.protocol == IpProto::Tcp
             && let Some(rules) = &self.flow.tcp_flags
         {
-            let tags = TcpFlags::from_packet(packet).active_flags();
-            if tags
-                .iter()
-                .any(|tag| rules.not_match_rules.is_match(tag.as_str()))
-            {
-                return Ok(false);
+            let flags_vec = TcpFlags::flags_from_bits(stats.tcp_flags);
+            // Check each flag individually against the patterns
+            // This allows patterns like "syn,ack" to match flows with any of those flags
+            for flag in &flags_vec {
+                let flag_str = flag.as_str();
+                // If any flag matches the not_match rules, reject the flow
+                if RuleCollection::<str>::matches(&rules.not_match_rules, flag_str) {
+                    return Ok(false);
+                }
             }
-            if !rules.match_rules.is_empty()
-                && !tags
+            // If match_rules is non-empty, at least one flag must match
+            if !RuleCollection::<str>::is_empty(&rules.match_rules) {
+                let has_match = flags_vec
                     .iter()
-                    .any(|tag| rules.match_rules.is_match(tag.as_str()))
-            {
-                return Ok(false);
+                    .any(|flag| RuleCollection::<str>::matches(&rules.match_rules, flag.as_str()));
+                if !has_match {
+                    return Ok(false);
+                }
             }
         }
 
-        // Address/port filters (requires IP parsing, evaluated last)
-        let (src_ip, dst_ip) = resolve_addrs(
-            packet.ip_addr_type,
-            packet.src_ipv4_addr,
-            packet.dst_ipv4_addr,
-            packet.src_ipv6_addr,
-            packet.dst_ipv6_addr,
-        )?;
-        let src_port = packet.src_port();
-        let dst_port = packet.dst_port();
+        // TODO: Add connection_state filter once we implement flow-level TCP state tracking.
+        // Currently, FlowStats.tcp_flags is an accumulated OR of all flags seen across packets,
+        // making it impossible to infer a single connection state (e.g., a flow might have
+        // SYN | ACK | FIN all set). We need to track state separately in FlowStats to support
+        // filters like "only track flows in ESTABLISHED state" or "exclude flows in CLOSED state".
+        // For now, users can filter on TCP flags directly (e.g., "exclude flows with RST").
 
-        check_filter!(&self.source.address, &src_ip);
-        check_filter!(&self.source.port, &src_port);
-        check_filter!(&self.destination.address, &dst_ip);
-        check_filter!(&self.destination.port, &dst_port);
+        // Source/Destination filters (requires IP parsing)
+        let (src_addr, dst_addr) = resolve_addrs(
+            flow_key.ip_version,
+            [
+                flow_key.src_ip[0],
+                flow_key.src_ip[1],
+                flow_key.src_ip[2],
+                flow_key.src_ip[3],
+            ],
+            [
+                flow_key.dst_ip[0],
+                flow_key.dst_ip[1],
+                flow_key.dst_ip[2],
+                flow_key.dst_ip[3],
+            ],
+            flow_key.src_ip,
+            flow_key.dst_ip,
+        )?;
+
+        check_filter!(&self.source.address, &src_addr);
+        check_filter!(&self.source.port, &flow_key.src_port);
+        check_filter!(&self.destination.address, &dst_addr);
+        check_filter!(&self.destination.port, &flow_key.dst_port);
 
         Ok(true)
     }
@@ -541,33 +464,77 @@ mod tests {
         sync::Arc,
     };
 
-    use mermin_common::{IpAddrType, PacketMeta};
-    use network_types::{eth::EtherType, ip::IpProto};
+    use mermin_common::{Direction, FlowKey, FlowStats, IpVersion};
+    use network_types::{
+        eth::EtherType,
+        ip::IpProto,
+        tcp::{TCP_FLAG_ACK, TCP_FLAG_RST, TCP_FLAG_SYN},
+    };
 
     use super::*;
     use crate::runtime::conf::{Conf, FilteringOptions, FilteringPair};
 
-    // TCP flag constants for test clarity
-    const TCP_FLAG_SYN: u8 = 0x02;
-    const TCP_FLAG_RST: u8 = 0x04;
-    const TCP_FLAG_ACK: u8 = 0x10;
-
-    fn mock_packet(
+    /// Helper to create a FlowKey for testing
+    fn mock_flow_key(
         src_ip: Ipv4Addr,
         src_port: u16,
         dst_ip: Ipv4Addr,
         dst_port: u16,
         proto: IpProto,
-    ) -> PacketMeta {
-        let mut packet = PacketMeta::default();
-        packet.ip_addr_type = IpAddrType::Ipv4;
-        packet.src_ipv4_addr = src_ip.octets();
-        packet.dst_ipv4_addr = dst_ip.octets();
-        packet.src_port = src_port.to_be_bytes();
-        packet.dst_port = dst_port.to_be_bytes();
-        packet.proto = proto;
-        packet.ether_type = EtherType::Ipv4;
-        packet
+    ) -> FlowKey {
+        let mut src_ip_bytes = [0u8; 16];
+        src_ip_bytes[0..4].copy_from_slice(&src_ip.octets());
+        let mut dst_ip_bytes = [0u8; 16];
+        dst_ip_bytes[0..4].copy_from_slice(&dst_ip.octets());
+
+        FlowKey {
+            src_ip: src_ip_bytes,
+            dst_ip: dst_ip_bytes,
+            src_port,
+            dst_port,
+            ip_version: IpVersion::V4,
+            protocol: proto,
+        }
+    }
+
+    /// Helper to create FlowStats for testing
+    fn mock_flow_stats(ifindex: u32) -> FlowStats {
+        FlowStats {
+            first_seen_ns: 0,
+            last_seen_ns: 0,
+            packets: 0,
+            bytes: 0,
+            reverse_packets: 0,
+            reverse_bytes: 0,
+            src_ip: [0; 16],
+            dst_ip: [0; 16],
+            src_mac: [0; 6],
+            ifindex,
+            ip_flow_label: 0,
+            ether_type: EtherType::Ipv4,
+            src_port: 0,
+            dst_port: 0,
+            direction: Direction::Egress,
+            ip_version: IpVersion::V4,
+            protocol: IpProto::Tcp,
+            ip_dscp: 0,
+            ip_ecn: 0,
+            ip_ttl: 64,
+            tcp_flags: 0,
+            icmp_type: 0,
+            icmp_code: 0,
+        }
+    }
+
+    fn build_filter(filters: HashMap<String, FilteringOptions>) -> PacketFilter {
+        let mut conf = Conf::default();
+        conf.filter = Some(filters);
+        let iface_map = Arc::new(DashMap::from_iter([
+            (1, "eth0".to_string()),
+            (2, "lo".to_string()),
+            (3, "docker0".to_string()),
+        ]));
+        PacketFilter::new(&conf, iface_map)
     }
 
     #[test]
@@ -615,28 +582,18 @@ mod tests {
         assert!(!glob_set.is_match("icmp"));
     }
 
-    fn build_filter(filters: HashMap<String, FilteringOptions>) -> PacketFilter {
-        let mut conf = Conf::default();
-        conf.filter = Some(filters);
-        let iface_map = Arc::new(DashMap::from_iter([
-            (1, "eth0".to_string()),
-            (2, "lo".to_string()),
-            (3, "docker0".to_string()),
-        ]));
-        PacketFilter::new(&conf, iface_map)
-    }
-
     #[test]
     fn test_filter_allows_by_default() {
         let filter = PacketFilter::default();
-        let packet = mock_packet(
+        let flow_key = mock_flow_key(
             "10.1.1.1".parse().unwrap(),
             1234,
             "10.2.2.2".parse().unwrap(),
             80,
             IpProto::Tcp,
         );
-        assert!(filter.should_process(&packet).unwrap());
+        let flow_stats = mock_flow_stats(1);
+        assert!(filter.should_track_flow(&flow_key, &flow_stats).unwrap());
     }
 
     #[test]
@@ -652,23 +609,28 @@ mod tests {
             },
         )]));
 
-        let packet_ok = mock_packet(
+        let flow_key_ok = mock_flow_key(
             "10.1.1.1".parse().unwrap(),
             1234,
             "10.2.2.2".parse().unwrap(),
             80,
             IpProto::Tcp,
         );
-        let packet_bad = mock_packet(
+        let flow_key_bad = mock_flow_key(
             "10.1.1.1".parse().unwrap(),
             1234,
             "10.2.2.2".parse().unwrap(),
             8080,
             IpProto::Tcp,
         );
+        let flow_stats = mock_flow_stats(1);
 
-        assert!(filter.should_process(&packet_ok).unwrap());
-        assert!(!filter.should_process(&packet_bad).unwrap());
+        assert!(filter.should_track_flow(&flow_key_ok, &flow_stats).unwrap());
+        assert!(
+            !filter
+                .should_track_flow(&flow_key_bad, &flow_stats)
+                .unwrap()
+        );
     }
 
     #[test]
@@ -684,23 +646,28 @@ mod tests {
             },
         )]));
 
-        let packet_ok = mock_packet(
+        let flow_key_ok = mock_flow_key(
             "192.168.1.1".parse().unwrap(),
             1234,
             "8.8.8.8".parse().unwrap(),
             53,
             IpProto::Udp,
         );
-        let packet_bad = mock_packet(
+        let flow_key_bad = mock_flow_key(
             "10.1.2.3".parse().unwrap(),
             1234,
             "8.8.8.8".parse().unwrap(),
             53,
             IpProto::Udp,
         );
+        let flow_stats = mock_flow_stats(1);
 
-        assert!(filter.should_process(&packet_ok).unwrap());
-        assert!(!filter.should_process(&packet_bad).unwrap());
+        assert!(filter.should_track_flow(&flow_key_ok, &flow_stats).unwrap());
+        assert!(
+            !filter
+                .should_track_flow(&flow_key_bad, &flow_stats)
+                .unwrap()
+        );
     }
 
     #[test]
@@ -716,61 +683,61 @@ mod tests {
             },
         )]));
 
-        let mut packet_ok = mock_packet(
+        let flow_key = mock_flow_key(
             "1.1.1.1".parse().unwrap(),
             1,
             "2.2.2.2".parse().unwrap(),
             2,
             IpProto::Tcp,
         );
-        packet_ok.ip_ttl = 64;
 
-        let mut packet_bad = mock_packet(
-            "1.1.1.1".parse().unwrap(),
-            1,
-            "2.2.2.2".parse().unwrap(),
-            2,
-            IpProto::Tcp,
+        let mut flow_stats_ok = mock_flow_stats(1);
+        flow_stats_ok.ip_ttl = 64;
+
+        let mut flow_stats_bad = mock_flow_stats(1);
+        flow_stats_bad.ip_ttl = 128;
+
+        assert!(filter.should_track_flow(&flow_key, &flow_stats_ok).unwrap());
+        assert!(
+            !filter
+                .should_track_flow(&flow_key, &flow_stats_bad)
+                .unwrap()
         );
-        packet_bad.ip_ttl = 128;
-
-        assert!(filter.should_process(&packet_ok).unwrap());
-        assert!(!filter.should_process(&packet_bad).unwrap());
     }
 
     #[test]
-    fn test_filter_dscp_name() {
+    fn test_filter_dscp_value() {
         let filter = build_filter(HashMap::from([(
             "flow".to_string(),
             FilteringOptions {
                 ip_dscp_name: Some(FilteringPair {
-                    match_glob: "ef".to_string(),
+                    match_glob: "46".to_string(), // EF (Expedited Forwarding)
                     ..Default::default()
                 }),
                 ..Default::default()
             },
         )]));
 
-        let mut packet_ok = mock_packet(
+        let flow_key = mock_flow_key(
             "1.1.1.1".parse().unwrap(),
             1,
             "2.2.2.2".parse().unwrap(),
             2,
             IpProto::Tcp,
         );
-        packet_ok.ip_dscp_id = 46; // EF (Expedited Forwarding)
 
-        let mut packet_bad = mock_packet(
-            "1.1.1.1".parse().unwrap(),
-            1,
-            "2.2.2.2".parse().unwrap(),
-            2,
-            IpProto::Tcp,
+        let mut flow_stats_ok = mock_flow_stats(1);
+        flow_stats_ok.ip_dscp = 46; // EF
+
+        let mut flow_stats_bad = mock_flow_stats(1);
+        flow_stats_bad.ip_dscp = 0; // DF (Default)
+
+        assert!(filter.should_track_flow(&flow_key, &flow_stats_ok).unwrap());
+        assert!(
+            !filter
+                .should_track_flow(&flow_key, &flow_stats_bad)
+                .unwrap()
         );
-        packet_bad.ip_dscp_id = 0; // DF (Default)
-
-        assert!(filter.should_process(&packet_ok).unwrap());
-        assert!(!filter.should_process(&packet_bad).unwrap());
     }
 
     #[test]
@@ -786,70 +753,85 @@ mod tests {
             },
         )]));
 
-        let mut packet_ok = mock_packet(
+        let flow_key = mock_flow_key(
             "1.1.1.1".parse().unwrap(),
             1,
             "2.2.2.2".parse().unwrap(),
             2,
             IpProto::Tcp,
         );
-        packet_ok.src_mac_addr = [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff];
 
-        let mut packet_bad = mock_packet(
-            "1.1.1.1".parse().unwrap(),
-            1,
-            "2.2.2.2".parse().unwrap(),
-            2,
-            IpProto::Tcp,
+        let mut flow_stats_ok = mock_flow_stats(1);
+        flow_stats_ok.src_mac = [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff];
+
+        let mut flow_stats_bad = mock_flow_stats(1);
+        flow_stats_bad.src_mac = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
+
+        assert!(filter.should_track_flow(&flow_key, &flow_stats_ok).unwrap());
+        assert!(
+            !filter
+                .should_track_flow(&flow_key, &flow_stats_bad)
+                .unwrap()
         );
-        packet_bad.src_mac_addr = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
-
-        assert!(filter.should_process(&packet_ok).unwrap());
-        assert!(!filter.should_process(&packet_bad).unwrap());
     }
 
     #[test]
-    fn test_filter_icmp_type_name() {
+    fn test_filter_icmp_type() {
         let filter = build_filter(HashMap::from([(
             "flow".to_string(),
             FilteringOptions {
                 icmp_type_name: Some(FilteringPair {
-                    match_glob: "echo_request".to_string(),
+                    match_glob: "8".to_string(), // Echo Request
                     ..Default::default()
                 }),
                 ..Default::default()
             },
         )]));
 
-        let mut packet_ok = mock_packet(
+        let flow_key_ok = mock_flow_key(
             "1.1.1.1".parse().unwrap(),
             0,
             "2.2.2.2".parse().unwrap(),
             0,
             IpProto::Icmp,
         );
-        packet_ok.icmp_type_id = 8; // Echo Request
+        let mut flow_stats_ok = mock_flow_stats(1);
+        flow_stats_ok.icmp_type = 8; // Echo Request
 
-        let mut packet_bad = mock_packet(
+        let flow_key_bad = mock_flow_key(
             "1.1.1.1".parse().unwrap(),
             0,
             "2.2.2.2".parse().unwrap(),
             0,
             IpProto::Icmp,
         );
-        packet_bad.icmp_type_id = 3; // Destination Unreachable
+        let mut flow_stats_bad = mock_flow_stats(1);
+        flow_stats_bad.icmp_type = 3; // Destination Unreachable
 
-        let packet_irrelevant = mock_packet(
+        let flow_key_irrelevant = mock_flow_key(
             "1.1.1.1".parse().unwrap(),
             1,
             "2.2.2.2".parse().unwrap(),
             80,
             IpProto::Tcp,
         );
+        let flow_stats_irrelevant = mock_flow_stats(1);
 
-        assert!(filter.should_process(&packet_ok).unwrap());
-        assert!(!filter.should_process(&packet_bad).unwrap());
-        assert!(filter.should_process(&packet_irrelevant).unwrap());
+        assert!(
+            filter
+                .should_track_flow(&flow_key_ok, &flow_stats_ok)
+                .unwrap()
+        );
+        assert!(
+            !filter
+                .should_track_flow(&flow_key_bad, &flow_stats_bad)
+                .unwrap()
+        );
+        assert!(
+            filter
+                .should_track_flow(&flow_key_irrelevant, &flow_stats_irrelevant)
+                .unwrap()
+        );
     }
 
     #[test]
@@ -865,46 +847,46 @@ mod tests {
             },
         )]));
 
-        let mut packet_syn_ack = mock_packet(
+        let flow_key = mock_flow_key(
             "1.1.1.1".parse().unwrap(),
             1,
             "2.2.2.2".parse().unwrap(),
             2,
             IpProto::Tcp,
         );
-        packet_syn_ack.tcp_flags = TCP_FLAG_SYN | TCP_FLAG_ACK;
 
-        let mut packet_ack = mock_packet(
-            "1.1.1.1".parse().unwrap(),
-            1,
-            "2.2.2.2".parse().unwrap(),
-            2,
-            IpProto::Tcp,
-        );
-        packet_ack.tcp_flags = TCP_FLAG_ACK;
+        let mut flow_stats_syn_ack = mock_flow_stats(1);
+        flow_stats_syn_ack.tcp_flags = TCP_FLAG_SYN | TCP_FLAG_ACK;
 
-        let mut packet_rst = mock_packet(
-            "1.1.1.1".parse().unwrap(),
-            1,
-            "2.2.2.2".parse().unwrap(),
-            2,
-            IpProto::Tcp,
-        );
-        packet_rst.tcp_flags = TCP_FLAG_RST;
+        let mut flow_stats_ack = mock_flow_stats(1);
+        flow_stats_ack.tcp_flags = TCP_FLAG_ACK;
 
-        let mut packet_syn_rst = mock_packet(
-            "1.1.1.1".parse().unwrap(),
-            1,
-            "2.2.2.2".parse().unwrap(),
-            2,
-            IpProto::Tcp,
-        );
-        packet_syn_rst.tcp_flags = TCP_FLAG_SYN | TCP_FLAG_RST;
+        let mut flow_stats_rst = mock_flow_stats(1);
+        flow_stats_rst.tcp_flags = TCP_FLAG_RST;
 
-        assert!(filter.should_process(&packet_syn_ack).unwrap()); // Has ACK, no RST
-        assert!(filter.should_process(&packet_ack).unwrap()); // Has ACK, no RST
-        assert!(!filter.should_process(&packet_rst).unwrap()); // Has RST
-        assert!(!filter.should_process(&packet_syn_rst).unwrap()); // Has RST
+        let mut flow_stats_syn_rst = mock_flow_stats(1);
+        flow_stats_syn_rst.tcp_flags = TCP_FLAG_SYN | TCP_FLAG_RST;
+
+        assert!(
+            filter
+                .should_track_flow(&flow_key, &flow_stats_syn_ack)
+                .unwrap()
+        ); // Has ACK, no RST
+        assert!(
+            filter
+                .should_track_flow(&flow_key, &flow_stats_ack)
+                .unwrap()
+        ); // Has ACK, no RST
+        assert!(
+            !filter
+                .should_track_flow(&flow_key, &flow_stats_rst)
+                .unwrap()
+        ); // Has RST
+        assert!(
+            !filter
+                .should_track_flow(&flow_key, &flow_stats_syn_rst)
+                .unwrap()
+        ); // Has RST
     }
 
     #[test]
@@ -922,24 +904,33 @@ mod tests {
         )]));
 
         // Valid CIDR should still work
-        let packet_in_range = mock_packet(
+        let flow_key_in_range = mock_flow_key(
             "192.168.1.50".parse().unwrap(),
             1234,
             "8.8.8.8".parse().unwrap(),
             53,
             IpProto::Tcp,
         );
-        assert!(filter.should_process(&packet_in_range).unwrap());
+        let flow_stats = mock_flow_stats(1);
+        assert!(
+            filter
+                .should_track_flow(&flow_key_in_range, &flow_stats)
+                .unwrap()
+        );
 
         // invalid CIDR shouldn't cause panic or stop processing
-        let packet_out_range = mock_packet(
+        let flow_key_out_range = mock_flow_key(
             "172.16.0.1".parse().unwrap(),
             1234,
             "8.8.8.8".parse().unwrap(),
             53,
             IpProto::Tcp,
         );
-        assert!(!filter.should_process(&packet_out_range).unwrap());
+        assert!(
+            !filter
+                .should_track_flow(&flow_key_out_range, &flow_stats)
+                .unwrap()
+        );
     }
 
     #[test]
@@ -957,40 +948,46 @@ mod tests {
         )]));
 
         // Valid ports should still work
-        let packet_80 = mock_packet(
+        let flow_key_80 = mock_flow_key(
             "10.1.1.1".parse().unwrap(),
             1234,
             "10.2.2.2".parse().unwrap(),
             80,
             IpProto::Tcp,
         );
-        assert!(filter.should_process(&packet_80).unwrap());
+        let flow_stats = mock_flow_stats(1);
+        assert!(filter.should_track_flow(&flow_key_80, &flow_stats).unwrap());
 
         // Port in invalid range should not match
-        let packet_8500 = mock_packet(
+        let flow_key_8500 = mock_flow_key(
             "10.1.1.1".parse().unwrap(),
             1234,
             "10.2.2.2".parse().unwrap(),
             8500,
             IpProto::Tcp,
         );
-        assert!(!filter.should_process(&packet_8500).unwrap());
+        assert!(
+            !filter
+                .should_track_flow(&flow_key_8500, &flow_stats)
+                .unwrap()
+        );
     }
 
     #[test]
     fn test_empty_filter_configuration() {
-        // Test that empty/missing filter configuration allows all packets
+        // Test that empty/missing filter configuration allows all flows
         let filter = build_filter(HashMap::new());
 
-        let packet = mock_packet(
+        let flow_key = mock_flow_key(
             "1.2.3.4".parse().unwrap(),
             1234,
             "5.6.7.8".parse().unwrap(),
             80,
             IpProto::Tcp,
         );
+        let flow_stats = mock_flow_stats(1);
 
-        assert!(filter.should_process(&packet).unwrap());
+        assert!(filter.should_track_flow(&flow_key, &flow_stats).unwrap());
     }
 
     #[test]
@@ -1008,14 +1005,15 @@ mod tests {
         )]));
 
         // Valid numeric ports should still work
-        let packet = mock_packet(
+        let flow_key = mock_flow_key(
             "10.1.1.1".parse().unwrap(),
             1234,
             "10.2.2.2".parse().unwrap(),
             443,
             IpProto::Tcp,
         );
-        assert!(filter.should_process(&packet).unwrap());
+        let flow_stats = mock_flow_stats(1);
+        assert!(filter.should_track_flow(&flow_key, &flow_stats).unwrap());
     }
 
     #[test]
@@ -1033,17 +1031,31 @@ mod tests {
         )]));
 
         // Valid patterns should still work
-        let mut packet = mock_packet(
+        let flow_key_tcp = mock_flow_key(
             "10.1.1.1".parse().unwrap(),
             1234,
             "10.2.2.2".parse().unwrap(),
             80,
             IpProto::Tcp,
         );
+        let flow_stats = mock_flow_stats(1);
+        assert!(
+            filter
+                .should_track_flow(&flow_key_tcp, &flow_stats)
+                .unwrap()
+        );
 
-        assert!(filter.should_process(&packet).unwrap());
-
-        packet.proto = IpProto::Udp;
-        assert!(filter.should_process(&packet).unwrap());
+        let flow_key_udp = mock_flow_key(
+            "10.1.1.1".parse().unwrap(),
+            1234,
+            "10.2.2.2".parse().unwrap(),
+            80,
+            IpProto::Udp,
+        );
+        assert!(
+            filter
+                .should_track_flow(&flow_key_udp, &flow_stats)
+                .unwrap()
+        );
     }
 }

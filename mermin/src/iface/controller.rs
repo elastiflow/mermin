@@ -174,9 +174,9 @@ impl TcAttachTypeExt for TcAttachType {
 
     fn program_name(&self) -> &'static str {
         match self {
-            TcAttachType::Ingress => "mermin_ingress",
-            TcAttachType::Egress => "mermin_egress",
-            TcAttachType::Custom(_) => "mermin_custom",
+            TcAttachType::Ingress => "mermin_flow_ingress",
+            TcAttachType::Egress => "mermin_flow_egress",
+            TcAttachType::Custom(_) => "mermin_flow_custom",
         }
     }
 }
@@ -693,8 +693,8 @@ impl IfaceController {
         link_id: SchedClassifierLinkId,
     ) -> Result<(), MerminError> {
         let program_name = match direction {
-            "ingress" => "mermin_ingress",
-            "egress" => "mermin_egress",
+            "ingress" => "mermin_flow_ingress",
+            "egress" => "mermin_flow_egress",
             _ => unreachable!("to_static_direction ensures only ingress/egress"),
         };
 

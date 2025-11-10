@@ -55,6 +55,16 @@ pub mod ipv4 {
     /// The length of the IPv4 header.
     pub const IPV4_LEN: usize = 20;
 
+    pub const IPV4_DSCP_ECN_OFFSET: usize = 1;
+    pub const IPV4_TOTAL_LEN_OFFSET: usize = 2;
+    pub const IPV4_IDENTIFICATION_OFFSET: usize = 4;
+    pub const IPV4_FRAGMENT_OFFSET_OFFSET: usize = 6;
+    pub const IPV4_TTL_OFFSET: usize = 8;
+    pub const IPV4_PROTOCOL_OFFSET: usize = 9;
+    pub const IPV4_CHECKSUM_OFFSET: usize = 10;
+    pub const IPV4_SRC_ADDR_OFFSET: usize = 12;
+    pub const IPV4_DST_ADDR_OFFSET: usize = 16;
+
     pub type Vihl = u8;
     pub type DscpEcn = u8;
     pub type TotalLen = [u8; 2];
@@ -139,6 +149,12 @@ pub mod ipv6 {
     /// The length of the IPv6 header.
     pub const IPV6_LEN: usize = 40;
 
+    pub const IPV6_PAYLOAD_LEN_OFFSET: usize = 4;
+    pub const IPV6_NEXT_HDR_OFFSET: usize = 6;
+    pub const IPV6_HOP_LIMIT_OFFSET: usize = 7;
+    pub const IPV6_SRC_ADDR_OFFSET: usize = 8;
+    pub const IPV6_DST_ADDR_OFFSET: usize = 24;
+
     pub type Vcf = [u8; 4];
     pub type PayloadLen = [u8; 2];
     pub type NextHdr = IpProto;
@@ -192,7 +208,7 @@ pub mod ipv6 {
 /// Protocol which is encapsulated in the IPv4 packet.
 /// <https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml>
 #[repr(u8)]
-#[derive(Default, PartialEq, Eq, Debug, Copy, Clone)]
+#[derive(Default, PartialEq, Eq, Debug, Copy, Clone, Hash)]
 pub enum IpProto {
     /// IPv6 Hop-by-Hop Option
     HopOpt = 0,

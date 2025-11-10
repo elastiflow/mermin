@@ -35,7 +35,7 @@ Notes on the example deployment:
   helm upgrade -i --wait --timeout 15m \
     -f examples/local_otel/values_mermin.yaml \
     --set-file config.content=examples/local_otel/config.hcl \
-    mermin mermin/mermin
+    mermin charts/mermin
   ```
 
 - Optionally install `metrics-server` to get metrics if it has not been installed yet
@@ -63,8 +63,8 @@ In order to render K8s manifests you may use following commands
 
   ```sh
   rm -rf helm_rendered; helm template \
-    -f examples/local_otel/values.yaml \
+    -f examples/local_otel/values_mermin.yaml \
     --set-file config.content=examples/local_otel/config.hcl \
     --output-dir helm_rendered \
-    mermin mermin/mermin --devel
+    mermin charts/mermin --devel
   ```

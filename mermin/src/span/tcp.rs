@@ -1,4 +1,4 @@
-use mermin_common::PacketMeta;
+use mermin_common::FlowStats;
 use network_types::tcp::{
     TCP_FLAG_ACK, TCP_FLAG_CWR, TCP_FLAG_ECE, TCP_FLAG_FIN, TCP_FLAG_PSH, TCP_FLAG_RST,
     TCP_FLAG_SYN, TCP_FLAG_URG,
@@ -55,20 +55,19 @@ pub struct TcpFlags {
     flags: [bool; 8],
 }
 
-#[allow(dead_code)]
 impl TcpFlags {
     /// Create TcpFlags from a packet
-    pub fn from_packet(packet: &PacketMeta) -> Self {
+    pub fn from_stats(stats: &FlowStats) -> Self {
         Self {
             flags: [
-                packet.fin(),
-                packet.syn(),
-                packet.rst(),
-                packet.psh(),
-                packet.ack(),
-                packet.urg(),
-                packet.ece(),
-                packet.cwr(),
+                stats.fin(),
+                stats.syn(),
+                stats.rst(),
+                stats.psh(),
+                stats.ack(),
+                stats.urg(),
+                stats.ece(),
+                stats.cwr(),
             ],
         }
     }
@@ -127,6 +126,7 @@ impl TcpFlags {
 ///
 /// States match OpenTelemetry semantic conventions:
 /// https://opentelemetry.io/docs/specs/semconv/attributes/network/
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionState {
     /// No connection state at all
@@ -173,9 +173,10 @@ impl ConnectionState {
     ///
     /// This method infers the initial connection state from TCP flags according to RFC 9293.
     /// Used when we first observe a connection (no prior state).
-    pub fn from_packet(packet: &PacketMeta) -> Option<Self> {
+    #[allow(dead_code)]
+    pub fn from_stats(stats: &FlowStats) -> Option<Self> {
         // Check flag combinations in order of specificity
-        match (packet.syn(), packet.ack(), packet.fin(), packet.rst()) {
+        match (stats.syn(), stats.ack(), stats.fin(), stats.rst()) {
             // RST flag indicates connection closed/reset
             (_, _, _, true) => Some(ConnectionState::Closed),
 
@@ -208,11 +209,12 @@ impl ConnectionState {
     ///
     /// Note: As a passive observer, we may miss some packets, so this is best-effort.
     /// We track both forward and reverse direction packets in the same flow.
-    pub fn next_state(current: Self, packet: &PacketMeta, is_forward: bool) -> Self {
-        let syn = packet.syn();
-        let ack = packet.ack();
-        let fin = packet.fin();
-        let rst = packet.rst();
+    #[allow(dead_code)]
+    pub fn next_state(current: Self, stats: &FlowStats, is_forward: bool) -> Self {
+        let syn = stats.syn();
+        let ack = stats.ack();
+        let fin = stats.fin();
+        let rst = stats.rst();
 
         // RST can transition from any state to CLOSED (RFC 9293 Note 3)
         if rst {
@@ -350,38 +352,68 @@ impl ConnectionState {
 
 #[cfg(test)]
 mod tests {
-    use network_types::ip::IpProto;
+    use mermin_common::IpVersion;
+    use network_types::{eth::EtherType, ip::IpProto};
 
     use super::*;
 
     #[test]
     fn test_tcp_flags_from_packet() {
-        let mut packet = PacketMeta::default();
-        packet.proto = IpProto::Tcp;
+        // Helper to create FlowStats with specific TCP flags
+        fn create_stats_with_flags(tcp_flags: u8) -> FlowStats {
+            use mermin_common::IpVersion;
+            use network_types::{eth::EtherType, ip::IpProto};
+
+            FlowStats {
+                direction: mermin_common::Direction::Egress,
+                ether_type: EtherType::Ipv4,
+                ip_version: IpVersion::V4,
+                protocol: IpProto::Tcp,
+                src_ip: [0; 16],
+                dst_ip: [0; 16],
+                src_port: 0,
+                dst_port: 0,
+                packets: 0,
+                bytes: 0,
+                reverse_packets: 0,
+                reverse_bytes: 0,
+                src_mac: [0; 6],
+                ifindex: 0,
+                ip_flow_label: 0,
+                first_seen_ns: 0,
+                last_seen_ns: 0,
+                ip_dscp: 0,
+                ip_ecn: 0,
+                ip_ttl: 0,
+                tcp_flags,
+                icmp_type: 0,
+                icmp_code: 0,
+            }
+        }
 
         // Test no flags
-        packet.tcp_flags = 0;
-        let flags = TcpFlags::from_packet(&packet);
+        let stats = create_stats_with_flags(0);
+        let flags = TcpFlags::from_stats(&stats);
         assert_eq!(flags.active_flags(), Vec::<TcpFlag>::new());
 
         // Test SYN flag only
-        packet.tcp_flags = PacketMeta::TCP_FLAG_SYN;
-        let flags = TcpFlags::from_packet(&packet);
+        let stats = create_stats_with_flags(TCP_FLAG_SYN);
+        let flags = TcpFlags::from_stats(&stats);
         assert_eq!(flags.active_flags(), vec![TcpFlag::Syn]);
 
         // Test SYN+ACK
-        packet.tcp_flags = PacketMeta::TCP_FLAG_SYN | PacketMeta::TCP_FLAG_ACK;
-        let flags = TcpFlags::from_packet(&packet);
+        let stats = create_stats_with_flags(TCP_FLAG_SYN | TCP_FLAG_ACK);
+        let flags = TcpFlags::from_stats(&stats);
         assert_eq!(flags.active_flags(), vec![TcpFlag::Syn, TcpFlag::Ack]);
 
         // Test FIN+ACK
-        packet.tcp_flags = PacketMeta::TCP_FLAG_FIN | PacketMeta::TCP_FLAG_ACK;
-        let flags = TcpFlags::from_packet(&packet);
+        let stats = create_stats_with_flags(TCP_FLAG_FIN | TCP_FLAG_ACK);
+        let flags = TcpFlags::from_stats(&stats);
         assert_eq!(flags.active_flags(), vec![TcpFlag::Fin, TcpFlag::Ack]);
 
         // Test all flags
-        packet.tcp_flags = 0xFF;
-        let flags = TcpFlags::from_packet(&packet);
+        let stats = create_stats_with_flags(0xFF);
+        let flags = TcpFlags::from_stats(&stats);
         assert_eq!(
             flags.active_flags(),
             vec![
@@ -442,77 +474,132 @@ mod tests {
         );
 
         // Test that flags_from_bits and from_packet produce the same results
-        let mut packet = PacketMeta::default();
-        packet.tcp_flags = 0x12; // SYN+ACK
-        let from_packet = TcpFlags::from_packet(&packet).active_flags();
+        use mermin_common::IpVersion;
+        use network_types::eth::EtherType;
+
+        let stats = FlowStats {
+            direction: mermin_common::Direction::Egress,
+            ether_type: EtherType::Ipv4,
+            ip_version: IpVersion::V4,
+            protocol: IpProto::Tcp,
+            src_ip: [0; 16],
+            dst_ip: [0; 16],
+            src_port: 0,
+            dst_port: 0,
+            packets: 0,
+            bytes: 0,
+            reverse_packets: 0,
+            reverse_bytes: 0,
+            src_mac: [0; 6],
+            ifindex: 0,
+            ip_flow_label: 0,
+            first_seen_ns: 0,
+            last_seen_ns: 0,
+            ip_dscp: 0,
+            ip_ecn: 0,
+            ip_ttl: 0,
+            tcp_flags: 0x12, // SYN+ACK
+            icmp_type: 0,
+            icmp_code: 0,
+        };
+        let from_packet = TcpFlags::from_stats(&stats).active_flags();
         let from_bits = TcpFlags::flags_from_bits(0x12);
         assert_eq!(from_packet, from_bits);
     }
 
     #[test]
     fn test_connection_state_from_packet() {
-        let mut packet = PacketMeta::default();
-        packet.proto = IpProto::Tcp;
+        // Helper to create FlowStats with specific TCP flags
+        fn create_stats_with_flags(tcp_flags: u8) -> FlowStats {
+            use mermin_common::IpVersion;
+            use network_types::eth::EtherType;
+
+            FlowStats {
+                direction: mermin_common::Direction::Egress,
+                ether_type: EtherType::Ipv4,
+                ip_version: IpVersion::V4,
+                protocol: IpProto::Tcp,
+                src_ip: [0; 16],
+                dst_ip: [0; 16],
+                src_port: 0,
+                dst_port: 0,
+                packets: 0,
+                bytes: 0,
+                reverse_packets: 0,
+                reverse_bytes: 0,
+                src_mac: [0; 6],
+                ifindex: 0,
+                ip_flow_label: 0,
+                first_seen_ns: 0,
+                last_seen_ns: 0,
+                ip_dscp: 0,
+                ip_ecn: 0,
+                ip_ttl: 0,
+                tcp_flags,
+                icmp_type: 0,
+                icmp_code: 0,
+            }
+        }
 
         // Test SYN only - connection initiation
-        packet.tcp_flags = PacketMeta::TCP_FLAG_SYN;
+        let stats = create_stats_with_flags(TCP_FLAG_SYN);
         assert_eq!(
-            ConnectionState::from_packet(&packet),
+            ConnectionState::from_stats(&stats),
             Some(ConnectionState::SynSent)
         );
 
         // Test SYN+ACK - connection response
-        packet.tcp_flags = PacketMeta::TCP_FLAG_SYN | PacketMeta::TCP_FLAG_ACK;
+        let stats = create_stats_with_flags(TCP_FLAG_SYN | TCP_FLAG_ACK);
         assert_eq!(
-            ConnectionState::from_packet(&packet),
+            ConnectionState::from_stats(&stats),
             Some(ConnectionState::SynReceived)
         );
 
         // Test ACK only - established connection
-        packet.tcp_flags = PacketMeta::TCP_FLAG_ACK;
+        let stats = create_stats_with_flags(TCP_FLAG_ACK);
         assert_eq!(
-            ConnectionState::from_packet(&packet),
+            ConnectionState::from_stats(&stats),
             Some(ConnectionState::Established)
         );
 
         // Test PSH+ACK - established connection with data
-        packet.tcp_flags = PacketMeta::TCP_FLAG_PSH | PacketMeta::TCP_FLAG_ACK;
+        let stats = create_stats_with_flags(TCP_FLAG_PSH | TCP_FLAG_ACK);
         assert_eq!(
-            ConnectionState::from_packet(&packet),
+            ConnectionState::from_stats(&stats),
             Some(ConnectionState::Established)
         );
 
         // Test FIN only - connection termination
-        packet.tcp_flags = PacketMeta::TCP_FLAG_FIN;
+        let stats = create_stats_with_flags(TCP_FLAG_FIN);
         assert_eq!(
-            ConnectionState::from_packet(&packet),
+            ConnectionState::from_stats(&stats),
             Some(ConnectionState::FinWait1)
         );
 
         // Test FIN+ACK - graceful close
-        packet.tcp_flags = PacketMeta::TCP_FLAG_FIN | PacketMeta::TCP_FLAG_ACK;
+        let stats = create_stats_with_flags(TCP_FLAG_FIN | TCP_FLAG_ACK);
         assert_eq!(
-            ConnectionState::from_packet(&packet),
+            ConnectionState::from_stats(&stats),
             Some(ConnectionState::FinWait1)
         );
 
         // Test RST - connection reset
-        packet.tcp_flags = PacketMeta::TCP_FLAG_RST;
+        let stats = create_stats_with_flags(TCP_FLAG_RST);
         assert_eq!(
-            ConnectionState::from_packet(&packet),
+            ConnectionState::from_stats(&stats),
             Some(ConnectionState::Closed)
         );
 
         // Test RST+ACK - connection reset with ack
-        packet.tcp_flags = PacketMeta::TCP_FLAG_RST | PacketMeta::TCP_FLAG_ACK;
+        let stats = create_stats_with_flags(TCP_FLAG_RST | TCP_FLAG_ACK);
         assert_eq!(
-            ConnectionState::from_packet(&packet),
+            ConnectionState::from_stats(&stats),
             Some(ConnectionState::Closed)
         );
 
         // Test no flags
-        packet.tcp_flags = 0;
-        assert_eq!(ConnectionState::from_packet(&packet), None);
+        let stats = create_stats_with_flags(0);
+        assert_eq!(ConnectionState::from_stats(&stats), None);
 
         // Test as_str() conversion
         assert_eq!(ConnectionState::SynSent.as_str(), "syn_sent");
@@ -528,23 +615,45 @@ mod tests {
     }
 
     // Helper function to create a packet with specific flags
-    fn packet_with_flags(syn: bool, ack: bool, fin: bool, rst: bool) -> PacketMeta {
-        let mut packet = PacketMeta::default();
-        packet.proto = IpProto::Tcp;
-        packet.tcp_flags = 0;
+    fn stats_with_flags(syn: bool, ack: bool, fin: bool, rst: bool) -> FlowStats {
+        let mut stats = FlowStats {
+            direction: mermin_common::Direction::Egress,
+            ether_type: EtherType::Ipv4,
+            ip_version: IpVersion::V4,
+            protocol: IpProto::Tcp,
+            src_ip: [0; 16],
+            dst_ip: [0; 16],
+            src_port: 0,
+            dst_port: 0,
+            packets: 0,
+            bytes: 0,
+            reverse_packets: 0,
+            reverse_bytes: 0,
+            src_mac: [0; 6],
+            ifindex: 0,
+            ip_flow_label: 0,
+            first_seen_ns: 0,
+            last_seen_ns: 0,
+            ip_dscp: 0,
+            ip_ecn: 0,
+            ip_ttl: 0,
+            tcp_flags: 0,
+            icmp_type: 0,
+            icmp_code: 0,
+        };
         if syn {
-            packet.tcp_flags |= PacketMeta::TCP_FLAG_SYN;
+            stats.tcp_flags |= TCP_FLAG_SYN;
         }
         if ack {
-            packet.tcp_flags |= PacketMeta::TCP_FLAG_ACK;
+            stats.tcp_flags |= TCP_FLAG_ACK;
         }
         if fin {
-            packet.tcp_flags |= PacketMeta::TCP_FLAG_FIN;
+            stats.tcp_flags |= TCP_FLAG_FIN;
         }
         if rst {
-            packet.tcp_flags |= PacketMeta::TCP_FLAG_RST;
+            stats.tcp_flags |= TCP_FLAG_RST;
         }
-        packet
+        stats
     }
 
     #[test]
@@ -552,18 +661,18 @@ mod tests {
         // Test normal TCP 3-way handshake: SYN → SYN-ACK → ACK
 
         // Client sends SYN (forward direction)
-        let syn_packet = packet_with_flags(true, false, false, false);
-        let state = ConnectionState::from_packet(&syn_packet).unwrap();
+        let syn_stats = stats_with_flags(true, false, false, false);
+        let state = ConnectionState::from_stats(&syn_stats).unwrap();
         assert_eq!(state, ConnectionState::SynSent);
 
         // Server responds with SYN+ACK (reverse direction)
-        let syn_ack_packet = packet_with_flags(true, true, false, false);
-        let state = ConnectionState::next_state(state, &syn_ack_packet, false);
+        let syn_ack_stats = stats_with_flags(true, true, false, false);
+        let state = ConnectionState::next_state(state, &syn_ack_stats, false);
         assert_eq!(state, ConnectionState::SynReceived);
 
         // Client sends final ACK (forward direction)
-        let ack_packet = packet_with_flags(false, true, false, false);
-        let state = ConnectionState::next_state(state, &ack_packet, true);
+        let ack_stats = stats_with_flags(false, true, false, false);
+        let state = ConnectionState::next_state(state, &ack_stats, true);
         assert_eq!(state, ConnectionState::Established);
     }
 
@@ -575,13 +684,13 @@ mod tests {
         let mut state = ConnectionState::Established;
 
         // Client sends FIN (forward direction)
-        let fin_packet = packet_with_flags(false, false, true, false);
-        state = ConnectionState::next_state(state, &fin_packet, true);
+        let fin_stats = stats_with_flags(false, false, true, false);
+        state = ConnectionState::next_state(state, &fin_stats, true);
         assert_eq!(state, ConnectionState::FinWait1);
 
         // Server sends FIN+ACK (reverse direction)
-        let fin_ack_packet = packet_with_flags(false, true, true, false);
-        state = ConnectionState::next_state(state, &fin_ack_packet, false);
+        let fin_ack_stats = stats_with_flags(false, true, true, false);
+        state = ConnectionState::next_state(state, &fin_ack_stats, false);
         assert_eq!(state, ConnectionState::TimeWait);
     }
 
@@ -592,18 +701,18 @@ mod tests {
         let mut state = ConnectionState::Established;
 
         // Client sends FIN (forward direction)
-        let fin_packet = packet_with_flags(false, false, true, false);
-        state = ConnectionState::next_state(state, &fin_packet, true);
+        let fin_stats = stats_with_flags(false, false, true, false);
+        state = ConnectionState::next_state(state, &fin_stats, true);
         assert_eq!(state, ConnectionState::FinWait1);
 
         // Server sends ACK (reverse direction)
-        let ack_packet = packet_with_flags(false, true, false, false);
-        state = ConnectionState::next_state(state, &ack_packet, false);
+        let ack_stats = stats_with_flags(false, true, false, false);
+        state = ConnectionState::next_state(state, &ack_stats, false);
         assert_eq!(state, ConnectionState::FinWait2);
 
         // Server sends FIN (reverse direction)
-        let fin_packet = packet_with_flags(false, false, true, false);
-        state = ConnectionState::next_state(state, &fin_packet, false);
+        let fin_stats = stats_with_flags(false, false, true, false);
+        state = ConnectionState::next_state(state, &fin_stats, false);
         assert_eq!(state, ConnectionState::TimeWait);
     }
 
@@ -614,18 +723,18 @@ mod tests {
         let mut state = ConnectionState::Established;
 
         // Client sends FIN (forward direction)
-        let fin_packet = packet_with_flags(false, false, true, false);
-        state = ConnectionState::next_state(state, &fin_packet, true);
+        let fin_stats = stats_with_flags(false, false, true, false);
+        state = ConnectionState::next_state(state, &fin_stats, true);
         assert_eq!(state, ConnectionState::FinWait1);
 
         // Server also sends FIN before ACKing client's FIN (reverse direction)
-        let fin_packet = packet_with_flags(false, false, true, false);
-        state = ConnectionState::next_state(state, &fin_packet, false);
+        let fin_stats = stats_with_flags(false, false, true, false);
+        state = ConnectionState::next_state(state, &fin_stats, false);
         assert_eq!(state, ConnectionState::Closing);
 
         // Server sends ACK (reverse direction)
-        let ack_packet = packet_with_flags(false, true, false, false);
-        state = ConnectionState::next_state(state, &ack_packet, false);
+        let ack_stats = stats_with_flags(false, true, false, false);
+        state = ConnectionState::next_state(state, &ack_stats, false);
         assert_eq!(state, ConnectionState::TimeWait);
     }
 
@@ -636,18 +745,18 @@ mod tests {
         let mut state = ConnectionState::Established;
 
         // Server sends FIN (reverse direction)
-        let fin_packet = packet_with_flags(false, false, true, false);
-        state = ConnectionState::next_state(state, &fin_packet, false);
+        let fin_stats = stats_with_flags(false, false, true, false);
+        state = ConnectionState::next_state(state, &fin_stats, false);
         assert_eq!(state, ConnectionState::CloseWait);
 
         // Client sends FIN (forward direction)
-        let fin_packet = packet_with_flags(false, false, true, false);
-        state = ConnectionState::next_state(state, &fin_packet, true);
+        let fin_stats = stats_with_flags(false, false, true, false);
+        state = ConnectionState::next_state(state, &fin_stats, true);
         assert_eq!(state, ConnectionState::LastAck);
 
         // Server sends ACK (reverse direction)
-        let ack_packet = packet_with_flags(false, true, false, false);
-        state = ConnectionState::next_state(state, &ack_packet, false);
+        let ack_stats = stats_with_flags(false, true, false, false);
+        state = ConnectionState::next_state(state, &ack_stats, false);
         assert_eq!(state, ConnectionState::Closed);
     }
 
@@ -655,7 +764,7 @@ mod tests {
     fn test_state_transition_rst_from_any_state() {
         // Test that RST transitions to CLOSED from any state
 
-        let rst_packet = packet_with_flags(false, false, false, true);
+        let rst_stats = stats_with_flags(false, false, false, true);
 
         let states = [
             ConnectionState::SynSent,
@@ -670,7 +779,7 @@ mod tests {
         ];
 
         for state in states {
-            let new_state = ConnectionState::next_state(state, &rst_packet, true);
+            let new_state = ConnectionState::next_state(state, &rst_stats, true);
             assert_eq!(
                 new_state,
                 ConnectionState::Closed,
@@ -687,13 +796,13 @@ mod tests {
         let mut state = ConnectionState::SynSent;
 
         // Receive SYN from the other side (both sent SYN)
-        let syn_packet = packet_with_flags(true, false, false, false);
-        state = ConnectionState::next_state(state, &syn_packet, false);
+        let syn_stats = stats_with_flags(true, false, false, false);
+        state = ConnectionState::next_state(state, &syn_stats, false);
         assert_eq!(state, ConnectionState::SynReceived);
 
         // Both sides ACK each other's SYN
-        let ack_packet = packet_with_flags(false, true, false, false);
-        state = ConnectionState::next_state(state, &ack_packet, true);
+        let ack_stats = stats_with_flags(false, true, false, false);
+        state = ConnectionState::next_state(state, &ack_stats, true);
         assert_eq!(state, ConnectionState::Established);
     }
 
@@ -704,14 +813,14 @@ mod tests {
         let state = ConnectionState::Established;
 
         // Data packet with ACK (forward)
-        let data_packet = packet_with_flags(false, true, false, false);
-        let new_state = ConnectionState::next_state(state, &data_packet, true);
+        let data_stats = stats_with_flags(false, true, false, false);
+        let new_state = ConnectionState::next_state(state, &data_stats, true);
         assert_eq!(new_state, ConnectionState::Established);
 
         // Data packet with PSH+ACK (reverse)
-        let mut psh_ack_packet = packet_with_flags(false, true, false, false);
-        psh_ack_packet.tcp_flags |= PacketMeta::TCP_FLAG_PSH;
-        let new_state = ConnectionState::next_state(new_state, &psh_ack_packet, false);
+        let mut psh_ack_stats = stats_with_flags(false, true, false, false);
+        psh_ack_stats.tcp_flags |= TCP_FLAG_PSH;
+        let new_state = ConnectionState::next_state(new_state, &psh_ack_stats, false);
         assert_eq!(new_state, ConnectionState::Established);
     }
 
@@ -721,20 +830,20 @@ mod tests {
 
         // FIN-WAIT-1 receiving data packets stays in FIN-WAIT-1
         let state = ConnectionState::FinWait1;
-        let data_packet = packet_with_flags(false, false, false, false);
-        let new_state = ConnectionState::next_state(state, &data_packet, true);
+        let data_stats = stats_with_flags(false, false, false, false);
+        let new_state = ConnectionState::next_state(state, &data_stats, true);
         assert_eq!(new_state, ConnectionState::FinWait1);
 
         // FIN-WAIT-2 receiving data packets stays in FIN-WAIT-2
         let state = ConnectionState::FinWait2;
-        let data_packet = packet_with_flags(false, true, false, false);
-        let new_state = ConnectionState::next_state(state, &data_packet, true);
+        let data_stats = stats_with_flags(false, true, false, false);
+        let new_state = ConnectionState::next_state(state, &data_stats, true);
         assert_eq!(new_state, ConnectionState::FinWait2);
 
         // CLOSE-WAIT stays until local application closes (forward FIN)
         let state = ConnectionState::CloseWait;
-        let ack_packet = packet_with_flags(false, true, false, false);
-        let new_state = ConnectionState::next_state(state, &ack_packet, false);
+        let ack_stats = stats_with_flags(false, true, false, false);
+        let new_state = ConnectionState::next_state(state, &ack_stats, false);
         assert_eq!(new_state, ConnectionState::CloseWait);
     }
 
@@ -745,12 +854,12 @@ mod tests {
         let state = ConnectionState::TimeWait;
 
         // Any packet should keep it in TIME-WAIT
-        let ack_packet = packet_with_flags(false, true, false, false);
-        let new_state = ConnectionState::next_state(state, &ack_packet, true);
+        let ack_stats = stats_with_flags(false, true, false, false);
+        let new_state = ConnectionState::next_state(state, &ack_stats, true);
         assert_eq!(new_state, ConnectionState::TimeWait);
 
-        let data_packet = packet_with_flags(false, false, false, false);
-        let new_state = ConnectionState::next_state(state, &data_packet, false);
+        let data_stats = stats_with_flags(false, false, false, false);
+        let new_state = ConnectionState::next_state(state, &data_stats, false);
         assert_eq!(new_state, ConnectionState::TimeWait);
     }
 
@@ -760,8 +869,8 @@ mod tests {
 
         let state = ConnectionState::Closed;
 
-        let syn_packet = packet_with_flags(true, false, false, false);
-        let new_state = ConnectionState::next_state(state, &syn_packet, true);
+        let syn_stats = stats_with_flags(true, false, false, false);
+        let new_state = ConnectionState::next_state(state, &syn_stats, true);
         assert_eq!(new_state, ConnectionState::SynSent);
     }
 }
