@@ -88,7 +88,6 @@
 use aya_ebpf::{
     bindings::TC_ACT_UNSPEC,
     helpers::bpf_ktime_get_boot_ns,
-    helpers::bpf_skb_load_bytes,
     macros::{classifier, map},
     maps::{HashMap, PerCpuArray, RingBuf},
     programs::TcContext,
@@ -272,33 +271,15 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             flow_event.parsed_offset = parsed_offset as u16;
 
             // Copy unparsed data (if any) for userspace deep parsing.
-            // Only copy what's actually available, up to our buffer size (192 bytes).
-            // Verifier needs very explicit step-by-step bounds with separate checks.
-            if ctx.len() > parsed_offset as u32 {
-                let mut len = ctx.len() - parsed_offset as u32;
-                // Mask to bounded unsigned range
-                len &= 0xFF;
-                // Explicit clamp to range [1, 192] for verifier
-                if len < 1 {
-                    len = 1;
-                }
-                if len > 192 {
-                    len = 192;
-                }
-                // Separate check for non-zero - verifier tracks this better
-                if len >= 1 && len <= 192 {
-                    let ret = unsafe {
-                        bpf_skb_load_bytes(
-                            ctx.skb.skb as *const _,
-                            parsed_offset as u32,
-                            flow_event.packet_data.as_mut_ptr() as *mut _,
-                            len,
-                        )
-                    };
-                    if ret != 0 {
-                        event.discard(0);
-                        return Err(Error::InternalError);
-                    }
+            // Load bytes one at a time until we hit the end of the packet or reach 192 bytes.
+            // The verifier can track this bounded loop easily.
+            for i in 0..192 {
+                let offset = parsed_offset + i;
+                if let Ok(byte) = ctx.load::<u8>(offset) {
+                    flow_event.packet_data[i as usize] = byte;
+                } else {
+                    // Reached end of packet or error - stop reading
+                    break;
                 }
             }
 

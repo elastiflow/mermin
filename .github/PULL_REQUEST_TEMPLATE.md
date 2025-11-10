@@ -10,6 +10,7 @@ Fixes #(issue)
 - [ ] New feature
 - [ ] Breaking change
 - [ ] Documentation
+- [ ] Refactor
 - [ ] Other:
 
 ## Testing
