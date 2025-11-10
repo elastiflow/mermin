@@ -1,6 +1,6 @@
-# Mermin with NetObserv Flow and OpenSearch
+# Mermin with NetObserv Flow and OpenSearch in GKE with Gateway
 
-- [Mermin with NetObserv Flow and OpenSearch](#mermin-with-netobserv-flow-and-opensearch)
+- [Mermin with NetObserv Flow and OpenSearch in GKE with Gateway](#mermin-with-netobserv-flow-and-opensearch-in-gke-with-gateway)
   - [Overview](#overview)
   - [Install](#install)
   - [Access](#access)
