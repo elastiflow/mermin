@@ -276,7 +276,7 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             for i in 0..192 {
                 let offset = parsed_offset + i;
                 if let Ok(byte) = ctx.load::<u8>(offset) {
-                    flow_event.packet_data[i as usize] = byte;
+                    flow_event.packet_data[i] = byte;
                 } else {
                     break;
                 }
