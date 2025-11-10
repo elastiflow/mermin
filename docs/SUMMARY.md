@@ -48,4 +48,4 @@
 * [Performance Issues](troubleshooting/performance.md)
 * [Kubernetes Metadata Issues](troubleshooting/kubernetes-metadata.md)
 * [Export Issues](troubleshooting/export-issues.md)
-* [Interface Visibility and Traffic Decapsulation](architecture/interface-visibility.md)
+* [Interface Visibility and Traffic Decapsulation](troubleshooting/interface-visibility-and-traffic-decapsulation.md)
