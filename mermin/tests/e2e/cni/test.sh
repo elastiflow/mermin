@@ -61,7 +61,7 @@ verify_agent_logs() {
   }
 
   # Give pinger enough time to generate traffic and for spans to be recorded
-  sleep 10
+  sleep 20
 
   echo "Verifying mermin agent logs are enriching data..."
   export NAMESPACE RELEASE_NAME
@@ -80,7 +80,8 @@ verify_agent_logs() {
     (
       local counter=0
       while [ $counter -lt 120 ]; do
-        if kubectl logs -n "${NAMESPACE}" "$pod" --tail=500 2>/dev/null | grep --color=never -E '(source\.k8s\.pod\.name.*pinger|destination\.k8s\.pod\.name.*ping-receiver|source\.k8s\.pod\.name.*String\(Owned\("pinger"\)|destination\.k8s\.pod\.name.*String\(Owned\("ping-receiver"\))' >/dev/null; then
+        # examples: https://regex101.com/r/rYbX7m/1
+        if kubectl logs -n "${NAMESPACE}" "$pod" --tail=1000 2>/dev/null | grep --color=never -E '(source\.k8s\.pod\.name.*String\(Owned\("pinger"\)|destination\.k8s\.pod\.name.*String\(Owned\("ping-receiver"\))' >/dev/null; then
           exit 0
         fi
         counter=$((counter + 1))
