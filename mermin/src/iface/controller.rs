@@ -139,7 +139,7 @@ use aya::{
     Ebpf,
     programs::{
         LinkOrder, SchedClassifier, TcAttachType,
-        tc::{self, NlOptions, SchedClassifierLinkId, TcAttachOptions},
+        tc::{self, NlOptions, SchedClassifierLinkId, TcAttachOptions, qdisc_detach_program},
     },
 };
 use dashmap::DashMap;
@@ -337,6 +337,16 @@ impl IfaceController {
         );
 
         self.build_iface_map()?;
+
+        // Clean up any orphaned TC programs from previous instances before attaching new ones.
+        // This prevents the issue where killed pods leave TC programs attached that intercept traffic.
+        if let Err(e) = self.cleanup_orphaned_programs().await {
+            warn!(
+                event.name = "interface_controller.cleanup_failed",
+                error = %e,
+                "failed to clean up orphaned TC programs, proceeding with attachment anyway"
+            );
+        }
 
         let programs = [TcAttachType::Ingress, TcAttachType::Egress];
 
@@ -722,6 +732,109 @@ impl IfaceController {
         })?;
 
         Ok(())
+    }
+
+    /// Clean up orphaned TC programs from all active interfaces before attachment.
+    ///
+    /// This prevents the issue where killed pods leave TC programs attached,
+    /// which then intercept traffic and prevent new programs from functioning.
+    ///
+    /// Must be called in the host network namespace.
+    async fn cleanup_orphaned_programs(&mut self) -> Result<(), MerminError> {
+        info!(
+            event.name = "interface_controller.cleanup_started",
+            iface_count = self.active_ifaces.len(),
+            "cleaning up orphaned TC programs before attachment"
+        );
+
+        let mut total_removed = 0u32;
+        let ifaces: Vec<String> = self.active_ifaces.iter().cloned().collect();
+
+        for iface in &ifaces {
+            let iface_owned = iface.clone();
+            let removed = self.netns_switch.in_host_namespace(None, || {
+                Self::cleanup_orphaned_programs_on_iface(&iface_owned)
+            })?;
+
+            if removed > 0 {
+                info!(
+                    event.name = "interface_controller.cleanup_completed",
+                    network.interface.name = %iface,
+                    programs_removed = removed,
+                    "cleaned up orphaned TC programs from interface"
+                );
+                total_removed += removed;
+            }
+        }
+
+        if total_removed > 0 {
+            info!(
+                event.name = "interface_controller.cleanup_summary",
+                total_programs_removed = total_removed,
+                interfaces_cleaned = ifaces.len(),
+                "orphaned TC program cleanup completed"
+            );
+        } else {
+            debug!(
+                event.name = "interface_controller.cleanup_none_found",
+                "no orphaned TC programs found"
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Remove orphaned TC programs from an interface.
+    ///
+    /// Uses Aya's native netlink functions to find and detach TC programs by name.
+    /// Returns the count of removed programs.
+    ///
+    /// This method must run in the host network namespace and is best-effort:
+    /// if removal fails, it logs a warning but doesn't fail the entire operation.
+    fn cleanup_orphaned_programs_on_iface(iface: &str) -> Result<u32, MerminError> {
+        let mut removed_count = 0u32;
+
+        // Program names to search for
+        let program_names = [
+            ("mermin_flow_ingress", TcAttachType::Ingress),
+            ("mermin_flow_egress", TcAttachType::Egress),
+        ];
+
+        for (program_name, attach_type) in &program_names {
+            match qdisc_detach_program(iface, *attach_type, program_name) {
+                Ok(()) => {
+                    removed_count += 1;
+                    debug!(
+                        event.name = "interface_controller.orphaned_program_removed",
+                        network.interface.name = %iface,
+                        attach_type = ?attach_type,
+                        program = %program_name,
+                        "removed orphaned TC program"
+                    );
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    trace!(
+                        event.name = "interface_controller.no_orphaned_program",
+                        network.interface.name = %iface,
+                        attach_type = ?attach_type,
+                        program = %program_name,
+                        "no orphaned program found (expected)"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        event.name = "interface_controller.program_detach_failed",
+                        network.interface.name = %iface,
+                        attach_type = ?attach_type,
+                        program = %program_name,
+                        error = %e,
+                        "failed to detach program (may have been removed already)"
+                    );
+                }
+            }
+        }
+
+        Ok(removed_count)
     }
 
     /// Start reconciliation loop via netlink multicast (RTNLGRP_LINK).
