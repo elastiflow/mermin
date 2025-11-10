@@ -46,6 +46,7 @@ This installation assumes that no additional DNS controllers are running in the 
     helm upgrade -i --wait --timeout 15m -n elastiflow \
       -f examples/netobserv_os_simple_gke_gw/values.yaml \
       --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
+      --devel \
       mermin mermin/mermin-netobserv-os-stack
     ```
 
@@ -62,6 +63,7 @@ This installation assumes that no additional DNS controllers are running in the 
     helm upgrade -i --wait --timeout 15m -n elastiflow \
       -f examples/netobserv_os_simple_gke_gw/values.yaml \
       --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
+      --devel \
       mermin mermin/mermin-netobserv-os-stack
     ```
 
@@ -83,8 +85,9 @@ To render and diff Helm templates to Kubernetes manifests, run:
 rm -rf helm_rendered; helm template -n elastiflow \
   -f examples/netobserv_os_simple_gke_gw/values.yaml \
   --set-file mermin.config.content=examples/netobserv_os_simple_gke_gw/config.hcl \
-  --output-dir helm_rendered \
-  mermin mermin/mermin-netobserv-os-stack
+  --devel \
+  mermin mermin/mermin-netobserv-os-stack \
+  --output-dir helm_rendered
 
 # Diff with existing K8s resources
 kubectl diff -R -f helm_rendered/mermin/
