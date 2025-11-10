@@ -5,7 +5,7 @@ use aya::Pod;
 use network_types::{eth::EtherType, wireguard::WireGuardType};
 
 /// Test data structures containing only the fields actually extracted by the parser
-/// These mirror what gets stored in PacketMeta, not the full protocol headers
+/// These mirror what gets stored in FlowStats, not the full protocol headers
 #[cfg(feature = "user")]
 unsafe impl Pod for ParsedHeader {}
 

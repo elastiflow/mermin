@@ -38,6 +38,7 @@ pub enum MerminError {
 
     /// eBPF map errors
     #[error("eBPF map error: {0}")]
+    #[allow(dead_code)]
     EbpfMap(String),
 
     /// eBPF map conversion errors
@@ -86,6 +87,7 @@ pub enum MerminError {
 
 impl MerminError {
     /// Create an eBPF map error
+    #[allow(dead_code)]
     pub fn ebpf_map(msg: impl Into<String>) -> Self {
         Self::EbpfMap(msg.into())
     }
