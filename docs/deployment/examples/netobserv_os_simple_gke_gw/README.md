@@ -13,6 +13,7 @@ This example is intended only for demonstration, testing, or proof-of-concept us
 
 Notes on the example deployment:
 
+- [Location in the repository](https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/netobserv_os_simple_gke_gw/) - `docs/deployment/examples/netobserv_os_simple_gke_gw`
 - This example assumes you can access internal GCP subnets via a VPN.
 - Namespace used in the example: `elastiflow`.
 - GKE [node auto-provisioning](https://cloud.google.com/kubernetes-engine/docs/how-to/node-auto-provisioning) must be enabled.
@@ -35,6 +36,14 @@ The installation process consists of two phases:
 This installation assumes that no additional DNS controllers are running in the cluster. Therefore, it is not possible to know the IP address of the NetObserv gRPC load balancer without extra GCP actions before the NetObserv chart (dependency) is ready.
 
 - Phase 1
+  - Create values file for the Mermin Umbrella chart (or use one from the repo)
+
+    <details>
+    <summary>values.yaml</summary>
+
+    <!-- {% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/netobserv_os_simple_gke_gw/values.yaml" %} -->
+
+    </details>
   - Add Helm charts and Deploy
 
     ```sh
@@ -43,6 +52,7 @@ This installation assumes that no additional DNS controllers are running in the 
     helm repo add opensearch https://opensearch-project.github.io/helm-charts/
     helm repo update
     # Deploy
+    kubectl create namespace elastiflow
     helm upgrade -i --wait --timeout 15m -n elastiflow \
       -f values.yaml \
       --set-file mermin.config.content=config.hcl \
