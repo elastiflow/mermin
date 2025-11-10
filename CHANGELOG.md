@@ -1,3 +1,16 @@
+## [v0.1.0-beta.23] - 2025-11-10
+
+### Bug Fixes
+
+- Readme and docs (#258)
+### Features
+
+- Add cleanup of orphaned TC programs before attachment (#263)
+
+[v0.1.0-beta.22..v0.1.0-beta.23](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.22...v0.1.0-beta.23)
+
+
+
 ## [v0.1.0-beta.22] - 2025-11-10
 
 ### Bug Fixes
