@@ -12,8 +12,8 @@ imagePullSecrets: []
 updateStrategy:
   type: RollingUpdate
   rollingUpdate:
-    maxUnavailable: 0
-    maxSurge: "10%"
+    maxUnavailable: "10%"
+    maxSurge: 0
 
 # Mermin container extra args
 extraArgs: []
@@ -49,6 +49,7 @@ hostPID: true
 podSecurityContext:
   runAsNonRoot: true
 
+# TODO(Cleanup for GA): Use a public link once available docs/getting-started/architecture.md#Security_Considerations
 securityContext:
   privileged: true
   readOnlyRootFilesystem: true

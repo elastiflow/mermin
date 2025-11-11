@@ -16,6 +16,7 @@ export "traces" {
 }
 
 # TODO(mack#ENG-286|2025-11-04): attributes "source" and "destination" sections should be gone
+# Source attributes - maps flow source data to K8s resources
 attributes "source" "k8s" {
   extract {
     metadata = [
@@ -105,6 +106,7 @@ attributes "source" "k8s" {
   }
 }
 
+# Destination attributes - maps flow destination data to K8s resources
 attributes "destination" "k8s" {
   extract {
     metadata = [

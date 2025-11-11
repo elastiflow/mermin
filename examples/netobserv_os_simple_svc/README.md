@@ -33,6 +33,7 @@ Notes on the example deployment:
   helm upgrade -i --wait --timeout 15m -n elastiflow \
     -f examples/netobserv_os_simple_svc/values.yaml \
     --set-file mermin.config.content=examples/netobserv_os_simple_svc/config.hcl \
+    --devel \
     mermin mermin/mermin-netobserv-os-stack
   ```
 
@@ -62,9 +63,9 @@ To render and diff Helm templates to Kubernetes manifests, run:
 rm -rf helm_rendered; helm template -n elastiflow \
   -f examples/netobserv_os_simple_svc/values.yaml \
   --set-file mermin.config.content=examples/netobserv_os_simple_svc/config.hcl \
-  --output-dir helm_rendered \
   --devel \
-  mermin mermin/mermin-netobserv-os-stack
+  mermin mermin/mermin-netobserv-os-stack \
+  --output-dir helm_rendered
 
 # Diff with existing K8s resources
 kubectl diff -R -f helm_rendered/mermin/

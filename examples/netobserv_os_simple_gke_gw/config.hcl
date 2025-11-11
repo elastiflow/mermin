@@ -1,17 +1,13 @@
-discovery "instrument" {
-  # Network interfaces to monitor
-  interfaces = ["*"]
-}
-
 # OTLP exporter configuration
 # See OBI export concepts: https://opentelemetry.io/docs/zero-code/obi/configure/export-data/
 export "traces" {
+  # Uncomment to receive spans in STDOUT
   # stdout = {
   #   format = "text_indent" // text, text_indent(*new), json, json_indent
   # }
 
   otlp = {
-    endpoint = "https://10.0.7.231:443"
+    endpoint = "https://192.168.0.100:443"
 
     tls = {
       insecure_skip_verify = true
@@ -20,6 +16,7 @@ export "traces" {
 }
 
 # TODO(mack#ENG-286|2025-11-04): attributes "source" and "destination" sections should be gone
+# Source attributes - maps flow source data to K8s resources
 attributes "source" "k8s" {
   extract {
     metadata = [
@@ -109,6 +106,7 @@ attributes "source" "k8s" {
   }
 }
 
+# Destination attributes - maps flow destination data to K8s resources
 attributes "destination" "k8s" {
   extract {
     metadata = [
