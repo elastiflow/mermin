@@ -1,3 +1,13 @@
+## [v0.1.0-beta.25] - 2025-11-11
+
+### Bug Fixes
+
+- **helm:** Disable "surge" upgrades (#243)
+
+[v0.1.0-beta.24..v0.1.0-beta.25](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.24...v0.1.0-beta.25)
+
+
+
 ## [v0.1.0-beta.24] - 2025-11-11
 
 ### Bug Fixes
