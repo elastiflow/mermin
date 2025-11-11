@@ -42,10 +42,9 @@ Notes on the example deployment:
   ```sh
   helm repo add mermin https://elastiflow.github.io/mermin/
   helm upgrade -i --wait --timeout 15m \
-    -f examples/local_otel/values_mermin.yaml \
-    --set-file config.content=examples/local_otel/config.hcl \
+    --set-file config.content=config.hcl \
     --devel \
-    mermin charts/mermin
+    mermin mermin/mermin
   ```
 
 - Optionally install `metrics-server` to get metrics if it has not been installed yet
@@ -63,19 +62,24 @@ In order to render K8s manifests you may use following commands
 - OpenTelemetry Collector
 
   ```sh
-  rm -rf helm_rendered; helm template otel-collector \
-    -f examples/local_otel/values_otel.yaml \
-    open-telemetry/opentelemetry-collector \
+  rm -rf helm_rendered; helm template \
+    -f values_otel.yaml \
+    otel-collector open-telemetry/opentelemetry-collector \
     --output-dir helm_rendered
+
+  # Diff with existing K8s resources
+  kubectl diff -R -f helm_rendered/mermin/    
   ```
 
 - Mermin
 
   ```sh
   rm -rf helm_rendered; helm template \
-    -f examples/local_otel/values_mermin.yaml \
-    --set-file config.content=examples/local_otel/config.hcl \
+    --set-file config.content=config.hcl \
     --devel \
-    mermin charts/mermin \
+    mermin mermin/mermin \
     --output-dir helm_rendered
+
+  # Diff with existing K8s resources
+  kubectl diff -R -f helm_rendered/mermin/    
   ```
