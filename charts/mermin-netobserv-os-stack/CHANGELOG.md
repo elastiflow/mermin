@@ -1,3 +1,13 @@
+## [mermin-netobserv-os-stack-0.1.0-beta.8] - 2025-11-11
+
+### Bug Fixes
+
+- Bump minimum requirements in the umbrella chart (#262)
+
+[mermin-netobserv-os-stack-0.1.0-beta.7..mermin-netobserv-os-stack-0.1.0-beta.8](https://github.com/elastiflow/mermin/compare/mermin-netobserv-os-stack-0.1.0-beta.7...mermin-netobserv-os-stack-0.1.0-beta.8)
+
+
+
 ## [mermin-netobserv-os-stack-0.1.0-beta.7] - 2025-11-07
 
 ### Bug Fixes
