@@ -4,6 +4,7 @@ mod health;
 mod iface;
 mod ip;
 mod k8s;
+mod metrics;
 mod otlp;
 mod packet;
 mod runtime;
@@ -23,6 +24,7 @@ use crate::{
     health::{HealthState, start_api_server},
     iface::controller::IfaceController,
     k8s::{attributor::Attributor, decorator::Decorator},
+    metrics::server::start_metrics_server,
     otlp::{
         provider::{init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
@@ -48,6 +50,34 @@ async fn run() -> Result<()> {
     let runtime = Context::new()?;
     let Context { conf, .. } = runtime;
 
+    // Initialize Prometheus metrics registry early, before any subsystems that might record metrics
+    if let Err(e) = metrics::registry::init_registry() {
+        error!(
+            event.name = "metrics.registry_init_failed",
+            error.message = %e,
+            "failed to initialize metrics registry"
+        );
+    } else {
+        info!(
+            event.name = "metrics.registry_initialized",
+            "prometheus metrics registry initialized"
+        );
+    }
+
+    if conf.metrics.enabled {
+        let metrics_conf = conf.metrics.clone();
+
+        tokio::spawn(async move {
+            if let Err(e) = start_metrics_server(metrics_conf).await {
+                error!(
+                    event.name = "metrics.server_error",
+                    error.message = %e,
+                    "metrics server encountered a fatal error"
+                );
+            }
+        });
+    }
+
     // If a provider is already installed, install_default() returns Err, which we can safely ignore.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
@@ -57,6 +87,7 @@ async fn run() -> Result<()> {
         init_internal_tracing(
             conf.log_level,
             conf.internal.traces.span_fmt,
+            conf.log_color,
             conf.internal.traces.stdout.clone(),
             conf.internal.traces.otlp.clone(),
         )
@@ -142,6 +173,8 @@ async fn run() -> Result<()> {
     );
 
     let health_state = HealthState::default();
+
+    // Start API server (health endpoints)
     if conf.api.enabled {
         let health_state_clone = health_state.clone();
         let api_conf = conf.api.clone();

@@ -155,7 +155,12 @@ use pnet::datalink;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::{error::MerminError, iface::netns::NetnsSwitch, runtime::conf::TcxOrderStrategy};
+use crate::{
+    error::MerminError,
+    iface::netns::NetnsSwitch,
+    metrics::ebpf::{inc_tc_programs_attached, inc_tc_programs_detached},
+    runtime::conf::TcxOrderStrategy,
+};
 
 /// Extension trait for TcAttachType to provide direction and program names
 pub trait TcAttachTypeExt {
@@ -684,6 +689,8 @@ impl IfaceController {
 
         self.register_tc_link(iface.to_string(), attach_type.direction_name(), link_id);
 
+        inc_tc_programs_attached(iface, attach_type.direction_name());
+
         debug!(
             event.name = "interface_controller.program_attached",
             ebpf.program.direction = attach_type.direction_name(),
@@ -730,6 +737,8 @@ impl IfaceController {
                 ))
             })
         })?;
+
+        inc_tc_programs_detached(iface, direction);
 
         Ok(())
     }

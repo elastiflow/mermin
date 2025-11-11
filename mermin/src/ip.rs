@@ -5,7 +5,7 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-use mermin_common::IpVersion;
+use mermin_common::{FlowKey, IpVersion};
 
 /// Resolve IP addresses from raw byte arrays based on the provided IP address type.
 #[allow(dead_code)]
@@ -28,6 +28,23 @@ pub fn resolve_addrs(
             let dst = IpAddr::V6(Ipv6Addr::from(dst_ipv6_addr));
             Ok((src, dst))
         }
+    }
+}
+
+/// Convert FlowKey IPs to IpAddr for Community ID generation.
+pub fn flow_key_to_ip_addrs(key: &FlowKey) -> Result<(IpAddr, IpAddr), Error> {
+    match key.ip_version {
+        IpVersion::V4 => {
+            let src = Ipv4Addr::new(key.src_ip[0], key.src_ip[1], key.src_ip[2], key.src_ip[3]);
+            let dst = Ipv4Addr::new(key.dst_ip[0], key.dst_ip[1], key.dst_ip[2], key.dst_ip[3]);
+            Ok((IpAddr::V4(src), IpAddr::V4(dst)))
+        }
+        IpVersion::V6 => {
+            let src = Ipv6Addr::from(key.src_ip);
+            let dst = Ipv6Addr::from(key.dst_ip);
+            Ok((IpAddr::V6(src), IpAddr::V6(dst)))
+        }
+        _ => Err(Error::UnknownIpAddrType),
     }
 }
 
