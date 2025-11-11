@@ -3,8 +3,8 @@ name: mermin-netobserv-os-stack
 description: A Helm chart for deploying the Mermin eBPF agent
 icon: https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1746227898/mermin-horizontal_kxhvzo.png
 type: application
-version: 0.1.0-beta.7
-appVersion: "0.1.0-beta.7"
+version: 0.1.0-beta.8
+appVersion: "0.1.0-beta.8"
 sources:
   - https://github.com/elastiflow/mermin
 dependencies:
