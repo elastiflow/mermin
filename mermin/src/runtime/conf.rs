@@ -67,7 +67,7 @@ fn env_func(args: FuncArgs) -> Result<Value, String> {
         Err(_) => {
             if args.len() == 2 {
                 warn!(
-                    event.name = "hcl.env.fallback",
+                    event.name = "hcl.func.env.fallback",
                     variable.name = %var_name,
                     fallback.reason = "environment_variable_not_set",
                     fallback.value = %default_value,
@@ -75,7 +75,7 @@ fn env_func(args: FuncArgs) -> Result<Value, String> {
                 );
             } else {
                 warn!(
-                    event.name = "hcl.env.fallback",
+                    event.name = "hcl.func.env.fallback",
                     variable.name = %var_name,
                     fallback.reason = "environment_variable_not_set",
                     fallback.value = "",
