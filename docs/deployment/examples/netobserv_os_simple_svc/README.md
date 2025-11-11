@@ -13,6 +13,7 @@ This example is intended only for demonstration, testing, or proof-of-concept us
 
 Notes on the example deployment:
 
+- [Location in the repository](https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/netobserv_os_simple_svc/) - `docs/deployment/examples/netobserv_os_simple_svc`
 - Namespace used in the example: `elastiflow`.
 - Allocatable resources needed (mCPU/MiB):
   - OpenSearch `2000m`/`4000Mi`
@@ -22,6 +23,22 @@ Notes on the example deployment:
 
 ## Install
 
+- Create values and a config file for the Mermin Umbrella chart (or use ones from the repo)
+  
+  <details>
+  <summary>values.yaml</summary>
+
+  <!-- {% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/netobserv_os_simple_svc/values.yaml" %} -->
+
+  </details>
+
+  <details>
+  <summary>values.yaml</summary>
+
+  <!-- {% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/netobserv_os_simple_svc/config.hcl" %} -->
+
+  </details>
+  
 - Add Helm charts and Deploy
 
   ```sh
@@ -30,9 +47,10 @@ Notes on the example deployment:
   helm repo add opensearch https://opensearch-project.github.io/helm-charts/
   helm repo update
   # Deploy
+  kubectl create namespace elastiflow
   helm upgrade -i --wait --timeout 15m -n elastiflow \
-    -f examples/netobserv_os_simple_svc/values.yaml \
-    --set-file mermin.config.content=examples/netobserv_os_simple_svc/config.hcl \
+    -f values.yaml \
+    --set-file mermin.config.content=config.hcl \
     --devel \
     mermin mermin/mermin-netobserv-os-stack
   ```
@@ -61,12 +79,12 @@ To render and diff Helm templates to Kubernetes manifests, run:
 
 ```sh
 rm -rf helm_rendered; helm template -n elastiflow \
-  -f examples/netobserv_os_simple_svc/values.yaml \
-  --set-file mermin.config.content=examples/netobserv_os_simple_svc/config.hcl \
+  -f values.yaml \
+  --set-file mermin.config.content=config.hcl \
   --devel \
   mermin mermin/mermin-netobserv-os-stack \
   --output-dir helm_rendered
 
 # Diff with existing K8s resources
-kubectl diff -R -f helm_rendered/mermin/
+kubectl -n elastiflow diff -R -f helm_rendered/
 ```

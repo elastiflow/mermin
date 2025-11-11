@@ -10,7 +10,7 @@ on:
       - alpha
       - beta
     paths-ignore:
-      - 'examples/**/*'
+      - 'docs/**/*'
       - 'charts/mermin-netobserv-os-stack/**/*'
       - '.github/workflows/release_mermin-netobserv-os-stack.yml'
 
@@ -61,7 +61,7 @@ jobs:
         uses: elastiflow/gha-reusable/actions/prepare-release@v0
         with:
           tag_prefix: ${{ fromJson(env.BRANCH_TAG_PREFIXES)[github.ref_name] }}
-          exclude_paths: "examples/**/*,charts/mermin-netobserv-os-stack/**/*"
+          exclude_paths: "docs/**/*,charts/mermin-netobserv-os-stack/**/*"
           changelog_update: true
           bump_version_yaml: true
           bump_version_yaml_path: charts/mermin/Chart.yaml
@@ -105,7 +105,7 @@ jobs:
         uses: elastiflow/gha-reusable/actions/prepare-release@v0
         with:
           tag_prefix: ${{ fromJson(env.BRANCH_TAG_PREFIXES)[github.ref_name] }}
-          exclude_paths: "examples/**/*,charts/mermin-netobserv-os-stack/**/*"
+          exclude_paths: "docs/**/*,charts/mermin-netobserv-os-stack/**/*"
       - name: Create GH release
         if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
         uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8

@@ -1,6 +1,27 @@
-# TODO(mack#lgo-406|2025-11-04): Re-iterate on the example, values must be aligned with "examples/netobserv_os_simple_svc"
 mermin:
   enabled: true
+
+  # Optionally add GKE PodMonitoring to scrape metrics
+  # extraObjects:
+  #     - |
+  #       apiVersion: monitoring.googleapis.com/v1
+  #       kind: PodMonitoring
+  #       metadata:
+  #         name: {{ include "mermin.fullname" . }}
+  #         namespace: {{ .Release.Namespace }}
+  #         labels:
+  #           {{- include "mermin.labels" . | nindent 6 }}
+  #       spec:
+  #         endpoints:
+  #         - interval: 60s
+  #           port: metrics
+  #         selector:
+  #           matchLabels:
+  #             {{- include "mermin.selectorLabels" . | nindent 6 }}
+  #         targetLabels:
+  #           metadata:
+  #           - pod
+  #           - container
 
 netobserv-flow:
   enabled: true

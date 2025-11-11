@@ -140,7 +140,7 @@ attributes "destination" "k8s" {
 
 ## Complete Example
 
-See `examples/local/config.hcl` in the repository for a complete, working configuration.
+See `docs/deployment/examples/local/config.hcl` in the repository for a complete, working configuration.
 
 ## Next Steps
 

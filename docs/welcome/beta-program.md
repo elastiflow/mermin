@@ -6,7 +6,7 @@ We plan to update the beta image multiple times throughout this beta period. We 
 
 ### Accessing the Beta Image
 
-> **Version Requirement**: v0.1.0-beta.24 or higher
+> **Version Requirement**: v0.1.0-beta.25 or higher
 
 Before starting, add the beta Helm chart:
 
@@ -133,6 +133,11 @@ helm upgrade -i mermin mermin/mermin \
 kubectl -n elastiflow get pods -l app.kubernetes.io/name=mermin
 ```
 
+* **Additional Helm deployment examples**
+  * [Mermin with OpenTelemetry Collector](deployment/examples/local_otel/README.md)
+  * [Mermin with NetObserv Flow and OpenSearch](deployment/examples/netobserv_os_simple_svc/README.md)
+  * [Mermin with NetObserv Flow and OpenSearch in GKE with Gateway](deployment/examples/netobserv_os_simple_gke_gw/README.md)
+
 ### See Your First Flows
 
 View network flows captured by Mermin:
@@ -246,4 +251,7 @@ Feedback Channels
 
 ### Example Configuration
 
-{% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/charts/mermin/config/examples/config.hcl" %}
+* **Helm deployment examples** 
+  * [Mermin with OpenTelemetry Collector](deployment/examples/local_otel/README.md)
+  * [Mermin with NetObserv Flow and OpenSearch](deployment/examples/netobserv_os_simple_svc/README.md)
+  * [Mermin with NetObserv Flow and OpenSearch in GKE with Gateway](deployment/examples/netobserv_os_simple_gke_gw/README.md)

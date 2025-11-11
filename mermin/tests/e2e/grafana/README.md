@@ -46,7 +46,7 @@ You only need to run this once. The services will continue running until you bri
 
 ```bash
 # 1. Create the kind cluster
-kind create cluster --config examples/local/kind-config.yaml
+kind create cluster --config docs/deployment/examples/local/kind-config.yaml
 
 # 2. Build the mermin image and load it into the cluster
 docker build -t mermin:latest --target runner-debug .
@@ -59,7 +59,7 @@ helm repo update
 helm dependency build charts/mermin
 
 # 4.
-make helm-upgrade EXTRA_HELM_ARGS='--set-file config.content=examples/local/config.hcl'
+make helm-upgrade EXTRA_HELM_ARGS='--set-file config.content=docs/deployment/examples/local/config.hcl'
 
 # 5. (optional) if you already have a Helm release, uninstall it first
 helm uninstall mermin
