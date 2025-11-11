@@ -60,8 +60,8 @@ verify_agent_logs() {
     echo "WARNING: pinger pod failed to become ready. Continuing..."
   }
 
-  # Give pinger enough time to generate traffic and for spans to be recorded
-  sleep 20
+  # Wait for max_record_interval (60s) + buffer to ensure active ICMP flows are exported
+  sleep 70
 
   echo "Verifying mermin agent logs are enriching data..."
   export NAMESPACE RELEASE_NAME
