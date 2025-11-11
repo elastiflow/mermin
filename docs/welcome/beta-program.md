@@ -6,7 +6,7 @@ We plan to update the beta image multiple times throughout this beta period. We 
 
 ### Accessing the Beta Image
 
-> **Version Requirement**: v0.1.0-beta.24 or higher
+> **Version Requirement**: v0.1.0-beta.25 or higher
 
 Before starting, add the beta Helm chart:
 
