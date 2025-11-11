@@ -246,4 +246,13 @@ Feedback Channels
 
 ### Example Configuration
 
-{% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/charts/mermin/config/examples/config.hcl" %}
+* **Helm deployment examples** 
+  * [Mermin with OpenTelemetry Collector](deployment/docs/deployment/examples/local_otel/README.md)
+  * [Mermin with NetObserv Flow and OpenSearch](deployment/docs/deployment/examples/netobserv_os_simple_svc/README.md)
+  * [Mermin with NetObserv Flow and OpenSearch in GKE with Gateway](deployment/docs/deployment/examples/netobserv_os_simple_gke_gw/README.md)
+* **Full Deployment Guide** - Production deployment with OTLP
+* **OTLP Configuration** - Export to observability backends
+* **Integrations** - Connect to Grafana, Elastic, Tempo, Jaeger
+* **Architecture Overview** - How Mermin works
+* **Configuration Reference** - Complete configuration options
+* **Troubleshooting** - Common issues and solutions

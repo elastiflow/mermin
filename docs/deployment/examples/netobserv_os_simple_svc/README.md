@@ -23,12 +23,19 @@ Notes on the example deployment:
 
 ## Install
 
-- Create values file for the Mermin Umbrella chart (or use one from the repo)
+- Create values and a config file for the Mermin Umbrella chart (or use ones from the repo)
   
   <details>
   <summary>values.yaml</summary>
 
   <!-- {% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/netobserv_os_simple_svc/values.yaml" %} -->
+
+  </details>
+
+  <details>
+  <summary>values.yaml</summary>
+
+  <!-- {% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/netobserv_os_simple_svc/config.hcl" %} -->
 
   </details>
   

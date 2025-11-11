@@ -37,6 +37,15 @@ Notes on the example deployment:
     -f values_otel.yaml \
     otel-collector open-telemetry/opentelemetry-collector
 
+- Create config file for the Mermin (or use one from the repo)
+  
+  <details>
+  <summary>values_otel.yaml</summary>
+
+  <!-- {% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/local_otel/config.hcl" %} -->
+
+  </details>
+
 - Deploy the Mermin chart
   
   ```sh

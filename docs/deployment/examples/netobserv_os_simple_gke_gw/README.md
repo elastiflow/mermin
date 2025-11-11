@@ -36,7 +36,7 @@ The installation process consists of two phases:
 This installation assumes that no additional DNS controllers are running in the cluster. Therefore, it is not possible to know the IP address of the NetObserv gRPC load balancer without extra GCP actions before the NetObserv chart (dependency) is ready.
 
 - Phase 1
-  - Create values file for the Mermin Umbrella chart (or use one from the repo)
+  - Create values and a config files for the Mermin Umbrella chart (or use ones from the repo)
 
     <details>
     <summary>values.yaml</summary>
@@ -44,6 +44,14 @@ This installation assumes that no additional DNS controllers are running in the 
     <!-- {% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/netobserv_os_simple_gke_gw/values.yaml" %} -->
 
     </details>
+
+    <details>
+    <summary>config.hcl</summary>
+
+    <!-- {% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/netobserv_os_simple_gke_gw/config.hcl" %} -->
+
+    </details>
+
   - Add Helm charts and Deploy
 
     ```sh
