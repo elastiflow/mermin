@@ -14,7 +14,7 @@ tmp.*
 charts/**/charts/*.tgz
 helm_rendered
 /mermin/tests/e2e/grafana/tempo-data/
-/examples/local/config.hcl
+/docs/deployment/examples/local/config.hcl
 
 # IDEs
 .idea

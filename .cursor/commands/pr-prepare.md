@@ -77,7 +77,7 @@ docker run --privileged --mount type=bind,source=.,target=/app \
 
 ```bash
 helm lint charts/mermin/
-helm template charts/mermin/ --values examples/local/values.yaml
+helm template charts/mermin/ --values docs/deployment/examples/local/values.yaml
 ```
 
 ### 3. PR Content Generation
