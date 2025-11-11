@@ -17,7 +17,7 @@ mermin:
   #           port: metrics
   #         selector:
   #           matchLabels:
-  #             {{- include "mermin.labels" . | nindent 6 }}
+  #             {{- include "mermin.selectorLabels" . | nindent 6 }}
   #         targetLabels:
   #           metadata:
   #           - pod
