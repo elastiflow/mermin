@@ -1,3 +1,16 @@
+## [v0.1.0-beta.24] - 2025-11-11
+
+### Bug Fixes
+
+- Bump minimum requirements in the umbrella chart (#262)
+### Features
+
+- Add Prometheus metrics server and stability improvements (#266)
+
+[v0.1.0-beta.23..v0.1.0-beta.24](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.23...v0.1.0-beta.24)
+
+
+
 ## [v0.1.0-beta.23] - 2025-11-10
 
 ### Bug Fixes
