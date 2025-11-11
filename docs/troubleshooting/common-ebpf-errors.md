@@ -17,6 +17,10 @@ The eBPF verifier is a kernel component that validates eBPF programs before load
 * Mermin has been optimized for compatibility but some edge cases may still occur
 * Most verifier errors are resolved in beta.21 and later
 
+{% hint style="info" %}
+If you encounter eBPF verifier issues or program loading failures not covered by the solutions in this guide, please reach out to the Mermin team. We continuously improve kernel compatibility and your feedback helps us identify and resolve edge cases.
+{% endhint %}
+
 ### Symptoms
 
 Mermin pods fail to start with errors in logs like:
