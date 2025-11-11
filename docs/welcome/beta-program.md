@@ -1,233 +1,122 @@
 # Beta Program
 
-> **Version Requirement**: v0.1.0-beta.18 or higher
+Thank you for participating in the Mermin beta program. Mermin captures network traffic passing through your Kubernetes cluster and generates flow traces in OpenTelemetry format, allowing you to see exactly what is happening inside your cluster. See [Mermin Overview](../) for a more detailed description of what Mermin can do for you.
 
-### Accessing Beta Image
+We plan to update the beta image multiple times throughout this beta period. We will reach out to you every time a new version is available and describe the changes included.
 
-Before starting, configure access to the beta Helm charts and container images:
+### Accessing the Beta Image
+
+> **Version Requirement**: v0.1.0-beta.22 or higher
+
+Before starting, add the beta Helm chart:
 
 ```bash
-# Add Helm repositories
-helm repo add mermin https://raw.githubusercontent.com/elastiflow/mermin/gh-pages
-
-helm repo add netobserv https://elastiflow.github.io/helm-chart-netobserv/
-helm repo add opensearch https://opensearch-project.github.io/helm-charts/
+# Add Helm repository
+helm repo add mermin https://elastiflow.github.io/mermin/
 helm repo update
-
-# Create namespace and image pull secret
-kubectl create namespace elastiflow
 ```
 
 ### Configuration Essentials
 
-To see flows with Kubernetes metadata enrichment, Mermin requires three core configuration blocks:
+To view flows with Kubernetes metadata enrichment, Mermin requires four core configuration blocks: Network Interface Discovery, Kubernetes Informer, Flow-to-Kubernetes Attribute Mapping & Export.
 
-#### Network Interface Discovery
+An example configuration is available here: [Example config.hcl](../../charts/mermin/config/examples/config.hcl).&#x20;
 
-Configure which network interfaces Mermin monitors. Choose based on your visibility needs:
+<details>
 
-**Recommended: CNI Bridge Interfaces (Pod-Focused)**
+<summary>Network Interface Discovery</summary>
 
-**Best for application monitoring** - Captures all pod-to-pod traffic, including intra-node communication:
+#### **CNI-Specific Patterns**
+
+Customize which interfaces to monitor for specific CNI configurations:
 
 ```hcl
 discovery "instrument" {
-  # CNI bridge interfaces - captures all pod traffic
-  # Choose patterns matching your CNI:
-
-  # Kindnet (Kind cluster)
+  # Kind / kindnet
   interfaces = ["veth*"]
 
   # Flannel
-  # interfaces = ["cni*", "flannel*"]
+  # interfaces = ["veth*", "flannel*", "vxlan*"]
 
   # Calico
-  # interfaces = ["cali*", "tunl*"]
+  # interfaces = ["veth*", "cali*", "tunl*", "ip6tnl*"]
 
   # Cilium
-  # interfaces = ["cilium_*", "lxc*"]
+  # interfaces = ["veth*", "cilium_*", "lxc*"]
 
   # GKE
-  # interfaces = ["gke*"]
+  # interfaces = ["veth*", "gke*"]
 
   # AWS VPC CNI
-  # interfaces = ["eni*"]
+  # interfaces = ["veth*", "eni*"]
 
-  # Multi-CNI (comprehensive)
-  # interfaces = ["cni*", "flannel*", "cali*", "tunl*", "cilium_*", "lxc*", "gke*", "eni*"]
 }
 ```
 
-**What you'll see**: All pod-to-pod traffic (both inter-node and intra-node)\
-**What you'll miss**: Host network pods, node-to-node infrastructure traffic\
-**Note**: Generates 4 flow records per inter-node flow, 2 per intra-node flow (deduplication coming soon)
+**What you'll see**: All pod-to-pod traffic (inter-node and intra-node)\
+**What you'll miss**: Traffic on other CNI-specific interfaces not listed\
+**Use cases**: Fine-tuning for specific CNI setups, reducing monitored interface count
 
-**Alternative: Physical Interfaces (Infrastructure-Focused)**
+#### **Physical Interfaces Only**
 
-**Best for node/infrastructure monitoring** - Captures only inter-node traffic:
+Monitor only physical network interfaces for inter-node traffic:
 
 ```hcl
 discovery "instrument" {
-  # Physical network interfaces
   interfaces = ["eth*", "ens*", "en*"]
 }
 ```
 
-**What you'll see**: Inter-node pod traffic, node-to-node traffic, host network pods\
-**What you'll miss**: Intra-node pod-to-pod communication\
-**Note**: Generates 2 flow records per flow (one at the source node, one at the destination node)
+**What you'll see**: Inter-node pod traffic, node-to-node traffic, external connections\
+**What you'll miss**: Same-node pod-to-pod communication (never hits physical interfaces)\
 
-> **For more information please reference**: [Network Interface Discovery](../configuration/discovery-interfaces.md)
 
-#### Kubernetes Informer Discovery
+**Trade-offs**: Lower overhead (fewer interfaces), incomplete visibility, may cause flow duplication if combined with veth monitoring\
+**Use cases**: Infrastructure-focused monitoring, cost-sensitive deployments, clusters with minimal same-node communication
 
-Defines which Kubernetes resources to watch for metadata enrichment
+> **For more information, please reference**: [Network Interface Discovery](../configuration/discovery-interfaces.md)
 
-```hcl
-discovery "informer" "k8s" {
-  # Kubernetes resources to watch
-  selectors = [
-    { kind = "Service" }, { kind = "Endpoint" }, { kind = "EndpointSlice" },
-    { kind = "Gateway" }, { kind = "Ingress" },
-    { kind = "Pod" }, { kind = "ReplicaSet" }, { kind = "Deployment" },
-    { kind = "DaemonSet" }, { kind = "StatefulSet" },
-    { kind = "Job" }, { kind = "CronJob" }, { kind = "NetworkPolicy" }
-  ]
+</details>
 
-  # Owner reference walking (Pod -> ReplicaSet -> Deployment)
-  owner_relations = {
-    max_depth     = 5
-    include_kinds = ["Service"]
-    exclude_kinds = ["EndpointSlice"]
-  }
+<details>
 
-  # Selector-based relations (NetworkPolicy -> Pod, Service -> Pod)
-  selector_relations = [
-    {
-      kind                             = "NetworkPolicy"
-      to                               = "Pod"
-      selector_match_labels_field      = "spec.podSelector.matchLabels"
-      selector_match_expressions_field = "spec.podSelector.matchExpressions"
-    },
-    {
-      kind                        = "Service"
-      to                          = "Pod"
-      selector_match_labels_field = "spec.selector"
-    }
-  ]
-}
-```
+<summary>Kubernetes Informer</summary>
 
-> **For more information please reference:** [Owner Relations](../configuration/owner-relations.md) **&** [Selector Relations](../configuration/selector-relations.md)
+Configures which Kubernetes resources Mermin watches to enrich network flows with metadata. This enables Mermin to associate IP addresses and ports with pod names, services, deployments, and other Kubernetes contexts.
 
-#### Flow-to-Kubernetes Attribute Mapping
+**For more information, please reference:** [Owner Relations](../configuration/owner-relations.md) **&** [Selector Relations](../configuration/selector-relations.md)
 
-Maps flow data (IPs, ports) to Kubernetes resources:
+</details>
 
-```hcl
-# Source IP/port mapping
-attributes "source" "k8s" {
-  extract {
-    metadata = [
-      "[*].metadata.name",
-      "[*].metadata.namespace",
-      "[*].metadata.uid"
-    ]
-  }
+<details>
 
-  association {
-    pod = {
-      sources = [
-        { from = "flow", name = "source.ip", to = ["status.podIP", "status.podIPs[*]"] },
-        { from = "flow", name = "source.port", to = ["spec.containers[*].ports[*].containerPort"] }
-      ]
-    }
-    service = {
-      sources = [
-        { from = "flow", name = "source.ip", to = ["spec.clusterIP", "spec.clusterIPs[*]"] },
-        { from = "flow", name = "source.port", to = ["spec.ports[*].port"] }
-      ]
-    }
-  }
-}
+<summary>Flow-to-Kubernetes Attribute Mapping</summary>
 
-# Destination IP/port mapping
-attributes "destination" "k8s" {
-  extract {
-    metadata = [
-      "[*].metadata.name",
-      "[*].metadata.namespace",
-      "[*].metadata.uid"
-    ]
-  }
+Configures how Mermin matches network flow data (source/destination IPs and ports) to Kubernetes resources. This mapping defines which Kubernetes object fields to extract and how to associate them with captured flows.
 
-  association {
-    pod = {
-      sources = [
-        { from = "flow", name = "destination.ip", to = ["status.podIP", "status.podIPs[*]"] },
-        { from = "flow", name = "destination.port", to = ["spec.containers[*].ports[*].containerPort"] }
-      ]
-    }
-    service = {
-      sources = [
-        { from = "flow", name = "destination.ip", to = ["spec.clusterIP", "spec.clusterIPs[*]"] },
-        { from = "flow", name = "destination.port", to = ["spec.ports[*].port"] }
-      ]
-    }
-  }
-}
-```
+> **For more information, please reference:** [Flow Attributes](../configuration/attributes.md)
 
-> **For more information please reference:** [Flow Attributes](../configuration/attributes.md)
+</details>
 
-#### Export
+<details>
 
-Configure the OTLP export
+<summary>Exporter</summary>
 
-```hcl
-export "traces" {
-  # Export to stdout (logs)
-  stdout = {
-    format = "text_indent" // text, text_indent(*new), json, json_indent
-  }
+Configures how Mermin exports network flow data. Flows can be sent to an OTLP receiver (OpenTelemetry Protocol) for storage and analysis, or output to stdout for debugging.
 
-  # Configure exporting to an OTLP receiver
-  # otlp = {
-  #   endpoint               = "http://otelcol:4317"
-  #   protocol               = "grpc"
-  #   timeout                = "10s"
-  #   max_batch_size         = 512
-  #   max_batch_interval     = "5s"
-  #   max_queue_size         = 2048
-  #   max_concurrent_exports = 1
-  #   max_export_timeout     = "30s"
+> **For more information, please reference:** [OTLP Exporter](../configuration/export-otlp.md)
 
-  #   auth = {
-  #     basic = {
-  #       user = "USERNAME"
-  #       pass = "PASSWORD"
-  #     }
-  #   }
+</details>
 
-  #   tls = {
-  #     insecure_skip_verify = false
-  #     ca_cert              = "/etc/certs/ca.crt"
-  #     client_cert          = "/etc/certs/cert.crt"
-  #     client_key           = "/etc/certs/cert.key"
-  #   }
-  # }
-}
-```
+### Deploying Mermin
 
-A fleshed out config is available here: [Examples](../../charts/mermin/config/examples/config.hcl). Once the config is in a good place you cana deploy it with the below command
+Once your configuration is ready, you can deploy with the following command:
 
 ```
 helm upgrade -i mermin mermin/mermin \
   --namespace elastiflow \
-  --version 0.1.0-beta.15 \
-  --set image.tag=v0.1.0-beta.15 \
-  --set 'imagePullSecrets[0].name=ghcr' \
-  --set-file config.content=mermin-config.hcl \
+  --create-namespace \
+  --set-file config.content=config.hcl \
   --wait
 
 # Verify deployment
@@ -259,6 +148,92 @@ Flow Span:
   Duration: 4.2s
 ```
 
+### Known Limitations
+
+<details>
+
+<summary><strong>Tunneled/Encapsulated Traffic Parsing</strong></summary>
+
+Deep packet parsing for tunneled traffic is not yet implemented in userspace.
+
+**Current functionality:**
+
+The default configuration monitors veth interfaces and CNI-specific interfaces where packets are already decapsulated. This includes:
+
+* veth\* interfaces (pod network namespaces)
+* CNI workload interfaces (cali\*, cilium\__, lxc_, eni\*, etc.)
+
+**Not currently supported:**
+
+* Direct monitoring of tunnel interfaces (tunl\*, vxlan\*, flannel\*) as the primary capture point
+* Bare metal deployments where packet encapsulation is not removed
+* Parsing nested/encapsulated protocol headers
+
+</details>
+
+<details>
+
+<summary><strong>Kernel and Platform Compatibility</strong></summary>
+
+Mermin has been tested and verified on the following platforms:
+
+| Platform         | Status    | Minimum Version |
+| ---------------- | --------- | --------------- |
+| Debian 13        | Supported | Latest kernels  |
+| Debian 12        | Supported | As of beta.21   |
+| GKE Standard     | Supported | As of beta.21   |
+| GKE Autopilot    | Supported | As of beta.21   |
+| Kind (local dev) | Supported | All versions    |
+
+**Important:** eBPF verifier requirements vary between kernel versions. If you encounter eBPF program loading failures, include your kernel version when reporting the issue.
+
+</details>
+
+### eBPF Errors
+
+When deploying Mermin for the first time, you may encounter issues. Depending on your kernel version, you may encounter eBPF verifier errors, as shown [here](https://app.gitbook.com/o/YQl6hRr9OfcQwPhzjYYh/s/mj0i8oypT20U3rYftS6q/~/changes/13/troubleshooting/common-ebpf-errors).&#x20;
+
+**Minimum requirements:**
+
+* Linux kernel 5.4 or later (may work, but has not been fully tested)
+* BTF support enabled
+* eBPF support enabled
+
+**Note:** While Mermin may work on kernels older than 6.1, it has been  tested and validated on 6.1+. If you encounter verifier errors on older kernels, please report the issue with your kernel version using the template below.
+
+### Reporting Issues
+
+If you encounter problems during the beta, please report them using the template below. This information helps us diagnose and resolve issues quickly
+
+Feedback Channels
+
+* **Email**: [merminbeta@elastiflow.com](mailto:merminbeta@elastiflow.com)​
+* **Slack:** [**https://elastiflowcommunity.slack.com/archives/C09MANJTSP3**](https://elastiflowcommunity.slack.com/archives/C09MANJTSP3)
+
+{% code expandable="true" %}
+```markup
+**Issue Title:** [Brief description of the problem]
+**Problem Description:**
+[Describe what's happening and what you expected to happen]
+**Error Messages:***
+**Config File:**
+**Environment:**
+- Mermin Version: [e.g., v0.1.0-beta.22]
+- Platform: [GKE/EKS/AKS/bare metal/Kind/other]
+- Kubernetes Version: [output of `kubectl version --short`]
+- Kernel Version: [output of `uname -r`]
+- Node OS: [e.g., Debian 12, Ubuntu 22.04, etc.]
+- CNI: [e.g., Calico, Flannel, Cilium, kindnet, etc.]
+
+#### Additional Information to Include
+- **eBPF Verifier Errors**: Include the full verifier output from logs
+- **Interface Issues**: List output of `ip link show` from the node
+- **Deployment Method**: Helm chart version and values used
+- **Resource Constraints**: Pod resource limits/requests if relevant
+- Additional Context: [Any other relevant information - recent changes, specific workloads, etc.]
+```
+{% endcode %}
+
 ### Next Steps
 
 * **Full Deployment Guide** - Production deployment with OTLP
@@ -267,8 +242,3 @@ Flow Span:
 * **Architecture Overview** - How Mermin works
 * **Configuration Reference** - Complete configuration options
 * **Troubleshooting** - Common issues and solutions
-
-### Providing Feedback
-
-* **Email**: [merminbeta@elastiflow.com](mailto:merminbeta@elastiflow.com)
-* **Slack:** [**https://elastiflowcommunity.slack.com/archives/C09MANJTSP3**](https://elastiflowcommunity.slack.com/archives/C09MANJTSP3)
