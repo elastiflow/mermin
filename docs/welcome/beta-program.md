@@ -247,9 +247,9 @@ Feedback Channels
 ### Example Configuration
 
 * **Helm deployment examples** 
-  * [Mermin with OpenTelemetry Collector](deployment/docs/deployment/examples/local_otel/README.md)
-  * [Mermin with NetObserv Flow and OpenSearch](deployment/docs/deployment/examples/netobserv_os_simple_svc/README.md)
-  * [Mermin with NetObserv Flow and OpenSearch in GKE with Gateway](deployment/docs/deployment/examples/netobserv_os_simple_gke_gw/README.md)
+  * [Mermin with OpenTelemetry Collector](docs/deployment/examples/local_otel/README.md)
+  * [Mermin with NetObserv Flow and OpenSearch](docs/deployment/examples/netobserv_os_simple_svc/README.md)
+  * [Mermin with NetObserv Flow and OpenSearch in GKE with Gateway](docs/deployment/examples/netobserv_os_simple_gke_gw/README.md)
 * **Full Deployment Guide** - Production deployment with OTLP
 * **OTLP Configuration** - Export to observability backends
 * **Integrations** - Connect to Grafana, Elastic, Tempo, Jaeger

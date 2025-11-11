@@ -18,9 +18,9 @@
 * [Advanced Scenarios](deployment/advanced-scenarios.md)
 * [Docker on Bare Metal](deployment/docker-bare-metal.md)
 * Helm Examples
-  * [Mermin with OpenTelemetry Collector](deployment/docs/deployment/examples/local_otel/README.md)
-  * [Mermin with NetObserv Flow and OpenSearch](deployment/docs/deployment/examples/netobserv_os_simple_svc/README.md)
-  * [Mermin with NetObserv Flow and OpenSearch in GKE with Gateway](deployment/docs/deployment/examples/netobserv_os_simple_gke_gw/README.md)
+  * [Mermin with OpenTelemetry Collector](docs/deployment/examples/local_otel/README.md)
+  * [Mermin with NetObserv Flow and OpenSearch](docs/deployment/examples/netobserv_os_simple_svc/README.md)
+  * [Mermin with NetObserv Flow and OpenSearch in GKE with Gateway](docs/deployment/examples/netobserv_os_simple_gke_gw/README.md)
 
 ## Observability
 
