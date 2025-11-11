@@ -13,7 +13,7 @@ Flow Traces are OpenTelemetry trace spans that represent network flows with NetF
 ## Mermin Key Features
 
 * **eBPF-Based Packet Capture**: Leverages eBPF technology for high-performance, low-overhead network monitoring directly in the Linux kernel.
-* **Kubernetes-Native**:  Integration with Kubernetes, automatically enriching network flows with pod, service, deployment, and other resource metadata.
+* **Kubernetes-Native**: Integration with Kubernetes, automatically enriching network flows with pod, service, deployment, and other resource metadata.
 * **OpenTelemetry Protocol**: Standards-based OTLP export ensures compatibility with a wide ecosystem of observability platforms.
 * **Zero Application Changes**: Operates transparently without requiring any modifications to your applications.
 * **Comprehensive Protocol Support**: Parses and tracks TCP, UDP, ICMP traffic, with support for common tunneling protocols (VXLAN, Geneve, WireGuard).
@@ -35,7 +35,7 @@ This documentation is designed to help you successfully deploy, configure, and o
 
 Mermin requires:
 
-* **Linux Kernel**: Version 5.8 or newer with eBPF support enabled
+* **Linux Kernel**: Version 5.14 or newer with eBPF support enabled
 * **Kubernetes**: Version 1.20 or newer (for Kubernetes deployments)
 * **Container Runtime**: Docker, containerd, or CRI-O
 * **Privileges**: Requires privileged mode to load eBPF programs and access network interfaces
