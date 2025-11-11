@@ -606,6 +606,49 @@ entries:
         - name: Chart Source
           url: https://github.com/elastiflow/mermin
     apiVersion: v2
+    appVersion: 0.1.0-beta.8
+    created: "2025-11-11T01:24:53.992779623Z"
+    dependencies:
+    - condition: mermin.enabled
+      name: mermin
+      repository: https://elastiflow.github.io/mermin/
+      version: '>= 0.1.0-beta.23'
+    - condition: netobserv-flow.enabled
+      name: netobserv-flow
+      repository: https://elastiflow.github.io/helm-chart-netobserv/
+      version: '>= 0.5.2'
+    - condition: opensearch.enabled
+      name: opensearch
+      repository: https://opensearch-project.github.io/helm-charts/
+      version: '>= 3.3.2'
+    - condition: opensearch-dashboards.enabled
+      name: opensearch-dashboards
+      repository: https://opensearch-project.github.io/helm-charts/
+      version: '>= 3.3.0'
+    description: A Helm chart for deploying the Mermin eBPF agent
+    digest: 9d4e40a9d7c9d8e768c2ca55eed9f6e5659a22ed3e61ad91453f0fd6fe904fe2
+    icon: https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1746227898/mermin-horizontal_kxhvzo.png
+    keywords:
+    - netflow
+    - network
+    - flow
+    - observability
+    maintainers:
+    - email: engineering@elastiflow.com
+      name: ElastiFlow Engineering Team
+    name: mermin-netobserv-os-stack
+    sources:
+    - https://github.com/elastiflow/mermin
+    type: application
+    urls:
+    - https://github.com/elastiflow/mermin/releases/download/mermin-netobserv-os-stack-0.1.0-beta.8/mermin-netobserv-os-stack-0.1.0-beta.8.tgz
+    version: 0.1.0-beta.8
+  - annotations:
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: Chart Source
+          url: https://github.com/elastiflow/mermin
+    apiVersion: v2
     appVersion: 0.1.0-beta.7
     created: "2025-11-07T17:10:57.429344202Z"
     dependencies:
@@ -901,4 +944,4 @@ entries:
     urls:
     - mermin-netobserv-os-stack-0.1.0-beta.1.tgz
     version: 0.1.0-beta.1
-generated: "2025-11-10T22:32:55.688810073Z"
+generated: "2025-11-11T01:24:53.992909044Z"
