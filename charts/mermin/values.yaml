@@ -156,14 +156,14 @@ extraObjects: []
   #     name: {{ include "mermin.fullname" . }}
   #     namespace: {{ .Release.Namespace }}
   #     labels:
-  #       {{- include "mermin.labels" . | nindent 4 }}
+  #       {{- include "mermin.labels" . | nindent 6 }}
   #   spec:
   #     endpoints:
   #     - interval: 60s
   #       port: metrics
   #     selector:
   #       matchLabels:
-  #         {{- include "mermin.labels" . | nindent 4 }}
+  #         {{- include "mermin.labels" . | nindent 6 }}
   #     targetLabels:
   #       metadata:
   #       - pod
