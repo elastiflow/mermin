@@ -13,7 +13,7 @@ This example is intended only for demonstration, testing, or proof-of-concept us
 
 Notes on the example deployment:
 
-- [Location in the repository](https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/netobserv_os_simple_svc/) - `docs/deployment/examples/netobserv_os_simple_svc`
+- [Location in the repository](docs/deployment/examples/netobserv_os_simple_svc/) - `docs/deployment/examples/netobserv_os_simple_svc`
 - Namespace used in the example: `elastiflow`.
 - Allocatable resources needed (mCPU/MiB):
   - OpenSearch `2000m`/`4000Mi`
@@ -28,14 +28,14 @@ Notes on the example deployment:
   <details>
   <summary>values.yaml</summary>
 
-  <!-- {% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/netobserv_os_simple_svc/values.yaml" %} -->
+  {% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/netobserv_os_simple_svc/values.yaml" %}
 
   </details>
 
   <details>
   <summary>values.yaml</summary>
 
-  <!-- {% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/netobserv_os_simple_svc/config.hcl" %} -->
+  {% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/netobserv_os_simple_svc/config.hcl" %}
 
   </details>
   
