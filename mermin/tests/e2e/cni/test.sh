@@ -31,13 +31,37 @@ verify_deployment() {
 verify_agent_logs() {
   echo "Creating flows generator (pinger)..."
   kubectl -n "${NAMESPACE}" run ping-receiver --grace-period=1 --image=alpine --command -- sleep 3600
+  echo "Waiting for ping-receiver pod to be ready..."
+  kubectl wait --for=condition=ready pod/ping-receiver -n "${NAMESPACE}" --timeout=60s || {
+    echo "ERROR: ping-receiver pod failed to become ready"
+    return 1
+  }
+  
   local counter=0
+  ping_receiver_ip=""
   while [ $counter -lt 30 ]; do
     ping_receiver_ip=$(kubectl -n "${NAMESPACE}" get pod ping-receiver -o 'jsonpath={.status.podIP}')
+    if [[ -n "$ping_receiver_ip" ]]; then
+      echo "ping-receiver IP: $ping_receiver_ip"
+      break
+    fi
     counter=$((counter + 1))
     sleep 0.5
   done
+  
+  if [[ -z "$ping_receiver_ip" ]]; then
+    echo "ERROR: Failed to get ping-receiver IP after 15 seconds"
+    return 1
+  fi
+  
   kubectl -n "${NAMESPACE}" run pinger --grace-period=1 --image=alpine --command -- ping "${ping_receiver_ip}"
+  echo "Waiting for pinger pod to be ready..."
+  kubectl wait --for=condition=ready pod/pinger -n "${NAMESPACE}" --timeout=60s || {
+    echo "WARNING: pinger pod failed to become ready. Continuing..."
+  }
+
+  # Wait for max_record_interval (60s) + buffer to ensure active ICMP flows are exported
+  sleep 70
 
   echo "Verifying mermin agent logs are enriching data..."
   export NAMESPACE RELEASE_NAME
@@ -55,7 +79,9 @@ verify_agent_logs() {
   for pod in "${pods[@]}"; do
     (
       local counter=0
-      while [ $counter -lt 60 ]; do if grep --color=never -B 35 -e 'source.k8s.pod.name: String(Owned("pinger"))' -e 'destination.k8s.pod.name: String(Owned("ping-receiver"))' <(kubectl logs -n "${NAMESPACE}" "$pod" --tail=500); then
+      while [ $counter -lt 120 ]; do
+        # examples: https://regex101.com/r/rYbX7m/1
+        if kubectl logs -n "${NAMESPACE}" "$pod" --tail=1000 2>/dev/null | grep --color=never -E '(source\.k8s\.pod\.name.*String\(Owned\("(pinger|ping-receiver)"\)|destination\.k8s\.pod\.name.*String\(Owned\("(pinger|ping-receiver)"\))' >/dev/null; then
           exit 0
         fi
         counter=$((counter + 1))
@@ -77,18 +103,18 @@ verify_agent_logs() {
     echo "Test PASSED: At least one agent pod is enriching data."
   else
     echo "Test FAILED: No agent pods showed enriched packet logs."
-    exit 1
+    return 1
   fi
 }
 
 # --- Debugging Function ---
 dump_debug_info() {
-  echo "=== Pod Status Summary ==="
   kubectl get pods -n "${NAMESPACE}" -o wide
-  echo "=== Pod Details and Events ==="
-  kubectl describe pods -n "${NAMESPACE}"
-  echo "=== Full Namespace Event Log (sorted by time) ==="
-  kubectl get events -n "${NAMESPACE}" --sort-by='.lastTimestamp'
+  kubectl get events -n "${NAMESPACE}" --sort-by='.lastTimestamp' | tail -20
+  for pod in $(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=${RELEASE_NAME}" -o name 2>/dev/null | cut -d/ -f2); do
+    echo "--- $pod logs ---"
+    kubectl logs -n "${NAMESPACE}" "$pod" --tail=100 2>/dev/null || true
+  done
 }
 
 #----------------#
