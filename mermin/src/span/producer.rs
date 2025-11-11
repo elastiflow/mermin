@@ -1,5 +1,4 @@
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
     os::fd::AsRawFd,
     sync::Arc,
     time::{Duration, UNIX_EPOCH},
@@ -8,7 +7,7 @@ use std::{
 use aya::maps::{HashMap as EbpfHashMap, RingBuf};
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
-use mermin_common::{FlowEvent, FlowKey, FlowStats, IpVersion};
+use mermin_common::{FlowEvent, FlowKey, FlowStats};
 use network_types::{
     eth::EtherType,
     ip::{IpDscp, IpEcn, IpProto},
@@ -25,7 +24,8 @@ use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     filter::source::PacketFilter,
-    ip::Error,
+    ip::{Error, flow_key_to_ip_addrs},
+    metrics,
     packet::{
         parser::{is_tunnel, parse_packet_from_offset},
         types::ParsedPacket,
@@ -33,6 +33,7 @@ use crate::{
     runtime::conf::Conf,
     span::{
         community_id::CommunityIdGenerator,
+        ebpf_guard::EbpfFlowGuard,
         flow::{FlowEndReason, FlowSpan, SpanAttributes},
         opts::SpanOptions,
         tcp::TcpFlags,
@@ -244,6 +245,24 @@ impl FlowSpanProducer {
             "flow workers spawned, starting event loop"
         );
 
+        // Orphan threshold: 4x max_record_interval provides safety margin for processing delays
+        // while catching truly orphaned entries much faster than a fixed long timeout.
+        let max_orphan_age = self.span_opts.max_record_interval.saturating_mul(4);
+        let community_id_gen = Arc::new(self.community_id_generator.clone());
+        tokio::spawn(orphan_scanner_task(
+            Arc::clone(&flow_stats_map),
+            Arc::clone(&self.flow_store),
+            self.boot_time_offset_nanos,
+            max_orphan_age,
+            community_id_gen,
+        ));
+        info!(
+            event.name = "orphan_scanner.started",
+            scan.interval_secs = 300,
+            max_age_secs = max_orphan_age.as_secs(),
+            "orphan scanner task started (safety net for stale eBPF entries)"
+        );
+
         // Wrap the ring buffer's fd in AsyncFd for event-driven polling
         let async_fd = match AsyncFd::new(flow_events.as_raw_fd()) {
             Ok(fd) => fd,
@@ -451,6 +470,11 @@ impl FlowWorker {
     /// Fast path for plain (non-tunneled) traffic.
     /// Uses FlowStats from eBPF directly
     async fn create_direct_flow(&self, event: FlowEvent) -> Result<(), Error> {
+        // CRITICAL: Create guard to ensure eBPF cleanup on ANY error path
+        // The guard will automatically clean up the eBPF entry if this function exits
+        // early (via error return) or panics, preventing orphaned entries.
+        let guard = EbpfFlowGuard::new(event.flow_key, Arc::clone(&self.flow_stats_map));
+
         // Read stats from eBPF map and immediately release lock to minimize contention.
         // The scoped block ensures the lock is dropped before expensive filtering logic.
         let stats = {
@@ -486,7 +510,7 @@ impl FlowWorker {
 
         // Convert eBPF FlowKey to Community ID
         // For plain traffic, outermost = innermost, so we use flow_key directly
-        let (src_addr, dst_addr) = self.flow_key_to_ip_addrs(&event.flow_key)?;
+        let (src_addr, dst_addr) = flow_key_to_ip_addrs(&event.flow_key)?;
         let community_id = self.community_id_generator.generate(
             src_addr,
             dst_addr,
@@ -496,7 +520,13 @@ impl FlowWorker {
         );
 
         self.create_flow_span(&community_id, &event.flow_key, &stats)
-            .await
+            .await?;
+
+        // Flow successfully created and stored - disable guard cleanup
+        // The entry is now managed by flow_store and will be cleaned up by timeout task
+        guard.keep();
+
+        Ok(())
     }
 
     /// Slow path for tunneled traffic.
@@ -562,23 +592,6 @@ impl FlowWorker {
         }
     }
 
-    /// Convert FlowKey IPs to IpAddr for Community ID generation
-    fn flow_key_to_ip_addrs(&self, key: &FlowKey) -> Result<(IpAddr, IpAddr), Error> {
-        match key.ip_version {
-            IpVersion::V4 => {
-                let src = Ipv4Addr::new(key.src_ip[0], key.src_ip[1], key.src_ip[2], key.src_ip[3]);
-                let dst = Ipv4Addr::new(key.dst_ip[0], key.dst_ip[1], key.dst_ip[2], key.dst_ip[3]);
-                Ok((IpAddr::V4(src), IpAddr::V4(dst)))
-            }
-            IpVersion::V6 => {
-                let src = Ipv6Addr::from(key.src_ip);
-                let dst = Ipv6Addr::from(key.dst_ip);
-                Ok((IpAddr::V6(src), IpAddr::V6(dst)))
-            }
-            _ => Err(Error::UnknownIpAddrType),
-        }
-    }
-
     /// Create a FlowSpan from eBPF FlowStats
     async fn create_flow_span(
         &self,
@@ -598,7 +611,7 @@ impl FlowWorker {
             .iface_map
             .get(&stats.ifindex)
             .map(|r| r.value().clone());
-        let (src_addr, dst_addr) = self.flow_key_to_ip_addrs(flow_key)?;
+        let (src_addr, dst_addr) = flow_key_to_ip_addrs(flow_key)?;
         let timeout = self.calculate_timeout(flow_key.protocol, stats);
         let span = FlowSpan {
             start_time: UNIX_EPOCH + Duration::from_nanos(start_time_nanos),
@@ -769,6 +782,14 @@ impl FlowWorker {
                 .await;
             })
         };
+
+        // Metrics: Extract interface name before moving flow_span
+        let iface_name = flow_span
+            .attributes
+            .network_interface_name
+            .as_deref()
+            .unwrap_or("unknown");
+        metrics::flow::inc_flows_created(iface_name);
 
         let flow_entry = FlowEntry {
             flow_span,
@@ -984,9 +1005,34 @@ async fn timeout_task_loop(
                 }
                 // If we reach here, proceed with timeout
 
+                // CRITICAL FIX: Capture eBPF key BEFORE attempting flow_store removal
+                // to ensure cleanup happens even if flow_store entry is gone (race condition)
+                let ebpf_key_for_cleanup = ebpf_key;
+
                 let entry = match flow_store.remove(&community_id) {
                     Some((_, entry)) => entry,
-                    None => break,
+                    None => {
+                        // Flow already removed from flow_store (race condition)
+                        // But we still need to cleanup eBPF map using the captured key
+                        if let Some(key) = ebpf_key_for_cleanup {
+                            let mut map = flow_stats_map.lock().await;
+                            if let Err(e) = map.remove(&key) {
+                                debug!(
+                                    event.name = "ebpf.map_cleanup_failed_race",
+                                    flow.community_id = %community_id,
+                                    error.message = %e,
+                                    "failed to remove eBPF entry after flow_store race condition"
+                                );
+                            } else {
+                                debug!(
+                                    event.name = "ebpf.map_cleanup_success_race",
+                                    flow.community_id = %community_id,
+                                    "cleaned up eBPF entry despite flow_store race condition"
+                                );
+                            }
+                        }
+                        break;
+                    }
                 };
 
                 let mut flow_span = entry.flow_span;
@@ -1041,9 +1087,143 @@ async fn timeout_task_loop(
                     drop(map);
                 }
 
+                let iface_name = flow_span
+                    .attributes
+                    .network_interface_name
+                    .as_deref()
+                    .unwrap_or("unknown");
+                metrics::flow::inc_flows_expired(iface_name, "timeout");
+
+                if let Ok(duration) = flow_span.end_time.duration_since(flow_span.start_time) {
+                    metrics::flow::observe_flow_duration(duration);
+                }
+
                 entry.task_handles.record_task.abort();
                 break;
             }
+        }
+    }
+}
+
+/// Periodic orphan scanner task - safety net for cleaning up stale eBPF entries.
+///
+/// Scans the eBPF `FLOW_STATS_MAP` periodically and removes entries that are:
+/// - Old (exceed max_age threshold, typically 4x max_record_interval)
+/// - Not tracked in the userspace `flow_store`
+///
+/// This task acts as a safety net to catch any orphaned entries that slipped
+/// through the primary cleanup mechanisms (guard, timeout task).
+///
+/// Note: The max_age threshold is based on max_record_interval, not absolute time.
+/// Active flows are tracked in userspace and updated regularly, so only truly
+/// orphaned entries (failed initialization) will exceed the threshold without tracking.
+///
+/// ### Arguments
+///
+/// - `flow_stats_map` - Shared eBPF map containing flow statistics
+/// - `flow_store` - Userspace flow tracking store
+/// - `boot_time_offset` - Offset to convert boot time to wall clock time
+/// - `max_age` - Maximum age for entries before they're considered orphans
+/// - `community_id_generator` - For generating community IDs from flow keys
+pub async fn orphan_scanner_task(
+    flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
+    flow_store: FlowStore,
+    boot_time_offset: u64,
+    max_age: Duration,
+    community_id_generator: Arc<CommunityIdGenerator>,
+) {
+    let scan_interval = Duration::from_secs(300);
+
+    loop {
+        tokio::time::sleep(scan_interval).await;
+
+        let current_time_ns = std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+        let current_boot_time_ns = current_time_ns.saturating_sub(boot_time_offset);
+        let max_age_ns = max_age.as_nanos() as u64;
+
+        let mut removed = 0u64;
+        let mut scanned = 0u64;
+
+        // Get all keys first (to avoid holding lock during iteration)
+        let keys: Vec<FlowKey> = {
+            let map = flow_stats_map.lock().await;
+            map.keys().filter_map(|k| k.ok()).collect()
+        };
+
+        let ebpf_map_entries = keys.len() as u64;
+        let userspace_entries = flow_store.len() as u64;
+        metrics::ebpf::set_map_entries(ebpf_map_entries);
+        metrics::ebpf::set_userspace_flows(userspace_entries);
+
+        for key in keys {
+            scanned += 1;
+
+            // Check if entry is very old
+            let is_old = {
+                let map = flow_stats_map.lock().await;
+                match map.get(&key, 0) {
+                    Ok(stats) => {
+                        let age_ns = current_boot_time_ns.saturating_sub(stats.last_seen_ns);
+                        age_ns > max_age_ns
+                    }
+                    Err(_) => continue, // Entry already removed
+                }
+            };
+
+            if !is_old {
+                continue;
+            }
+
+            // Convert FlowKey to IP addresses for Community ID generation
+            let (src_addr, dst_addr) = match flow_key_to_ip_addrs(&key) {
+                Ok(addrs) => addrs,
+                Err(_) => continue, // Skip invalid IP version
+            };
+
+            let community_id = community_id_generator.generate(
+                src_addr,
+                dst_addr,
+                key.src_port,
+                key.dst_port,
+                key.protocol,
+            );
+
+            if flow_store.contains_key(&community_id) {
+                // Entry is old but still being tracked - don't remove
+                continue;
+            }
+
+            // Orphan detected - remove it
+            let mut map = flow_stats_map.lock().await;
+            if map.remove(&key).is_ok() {
+                removed += 1;
+                crate::metrics::ebpf::inc_orphans_cleaned(1);
+                warn!(
+                    event.name = "orphan_scanner.entry_removed",
+                    flow.key = ?key,
+                    "removed orphaned eBPF entry (age exceeded threshold and not tracked in userspace)"
+                );
+            }
+            drop(map);
+        }
+
+        if removed > 0 {
+            warn!(
+                event.name = "orphan_scanner.scan_completed",
+                entries.scanned = scanned,
+                entries.removed = removed,
+                scan.interval_secs = scan_interval.as_secs(),
+                "orphan scanner completed - removed stale entries"
+            );
+        } else {
+            debug!(
+                event.name = "orphan_scanner.scan_completed_clean",
+                entries.scanned = scanned,
+                "orphan scanner completed - no orphans found"
+            );
         }
     }
 }
@@ -1119,6 +1299,8 @@ fn determine_flow_end_reason(
 
 #[cfg(test)]
 mod tests {
+    use mermin_common::IpVersion;
+
     use super::*;
 
     /// Helper to create test FlowStats with specific TCP flags

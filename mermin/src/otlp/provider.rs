@@ -469,11 +469,14 @@ pub async fn init_provider(
 pub async fn init_internal_tracing(
     log_level: Level,
     span_fmt: SpanFmt,
+    log_color: bool,
     stdout: Option<StdoutExportOptions>,
     otlp: Option<OtlpExportOptions>,
 ) -> Result<(), OtlpError> {
     let provider = init_provider(stdout, otlp).await?;
-    let mut fmt_layer = Layer::new().with_span_events(FmtSpan::from(span_fmt));
+    let mut fmt_layer = Layer::new()
+        .with_span_events(FmtSpan::from(span_fmt))
+        .with_ansi(log_color);
 
     match log_level {
         Level::DEBUG => fmt_layer = fmt_layer.with_file(true).with_line_number(true),
@@ -489,7 +492,7 @@ pub async fn init_internal_tracing(
             // Format {
             //     format: Full,
             //     timer: SystemTime,
-            //     ansi: None, // conditionally set based on environment, handled by tracing-subscriber
+            //     ansi: set explicitly via with_ansi() based on log_color configuration
             //     display_timestamp: true,
             //     display_target: true,
             //     display_level: true,
