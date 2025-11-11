@@ -13,7 +13,7 @@ This example is intended only for demonstration, testing, or proof-of-concept us
 
 Notes on the example deployment:
 
-- [Location in the repository](https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/netobserv_os_simple_gke_gw/) - `docs/deployment/examples/netobserv_os_simple_gke_gw`
+- [Location in the repository](docs/deployment/examples/netobserv_os_simple_gke_gw/) - `docs/deployment/examples/netobserv_os_simple_gke_gw`
 - This example assumes you can access internal GCP subnets via a VPN.
 - Namespace used in the example: `elastiflow`.
 - GKE [node auto-provisioning](https://cloud.google.com/kubernetes-engine/docs/how-to/node-auto-provisioning) must be enabled.
@@ -41,14 +41,14 @@ This installation assumes that no additional DNS controllers are running in the 
     <details>
     <summary>values.yaml</summary>
 
-    <!-- {% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/netobserv_os_simple_gke_gw/values.yaml" %} -->
+    {% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/netobserv_os_simple_gke_gw/values.yaml" %}
 
     </details>
 
     <details>
     <summary>config.hcl</summary>
 
-    <!-- {% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/netobserv_os_simple_gke_gw/config.hcl" %} -->
+    {% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/docs/deployment/examples/netobserv_os_simple_gke_gw/config.hcl" %}
 
     </details>
 
