@@ -6,7 +6,7 @@ We plan to update the beta image multiple times throughout this beta period. We 
 
 ### Accessing the Beta Image
 
-> **Version Requirement**: v0.1.0-beta.23 or higher
+> **Version Requirement**: v0.1.0-beta.24 or higher
 
 Before starting, add the beta Helm chart:
 
@@ -20,7 +20,7 @@ helm repo update
 
 To view flows with Kubernetes metadata enrichment, Mermin requires four core configuration blocks: Network Interface Discovery, Kubernetes Informer, Flow-to-Kubernetes Attribute Mapping & Export.
 
-An example configuration is available here: [Example config.hcl](../../charts/mermin/config/examples/config.hcl).&#x20;
+An example configuration is available here: [Example Configuration](https://elastiflow-1.gitbook.io/mermin-documentation/welcome/beta-program#configuration-essentials)
 
 <details>
 
@@ -61,7 +61,7 @@ Default:
 **Use cases**: Fine-tuning for specific CNI setups, reducing monitored interface count
 
 {% hint style="info" %}
-Mermin's goal is to show you pod-to-pod traffic which is exposed by Virtual Ethernet Devices, which match patterns like `"veth*", "gke*"``, "cali*"`. Currently, bridge interfaces like `"tun*"` or `flannel*` are ignored, because Mermin does not support parsing tunneled/encapsulated traffic. This feature will come very soon.
+Mermin's goal is to show you pod-to-pod traffic which is exposed by Virtual Ethernet Devices, which match patterns like `"veth*", "gke*", "cali*"`. Currently, bridge interfaces like `"tun*"` or `flannel*` are ignored, because Mermin does not support parsing tunneled/encapsulated traffic. This feature will come very soon.
 {% endhint %}
 
 #### **Physical Interfaces Only**
@@ -244,11 +244,6 @@ Feedback Channels
 ```
 {% endcode %}
 
-### Next Steps
+### Example Configuration
 
-* **Full Deployment Guide** - Production deployment with OTLP
-* **OTLP Configuration** - Export to observability backends
-* **Integrations** - Connect to Grafana, Elastic, Tempo, Jaeger
-* **Architecture Overview** - How Mermin works
-* **Configuration Reference** - Complete configuration options
-* **Troubleshooting** - Common issues and solutions
+{% @github-files/github-code-block url="https://github.com/elastiflow/mermin/blob/beta/charts/mermin/config/examples/config.hcl" %}
