@@ -134,9 +134,9 @@ kubectl -n elastiflow get pods -l app.kubernetes.io/name=mermin
 ```
 
 * **Additional Helm deployment examples**
-  * [Mermin with OpenTelemetry Collector](deployment/examples/local_otel/README.md)
-  * [Mermin with NetObserv Flow and OpenSearch](deployment/examples/netobserv_os_simple_svc/README.md)
-  * [Mermin with NetObserv Flow and OpenSearch in GKE with Gateway](deployment/examples/netobserv_os_simple_gke_gw/README.md)
+  * [Mermin with OpenTelemetry Collector](../deployment/examples/local_otel/README.md)
+  * [Mermin with NetObserv Flow and OpenSearch](../deployment/examples/netobserv_os_simple_svc/README.md)
+  * [Mermin with NetObserv Flow and OpenSearch in GKE with Gateway](../deployment/examples/netobserv_os_simple_gke_gw/README.md)
 
 ### See Your First Flows
 
@@ -248,10 +248,3 @@ Feedback Channels
 - Additional Context: [Any other relevant information - recent changes, specific workloads, etc.]
 ```
 {% endcode %}
-
-### Example Configuration
-
-* **Helm deployment examples** 
-  * [Mermin with OpenTelemetry Collector](deployment/examples/local_otel/README.md)
-  * [Mermin with NetObserv Flow and OpenSearch](deployment/examples/netobserv_os_simple_svc/README.md)
-  * [Mermin with NetObserv Flow and OpenSearch in GKE with Gateway](deployment/examples/netobserv_os_simple_gke_gw/README.md)
