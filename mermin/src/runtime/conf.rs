@@ -65,6 +65,7 @@ pub struct Conf {
     pub config_path: Option<std::path::PathBuf>,
     #[serde(with = "level")]
     pub log_level: Level,
+    pub log_color: bool,
     pub auto_reload: bool,
     #[serde(with = "duration")]
     pub shutdown_timeout: Duration,
@@ -95,6 +96,7 @@ impl Default for Conf {
         Self {
             config_path: None,
             log_level: Level::INFO,
+            log_color: false,
             auto_reload: false,
             shutdown_timeout: defaults::shutdown_timeout(),
             packet_channel_capacity: defaults::packet_channel_capacity(),
@@ -937,6 +939,10 @@ mod tests {
                 crate::runtime::opts::SpanFmt::Full
             ),
             "default internal span_fmt should be Full"
+        );
+        assert!(
+            !cfg.log_color,
+            "default log_color should be false (colors disabled)"
         );
         assert!(
             cfg.internal.traces.stdout.is_none(),
