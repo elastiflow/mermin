@@ -35,6 +35,7 @@ Notes on the example deployment:
   helm upgrade -i --wait --timeout 15m \
     -f examples/local_otel/values_mermin.yaml \
     --set-file config.content=examples/local_otel/config.hcl \
+    --devel \
     mermin charts/mermin
   ```
 
@@ -55,8 +56,8 @@ In order to render K8s manifests you may use following commands
   ```sh
   rm -rf helm_rendered; helm template otel-collector \
     -f examples/local_otel/values_otel.yaml \
-    --output-dir helm_rendered \
-    open-telemetry/opentelemetry-collector
+    open-telemetry/opentelemetry-collector \
+    --output-dir helm_rendered
   ```
 
 - Mermin
@@ -65,6 +66,7 @@ In order to render K8s manifests you may use following commands
   rm -rf helm_rendered; helm template \
     -f examples/local_otel/values_mermin.yaml \
     --set-file config.content=examples/local_otel/config.hcl \
-    --output-dir helm_rendered \
-    mermin charts/mermin --devel
+    --devel \
+    mermin charts/mermin \
+    --output-dir helm_rendered
   ```

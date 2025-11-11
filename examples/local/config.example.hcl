@@ -1,3 +1,5 @@
+# OTLP exporter configuration
+# See OBI export concepts: https://opentelemetry.io/docs/zero-code/obi/configure/export-data/
 export "traces" {
   stdout = {
     format = "text_indent" // text, text_indent(*new), json, json_indent
@@ -25,6 +27,7 @@ export "traces" {
 }
 
 # TODO(mack#ENG-286|2025-11-04): attributes "source" and "destination" sections should be gone
+# Source attributes - maps flow source data to K8s resources
 attributes "source" "k8s" {
   extract {
     metadata = [
@@ -114,6 +117,7 @@ attributes "source" "k8s" {
   }
 }
 
+# Destination attributes - maps flow destination data to K8s resources
 attributes "destination" "k8s" {
   extract {
     metadata = [
