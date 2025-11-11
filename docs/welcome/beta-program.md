@@ -6,7 +6,7 @@ We plan to update the beta image multiple times throughout this beta period. We 
 
 ### Accessing the Beta Image
 
-> **Version Requirement**: v0.1.0-beta.22 or higher
+> **Version Requirement**: v0.1.0-beta.23 or higher
 
 Before starting, add the beta Helm chart:
 
@@ -28,12 +28,10 @@ An example configuration is available here: [Example config.hcl](../../charts/me
 
 #### **CNI-Specific Patterns**
 
-Customize which interfaces to monitor for specific CNI configurations:
-
 ```hcl
 discovery "instrument" {
   # Kind / kindnet
-  interfaces = ["veth*"]
+  # interfaces = ["veth*"]
 
   # Flannel
   # interfaces = ["veth*", "flannel*", "vxlan*"]
@@ -49,15 +47,28 @@ discovery "instrument" {
 
   # AWS VPC CNI
   # interfaces = ["veth*", "eni*"]
-
 }
+```
+
+Default:
+
+```
+"veth*", "tunl*", "ip6tnl*", "vxlan*", "flannel*", "cali*", "cilium_", "lxc", "gke*", "eni*", "ovn-k8s*"
 ```
 
 **What you'll see**: All pod-to-pod traffic (inter-node and intra-node)\
 **What you'll miss**: Traffic on other CNI-specific interfaces not listed\
 **Use cases**: Fine-tuning for specific CNI setups, reducing monitored interface count
 
+{% hint style="info" %}
+Mermin's goal is to show you pod-to-pod traffic which is exposed by Virtual Ethernet Devices, which match patterns like `"veth*", "gke*"``, "cali*"`. Currently, bridge interfaces like `"tun*"` or `flannel*` are ignored, because Mermin does not support parsing tunneled/encapsulated traffic. This feature will come very soon.
+{% endhint %}
+
 #### **Physical Interfaces Only**
+
+{% hint style="warning" %}
+Most of the traffic on the physical interfaces will be ignored, because Mermin currently lacks support for tunneled/encapsulated traffic.
+{% endhint %}
 
 Monitor only physical network interfaces for inter-node traffic:
 
@@ -68,8 +79,7 @@ discovery "instrument" {
 ```
 
 **What you'll see**: Inter-node pod traffic, node-to-node traffic, external connections\
-**What you'll miss**: Same-node pod-to-pod communication (never hits physical interfaces)\
-
+**What you'll miss**: Same-node pod-to-pod communication (never hits physical interfaces)
 
 **Trade-offs**: Lower overhead (fewer interfaces), incomplete visibility, may cause flow duplication if combined with veth monitoring\
 **Use cases**: Infrastructure-focused monitoring, cost-sensitive deployments, clusters with minimal same-node communication
@@ -179,11 +189,11 @@ Mermin has been tested and verified on the following platforms:
 
 | Platform         | Status    | Minimum Version |
 | ---------------- | --------- | --------------- |
-| Debian 13        | Supported | Latest kernels  |
+| Debian 13        | Supported | All versions    |
 | Debian 12        | Supported | As of beta.21   |
 | GKE Standard     | Supported | As of beta.21   |
 | GKE Autopilot    | Supported | As of beta.21   |
-| Kind (local dev) | Supported | All versions    |
+| Kind (local dev) | Supported | As of beta.21   |
 
 **Important:** eBPF verifier requirements vary between kernel versions. If you encounter eBPF program loading failures, include your kernel version when reporting the issue.
 
