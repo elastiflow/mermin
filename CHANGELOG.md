@@ -1,3 +1,13 @@
+## [v0.1.0-beta.26] - 2025-11-11
+
+### Features
+
+- **helm:** Add "extraObjects" Helm value (#271)
+
+[v0.1.0-beta.25..v0.1.0-beta.26](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.25...v0.1.0-beta.26)
+
+
+
 ## [v0.1.0-beta.25] - 2025-11-11
 
 ### Bug Fixes
