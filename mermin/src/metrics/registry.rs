@@ -74,26 +74,12 @@ lazy_static! {
     // Flow Lifecycle Metrics
     // ============================================================================
 
-    /// Total number of flows created.
-    pub static ref FLOWS_CREATED: IntCounterVec = IntCounterVec::new(
-        Opts::new("mermin_flows_created_total", "Total number of flows created")
-            .namespace("mermin"),
-        &["interface"]
-    ).expect("failed to create flows_created metric");
-
     /// Total number of flows expired/removed.
     pub static ref FLOWS_EXPIRED: IntCounterVec = IntCounterVec::new(
         Opts::new("mermin_flows_expired_total", "Total number of flows expired")
             .namespace("mermin"),
         &["reason"]  // timeout, recorded, error, guard_cleanup
     ).expect("failed to create flows_expired metric");
-
-    /// Current number of active flows being tracked.
-    pub static ref FLOWS_ACTIVE: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("mermin_flows_active", "Current number of active flows")
-            .namespace("mermin"),
-        &["interface"]
-    ).expect("failed to create flows_active metric");
 
     /// Histogram of flow durations.
     pub static ref FLOW_DURATION: Histogram = Histogram::with_opts(
@@ -150,6 +136,81 @@ lazy_static! {
             .namespace("mermin"),
         &["interface", "direction"]
     ).expect("failed to create bytes_total metric");
+
+    // ============================================================================
+    // eBPF Parsing & Error Metrics
+    // ============================================================================
+
+    /// Total number of eBPF parsing errors by type and interface.
+    pub static ref EBPF_PARSING_ERRORS: IntCounterVec = IntCounterVec::new(
+        Opts::new("ebpf_parsing_errors_total", "Total eBPF parsing errors by type")
+            .namespace("mermin"),
+        &["error_type", "interface"]
+    ).expect("failed to create ebpf_parsing_errors metric");
+
+    /// Total number of ring buffer events received.
+    pub static ref EBPF_RING_BUFFER_EVENTS: IntCounterVec = IntCounterVec::new(
+        Opts::new("ebpf_ring_buffer_events_total", "Total ring buffer events received")
+            .namespace("mermin"),
+        &["interface"]
+    ).expect("failed to create ebpf_ring_buffer_events metric");
+
+    /// Total number of flow worker events processed.
+    pub static ref FLOW_WORKER_EVENTS_PROCESSED: IntCounterVec = IntCounterVec::new(
+        Opts::new("flow_worker_events_processed_total", "Total events processed by flow workers")
+            .namespace("mermin"),
+        &["worker_id"]
+    ).expect("failed to create flow_worker_events_processed metric");
+
+    /// Current depth of flow worker queues.
+    pub static ref FLOW_WORKER_QUEUE_DEPTH: IntGaugeVec = IntGaugeVec::new(
+        Opts::new("flow_worker_queue_depth", "Current depth of flow worker queues")
+            .namespace("mermin"),
+        &["worker_id"]
+    ).expect("failed to create flow_worker_queue_depth metric");
+
+    /// Total number of eBPF map lookup errors.
+    pub static ref EBPF_MAP_LOOKUP_ERRORS: IntCounterVec = IntCounterVec::new(
+        Opts::new("ebpf_map_lookup_errors_total", "Total eBPF map lookup errors")
+            .namespace("mermin"),
+        &["map"]
+    ).expect("failed to create ebpf_map_lookup_errors metric");
+
+    /// Total number of eBPF map update/insert errors.
+    pub static ref EBPF_MAP_UPDATE_ERRORS: IntCounterVec = IntCounterVec::new(
+        Opts::new("ebpf_map_update_errors_total", "Total eBPF map update/insert errors")
+            .namespace("mermin"),
+        &["map"]
+    ).expect("failed to create ebpf_map_update_errors metric");
+
+    // ============================================================================
+    // Protocol Distribution Metrics
+    // ============================================================================
+
+    /// Total number of flows by protocol.
+    pub static ref FLOWS_BY_PROTOCOL: IntCounterVec = IntCounterVec::new(
+        Opts::new("flows_by_protocol_total", "Total flows by protocol type")
+            .namespace("mermin"),
+        &["protocol", "interface"]
+    ).expect("failed to create flows_by_protocol metric");
+
+    /// Current number of active flows by protocol.
+    pub static ref FLOWS_ACTIVE_BY_PROTOCOL: IntGaugeVec = IntGaugeVec::new(
+        Opts::new("flows_active_by_protocol", "Current active flows by protocol")
+            .namespace("mermin"),
+        &["protocol", "interface"]
+    ).expect("failed to create flows_active_by_protocol metric");
+
+    // ============================================================================
+    // Packet Filter Metrics
+    // ============================================================================
+
+    /// Total number of packets filtered/dropped by userspace filter.
+    pub static ref PACKETS_FILTERED: IntCounterVec = IntCounterVec::new(
+        Opts::new("packets_filtered_total", "Total packets filtered by userspace filter")
+            .namespace("mermin"),
+        &["interface", "reason"]
+    ).expect("failed to create packets_filtered metric");
 }
 
 /// Initialize the metrics registry by registering all collectors.
@@ -167,9 +228,7 @@ pub fn init_registry() -> Result<(), prometheus::Error> {
     REGISTRY.register(Box::new(TC_PROGRAMS_DETACHED.clone()))?;
 
     // Flow metrics
-    REGISTRY.register(Box::new(FLOWS_CREATED.clone()))?;
     REGISTRY.register(Box::new(FLOWS_EXPIRED.clone()))?;
-    REGISTRY.register(Box::new(FLOWS_ACTIVE.clone()))?;
     REGISTRY.register(Box::new(FLOW_DURATION.clone()))?;
 
     // Export metrics
@@ -181,6 +240,21 @@ pub fn init_registry() -> Result<(), prometheus::Error> {
     // Interface metrics
     REGISTRY.register(Box::new(PACKETS_TOTAL.clone()))?;
     REGISTRY.register(Box::new(BYTES_TOTAL.clone()))?;
+
+    // eBPF parsing & error metrics
+    REGISTRY.register(Box::new(EBPF_PARSING_ERRORS.clone()))?;
+    REGISTRY.register(Box::new(EBPF_RING_BUFFER_EVENTS.clone()))?;
+    REGISTRY.register(Box::new(FLOW_WORKER_EVENTS_PROCESSED.clone()))?;
+    REGISTRY.register(Box::new(FLOW_WORKER_QUEUE_DEPTH.clone()))?;
+    REGISTRY.register(Box::new(EBPF_MAP_LOOKUP_ERRORS.clone()))?;
+    REGISTRY.register(Box::new(EBPF_MAP_UPDATE_ERRORS.clone()))?;
+
+    // Protocol distribution metrics
+    REGISTRY.register(Box::new(FLOWS_BY_PROTOCOL.clone()))?;
+    REGISTRY.register(Box::new(FLOWS_ACTIVE_BY_PROTOCOL.clone()))?;
+
+    // Packet filter metrics
+    REGISTRY.register(Box::new(PACKETS_FILTERED.clone()))?;
 
     Ok(())
 }

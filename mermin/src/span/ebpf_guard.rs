@@ -45,10 +45,11 @@ use std::sync::{
 
 use aya::maps::HashMap as EbpfHashMap;
 use mermin_common::FlowKey;
+use network_types::ip::IpProto;
 use tokio::sync::Mutex;
 use tracing::warn;
 
-use crate::metrics::flow::inc_flows_expired;
+use crate::metrics::flow::inc_flows_expired_by_protocol;
 
 /// RAII guard for eBPF flow map entries.
 ///
@@ -118,7 +119,8 @@ impl Drop for EbpfFlowGuard {
                     );
 
                     // Metrics: Flow expired via guard cleanup (error path)
-                    inc_flows_expired("unknown", "guard_cleanup");
+                    let protocol = protocol_to_string(key.protocol);
+                    inc_flows_expired_by_protocol(protocol, "unknown", "guard_cleanup");
                 }
             });
         }
@@ -145,5 +147,18 @@ mod tests {
         let should_keep = Arc::new(AtomicBool::new(false));
         should_keep.store(true, Ordering::Release);
         assert!(should_keep.load(Ordering::Acquire));
+    }
+}
+
+/// Convert IpProto to a string for metrics labels.
+fn protocol_to_string(protocol: IpProto) -> &'static str {
+    match protocol {
+        IpProto::Tcp => "tcp",
+        IpProto::Udp => "udp",
+        IpProto::Icmp => "icmp",
+        IpProto::Ipv6Icmp => "icmpv6",
+        IpProto::Sctp => "sctp",
+        IpProto::Gre => "gre",
+        _ => "other",
     }
 }

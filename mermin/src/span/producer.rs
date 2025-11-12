@@ -296,6 +296,11 @@ impl FlowSpanProducer {
                 let flow_event: FlowEvent =
                     unsafe { std::ptr::read_unaligned(item.as_ptr() as *const FlowEvent) };
 
+                // Track ring buffer events received
+                // Note: We don't have direct access to ifindex here, will track as "all"
+                // Individual workers will track per-interface metrics when processing
+                metrics::ebpf::inc_ring_buffer_events("all");
+
                 let mut sent = false;
                 for attempt in 0..worker_count {
                     let current_worker = (worker_index + attempt) % worker_count;
@@ -407,6 +412,9 @@ impl FlowWorker {
         );
 
         while let Some(flow_event) = self.flow_event_rx.recv().await {
+            // Track worker activity
+            metrics::ebpf::inc_flow_worker_events(self.worker_id);
+
             if let Err(e) = self.process_new_flow(flow_event).await {
                 warn!(
                     event.name = "flow.processing_failed",
@@ -479,8 +487,16 @@ impl FlowWorker {
         // The scoped block ensures the lock is dropped before expensive filtering logic.
         let stats = {
             let map = self.flow_stats_map.lock().await;
-            map.get(&event.flow_key, 0)
-                .map_err(|_| Error::FlowNotFound)?
+            map.get(&event.flow_key, 0).map_err(|e| {
+                metrics::ebpf::inc_map_lookup_errors("flow_stats");
+                trace!(
+                    event.name = "ebpf.map_lookup_failed",
+                    worker.id = self.worker_id,
+                    error.message = %e,
+                    "failed to lookup flow stats in eBPF map"
+                );
+                Error::FlowNotFound
+            })?
         };
 
         // Early flow filtering: Check if this flow should be tracked
@@ -783,13 +799,15 @@ impl FlowWorker {
             })
         };
 
-        // Metrics: Extract interface name before moving flow_span
+        // Metrics: Extract interface name and protocol before moving flow_span
         let iface_name = flow_span
             .attributes
             .network_interface_name
             .as_deref()
             .unwrap_or("unknown");
-        metrics::flow::inc_flows_created(iface_name);
+        let protocol_name = protocol_to_string(flow_span.attributes.network_transport);
+        
+        metrics::flow::inc_flows_created_by_protocol(protocol_name, iface_name);
 
         let flow_entry = FlowEntry {
             flow_span,
@@ -1092,7 +1110,10 @@ async fn timeout_task_loop(
                     .network_interface_name
                     .as_deref()
                     .unwrap_or("unknown");
-                metrics::flow::inc_flows_expired(iface_name, "timeout");
+                
+                // Track protocol-specific flow expiry
+                let protocol_name = protocol_to_string(flow_span.attributes.network_transport);
+                metrics::flow::inc_flows_expired_by_protocol(protocol_name, iface_name, "timeout");
 
                 if let Ok(duration) = flow_span.end_time.duration_since(flow_span.start_time) {
                     metrics::flow::observe_flow_duration(duration);
@@ -1157,6 +1178,19 @@ pub async fn orphan_scanner_task(
         let userspace_entries = flow_store.len() as u64;
         metrics::ebpf::set_map_entries(ebpf_map_entries);
         metrics::ebpf::set_userspace_flows(userspace_entries);
+
+        // Set map capacity (from eBPF program: 1M max entries)
+        // TODO: Query this from the map metadata when aya supports it
+        let map_capacity = 1_000_000u64;
+        crate::metrics::registry::EBPF_MAP_CAPACITY
+            .with_label_values(&["flow_stats"])
+            .set(map_capacity as i64);
+
+        // Calculate and set utilization ratio
+        let utilization_ratio = ebpf_map_entries as f64 / map_capacity as f64;
+        crate::metrics::registry::EBPF_MAP_UTILIZATION
+            .with_label_values(&["flow_stats"])
+            .set(utilization_ratio);
 
         for key in keys {
             scanned += 1;
@@ -1294,6 +1328,19 @@ fn determine_flow_end_reason(
         }
     } else {
         default_reason
+    }
+}
+
+/// Convert IpProto to a string for metrics labels.
+fn protocol_to_string(protocol: IpProto) -> &'static str {
+    match protocol {
+        IpProto::Tcp => "tcp",
+        IpProto::Udp => "udp",
+        IpProto::Icmp => "icmp",
+        IpProto::Ipv6Icmp => "icmpv6",
+        IpProto::Sctp => "sctp",
+        IpProto::Gre => "gre",
+        _ => "other",
     }
 }
 
