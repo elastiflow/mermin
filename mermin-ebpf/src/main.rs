@@ -223,8 +223,11 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
         FLOW_STATS_MAP.get(&normalized_key).is_none()
     };
 
-    if is_new_flow {
-        let timestamp = unsafe { bpf_ktime_get_boot_ns() };
+    let timestamp = unsafe { bpf_ktime_get_boot_ns() };
+
+    // Get or create flow stats entry
+    #[allow(static_mut_refs)]
+    let stats_ptr = if is_new_flow {
         let ifindex = unsafe { (*ctx.skb.skb).ifindex };
 
         // Use per-CPU scratch space to initialize FlowStats (avoids stack overflow)
@@ -243,6 +246,8 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
         stats.dst_ip = flow_key.dst_ip;
         stats.src_port = flow_key.src_port;
         stats.dst_port = flow_key.dst_port;
+        stats.forward_metadata_seen = 1;
+        stats.reverse_metadata_seen = 0;
 
         let parsed_offset = parse_metadata(ctx, stats)?;
 
@@ -291,11 +296,23 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
                 flow_key.protocol as u8
             );
         }
-    }
 
-    let timestamp = unsafe { bpf_ktime_get_boot_ns() };
+        // Get pointer to the entry we just inserted
+        #[allow(static_mut_refs)]
+        unsafe {
+            FLOW_STATS_MAP.get_ptr_mut(&normalized_key)
+        }
+    } else {
+        // Get pointer to existing entry
+        #[allow(static_mut_refs)]
+        unsafe {
+            FLOW_STATS_MAP.get_ptr_mut(&normalized_key)
+        }
+    };
+
+    // Update stats for current packet (works for both new and existing flows)
     #[allow(static_mut_refs)]
-    if let Some(stats_ptr) = unsafe { FLOW_STATS_MAP.get_ptr_mut(&normalized_key) } {
+    if let Some(stats_ptr) = stats_ptr {
         let stats = unsafe { &mut *stats_ptr };
         stats.last_seen_ns = timestamp;
 
@@ -322,6 +339,64 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
 
             if let Ok(current_flags) = ctx.load::<tcp::Flags>(tcp_offset + tcp::TCP_FLAGS_OFFSET) {
                 stats.tcp_flags |= current_flags;
+            }
+        }
+
+        if is_forward && stats.forward_metadata_seen == 0 {
+            let offset = eth::ETH_LEN;
+            match eth_type {
+                EtherType::Ipv4 => {
+                    if let (Ok(dscp_ecn), Ok(ttl)) = (
+                        ctx.load::<ipv4::DscpEcn>(offset + ipv4::IPV4_DSCP_ECN_OFFSET),
+                        ctx.load::<ipv4::Ttl>(offset + ipv4::IPV4_TTL_OFFSET),
+                    ) {
+                        stats.ip_dscp = ipv4::dscp(dscp_ecn);
+                        stats.ip_ecn = ipv4::ecn(dscp_ecn);
+                        stats.ip_ttl = ttl;
+                        stats.forward_metadata_seen = 1;
+                    }
+                }
+                EtherType::Ipv6 => {
+                    if let (Ok(vtcfl), Ok(hop_limit)) = (
+                        ctx.load::<ipv6::Vcf>(offset),
+                        ctx.load::<ipv6::HopLimit>(offset + ipv6::IPV6_HOP_LIMIT_OFFSET),
+                    ) {
+                        stats.ip_dscp = ipv6::dscp(vtcfl);
+                        stats.ip_ecn = ipv6::ecn(vtcfl);
+                        stats.ip_flow_label = ipv6::flow_label(vtcfl);
+                        stats.ip_ttl = hop_limit;
+                        stats.forward_metadata_seen = 1;
+                    }
+                }
+                _ => {}
+            }
+        } else if !is_forward && stats.reverse_metadata_seen == 0 {
+            let offset = eth::ETH_LEN;
+            match eth_type {
+                EtherType::Ipv4 => {
+                    if let (Ok(dscp_ecn), Ok(ttl)) = (
+                        ctx.load::<ipv4::DscpEcn>(offset + ipv4::IPV4_DSCP_ECN_OFFSET),
+                        ctx.load::<ipv4::Ttl>(offset + ipv4::IPV4_TTL_OFFSET),
+                    ) {
+                        stats.reverse_ip_dscp = ipv4::dscp(dscp_ecn);
+                        stats.reverse_ip_ecn = ipv4::ecn(dscp_ecn);
+                        stats.reverse_ip_ttl = ttl;
+                        stats.reverse_metadata_seen = 1;
+                    }
+                }
+                EtherType::Ipv6 => {
+                    if let (Ok(vtcfl), Ok(hop_limit)) = (
+                        ctx.load::<ipv6::Vcf>(offset),
+                        ctx.load::<ipv6::HopLimit>(offset + ipv6::IPV6_HOP_LIMIT_OFFSET),
+                    ) {
+                        stats.reverse_ip_dscp = ipv6::dscp(vtcfl);
+                        stats.reverse_ip_ecn = ipv6::ecn(vtcfl);
+                        stats.reverse_ip_flow_label = ipv6::flow_label(vtcfl);
+                        stats.reverse_ip_ttl = hop_limit;
+                        stats.reverse_metadata_seen = 1;
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -475,6 +550,7 @@ fn parse_metadata(ctx: &TcContext, stats: &mut FlowStats) -> Result<usize, Error
         .map_err(|_| Error::OutOfBounds)?;
     offset += eth::ETH_LEN;
 
+    // Parse IP metadata (DSCP, ECN, TTL, flow label) - first packet is always forward direction
     offset = match stats.ether_type {
         EtherType::Ipv4 => {
             let ihl = ipv4::ihl(
@@ -684,10 +760,16 @@ mod tests {
             ip_dscp: 0,
             ip_ecn: 0,
             ip_ttl: 0,
+            reverse_ip_dscp: 0,
+            reverse_ip_ecn: 0,
+            reverse_ip_ttl: 0,
             ip_flow_label: 0,
+            reverse_ip_flow_label: 0,
             tcp_flags: 0,
             icmp_type: 0,
             icmp_code: 0,
+            forward_metadata_seen: 0,
+            reverse_metadata_seen: 0,
         }
     }
 
