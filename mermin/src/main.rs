@@ -520,14 +520,6 @@ fn display_error(error: &MerminError) {
             eprintln!("   - Run with elevated privileges");
         }
 
-        MerminError::EbpfMap(msg) => {
-            eprintln!("❌ eBPF Map Error");
-            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-            eprintln!("{msg}\n");
-            eprintln!("💡 This is likely a compilation or loading issue.");
-            eprintln!("   Try rebuilding the project.");
-        }
-
         MerminError::Otlp(e) => {
             eprintln!("❌ OpenTelemetry Error");
             eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
