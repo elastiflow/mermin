@@ -11,7 +11,7 @@ This example deploys Mermin with the OpenTelemetry Collector for testing purpose
 
 Notes on the example deployment:
 
-* [Location in the reporistory](https://github.com/elastiflow/mermin/tree/beta/docs/deployment/examples/local_otel) - `docs/deployment/examples/local_otel`
+* [Location in the repository](https://github.com/elastiflow/mermin/tree/beta/docs/deployment/examples/local_otel) - `docs/deployment/examples/local_otel`
 * Deployment happens in the "current" namespace
 * You may optionally customize and use `config.hcl` instead of the default config.
 * Mermin values use `mermin:latest` image, it is expected you build it and load to your K8s cluster
@@ -19,7 +19,7 @@ Notes on the example deployment:
 ## Install
 
 * Create a values file for the OTEL Collector  with [contents](values_otel.yaml) or use one from the repo
-*   Deploy the OTEL Collector chart
+* Deploy the OTEL Collector chart
 
     ```sh
     # Deploy OpenTelemetry Collector
@@ -30,7 +30,7 @@ Notes on the example deployment:
 
     ```
 * Create config file for the Mermin with [contents](config.hcl) or use one from the repo
-*   Deploy the Mermin chart
+* Deploy the Mermin chart
 
     ```sh
     helm repo add mermin https://elastiflow.github.io/mermin/
@@ -39,7 +39,7 @@ Notes on the example deployment:
       --devel \
       mermin mermin/mermin
     ```
-*   Optionally install `metrics-server` to get metrics if it has not been installed yet
+* Optionally install `metrics-server` to get metrics if it has not been installed yet
 
     ```sh
     kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.8.0/components.yaml
@@ -51,7 +51,7 @@ Notes on the example deployment:
 
 In order to render K8s manifests you may use following commands
 
-*   OpenTelemetry Collector
+* OpenTelemetry Collector
 
     ```sh
     rm -rf helm_rendered; helm template \
@@ -62,7 +62,7 @@ In order to render K8s manifests you may use following commands
     # Diff with existing K8s resources
     kubectl diff -R -f helm_rendered/mermin/    
     ```
-*   Mermin
+* Mermin
 
     ```sh
     rm -rf helm_rendered; helm template \
