@@ -30,7 +30,7 @@ lazy_static! {
     ).expect("failed to create ebpf_map_capacity metric");
 
     pub static ref EBPF_MAP_UTILIZATION: GaugeVec = GaugeVec::new(
-        Opts::new("ebpf_map_utilization_ratio", "Utilization ratio of eBPF maps")
+        Opts::new("ebpf_map_utilization_ratio", "Utilization ratio of eBPF maps (0.0-1.0)")
             .namespace("mermin"),
         &["map"]
     ).expect("failed to create ebpf_map_utilization metric");
