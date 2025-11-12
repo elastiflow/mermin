@@ -38,7 +38,7 @@ This installation assumes that no additional DNS controllers are running in the 
   * Create values and a config files for the Mermin Umbrella chart (or use ones from the repo)
     * Values [contents](values.yaml)
     * Config [contents](config.hcl)
-  *   Add Helm charts and Deploy
+  * Add Helm charts and Deploy
 
       ```sh
       helm repo add mermin https://elastiflow.github.io/mermin/
@@ -54,12 +54,12 @@ This installation assumes that no additional DNS controllers are running in the 
         mermin mermin/mermin-netobserv-os-stack
       ```
 * Phase 2:
-  *   Get the NetObserv Gateway (Load Balancer) IP
+  * Get the NetObserv Gateway (Load Balancer) IP
 
       ```sh
       kubectl get gtw netobserv-flow -o=jsonpath='{.status.addresses[0].value}'
       ```
-  *   Modify `export.traces.otlp.endpoint` in the `config.hcl` to the value from the previous step and redeploy the chart
+  * Modify `export.traces.otlp.endpoint` in the `config.hcl` to the value from the previous step and redeploy the chart
 
       ```sh
       helm upgrade -i --wait --timeout 15m -n elastiflow \

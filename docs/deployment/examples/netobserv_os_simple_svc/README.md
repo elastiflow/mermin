@@ -25,7 +25,7 @@ Notes on the example deployment:
 * Create values and a config file for the Mermin Umbrella chart (or use ones from the repo)
   * Values [contents](values.yaml)
   * Config [contents](config.hcl)
-*   Add Helm charts and Deploy
+* Add Helm charts and Deploy
 
     ```sh
     helm repo add mermin https://elastiflow.github.io/mermin/
@@ -40,7 +40,7 @@ Notes on the example deployment:
       --devel \
       mermin mermin/mermin-netobserv-os-stack
     ```
-*   Optionally install `metrics-server` to get metrics if it has not been installed yet
+* Optionally install `metrics-server` to get metrics if it has not been installed yet
 
     ```sh
     kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.8.0/components.yaml
