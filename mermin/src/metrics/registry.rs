@@ -52,9 +52,9 @@ lazy_static! {
 
     /// Current number of flows tracked in userspace flow store.
     pub static ref EBPF_USERSPACE_FLOWS: IntGauge = IntGauge::new(
-        "mermin_ebpf_userspace_flows",
+        "mermin_userspace_flows",
         "Current number of flows tracked in userspace"
-    ).expect("failed to create ebpf_userspace_flows metric");
+    ).expect("failed to create userspace_flows metric");
 
     /// Total number of TC programs attached to interfaces.
     pub static ref TC_PROGRAMS_ATTACHED: IntCounterVec = IntCounterVec::new(
@@ -71,7 +71,46 @@ lazy_static! {
     ).expect("failed to create tc_programs_detached metric");
 
     // ============================================================================
-    // Flow Lifecycle Metrics
+    // Userspace Ring Buffer Metrics (subsystem: userspace)
+    // ============================================================================
+
+    /// Total number of packets processed from the ring buffer.
+    /// Type can be: received, dropped, filtered
+    pub static ref USERSPACE_RINGBUF_PACKETS: IntCounterVec = IntCounterVec::new(
+        Opts::new("userspace_ringbuf_packets_total", "Total number of packets in the userspace ring buffer")
+            .namespace("mermin"),
+        &["type"]  // received, dropped, filtered
+    ).expect("failed to create userspace_ringbuf_packets metric");
+
+    /// Total number of bytes received from the ring buffer.
+    pub static ref USERSPACE_RINGBUF_BYTES: IntCounter = IntCounter::new(
+        "mermin_userspace_ringbuf_bytes_total",
+        "Total number of bytes received from the userspace ring buffer"
+    ).expect("failed to create userspace_ringbuf_bytes metric");
+
+    /// Capacity of internal channels (for debugging).
+    pub static ref USERSPACE_CHANNEL_CAPACITY: IntGaugeVec = IntGaugeVec::new(
+        Opts::new("userspace_channel_capacity", "Capacity of internal channels")
+            .namespace("mermin"),
+        &["channel"]  // packet_worker, exporter
+    ).expect("failed to create userspace_channel_capacity metric");
+
+    /// Current number of items in internal channels (for debugging).
+    pub static ref USERSPACE_CHANNEL_SIZE: IntGaugeVec = IntGaugeVec::new(
+        Opts::new("userspace_channel_size", "Current number of items in channels")
+            .namespace("mermin"),
+        &["channel"]  // packet_worker, exporter
+    ).expect("failed to create userspace_channel_size metric");
+
+    /// Total number of channel send operations.
+    pub static ref USERSPACE_CHANNEL_SENDS: IntCounterVec = IntCounterVec::new(
+        Opts::new("userspace_channel_sends_total", "Total number of channel send operations")
+            .namespace("mermin"),
+        &["channel", "status"]  // status: success, error; channel: packet_worker, exporter
+    ).expect("failed to create userspace_channel_sends metric");
+
+    // ============================================================================
+    // Flow Span Lifecycle Metrics (subsystem: span)
     // ============================================================================
 
     pub static ref FLOW_EVENTS_DROPPED_BACKPRESSURE: IntCounter = IntCounter::with_opts(
@@ -273,6 +312,13 @@ pub fn init_registry() -> Result<(), prometheus::Error> {
     REGISTRY.register(Box::new(EBPF_USERSPACE_FLOWS.clone()))?;
     REGISTRY.register(Box::new(TC_PROGRAMS_ATTACHED.clone()))?;
     REGISTRY.register(Box::new(TC_PROGRAMS_DETACHED.clone()))?;
+
+    // Userspace metrics
+    REGISTRY.register(Box::new(USERSPACE_RINGBUF_PACKETS.clone()))?;
+    REGISTRY.register(Box::new(USERSPACE_RINGBUF_BYTES.clone()))?;
+    REGISTRY.register(Box::new(USERSPACE_CHANNEL_CAPACITY.clone()))?;
+    REGISTRY.register(Box::new(USERSPACE_CHANNEL_SIZE.clone()))?;
+    REGISTRY.register(Box::new(USERSPACE_CHANNEL_SENDS.clone()))?;
 
     // Flow metrics
     REGISTRY.register(Box::new(FLOW_EVENTS_DROPPED_BACKPRESSURE.clone()))?;

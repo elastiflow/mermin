@@ -5,3 +5,4 @@ pub mod flow;
 pub mod opts;
 pub mod registry;
 pub mod server;
+pub mod userspace;

@@ -178,6 +178,9 @@ impl FlowSpanProducer {
             let (worker_tx, worker_rx) = mpsc::channel(worker_capacity);
             worker_channels.push(worker_tx);
 
+            // Track channel capacity for debugging
+            metrics::userspace::set_channel_capacity("packet_worker", worker_capacity);
+
             let flow_worker = FlowWorker::new(
                 worker_id,
                 self.span_opts.clone(),
@@ -288,6 +291,11 @@ impl FlowSpanProducer {
                 let flow_event: FlowEvent =
                     unsafe { std::ptr::read_unaligned(item.as_ptr() as *const FlowEvent) };
 
+                // Track ring buffer packet reception
+                metrics::userspace::inc_ringbuf_packets("received", 1);
+                // Track bytes from the FlowEvent (snaplen is the actual packet length captured)
+                metrics::userspace::inc_ringbuf_bytes(flow_event.snaplen as u64);
+
                 let mut sent = false;
                 for attempt in 0..worker_count {
                     let current_worker = (worker_index + attempt) % worker_count;
@@ -295,6 +303,7 @@ impl FlowSpanProducer {
 
                     match worker_tx.try_send(flow_event) {
                         Ok(_) => {
+                            metrics::userspace::inc_channel_sends("packet_worker", "success");
                             worker_index = (current_worker + 1) % worker_count;
                             sent = true;
                             break;
@@ -305,6 +314,7 @@ impl FlowSpanProducer {
                         }
                         Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
                             // Worker is gone, try next one
+                            metrics::userspace::inc_channel_sends("packet_worker", "error");
                             continue;
                         }
                     }
@@ -416,6 +426,9 @@ impl FlowWorker {
         );
 
         while let Some(flow_event) = self.flow_event_rx.recv().await {
+            // Sample packet worker channel size after each receive
+            metrics::userspace::set_channel_size("packet_worker", self.flow_event_rx.len());
+
             if let Err(e) = self.process_new_flow(flow_event).await {
                 warn!(
                     event.name = "flow.processing_failed",
@@ -495,6 +508,9 @@ impl FlowWorker {
         // Early flow filtering: Check if this flow should be tracked
         // If filtered out, immediately remove from eBPF map to prevent memory leaks
         if !self.should_process_flow(&event.flow_key, &stats) {
+            // Track filtered packets
+            metrics::userspace::inc_ringbuf_packets("filtered", 1);
+
             let mut map = self.flow_stats_map.lock().await;
             if let Err(e) = map.remove(&event.flow_key) {
                 warn!(
