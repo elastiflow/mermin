@@ -437,26 +437,28 @@ impl Attributor {
             .map_err(|e| K8sError::ClientInitialization(Box::new(e)))?;
 
         let mut required_kinds = HashSet::new();
-        for provider_map in conf.attributes.values() {
-            if let Some(k8s_conf) = provider_map.get("k8s") {
-                let assoc = &k8s_conf.association;
-                if assoc.pod.is_some() {
-                    required_kinds.insert("pod".to_string());
-                }
-                if assoc.node.is_some() {
-                    required_kinds.insert("node".to_string());
-                }
-                if assoc.service.is_some() {
-                    required_kinds.insert("service".to_string());
-                }
-                if assoc.ingress.is_some() {
-                    required_kinds.insert("ingress".to_string());
-                }
-                if assoc.endpointslice.is_some() {
-                    required_kinds.insert("endpointslice".to_string());
-                }
-                if assoc.networkpolicy.is_some() {
-                    required_kinds.insert("networkpolicy".to_string());
+        if let Some(attributes_map) = &conf.attributes {
+            for provider_map in attributes_map.values() {
+                if let Some(k8s_conf) = provider_map.get("k8s") {
+                    let assoc = &k8s_conf.association;
+                    if assoc.pod.is_some() {
+                        required_kinds.insert("pod".to_string());
+                    }
+                    if assoc.node.is_some() {
+                        required_kinds.insert("node".to_string());
+                    }
+                    if assoc.service.is_some() {
+                        required_kinds.insert("service".to_string());
+                    }
+                    if assoc.ingress.is_some() {
+                        required_kinds.insert("ingress".to_string());
+                    }
+                    if assoc.endpointslice.is_some() {
+                        required_kinds.insert("endpointslice".to_string());
+                    }
+                    if assoc.networkpolicy.is_some() {
+                        required_kinds.insert("networkpolicy".to_string());
+                    }
                 }
             }
         }
@@ -1047,7 +1049,11 @@ async fn update_ip_index(
 ) {
     let mut new_index = HashMap::new();
 
-    if let Some(k8s_conf) = conf.attributes.values().find_map(|p| p.get("k8s")) {
+    if let Some(k8s_conf) = conf
+        .attributes
+        .as_ref()
+        .and_then(|attributes_map| attributes_map.values().find_map(|p| p.get("k8s")))
+    {
         let assoc = &k8s_conf.association;
 
         // Dynamically call the generic indexer for each configured object type.

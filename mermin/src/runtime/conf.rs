@@ -37,6 +37,7 @@ use crate::{
     otlp::opts::ExportOptions,
     runtime::{
         conf::conf_serde::{duration, level},
+        defaults::default_attributes,
         opts::InternalOptions,
     },
     span::opts::SpanOptions,
@@ -87,8 +88,16 @@ pub struct Conf {
     /// This field holds settings for filtering.
     pub filter: Option<HashMap<String, FilteringOptions>>,
     /// Configuration for flow-to-object association.
+    ///
+    /// By default, this is populated with rules to enable Kubernetes-aware
+    /// attribution for pods, services, and nodes for both "source" and
+    /// "destination" flows.
+    ///
+    /// This behavior can be disabled or customized by defining an `attributes`
+    /// block in the HCL configuration file. An empty `attributes {}` block
+    /// will disable the feature entirely.
     #[serde(default)]
-    pub attributes: HashMap<String, HashMap<String, AttributesConf>>,
+    pub attributes: Option<HashMap<String, HashMap<String, AttributesConf>>>,
 }
 
 impl Default for Conf {
@@ -109,7 +118,7 @@ impl Default for Conf {
             discovery: DiscoveryConf::default(),
             export: ExportOptions::default(),
             filter: None,
-            attributes: HashMap::new(),
+            attributes: None,
         }
     }
 }
@@ -159,7 +168,11 @@ impl Conf {
         figment = figment.merge(Serialized::defaults(&cli));
 
         let mut conf: Conf = figment.extract()?;
-
+        conf.attributes = match conf.attributes {
+            None => Some(default_attributes()),
+            Some(map) if map.is_empty() => None,
+            Some(map) => Some(map),
+        };
         conf.config_path = config_path_to_store;
 
         // Validate discovery.instrument configuration
@@ -209,6 +222,11 @@ impl Conf {
         figment = Self::merge_provider_for_path(figment, path)?;
 
         let mut conf: Conf = figment.extract()?;
+        conf.attributes = match conf.attributes {
+            None => Some(default_attributes()),
+            Some(map) if map.is_empty() => None,
+            Some(map) => Some(map),
+        };
         conf.config_path = self.config_path.clone();
 
         // Validate discovery.instrument configuration
