@@ -39,22 +39,22 @@ lazy_static! {
     ).expect("failed to create ebpf_map_utilization metric");
 
     /// Total number of dropped ring buffer events due to buffer full.
-    pub static ref EBPF_RING_BUFFER_DROPS: IntCounter = IntCounter::new(
-        "mermin_ebpf_ring_buffer_drops_total",
-        "Total number of ring buffer events dropped due to buffer full"
+    pub static ref EBPF_RING_BUFFER_DROPS: IntCounter = IntCounter::with_opts(
+        Opts::new("ebpf_ring_buffer_drops_total", "Total number of ring buffer events dropped due to buffer full")
+            .namespace("mermin")
     ).expect("failed to create ebpf_ring_buffer_drops metric");
 
     /// Total number of orphaned entries cleaned up by the orphan scanner.
-    pub static ref EBPF_ORPHANS_CLEANED: IntCounter = IntCounter::new(
-        "mermin_ebpf_orphans_cleaned_total",
-        "Total number of orphaned eBPF map entries cleaned up"
+    pub static ref EBPF_ORPHANS_CLEANED: IntCounter = IntCounter::with_opts(
+        Opts::new("ebpf_orphans_cleaned_total", "Total number of orphaned eBPF map entries cleaned up")
+            .namespace("mermin")
     ).expect("failed to create ebpf_orphans_cleaned metric");
 
     /// Current number of flows tracked in userspace flow store.
-    pub static ref EBPF_USERSPACE_FLOWS: IntGauge = IntGauge::new(
-        "mermin_userspace_flows",
-        "Current number of flows tracked in userspace"
-    ).expect("failed to create userspace_flows metric");
+    pub static ref EBPF_USERSPACE_FLOWS: IntGauge = IntGauge::with_opts(
+        Opts::new("flows", "Current number of flows tracked in userspace")
+            .namespace("mermin")
+    ).expect("failed to create flows metric");
 
     /// Total number of TC programs attached to interfaces.
     pub static ref TC_PROGRAMS_ATTACHED: IntCounterVec = IntCounterVec::new(
@@ -77,37 +77,37 @@ lazy_static! {
     /// Total number of packets processed from the ring buffer.
     /// Type can be: received, dropped, filtered
     pub static ref USERSPACE_RINGBUF_PACKETS: IntCounterVec = IntCounterVec::new(
-        Opts::new("userspace_ringbuf_packets_total", "Total number of packets in the userspace ring buffer")
+        Opts::new("ringbuf_packets_total", "Total number of packets in the userspace ring buffer")
             .namespace("mermin"),
         &["type"]  // received, dropped, filtered
-    ).expect("failed to create userspace_ringbuf_packets metric");
+    ).expect("failed to create ringbuf_packets metric");
 
     /// Total number of bytes received from the ring buffer.
-    pub static ref USERSPACE_RINGBUF_BYTES: IntCounter = IntCounter::new(
-        "mermin_userspace_ringbuf_bytes_total",
-        "Total number of bytes received from the userspace ring buffer"
-    ).expect("failed to create userspace_ringbuf_bytes metric");
+    pub static ref USERSPACE_RINGBUF_BYTES: IntCounter = IntCounter::with_opts(
+        Opts::new("ringbuf_bytes_total", "Total number of bytes received from the userspace ring buffer")
+            .namespace("mermin")
+    ).expect("failed to create ringbuf_bytes metric");
 
     /// Capacity of internal channels (for debugging).
     pub static ref USERSPACE_CHANNEL_CAPACITY: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("userspace_channel_capacity", "Capacity of internal channels")
+        Opts::new("channel_capacity", "Capacity of internal channels")
             .namespace("mermin"),
         &["channel"]  // packet_worker, exporter
-    ).expect("failed to create userspace_channel_capacity metric");
+    ).expect("failed to create channel_capacity metric");
 
     /// Current number of items in internal channels (for debugging).
     pub static ref USERSPACE_CHANNEL_SIZE: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("userspace_channel_size", "Current number of items in channels")
+        Opts::new("channel_size", "Current number of items in channels")
             .namespace("mermin"),
         &["channel"]  // packet_worker, exporter
-    ).expect("failed to create userspace_channel_size metric");
+    ).expect("failed to create channel_size metric");
 
     /// Total number of channel send operations.
     pub static ref USERSPACE_CHANNEL_SENDS: IntCounterVec = IntCounterVec::new(
-        Opts::new("userspace_channel_sends_total", "Total number of channel send operations")
+        Opts::new("channel_sends_total", "Total number of channel send operations")
             .namespace("mermin"),
         &["channel", "status"]  // status: success, error; channel: packet_worker, exporter
-    ).expect("failed to create userspace_channel_sends metric");
+    ).expect("failed to create channel_sends metric");
 
     // ============================================================================
     // Flow Span Lifecycle Metrics (subsystem: span)
@@ -223,9 +223,9 @@ lazy_static! {
     // ============================================================================
 
     /// Total number of spans successfully exported.
-    pub static ref SPANS_EXPORTED: IntCounter = IntCounter::new(
-        "mermin_export_spans_total",
-        "Total number of flow spans successfully exported"
+    pub static ref SPANS_EXPORTED: IntCounter = IntCounter::with_opts(
+        Opts::new("export_spans_total", "Total number of flow spans successfully exported")
+            .namespace("mermin")
     ).expect("failed to create spans_exported metric");
 
     /// Total number of span export errors.

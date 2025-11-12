@@ -426,7 +426,6 @@ impl FlowWorker {
         );
 
         while let Some(flow_event) = self.flow_event_rx.recv().await {
-            // Sample packet worker channel size after each receive
             metrics::userspace::set_channel_size("packet_worker", self.flow_event_rx.len());
 
             if let Err(e) = self.process_new_flow(flow_event).await {
