@@ -1,7 +1,10 @@
 use std::{collections::HashMap, error::Error, fmt, net::Ipv4Addr, path::Path, time::Duration};
 
 use figment::providers::Format;
-use hcl::eval::Context;
+use hcl::{
+    Value,
+    eval::{Context, FuncArgs, FuncDef, ParamType},
+};
 use serde::{Deserialize, Serialize};
 use tracing::{Level, warn};
 
@@ -45,6 +48,46 @@ use crate::{
 
 pub struct Hcl;
 
+fn env_func(args: FuncArgs) -> Result<Value, String> {
+    if !(1..=2).contains(&args.len()) {
+        return Err(format!(
+            "env function expects 1 or 2 arguments, but received {}",
+            args.len()
+        ));
+    }
+
+    let var_name = args[0].as_str().unwrap();
+    let default_value = if let Some(default_arg) = args.get(1) {
+        default_arg.as_str().unwrap().to_string()
+    } else {
+        String::new()
+    };
+
+    match std::env::var(var_name) {
+        Ok(value) => Ok(Value::String(value)),
+        Err(_) => {
+            if args.len() == 2 {
+                warn!(
+                    event.name = "hcl.func.env.fallback",
+                    variable.name = %var_name,
+                    fallback.reason = "environment_variable_not_set",
+                    fallback.value = %default_value,
+                    "environment variable not found, using provided default value"
+                );
+            } else {
+                warn!(
+                    event.name = "hcl.func.env.fallback",
+                    variable.name = %var_name,
+                    fallback.reason = "environment_variable_not_set",
+                    fallback.value = "",
+                    "environment variable not found, using empty string as default"
+                );
+            }
+            Ok(Value::String(default_value))
+        }
+    }
+}
+
 impl Format for Hcl {
     type Error = hcl::Error;
 
@@ -52,7 +95,15 @@ impl Format for Hcl {
     const NAME: &'static str = "HCL";
 
     fn from_str<T: serde::de::DeserializeOwned>(string: &str) -> Result<T, Self::Error> {
-        hcl::eval::from_str(string, &Context::new())
+        let mut context = Context::new();
+
+        let env_def = FuncDef::builder()
+            .variadic_param(ParamType::String)
+            .build(env_func);
+
+        context.declare_func("env", env_def);
+
+        hcl::eval::from_str(string, &context)
     }
 }
 
@@ -2771,5 +2822,57 @@ discovery:
                 priority
             );
         }
+    }
+
+    #[test]
+    fn test_env_function_in_hcl() {
+        Jail::expect_with(|jail| unsafe {
+            std::env::set_var("TEST_ENV_VAR", "test_value");
+            std::env::set_var("ANOTHER_TEST_VAR", "another_value");
+
+            let path = "env_test.hcl";
+            jail.create_file(
+                path,
+                r#"
+# Test env function with various scenarios
+discovery "instrument" {
+    interfaces = [env("TEST_ENV_VAR")]
+}
+
+# Test env with default value
+log_level = env("MISSING_VAR", "info")
+
+# Test env without default (should use empty string)
+auto_reload = env("MISSING_BOOL_VAR") == ""
+
+# Test interpolation syntax
+api {
+    listen_address = "prefix-${env("ANOTHER_TEST_VAR")}-suffix"
+    port = 8080
+}
+
+# Test env with existing variable and default (should use env value)
+metrics {
+    listen_address = env("ANOTHER_TEST_VAR", "fallback")
+    port = 9090
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load with env function");
+
+            // Verify env function results
+            assert_eq!(cfg.discovery.instrument.interfaces, vec!["test_value"]);
+            assert_eq!(cfg.log_level, Level::INFO);
+            assert_eq!(cfg.auto_reload, true);
+            assert_eq!(cfg.api.listen_address, "prefix-another_value-suffix");
+            assert_eq!(cfg.metrics.listen_address, "another_value");
+
+            std::env::remove_var("TEST_ENV_VAR");
+            std::env::remove_var("ANOTHER_TEST_VAR");
+
+            Ok(())
+        });
     }
 }
