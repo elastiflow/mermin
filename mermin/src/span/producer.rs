@@ -695,6 +695,32 @@ impl FlowWorker {
                 } else {
                     None
                 },
+                flow_reverse_icmp_type_id: is_icmp_any.then_some(stats.reverse_icmp_type),
+                flow_reverse_icmp_type_name: if is_icmp {
+                    network_types::icmp::get_icmpv4_type_name(stats.reverse_icmp_type)
+                        .map(String::from)
+                } else if is_icmpv6 {
+                    network_types::icmp::get_icmpv6_type_name(stats.reverse_icmp_type)
+                        .map(String::from)
+                } else {
+                    None
+                },
+                flow_reverse_icmp_code_id: is_icmp_any.then_some(stats.reverse_icmp_code),
+                flow_reverse_icmp_code_name: if is_icmp {
+                    network_types::icmp::get_icmpv4_code_name(
+                        stats.reverse_icmp_type,
+                        stats.reverse_icmp_code,
+                    )
+                    .map(String::from)
+                } else if is_icmpv6 {
+                    network_types::icmp::get_icmpv6_code_name(
+                        stats.reverse_icmp_type,
+                        stats.reverse_icmp_code,
+                    )
+                    .map(String::from)
+                } else {
+                    None
+                },
 
                 // Initialize counters (will be updated from eBPF map on record intervals)
                 flow_bytes_delta: stats.bytes as i64,
@@ -1009,32 +1035,36 @@ async fn record_task_loop(
         // Reset metadata flags AND values in eBPF map for next interval
         // This allows capturing "first seen" values per direction for the next span
         // AND prevents stale values from being exported if no packets arrive in a direction
-        if let Some(entry_ref) = flow_store.get(&community_id) {
-            if let Some(ebpf_key) = entry_ref.flow_span.flow_key {
-                let mut map = flow_stats_map.lock().await;
-                if let Ok(stats) = map.get(&ebpf_key, 0) {
-                    let mut updated_stats = stats;
-                    // Reset flags to allow capturing new values
-                    updated_stats.forward_metadata_seen = 0;
-                    updated_stats.reverse_metadata_seen = 0;
-                    // Reset values to zero to prevent stale data if no packets arrive
-                    updated_stats.ip_dscp = 0;
-                    updated_stats.ip_ecn = 0;
-                    updated_stats.ip_ttl = 0;
-                    updated_stats.ip_flow_label = 0;
-                    updated_stats.reverse_ip_dscp = 0;
-                    updated_stats.reverse_ip_ecn = 0;
-                    updated_stats.reverse_ip_ttl = 0;
-                    updated_stats.reverse_ip_flow_label = 0;
+        if let Some(entry_ref) = flow_store.get(&community_id)
+            && let Some(ebpf_key) = entry_ref.flow_span.flow_key
+        {
+            let mut map = flow_stats_map.lock().await;
+            if let Ok(stats) = map.get(&ebpf_key, 0) {
+                let mut updated_stats = stats;
+                // Reset flags to allow capturing new values
+                updated_stats.forward_metadata_seen = 0;
+                updated_stats.reverse_metadata_seen = 0;
+                // Reset values to zero to prevent stale data if no packets arrive
+                updated_stats.ip_dscp = 0;
+                updated_stats.ip_ecn = 0;
+                updated_stats.ip_ttl = 0;
+                updated_stats.ip_flow_label = 0;
+                updated_stats.reverse_ip_dscp = 0;
+                updated_stats.reverse_ip_ecn = 0;
+                updated_stats.reverse_ip_ttl = 0;
+                updated_stats.reverse_ip_flow_label = 0;
+                updated_stats.icmp_type = 0;
+                updated_stats.icmp_code = 0;
+                updated_stats.reverse_icmp_type = 0;
+                updated_stats.reverse_icmp_code = 0;
 
-                    if let Err(e) = map.insert(&ebpf_key, &updated_stats, 0) {
-                        debug!(
-                            event.name = "record.metadata_reset_failed",
-                            flow.community_id = %community_id,
-                            error.message = %e,
-                            "failed to reset metadata flags and values in eBPF map"
-                        );
-                    }
+                if let Err(e) = map.insert(ebpf_key, updated_stats, 0) {
+                    debug!(
+                        event.name = "record.metadata_reset_failed",
+                        flow.community_id = %community_id,
+                        error.message = %e,
+                        "failed to reset metadata flags and values in eBPF map"
+                    );
                 }
             }
         }
@@ -1427,6 +1457,8 @@ mod tests {
             tcp_flags,
             icmp_type: 0,
             icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 0,
         }

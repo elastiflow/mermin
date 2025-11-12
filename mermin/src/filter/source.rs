@@ -520,9 +520,17 @@ mod tests {
             ip_dscp: 0,
             ip_ecn: 0,
             ip_ttl: 64,
+            reverse_ip_dscp: 0,
+            reverse_ip_ecn: 0,
+            reverse_ip_ttl: 0,
+            reverse_ip_flow_label: 0,
             tcp_flags: 0,
             icmp_type: 0,
             icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
+            forward_metadata_seen: 1,
+            reverse_metadata_seen: 0,
         }
     }
 

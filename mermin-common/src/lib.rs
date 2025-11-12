@@ -190,6 +190,10 @@ pub struct FlowStats {
     pub icmp_type: u8,
     /// ICMP code
     pub icmp_code: u8,
+    /// ICMP type (reverse direction, first seen per interval)
+    pub reverse_icmp_type: u8,
+    /// ICMP code (reverse direction, first seen per interval)
+    pub reverse_icmp_code: u8,
     /// Flag indicating forward direction metadata has been captured for current interval (1=captured, 0=not yet)
     pub forward_metadata_seen: u8,
     /// Flag indicating reverse direction metadata has been captured for current interval (1=captured, 0=not yet)
@@ -390,6 +394,8 @@ mod tests {
             tcp_flags,
             icmp_type: 8,
             icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 1,
         };
@@ -476,6 +482,8 @@ mod tests {
             tcp_flags: 0,
             icmp_type: 0,
             icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
             forward_metadata_seen: 0,
             reverse_metadata_seen: 0,
         };

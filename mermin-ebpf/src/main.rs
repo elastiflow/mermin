@@ -325,79 +325,105 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             stats.reverse_bytes = stats.reverse_bytes.saturating_add(ctx.len() as u64);
         }
 
-        if stats.protocol == IpProto::Tcp {
-            let mut tcp_offset = eth::ETH_LEN;
-            if eth_type == EtherType::Ipv4 {
-                if let Ok(vihl) = ctx.load::<ipv4::Vihl>(tcp_offset) {
-                    tcp_offset += ipv4::ihl(vihl) as usize;
-                } else {
-                    tcp_offset += ipv4::IPV4_LEN;
-                }
-            } else if eth_type == EtherType::Ipv6 {
-                tcp_offset += ipv6::IPV6_LEN;
-            }
-
-            if let Ok(current_flags) = ctx.load::<tcp::Flags>(tcp_offset + tcp::TCP_FLAGS_OFFSET) {
-                stats.tcp_flags |= current_flags;
-            }
+        let mut l4_offset = eth::ETH_LEN;
+        if eth_type == EtherType::Ipv4 {
+            let vihl: ipv4::Vihl = ctx.load(l4_offset).map_err(|_| Error::OutOfBounds)?;
+            l4_offset += ipv4::ihl(vihl) as usize;
+        } else if eth_type == EtherType::Ipv6 {
+            l4_offset += ipv6::IPV6_LEN;
         }
 
         if is_forward && stats.forward_metadata_seen == 0 {
-            let offset = eth::ETH_LEN;
             match eth_type {
                 EtherType::Ipv4 => {
-                    if let (Ok(dscp_ecn), Ok(ttl)) = (
-                        ctx.load::<ipv4::DscpEcn>(offset + ipv4::IPV4_DSCP_ECN_OFFSET),
-                        ctx.load::<ipv4::Ttl>(offset + ipv4::IPV4_TTL_OFFSET),
-                    ) {
-                        stats.ip_dscp = ipv4::dscp(dscp_ecn);
-                        stats.ip_ecn = ipv4::ecn(dscp_ecn);
-                        stats.ip_ttl = ttl;
-                        stats.forward_metadata_seen = 1;
-                    }
+                    let dscp_ecn: ipv4::DscpEcn = ctx
+                        .load(eth::ETH_LEN + ipv4::IPV4_DSCP_ECN_OFFSET)
+                        .map_err(|_| Error::OutOfBounds)?;
+                    stats.ip_dscp = ipv4::dscp(dscp_ecn);
+                    stats.ip_ecn = ipv4::ecn(dscp_ecn);
+
+                    let ttl: ipv4::Ttl = ctx
+                        .load(eth::ETH_LEN + ipv4::IPV4_TTL_OFFSET)
+                        .map_err(|_| Error::OutOfBounds)?;
+                    stats.ip_ttl = ttl;
                 }
                 EtherType::Ipv6 => {
-                    if let (Ok(vtcfl), Ok(hop_limit)) = (
-                        ctx.load::<ipv6::Vcf>(offset),
-                        ctx.load::<ipv6::HopLimit>(offset + ipv6::IPV6_HOP_LIMIT_OFFSET),
-                    ) {
-                        stats.ip_dscp = ipv6::dscp(vtcfl);
-                        stats.ip_ecn = ipv6::ecn(vtcfl);
-                        stats.ip_flow_label = ipv6::flow_label(vtcfl);
-                        stats.ip_ttl = hop_limit;
-                        stats.forward_metadata_seen = 1;
-                    }
+                    let vtcfl: ipv6::Vcf =
+                        ctx.load(eth::ETH_LEN).map_err(|_| Error::OutOfBounds)?;
+                    stats.ip_dscp = ipv6::dscp(vtcfl);
+                    stats.ip_ecn = ipv6::ecn(vtcfl);
+                    stats.ip_flow_label = ipv6::flow_label(vtcfl);
+
+                    let hop_limit: ipv6::HopLimit = ctx
+                        .load(eth::ETH_LEN + ipv6::IPV6_HOP_LIMIT_OFFSET)
+                        .map_err(|_| Error::OutOfBounds)?;
+                    stats.ip_ttl = hop_limit;
                 }
                 _ => {}
             }
+
+            if stats.protocol == IpProto::Icmp || stats.protocol == IpProto::Ipv6Icmp {
+                let icmp_type: u8 = ctx
+                    .load(l4_offset + icmp::ICMP_TYPE_OFFSET)
+                    .map_err(|_| Error::OutOfBounds)?;
+                stats.icmp_type = icmp_type;
+
+                let icmp_code: u8 = ctx
+                    .load(l4_offset + icmp::ICMP_CODE_OFFSET)
+                    .map_err(|_| Error::OutOfBounds)?;
+                stats.icmp_code = icmp_code;
+            }
+
+            stats.forward_metadata_seen = 1;
         } else if !is_forward && stats.reverse_metadata_seen == 0 {
-            let offset = eth::ETH_LEN;
             match eth_type {
                 EtherType::Ipv4 => {
-                    if let (Ok(dscp_ecn), Ok(ttl)) = (
-                        ctx.load::<ipv4::DscpEcn>(offset + ipv4::IPV4_DSCP_ECN_OFFSET),
-                        ctx.load::<ipv4::Ttl>(offset + ipv4::IPV4_TTL_OFFSET),
-                    ) {
-                        stats.reverse_ip_dscp = ipv4::dscp(dscp_ecn);
-                        stats.reverse_ip_ecn = ipv4::ecn(dscp_ecn);
-                        stats.reverse_ip_ttl = ttl;
-                        stats.reverse_metadata_seen = 1;
-                    }
+                    let dscp_ecn: ipv4::DscpEcn = ctx
+                        .load(eth::ETH_LEN + ipv4::IPV4_DSCP_ECN_OFFSET)
+                        .map_err(|_| Error::OutOfBounds)?;
+                    stats.reverse_ip_dscp = ipv4::dscp(dscp_ecn);
+                    stats.reverse_ip_ecn = ipv4::ecn(dscp_ecn);
+
+                    let ttl: ipv4::Ttl = ctx
+                        .load(eth::ETH_LEN + ipv4::IPV4_TTL_OFFSET)
+                        .map_err(|_| Error::OutOfBounds)?;
+                    stats.reverse_ip_ttl = ttl;
                 }
                 EtherType::Ipv6 => {
-                    if let (Ok(vtcfl), Ok(hop_limit)) = (
-                        ctx.load::<ipv6::Vcf>(offset),
-                        ctx.load::<ipv6::HopLimit>(offset + ipv6::IPV6_HOP_LIMIT_OFFSET),
-                    ) {
-                        stats.reverse_ip_dscp = ipv6::dscp(vtcfl);
-                        stats.reverse_ip_ecn = ipv6::ecn(vtcfl);
-                        stats.reverse_ip_flow_label = ipv6::flow_label(vtcfl);
-                        stats.reverse_ip_ttl = hop_limit;
-                        stats.reverse_metadata_seen = 1;
-                    }
+                    let vtcfl: ipv6::Vcf =
+                        ctx.load(eth::ETH_LEN).map_err(|_| Error::OutOfBounds)?;
+                    stats.reverse_ip_dscp = ipv6::dscp(vtcfl);
+                    stats.reverse_ip_ecn = ipv6::ecn(vtcfl);
+                    stats.reverse_ip_flow_label = ipv6::flow_label(vtcfl);
+
+                    let hop_limit: ipv6::HopLimit = ctx
+                        .load(eth::ETH_LEN + ipv6::IPV6_HOP_LIMIT_OFFSET)
+                        .map_err(|_| Error::OutOfBounds)?;
+                    stats.reverse_ip_ttl = hop_limit;
                 }
                 _ => {}
             }
+
+            if stats.protocol == IpProto::Icmp || stats.protocol == IpProto::Ipv6Icmp {
+                let icmp_type: u8 = ctx
+                    .load(l4_offset + icmp::ICMP_TYPE_OFFSET)
+                    .map_err(|_| Error::OutOfBounds)?;
+                stats.reverse_icmp_type = icmp_type;
+
+                let icmp_code: u8 = ctx
+                    .load(l4_offset + icmp::ICMP_CODE_OFFSET)
+                    .map_err(|_| Error::OutOfBounds)?;
+                stats.reverse_icmp_code = icmp_code;
+            }
+
+            stats.reverse_metadata_seen = 1;
+        }
+
+        if stats.protocol == IpProto::Tcp {
+            let current_flags: tcp::Flags = ctx
+                .load(l4_offset + tcp::TCP_FLAGS_OFFSET)
+                .map_err(|_| Error::OutOfBounds)?;
+            stats.tcp_flags |= current_flags;
         }
     }
 
@@ -768,6 +794,8 @@ mod tests {
             tcp_flags: 0,
             icmp_type: 0,
             icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
             forward_metadata_seen: 0,
             reverse_metadata_seen: 0,
         }
