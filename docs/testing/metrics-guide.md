@@ -106,17 +106,17 @@ This section focuses on metrics originating from the eBPF layer, which is respon
 - **Type:** Counter
 - **Description:** The total bytes received from the eBPF ring buffer.
 
-## Userspace Ring Buffer Metrics (`mermin_userspace_*`)
+## Userspace Ring Buffer Metrics (`mermin_*`)
 
 These metrics describe the flow of data from the eBPF programs to the userspace application via the ring buffer.
 
 ### Packet Processing
 
-**`mermin_userspace_ringbuf_packets_total{type}`**
+**`mermin_ringbuf_packets_total{type}`**
 - **Type:** Counter
 - **Description:** A counter for packets in the userspace ring buffer. `type` can be `received`, `dropped`, or `filtered`.
 
-**`mermin_userspace_ringbuf_bytes`**
+**`mermin_ringbuf_bytes`**
 - **Type:** Counter
 - **Description:** The total bytes received in the userspace ring buffer.
 
@@ -124,15 +124,15 @@ These metrics describe the flow of data from the eBPF programs to the userspace 
 
 These metrics offer insight into the internal channels used for data transmission.
 
-**`mermin_userspace_channel_capacity{channel}`**
+**`mermin_channel_capacity{channel}`**
 - **Type:** Gauge
 - **Description:** The capacity of internal channels (`packet_meta`, `exporter`).
 
-**`mermin_userspace_channel_size{channel}`**
+**`mermin_channel_size{channel}`**
 - **Type:** Gauge
 - **Description:** The current number of items in the channels.
 
-**`mermin_userspace_channel_sends_total{status, error_code}`**
+**`mermin_channel_sends_total{status, error_code}`**
 - **Type:** Counter
 - **Description:** A counter for send operations on channels. `status` can be `error` or `success`.
 
