@@ -654,6 +654,24 @@ impl FlowWorker {
                 flow_ip_ttl: is_ip_flow.then_some(stats.ip_ttl),
                 flow_ip_flow_label: is_ipv6.then_some(stats.ip_flow_label),
 
+                // Reverse direction IP metadata (first seen per interval)
+                flow_reverse_ip_dscp_id: is_ip_flow.then_some(stats.reverse_ip_dscp),
+                flow_reverse_ip_dscp_name: is_ip_flow.then_some(
+                    IpDscp::try_from_u8(stats.reverse_ip_dscp)
+                        .unwrap_or_default()
+                        .as_str()
+                        .to_string(),
+                ),
+                flow_reverse_ip_ecn_id: is_ip_flow.then_some(stats.reverse_ip_ecn),
+                flow_reverse_ip_ecn_name: is_ip_flow.then_some(
+                    IpEcn::try_from_u8(stats.reverse_ip_ecn)
+                        .unwrap_or_default()
+                        .as_str()
+                        .to_string(),
+                ),
+                flow_reverse_ip_ttl: is_ip_flow.then_some(stats.reverse_ip_ttl),
+                flow_reverse_ip_flow_label: is_ipv6.then_some(stats.reverse_ip_flow_label),
+
                 // TCP metadata
                 flow_tcp_flags_bits: is_tcp.then_some(stats.tcp_flags),
                 flow_tcp_flags_tags: is_tcp.then(|| TcpFlags::from_stats(stats).active_flags()),
@@ -674,6 +692,32 @@ impl FlowWorker {
                 } else if is_icmpv6 {
                     network_types::icmp::get_icmpv6_code_name(stats.icmp_type, stats.icmp_code)
                         .map(String::from)
+                } else {
+                    None
+                },
+                flow_reverse_icmp_type_id: is_icmp_any.then_some(stats.reverse_icmp_type),
+                flow_reverse_icmp_type_name: if is_icmp {
+                    network_types::icmp::get_icmpv4_type_name(stats.reverse_icmp_type)
+                        .map(String::from)
+                } else if is_icmpv6 {
+                    network_types::icmp::get_icmpv6_type_name(stats.reverse_icmp_type)
+                        .map(String::from)
+                } else {
+                    None
+                },
+                flow_reverse_icmp_code_id: is_icmp_any.then_some(stats.reverse_icmp_code),
+                flow_reverse_icmp_code_name: if is_icmp {
+                    network_types::icmp::get_icmpv4_code_name(
+                        stats.reverse_icmp_type,
+                        stats.reverse_icmp_code,
+                    )
+                    .map(String::from)
+                } else if is_icmpv6 {
+                    network_types::icmp::get_icmpv6_code_name(
+                        stats.reverse_icmp_type,
+                        stats.reverse_icmp_code,
+                    )
+                    .map(String::from)
                 } else {
                     None
                 },
@@ -864,7 +908,7 @@ async fn record_task_loop(
             None => break,
         };
         let flow_span = &mut entry_ref.flow_span;
-        let ebpf_key: FlowKey = match flow_span.flow_key {
+        let flow_key: FlowKey = match flow_span.flow_key {
             Some(key) => key,
             None => {
                 warn!(
@@ -877,7 +921,7 @@ async fn record_task_loop(
         };
 
         let map = flow_stats_map.lock().await;
-        let stats = match map.get(&ebpf_key, 0) {
+        let stats = match map.get(&flow_key, 0) {
             Ok(s) => s,
             Err(e) => {
                 warn!(
@@ -921,6 +965,49 @@ async fn record_task_loop(
         let end_time_nanos = stats.last_seen_ns + flow_span.boot_time_offset;
         flow_span.end_time = UNIX_EPOCH + Duration::from_nanos(end_time_nanos);
 
+        // Update IP metadata from eBPF stats (current "first seen" values for this interval)
+        let is_ip_flow = stats.ether_type == EtherType::Ipv4 || stats.ether_type == EtherType::Ipv6;
+        let is_ipv6 = stats.ether_type == EtherType::Ipv6;
+
+        if is_ip_flow {
+            flow_span.attributes.flow_ip_dscp_id = Some(stats.ip_dscp);
+            flow_span.attributes.flow_ip_dscp_name = Some(
+                IpDscp::try_from_u8(stats.ip_dscp)
+                    .unwrap_or_default()
+                    .as_str()
+                    .to_string(),
+            );
+            flow_span.attributes.flow_ip_ecn_id = Some(stats.ip_ecn);
+            flow_span.attributes.flow_ip_ecn_name = Some(
+                IpEcn::try_from_u8(stats.ip_ecn)
+                    .unwrap_or_default()
+                    .as_str()
+                    .to_string(),
+            );
+            flow_span.attributes.flow_ip_ttl = Some(stats.ip_ttl);
+
+            flow_span.attributes.flow_reverse_ip_dscp_id = Some(stats.reverse_ip_dscp);
+            flow_span.attributes.flow_reverse_ip_dscp_name = Some(
+                IpDscp::try_from_u8(stats.reverse_ip_dscp)
+                    .unwrap_or_default()
+                    .as_str()
+                    .to_string(),
+            );
+            flow_span.attributes.flow_reverse_ip_ecn_id = Some(stats.reverse_ip_ecn);
+            flow_span.attributes.flow_reverse_ip_ecn_name = Some(
+                IpEcn::try_from_u8(stats.reverse_ip_ecn)
+                    .unwrap_or_default()
+                    .as_str()
+                    .to_string(),
+            );
+            flow_span.attributes.flow_reverse_ip_ttl = Some(stats.reverse_ip_ttl);
+        }
+
+        if is_ipv6 {
+            flow_span.attributes.flow_ip_flow_label = Some(stats.ip_flow_label);
+            flow_span.attributes.flow_reverse_ip_flow_label = Some(stats.reverse_ip_flow_label);
+        }
+
         let mut recorded_span = flow_span.clone();
         recorded_span.attributes.flow_end_reason = Some(determine_flow_end_reason(
             flow_span.attributes.flow_tcp_flags_bits,
@@ -943,6 +1030,43 @@ async fn record_task_loop(
                 "failed to send flow span for active recording"
             );
             break;
+        }
+
+        // Reset metadata flags AND values in eBPF map for next interval
+        // This allows capturing "first seen" values per direction for the next span
+        // AND prevents stale values from being exported if no packets arrive in a direction
+        if let Some(entry_ref) = flow_store.get(&community_id)
+            && let Some(ebpf_key) = entry_ref.flow_span.flow_key
+        {
+            let mut map = flow_stats_map.lock().await;
+            if let Ok(stats) = map.get(&ebpf_key, 0) {
+                let mut updated_stats = stats;
+                // Reset flags to allow capturing new values
+                updated_stats.forward_metadata_seen = 0;
+                updated_stats.reverse_metadata_seen = 0;
+                // Reset values to zero to prevent stale data if no packets arrive
+                updated_stats.ip_dscp = 0;
+                updated_stats.ip_ecn = 0;
+                updated_stats.ip_ttl = 0;
+                updated_stats.ip_flow_label = 0;
+                updated_stats.reverse_ip_dscp = 0;
+                updated_stats.reverse_ip_ecn = 0;
+                updated_stats.reverse_ip_ttl = 0;
+                updated_stats.reverse_ip_flow_label = 0;
+                updated_stats.icmp_type = 0;
+                updated_stats.icmp_code = 0;
+                updated_stats.reverse_icmp_type = 0;
+                updated_stats.reverse_icmp_code = 0;
+
+                if let Err(e) = map.insert(ebpf_key, updated_stats, 0) {
+                    debug!(
+                        event.name = "record.metadata_reset_failed",
+                        flow.community_id = %community_id,
+                        error.message = %e,
+                        "failed to reset metadata flags and values in eBPF map"
+                    );
+                }
+            }
         }
     }
 }
@@ -1321,14 +1445,22 @@ mod tests {
             src_mac: [0; 6],
             ifindex: 1,
             ip_flow_label: 0,
+            reverse_ip_flow_label: 0,
             first_seen_ns: 1_000_000_000,
             last_seen_ns: 1_000_000_000,
             ip_dscp: 0,
             ip_ecn: 0,
             ip_ttl: 64,
+            reverse_ip_dscp: 0,
+            reverse_ip_ecn: 0,
+            reverse_ip_ttl: 0,
             tcp_flags,
             icmp_type: 0,
             icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
+            forward_metadata_seen: 1,
+            reverse_metadata_seen: 0,
         }
     }
 

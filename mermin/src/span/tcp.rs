@@ -385,9 +385,17 @@ mod tests {
                 ip_dscp: 0,
                 ip_ecn: 0,
                 ip_ttl: 0,
+                reverse_ip_dscp: 0,
+                reverse_ip_ecn: 0,
+                reverse_ip_ttl: 0,
+                reverse_ip_flow_label: 0,
                 tcp_flags,
                 icmp_type: 0,
                 icmp_code: 0,
+                reverse_icmp_type: 0,
+                reverse_icmp_code: 0,
+                forward_metadata_seen: 1,
+                reverse_metadata_seen: 0,
             }
         }
 
@@ -498,9 +506,17 @@ mod tests {
             ip_dscp: 0,
             ip_ecn: 0,
             ip_ttl: 0,
+            reverse_ip_dscp: 0,
+            reverse_ip_ecn: 0,
+            reverse_ip_ttl: 0,
+            reverse_ip_flow_label: 0,
             tcp_flags: 0x12, // SYN+ACK
             icmp_type: 0,
             icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
+            forward_metadata_seen: 1,
+            reverse_metadata_seen: 0,
         };
         let from_packet = TcpFlags::from_stats(&stats).active_flags();
         let from_bits = TcpFlags::flags_from_bits(0x12);
@@ -535,9 +551,17 @@ mod tests {
                 ip_dscp: 0,
                 ip_ecn: 0,
                 ip_ttl: 0,
+                reverse_ip_dscp: 0,
+                reverse_ip_ecn: 0,
+                reverse_ip_ttl: 0,
+                reverse_ip_flow_label: 0,
                 tcp_flags,
                 icmp_type: 0,
                 icmp_code: 0,
+                reverse_icmp_type: 0,
+                reverse_icmp_code: 0,
+                forward_metadata_seen: 1,
+                reverse_metadata_seen: 0,
             }
         }
 
@@ -637,9 +661,17 @@ mod tests {
             ip_dscp: 0,
             ip_ecn: 0,
             ip_ttl: 0,
+            reverse_ip_dscp: 0,
+            reverse_ip_ecn: 0,
+            reverse_ip_ttl: 0,
+            reverse_ip_flow_label: 0,
             tcp_flags: 0,
             icmp_type: 0,
             icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
+            forward_metadata_seen: 1,
+            reverse_metadata_seen: 0,
         };
         if syn {
             stats.tcp_flags |= TCP_FLAG_SYN;

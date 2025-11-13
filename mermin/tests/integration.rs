@@ -310,9 +310,17 @@ mod event_driven_tests {
             ip_dscp: 0,
             ip_ecn: 0,
             ip_ttl: 64,
+            reverse_ip_dscp: 0,
+            reverse_ip_ecn: 0,
+            reverse_ip_ttl: 0,
+            reverse_ip_flow_label: 0,
             tcp_flags: 0x02, // SYN
             icmp_type: 0,
             icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
+            forward_metadata_seen: 1,
+            reverse_metadata_seen: 0,
         };
 
         handler.handle_flow_event(flow_key, stats).await;
@@ -356,9 +364,17 @@ mod event_driven_tests {
             ip_dscp: 0,
             ip_ecn: 0,
             ip_ttl: 64,
+            reverse_ip_dscp: 0,
+            reverse_ip_ecn: 0,
+            reverse_ip_ttl: 0,
+            reverse_ip_flow_label: 0,
             tcp_flags: 0x12, // SYN+ACK
             icmp_type: 0,
             icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
+            forward_metadata_seen: 1,
+            reverse_metadata_seen: 0,
         };
 
         handler
@@ -398,9 +414,17 @@ mod event_driven_tests {
             ip_dscp: 0,
             ip_ecn: 0,
             ip_ttl: 64,
+            reverse_ip_dscp: 0,
+            reverse_ip_ecn: 0,
+            reverse_ip_ttl: 0,
+            reverse_ip_flow_label: 0,
             tcp_flags: 0x1A, // SYN+ACK+PSH
             icmp_type: 0,
             icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
+            forward_metadata_seen: 1,
+            reverse_metadata_seen: 1,
         };
 
         // Update stats (simulating eBPF map update)
@@ -449,9 +473,17 @@ mod event_driven_tests {
             ip_dscp: 0,
             ip_ecn: 0,
             ip_ttl: 64,
+            reverse_ip_dscp: 0,
+            reverse_ip_ecn: 0,
+            reverse_ip_ttl: 0,
+            reverse_ip_flow_label: 0,
             tcp_flags: 0x12,
             icmp_type: 0,
             icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
+            forward_metadata_seen: 1,
+            reverse_metadata_seen: 1,
         };
 
         handler.handle_flow_event(flow_key, stats_t1).await;
@@ -481,9 +513,17 @@ mod event_driven_tests {
             ip_dscp: 0,
             ip_ecn: 0,
             ip_ttl: 64,
+            reverse_ip_dscp: 0,
+            reverse_ip_ecn: 0,
+            reverse_ip_ttl: 0,
+            reverse_ip_flow_label: 0,
             tcp_flags: 0x1A,
             icmp_type: 0,
             icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
+            forward_metadata_seen: 1,
+            reverse_metadata_seen: 1,
         };
 
         handler.handle_flow_event(flow_key, stats_t2).await;
@@ -545,9 +585,17 @@ mod event_driven_tests {
                     ip_dscp: 0,
                     ip_ecn: 0,
                     ip_ttl: 64,
+                    reverse_ip_dscp: 0,
+                    reverse_ip_ecn: 0,
+                    reverse_ip_ttl: 0,
+                    reverse_ip_flow_label: 0,
                     tcp_flags: 0x02,
                     icmp_type: 0,
                     icmp_code: 0,
+                    reverse_icmp_type: 0,
+                    reverse_icmp_code: 0,
+                    forward_metadata_seen: 1,
+                    reverse_metadata_seen: 0,
                 };
 
                 handler_clone.handle_flow_event(key, stats).await;
