@@ -98,6 +98,9 @@ pub struct FlowSpan {
     #[allow(dead_code)]
     pub boot_time_offset: u64,
 
+    // Trace ID for correlating flows with the same community ID
+    #[serde(skip)]
+    pub trace_id: Option<opentelemetry::trace::TraceId>,
     // Timing metadata for polling architecture
     #[serde(skip)]
     pub last_recorded_time: SystemTime,
@@ -392,6 +395,10 @@ impl Traceable for FlowSpan {
             self.attributes.network_type.as_str(),
             self.attributes.network_transport.to_string().as_str()
         ))
+    }
+
+    fn trace_id(&self) -> Option<opentelemetry::trace::TraceId> {
+        self.trace_id
     }
 
     fn record(&self, mut span: opentelemetry_sdk::trace::Span) -> opentelemetry_sdk::trace::Span {
@@ -1037,6 +1044,7 @@ mod tests {
             last_recorded_reverse_packets: 0,
             last_recorded_reverse_bytes: 0,
             boot_time_offset: 0,
+            trace_id: None,
             last_recorded_time: std::time::UNIX_EPOCH,
             last_activity_time: std::time::UNIX_EPOCH,
             timeout_duration: Duration::from_secs(0),
@@ -1061,6 +1069,7 @@ mod tests {
             last_recorded_reverse_packets: 0,
             last_recorded_reverse_bytes: 0,
             boot_time_offset: 0,
+            trace_id: None,
             last_recorded_time: std::time::UNIX_EPOCH,
             last_activity_time: std::time::UNIX_EPOCH,
             timeout_duration: Duration::from_secs(0),
@@ -1085,6 +1094,7 @@ mod tests {
             last_recorded_reverse_packets: 0,
             last_recorded_reverse_bytes: 0,
             boot_time_offset: 0,
+            trace_id: None,
             last_recorded_time: std::time::UNIX_EPOCH,
             last_activity_time: std::time::UNIX_EPOCH,
             timeout_duration: Duration::from_secs(0),
@@ -1109,6 +1119,7 @@ mod tests {
             last_recorded_reverse_packets: 0,
             last_recorded_reverse_bytes: 0,
             boot_time_offset: 0,
+            trace_id: None,
             last_recorded_time: std::time::UNIX_EPOCH,
             last_activity_time: std::time::UNIX_EPOCH,
             timeout_duration: Duration::from_secs(0),
@@ -1320,6 +1331,7 @@ mod tests {
             last_recorded_reverse_packets: 0,
             last_recorded_reverse_bytes: 0,
             boot_time_offset: 0,
+            trace_id: None,
             last_recorded_time: std::time::UNIX_EPOCH,
             last_activity_time: std::time::UNIX_EPOCH,
             timeout_duration: Duration::from_secs(0),
@@ -1363,6 +1375,7 @@ mod tests {
             last_recorded_reverse_packets: 0,
             last_recorded_reverse_bytes: 0,
             boot_time_offset: 0,
+            trace_id: None,
             last_recorded_time: std::time::UNIX_EPOCH,
             last_activity_time: std::time::UNIX_EPOCH,
             timeout_duration: Duration::from_secs(0),
@@ -1428,5 +1441,80 @@ mod tests {
             assert!(str_repr.len() > 0);
             assert_eq!(recovered, Some(reason));
         }
+    }
+
+    #[test]
+    fn test_traceable_trace_id_none() {
+        // Test that FlowSpan returns None when trace_id is not set
+        let flow_span = FlowSpan {
+            start_time: std::time::UNIX_EPOCH,
+            end_time: std::time::UNIX_EPOCH + Duration::from_secs(10),
+            span_kind: SpanKind::Internal,
+            attributes: SpanAttributes::default(),
+            flow_key: None,
+            last_recorded_packets: 0,
+            last_recorded_bytes: 0,
+            last_recorded_reverse_packets: 0,
+            last_recorded_reverse_bytes: 0,
+            boot_time_offset: 0,
+            trace_id: None,
+        };
+
+        assert_eq!(flow_span.trace_id(), None);
+    }
+
+    #[test]
+    fn test_traceable_trace_id_some() {
+        use opentelemetry::trace::TraceId;
+
+        // Create a test trace ID
+        let test_trace_id = TraceId::from_bytes([
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+            0x0f, 0x10,
+        ]);
+
+        let flow_span = FlowSpan {
+            start_time: std::time::UNIX_EPOCH,
+            end_time: std::time::UNIX_EPOCH + Duration::from_secs(10),
+            span_kind: SpanKind::Internal,
+            attributes: SpanAttributes::default(),
+            flow_key: None,
+            last_recorded_packets: 0,
+            last_recorded_bytes: 0,
+            last_recorded_reverse_packets: 0,
+            last_recorded_reverse_bytes: 0,
+            boot_time_offset: 0,
+            trace_id: Some(test_trace_id),
+        };
+
+        assert_eq!(flow_span.trace_id(), Some(test_trace_id));
+    }
+
+    #[test]
+    fn test_flow_span_with_trace_id_clones_correctly() {
+        use opentelemetry::trace::TraceId;
+
+        let test_trace_id = TraceId::from_bytes([
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+            0x0f, 0x10,
+        ]);
+
+        let flow_span = FlowSpan {
+            start_time: std::time::UNIX_EPOCH,
+            end_time: std::time::UNIX_EPOCH + Duration::from_secs(10),
+            span_kind: SpanKind::Internal,
+            attributes: SpanAttributes::default(),
+            flow_key: None,
+            last_recorded_packets: 0,
+            last_recorded_bytes: 0,
+            last_recorded_reverse_packets: 0,
+            last_recorded_reverse_bytes: 0,
+            boot_time_offset: 0,
+            trace_id: Some(test_trace_id),
+        };
+
+        let cloned = flow_span.clone();
+        assert_eq!(flow_span.trace_id, cloned.trace_id);
+        assert_eq!(cloned.trace_id(), Some(test_trace_id));
     }
 }

@@ -70,6 +70,15 @@ pub struct SpanOptions {
     /// - Example: Set to `1` to use a different seed for Community ID hashing
     #[serde(default = "defaults::community_id_seed")]
     pub community_id_seed: u16,
+
+    /// The timeout for trace ID correlation by community ID.
+    /// After this duration, a new trace ID will be generated for the same community ID.
+    /// This prevents indefinite trace retention and allows trace correlation across
+    /// multiple flow records while bounding memory usage.
+    /// - Default Value: `24h`
+    /// - Example: Set to `1h` for shorter trace correlation windows
+    #[serde(default = "defaults::trace_id_timeout", with = "duration")]
+    pub trace_id_timeout: Duration,
 }
 
 impl Default for SpanOptions {
@@ -83,6 +92,7 @@ impl Default for SpanOptions {
             tcp_rst_timeout: defaults::tcp_rst_timeout(),
             udp_timeout: defaults::udp_timeout(),
             community_id_seed: defaults::community_id_seed(),
+            trace_id_timeout: defaults::trace_id_timeout(),
         }
     }
 }
@@ -113,5 +123,8 @@ mod defaults {
     }
     pub fn community_id_seed() -> u16 {
         0
+    }
+    pub fn trace_id_timeout() -> Duration {
+        Duration::from_secs(86400) // 24 hours
     }
 }

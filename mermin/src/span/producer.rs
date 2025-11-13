@@ -36,6 +36,7 @@ use crate::{
         flow::{FlowEndReason, FlowSpan, SpanAttributes},
         opts::SpanOptions,
         tcp::TcpFlags,
+        trace_cache::TraceIdCache,
     },
 };
 
@@ -76,6 +77,8 @@ pub struct FlowSpanProducer {
     iface_map: Arc<DashMap<u32, String>>,
     flow_store: FlowStore,
     community_id_generator: CommunityIdGenerator,
+    trace_id_cache: TraceIdCache,
+    ebpf: Arc<Mutex<aya::Ebpf>>,
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     flow_events_ringbuf: RingBuf<aya::maps::MapData>,
     flow_span_tx: mpsc::Sender<FlowSpan>,
@@ -117,6 +120,9 @@ impl FlowSpanProducer {
         ));
         let community_id_generator = CommunityIdGenerator::new(span_opts.community_id_seed);
 
+        // Initialize trace ID cache with configured timeout
+        let trace_id_cache = TraceIdCache::new(span_opts.trace_id_timeout, flow_store_capacity);
+
         // Calculate boot time offset to convert kernel boot-relative timestamps to wall clock
         // This is critical - if we can't determine boot time, timestamps will be wrong
         let boot_time_offset_nanos = calculate_boot_time_offset_nanos()?;
@@ -142,6 +148,7 @@ impl FlowSpanProducer {
             worker_poll_interval: conf.pipeline.worker_poll_interval,
             boot_time_offset_nanos,
             community_id_generator,
+            trace_id_cache,
             iface_map,
             flow_store,
             flow_stats_map,
@@ -186,6 +193,7 @@ impl FlowSpanProducer {
                 self.span_opts.clone(),
                 self.boot_time_offset_nanos,
                 self.community_id_generator.clone(),
+                self.trace_id_cache.clone(),
                 Arc::clone(&self.iface_map),
                 Arc::clone(&self.flow_store),
                 Arc::clone(&flow_stats_map),
@@ -406,6 +414,7 @@ pub struct FlowWorker {
     udp_timeout: Duration,
     boot_time_offset_nanos: u64,
     community_id_generator: CommunityIdGenerator,
+    trace_id_cache: TraceIdCache,
     iface_map: Arc<DashMap<u32, String>>,
     flow_store: FlowStore,
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
@@ -423,6 +432,7 @@ impl FlowWorker {
         span_opts: SpanOptions,
         boot_time_offset_nanos: u64,
         community_id_generator: CommunityIdGenerator,
+        trace_id_cache: TraceIdCache,
         iface_map: Arc<DashMap<u32, String>>,
         flow_store: FlowStore,
         flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
@@ -442,6 +452,7 @@ impl FlowWorker {
             udp_timeout: span_opts.udp_timeout,
             boot_time_offset_nanos,
             community_id_generator,
+            trace_id_cache,
             iface_map,
             flow_store,
             flow_stats_map,
@@ -671,6 +682,10 @@ impl FlowWorker {
             .map(|r| r.value().clone());
         let (src_addr, dst_addr) = flow_key_to_ip_addrs(flow_key)?;
         let timeout = self.calculate_timeout(flow_key.protocol, stats);
+
+        // Get or create trace ID from cache for correlation
+        let trace_id = self.trace_id_cache.get_or_create(community_id);
+
         let span = FlowSpan {
             start_time: UNIX_EPOCH + Duration::from_nanos(start_time_nanos),
             end_time: UNIX_EPOCH + Duration::from_nanos(end_time_nanos),
@@ -801,6 +816,8 @@ impl FlowWorker {
             last_recorded_reverse_bytes: stats.reverse_bytes,
             boot_time_offset: self.boot_time_offset_nanos,
 
+            // Trace ID for correlation by community ID
+            trace_id: Some(trace_id),
             // Timing fields for polling architecture (initialized by insert_flow)
             last_recorded_time: UNIX_EPOCH,
             last_activity_time: UNIX_EPOCH,
@@ -1746,6 +1763,7 @@ mod tests {
             FxBuildHasher::default(),
         ));
         let community_id_generator = CommunityIdGenerator::new(span_opts.community_id_seed);
+        let trace_id_cache = TraceIdCache::new(span_opts.trace_id_timeout, 100);
         let iface_map = Arc::new(DashMap::new());
         // Create a dummy eBPF map - won't be used in unit tests
         let flow_stats_map = Arc::new(Mutex::new(unsafe {
@@ -1762,6 +1780,7 @@ mod tests {
             udp_timeout: span_opts.udp_timeout,
             boot_time_offset_nanos: 0,
             community_id_generator,
+            trace_id_cache,
             iface_map,
             flow_store,
             flow_stats_map,

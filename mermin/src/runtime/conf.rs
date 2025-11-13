@@ -898,6 +898,11 @@ mod tests {
             Duration::from_secs(60),
             "default udp_timeout should be 60s"
         );
+        assert_eq!(
+            cfg.span.trace_id_timeout,
+            Duration::from_secs(86400),
+            "default trace_id_timeout should be 24h (86400s)"
+        );
 
         assert!(
             cfg.export.traces.otlp.is_none(),
@@ -1643,6 +1648,7 @@ discovery:
             assert_eq!(cfg.span.tcp_fin_timeout, Duration::from_secs(5));
             assert_eq!(cfg.span.tcp_rst_timeout, Duration::from_secs(5));
             assert_eq!(cfg.span.udp_timeout, Duration::from_secs(60));
+            assert_eq!(cfg.span.trace_id_timeout, Duration::from_secs(86400));
             assert!(cfg.export.traces.stdout.is_none());
             // OTLP should not be configured unless explicitly set
             assert!(cfg.export.traces.otlp.is_none());
@@ -1775,6 +1781,11 @@ shutdown_timeout: 2min
             Duration::from_secs(60),
             "udp_timeout should be 60s"
         );
+        assert_eq!(
+            span.trace_id_timeout,
+            Duration::from_secs(86400),
+            "trace_id_timeout should be 24h (86400s)"
+        );
     }
 
     #[test]
@@ -1836,6 +1847,7 @@ discovery:
             assert_eq!(cfg.span.tcp_fin_timeout, Duration::from_secs(5));
             assert_eq!(cfg.span.tcp_rst_timeout, Duration::from_secs(5));
             assert_eq!(cfg.span.udp_timeout, Duration::from_secs(60));
+            assert_eq!(cfg.span.trace_id_timeout, Duration::from_secs(86400));
 
             Ok(())
         });
@@ -1932,6 +1944,7 @@ span:
   tcp_fin_timeout: 10s
   tcp_rst_timeout: 10s
   udp_timeout: 90s
+  trace_id_timeout: 12h
                 "#,
             )?;
 
@@ -1945,6 +1958,7 @@ span:
             assert_eq!(cfg.span.tcp_fin_timeout, Duration::from_secs(10));
             assert_eq!(cfg.span.tcp_rst_timeout, Duration::from_secs(10));
             assert_eq!(cfg.span.udp_timeout, Duration::from_secs(90));
+            assert_eq!(cfg.span.trace_id_timeout, Duration::from_secs(43200)); // 12 hours
 
             Ok(())
         });
@@ -1965,6 +1979,7 @@ span {
     tcp_fin_timeout = "10s"
     tcp_rst_timeout = "10s"
     udp_timeout = "90s"
+    trace_id_timeout = "12h"
 }
                 "#,
             )?;
@@ -1979,6 +1994,7 @@ span {
             assert_eq!(cfg.span.tcp_fin_timeout, Duration::from_secs(10));
             assert_eq!(cfg.span.tcp_rst_timeout, Duration::from_secs(10));
             assert_eq!(cfg.span.udp_timeout, Duration::from_secs(90));
+            assert_eq!(cfg.span.trace_id_timeout, Duration::from_secs(43200)); // 12 hours
 
             Ok(())
         });
@@ -2741,6 +2757,87 @@ discovery:
                 priority
             );
         }
+    }
+
+    #[test]
+    fn test_trace_id_timeout_duration_formats() {
+        // Test various duration formats for trace_id_timeout
+        Jail::expect_with(|jail| {
+            let path = "trace_timeout.yaml";
+            jail.create_file(
+                path,
+                r#"
+span:
+  trace_id_timeout: 2h
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            assert_eq!(cfg.span.trace_id_timeout, Duration::from_secs(7200)); // 2 hours
+
+            Ok(())
+        });
+
+        Jail::expect_with(|jail| {
+            let path = "trace_timeout2.yaml";
+            jail.create_file(
+                path,
+                r#"
+span:
+  trace_id_timeout: 30m
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            assert_eq!(cfg.span.trace_id_timeout, Duration::from_secs(1800)); // 30 minutes
+
+            Ok(())
+        });
+
+        Jail::expect_with(|jail| {
+            let path = "trace_timeout3.hcl";
+            jail.create_file(
+                path,
+                r#"
+span {
+    trace_id_timeout = "7d"
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            assert_eq!(cfg.span.trace_id_timeout, Duration::from_secs(604800)); // 7 days
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_trace_id_timeout_defaults_when_not_specified() {
+        // Verify trace_id_timeout gets default value when not in config
+        Jail::expect_with(|jail| {
+            let path = "minimal_span.yaml";
+            jail.create_file(
+                path,
+                r#"
+span:
+  tcp_timeout: 25s
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            // Should use default 24h even though not specified
+            assert_eq!(cfg.span.trace_id_timeout, Duration::from_secs(86400));
+            // But custom tcp_timeout should be applied
+            assert_eq!(cfg.span.tcp_timeout, Duration::from_secs(25));
+
+            Ok(())
+        });
     }
 
     #[test]

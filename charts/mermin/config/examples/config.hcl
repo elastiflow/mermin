@@ -757,6 +757,12 @@ span {
   tcp_rst_timeout     = "5s"
   udp_timeout         = "60s"
   community_id_seed   = 0
+  
+  # Trace ID correlation timeout
+  # After this duration, flows with the same community ID will get a new trace ID
+  # This enables correlation across multiple flow records while preventing indefinite retention
+  # Default: 24h (86400s)
+  trace_id_timeout = "24h"
 }
 
 # OTLP exporter configuration

@@ -1,3 +1,18 @@
+# Span configuration for flow tracking and trace correlation
+span {
+  # Trace ID correlation timeout
+  # Flows with the same community ID will share the same trace ID until this timeout expires
+  # This enables correlation of related flows (e.g., multiple records from a long TCP connection)
+  # Default: 24h
+  trace_id_timeout = "24h"
+  
+  # Other span options use default values if not specified:
+  # max_record_interval = "60s"  # Maximum interval for active flow recording
+  # tcp_timeout         = "20s"  # Idle timeout for TCP flows
+  # udp_timeout         = "60s"  # Idle timeout for UDP flows
+  # icmp_timeout        = "10s"  # Idle timeout for ICMP flows
+}
+
 # OTLP exporter configuration
 # See OBI export concepts: https://opentelemetry.io/docs/zero-code/obi/configure/export-data/
 export "traces" {
