@@ -124,10 +124,20 @@ pub struct SpanAttributes {
     pub flow_ip_ecn_name: Option<String>,
     pub flow_ip_ttl: Option<u8>,
     pub flow_ip_flow_label: Option<u32>,
+    pub flow_reverse_ip_dscp_id: Option<u8>,
+    pub flow_reverse_ip_dscp_name: Option<String>,
+    pub flow_reverse_ip_ecn_id: Option<u8>,
+    pub flow_reverse_ip_ecn_name: Option<String>,
+    pub flow_reverse_ip_ttl: Option<u8>,
+    pub flow_reverse_ip_flow_label: Option<u32>,
     pub flow_icmp_type_id: Option<u8>,
     pub flow_icmp_type_name: Option<String>,
     pub flow_icmp_code_id: Option<u8>,
     pub flow_icmp_code_name: Option<String>,
+    pub flow_reverse_icmp_type_id: Option<u8>,
+    pub flow_reverse_icmp_type_name: Option<String>,
+    pub flow_reverse_icmp_code_id: Option<u8>,
+    pub flow_reverse_icmp_code_name: Option<String>,
     pub flow_tcp_flags_bits: Option<u8>,
     #[serde(serialize_with = "serialize_option_tcp_flags")]
     pub flow_tcp_flags_tags: Option<Vec<TcpFlag>>,
@@ -253,10 +263,20 @@ impl Default for SpanAttributes {
             flow_ip_ecn_name: None,
             flow_ip_ttl: None,
             flow_ip_flow_label: None,
+            flow_reverse_ip_dscp_id: None,
+            flow_reverse_ip_dscp_name: None,
+            flow_reverse_ip_ecn_id: None,
+            flow_reverse_ip_ecn_name: None,
+            flow_reverse_ip_ttl: None,
+            flow_reverse_ip_flow_label: None,
             flow_icmp_type_id: None,
             flow_icmp_type_name: None,
             flow_icmp_code_id: None,
             flow_icmp_code_name: None,
+            flow_reverse_icmp_type_id: None,
+            flow_reverse_icmp_type_name: None,
+            flow_reverse_icmp_code_id: None,
+            flow_reverse_icmp_code_name: None,
             flow_tcp_flags_bits: None,
             flow_tcp_flags_tags: None,
             flow_ipsec_ah_spi: None,
@@ -471,6 +491,24 @@ impl Traceable for FlowSpan {
         }
         if let Some(ref value) = self.attributes.flow_icmp_code_name {
             kvs.push(KeyValue::new("flow.icmp.code.name", value.to_owned()));
+        }
+        if let Some(value) = self.attributes.flow_reverse_icmp_type_id {
+            kvs.push(KeyValue::new("flow.reverse.icmp.type.id", value as i64));
+        }
+        if let Some(ref value) = self.attributes.flow_reverse_icmp_type_name {
+            kvs.push(KeyValue::new(
+                "flow.reverse.icmp.type.name",
+                value.to_owned(),
+            ));
+        }
+        if let Some(value) = self.attributes.flow_reverse_icmp_code_id {
+            kvs.push(KeyValue::new("flow.reverse.icmp.code.id", value as i64));
+        }
+        if let Some(ref value) = self.attributes.flow_reverse_icmp_code_name {
+            kvs.push(KeyValue::new(
+                "flow.reverse.icmp.code.name",
+                value.to_owned(),
+            ));
         }
         if let Some(value) = self.attributes.flow_tcp_flags_bits {
             kvs.push(KeyValue::new("flow.tcp.flags.bits", value as i64));
