@@ -12,24 +12,8 @@ Ensure you have the following installed:
 * [**Helm**](https://helm.sh/docs/intro/install/): Kubernetes package manager (version 3.x)
 * **k9s** (optional): Terminal-based Kubernetes UI
 
-## Metric Naming Convention
-
-Mermin follows Prometheus naming best practices:
-
-**Format**: `mermin_<subsystem>_<name>_<type>`
-
-**Subsystems**:
-- `(none)`: Application-wide metrics (e.g., `packets_total`, `bytes_total`)
-- `ebpf`: eBPF-specific metrics (e.g., `ebpf_map_entries`, `ebpf_tc_programs_attached_total`)
-- `userspace`: Userspace ring buffer and channel metrics (e.g., `userspace_ringbuf_packets_total`)
-- `span`: Flow span producer metrics (e.g., `span_flows_created_total`)
-- `export`: Export subsystem metrics (e.g., `export_latency_seconds`)
-
-**Type Suffixes**:
-- `_total`: Counter that only increases
-- `_bytes`: Counter for bytes
-- `_seconds`: Histogram for duration measurements
-- (no suffix): Gauge for current values
+Also be sure to read the relevant metrics documentation first to get an understanding of the types of metrics that exist for Mermin. This page is a minimal working example to view metrics output.
+@TODO: Link to final metrics pages in Gitbook.
 
 ## Complete Example Workflow
 
