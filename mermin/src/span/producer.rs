@@ -813,8 +813,7 @@ impl FlowWorker {
             last_recorded_reverse_packets: stats.reverse_packets,
             last_recorded_reverse_bytes: stats.reverse_bytes,
             boot_time_offset: self.boot_time_offset_nanos,
-
-            // Trace ID for correlation by community ID
+            
             trace_id: Some(trace_id),
             // Timing fields for polling architecture (initialized by insert_flow)
             last_recorded_time: UNIX_EPOCH,
