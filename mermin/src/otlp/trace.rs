@@ -56,9 +56,6 @@ pub trait Traceable {
     /// If `Some(TraceId)` is returned, it will be used as the trace ID for this span,
     /// enabling correlation of multiple spans under the same trace. If `None` is returned,
     /// OpenTelemetry will generate a new random trace ID.
-    ///
-    /// This is particularly useful for correlating network flows with the same community ID
-    /// under a single trace.
     fn trace_id(&self) -> Option<TraceId> {
         None
     }
@@ -105,7 +102,6 @@ impl TraceableExporter for TraceExporterAdapter {
 
         // Build the span, injecting custom trace ID if provided
         let mut span = if let Some(custom_trace_id) = traceable.trace_id() {
-            // Create a span context with the custom trace ID
             // Generate a new span ID for this specific span within the trace
             let span_id_bytes: [u8; 8] = opentelemetry_sdk::trace::RandomIdGenerator::default()
                 .new_span_id()
