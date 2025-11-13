@@ -36,11 +36,10 @@ impl fmt::Display for TcxOrderStrategy {
 }
 
 use crate::{
-    k8s::owner_relations::OwnerRelationsOptions,
+    k8s::{opts::default_attributes, owner_relations::OwnerRelationsOptions},
     otlp::opts::ExportOptions,
     runtime::{
         conf::conf_serde::{duration, level},
-        defaults::default_attributes,
         opts::InternalOptions,
     },
     span::opts::SpanOptions,
