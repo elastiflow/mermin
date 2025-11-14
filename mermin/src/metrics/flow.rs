@@ -1,7 +1,5 @@
 //! Helper functions for flow lifecycle metrics.
 
-use std::time::Duration;
-
 use crate::metrics::registry;
 
 /// Increment the flow creation counter.
@@ -27,13 +25,4 @@ pub fn inc_flows_expired(interface: &str, reason: &str) {
     registry::FLOWS_EXPIRED.with_label_values(&[reason]).inc();
 
     registry::FLOWS_ACTIVE.with_label_values(&[interface]).dec();
-}
-
-/// Record flow duration.
-///
-/// ### Arguments
-///
-/// - `duration` - Duration from first to last packet
-pub fn observe_flow_duration(duration: Duration) {
-    registry::FLOW_DURATION.observe(duration.as_secs_f64());
 }

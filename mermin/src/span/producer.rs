@@ -1470,9 +1470,7 @@ pub async fn orphan_scanner_task(
         };
 
         let ebpf_map_entries = keys.len() as u64;
-        let userspace_entries = flow_store.len() as u64;
         metrics::ebpf::set_map_entries(ebpf_map_entries);
-        metrics::ebpf::set_userspace_flows(userspace_entries);
 
         for key in keys {
             scanned += 1;

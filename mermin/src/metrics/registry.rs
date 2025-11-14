@@ -30,7 +30,7 @@ lazy_static! {
     ).expect("failed to create ebpf_map_capacity metric");
 
     pub static ref EBPF_MAP_UTILIZATION: GaugeVec = GaugeVec::new(
-        Opts::new("ebpf_map_utilization_ratio", "Utilization ratio of eBPF maps (0.0-1.0)")
+        Opts::new("ebpf_map_utilization_ratio", "Utilization ratio of eBPF maps")
             .namespace("mermin"),
         &["map"]
     ).expect("failed to create ebpf_map_utilization metric");
@@ -44,11 +44,6 @@ lazy_static! {
         Opts::new("ebpf_orphans_cleaned_total", "Total number of orphaned eBPF map entries cleaned up")
             .namespace("mermin")
     ).expect("failed to create ebpf_orphans_cleaned metric");
-
-    pub static ref EBPF_USERSPACE_FLOWS: IntGauge = IntGauge::with_opts(
-        Opts::new("flows", "Current number of flows tracked in userspace")
-            .namespace("mermin")
-    ).expect("failed to create flows metric");
 
     pub static ref TC_PROGRAMS_ATTACHED: IntCounterVec = IntCounterVec::new(
         Opts::new("ebpf_tc_programs_attached_total", "Total number of TC programs attached")
@@ -178,28 +173,22 @@ lazy_static! {
 
     /// Total number of flows created.
     pub static ref FLOWS_CREATED: IntCounterVec = IntCounterVec::new(
-        Opts::new("span_flows_created_total", "Total number of flows created")
+        Opts::new("flow_spans_created_total", "Total number of flow spans created")
             .namespace("mermin"),
         &["interface"]
     ).expect("failed to create flows_created metric");
 
     pub static ref FLOWS_EXPIRED: IntCounterVec = IntCounterVec::new(
-        Opts::new("span_flows_expired_total", "Total number of flows expired")
+        Opts::new("flow_spans_expired_total", "Total number of flow spans expired")
             .namespace("mermin"),
         &["reason"]  // timeout, recorded, error, guard_cleanup
     ).expect("failed to create flows_expired metric");
 
     pub static ref FLOWS_ACTIVE: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("span_flows_active", "Current number of active flows")
+        Opts::new("flow_spans_active", "Current number of active flow traces")
             .namespace("mermin"),
         &["interface"]
     ).expect("failed to create flows_active metric");
-
-    pub static ref FLOW_DURATION: Histogram = Histogram::with_opts(
-        HistogramOpts::new("span_flow_duration_seconds", "Duration of flows from first to last packet")
-            .namespace("mermin")
-            .buckets(vec![1.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1800.0])
-    ).expect("failed to create flow_duration metric");
 
     // ============================================================================
     // Export Metrics
@@ -284,7 +273,6 @@ pub fn init_registry() -> Result<(), prometheus::Error> {
     REGISTRY.register(Box::new(EBPF_MAP_UTILIZATION.clone()))?;
     REGISTRY.register(Box::new(EBPF_RING_BUFFER_DROPS.clone()))?;
     REGISTRY.register(Box::new(EBPF_ORPHANS_CLEANED.clone()))?;
-    REGISTRY.register(Box::new(EBPF_USERSPACE_FLOWS.clone()))?;
     REGISTRY.register(Box::new(TC_PROGRAMS_ATTACHED.clone()))?;
     REGISTRY.register(Box::new(TC_PROGRAMS_DETACHED.clone()))?;
 
@@ -308,7 +296,6 @@ pub fn init_registry() -> Result<(), prometheus::Error> {
     REGISTRY.register(Box::new(FLOWS_CREATED.clone()))?;
     REGISTRY.register(Box::new(FLOWS_EXPIRED.clone()))?;
     REGISTRY.register(Box::new(FLOWS_ACTIVE.clone()))?;
-    REGISTRY.register(Box::new(FLOW_DURATION.clone()))?;
 
     // Export metrics
     REGISTRY.register(Box::new(SPANS_EXPORTED.clone()))?;
