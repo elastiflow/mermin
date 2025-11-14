@@ -16,8 +16,9 @@ use pnet::datalink::MacAddr;
 use tracing::{error, warn};
 
 use crate::{
+    filter::opts::{FilteringOptions, FilteringPair},
     ip::{Error as IpError, resolve_addrs},
-    runtime::conf::{Conf, FilteringOptions, FilteringPair},
+    runtime::conf::Conf,
     span::tcp::TcpFlags,
 };
 
@@ -472,7 +473,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::runtime::conf::{Conf, FilteringOptions, FilteringPair};
+    use crate::runtime::conf::Conf;
 
     /// Helper to create a FlowKey for testing
     fn mock_flow_key(

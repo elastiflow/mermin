@@ -43,18 +43,18 @@ If object counts are 0, informers aren't working.
 **Solution**: Ensure informer is enabled in configuration:
 
 ```hcl
-informer "k8s" {
+discovery "informer" "k8s" {
+  # K8s API connection configuration
   # Use in-cluster config (default in Kubernetes)
   # kubeconfig_path is optional
-
   informers_sync_timeout = "30s"
   informers_resync_period = "10m"
 
-  resources {
-    pod = { enabled = true }
-    service = { enabled = true }
-    node = { enabled = true }
-  }
+  selectors = [
+    { kind = "Pod" },
+    { kind = "Service" },
+    { kind = "Node" }
+  ]
 }
 ```
 
@@ -107,8 +107,9 @@ WARN Kubernetes informers did not sync within 30s
 **Solution**: Increase sync timeout for large clusters:
 
 ```hcl
-informer "k8s" {
+discovery "informer" "k8s" {
   informers_sync_timeout = "60s"  # Increase from 30s
+  # ... rest of configuration
 }
 ```
 
@@ -119,22 +120,20 @@ If namespace filtering is configured, pods outside those namespaces won't have m
 **Check configuration**:
 
 ```hcl
-informer "k8s" {
-  resources {
-    namespace_selector = {
-      match_names = ["production"]  # Only watching "production"
-    }
-  }
+discovery "informer" "k8s" {
+  selectors = [
+    { kind = "Pod", namespaces = ["production"] }  # Only watching "production"
+  ]
 }
 ```
 
 **Solution**: Add missing namespaces or remove filter:
 
 ```hcl
-informer "k8s" {
-  resources {
-    # No namespace_selector = watch all namespaces
-  }
+discovery "informer" "k8s" {
+  selectors = [
+    { kind = "Pod" }  # No namespaces = watch all namespaces
+  ]
 }
 ```
 
@@ -223,18 +222,15 @@ Large clusters with many watchers can overload API server.
 **Solution**: Reduce watch load:
 
 ```hcl
-informer "k8s" {
+discovery "informer" "k8s" {
   # Increase resync period (less frequent full list)
-  informers_resync_period = "30m"  # From 10m
+  informers_resync_period = "5m"  # From 30s
 
   # Watch only necessary resources
-  resources {
-    pod = { enabled = true }
-    service = { enabled = true }
-    # Disable less critical resources
-    ingress = { enabled = false }
-    gateway = { enabled = false }
-  }
+  selectors = [
+    { kind = "Pod" },
+    { kind = "Service" }
+  ]
 }
 ```
 
@@ -245,8 +241,9 @@ If running outside Kubernetes (Docker bare metal), kubeconfig is required.
 **Solution**:
 
 ```hcl
-informer "k8s" {
+discovery "informer" "k8s" {
   kubeconfig_path = "/etc/kubernetes/admin.conf"
+  # ... rest of configuration
 }
 ```
 
@@ -265,12 +262,12 @@ Flows show destination pod but not service name.
 **Solution**:
 
 ```hcl
-informer "k8s" {
-  resources {
-    service = { enabled = true }
-    endpoint = { enabled = true }      # For Kubernetes <1.21
-    endpointslice = { enabled = true }  # For Kubernetes >=1.21
-  }
+discovery "informer" "k8s" {
+  selectors = [
+    { kind = "Service" },
+    { kind = "Endpoint" },      # For Kubernetes <1.21
+    { kind = "EndpointSlice" }  # For Kubernetes >=1.21
+  ]
 }
 ```
 
@@ -297,15 +294,19 @@ No NetworkPolicy information in flows.
 Enable NetworkPolicy informer and selector relations:
 
 ```hcl
-informer "k8s" {
-  resources {
-    networkpolicy = { enabled = true }
-  }
-}
+discovery "informer" "k8s" {
+  selectors = [
+    { kind = "NetworkPolicy" }
+  ]
 
-discovery "selector_relations" {
-  # NetworkPolicy -> Pod selector matching
-  enabled = true
+  selector_relations = [
+    {
+      kind = "NetworkPolicy"
+      to = "Pod"
+      selector_match_labels_field = "spec.podSelector.matchLabels"
+      selector_match_expressions_field = "spec.podSelector.matchExpressions"
+    }
+  ]
 }
 ```
 

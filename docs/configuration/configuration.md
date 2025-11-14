@@ -198,12 +198,11 @@ discovery "instrument" {
   interfaces = ["eth*", "ens*"]
 }
 
-informer "k8s" {
-  informers_sync_timeout = "30s"
-  informers_resync_period = "30m"
-}
-
 discovery "informer" "k8s" {
+  # K8s API connection configuration
+  informers_sync_timeout = "30s"
+  informers_resync_period = "5s"
+
   selectors = [
     { kind = "Pod" },
     { kind = "Service" }
