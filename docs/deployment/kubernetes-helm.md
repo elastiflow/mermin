@@ -48,7 +48,6 @@ discovery "instrument" {
 discovery "informer" "k8s" {
   # K8s API connection configuration
   informers_sync_timeout = "30s"   # Sync timeout for initial load
-  informers_resync_period = "5s"  # Periodic resync interval
 
   selectors = [
     { kind = "Service" },
