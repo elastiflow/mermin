@@ -215,7 +215,7 @@ async fn run() -> Result<()> {
             event.name = "config.interfaces_empty",
             "no interfaces configured, using default patterns"
         );
-        runtime::conf::InstrumentConf::default().interfaces
+        runtime::conf::InstrumentOptions::default().interfaces
     } else {
         conf.discovery.instrument.interfaces.clone()
     };

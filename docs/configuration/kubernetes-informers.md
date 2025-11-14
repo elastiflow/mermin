@@ -13,13 +13,12 @@ Mermin uses Kubernetes informers to maintain an in-memory cache of cluster resou
 ## Configuration
 
 ```hcl
-informer "k8s" {
+discovery "informer" "k8s" {
+  # K8s API connection configuration
   kubeconfig_path = ""
   informers_sync_timeout = "30s"
-  informers_resync_period = "30m"
-}
+  informers_resync_period = "5s"
 
-discovery "informer" "k8s" {
   selectors = [
     { kind = "Service" },
     { kind = "Endpoint" },
@@ -49,12 +48,14 @@ Path to kubeconfig file for API server connection.
 **Examples:**
 
 ```hcl
-informer "k8s" {
+discovery "informer" "k8s" {
   # Use in-cluster config (default for pods)
   kubeconfig_path = ""
 
   # Use specific kubeconfig
   # kubeconfig_path = "/etc/mermin/kubeconfig"
+
+  # ... rest of configuration
 }
 ```
 
@@ -79,12 +80,14 @@ Timeout for initial informer synchronization.
 **Examples:**
 
 ```hcl
-informer "k8s" {
+discovery "informer" "k8s" {
   # Default
   informers_sync_timeout = "30s"
 
   # For large clusters (10,000+ pods)
   # informers_sync_timeout = "120s"
+
+  # ... rest of configuration
 }
 ```
 
@@ -103,15 +106,17 @@ Periodic full resynchronization interval.
 **Examples:**
 
 ```hcl
-informer "k8s" {
+discovery "informer" "k8s" {
   # Default
-  informers_resync_period = "30m"
+  informers_resync_period = "5s"
 
   # More frequent for critical environments
   # informers_resync_period = "15m"
 
   # Less frequent to reduce API load
   # informers_resync_period = "60m"
+
+  # ... rest of configuration
 }
 ```
 
@@ -261,15 +266,14 @@ Mermin supports watching these Kubernetes resources:
 ## Complete Configuration Example
 
 ```hcl
-# Kubernetes informer basic configuration
-informer "k8s" {
+# Kubernetes informer configuration
+discovery "informer" "k8s" {
+  # K8s API connection configuration
   kubeconfig_path = ""
   informers_sync_timeout = "30s"
-  informers_resync_period = "30m"
-}
+  informers_resync_period = "5s"
 
-# Resource selectors
-discovery "informer" "k8s" {
+  # Resource selectors
   selectors = [
     # Core resources (always recommended)
     { kind = "Service" },
@@ -336,12 +340,14 @@ Initial sync time depends on:
 **Large cluster tuning:**
 
 ```hcl
-informer "k8s" {
+discovery "informer" "k8s" {
   # Longer timeout for large clusters
   informers_sync_timeout = "120s"
 
   # Less frequent resync
-  informers_resync_period = "60m"
+  informers_resync_period = "5m"
+
+  # ... rest of configuration
 }
 ```
 

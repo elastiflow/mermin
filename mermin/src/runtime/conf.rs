@@ -8,6 +8,21 @@ use hcl::{
 use serde::{Deserialize, Serialize};
 use tracing::{Level, warn};
 
+use crate::{
+    filter::opts::FilteringOptions,
+    k8s::{
+        attributor::{AttributesOptions, default_attributes},
+        opts::K8sInformerOptions,
+    },
+    metrics::opts::MetricsOptions,
+    otlp::opts::ExportOptions,
+    runtime::{
+        conf::conf_serde::{duration, level},
+        opts::InternalOptions,
+    },
+    span::opts::SpanOptions,
+};
+
 /// TCX ordering strategy for kernel >= 6.6
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -34,16 +49,6 @@ impl fmt::Display for TcxOrderStrategy {
         }
     }
 }
-
-use crate::{
-    k8s::{opts::default_attributes, owner_relations::OwnerRelationsOptions},
-    otlp::opts::ExportOptions,
-    runtime::{
-        conf::conf_serde::{duration, level},
-        opts::InternalOptions,
-    },
-    span::opts::SpanOptions,
-};
 
 pub struct Hcl;
 
@@ -124,8 +129,10 @@ pub struct Conf {
     pub packet_worker_count: usize,
     /// Contains the configuration for internal exporters
     pub internal: InternalOptions,
+    /// API configuration for the API server
     pub api: ApiConf,
-    pub metrics: MetricsConf,
+    /// Metrics configuration for the metrics server
+    pub metrics: MetricsOptions,
     /// Parser configuration for eBPF packet parsing
     pub parser: ParserConf,
     /// Span configuration for flow span producer
@@ -147,7 +154,7 @@ pub struct Conf {
     /// block in the HCL configuration file. An empty `attributes {}` block
     /// will disable the feature entirely.
     #[serde(default)]
-    pub attributes: Option<HashMap<String, HashMap<String, AttributesConf>>>,
+    pub attributes: Option<HashMap<String, HashMap<String, AttributesOptions>>>,
 }
 
 impl Default for Conf {
@@ -162,7 +169,7 @@ impl Default for Conf {
             packet_worker_count: defaults::flow_workers(),
             internal: InternalOptions::default(),
             api: ApiConf::default(),
-            metrics: MetricsConf::default(),
+            metrics: MetricsOptions::default(),
             parser: ParserConf::default(),
             span: SpanOptions::default(),
             discovery: DiscoveryConf::default(),
@@ -351,15 +358,15 @@ impl Default for ParserConf {
 #[serde(default)]
 pub struct DiscoveryConf {
     /// Instrumentation configuration
-    pub instrument: InstrumentConf,
+    pub instrument: InstrumentOptions,
     /// Informer discovery configuration
-    pub informer: Option<InformerDiscoveryConf>,
+    pub informer: Option<InformerDiscoveryOptions>,
 }
 
 /// Instrumentation configuration for network interfaces
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
-pub struct InstrumentConf {
+pub struct InstrumentOptions {
     /// Network interfaces to monitor
     pub interfaces: Vec<String>,
     /// Automatically discover and attach to new interfaces matching patterns.
@@ -378,7 +385,7 @@ pub struct InstrumentConf {
     pub tcx_order: TcxOrderStrategy,
 }
 
-impl Default for InstrumentConf {
+impl Default for InstrumentOptions {
     fn default() -> Self {
         Self {
             // Default strategy: complete visibility without flow duplication
@@ -419,7 +426,7 @@ impl Default for InstrumentConf {
     }
 }
 
-impl InstrumentConf {
+impl InstrumentOptions {
     /// Validate tc_priority and tcx_order settings
     pub fn validate(&self) -> Result<(), String> {
         const MIN_PRIORITY: u16 = 1;
@@ -467,41 +474,9 @@ impl InstrumentConf {
 /// Informer discovery configuration
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default)]
-pub struct InformerDiscoveryConf {
+pub struct InformerDiscoveryOptions {
     /// Kubernetes informer configuration
-    pub k8s: Option<K8sInformerConf>,
-}
-
-/// Kubernetes informer configuration
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(default)]
-pub struct K8sInformerConf {
-    /// Owner relations configuration
-    pub owner_relations: Option<OwnerRelationsOptions>,
-    /// Selector-based resource relations configuration
-    ///
-    /// If None or an empty list, selector-based matching is disabled.
-    /// Rules are required for selector matching to function.
-    pub selector_relations: Option<Vec<SelectorRelationRule>>,
-}
-
-/// Configuration for a single selector-based resource relation rule
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct SelectorRelationRule {
-    /// The kind of resource that contains the selector (e.g., "NetworkPolicy", "Service")
-    /// Case insensitive
-    pub kind: String,
-    /// The kind of resource to match against (e.g., "Pod")
-    /// Case insensitive
-    pub to: String,
-    /// JSON path to the matchLabels field in the source resource
-    /// Example: "spec.podSelector.matchLabels" or "spec.selector"
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub selector_match_labels_field: Option<String>,
-    /// JSON path to the matchExpressions field in the source resource
-    /// Example: "spec.podSelector.matchExpressions"
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub selector_match_expressions_field: Option<String>,
+    pub k8s: Option<K8sInformerOptions>,
 }
 
 pub mod defaults {
@@ -752,114 +727,6 @@ impl Default for ApiConf {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct MetricsConf {
-    /// Enable the metrics server.
-    pub enabled: bool,
-    /// The network address the metrics server will listen on.
-    pub listen_address: String,
-    /// The port the metrics server will listen on.
-    pub port: u16,
-}
-
-impl Default for MetricsConf {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
-            port: 10250,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(default)]
-/// Defines the configuration for associating network flows with Kubernetes objects.
-pub struct AttributesConf {
-    /// Defines metadata to extract from all Kubernetes objects.
-    pub extract: ExtractConf,
-    /// Defines rules for mapping flow attributes to Kubernetes object attributes.
-    pub association: AssociationBlock,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(default)]
-/// Configuration for metadata extraction from Kubernetes objects.
-pub struct ExtractConf {
-    /// A list of metadata fields to extract.
-    pub metadata: Vec<String>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(default)]
-/// Defines association rules for different Kubernetes object kinds.
-pub struct AssociationBlock {
-    #[serde(default)]
-    pub pod: Option<ObjectAssociationRule>,
-    #[serde(default)]
-    pub node: Option<ObjectAssociationRule>,
-    #[serde(default)]
-    pub service: Option<ObjectAssociationRule>,
-    #[serde(default)]
-    pub networkpolicy: Option<ObjectAssociationRule>,
-    #[serde(default)]
-    pub endpoint: Option<ObjectAssociationRule>,
-    #[serde(default)]
-    pub endpointslice: Option<ObjectAssociationRule>,
-    #[serde(default)]
-    pub ingress: Option<ObjectAssociationRule>,
-    #[serde(default)]
-    pub gateway: Option<ObjectAssociationRule>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(default)]
-/// Represents the association rules for a specific Kubernetes object kind.
-pub struct ObjectAssociationRule {
-    /// A list of sources to match against for association.
-    pub sources: Vec<AssociationSource>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(default)]
-/// Defines a single association rule mapping a flow attribute to Kubernetes object fields.
-pub struct AssociationSource {
-    /// The origin of the attribute (e.g., "flow").
-    pub from: String,
-    /// The specific attribute name (e.g., "source.ip").
-    pub name: String,
-    /// A list of Kubernetes object fields to match against.
-    pub to: Vec<String>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub struct FilteringOptions {
-    pub address: Option<FilteringPair>,
-    pub port: Option<FilteringPair>,
-    pub transport: Option<FilteringPair>,
-    #[serde(rename = "type")]
-    pub type_: Option<FilteringPair>,
-    pub interface_name: Option<FilteringPair>,
-    pub interface_index: Option<FilteringPair>,
-    pub interface_mac: Option<FilteringPair>,
-    pub connection_state: Option<FilteringPair>,
-    pub ip_dscp_name: Option<FilteringPair>,
-    pub ip_ecn_name: Option<FilteringPair>,
-    pub ip_ttl: Option<FilteringPair>,
-    pub ip_flow_label: Option<FilteringPair>,
-    pub icmp_type_name: Option<FilteringPair>,
-    pub icmp_code_name: Option<FilteringPair>,
-    pub tcp_flags: Option<FilteringPair>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub struct FilteringPair {
-    #[serde(default, rename = "match")]
-    pub match_glob: String,
-    #[serde(default, rename = "not_match")]
-    pub not_match_glob: String,
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -868,7 +735,7 @@ mod tests {
     use figment::Jail;
     use tracing::Level;
 
-    use super::{ApiConf, Conf, InstrumentConf, MetricsConf, ParserConf};
+    use super::{ApiConf, Conf, InstrumentOptions, MetricsOptions, ParserConf};
     use crate::{
         otlp::opts::{ExportOptions, ExporterProtocol},
         runtime::{cli::Cli, opts::InternalOptions},
@@ -1810,7 +1677,7 @@ shutdown_timeout: 2min
 
     #[test]
     fn default_metrics_conf_has_expected_values() {
-        let metrics = MetricsConf::default();
+        let metrics = MetricsOptions::default();
 
         assert_eq!(
             metrics.enabled, true,
@@ -2503,9 +2370,9 @@ discovery:
 
     #[test]
     fn owner_relations_conf_default_values() {
-        use crate::k8s::owner_relations::OwnerRelationsOptions;
+        use crate::k8s::owner_relations::OwnerRelationsRules;
 
-        let conf = OwnerRelationsOptions::default();
+        let conf = OwnerRelationsRules::default();
         assert_eq!(conf.max_depth, 5, "Default max_depth should be 5");
         assert!(
             conf.include_kinds.is_empty(),
@@ -2726,7 +2593,7 @@ discovery:
 
     #[test]
     fn test_tc_priority_validation_valid_range() {
-        let conf = InstrumentConf {
+        let conf = InstrumentOptions {
             tc_priority: 50,
             ..Default::default()
         };
@@ -2735,7 +2602,7 @@ discovery:
 
     #[test]
     fn test_tc_priority_validation_min_boundary() {
-        let conf = InstrumentConf {
+        let conf = InstrumentOptions {
             tc_priority: 1,
             ..Default::default()
         };
@@ -2744,7 +2611,7 @@ discovery:
 
     #[test]
     fn test_tc_priority_validation_max_boundary() {
-        let conf = InstrumentConf {
+        let conf = InstrumentOptions {
             tc_priority: 32767,
             ..Default::default()
         };
@@ -2753,7 +2620,7 @@ discovery:
 
     #[test]
     fn test_tc_priority_validation_below_min() {
-        let conf = InstrumentConf {
+        let conf = InstrumentOptions {
             tc_priority: 0,
             ..Default::default()
         };
@@ -2764,7 +2631,7 @@ discovery:
 
     #[test]
     fn test_tc_priority_validation_above_max() {
-        let conf = InstrumentConf {
+        let conf = InstrumentOptions {
             tc_priority: 32768,
             ..Default::default()
         };
@@ -2777,7 +2644,7 @@ discovery:
     fn test_tc_priority_validation_safe_range() {
         // Test that values in safe range don't error
         for priority in [30, 50, 100, 1000, 32767] {
-            let conf = InstrumentConf {
+            let conf = InstrumentOptions {
                 tc_priority: priority,
                 ..Default::default()
             };
@@ -2787,7 +2654,7 @@ discovery:
 
     #[test]
     fn test_tc_priority_default_is_valid() {
-        let conf = InstrumentConf::default();
+        let conf = InstrumentOptions::default();
         assert!(conf.validate().is_ok());
         assert_eq!(conf.tc_priority, 50);
     }
@@ -2797,7 +2664,7 @@ discovery:
         // Test edge cases around the boundaries
         let valid_priorities = [1, 2, 29, 30, 31, 49, 50, 51, 32766, 32767];
         for priority in valid_priorities {
-            let conf = InstrumentConf {
+            let conf = InstrumentOptions {
                 tc_priority: priority,
                 ..Default::default()
             };
@@ -2811,7 +2678,7 @@ discovery:
         // Test invalid values
         let invalid_priorities = [0u16, 32768u16, 65535u16];
         for priority in invalid_priorities {
-            let conf = InstrumentConf {
+            let conf = InstrumentOptions {
                 tc_priority: priority,
                 ..Default::default()
             };

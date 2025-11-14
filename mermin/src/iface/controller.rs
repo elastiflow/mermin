@@ -599,6 +599,15 @@ impl IfaceController {
     }
 
     /// Attach eBPF program to interface in host namespace.
+    ///
+    /// Orphan Handling:
+    /// - Netlink mode: cleanup_orphaned_programs() removes old programs by name
+    /// - TCX mode: Supports multiple programs on same hook. New program attaches successfully
+    ///   even if orphaned programs exist from previous instances. Orphaned programs are
+    ///   automatically cleaned up by the kernel when the old pod's file descriptors close.
+    ///
+    /// Note: True atomic replacement would require link pinning, which Aya doesn't currently
+    /// support. See aya-link-pinning-enhancement.md for the GitHub issue.
     async fn attach_to_iface(
         &mut self,
         iface: &str,
@@ -606,6 +615,7 @@ impl IfaceController {
     ) -> Result<(), MerminError> {
         let context = format!("{} ({})", iface, attach_type.direction_name());
         let iface_owned = iface.to_string();
+        let direction_name = attach_type.direction_name();
         let use_tcx = self.use_tcx;
         let tc_priority = self.tc_priority;
 
@@ -652,6 +662,8 @@ impl IfaceController {
 
                 if use_tcx {
                     // TCX mode: kernel >= 6.6, attach with configured ordering
+                    // TCX supports multiple programs on the same hook, so attachment
+                    // succeeds even if orphaned programs exist from crashed instances
                     let link_order = match self.tcx_order {
                         TcxOrderStrategy::Last => LinkOrder::last(),
                         TcxOrderStrategy::First => LinkOrder::first(),
@@ -660,9 +672,10 @@ impl IfaceController {
                     debug!(
                         event.name = "interface_controller.attaching_tcx",
                         network.interface.name = %iface_owned,
-                        ebpf.program.direction = attach_type.direction_name(),
+                        ebpf.program.direction = direction_name,
                         ebpf.tcx.order = %self.tcx_order,
-                        "attaching ebpf program with tcx ordering"
+                        "attaching ebpf program with TCX ordering - \
+                         TCX supports multiple programs, orphans will be GC'd when old pod exits"
                     );
 
                     let options = TcAttachOptions::TcxOrder(link_order);
@@ -678,7 +691,7 @@ impl IfaceController {
                         event.name = "interface_controller.attaching_with_priority",
                         network.interface.name = %iface_owned,
                         ebpf.program.priority = tc_priority,
-                        ebpf.program.direction = attach_type.direction_name(),
+                        ebpf.program.direction = direction_name,
                         "attaching ebpf program with TC priority (netlink mode)"
                     );
 
@@ -687,13 +700,13 @@ impl IfaceController {
             })?
         };
 
-        self.register_tc_link(iface.to_string(), attach_type.direction_name(), link_id);
+        self.register_tc_link(iface.to_string(), direction_name, link_id);
 
-        inc_tc_programs_attached(iface, attach_type.direction_name());
+        inc_tc_programs_attached(iface, direction_name);
 
         debug!(
             event.name = "interface_controller.program_attached",
-            ebpf.program.direction = attach_type.direction_name(),
+            ebpf.program.direction = direction_name,
             ebpf.program.priority = tc_priority,
             network.interface.name = %iface,
             "ebpf program attached to interface"
@@ -762,7 +775,7 @@ impl IfaceController {
         for iface in &ifaces {
             let iface_owned = iface.clone();
             let removed = self.netns_switch.in_host_namespace(None, || {
-                Self::cleanup_orphaned_programs_on_iface(&iface_owned)
+                Self::cleanup_orphaned_programs_on_iface(&iface_owned, self.use_tcx)
             })?;
 
             if removed > 0 {
@@ -800,45 +813,52 @@ impl IfaceController {
     ///
     /// This method must run in the host network namespace and is best-effort:
     /// if removal fails, it logs a warning but doesn't fail the entire operation.
-    fn cleanup_orphaned_programs_on_iface(iface: &str) -> Result<u32, MerminError> {
+    ///
+    /// For TCX mode (kernel >= 6.6), orphaned programs cannot be removed without the original
+    /// link_id. However, TCX supports multiple programs on the same hook, so new attachments
+    /// should succeed. The kernel will clean up orphaned programs when the process exits.
+    fn cleanup_orphaned_programs_on_iface(iface: &str, use_tcx: bool) -> Result<u32, MerminError> {
         let mut removed_count = 0u32;
 
-        // Program names to search for
-        let program_names = [
-            ("mermin_flow_ingress", TcAttachType::Ingress),
-            ("mermin_flow_egress", TcAttachType::Egress),
-        ];
+        // Only netlink mode supports cleanup by program name
+        // TCX requires link_id for detachment, which we don't have from previous instances
+        if !use_tcx {
+            let program_names = [
+                ("mermin_flow_ingress", TcAttachType::Ingress),
+                ("mermin_flow_egress", TcAttachType::Egress),
+            ];
 
-        for (program_name, attach_type) in &program_names {
-            match qdisc_detach_program(iface, *attach_type, program_name) {
-                Ok(()) => {
-                    removed_count += 1;
-                    debug!(
-                        event.name = "interface_controller.orphaned_program_removed",
-                        network.interface.name = %iface,
-                        attach_type = ?attach_type,
-                        program = %program_name,
-                        "removed orphaned TC program"
-                    );
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    trace!(
-                        event.name = "interface_controller.no_orphaned_program",
-                        network.interface.name = %iface,
-                        attach_type = ?attach_type,
-                        program = %program_name,
-                        "no orphaned program found (expected)"
-                    );
-                }
-                Err(e) => {
-                    warn!(
-                        event.name = "interface_controller.program_detach_failed",
-                        network.interface.name = %iface,
-                        attach_type = ?attach_type,
-                        program = %program_name,
-                        error = %e,
-                        "failed to detach program (may have been removed already)"
-                    );
+            for (program_name, attach_type) in &program_names {
+                match qdisc_detach_program(iface, *attach_type, program_name) {
+                    Ok(()) => {
+                        removed_count += 1;
+                        debug!(
+                            event.name = "interface_controller.orphaned_program_removed",
+                            network.interface.name = %iface,
+                            attach_type = ?attach_type,
+                            program = %program_name,
+                            "removed orphaned TC program (netlink mode)"
+                        );
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        trace!(
+                            event.name = "interface_controller.no_orphaned_program",
+                            network.interface.name = %iface,
+                            attach_type = ?attach_type,
+                            program = %program_name,
+                            "no orphaned program found (expected)"
+                        );
+                    }
+                    Err(e) => {
+                        warn!(
+                            event.name = "interface_controller.program_detach_failed",
+                            network.interface.name = %iface,
+                            attach_type = ?attach_type,
+                            program = %program_name,
+                            error = %e,
+                            "failed to detach program (may have been removed already)"
+                        );
+                    }
                 }
             }
         }

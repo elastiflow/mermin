@@ -319,14 +319,26 @@ impl FlowSpanProducer {
                 }
 
                 if !sent {
-                    // All workers are full - fallback to blocking send to preferred worker
-                    let worker_tx = &worker_channels[worker_index];
-                    if worker_tx.send(flow_event).await.is_err() {
-                        // Worker channel is closed, handle gracefully
-                        warn!("all workers closed, exiting");
-                        return;
-                    }
-                    worker_index = (worker_index + 1) % worker_count;
+                    // All workers are full - drop event to prevent ring buffer backup
+                    // CRITICAL: Blocking here prevents draining ring buffer, causing eBPF to drop MORE events
+                    metrics::registry::FLOW_EVENTS_DROPPED_BACKPRESSURE.inc();
+                    warn!(
+                        event.name = "flow.worker_backpressure",
+                        worker_count = worker_count,
+                        "all worker channels full, dropping flow event (prevents ring buffer deadlock)"
+                    );
+                    // Continue draining ring buffer - better to drop here with visibility
+                    // than block and cause eBPF to drop events silently
+
+                    // TODO: implement a more robust solution for this like ratio based sampling to prevent completely filling up:
+                    // // All workers are full - fallback to blocking send to preferred worker
+                    // let worker_tx = &worker_channels[worker_index];
+                    // if worker_tx.send(flow_event).await.is_err() {
+                    //     // Worker channel is closed, handle gracefully
+                    //     warn!("all workers closed, exiting");
+                    //     return;
+                    // }
+                    // worker_index = (worker_index + 1) % worker_count;
                 }
             }
 

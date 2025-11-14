@@ -30,21 +30,21 @@ use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
-use crate::{
-    metrics::{error::MetricsError, registry},
-    runtime::conf::MetricsConf,
-};
+use crate::metrics::{error::MetricsError, opts::MetricsOptions, registry};
 
 /// Handler for the `/metrics` endpoint.
 ///
 /// Returns Prometheus text format metrics for all registered collectors.
 async fn metrics_handler() -> impl IntoResponse {
-    let encoder = prometheus::TextEncoder::new();
-    let metric_families = registry::REGISTRY.gather();
-
-    match encoder.encode_to_string(&metric_families) {
-        Ok(body) => (StatusCode::OK, body),
-        Err(e) => {
+    match tokio::task::spawn_blocking(|| {
+        let encoder = prometheus::TextEncoder::new();
+        let metric_families = registry::REGISTRY.gather();
+        encoder.encode_to_string(&metric_families)
+    })
+    .await
+    {
+        Ok(Ok(body)) => (StatusCode::OK, body),
+        Ok(Err(e)) => {
             tracing::error!(
                 event.name = "metrics.encode_failed",
                 error.message = %e,
@@ -53,6 +53,17 @@ async fn metrics_handler() -> impl IntoResponse {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to encode metrics: {e}"),
+            )
+        }
+        Err(e) => {
+            tracing::error!(
+                event.name = "metrics.gather_failed",
+                error.message = %e,
+                "metrics gathering task panicked"
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to gather metrics".to_string(),
             )
         }
     }
@@ -88,7 +99,7 @@ fn create_metrics_router() -> Router {
 ///
 /// tokio::spawn(start_metrics_server(config));
 /// ```
-pub async fn start_metrics_server(config: MetricsConf) -> Result<(), MetricsError> {
+pub async fn start_metrics_server(config: MetricsOptions) -> Result<(), MetricsError> {
     if !config.enabled {
         info!(
             event.name = "metrics.disabled",

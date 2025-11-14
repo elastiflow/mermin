@@ -46,30 +46,30 @@ discovery "instrument" {
 }
 
 # Full Kubernetes metadata enrichment
-informer "k8s" {
+discovery "informer" "k8s" {
   informers_sync_timeout = "60s"
   informers_resync_period = "30m"
 
-  resources {
+  selectors = [
     # Core resources
-    pod = { enabled = true }
-    service = { enabled = true }
-    endpoint = { enabled = true }
-    endpointslice = { enabled = true }
-    node = { enabled = true }
+    { kind = "Pod" },
+    { kind = "Service" },
+    { kind = "Endpoint" },
+    { kind = "EndpointSlice" },
+    { kind = "Node" },
 
     # Workload controllers
-    deployment = { enabled = true }
-    replicaset = { enabled = true }
-    statefulset = { enabled = true }
-    daemonset = { enabled = true }
-    job = { enabled = true }
-    cronjob = { enabled = true }
+    { kind = "Deployment" },
+    { kind = "ReplicaSet" },
+    { kind = "StatefulSet" },
+    { kind = "DaemonSet" },
+    { kind = "Job" },
+    { kind = "CronJob" },
 
     # Networking
-    networkpolicy = { enabled = true }
-    ingress = { enabled = true }
-  }
+    { kind = "NetworkPolicy" },
+    { kind = "Ingress" }
+  ]
 }
 
 # Walk owner references for workload attribution
@@ -194,12 +194,12 @@ discovery "instrument" {
 }
 
 # Basic Kubernetes enrichment
-informer "k8s" {
-  resources {
-    pod = { enabled = true }
-    service = { enabled = true }
-    node = { enabled = true }
-  }
+discovery "informer" "k8s" {
+  selectors = [
+    { kind = "Pod" },
+    { kind = "Service" },
+    { kind = "Node" }
+  ]
 }
 
 # Simple owner tracking
@@ -269,15 +269,15 @@ discovery "instrument" {
   ]
 }
 
-informer "k8s" {
-  resources {
-    pod = { enabled = true }
-    service = { enabled = true }
-    endpoint = { enabled = true }
-    node = { enabled = true }
-    deployment = { enabled = true }
-    networkpolicy = { enabled = true }  # Cilium NetworkPolicies
-  }
+discovery "informer" "k8s" {
+  selectors = [
+    { kind = "Pod" },
+    { kind = "Service" },
+    { kind = "Endpoint" },
+    { kind = "Node" },
+    { kind = "Deployment" },
+    { kind = "NetworkPolicy" }  # Cilium NetworkPolicies
+  ]
 }
 
 discovery "owners" {
@@ -344,14 +344,14 @@ discovery "instrument" {
   ]
 }
 
-informer "k8s" {
-  resources {
-    pod = { enabled = true }
-    service = { enabled = true }
-    node = { enabled = true }
-    deployment = { enabled = true }
-    networkpolicy = { enabled = true }
-  }
+discovery "informer" "k8s" {
+  selectors = [
+    { kind = "Pod" },
+    { kind = "Service" },
+    { kind = "Node" },
+    { kind = "Deployment" },
+    { kind = "NetworkPolicy" }
+  ]
 }
 
 discovery "owners" {
@@ -418,19 +418,15 @@ discovery "instrument" {
 }
 
 # Optimize Kubernetes informer load
-informer "k8s" {
+discovery "informer" "k8s" {
   informers_resync_period = "1h"  # Reduce API server load
 
-  resources {
-    # Only essential resources
-    pod = { enabled = true }
-    service = { enabled = true }
-    node = { enabled = true }
-
-    # Disable less critical resources
-    ingress = { enabled = false }
-    networkpolicy = { enabled = false }
-  }
+  # Only watch essential resources
+  selectors = [
+    { kind = "Pod" },
+    { kind = "Service" },
+    { kind = "Node" }
+  ]
 }
 
 discovery "owners" {
@@ -509,17 +505,13 @@ discovery "instrument" {
 }
 
 # Namespace filtering for security
-informer "k8s" {
-  resources {
-    namespace_selector = {
-      match_names = ["production", "staging"]  # Only specific namespaces
-    }
-
-    pod = { enabled = true }
-    service = { enabled = true }
-    node = { enabled = true }
-    deployment = { enabled = true }
-  }
+discovery "informer" "k8s" {
+  selectors = [
+    { kind = "Pod", namespaces = ["production", "staging"] },  # Only specific namespaces
+    { kind = "Service", namespaces = ["production", "staging"] },
+    { kind = "Node" },  # Nodes are cluster-scoped, no namespace filter
+    { kind = "Deployment", namespaces = ["production", "staging"] }
+  ]
 }
 
 discovery "owners" {
@@ -599,13 +591,13 @@ discovery "instrument" {
   interfaces = ["eth*", "cni*"]
 }
 
-informer "k8s" {
-  resources {
-    pod = { enabled = true }
-    service = { enabled = true }
-    node = { enabled = true }
-    deployment = { enabled = true }
-  }
+discovery "informer" "k8s" {
+  selectors = [
+    { kind = "Pod" },
+    { kind = "Service" },
+    { kind = "Node" },
+    { kind = "Deployment" }
+  ]
 }
 
 discovery "owners" {
@@ -691,13 +683,13 @@ discovery "instrument" {
 }
 
 # Standard configuration for GKE
-informer "k8s" {
-  resources {
-    pod = { enabled = true }
-    service = { enabled = true }
-    node = { enabled = true }
-    deployment = { enabled = true }
-  }
+discovery "informer" "k8s" {
+  selectors = [
+    { kind = "Pod" },
+    { kind = "Service" },
+    { kind = "Node" },
+    { kind = "Deployment" }
+  ]
 }
 
 discovery "owners" {
@@ -726,13 +718,13 @@ discovery "instrument" {
   interfaces = ["eth0"]  # EKS typically uses eth0 for pod networking
 }
 
-informer "k8s" {
-  resources {
-    pod = { enabled = true }
-    service = { enabled = true }
-    node = { enabled = true }
-    deployment = { enabled = true }
-  }
+discovery "informer" "k8s" {
+  selectors = [
+    { kind = "Pod" },
+    { kind = "Service" },
+    { kind = "Node" },
+    { kind = "Deployment" }
+  ]
 }
 
 discovery "owners" {
@@ -761,13 +753,13 @@ discovery "instrument" {
   interfaces = ["eth0", "cni*"]  # AKS with Azure CNI or Kubenet
 }
 
-informer "k8s" {
-  resources {
-    pod = { enabled = true }
-    service = { enabled = true }
-    node = { enabled = true }
-    deployment = { enabled = true }
-  }
+discovery "informer" "k8s" {
+  selectors = [
+    { kind = "Pod" },
+    { kind = "Service" },
+    { kind = "Node" },
+    { kind = "Deployment" }
+  ]
 }
 
 discovery "owners" {
