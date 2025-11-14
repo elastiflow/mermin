@@ -1,3 +1,18 @@
+## [v0.1.0-beta.27] - 2025-11-14
+
+### Bug Fixes
+
+- Gke deployment issues - healthchecks, metrics timeouts, and deadlock (#283)
+### Features
+
+- Improve k8s attributions defaults (#275)
+- Implement env hcl function (#261)
+- Add bidirectional ip and icmp metadata tracking (#279)
+
+[v0.1.0-beta.26..v0.1.0-beta.27](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.26...v0.1.0-beta.27)
+
+
+
 ## [v0.1.0-beta.26] - 2025-11-11
 
 ### Features
