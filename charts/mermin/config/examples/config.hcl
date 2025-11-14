@@ -84,13 +84,6 @@ parser {
   parse_ipv6_dest_opts = false  # IPv6 Destination Options (disabled to reduce complexity)
 }
 
-# K8s informer configuration
-informer "k8s" {
-  kubeconfig_path         = ""
-  informers_sync_timeout  = "30s"
-  informers_resync_period = "30m"
-}
-
 discovery "instrument" {
   # Network interfaces to monitor
   #
@@ -159,6 +152,11 @@ discovery "instrument" {
 }
 
 discovery "informer" "k8s" {
+  # K8s API connection configuration
+  kubeconfig_path         = "" # Empty uses in-cluster config (default for pods)
+  informers_sync_timeout  = "30s"  # Timeout for initial cache sync (increase for large clusters)
+  informers_resync_period = "5s"  # Period between full cache resyncs
+
   /*
     Define which flow will be processed and sent to the output.
     Impacts the "In-mem K8s objects cache" build by K8s informer (https://www.plural.sh/blog/manage-kubernetes-events-informers/)

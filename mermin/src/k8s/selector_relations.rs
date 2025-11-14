@@ -16,13 +16,30 @@ use k8s_openapi::{
     apimachinery::pkg::apis::meta::v1::{LabelSelector, LabelSelectorRequirement},
 };
 use kube::ResourceExt;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::{debug, trace, warn};
 
-use crate::{
-    k8s::attributor::{K8sObjectMeta, ResourceStore},
-    runtime::conf::SelectorRelationRule,
-};
+use crate::k8s::attributor::{K8sObjectMeta, ResourceStore};
+
+/// Configuration for a single selector-based resource relation rule
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SelectorRelationRule {
+    /// The kind of resource that contains the selector (e.g., "NetworkPolicy", "Service")
+    /// Case insensitive
+    pub kind: String,
+    /// The kind of resource to match against (e.g., "Pod")
+    /// Case insensitive
+    pub to: String,
+    /// JSON path to the matchLabels field in the source resource
+    /// Example: "spec.podSelector.matchLabels" or "spec.selector"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selector_match_labels_field: Option<String>,
+    /// JSON path to the matchExpressions field in the source resource
+    /// Example: "spec.podSelector.matchExpressions"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selector_match_expressions_field: Option<String>,
+}
 
 /// Manages selector-based resource relations according to configuration rules.
 ///

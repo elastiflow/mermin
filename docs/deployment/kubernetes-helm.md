@@ -44,16 +44,12 @@ discovery "instrument" {
   interfaces = ["eth*", "ens*"]
 }
 
-# Kubernetes informer configuration
-informer "k8s" {
-  # Sync timeout for initial load
-  informers_sync_timeout = "30s"
-  # Periodic resync interval
-  informers_resync_period = "30m"
-}
-
-# Configure which Kubernetes resources to watch
+# Configure Kubernetes informer and resources to watch
 discovery "informer" "k8s" {
+  # K8s API connection configuration
+  informers_sync_timeout = "30s"   # Sync timeout for initial load
+  informers_resync_period = "5s"  # Periodic resync interval
+
   selectors = [
     { kind = "Service" },
     { kind = "Endpoint" },

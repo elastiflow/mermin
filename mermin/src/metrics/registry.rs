@@ -74,6 +74,11 @@ lazy_static! {
     // Flow Lifecycle Metrics
     // ============================================================================
 
+    pub static ref FLOW_EVENTS_DROPPED_BACKPRESSURE: IntCounter = IntCounter::with_opts(
+        Opts::new("flow_events_dropped_backpressure_total", "Flow events dropped due to worker channel backpressure")
+            .namespace("mermin")
+    ).expect("failed to create flow_events_dropped_backpressure metric");
+
     /// Total number of flows created.
     pub static ref FLOWS_CREATED: IntCounterVec = IntCounterVec::new(
         Opts::new("mermin_flows_created_total", "Total number of flows created")
@@ -167,6 +172,7 @@ pub fn init_registry() -> Result<(), prometheus::Error> {
     REGISTRY.register(Box::new(TC_PROGRAMS_DETACHED.clone()))?;
 
     // Flow metrics
+    REGISTRY.register(Box::new(FLOW_EVENTS_DROPPED_BACKPRESSURE.clone()))?;
     REGISTRY.register(Box::new(FLOWS_CREATED.clone()))?;
     REGISTRY.register(Box::new(FLOWS_EXPIRED.clone()))?;
     REGISTRY.register(Box::new(FLOWS_ACTIVE.clone()))?;

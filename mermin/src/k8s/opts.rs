@@ -1,107 +1,45 @@
-use std::collections::HashMap;
+use std::time::Duration;
 
-use crate::runtime::conf::{
-    AssociationBlock, AssociationSource, AttributesConf, ExtractConf, ObjectAssociationRule,
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    k8s::{owner_relations::OwnerRelationsRules, selector_relations::SelectorRelationRule},
+    runtime::conf::conf_serde::duration,
 };
 
-/// Creates the default Kubernetes attribution configuration.
-/// This enables pod, service, and node enrichment out-of-the-box.
-pub fn default_attributes() -> HashMap<String, HashMap<String, AttributesConf>> {
-    let source_conf = create_k8s_attributes_conf("source");
-    let dest_conf = create_k8s_attributes_conf("destination");
-
-    HashMap::from([
-        (
-            "source".to_string(),
-            HashMap::from([("k8s".to_string(), source_conf)]),
-        ),
-        (
-            "destination".to_string(),
-            HashMap::from([("k8s".to_string(), dest_conf)]),
-        ),
-    ])
+/// Kubernetes informer configuration
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub struct K8sInformerOptions {
+    /// Path to kubeconfig file for API server connection.
+    /// Empty string uses in-cluster config (default for pods).
+    pub kubeconfig_path: String,
+    /// Timeout for initial informer synchronization.
+    /// Mermin won't be ready until sync completes.
+    /// Large clusters may need longer timeout.
+    #[serde(with = "duration")]
+    pub informers_sync_timeout: Duration,
+    /// Period between full cache resyncs from API server.
+    /// Helps recover from potential drift between cache and actual state.
+    #[serde(with = "duration")]
+    pub informers_resync_period: Duration,
+    /// Owner relations configuration
+    pub owner_relations: Option<OwnerRelationsRules>,
+    /// Selector-based resource relations configuration
+    ///
+    /// If None or an empty list, selector-based matching is disabled.
+    /// Rules are required for selector matching to function.
+    pub selector_relations: Option<Vec<SelectorRelationRule>>,
 }
 
-/// Helper to create an `AttributesConf` for a given flow direction ("source" or "destination").
-fn create_k8s_attributes_conf(direction: &str) -> AttributesConf {
-    let ip_attr_name = format!("{direction}.ip");
-    let port_attr_name = format!("{direction}.port");
-
-    AttributesConf {
-        extract: ExtractConf {
-            metadata: vec![
-                "[*].metadata.name".to_string(),
-                "[*].metadata.namespace".to_string(),
-                "[*].metadata.uid".to_string(),
-            ],
-        },
-        association: AssociationBlock {
-            pod: Some(ObjectAssociationRule {
-                sources: vec![
-                    AssociationSource {
-                        from: "flow".to_string(),
-                        name: ip_attr_name.clone(),
-                        to: vec![
-                            "status.podIP".to_string(),
-                            "status.podIPs[*]".to_string(),
-                            "status.hostIP".to_string(),
-                            "status.hostIPs[*]".to_string(),
-                        ],
-                    },
-                    AssociationSource {
-                        from: "flow".to_string(),
-                        name: port_attr_name.clone(),
-                        to: vec![
-                            "spec.containers[*].ports[*].containerPort".to_string(),
-                            "spec.containers[*].ports[*].hostPort".to_string(),
-                        ],
-                    },
-                    AssociationSource {
-                        from: "flow".to_string(),
-                        name: "network.transport".to_string(),
-                        to: vec!["spec.containers[*].ports[*].protocol".to_string()],
-                    },
-                ],
-            }),
-            service: Some(ObjectAssociationRule {
-                sources: vec![
-                    AssociationSource {
-                        from: "flow".to_string(),
-                        name: ip_attr_name.clone(),
-                        to: vec![
-                            "spec.clusterIP".to_string(),
-                            "spec.clusterIPs[*]".to_string(),
-                            "spec.externalIPs[*]".to_string(),
-                            "spec.loadBalancerIP".to_string(),
-                        ],
-                    },
-                    AssociationSource {
-                        from: "flow".to_string(),
-                        name: port_attr_name.clone(),
-                        to: vec!["spec.ports[*].port".to_string()],
-                    },
-                    AssociationSource {
-                        from: "flow".to_string(),
-                        name: "network.transport".to_string(),
-                        to: vec!["spec.ports[*].protocol".to_string()],
-                    },
-                ],
-            }),
-            node: Some(ObjectAssociationRule {
-                sources: vec![AssociationSource {
-                    from: "flow".to_string(),
-                    name: ip_attr_name.clone(),
-                    to: vec!["status.addresses[*].address".to_string()],
-                }],
-            }),
-            endpoint: Some(ObjectAssociationRule {
-                sources: vec![AssociationSource {
-                    from: "flow".to_string(),
-                    name: ip_attr_name,
-                    to: vec!["endpoints[*].addresses[*]".to_string()],
-                }],
-            }),
-            ..Default::default()
-        },
+impl Default for K8sInformerOptions {
+    fn default() -> Self {
+        Self {
+            kubeconfig_path: String::new(),
+            informers_sync_timeout: Duration::from_secs(30),
+            informers_resync_period: Duration::from_secs(5),
+            owner_relations: None,
+            selector_relations: None,
+        }
     }
 }

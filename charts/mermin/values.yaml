@@ -99,7 +99,7 @@ startupProbe:
   initialDelaySeconds: 0
   periodSeconds: 3
   timeoutSeconds: 5
-  failureThreshold: 50
+  failureThreshold: 60
 
 tolerations:
   - effect: NoSchedule

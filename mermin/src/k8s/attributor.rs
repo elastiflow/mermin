@@ -37,10 +37,12 @@ use kube::{
 };
 use kube_runtime::watcher;
 use network_types::ip::IpProto;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::{
     net::lookup_host,
     sync::{RwLock, oneshot},
+    time::{Duration, timeout},
 };
 use tracing::{debug, error, warn};
 
@@ -48,12 +50,174 @@ use crate::{
     health::HealthState,
     k8s::{
         K8sError,
-        owner_relations::{OwnerRelationsManager, OwnerRelationsOptions},
-        selector_relations::SelectorRelationsManager,
+        owner_relations::{OwnerRelationsManager, OwnerRelationsRules},
+        selector_relations::{SelectorRelationRule, SelectorRelationsManager},
     },
-    runtime::conf::{Conf, ObjectAssociationRule, SelectorRelationRule},
+    runtime::conf::Conf,
     span::flow::FlowSpan,
 };
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+/// Defines the configuration for associating network flows with Kubernetes objects.
+pub struct AttributesOptions {
+    /// Defines metadata to extract from all Kubernetes objects.
+    pub extract: Extract,
+    /// Defines rules for mapping flow attributes to Kubernetes object attributes.
+    pub association: AssociationBlock,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+/// Configuration for metadata extraction from Kubernetes objects.
+pub struct Extract {
+    /// A list of metadata fields to extract.
+    pub metadata: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+/// Defines association rules for different Kubernetes object kinds.
+pub struct AssociationBlock {
+    #[serde(default)]
+    pub pod: Option<ObjectAssociationRule>,
+    #[serde(default)]
+    pub node: Option<ObjectAssociationRule>,
+    #[serde(default)]
+    pub service: Option<ObjectAssociationRule>,
+    #[serde(default)]
+    pub networkpolicy: Option<ObjectAssociationRule>,
+    #[serde(default)]
+    pub endpoint: Option<ObjectAssociationRule>,
+    #[serde(default)]
+    pub endpointslice: Option<ObjectAssociationRule>,
+    #[serde(default)]
+    pub ingress: Option<ObjectAssociationRule>,
+    #[serde(default)]
+    pub gateway: Option<ObjectAssociationRule>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+/// Represents the association rules for a specific Kubernetes object kind.
+pub struct ObjectAssociationRule {
+    /// A list of sources to match against for association.
+    pub sources: Vec<AssociationSource>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+/// Defines a single association rule mapping a flow attribute to Kubernetes object fields.
+pub struct AssociationSource {
+    /// The origin of the attribute (e.g., "flow").
+    pub from: String,
+    /// The specific attribute name (e.g., "source.ip").
+    pub name: String,
+    /// A list of Kubernetes object fields to match against.
+    pub to: Vec<String>,
+}
+
+/// Creates the default Kubernetes attribution configuration.
+/// This enables pod, service, and node enrichment out-of-the-box.
+pub fn default_attributes() -> HashMap<String, HashMap<String, AttributesOptions>> {
+    let src_mapping = create_k8s_attributes_mapping("source");
+    let dst_mapping = create_k8s_attributes_mapping("destination");
+
+    HashMap::from([
+        (
+            "source".to_string(),
+            HashMap::from([("k8s".to_string(), src_mapping)]),
+        ),
+        (
+            "destination".to_string(),
+            HashMap::from([("k8s".to_string(), dst_mapping)]),
+        ),
+    ])
+}
+
+/// Helper to create an `AttributesConf` for a given flow direction ("source" or "destination").
+fn create_k8s_attributes_mapping(direction: &str) -> AttributesOptions {
+    let ip_attr_name = format!("{direction}.ip");
+    let port_attr_name = format!("{direction}.port");
+
+    AttributesOptions {
+        extract: Extract {
+            metadata: vec![
+                "[*].metadata.name".to_string(),
+                "[*].metadata.namespace".to_string(),
+                "[*].metadata.uid".to_string(),
+            ],
+        },
+        association: AssociationBlock {
+            pod: Some(ObjectAssociationRule {
+                sources: vec![
+                    AssociationSource {
+                        from: "flow".to_string(),
+                        name: ip_attr_name.clone(),
+                        to: vec![
+                            "status.podIP".to_string(),
+                            "status.podIPs[*]".to_string(),
+                            "status.hostIP".to_string(),
+                            "status.hostIPs[*]".to_string(),
+                        ],
+                    },
+                    AssociationSource {
+                        from: "flow".to_string(),
+                        name: port_attr_name.clone(),
+                        to: vec![
+                            "spec.containers[*].ports[*].containerPort".to_string(),
+                            "spec.containers[*].ports[*].hostPort".to_string(),
+                        ],
+                    },
+                    AssociationSource {
+                        from: "flow".to_string(),
+                        name: "network.transport".to_string(),
+                        to: vec!["spec.containers[*].ports[*].protocol".to_string()],
+                    },
+                ],
+            }),
+            service: Some(ObjectAssociationRule {
+                sources: vec![
+                    AssociationSource {
+                        from: "flow".to_string(),
+                        name: ip_attr_name.clone(),
+                        to: vec![
+                            "spec.clusterIP".to_string(),
+                            "spec.clusterIPs[*]".to_string(),
+                            "spec.externalIPs[*]".to_string(),
+                            "spec.loadBalancerIP".to_string(),
+                        ],
+                    },
+                    AssociationSource {
+                        from: "flow".to_string(),
+                        name: port_attr_name.clone(),
+                        to: vec!["spec.ports[*].port".to_string()],
+                    },
+                    AssociationSource {
+                        from: "flow".to_string(),
+                        name: "network.transport".to_string(),
+                        to: vec!["spec.ports[*].protocol".to_string()],
+                    },
+                ],
+            }),
+            node: Some(ObjectAssociationRule {
+                sources: vec![AssociationSource {
+                    from: "flow".to_string(),
+                    name: ip_attr_name.clone(),
+                    to: vec!["status.addresses[*].address".to_string()],
+                }],
+            }),
+            endpoint: Some(ObjectAssociationRule {
+                sources: vec![AssociationSource {
+                    from: "flow".to_string(),
+                    name: ip_attr_name,
+                    to: vec!["endpoints[*].addresses[*]".to_string()],
+                }],
+            }),
+            ..Default::default()
+        },
+    }
+}
 
 /// Holds metadata for a single Kubernetes object.
 #[derive(Debug, Clone)]
@@ -243,12 +407,34 @@ impl ResourceStore {
             network_policies,
         };
 
-        // Wait for all *started* reflectors to sync
-        let _ = futures::future::join_all(readiness_handles).await;
-        debug!(
-            event.name = "k8s.reflector.all_synced",
-            "all active kubernetes resource reflectors have synced"
-        );
+        // Wait for all *started* reflectors to sync with timeout
+        let timeout_secs = conf
+            .discovery
+            .informer
+            .as_ref()
+            .and_then(|i| i.k8s.as_ref())
+            .map(|k| k.informers_sync_timeout.as_secs())
+            .unwrap_or(30u64);
+
+        match timeout(
+            Duration::from_secs(timeout_secs),
+            futures::future::join_all(readiness_handles),
+        )
+        .await
+        {
+            Ok(_) => {
+                debug!(
+                    event.name = "k8s.reflector.all_synced",
+                    timeout_secs = timeout_secs,
+                    "all active kubernetes resource reflectors have synced"
+                );
+            }
+            Err(_) => {
+                return Err(K8sError::Attribution(format!(
+                    "kubernetes cache sync timed out after {timeout_secs}s - increase informers_sync_timeout if needed",
+                )));
+            }
+        }
 
         debug!(
             event.name = "k8s.ip_index.initial_build",
@@ -428,7 +614,7 @@ impl Attributor {
     /// Creates a new Decorator, initializing all resource reflectors concurrently.
     pub async fn new(
         health_state: HealthState,
-        owner_relations_opts: Option<OwnerRelationsOptions>,
+        owner_relations_opts: Option<OwnerRelationsRules>,
         selector_relations_opts: Option<Vec<SelectorRelationRule>>,
         conf: &Conf,
     ) -> Result<Self, K8sError> {
@@ -1098,11 +1284,8 @@ mod tests {
     use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
 
     use super::*;
-    use crate::{
-        k8s::{
-            owner_relations::OwnerRelationsOptions, selector_relations::SelectorRelationsManager,
-        },
-        runtime::conf::SelectorRelationRule,
+    use crate::k8s::{
+        owner_relations::OwnerRelationsRules, selector_relations::SelectorRelationRule,
     };
 
     /// Creates a test pod with the given name, labels, and owner references
@@ -1319,7 +1502,7 @@ mod tests {
         };
 
         // Setup: Create OwnerRelationsManager with default config (include all)
-        let owner_options = OwnerRelationsOptions {
+        let owner_options = OwnerRelationsRules {
             max_depth: 5,
             include_kinds: vec![], // Empty = include all
             exclude_kinds: vec![],

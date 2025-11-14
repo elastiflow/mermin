@@ -22,7 +22,7 @@ use crate::k8s::attributor::{K8sObjectMeta, ResourceStore, WorkloadOwner};
 /// Configuration for K8s owner reference walking
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
-pub struct OwnerRelationsOptions {
+pub struct OwnerRelationsRules {
     /// Maximum depth to walk owner references
     pub max_depth: usize,
     /// Include only these owner kinds in flow metadata (case insensitive)
@@ -33,7 +33,7 @@ pub struct OwnerRelationsOptions {
     pub exclude_kinds: Vec<String>,
 }
 
-impl Default for OwnerRelationsOptions {
+impl Default for OwnerRelationsRules {
     fn default() -> Self {
         Self {
             max_depth: 5,
@@ -77,7 +77,7 @@ impl OwnerRelationsManager {
     /// // Use with defaults
     /// let manager = OwnerRelationsManager::new(OwnerRelationsOptions::default());
     /// ```
-    pub fn new(config: OwnerRelationsOptions) -> Self {
+    pub fn new(config: OwnerRelationsRules) -> Self {
         let include_kinds = config
             .include_kinds
             .iter()
@@ -346,8 +346,8 @@ mod tests {
         max_depth: usize,
         include_kinds: Vec<&str>,
         exclude_kinds: Vec<&str>,
-    ) -> OwnerRelationsOptions {
-        OwnerRelationsOptions {
+    ) -> OwnerRelationsRules {
+        OwnerRelationsRules {
             max_depth,
             include_kinds: include_kinds.iter().map(|s| s.to_string()).collect(),
             exclude_kinds: exclude_kinds.iter().map(|s| s.to_string()).collect(),
@@ -505,7 +505,7 @@ mod tests {
 
     #[test]
     fn test_default_config_values() {
-        let config = OwnerRelationsOptions::default();
+        let config = OwnerRelationsRules::default();
         assert_eq!(config.max_depth, 5, "Default max_depth should be 5");
         assert!(
             config.include_kinds.is_empty(),
@@ -698,7 +698,7 @@ mod tests {
         // This is critical: the default configuration should NOT filter out any owners
         // This test would have caught the config file bug where include_kinds=["Service"]
         // was filtering out DaemonSets
-        let config = OwnerRelationsOptions::default();
+        let config = OwnerRelationsRules::default();
         let manager = OwnerRelationsManager::new(config);
 
         // Create all supported owner types
@@ -753,7 +753,7 @@ mod tests {
         // Test that verifies the documented filtering behavior:
         // "Empty include_kinds list means include all kinds"
 
-        let config = OwnerRelationsOptions {
+        let config = OwnerRelationsRules {
             max_depth: 5,
             include_kinds: vec![], // Empty = include all
             exclude_kinds: vec![],
