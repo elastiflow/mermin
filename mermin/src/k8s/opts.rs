@@ -19,10 +19,6 @@ pub struct K8sInformerOptions {
     /// Large clusters may need longer timeout.
     #[serde(with = "duration")]
     pub informers_sync_timeout: Duration,
-    /// Period between full cache resyncs from API server.
-    /// Helps recover from potential drift between cache and actual state.
-    #[serde(with = "duration")]
-    pub informers_resync_period: Duration,
     /// Owner relations configuration
     pub owner_relations: Option<OwnerRelationsRules>,
     /// Selector-based resource relations configuration
@@ -37,7 +33,6 @@ impl Default for K8sInformerOptions {
         Self {
             kubeconfig_path: String::new(),
             informers_sync_timeout: Duration::from_secs(30),
-            informers_resync_period: Duration::from_secs(5),
             owner_relations: None,
             selector_relations: None,
         }

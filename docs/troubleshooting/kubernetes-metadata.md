@@ -48,7 +48,6 @@ discovery "informer" "k8s" {
   # Use in-cluster config (default in Kubernetes)
   # kubeconfig_path is optional
   informers_sync_timeout = "30s"
-  informers_resync_period = "10m"
 
   selectors = [
     { kind = "Pod" },
@@ -223,9 +222,6 @@ Large clusters with many watchers can overload API server.
 
 ```hcl
 discovery "informer" "k8s" {
-  # Increase resync period (less frequent full list)
-  informers_resync_period = "5m"  # From 30s
-
   # Watch only necessary resources
   selectors = [
     { kind = "Pod" },

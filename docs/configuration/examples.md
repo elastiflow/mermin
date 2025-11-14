@@ -48,7 +48,6 @@ discovery "instrument" {
 # Full Kubernetes metadata enrichment
 discovery "informer" "k8s" {
   informers_sync_timeout = "60s"
-  informers_resync_period = "30m"
 
   selectors = [
     # Core resources
@@ -419,8 +418,6 @@ discovery "instrument" {
 
 # Optimize Kubernetes informer load
 discovery "informer" "k8s" {
-  informers_resync_period = "1h"  # Reduce API server load
-
   # Only watch essential resources
   selectors = [
     { kind = "Pod" },

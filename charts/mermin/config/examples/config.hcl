@@ -155,7 +155,6 @@ discovery "informer" "k8s" {
   # K8s API connection configuration
   kubeconfig_path         = "" # Empty uses in-cluster config (default for pods)
   informers_sync_timeout  = "30s"  # Timeout for initial cache sync (increase for large clusters)
-  informers_resync_period = "5s"  # Period between full cache resyncs
 
   /*
     Define which flow will be processed and sent to the output.
