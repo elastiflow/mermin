@@ -17,7 +17,6 @@ discovery "informer" "k8s" {
   # K8s API connection configuration
   kubeconfig_path = ""
   informers_sync_timeout = "30s"
-  informers_resync_period = "5s"
 
   selectors = [
     { kind = "Service" },
@@ -86,35 +85,6 @@ discovery "informer" "k8s" {
 
   # For large clusters (10,000+ pods)
   # informers_sync_timeout = "120s"
-
-  # ... rest of configuration
-}
-```
-
-### `informers_resync_period`
-
-**Type:** Duration **Default:** `"30m"`
-
-Periodic full resynchronization interval.
-
-**Description:**
-
-* Forces complete refresh of cached data
-* Helps recover from missed watch events
-* Balances freshness vs. API server load
-
-**Examples:**
-
-```hcl
-discovery "informer" "k8s" {
-  # Default
-  informers_resync_period = "5s"
-
-  # More frequent for critical environments
-  # informers_resync_period = "15m"
-
-  # Less frequent to reduce API load
-  # informers_resync_period = "60m"
 
   # ... rest of configuration
 }
@@ -271,7 +241,6 @@ discovery "informer" "k8s" {
   # K8s API connection configuration
   kubeconfig_path = ""
   informers_sync_timeout = "30s"
-  informers_resync_period = "5s"
 
   # Resource selectors
   selectors = [
@@ -320,13 +289,11 @@ Informers use Kubernetes watch API:
 
 * Initial LIST operation per resource type
 * WATCH for ongoing updates
-* Periodic resync (controlled by `informers_resync_period`)
 
 **Reduce load:**
 
 * Use namespace filtering
 * Use label selectors
-* Increase `informers_resync_period`
 
 ### Sync Time
 
@@ -343,9 +310,6 @@ Initial sync time depends on:
 discovery "informer" "k8s" {
   # Longer timeout for large clusters
   informers_sync_timeout = "120s"
-
-  # Less frequent resync
-  informers_resync_period = "5m"
 
   # ... rest of configuration
 }

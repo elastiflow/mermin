@@ -368,7 +368,6 @@ filter:
       not_match: ""
 informer:
   k8s:
-    informers_resync_period: 30m
     informers_sync_timeout: 30s
     kubeconfig_path: ""
 internal:
