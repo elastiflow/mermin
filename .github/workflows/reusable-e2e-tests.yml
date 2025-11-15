@@ -4,20 +4,19 @@ on:
   workflow_call:
     inputs:
       cni-list:
-        description: 'JSON list of CNIs to test'
+        description: "JSON list of CNIs to test"
         required: false
         default: '["calico", "cilium", "flannel", "kindnetd"]'
         type: string
       test-path:
-        description: 'path the the e2e test suite that should be run'
+        description: "path the the e2e test suite that should be run"
         required: true
         type: string
       image-tag:
-        description: 'Tag of the Mermin image to use for testing'
+        description: "Tag of the Mermin image to use for testing"
         required: false
-        default: 'latest'
+        default: "latest"
         type: string
-
 
 jobs:
   build:
@@ -83,7 +82,7 @@ jobs:
         if: matrix.cni == 'cilium'
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: "1.24"
 
       - name: Download Docker image artifact
         uses: actions/download-artifact@v4
@@ -99,15 +98,6 @@ jobs:
           sudo curl -L "https://github.com/docker/compose/releases/download/v2.3.3/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
           sudo chmod +x /usr/local/bin/docker-compose
           docker-compose --version
-
-      - name: Install Homebrew
-        run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-      - name: Add Homebrew to PATH
-        run: echo "/home/linuxbrew/.linuxbrew/bin" >> $GITHUB_PATH
-
-      - name: Install gRPCurl
-        run: brew install grpcurl
 
       - name: Make test script executable
         run: chmod +x ${{ inputs.test-path }}

@@ -41,10 +41,6 @@ check_dependencies() {
     log_error "Docker Compose is not installed. Please install it to continue."
     exit 1
   fi
-  if ! command -v grpcurl &> /dev/null; then
-    log_error "grpcurl is not installed. Please install it (e.g., 'brew install grpcurl')."
-    exit 1
-  fi
 }
 
 start_services() {
