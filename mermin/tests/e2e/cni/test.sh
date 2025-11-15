@@ -12,6 +12,7 @@ NAMESPACE="${NAMESPACE:-default}"
 DOCKER_REPOSITORY="${DOCKER_REPOSITORY:-mermin}"
 DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-latest}"
 VALUES_FILE="${VALUES_FILE:-docs/deployment/examples/local/values.yaml}"
+MERMIN_CONFIG_PATH="${MERMIN_CONFIG_PATH:-docs/deployment/examples/local/config.test.hcl}"
 CNI="${CNI:-calico}"
 
 # --- Cleanup Function ---
@@ -60,8 +61,8 @@ verify_agent_logs() {
     echo "WARNING: pinger pod failed to become ready. Continuing..."
   }
 
-  # Wait for max_record_interval (60s) + buffer to ensure active ICMP flows are exported
-  sleep 70
+  # Wait for max_record_interval (5s) + icmp_timeout (3s) + buffer to ensure ICMP flows are exported
+  sleep 15
 
   echo "Verifying mermin agent logs are enriching data..."
   export NAMESPACE RELEASE_NAME
@@ -79,13 +80,13 @@ verify_agent_logs() {
   for pod in "${pods[@]}"; do
     (
       local counter=0
-      while [ $counter -lt 120 ]; do
+      while [ $counter -lt 60 ]; do
         # examples: https://regex101.com/r/rYbX7m/1
         if kubectl logs -n "${NAMESPACE}" "$pod" --tail=1000 2>/dev/null | grep --color=never -E '(source\.k8s\.pod\.name.*String\(Owned\("(pinger|ping-receiver)"\)|destination\.k8s\.pod\.name.*String\(Owned\("(pinger|ping-receiver)"\))' >/dev/null; then
           exit 0
         fi
         counter=$((counter + 1))
-        sleep 2
+        sleep 1
       done
       return 1
     ) &
@@ -123,6 +124,9 @@ dump_debug_info() {
 echo "==============================="
 echo "Testing with CNI: $CNI"
 echo "==============================="
+
+# Export variables needed by setup.sh
+export CLUSTER_NAME RELEASE_NAME NAMESPACE DOCKER_REPOSITORY DOCKER_IMAGE_TAG VALUES_FILE MERMIN_CONFIG_PATH CNI
 
 bash ./mermin/tests/e2e/common/setup.sh
 verify_deployment || { dump_debug_info; exit 1; }
