@@ -14,4 +14,4 @@ user = ["aya"]
 
 [dependencies]
 network-types = { path = "../network-types" }
-aya = { version = "0.13", optional = true }
+aya = { workspace = true, optional = true }

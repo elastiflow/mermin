@@ -136,6 +136,7 @@ use aya::{
     Ebpf,
     programs::{
         LinkOrder, SchedClassifier, TcAttachType,
+        links::PinnedLink,
         tc::{self, NlOptions, SchedClassifierLinkId, TcAttachOptions, qdisc_detach_program},
     },
 };
@@ -143,7 +144,7 @@ use crossbeam::channel::Sender;
 use dashmap::DashMap;
 use globset::Glob;
 use pnet::datalink;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     error::MerminError,
@@ -161,16 +162,16 @@ pub trait TcAttachTypeExt {
 impl TcAttachTypeExt for TcAttachType {
     fn direction_name(&self) -> &'static str {
         match self {
-            TcAttachType::Ingress => "ingress",
-            TcAttachType::Egress => "egress",
+            TcAttachType::Ingress => DIRECTION_INGRESS,
+            TcAttachType::Egress => DIRECTION_EGRESS,
             TcAttachType::Custom(_) => "custom",
         }
     }
 
     fn program_name(&self) -> &'static str {
         match self {
-            TcAttachType::Ingress => "mermin_flow_ingress",
-            TcAttachType::Egress => "mermin_flow_egress",
+            TcAttachType::Ingress => PROGRAM_NAME_INGRESS,
+            TcAttachType::Egress => PROGRAM_NAME_EGRESS,
             TcAttachType::Custom(_) => "mermin_flow_custom",
         }
     }
@@ -217,12 +218,23 @@ pub struct IfaceController {
     /// TCX ordering strategy (kernel >= 6.6)
     /// Controls where programs attach in TCX chain (first/last)
     tcx_order: TcxOrderStrategy,
+    /// Whether /sys/fs/bpf is writable for TCX link pinning.
+    /// Checked once during initialization to avoid repeated filesystem checks.
+    bpf_fs_writable: bool,
     /// Optional channel for sending controller events to main thread for observability
     event_tx: Option<Sender<ControllerEvent>>,
 }
 
+/// Direction string constants
+const DIRECTION_INGRESS: &str = "ingress";
+const DIRECTION_EGRESS: &str = "egress";
+
+/// Program name constants
+const PROGRAM_NAME_INGRESS: &str = "mermin_flow_ingress";
+const PROGRAM_NAME_EGRESS: &str = "mermin_flow_egress";
+
 /// TC attachment directions used for iterating over all attach types
-const DIRECTIONS: &[&str] = &["ingress", "egress"];
+const DIRECTIONS: &[&str] = &[DIRECTION_INGRESS, DIRECTION_EGRESS];
 
 impl IfaceController {
     /// Create blocking controller that runs in host network namespace.
@@ -250,10 +262,34 @@ impl IfaceController {
         tcx_order: TcxOrderStrategy,
         event_tx: Option<Sender<ControllerEvent>>,
     ) -> Result<Self, MerminError> {
+        // Check /sys/fs/bpf writability once for TCX link pinning
+        let bpf_fs_writable = use_tcx
+            && std::fs::metadata("/sys/fs/bpf")
+                .and_then(|m| {
+                    if m.is_dir() {
+                        std::fs::OpenOptions::new()
+                            .write(true)
+                            .create(true)
+                            .truncate(true)
+                            .open("/sys/fs/bpf/.mermin_test")
+                            .and_then(|f| {
+                                drop(f);
+                                std::fs::remove_file("/sys/fs/bpf/.mermin_test")
+                            })
+                    } else {
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            "not a directory",
+                        ))
+                    }
+                })
+                .is_ok();
+
         info!(
             event.name = "interface_controller.created",
             pattern_count = patterns.len(),
             use_tcx = use_tcx,
+            bpf_fs_writable = bpf_fs_writable,
             "interface controller created, will discover interfaces after namespace switch"
         );
 
@@ -266,6 +302,7 @@ impl IfaceController {
             use_tcx,
             tc_priority,
             tcx_order,
+            bpf_fs_writable,
             event_tx,
         })
     }
@@ -348,9 +385,7 @@ impl IfaceController {
             let successful_attachments = success_per_iface.get(failed_iface).copied().unwrap_or(0);
             if successful_attachments < programs.len() as u32 {
                 for direction in DIRECTIONS {
-                    if let Some(link_id) = self.unregister_tc_link(failed_iface, direction)
-                        && let Err(e) = self.detach_program(failed_iface, direction, link_id)
-                    {
+                    if let Err(e) = self.detach_from_iface(failed_iface, direction) {
                         warn!(
                             event.name = "interface_controller.init_cleanup_failed",
                             network.interface.name = %failed_iface,
@@ -463,51 +498,6 @@ impl IfaceController {
         Arc::clone(&self.iface_map)
     }
 
-    /// Register TC link for tracking.
-    pub fn register_tc_link(
-        &mut self,
-        iface: String,
-        direction: &'static str,
-        link_id: SchedClassifierLinkId,
-    ) {
-        debug!(
-            event.name = "interface_controller.tc_link_registered",
-            iface = %iface,
-            direction = %direction,
-            "TC link registered"
-        );
-        self.tc_links.insert((iface, direction), link_id);
-    }
-
-    /// Unregister TC link and return for detachment.
-    pub fn unregister_tc_link(
-        &mut self,
-        iface: &str,
-        direction: &str,
-    ) -> Option<SchedClassifierLinkId> {
-        let static_direction = Self::to_static_direction(direction)?;
-
-        let link_id = self.tc_links.remove(&(iface.to_string(), static_direction));
-        if link_id.is_some() {
-            debug!(
-                event.name = "interface_controller.tc_link_unregistered",
-                iface = %iface,
-                direction = %direction,
-                "TC link unregistered"
-            );
-        }
-        link_id
-    }
-
-    /// Convert direction string to static lifetime for HashMap key.
-    fn to_static_direction(direction: &str) -> Option<&'static str> {
-        match direction {
-            "ingress" => Some("ingress"),
-            "egress" => Some("egress"),
-            _ => None,
-        }
-    }
-
     /// Build interface index → name mapping from host namespace.
     fn build_iface_map(&mut self) -> Result<(), MerminError> {
         self.iface_map.clear();
@@ -574,45 +564,110 @@ impl IfaceController {
         }
     }
 
-    /// Attach eBPF TC program with specified priority (netlink-based).
+    /// Handle netlink event by reconciling interface state.
     ///
-    /// Uses aya's built-in `attach_with_options()` method with `NlOptions` to set priority.
-    /// This allows mermin to coexist with other TC programs like Cilium by controlling
-    /// execution order through priority values.
+    /// This is the main event handler called by the controller thread in response
+    /// to netlink events from the netlink monitoring thread.
     ///
-    /// ## Priority Semantics
-    /// - Lower numeric values = higher priority = runs earlier in TC chain
-    /// - Cilium typically uses priorities 1-20
-    /// - mermin default is 50 (runs after Cilium)
-    /// - Valid range: 1-65535 (we validate 30-32767 in config)
-    ///
-    /// ## Parameters
-    /// - `program`: Mutable reference to the SchedClassifier program
-    /// - `iface`: Interface name to attach to
-    /// - `attach_type`: TC attach type (ingress/egress)
-    /// - `priority`: TC priority value (higher = lower priority = runs later)
-    ///
-    /// ## Returns
-    /// - `Ok(SchedClassifierLinkId)` on success
-    /// - `Err(MerminError)` if attachment fails
-    fn attach_tc_with_priority(
-        program: &mut SchedClassifier,
-        iface: &str,
-        attach_type: TcAttachType,
-        priority: u16,
-    ) -> Result<SchedClassifierLinkId, MerminError> {
-        let options = TcAttachOptions::Netlink(NlOptions {
-            priority,
-            handle: 0, // Let system choose handle
-        });
+    /// Blocking operation. Thread must be in host network namespace.
+    pub fn handle_netlink_event(&mut self, event: NetlinkEvent) -> Result<(), MerminError> {
+        match event {
+            NetlinkEvent::InterfaceUp { name } => {
+                if Self::matches_pattern(&name, &self.patterns)
+                    && !self.active_ifaces.contains(&name)
+                {
+                    info!(
+                        event.name = "interface_controller.interface_up",
+                        network.interface.name = %name,
+                        "interface came up, attaching eBPF programs"
+                    );
 
-        program
-            .attach_with_options(iface, attach_type, options)
-            .map_err(|e| {
-                MerminError::internal(format!(
-                    "failed to attach ebpf program to interface {iface} with priority {priority}: {e}",
-                ))
-            })
+                    self.iface_map_add(&name)?;
+
+                    let mut attached_programs = Vec::new();
+
+                    for attach_type in &[TcAttachType::Ingress, TcAttachType::Egress] {
+                        match self.attach_to_iface(&name, *attach_type) {
+                            Ok(()) => {
+                                attached_programs.push(*attach_type);
+                            }
+                            Err(e) => {
+                                warn!(
+                                    event.name = "interface_controller.attach_failed",
+                                    network.interface.name = %name,
+                                    ebpf.program.direction = attach_type.direction_name(),
+                                    error = %e,
+                                    "failed to attach program to new interface, rolling back"
+                                );
+
+                                // Rollback: detach any successfully attached programs
+                                for prev_attach_type in attached_programs {
+                                    let direction = prev_attach_type.direction_name();
+                                    if let Err(detach_err) =
+                                        self.detach_from_iface(&name, direction)
+                                    {
+                                        warn!(
+                                            event.name = "interface_controller.rollback_detach_failed",
+                                            network.interface.name = %name,
+                                            ebpf.program.direction = direction,
+                                            error = %detach_err,
+                                            "failed to detach program during rollback"
+                                        );
+                                    }
+                                }
+
+                                self.iface_map_remove(&name);
+
+                                if let Some(ref tx) = self.event_tx {
+                                    let _ = tx.send(ControllerEvent::AttachmentFailed {
+                                        iface: name.clone(),
+                                        error: format!("{e}"),
+                                    });
+                                }
+
+                                return Err(e);
+                            }
+                        }
+                    }
+
+                    self.active_ifaces.insert(name.clone());
+
+                    if let Some(ref tx) = self.event_tx {
+                        let _ = tx.send(ControllerEvent::InterfaceAttached { iface: name });
+                    }
+                }
+            }
+            NetlinkEvent::InterfaceDown { name } => {
+                if self.active_ifaces.contains(&name) {
+                    info!(
+                        event.name = "interface_controller.interface_down",
+                        network.interface.name = %name,
+                        "interface went down, detaching eBPF programs"
+                    );
+
+                    self.active_ifaces.remove(&name);
+
+                    self.iface_map_remove(&name);
+
+                    for direction in DIRECTIONS {
+                        if let Err(e) = self.detach_from_iface(&name, direction) {
+                            warn!(
+                                event.name = "interface_controller.detach_failed",
+                                network.interface.name = %name,
+                                ebpf.program.direction = %direction,
+                                error = %e,
+                                "failed to detach program from removed interface"
+                            );
+                        }
+                    }
+
+                    if let Some(ref tx) = self.event_tx {
+                        let _ = tx.send(ControllerEvent::InterfaceDetached { iface: name });
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Attach eBPF program to interface in host namespace.
@@ -667,7 +722,7 @@ impl IfaceController {
         // Note: TCX provides better multi-program support without priority conflicts.
         // On older kernels, we explicitly use netlink with our configured priority.
 
-        let link_id = if use_tcx {
+        if use_tcx {
             // TCX mode: kernel >= 6.6, attach with configured ordering
             // TCX supports multiple programs on the same hook, so attachment
             // succeeds even if orphaned programs exist from crashed instances
@@ -682,18 +737,79 @@ impl IfaceController {
                 ebpf.program.direction = direction_name,
                 ebpf.tcx.order = %self.tcx_order,
                 "attaching ebpf program with TCX ordering - \
-                 TCX supports multiple programs, orphans will be GC'd when old pod exits"
+                 will pin link for orphan cleanup on restart"
             );
 
             let options = TcAttachOptions::TcxOrder(link_order);
-            program
+            let link_id = program
                 .attach_with_options(&iface_owned, attach_type, options)
                 .map_err(|e| {
                     MerminError::internal(format!(
                         "failed to attach ebpf program to interface {} (tcx mode, order={}): {}",
                         iface, self.tcx_order, e
                     ))
-                })?
+                })?;
+
+            // CRITICAL: Check /sys/fs/bpf accessibility BEFORE taking the link.
+            // If take_link() succeeds but pin() fails, the FdLink is consumed and
+            // the program detaches immediately. By checking first, we avoid this.
+            let pin_path = Self::pin_path(&iface_owned, direction_name);
+
+            if self.bpf_fs_writable {
+                match program.take_link(link_id) {
+                    Ok(link) => match TryInto::<aya::programs::links::FdLink>::try_into(link) {
+                        Ok(fd_link) => match fd_link.pin(&pin_path) {
+                            Ok(pinned_fd_link) => {
+                                debug!(
+                                    event.name = "interface_controller.tcx_link_pinned",
+                                    network.interface.name = %iface_owned,
+                                    ebpf.program.direction = direction_name,
+                                    pin_path = %pin_path,
+                                    "tcx link pinned successfully - orphan cleanup enabled"
+                                );
+                                std::mem::forget(pinned_fd_link);
+                            }
+                            Err(e) => {
+                                error!(
+                                    event.name = "interface_controller.tcx_pin_failed_unexpected",
+                                    network.interface.name = %iface_owned,
+                                    ebpf.program.direction = direction_name,
+                                    pin_path = %pin_path,
+                                    error = %e,
+                                    "pin() failed despite /sys/fs/bpf being writable - \
+                                     fd link consumed, program may have detached"
+                                );
+                            }
+                        },
+                        Err(e) => {
+                            warn!(
+                                event.name = "interface_controller.tcx_link_conversion_failed",
+                                network.interface.name = %iface_owned,
+                                ebpf.program.direction = direction_name,
+                                error = ?e,
+                                "failed to convert link to fd link - program may be orphaned"
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        warn!(
+                            event.name = "interface_controller.tcx_link_take_failed",
+                            network.interface.name = %iface_owned,
+                            ebpf.program.direction = direction_name,
+                            error = %e,
+                            "could not take link - will remain in program storage"
+                        );
+                    }
+                }
+            } else {
+                warn!(
+                    event.name = "interface_controller.tcx_link_not_pinned",
+                    network.interface.name = %iface_owned,
+                    ebpf.program.direction = direction_name,
+                    "tcx link left in program storage (/sys/fs/bpf not writable) - \
+                     program will stay attached, mount /sys/fs/bpf as hostPath for orphan cleanup"
+                );
+            }
         } else {
             // Netlink mode: kernel < 6.6, use priority
             debug!(
@@ -704,10 +820,10 @@ impl IfaceController {
                 "attaching ebpf program with TC priority (netlink mode)"
             );
 
-            Self::attach_tc_with_priority(program, &iface_owned, attach_type, tc_priority)?
-        };
-
-        self.register_tc_link(iface.to_string(), direction_name, link_id);
+            let link_id =
+                Self::attach_tc_with_priority(program, &iface_owned, attach_type, tc_priority)?;
+            self.register_tc_link(iface.to_string(), direction_name, link_id);
+        }
 
         inc_tc_programs_attached(iface, direction_name);
 
@@ -722,7 +838,51 @@ impl IfaceController {
         Ok(())
     }
 
+    /// Attach eBPF TC program with specified priority (netlink-based).
+    ///
+    /// Uses aya's built-in `attach_with_options()` method with `NlOptions` to set priority.
+    /// This allows mermin to coexist with other TC programs like Cilium by controlling
+    /// execution order through priority values.
+    ///
+    /// ## Priority Semantics
+    /// - Lower numeric values = higher priority = runs earlier in TC chain
+    /// - Cilium typically uses priorities 1-20
+    /// - mermin default is 50 (runs after Cilium)
+    /// - Valid range: 1-65535 (we validate 30-32767 in config)
+    ///
+    /// ## Parameters
+    /// - `program`: Mutable reference to the SchedClassifier program
+    /// - `iface`: Interface name to attach to
+    /// - `attach_type`: TC attach type (ingress/egress)
+    /// - `priority`: TC priority value (higher = lower priority = runs later)
+    ///
+    /// ## Returns
+    /// - `Ok(SchedClassifierLinkId)` on success
+    /// - `Err(MerminError)` if attachment fails
+    fn attach_tc_with_priority(
+        program: &mut SchedClassifier,
+        iface: &str,
+        attach_type: TcAttachType,
+        priority: u16,
+    ) -> Result<SchedClassifierLinkId, MerminError> {
+        let options = TcAttachOptions::Netlink(NlOptions {
+            priority,
+            handle: 0, // Let system choose handle
+        });
+
+        program
+            .attach_with_options(iface, attach_type, options)
+            .map_err(|e| {
+                MerminError::internal(format!(
+                    "failed to attach ebpf program to interface {iface} with priority {priority}: {e}",
+                ))
+            })
+    }
+
     /// Detach eBPF program from interface.
+    ///
+    /// For TCX mode: Unpins the link before detaching to clean up the BPF filesystem.
+    /// For Netlink mode: Standard detachment without pinning.
     ///
     /// Blocking operation. Thread must be in host network namespace.
     fn detach_program(
@@ -732,12 +892,63 @@ impl IfaceController {
         link_id: SchedClassifierLinkId,
     ) -> Result<(), MerminError> {
         let program_name = match direction {
-            "ingress" => "mermin_flow_ingress",
-            "egress" => "mermin_flow_egress",
+            DIRECTION_INGRESS => PROGRAM_NAME_INGRESS,
+            DIRECTION_EGRESS => PROGRAM_NAME_EGRESS,
             _ => unreachable!("to_static_direction ensures only ingress/egress"),
         };
 
         let iface_owned = iface.to_string();
+
+        // In TCX mode, try to unpin the link before detaching
+        if self.use_tcx {
+            let pin_path = Self::pin_path(&iface_owned, direction);
+            match PinnedLink::from_pin(&pin_path) {
+                Ok(pinned_link) => match pinned_link.unpin() {
+                    Ok(fd_link) => {
+                        debug!(
+                            event.name = "interface_controller.tcx_link_unpinned",
+                            network.interface.name = %iface_owned,
+                            ebpf.program.direction = %direction,
+                            pin_path = %pin_path,
+                            "unpinned TCX link during detachment"
+                        );
+                        inc_tc_programs_detached(iface, direction);
+                        drop(fd_link);
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        debug!(
+                            event.name = "interface_controller.tcx_unpin_failed_fallback",
+                            network.interface.name = %iface_owned,
+                            ebpf.program.direction = %direction,
+                            pin_path = %pin_path,
+                            error = %e,
+                            "failed to unpin TCX link, falling back to standard detach"
+                        );
+                    }
+                },
+                Err(e) => {
+                    if Self::is_not_found_error(&e) {
+                        debug!(
+                            event.name = "interface_controller.tcx_pin_not_found",
+                            network.interface.name = %iface_owned,
+                            ebpf.program.direction = %direction,
+                            pin_path = %pin_path,
+                            "pinned link not found, using standard detach"
+                        );
+                    } else {
+                        debug!(
+                            event.name = "interface_controller.tcx_pin_load_failed_fallback",
+                            network.interface.name = %iface_owned,
+                            ebpf.program.direction = %direction,
+                            pin_path = %pin_path,
+                            error = %e,
+                            "failed to load pinned link, falling back to standard detach"
+                        );
+                    }
+                }
+            }
+        }
 
         let program: &mut SchedClassifier = self
             .ebpf
@@ -761,31 +972,182 @@ impl IfaceController {
         Ok(())
     }
 
+    /// Detach eBPF program from interface (unified method for both TCX and Netlink modes).
+    ///
+    /// For TCX mode: First tries to unpin from BPF filesystem, then falls back to stored link_id.
+    /// For Netlink mode: Uses stored link_id from tc_links HashMap.
+    ///
+    /// Blocking operation. Thread must be in host network namespace.
+    fn detach_from_iface(
+        &mut self,
+        iface: &str,
+        direction: &'static str,
+    ) -> Result<(), MerminError> {
+        if self.use_tcx {
+            // Try pinned link first (if /sys/fs/bpf was available during attachment)
+            let pin_path = Self::pin_path(iface, direction);
+            match PinnedLink::from_pin(&pin_path) {
+                Ok(pinned_link) => {
+                    // Found pinned link, unpin and detach
+                    match pinned_link.unpin() {
+                        Ok(_fd_link) => {
+                            debug!(
+                                event.name = "interface_controller.tcx_pinned_link_detached",
+                                network.interface.name = %iface,
+                                ebpf.program.direction = %direction,
+                                pin_path = %pin_path,
+                                "detached TCX program via pinned link"
+                            );
+                            inc_tc_programs_detached(iface, direction);
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            warn!(
+                                event.name = "interface_controller.tcx_unpin_failed",
+                                network.interface.name = %iface,
+                                ebpf.program.direction = %direction,
+                                pin_path = %pin_path,
+                                error = %e,
+                                "failed to unpin TCX link, trying standard detachment"
+                            );
+                        }
+                    }
+                }
+                Err(_) => {
+                    // No pinned link found, fall through to standard detachment
+                    trace!(
+                        event.name = "interface_controller.tcx_no_pinned_link",
+                        network.interface.name = %iface,
+                        ebpf.program.direction = %direction,
+                        "no pinned link found, using standard detachment"
+                    );
+                }
+            }
+        }
+
+        // Fall back to standard detachment (works for both TCX and Netlink)
+        self.detach_netlink_program(iface, direction)
+    }
+
+    /// Detach program using stored link_id (works for both TCX and Netlink modes).
+    ///
+    /// Links are tracked in the tc_links HashMap with their link_id.
+    ///
+    /// Blocking operation. Thread must be in host network namespace.
+    fn detach_netlink_program(
+        &mut self,
+        iface: &str,
+        direction: &'static str,
+    ) -> Result<(), MerminError> {
+        if let Some(link_id) = self.unregister_tc_link(iface, direction) {
+            self.detach_program(iface, direction, link_id)
+        } else {
+            debug!(
+                event.name = "interface_controller.netlink_link_not_found",
+                network.interface.name = %iface,
+                ebpf.program.direction = %direction,
+                "no netlink link found in tc_links HashMap (may have been already removed)"
+            );
+            Ok(())
+        }
+    }
+
     /// Clean up orphaned TC programs from all active interfaces before attachment.
     ///
     /// This prevents the issue where killed pods leave TC programs attached,
     /// which then intercept traffic and prevent new programs from functioning.
     ///
-    /// LIMITATION: On kernels >= 6.6 (TCX mode), orphaned programs cannot be cleaned up
-    /// without the original link_id from the previous mermin instance. TCX supports multiple
-    /// programs on the same hook, so new attachments will succeed, but orphaned programs will
-    /// remain until the node reboots or the kernel process exits.
+    /// For TCX mode (kernel >= 6.6): Attempts to load and detach pinned links.
+    /// For Netlink mode (kernel < 6.6): Uses qdisc_detach_program to remove by program name.
     ///
     /// Blocking operation. Thread must be in host network namespace.
     fn cleanup_orphaned_programs(&mut self) -> Result<(), MerminError> {
         if self.use_tcx {
-            // TCX mode: Cannot clean up orphaned programs without link_id
-            warn!(
-                event.name = "interface_controller.tcx_orphan_limitation",
+            // TCX mode: Try to clean up orphaned programs using pinned links
+            info!(
+                event.name = "interface_controller.tcx_cleanup_started",
                 kernel.tcx_mode = true,
-                "Running in TCX mode (kernel >= 6.6). Orphaned TC programs from previous Mermin instances \
-                 cannot be automatically cleaned up as they require the original link_id for detachment. \
-                 TCX supports multiple programs on the same hook, so new attachments will succeed. \
-                 However, orphaned programs may cause packet duplication or performance issues. \
-                 If experiencing problems, consider restarting the node to clear all orphaned programs. \
-                 This is a known limitation of the TCX attachment method."
+                iface_count = self.active_ifaces.len(),
+                "attempting to clean up orphaned TCX programs via pinned links"
             );
-            // Continue with attachment - TCX will allow multiple programs
+
+            let mut total_removed = 0u32;
+            let ifaces: Vec<String> = self.active_ifaces.iter().cloned().collect();
+
+            for iface in &ifaces {
+                for direction in DIRECTIONS {
+                    let pin_path = Self::pin_path(iface, direction);
+                    match PinnedLink::from_pin(&pin_path) {
+                        Ok(pinned_link) => {
+                            debug!(
+                                event.name = "interface_controller.tcx_orphan_found",
+                                network.interface.name = %iface,
+                                ebpf.program.direction = %direction,
+                                pin_path = %pin_path,
+                                "found orphaned TCX link from previous instance"
+                            );
+
+                            match pinned_link.unpin() {
+                                Ok(_fd_link) => {
+                                    total_removed += 1;
+                                    info!(
+                                        event.name = "interface_controller.tcx_orphan_removed",
+                                        network.interface.name = %iface,
+                                        ebpf.program.direction = %direction,
+                                        pin_path = %pin_path,
+                                        "successfully removed orphaned TCX program"
+                                    );
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        event.name = "interface_controller.tcx_orphan_unpin_failed",
+                                        network.interface.name = %iface,
+                                        ebpf.program.direction = %direction,
+                                        pin_path = %pin_path,
+                                        error = %e,
+                                        "failed to unpin orphaned TCX link"
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            if Self::is_not_found_error(&e) {
+                                trace!(
+                                    event.name = "interface_controller.tcx_no_orphan",
+                                    network.interface.name = %iface,
+                                    ebpf.program.direction = %direction,
+                                    pin_path = %pin_path,
+                                    "no orphaned TCX link found (expected on first run)"
+                                );
+                            } else {
+                                debug!(
+                                    event.name = "interface_controller.tcx_orphan_load_failed",
+                                    network.interface.name = %iface,
+                                    ebpf.program.direction = %direction,
+                                    pin_path = %pin_path,
+                                    error = %e,
+                                    "could not load pinned link (may not exist or /sys/fs/bpf not mounted)"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            if total_removed > 0 {
+                info!(
+                    event.name = "interface_controller.tcx_cleanup_completed",
+                    total_programs_removed = total_removed,
+                    interfaces_cleaned = ifaces.len(),
+                    "orphaned TCX program cleanup completed successfully"
+                );
+            } else {
+                debug!(
+                    event.name = "interface_controller.tcx_cleanup_none_found",
+                    "no orphaned TCX programs found"
+                );
+            }
+
             return Ok(());
         }
 
@@ -848,8 +1210,8 @@ impl IfaceController {
         // TCX requires link_id for detachment, which we don't have from previous instances
         if !use_tcx {
             let program_names = [
-                ("mermin_flow_ingress", TcAttachType::Ingress),
-                ("mermin_flow_egress", TcAttachType::Egress),
+                (PROGRAM_NAME_INGRESS, TcAttachType::Ingress),
+                (PROGRAM_NAME_EGRESS, TcAttachType::Egress),
             ];
 
             for (program_name, attach_type) in &program_names {
@@ -864,24 +1226,25 @@ impl IfaceController {
                             "removed orphaned TC program (netlink mode)"
                         );
                     }
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                        trace!(
-                            event.name = "interface_controller.no_orphaned_program",
-                            network.interface.name = %iface,
-                            attach_type = ?attach_type,
-                            program = %program_name,
-                            "no orphaned program found (expected)"
-                        );
-                    }
                     Err(e) => {
-                        warn!(
-                            event.name = "interface_controller.program_detach_failed",
-                            network.interface.name = %iface,
-                            attach_type = ?attach_type,
-                            program = %program_name,
-                            error = %e,
-                            "failed to detach program (may have been removed already)"
-                        );
+                        if Self::is_not_found_error(&e) {
+                            trace!(
+                                event.name = "interface_controller.no_orphaned_program",
+                                network.interface.name = %iface,
+                                attach_type = ?attach_type,
+                                program = %program_name,
+                                "no orphaned program found (expected)"
+                            );
+                        } else {
+                            warn!(
+                                event.name = "interface_controller.program_detach_failed",
+                                network.interface.name = %iface,
+                                attach_type = ?attach_type,
+                                program = %program_name,
+                                error = %e,
+                                "failed to detach program (may have been removed already)"
+                            );
+                        }
                     }
                 }
             }
@@ -890,116 +1253,65 @@ impl IfaceController {
         Ok(removed_count)
     }
 
-    /// Handle netlink event by reconciling interface state.
-    ///
-    /// This is the main event handler called by the controller thread in response
-    /// to netlink events from the netlink monitoring thread.
-    ///
-    /// Blocking operation. Thread must be in host network namespace.
-    pub fn handle_netlink_event(&mut self, event: NetlinkEvent) -> Result<(), MerminError> {
-        match event {
-            NetlinkEvent::InterfaceUp { name } => {
-                if Self::matches_pattern(&name, &self.patterns)
-                    && !self.active_ifaces.contains(&name)
-                {
-                    info!(
-                        event.name = "interface_controller.interface_up",
-                        network.interface.name = %name,
-                        "interface came up, attaching eBPF programs"
-                    );
+    /// Register TC link for tracking.
+    fn register_tc_link(
+        &mut self,
+        iface: String,
+        direction: &'static str,
+        link_id: SchedClassifierLinkId,
+    ) {
+        debug!(
+            event.name = "interface_controller.tc_link_registered",
+            iface = %iface,
+            direction = %direction,
+            "TC link registered"
+        );
+        self.tc_links.insert((iface, direction), link_id);
+    }
 
-                    self.iface_map_add(&name)?;
+    /// Unregister TC link and return for detachment.
+    fn unregister_tc_link(
+        &mut self,
+        iface: &str,
+        direction: &str,
+    ) -> Option<SchedClassifierLinkId> {
+        let static_direction = Self::to_static_direction(direction)?;
 
-                    let mut attached_programs = Vec::new();
-
-                    for attach_type in &[TcAttachType::Ingress, TcAttachType::Egress] {
-                        match self.attach_to_iface(&name, *attach_type) {
-                            Ok(()) => {
-                                attached_programs.push(*attach_type);
-                            }
-                            Err(e) => {
-                                warn!(
-                                    event.name = "interface_controller.attach_failed",
-                                    network.interface.name = %name,
-                                    ebpf.program.direction = attach_type.direction_name(),
-                                    error = %e,
-                                    "failed to attach program to new interface, rolling back"
-                                );
-
-                                // Rollback: detach any successfully attached programs
-                                for prev_attach_type in attached_programs {
-                                    if let Some(link_id) = self.unregister_tc_link(
-                                        &name,
-                                        prev_attach_type.direction_name(),
-                                    ) && let Err(detach_err) = self.detach_program(
-                                        &name,
-                                        prev_attach_type.direction_name(),
-                                        link_id,
-                                    ) {
-                                        warn!(
-                                            event.name = "interface_controller.rollback_detach_failed",
-                                            network.interface.name = %name,
-                                            ebpf.program.direction = prev_attach_type.direction_name(),
-                                            error = %detach_err,
-                                            "failed to detach program during rollback"
-                                        );
-                                    }
-                                }
-
-                                self.iface_map_remove(&name);
-
-                                if let Some(ref tx) = self.event_tx {
-                                    let _ = tx.send(ControllerEvent::AttachmentFailed {
-                                        iface: name.clone(),
-                                        error: format!("{e}"),
-                                    });
-                                }
-
-                                return Err(e);
-                            }
-                        }
-                    }
-
-                    self.active_ifaces.insert(name.clone());
-
-                    if let Some(ref tx) = self.event_tx {
-                        let _ = tx.send(ControllerEvent::InterfaceAttached { iface: name });
-                    }
-                }
-            }
-            NetlinkEvent::InterfaceDown { name } => {
-                if self.active_ifaces.contains(&name) {
-                    info!(
-                        event.name = "interface_controller.interface_down",
-                        network.interface.name = %name,
-                        "interface went down, detaching eBPF programs"
-                    );
-
-                    self.active_ifaces.remove(&name);
-
-                    self.iface_map_remove(&name);
-
-                    for direction in DIRECTIONS {
-                        if let Some(link_id) = self.unregister_tc_link(&name, direction)
-                            && let Err(e) = self.detach_program(&name, direction, link_id)
-                        {
-                            warn!(
-                                event.name = "interface_controller.detach_failed",
-                                network.interface.name = %name,
-                                ebpf.program.direction = %direction,
-                                error = %e,
-                                "failed to detach program from removed interface"
-                            );
-                        }
-                    }
-
-                    if let Some(ref tx) = self.event_tx {
-                        let _ = tx.send(ControllerEvent::InterfaceDetached { iface: name });
-                    }
-                }
-            }
+        let link_id = self.tc_links.remove(&(iface.to_string(), static_direction));
+        if link_id.is_some() {
+            debug!(
+                event.name = "interface_controller.tc_link_unregistered",
+                iface = %iface,
+                direction = %direction,
+                "TC link unregistered"
+            );
         }
-        Ok(())
+        link_id
+    }
+
+    /// Generate consistent BPF filesystem path for pinning TCX links.
+    ///
+    /// Path format: /sys/fs/bpf/mermin_tcx_{iface}_{direction}
+    /// This ensures links can be reloaded on pod restart to cleanup orphaned programs.
+    ///
+    /// # Safety
+    /// Interface names are kernel-controlled and should not contain path separators.
+    /// We validate this with debug assertions to catch any unexpected behavior.
+    fn pin_path(iface: &str, direction: &str) -> String {
+        debug_assert!(
+            !iface.contains('/') && !iface.contains('\0'),
+            "interface name '{iface}' contains invalid path characters",
+        );
+        format!("/sys/fs/bpf/mermin_tcx_{iface}_{direction}")
+    }
+
+    /// Convert direction string to static lifetime for HashMap key.
+    fn to_static_direction(direction: &str) -> Option<&'static str> {
+        match direction {
+            DIRECTION_INGRESS => Some(DIRECTION_INGRESS),
+            DIRECTION_EGRESS => Some(DIRECTION_EGRESS),
+            _ => None,
+        }
     }
 
     /// Resolve patterns to concrete interface names.
@@ -1100,6 +1412,16 @@ impl IfaceController {
                 pattern == text
             }
         }
+    }
+
+    /// Check if an error indicates a "not found" condition.
+    ///
+    /// Returns true if the error message contains common "not found" patterns.
+    fn is_not_found_error(e: &impl std::fmt::Display) -> bool {
+        let error_str = e.to_string();
+        error_str.contains("No such file")
+            || error_str.contains("not found")
+            || error_str.contains("ENOENT")
     }
 }
 
