@@ -1,3 +1,13 @@
+## [v0.1.0-beta.28] - 2025-11-15
+
+### Features
+
+- Refactor interface controller to use dedicated host namespace thread (#285)
+
+[v0.1.0-beta.27..v0.1.0-beta.28](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.27...v0.1.0-beta.28)
+
+
+
 ## [v0.1.0-beta.27] - 2025-11-14
 
 ### Bug Fixes
