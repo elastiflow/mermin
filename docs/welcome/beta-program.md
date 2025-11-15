@@ -6,7 +6,7 @@ We plan to update the beta image multiple times throughout this beta period. We 
 
 ### Accessing the Beta Image
 
-> **Version Requirement**: v0.1.0-beta.25 or higher
+> **Version Requirement**: v0.1.0-beta.29 or higher
 
 Before starting, add the beta Helm chart:
 
@@ -196,8 +196,7 @@ Mermin has been tested and verified on the following platforms:
 | ---------------- | --------- | --------------- |
 | Debian 13        | Supported | All versions    |
 | Debian 12        | Supported | As of beta.21   |
-| GKE Standard     | Supported | As of beta.21   |
-| GKE Autopilot    | Supported | As of beta.21   |
+| GKE Standard     | Supported | As of beta.29   |
 | Kind (local dev) | Supported | As of beta.21   |
 
 **Important:** eBPF verifier requirements vary between kernel versions. If you encounter eBPF program loading failures, include your kernel version when reporting the issue.
@@ -233,7 +232,7 @@ Feedback Channels
 **Error Messages:***
 **Config File:**
 **Environment:**
-- Mermin Version: [e.g., v0.1.0-beta.22]
+- Mermin Version: [e.g., v0.1.0-beta.29]
 - Platform: [GKE/EKS/AKS/bare metal/Kind/other]
 - Kubernetes Version: [output of `kubectl version --short`]
 - Kernel Version: [output of `uname -r`]
