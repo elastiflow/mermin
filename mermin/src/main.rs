@@ -16,13 +16,21 @@ use aya::{
     programs::{SchedClassifier, TcAttachType},
     util::KernelVersion,
 };
+use dashmap::DashMap;
 use error::{MerminError, Result};
 use tokio::{signal, sync::mpsc};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     health::{HealthState, start_api_server},
-    iface::controller::IfaceController,
+    iface::{
+        controller::IfaceController,
+        threads::{
+            spawn_controller_event_handler, spawn_controller_thread, spawn_netlink_thread,
+            wait_for_controller_initialized, wait_for_controller_ready,
+        },
+        types::ControllerCommand,
+    },
     k8s::{attributor::Attributor, decorator::Decorator},
     metrics::server::start_metrics_server,
     otlp::{
@@ -76,6 +84,30 @@ async fn run() -> Result<()> {
                 );
             }
         });
+    }
+
+    let health_state = HealthState::default();
+
+    // Start API server immediately so Kubernetes can start health checks
+    // Health checks will return "not ready" based on health_state flags until initialization completes
+    if conf.api.enabled {
+        let health_state_clone = health_state.clone();
+        let api_conf = conf.api.clone();
+
+        tokio::spawn(async move {
+            if let Err(e) = start_api_server(health_state_clone, &api_conf).await {
+                error!(
+                    event.name = "api.internal_error",
+                    error.message = %e,
+                    "api server encountered a fatal error"
+                );
+            }
+        });
+
+        info!(
+            event.name = "api.started",
+            "api server started, health checks will report not ready until initialization completes"
+        );
     }
 
     // If a provider is already installed, install_default() returns Err, which we can safely ignore.
@@ -172,23 +204,27 @@ async fn run() -> Result<()> {
         "tc programs loaded into kernel"
     );
 
-    let health_state = HealthState::default();
+    // Extract eBPF maps BEFORE moving Ebpf object to controller thread
+    // Maps will be owned by FlowSpanProducer (main thread), programs by controller (host namespace thread)
+    let flow_stats_map = ebpf
+        .take_map("FLOW_STATS_MAP")
+        .ok_or_else(|| MerminError::internal("FLOW_STATS_MAP not found in eBPF object"))?;
+    let flow_events_map = ebpf
+        .take_map("FLOW_EVENTS")
+        .ok_or_else(|| MerminError::internal("FLOW_EVENTS not found in eBPF object"))?;
 
-    // Start API server (health endpoints)
-    if conf.api.enabled {
-        let health_state_clone = health_state.clone();
-        let api_conf = conf.api.clone();
+    let flow_stats_map = Arc::new(tokio::sync::Mutex::new(
+        aya::maps::HashMap::try_from(flow_stats_map)
+            .map_err(|e| MerminError::internal(format!("failed to convert FLOW_STATS_MAP: {e}")))?,
+    ));
+    let flow_events_ringbuf = aya::maps::RingBuf::try_from(flow_events_map).map_err(|e| {
+        MerminError::internal(format!("failed to convert FLOW_EVENTS ring buffer: {e}"))
+    })?;
 
-        tokio::spawn(async move {
-            if let Err(e) = start_api_server(health_state_clone, &api_conf).await {
-                error!(
-                    event.name = "api.internal_error",
-                    error.message = %e,
-                    "api server encountered a fatal error"
-                );
-            }
-        });
-    }
+    info!(
+        event.name = "ebpf.maps_extracted",
+        "eBPF maps extracted successfully for flow producer"
+    );
 
     let kernel_version = KernelVersion::current().unwrap_or(KernelVersion::new(0, 0, 0));
     let use_tcx = kernel_version >= KernelVersion::new(6, 6, 0);
@@ -201,13 +237,9 @@ async fn run() -> Result<()> {
         system.kernel.version = %kernel_version,
         "determined TC attachment method and priority"
     );
-
-    // Shared ownership for concurrent access from controller and flow producer
-    // NOTE: eBPF maps (FLOW_STATS_MAPS, FLOW_EVENTS) will be accessed by FlowSpanProducer
-    let ebpf = Arc::new(tokio::sync::Mutex::new(ebpf));
     info!(
-        event.name = "ebpf.shared",
-        "eBPF object prepared for concurrent access, maps will be accessed on-demand"
+        event.name = "ebpf.ready_for_controller",
+        "eBPF programs ready to move to controller thread"
     );
 
     let patterns = if conf.discovery.instrument.interfaces.is_empty() {
@@ -219,43 +251,57 @@ async fn run() -> Result<()> {
     } else {
         conf.discovery.instrument.interfaces.clone()
     };
-
-    let mut iface_controller = IfaceController::new(
+    let iface_map = Arc::new(DashMap::new());
+    let host_netns = Arc::new(std::fs::File::open("/proc/1/ns/net").map_err(|e| {
+        MerminError::internal(format!(
+            "failed to open host network namespace: {e} - requires hostPID: true in pod spec"
+        ))
+    })?);
+    let (cmd_tx, cmd_rx) = crossbeam::channel::unbounded();
+    let (netlink_tx, netlink_rx) = crossbeam::channel::unbounded();
+    let (event_tx, event_rx) = crossbeam::channel::unbounded();
+    let controller = IfaceController::new(
         patterns,
-        Arc::clone(&ebpf),
+        Arc::clone(&iface_map),
+        ebpf,
         use_tcx,
         conf.discovery.instrument.tc_priority,
         conf.discovery.instrument.tcx_order.clone(),
+        Some(event_tx.clone()),
     )?;
+    let (netlink_handle, netlink_shutdown_fd) =
+        spawn_netlink_thread(Arc::clone(&host_netns), netlink_tx).map_err(|e| {
+            MerminError::internal(format!("failed to spawn netlink monitoring thread: {e}"))
+        })?;
+    let controller_handle = spawn_controller_thread(
+        Arc::clone(&host_netns),
+        controller,
+        cmd_rx,
+        netlink_rx,
+        Some(event_tx.clone()),
+    )
+    .map_err(|e| MerminError::internal(format!("failed to spawn controller thread: {e}")))?;
 
-    // DashMap allows lock-free reads during packet processing while controller updates it dynamically
-    let iface_map = iface_controller.iface_map();
-    iface_controller.initialize().await?;
+    wait_for_controller_ready(&event_rx, &cmd_tx)?;
+
     info!(
-        event.name = "ebpf.ready",
-        "ebpf program loaded and ready to process network traffic"
+        event.name = "interface_controller.sending_initialize",
+        "sending initialize command to controller thread"
     );
+    cmd_tx
+        .send(ControllerCommand::Initialize)
+        .map_err(|e| MerminError::internal(format!("failed to send initialize command: {e}")))?;
+
+    let _interface_count = wait_for_controller_initialized(&event_rx, &cmd_tx)?;
     health_state.ebpf_loaded.store(true, Ordering::Relaxed);
 
-    // Shared across reconciliation loop and flow producer for concurrent access
-    let iface_controller = Arc::new(tokio::sync::Mutex::new(iface_controller));
+    let _event_handler = spawn_controller_event_handler(event_rx)
+        .map_err(|e| MerminError::internal(format!("failed to spawn event handler: {e}")))?;
 
-    // Start reconciliation loop immediately to minimize window for missed interface events
-    let controller_handle = if conf.discovery.instrument.auto_discover_interfaces {
-        info!(
-            event.name = "interface_controller.starting",
-            "starting interface controller"
-        );
-        Some(IfaceController::start_reconciliation_loop(Arc::clone(
-            &iface_controller,
-        )))
-    } else {
-        info!(
-            event.name = "interface_controller.disabled",
-            "interface controller disabled, monitoring only startup interfaces"
-        );
-        None
-    };
+    info!(
+        event.name = "ebpf.ready",
+        "ebpf programs attached and ready to process network traffic"
+    );
 
     let (flow_span_tx, mut flow_span_rx) = mpsc::channel(conf.packet_channel_capacity);
     let (k8s_decorated_flow_span_tx, mut k8s_decorated_flow_span_rx) =
@@ -265,8 +311,9 @@ async fn run() -> Result<()> {
         conf.clone().span,
         conf.packet_channel_capacity,
         conf.packet_worker_count,
-        iface_map.clone(),
-        Arc::clone(&ebpf),
+        Arc::clone(&iface_map),
+        flow_stats_map,
+        flow_events_ringbuf,
         flow_span_tx,
         &conf,
     )?;
@@ -439,19 +486,110 @@ async fn run() -> Result<()> {
         event.name = "application.shutdown_initiated",
         "received shutdown signal, starting graceful cleanup"
     );
+    debug!(
+        event.name = "interface_controller.shutdown_requested",
+        "sending shutdown command to controller thread"
+    );
 
-    // Stop reconciliation loop before detaching programs
-    if let Some(handle) = controller_handle {
-        info!(
-            event.name = "interface_controller.stopping",
-            "stopping interface syncing"
+    if let Err(e) = cmd_tx.send(ControllerCommand::Shutdown) {
+        warn!(
+            event.name = "interface_controller.shutdown_send_failed",
+            error = %e,
+            "failed to send shutdown command, controller thread may have already exited"
         );
-        handle.abort();
-        // Give the task a moment to clean up
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), handle).await;
     }
 
-    iface_controller.lock().await.shutdown().await?;
+    // Wait for controller thread to complete shutdown
+    match tokio::task::spawn_blocking(move || match controller_handle.join() {
+        Ok(()) => Ok(()),
+        Err(panic_err) => {
+            if let Some(panic_msg) = panic_err.downcast_ref::<&str>() {
+                Err(format!("controller thread panicked: {panic_msg}"))
+            } else if let Some(panic_msg) = panic_err.downcast_ref::<String>() {
+                Err(format!("controller thread panicked: {panic_msg}"))
+            } else {
+                Err("controller thread panicked with unknown error".to_string())
+            }
+        }
+    })
+    .await
+    {
+        Ok(Ok(())) => {
+            debug!(
+                event.name = "interface_controller.thread_joined",
+                "controller thread exited cleanly"
+            );
+        }
+        Ok(Err(panic_msg)) => {
+            error!(
+                event.name = "interface_controller.thread_panicked",
+                error.message = %panic_msg,
+                "controller thread panicked during execution"
+            );
+        }
+        Err(e) => {
+            warn!(
+                event.name = "interface_controller.join_failed",
+                error = %e,
+                "failed to join controller thread"
+            );
+        }
+    }
+
+    // Signal netlink thread to shutdown via eventfd
+    debug!(
+        event.name = "interface_controller.netlink.signaling_shutdown",
+        "signaling netlink thread to shutdown"
+    );
+    if let Err(e) = netlink_shutdown_fd.signal() {
+        warn!(
+            event.name = "interface_controller.netlink.signal_failed",
+            error = %e,
+            "failed to signal shutdown to netlink thread, it may not exit cleanly"
+        );
+    }
+
+    // Wait for netlink thread to exit gracefully
+    // poll() will wake immediately when the shutdown eventfd is signaled
+    debug!(
+        event.name = "interface_controller.netlink.waiting",
+        "waiting for netlink thread to exit gracefully"
+    );
+    match tokio::task::spawn_blocking(move || match netlink_handle.join() {
+        Ok(()) => Ok(()),
+        Err(panic_err) => {
+            if let Some(panic_msg) = panic_err.downcast_ref::<&str>() {
+                Err(format!("netlink thread panicked: {panic_msg}"))
+            } else if let Some(panic_msg) = panic_err.downcast_ref::<String>() {
+                Err(format!("netlink thread panicked: {panic_msg}"))
+            } else {
+                Err("netlink thread panicked with unknown error".to_string())
+            }
+        }
+    })
+    .await
+    {
+        Ok(Ok(())) => {
+            debug!(
+                event.name = "interface_controller.netlink.thread_joined",
+                "netlink thread exited cleanly"
+            );
+        }
+        Ok(Err(panic_msg)) => {
+            error!(
+                event.name = "interface_controller.netlink.thread_panicked",
+                error.message = %panic_msg,
+                "netlink thread panicked during execution"
+            );
+        }
+        Err(e) => {
+            warn!(
+                event.name = "interface_controller.netlink.join_failed",
+                error = %e,
+                "failed to join netlink thread"
+            );
+        }
+    }
 
     info!(
         event.name = "application.cleanup_complete",
