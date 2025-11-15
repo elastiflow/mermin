@@ -25,8 +25,11 @@ use crate::{
     health::{HealthState, start_api_server},
     iface::{
         controller::IfaceController,
-        threads::{spawn_controller_thread, spawn_netlink_thread},
-        types::{ControllerCommand, ControllerEvent},
+        threads::{
+            spawn_controller_event_handler, spawn_controller_thread, spawn_netlink_thread,
+            wait_for_controller_initialized, wait_for_controller_ready,
+        },
+        types::ControllerCommand,
     },
     k8s::{attributor::Attributor, decorator::Decorator},
     metrics::server::start_metrics_server,
@@ -37,9 +40,6 @@ use crate::{
     runtime::{capabilities, context::Context},
     span::producer::FlowSpanProducer,
 };
-
-const CONTROLLER_READY_TIMEOUT_SECS: u64 = 10;
-const CONTROLLER_INIT_TIMEOUT_SECS: u64 = 30;
 
 #[tokio::main]
 async fn main() {
@@ -282,36 +282,7 @@ async fn run() -> Result<()> {
     )
     .map_err(|e| MerminError::internal(format!("failed to spawn controller thread: {e}")))?;
 
-    info!(
-        event.name = "interface_controller.waiting_for_ready",
-        timeout_secs = CONTROLLER_READY_TIMEOUT_SECS,
-        "waiting for controller thread to enter host namespace and become ready"
-    );
-    match event_rx.recv_timeout(std::time::Duration::from_secs(
-        CONTROLLER_READY_TIMEOUT_SECS,
-    )) {
-        Ok(ControllerEvent::Ready) => {
-            info!(
-                event.name = "interface_controller.ready_received",
-                "controller thread is ready to receive commands"
-            );
-        }
-        Ok(other) => {
-            return Err(MerminError::internal(format!(
-                "unexpected controller event while waiting for ready: {other:?}",
-            )));
-        }
-        Err(e) => {
-            warn!(
-                event.name = "interface_controller.ready_timeout",
-                "ready signal timed out, controller thread may have failed to start"
-            );
-            let _ = cmd_tx.send(ControllerCommand::Shutdown);
-            return Err(MerminError::internal(format!(
-                "controller ready timeout after 10s: {e}"
-            )));
-        }
-    }
+    wait_for_controller_ready(&event_rx, &cmd_tx)?;
 
     info!(
         event.name = "interface_controller.sending_initialize",
@@ -321,95 +292,11 @@ async fn run() -> Result<()> {
         .send(ControllerCommand::Initialize)
         .map_err(|e| MerminError::internal(format!("failed to send initialize command: {e}")))?;
 
-    info!(
-        event.name = "interface_controller.waiting_for_initialized",
-        timeout_secs = CONTROLLER_INIT_TIMEOUT_SECS,
-        "waiting for initialization to complete"
-    );
-    match event_rx.recv_timeout(std::time::Duration::from_secs(CONTROLLER_INIT_TIMEOUT_SECS)) {
-        Ok(ControllerEvent::Initialized { interface_count }) => {
-            info!(
-                event.name = "interface_controller.initialized",
-                interface_count = interface_count,
-                "controller initialized successfully"
-            );
-            health_state.ebpf_loaded.store(true, Ordering::Relaxed);
-        }
-        Ok(other) => {
-            return Err(MerminError::internal(format!(
-                "unexpected controller event during initialization: {other:?}",
-            )));
-        }
-        Err(e) => {
-            warn!(
-                event.name = "interface_controller.init_timeout",
-                "initialization timed out, sending shutdown to controller thread"
-            );
-            let _ = cmd_tx.send(ControllerCommand::Shutdown);
-            return Err(MerminError::internal(format!(
-                "controller initialization timeout after {CONTROLLER_INIT_TIMEOUT_SECS}s: {e}"
-            )));
-        }
-    }
+    let _interface_count = wait_for_controller_initialized(&event_rx, &cmd_tx)?;
+    health_state.ebpf_loaded.store(true, Ordering::Relaxed);
 
-    // Spawn background task to handle controller events for observability
-    tokio::spawn(async move {
-        while let Ok(event) = event_rx.recv() {
-            match event {
-                ControllerEvent::InterfaceAttached { iface } => {
-                    info!(
-                        event.name = "interface_controller.interface_attached",
-                        network.interface.name = %iface,
-                        "interface attached successfully"
-                    );
-                }
-                ControllerEvent::InterfaceDetached { iface } => {
-                    info!(
-                        event.name = "interface_controller.interface_detached",
-                        network.interface.name = %iface,
-                        "interface detached successfully"
-                    );
-                }
-                ControllerEvent::AttachmentFailed { iface, error } => {
-                    warn!(
-                        event.name = "interface_controller.attachment_failed",
-                        network.interface.name = %iface,
-                        error.message = %error,
-                        "interface attachment failed"
-                    );
-                }
-                ControllerEvent::Ready => {
-                    // Ready event is waited for synchronously before this task spawns,
-                    // but log it if we somehow receive it here
-                    debug!(
-                        event.name = "interface_controller.unexpected_ready",
-                        "received ready event in background handler"
-                    );
-                }
-                ControllerEvent::Initialized { interface_count } => {
-                    // Initialization is waited for synchronously before this task spawns,
-                    // but log it if we somehow receive it here
-                    debug!(
-                        event.name = "interface_controller.unexpected_initialization",
-                        interface_count = interface_count,
-                        "received initialization event in background handler"
-                    );
-                }
-                ControllerEvent::ShutdownComplete => {
-                    info!(
-                        event.name = "interface_controller.shutdown_complete",
-                        "controller thread shutdown successfully"
-                    );
-                    // Exit the event loop since controller is shutting down
-                    break;
-                }
-            }
-        }
-        debug!(
-            event.name = "interface_controller.event_handler_stopped",
-            "controller event handler stopped"
-        );
-    });
+    let _event_handler = spawn_controller_event_handler(event_rx)
+        .map_err(|e| MerminError::internal(format!("failed to spawn event handler: {e}")))?;
 
     info!(
         event.name = "ebpf.ready",

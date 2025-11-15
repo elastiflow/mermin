@@ -11,7 +11,7 @@ RELEASE_NAME="${RELEASE_NAME:-mermin}"
 NAMESPACE="${NAMESPACE:-default}"
 DOCKER_REPOSITORY="${DOCKER_REPOSITORY:-mermin}"
 DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-latest}"
-VALUES_FILE="${VALUES_FILE:-local/values.yaml}"
+VALUES_FILE="${VALUES_FILE:-docs/deployment/examples/local/values.yaml}"
 CNI="${CNI:-calico}"
 
 # --- Cleanup Function ---
@@ -36,7 +36,7 @@ verify_agent_logs() {
     echo "ERROR: ping-receiver pod failed to become ready"
     return 1
   }
-  
+
   local counter=0
   ping_receiver_ip=""
   while [ $counter -lt 30 ]; do
@@ -48,12 +48,12 @@ verify_agent_logs() {
     counter=$((counter + 1))
     sleep 0.5
   done
-  
+
   if [[ -z "$ping_receiver_ip" ]]; then
     echo "ERROR: Failed to get ping-receiver IP after 15 seconds"
     return 1
   fi
-  
+
   kubectl -n "${NAMESPACE}" run pinger --grace-period=1 --image=alpine --command -- ping "${ping_receiver_ip}"
   echo "Waiting for pinger pod to be ready..."
   kubectl wait --for=condition=ready pod/pinger -n "${NAMESPACE}" --timeout=60s || {

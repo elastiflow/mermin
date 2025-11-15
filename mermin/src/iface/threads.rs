@@ -3,8 +3,10 @@
 //! This module provides functions to spawn:
 //! 1. Netlink monitoring thread - permanently in host namespace, blocking netlink socket
 //! 2. Controller thread - permanently in host namespace, handles commands and netlink events
+//!
+//! Also provides helper functions for coordinating with controller thread lifecycle.
 
-use std::{mem, os::fd::RawFd, sync::Arc, thread};
+use std::{mem, os::fd::RawFd, sync::Arc, thread, time};
 
 use crossbeam::channel::{Receiver, Sender};
 use libc::{
@@ -24,6 +26,13 @@ use super::{
     controller::IfaceController,
     types::{ControllerCommand, ControllerEvent, NetlinkEvent},
 };
+use crate::error::MerminError;
+
+/// Default timeout for waiting for controller thread to become ready (in seconds)
+pub const CONTROLLER_READY_TIMEOUT_SECS: u64 = 30;
+
+/// Default timeout for waiting for controller initialization to complete (in seconds)
+pub const CONTROLLER_INIT_TIMEOUT_SECS: u64 = 30;
 
 /// RAII wrapper for netlink socket file descriptor to ensure proper cleanup.
 /// Automatically closes the socket when dropped, preventing file descriptor leaks.
@@ -703,4 +712,217 @@ pub fn spawn_netlink_thread(
             );
         })
         .map(|handle| (handle, shutdown_fd))
+}
+
+/// Wait for controller thread to enter host namespace and become ready.
+///
+/// This function blocks until the controller thread sends the `Ready` event,
+/// indicating it has successfully entered the host network namespace and is
+/// ready to receive commands.
+///
+/// Timeout is controlled by `CONTROLLER_READY_TIMEOUT_SECS` constant.
+///
+/// ## Arguments
+///
+/// - `event_rx` - Receiver for controller events
+/// - `cmd_tx` - Sender for commands (used to send shutdown on timeout)
+///
+/// ## Returns
+///
+/// - `Ok(())` if controller becomes ready within timeout
+/// - `Err(MerminError)` if timeout occurs or unexpected event received
+pub fn wait_for_controller_ready(
+    event_rx: &Receiver<ControllerEvent>,
+    cmd_tx: &Sender<ControllerCommand>,
+) -> Result<(), MerminError> {
+    info!(
+        event.name = "interface_controller.waiting_for_ready",
+        timeout_secs = CONTROLLER_READY_TIMEOUT_SECS,
+        "waiting for controller thread to enter host namespace and become ready"
+    );
+
+    match event_rx.recv_timeout(time::Duration::from_secs(CONTROLLER_READY_TIMEOUT_SECS)) {
+        Ok(ControllerEvent::Ready) => {
+            info!(
+                event.name = "interface_controller.ready_received",
+                "controller thread is ready to receive commands"
+            );
+            Ok(())
+        }
+        Ok(other) => Err(MerminError::internal(format!(
+            "unexpected controller event while waiting for ready: {other:?}",
+        ))),
+        Err(_) => {
+            warn!(
+                event.name = "interface_controller.ready_timeout",
+                "ready signal timed out, controller thread may have failed to start"
+            );
+            let _ = cmd_tx.send(ControllerCommand::Shutdown);
+            Err(MerminError::internal(format!(
+                "controller ready timeout after {CONTROLLER_READY_TIMEOUT_SECS}s"
+            )))
+        }
+    }
+}
+
+/// Wait for controller initialization to complete.
+///
+/// This function blocks until the controller thread sends the `Initialized` event,
+/// draining intermediate events like `InterfaceAttached` and `AttachmentFailed` that
+/// may arrive during the initialization process.
+///
+/// Timeout is controlled by `CONTROLLER_INIT_TIMEOUT_SECS` constant.
+///
+/// ## Arguments
+///
+/// - `event_rx` - Receiver for controller events
+/// - `cmd_tx` - Sender for commands (used to send shutdown on timeout)
+///
+/// ## Returns
+///
+/// - `Ok(interface_count)` if initialization completes successfully
+/// - `Err(MerminError)` if timeout occurs or unexpected event received
+pub fn wait_for_controller_initialized(
+    event_rx: &Receiver<ControllerEvent>,
+    cmd_tx: &Sender<ControllerCommand>,
+) -> Result<usize, MerminError> {
+    info!(
+        event.name = "interface_controller.waiting_for_initialized",
+        timeout_secs = CONTROLLER_INIT_TIMEOUT_SECS,
+        "waiting for initialization to complete"
+    );
+
+    // Loop to drain intermediate events (InterfaceAttached, AttachmentFailed) until we receive
+    // the final Initialized event. During initialization, the controller sends an event for each
+    // interface attachment (success or failure), which may arrive before the Initialized event.
+    let init_deadline =
+        time::Instant::now() + time::Duration::from_secs(CONTROLLER_INIT_TIMEOUT_SECS);
+
+    loop {
+        let remaining_timeout = init_deadline.saturating_duration_since(time::Instant::now());
+
+        match event_rx.recv_timeout(remaining_timeout) {
+            Ok(ControllerEvent::Initialized { interface_count }) => {
+                info!(
+                    event.name = "interface_controller.initialized",
+                    interface_count = interface_count,
+                    "controller initialized successfully"
+                );
+                return Ok(interface_count);
+            }
+            Ok(ControllerEvent::InterfaceAttached { iface }) => {
+                debug!(
+                    event.name = "interface_controller.init_interface_attached",
+                    network.interface.name = %iface,
+                    "interface attached during initialization (expected)"
+                );
+            }
+            Ok(ControllerEvent::AttachmentFailed { iface, error }) => {
+                debug!(
+                    event.name = "interface_controller.init_attachment_failed",
+                    network.interface.name = %iface,
+                    error = %error,
+                    "interface attachment failed during initialization (expected, will be retried)"
+                );
+            }
+            Ok(ControllerEvent::InterfaceDetached { iface }) => {
+                debug!(
+                    event.name = "interface_controller.init_interface_detached",
+                    network.interface.name = %iface,
+                    "interface detached during initialization (unexpected but non-fatal)"
+                );
+            }
+            Ok(other) => {
+                return Err(MerminError::internal(format!(
+                    "unexpected controller event during initialization: {other:?}",
+                )));
+            }
+            Err(_) => {
+                warn!(
+                    event.name = "interface_controller.init_timeout",
+                    "initialization timed out, sending shutdown to controller thread"
+                );
+                let _ = cmd_tx.send(ControllerCommand::Shutdown);
+                return Err(MerminError::internal(format!(
+                    "controller initialization timeout after {CONTROLLER_INIT_TIMEOUT_SECS}s"
+                )));
+            }
+        }
+    }
+}
+
+/// Spawn background task to handle controller events for observability.
+///
+/// This creates a blocking thread that continuously receives and logs controller events.
+/// The task will exit when the controller sends `ShutdownComplete` or the channel closes.
+///
+/// ## Arguments
+///
+/// - `event_rx` - Receiver for controller events
+///
+/// ## Returns
+///
+/// - `JoinHandle` for the spawned thread
+pub fn spawn_controller_event_handler(
+    event_rx: Receiver<ControllerEvent>,
+) -> Result<thread::JoinHandle<()>, std::io::Error> {
+    thread::Builder::new()
+        .name("mermin-controller-events".to_string())
+        .spawn(move || {
+            while let Ok(event) = event_rx.recv() {
+                match event {
+                    ControllerEvent::InterfaceAttached { iface } => {
+                        info!(
+                            event.name = "interface_controller.interface_attached",
+                            network.interface.name = %iface,
+                            "interface attached successfully"
+                        );
+                    }
+                    ControllerEvent::InterfaceDetached { iface } => {
+                        info!(
+                            event.name = "interface_controller.interface_detached",
+                            network.interface.name = %iface,
+                            "interface detached successfully"
+                        );
+                    }
+                    ControllerEvent::AttachmentFailed { iface, error } => {
+                        warn!(
+                            event.name = "interface_controller.attachment_failed",
+                            network.interface.name = %iface,
+                            error.message = %error,
+                            "interface attachment failed"
+                        );
+                    }
+                    ControllerEvent::Ready => {
+                        // Ready event is waited for synchronously before this task spawns,
+                        // but log it if we somehow receive it here
+                        debug!(
+                            event.name = "interface_controller.unexpected_ready",
+                            "received ready event in background handler"
+                        );
+                    }
+                    ControllerEvent::Initialized { interface_count } => {
+                        // Initialization is waited for synchronously before this task spawns,
+                        // but log it if we somehow receive it here
+                        debug!(
+                            event.name = "interface_controller.unexpected_initialization",
+                            interface_count = interface_count,
+                            "received initialization event in background handler"
+                        );
+                    }
+                    ControllerEvent::ShutdownComplete => {
+                        info!(
+                            event.name = "interface_controller.shutdown_complete",
+                            "controller thread shutdown successfully"
+                        );
+                        // Exit the event loop since controller is shutting down
+                        break;
+                    }
+                }
+            }
+            debug!(
+                event.name = "interface_controller.event_handler_stopped",
+                "controller event handler stopped"
+            );
+        })
 }
