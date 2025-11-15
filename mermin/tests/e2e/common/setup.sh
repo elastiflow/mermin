@@ -11,7 +11,6 @@ DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-latest}"
 DOCKER_IMAGE_NAME="${DOCKER_REPOSITORY}:${DOCKER_IMAGE_TAG}"
 VALUES_FILE="${VALUES_FILE:-docs/deployment/examples/local/values.yaml}"
 CNI="${CNI:-calico}"
-HOST_CNI_PATH="$HOME/cni-plugins-for-kind"
 MERMIN_CONFIG_PATH="${MERMIN_CONFIG_PATH:-docs/deployment/examples/local/config.example.hcl}"
 
 # --- CNI Installation Functions ---
@@ -46,14 +45,57 @@ install_cilium() {
 
 install_flannel() {
   echo "Installing CNI plugin binaries for Flannel..."
+
+  # Download CNI plugins once on host (much faster than downloading in each container)
+  local ARCH
+  ARCH=$(uname -m | sed "s/x86_64/amd64/" | sed "s/aarch64/arm64/")
+  local CNI_VERSION="v1.5.0"
+  local CNI_TGZ="/tmp/cni-plugins-${CNI_VERSION}.tgz"
+
+  if [ ! -f "$CNI_TGZ" ]; then
+    echo "Downloading CNI plugins ${CNI_VERSION} to $CNI_TGZ..."
+    if ! curl -sL -o "$CNI_TGZ" "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-${ARCH}-${CNI_VERSION}.tgz"; then
+      echo "ERROR: Failed to download CNI plugins"
+      exit 1
+    fi
+    if [ ! -f "$CNI_TGZ" ]; then
+      echo "ERROR: Downloaded file $CNI_TGZ does not exist"
+      exit 1
+    fi
+    echo "Successfully downloaded CNI plugins ($(du -h "$CNI_TGZ" | cut -f1))"
+  else
+    echo "Using cached CNI plugins from $CNI_TGZ ($(du -h "$CNI_TGZ" | cut -f1))"
+  fi
+
+  # Copy to all nodes (using /opt for better compatibility with Kind containers)
   for node in $(kind get nodes --name "${CLUSTER_NAME}"); do
-    docker exec "${node}" sh -c '
-      ARCH=$(uname -m | sed "s/x86_64/amd64/" | sed "s/aarch64/arm64/");
-      CNI_VERSION="v1.5.0";
-      curl -sL "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-${ARCH}-${CNI_VERSION}.tgz" | tar -C /opt/cni/bin -xz;
-    '
+    echo "Installing CNI plugins on node: $node"
+
+    # Copy to /opt instead of /tmp (Kind containers may have special /tmp handling)
+    echo "Copying CNI plugins to $node:/opt/cni-plugins.tgz..."
+    if ! docker cp "$CNI_TGZ" "${node}:/opt/cni-plugins.tgz"; then
+      echo "ERROR: Failed to copy CNI plugins to node $node"
+      exit 1
+    fi
+
+    # Verify the file exists
+    if ! docker exec "${node}" test -f /opt/cni-plugins.tgz; then
+      echo "ERROR: File /opt/cni-plugins.tgz does not exist on node $node after copy"
+      exit 1
+    fi
+
+    # Extract the plugins
+    echo "Extracting CNI plugins on $node..."
+    if ! docker exec "${node}" tar -C /opt/cni/bin -xzf /opt/cni-plugins.tgz; then
+      echo "ERROR: Failed to extract CNI plugins on node $node"
+      exit 1
+    fi
+
+    # Clean up
+    docker exec "${node}" rm -f /opt/cni-plugins.tgz
+    echo "✓ Successfully installed CNI plugins on node: $node"
   done
-  sleep 10
+
   echo "Installing Flannel manifest..."
   kubectl apply -f https://github.com/flannel-io/flannel/releases/download/v0.24.2/kube-flannel.yml
   kubectl rollout status daemonset kube-flannel-ds -n kube-flannel --timeout=240s
@@ -89,10 +131,7 @@ install_cni() {
 create_kind_cluster() {
   echo "Creating Kind cluster configured for CNI: $1"
   [[ $1 == "kindnetd" ]] && disable_cni=false || disable_cni=true
-  [[ $1 == "flannel" ]] && {
-    mkdir -p "$HOST_CNI_PATH"
-    mounts=$'\n  extraMounts:\n  - hostPath: '"$HOST_CNI_PATH"$'\n    containerPath: /opt/cni/bin'
-  }
+
   cat <<EOF | kind create cluster --name "$CLUSTER_NAME" --config=-
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
@@ -101,7 +140,7 @@ networking:
   disableDefaultCNI: $disable_cni
 nodes:
 - role: control-plane
-- role: worker${mounts:-}
+- role: worker
 EOF
   # Explicitly set kubectl context to ensure it's configured correctly
   kubectl config use-context "kind-${CLUSTER_NAME}"

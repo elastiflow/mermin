@@ -449,6 +449,83 @@ kubectl delete serviceaccount mermin -n default
 
 ## Advanced Configuration
 
+### TCX Mode and BPF Filesystem (Kernel >= 6.6)
+
+{% hint style="info" %}
+**Linux Kernel 6.6+** introduced TCX (TC eXpress), an improved TC attachment mechanism that supports multiple programs per hook. Mermin automatically uses TCX when available.
+{% endhint %}
+
+For **orphan cleanup support** on pod restarts (highly recommended for production), mount `/sys/fs/bpf` as a hostPath volume.
+
+**Option 1: Using extraObjects (Recommended)**
+
+Add the volume mount via a DaemonSet patch:
+
+```yaml
+# values.yaml
+extraObjects:
+  - |
+    apiVersion: apps/v1
+    kind: DaemonSet
+    metadata:
+      name: {{ include "mermin.fullname" . }}
+      namespace: {{ .Release.Namespace }}
+    spec:
+      template:
+        spec:
+          volumes:
+            - name: bpf-fs
+              hostPath:
+                path: /sys/fs/bpf
+                type: Directory
+          containers:
+            - name: mermin
+              volumeMounts:
+                - name: bpf-fs
+                  mountPath: /sys/fs/bpf
+```
+
+**Option 2: Modify Chart Locally**
+
+If using a local chart, edit `charts/mermin/templates/daemonset.yaml` to add:
+
+```yaml
+# In volumes section
+- name: bpf-fs
+  hostPath:
+    path: /sys/fs/bpf
+    type: Directory
+
+# In volumeMounts section
+- name: bpf-fs
+  mountPath: /sys/fs/bpf
+```
+
+**Why is this needed?**
+
+When a Mermin pod crashes unexpectedly (OOM, node failure, etc.), its TC programs remain attached to interfaces. On restart, Mermin can clean up these "orphaned" programs by loading pinned links from `/sys/fs/bpf`.
+
+**Without `/sys/fs/bpf` mounted:**
+- ✅ Programs attach and work correctly
+- ⚠️ Orphaned programs from crashed pods remain until node reboot
+- 📝 Warnings logged: `failed to pin TCX link to /sys/fs/bpf`
+
+**With `/sys/fs/bpf` mounted:**
+- ✅ Programs attach and work correctly
+- ✅ Orphaned programs cleaned up automatically on restart
+- ✅ Production-ready operational robustness
+
+**Verifying TCX mode:**
+
+Check Mermin logs on startup:
+
+```bash
+kubectl logs <mermin-pod> | grep tcx_mode
+# Should show: kernel.tcx_mode=true (kernel >= 6.6)
+```
+
+**For older kernels (< 6.6):** Mermin uses netlink-based TC attachment, which includes automatic orphan cleanup without requiring `/sys/fs/bpf`.
+
 ### Custom Image Repository
 
 Use a private registry:
@@ -527,6 +604,7 @@ Common issues:
 * No matching interfaces: Check `discovery.instrument.interfaces` configuration
 * eBPF load failure: Ensure kernel version >= 4.18 with eBPF support
 * OTLP connection failure: Verify collector endpoint and network policies
+* TCX pin warnings (kernel >= 6.6): See [TCX Mode and BPF Filesystem](#tcx-mode-and-bpf-filesystem-kernel-66) for mounting `/sys/fs/bpf`
 
 ### High Resource Usage
 
