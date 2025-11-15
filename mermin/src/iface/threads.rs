@@ -4,16 +4,12 @@
 //! 1. Netlink monitoring thread - permanently in host namespace, blocking netlink socket
 //! 2. Controller thread - permanently in host namespace, handles commands and netlink events
 
-use std::{
-    mem,
-    os::fd::{FromRawFd, OwnedFd, RawFd},
-    thread,
-};
+use std::{mem, os::fd::RawFd, sync::Arc, thread};
 
 use crossbeam::channel::{Receiver, Sender};
 use libc::{
-    AF_NETLINK, NETLINK_ADD_MEMBERSHIP, SOCK_RAW, SOL_NETLINK, bind, c_void, recv, setsockopt,
-    sockaddr_nl, socket,
+    AF_NETLINK, EFD_NONBLOCK, NETLINK_ADD_MEMBERSHIP, POLLERR, POLLHUP, POLLIN, POLLNVAL, SOCK_RAW,
+    SOL_NETLINK, bind, c_void, eventfd, poll, pollfd, recv, setsockopt, sockaddr_nl, socket,
 };
 use netlink_packet_core::{NetlinkBuffer, NetlinkMessage, NetlinkPayload};
 use netlink_packet_route::{
@@ -54,6 +50,56 @@ impl Drop for NetlinkSocket {
     }
 }
 
+/// RAII wrapper for eventfd used to signal shutdown to netlink thread.
+/// Automatically closes the eventfd when dropped.
+pub struct ShutdownEventFd(RawFd);
+
+impl ShutdownEventFd {
+    fn new() -> Result<Self, std::io::Error> {
+        // SAFETY: eventfd() is safe to call, we check for errors
+        let fd = unsafe { eventfd(0, EFD_NONBLOCK) };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(Self(fd))
+    }
+
+    fn as_raw_fd(&self) -> RawFd {
+        self.0
+    }
+
+    /// Signal shutdown by writing to the eventfd
+    pub fn signal(&self) -> Result<(), std::io::Error> {
+        let val: u64 = 1;
+        // SAFETY: self.0 is valid, val is properly initialized
+        let ret = unsafe {
+            libc::write(
+                self.0,
+                &val as *const u64 as *const c_void,
+                mem::size_of::<u64>(),
+            )
+        };
+        if ret < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+}
+
+impl Drop for ShutdownEventFd {
+    fn drop(&mut self) {
+        // SAFETY: self.0 is a valid file descriptor that we own
+        unsafe {
+            libc::close(self.0);
+        }
+        trace!(
+            event.name = "interface_controller.netlink.shutdown_fd_closed",
+            fd = self.0,
+            "shutdown eventfd closed via RAII cleanup"
+        );
+    }
+}
+
 /// Netlink multicast group for link events (interface up/down)
 const RTNLGRP_LINK: i32 = 1;
 
@@ -72,7 +118,7 @@ const NETLINK_RECV_BUFFER_SIZE: usize = 8192;
 ///
 /// ## Arguments
 ///
-/// - `host_netns_fd` - File descriptor for `/proc/1/ns/net` (host namespace)
+/// - `host_netns` - Arc-wrapped File handle for `/proc/1/ns/net` (host namespace)
 /// - `controller` - Initialized controller (will be moved to thread)
 /// - `cmd_rx` - Receiver for commands from main thread
 /// - `netlink_rx` - Receiver for netlink events from netlink thread
@@ -86,7 +132,7 @@ const NETLINK_RECV_BUFFER_SIZE: usize = 8192;
 ///
 /// The spawned thread panics if unable to enter host network namespace (requires CAP_SYS_ADMIN).
 pub fn spawn_controller_thread(
-    host_netns_fd: RawFd,
+    host_netns: Arc<std::fs::File>,
     mut controller: IfaceController,
     cmd_rx: Receiver<ControllerCommand>,
     netlink_rx: Receiver<NetlinkEvent>,
@@ -95,9 +141,10 @@ pub fn spawn_controller_thread(
     thread::Builder::new()
         .name("mermin-controller".to_string())
         .spawn(move || {
-            // Enter host namespace permanently
-            let host_fd = unsafe { OwnedFd::from_raw_fd(host_netns_fd) };
-            if let Err(e) = setns(&host_fd, CloneFlags::CLONE_NEWNET) {
+            // Enter host namespace permanently. Thread holds Arc reference to File,
+            // ensuring FD stays open for the duration of setns() call. No risk of
+            // use-after-close since each thread has its own reference count.
+            if let Err(e) = setns(host_netns.as_ref(), CloneFlags::CLONE_NEWNET) {
                 error!(
                     event.name = "interface_controller.setns_failed",
                     error = %e,
@@ -113,6 +160,22 @@ pub fn spawn_controller_thread(
                 "controller thread started and permanently in host network namespace"
             );
 
+            if let Some(ref tx) = event_tx && tx.send(ControllerEvent::Ready).is_err() {
+                error!(
+                    event.name = "interface_controller.ready_send_failed",
+                    "failed to send ready event, main thread may have exited"
+                );
+                return;
+            }
+            info!(
+                event.name = "interface_controller.ready",
+                "controller ready to receive commands"
+            );
+
+            // Buffer for netlink events received before initialization completes
+            let mut netlink_event_buffer: Vec<NetlinkEvent> = Vec::new();
+            let mut initialized = false;
+
             loop {
                 crossbeam::select! {
                     recv(cmd_rx) -> result => {
@@ -125,20 +188,48 @@ pub fn spawn_controller_thread(
                                 );
 
                                 match cmd {
-                                    ControllerCommand::Initialize => match controller.initialize() {
-                                        Ok(_) => {
-                                            if let Some(ref tx) = event_tx {
-                                                let _ = tx.send(ControllerEvent::Initialized {
-                                                    interface_count: controller.iface_map().len(),
-                                                });
+                                    ControllerCommand::Initialize => {
+                                        info!(
+                                            event.name = "interface_controller.init_command_received",
+                                            "processing initialize command"
+                                        );
+
+                                        match controller.initialize() {
+                                            Ok(_) => {
+                                                initialized = true;
+
+                                                if let Some(ref tx) = event_tx {
+                                                    let _ = tx.send(ControllerEvent::Initialized {
+                                                        interface_count: controller.iface_map().len(),
+                                                    });
+                                                }
+
+                                                // Process buffered netlink events that arrived during initialization
+                                                if !netlink_event_buffer.is_empty() {
+                                                    debug!(
+                                                        event.name = "interface_controller.processing_buffered_events",
+                                                        event_count = netlink_event_buffer.len(),
+                                                        "processing netlink events buffered during initialization"
+                                                    );
+
+                                                    for buffered_event in netlink_event_buffer.drain(..) {
+                                                        if let Err(e) = controller.handle_netlink_event(buffered_event) {
+                                                            warn!(
+                                                                event.name = "interface_controller.buffered_event_failed",
+                                                                error = %e,
+                                                                "failed to handle buffered netlink event"
+                                                            );
+                                                        }
+                                                    }
+                                                }
                                             }
-                                        }
-                                        Err(e) => {
-                                            error!(
-                                                event.name = "interface_controller.init_failed",
-                                                error = %e,
-                                                "controller initialization failed"
-                                            );
+                                            Err(e) => {
+                                                error!(
+                                                    event.name = "interface_controller.init_failed",
+                                                    error = %e,
+                                                    "controller initialization failed"
+                                                );
+                                            }
                                         }
                                     },
                                     ControllerCommand::Shutdown => {
@@ -166,18 +257,27 @@ pub fn spawn_controller_thread(
                     recv(netlink_rx) -> result => {
                         match result {
                             Ok(event) => {
-                                debug!(
-                                    event.name = "interface_controller.netlink_event_received",
-                                    netlink_event = %event,
-                                    "received netlink event from monitoring thread"
-                                );
-
-                                if let Err(e) = controller.handle_netlink_event(event) {
-                                    warn!(
-                                        event.name = "interface_controller.netlink_event_failed",
-                                        error = %e,
-                                        "failed to handle netlink event"
+                                if initialized {
+                                    debug!(
+                                        event.name = "interface_controller.netlink_event_received",
+                                        netlink_event = %event,
+                                        "received netlink event from monitoring thread"
                                     );
+
+                                    if let Err(e) = controller.handle_netlink_event(event) {
+                                        warn!(
+                                            event.name = "interface_controller.netlink_event_failed",
+                                            error = %e,
+                                            "failed to handle netlink event"
+                                        );
+                                    }
+                                } else {
+                                    debug!(
+                                        event.name = "interface_controller.netlink_event_buffered",
+                                        netlink_event = %event,
+                                        "buffering netlink event until initialization completes"
+                                    );
+                                    netlink_event_buffer.push(event);
                                 }
                             }
                             Err(_) => {
@@ -206,16 +306,22 @@ pub fn spawn_controller_thread(
 /// - Stays in host namespace permanently (never switches back)
 /// - Creates a raw netlink socket (AF_NETLINK, SOCK_RAW, NETLINK_ROUTE)
 /// - Subscribes to RTNLGRP_LINK multicast group for interface events
-/// - Blocks on `recv()` waiting for kernel netlink messages
+/// - Blocks on `recv()` with 1-second timeout waiting for kernel netlink messages
 /// - Parses RTM_NEWLINK/RTM_SETLINK/RTM_DELLINK messages
 /// - Extracts interface name and UP flag from link attributes
 /// - Sends `NetlinkEvent::InterfaceUp` or `InterfaceDown` to controller thread
 /// - Handles message boundaries correctly using NLMSG_ALIGN
-/// - Exits gracefully on socket errors or channel closure
+/// - Exits gracefully when channel is disconnected (detected during recv timeout)
+///
+/// ## Graceful Shutdown
+///
+/// Uses `poll()` to wait on both the netlink socket and a shutdown eventfd. When shutdown
+/// is requested, the main thread signals the eventfd, causing `poll()` to wake immediately.
+/// This avoids busy loops and provides instant shutdown response with zero CPU overhead.
 ///
 /// ## Arguments
 ///
-/// - `host_netns_fd` - File descriptor for `/proc/1/ns/net` (host namespace)
+/// - `host_netns` - Arc-wrapped File handle for `/proc/1/ns/net` (host namespace)
 /// - `event_tx` - Sender to send netlink events to controller thread
 ///
 /// ## Errors
@@ -233,15 +339,19 @@ pub fn spawn_controller_thread(
 /// issues with blocking recv(). All unsafe operations are documented with
 /// SAFETY comments explaining invariants.
 pub fn spawn_netlink_thread(
-    host_netns_fd: RawFd,
+    host_netns: Arc<std::fs::File>,
     event_tx: Sender<NetlinkEvent>,
-) -> Result<thread::JoinHandle<()>, std::io::Error> {
+) -> Result<(thread::JoinHandle<()>, Arc<ShutdownEventFd>), std::io::Error> {
+    // Create shutdown eventfd before spawning thread
+    let shutdown_fd = Arc::new(ShutdownEventFd::new()?);
+    let shutdown_fd_clone = Arc::clone(&shutdown_fd);
     thread::Builder::new()
         .name("mermin-netlink".to_string())
         .spawn(move || {
-            // Enter host namespace permanently
-            let host_fd = unsafe { OwnedFd::from_raw_fd(host_netns_fd) };
-            if let Err(e) = setns(&host_fd, CloneFlags::CLONE_NEWNET) {
+            // Enter host namespace permanently. Thread holds Arc reference to File,
+            // ensuring FD stays open for the duration of setns() call. No risk of
+            // use-after-close since each thread has its own reference count.
+            if let Err(e) = setns(host_netns.as_ref(), CloneFlags::CLONE_NEWNET) {
                 error!(
                     event.name = "interface_controller.netlink.setns_failed",
                     error = %e,
@@ -343,7 +453,73 @@ pub fn spawn_netlink_thread(
             );
 
             let mut buf = vec![0u8; NETLINK_RECV_BUFFER_SIZE];
+            let mut total_messages_received = 0u64;
+            let mut total_messages_skipped = 0u64;
+
+            // Setup poll fds: watch both netlink socket and shutdown eventfd
+            let mut fds = [
+                pollfd {
+                    fd: sock.as_raw_fd(),
+                    events: POLLIN,
+                    revents: 0,
+                },
+                pollfd {
+                    fd: shutdown_fd_clone.as_raw_fd(),
+                    events: POLLIN,
+                    revents: 0,
+                },
+            ];
+
             loop {
+                // Wait for events on either socket or shutdown signal
+                // SAFETY: fds array is properly initialized, timeout -1 means wait indefinitely
+                let poll_ret = unsafe { poll(fds.as_mut_ptr(), fds.len() as u64, -1) };
+
+                if poll_ret < 0 {
+                    let err = std::io::Error::last_os_error();
+                    error!(
+                        event.name = "interface_controller.netlink.poll_error",
+                        error = %err,
+                        "poll() failed, exiting"
+                    );
+                    break;
+                }
+
+                // Check for errors on either FD first
+                if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0 {
+                    error!(
+                        event.name = "interface_controller.netlink.socket_error",
+                        revents = fds[0].revents,
+                        "netlink socket error detected via poll(), exiting"
+                    );
+                    break;
+                }
+                if (fds[1].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0 {
+                    error!(
+                        event.name = "interface_controller.netlink.shutdown_fd_error",
+                        revents = fds[1].revents,
+                        "shutdown eventfd error detected via poll(), exiting"
+                    );
+                    break;
+                }
+
+                // Check if shutdown was signaled
+                if (fds[1].revents & POLLIN) != 0 {
+                    info!(
+                        event.name = "interface_controller.netlink.shutdown_signaled",
+                        total_messages_received = total_messages_received,
+                        total_messages_skipped = total_messages_skipped,
+                        "shutdown signal received, exiting gracefully"
+                    );
+                    break;
+                }
+
+                // Check if socket has data ready
+                if (fds[0].revents & POLLIN) == 0 {
+                    // No data on socket, loop again
+                    continue;
+                }
+
                 // SAFETY: sock is valid, buf is properly sized and mutable,
                 // and we pass the correct buffer length. Return value checked for errors.
                 let n = unsafe { recv(sock.as_raw_fd(), buf.as_mut_ptr() as *mut c_void, buf.len(), 0) };
@@ -353,6 +529,8 @@ pub fn spawn_netlink_thread(
                     error!(
                         event.name = "interface_controller.netlink.socket_recv_error",
                         error = %err,
+                        total_messages_received = total_messages_received,
+                        total_messages_skipped = total_messages_skipped,
                         "error receiving from netlink socket, exiting"
                     );
                     break;
@@ -362,6 +540,8 @@ pub fn spawn_netlink_thread(
                 if n == 0 {
                     warn!(
                         event.name = "interface_controller.netlink.socket_closed",
+                        total_messages_received = total_messages_received,
+                        total_messages_skipped = total_messages_skipped,
                         "netlink socket closed by kernel, exiting"
                     );
                     break;
@@ -375,6 +555,8 @@ pub fn spawn_netlink_thread(
 
                 // Parse all messages in buffer (may contain multiple netlink messages)
                 let mut offset = 0;
+                let mut messages_in_batch = 0;
+                let mut skipped_in_batch = 0;
                 while offset < n {
                     let bytes = &buf[offset..n];
                     match NetlinkBuffer::new_checked(bytes) {
@@ -390,11 +572,13 @@ pub fn spawn_netlink_thread(
                                             msg_len = msg_len,
                                             offset = offset,
                                             buffer_size = n,
-                                            "invalid message length detected, stopping parse"
+                                            "invalid message length detected, stopping parse - skipping remaining messages in batch"
                                         );
+                                        skipped_in_batch += 1;
                                         break;
                                     }
                                     offset = new_offset;
+                                    messages_in_batch += 1;
 
                                     if let NetlinkPayload::InnerMessage(rtnl_msg) = msg.payload {
                                         match rtnl_msg {
@@ -478,8 +662,9 @@ pub fn spawn_netlink_thread(
                                     warn!(
                                         event.name = "interface_controller.netlink.message_parse_error",
                                         error = %e,
-                                        "failed to parse netlink message, skipping"
+                                        "failed to parse netlink message, skipping remaining messages in batch"
                                     );
+                                    skipped_in_batch += 1;
                                     break;
                                 }
                             }
@@ -496,6 +681,20 @@ pub fn spawn_netlink_thread(
                         }
                     }
                 }
+
+                // Update counters
+                total_messages_received += messages_in_batch;
+                total_messages_skipped += skipped_in_batch;
+
+                if skipped_in_batch > 0 {
+                    warn!(
+                        event.name = "interface_controller.netlink.messages_skipped",
+                        skipped_in_batch = skipped_in_batch,
+                        total_skipped = total_messages_skipped,
+                        total_received = total_messages_received,
+                        "skipped netlink messages due to parsing errors or invalid lengths"
+                    );
+                }
             }
 
             info!(
@@ -503,4 +702,5 @@ pub fn spawn_netlink_thread(
                 "netlink monitoring thread stopped, socket will be closed by RAII wrapper"
             );
         })
+        .map(|handle| (handle, shutdown_fd))
 }

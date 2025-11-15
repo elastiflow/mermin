@@ -62,6 +62,13 @@ pub enum ControllerEvent {
     /// retry when the interface becomes available again via netlink events.
     AttachmentFailed { iface: String, error: String },
 
+    /// Controller thread ready to receive commands.
+    ///
+    /// Sent after the controller thread has entered the host namespace and is ready
+    /// to process commands. This ensures the main thread doesn't send Initialize
+    /// before the controller is ready to receive it.
+    Ready,
+
     /// Initialization complete.
     ///
     /// Sent when the Initialize command completes. Indicates how many interfaces
@@ -83,6 +90,7 @@ impl fmt::Display for ControllerEvent {
             Self::AttachmentFailed { iface, error } => {
                 write!(f, "attachment_failed({iface}), ({error})")
             }
+            Self::Ready => write!(f, "ready"),
             Self::Initialized { interface_count } => {
                 write!(f, "initialized({interface_count} interfaces)")
             }

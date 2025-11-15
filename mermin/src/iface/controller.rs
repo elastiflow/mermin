@@ -275,12 +275,25 @@ impl IfaceController {
     /// This is a blocking operation that should be called once after controller creation.
     /// Thread must already be in host network namespace.
     pub fn initialize(&mut self) -> Result<(), MerminError> {
+        info!(
+            event.name = "interface_controller.init_resolving_interfaces",
+            pattern_count = self.patterns.len(),
+            "resolving interface patterns to concrete interface names"
+        );
+
         self.active_ifaces = Self::resolve_ifaces(&self.patterns)?;
 
+        let sorted_ifaces: Vec<_> = {
+            let mut v: Vec<_> = self.active_ifaces.iter().cloned().collect();
+            v.sort();
+            v
+        };
+
         info!(
-            event.name = "interface_controller.initializing",
+            event.name = "interface_controller.init_interfaces_resolved",
             iface_count = self.active_ifaces.len(),
-            "initializing controller and attaching ebpf programs"
+            interfaces = ?sorted_ifaces,
+            "resolved interfaces, beginning initialization"
         );
 
         self.build_iface_map()?;
@@ -753,8 +766,29 @@ impl IfaceController {
     /// This prevents the issue where killed pods leave TC programs attached,
     /// which then intercept traffic and prevent new programs from functioning.
     ///
+    /// LIMITATION: On kernels >= 6.6 (TCX mode), orphaned programs cannot be cleaned up
+    /// without the original link_id from the previous mermin instance. TCX supports multiple
+    /// programs on the same hook, so new attachments will succeed, but orphaned programs will
+    /// remain until the node reboots or the kernel process exits.
+    ///
     /// Blocking operation. Thread must be in host network namespace.
     fn cleanup_orphaned_programs(&mut self) -> Result<(), MerminError> {
+        if self.use_tcx {
+            // TCX mode: Cannot clean up orphaned programs without link_id
+            warn!(
+                event.name = "interface_controller.tcx_orphan_limitation",
+                kernel.tcx_mode = true,
+                "Running in TCX mode (kernel >= 6.6). Orphaned TC programs from previous Mermin instances \
+                 cannot be automatically cleaned up as they require the original link_id for detachment. \
+                 TCX supports multiple programs on the same hook, so new attachments will succeed. \
+                 However, orphaned programs may cause packet duplication or performance issues. \
+                 If experiencing problems, consider restarting the node to clear all orphaned programs. \
+                 This is a known limitation of the TCX attachment method."
+            );
+            // Continue with attachment - TCX will allow multiple programs
+            return Ok(());
+        }
+
         info!(
             event.name = "interface_controller.cleanup_started",
             iface_count = self.active_ifaces.len(),
@@ -973,26 +1007,45 @@ impl IfaceController {
     /// Discovers all network interfaces and matches them against configured patterns.
     /// Thread must already be in host network namespace.
     fn resolve_ifaces(patterns: &[String]) -> Result<HashSet<String>, MerminError> {
-        // Discover all interfaces (already in host namespace)
         let available: Vec<String> = datalink::interfaces().into_iter().map(|i| i.name).collect();
+        let mut sorted_available = available.clone();
+        sorted_available.sort();
 
         info!(
             event.name = "interface_controller.interfaces_discovered",
             iface_count = available.len(),
-            interfaces = ?available,
+            interfaces = ?sorted_available,
+            patterns = ?patterns,
             "discovered interfaces from host namespace"
         );
 
         let mut resolved = HashSet::new();
+        let mut matches_per_pattern = HashMap::new();
+
         for pattern in patterns {
+            let mut pattern_matches = Vec::new();
             for iface in &available {
                 if Self::matches_pattern(iface, std::slice::from_ref(pattern)) {
                     resolved.insert(iface.clone());
+                    pattern_matches.push(iface.clone());
                 }
+            }
+            if !pattern_matches.is_empty() {
+                pattern_matches.sort();
+                matches_per_pattern.insert(pattern.clone(), pattern_matches);
             }
         }
 
-        // Convert to sorted Vec for consistent, readable logging
+        for (pattern, matches) in &matches_per_pattern {
+            debug!(
+                event.name = "interface_controller.pattern_matched",
+                pattern = %pattern,
+                match_count = matches.len(),
+                matches = ?matches,
+                "pattern matched interfaces"
+            );
+        }
+
         let mut resolved_list: Vec<_> = resolved.iter().collect();
         resolved_list.sort();
         info!(
@@ -1001,6 +1054,17 @@ impl IfaceController {
             interfaces = ?resolved_list,
             "resolved interfaces from patterns"
         );
+
+        if resolved.is_empty() {
+            warn!(
+                event.name = "interface_controller.no_interfaces_matched",
+                pattern_count = patterns.len(),
+                patterns = ?patterns,
+                available_count = available.len(),
+                available_interfaces = ?sorted_available,
+                "no interfaces matched the configured patterns - controller will not attach to any interfaces"
+            );
+        }
 
         Ok(resolved)
     }

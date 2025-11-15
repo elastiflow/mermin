@@ -10,10 +10,7 @@ mod packet;
 mod runtime;
 mod span;
 
-use std::{
-    os::fd::AsRawFd,
-    sync::{Arc, atomic::Ordering},
-};
+use std::sync::{Arc, atomic::Ordering};
 
 use aya::{
     programs::{SchedClassifier, TcAttachType},
@@ -41,7 +38,8 @@ use crate::{
     span::producer::FlowSpanProducer,
 };
 
-const CONTROLLER_INIT_TIMEOUT_SECS: u64 = 60;
+const CONTROLLER_READY_TIMEOUT_SECS: u64 = 10;
+const CONTROLLER_INIT_TIMEOUT_SECS: u64 = 30;
 
 #[tokio::main]
 async fn main() {
@@ -254,24 +252,11 @@ async fn run() -> Result<()> {
         conf.discovery.instrument.interfaces.clone()
     };
     let iface_map = Arc::new(DashMap::new());
-    let host_netns = std::fs::File::open("/proc/1/ns/net").map_err(|e| {
+    let host_netns = Arc::new(std::fs::File::open("/proc/1/ns/net").map_err(|e| {
         MerminError::internal(format!(
             "failed to open host network namespace: {e} - requires hostPID: true in pod spec"
         ))
-    })?;
-    let host_netns_fd = host_netns.as_raw_fd();
-    let netlink_fd = unsafe { libc::dup(host_netns_fd) };
-    if netlink_fd < 0 {
-        return Err(MerminError::internal(
-            "failed to duplicate netns fd for netlink thread",
-        ));
-    }
-    let controller_fd = unsafe { libc::dup(host_netns_fd) };
-    if controller_fd < 0 {
-        return Err(MerminError::internal(
-            "failed to duplicate netns fd for controller thread",
-        ));
-    }
+    })?);
     let (cmd_tx, cmd_rx) = crossbeam::channel::unbounded();
     let (netlink_tx, netlink_rx) = crossbeam::channel::unbounded();
     let (event_tx, event_rx) = crossbeam::channel::unbounded();
@@ -284,27 +269,63 @@ async fn run() -> Result<()> {
         conf.discovery.instrument.tcx_order.clone(),
         Some(event_tx.clone()),
     )?;
-    let _netlink_handle = spawn_netlink_thread(netlink_fd, netlink_tx).map_err(|e| {
-        MerminError::internal(format!("failed to spawn netlink monitoring thread: {e}"))
-    })?;
-    let _controller_handle = spawn_controller_thread(
-        controller_fd,
+    let (netlink_handle, netlink_shutdown_fd) =
+        spawn_netlink_thread(Arc::clone(&host_netns), netlink_tx).map_err(|e| {
+            MerminError::internal(format!("failed to spawn netlink monitoring thread: {e}"))
+        })?;
+    let controller_handle = spawn_controller_thread(
+        Arc::clone(&host_netns),
         controller,
         cmd_rx,
         netlink_rx,
-        Some(event_tx),
+        Some(event_tx.clone()),
     )
     .map_err(|e| MerminError::internal(format!("failed to spawn controller thread: {e}")))?;
 
     info!(
-        event.name = "interface_controller.initializing",
+        event.name = "interface_controller.waiting_for_ready",
+        timeout_secs = CONTROLLER_READY_TIMEOUT_SECS,
+        "waiting for controller thread to enter host namespace and become ready"
+    );
+    match event_rx.recv_timeout(std::time::Duration::from_secs(
+        CONTROLLER_READY_TIMEOUT_SECS,
+    )) {
+        Ok(ControllerEvent::Ready) => {
+            info!(
+                event.name = "interface_controller.ready_received",
+                "controller thread is ready to receive commands"
+            );
+        }
+        Ok(other) => {
+            return Err(MerminError::internal(format!(
+                "unexpected controller event while waiting for ready: {other:?}",
+            )));
+        }
+        Err(e) => {
+            warn!(
+                event.name = "interface_controller.ready_timeout",
+                "ready signal timed out, controller thread may have failed to start"
+            );
+            let _ = cmd_tx.send(ControllerCommand::Shutdown);
+            return Err(MerminError::internal(format!(
+                "controller ready timeout after 10s: {e}"
+            )));
+        }
+    }
+
+    info!(
+        event.name = "interface_controller.sending_initialize",
         "sending initialize command to controller thread"
     );
-
     cmd_tx
         .send(ControllerCommand::Initialize)
         .map_err(|e| MerminError::internal(format!("failed to send initialize command: {e}")))?;
 
+    info!(
+        event.name = "interface_controller.waiting_for_initialized",
+        timeout_secs = CONTROLLER_INIT_TIMEOUT_SECS,
+        "waiting for initialization to complete"
+    );
     match event_rx.recv_timeout(std::time::Duration::from_secs(CONTROLLER_INIT_TIMEOUT_SECS)) {
         Ok(ControllerEvent::Initialized { interface_count }) => {
             info!(
@@ -355,6 +376,14 @@ async fn run() -> Result<()> {
                         network.interface.name = %iface,
                         error.message = %error,
                         "interface attachment failed"
+                    );
+                }
+                ControllerEvent::Ready => {
+                    // Ready event is waited for synchronously before this task spawns,
+                    // but log it if we somehow receive it here
+                    debug!(
+                        event.name = "interface_controller.unexpected_ready",
+                        "received ready event in background handler"
                     );
                 }
                 ControllerEvent::Initialized { interface_count } => {
@@ -570,9 +599,7 @@ async fn run() -> Result<()> {
         event.name = "application.shutdown_initiated",
         "received shutdown signal, starting graceful cleanup"
     );
-
-    // Send shutdown command to controller thread
-    info!(
+    debug!(
         event.name = "interface_controller.shutdown_requested",
         "sending shutdown command to controller thread"
     );
@@ -585,8 +612,97 @@ async fn run() -> Result<()> {
         );
     }
 
-    // Note: ShutdownComplete event is handled by the background event handler task
-    // which will log the completion and exit when it receives the event
+    // Wait for controller thread to complete shutdown
+    match tokio::task::spawn_blocking(move || match controller_handle.join() {
+        Ok(()) => Ok(()),
+        Err(panic_err) => {
+            if let Some(panic_msg) = panic_err.downcast_ref::<&str>() {
+                Err(format!("controller thread panicked: {panic_msg}"))
+            } else if let Some(panic_msg) = panic_err.downcast_ref::<String>() {
+                Err(format!("controller thread panicked: {panic_msg}"))
+            } else {
+                Err("controller thread panicked with unknown error".to_string())
+            }
+        }
+    })
+    .await
+    {
+        Ok(Ok(())) => {
+            debug!(
+                event.name = "interface_controller.thread_joined",
+                "controller thread exited cleanly"
+            );
+        }
+        Ok(Err(panic_msg)) => {
+            error!(
+                event.name = "interface_controller.thread_panicked",
+                error.message = %panic_msg,
+                "controller thread panicked during execution"
+            );
+        }
+        Err(e) => {
+            warn!(
+                event.name = "interface_controller.join_failed",
+                error = %e,
+                "failed to join controller thread"
+            );
+        }
+    }
+
+    // Signal netlink thread to shutdown via eventfd
+    debug!(
+        event.name = "interface_controller.netlink.signaling_shutdown",
+        "signaling netlink thread to shutdown"
+    );
+    if let Err(e) = netlink_shutdown_fd.signal() {
+        warn!(
+            event.name = "interface_controller.netlink.signal_failed",
+            error = %e,
+            "failed to signal shutdown to netlink thread, it may not exit cleanly"
+        );
+    }
+
+    // Wait for netlink thread to exit gracefully
+    // poll() will wake immediately when the shutdown eventfd is signaled
+    debug!(
+        event.name = "interface_controller.netlink.waiting",
+        "waiting for netlink thread to exit gracefully"
+    );
+    match tokio::task::spawn_blocking(move || match netlink_handle.join() {
+        Ok(()) => Ok(()),
+        Err(panic_err) => {
+            if let Some(panic_msg) = panic_err.downcast_ref::<&str>() {
+                Err(format!("netlink thread panicked: {panic_msg}"))
+            } else if let Some(panic_msg) = panic_err.downcast_ref::<String>() {
+                Err(format!("netlink thread panicked: {panic_msg}"))
+            } else {
+                Err("netlink thread panicked with unknown error".to_string())
+            }
+        }
+    })
+    .await
+    {
+        Ok(Ok(())) => {
+            debug!(
+                event.name = "interface_controller.netlink.thread_joined",
+                "netlink thread exited cleanly"
+            );
+        }
+        Ok(Err(panic_msg)) => {
+            error!(
+                event.name = "interface_controller.netlink.thread_panicked",
+                error.message = %panic_msg,
+                "netlink thread panicked during execution"
+            );
+        }
+        Err(e) => {
+            warn!(
+                event.name = "interface_controller.netlink.join_failed",
+                error = %e,
+                "failed to join netlink thread"
+            );
+        }
+    }
 
     info!(
         event.name = "application.cleanup_complete",
