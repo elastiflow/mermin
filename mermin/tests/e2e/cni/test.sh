@@ -12,7 +12,6 @@ NAMESPACE="${NAMESPACE:-default}"
 DOCKER_REPOSITORY="${DOCKER_REPOSITORY:-mermin}"
 DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-latest}"
 VALUES_FILE="${VALUES_FILE:-docs/deployment/examples/local/values.yaml}"
-MERMIN_CONFIG_PATH="${MERMIN_CONFIG_PATH:-docs/deployment/examples/local/config.test.hcl}"
 CNI="${CNI:-calico}"
 
 # --- Cleanup Function ---
@@ -126,7 +125,7 @@ echo "Testing with CNI: $CNI"
 echo "==============================="
 
 # Export variables needed by setup.sh
-export CLUSTER_NAME RELEASE_NAME NAMESPACE DOCKER_REPOSITORY DOCKER_IMAGE_TAG VALUES_FILE MERMIN_CONFIG_PATH CNI
+export CLUSTER_NAME RELEASE_NAME NAMESPACE DOCKER_REPOSITORY DOCKER_IMAGE_TAG VALUES_FILE CNI
 
 bash ./mermin/tests/e2e/common/setup.sh
 verify_deployment || { dump_debug_info; exit 1; }
