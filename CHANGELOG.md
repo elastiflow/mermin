@@ -1,3 +1,13 @@
+## [v0.1.0-beta.29] - 2025-11-15
+
+### Features
+
+- Implement tcx link pinning for orphaned program cleanup (#288)
+
+[v0.1.0-beta.28..v0.1.0-beta.29](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.28...v0.1.0-beta.29)
+
+
+
 ## [v0.1.0-beta.28] - 2025-11-15
 
 ### Features
