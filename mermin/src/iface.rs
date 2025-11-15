@@ -1,8 +1,8 @@
-//! Network interface management module.
+//! Network interface management and eBPF program lifecycle.
 //!
-//! This module provides interface lifecycle management including:
-//! - Controller for dynamic eBPF attachment/detachment
-//! - Network namespace switching for host interface access
+//! This module provides the controller for managing eBPF program attachments
+//! to network interfaces, handling interface lifecycle events via netlink.
 
 pub mod controller;
-pub mod netns;
+pub mod threads;
+pub mod types;

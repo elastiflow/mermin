@@ -21,6 +21,7 @@ aya-log = { workspace = true }
 base64 = "0.21"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 clap = { workspace = true, features = ["derive", "env", "help", "suggestions", "usage"] }
+crossbeam = "0.8"
 dashmap = "6.0"
 figment = { version = "0.10", features = ["env", "test", "yaml"] }
 futures = "0.3"

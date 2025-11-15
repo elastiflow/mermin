@@ -10,19 +10,27 @@ mod packet;
 mod runtime;
 mod span;
 
-use std::sync::{Arc, atomic::Ordering};
+use std::{
+    os::fd::AsRawFd,
+    sync::{Arc, atomic::Ordering},
+};
 
 use aya::{
     programs::{SchedClassifier, TcAttachType},
     util::KernelVersion,
 };
+use dashmap::DashMap;
 use error::{MerminError, Result};
 use tokio::{signal, sync::mpsc};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     health::{HealthState, start_api_server},
-    iface::controller::IfaceController,
+    iface::{
+        controller::IfaceController,
+        threads::{spawn_controller_thread, spawn_netlink_thread},
+        types::{ControllerCommand, ControllerEvent},
+    },
     k8s::{attributor::Attributor, decorator::Decorator},
     metrics::server::start_metrics_server,
     otlp::{
@@ -32,6 +40,8 @@ use crate::{
     runtime::{capabilities, context::Context},
     span::producer::FlowSpanProducer,
 };
+
+const CONTROLLER_INIT_TIMEOUT_SECS: u64 = 60;
 
 #[tokio::main]
 async fn main() {
@@ -76,6 +86,30 @@ async fn run() -> Result<()> {
                 );
             }
         });
+    }
+
+    let health_state = HealthState::default();
+
+    // Start API server immediately so Kubernetes can start health checks
+    // Health checks will return "not ready" based on health_state flags until initialization completes
+    if conf.api.enabled {
+        let health_state_clone = health_state.clone();
+        let api_conf = conf.api.clone();
+
+        tokio::spawn(async move {
+            if let Err(e) = start_api_server(health_state_clone, &api_conf).await {
+                error!(
+                    event.name = "api.internal_error",
+                    error.message = %e,
+                    "api server encountered a fatal error"
+                );
+            }
+        });
+
+        info!(
+            event.name = "api.started",
+            "api server started, health checks will report not ready until initialization completes"
+        );
     }
 
     // If a provider is already installed, install_default() returns Err, which we can safely ignore.
@@ -172,23 +206,27 @@ async fn run() -> Result<()> {
         "tc programs loaded into kernel"
     );
 
-    let health_state = HealthState::default();
+    // Extract eBPF maps BEFORE moving Ebpf object to controller thread
+    // Maps will be owned by FlowSpanProducer (main thread), programs by controller (host namespace thread)
+    let flow_stats_map = ebpf
+        .take_map("FLOW_STATS_MAP")
+        .ok_or_else(|| MerminError::internal("FLOW_STATS_MAP not found in eBPF object"))?;
+    let flow_events_map = ebpf
+        .take_map("FLOW_EVENTS")
+        .ok_or_else(|| MerminError::internal("FLOW_EVENTS not found in eBPF object"))?;
 
-    // Start API server (health endpoints)
-    if conf.api.enabled {
-        let health_state_clone = health_state.clone();
-        let api_conf = conf.api.clone();
+    let flow_stats_map = Arc::new(tokio::sync::Mutex::new(
+        aya::maps::HashMap::try_from(flow_stats_map)
+            .map_err(|e| MerminError::internal(format!("failed to convert FLOW_STATS_MAP: {e}")))?,
+    ));
+    let flow_events_ringbuf = aya::maps::RingBuf::try_from(flow_events_map).map_err(|e| {
+        MerminError::internal(format!("failed to convert FLOW_EVENTS ring buffer: {e}"))
+    })?;
 
-        tokio::spawn(async move {
-            if let Err(e) = start_api_server(health_state_clone, &api_conf).await {
-                error!(
-                    event.name = "api.internal_error",
-                    error.message = %e,
-                    "api server encountered a fatal error"
-                );
-            }
-        });
-    }
+    info!(
+        event.name = "ebpf.maps_extracted",
+        "eBPF maps extracted successfully for flow producer"
+    );
 
     let kernel_version = KernelVersion::current().unwrap_or(KernelVersion::new(0, 0, 0));
     let use_tcx = kernel_version >= KernelVersion::new(6, 6, 0);
@@ -201,13 +239,9 @@ async fn run() -> Result<()> {
         system.kernel.version = %kernel_version,
         "determined TC attachment method and priority"
     );
-
-    // Shared ownership for concurrent access from controller and flow producer
-    // NOTE: eBPF maps (FLOW_STATS_MAPS, FLOW_EVENTS) will be accessed by FlowSpanProducer
-    let ebpf = Arc::new(tokio::sync::Mutex::new(ebpf));
     info!(
-        event.name = "ebpf.shared",
-        "eBPF object prepared for concurrent access, maps will be accessed on-demand"
+        event.name = "ebpf.ready_for_controller",
+        "eBPF programs ready to move to controller thread"
     );
 
     let patterns = if conf.discovery.instrument.interfaces.is_empty() {
@@ -219,43 +253,139 @@ async fn run() -> Result<()> {
     } else {
         conf.discovery.instrument.interfaces.clone()
     };
-
-    let mut iface_controller = IfaceController::new(
+    let iface_map = Arc::new(DashMap::new());
+    let host_netns = std::fs::File::open("/proc/1/ns/net").map_err(|e| {
+        MerminError::internal(format!(
+            "failed to open host network namespace: {e} - requires hostPID: true in pod spec"
+        ))
+    })?;
+    let host_netns_fd = host_netns.as_raw_fd();
+    let netlink_fd = unsafe { libc::dup(host_netns_fd) };
+    if netlink_fd < 0 {
+        return Err(MerminError::internal(
+            "failed to duplicate netns fd for netlink thread",
+        ));
+    }
+    let controller_fd = unsafe { libc::dup(host_netns_fd) };
+    if controller_fd < 0 {
+        return Err(MerminError::internal(
+            "failed to duplicate netns fd for controller thread",
+        ));
+    }
+    let (cmd_tx, cmd_rx) = crossbeam::channel::unbounded();
+    let (netlink_tx, netlink_rx) = crossbeam::channel::unbounded();
+    let (event_tx, event_rx) = crossbeam::channel::unbounded();
+    let controller = IfaceController::new(
         patterns,
-        Arc::clone(&ebpf),
+        Arc::clone(&iface_map),
+        ebpf,
         use_tcx,
         conf.discovery.instrument.tc_priority,
         conf.discovery.instrument.tcx_order.clone(),
+        Some(event_tx.clone()),
     )?;
+    let _netlink_handle = spawn_netlink_thread(netlink_fd, netlink_tx).map_err(|e| {
+        MerminError::internal(format!("failed to spawn netlink monitoring thread: {e}"))
+    })?;
+    let _controller_handle = spawn_controller_thread(
+        controller_fd,
+        controller,
+        cmd_rx,
+        netlink_rx,
+        Some(event_tx),
+    )
+    .map_err(|e| MerminError::internal(format!("failed to spawn controller thread: {e}")))?;
 
-    // DashMap allows lock-free reads during packet processing while controller updates it dynamically
-    let iface_map = iface_controller.iface_map();
-    iface_controller.initialize().await?;
+    info!(
+        event.name = "interface_controller.initializing",
+        "sending initialize command to controller thread"
+    );
+
+    cmd_tx
+        .send(ControllerCommand::Initialize)
+        .map_err(|e| MerminError::internal(format!("failed to send initialize command: {e}")))?;
+
+    match event_rx.recv_timeout(std::time::Duration::from_secs(CONTROLLER_INIT_TIMEOUT_SECS)) {
+        Ok(ControllerEvent::Initialized { interface_count }) => {
+            info!(
+                event.name = "interface_controller.initialized",
+                interface_count = interface_count,
+                "controller initialized successfully"
+            );
+            health_state.ebpf_loaded.store(true, Ordering::Relaxed);
+        }
+        Ok(other) => {
+            return Err(MerminError::internal(format!(
+                "unexpected controller event during initialization: {other:?}",
+            )));
+        }
+        Err(e) => {
+            warn!(
+                event.name = "interface_controller.init_timeout",
+                "initialization timed out, sending shutdown to controller thread"
+            );
+            let _ = cmd_tx.send(ControllerCommand::Shutdown);
+            return Err(MerminError::internal(format!(
+                "controller initialization timeout after {CONTROLLER_INIT_TIMEOUT_SECS}s: {e}"
+            )));
+        }
+    }
+
+    // Spawn background task to handle controller events for observability
+    tokio::spawn(async move {
+        while let Ok(event) = event_rx.recv() {
+            match event {
+                ControllerEvent::InterfaceAttached { iface } => {
+                    info!(
+                        event.name = "interface_controller.interface_attached",
+                        network.interface.name = %iface,
+                        "interface attached successfully"
+                    );
+                }
+                ControllerEvent::InterfaceDetached { iface } => {
+                    info!(
+                        event.name = "interface_controller.interface_detached",
+                        network.interface.name = %iface,
+                        "interface detached successfully"
+                    );
+                }
+                ControllerEvent::AttachmentFailed { iface, error } => {
+                    warn!(
+                        event.name = "interface_controller.attachment_failed",
+                        network.interface.name = %iface,
+                        error.message = %error,
+                        "interface attachment failed"
+                    );
+                }
+                ControllerEvent::Initialized { interface_count } => {
+                    // Initialization is waited for synchronously before this task spawns,
+                    // but log it if we somehow receive it here
+                    debug!(
+                        event.name = "interface_controller.unexpected_initialization",
+                        interface_count = interface_count,
+                        "received initialization event in background handler"
+                    );
+                }
+                ControllerEvent::ShutdownComplete => {
+                    info!(
+                        event.name = "interface_controller.shutdown_complete",
+                        "controller thread shutdown successfully"
+                    );
+                    // Exit the event loop since controller is shutting down
+                    break;
+                }
+            }
+        }
+        debug!(
+            event.name = "interface_controller.event_handler_stopped",
+            "controller event handler stopped"
+        );
+    });
+
     info!(
         event.name = "ebpf.ready",
-        "ebpf program loaded and ready to process network traffic"
+        "ebpf programs attached and ready to process network traffic"
     );
-    health_state.ebpf_loaded.store(true, Ordering::Relaxed);
-
-    // Shared across reconciliation loop and flow producer for concurrent access
-    let iface_controller = Arc::new(tokio::sync::Mutex::new(iface_controller));
-
-    // Start reconciliation loop immediately to minimize window for missed interface events
-    let controller_handle = if conf.discovery.instrument.auto_discover_interfaces {
-        info!(
-            event.name = "interface_controller.starting",
-            "starting interface controller"
-        );
-        Some(IfaceController::start_reconciliation_loop(Arc::clone(
-            &iface_controller,
-        )))
-    } else {
-        info!(
-            event.name = "interface_controller.disabled",
-            "interface controller disabled, monitoring only startup interfaces"
-        );
-        None
-    };
 
     let (flow_span_tx, mut flow_span_rx) = mpsc::channel(conf.packet_channel_capacity);
     let (k8s_decorated_flow_span_tx, mut k8s_decorated_flow_span_rx) =
@@ -265,8 +395,9 @@ async fn run() -> Result<()> {
         conf.clone().span,
         conf.packet_channel_capacity,
         conf.packet_worker_count,
-        iface_map.clone(),
-        Arc::clone(&ebpf),
+        Arc::clone(&iface_map),
+        flow_stats_map,
+        flow_events_ringbuf,
         flow_span_tx,
         &conf,
     )?;
@@ -440,18 +571,22 @@ async fn run() -> Result<()> {
         "received shutdown signal, starting graceful cleanup"
     );
 
-    // Stop reconciliation loop before detaching programs
-    if let Some(handle) = controller_handle {
-        info!(
-            event.name = "interface_controller.stopping",
-            "stopping interface syncing"
+    // Send shutdown command to controller thread
+    info!(
+        event.name = "interface_controller.shutdown_requested",
+        "sending shutdown command to controller thread"
+    );
+
+    if let Err(e) = cmd_tx.send(ControllerCommand::Shutdown) {
+        warn!(
+            event.name = "interface_controller.shutdown_send_failed",
+            error = %e,
+            "failed to send shutdown command, controller thread may have already exited"
         );
-        handle.abort();
-        // Give the task a moment to clean up
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), handle).await;
     }
 
-    iface_controller.lock().await.shutdown().await?;
+    // Note: ShutdownComplete event is handled by the background event handler task
+    // which will log the completion and exit when it receives the event
 
     info!(
         event.name = "application.cleanup_complete",

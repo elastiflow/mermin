@@ -32,85 +32,83 @@
 //! ## Usage Flow
 //!
 //! ```text
-//! 1. INITIALIZATION
+//! 1. INITIALIZATION (Main Thread)
 //!    ┌─────────────────────────────────────────────────────────┐
-//!    │ new(patterns, ebpf, use_tcx)                            │
-//!    │   ├─ Initialize NetnsSwitch                             │
+//!    │ main.rs: Load eBPF, extract maps                        │
+//!    │   ├─ Ebpf loaded with programs                          │
+//!    │   └─ Maps extracted: FLOW_STATS_MAP, FLOW_EVENTS        │
+//!    └─────────────────────────────────────────────────────────┘
+//!                           │
+//!                           ▼
+//!    ┌─────────────────────────────────────────────────────────┐
+//!    │ new(patterns, iface_map, ebpf, ...)                     │
 //!    │   └─ Resolve patterns → initial active_ifaces           │
+//!    │       (Thread not yet in host namespace)                │
 //!    └─────────────────────────────────────────────────────────┘
 //!                           │
+//!                           │ Controller moved to thread
 //!                           ▼
+//! 2. CONTROLLER THREAD (Permanently in Host Namespace)
 //!    ┌─────────────────────────────────────────────────────────┐
-//!    │ initialize().await                                      │
-//!    │   ├─ Build iface_map (index → name) in host namespace   │
-//!    │   └─ Attach eBPF programs (ingress & egress) to all     │
-//!    └─────────────────────────────────────────────────────────┘
-//!                           │
-//!                           ▼
-//!    ┌─────────────────────────────────────────────────────────┐
-//!    │ start_reconciliation_loop(Arc<Mutex<Self>>)             │
-//!    │   └─ Spawns background task                             │
-//!    └─────────────────────────────────────────────────────────┘
-//!
-//! 2. RECONCILIATION LOOP (Dual-Thread Architecture)
-//!    ┌─────────────────────────────────────────────────────────┐
-//!    │ Blocking Thread (permanently in host namespace)         │
-//!    │   ├─ Raw libc netlink socket (RTNLGRP_LINK multicast)   │
-//!    │   ├─ Blocking recv() loop                               │
-//!    │   └─ Parses RTM_NEWLINK/RTM_DELLINK messages            │
-//!    └─────────────────────────────────────────────────────────┘
-//!                           │
-//!                           │ mpsc::unbounded_channel
-//!                           ▼
-//!    ┌─────────────────────────────────────────────────────────┐
-//!    │ Async Task (tokio)                                      │
-//!    │   └─ reconcile_link(&link_msg, is_new_or_set)           │
-//!    │       ├─ Extract interface name & state (UP/DOWN)       │
-//!    │       ├─ Match against patterns                         │
-//!    │       └─ Compare with active_ifaces (desired state)     │
+//!    │ threads::spawn_controller_thread()                      │
+//!    │   ├─ setns() to host namespace (once, permanent)        │
+//!    │   └─ Event loop: process commands + netlink events      │
 //!    └─────────────────────────────────────────────────────────┘
 //!                           │
 //!            ┌──────────────┴──────────────┐
-//!            ▼                             ▼
-//!     ┌─────────────┐             ┌─────────────────┐
-//!     │ ADD PATH    │             │ REMOVE PATH     │
-//!     │ (UP & !act) │             │ (!UP & active)  │
-//!     └─────────────┘             └─────────────────┘
 //!            │                             │
 //!            ▼                             ▼
-//!  iface_map_add()              active_ifaces.remove()
-//!            │                   iface_map_remove()
-//!            ▼                             │
-//!  attach_all_programs()                   ▼
-//!            │                   unregister_tc_link() x2
-//!            ▼                             │
-//!  active_ifaces.insert()                  ▼
-//!                                 detach_program() x2
+//!    ┌──────────────┐           ┌──────────────────┐
+//!    │ Initialize   │           │ NetlinkEvent     │
+//!    │ Command      │           │ from netlink     │
+//!    │              │           │ thread           │
+//!    └──────────────┘           └──────────────────┘
+//!            │                             │
+//!            ▼                             ▼
+//!    initialize()              handle_netlink_event()
+//!       ├─ build_iface_map()      ├─ InterfaceUp
+//!       └─ attach programs         │   └─ attach programs
+//!                                  └─ InterfaceDown
+//!                                      └─ detach programs
 //!
-//!    [On failure: rollback via iface_map_remove() + detach]
-//!
-//! 3. SHUTDOWN
+//! 3. NETLINK THREAD (Permanently in Host Namespace)
 //!    ┌─────────────────────────────────────────────────────────┐
-//!    │ shutdown().await                                        │
-//!    │   ├─ Abort reconciliation loop                          │
-//!    │   └─ Detach all eBPF programs from all interfaces       │
+//!    │ threads::spawn_netlink_thread()                         │
+//!    │   ├─ setns() to host namespace (once, permanent)        │
+//!    │   ├─ Create netlink socket (RTNLGRP_LINK)               │
+//!    │   ├─ Blocking recv() loop                               │
+//!    │   └─ Send NetlinkEvent to controller thread             │
+//!    └─────────────────────────────────────────────────────────┘
+//!
+//! 4. SHUTDOWN
+//!    ┌─────────────────────────────────────────────────────────┐
+//!    │ main.rs: Send Shutdown command                          │
+//!    │   └─ Controller: shutdown()                             │
+//!    │       └─ Detach all eBPF programs                       │
 //!    └─────────────────────────────────────────────────────────┘
 //! ```
 //!
-//! # Network Namespace Switching
+//! # Network Namespace Architecture
 //!
-//! All interface operations (discovery, attachment, detachment) execute in the
-//! host network namespace via `NetnsSwitch::in_host_namespace()`:
+//! All interface operations execute in the host network namespace.
+//! The controller thread enters host namespace once at startup via `setns()`
+//! and stays there permanently:
 //!
 //! ```text
-//! ┌─────────────────┐        ┌──────────────────┐        ┌─────────────────┐
-//! │   Pod Netns     │  ────► │   Host Netns     │  ────► │   Pod Netns     │
-//! │  (container)    │ switch │ (iface ops here) │ switch │  (restored)     │
-//! └─────────────────┘        └──────────────────┘  back  └─────────────────┘
+//! ┌──────────────────┐                    ┌──────────────────────────────┐
+//! │  Main Thread     │                    │  Controller Thread           │
+//! │  (Pod Netns)     │                    │  (Host Netns - Permanent)    │
+//! │                  │                    │                              │
+//! │  - API Server    │                    │  - eBPF attach/detach        │
+//! │  - Metrics       │   Commands via     │  - Interface discovery       │
+//! │  - Flow Producer │   mpsc::channel    │  - Netlink event handling    │
+//! │  - K8s Decorator │                    │  - State management          │
+//! └──────────────────┘                    └──────────────────────────────┘
 //! ```
 //!
-//! The reconciliation loop's blocking thread uses `setns()` once at startup to permanently
-//! enter the host namespace, avoiding repeated namespace switches on every netlink event.
+//! The controller thread uses `setns()` once at startup to permanently
+//! enter the host namespace, eliminating namespace switching overhead and
+//! preventing namespace restoration failures.
 //!
 //! # Netlink Socket Implementation
 //!
@@ -131,7 +129,6 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    os::fd::{FromRawFd, OwnedFd},
     sync::Arc,
 };
 
@@ -142,22 +139,15 @@ use aya::{
         tc::{self, NlOptions, SchedClassifierLinkId, TcAttachOptions, qdisc_detach_program},
     },
 };
+use crossbeam::channel::Sender;
 use dashmap::DashMap;
 use globset::Glob;
-use netlink_packet_core::{NetlinkBuffer, NetlinkMessage, NetlinkPayload};
-use netlink_packet_route::{
-    RouteNetlinkMessage,
-    link::{LinkAttribute, LinkFlags},
-};
-use netlink_sys::protocols::NETLINK_ROUTE;
-use nix::sched::{CloneFlags, setns};
 use pnet::datalink;
-use tokio::task::JoinHandle;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::{
     error::MerminError,
-    iface::netns::NetnsSwitch,
+    iface::types::{ControllerEvent, NetlinkEvent},
     metrics::ebpf::{inc_tc_programs_attached, inc_tc_programs_detached},
     runtime::conf::TcxOrderStrategy,
 };
@@ -186,31 +176,25 @@ impl TcAttachTypeExt for TcAttachType {
     }
 }
 
-/// Netlink interface events for reconciliation.
-/// Currently unused as controller handles attachment/detachment internally.
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum IfaceEvent {
-    Added(String),
-    Removed(String),
-}
-
-/// Controller for network iface lifecycle.
+/// Controller that runs in host network namespace.
 ///
 /// Reconciles desired state (patterns) with actual state (active_ifaces, tc_links)
-/// by attaching/detaching eBPF TC programs. Owns all interface management including
-/// initial attachment, dynamic reconciliation, iface_map updates, and graceful shutdown.
+/// by attaching/detaching eBPF TC programs. Runs in a dedicated thread that permanently
+/// stays in the host network namespace, eliminating repeated namespace switching.
 ///
-/// # Lock Ordering
+/// ## Thread Architecture
 ///
-/// When locks are acquired, they must follow this order to prevent deadlocks:
-/// 1. IfaceController mutex (acquired in reconciliation loop with `.lock().await`)
-/// 2. ebpf mutex (acquired during attach/detach operations with `.lock().await`)
+/// This controller is designed to run in a dedicated blocking thread that:
+/// - Enters host network namespace once at thread startup (via setns)
+/// - Stays in host namespace permanently (no switching back)
+/// - Handles netlink events and command messages in a single-threaded loop
+/// - Performs all eBPF attach/detach operations synchronously
 ///
-/// The `attach_to_iface` method acquires the ebpf mutex asynchronously and performs
-/// synchronous FFI/syscalls within the critical section via `in_host_namespace`.
-/// The critical section is kept minimal to avoid blocking other operations. Lock
-/// scopes are explicitly limited to reduce contention.
+/// ## Ownership
+///
+/// - Direct ownership of `Ebpf` object (programs only, maps extracted beforehand)
+/// - Shared ownership of `iface_map` (via Arc<DashMap>) for coordination with main thread
+/// - All methods are synchronous/blocking (no async/await)
 pub struct IfaceController {
     /// Glob patterns for matching interface names
     patterns: Vec<String>,
@@ -223,10 +207,8 @@ pub struct IfaceController {
     /// Separate from controller state because it uses different key type (u32 vs String),
     /// requires concurrent access from packet processing hot path, and is shared via Arc.
     iface_map: Arc<DashMap<u32, String>>,
-    /// Shared eBPF program object for attach/detach operations
-    ebpf: Arc<tokio::sync::Mutex<Ebpf>>,
-    /// Network namespace switcher for host namespace operations
-    netns_switch: NetnsSwitch,
+    /// eBPF program object (direct ownership, programs only - maps extracted beforehand)
+    ebpf: Ebpf,
     /// TCX (kernel >= 6.6) vs netlink-based attachment
     use_tcx: bool,
     /// TC priority for netlink attachment (kernel < 6.6)
@@ -235,106 +217,66 @@ pub struct IfaceController {
     /// TCX ordering strategy (kernel >= 6.6)
     /// Controls where programs attach in TCX chain (first/last)
     tcx_order: TcxOrderStrategy,
+    /// Optional channel for sending controller events to main thread for observability
+    event_tx: Option<Sender<ControllerEvent>>,
 }
 
 /// TC attachment directions used for iterating over all attach types
 const DIRECTIONS: &[&str] = &["ingress", "egress"];
 
-/// Netlink multicast group ID for link events (RTNLGRP_LINK)
-const RTNLGRP_LINK: i32 = 1;
-
-/// Maximum netlink message size for kernel multicast messages.
-/// 8KB is sufficient for typical netlink messages (2x standard page size).
-const NETLINK_RECV_BUFFER_SIZE: usize = 8192;
-
 impl IfaceController {
-    /// Create controller, initialize netns switcher and resolve interface patterns.
-    /// Requires hostPID: true and CAP_SYS_ADMIN for host namespace access.
+    /// Create blocking controller that runs in host network namespace.
+    ///
+    /// This constructor is called from the MAIN thread (before namespace switch).
+    /// The controller is then moved to a dedicated thread which enters the host
+    /// namespace via `setns()`. Interface discovery happens in `initialize()` after
+    /// the namespace switch.
+    ///
+    /// ## Arguments
+    ///
+    /// - `patterns` - Glob patterns for matching interface names (e.g., "eth*", "ens*")
+    /// - `iface_map` - Shared interface index → name map for packet decoration
+    /// - `ebpf` - eBPF object with loaded programs (maps must be extracted beforehand)
+    /// - `use_tcx` - Whether to use TCX (kernel >= 6.6) or netlink attachment
+    /// - `tc_priority` - TC priority for netlink mode (lower number = higher priority)
+    /// - `tcx_order` - TCX ordering strategy (First or Last in chain)
+    /// - `event_tx` - Optional channel for sending controller events for observability
     pub fn new(
         patterns: Vec<String>,
-        ebpf: Arc<tokio::sync::Mutex<Ebpf>>,
+        iface_map: Arc<DashMap<u32, String>>,
+        ebpf: Ebpf,
         use_tcx: bool,
         tc_priority: u16,
         tcx_order: TcxOrderStrategy,
+        event_tx: Option<Sender<ControllerEvent>>,
     ) -> Result<Self, MerminError> {
-        let netns_switch = NetnsSwitch::new().map_err(|e| {
-            MerminError::internal(format!(
-                "failed to initialize network namespace switching: {e} - ensure hostPID: true is set, CAP_SYS_PTRACE, and CAP_SYS_ADMIN capabilities are granted",
-            ))
-        })?;
-
-        let initial_ifaces = Self::resolve_ifaces(&patterns, &netns_switch)?;
-
         info!(
             event.name = "interface_controller.created",
-            iface_count = initial_ifaces.len(),
-            "interface controller created with resolved interfaces"
+            pattern_count = patterns.len(),
+            use_tcx = use_tcx,
+            "interface controller created, will discover interfaces after namespace switch"
         );
 
         Ok(Self {
             patterns,
-            active_ifaces: initial_ifaces,
+            active_ifaces: HashSet::new(), // Will be populated by initialize() after namespace switch
             tc_links: HashMap::new(),
-            iface_map: Arc::new(DashMap::new()),
+            iface_map,
             ebpf,
-            netns_switch,
             use_tcx,
             tc_priority,
             tcx_order,
+            event_tx,
         })
     }
 
-    /// Resolve patterns to concrete interface names from host namespace.
-    fn resolve_ifaces(
-        patterns: &[String],
-        netns_switch: &NetnsSwitch,
-    ) -> Result<HashSet<String>, MerminError> {
-        let available: Vec<String> =
-            netns_switch.in_host_namespace(Some("interface_discovery"), || {
-                Ok(datalink::interfaces()
-                    .into_iter()
-                    .map(|i| i.name)
-                    .collect::<Vec<String>>())
-            })?;
+    /// Attach eBPF programs to all active interfaces and build initial iface_map.
+    ///
+    /// This is a blocking operation that should be called once after controller creation.
+    /// Thread must already be in host network namespace.
+    pub fn initialize(&mut self) -> Result<(), MerminError> {
+        self.active_ifaces = Self::resolve_ifaces(&self.patterns)?;
 
-        info!(
-            event.name = "interface_controller.interfaces_discovered",
-            iface_count = available.len(),
-            interfaces = ?available,
-            "discovered interface from host namespace"
-        );
-
-        let mut resolved = HashSet::new();
-        for pattern in patterns {
-            for iface in &available {
-                if Self::matches_pattern(iface, std::slice::from_ref(pattern)) {
-                    resolved.insert(iface.clone());
-                }
-            }
-        }
-
-        // Convert to sorted Vec for consistent, readable logging
-        let mut resolved_list: Vec<_> = resolved.iter().collect();
-        resolved_list.sort();
-        info!(
-            event.name = "interface_controller.interfaces_resolved",
-            interfaces_count = resolved.len(),
-            interfaces = ?resolved_list,
-            "resolved interface from patterns"
-        );
-
-        Ok(resolved)
-    }
-
-    fn matches_pattern(name: &str, patterns: &[String]) -> bool {
-        patterns
-            .iter()
-            .any(|pattern| Self::glob_matches(pattern, name))
-    }
-
-    /// Attach eBPF programs to all active interface and build initial iface_map.
-    /// Should be called once after controller creation.
-    pub async fn initialize(&mut self) -> Result<(), MerminError> {
         info!(
             event.name = "interface_controller.initializing",
             iface_count = self.active_ifaces.len(),
@@ -345,7 +287,7 @@ impl IfaceController {
 
         // Clean up any orphaned TC programs from previous instances before attaching new ones.
         // This prevents the issue where killed pods leave TC programs attached that intercept traffic.
-        if let Err(e) = self.cleanup_orphaned_programs().await {
+        if let Err(e) = self.cleanup_orphaned_programs() {
             warn!(
                 event.name = "interface_controller.cleanup_failed",
                 error = %e,
@@ -354,35 +296,97 @@ impl IfaceController {
         }
 
         let programs = [TcAttachType::Ingress, TcAttachType::Egress];
-
-        // Clone to avoid borrow checker conflict (can't borrow self immutably while calling mutable methods)
         let ifaces: Vec<String> = self.active_ifaces.iter().cloned().collect();
+        let mut failed_ifaces = HashSet::new();
+        let mut success_per_iface: HashMap<String, u32> = HashMap::new();
+        let mut success_count = 0u32;
 
         for attach_type in &programs {
             for iface in &ifaces {
-                self.attach_to_iface(iface, *attach_type).await?;
+                if let Err(e) = self.attach_to_iface(iface, *attach_type) {
+                    warn!(
+                        event.name = "interface_controller.init_attach_failed",
+                        network.interface.name = %iface,
+                        ebpf.program.direction = ?attach_type,
+                        error = %e,
+                        "failed to attach program during initialization, interface will be retried by reconciliation loop"
+                    );
+                    failed_ifaces.insert(iface.clone());
+                } else {
+                    *success_per_iface.entry(iface.clone()).or_insert(0) += 1;
+                    success_count += 1;
+                }
             }
+        }
+
+        // Send events for failed attachments
+        for failed_iface in &failed_ifaces {
+            if let Some(ref tx) = self.event_tx {
+                let _ = tx.send(ControllerEvent::AttachmentFailed {
+                    iface: failed_iface.clone(),
+                    error: "attachment failed during initialization".to_string(),
+                });
+            }
+        }
+
+        // Only remove interfaces that had failures and didn't succeed completely
+        // Cleanup partial attachments for these interfaces
+        for failed_iface in &failed_ifaces {
+            let successful_attachments = success_per_iface.get(failed_iface).copied().unwrap_or(0);
+            if successful_attachments < programs.len() as u32 {
+                for direction in DIRECTIONS {
+                    if let Some(link_id) = self.unregister_tc_link(failed_iface, direction)
+                        && let Err(e) = self.detach_program(failed_iface, direction, link_id)
+                    {
+                        warn!(
+                            event.name = "interface_controller.init_cleanup_failed",
+                            network.interface.name = %failed_iface,
+                            ebpf.program.direction = %direction,
+                            error = %e,
+                            "failed to cleanup partially attached program"
+                        );
+                    }
+                }
+                self.active_ifaces.remove(failed_iface);
+                self.iface_map_remove(failed_iface);
+            }
+        }
+
+        // Send events for successfully attached interfaces
+        for iface in &ifaces {
+            if !failed_ifaces.contains(iface)
+                && let Some(ref tx) = self.event_tx
+            {
+                let _ = tx.send(ControllerEvent::InterfaceAttached {
+                    iface: iface.clone(),
+                });
+            }
+        }
+
+        if !failed_ifaces.is_empty() {
+            warn!(
+                event.name = "interface_controller.init_partial_success",
+                successful_attachments = success_count,
+                failed_interfaces = ?failed_ifaces,
+                "some interfaces failed during initialization, reconciliation loop will retry"
+            );
         }
 
         info!(
             event.name = "interface_controller.initialized",
             iface_count = self.active_ifaces.len(),
             tc_links = self.tc_links.len(),
+            successful_attachments = success_count,
             "controller initialized successfully"
         );
 
         Ok(())
     }
 
-    /// Get shared iface_map for flow decoration. DashMap allows lock-free reads
-    /// while controller updates it dynamically.
-    #[must_use]
-    pub fn iface_map(&self) -> Arc<DashMap<u32, String>> {
-        Arc::clone(&self.iface_map)
-    }
-
     /// Gracefully detach all eBPF programs. Should be called during shutdown.
-    pub async fn shutdown(&mut self) -> Result<(), MerminError> {
+    ///
+    /// This is a blocking operation. Thread must be in host network namespace.
+    pub fn shutdown(&mut self) -> Result<(), MerminError> {
         let total_links = self.tc_links.len();
         let mut detached_count = 0;
         let mut failed_count = 0;
@@ -396,7 +400,7 @@ impl IfaceController {
         let tc_links = std::mem::take(&mut self.tc_links);
 
         for ((iface, direction), link_id) in tc_links {
-            match self.detach_program(&iface, direction, link_id).await {
+            match self.detach_program(&iface, direction, link_id) {
                 Ok(_) => {
                     detached_count += 1;
                     debug!(
@@ -437,6 +441,13 @@ impl IfaceController {
             );
         }
         Ok(())
+    }
+
+    /// Get shared iface_map for flow decoration. DashMap allows lock-free reads
+    /// while controller updates it dynamically.
+    #[must_use]
+    pub fn iface_map(&self) -> Arc<DashMap<u32, String>> {
+        Arc::clone(&self.iface_map)
     }
 
     /// Register TC link for tracking.
@@ -488,15 +499,11 @@ impl IfaceController {
     fn build_iface_map(&mut self) -> Result<(), MerminError> {
         self.iface_map.clear();
 
-        self.netns_switch
-            .in_host_namespace(Some("build_interface_map"), || {
-                for iface in datalink::interfaces() {
-                    if self.active_ifaces.contains(&iface.name) {
-                        self.iface_map.insert(iface.index, iface.name.clone());
-                    }
-                }
-                Ok(())
-            })?;
+        for iface in datalink::interfaces() {
+            if self.active_ifaces.contains(&iface.name) {
+                self.iface_map.insert(iface.index, iface.name.clone());
+            }
+        }
 
         debug!(
             event.name = "interface_controller.interface_map_built",
@@ -509,24 +516,21 @@ impl IfaceController {
 
     /// Add newly discovered interface to iface_map.
     fn iface_map_add(&mut self, iface_name: &str) -> Result<(), MerminError> {
-        self.netns_switch
-            .in_host_namespace(Some("interface_map_add"), || {
-                for iface in datalink::interfaces() {
-                    if iface.name == iface_name {
-                        self.iface_map.insert(iface.index, iface.name.clone());
-                        debug!(
-                            event.name = "interface_controller.interface_map_updated",
-                            iface = %iface_name,
-                            index = iface.index,
-                            "added interface to interface_map"
-                        );
-                        return Ok(());
-                    }
-                }
-                Err(MerminError::internal(format!(
-                    "interface '{iface_name}' not found in datalink::interfaces()",
-                )))
-            })
+        for iface in datalink::interfaces() {
+            if iface.name == iface_name {
+                self.iface_map.insert(iface.index, iface.name.clone());
+                debug!(
+                    event.name = "interface_controller.interface_map_updated",
+                    iface = %iface_name,
+                    index = iface.index,
+                    "added interface to interface_map"
+                );
+                return Ok(());
+            }
+        }
+        Err(MerminError::internal(format!(
+            "interface '{iface_name}' not found in datalink::interfaces()",
+        )))
     }
 
     /// Remove interface from iface_map.
@@ -608,96 +612,86 @@ impl IfaceController {
     ///
     /// Note: True atomic replacement would require link pinning, which Aya doesn't currently
     /// support. See aya-link-pinning-enhancement.md for the GitHub issue.
-    async fn attach_to_iface(
+    fn attach_to_iface(
         &mut self,
         iface: &str,
         attach_type: TcAttachType,
     ) -> Result<(), MerminError> {
-        let context = format!("{} ({})", iface, attach_type.direction_name());
         let iface_owned = iface.to_string();
         let direction_name = attach_type.direction_name();
         let use_tcx = self.use_tcx;
         let tc_priority = self.tc_priority;
 
-        // Closure cannot capture self, so get program name before entering
         let program_name = attach_type.program_name();
 
         // TCX (kernel >= 6.6) doesn't require clsact qdisc
-        if !use_tcx {
-            self.netns_switch.in_host_namespace(Some(&context), || {
-                if let Err(e) = tc::qdisc_add_clsact(&iface_owned) {
-                    debug!(
-                        event.name = "interface_controller.qdisc_add_skipped",
-                        network.interface.name = %iface_owned,
-                        error = %e,
-                        "clsact qdisc add failed (likely already exists)"
-                    );
-                }
-                Ok(())
-            })?;
+        // Netlink mode (kernel < 6.6) requires clsact qdisc
+        if !use_tcx && let Err(e) = tc::qdisc_add_clsact(&iface_owned) {
+            debug!(
+                event.name = "interface_controller.qdisc_add_skipped",
+                network.interface.name = %iface_owned,
+                error = %e,
+                "clsact qdisc add failed (likely already exists)"
+            );
         }
 
-        let link_id = {
-            let mut ebpf_guard = self.ebpf.lock().await;
-
-            self.netns_switch.in_host_namespace(Some(&context), || {
-                let program: &mut SchedClassifier = ebpf_guard
-                    .program_mut(program_name)
-                    .ok_or_else(|| {
-                        MerminError::internal(format!(
-                            "ebpf program '{program_name}' not found in loaded object",
-                        ))
-                    })?
-                    .try_into()
-                    .map_err(|e| MerminError::internal(format!("failed to cast program: {e}")))?;
-
-                // TC Priority-Aware Attachment
-                //
-                // For TCX (kernel >= 6.6): use default attach() which auto-selects TCX
-                // For Netlink (kernel < 6.6): use priority-aware attachment
-                //
-                // Note: program.attach() on kernel >= 6.6 will use TCX by default,
-                // which provides better multi-program support without priority conflicts.
-                // On older kernels, we explicitly use netlink with our configured priority.
-
-                if use_tcx {
-                    // TCX mode: kernel >= 6.6, attach with configured ordering
-                    // TCX supports multiple programs on the same hook, so attachment
-                    // succeeds even if orphaned programs exist from crashed instances
-                    let link_order = match self.tcx_order {
-                        TcxOrderStrategy::Last => LinkOrder::last(),
-                        TcxOrderStrategy::First => LinkOrder::first(),
-                    };
-
-                    debug!(
-                        event.name = "interface_controller.attaching_tcx",
-                        network.interface.name = %iface_owned,
-                        ebpf.program.direction = direction_name,
-                        ebpf.tcx.order = %self.tcx_order,
-                        "attaching ebpf program with TCX ordering - \
-                         TCX supports multiple programs, orphans will be GC'd when old pod exits"
-                    );
-
-                    let options = TcAttachOptions::TcxOrder(link_order);
-                    program.attach_with_options(&iface_owned, attach_type, options).map_err(|e| {
-                        MerminError::internal(format!(
-                            "failed to attach ebpf program to interface {iface} (tcx mode, order={}): {e}",
-                            self.tcx_order
-                        ))
-                    })
-                } else {
-                    // Netlink mode: kernel < 6.6, use priority
-                    debug!(
-                        event.name = "interface_controller.attaching_with_priority",
-                        network.interface.name = %iface_owned,
-                        ebpf.program.priority = tc_priority,
-                        ebpf.program.direction = direction_name,
-                        "attaching ebpf program with TC priority (netlink mode)"
-                    );
-
-                    Self::attach_tc_with_priority(program, &iface_owned, attach_type, tc_priority)
-                }
+        let program: &mut SchedClassifier = self
+            .ebpf
+            .program_mut(program_name)
+            .ok_or_else(|| {
+                MerminError::internal(format!(
+                    "ebpf program '{program_name}' not found in loaded object",
+                ))
             })?
+            .try_into()
+            .map_err(|e| MerminError::internal(format!("failed to cast program: {e}")))?;
+
+        // TC Priority-Aware Attachment
+        //
+        // For TCX (kernel >= 6.6): use configured ordering strategy
+        // For Netlink (kernel < 6.6): use priority-aware attachment
+        //
+        // Note: TCX provides better multi-program support without priority conflicts.
+        // On older kernels, we explicitly use netlink with our configured priority.
+
+        let link_id = if use_tcx {
+            // TCX mode: kernel >= 6.6, attach with configured ordering
+            // TCX supports multiple programs on the same hook, so attachment
+            // succeeds even if orphaned programs exist from crashed instances
+            let link_order = match self.tcx_order {
+                TcxOrderStrategy::Last => LinkOrder::last(),
+                TcxOrderStrategy::First => LinkOrder::first(),
+            };
+
+            debug!(
+                event.name = "interface_controller.attaching_tcx",
+                network.interface.name = %iface_owned,
+                ebpf.program.direction = direction_name,
+                ebpf.tcx.order = %self.tcx_order,
+                "attaching ebpf program with TCX ordering - \
+                 TCX supports multiple programs, orphans will be GC'd when old pod exits"
+            );
+
+            let options = TcAttachOptions::TcxOrder(link_order);
+            program
+                .attach_with_options(&iface_owned, attach_type, options)
+                .map_err(|e| {
+                    MerminError::internal(format!(
+                        "failed to attach ebpf program to interface {} (tcx mode, order={}): {}",
+                        iface, self.tcx_order, e
+                    ))
+                })?
+        } else {
+            // Netlink mode: kernel < 6.6, use priority
+            debug!(
+                event.name = "interface_controller.attaching_with_priority",
+                network.interface.name = %iface_owned,
+                ebpf.program.priority = tc_priority,
+                ebpf.program.direction = direction_name,
+                "attaching ebpf program with TC priority (netlink mode)"
+            );
+
+            Self::attach_tc_with_priority(program, &iface_owned, attach_type, tc_priority)?
         };
 
         self.register_tc_link(iface.to_string(), direction_name, link_id);
@@ -716,7 +710,9 @@ impl IfaceController {
     }
 
     /// Detach eBPF program from interface.
-    async fn detach_program(
+    ///
+    /// Blocking operation. Thread must be in host network namespace.
+    fn detach_program(
         &mut self,
         iface: &str,
         direction: &'static str,
@@ -729,26 +725,22 @@ impl IfaceController {
         };
 
         let iface_owned = iface.to_string();
-        let context = format!("{iface_owned} ({direction})");
 
-        let mut ebpf_guard = self.ebpf.lock().await;
-
-        self.netns_switch.in_host_namespace(Some(&context), || {
-            let program: &mut SchedClassifier = ebpf_guard
-                .program_mut(program_name)
-                .ok_or_else(|| {
-                    MerminError::internal(format!(
-                        "ebpf program '{program_name}' not found for detachment",
-                    ))
-                })?
-                .try_into()
-                .map_err(|e| MerminError::internal(format!("failed to cast program: {e}")))?;
-
-            program.detach(link_id).map_err(|e| {
+        let program: &mut SchedClassifier = self
+            .ebpf
+            .program_mut(program_name)
+            .ok_or_else(|| {
                 MerminError::internal(format!(
-                    "failed to detach ebpf program from interface {iface_owned}: {e}"
+                    "ebpf program '{program_name}' not found for detachment",
                 ))
-            })
+            })?
+            .try_into()
+            .map_err(|e| MerminError::internal(format!("failed to cast program: {e}")))?;
+
+        program.detach(link_id).map_err(|e| {
+            MerminError::internal(format!(
+                "failed to detach ebpf program from interface {iface_owned}: {e}"
+            ))
         })?;
 
         inc_tc_programs_detached(iface, direction);
@@ -761,8 +753,8 @@ impl IfaceController {
     /// This prevents the issue where killed pods leave TC programs attached,
     /// which then intercept traffic and prevent new programs from functioning.
     ///
-    /// Must be called in the host network namespace.
-    async fn cleanup_orphaned_programs(&mut self) -> Result<(), MerminError> {
+    /// Blocking operation. Thread must be in host network namespace.
+    fn cleanup_orphaned_programs(&mut self) -> Result<(), MerminError> {
         info!(
             event.name = "interface_controller.cleanup_started",
             iface_count = self.active_ifaces.len(),
@@ -774,9 +766,7 @@ impl IfaceController {
 
         for iface in &ifaces {
             let iface_owned = iface.clone();
-            let removed = self.netns_switch.in_host_namespace(None, || {
-                Self::cleanup_orphaned_programs_on_iface(&iface_owned, self.use_tcx)
-            })?;
+            let removed = Self::cleanup_orphaned_programs_on_iface(&iface_owned, self.use_tcx)?;
 
             if removed > 0 {
                 info!(
@@ -866,435 +856,159 @@ impl IfaceController {
         Ok(removed_count)
     }
 
-    /// Start reconciliation loop via netlink multicast (RTNLGRP_LINK).
-    /// Controller handles all attachment/detachment internally.
+    /// Handle netlink event by reconciling interface state.
     ///
-    /// Uses a dedicated blocking thread that permanently runs in the host network
-    /// namespace to receive netlink events, then sends them via channel to the
-    /// async task for processing.
-    pub fn start_reconciliation_loop(controller: Arc<tokio::sync::Mutex<Self>>) -> JoinHandle<()> {
-        let ctrl = Arc::clone(&controller);
-
-        tokio::spawn(async move {
-            info!(
-                event.name = "interface_controller.syncing_started",
-                "watching for network interface changes via netlink (RTM_NEWLINK/RTM_DELLINK)"
-            );
-
-            // Get netns file descriptor for host namespace
-            let host_netns_fd = {
-                let controller_guard = ctrl.lock().await;
-                controller_guard.netns_switch.host_netns_fd()
-            };
-
-            let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
-
-            // Spawn dedicated blocking thread in host namespace for netlink recv (can't use tokio async here)
-            std::thread::spawn(move || {
-                // CRITICAL: Enter host namespace and stay there for entire thread lifetime
-                // SAFETY: host_netns_fd is a valid file descriptor obtained from
-                // NetnsSwitch.host_netns.as_raw_fd() which is guaranteed to outlive
-                // this thread. OwnedFd takes ownership but we're creating a new owned
-                // reference for this thread's lifetime.
-                let host_fd = unsafe { OwnedFd::from_raw_fd(host_netns_fd) };
-                if let Err(e) = setns(&host_fd, CloneFlags::CLONE_NEWNET) {
-                    error!(
-                        event.name = "interface_controller.netns_switch_failed",
-                        error = %e,
-                        "failed to switch blocking thread to host network namespace"
+    /// This is the main event handler called by the controller thread in response
+    /// to netlink events from the netlink monitoring thread.
+    ///
+    /// Blocking operation. Thread must be in host network namespace.
+    pub fn handle_netlink_event(&mut self, event: NetlinkEvent) -> Result<(), MerminError> {
+        match event {
+            NetlinkEvent::InterfaceUp { name } => {
+                if Self::matches_pattern(&name, &self.patterns)
+                    && !self.active_ifaces.contains(&name)
+                {
+                    info!(
+                        event.name = "interface_controller.interface_up",
+                        network.interface.name = %name,
+                        "interface came up, attaching eBPF programs"
                     );
-                    return;
-                }
 
-                debug!(
-                    event.name = "interface_controller.blocking_thread_in_host_ns",
-                    "netlink blocking thread permanently in host network namespace"
-                );
+                    self.iface_map_add(&name)?;
 
-                // Create netlink socket using raw libc (netlink-sys Socket has issues with recv)
-                use std::mem;
+                    let mut attached_programs = Vec::new();
 
-                use libc::{
-                    AF_NETLINK, NETLINK_ADD_MEMBERSHIP, SOCK_RAW, SOL_NETLINK, bind, c_void, recv,
-                    setsockopt, sockaddr_nl, socket,
-                };
+                    for attach_type in &[TcAttachType::Ingress, TcAttachType::Egress] {
+                        match self.attach_to_iface(&name, *attach_type) {
+                            Ok(()) => {
+                                attached_programs.push(*attach_type);
+                            }
+                            Err(e) => {
+                                warn!(
+                                    event.name = "interface_controller.attach_failed",
+                                    network.interface.name = %name,
+                                    ebpf.program.direction = attach_type.direction_name(),
+                                    error = %e,
+                                    "failed to attach program to new interface, rolling back"
+                                );
 
-                // SAFETY: socket() syscall is safe to call. We check the return value for errors.
-                let sock_fd = unsafe { socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE as i32) };
-                if sock_fd < 0 {
-                    let err = std::io::Error::last_os_error();
-                    error!(
-                        event.name = "interface_controller.socket_creation_failed",
-                        error = %err,
-                        "failed to create netlink socket"
-                    );
-                    return;
-                }
-
-                // Bind with kernel-assigned PID and no groups (will subscribe via setsockopt instead)
-                // SAFETY: sockaddr_nl is a C-compatible struct that is safe to zero-initialize.
-                let mut addr: sockaddr_nl = unsafe { mem::zeroed() };
-                addr.nl_family = AF_NETLINK as u16;
-                addr.nl_pid = 0;
-                addr.nl_groups = 0;
-
-                // SAFETY: sock_fd is a valid socket descriptor, addr is properly initialized,
-                // and we're passing the correct size. Return value is checked for errors.
-                let ret = unsafe {
-                    bind(
-                        sock_fd,
-                        &addr as *const sockaddr_nl as *const libc::sockaddr,
-                        mem::size_of::<sockaddr_nl>() as u32,
-                    )
-                };
-
-                if ret < 0 {
-                    let err = std::io::Error::last_os_error();
-                    error!(
-                        event.name = "interface_controller.socket_bind_failed",
-                        error = %err,
-                        "failed to bind netlink socket"
-                    );
-                    // SAFETY: sock_fd is a valid file descriptor that we own.
-                    unsafe { libc::close(sock_fd) };
-                    return;
-                }
-
-                // Add multicast group membership using setsockopt
-                // SAFETY: sock_fd is a valid socket, RTNLGRP_LINK is a valid i32 constant,
-                // and we're passing the correct size for the option value.
-                let ret = unsafe {
-                    setsockopt(
-                        sock_fd,
-                        SOL_NETLINK,
-                        NETLINK_ADD_MEMBERSHIP,
-                        &RTNLGRP_LINK as *const i32 as *const c_void,
-                        mem::size_of::<i32>() as u32,
-                    )
-                };
-
-                if ret < 0 {
-                    let err = std::io::Error::last_os_error();
-                    error!(
-                        event.name = "interface_controller.setsockopt_failed",
-                        error = %err,
-                        group_id = RTNLGRP_LINK,
-                        "failed to add netlink multicast group membership"
-                    );
-                    // SAFETY: sock_fd is a valid file descriptor that we own.
-                    unsafe { libc::close(sock_fd) };
-                    return;
-                }
-
-                debug!(
-                    event.name = "interface_controller.subscribed_to_link_events",
-                    group_id = RTNLGRP_LINK,
-                    socket_fd = sock_fd,
-                    "successfully subscribed to RTNLGRP_LINK multicast group in host namespace"
-                );
-
-                let mut buf = vec![0u8; NETLINK_RECV_BUFFER_SIZE];
-                loop {
-                    // Use raw libc recv (netlink-sys has buffering issues)
-                    // SAFETY: sock_fd is valid, buf is properly sized and mutable,
-                    // and we pass the correct buffer length. Return value checked for errors.
-                    let n = unsafe { recv(sock_fd, buf.as_mut_ptr() as *mut c_void, buf.len(), 0) };
-
-                    if n < 0 {
-                        let err = std::io::Error::last_os_error();
-                        error!(
-                            event.name = "interface_controller.socket_recv_error",
-                            error = %err,
-                            "error receiving from netlink socket"
-                        );
-                        break;
-                    }
-
-                    let n = n as usize;
-                    if n > 0 {
-                        trace!(
-                            event.name = "interface_controller.netlink_data_received",
-                            bytes = n,
-                            "received netlink data"
-                        );
-                        // Parse all messages in buffer
-                        let mut offset = 0;
-                        while offset < n {
-                            let bytes = &buf[offset..n];
-                            match NetlinkBuffer::new_checked(bytes) {
-                                Ok(nl_buf) => {
-                                    match NetlinkMessage::<RouteNetlinkMessage>::deserialize(bytes)
-                                    {
-                                        Ok(msg) => {
-                                            let msg_len = nl_buf.length() as usize;
-                                            offset += (msg_len + 3) & !3; // NLMSG_ALIGN
-
-                                            // Extract link messages and send via channel
-                                            if let NetlinkPayload::InnerMessage(rtnl_msg) =
-                                                msg.payload
-                                            {
-                                                match rtnl_msg {
-                                                    RouteNetlinkMessage::NewLink(link_msg)
-                                                    | RouteNetlinkMessage::SetLink(link_msg) => {
-                                                        trace!(
-                                                            event.name = "interface_controller.newlink_parsed",
-                                                            "parsed NewLink/SetLink message, sending to async task"
-                                                        );
-                                                        if event_tx.send((link_msg, true)).is_err()
-                                                        {
-                                                            error!(
-                                                                event.name = "interface_controller.channel_send_failed",
-                                                                "failed to send NewLink event, receiver dropped"
-                                                            );
-                                                            return;
-                                                        }
-                                                    }
-                                                    RouteNetlinkMessage::DelLink(link_msg) => {
-                                                        trace!(
-                                                            event.name = "interface_controller.dellink_parsed",
-                                                            "parsed DelLink message, sending to async task"
-                                                        );
-                                                        if event_tx.send((link_msg, false)).is_err()
-                                                        {
-                                                            error!(
-                                                                event.name = "interface_controller.channel_send_failed",
-                                                                "failed to send DelLink event, receiver dropped"
-                                                            );
-                                                            return;
-                                                        }
-                                                    }
-                                                    _ => {}
-                                                }
-                                            }
-                                        }
-                                        Err(e) => {
-                                            warn!(
-                                                event.name = "interface_controller.message_parse_error",
-                                                error = %e,
-                                                "failed to parse netlink message"
-                                            );
-                                            break;
-                                        }
+                                // Rollback: detach any successfully attached programs
+                                for prev_attach_type in attached_programs {
+                                    if let Some(link_id) = self.unregister_tc_link(
+                                        &name,
+                                        prev_attach_type.direction_name(),
+                                    ) && let Err(detach_err) = self.detach_program(
+                                        &name,
+                                        prev_attach_type.direction_name(),
+                                        link_id,
+                                    ) {
+                                        warn!(
+                                            event.name = "interface_controller.rollback_detach_failed",
+                                            network.interface.name = %name,
+                                            ebpf.program.direction = prev_attach_type.direction_name(),
+                                            error = %detach_err,
+                                            "failed to detach program during rollback"
+                                        );
                                     }
                                 }
-                                Err(e) => {
-                                    trace!(
-                                        event.name = "interface_controller.buffer_check_failed",
-                                        error = ?e,
-                                        offset = offset,
-                                        remaining = n - offset,
-                                        "not enough bytes for complete message, ending parse loop"
-                                    );
-                                    break;
+
+                                self.iface_map_remove(&name);
+
+                                if let Some(ref tx) = self.event_tx {
+                                    let _ = tx.send(ControllerEvent::AttachmentFailed {
+                                        iface: name.clone(),
+                                        error: format!("{e}"),
+                                    });
                                 }
+
+                                return Err(e);
                             }
                         }
+                    }
 
-                        trace!(
-                            event.name = "interface_controller.parse_loop_completed",
-                            bytes_processed = n,
-                            "completed parsing netlink data"
-                        );
+                    self.active_ifaces.insert(name.clone());
+
+                    if let Some(ref tx) = self.event_tx {
+                        let _ = tx.send(ControllerEvent::InterfaceAttached { iface: name });
                     }
                 }
-
-                // SAFETY: sock_fd is a valid file descriptor that we own and are done using.
-                unsafe { libc::close(sock_fd) };
-                info!(
-                    event.name = "interface_controller.socket_closed",
-                    "netlink socket closed, exiting recv loop"
-                );
-            });
-
-            trace!(
-                event.name = "interface_controller.event_loop_started",
-                "starting async event processing loop"
-            );
-
-            while let Some((link_msg, is_new_or_set)) = event_rx.recv().await {
-                trace!(
-                    event.name = "interface_controller.event_received_from_channel",
-                    is_new_or_set = is_new_or_set,
-                    "received link event from blocking thread channel"
-                );
-
-                // Explicitly scope the lock to minimize hold time during reconciliation
-                let result = {
-                    let mut controller = ctrl.lock().await;
-                    controller.reconcile_link(&link_msg, is_new_or_set).await
-                };
-
-                if let Err(e) = result {
-                    error!(
-                        event.name = "interface_controller.reconcile_error",
-                        error = %e,
-                        "error reconciling link event"
-                    );
-                }
             }
-
-            info!(
-                event.name = "interface_controller.watching_stopped",
-                "interface syncing stopped (channel closed)"
-            );
-        })
-    }
-
-    /// Attach all eBPF programs (ingress and egress) to an interface.
-    /// Rolls back on failure by detaching any successfully attached programs.
-    async fn attach_all_programs(&mut self, if_name: &str) -> Result<(), MerminError> {
-        let mut attached_programs = Vec::new();
-
-        for attach_type in &[TcAttachType::Ingress, TcAttachType::Egress] {
-            match self.attach_to_iface(if_name, *attach_type).await {
-                Ok(_) => {
-                    attached_programs.push(*attach_type);
-                }
-                Err(e) => {
-                    error!(
-                        event.name = "interface_controller.attach_failed",
-                        iface = %if_name,
-                        direction = attach_type.direction_name(),
-                        error = %e,
-                        "failed to attach ebpf program to new interface, rolling back"
+            NetlinkEvent::InterfaceDown { name } => {
+                if self.active_ifaces.contains(&name) {
+                    info!(
+                        event.name = "interface_controller.interface_down",
+                        network.interface.name = %name,
+                        "interface went down, detaching eBPF programs"
                     );
-                    self.rollback_attachments(if_name, attached_programs).await;
-                    return Err(e);
+
+                    self.active_ifaces.remove(&name);
+
+                    self.iface_map_remove(&name);
+
+                    for direction in DIRECTIONS {
+                        if let Some(link_id) = self.unregister_tc_link(&name, direction)
+                            && let Err(e) = self.detach_program(&name, direction, link_id)
+                        {
+                            warn!(
+                                event.name = "interface_controller.detach_failed",
+                                network.interface.name = %name,
+                                ebpf.program.direction = %direction,
+                                error = %e,
+                                "failed to detach program from removed interface"
+                            );
+                        }
+                    }
+
+                    if let Some(ref tx) = self.event_tx {
+                        let _ = tx.send(ControllerEvent::InterfaceDetached { iface: name });
+                    }
                 }
             }
         }
         Ok(())
     }
 
-    /// Rollback partial attachments by detaching all successfully attached programs.
-    async fn rollback_attachments(&mut self, if_name: &str, programs: Vec<TcAttachType>) {
-        for attach_type in programs {
-            let direction = attach_type.direction_name();
-            if let Some(link_id) = self.unregister_tc_link(if_name, direction)
-                && let Err(e) = self.detach_program(if_name, direction, link_id).await
-            {
-                warn!(
-                    event.name = "interface_controller.rollback_failed",
-                    iface = %if_name,
-                    direction = %direction,
-                    error = %e,
-                    "failed to detach during rollback"
-                );
-            }
-        }
-    }
+    /// Resolve patterns to concrete interface names.
+    ///
+    /// Discovers all network interfaces and matches them against configured patterns.
+    /// Thread must already be in host network namespace.
+    fn resolve_ifaces(patterns: &[String]) -> Result<HashSet<String>, MerminError> {
+        // Discover all interfaces (already in host namespace)
+        let available: Vec<String> = datalink::interfaces().into_iter().map(|i| i.name).collect();
 
-    /// Reconcile link event by comparing desired vs actual state and
-    /// attaching/detaching eBPF programs when they differ.
-    /// Note: There is an inherent TOCTOU race between checking interface state
-    /// and performing operations, but the rollback logic handles failures gracefully.
-    async fn reconcile_link(
-        &mut self,
-        link_msg: &netlink_packet_route::link::LinkMessage,
-        is_new_or_set: bool,
-    ) -> Result<(), MerminError> {
-        let if_name = link_msg
-            .attributes
-            .iter()
-            .find_map(|attr| match attr {
-                LinkAttribute::IfName(name) => Some(name.to_string()),
-                _ => None,
-            })
-            .ok_or_else(|| MerminError::internal("interface name not found in link message"))?;
-
-        trace!(
-            event.name = "interface_controller.link_event_received",
-            iface = %if_name,
-            is_new_or_set = is_new_or_set,
-            flags = ?link_msg.header.flags,
-            "received netlink link event"
+        info!(
+            event.name = "interface_controller.interfaces_discovered",
+            iface_count = available.len(),
+            interfaces = ?available,
+            "discovered interfaces from host namespace"
         );
 
-        if !Self::matches_pattern(&if_name, &self.patterns) {
-            debug!(
-                event.name = "interface_controller.link_event_filtered",
-                iface = %if_name,
-                "interface does not match configured patterns"
-            );
-            return Ok(());
-        }
-
-        let is_up = if is_new_or_set {
-            link_msg.header.flags.contains(LinkFlags::Up)
-        } else {
-            false
-        };
-
-        let is_active = self.active_ifaces.contains(&if_name);
-
-        if is_up && !is_active {
-            info!(
-                event.name = "interface_controller.interface_added",
-                iface = %if_name,
-                "detected new interface, attaching ebpf programs"
-            );
-
-            if let Err(e) = self.iface_map_add(&if_name) {
-                error!(
-                    event.name = "interface_controller.interface_map_update_failed",
-                    iface = %if_name,
-                    error = %e,
-                    "failed to update interface map for added interface, will retry on next event"
-                );
-                return Ok(());
-            }
-
-            // Attempt to attach both ingress and egress programs with automatic rollback on failure
-            if let Err(e) = self.attach_all_programs(&if_name).await {
-                // Rollback already performed by attach_all_programs
-                // Remove from iface_map since we're not proceeding
-                self.iface_map_remove(&if_name);
-                // Log error but don't fail - will retry on next netlink event
-                error!(
-                    event.name = "interface_controller.attach_all_failed",
-                    iface = %if_name,
-                    error = %e,
-                    "failed to attach programs to interface, will retry on next event"
-                );
-                return Ok(());
-            }
-
-            // Only mark as active if ALL operations succeeded
-            self.active_ifaces.insert(if_name);
-        } else if !is_up && is_active {
-            info!(
-                event.name = "interface_controller.interface_removed",
-                iface = %if_name,
-                "detected interface removal, detaching ebpf programs"
-            );
-
-            self.active_ifaces.remove(&if_name);
-
-            self.iface_map_remove(&if_name);
-
-            for direction in DIRECTIONS {
-                if let Some(link_id) = self.unregister_tc_link(&if_name, direction) {
-                    if let Err(e) = self.detach_program(&if_name, direction, link_id).await {
-                        warn!(
-                            event.name = "interface_controller.detach_failed",
-                            iface = %if_name,
-                            direction = %direction,
-                            error = %e,
-                            "failed to detach ebpf program from removed interface"
-                        );
-                    } else {
-                        debug!(
-                            event.name = "interface_controller.program_detached",
-                            iface = %if_name,
-                            direction = %direction,
-                            "ebpf program detached from removed interface"
-                        );
-                    }
+        let mut resolved = HashSet::new();
+        for pattern in patterns {
+            for iface in &available {
+                if Self::matches_pattern(iface, std::slice::from_ref(pattern)) {
+                    resolved.insert(iface.clone());
                 }
             }
         }
 
-        Ok(())
+        // Convert to sorted Vec for consistent, readable logging
+        let mut resolved_list: Vec<_> = resolved.iter().collect();
+        resolved_list.sort();
+        info!(
+            event.name = "interface_controller.interfaces_resolved",
+            interfaces_count = resolved.len(),
+            interfaces = ?resolved_list,
+            "resolved interfaces from patterns"
+        );
+
+        Ok(resolved)
+    }
+
+    fn matches_pattern(name: &str, patterns: &[String]) -> bool {
+        patterns
+            .iter()
+            .any(|pattern| Self::glob_matches(pattern, name))
     }
 
     fn glob_matches(pattern: &str, text: &str) -> bool {
