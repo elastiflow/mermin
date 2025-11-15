@@ -12,7 +12,7 @@ DOCKER_IMAGE_NAME="${DOCKER_REPOSITORY}:${DOCKER_IMAGE_TAG}"
 VALUES_FILE="${VALUES_FILE:-docs/deployment/examples/local/values.yaml}"
 CNI="${CNI:-calico}"
 HOST_CNI_PATH="$HOME/cni-plugins-for-kind"
-MERMIN_CONFIG_PATH="${MERMIN_CONFIG_PATH:-docs/deployment/examples/local/config.hcl}"
+MERMIN_CONFIG_PATH="${MERMIN_CONFIG_PATH:-docs/deployment/examples/local/config.example.hcl}"
 
 # --- CNI Installation Functions ---
 install_calico() {

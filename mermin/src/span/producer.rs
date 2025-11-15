@@ -110,7 +110,8 @@ pub struct FlowSpanProducer {
     iface_map: Arc<DashMap<u32, String>>,
     flow_store: FlowStore,
     community_id_generator: CommunityIdGenerator,
-    ebpf: Arc<Mutex<aya::Ebpf>>,
+    flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
+    flow_events_ringbuf: RingBuf<aya::maps::MapData>,
     flow_span_tx: mpsc::Sender<FlowSpan>,
     filter: Option<Arc<PacketFilter>>,
     vxlan_port: u16,
@@ -119,12 +120,14 @@ pub struct FlowSpanProducer {
 }
 
 impl FlowSpanProducer {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         span_opts: SpanOptions,
         packet_channel_capacity: usize,
         packet_worker_count: usize,
         iface_map: Arc<DashMap<u32, String>>,
-        ebpf: Arc<Mutex<aya::Ebpf>>,
+        flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
+        flow_events_ringbuf: RingBuf<aya::maps::MapData>,
         flow_span_tx: mpsc::Sender<FlowSpan>,
         conf: &Conf,
     ) -> Result<Self, BootTimeError> {
@@ -161,7 +164,8 @@ impl FlowSpanProducer {
             community_id_generator,
             iface_map,
             flow_store,
-            ebpf,
+            flow_stats_map,
+            flow_events_ringbuf,
             flow_span_tx,
             filter,
             vxlan_port: conf.parser.vxlan_port,
@@ -178,37 +182,12 @@ impl FlowSpanProducer {
             "userspace task started (event-driven architecture)"
         );
 
-        let mut ebpf_guard = self.ebpf.lock().await;
-        let flow_stats_map = match ebpf_guard.take_map("FLOW_STATS_MAP") {
-            Some(map) => match EbpfHashMap::try_from(map) {
-                Ok(m) => Arc::new(Mutex::new(m)),
-                Err(e) => {
-                    warn!("failed to convert FLOW_STATS_MAP: {}", e);
-                    return;
-                }
-            },
-            None => {
-                warn!("FLOW_STATS_MAP not found");
-                return;
-            }
-        };
-        let mut flow_events = match ebpf_guard.take_map("FLOW_EVENTS") {
-            Some(map) => match RingBuf::try_from(map) {
-                Ok(rb) => rb,
-                Err(e) => {
-                    warn!("failed to convert FLOW_EVENTS ring buffer: {}", e);
-                    return;
-                }
-            },
-            None => {
-                warn!("FLOW_EVENTS map not found");
-                return;
-            }
-        };
-        drop(ebpf_guard);
+        let flow_stats_map = self.flow_stats_map;
+        let mut flow_events = self.flow_events_ringbuf;
+
         info!(
-            event.name = "ebpf.maps_initialized",
-            "eBPF maps accessed successfully, starting event-driven flow processing"
+            event.name = "ebpf.maps_ready",
+            "eBPF maps ready, starting event-driven flow processing"
         );
 
         let mut worker_channels = Vec::new();
