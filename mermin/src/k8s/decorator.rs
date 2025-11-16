@@ -58,23 +58,10 @@ impl<'a> Decorator<'a> {
     /// Correlates flow attributes with Kubernetes resources and populates K8s metadata fields.
     /// Returns a cloned FlowSpan with source and destination Kubernetes attributes populated.
     async fn decorate(&self, flow_span: &FlowSpan) -> Result<FlowSpan, K8sError> {
-        // Create FlowContext directly for both directions
         let ctx = FlowContext::from_flow_span(flow_span, self.attributor).await;
-        // Clone the original flow attributes and populate with Kubernetes metadata
         let mut decorated_flow = flow_span.clone();
 
-        let src_pod = self
-            .attributor
-            .get_pod_by_ip(flow_span.attributes.source_address)
-            .await;
-        let dst_pod = self
-            .attributor
-            .get_pod_by_ip(flow_span.attributes.destination_address)
-            .await;
-
-        let src_info = self
-            .enrich(src_pod.as_deref(), flow_span.attributes.source_address)
-            .await;
+        let src_info = self.enrich(ctx.src_pod.as_ref(), ctx.src_ip).await;
         if let Some(info) = &src_info {
             trace!(
                 event.name = "k8s.decorator.associated",
@@ -85,9 +72,7 @@ impl<'a> Decorator<'a> {
             self.populate_k8s_attributes(&mut decorated_flow, info, true);
         }
 
-        let dst_info = self
-            .enrich(dst_pod.as_deref(), flow_span.attributes.destination_address)
-            .await;
+        let dst_info = self.enrich(ctx.dst_pod.as_ref(), ctx.dst_ip).await;
         if let Some(info) = &dst_info {
             trace!(
                 event.name = "k8s.decorator.associated",
@@ -143,7 +128,7 @@ impl<'a> Decorator<'a> {
             });
         }
 
-        debug!(
+        trace!(
             event.name = "k8s.ip_unattributable",
             net.ip.address = %ip,
             "ip could not be attributed to any known kubernetes resource"

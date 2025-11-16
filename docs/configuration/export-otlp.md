@@ -20,9 +20,9 @@ export "traces" {
     timeout = "10s"
     max_batch_size = 512
     max_batch_interval = "5s"
-    max_queue_size = 2048
+    max_queue_size = 32768
     max_concurrent_exports = 1
-    max_export_timeout = "30s"
+    max_export_timeout = "10s"
 
     auth = {
       basic = {
@@ -155,11 +155,11 @@ export "traces" {
 
 ## Batching Configuration
 
-Mermin batches flow records before export to reduce network overhead and improve efficiency.
+Mermin uses OpenTelemetry's `BatchSpanProcessor` for efficient batching and export of flow spans. The processor queues spans asynchronously and exports them in batches, providing natural backpressure when the queue fills up.
 
 ### `max_batch_size`
 
-**Type:** Integer **Default:** `512`
+**Type:** Integer **Default:** `1024`
 
 Maximum number of spans (flow records) per batch.
 
@@ -186,7 +186,7 @@ export "traces" {
 
 ### `max_batch_interval`
 
-**Type:** Duration **Default:** `"5s"`
+**Type:** Duration **Default:** `"2s"`
 
 Maximum time to wait before exporting a partial batch.
 
@@ -213,37 +213,60 @@ export "traces" {
 
 ### `max_queue_size`
 
-**Type:** Integer **Default:** `2048`
+**Type:** Integer **Default:** `32768`
 
-Maximum number of spans queued for export.
+Maximum number of spans queued in the `BatchSpanProcessor` before they are exported.
+
+**Critical for High Throughput:**
+
+This is the internal queue capacity of OpenTelemetry's `BatchSpanProcessor`. When this queue fills up:
+- New spans are **dropped silently** (OpenTelemetry will log a warning)
+- The queue uses `try_send` which is **non-blocking**, so your pipeline won't deadlock
+- This provides natural backpressure during export slowdowns
 
 **Examples:**
 
 ```hcl
 export "traces" {
   otlp = {
-    max_queue_size = 2048  # Default
+    max_queue_size = 32768  # Default (sized for 100K flows/sec)
 
-    # For higher burst tolerance
-    # max_queue_size = 4096
+    # For higher burst tolerance or very high throughput
+    # max_queue_size = 65536
+
+    # For lower traffic environments
+    # max_queue_size = 8192
 
     # For memory-constrained environments
-    # max_queue_size = 1024
+    # max_queue_size = 2048
   }
 }
 ```
 
 **Queue Behavior:**
 
-* Acts as buffer during temporary collector unavailability
-* When full, oldest spans are dropped (not newest)
-* Monitor `mermin_export_queue_size` and `mermin_export_drops_total` metrics
+* Acts as buffer during temporary collector unavailability or slow exports
+* When full, `export()` calls block until space is available (with 60s timeout protection)
+* Default sized to buffer ~5 minutes at 100K flows/sec throughput
+* Monitor `mermin_export_timeouts_total` and `mermin_export_blocking_time_seconds` metrics
 
 ### `max_concurrent_exports`
 
-**Type:** Integer **Default:** `1` **Status:** Experimental
+**Type:** Integer **Default:** `4`
 
-Maximum number of concurrent export requests.
+Maximum number of concurrent export requests to the backend.
+
+**Tuning for Throughput:**
+
+This setting is **critical** for high-throughput scenarios. With the defaults:
+- `1024 spans/batch × 100 batches/sec/worker = 102,400 flows/sec capacity`
+- Each worker needs ~40ms per export (including network + backend processing)
+- If exports take longer, increase this value
+
+**Recommendations:**
+- **2-4:** Good for most scenarios (default is 4)
+- **6-8:** High backend latency (>50ms per export)
+- **1:** Low-latency, high-performance backends only
 
 **Examples:**
 
@@ -264,7 +287,7 @@ Values > 1 are experimental. Use with caution and monitor for ordering issues.
 
 ### `max_export_timeout`
 
-**Type:** Duration **Default:** `"30s"` **Status:** Experimental
+**Type:** Duration **Default:** `"10s"`
 
 Maximum time for export operation including retries.
 
@@ -273,7 +296,13 @@ Maximum time for export operation including retries.
 ```hcl
 export "traces" {
   otlp = {
-    max_export_timeout = "30s"  # Default
+    max_export_timeout = "10s"  # Default
+
+    # For high-latency networks or slow backends
+    # max_export_timeout = "30s"
+
+    # For low-latency local deployments
+    # max_export_timeout = "5s"
   }
 }
 ```

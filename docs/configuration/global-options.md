@@ -15,8 +15,6 @@ Global options are top-level configuration settings that control Mermin's overal
 log_level = "info"
 auto_reload = true
 shutdown_timeout = "10s"
-packet_channel_capacity = 2048
-packet_worker_count = 4
 ```
 
 ### Command-Line Flags
@@ -162,39 +160,68 @@ shutdown_timeout = "10s"
 
 * `export.otlp.max_export_timeout`: Should be less than `shutdown_timeout`
 
-### `packet_channel_capacity`
+## Pipeline Tuning Options
 
-**Type:** Integer **Default:** `1024` **CLI Flag:** Not available **Environment:** Not available
+The `pipeline` block provides advanced configuration for flow processing pipeline optimization, including base channel sizing, worker threading, Kubernetes decoration, backpressure management, and buffer multipliers.
 
-Size of the internal channel buffer between eBPF packet capture and userspace flow processing.
+### Overview
 
 **HCL:**
 
 ```hcl
-packet_channel_capacity = 2048
+pipeline {
+  # Base ring buffer capacity (default: 8192 for 100K flows/sec)
+  ring_buffer_capacity = 8192
+
+  # Number of parallel flow workers (default: 4 for 100K flows/sec)
+  worker_count = 4
+
+  # Worker polling interval (default: 5s)
+  worker_poll_interval = "5s"
+
+  # Kubernetes decorator threading (default: 12 for 100K flows/sec)
+  k8s_decorator_threads = 12
+
+  # Channel multipliers
+  flow_span_channel_multiplier = 2.0
+  decorated_span_channel_multiplier = 4.0
+
+  # Adaptive sampling under load (not yet implemented)
+  sampling_enabled = true
+  sampling_min_rate = 0.1
+  backpressure_warning_threshold = 0.01
+}
 ```
+
+### `ring_buffer_capacity`
+
+**Type:** Integer
+**Default:** `8192`
+
+Base capacity for the eBPF ring buffer between kernel and userspace. This is the foundation for all pipeline channel sizes.
 
 **Behavior:**
 
 * Acts as a buffer for packets captured by eBPF before userspace processing
+* Used directly for worker channels and as the base for multipliers (`flow_span_channel_multiplier`, `decorated_span_channel_multiplier`)
 * Higher values provide more buffering for burst traffic
 * Lower values reduce memory usage
 * If channel fills, packets are dropped (visible in metrics)
 
 **Tuning Guidelines:**
 
-| Traffic Volume           | Recommended Value |
-| ------------------------ | ----------------- |
-| Low (< 1K pkt/s)         | 512               |
-| Medium (1K-10K pkt/s)    | 1024 (default)    |
-| High (10K-100K pkt/s)    | 2048              |
-| Very High (> 100K pkt/s) | 4096              |
+| Traffic Volume             | Recommended Value |
+|----------------------------|-------------------|
+| Low (< 10K flows/s)        | 2048-4096         |
+| Medium (10K-50K flows/s)   | 4096-8192         |
+| High (50K-100K flows/s)    | 8192 (default)    |
+| Very High (> 100K flows/s) | 16384+            |
 
 **Signs You Need to Increase:**
 
 * Metrics show packet drops (`mermin_packets_dropped_total`)
 * Gaps in Flow Trace exports
-* Warning logs about channel capacity
+* Warning logs about channel capacity or backpressure
 
 **Signs You Can Decrease:**
 
@@ -202,17 +229,12 @@ packet_channel_capacity = 2048
 * Minimal traffic volume
 * Memory constraints
 
-### `packet_worker_count`
+### `worker_count`
 
-**Type:** Integer **Default:** `2` **CLI Flag:** Not available **Environment:** Not available
+**Type:** Integer
+**Default:** `4`
 
-Number of parallel goroutines processing packets and generating flows.
-
-**HCL:**
-
-```hcl
-packet_worker_count = 4
-```
+Number of parallel worker threads processing packets and generating flow spans. Each worker processes eBPF events independently from a dedicated worker queue.
 
 **Behavior:**
 
@@ -220,15 +242,16 @@ packet_worker_count = 4
 * More workers = more parallelism = higher throughput
 * More workers = more CPU usage
 * Workers share the flow table (synchronized)
+* Worker queue capacity = `ring_buffer_capacity / worker_count`
 
 **Tuning Guidelines:**
 
-| Traffic Volume | Recommended Workers | CPU Allocation |
-| -------------- | ------------------- | -------------- |
-| Low            | 1-2                 | 0.1-0.5 cores  |
-| Medium         | 2-4 (default)       | 0.5-1 cores    |
-| High           | 4-8                 | 1-2 cores      |
-| Very High      | 8-16                | 2-4 cores      |
+| Traffic Volume             | Recommended Workers | CPU Allocation |
+|----------------------------|---------------------|----------------|
+| Low (< 10K flows/s)        | 1-2                 | 0.5-1 cores    |
+| Medium (10K-50K flows/s)   | 2-4                 | 1-2 cores      |
+| High (50K-100K flows/s)    | 4 (default)         | 2-4 cores      |
+| Very High (> 100K flows/s) | 8-16                | 4-8 cores      |
 
 **Optimal Worker Count:**
 
@@ -243,9 +266,176 @@ packet_worker_count = 4
 # Kubernetes resources should match worker count
 resources:
   requests:
-    cpu: 500m  # For packet_worker_count = 2
+    cpu: 2     # For worker_count = 4
   limits:
-    cpu: 1     # For packet_worker_count = 2
+    cpu: 4     # For worker_count = 4
+```
+
+### `worker_poll_interval`
+
+**Type:** Duration
+**Default:** `5s`
+
+Interval at which flow pollers check for flow records and timeouts. Pollers iterate through active flows to:
+
+* Generate periodic flow records (based on `max_record_interval` in `span` config)
+* Detect and remove idle flows (based on protocol-specific timeouts in `span` config)
+
+**Behavior:**
+
+* Lower values = more responsive timeout detection and flow recording
+* Higher values = less CPU overhead
+* At 100K flows/sec with 1M active flows and 32 pollers: ~6K flow checks/sec per poller
+* Modern CPUs handle flow checking very efficiently (microseconds per check)
+
+**Tuning Guidelines:**
+
+| Traffic Pattern | Recommended Interval | Rationale |
+|-----------------|---------------------|-----------|
+| Short-lived flows (ICMP) | 3-5s | Fast timeout detection |
+| Mixed traffic | 5s (default) | Balance responsiveness and overhead |
+| Long-lived flows (TCP) | 10s | Lower overhead, slower timeouts |
+| Memory constrained | 3-5s | More frequent cleanup |
+
+**Trade-offs:**
+
+* **3s interval**: Most responsive, slightly higher CPU (~10K checks/sec per poller)
+* **5s interval** (default): Best balance for most workloads
+* **10s interval**: Lowest CPU, flows may linger longer before timeout
+
+**Signs You Should Decrease:**
+
+* Flows lingering past their intended timeout
+* Memory usage growing steadily
+* Short-lived flow protocols (ICMP with 10s timeout)
+
+**Signs You Can Increase:**
+
+* CPU constrained
+* Primarily long-lived TCP flows
+* Flow timeout accuracy not critical
+
+### `k8s_decorator_threads`
+
+**Type:** Integer
+**Default:** `12`
+
+Number of dedicated threads for Kubernetes metadata decoration. Running decoration on separate threads prevents K8s API lookups from blocking flow processing. After DashMap optimization, each thread handles ~8K flows/sec (~100-150μs per flow).
+
+**Recommendations:**
+
+| Traffic Volume             | Recommended Threads |
+|----------------------------|---------------------|
+| Low (< 25K flows/s)        | 4                   |
+| Medium (25K-50K flows/s)   | 8                   |
+| High (50K-100K flows/s)    | 12 (default)        |
+| Very High (> 100K flows/s) | 16-24               |
+
+### `sampling_enabled`
+
+**Type:** Boolean
+**Default:** `true`
+
+Enable adaptive sampling when worker channels are full. When enabled, Mermin intelligently drops events to prevent complete pipeline stalls while preserving critical flow information (TCP FIN/RST, new flows).
+
+**Behavior:**
+
+* Sampling activates only under backpressure
+* Preserves flow control packets (FIN, RST)
+* Maintains minimum sampling rate (see `sampling_min_rate`)
+
+### `sampling_min_rate`
+
+**Type:** Float (0.0-1.0)
+**Default:** `0.1` (10%)
+
+Minimum fraction of events to keep during maximum backpressure. A value of `0.1` ensures at least 10% of events are processed even under extreme load.
+
+### `backpressure_warning_threshold`
+
+**Type:** Float (0.0-1.0)
+**Default:** `0.01` (1%)
+
+Drop rate threshold for logging backpressure warnings. Warnings are logged when the fraction of dropped events exceeds this value.
+
+### Channel Capacity Tuning
+
+These options control the buffer sizes between pipeline stages to optimize for your workload.
+
+#### `flow_span_channel_multiplier`
+
+**Type:** Float
+**Default:** `2.0`
+
+Multiplier for flow span channel capacity. Provides buffering between workers and K8s decorator. Channel size = `ring_buffer_capacity * flow_span_channel_multiplier`. With defaults (8192 × 2.0 = 16,384 slots, ~160ms buffer at 100K/s).
+
+**Recommendations:**
+
+* **Steady traffic**: `2.0` (default)
+* **Bursty traffic**: `3.0`-`4.0`
+* **Low latency priority**: `1.5`
+
+#### `decorated_span_channel_multiplier`
+
+**Type:** Float
+**Default:** `4.0`
+
+Multiplier for decorated span (export) channel capacity. Provides buffering between K8s decorator and OTLP exporter. This should be the largest buffer since network export is the slowest stage. Channel size = `ring_buffer_capacity * decorated_span_channel_multiplier`. With defaults (8192 × 4.0 = 32,768 slots, ~320ms buffer at 100K/s).
+
+**Recommendations:**
+
+* **Reliable network**: `4.0` (default)
+* **Unreliable network**: `6.0`-`8.0`
+* **Very high throughput**: `8.0`-`12.0`
+
+### Monitoring Performance Configuration
+
+After tuning performance settings, monitor these metrics:
+
+```prometheus
+# Cache effectiveness
+mermin_k8s_cache_hits_total / (mermin_k8s_cache_hits_total + mermin_k8s_cache_misses_total)
+
+# Backpressure and sampling
+rate(mermin_flow_events_dropped_backpressure_total[5m])
+rate(mermin_flow_events_sampled_total[5m])
+mermin_flow_events_sampling_rate
+
+# Channel utilization
+mermin_channel_capacity_used_ratio
+
+# Pipeline latency
+histogram_quantile(0.95, rate(mermin_processing_latency_seconds_bucket[5m]))
+```
+
+**Healthy indicators:**
+
+* Sampling rate = 0 (no backpressure)
+* Channel utilization < 80%
+* p95 processing latency < 10ms
+* IP index updates < 100ms
+
+### Pipeline Tuning Example
+
+For a large cluster with high throughput:
+
+```hcl
+pipeline {
+  # High-throughput base capacity
+  ring_buffer_capacity = 16384
+  worker_count = 8
+
+  # Increase decorator parallelism
+  k8s_decorator_threads = 16
+
+  # Channel multipliers
+  flow_span_channel_multiplier = 3.0
+  decorated_span_channel_multiplier = 8.0
+
+  # Adaptive sampling enabled
+  sampling_enabled = true
+  sampling_min_rate = 0.15
+}
 ```
 
 ## Complete Example
@@ -265,11 +455,13 @@ auto_reload = true
 # Graceful shutdown timeout
 shutdown_timeout = "10s"
 
-# Internal packet processing buffer
-packet_channel_capacity = 2048
+# Pipeline tuning for flow processing
+pipeline {
+  ring_buffer_capacity = 8192
+  worker_count = 4
+  k8s_decorator_threads = 12
+}
 
-# Number of parallel flow processors
-packet_worker_count = 4
 ```
 
 ## Precedence Example
@@ -311,11 +503,13 @@ Error: invalid log level "invalid", must be one of: trace, debug, info, warn, er
 ```
 
 ```hcl
-packet_channel_capacity = -1
+pipeline {
+  ring_buffer_capacity = -1
+}
 ```
 
 ```
-Error: packet_channel_capacity must be a positive integer
+Error: pipeline.ring_buffer_capacity must be a positive integer
 ```
 
 ## Monitoring Configuration Effectiveness
@@ -356,8 +550,8 @@ container_memory_working_set_bytes
 
 **Solutions:**
 
-1. Increase `packet_channel_capacity`
-2. Increase `packet_worker_count`
+1. Increase `pipeline.ring_buffer_capacity`
+2. Increase `pipeline.worker_count`
 3. Allocate more CPU resources
 4. Reduce monitored interfaces
 
@@ -367,7 +561,7 @@ container_memory_working_set_bytes
 
 **Solutions:**
 
-1. Decrease `packet_worker_count`
+1. Decrease `pipeline.worker_count`
 2. Increase flow timeouts (see [Span Options](span-options.md))
 3. Add flow filters (see [Filtering](filtering.md))
 4. Allocate more CPU resources
@@ -378,7 +572,7 @@ container_memory_working_set_bytes
 
 **Solutions:**
 
-1. Decrease `packet_channel_capacity`
+1. Decrease `pipeline.ring_buffer_capacity`
 2. Decrease flow timeouts (see [Span Options](span-options.md))
 3. Add flow filters to reduce active flows
 4. Allocate more memory resources

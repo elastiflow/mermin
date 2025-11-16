@@ -125,14 +125,14 @@ pub struct Conf {
     pub auto_reload: bool,
     #[serde(with = "duration")]
     pub shutdown_timeout: Duration,
-    pub packet_channel_capacity: usize,
-    pub packet_worker_count: usize,
     /// Contains the configuration for internal exporters
     pub internal: InternalOptions,
     /// API configuration for the API server
     pub api: ApiConf,
     /// Metrics configuration for the metrics server
     pub metrics: MetricsOptions,
+    /// Pipeline tuning configuration
+    pub pipeline: PipelineOptions,
     /// Parser configuration for eBPF packet parsing
     pub parser: ParserConf,
     /// Span configuration for flow span producer
@@ -165,8 +165,6 @@ impl Default for Conf {
             log_color: false,
             auto_reload: false,
             shutdown_timeout: defaults::shutdown_timeout(),
-            packet_channel_capacity: defaults::packet_channel_capacity(),
-            packet_worker_count: defaults::flow_workers(),
             internal: InternalOptions::default(),
             api: ApiConf::default(),
             metrics: MetricsOptions::default(),
@@ -174,6 +172,7 @@ impl Default for Conf {
             span: SpanOptions::default(),
             discovery: DiscoveryConf::default(),
             export: ExportOptions::default(),
+            pipeline: PipelineOptions::default(),
             filter: None,
             attributes: None,
         }
@@ -482,14 +481,6 @@ pub struct InformerDiscoveryOptions {
 pub mod defaults {
     use std::time::Duration;
 
-    pub fn packet_channel_capacity() -> usize {
-        1024
-    }
-
-    pub fn flow_workers() -> usize {
-        2
-    }
-
     pub fn shutdown_timeout() -> Duration {
         Duration::from_secs(5)
     }
@@ -707,6 +698,79 @@ pub mod conf_serde {
     }
 }
 
+/// Pipeline tuning configuration for flow processing optimization
+///
+/// Defaults are tuned for 100K flows/sec throughput:
+/// - `ring_buffer_capacity = 8192` (80ms burst buffer at 100K/s)
+/// - `worker_count = 4` (parallel flow processing, 2048 slots per worker)
+/// - `k8s_decorator_threads = 12` (12 threads × 8K flows/s = 96K/s capacity)
+/// - `worker_poll_interval = 5s` (responsive timeout/record checking with low overhead)
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub struct PipelineOptions {
+    /// eBPF ring buffer capacity (default: 8192)
+    /// This is the base capacity for the ring buffer between eBPF and userspace.
+    /// Also used as the base for flow_span and decorated_span channel multipliers.
+    pub ring_buffer_capacity: usize,
+
+    /// Number of flow worker threads for packet processing (default: 4)
+    /// Worker queue capacity derived from: ring_buffer_capacity / worker_count
+    /// With defaults: 8192 / 4 = 2048 slots per worker.
+    pub worker_count: usize,
+
+    /// Worker polling interval (default: 5s)
+    /// Pollers check for record intervals and timeouts at this frequency.
+    /// Lower values = more responsive but higher CPU. Higher values = less overhead.
+    /// At 100K flows/sec with 1M active flows and 32 pollers: ~6K checks/sec per poller.
+    #[serde(with = "conf_serde::duration")]
+    pub worker_poll_interval: Duration,
+
+    /// Number of dedicated threads for K8s decorator (default: 12)
+    /// Creates a dedicated multi-threaded Tokio runtime for Kubernetes metadata decoration.
+    pub k8s_decorator_threads: usize,
+
+    /// Multiplier for flow span channel capacity (default: 2.0)
+    /// Provides buffering between workers and K8s decorator. Channel size = ring_buffer_capacity * multiplier.
+    /// With defaults: 8192 × 2.0 = 16,384 slots (~160ms buffer at 100K/s).
+    pub flow_span_channel_multiplier: f32,
+
+    /// Multiplier for decorated span channel capacity (default: 4.0)
+    /// Provides buffering between K8s decorator and OTLP exporter. Channel size = ring_buffer_capacity * multiplier.
+    /// With defaults: 8192 × 4.0 = 32,768 slots (~320ms buffer at 100K/s).
+    pub decorated_span_channel_multiplier: f32,
+
+    // TODO: Implement adaptive sampling (ring buffer consumer in mermin-ebpf/src/main.rs)
+    /// Enable adaptive sampling under backpressure (default: true)
+    /// **NOT IMPLEMENTED:** Should drop low-priority flows when worker channels are full.
+    pub sampling_enabled: bool,
+
+    // TODO: Implement minimum sampling rate enforcement
+    /// Minimum sampling rate to maintain (default: 0.1 = 10%)
+    /// **NOT IMPLEMENTED:** Ensure at least 10% of flows pass through even under extreme load.
+    pub sampling_min_rate: f32,
+
+    // TODO: Implement backpressure threshold warnings
+    /// Drop rate threshold for backpressure warnings (default: 0.01 = 1%)
+    /// **NOT IMPLEMENTED:** Should emit warnings when drop rate exceeds this threshold.
+    pub backpressure_warning_threshold: f32,
+}
+
+impl Default for PipelineOptions {
+    fn default() -> Self {
+        Self {
+            ring_buffer_capacity: 8192,
+            worker_count: 4,
+            worker_poll_interval: Duration::from_secs(5),
+            k8s_decorator_threads: 12,
+            flow_span_channel_multiplier: 2.0,
+            decorated_span_channel_multiplier: 4.0,
+            sampling_enabled: true,
+            sampling_min_rate: 0.1,
+            backpressure_warning_threshold: 0.01,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ApiConf {
     /// Enable the API server.
@@ -761,13 +825,10 @@ mod tests {
             "shutdown_timeout should be 5s"
         );
         assert_eq!(
-            cfg.packet_channel_capacity, 1024,
-            "packet_channel_capacity should be 1024"
+            cfg.pipeline.ring_buffer_capacity, 8192,
+            "ring_buffer_capacity should be 8192"
         );
-        assert_eq!(
-            cfg.packet_worker_count, 2,
-            "packet_worker_count should be 2"
-        );
+        assert_eq!(cfg.pipeline.worker_count, 4, "worker_count should be 4");
 
         assert_eq!(
             cfg.discovery.instrument.interfaces,
@@ -897,10 +958,13 @@ mod tests {
         let deserialized: Conf = serde_yaml::from_str(&serialized).expect("should deserialize");
 
         assert_eq!(
-            cfg.packet_channel_capacity,
-            deserialized.packet_channel_capacity
+            cfg.pipeline.ring_buffer_capacity,
+            deserialized.pipeline.ring_buffer_capacity
         );
-        assert_eq!(cfg.packet_worker_count, deserialized.packet_worker_count);
+        assert_eq!(
+            cfg.pipeline.worker_count,
+            deserialized.pipeline.worker_count
+        );
     }
 
     #[test]
@@ -1315,8 +1379,9 @@ metrics {
 log_level: error
 auto_reload: true
 shutdown_timeout: 30s
-packet_channel_capacity: 2048
-packet_worker_count: 8
+pipeline:
+  ring_buffer_capacity: 2048
+  worker_count: 8
 discovery:
   instrument:
     interfaces:
@@ -1331,8 +1396,8 @@ discovery:
             assert_eq!(cfg.log_level, Level::ERROR);
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
-            assert_eq!(cfg.packet_channel_capacity, 2048);
-            assert_eq!(cfg.packet_worker_count, 8);
+            assert_eq!(cfg.pipeline.ring_buffer_capacity, 2048);
+            assert_eq!(cfg.pipeline.worker_count, 8);
             assert_eq!(cfg.discovery.instrument.interfaces, vec!["eth1", "eth2"]);
 
             Ok(())
@@ -1349,8 +1414,10 @@ discovery:
 log_level = "error"
 auto_reload = true
 shutdown_timeout = "30s"
-packet_channel_capacity = 2048
-packet_worker_count = 8
+pipeline {
+    ring_buffer_capacity = 2048
+    worker_count = 8
+}
 discovery "instrument" {
     interfaces = ["eth1", "eth2"]
 }
@@ -1363,8 +1430,8 @@ discovery "instrument" {
             assert_eq!(cfg.log_level, Level::ERROR);
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
-            assert_eq!(cfg.packet_channel_capacity, 2048);
-            assert_eq!(cfg.packet_worker_count, 8);
+            assert_eq!(cfg.pipeline.ring_buffer_capacity, 2048);
+            assert_eq!(cfg.pipeline.worker_count, 8);
             assert_eq!(cfg.discovery.instrument.interfaces, vec!["eth1", "eth2"]);
 
             Ok(())
@@ -1579,8 +1646,8 @@ discovery:
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.auto_reload, false);
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(5));
-            assert_eq!(cfg.packet_channel_capacity, 1024);
-            assert_eq!(cfg.packet_worker_count, 2);
+            assert_eq!(cfg.pipeline.ring_buffer_capacity, 8192);
+            assert_eq!(cfg.pipeline.worker_count, 4);
             assert_eq!(cfg.api.port, 8080);
             assert_eq!(cfg.metrics.port, 10250);
             assert!(matches!(
@@ -1780,7 +1847,7 @@ discovery:
 
             // Other defaults should be applied
             assert_eq!(cfg.log_level, Level::INFO);
-            assert_eq!(cfg.packet_channel_capacity, 1024);
+            assert_eq!(cfg.pipeline.ring_buffer_capacity, 8192);
 
             // Verify all span defaults
             assert_eq!(cfg.span.max_record_interval, Duration::from_secs(60));

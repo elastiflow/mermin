@@ -16,8 +16,11 @@ log_level = "info"
 shutdown_timeout = "30s"
 
 # Optimized for production load
-packet_worker_count = 8
-packet_channel_capacity = 4096
+pipeline {
+  ring_buffer_capacity = 8192
+  worker_count = 8
+  k8s_decorator_threads = 12
+}
 
 # API for health checks (required for liveness/readiness probes)
 api {
@@ -399,8 +402,11 @@ Optimized for high packet rate environments (>10 Gbps).
 log_level = "warn"  # Reduce logging overhead
 
 # Maximize worker parallelism
-packet_worker_count = 16
-packet_channel_capacity = 16384
+pipeline {
+  ring_buffer_capacity = 16384
+  worker_count = 16
+  k8s_decorator_threads = 24
+}
 
 api {
   enabled = true

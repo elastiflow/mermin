@@ -149,8 +149,11 @@ Top-level settings that affect overall behavior:
 log_level = "info"
 auto_reload = false
 shutdown_timeout = "5s"
-packet_channel_capacity = 1024
-packet_worker_count = 2
+
+pipeline {
+  ring_buffer_capacity = 8192
+  worker_count = 4
+}
 ```
 
 See [Global Options](global-options.md) for details.

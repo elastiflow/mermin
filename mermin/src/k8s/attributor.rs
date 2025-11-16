@@ -14,7 +14,8 @@ use std::{
     sync::{Arc, atomic::Ordering},
 };
 
-use futures::TryStreamExt;
+use dashmap::DashMap;
+use futures::{StreamExt, TryStreamExt};
 use ip_network::IpNetwork;
 use jsonpath_rust::JsonPath;
 use k8s_openapi::{
@@ -41,10 +42,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::{
     net::lookup_host,
-    sync::{RwLock, oneshot},
+    sync::oneshot,
     time::{Duration, timeout},
 };
-use tracing::{debug, error, warn};
+use tracing::{debug, error, trace, warn};
 
 use crate::{
     health::HealthState,
@@ -53,6 +54,7 @@ use crate::{
         owner_relations::{OwnerRelationsManager, OwnerRelationsRules},
         selector_relations::{SelectorRelationRule, SelectorRelationsManager},
     },
+    metrics,
     runtime::conf::Conf,
     span::flow::FlowSpan,
 };
@@ -345,7 +347,7 @@ impl ResourceStore {
         client: Client,
         health_state: HealthState,
         required_kinds: &HashSet<String>,
-        ip_index: Arc<RwLock<HashMap<String, Vec<K8sObjectMeta>>>>,
+        ip_index: Arc<DashMap<String, Vec<K8sObjectMeta>>>,
         conf: &Conf,
     ) -> Result<Self, K8sError> {
         let mut readiness_handles = Vec::new();
@@ -441,6 +443,60 @@ impl ResourceStore {
             "caches synced, performing initial ip index build"
         );
         update_ip_index(&store, &ip_index, conf).await;
+
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let store_clone = store.clone();
+        let ip_index_clone = ip_index.clone();
+        let conf_clone = conf.clone();
+        tokio::spawn(async move {
+            // Debounce rapid changes (e.g., rolling updates, Node status updates) to avoid excessive rebuilds
+            // Use 1 second debounce to prevent death spiral from frequent Node heartbeat events
+            let mut debounce_timer = tokio::time::interval(Duration::from_secs(1));
+            debounce_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut pending_update = false;
+
+            loop {
+                tokio::select! {
+                    Some(_) = event_rx.recv() => {
+                        pending_update = true;
+                    }
+                    _ = debounce_timer.tick() => {
+                        if pending_update {
+                            let timer = metrics::registry::K8S_IP_INDEX_UPDATE_DURATION.start_timer();
+                            update_ip_index(&store_clone, &ip_index_clone, &conf_clone).await;
+                            timer.observe_duration();
+                            metrics::registry::K8S_IP_INDEX_UPDATES.inc();
+                            pending_update = false;
+                            trace!(
+                                event.name = "k8s.ip_index.updated",
+                                "IP index rebuilt due to K8s resource changes"
+                            );
+                        }
+                    }
+                }
+            }
+        });
+
+        // Spawn watchers for resources that have IP addresses
+        // These will trigger IP index rebuilds ONLY when IPs actually change (not on status-only updates)
+        spawn_ip_resource_watcher::<Pod, _>(client.clone(), event_tx.clone(), extract_pod_ips);
+        spawn_ip_resource_watcher::<Node, _>(client.clone(), event_tx.clone(), extract_node_ips);
+        spawn_ip_resource_watcher::<Service, _>(
+            client.clone(),
+            event_tx.clone(),
+            extract_service_ips,
+        );
+        spawn_ip_resource_watcher::<Ingress, _>(
+            client.clone(),
+            event_tx.clone(),
+            extract_ingress_ips,
+        );
+        spawn_ip_resource_watcher::<EndpointSlice, _>(
+            client.clone(),
+            event_tx,
+            extract_endpointslice_ips,
+        );
 
         health_state
             .k8s_caches_synced
@@ -607,7 +663,7 @@ pub struct Attributor {
     pub resource_store: ResourceStore,
     pub owner_relations_manager: OwnerRelationsManager,
     pub selector_relations_manager: Option<SelectorRelationsManager>,
-    ip_index: Arc<RwLock<HashMap<String, Vec<K8sObjectMeta>>>>,
+    ip_index: Arc<DashMap<String, Vec<K8sObjectMeta>>>,
 }
 
 impl Attributor {
@@ -655,7 +711,7 @@ impl Attributor {
         required_kinds.insert("job".to_string());
         required_kinds.insert("cronjob".to_string());
 
-        let ip_index = Arc::new(RwLock::new(HashMap::new()));
+        let ip_index = Arc::new(DashMap::new());
         let resource_store = ResourceStore::new(
             client.clone(),
             health_state,
@@ -676,17 +732,6 @@ impl Attributor {
         let selector_relations_manager = selector_relations_opts
             .filter(|rules| !rules.is_empty())
             .map(SelectorRelationsManager::new);
-
-        let resource_store_clone = resource_store.clone();
-        let ip_index_clone = ip_index.clone();
-        let conf_clone = conf.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
-            loop {
-                interval.tick().await;
-                update_ip_index(&resource_store_clone, &ip_index_clone, &conf_clone).await;
-            }
-        });
 
         Ok(Self {
             client,
@@ -726,10 +771,10 @@ impl Attributor {
         ResourceStore: HasStore<K>,
     {
         let ip_str = ip.to_string();
-        let index = self.ip_index.read().await;
         let mut results = Vec::new();
 
-        if let Some(candidates) = index.get(&ip_str) {
+        if let Some(entry) = self.ip_index.get(&ip_str) {
+            let candidates = entry.value();
             let store = self.resource_store.store();
 
             for meta in candidates {
@@ -1227,10 +1272,287 @@ async fn index_resource_by_ip<K>(
     }
 }
 
+/// Extracts IP addresses from a Pod resource
+fn extract_pod_ips(pod: &Pod) -> HashSet<String> {
+    let mut ips = HashSet::new();
+    if let Some(status) = &pod.status {
+        if let Some(pod_ip) = &status.pod_ip {
+            ips.insert(pod_ip.clone());
+        }
+        if let Some(pod_ips) = &status.pod_ips {
+            for pod_ip_info in pod_ips {
+                ips.insert(pod_ip_info.ip.clone());
+            }
+        }
+    }
+    ips
+}
+
+/// Extracts IP addresses from a Node resource
+fn extract_node_ips(node: &Node) -> HashSet<String> {
+    let mut ips = HashSet::new();
+    if let Some(status) = &node.status
+        && let Some(addresses) = &status.addresses
+    {
+        for addr in addresses {
+            if addr.type_ == "InternalIP" || addr.type_ == "ExternalIP" {
+                ips.insert(addr.address.clone());
+            }
+        }
+    }
+    ips
+}
+
+/// Extracts IP addresses from a Service resource
+fn extract_service_ips(service: &Service) -> HashSet<String> {
+    let mut ips = HashSet::new();
+    if let Some(spec) = &service.spec {
+        if let Some(cluster_ip) = &spec.cluster_ip
+            && cluster_ip != "None"
+        {
+            ips.insert(cluster_ip.clone());
+        }
+        if let Some(cluster_ips) = &spec.cluster_ips {
+            for ip in cluster_ips {
+                if ip != "None" {
+                    ips.insert(ip.clone());
+                }
+            }
+        }
+        if let Some(external_ips) = &spec.external_ips {
+            for ip in external_ips {
+                ips.insert(ip.clone());
+            }
+        }
+    }
+    if let Some(status) = &service.status
+        && let Some(load_balancer) = &status.load_balancer
+        && let Some(ingress_list) = &load_balancer.ingress
+    {
+        for ingress in ingress_list {
+            if let Some(ip) = &ingress.ip {
+                ips.insert(ip.clone());
+            }
+        }
+    }
+    ips
+}
+
+/// Extracts IP addresses from an Ingress resource
+fn extract_ingress_ips(ingress: &Ingress) -> HashSet<String> {
+    let mut ips = HashSet::new();
+    if let Some(status) = &ingress.status
+        && let Some(load_balancer) = &status.load_balancer
+        && let Some(ingress_list) = &load_balancer.ingress
+    {
+        for ing in ingress_list {
+            if let Some(ip) = &ing.ip {
+                ips.insert(ip.clone());
+            }
+        }
+    }
+    ips
+}
+
+/// Extracts IP addresses from an EndpointSlice resource
+fn extract_endpointslice_ips(endpoint_slice: &EndpointSlice) -> HashSet<String> {
+    let mut ips = HashSet::new();
+    for endpoint in &endpoint_slice.endpoints {
+        for address in &endpoint.addresses {
+            ips.insert(address.clone());
+        }
+    }
+    ips
+}
+
+/// Spawns a watcher for a Kubernetes resource that triggers IP index updates only when IPs change.
+///
+/// This uses the K8s watch API to receive real-time events when resources are created,
+/// updated, or deleted. The watcher automatically handles reconnection and error recovery.
+///
+/// **Smart IP Change Detection:**
+/// - Caches IP addresses for each resource
+/// - Compares current vs previous IPs on Apply events
+/// - Only triggers rebuild if IPs actually changed
+/// - Drastically reduces unnecessary rebuilds from status-only updates (e.g. Node heartbeats)
+///
+/// # Arguments
+/// * `client` - Kubernetes client
+/// * `event_tx` - Channel to send trigger events for IP index rebuilds
+/// * `extract_ips` - Function to extract IP addresses from the resource
+///
+/// # Resource Types
+/// This should only be used for resources that contain IP addresses:
+/// - Pod (pod IPs)
+/// - Node (node IPs)
+/// - Service (cluster IPs, external IPs)
+/// - Ingress (load balancer IPs)
+/// - EndpointSlice (endpoint IPs)
+fn spawn_ip_resource_watcher<K, F>(
+    client: Client,
+    event_tx: tokio::sync::mpsc::UnboundedSender<()>,
+    extract_ips: F,
+) where
+    K: Resource + Clone + Debug + Send + 'static + for<'de> serde::Deserialize<'de>,
+    K::DynamicType: Default,
+    F: Fn(&K) -> HashSet<String> + Send + 'static,
+{
+    tokio::spawn(async move {
+        let resource_name = K::kind(&K::DynamicType::default()).to_string();
+        let api = Api::<K>::all(client);
+
+        // Cache of resource UID -> IP addresses for smart change detection
+        let ip_cache: DashMap<String, HashSet<String>> = DashMap::new();
+
+        loop {
+            debug!(
+                event.name = "k8s.watcher.starting",
+                k8s.resource.name = %resource_name,
+                "Starting K8s resource watcher for IP index updates"
+            );
+
+            let watcher_config = watcher::Config::default();
+            let mut stream = watcher(api.clone(), watcher_config).boxed();
+
+            while let Some(event) = stream.next().await {
+                match event {
+                    Ok(watcher::Event::Apply(obj)) => {
+                        metrics::registry::K8S_WATCHER_EVENTS
+                            .with_label_values(&[&resource_name, "apply"])
+                            .inc();
+
+                        // Extract current IPs from this resource
+                        let current_ips = extract_ips(&obj);
+                        let uid = obj.meta().uid.clone().unwrap_or_default();
+
+                        // Compare with cached IPs to detect if IPs actually changed
+                        let ips_changed = if let Some(cached_entry) = ip_cache.get(&uid) {
+                            let cached_ips = cached_entry.value();
+                            cached_ips != &current_ips
+                        } else {
+                            // New resource, IPs definitely changed (from none to some)
+                            !current_ips.is_empty()
+                        };
+
+                        if ips_changed {
+                            // Update cache with new IPs
+                            ip_cache.insert(uid.clone(), current_ips.clone());
+
+                            // Trigger IP index rebuild
+                            if event_tx.send(()).is_err() {
+                                warn!(
+                                    event.name = "k8s.watcher.channel_closed",
+                                    k8s.resource.name = %resource_name,
+                                    "IP index update channel closed, stopping watcher"
+                                );
+                                return;
+                            }
+                            trace!(
+                                event.name = "k8s.watcher.ip_changed",
+                                k8s.resource.name = %resource_name,
+                                k8s.resource.object = ?obj.meta().name,
+                                k8s.resource.uid = %uid,
+                                old_ip_count = current_ips.len(),
+                                "Resource IPs changed, triggering IP index update"
+                            );
+                        } else {
+                            trace!(
+                                event.name = "k8s.watcher.ip_unchanged",
+                                k8s.resource.name = %resource_name,
+                                k8s.resource.object = ?obj.meta().name,
+                                "Resource updated but IPs unchanged, skipping rebuild"
+                            );
+                        }
+                    }
+                    Ok(watcher::Event::Delete(obj)) => {
+                        metrics::registry::K8S_WATCHER_EVENTS
+                            .with_label_values(&[&resource_name, "delete"])
+                            .inc();
+
+                        // Remove from cache and trigger rebuild since IPs are being removed
+                        let uid = obj.meta().uid.clone().unwrap_or_default();
+                        ip_cache.remove(&uid);
+
+                        if event_tx.send(()).is_err() {
+                            warn!(
+                                event.name = "k8s.watcher.channel_closed",
+                                k8s.resource.name = %resource_name,
+                                "IP index update channel closed, stopping watcher"
+                            );
+                            return;
+                        }
+                        trace!(
+                            event.name = "k8s.watcher.event",
+                            k8s.resource.name = %resource_name,
+                            k8s.resource.object = ?obj.meta().name,
+                            k8s.resource.uid = %uid,
+                            event_type = "delete",
+                            "Resource deleted, triggering IP index update"
+                        );
+                    }
+                    Ok(watcher::Event::Init) => {
+                        metrics::registry::K8S_WATCHER_EVENTS
+                            .with_label_values(&[&resource_name, "init"])
+                            .inc();
+
+                        debug!(
+                            event.name = "k8s.watcher.init",
+                            k8s.resource.name = %resource_name,
+                            "K8s watcher initialization started"
+                        );
+                    }
+                    Ok(watcher::Event::InitApply(_)) => {
+                        trace!(
+                            event.name = "k8s.watcher.init_apply",
+                            k8s.resource.name = %resource_name,
+                            "K8s watcher loading initial object"
+                        );
+                    }
+                    Ok(watcher::Event::InitDone) => {
+                        metrics::registry::K8S_WATCHER_EVENTS
+                            .with_label_values(&[&resource_name, "init_done"])
+                            .inc();
+
+                        if event_tx.send(()).is_err() {
+                            return;
+                        }
+                        debug!(
+                            event.name = "k8s.watcher.init_done",
+                            k8s.resource.name = %resource_name,
+                            "K8s watcher initialization complete, triggering IP index update"
+                        );
+                    }
+                    Err(e) => {
+                        metrics::registry::K8S_WATCHER_ERRORS
+                            .with_label_values(&[&resource_name])
+                            .inc();
+
+                        error!(
+                            event.name = "k8s.watcher.error",
+                            error.message = %e,
+                            k8s.resource.name = %resource_name,
+                            "K8s watcher error, will retry"
+                        );
+                        break;
+                    }
+                }
+            }
+
+            warn!(
+                event.name = "k8s.watcher.reconnecting",
+                k8s.resource.name = %resource_name,
+                "K8s watcher disconnected, reconnecting in 5s"
+            );
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    });
+}
+
 /// Scans all relevant Kubernetes objects and builds a lookup map from IP to object metadata.
+/// This is triggered by resource changes for real-time accuracy.
 async fn update_ip_index(
     store: &ResourceStore,
-    index: &Arc<RwLock<HashMap<String, Vec<K8sObjectMeta>>>>,
+    index: &Arc<DashMap<String, Vec<K8sObjectMeta>>>,
     conf: &Conf,
 ) {
     let mut new_index = HashMap::new();
@@ -1242,7 +1564,6 @@ async fn update_ip_index(
     {
         let assoc = &k8s_conf.association;
 
-        // Dynamically call the generic indexer for each configured object type.
         if let Some(rule) = &assoc.pod {
             index_resource_by_ip::<Pod>(store, &mut new_index, rule).await;
         }
@@ -1260,12 +1581,14 @@ async fn update_ip_index(
         }
     }
 
-    let mut writer = index.write().await;
-    *writer = new_index;
+    index.clear();
+    for (ip, metas) in new_index {
+        index.insert(ip, metas);
+    }
 
-    debug!(
+    trace!(
         event.name = "k8s.ip_index.updated",
-        index.size = writer.len(),
+        index.size = index.len(),
         "ip to object index was updated"
     );
 }

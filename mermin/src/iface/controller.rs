@@ -250,41 +250,21 @@ impl IfaceController {
     /// - `iface_map` - Shared interface index → name map for packet decoration
     /// - `ebpf` - eBPF object with loaded programs (maps must be extracted beforehand)
     /// - `use_tcx` - Whether to use TCX (kernel >= 6.6) or netlink attachment
+    /// - `bpf_fs_writable` - Whether /sys/fs/bpf is writable for TCX link pinning
     /// - `tc_priority` - TC priority for netlink mode (lower number = higher priority)
     /// - `tcx_order` - TCX ordering strategy (First or Last in chain)
     /// - `event_tx` - Optional channel for sending controller events for observability
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         patterns: Vec<String>,
         iface_map: Arc<DashMap<u32, String>>,
         ebpf: Ebpf,
         use_tcx: bool,
+        bpf_fs_writable: bool,
         tc_priority: u16,
         tcx_order: TcxOrderStrategy,
         event_tx: Option<Sender<ControllerEvent>>,
     ) -> Result<Self, MerminError> {
-        // Check /sys/fs/bpf writability once for TCX link pinning
-        let bpf_fs_writable = use_tcx
-            && std::fs::metadata("/sys/fs/bpf")
-                .and_then(|m| {
-                    if m.is_dir() {
-                        std::fs::OpenOptions::new()
-                            .write(true)
-                            .create(true)
-                            .truncate(true)
-                            .open("/sys/fs/bpf/.mermin_test")
-                            .and_then(|f| {
-                                drop(f);
-                                std::fs::remove_file("/sys/fs/bpf/.mermin_test")
-                            })
-                    } else {
-                        Err(std::io::Error::new(
-                            std::io::ErrorKind::NotFound,
-                            "not a directory",
-                        ))
-                    }
-                })
-                .is_ok();
-
         info!(
             event.name = "interface_controller.created",
             pattern_count = patterns.len(),
@@ -1062,7 +1042,7 @@ impl IfaceController {
     ///
     /// Blocking operation. Thread must be in host network namespace.
     fn cleanup_orphaned_programs(&mut self) -> Result<(), MerminError> {
-        if self.use_tcx {
+        if self.use_tcx && self.bpf_fs_writable {
             // TCX mode: Try to clean up orphaned programs using pinned links
             info!(
                 event.name = "interface_controller.tcx_cleanup_started",
@@ -1151,6 +1131,17 @@ impl IfaceController {
             return Ok(());
         }
 
+        if self.use_tcx && !self.bpf_fs_writable {
+            info!(
+                event.name = "interface_controller.tcx_cleanup_skipped",
+                kernel.tcx_mode = true,
+                bpf_fs_writable = false,
+                "skipping TCX orphan cleanup - /sys/fs/bpf not writable, no pinned links exist"
+            );
+            return Ok(());
+        }
+
+        // Netlink mode: kernel < 6.6, use qdisc_detach_program
         info!(
             event.name = "interface_controller.cleanup_started",
             iface_count = self.active_ifaces.len(),

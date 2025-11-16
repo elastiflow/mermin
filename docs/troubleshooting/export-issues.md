@@ -376,12 +376,12 @@ export "traces" {
 ```hcl
 export "traces" {
   otlp = {
-    max_queue_size = 8192  # Increase from default (2048)
+    max_queue_size = 65536  # Increase from default (32768)
   }
 }
 ```
 
-**Note**: Larger queues use more memory.
+**Note**: Larger queues use more memory. Default (32768) is sized for 100K flows/sec.
 
 #### 3. Network Latency
 

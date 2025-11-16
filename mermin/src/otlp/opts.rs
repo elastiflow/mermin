@@ -402,19 +402,19 @@ pub mod defaults {
         Duration::from_secs(10)
     }
     pub fn max_batch_size() -> usize {
-        512
+        1024
     }
     pub fn max_batch_interval() -> Duration {
-        Duration::from_secs(5)
+        Duration::from_secs(2)
     }
     pub fn max_queue_size() -> usize {
-        2048
+        32768
     }
     pub fn max_concurrent_exports() -> usize {
-        1
+        4
     }
     pub fn max_export_timeout() -> Duration {
-        Duration::from_millis(30000)
+        Duration::from_secs(10)
     }
 }
 

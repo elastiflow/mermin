@@ -1,4 +1,7 @@
-use std::{net::IpAddr, time::SystemTime};
+use std::{
+    net::IpAddr,
+    time::{Duration, SystemTime},
+};
 
 use mermin_common::TunnelType;
 use network_types::{eth::EtherType, ip::IpProto};
@@ -80,7 +83,7 @@ pub struct FlowSpan {
     pub span_kind: SpanKind,
     pub attributes: SpanAttributes,
 
-    // NEW: For eBPF map aggregation architecture
+    // eBPF map aggregation fields
     #[serde(skip)]
     pub flow_key: Option<mermin_common::FlowKey>,
     #[serde(skip)]
@@ -94,6 +97,14 @@ pub struct FlowSpan {
     #[serde(skip)]
     #[allow(dead_code)]
     pub boot_time_offset: u64,
+
+    // Timing metadata for polling architecture
+    #[serde(skip)]
+    pub last_recorded_time: SystemTime,
+    #[serde(skip)]
+    pub last_activity_time: SystemTime,
+    #[serde(skip)]
+    pub timeout_duration: Duration,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1026,6 +1037,9 @@ mod tests {
             last_recorded_reverse_packets: 0,
             last_recorded_reverse_bytes: 0,
             boot_time_offset: 0,
+            last_recorded_time: std::time::UNIX_EPOCH,
+            last_activity_time: std::time::UNIX_EPOCH,
+            timeout_duration: Duration::from_secs(0),
         };
 
         assert_eq!(
@@ -1047,6 +1061,9 @@ mod tests {
             last_recorded_reverse_packets: 0,
             last_recorded_reverse_bytes: 0,
             boot_time_offset: 0,
+            last_recorded_time: std::time::UNIX_EPOCH,
+            last_activity_time: std::time::UNIX_EPOCH,
+            timeout_duration: Duration::from_secs(0),
         };
 
         assert_eq!(
@@ -1068,6 +1085,9 @@ mod tests {
             last_recorded_reverse_packets: 0,
             last_recorded_reverse_bytes: 0,
             boot_time_offset: 0,
+            last_recorded_time: std::time::UNIX_EPOCH,
+            last_activity_time: std::time::UNIX_EPOCH,
+            timeout_duration: Duration::from_secs(0),
         };
         flow_span.attributes.network_type = EtherType::Ipv4;
         flow_span.attributes.network_transport = IpProto::Tcp;
@@ -1089,6 +1109,9 @@ mod tests {
             last_recorded_reverse_packets: 0,
             last_recorded_reverse_bytes: 0,
             boot_time_offset: 0,
+            last_recorded_time: std::time::UNIX_EPOCH,
+            last_activity_time: std::time::UNIX_EPOCH,
+            timeout_duration: Duration::from_secs(0),
         };
         flow_span.attributes.network_type = EtherType::Ipv6;
         flow_span.attributes.network_transport = IpProto::Udp;
@@ -1297,6 +1320,9 @@ mod tests {
             last_recorded_reverse_packets: 0,
             last_recorded_reverse_bytes: 0,
             boot_time_offset: 0,
+            last_recorded_time: std::time::UNIX_EPOCH,
+            last_activity_time: std::time::UNIX_EPOCH,
+            timeout_duration: Duration::from_secs(0),
         };
 
         let cloned = flow_span.clone();
@@ -1337,6 +1363,9 @@ mod tests {
             last_recorded_reverse_packets: 0,
             last_recorded_reverse_bytes: 0,
             boot_time_offset: 0,
+            last_recorded_time: std::time::UNIX_EPOCH,
+            last_activity_time: std::time::UNIX_EPOCH,
+            timeout_duration: Duration::from_secs(0),
         };
 
         let json = serde_json::to_string(&flow_span);

@@ -101,6 +101,7 @@ spec:
             - name: bpf-fs
               mountPath: /sys/fs/bpf
               readOnly: false
+              mountPropagation: HostToContainer
             {{- if .Values.config.content }}
             - name: mermin-config
               mountPath: /etc/mermin

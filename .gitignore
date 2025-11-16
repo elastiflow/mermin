@@ -19,3 +19,6 @@ helm_rendered
 # IDEs
 .idea
 .vscode
+
+# Development artifacts
+/local

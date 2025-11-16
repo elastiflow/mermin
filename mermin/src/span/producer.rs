@@ -18,7 +18,6 @@ use pnet::datalink::MacAddr;
 use tokio::{
     io::unix::AsyncFd,
     sync::{Mutex, mpsc},
-    task::JoinHandle,
 };
 use tracing::{debug, error, info, trace, warn};
 
@@ -62,50 +61,17 @@ use crate::{
 /// - Record vs. Timeout: Safe - timeout waits for record to complete removal
 pub type FlowStore = Arc<DashMap<String, FlowEntry, FxBuildHasher>>;
 
-/// Entry in the flow map containing both the flow span and its task handles
+/// Entry in the flow map containing the flow span.
+/// Polling tasks will handle record intervals and timeouts.
 pub struct FlowEntry {
     pub flow_span: FlowSpan,
-    pub task_handles: FlowTaskHandles,
-}
-
-/// Task handles and communication channels for managing a flow's lifecycle.
-///
-/// ### Task Lifecycle
-///
-/// Each flow entry spawns two concurrent tokio tasks:
-///
-/// 1. **Record Task** (`record_task_loop`):
-///    - Wakes up periodically (every `max_record_interval`)
-///    - Records the current flow state and sends it to the exporter
-///    - Resets delta counters (bytes/packets) after recording
-///    - Exits when the flow entry is removed from the map
-///
-/// 2. **Timeout Task** (`timeout_task_loop`):
-///    - Sleeps for the configured timeout duration
-///    - Can be reset by incoming packets via the `timeout_reset_tx` channel
-///    - When timeout fires: records final flow state, removes from map, aborts record task
-///    - Exits after timeout fires or on shutdown signal
-///
-/// #### Concurrency & Cleanup
-///
-/// - Both tasks hold an Arc to the flow_store for concurrent access
-/// - The timeout task is responsible for final cleanup (removing flow, aborting record task)
-/// - If a packet arrives during timeout: the timeout is reset, keeping the flow alive
-/// - If the record interval fires during final timeout: both operations happen independently
-/// - The timeout task holds its own JoinHandle for cleanup coordination
-pub struct FlowTaskHandles {
-    /// Handle to the record task (periodic recording)
-    #[allow(dead_code)]
-    record_task: JoinHandle<()>,
-    /// Handle to the timeout task (idle timeout)
-    #[allow(dead_code)]
-    timeout_task: JoinHandle<()>,
 }
 
 pub struct FlowSpanProducer {
     span_opts: SpanOptions,
-    packet_channel_capacity: usize,
-    packet_worker_count: usize,
+    ring_buffer_capacity: usize,
+    worker_count: usize,
+    worker_poll_interval: Duration,
     boot_time_offset_nanos: u64,
     iface_map: Arc<DashMap<u32, String>>,
     flow_store: FlowStore,
@@ -123,15 +89,28 @@ impl FlowSpanProducer {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         span_opts: SpanOptions,
-        packet_channel_capacity: usize,
-        packet_worker_count: usize,
+        ring_buffer_capacity: usize,
+        worker_count: usize,
         iface_map: Arc<DashMap<u32, String>>,
         flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
         flow_events_ringbuf: RingBuf<aya::maps::MapData>,
         flow_span_tx: mpsc::Sender<FlowSpan>,
         conf: &Conf,
     ) -> Result<Self, BootTimeError> {
-        let flow_store_capacity = packet_channel_capacity * 8;
+        // Scale flow store capacity based on expected concurrent flows
+        // At 100k flows/sec with 10s avg lifetime = 1M concurrent flows
+        // Capacity: ring_buffer_capacity (8192) * 128 = 1,048,576 (~400MB)
+        // DashMap will resize if needed, but this minimizes expensive resizing operations
+        const FLOW_STORE_CAPACITY_MULTIPLIER: usize = 128;
+        let flow_store_capacity = ring_buffer_capacity * FLOW_STORE_CAPACITY_MULTIPLIER;
+        info!(
+            event.name = "flow_store.initialized",
+            capacity = flow_store_capacity,
+            ring_buffer_capacity = ring_buffer_capacity,
+            capacity_multiplier = FLOW_STORE_CAPACITY_MULTIPLIER,
+            estimated_memory_mb = (flow_store_capacity * 400) / 1_048_576, // ~400 bytes per entry
+            "flow store initialized with capacity for high-throughput operation"
+        );
         let flow_store = Arc::new(DashMap::with_capacity_and_hasher(
             flow_store_capacity,
             FxBuildHasher::default(),
@@ -158,8 +137,9 @@ impl FlowSpanProducer {
 
         Ok(Self {
             span_opts,
-            packet_channel_capacity,
-            packet_worker_count,
+            ring_buffer_capacity,
+            worker_count,
+            worker_poll_interval: conf.pipeline.worker_poll_interval,
             boot_time_offset_nanos,
             community_id_generator,
             iface_map,
@@ -191,10 +171,10 @@ impl FlowSpanProducer {
         );
 
         let mut worker_channels = Vec::new();
-        let worker_capacity = self.packet_channel_capacity.max(self.packet_worker_count)
-            / self.packet_worker_count.max(1);
+        let worker_capacity =
+            self.ring_buffer_capacity.max(self.worker_count) / self.worker_count.max(1);
 
-        for worker_id in 0..self.packet_worker_count.max(1) {
+        for worker_id in 0..self.worker_count.max(1) {
             let (worker_tx, worker_rx) = mpsc::channel(worker_capacity);
             worker_channels.push(worker_tx);
 
@@ -207,7 +187,6 @@ impl FlowSpanProducer {
                 Arc::clone(&self.flow_store),
                 Arc::clone(&flow_stats_map),
                 worker_rx,
-                self.flow_span_tx.clone(),
                 self.filter.clone(),
                 self.vxlan_port,
                 self.geneve_port,
@@ -220,7 +199,7 @@ impl FlowSpanProducer {
         }
         info!(
             event.name = "workers.started",
-            worker.count = self.packet_worker_count.max(1),
+            worker.count = self.worker_count.max(1),
             "flow workers spawned, starting event loop"
         );
 
@@ -242,7 +221,37 @@ impl FlowSpanProducer {
             "orphan scanner task started (safety net for stale eBPF entries)"
         );
 
-        // Wrap the ring buffer's fd in AsyncFd for event-driven polling
+        // Spawn flow pollers (sharded by community_id hash) to replace per-flow tasks
+        // Scale with worker count but cap at 32 for high-throughput (100k flows/sec)
+        // Each poller can handle ~100K active flows efficiently
+        let num_pollers = self.worker_count.clamp(1, 32);
+        let max_record_interval = self.span_opts.max_record_interval;
+        let poll_interval = self.worker_poll_interval;
+        for poller_id in 0..num_pollers {
+            let poller_flow_store = Arc::clone(&self.flow_store);
+            let poller_stats_map = Arc::clone(&flow_stats_map);
+            let poller_span_tx = self.flow_span_tx.clone();
+
+            tokio::spawn(async move {
+                flow_poller_task(
+                    poller_id,
+                    num_pollers,
+                    poller_flow_store,
+                    poller_stats_map,
+                    poller_span_tx,
+                    max_record_interval,
+                    poll_interval,
+                )
+                .await;
+            });
+        }
+        info!(
+            event.name = "flow_pollers.started",
+            poller.count = num_pollers,
+            poll.interval_secs = poll_interval.as_secs(),
+            "flow pollers started (replaces per-flow record/timeout tasks)"
+        );
+
         let async_fd = match AsyncFd::new(flow_events.as_raw_fd()) {
             Ok(fd) => fd,
             Err(e) => {
@@ -256,7 +265,7 @@ impl FlowSpanProducer {
         };
 
         let mut worker_index = 0;
-        let worker_count = self.packet_worker_count.max(1);
+        let worker_count = self.worker_count.max(1);
 
         loop {
             let mut guard = match async_fd.readable().await {
@@ -272,6 +281,10 @@ impl FlowSpanProducer {
             };
 
             while let Some(item) = flow_events.next() {
+                let timer = metrics::registry::PROCESSING_LATENCY
+                    .with_label_values(&["flow_ingestion"])
+                    .start_timer();
+
                 let flow_event: FlowEvent =
                     unsafe { std::ptr::read_unaligned(item.as_ptr() as *const FlowEvent) };
 
@@ -300,25 +313,35 @@ impl FlowSpanProducer {
                 if !sent {
                     // All workers are full - drop event to prevent ring buffer backup
                     // CRITICAL: Blocking here prevents draining ring buffer, causing eBPF to drop MORE events
+                    // This is a fail-safe to maintain pipeline throughput under extreme load.
                     metrics::registry::FLOW_EVENTS_DROPPED_BACKPRESSURE.inc();
-                    warn!(
-                        event.name = "flow.worker_backpressure",
-                        worker_count = worker_count,
-                        "all worker channels full, dropping flow event (prevents ring buffer deadlock)"
-                    );
+
+                    // Log detailed backpressure info every 1000 drops (avoid log spam)
+                    static BACKPRESSURE_DROP_COUNT: std::sync::atomic::AtomicU64 =
+                        std::sync::atomic::AtomicU64::new(0);
+                    let drop_count =
+                        BACKPRESSURE_DROP_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+                    if drop_count % 1000 == 0 {
+                        warn!(
+                            event.name = "flow.worker_backpressure",
+                            worker_count = worker_count,
+                            total_drops = drop_count + 1,
+                            protocol = ?flow_event.flow_key.protocol,
+                            "worker backpressure detected - dropping flow events to prevent deadlock"
+                        );
+                    }
+
                     // Continue draining ring buffer - better to drop here with visibility
                     // than block and cause eBPF to drop events silently
-
-                    // TODO: implement a more robust solution for this like ratio based sampling to prevent completely filling up:
-                    // // All workers are full - fallback to blocking send to preferred worker
-                    // let worker_tx = &worker_channels[worker_index];
-                    // if worker_tx.send(flow_event).await.is_err() {
-                    //     // Worker channel is closed, handle gracefully
-                    //     warn!("all workers closed, exiting");
-                    //     return;
-                    // }
-                    // worker_index = (worker_index + 1) % worker_count;
+                    //
+                    // TODO: Implement adaptive sampling strategy:
+                    // 1. Priority-based dropping (keep long-lived flows, drop short ones)
+                    // 2. Sampling (keep 1 in N flows during overload)
+                    // 3. Protocol-based priority (TCP > UDP > ICMP)
                 }
+
+                timer.observe_duration();
             }
 
             guard.clear_ready();
@@ -330,7 +353,6 @@ impl FlowSpanProducer {
 /// Replaces PacketWorker in the new event-driven architecture.
 pub struct FlowWorker {
     worker_id: usize,
-    max_record_interval: Duration,
     generic_timeout: Duration,
     icmp_timeout: Duration,
     tcp_timeout: Duration,
@@ -343,7 +365,6 @@ pub struct FlowWorker {
     flow_store: FlowStore,
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     flow_event_rx: mpsc::Receiver<FlowEvent>,
-    flow_span_tx: mpsc::Sender<FlowSpan>,
     filter: Option<Arc<PacketFilter>>,
     vxlan_port: u16,
     geneve_port: u16,
@@ -361,7 +382,6 @@ impl FlowWorker {
         flow_store: FlowStore,
         flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
         flow_event_rx: mpsc::Receiver<FlowEvent>,
-        flow_span_tx: mpsc::Sender<FlowSpan>,
         filter: Option<Arc<PacketFilter>>,
         vxlan_port: u16,
         geneve_port: u16,
@@ -369,7 +389,6 @@ impl FlowWorker {
     ) -> Self {
         Self {
             worker_id,
-            max_record_interval: span_opts.max_record_interval,
             generic_timeout: span_opts.generic_timeout,
             icmp_timeout: span_opts.icmp_timeout,
             tcp_timeout: span_opts.tcp_timeout,
@@ -382,7 +401,6 @@ impl FlowWorker {
             flow_store,
             flow_stats_map,
             flow_event_rx,
-            flow_span_tx,
             filter,
             vxlan_port,
             geneve_port,
@@ -733,10 +751,14 @@ impl FlowWorker {
             last_recorded_reverse_packets: stats.reverse_packets,
             last_recorded_reverse_bytes: stats.reverse_bytes,
             boot_time_offset: self.boot_time_offset_nanos,
+
+            // Timing fields for polling architecture (initialized by insert_flow)
+            last_recorded_time: UNIX_EPOCH,
+            last_activity_time: UNIX_EPOCH,
+            timeout_duration: Duration::from_secs(0),
         };
 
-        self.insert_flow_and_spawn_tasks(community_id.to_string(), span, timeout)
-            .await;
+        self.insert_flow(community_id.to_string(), span, timeout);
 
         trace!(
             event.name = "span.producer.created_flow",
@@ -773,52 +795,14 @@ impl FlowWorker {
         }
     }
 
-    /// Insert flow into tracking map and spawn record/timeout tasks.
-    /// Reuses existing logic from PacketWorker.
-    async fn insert_flow_and_spawn_tasks(
-        &self,
-        community_id: String,
-        flow_span: FlowSpan,
-        timeout: Duration,
-    ) {
-        let record_task = {
-            let community_id = community_id.clone();
-            let flow_store = Arc::clone(&self.flow_store);
-            let flow_stats_map = Arc::clone(&self.flow_stats_map);
-            let flow_span_tx = self.flow_span_tx.clone();
-            let interval = self.max_record_interval;
+    /// Insert flow into tracking map with initialized timing fields.
+    /// Polling tasks will handle record intervals and timeouts.
+    fn insert_flow(&self, community_id: String, mut flow_span: FlowSpan, timeout: Duration) {
+        let now = std::time::SystemTime::now();
+        flow_span.last_recorded_time = now;
+        flow_span.last_activity_time = flow_span.end_time;
+        flow_span.timeout_duration = timeout;
 
-            tokio::spawn(async move {
-                record_task_loop(
-                    community_id,
-                    flow_store,
-                    flow_stats_map,
-                    flow_span_tx,
-                    interval,
-                )
-                .await;
-            })
-        };
-
-        let timeout_task = {
-            let community_id = community_id.clone();
-            let flow_span_map = Arc::clone(&self.flow_store);
-            let flow_stats_map = Arc::clone(&self.flow_stats_map);
-            let flow_span_tx = self.flow_span_tx.clone();
-
-            tokio::spawn(async move {
-                timeout_task_loop(
-                    community_id,
-                    flow_span_map,
-                    flow_stats_map,
-                    flow_span_tx,
-                    timeout,
-                )
-                .await;
-            })
-        };
-
-        // Metrics: Extract interface name before moving flow_span
         let iface_name = flow_span
             .attributes
             .network_interface_name
@@ -826,15 +810,9 @@ impl FlowWorker {
             .unwrap_or("unknown");
         metrics::flow::inc_flows_created(iface_name);
 
-        let flow_entry = FlowEntry {
-            flow_span,
-            task_handles: FlowTaskHandles {
-                record_task,
-                timeout_task,
-            },
-        };
+        let flow_entry = FlowEntry { flow_span };
 
-        self.flow_store.insert(community_id.clone(), flow_entry);
+        self.flow_store.insert(community_id, flow_entry);
     }
 }
 
@@ -878,28 +856,38 @@ impl std::error::Error for BootTimeError {
     }
 }
 
-/// eBPF-aware record task loop - periodically pulls stats from eBPF FLOW_STATS_MAP
-/// and records active flows.
-///
-/// This replaces record_task_loop() in the new event-driven architecture.
-/// Instead of reading from FlowSpan (which is updated per-packet), this pulls
-/// the latest stats from the eBPF map and calculates deltas.
-async fn record_task_loop(
-    community_id: String,
-    flow_store: FlowStore,
-    flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
-    flow_span_tx: mpsc::Sender<FlowSpan>,
-    interval: Duration,
-) {
-    loop {
-        tokio::time::sleep(interval).await;
+/// Hash a string for flow partitioning across pollers
+fn hash_string(s: &str) -> usize {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = fxhash::FxHasher::default();
+    s.hash(&mut hasher);
+    hasher.finish() as usize
+}
 
-        let mut entry_ref = match flow_store.get_mut(&community_id) {
+/// Record a flow span by reading from eBPF map, updating counters, and sending to exporter.
+/// Returns true if the flow should continue being tracked, false if export channel is closed.
+async fn record_flow(
+    community_id: &str,
+    flow_store: &FlowStore,
+    flow_stats_map: &Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
+    flow_span_tx: &mpsc::Sender<FlowSpan>,
+) -> bool {
+    // Extract flow_key and boot_time_offset WITHOUT holding DashMap reference
+    let (
+        flow_key,
+        boot_time_offset,
+        last_recorded_packets,
+        last_recorded_bytes,
+        last_recorded_reverse_packets,
+        last_recorded_reverse_bytes,
+    ) = {
+        let entry_ref = match flow_store.get(community_id) {
             Some(entry) => entry,
-            None => break,
+            None => return true, // Flow removed, but that's ok
         };
-        let flow_span = &mut entry_ref.flow_span;
-        let flow_key: FlowKey = match flow_span.flow_key {
+
+        let flow_span = &entry_ref.flow_span;
+        let flow_key = match flow_span.flow_key {
             Some(key) => key,
             None => {
                 warn!(
@@ -907,315 +895,517 @@ async fn record_task_loop(
                     flow.community_id = %community_id,
                     "flow span missing eBPF key, skipping record"
                 );
-                continue;
+                return true;
             }
         };
 
-        let map = flow_stats_map.lock().await;
-        let stats = match map.get(&flow_key, 0) {
-            Ok(s) => s,
-            Err(e) => {
-                warn!(
-                    event.name = "record.ebpf_read_failed",
+        (
+            flow_key,
+            flow_span.boot_time_offset,
+            flow_span.last_recorded_packets,
+            flow_span.last_recorded_bytes,
+            flow_span.last_recorded_reverse_packets,
+            flow_span.last_recorded_reverse_bytes,
+        )
+    }; // entry_ref dropped here
+
+    // Now acquire mutex WITHOUT holding DashMap reference
+    let lock_start = std::time::Instant::now();
+    let map = flow_stats_map.lock().await;
+    let lock_duration = lock_start.elapsed();
+
+    if lock_duration.as_millis() > 100 {
+        warn!(
+            event.name = "record_flow.slow_lock",
+            flow.community_id = %community_id,
+            lock.duration_ms = lock_duration.as_millis(),
+            "mutex acquisition took longer than expected"
+        );
+    } else {
+        trace!(
+            event.name = "record_flow.lock_acquired",
+            flow.community_id = %community_id,
+            lock.duration_ms = lock_duration.as_millis(),
+            "acquired flow_stats_map mutex"
+        );
+    }
+    let stats = match map.get(&flow_key, 0) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(
+                event.name = "record.ebpf_read_failed",
+                flow.community_id = %community_id,
+                error.message = %e,
+                "failed to read stats from eBPF map, flow may have been evicted"
+            );
+            drop(map);
+            return true;
+        }
+    };
+    drop(map);
+
+    // Calculate deltas using extracted values
+    let delta_packets = stats.packets.saturating_sub(last_recorded_packets);
+    let delta_bytes = stats.bytes.saturating_sub(last_recorded_bytes);
+    let delta_reverse_packets = stats
+        .reverse_packets
+        .saturating_sub(last_recorded_reverse_packets);
+    let delta_reverse_bytes = stats
+        .reverse_bytes
+        .saturating_sub(last_recorded_reverse_bytes);
+
+    // Now get mutable reference to update flow span attributes
+    let mut entry_ref = match flow_store.get_mut(community_id) {
+        Some(entry) => entry,
+        None => return true, // Flow removed during processing
+    };
+
+    let flow_span = &mut entry_ref.flow_span;
+    flow_span.attributes.flow_bytes_delta = delta_bytes as i64;
+    flow_span.attributes.flow_packets_delta = delta_packets as i64;
+    flow_span.attributes.flow_reverse_bytes_delta = delta_reverse_bytes as i64;
+    flow_span.attributes.flow_reverse_packets_delta = delta_reverse_packets as i64;
+    flow_span.attributes.flow_bytes_total = stats.bytes as i64;
+    flow_span.attributes.flow_packets_total = stats.packets as i64;
+    flow_span.attributes.flow_reverse_bytes_total = stats.reverse_bytes as i64;
+    flow_span.attributes.flow_reverse_packets_total = stats.reverse_packets as i64;
+
+    flow_span.last_recorded_packets = stats.packets;
+    flow_span.last_recorded_bytes = stats.bytes;
+    flow_span.last_recorded_reverse_packets = stats.reverse_packets;
+    flow_span.last_recorded_reverse_bytes = stats.reverse_bytes;
+
+    // Update end_time and last_activity_time from eBPF map's latest timestamp
+    let end_time_nanos = stats.last_seen_ns + boot_time_offset;
+    let end_time = UNIX_EPOCH + Duration::from_nanos(end_time_nanos);
+    flow_span.end_time = end_time;
+    flow_span.last_activity_time = end_time;
+
+    // Update IP metadata from eBPF stats
+    let is_ip_flow = stats.ether_type == EtherType::Ipv4 || stats.ether_type == EtherType::Ipv6;
+    let is_ipv6 = stats.ether_type == EtherType::Ipv6;
+
+    if is_ip_flow {
+        flow_span.attributes.flow_ip_dscp_id = Some(stats.ip_dscp);
+        flow_span.attributes.flow_ip_dscp_name = Some(
+            IpDscp::try_from_u8(stats.ip_dscp)
+                .unwrap_or_default()
+                .as_str()
+                .to_string(),
+        );
+        flow_span.attributes.flow_ip_ecn_id = Some(stats.ip_ecn);
+        flow_span.attributes.flow_ip_ecn_name = Some(
+            IpEcn::try_from_u8(stats.ip_ecn)
+                .unwrap_or_default()
+                .as_str()
+                .to_string(),
+        );
+        flow_span.attributes.flow_ip_ttl = Some(stats.ip_ttl);
+
+        flow_span.attributes.flow_reverse_ip_dscp_id = Some(stats.reverse_ip_dscp);
+        flow_span.attributes.flow_reverse_ip_dscp_name = Some(
+            IpDscp::try_from_u8(stats.reverse_ip_dscp)
+                .unwrap_or_default()
+                .as_str()
+                .to_string(),
+        );
+        flow_span.attributes.flow_reverse_ip_ecn_id = Some(stats.reverse_ip_ecn);
+        flow_span.attributes.flow_reverse_ip_ecn_name = Some(
+            IpEcn::try_from_u8(stats.reverse_ip_ecn)
+                .unwrap_or_default()
+                .as_str()
+                .to_string(),
+        );
+        flow_span.attributes.flow_reverse_ip_ttl = Some(stats.reverse_ip_ttl);
+    }
+
+    if is_ipv6 {
+        flow_span.attributes.flow_ip_flow_label = Some(stats.ip_flow_label);
+        flow_span.attributes.flow_reverse_ip_flow_label = Some(stats.reverse_ip_flow_label);
+    }
+
+    flow_span.last_recorded_time = std::time::SystemTime::now();
+
+    let mut recorded_span = flow_span.clone();
+    recorded_span.attributes.flow_end_reason = Some(determine_flow_end_reason(
+        flow_span.attributes.flow_tcp_flags_bits,
+        FlowEndReason::ActiveTimeout,
+    ));
+
+    // Ensure end_time is never before start_time (OTLP requirement)
+    if recorded_span.end_time < recorded_span.start_time {
+        std::mem::swap(&mut recorded_span.start_time, &mut recorded_span.end_time);
+    }
+
+    drop(entry_ref);
+
+    // Send to exporter
+    match flow_span_tx.try_send(recorded_span) {
+        Ok(_) => {}
+        Err(mpsc::error::TrySendError::Full(_)) => {
+            metrics::registry::FLOW_SPANS_DROPPED_EXPORT_FAILURE.inc();
+            debug!(
+                event.name = "span.dropped",
+                flow.community_id = %community_id,
+                reason = "export_channel_full",
+                export.context = "active_record",
+                "dropped flow span - export channel at capacity"
+            );
+        }
+        Err(mpsc::error::TrySendError::Closed(_)) => {
+            error!(
+                event.name = "span.export_failed",
+                flow.community_id = %community_id,
+                reason = "channel_closed",
+                export.context = "active_record",
+                "export channel closed, stopping poller"
+            );
+            return false; // Signal to stop poller
+        }
+    }
+
+    // Reset metadata flags AND values in eBPF map for next interval
+    // Extract ebpf_key first, then drop DashMap reference before acquiring mutex
+    let ebpf_key = flow_store
+        .get(community_id)
+        .and_then(|entry| entry.flow_span.flow_key);
+
+    if let Some(ebpf_key) = ebpf_key {
+        let mut map = flow_stats_map.lock().await;
+        if let Ok(stats) = map.get(&ebpf_key, 0) {
+            let mut updated_stats = stats;
+            updated_stats.forward_metadata_seen = 0;
+            updated_stats.reverse_metadata_seen = 0;
+            updated_stats.ip_dscp = 0;
+            updated_stats.ip_ecn = 0;
+            updated_stats.ip_ttl = 0;
+            updated_stats.ip_flow_label = 0;
+            updated_stats.reverse_ip_dscp = 0;
+            updated_stats.reverse_ip_ecn = 0;
+            updated_stats.reverse_ip_ttl = 0;
+            updated_stats.reverse_ip_flow_label = 0;
+            updated_stats.icmp_type = 0;
+            updated_stats.icmp_code = 0;
+            updated_stats.reverse_icmp_type = 0;
+            updated_stats.reverse_icmp_code = 0;
+
+            if let Err(e) = map.insert(ebpf_key, updated_stats, 0) {
+                debug!(
+                    event.name = "record.metadata_reset_failed",
                     flow.community_id = %community_id,
                     error.message = %e,
-                    "failed to read stats from eBPF map, flow may have been evicted"
+                    "failed to reset metadata flags and values in eBPF map"
                 );
-                drop(map);
-                continue;
             }
-        };
+        }
+    }
+
+    true
+}
+
+/// Timeout and remove a flow, recording it one final time if it has packets.
+async fn timeout_and_remove_flow(
+    community_id: String,
+    flow_store: &FlowStore,
+    flow_stats_map: &Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
+    flow_span_tx: &mpsc::Sender<FlowSpan>,
+) {
+    // Remove from flow store (get ebpf_key before removing)
+    let (ebpf_key, boot_time_offset) = if let Some(entry) = flow_store.get(&community_id) {
+        (entry.flow_span.flow_key, entry.flow_span.boot_time_offset)
+    } else {
+        return; // Flow already removed
+    };
+
+    // Drop DashMap reference before acquiring mutex
+    let entry = match flow_store.remove(&community_id) {
+        Some((_, entry)) => entry,
+        None => return, // Race condition, already removed
+    };
+
+    let mut flow_span = entry.flow_span;
+
+    // Update end_time from eBPF map one last time
+    if let Some(key) = ebpf_key {
+        let lock_start = std::time::Instant::now();
+        let map = flow_stats_map.lock().await;
+        let lock_duration = lock_start.elapsed();
+
+        if lock_duration.as_millis() > 100 {
+            warn!(
+                event.name = "timeout_flow.slow_lock_read",
+                flow.community_id = %community_id,
+                lock.duration_ms = lock_duration.as_millis(),
+                "mutex acquisition took longer than expected"
+            );
+        }
+
+        if let Ok(stats) = map.get(&key, 0) {
+            let end_time_nanos = stats.last_seen_ns + boot_time_offset;
+            flow_span.end_time = UNIX_EPOCH + Duration::from_nanos(end_time_nanos);
+        }
         drop(map);
+    }
 
-        let delta_packets = stats
-            .packets
-            .saturating_sub(flow_span.last_recorded_packets);
-        let delta_bytes = stats.bytes.saturating_sub(flow_span.last_recorded_bytes);
-        let delta_reverse_packets = stats
-            .reverse_packets
-            .saturating_sub(flow_span.last_recorded_reverse_packets);
-        let delta_reverse_bytes = stats
-            .reverse_bytes
-            .saturating_sub(flow_span.last_recorded_reverse_bytes);
+    // Record final span if it has packets
+    let has_packets = flow_span.attributes.flow_packets_total > 0
+        || flow_span.attributes.flow_reverse_packets_total > 0;
 
-        flow_span.attributes.flow_bytes_delta = delta_bytes as i64;
-        flow_span.attributes.flow_packets_delta = delta_packets as i64;
-        flow_span.attributes.flow_reverse_bytes_delta = delta_reverse_bytes as i64;
-        flow_span.attributes.flow_reverse_packets_delta = delta_reverse_packets as i64;
-        flow_span.attributes.flow_bytes_total = stats.bytes as i64;
-        flow_span.attributes.flow_packets_total = stats.packets as i64;
-        flow_span.attributes.flow_reverse_bytes_total = stats.reverse_bytes as i64;
-        flow_span.attributes.flow_reverse_packets_total = stats.reverse_packets as i64;
-
-        flow_span.last_recorded_packets = stats.packets;
-        flow_span.last_recorded_bytes = stats.bytes;
-        flow_span.last_recorded_reverse_packets = stats.reverse_packets;
-        flow_span.last_recorded_reverse_bytes = stats.reverse_bytes;
-
-        // Update end_time from eBPF map's latest timestamp
-        let end_time_nanos = stats.last_seen_ns + flow_span.boot_time_offset;
-        flow_span.end_time = UNIX_EPOCH + Duration::from_nanos(end_time_nanos);
-
-        // Update IP metadata from eBPF stats (current "first seen" values for this interval)
-        let is_ip_flow = stats.ether_type == EtherType::Ipv4 || stats.ether_type == EtherType::Ipv6;
-        let is_ipv6 = stats.ether_type == EtherType::Ipv6;
-
-        if is_ip_flow {
-            flow_span.attributes.flow_ip_dscp_id = Some(stats.ip_dscp);
-            flow_span.attributes.flow_ip_dscp_name = Some(
-                IpDscp::try_from_u8(stats.ip_dscp)
-                    .unwrap_or_default()
-                    .as_str()
-                    .to_string(),
-            );
-            flow_span.attributes.flow_ip_ecn_id = Some(stats.ip_ecn);
-            flow_span.attributes.flow_ip_ecn_name = Some(
-                IpEcn::try_from_u8(stats.ip_ecn)
-                    .unwrap_or_default()
-                    .as_str()
-                    .to_string(),
-            );
-            flow_span.attributes.flow_ip_ttl = Some(stats.ip_ttl);
-
-            flow_span.attributes.flow_reverse_ip_dscp_id = Some(stats.reverse_ip_dscp);
-            flow_span.attributes.flow_reverse_ip_dscp_name = Some(
-                IpDscp::try_from_u8(stats.reverse_ip_dscp)
-                    .unwrap_or_default()
-                    .as_str()
-                    .to_string(),
-            );
-            flow_span.attributes.flow_reverse_ip_ecn_id = Some(stats.reverse_ip_ecn);
-            flow_span.attributes.flow_reverse_ip_ecn_name = Some(
-                IpEcn::try_from_u8(stats.reverse_ip_ecn)
-                    .unwrap_or_default()
-                    .as_str()
-                    .to_string(),
-            );
-            flow_span.attributes.flow_reverse_ip_ttl = Some(stats.reverse_ip_ttl);
-        }
-
-        if is_ipv6 {
-            flow_span.attributes.flow_ip_flow_label = Some(stats.ip_flow_label);
-            flow_span.attributes.flow_reverse_ip_flow_label = Some(stats.reverse_ip_flow_label);
-        }
-
+    if has_packets {
         let mut recorded_span = flow_span.clone();
         recorded_span.attributes.flow_end_reason = Some(determine_flow_end_reason(
             flow_span.attributes.flow_tcp_flags_bits,
-            FlowEndReason::ActiveTimeout,
+            FlowEndReason::IdleTimeout,
         ));
 
         // Ensure end_time is never before start_time (OTLP requirement)
-        // Swap timestamps if they're inverted to preserve duration
         if recorded_span.end_time < recorded_span.start_time {
             std::mem::swap(&mut recorded_span.start_time, &mut recorded_span.end_time);
         }
 
-        drop(entry_ref);
-
-        if flow_span_tx.send(recorded_span).await.is_err() {
-            warn!(
-                event.name = "span.export_failed",
-                flow.community_id = %community_id,
-                export.reason = "active_record",
-                "failed to send flow span for active recording"
-            );
-            break;
-        }
-
-        // Reset metadata flags AND values in eBPF map for next interval
-        // This allows capturing "first seen" values per direction for the next span
-        // AND prevents stale values from being exported if no packets arrive in a direction
-        if let Some(entry_ref) = flow_store.get(&community_id)
-            && let Some(ebpf_key) = entry_ref.flow_span.flow_key
-        {
-            let mut map = flow_stats_map.lock().await;
-            if let Ok(stats) = map.get(&ebpf_key, 0) {
-                let mut updated_stats = stats;
-                // Reset flags to allow capturing new values
-                updated_stats.forward_metadata_seen = 0;
-                updated_stats.reverse_metadata_seen = 0;
-                // Reset values to zero to prevent stale data if no packets arrive
-                updated_stats.ip_dscp = 0;
-                updated_stats.ip_ecn = 0;
-                updated_stats.ip_ttl = 0;
-                updated_stats.ip_flow_label = 0;
-                updated_stats.reverse_ip_dscp = 0;
-                updated_stats.reverse_ip_ecn = 0;
-                updated_stats.reverse_ip_ttl = 0;
-                updated_stats.reverse_ip_flow_label = 0;
-                updated_stats.icmp_type = 0;
-                updated_stats.icmp_code = 0;
-                updated_stats.reverse_icmp_type = 0;
-                updated_stats.reverse_icmp_code = 0;
-
-                if let Err(e) = map.insert(ebpf_key, updated_stats, 0) {
-                    debug!(
-                        event.name = "record.metadata_reset_failed",
-                        flow.community_id = %community_id,
-                        error.message = %e,
-                        "failed to reset metadata flags and values in eBPF map"
-                    );
-                }
+        match flow_span_tx.try_send(recorded_span) {
+            Ok(_) => {}
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                metrics::registry::FLOW_SPANS_DROPPED_EXPORT_FAILURE.inc();
+                debug!(
+                    event.name = "span.dropped",
+                    flow.community_id = %community_id,
+                    reason = "export_channel_full",
+                    export.context = "idle_timeout",
+                    "dropped flow span - export channel at capacity"
+                );
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                error!(
+                    event.name = "span.export_failed",
+                    flow.community_id = %community_id,
+                    reason = "channel_closed",
+                    export.context = "idle_timeout",
+                    "export channel closed"
+                );
             }
         }
     }
+
+    // Clean up eBPF map entry
+    if let Some(key) = ebpf_key {
+        let lock_start = std::time::Instant::now();
+        let mut map = flow_stats_map.lock().await;
+        let lock_duration = lock_start.elapsed();
+
+        if lock_duration.as_millis() > 100 {
+            warn!(
+                event.name = "timeout_flow.slow_lock_cleanup",
+                flow.community_id = %community_id,
+                lock.duration_ms = lock_duration.as_millis(),
+                "mutex acquisition for cleanup took longer than expected"
+            );
+        }
+
+        if let Err(e) = map.remove(&key) {
+            debug!(
+                event.name = "ebpf.map_cleanup_failed",
+                flow.community_id = %community_id,
+                error.message = %e,
+                "failed to remove eBPF map entry (may have been evicted already)"
+            );
+        }
+        drop(map);
+    }
+
+    // Metrics
+    let iface_name = flow_span
+        .attributes
+        .network_interface_name
+        .as_deref()
+        .unwrap_or("unknown");
+    metrics::flow::inc_flows_expired(iface_name, "timeout");
+
+    if let Ok(duration) = flow_span.end_time.duration_since(flow_span.start_time) {
+        metrics::flow::observe_flow_duration(duration);
+    }
 }
 
-/// eBPF-aware timeout task loop - handles flow idle timeout and cleans up eBPF map entries.
-///
-/// This replaces timeout_task_loop() in the new event-driven architecture.
-/// In addition to removing the flow from userspace tracking, this also cleans up
-/// the eBPF FLOW_STATS_MAP entry to prevent memory leaks.
-async fn timeout_task_loop(
-    community_id: String,
+/// Individual poller task - handles flows hashed to this poller.
+/// Polls at configured interval to check for record intervals and timeouts.
+async fn flow_poller_task(
+    poller_id: usize,
+    num_pollers: usize,
     flow_store: FlowStore,
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     flow_span_tx: mpsc::Sender<FlowSpan>,
-    mut timeout_duration: Duration,
+    max_record_interval: Duration,
+    poll_interval: Duration,
 ) {
+    let mut interval = tokio::time::interval(poll_interval);
+
+    debug!(
+        event.name = "flow_poller.started",
+        poller.id = poller_id,
+        poller.total = num_pollers,
+        "flow poller started"
+    );
+
+    let mut iteration_count = 0u64;
+    let mut last_stats_log = std::time::Instant::now();
+
     loop {
-        tokio::select! {
-            _ = tokio::time::sleep(timeout_duration) => {
-                // Before timing out, check if flow is still active in eBPF map
-                // Optimization: get boot_time_offset once outside the lock
-                let (ebpf_key, boot_time_offset) = match flow_store.get(&community_id) {
-                    Some(entry) => {
-                        let key = entry.flow_span.flow_key;
-                        let offset = entry.flow_span.boot_time_offset;
-                        (key, offset)
-                    }
-                    None => {
-                        // Flow already removed from store, proceed with timeout
-                        break;
-                    }
-                };
+        interval.tick().await;
 
-                // Only check eBPF map if we have a key
-                if let Some(key) = ebpf_key {
-                    let map = flow_stats_map.lock().await;
-                    match map.get(&key, 0) {
-                        Ok(stats) => {
-                            let current_time_ns = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap()
-                                .as_nanos() as u64;
-                            let current_boot_time_ns = current_time_ns.saturating_sub(boot_time_offset);
-                            let last_seen_elapsed_ns = current_boot_time_ns.saturating_sub(stats.last_seen_ns);
+        let tick_start = std::time::Instant::now();
+        let now = std::time::SystemTime::now();
+        let mut flows_to_remove = Vec::new();
+        let mut flows_checked = 0usize;
+        let mut flows_recorded = 0usize;
+        let mut flows_skipped_partition = 0usize;
 
-                            // If flow is still active, reschedule timeout
-                            if last_seen_elapsed_ns < timeout_duration.as_nanos() as u64 {
-                                let remaining_ns = timeout_duration.as_nanos() as u64 - last_seen_elapsed_ns;
-                                timeout_duration = Duration::from_nanos(remaining_ns.max(1_000_000)); // At least 1ms
-                                drop(map);
-                                continue;
-                            }
-                            // Flow is idle, proceed with timeout below
-                            drop(map);
-                        }
-                        Err(_) => {
-                            // Flow already removed from eBPF map, proceed with timeout
-                        }
-                    }
-                }
-                // If we reach here, proceed with timeout
+        trace!(
+            event.name = "flow_poller.tick_start",
+            poller.id = poller_id,
+            iteration.count = iteration_count + 1,
+            "poller tick started"
+        );
 
-                // CRITICAL FIX: Capture eBPF key BEFORE attempting flow_store removal
-                // to ensure cleanup happens even if flow_store entry is gone (race condition)
-                let ebpf_key_for_cleanup = ebpf_key;
+        // Collect flows to process - CRITICAL: Must collect IDs first, then drop iterator
+        // before calling record_flow/timeout_and_remove_flow to avoid iterator deadlock
+        let mut flows_to_record = Vec::new();
 
-                let entry = match flow_store.remove(&community_id) {
-                    Some((_, entry)) => entry,
-                    None => {
-                        // Flow already removed from flow_store (race condition)
-                        // But we still need to cleanup eBPF map using the captured key
-                        if let Some(key) = ebpf_key_for_cleanup {
-                            let mut map = flow_stats_map.lock().await;
-                            if let Err(e) = map.remove(&key) {
-                                debug!(
-                                    event.name = "ebpf.map_cleanup_failed_race",
-                                    flow.community_id = %community_id,
-                                    error.message = %e,
-                                    "failed to remove eBPF entry after flow_store race condition"
-                                );
-                            } else {
-                                debug!(
-                                    event.name = "ebpf.map_cleanup_success_race",
-                                    flow.community_id = %community_id,
-                                    "cleaned up eBPF entry despite flow_store race condition"
-                                );
-                            }
-                        }
-                        break;
-                    }
-                };
+        let collection_start = std::time::Instant::now();
+        for entry in flow_store.iter() {
+            let community_id = entry.key();
 
-                let mut flow_span = entry.flow_span;
-                let ebpf_key = flow_span.flow_key;
-
-                // Update end_time before exporting using the latest stats from eBPF map
-                if let Some(key) = ebpf_key {
-                    let map = flow_stats_map.lock().await;
-                    if let Ok(stats) = map.get(&key, 0) {
-                        let end_time_nanos = stats.last_seen_ns + boot_time_offset;
-                        flow_span.end_time = UNIX_EPOCH + Duration::from_nanos(end_time_nanos);
-                    }
-                    drop(map);
-                }
-
-                let has_packets = flow_span.attributes.flow_packets_total > 0
-                    || flow_span.attributes.flow_reverse_packets_total > 0;
-
-                if has_packets {
-                    let mut recorded_span = flow_span.clone();
-                    recorded_span.attributes.flow_end_reason = Some(determine_flow_end_reason(
-                        flow_span.attributes.flow_tcp_flags_bits,
-                        FlowEndReason::IdleTimeout,
-                    ));
-
-                    // Ensure end_time is never before start_time (OTLP requirement)
-                    // Swap timestamps if they're inverted to preserve duration
-                    if recorded_span.end_time < recorded_span.start_time {
-                        std::mem::swap(&mut recorded_span.start_time, &mut recorded_span.end_time);
-                    }
-
-                    if flow_span_tx.send(recorded_span).await.is_err() {
-                        warn!(
-                            event.name = "span.export_failed",
-                            flow.community_id = %community_id,
-                            export.reason = "idle_timeout",
-                            "failed to send timed-out flow span"
-                        );
-                    }
-                }
-
-                if let Some(key) = ebpf_key {
-                    let mut map = flow_stats_map.lock().await;
-                    if let Err(e) = map.remove(&key) {
-                        debug!(
-                            event.name = "ebpf.map_cleanup_failed",
-                            flow.community_id = %community_id,
-                            error.message = %e,
-                            "failed to remove eBPF map entry (may have been evicted already)"
-                        );
-                    }
-                    drop(map);
-                }
-
-                let iface_name = flow_span
-                    .attributes
-                    .network_interface_name
-                    .as_deref()
-                    .unwrap_or("unknown");
-                metrics::flow::inc_flows_expired(iface_name, "timeout");
-
-                if let Ok(duration) = flow_span.end_time.duration_since(flow_span.start_time) {
-                    metrics::flow::observe_flow_duration(duration);
-                }
-
-                entry.task_handles.record_task.abort();
-                break;
+            // Partition: only process flows hashed to this poller
+            if hash_string(community_id) % num_pollers != poller_id {
+                flows_skipped_partition += 1;
+                continue;
             }
+
+            // Extract all needed data from entry
+            let flow_span = &entry.flow_span;
+            let last_recorded_time = flow_span.last_recorded_time;
+            let last_activity_time = flow_span.last_activity_time;
+            let timeout_duration = flow_span.timeout_duration;
+
+            flows_checked += 1;
+
+            // Check if record interval elapsed
+            if let Ok(elapsed) = now.duration_since(last_recorded_time)
+                && elapsed >= max_record_interval
+            {
+                flows_to_record.push(community_id.clone());
+            }
+
+            // Check if timeout elapsed
+            if let Ok(elapsed) = now.duration_since(last_activity_time)
+                && elapsed >= timeout_duration
+            {
+                flows_to_remove.push(community_id.clone());
+            }
+        } // Iterator dropped here - no longer holding DashMap locks
+        let collection_duration = collection_start.elapsed();
+
+        trace!(
+            event.name = "flow_poller.collection_phase",
+            poller.id = poller_id,
+            flows.total_checked = flows_checked,
+            flows.to_record = flows_to_record.len(),
+            flows.to_timeout = flows_to_remove.len(),
+            collection.duration_ms = collection_duration.as_millis(),
+            "collection phase completed"
+        );
+
+        // Now process flows WITHOUT holding iterator locks
+        let record_start = std::time::Instant::now();
+        for community_id in &flows_to_record {
+            flows_recorded += 1;
+            trace!(
+                event.name = "flow_poller.recording",
+                poller.id = poller_id,
+                flow.community_id = %community_id,
+                "calling record_flow"
+            );
+            if !record_flow(community_id, &flow_store, &flow_stats_map, &flow_span_tx).await {
+                // Export channel closed, stop poller
+                warn!(
+                    event.name = "flow_poller.stopped",
+                    poller.id = poller_id,
+                    reason = "export_channel_closed",
+                    "flow poller stopping due to closed export channel"
+                );
+                return;
+            }
+        }
+        let record_duration = record_start.elapsed();
+
+        if !flows_to_record.is_empty() {
+            trace!(
+                event.name = "flow_poller.record_phase",
+                poller.id = poller_id,
+                flows.recorded = flows_to_record.len(),
+                record.duration_ms = record_duration.as_millis(),
+                "record phase completed"
+            );
+        }
+
+        // Remove timed out flows
+        let timeout_start = std::time::Instant::now();
+        for community_id in flows_to_remove.iter() {
+            trace!(
+                event.name = "flow_poller.timing_out",
+                poller.id = poller_id,
+                flow.community_id = %community_id,
+                "calling timeout_and_remove_flow"
+            );
+            timeout_and_remove_flow(
+                community_id.clone(),
+                &flow_store,
+                &flow_stats_map,
+                &flow_span_tx,
+            )
+            .await;
+        }
+        let timeout_duration_elapsed = timeout_start.elapsed();
+
+        if !flows_to_remove.is_empty() {
+            trace!(
+                event.name = "flow_poller.timeout_phase",
+                poller.id = poller_id,
+                flows.timed_out = flows_to_remove.len(),
+                timeout.duration_ms = timeout_duration_elapsed.as_millis(),
+                "timeout phase completed"
+            );
+        }
+
+        let tick_duration = tick_start.elapsed();
+        iteration_count += 1;
+
+        if last_stats_log.elapsed() >= Duration::from_secs(30) {
+            info!(
+                event.name = "flow_poller.stats",
+                poller.id = poller_id,
+                iteration.count = iteration_count,
+                flows.checked = flows_checked,
+                flows.recorded = flows_recorded,
+                flows.timed_out = flows_to_remove.len(),
+                flows.skipped_partition = flows_skipped_partition,
+                tick.duration_ms = tick_duration.as_millis(),
+                collection.duration_ms = collection_duration.as_millis(),
+                record.duration_ms = record_duration.as_millis(),
+                timeout.duration_ms = timeout_duration_elapsed.as_millis(),
+                "flow poller iteration stats"
+            );
+            last_stats_log = std::time::Instant::now();
+        }
+
+        // Warn if iteration took > 500ms (should complete much faster)
+        if tick_duration.as_millis() > 500 {
+            warn!(
+                event.name = "flow_poller.slow_iteration",
+                poller.id = poller_id,
+                tick.duration_ms = tick_duration.as_millis(),
+                flows.checked = flows_checked,
+                "flow poller iteration took longer than expected"
+            );
         }
     }
 }
@@ -1458,8 +1648,7 @@ mod tests {
     /// Helper to create a test FlowWorker for timeout calculations
     fn create_test_worker_for_timeout() -> FlowWorker {
         let span_opts = SpanOptions::default();
-        let (_flow_event_tx, flow_event_rx) = mpsc::channel(100);
-        let (flow_span_tx, _flow_span_rx) = mpsc::channel(100);
+        let (_flow_event_tx, flow_event_rx) = mpsc::channel::<FlowEvent>(100);
         let flow_store = Arc::new(DashMap::with_capacity_and_hasher(
             100,
             FxBuildHasher::default(),
@@ -1473,7 +1662,6 @@ mod tests {
 
         FlowWorker {
             worker_id: 0,
-            max_record_interval: span_opts.max_record_interval,
             generic_timeout: span_opts.generic_timeout,
             icmp_timeout: span_opts.icmp_timeout,
             tcp_timeout: span_opts.tcp_timeout,
@@ -1486,7 +1674,6 @@ mod tests {
             flow_store,
             flow_stats_map,
             flow_event_rx,
-            flow_span_tx,
             filter: None,
             vxlan_port: 4789,
             geneve_port: 6081,

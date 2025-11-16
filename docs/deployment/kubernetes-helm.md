@@ -152,9 +152,9 @@ export "traces" {
     timeout = "10s"
     max_batch_size = 512
     max_batch_interval = "5s"
-    max_queue_size = 2048
+    max_queue_size = 32768
     max_concurrent_exports = 1
-    max_export_timeout = "30s"
+    max_export_timeout = "10s"
   }
 }
 
