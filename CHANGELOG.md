@@ -1,3 +1,13 @@
+## [v0.1.0-beta.30] - 2025-11-16
+
+### Bug Fixes
+
+- Pipeline stalls by isolating runtime threads and eliminating blocking operations (#291)
+
+[v0.1.0-beta.29..v0.1.0-beta.30](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.29...v0.1.0-beta.30)
+
+
+
 ## [v0.1.0-beta.29] - 2025-11-15
 
 ### Features
