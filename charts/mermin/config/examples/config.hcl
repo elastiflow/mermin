@@ -10,9 +10,15 @@ auto_reload = false
 # Shutdown timeout
 shutdown_timeout = "5s"
 
-# Internal channel and performance related configuration options
-packet_channel_capacity = 1024
-packet_worker_count     = 2
+# Pipeline performance and channel configuration options
+pipeline {
+  ring_buffer_capacity             = 8192
+  worker_count                     = 4
+  worker_poll_interval             = "5s"
+  k8s_decorator_threads            = 12
+  flow_span_channel_multiplier     = 2.0
+  decorated_span_channel_multiplier = 4.0
+}
 
 # Internal configuration options
 internal "traces" {

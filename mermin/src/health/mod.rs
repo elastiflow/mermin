@@ -7,18 +7,19 @@ use std::sync::{
 
 use axum::{
     Router,
-    extract::State,
+    extract::{Request, State},
     http::StatusCode,
-    response::{IntoResponse, Json},
+    middleware::{self, Next},
+    response::{IntoResponse, Json, Response},
     routing::get,
 };
 pub use error::HealthError;
 use serde_json::json;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
-use tracing::info;
+use tracing::{debug, error, info, warn};
 
-use crate::runtime::conf::ApiConf;
+use crate::{metrics::registry, runtime::conf::ApiConf};
 
 #[derive(Clone)]
 pub struct HealthState {
@@ -40,17 +41,50 @@ impl Default for HealthState {
 }
 
 pub async fn liveness_handler(State(state): State<HealthState>) -> impl IntoResponse {
+    let start = std::time::Instant::now();
+
     let ebpf_loaded = state.ebpf_loaded.load(Ordering::Relaxed);
-    let status_code = if ebpf_loaded {
+    let startup_complete = state.startup_complete.load(Ordering::Relaxed);
+    let ready_to_process = state.ready_to_process.load(Ordering::Relaxed);
+
+    // Liveness is OK if eBPF is loaded OR if we haven't completed startup yet
+    // This prevents killing the pod during initialization
+    let is_alive = ebpf_loaded || !startup_complete;
+
+    let status_code = if is_alive {
         StatusCode::OK
     } else {
+        warn!(
+            event.name = "health.liveness.failed",
+            ebpf_loaded = %ebpf_loaded,
+            startup_complete = %startup_complete,
+            "liveness check failed"
+        );
         StatusCode::SERVICE_UNAVAILABLE
     };
 
+    let duration = start.elapsed();
+    debug!(
+        event.name = "health.liveness.checked",
+        http.response.status_code = status_code.as_u16(),
+        duration_us = duration.as_micros(),
+        ebpf_loaded = ebpf_loaded,
+        startup_complete = startup_complete,
+        "liveness check completed"
+    );
+
+    let dropped_export_spans = registry::FLOW_SPANS_DROPPED_EXPORT_FAILURE.get();
+    let pipeline_healthy = ebpf_loaded && ready_to_process;
+
     let body = Json(json!({
-        "status": if ebpf_loaded { "ok" } else { "unavailable" },
+        "status": if is_alive { "ok" } else { "unavailable" },
         "checks": {
-            "ebpf_loaded": ebpf_loaded
+            "ebpf_loaded": ebpf_loaded,
+            "startup_complete": startup_complete,
+            "pipeline_healthy": pipeline_healthy
+        },
+        "metrics": {
+            "dropped_export_spans": dropped_export_spans
         }
     }));
 
@@ -64,9 +98,21 @@ pub async fn readiness_handler(State(state): State<HealthState>) -> impl IntoRes
 
     let is_ready = ebpf_loaded && k8s_caches_synced && ready_to_process;
 
+    let dropped_export_spans = registry::FLOW_SPANS_DROPPED_EXPORT_FAILURE.get();
+    let pipeline_healthy = ebpf_loaded && ready_to_process;
+
     let status_code = if is_ready {
         StatusCode::OK
     } else {
+        warn!(
+            event.name = "health.readiness.failed",
+            ebpf_loaded = %ebpf_loaded,
+            k8s_caches_synced = %k8s_caches_synced,
+            ready_to_process = %ready_to_process,
+            pipeline_healthy = %pipeline_healthy,
+            dropped_export_spans = %dropped_export_spans,
+            "readiness check failed"
+        );
         StatusCode::SERVICE_UNAVAILABLE
     };
 
@@ -75,7 +121,11 @@ pub async fn readiness_handler(State(state): State<HealthState>) -> impl IntoRes
         "checks": {
             "ebpf_loaded": ebpf_loaded,
             "k8s_caches_synced": k8s_caches_synced,
-            "ready_to_process": ready_to_process
+            "ready_to_process": ready_to_process,
+            "pipeline_healthy": pipeline_healthy
+        },
+        "metrics": {
+            "dropped_export_spans": dropped_export_spans
         }
     }));
 
@@ -87,6 +137,11 @@ pub async fn startup_handler(State(state): State<HealthState>) -> impl IntoRespo
     let status_code = if startup_complete {
         StatusCode::OK
     } else {
+        warn!(
+            event.name = "health.startup.failed",
+            startup_complete = %startup_complete,
+            "startup check failed"
+        );
         StatusCode::SERVICE_UNAVAILABLE
     };
 
@@ -100,11 +155,43 @@ pub async fn startup_handler(State(state): State<HealthState>) -> impl IntoRespo
     (status_code, body)
 }
 
+async fn log_errors_middleware(req: Request, next: Next) -> Response {
+    let method = req.method().clone();
+    let uri = req.uri().clone();
+
+    let response = next.run(req).await;
+    let status = response.status();
+
+    // Log unexpected errors (not 503 SERVICE_UNAVAILABLE which is expected for health checks)
+    if !status.is_success() && status != StatusCode::SERVICE_UNAVAILABLE {
+        if status.is_client_error() {
+            warn!(
+                event.name = "health.request.client_error",
+                http.request.method = %method,
+                url.path = %uri.path(),
+                http.response.status_code = %status.as_u16(),
+                "health check request returned unexpected client error"
+            );
+        } else if status.is_server_error() {
+            error!(
+                event.name = "health.request.server_error",
+                http.request.method = %method,
+                url.path = %uri.path(),
+                http.response.status_code = %status.as_u16(),
+                "health check request returned unexpected server error"
+            );
+        }
+    }
+
+    response
+}
+
 pub fn create_health_router(state: HealthState) -> Router {
     Router::new()
         .route("/livez", get(liveness_handler))
         .route("/readyz", get(readiness_handler))
         .route("/startup", get(startup_handler))
+        .layer(middleware::from_fn(log_errors_middleware))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

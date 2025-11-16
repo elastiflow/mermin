@@ -15,7 +15,7 @@ use k8s_openapi::{
 };
 use kube::{Resource, ResourceExt};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, trace, warn};
+use tracing::{trace, warn};
 
 use crate::k8s::attributor::{K8sObjectMeta, ResourceStore, WorkloadOwner};
 
@@ -183,7 +183,7 @@ impl OwnerRelationsManager {
                         next_level_owners.extend(next_owners);
                     }
                 } else {
-                    debug!(
+                    trace!(
                         event.name = "k8s.owner_ref_missing",
                         k8s.owner.name = %owner_ref.name,
                         k8s.owner.kind = %owner_ref.kind,
@@ -268,7 +268,7 @@ impl OwnerRelationsManager {
             ($store_type:ty, $variant:ident) => {{
                 let resources = store.get_by_namespace::<$store_type>(namespace);
                 let resource_count = resources.len();
-                debug!(
+                trace!(
                     event.name = "k8s.lookup_owner.store_check",
                     k8s.owner.kind = %kind,
                     k8s.namespace = %namespace,
@@ -303,7 +303,7 @@ impl OwnerRelationsManager {
             "Job" => find_in_store!(Job, Job),
             "CronJob" => find_in_store!(CronJob, CronJob),
             _ => {
-                debug!(
+                trace!(
                     event.name = "k8s.unsupported_owner_kind",
                     k8s.owner.kind = %owner_ref.kind,
                     "owner lookup for this resource kind is not implemented"

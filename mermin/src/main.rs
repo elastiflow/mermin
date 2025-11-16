@@ -75,33 +75,53 @@ async fn run() -> Result<()> {
     if conf.metrics.enabled {
         let metrics_conf = conf.metrics.clone();
 
-        tokio::spawn(async move {
-            if let Err(e) = start_metrics_server(metrics_conf).await {
-                error!(
-                    event.name = "metrics.server_error",
-                    error.message = %e,
-                    "metrics server encountered a fatal error"
-                );
-            }
+        // Start metrics server on a dedicated runtime thread to prevent starvation
+        // This ensures /metrics endpoint always responds even when main runtime is under heavy load
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .thread_name("mermin-metrics")
+                .build()
+                .expect("failed to create metrics server runtime");
+
+            rt.block_on(async move {
+                if let Err(e) = start_metrics_server(metrics_conf).await {
+                    error!(
+                        event.name = "metrics.server_error",
+                        error.message = %e,
+                        "metrics server encountered a fatal error"
+                    );
+                }
+            });
         });
+
+        info!(event.name = "metrics.started", "metrics server started");
     }
 
     let health_state = HealthState::default();
 
-    // Start API server immediately so Kubernetes can start health checks
-    // Health checks will return "not ready" based on health_state flags until initialization completes
     if conf.api.enabled {
         let health_state_clone = health_state.clone();
         let api_conf = conf.api.clone();
 
-        tokio::spawn(async move {
-            if let Err(e) = start_api_server(health_state_clone, &api_conf).await {
-                error!(
-                    event.name = "api.internal_error",
-                    error.message = %e,
-                    "api server encountered a fatal error"
-                );
-            }
+        // Start API server on a dedicated runtime thread to prevent starvation
+        // This ensures health checks always respond even when main runtime is under heavy load
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .thread_name("mermin-api")
+                .build()
+                .expect("failed to create api server runtime");
+
+            rt.block_on(async move {
+                if let Err(e) = start_api_server(health_state_clone, &api_conf).await {
+                    error!(
+                        event.name = "api.internal_error",
+                        error.message = %e,
+                        "api server encountered a fatal error"
+                    );
+                }
+            });
         });
 
         info!(
@@ -204,6 +224,44 @@ async fn run() -> Result<()> {
         "tc programs loaded into kernel"
     );
 
+    // Determine TC attachment method based on kernel version
+    let kernel_version = KernelVersion::current().unwrap_or(KernelVersion::new(0, 0, 0));
+    let use_tcx = kernel_version >= KernelVersion::new(6, 6, 0);
+
+    // Check /sys/fs/bpf writability for TCX link pinning BEFORE extracting maps
+    // We test by attempting to pin a BPF map temporarily, since /sys/fs/bpf
+    // is a BPF filesystem that only supports pinning BPF objects (not regular files)
+    let bpf_fs_writable = use_tcx && {
+        let test_pin_path = "/sys/fs/bpf/.mermin_test_map";
+        let test_result = ebpf
+            .maps()
+            .next()
+            .and_then(|(_, map)| match map.pin(test_pin_path) {
+                Ok(_) => match std::fs::remove_file(test_pin_path) {
+                    Ok(_) => Some(()),
+                    Err(e) => {
+                        warn!(
+                            event.name = "ebpf.bpf_test_cleanup_failed",
+                            error = %e,
+                            "failed to cleanup test pin at {}, but /sys/fs/bpf is writable",
+                            test_pin_path
+                        );
+                        Some(())
+                    }
+                },
+                Err(_) => None,
+            });
+        test_result.is_some()
+    };
+
+    if use_tcx {
+        info!(
+            event.name = "ebpf.bpf_fs_check_complete",
+            bpf_fs_writable = bpf_fs_writable,
+            "checked /sys/fs/bpf writability for TCX link pinning"
+        );
+    }
+
     // Extract eBPF maps BEFORE moving Ebpf object to controller thread
     // Maps will be owned by FlowSpanProducer (main thread), programs by controller (host namespace thread)
     let flow_stats_map = ebpf
@@ -226,8 +284,6 @@ async fn run() -> Result<()> {
         "eBPF maps extracted successfully for flow producer"
     );
 
-    let kernel_version = KernelVersion::current().unwrap_or(KernelVersion::new(0, 0, 0));
-    let use_tcx = kernel_version >= KernelVersion::new(6, 6, 0);
     let attach_method = if use_tcx { "TCX" } else { "netlink" };
     debug!(
         event.name = "ebpf.attach_method_determined",
@@ -265,6 +321,7 @@ async fn run() -> Result<()> {
         Arc::clone(&iface_map),
         ebpf,
         use_tcx,
+        bpf_fs_writable,
         conf.discovery.instrument.tc_priority,
         conf.discovery.instrument.tcx_order.clone(),
         Some(event_tx.clone()),
@@ -303,14 +360,20 @@ async fn run() -> Result<()> {
         "ebpf programs attached and ready to process network traffic"
     );
 
-    let (flow_span_tx, mut flow_span_rx) = mpsc::channel(conf.packet_channel_capacity);
+    let flow_span_capacity = (conf.pipeline.ring_buffer_capacity as f32
+        * conf.pipeline.flow_span_channel_multiplier) as usize;
+    let decorated_span_capacity = (conf.pipeline.ring_buffer_capacity as f32
+        * conf.pipeline.decorated_span_channel_multiplier)
+        as usize;
+
+    let (flow_span_tx, mut flow_span_rx) = mpsc::channel(flow_span_capacity);
     let (k8s_decorated_flow_span_tx, mut k8s_decorated_flow_span_rx) =
-        mpsc::channel(conf.packet_channel_capacity);
+        mpsc::channel(decorated_span_capacity);
 
     let flow_span_producer = FlowSpanProducer::new(
         conf.clone().span,
-        conf.packet_channel_capacity,
-        conf.packet_worker_count,
+        conf.pipeline.ring_buffer_capacity,
+        conf.pipeline.worker_count,
         Arc::clone(&iface_map),
         flow_stats_map,
         flow_events_ringbuf,
@@ -368,70 +431,93 @@ async fn run() -> Result<()> {
             None
         }
     };
-    tokio::spawn(async move {
-        info!(
-            event.name = "task.started",
-            task.name = "k8s.decorator",
-            task.description = "decorating flow attributes with kubernetes metadata",
-            "userspace task started"
-        );
-        // Matching on the attributor early is a performance optimization to avoid having to check to see if the attributor is None per flow_span_rx receive.
-        match k8s_attributor.as_ref().map(Decorator::new) {
-            Some(decorator) => {
-                while let Some(flow_span) = flow_span_rx.recv().await {
-                    let (span, err) = decorator.decorate_or_fallback(flow_span).await;
 
-                    if let Some(e) = &err {
-                        debug!(
-                            event.name = "k8s.decorator.failed",
-                            flow.community_id = %span.attributes.flow_community_id,
-                            error.message = %e,
-                            "failed to decorate flow attributes with kubernetes metadata, sending undecorated span"
-                        );
-                    } else {
-                        trace!(
-                            event.name = "k8s.decorator.decorated",
-                            flow.community_id = %span.attributes.flow_community_id,
-                            "successfully decorated flow attributes with kubernetes metadata"
-                        );
+    // K8s decorator runs on dedicated thread pool to prevent K8s API lookups from blocking main runtime
+    let decorator_threads = conf.pipeline.k8s_decorator_threads;
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(decorator_threads)
+            .thread_name("mermin-k8s-decorator")
+            .enable_all()
+            .build()
+            .expect("failed to create k8s decorator runtime");
+
+        rt.block_on(async move {
+            info!(
+                event.name = "task.started",
+                task.name = "k8s.decorator",
+                task.description = "decorating flow attributes with kubernetes metadata",
+                decorator.threads = decorator_threads,
+                "k8s decorator started on dedicated thread pool"
+            );
+
+            // Matching on the attributor early is a performance optimization to avoid having to check to see if the attributor is None per flow_span_rx receive.
+            match k8s_attributor.as_ref().map(Decorator::new) {
+                Some(decorator) => {
+                    while let Some(flow_span) = flow_span_rx.recv().await {
+                        let timer = metrics::registry::PROCESSING_LATENCY
+                            .with_label_values(&["k8s_decoration"])
+                            .start_timer();
+                        let (span, err) = decorator.decorate_or_fallback(flow_span).await;
+                        timer.observe_duration();
+
+                        if let Some(e) = &err {
+                            debug!(
+                                event.name = "k8s.decorator.failed",
+                                flow.community_id = %span.attributes.flow_community_id,
+                                error.message = %e,
+                                "failed to decorate flow attributes with kubernetes metadata, sending undecorated span"
+                            );
+                        } else {
+                            trace!(
+                                event.name = "k8s.decorator.decorated",
+                                flow.community_id = %span.attributes.flow_community_id,
+                                "successfully decorated flow attributes with kubernetes metadata"
+                            );
+                        }
+
+                        if let Err(e) = k8s_decorated_flow_span_tx.send(span).await {
+                            metrics::registry::FLOW_SPANS_DROPPED_EXPORT_FAILURE.inc();
+                            error!(
+                                event.name = "channel.send_failed",
+                                channel.name = "k8s_decorated_flow_span",
+                                error.message = %e,
+                                "failed to send flow span to export channel"
+                            );
+                        }
                     }
+                }
+                None => {
+                    warn!(
+                        event.name = "k8s.decorator.unavailable",
+                        reason = "kubernetes_client_unavailable",
+                        "kubernetes decorator unavailable, all spans will be sent undecorated"
+                    );
 
-                    if let Err(e) = k8s_decorated_flow_span_tx.send(span).await {
-                        error!(
-                            event.name = "channel.send_failed",
-                            channel.name = "k8s_decorated_flow_span",
-                            error.message = %e,
-                            "failed to send flow span to export channel"
-                        );
+                    while let Some(flow_span) = flow_span_rx.recv().await {
+                        if let Err(e) = k8s_decorated_flow_span_tx.send(flow_span).await {
+                            metrics::registry::FLOW_SPANS_DROPPED_EXPORT_FAILURE.inc();
+                            error!(
+                                event.name = "channel.send_failed",
+                                channel.name = "k8s_decorated_flow_span",
+                                error.message = %e,
+                                "failed to send flow span to export channel"
+                            );
+                        }
                     }
                 }
             }
-            None => {
-                warn!(
-                    event.name = "k8s.decorator.unavailable",
-                    reason = "kubernetes_client_unavailable",
-                    "kubernetes decorator unavailable, all spans will be sent undecorated"
-                );
 
-                while let Some(flow_span) = flow_span_rx.recv().await {
-                    if let Err(e) = k8s_decorated_flow_span_tx.send(flow_span).await {
-                        error!(
-                            event.name = "channel.send_failed",
-                            channel.name = "k8s_decorated_flow_span",
-                            error.message = %e,
-                            "failed to send flow span to export channel"
-                        );
-                    }
-                }
-            }
-        }
-
-        info!(
-            event.name = "task.exited",
-            task.name = "k8s.decorator",
-            "attributes decoration task exited"
-        );
+            info!(
+                event.name = "task.exited",
+                task.name = "k8s.decorator",
+                "k8s decorator task exited"
+            );
+        });
     });
+    health_state
+        .k8s_caches_synced
+        .store(true, Ordering::Relaxed);
 
     tokio::spawn(async move {
         flow_span_producer.run().await;
@@ -444,10 +530,15 @@ async fn run() -> Result<()> {
     health_state.ready_to_process.store(true, Ordering::Relaxed);
 
     tokio::spawn(async move {
-        while let Some(k8s_decorated_flow_span) = k8s_decorated_flow_span_rx.recv().await {
-            let traceable: TraceableRecord = Arc::new(k8s_decorated_flow_span);
+        while let Some(flow_span) = k8s_decorated_flow_span_rx.recv().await {
+            let traceable: TraceableRecord = Arc::new(flow_span);
             trace!(event.name = "flow.exporting", "exporting flow span");
+
+            let timer = metrics::registry::PROCESSING_LATENCY
+                .with_label_values(&["otlp_export"])
+                .start_timer();
             exporter.export(traceable).await;
+            timer.observe_duration();
         }
         info!(
             event.name = "task.exited",

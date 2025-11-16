@@ -78,25 +78,25 @@ livenessProbe:
   httpGet:
     path: /livez
     port: api
-  initialDelaySeconds: 5
+  initialDelaySeconds: 10
   periodSeconds: 10
   timeoutSeconds: 5
-  failureThreshold: 3
+  failureThreshold: 6
 
 readinessProbe:
   httpGet:
     path: /readyz
     port: api
-  initialDelaySeconds: 5
+  initialDelaySeconds: 10
   periodSeconds: 5
   timeoutSeconds: 5
-  failureThreshold: 3
+  failureThreshold: 6
 
 startupProbe:
   httpGet:
     path: /startup
     port: api
-  initialDelaySeconds: 0
+  initialDelaySeconds: 2
   periodSeconds: 3
   timeoutSeconds: 5
   failureThreshold: 60

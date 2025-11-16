@@ -192,8 +192,10 @@ kubectl exec mermin-xxxxx -n mermin -- wget -qO- http://localhost:10250/metrics 
 **Solution:**
 
 ```hcl
-# Increase workers to match CPU cores
-packet_worker_count = 8  # Default is 4, max recommended = CPU cores
+pipeline {
+  # Increase workers to match CPU cores
+  worker_count = 8  # Default is 4, max recommended = CPU cores
+}
 ```
 
 **Validation:**
@@ -572,7 +574,7 @@ Not enough workers to process packet rate, causing channel overflow.
 
 ```bash
 # Check packet rate and worker count
-kubectl logs mermin-xxxxx -n mermin | grep "packet_worker_count\|Starting mermin"
+kubectl logs mermin-xxxxx -n mermin | grep "worker_count\|Starting mermin"
 
 # Workers should handle ~10K packets/sec each
 kubectl exec mermin-xxxxx -n mermin -- wget -qO- http://localhost:10250/metrics | grep packets_processed_total
@@ -581,8 +583,10 @@ kubectl exec mermin-xxxxx -n mermin -- wget -qO- http://localhost:10250/metrics 
 **Solution:**
 
 ```hcl
-# Match or exceed CPU core count
-packet_worker_count = 8  # Default is 4
+pipeline {
+  # Match or exceed CPU core count
+  worker_count = 8  # Default is 4
+}
 ```
 
 **Validation:**
@@ -618,8 +622,10 @@ kubectl logs mermin-xxxxx -n mermin --timestamps | grep -i "channel full\|ring b
 **Solution:**
 
 ```hcl
-# Increase buffer size (uses more memory)
-packet_channel_capacity = 4096  # Default is 1024, max practical ~8192
+pipeline {
+  # Increase buffer size (uses more memory)
+  ring_buffer_capacity = 16384  # Default is 8192, can go higher for extreme traffic
+}
 ```
 
 **Validation:**
@@ -776,8 +782,10 @@ kubectl exec mermin-xxxxx -n mermin -- wget -qO- http://localhost:10250/metrics 
 
 ```hcl
 # Minimal resource consumption
-packet_worker_count = 4
-packet_channel_capacity = 1024
+pipeline {
+  ring_buffer_capacity = 2048
+  worker_count = 2
+}
 
 span {
   max_record_interval = "2m"
@@ -790,7 +798,7 @@ export "traces" {
     max_batch_size = 512
     max_batch_interval = "5s"
     max_concurrent_exports = 2
-    max_queue_size = 2048
+    max_queue_size = 8192
   }
 }
 ```
@@ -799,8 +807,10 @@ export "traces" {
 
 ```hcl
 # Balanced configuration
-packet_worker_count = 6
-packet_channel_capacity = 2048
+pipeline {
+  ring_buffer_capacity = 4096
+  worker_count = 4
+}
 
 span {
   max_record_interval = "1m"
@@ -813,7 +823,7 @@ export "traces" {
     max_batch_size = 1024
     max_batch_interval = "5s"
     max_concurrent_exports = 4
-    max_queue_size = 4096
+    max_queue_size = 16384
   }
 }
 
@@ -830,8 +840,11 @@ discovery "informer" "k8s" {
 
 ```hcl
 # High-throughput configuration
-packet_worker_count = 8
-packet_channel_capacity = 4096
+pipeline {
+  ring_buffer_capacity = 8192
+  worker_count = 8
+  k8s_decorator_threads = 12
+}
 
 span {
   max_record_interval = "30s"
@@ -845,7 +858,7 @@ export "traces" {
     max_batch_size = 2048
     max_batch_interval = "3s"
     max_concurrent_exports = 8
-    max_queue_size = 8192
+    max_queue_size = 32768
   }
 }
 
@@ -1112,6 +1125,132 @@ export "traces" {
 **Result:** Export queue dropped to 20% utilization.
 
 **Prevention:** Load test collector capacity before deploying Mermin at scale.
+
+***
+
+## Advanced Performance Monitoring
+
+### Pipeline Backpressure Monitoring
+
+Mermin includes metrics to monitor pipeline health and detect backpressure early.
+
+#### Key Metrics
+
+```prometheus
+# Check for backpressure
+rate(mermin_flow_events_dropped_backpressure_total[5m]) > 0
+
+# Adaptive sampling activity
+mermin_flow_events_sampling_rate > 0
+
+# Channel utilization
+mermin_channel_capacity_used_ratio{channel="flow_spans"} > 0.8
+
+# Export channel drops
+rate(mermin_flow_spans_dropped_export_failure_total[5m]) > 0
+
+# Pipeline stage latency
+histogram_quantile(0.95, rate(mermin_processing_latency_seconds_bucket[5m]))
+```
+
+#### Backpressure Runbook
+
+**Symptoms:**
+
+* `mermin_flow_events_dropped_backpressure_total` increasing
+* `mermin_flow_events_sampling_rate` > 0
+* Logs showing "worker channel backpressure"
+
+**Diagnosis:**
+
+```bash
+# Check sampling rate per worker
+kubectl exec $POD -- wget -qO- http://localhost:10250/metrics | grep sampling_rate
+
+# Check channel utilization
+kubectl exec $POD -- wget -qO- http://localhost:10250/metrics | grep channel_capacity_used_ratio
+
+# Check where pipeline is bottlenecked
+kubectl exec $POD -- wget -qO- http://localhost:10250/metrics | grep processing_latency | grep "0.95"
+```
+
+**Resolution:**
+
+1. **If worker channels are full:**
+
+```hcl
+pipeline {
+  # Increase workers for more parallelism
+  worker_count = 8
+
+  # Increase flow span channel to absorb bursts
+  flow_span_channel_multiplier = 3.0
+}
+```
+
+2. **If K8s decorator is slow:**
+
+```hcl
+pipeline {
+  # Increase decorator parallelism
+  k8s_decorator_threads = 8
+}
+```
+
+3. **If export channel is full:**
+
+```hcl
+pipeline {
+  # Larger export buffer
+  decorated_span_channel_multiplier = 8.0
+}
+
+export "traces" {
+  otlp = {
+    # Faster export
+    max_concurrent_exports = 4
+    max_export_timeout = "5s"
+  }
+}
+```
+
+### Pipeline Health Dashboard
+
+Create a Grafana dashboard with these queries:
+
+```prometheus
+# Backpressure Overview
+sum(rate(mermin_flow_events_dropped_backpressure_total[5m])) by (pod)
+sum(rate(mermin_flow_events_sampled_total[5m])) by (pod)
+
+# Channel Health
+mermin_channel_capacity_used_ratio
+
+# Pipeline Latency p95
+histogram_quantile(0.95,
+  sum(rate(mermin_processing_latency_seconds_bucket[5m])) by (le, stage)
+)
+
+# Export Health
+rate(mermin_flow_spans_dropped_export_failure_total[5m])
+rate(mermin_spans_exported_total[5m])
+
+# IP Index Update Performance
+rate(mermin_k8s_ip_index_updates_total[5m])
+histogram_quantile(0.95, rate(mermin_k8s_ip_index_update_duration_seconds_bucket[5m]))
+```
+
+### Health Thresholds
+
+Set up alerts based on these thresholds:
+
+| Metric              | Warning | Critical | Action                 |
+|---------------------|---------|----------|------------------------|
+| Backpressure rate   | > 1%    | > 5%     | Increase channel sizes |
+| Channel utilization | > 80%   | > 95%    | Increase capacity      |
+| p95 latency         | > 50ms  | > 100ms  | Optimize pipeline      |
+| Export drops        | > 0     | > 10/min | Fix export config      |
+| IP index update p95 | > 50ms  | > 100ms  | Optimize K8s config    |
 
 ***
 

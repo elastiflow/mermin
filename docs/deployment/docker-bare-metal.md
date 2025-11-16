@@ -57,9 +57,11 @@ log_level = "info"
 # Shutdown timeout
 shutdown_timeout = "10s"
 
-# Internal channel configuration
-packet_channel_capacity = 1024
-packet_worker_count = 2
+# Pipeline configuration
+pipeline {
+  ring_buffer_capacity = 8192
+  worker_count = 4
+}
 
 # Network interfaces to monitor
 discovery "instrument" {
