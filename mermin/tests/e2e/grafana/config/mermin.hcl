@@ -3,8 +3,12 @@
 auto_reload = false
 
 # Pipeline configuration
-packet_channel_capacity = 1024
-packet_worker_count     = 2
+pipeline {
+  ring_buffer_capacity  = 8192
+  worker_count          = 4
+  worker_poll_interval  = "5s"
+  k8s_decorator_threads = 12
+}
 shutdown_timeout        = "5s"
 
 # API server configuration (health endpoints)

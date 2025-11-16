@@ -1,8 +1,8 @@
 # Test configuration optimized for fast CI runs
 # Reduce flow export intervals for faster test feedback
 span {
-  max_record_interval = "5s"   # Export active flows every 5s (default: 60s)
-  icmp_timeout = "3s"          # ICMP flows timeout after 3s (default: 10s)
+  max_record_interval = "10s"   # Export active flows every 5s (default: 60s)
+  icmp_timeout = "5s"          # ICMP flows timeout after 3s (default: 10s)
 }
 
 # OTLP exporter configuration

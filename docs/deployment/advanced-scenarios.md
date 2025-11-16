@@ -218,10 +218,10 @@ export "traces" {
 
     # Adjust timeouts for HA scenarios
     timeout = "10s"
-    max_export_timeout = "30s"
+    max_export_timeout = "10s"
 
     # Increase queue for temporary outages
-    max_queue_size = 4096
+    max_queue_size = 32768
   }
 }
 ```
@@ -268,8 +268,11 @@ For environments with high network traffic (> 10,000 flows/second):
 
 ```hcl
 # Increase internal buffering
-packet_channel_capacity = 4096
-packet_worker_count = 4
+pipeline {
+  ring_buffer_capacity = 8192
+  worker_count = 8
+  k8s_decorator_threads = 12
+}
 
 # Aggressive flow expiration to limit memory
 span {
@@ -337,9 +340,12 @@ export "traces" {
 For nodes with limited memory:
 
 ```hcl
-# Reduce buffer sizes
-packet_channel_capacity = 512
-packet_worker_count = 1
+# Reduce buffer sizes for low-resource environments
+pipeline {
+  ring_buffer_capacity = 2048
+  worker_count = 1
+  k8s_decorator_threads = 2
+}
 
 # Aggressive flow expiration
 span {
@@ -463,8 +469,8 @@ Key metrics:
 
 **If you see packet drops:**
 
-1. Increase `packet_channel_capacity`
-2. Increase `packet_worker_count`
+1. Increase `pipeline.ring_buffer_capacity`
+2. Increase `pipeline.worker_count`
 3. Add more CPU resources
 4. Reduce monitored interfaces
 

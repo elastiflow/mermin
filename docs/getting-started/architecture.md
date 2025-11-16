@@ -231,10 +231,11 @@ Mermin is designed to be efficient in production environments:
 
 ### Tunability
 
-Mermin provides extensive configuration for performance tuning:
+Mermin provides extensive configuration for performance tuning under the `pipeline` block:
 
-* `packet_channel_capacity`: Buffer size between eBPF and userspace
-* `packet_worker_count`: Number of parallel flow processors
+* `pipeline.ring_buffer_capacity`: eBPF ring buffer size between kernel and userspace
+* `pipeline.worker_count`: Number of parallel flow worker threads
+* `pipeline.k8s_decorator_threads`: Dedicated threads for Kubernetes metadata decoration
 * `span.*_timeout`: Flow expiration times affect memory usage
 * `export.otlp.max_batch_size`: Larger batches reduce network overhead
 * `export.otlp.max_queue_size`: Backpressure buffer for slow backends
@@ -313,7 +314,7 @@ If the OTLP backend is unavailable:
 
 * **Interface Unavailable**: Mermin logs a warning and continues monitoring other interfaces
 * **eBPF Load Failure**: Agent fails to start; check kernel version and eBPF support
-* **High Packet Loss**: Increase `packet_channel_capacity` or reduce monitored interfaces
+* **High Packet Loss**: Increase `pipeline.ring_buffer_capacity` or reduce monitored interfaces
 
 ## Comparison with Alternatives
 
