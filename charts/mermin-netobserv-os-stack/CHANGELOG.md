@@ -1,3 +1,13 @@
+## [mermin-netobserv-os-stack-0.1.0-beta.10] - 2025-11-17
+
+### Bug Fixes
+
+- Bump Mermin version in the Umbrella chart (#290)
+
+[mermin-netobserv-os-stack-0.1.0-beta.9..mermin-netobserv-os-stack-0.1.0-beta.10](https://github.com/elastiflow/mermin/compare/mermin-netobserv-os-stack-0.1.0-beta.9...mermin-netobserv-os-stack-0.1.0-beta.10)
+
+
+
 ## [mermin-netobserv-os-stack-0.1.0-beta.9] - 2025-11-11
 
 ### Bug Fixes
