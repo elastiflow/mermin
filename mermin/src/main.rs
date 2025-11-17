@@ -364,6 +364,9 @@ async fn run() -> Result<()> {
         }
     };
     if use_tcx {
+        // Update metric to track BPF filesystem writability status
+        crate::metrics::registry::BPF_FS_WRITABLE.set(if bpf_fs_writable { 1 } else { 0 });
+
         info!(
             event.name = "ebpf.bpf_fs_check_complete",
             bpf_fs_writable = bpf_fs_writable,
@@ -630,7 +633,9 @@ async fn run() -> Result<()> {
                                 error.message = %e,
                                 "failed to send flow span to export channel"
                             );
+                                
                         }
+						metrics::span::inc_flow_spans_sent_to_exporter();
                     }
                 }
             }

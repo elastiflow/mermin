@@ -57,6 +57,11 @@ lazy_static! {
         &["interface", "direction"]
     ).expect("failed to create tc_programs_detached metric");
 
+    pub static ref BPF_FS_WRITABLE: prometheus::IntGauge = prometheus::IntGauge::with_opts(
+        Opts::new("ebpf_bpf_fs_writable", "Whether /sys/fs/bpf is writable for TCX link pinning (1 = writable, 0 = not writable)")
+            .namespace("mermin")
+    ).expect("failed to create bpf_fs_writable metric");
+
     // ============================================================================
     // Userspace Ring Buffer Metrics (subsystem: userspace)
     // ============================================================================
@@ -93,6 +98,33 @@ lazy_static! {
     // ============================================================================
     // Flow Span Lifecycle Metrics (subsystem: span)
     // ============================================================================
+
+    pub static ref FLOW_SPANS_PROCESSED_TOTAL: IntCounter = IntCounter::with_opts(
+        Opts::new("flow_spans_processed_total", "Total number of flow spans processed by FlowWorker")
+            .namespace("mermin")
+    ).expect("failed to create flow_spans_processed_total metric");
+
+    pub static ref FLOW_SPANS_DECORATED_TOTAL: IntCounter = IntCounter::with_opts(
+        Opts::new("flow_spans_decorated_total", "Total number of flow spans enriched with Kubernetes metadata")
+            .namespace("mermin")
+    ).expect("failed to create flow_spans_decorated_total metric");
+
+    pub static ref FLOW_SPANS_SENT_TO_EXPORTER_TOTAL: IntCounter = IntCounter::with_opts(
+        Opts::new("flow_spans_sent_to_exporter_total", "Total number of flow spans sent to export channel")
+            .namespace("mermin")
+    ).expect("failed to create flow_spans_sent_to_exporter_total metric");
+
+    pub static ref FLOW_STORE_SIZE: IntGaugeVec = IntGaugeVec::new(
+        Opts::new("flow_store_size", "Current number of flows in flow_store")
+            .namespace("mermin"),
+        &["poller_id"]  // Track per poller for sharded architecture
+    ).expect("failed to create flow_store_size metric");
+
+    pub static ref FLOW_POLLER_QUEUE_SIZE: IntGaugeVec = IntGaugeVec::new(
+        Opts::new("flow_poller_queue_size", "Current number of flows queued for processing per poller")
+            .namespace("mermin"),
+        &["poller_id"]  // Track per poller
+    ).expect("failed to create flow_poller_queue_size metric");
 
     pub static ref FLOW_EVENTS_DROPPED_BACKPRESSURE: IntCounter = IntCounter::with_opts(
         Opts::new("flow_events_dropped_backpressure_total", "Flow events dropped due to worker channel backpressure")
@@ -275,6 +307,7 @@ pub fn init_registry() -> Result<(), prometheus::Error> {
     REGISTRY.register(Box::new(EBPF_ORPHANS_CLEANED.clone()))?;
     REGISTRY.register(Box::new(TC_PROGRAMS_ATTACHED.clone()))?;
     REGISTRY.register(Box::new(TC_PROGRAMS_DETACHED.clone()))?;
+    REGISTRY.register(Box::new(BPF_FS_WRITABLE.clone()))?;
 
     // Userspace metrics
     REGISTRY.register(Box::new(USERSPACE_RINGBUF_PACKETS.clone()))?;
@@ -284,6 +317,11 @@ pub fn init_registry() -> Result<(), prometheus::Error> {
     REGISTRY.register(Box::new(USERSPACE_CHANNEL_SENDS.clone()))?;
 
     // Flow metrics
+    REGISTRY.register(Box::new(FLOW_SPANS_PROCESSED_TOTAL.clone()))?;
+    REGISTRY.register(Box::new(FLOW_SPANS_DECORATED_TOTAL.clone()))?;
+    REGISTRY.register(Box::new(FLOW_SPANS_SENT_TO_EXPORTER_TOTAL.clone()))?;
+    REGISTRY.register(Box::new(FLOW_STORE_SIZE.clone()))?;
+    REGISTRY.register(Box::new(FLOW_POLLER_QUEUE_SIZE.clone()))?;
     REGISTRY.register(Box::new(FLOW_EVENTS_DROPPED_BACKPRESSURE.clone()))?;
     REGISTRY.register(Box::new(FLOW_EVENTS_SAMPLED.clone()))?;
     REGISTRY.register(Box::new(FLOW_EVENTS_SAMPLING_RATE.clone()))?;
