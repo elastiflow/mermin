@@ -1458,6 +1458,9 @@ mod tests {
             last_recorded_reverse_bytes: 0,
             boot_time_offset: 0,
             trace_id: None,
+            last_recorded_time: std::time::UNIX_EPOCH,
+            last_activity_time: std::time::UNIX_EPOCH,
+            timeout_duration: Duration::from_secs(0),
         };
 
         assert_eq!(flow_span.trace_id(), None);
@@ -1485,6 +1488,9 @@ mod tests {
             last_recorded_reverse_bytes: 0,
             boot_time_offset: 0,
             trace_id: Some(test_trace_id),
+            last_recorded_time: std::time::UNIX_EPOCH,
+            last_activity_time: std::time::UNIX_EPOCH,
+            timeout_duration: Duration::from_secs(0),
         };
 
         assert_eq!(flow_span.trace_id(), Some(test_trace_id));
@@ -1511,6 +1517,9 @@ mod tests {
             last_recorded_reverse_bytes: 0,
             boot_time_offset: 0,
             trace_id: Some(test_trace_id),
+            last_recorded_time: std::time::UNIX_EPOCH,
+            last_activity_time: std::time::UNIX_EPOCH,
+            timeout_duration: Duration::from_secs(0),
         };
 
         let cloned = flow_span.clone();
