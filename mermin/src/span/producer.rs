@@ -78,7 +78,6 @@ pub struct FlowSpanProducer {
     flow_store: FlowStore,
     community_id_generator: CommunityIdGenerator,
     trace_id_cache: TraceIdCache,
-    ebpf: Arc<Mutex<aya::Ebpf>>,
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     flow_events_ringbuf: RingBuf<aya::maps::MapData>,
     flow_span_tx: mpsc::Sender<FlowSpan>,
@@ -234,6 +233,29 @@ impl FlowSpanProducer {
             scan.interval_secs = 300,
             max_age_secs = max_orphan_age.as_secs(),
             "orphan scanner task started (safety net for stale eBPF entries)"
+        );
+
+        // Spawn trace ID cache cleanup task
+        let trace_id_cache_clone = self.trace_id_cache.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(300)); // 5 minutes
+            loop {
+                interval.tick().await;
+                let (scanned, removed) = trace_id_cache_clone.cleanup_expired();
+                if removed > 0 {
+                    debug!(
+                        event.name = "trace_id_cache.cleanup",
+                        entries.scanned = scanned,
+                        entries.removed = removed,
+                        "trace ID cache cleanup completed"
+                    );
+                }
+            }
+        });
+        info!(
+            event.name = "trace_id_cache.cleanup_task.started",
+            cleanup.interval_secs = 300,
+            "trace ID cache cleanup task started"
         );
 
         // Spawn flow pollers (sharded by community_id hash) to replace per-flow tasks
