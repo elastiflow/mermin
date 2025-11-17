@@ -538,6 +538,7 @@ async fn run() -> Result<()> {
             metrics::userspace::set_channel_size(
                 "exporter_input",
                 k8s_decorated_flow_span_rx.len(),
+            );
             let traceable: TraceableRecord = Arc::new(flow_span);
             trace!(event.name = "flow.exporting", "exporting flow span");
 

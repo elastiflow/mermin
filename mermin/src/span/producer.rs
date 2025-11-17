@@ -1231,10 +1231,6 @@ async fn timeout_and_remove_flow(
         .as_deref()
         .unwrap_or("unknown");
     metrics::flow::inc_flows_expired(iface_name, "timeout");
-
-    if let Ok(duration) = flow_span.end_time.duration_since(flow_span.start_time) {
-        metrics::flow::observe_flow_duration(duration);
-    }
 }
 
 /// Individual poller task - handles flows hashed to this poller.
