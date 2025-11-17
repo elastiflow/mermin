@@ -244,6 +244,28 @@ See [Configuration Reference](../configuration/configuration.md) for details.
 
 ## Security Considerations
 
+### Host Mounts Required
+
+#### TCX Mode and BPF Filesystem (Kernel >= 6.6)
+
+{% hint style="info" %}
+**Linux Kernel 6.6+** introduced TCX (TC eXpress), an improved TC attachment mechanism that supports multiple programs per hook. Mermin automatically uses TCX when available.
+{% endhint %}
+
+For **orphan cleanup support** on pod restarts (highly recommended for production), mount `/sys/fs/bpf` as a hostPath volume is required.
+When a Mermin pod crashes unexpectedly (OOM, node failure, etc.), its TC programs remain attached to interfaces. On restart, Mermin can clean up these "orphaned" programs by loading pinned links from `/sys/fs/bpf`.
+
+**Verifying TCX mode:**
+
+Check Mermin logs on startup:
+
+```bash
+kubectl logs <mermin-pod> | grep tcx_mode
+# Should show: kernel.tcx_mode=true (kernel >= 6.6)
+```
+
+**For older kernels (< 6.6):** Mermin uses netlink-based TC attachment, which includes automatic orphan cleanup without requiring `/sys/fs/bpf`.
+
 ### Privileges Required
 
 Mermin requires elevated privileges to operate:
