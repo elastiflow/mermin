@@ -439,6 +439,24 @@ pub fn init_registry() -> Result<(), prometheus::Error> {
     REGISTRY.register(Box::new(PACKETS_TOTAL.clone()))?;
     REGISTRY.register(Box::new(BYTES_TOTAL.clone()))?;
 
+    // Touch metrics to ensure they're always exposed in /metrics output, even when zero
+    USERSPACE_RINGBUF_PACKETS
+        .with_label_values(&["received"])
+        .inc_by(0);
+    USERSPACE_RINGBUF_PACKETS
+        .with_label_values(&["filtered"])
+        .inc_by(0);
+    USERSPACE_RINGBUF_BYTES.inc_by(0);
+    USERSPACE_CHANNEL_SIZE
+        .with_label_values(&["packet_worker"])
+        .set(0);
+    USERSPACE_CHANNEL_SIZE
+        .with_label_values(&["decorator_input"])
+        .set(0);
+    USERSPACE_CHANNEL_SIZE
+        .with_label_values(&["exporter_input"])
+        .set(0);
+
     Ok(())
 }
 
