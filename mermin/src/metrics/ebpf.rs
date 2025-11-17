@@ -24,15 +24,6 @@ pub fn set_map_entries(entries: u64) {
         .set(entries as i64);
 }
 
-/// Set the current number of flows tracked in userspace.
-///
-/// ### Arguments:
-///
-/// - `flows` - Current number of flows in the userspace flow store
-pub fn set_userspace_flows(flows: u64) {
-    registry::EBPF_USERSPACE_FLOWS.set(flows as i64);
-}
-
 /// Increment the TC program attached counter.
 ///
 /// ### Arguments:

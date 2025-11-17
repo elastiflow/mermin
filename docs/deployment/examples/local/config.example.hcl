@@ -25,7 +25,12 @@ export "traces" {
   #   # }
   # }
 }
-
+# Metrics server configuration (for Prometheus scraping)
+metrics {
+  enabled        = true
+  listen_address = "0.0.0.0"
+  port           = 10250
+}
 # Test configuration optimized for fast CI runs
 # Reduce flow export intervals for faster test feedback
 span {
