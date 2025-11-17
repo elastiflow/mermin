@@ -1864,6 +1864,10 @@ shutdown_timeout: 2min
             "metrics should listen on all interfaces"
         );
         assert_eq!(metrics.port, 10250, "metrics default port should be 10250");
+        assert_eq!(
+            metrics.debug_enabled, true,
+            "debug endpoint should be enabled by default"
+        );
     }
 
     #[test]

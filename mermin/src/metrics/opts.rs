@@ -10,6 +10,8 @@ pub struct MetricsOptions {
     pub listen_address: String,
     /// The port the metrics server will listen on.
     pub port: u16,
+    /// Enable the debug metrics endpoint at /debug.
+    pub debug_enabled: bool,
 }
 
 impl Default for MetricsOptions {
@@ -18,6 +20,7 @@ impl Default for MetricsOptions {
             enabled: true,
             listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
             port: 10250,
+            debug_enabled: true,
         }
     }
 }

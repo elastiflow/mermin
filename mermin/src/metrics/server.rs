@@ -69,11 +69,52 @@ async fn metrics_handler() -> impl IntoResponse {
     }
 }
 
+/// Handler for the `/debug` endpoint.
+///
+/// Returns Prometheus text format metrics for debug-specific collectors.
+async fn debug_handler() -> impl IntoResponse {
+    match tokio::task::spawn_blocking(|| {
+        let encoder = prometheus::TextEncoder::new();
+        let metric_families = registry::DEBUG_REGISTRY.gather();
+        encoder.encode_to_string(&metric_families)
+    })
+    .await
+    {
+        Ok(Ok(body)) => (StatusCode::OK, body),
+        Ok(Err(e)) => {
+            tracing::error!(
+                event.name = "debug.encode_failed",
+                error.message = %e,
+                "failed to encode debug metrics"
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to encode debug metrics: {e}"),
+            )
+        }
+        Err(e) => {
+            tracing::error!(
+                event.name = "debug.gather_failed",
+                error.message = %e,
+                "debug metrics gathering task panicked"
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to gather debug metrics".to_string(),
+            )
+        }
+    }
+}
+
 /// Create the metrics HTTP router.
-fn create_metrics_router() -> Router {
-    Router::new()
-        .route("/metrics", get(metrics_handler))
-        .layer(TraceLayer::new_for_http())
+fn create_metrics_router(config: &MetricsOptions) -> Router {
+    let mut router = Router::new().route("/metrics", get(metrics_handler));
+
+    if config.debug_enabled {
+        router = router.route("/debug", get(debug_handler));
+    }
+
+    router.layer(TraceLayer::new_for_http())
 }
 
 /// Start the Prometheus metrics HTTP server.
@@ -108,7 +149,7 @@ pub async fn start_metrics_server(config: MetricsOptions) -> Result<(), MetricsE
         return Ok(());
     }
 
-    let app = create_metrics_router();
+    let app = create_metrics_router(&config);
 
     let bind_address = format!("{}:{}", config.listen_address, config.port);
     let listener = TcpListener::bind(&bind_address)

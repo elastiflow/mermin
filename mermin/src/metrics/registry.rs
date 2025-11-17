@@ -13,6 +13,10 @@ lazy_static! {
     /// Global Prometheus registry for all Mermin metrics.
     pub static ref REGISTRY: Registry = Registry::new();
 
+    /// Global Prometheus registry for debug metrics.
+    /// This registry contains metrics that are only exposed via the /debug endpoint.
+    pub static ref DEBUG_REGISTRY: Registry = Registry::new();
+
     // ============================================================================
     // eBPF Resource Metrics
     // ============================================================================
@@ -434,6 +438,15 @@ pub fn init_registry() -> Result<(), prometheus::Error> {
     // Interface metrics
     REGISTRY.register(Box::new(PACKETS_TOTAL.clone()))?;
     REGISTRY.register(Box::new(BYTES_TOTAL.clone()))?;
+
+    Ok(())
+}
+
+/// Initialize the debug metrics registry by registering debug-specific collectors.
+pub fn init_debug_registry() -> Result<(), prometheus::Error> {
+    // Debug metrics: TC program attachment/detachment tracking
+    DEBUG_REGISTRY.register(Box::new(TC_PROGRAMS_ATTACHED.clone()))?;
+    DEBUG_REGISTRY.register(Box::new(TC_PROGRAMS_DETACHED.clone()))?;
 
     Ok(())
 }
