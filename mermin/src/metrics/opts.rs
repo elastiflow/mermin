@@ -10,7 +10,7 @@ pub struct MetricsOptions {
     pub listen_address: String,
     /// The port the metrics server will listen on.
     pub port: u16,
-    /// Enable the debug metrics endpoint at /debug.
+    /// Enable the debug metrics endpoint at /metrics_debug.
     pub debug_enabled: bool,
 }
 
