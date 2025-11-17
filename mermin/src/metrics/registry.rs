@@ -35,7 +35,7 @@ lazy_static! {
         &["map"]
     ).expect("failed to create ebpf_map_utilization metric");
 
-    pub static ref EBPF_RING_BUFFER_DROPS: IntCounter = IntCounter::with_opts(
+    pub static ref EBPF_FLOW_RING_BUFFER_DROPS: IntCounter = IntCounter::with_opts(
         Opts::new("ebpf_ring_buffer_drops_total", "Total number of ring buffer events dropped due to buffer full")
             .namespace("mermin")
     ).expect("failed to create ebpf_ring_buffer_drops metric");
@@ -271,7 +271,7 @@ pub fn init_registry() -> Result<(), prometheus::Error> {
     REGISTRY.register(Box::new(EBPF_MAP_ENTRIES.clone()))?;
     REGISTRY.register(Box::new(EBPF_MAP_CAPACITY.clone()))?;
     REGISTRY.register(Box::new(EBPF_MAP_UTILIZATION.clone()))?;
-    REGISTRY.register(Box::new(EBPF_RING_BUFFER_DROPS.clone()))?;
+    REGISTRY.register(Box::new(EBPF_FLOW_RING_BUFFER_DROPS.clone()))?;
     REGISTRY.register(Box::new(EBPF_ORPHANS_CLEANED.clone()))?;
     REGISTRY.register(Box::new(TC_PROGRAMS_ATTACHED.clone()))?;
     REGISTRY.register(Box::new(TC_PROGRAMS_DETACHED.clone()))?;
