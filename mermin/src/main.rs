@@ -367,6 +367,7 @@ async fn run() -> Result<()> {
         as usize;
 
     let (flow_span_tx, mut flow_span_rx) = mpsc::channel(flow_span_capacity);
+    metrics::userspace::set_channel_capacity("exporter", flow_span_capacity);
     let (k8s_decorated_flow_span_tx, mut k8s_decorated_flow_span_rx) =
         mpsc::channel(decorated_span_capacity);
 
@@ -455,6 +456,7 @@ async fn run() -> Result<()> {
             match k8s_attributor.as_ref().map(Decorator::new) {
                 Some(decorator) => {
                     while let Some(flow_span) = flow_span_rx.recv().await {
+                    	metrics::userspace::set_channel_size("decorator_input", flow_span_rx.len());
                         let timer = metrics::registry::PROCESSING_LATENCY
                             .with_label_values(&["k8s_decoration"])
                             .start_timer();
@@ -531,6 +533,10 @@ async fn run() -> Result<()> {
 
     tokio::spawn(async move {
         while let Some(flow_span) = k8s_decorated_flow_span_rx.recv().await {
+            metrics::userspace::set_channel_size(
+                "exporter_input",
+                k8s_decorated_flow_span_rx.len(),
+            );
             let traceable: TraceableRecord = Arc::new(flow_span);
             trace!(event.name = "flow.exporting", "exporting flow span");
 
