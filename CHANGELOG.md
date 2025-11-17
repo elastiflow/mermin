@@ -1,3 +1,13 @@
+## [v0.1.0-beta.32] - 2025-11-17
+
+### Features
+
+- Add userspace channel metrics (#277)
+
+[v0.1.0-beta.31..v0.1.0-beta.32](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.31...v0.1.0-beta.32)
+
+
+
 ## [v0.1.0-beta.31] - 2025-11-17
 
 ### Bug Fixes
