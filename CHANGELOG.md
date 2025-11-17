@@ -1,3 +1,13 @@
+## [v0.1.0-beta.31] - 2025-11-17
+
+### Bug Fixes
+
+- Bump Mermin version in the Umbrella chart (#290)
+
+[v0.1.0-beta.30..v0.1.0-beta.31](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.30...v0.1.0-beta.31)
+
+
+
 ## [v0.1.0-beta.30] - 2025-11-16
 
 ### Bug Fixes
