@@ -148,6 +148,10 @@ async fn run() -> Result<()> {
         );
     }
 
+    // Initialize the global debug metrics flag based on configuration
+    // This allows debug metric functions to check the flag without passing it around
+    conf.metrics.init_debug_flag();
+
     if conf.metrics.enabled {
         let metrics_conf = conf.metrics.clone();
         let mut shutdown_rx = os_shutdown_tx.subscribe();

@@ -1,6 +1,6 @@
 //! Helper functions for eBPF-related metrics.
 
-use crate::metrics::registry;
+use crate::metrics::{opts, registry};
 
 /// Increment the orphan cleanup counter.
 ///
@@ -31,9 +31,11 @@ pub fn set_map_entries(entries: u64) {
 /// - `interface` - Network interface name
 /// - `direction` - Traffic direction ("ingress" or "egress")
 pub fn inc_tc_programs_attached(interface: &str, direction: &str) {
-    registry::TC_PROGRAMS_ATTACHED
-        .with_label_values(&[interface, direction])
-        .inc();
+    opts::with_debug_metrics(|| {
+        registry::TC_PROGRAMS_ATTACHED
+            .with_label_values(&[interface, direction])
+            .inc();
+    });
 }
 
 /// Increment the TC program detached counter.
@@ -43,7 +45,9 @@ pub fn inc_tc_programs_attached(interface: &str, direction: &str) {
 /// - `interface` - Network interface name
 /// - `direction` - Traffic direction ("ingress" or "egress")
 pub fn inc_tc_programs_detached(interface: &str, direction: &str) {
-    registry::TC_PROGRAMS_DETACHED
-        .with_label_values(&[interface, direction])
-        .inc();
+    opts::with_debug_metrics(|| {
+        registry::TC_PROGRAMS_DETACHED
+            .with_label_values(&[interface, direction])
+            .inc();
+    });
 }

@@ -14,7 +14,7 @@ lazy_static! {
     pub static ref REGISTRY: Registry = Registry::new();
 
     /// Global Prometheus registry for debug metrics.
-    /// This registry contains metrics that are only exposed via the /metrics_debug endpoint.
+    /// This registry contains metrics that are only exposed via the /metrics/debug endpoint.
     pub static ref DEBUG_REGISTRY: Registry = Registry::new();
 
     // ============================================================================

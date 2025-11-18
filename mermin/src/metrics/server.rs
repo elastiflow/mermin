@@ -69,7 +69,7 @@ async fn metrics_handler() -> impl IntoResponse {
     }
 }
 
-/// Handler for the `/metrics_debug` endpoint.
+/// Handler for the `/metrics/debug` endpoint.
 ///
 /// Returns Prometheus text format metrics for debug-specific collectors.
 async fn debug_handler() -> impl IntoResponse {
@@ -111,7 +111,7 @@ fn create_metrics_router(config: &MetricsOptions) -> Router {
     let mut router = Router::new().route("/metrics", get(metrics_handler));
 
     if config.debug_enabled {
-        router = router.route("/metrics_debug", get(debug_handler));
+        router = router.route("/metrics/debug", get(debug_handler));
     }
 
     router.layer(TraceLayer::new_for_http())
