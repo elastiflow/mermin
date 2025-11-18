@@ -11,6 +11,7 @@ mod runtime;
 mod span;
 
 use std::{
+    fmt,
     sync::{Arc, atomic::Ordering},
     time::Duration,
 };
@@ -25,6 +26,8 @@ use error::{MerminError, Result};
 use tokio::{
     signal,
     sync::{broadcast, mpsc},
+    task::JoinHandle,
+    time::timeout,
 };
 use tracing::{debug, error, info, trace, warn};
 
@@ -711,17 +714,19 @@ async fn run() -> Result<()> {
             "exporter task exited because its channel was closed, flushing remaining spans via provider shutdown."
         );
 
-        if let Err(e) = shutdown_exporter_gracefully(exporter, Duration::from_secs(5)).await {
-            warn!(
-                event.name = "exporter.otlp_shutdown_failed",
-                error.message = %e,
-                "OpenTelemetry provider failed to shut down cleanly during exit."
-            );
-        } else {
-            debug!(
-                event.name = "exporter.otlp_shutdown_success",
-                "OpenTelemetry provider shut down cleanly."
-            );
+        match shutdown_exporter_gracefully(Arc::clone(&exporter), Duration::from_secs(5)).await {
+            Ok(()) => {
+                info!(event.name = "exporter.otlp_shutdown_success", "OpenTelemetry provider shut down cleanly");
+            }
+            Err(e) => {
+                let event_name = match &e {
+                    MerminError::Otlp(_) => "exporter.otlp_shutdown_error",
+                    MerminError::Internal(msg) if msg.contains("timed out") => "exporter.otlp_shutdown_timeout",
+                    MerminError::Internal(msg) if msg.contains("panicked") => "exporter.otlp_shutdown_panic",
+                    _ => "exporter.otlp_shutdown_error",
+                };
+                warn!(event.name = event_name, error.message = %e, "OpenTelemetry provider shutdown failed");
+            }
         }
 
         info!(
@@ -761,6 +766,22 @@ async fn run() -> Result<()> {
         event.name = "application.shutdown_initiated",
         "received shutdown signal, starting graceful cleanup"
     );
+
+    if shutdown_tx.send(()).is_err() {
+        warn!(
+            event.name = "application.shutdown.signal_failed",
+            "no tasks were listening for the broadcast shutdown signal"
+        );
+    }
+
+    // Signal control-plane controller thread
+    if let Err(e) = cmd_tx.send(ControllerCommand::Shutdown) {
+        warn!(
+            event.name = "interface_controller.shutdown_send_failed",
+            error = %e,
+            "failed to send shutdown command, controller thread may have already exited"
+        );
+    }
 
     let shutdown_manager = ShutdownManager {
         shutdown_tx,
