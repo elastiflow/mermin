@@ -1865,8 +1865,8 @@ shutdown_timeout: 2min
         );
         assert_eq!(metrics.port, 10250, "metrics default port should be 10250");
         assert_eq!(
-            metrics.debug_enabled, true,
-            "debug endpoint should be enabled by default"
+            metrics.debug_enabled, false,
+            "debug endpoint should be disabled by default"
         );
     }
 
