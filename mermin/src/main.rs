@@ -11,7 +11,6 @@ mod runtime;
 mod span;
 
 use std::{
-    fmt,
     sync::{Arc, atomic::Ordering},
     time::Duration,
 };
@@ -26,8 +25,6 @@ use error::{MerminError, Result};
 use tokio::{
     signal,
     sync::{broadcast, mpsc},
-    task::JoinHandle,
-    time::timeout,
 };
 use tracing::{debug, error, info, trace, warn};
 
