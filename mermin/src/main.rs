@@ -28,6 +28,8 @@ use aya::{
 use clap::Parser;
 use dashmap::DashMap;
 use error::{MerminError, Result};
+use globset::Glob;
+use pnet::datalink;
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal as unix_signal};
 use tokio::{
@@ -97,8 +99,8 @@ async fn main() {
     let cli = crate::runtime::cli::Cli::parse();
 
     // Handle subcommands before full runtime initialization
-    if let Some(crate::runtime::cli::CliSubcommand::TestBpf { interface }) = &cli.subcommand {
-        if let Err(e) = handle_test_bpf(interface.clone()).await {
+    if let Some(crate::runtime::cli::CliSubcommand::TestBpf { .. }) = &cli.subcommand {
+        if let Err(e) = handle_test_bpf(cli.subcommand.as_ref().unwrap()).await {
             eprintln!("Error: {e}");
             std::process::exit(1);
         }
@@ -927,6 +929,48 @@ impl std::fmt::Display for ShutdownSignal {
         }
     }
 }
+/// Result of testing a single interface
+struct InterfaceTestResult {
+    interface: String,
+    bpf_fs_writable: bool, // Shared across all interfaces
+    attach_success: bool,
+    pin_success: Option<bool>, // None if not applicable
+    detach_success: bool,
+}
+
+impl InterfaceTestResult {
+    fn overall_status(&self) -> bool {
+        self.attach_success && self.detach_success
+    }
+}
+
+/// Pattern matching helper using the same logic as IfaceController
+fn glob_matches(pattern: &str, text: &str) -> bool {
+    const MAX_PATTERN_LEN: usize = 256;
+
+    if pattern.len() > MAX_PATTERN_LEN {
+        warn!(
+            event.name = "test_bpf.pattern_too_long",
+            pattern_length = pattern.len(),
+            "pattern exceeds maximum length, rejecting"
+        );
+        return false;
+    }
+
+    match Glob::new(pattern) {
+        Ok(glob) => glob.compile_matcher().is_match(text),
+        Err(e) => {
+            warn!(
+                event.name = "test_bpf.invalid_pattern",
+                pattern = %pattern,
+                error = %e,
+                "invalid glob pattern, treating as literal match"
+            );
+            // Fall back to literal match if pattern is invalid
+            pattern == text
+        }
+    }
+}
 
 async fn wait_for_shutdown_signal() -> Result<ShutdownSignal> {
     #[cfg(unix)]
@@ -948,8 +992,117 @@ async fn wait_for_shutdown_signal() -> Result<ShutdownSignal> {
         Ok(ShutdownSignal::CtrlC)
     }
 }
+/// Filter interfaces based on patterns and skip patterns
+fn matches_pattern(name: &str, patterns: &[String]) -> bool {
+    if patterns.is_empty() {
+        return true; // No patterns means match all
+    }
+    patterns.iter().any(|pattern| glob_matches(pattern, name))
+}
+
+/// Check if interface matches any skip pattern
+fn matches_skip_pattern(name: &str, skip_patterns: &[String]) -> bool {
+    skip_patterns
+        .iter()
+        .any(|pattern| glob_matches(pattern, name))
+}
+
 /// Handle test-bpf subcommand: test BPF filesystem writeability and attach/detach operations
-async fn handle_test_bpf(interface: String) -> Result<()> {
+async fn handle_test_bpf(test_bpf_cmd: &crate::runtime::cli::CliSubcommand) -> Result<()> {
+    let crate::runtime::cli::CliSubcommand::TestBpf {
+        interface,
+        all,
+        pattern,
+        skip,
+    } = test_bpf_cmd;
+
+    // Determine interface list
+    let interfaces_to_test: Vec<String> = if *all {
+        // Discover all interfaces
+        let all_interfaces: Vec<_> = datalink::interfaces()
+            .into_iter()
+            .filter(|iface| {
+                // Skip loopback interfaces
+                if iface.is_loopback() {
+                    debug!(
+                        event.name = "test_bpf.interface_skipped",
+                        network.interface.name = %iface.name,
+                        reason = "loopback",
+                        "skipping loopback interface"
+                    );
+                    return false;
+                }
+                // Skip DOWN interfaces
+                if !iface.is_up() {
+                    debug!(
+                        event.name = "test_bpf.interface_skipped",
+                        network.interface.name = %iface.name,
+                        reason = "down",
+                        "skipping DOWN interface"
+                    );
+                    return false;
+                }
+                true
+            })
+            .map(|iface| iface.name)
+            .collect();
+
+        info!(
+            event.name = "test_bpf.interfaces_discovered",
+            iface_count = all_interfaces.len(),
+            interfaces = ?all_interfaces,
+            "discovered interfaces from host namespace"
+        );
+
+        // Apply pattern filter (if provided)
+        let pattern_filtered: Vec<String> = if pattern.is_empty() {
+            all_interfaces
+        } else {
+            all_interfaces
+                .into_iter()
+                .filter(|iface| matches_pattern(iface, pattern))
+                .collect()
+        };
+
+        info!(
+            event.name = "test_bpf.pattern_filter_applied",
+            pattern_count = pattern.len(),
+            patterns = ?pattern,
+            filtered_count = pattern_filtered.len(),
+            "applied pattern filter"
+        );
+
+        // Apply skip filter
+        let final_interfaces: Vec<String> = if skip.is_empty() {
+            pattern_filtered
+        } else {
+            pattern_filtered
+                .into_iter()
+                .filter(|iface| !matches_skip_pattern(iface, skip))
+                .collect()
+        };
+
+        info!(
+            event.name = "test_bpf.skip_filter_applied",
+            skip_count = skip.len(),
+            skip_patterns = ?skip,
+            final_count = final_interfaces.len(),
+            interfaces = ?final_interfaces,
+            "applied skip filter"
+        );
+
+        if final_interfaces.is_empty() {
+            return Err(MerminError::internal(
+                "no interfaces found matching the criteria",
+            ));
+        }
+
+        final_interfaces
+    } else {
+        // Single interface mode
+        let iface = interface.as_ref().map(|s| s.as_str()).unwrap_or("lo");
+        vec![iface.to_string()]
+    };
     // Initialize minimal tracing
     use tracing_subscriber::{
         EnvFilter,
@@ -988,7 +1141,8 @@ async fn handle_test_bpf(interface: String) -> Result<()> {
 
     info!(
         event.name = "test_bpf.started",
-        interface = %interface,
+        interface_count = interfaces_to_test.len(),
+        interfaces = ?interfaces_to_test,
         "starting BPF filesystem and attach/detach tests"
     );
 
@@ -1130,16 +1284,46 @@ async fn handle_test_bpf(interface: String) -> Result<()> {
         );
     }
 
-    // Test attach operation
+    // Test each interface
+    let mut results: Vec<InterfaceTestResult> = Vec::new();
+
+    for interface in &interfaces_to_test {
+        let result = test_single_interface(interface, ingress_program, bpf_fs_writable, use_tcx)?;
+        results.push(result);
+    }
+
+    // Print results
+    print_test_results(&results, &kernel_version, use_tcx, bpf_fs_writable);
+
+    // Determine exit code: 0 if any passed, 1 if all failed
+    let passed_count = results.iter().filter(|r| r.overall_status()).count();
+    let total_count = results.len();
+
+    if passed_count == 0 {
+        return Err(MerminError::internal(format!(
+            "all {total_count} interface(s) failed"
+        )));
+    }
+
+    Ok(())
+}
+
+/// Test a single interface and return the result
+fn test_single_interface(
+    interface: &str,
+    ingress_program: &mut SchedClassifier,
+    bpf_fs_writable: bool,
+    use_tcx: bool,
+) -> Result<InterfaceTestResult> {
+    let mut attach_success = false;
+    let mut pin_success: Option<bool> = None;
+    let mut link_id: Option<SchedClassifierLinkId> = None;
+
     info!(
         event.name = "test_bpf.attach_starting",
         network.interface.name = %interface,
         "starting attach test"
     );
-
-    let mut attach_success = false;
-    let mut pin_success = false;
-    let mut link_id: Option<SchedClassifierLinkId> = None;
 
     // TCX mode: kernel >= 6.6, attach with ordering
     if use_tcx {
@@ -1150,7 +1334,7 @@ async fn handle_test_bpf(interface: String) -> Result<()> {
         );
 
         let options = TcAttachOptions::TcxOrder(LinkOrder::last());
-        match ingress_program.attach_with_options(&interface, TcAttachType::Ingress, options) {
+        match ingress_program.attach_with_options(interface, TcAttachType::Ingress, options) {
             Ok(attached_id) => {
                 attach_success = true;
                 info!(
@@ -1160,9 +1344,6 @@ async fn handle_test_bpf(interface: String) -> Result<()> {
                 );
 
                 // Try to pin link if BPF FS is writable
-                // Note: taking the link consumes attached_id, so we can't use it for detach anymore
-                // If pinning succeeds, we'll test detach via unpinning.
-                // If it fails, link is consumed but program is still attached (orphaned).
                 if bpf_fs_writable {
                     let pin_path = format!("/sys/fs/bpf/mermin_tcx_{interface}_ingress");
                     info!(
@@ -1177,7 +1358,7 @@ async fn handle_test_bpf(interface: String) -> Result<()> {
                                 Ok(fd_link) => {
                                     match fd_link.pin(&pin_path) {
                                         Ok(pinned_fd_link) => {
-                                            pin_success = true;
+                                            pin_success = Some(true);
                                             info!(
                                                 event.name = "test_bpf.pin_success",
                                                 pin_path = %pin_path,
@@ -1185,50 +1366,41 @@ async fn handle_test_bpf(interface: String) -> Result<()> {
                                             );
                                             std::mem::forget(pinned_fd_link);
                                             // Link is pinned, so we'll test detach via unpinning
-                                            // Don't set link_id since we can't use it for standard detach
                                         }
                                         Err(e) => {
+                                            pin_success = Some(false);
                                             error!(
                                                 event.name = "test_bpf.pin_failed",
                                                 pin_path = %pin_path,
                                                 error = %e,
-                                                "✗ failed to pin TCX link despite /sys/fs/bpf being writable - link consumed, cannot test standard detach"
+                                                "✗ failed to pin TCX link despite /sys/fs/bpf being writable"
                                             );
                                             // Link was consumed, can't test standard detach
-                                            // But program is still attached
                                         }
                                     }
                                 }
                                 Err(e) => {
+                                    pin_success = Some(false);
                                     warn!(
                                         event.name = "test_bpf.link_conversion_failed",
                                         error = ?e,
-                                        "✗ failed to convert link to fd link - link consumed, cannot test standard detach"
+                                        "✗ failed to convert link to fd link"
                                     );
-                                    // Link was consumed, can't test standard detach
                                 }
                             }
                         }
                         Err(_e) => {
-                            // Link not taken, but we can't use attached_id here because borrow checker
-                            // sees it might be moved. We'll skip standard detach in this case since
-                            // the link is still in program storage and can be detached by kernel
-                            // when the program is dropped, but it's not ideal for testing.
+                            pin_success = Some(false);
                             warn!(
                                 event.name = "test_bpf.link_take_failed",
-                                "✗ could not take link from program storage - program will stay attached"
+                                "✗ could not take link from program storage"
                             );
-                            // Note: attached_id was consumed by take_link attempt even though it failed
+                            // Note: attached_id was consumed by take_link attempt, can't use for detach
                         }
                     }
                 } else {
                     // Store link_id for standard detach test
                     link_id = Some(attached_id);
-                    warn!(
-                        event.name = "test_bpf.pin_skipped",
-                        reason = "bpf_fs_not_writable",
-                        "skipping link pinning - /sys/fs/bpf is not writable"
-                    );
                 }
             }
             Err(e) => {
@@ -1249,7 +1421,7 @@ async fn handle_test_bpf(interface: String) -> Result<()> {
         );
 
         // Add clsact qdisc if needed (netlink mode requirement)
-        if let Err(e) = aya::programs::tc::qdisc_add_clsact(&interface) {
+        if let Err(e) = aya::programs::tc::qdisc_add_clsact(interface) {
             debug!(
                 event.name = "test_bpf.qdisc_add_skipped",
                 network.interface.name = %interface,
@@ -1263,7 +1435,7 @@ async fn handle_test_bpf(interface: String) -> Result<()> {
             handle: 0,
         });
 
-        match ingress_program.attach_with_options(&interface, TcAttachType::Ingress, options) {
+        match ingress_program.attach_with_options(interface, TcAttachType::Ingress, options) {
             Ok(id) => {
                 link_id = Some(id);
                 attach_success = true;
@@ -1325,11 +1497,10 @@ async fn handle_test_bpf(interface: String) -> Result<()> {
                         }
                     }
                 }
-                Err(e) => {
+                Err(_e) => {
                     debug!(
                         event.name = "test_bpf.pin_not_found",
                         pin_path = %pin_path,
-                        error = %e,
                         "pinned link not found, using standard detach"
                     );
                     // Fall through to standard detach
@@ -1337,24 +1508,33 @@ async fn handle_test_bpf(interface: String) -> Result<()> {
             }
 
             // Fallback to standard detach if unpin didn't work
-            if !detach_success && let Some(id) = link_id {
-                match ingress_program.detach(id) {
-                    Ok(_) => {
-                        detach_success = true;
-                        info!(
-                            event.name = "test_bpf.detach_success",
-                            network.interface.name = %interface,
-                            "✓ successfully detached program (standard detach)"
-                        );
+            if !detach_success {
+                if let Some(id) = link_id {
+                    match ingress_program.detach(id) {
+                        Ok(_) => {
+                            detach_success = true;
+                            info!(
+                                event.name = "test_bpf.detach_success",
+                                network.interface.name = %interface,
+                                "✓ successfully detached program (standard detach)"
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                event.name = "test_bpf.detach_failed",
+                                network.interface.name = %interface,
+                                error = %e,
+                                "✗ failed to detach program"
+                            );
+                        }
                     }
-                    Err(e) => {
-                        error!(
-                            event.name = "test_bpf.detach_failed",
-                            network.interface.name = %interface,
-                            error = %e,
-                            "✗ failed to detach program"
-                        );
-                    }
+                } else {
+                    warn!(
+                        event.name = "test_bpf.detach_skipped",
+                        network.interface.name = %interface,
+                        reason = "no_link_id",
+                        "skipping detach test - no link ID available"
+                    );
                 }
             }
         } else {
@@ -1378,72 +1558,147 @@ async fn handle_test_bpf(interface: String) -> Result<()> {
                         );
                     }
                 }
+            } else {
+                warn!(
+                    event.name = "test_bpf.detach_skipped",
+                    network.interface.name = %interface,
+                    reason = "no_link_id",
+                    "skipping detach test - no link ID available"
+                );
             }
         }
     } else {
         warn!(
             event.name = "test_bpf.detach_skipped",
+            network.interface.name = %interface,
             reason = "attach_failed",
             "skipping detach test - attach operation failed"
         );
     }
 
-    // Print summary
-    println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    println!("BPF Test Results Summary");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    println!("Interface: {interface}");
-    println!("Kernel: {kernel_version}");
-    println!("Mode: {}", if use_tcx { "TCX" } else { "netlink" });
-    println!();
-    println!(
-        "BPF Filesystem Writeable: {}",
-        if bpf_fs_writable {
-            "✓ PASS"
-        } else {
-            "✗ FAIL"
-        }
-    );
-    println!(
-        "Program Attach:           {}",
-        if attach_success {
-            "✓ PASS"
-        } else {
-            "✗ FAIL"
-        }
-    );
-    println!(
-        "Link Pinning:             {}",
-        if pin_success {
-            "✓ PASS"
-        } else {
-            "✗ FAIL (N/A if not TCX or BPF FS not writable)"
-        }
-    );
-    println!(
-        "Program Detach:           {}",
-        if detach_success {
-            "✓ PASS"
-        } else {
-            "✗ FAIL"
-        }
-    );
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    Ok(InterfaceTestResult {
+        interface: interface.to_string(),
+        bpf_fs_writable,
+        attach_success,
+        pin_success,
+        detach_success,
+    })
+}
 
-    if !bpf_fs_writable && use_tcx {
-        println!("\n WARNING: /sys/fs/bpf is not writable!");
-        println!("   Mount /sys/fs/bpf as hostPath for orphan cleanup on pod restart.");
+/// Print test results in a formatted table
+fn print_test_results(
+    results: &[InterfaceTestResult],
+    kernel_version: &KernelVersion,
+    use_tcx: bool,
+    bpf_fs_writable: bool,
+) {
+    let is_multi_interface = results.len() > 1;
+    let passed_count = results.iter().filter(|r| r.overall_status()).count();
+    let failed_count = results.len() - passed_count;
+
+    if is_multi_interface {
+        println!("\n       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!("       BPF Test Results Summary (All Interfaces)");
+        println!("       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!("       Total Interfaces Tested: {}", results.len());
+        println!("       Passed: {passed_count}  Failed: {failed_count}");
+        println!();
+        println!("              Interface    BPF FS    Attach    Pin    Detach    Status");
+        println!("       ─────────────────────────────────────────────────────────");
+
+        for result in results {
+            let bpf_fs_status = if result.bpf_fs_writable {
+                "✓ PASS"
+            } else {
+                "✗ FAIL"
+            };
+            let attach_status = if result.attach_success {
+                "✓ PASS"
+            } else {
+                "✗ FAIL"
+            };
+            let pin_status = match result.pin_success {
+                Some(true) => "✓ PASS",
+                Some(false) => "✗ FAIL",
+                None => "N/A",
+            };
+            let detach_status = if result.detach_success {
+                "✓ PASS"
+            } else {
+                "✗ FAIL"
+            };
+            let overall_status = if result.overall_status() {
+                "✓ PASS"
+            } else {
+                "✗ FAIL"
+            };
+
+            println!(
+                "       {:<20} {:<9} {:<8} {:<6} {:<8} {}",
+                result.interface,
+                bpf_fs_status,
+                attach_status,
+                pin_status,
+                detach_status,
+                overall_status
+            );
+        }
+
+        println!("       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+        if !bpf_fs_writable && use_tcx {
+            println!("\n       WARNING: /sys/fs/bpf is not writable!");
+            println!("       Mount /sys/fs/bpf as hostPath for orphan cleanup on pod restart.");
+        }
+    } else {
+        // Single interface mode - use original format
+        let result = &results[0];
+        println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!("BPF Test Results Summary");
+        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!("Interface: {}", result.interface);
+        println!("Kernel: {kernel_version}");
+        println!("Mode: {}", if use_tcx { "TCX" } else { "netlink" });
+        println!();
+        println!(
+            "BPF Filesystem Writeable: {}",
+            if result.bpf_fs_writable {
+                "✓ PASS"
+            } else {
+                "✗ FAIL"
+            }
+        );
+        println!(
+            "Program Attach:           {}",
+            if result.attach_success {
+                "✓ PASS"
+            } else {
+                "✗ FAIL"
+            }
+        );
+        println!(
+            "Link Pinning:             {}",
+            match result.pin_success {
+                Some(true) => "✓ PASS",
+                Some(false) => "✗ FAIL",
+                None => "N/A (not TCX or BPF FS not writable)",
+            }
+        );
+        println!(
+            "Program Detach:           {}",
+            if result.detach_success {
+                "✓ PASS"
+            } else {
+                "✗ FAIL"
+            }
+        );
+        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+        if !result.bpf_fs_writable && use_tcx {
+            println!("\n WARNING: /sys/fs/bpf is not writable!");
+            println!("   Mount /sys/fs/bpf as hostPath for orphan cleanup on pod restart.");
+        }
     }
-
-    if !attach_success {
-        return Err(MerminError::internal("attach test failed"));
-    }
-
-    if !detach_success {
-        return Err(MerminError::internal("detach test failed"));
-    }
-
-    Ok(())
 }
 
 /// Display user-friendly error messages with helpful hints

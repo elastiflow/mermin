@@ -38,8 +38,17 @@ pub enum CliSubcommand {
     /// Test BPF filesystem writeability and program attach/detach operations
     TestBpf {
         /// Network interface to test attach/detach operations on
-        #[arg(short, long, default_value = "lo")]
-        interface: String,
+        #[arg(short, long, default_value = "lo", conflicts_with = "all")]
+        interface: Option<String>,
+        /// Test all network interfaces (mutually exclusive with --interface)
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        all: bool,
+        /// Glob pattern to filter interfaces (only valid with --all, can be specified multiple times)
+        #[arg(long, requires = "all", action = clap::ArgAction::Append)]
+        pattern: Vec<String>,
+        /// Glob pattern to exclude interfaces (only valid with --all, can be specified multiple times)
+        #[arg(long, requires = "all", action = clap::ArgAction::Append)]
+        skip: Vec<String>,
     },
 }
 
