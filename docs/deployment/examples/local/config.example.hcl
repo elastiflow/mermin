@@ -6,11 +6,13 @@ span {
   # Default: 24h
   trace_id_timeout = "24h"
   
+  # Test-optimized values for faster CI feedback
+  max_record_interval = "10s"   # Export active flows every 10s (default: 60s)
+  icmp_timeout        = "5s"    # ICMP flows timeout after 5s (default: 10s)
+  
   # Other span options use default values if not specified:
-  # max_record_interval = "60s"  # Maximum interval for active flow recording
   # tcp_timeout         = "20s"  # Idle timeout for TCP flows
   # udp_timeout         = "60s"  # Idle timeout for UDP flows
-  # icmp_timeout        = "10s"  # Idle timeout for ICMP flows
 }
 
 # OTLP exporter configuration
@@ -40,15 +42,10 @@ export "traces" {
   #   # }
   # }
 }
+
 # Metrics server configuration (for Prometheus scraping)
 metrics {
   enabled        = true
   listen_address = "0.0.0.0"
   port           = 10250
-}
-# Test configuration optimized for fast CI runs
-# Reduce flow export intervals for faster test feedback
-span {
-  max_record_interval = "10s"   # Export active flows every 5s (default: 60s)
-  icmp_timeout = "5s"          # ICMP flows timeout after 3s (default: 10s)
 }
