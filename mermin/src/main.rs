@@ -10,7 +10,11 @@ mod packet;
 mod runtime;
 mod span;
 
-use std::sync::{Arc, atomic::Ordering};
+use std::{
+    fmt,
+    sync::{Arc, atomic::Ordering},
+    time::Duration,
+};
 
 use aya::{
     EbpfLoader,
@@ -19,7 +23,12 @@ use aya::{
 };
 use dashmap::DashMap;
 use error::{MerminError, Result};
-use tokio::{signal, sync::mpsc};
+use tokio::{
+    signal,
+    sync::{broadcast, mpsc},
+    task::JoinHandle,
+    time::timeout,
+};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
@@ -41,6 +50,70 @@ use crate::{
     runtime::{capabilities, context::Context},
     span::producer::FlowSpanProducer,
 };
+
+/// A simple manager to track spawned Tokio tasks with descriptive names.
+struct TaskManager {
+    tasks: Vec<(String, JoinHandle<()>)>,
+}
+
+impl TaskManager {
+    /// Creates a new, empty TaskManager.
+    fn new() -> Self {
+        Self { tasks: Vec::new() }
+    }
+
+    /// Spawns a new task and adds it to the registry with a name.
+    fn spawn<F>(&mut self, name: &str, future: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let handle = tokio::spawn(future);
+        self.tasks.push((name.to_string(), handle));
+    }
+
+    /// Waits for all tracked tasks to complete.
+    async fn wait_for_all(self) {
+        for (name, handle) in self.tasks {
+            info!(event.name = "task.waiting", task.name = %name, "waiting for task to complete");
+
+            match handle.await {
+                Ok(()) => {
+                    info!(event.name = "task.completed", task.name = %name, "task completed successfully");
+                }
+                Err(e) => {
+                    error!(
+                        event.name = "task.panic",
+                        task.name = %name,
+                        error.message = ?e,
+                        "a background task panicked"
+                    );
+                }
+            }
+        }
+    }
+}
+
+async fn shutdown_exporter_gracefully(
+    exporter: Arc<dyn TraceableExporter>,
+    timeout_duration: Duration,
+) -> Result<()> {
+    let shutdown_future = tokio::task::spawn_blocking(move || {
+        exporter
+            .as_any()
+            .downcast_ref::<TraceExporterAdapter>()
+            .map(|adapter| adapter.shutdown())
+            .unwrap_or(Ok(()))
+    });
+
+    match tokio::time::timeout(timeout_duration, shutdown_future).await {
+        Ok(Ok(result)) => result.map_err(|e| MerminError::Otlp(e.into())),
+        Ok(Err(join_error)) => Err(MerminError::internal(format!(
+            "shutdown task panicked: {:?}",
+            join_error
+        ))),
+        Err(_) => Err(MerminError::internal("shutdown timed out")),
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -89,12 +162,17 @@ async fn run() -> Result<()> {
         );
     }
 
+    let (shutdown_tx, _) = broadcast::channel::<()>(1);
+    let mut task_manager = TaskManager::new();
+    let mut os_thread_handles = Vec::new();
+
     if conf.metrics.enabled {
         let metrics_conf = conf.metrics.clone();
+        let mut shutdown_rx = shutdown_tx.subscribe();
 
         // Start metrics server on a dedicated runtime thread to prevent starvation
         // This ensures /metrics endpoint always responds even when main runtime is under heavy load
-        std::thread::spawn(move || {
+        let metrics_handle = std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .thread_name("mermin-metrics")
@@ -102,16 +180,24 @@ async fn run() -> Result<()> {
                 .expect("failed to create metrics server runtime");
 
             rt.block_on(async move {
-                if let Err(e) = start_metrics_server(metrics_conf).await {
-                    error!(
-                        event.name = "metrics.server_error",
-                        error.message = %e,
-                        "metrics server encountered a fatal error"
-                    );
+                tokio::select! {
+                    result = start_metrics_server(metrics_conf) => {
+                        if let Err(e) = result {
+                            error!(
+                                event.name = "metrics.server_error",
+                                error.message = %e,
+                                "metrics server encountered a fatal error"
+                            );
+                        }
+                    },
+                    _ = shutdown_rx.recv() => {
+                        info!(event.name = "metrics.shutdown_signal_received", "metrics server received shutdown signal");
+                    }
                 }
+                info!(event.name = "metrics.server_exited", "metrics server has shut down");
             });
         });
-
+        os_thread_handles.push(("metrics-server".to_string(), metrics_handle));
         info!(event.name = "metrics.started", "metrics server started");
     }
 
@@ -120,10 +206,11 @@ async fn run() -> Result<()> {
     if conf.api.enabled {
         let health_state_clone = health_state.clone();
         let api_conf = conf.api.clone();
+        let mut shutdown_rx = shutdown_tx.subscribe();
 
         // Start API server on a dedicated runtime thread to prevent starvation
         // This ensures health checks always respond even when main runtime is under heavy load
-        std::thread::spawn(move || {
+        let api_handle = std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .thread_name("mermin-api")
@@ -131,16 +218,24 @@ async fn run() -> Result<()> {
                 .expect("failed to create api server runtime");
 
             rt.block_on(async move {
-                if let Err(e) = start_api_server(health_state_clone, &api_conf).await {
-                    error!(
-                        event.name = "api.internal_error",
-                        error.message = %e,
-                        "api server encountered a fatal error"
-                    );
+                tokio::select! {
+                    result = start_api_server(health_state_clone, &api_conf) => {
+                        if let Err(e) = result {
+                            error!(
+                                event.name = "api.internal_error",
+                                error.message = %e,
+                                "api server encountered a fatal error"
+                            );
+                        }
+                    },
+                    _ = shutdown_rx.recv() => {
+                        info!(event.name = "api.shutdown_signal_received", "api server received shutdown signal");
+                    }
                 }
+                info!(event.name = "api.server_exited", "api server has shut down");
             });
         });
-
+        os_thread_handles.push(("api-server".to_string(), api_handle));
         info!(
             event.name = "api.started",
             "api server started, health checks will report not ready until initialization completes"
@@ -406,8 +501,9 @@ async fn run() -> Result<()> {
     let _interface_count = wait_for_controller_initialized(&event_rx, &cmd_tx)?;
     health_state.ebpf_loaded.store(true, Ordering::Relaxed);
 
-    let _event_handler = spawn_controller_event_handler(event_rx)
+    let event_handler_handle = spawn_controller_event_handler(event_rx)
         .map_err(|e| MerminError::internal(format!("failed to spawn event handler: {e}")))?;
+    os_thread_handles.push(("iface-event-handler".to_string(), event_handler_handle));
 
     info!(
         event.name = "ebpf.ready",
@@ -489,7 +585,8 @@ async fn run() -> Result<()> {
 
     // K8s decorator runs on dedicated thread pool to prevent K8s API lookups from blocking main runtime
     let decorator_threads = conf.pipeline.k8s_decorator_threads;
-    std::thread::spawn(move || {
+    let mut decorator_shutdown_rx = shutdown_tx.subscribe();
+    let decorator_handle = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(decorator_threads)
             .thread_name("mermin-k8s-decorator")
@@ -508,41 +605,54 @@ async fn run() -> Result<()> {
 
             // Matching on the attributor early is a performance optimization to avoid having to check to see if the attributor is None per flow_span_rx receive.
             match k8s_attributor.as_ref().map(Decorator::new) {
-                Some(decorator) => {
-                    while let Some(flow_span) = flow_span_rx.recv().await {
-                    	metrics::userspace::set_channel_size("decorator_input", flow_span_rx.len());
-                        let timer = metrics::registry::PROCESSING_LATENCY
-                            .with_label_values(&["k8s_decoration"])
-                            .start_timer();
-                        let (span, err) = decorator.decorate_or_fallback(flow_span).await;
-                        timer.observe_duration();
+                Some(decorator) => loop {
+                    tokio::select! {
+                        _ = decorator_shutdown_rx.recv() => {
+                            info!(
+                                event.name = "k8s.decorator.shutdown_signal_received",
+                                "k8s decorator received shutdown signal"
+                            );
+                            break;
+                        },
+                        maybe_span = flow_span_rx.recv() => {
+                            if let Some(flow_span) = maybe_span {
+                                metrics::userspace::set_channel_size("decorator_input", flow_span_rx.len());
+                                let timer = metrics::registry::PROCESSING_LATENCY
+                                .with_label_values(&["k8s_decoration"])
+                                .start_timer();
+                                let (span, err) = decorator.decorate_or_fallback(flow_span).await;
+                                timer.observe_duration();
 
-                        if let Some(e) = &err {
-                            debug!(
-                                event.name = "k8s.decorator.failed",
-                                flow.community_id = %span.attributes.flow_community_id,
-                                error.message = %e,
-                                "failed to decorate flow attributes with kubernetes metadata, sending undecorated span"
-                            );
-                        } else {
-                            trace!(
-                                event.name = "k8s.decorator.decorated",
-                                flow.community_id = %span.attributes.flow_community_id,
-                                "successfully decorated flow attributes with kubernetes metadata"
-                            );
-                        }
+                                if let Some(e) = &err {
+                                    debug!(
+                                        event.name = "k8s.decorator.failed",
+                                        flow.community_id = %span.attributes.flow_community_id,
+                                        error.message = %e,
+                                        "failed to decorate flow attributes with kubernetes metadata, sending undecorated span"
+                                    );
+                                } else {
+                                    trace!(
+                                        event.name = "k8s.decorator.decorated",
+                                        flow.community_id = %span.attributes.flow_community_id,
+                                        "successfully decorated flow attributes with kubernetes metadata"
+                                    );
+                                }
 
-                        if let Err(e) = k8s_decorated_flow_span_tx.send(span).await {
-                            metrics::registry::FLOW_SPANS_DROPPED_EXPORT_FAILURE.inc();
-                            error!(
-                                event.name = "channel.send_failed",
-                                channel.name = "k8s_decorated_flow_span",
-                                error.message = %e,
-                                "failed to send flow span to export channel"
-                            );
+                                if let Err(e) = k8s_decorated_flow_span_tx.send(span).await {
+                                    metrics::registry::FLOW_SPANS_DROPPED_EXPORT_FAILURE.inc();
+                                    error!(
+                                        event.name = "channel.send_failed",
+                                        channel.name = "k8s_decorated_flow_span",
+                                        error.message = %e,
+                                        "failed to send flow span to export channel"
+                                    );
+                                }
+                            } else {
+                                break;
+                            };
                         }
                     }
-                }
+                },
                 None => {
                     warn!(
                         event.name = "k8s.decorator.unavailable",
@@ -563,7 +673,8 @@ async fn run() -> Result<()> {
                     }
                 }
             }
-
+            drop(k8s_decorated_flow_span_tx);
+            flow_span_rx.close();
             info!(
                 event.name = "task.exited",
                 task.name = "k8s.decorator",
@@ -571,12 +682,15 @@ async fn run() -> Result<()> {
             );
         });
     });
+    let decorator_join_handle = decorator_handle;
+
     health_state
         .k8s_caches_synced
         .store(true, Ordering::Relaxed);
 
-    tokio::spawn(async move {
-        flow_span_producer.run().await;
+    let producer_shutdown_rx = shutdown_tx.subscribe();
+    task_manager.spawn("span-producer", async move {
+        flow_span_producer.run(producer_shutdown_rx).await;
         info!(
             event.name = "task.exited",
             task.name = "span.producer",
@@ -585,21 +699,37 @@ async fn run() -> Result<()> {
     });
     health_state.ready_to_process.store(true, Ordering::Relaxed);
 
-    tokio::spawn(async move {
+    task_manager.spawn("exporter", async move {
         while let Some(flow_span) = k8s_decorated_flow_span_rx.recv().await {
-            metrics::userspace::set_channel_size(
-                "exporter_input",
-                k8s_decorated_flow_span_rx.len(),
-            );
             let traceable: TraceableRecord = Arc::new(flow_span);
             trace!(event.name = "flow.exporting", "exporting flow span");
 
-            let timer = metrics::registry::PROCESSING_LATENCY
-                .with_label_values(&["otlp_export"])
-                .start_timer();
-            exporter.export(traceable).await;
-            timer.observe_duration();
+            if timeout(Duration::from_secs(10), exporter.export(traceable)).await.is_err() {
+                warn!(event.name = "flow.export_timeout", "export call timed out, span may be lost");
+            }
         }
+
+        info!(
+            event.name = "task.exited",
+            task.name = "exporter",
+            "exporter task exited because its channel was closed, flushing remaining spans via provider shutdown."
+        );
+
+        match shutdown_exporter_gracefully(Arc::clone(&exporter), Duration::from_secs(5)).await {
+            Ok(()) => {
+                info!(event.name = "exporter.otlp_shutdown_success", "OpenTelemetry provider shut down cleanly");
+            }
+            Err(e) => {
+                let event_name = match &e {
+                    MerminError::Otlp(_) => "exporter.otlp_shutdown_error",
+                    MerminError::Internal(msg) if msg.contains("timed out") => "exporter.otlp_shutdown_timeout",
+                    MerminError::Internal(msg) if msg.contains("panicked") => "exporter.otlp_shutdown_panic",
+                    _ => "exporter.otlp_shutdown_error",
+                };
+                warn!(event.name = event_name, error.message = %e, "OpenTelemetry provider shutdown failed");
+            }
+        }
+
         info!(
             event.name = "task.exited",
             task.name = "exporter",
@@ -637,11 +767,15 @@ async fn run() -> Result<()> {
         event.name = "application.shutdown_initiated",
         "received shutdown signal, starting graceful cleanup"
     );
-    debug!(
-        event.name = "interface_controller.shutdown_requested",
-        "sending shutdown command to controller thread"
-    );
 
+    if shutdown_tx.send(()).is_err() {
+        warn!(
+            event.name = "application.shutdown.signal_failed",
+            "no tasks were listening for the broadcast shutdown signal"
+        );
+    }
+
+    // Signal control-plane controller thread
     if let Err(e) = cmd_tx.send(ControllerCommand::Shutdown) {
         warn!(
             event.name = "interface_controller.shutdown_send_failed",
@@ -650,48 +784,7 @@ async fn run() -> Result<()> {
         );
     }
 
-    // Wait for controller thread to complete shutdown
-    match tokio::task::spawn_blocking(move || match controller_handle.join() {
-        Ok(()) => Ok(()),
-        Err(panic_err) => {
-            if let Some(panic_msg) = panic_err.downcast_ref::<&str>() {
-                Err(format!("controller thread panicked: {panic_msg}"))
-            } else if let Some(panic_msg) = panic_err.downcast_ref::<String>() {
-                Err(format!("controller thread panicked: {panic_msg}"))
-            } else {
-                Err("controller thread panicked with unknown error".to_string())
-            }
-        }
-    })
-    .await
-    {
-        Ok(Ok(())) => {
-            debug!(
-                event.name = "interface_controller.thread_joined",
-                "controller thread exited cleanly"
-            );
-        }
-        Ok(Err(panic_msg)) => {
-            error!(
-                event.name = "interface_controller.thread_panicked",
-                error.message = %panic_msg,
-                "controller thread panicked during execution"
-            );
-        }
-        Err(e) => {
-            warn!(
-                event.name = "interface_controller.join_failed",
-                error = %e,
-                "failed to join controller thread"
-            );
-        }
-    }
-
-    // Signal netlink thread to shutdown via eventfd
-    debug!(
-        event.name = "interface_controller.netlink.signaling_shutdown",
-        "signaling netlink thread to shutdown"
-    );
+    // Signal control-plane netlink thread
     if let Err(e) = netlink_shutdown_fd.signal() {
         warn!(
             event.name = "interface_controller.netlink.signal_failed",
@@ -700,47 +793,71 @@ async fn run() -> Result<()> {
         );
     }
 
-    // Wait for netlink thread to exit gracefully
-    // poll() will wake immediately when the shutdown eventfd is signaled
-    debug!(
-        event.name = "interface_controller.netlink.waiting",
-        "waiting for netlink thread to exit gracefully"
+    info!(
+        event.name = "application.shutdown.waiting_on_decorator",
+        "waiting for k8s decorator thread to finish"
     );
-    match tokio::task::spawn_blocking(move || match netlink_handle.join() {
-        Ok(()) => Ok(()),
-        Err(panic_err) => {
-            if let Some(panic_msg) = panic_err.downcast_ref::<&str>() {
-                Err(format!("netlink thread panicked: {panic_msg}"))
-            } else if let Some(panic_msg) = panic_err.downcast_ref::<String>() {
-                Err(format!("netlink thread panicked: {panic_msg}"))
-            } else {
-                Err("netlink thread panicked with unknown error".to_string())
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = decorator_join_handle.join() {
+            error!(event.name = "os_thread.panic", task.name = "k8s-decorator", error.message = ?e, "decorator thread panicked");
+        }
+    }).await.unwrap();
+    info!(
+        event.name = "application.shutdown.decorator_finished",
+        "k8s decorator thread has finished"
+    );
+
+    info!(
+        event.name = "application.shutdown.waiting_on_tokio_tasks",
+        task.count = task_manager.tasks.len(),
+        "waiting for main data plane tasks to finish (producer, exporter)"
+    );
+    task_manager.wait_for_all().await;
+    info!(
+        event.name = "application.shutdown.tokio_tasks_finished",
+        "main data plane tasks have finished"
+    );
+
+    info!(
+        event.name = "application.shutdown.waiting_on_os_threads",
+        "waiting for control plane and helper OS threads to finish"
+    );
+    tokio::task::spawn_blocking(move || {
+        // Join OS helper threads
+        for (name, handle) in os_thread_handles {
+            if let Err(e) = handle.join() {
+                error!(event.name = "os_thread.panic", task.name = %name, error.message = ?e, "a dedicated OS thread panicked");
             }
         }
-    })
-    .await
-    {
-        Ok(Ok(())) => {
-            debug!(
-                event.name = "interface_controller.netlink.thread_joined",
-                "netlink thread exited cleanly"
-            );
+
+        // Join control plane threads
+        if let Err(panic_err) = controller_handle.join() {
+            let panic_msg = if let Some(s) = panic_err.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = panic_err.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "controller thread panicked with unknown error".to_string()
+            };
+            error!(event.name = "os_thread.panic", task.name = "controller", error.message = %panic_msg);
         }
-        Ok(Err(panic_msg)) => {
-            error!(
-                event.name = "interface_controller.netlink.thread_panicked",
-                error.message = %panic_msg,
-                "netlink thread panicked during execution"
-            );
+
+        if let Err(panic_err) = netlink_handle.join() {
+            let panic_msg = if let Some(s) = panic_err.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = panic_err.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "netlink thread panicked with unknown error".to_string()
+            };
+            error!(event.name = "os_thread.panic", task.name = "netlink", error.message = %panic_msg);
         }
-        Err(e) => {
-            warn!(
-                event.name = "interface_controller.netlink.join_failed",
-                error = %e,
-                "failed to join netlink thread"
-            );
-        }
-    }
+    }).await.unwrap();
+
+    info!(
+        event.name = "application.shutdown.os_threads_joined",
+        "all dedicated OS threads have finished"
+    );
 
     info!(
         event.name = "application.cleanup_complete",

@@ -17,7 +17,7 @@ use opentelemetry::trace::SpanKind;
 use pnet::datalink::MacAddr;
 use tokio::{
     io::unix::AsyncFd,
-    sync::{Mutex, mpsc},
+    sync::{Mutex, broadcast, mpsc},
 };
 use tracing::{debug, error, info, trace, warn};
 
@@ -154,7 +154,7 @@ impl FlowSpanProducer {
         })
     }
 
-    pub async fn run(self) {
+    pub async fn run(self, mut shutdown_rx: broadcast::Receiver<()>) {
         info!(
             event.name = "task.started",
             task.name = "span.producer",
@@ -170,6 +170,7 @@ impl FlowSpanProducer {
             "eBPF maps ready, starting event-driven flow processing"
         );
 
+        let mut worker_handles = Vec::new();
         let mut worker_channels = Vec::new();
         let worker_capacity =
             self.ring_buffer_capacity.max(self.worker_count) / self.worker_count.max(1);
@@ -195,9 +196,10 @@ impl FlowSpanProducer {
                 self.wireguard_port,
             );
 
-            tokio::spawn(async move {
+            let worker_handle = tokio::spawn(async move {
                 flow_worker.run().await;
             });
+            worker_handles.push(worker_handle);
         }
         info!(
             event.name = "workers.started",
@@ -209,13 +211,16 @@ impl FlowSpanProducer {
         // while catching truly orphaned entries much faster than a fixed long timeout.
         let max_orphan_age = self.span_opts.max_record_interval.saturating_mul(4);
         let community_id_gen = Arc::new(self.community_id_generator.clone());
-        tokio::spawn(orphan_scanner_task(
+        let orphan_scanner_shutdown_rx = shutdown_rx.resubscribe();
+        let orphan_scanner_handle = tokio::spawn(orphan_scanner_task(
             Arc::clone(&flow_stats_map),
             Arc::clone(&self.flow_store),
             self.boot_time_offset_nanos,
             max_orphan_age,
             community_id_gen,
+            orphan_scanner_shutdown_rx,
         ));
+        worker_handles.push(orphan_scanner_handle);
         info!(
             event.name = "orphan_scanner.started",
             scan.interval_secs = 300,
@@ -233,8 +238,9 @@ impl FlowSpanProducer {
             let poller_flow_store = Arc::clone(&self.flow_store);
             let poller_stats_map = Arc::clone(&flow_stats_map);
             let poller_span_tx = self.flow_span_tx.clone();
+            let poller_shutdown_rx = shutdown_rx.resubscribe();
 
-            tokio::spawn(async move {
+            let poller_handle = tokio::spawn(async move {
                 flow_poller_task(
                     poller_id,
                     num_pollers,
@@ -243,9 +249,11 @@ impl FlowSpanProducer {
                     poller_span_tx,
                     max_record_interval,
                     poll_interval,
+                    poller_shutdown_rx,
                 )
                 .await;
             });
+            worker_handles.push(poller_handle);
         }
         info!(
             event.name = "flow_pollers.started",
@@ -270,89 +278,132 @@ impl FlowSpanProducer {
         let worker_count = self.worker_count.max(1);
 
         loop {
-            let mut guard = match async_fd.readable().await {
-                Ok(guard) => guard,
-                Err(e) => {
-                    error!(
-                        event.name = "span.producer.error",
-                        error.message = %e,
-                        "error waiting for ring buffer readability"
-                    );
-                    break;
-                }
-            };
-
-            while let Some(item) = flow_events.next() {
-                let timer = metrics::registry::PROCESSING_LATENCY
-                    .with_label_values(&["flow_ingestion"])
-                    .start_timer();
-
-                let flow_event: FlowEvent =
-                    unsafe { std::ptr::read_unaligned(item.as_ptr() as *const FlowEvent) };
-
-                metrics::userspace::inc_ringbuf_packets("received", 1);
-                metrics::userspace::inc_ringbuf_bytes(flow_event.snaplen as u64);
-
-                let mut sent = false;
-                for attempt in 0..worker_count {
-                    let current_worker = (worker_index + attempt) % worker_count;
-                    let worker_tx = &worker_channels[current_worker];
-
-                    match worker_tx.try_send(flow_event) {
-                        Ok(_) => {
-                            metrics::userspace::inc_channel_sends("packet_worker", "success");
-                            worker_index = (current_worker + 1) % worker_count;
-                            sent = true;
+            tokio::select! {
+            _ = shutdown_rx.recv() => {
+                info!(
+                    event.name = "task.stopped",
+                    task.name = "span.producer",
+                    "userspace task stopping gracefully"
+                );
+                break;
+            },
+            result = async_fd.readable() => {
+                let mut guard = match result {
+                    Ok(guard) => guard,
+                        Err(e) => {
+                            error!(
+                                event.name = "span.producer.error",
+                                error.message = %e,
+                                "error waiting for ring buffer readability"
+                            );
                             break;
                         }
-                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                            // This worker is full, try next one
-                            continue;
+                    };
+
+                    while let Some(item) = flow_events.next() {
+                        let timer = metrics::registry::PROCESSING_LATENCY
+                            .with_label_values(&["flow_ingestion"])
+                            .start_timer();
+
+                        let flow_event: FlowEvent =
+                            unsafe { std::ptr::read_unaligned(item.as_ptr() as *const FlowEvent) };
+
+                        metrics::userspace::inc_ringbuf_packets("received", 1);
+                        metrics::userspace::inc_ringbuf_bytes(flow_event.snaplen as u64);
+
+                        let mut sent = false;
+                        for attempt in 0..worker_count {
+                            let current_worker = (worker_index + attempt) % worker_count;
+                            let worker_tx = &worker_channels[current_worker];
+
+                            match worker_tx.try_send(flow_event) {
+                                Ok(_) => {
+                                    metrics::userspace::inc_channel_sends("packet_worker", "success");
+                                    worker_index = (current_worker + 1) % worker_count;
+                                    sent = true;
+                                    break;
+                                }
+                                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                                    // This worker is full, try next one
+                                    continue;
+                                }
+                                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                                    // Worker is gone, try next one
+                                    metrics::userspace::inc_channel_sends("packet_worker", "error");
+                                    continue;
+                                }
+                            }
                         }
-                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                            // Worker is gone, try next one
-                            metrics::userspace::inc_channel_sends("packet_worker", "error");
-                            continue;
+
+                        if !sent {
+                            // All workers are full - drop event to prevent ring buffer backup
+                            // CRITICAL: Blocking here prevents draining ring buffer, causing eBPF to drop MORE events
+                            // This is a fail-safe to maintain pipeline throughput under extreme load.
+                            metrics::registry::FLOW_EVENTS_DROPPED_BACKPRESSURE.inc();
+
+                            // Log detailed backpressure info every 1000 drops (avoid log spam)
+                            static BACKPRESSURE_DROP_COUNT: std::sync::atomic::AtomicU64 =
+                                std::sync::atomic::AtomicU64::new(0);
+                            let drop_count =
+                                BACKPRESSURE_DROP_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+                            if drop_count % 1000 == 0 {
+                                warn!(
+                                    event.name = "flow.worker_backpressure",
+                                    worker_count = worker_count,
+                                    total_drops = drop_count + 1,
+                                    protocol = ?flow_event.flow_key.protocol,
+                                    "worker backpressure detected - dropping flow events to prevent deadlock"
+                                );
+                            }
+
+                            // Continue draining ring buffer - better to drop here with visibility
+                            // than block and cause eBPF to drop events silently
+                            //
+                            // TODO: Implement adaptive sampling strategy:
+                            // 1. Priority-based dropping (keep long-lived flows, drop short ones)
+                            // 2. Sampling (keep 1 in N flows during overload)
+                            // 3. Protocol-based priority (TCP > UDP > ICMP)
                         }
-                    }
-                }
 
-                if !sent {
-                    // All workers are full - drop event to prevent ring buffer backup
-                    // CRITICAL: Blocking here prevents draining ring buffer, causing eBPF to drop MORE events
-                    // This is a fail-safe to maintain pipeline throughput under extreme load.
-                    metrics::registry::FLOW_EVENTS_DROPPED_BACKPRESSURE.inc();
-
-                    // Log detailed backpressure info every 1000 drops (avoid log spam)
-                    static BACKPRESSURE_DROP_COUNT: std::sync::atomic::AtomicU64 =
-                        std::sync::atomic::AtomicU64::new(0);
-                    let drop_count =
-                        BACKPRESSURE_DROP_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-                    if drop_count % 1000 == 0 {
-                        warn!(
-                            event.name = "flow.worker_backpressure",
-                            worker_count = worker_count,
-                            total_drops = drop_count + 1,
-                            protocol = ?flow_event.flow_key.protocol,
-                            "worker backpressure detected - dropping flow events to prevent deadlock"
-                        );
+                        timer.observe_duration();
                     }
 
-                    // Continue draining ring buffer - better to drop here with visibility
-                    // than block and cause eBPF to drop events silently
-                    //
-                    // TODO: Implement adaptive sampling strategy:
-                    // 1. Priority-based dropping (keep long-lived flows, drop short ones)
-                    // 2. Sampling (keep 1 in N flows during overload)
-                    // 3. Protocol-based priority (TCP > UDP > ICMP)
+                    guard.clear_ready();
                 }
-
-                timer.observe_duration();
             }
-
-            guard.clear_ready();
         }
+
+        info!(
+            event.name = "shutdown.cleanup",
+            task.name = "span.producer",
+            "shutting down workers and pollers"
+        );
+
+        // Dropping the senders signals the FlowWorkers to shut down their `recv()` loops.
+        drop(worker_channels);
+
+        // Wait for all spawned background tasks (workers, pollers, scanner) to finish.
+        for handle in worker_handles {
+            debug!(
+                event.name = "shutdown.cleanup.joining",
+                task.name = "span.producer",
+                "waiting for a child task to join"
+            );
+            handle.await.unwrap_or_else(|e| {
+                warn!(event.name = "shutdown.cleanup.join_error", task.name = "span.producer", error.message = ?e, "child task panicked or was cancelled");
+            });
+            debug!(
+                event.name = "shutdown.cleanup.joined",
+                task.name = "span.producer",
+                "a child task has joined successfully"
+            );
+        }
+        info!(
+            event.name = "shutdown.cleanup.all_joined",
+            task.name = "span.producer",
+            "all child tasks have been joined"
+        );
     }
 }
 
@@ -1243,6 +1294,7 @@ async fn flow_poller_task(
     flow_span_tx: mpsc::Sender<FlowSpan>,
     max_record_interval: Duration,
     poll_interval: Duration,
+    mut shutdown_rx: broadcast::Receiver<()>,
 ) {
     let mut interval = tokio::time::interval(poll_interval);
 
@@ -1257,134 +1309,138 @@ async fn flow_poller_task(
     let mut last_stats_log = std::time::Instant::now();
 
     loop {
-        interval.tick().await;
+        tokio::select! {
+            _ = shutdown_rx.recv() => {
+                info!(event.name = "task.shutdown", task.name = "flow_poller", poller.id = poller_id, "shutdown signal received");
+                break;
+            },
+            _ = interval.tick() => {
+                let tick_start = std::time::Instant::now();
+                let now = std::time::SystemTime::now();
+                let mut flows_to_remove = Vec::new();
+                let mut flows_checked = 0usize;
+                let mut flows_recorded = 0usize;
+                let mut flows_skipped_partition = 0usize;
 
-        let tick_start = std::time::Instant::now();
-        let now = std::time::SystemTime::now();
-        let mut flows_to_remove = Vec::new();
-        let mut flows_checked = 0usize;
-        let mut flows_recorded = 0usize;
-        let mut flows_skipped_partition = 0usize;
-
-        trace!(
-            event.name = "flow_poller.tick_start",
-            poller.id = poller_id,
-            iteration.count = iteration_count + 1,
-            "poller tick started"
-        );
-
-        // Collect flows to process - CRITICAL: Must collect IDs first, then drop iterator
-        // before calling record_flow/timeout_and_remove_flow to avoid iterator deadlock
-        let mut flows_to_record = Vec::new();
-
-        let collection_start = std::time::Instant::now();
-        for entry in flow_store.iter() {
-            let community_id = entry.key();
-
-            // Partition: only process flows hashed to this poller
-            if hash_string(community_id) % num_pollers != poller_id {
-                flows_skipped_partition += 1;
-                continue;
-            }
-
-            // Extract all needed data from entry
-            let flow_span = &entry.flow_span;
-            let last_recorded_time = flow_span.last_recorded_time;
-            let last_activity_time = flow_span.last_activity_time;
-            let timeout_duration = flow_span.timeout_duration;
-
-            flows_checked += 1;
-
-            // Check if record interval elapsed
-            if let Ok(elapsed) = now.duration_since(last_recorded_time)
-                && elapsed >= max_record_interval
-            {
-                flows_to_record.push(community_id.clone());
-            }
-
-            // Check if timeout elapsed
-            if let Ok(elapsed) = now.duration_since(last_activity_time)
-                && elapsed >= timeout_duration
-            {
-                flows_to_remove.push(community_id.clone());
-            }
-        } // Iterator dropped here - no longer holding DashMap locks
-        let collection_duration = collection_start.elapsed();
-
-        trace!(
-            event.name = "flow_poller.collection_phase",
-            poller.id = poller_id,
-            flows.total_checked = flows_checked,
-            flows.to_record = flows_to_record.len(),
-            flows.to_timeout = flows_to_remove.len(),
-            collection.duration_ms = collection_duration.as_millis(),
-            "collection phase completed"
-        );
-
-        // Now process flows WITHOUT holding iterator locks
-        let record_start = std::time::Instant::now();
-        for community_id in &flows_to_record {
-            flows_recorded += 1;
-            trace!(
-                event.name = "flow_poller.recording",
-                poller.id = poller_id,
-                flow.community_id = %community_id,
-                "calling record_flow"
-            );
-            if !record_flow(community_id, &flow_store, &flow_stats_map, &flow_span_tx).await {
-                // Export channel closed, stop poller
-                warn!(
-                    event.name = "flow_poller.stopped",
+                trace!(
+                    event.name = "flow_poller.tick_start",
                     poller.id = poller_id,
-                    reason = "export_channel_closed",
-                    "flow poller stopping due to closed export channel"
+                    iteration.count = iteration_count + 1,
+                    "poller tick started"
                 );
-                return;
-            }
-        }
-        let record_duration = record_start.elapsed();
 
-        if !flows_to_record.is_empty() {
-            trace!(
-                event.name = "flow_poller.record_phase",
-                poller.id = poller_id,
-                flows.recorded = flows_to_record.len(),
-                record.duration_ms = record_duration.as_millis(),
-                "record phase completed"
-            );
-        }
+                // Collect flows to process - CRITICAL: Must collect IDs first, then drop iterator
+                // before calling record_flow/timeout_and_remove_flow to avoid iterator deadlock
+                let mut flows_to_record = Vec::new();
 
-        // Remove timed out flows
-        let timeout_start = std::time::Instant::now();
-        for community_id in flows_to_remove.iter() {
-            trace!(
-                event.name = "flow_poller.timing_out",
-                poller.id = poller_id,
-                flow.community_id = %community_id,
-                "calling timeout_and_remove_flow"
-            );
-            timeout_and_remove_flow(
-                community_id.clone(),
-                &flow_store,
-                &flow_stats_map,
-                &flow_span_tx,
-            )
-            .await;
-        }
-        let timeout_duration_elapsed = timeout_start.elapsed();
+                let collection_start = std::time::Instant::now();
+                for entry in flow_store.iter() {
+                    let community_id = entry.key();
 
-        if !flows_to_remove.is_empty() {
-            trace!(
-                event.name = "flow_poller.timeout_phase",
-                poller.id = poller_id,
-                flows.timed_out = flows_to_remove.len(),
-                timeout.duration_ms = timeout_duration_elapsed.as_millis(),
-                "timeout phase completed"
-            );
-        }
+                    // Partition: only process flows hashed to this poller
+                    if hash_string(community_id) % num_pollers != poller_id {
+                        flows_skipped_partition += 1;
+                        continue;
+                    }
 
-        let tick_duration = tick_start.elapsed();
-        iteration_count += 1;
+                    // Extract all needed data from entry
+                    let flow_span = &entry.flow_span;
+                    let last_recorded_time = flow_span.last_recorded_time;
+                    let last_activity_time = flow_span.last_activity_time;
+                    let timeout_duration = flow_span.timeout_duration;
+
+                    flows_checked += 1;
+
+                    // Check if record interval elapsed
+                    if let Ok(elapsed) = now.duration_since(last_recorded_time)
+                        && elapsed >= max_record_interval
+                    {
+                        flows_to_record.push(community_id.clone());
+                    }
+
+                    // Check if timeout elapsed
+                    if let Ok(elapsed) = now.duration_since(last_activity_time)
+                        && elapsed >= timeout_duration
+                    {
+                        flows_to_remove.push(community_id.clone());
+                    }
+                } // Iterator dropped here - no longer holding DashMap locks
+                let collection_duration = collection_start.elapsed();
+
+                trace!(
+                    event.name = "flow_poller.collection_phase",
+                    poller.id = poller_id,
+                    flows.total_checked = flows_checked,
+                    flows.to_record = flows_to_record.len(),
+                    flows.to_timeout = flows_to_remove.len(),
+                    collection.duration_ms = collection_duration.as_millis(),
+                    "collection phase completed"
+                );
+
+                // Now process flows WITHOUT holding iterator locks
+                let record_start = std::time::Instant::now();
+                for community_id in &flows_to_record {
+                    flows_recorded += 1;
+                    trace!(
+                        event.name = "flow_poller.recording",
+                        poller.id = poller_id,
+                        flow.community_id = %community_id,
+                        "calling record_flow"
+                    );
+                    if !record_flow(community_id, &flow_store, &flow_stats_map, &flow_span_tx).await {
+                        // Export channel closed, stop poller
+                        warn!(
+                            event.name = "flow_poller.stopped",
+                            poller.id = poller_id,
+                            reason = "export_channel_closed",
+                            "flow poller stopping due to closed export channel"
+                        );
+                        return;
+                    }
+                }
+                let record_duration = record_start.elapsed();
+
+                if !flows_to_record.is_empty() {
+                    trace!(
+                        event.name = "flow_poller.record_phase",
+                        poller.id = poller_id,
+                        flows.recorded = flows_to_record.len(),
+                        record.duration_ms = record_duration.as_millis(),
+                        "record phase completed"
+                    );
+                }
+
+                // Remove timed out flows
+                let timeout_start = std::time::Instant::now();
+                for community_id in flows_to_remove.iter() {
+                    trace!(
+                        event.name = "flow_poller.timing_out",
+                        poller.id = poller_id,
+                        flow.community_id = %community_id,
+                        "calling timeout_and_remove_flow"
+                    );
+                    timeout_and_remove_flow(
+                        community_id.clone(),
+                        &flow_store,
+                        &flow_stats_map,
+                        &flow_span_tx,
+                    )
+                    .await;
+                }
+                let timeout_duration_elapsed = timeout_start.elapsed();
+
+                if !flows_to_remove.is_empty() {
+                    trace!(
+                        event.name = "flow_poller.timeout_phase",
+                        poller.id = poller_id,
+                        flows.timed_out = flows_to_remove.len(),
+                        timeout.duration_ms = timeout_duration_elapsed.as_millis(),
+                        "timeout phase completed"
+                    );
+                }
+
+                let tick_duration = tick_start.elapsed();
+                iteration_count += 1;
 
         if last_stats_log.elapsed() >= Duration::from_secs(30) {
             debug!(
@@ -1404,15 +1460,17 @@ async fn flow_poller_task(
             last_stats_log = std::time::Instant::now();
         }
 
-        // Warn if iteration took > 500ms (should complete much faster)
-        if tick_duration.as_millis() > 500 {
-            warn!(
-                event.name = "flow_poller.slow_iteration",
-                poller.id = poller_id,
-                tick.duration_ms = tick_duration.as_millis(),
-                flows.checked = flows_checked,
-                "flow poller iteration took longer than expected"
-            );
+                // Warn if iteration took > 500ms (should complete much faster)
+                if tick_duration.as_millis() > 500 {
+                    warn!(
+                        event.name = "flow_poller.slow_iteration",
+                        poller.id = poller_id,
+                        tick.duration_ms = tick_duration.as_millis(),
+                        flows.checked = flows_checked,
+                        "flow poller iteration took longer than expected"
+                    );
+                }
+            }
         }
     }
 }
@@ -1443,97 +1501,104 @@ pub async fn orphan_scanner_task(
     boot_time_offset: u64,
     max_age: Duration,
     community_id_generator: Arc<CommunityIdGenerator>,
+    mut shutdown_rx: broadcast::Receiver<()>,
 ) {
     let scan_interval = Duration::from_secs(300);
 
     loop {
-        tokio::time::sleep(scan_interval).await;
+        tokio::select! {
+            _ = shutdown_rx.recv() => {
+                info!(event.name = "task.shutdown", task.name = "orphan_scanner", "shutdown signal received");
+                break;
+            },
+            _ = tokio::time::sleep(scan_interval) => {
+                let current_time_ns = std::time::SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos() as u64;
+                let current_boot_time_ns = current_time_ns.saturating_sub(boot_time_offset);
+                let max_age_ns = max_age.as_nanos() as u64;
 
-        let current_time_ns = std::time::SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as u64;
-        let current_boot_time_ns = current_time_ns.saturating_sub(boot_time_offset);
-        let max_age_ns = max_age.as_nanos() as u64;
+                let mut removed = 0u64;
+                let mut scanned = 0u64;
 
-        let mut removed = 0u64;
-        let mut scanned = 0u64;
-
-        // Get all keys first (to avoid holding lock during iteration)
-        let keys: Vec<FlowKey> = {
-            let map = flow_stats_map.lock().await;
-            map.keys().filter_map(|k| k.ok()).collect()
-        };
+                // Get all keys first (to avoid holding lock during iteration)
+                let keys: Vec<FlowKey> = {
+                    let map = flow_stats_map.lock().await;
+                    map.keys().filter_map(|k| k.ok()).collect()
+                };
 
         let ebpf_map_entries = keys.len() as u64;
         metrics::ebpf::set_map_entries(ebpf_map_entries);
 
-        for key in keys {
-            scanned += 1;
+                for key in keys {
+                    scanned += 1;
 
-            // Check if entry is very old
-            let is_old = {
-                let map = flow_stats_map.lock().await;
-                match map.get(&key, 0) {
-                    Ok(stats) => {
-                        let age_ns = current_boot_time_ns.saturating_sub(stats.last_seen_ns);
-                        age_ns > max_age_ns
+                    // Check if entry is very old
+                    let is_old = {
+                        let map = flow_stats_map.lock().await;
+                        match map.get(&key, 0) {
+                            Ok(stats) => {
+                                let age_ns = current_boot_time_ns.saturating_sub(stats.last_seen_ns);
+                                age_ns > max_age_ns
+                            }
+                            Err(_) => continue, // Entry already removed
+                        }
+                    };
+
+                    if !is_old {
+                        continue;
                     }
-                    Err(_) => continue, // Entry already removed
+
+                    // Convert FlowKey to IP addresses for Community ID generation
+                    let (src_addr, dst_addr) = match flow_key_to_ip_addrs(&key) {
+                        Ok(addrs) => addrs,
+                        Err(_) => continue, // Skip invalid IP version
+                    };
+
+                    let community_id = community_id_generator.generate(
+                        src_addr,
+                        dst_addr,
+                        key.src_port,
+                        key.dst_port,
+                        key.protocol,
+                    );
+
+                    if flow_store.contains_key(&community_id) {
+                        // Entry is old but still being tracked - don't remove
+                        continue;
+                    }
+
+                    // Orphan detected - remove it
+                    let mut map = flow_stats_map.lock().await;
+                    if map.remove(&key).is_ok() {
+                        removed += 1;
+                        crate::metrics::ebpf::inc_orphans_cleaned(1);
+                        warn!(
+                            event.name = "orphan_scanner.entry_removed",
+                            flow.key = ?key,
+                            "removed orphaned eBPF entry (age exceeded threshold and not tracked in userspace)"
+                        );
+                    }
+                    drop(map);
                 }
-            };
 
-            if !is_old {
-                continue;
+                if removed > 0 {
+                    warn!(
+                        event.name = "orphan_scanner.scan_completed",
+                        entries.scanned = scanned,
+                        entries.removed = removed,
+                        scan.interval_secs = scan_interval.as_secs(),
+                        "orphan scanner completed - removed stale entries"
+                    );
+                } else {
+                    debug!(
+                        event.name = "orphan_scanner.scan_completed_clean",
+                        entries.scanned = scanned,
+                        "orphan scanner completed - no orphans found"
+                    );
+                }
             }
-
-            // Convert FlowKey to IP addresses for Community ID generation
-            let (src_addr, dst_addr) = match flow_key_to_ip_addrs(&key) {
-                Ok(addrs) => addrs,
-                Err(_) => continue, // Skip invalid IP version
-            };
-
-            let community_id = community_id_generator.generate(
-                src_addr,
-                dst_addr,
-                key.src_port,
-                key.dst_port,
-                key.protocol,
-            );
-
-            if flow_store.contains_key(&community_id) {
-                // Entry is old but still being tracked - don't remove
-                continue;
-            }
-
-            // Orphan detected - remove it
-            let mut map = flow_stats_map.lock().await;
-            if map.remove(&key).is_ok() {
-                removed += 1;
-                crate::metrics::ebpf::inc_orphans_cleaned(1);
-                warn!(
-                    event.name = "orphan_scanner.entry_removed",
-                    flow.key = ?key,
-                    "removed orphaned eBPF entry (age exceeded threshold and not tracked in userspace)"
-                );
-            }
-            drop(map);
-        }
-
-        if removed > 0 {
-            warn!(
-                event.name = "orphan_scanner.scan_completed",
-                entries.scanned = scanned,
-                entries.removed = removed,
-                scan.interval_secs = scan_interval.as_secs(),
-                "orphan scanner completed - removed stale entries"
-            );
-        } else {
-            debug!(
-                event.name = "orphan_scanner.scan_completed_clean",
-                entries.scanned = scanned,
-                "orphan scanner completed - no orphans found"
-            );
         }
     }
 }
