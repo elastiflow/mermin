@@ -18,7 +18,11 @@ use std::{
 
 use aya::{
     EbpfLoader,
-    programs::{SchedClassifier, TcAttachType},
+    programs::{
+        LinkOrder, SchedClassifier, TcAttachType,
+        links::PinnedLink,
+        tc::{NlOptions, SchedClassifierLinkId, TcAttachOptions},
+    },
     util::KernelVersion,
 };
 use clap::Parser;
@@ -90,6 +94,17 @@ async fn shutdown_exporter_gracefully(
 
 #[tokio::main]
 async fn main() {
+    let cli = crate::runtime::cli::Cli::parse();
+
+    // Handle subcommands before full runtime initialization
+    if let Some(crate::runtime::cli::CliSubcommand::TestBpf { interface }) = &cli.subcommand {
+        if let Err(e) = handle_test_bpf(interface.clone()).await {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+        std::process::exit(0);
+    }
+
     if let Err(e) = run().await {
         display_error(&e);
         std::process::exit(1);
@@ -932,6 +947,503 @@ async fn wait_for_shutdown_signal() -> Result<ShutdownSignal> {
         signal::ctrl_c().await?;
         Ok(ShutdownSignal::CtrlC)
     }
+}
+/// Handle test-bpf subcommand: test BPF filesystem writeability and attach/detach operations
+async fn handle_test_bpf(interface: String) -> Result<()> {
+    // Initialize minimal tracing
+    use tracing_subscriber::{
+        EnvFilter,
+        fmt::{Layer, format::FmtSpan},
+        prelude::__tracing_subscriber_SubscriberExt,
+        util::SubscriberInitExt,
+    };
+
+    let log_level = std::env::var("MERMIN_LOG_LEVEL")
+        .unwrap_or_else(|_| "info".to_string())
+        .parse::<tracing::Level>()
+        .unwrap_or(tracing::Level::INFO);
+
+    let mut fmt_layer = Layer::new()
+        .with_span_events(FmtSpan::CLOSE)
+        .with_ansi(std::env::var("NO_COLOR").is_err());
+
+    match log_level {
+        tracing::Level::DEBUG => fmt_layer = fmt_layer.with_file(true).with_line_number(true),
+        tracing::Level::TRACE => {
+            fmt_layer = fmt_layer
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .with_file(true)
+                .with_line_number(true)
+        }
+        _ => {}
+    }
+
+    let filter = EnvFilter::new(format!("warn,mermin={log_level}"));
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt_layer)
+        .init();
+
+    info!(
+        event.name = "test_bpf.started",
+        interface = %interface,
+        "starting BPF filesystem and attach/detach tests"
+    );
+
+    // Check required capabilities
+    info!(
+        event.name = "test_bpf.checking_capabilities",
+        "checking required capabilities"
+    );
+    capabilities::check_required_capabilities()?;
+    info!(
+        event.name = "test_bpf.capabilities_ok",
+        "all required capabilities present"
+    );
+
+    // Bump memlock rlimit
+    let rlim = libc::rlimit {
+        rlim_cur: libc::RLIM_INFINITY,
+        rlim_max: libc::RLIM_INFINITY,
+    };
+    let ret = unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &rlim) };
+    if ret != 0 {
+        warn!(
+            event.name = "test_bpf.rlimit_failed",
+            system.rlimit.type = "memlock",
+            error.code = ret,
+            "failed to remove limit on locked memory"
+        );
+    } else {
+        info!(
+            event.name = "test_bpf.rlimit_set",
+            "memlock rlimit set successfully"
+        );
+    }
+
+    // Load eBPF program
+    info!(event.name = "test_bpf.loading_ebpf", "loading eBPF program");
+    let mut ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
+        env!("OUT_DIR"),
+        "/mermin"
+    )))?;
+    if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
+        warn!(
+            event.name = "test_bpf.logger_init_failed",
+            error.message = %e,
+            "failed to initialize eBPF logger"
+        );
+    }
+
+    // Determine kernel version and TCX support
+    let kernel_version = KernelVersion::current().unwrap_or(KernelVersion::new(0, 0, 0));
+    let use_tcx = kernel_version >= KernelVersion::new(6, 6, 0);
+    info!(
+        event.name = "test_bpf.kernel_info",
+        system.kernel.version = %kernel_version,
+        ebpf.attach.method = if use_tcx { "TCX" } else { "netlink" },
+        "kernel version determined"
+    );
+
+    // Test /sys/fs/bpf writeability BEFORE extracting program
+    info!(
+        event.name = "test_bpf.testing_bpf_fs",
+        "testing /sys/fs/bpf writeability"
+    );
+    let bpf_fs_writable = use_tcx && {
+        let test_pin_path = "/sys/fs/bpf/.mermin_test_map";
+        let test_result = ebpf
+            .maps()
+            .next()
+            .and_then(|(_, map)| match map.pin(test_pin_path) {
+                Ok(_) => {
+                    info!(
+                        event.name = "test_bpf.bpf_fs_pin_success",
+                        test_path = %test_pin_path,
+                        "successfully pinned test map to BPF filesystem"
+                    );
+                    match std::fs::remove_file(test_pin_path) {
+                        Ok(_) => {
+                            info!(
+                                event.name = "test_bpf.bpf_fs_cleanup_success",
+                                test_path = %test_pin_path,
+                                "successfully cleaned up test pin"
+                            );
+                            Some(())
+                        }
+                        Err(e) => {
+                            warn!(
+                                event.name = "test_bpf.bpf_fs_cleanup_failed",
+                                error = %e,
+                                test_path = %test_pin_path,
+                                "failed to cleanup test pin, but /sys/fs/bpf is writable"
+                            );
+                            Some(())
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        event.name = "test_bpf.bpf_fs_pin_failed",
+                        error = %e,
+                        test_path = %test_pin_path,
+                        "failed to pin test map to BPF filesystem"
+                    );
+                    None
+                }
+            });
+        test_result.is_some()
+    };
+
+    // Extract and load ingress program AFTER BPF FS test
+    let ingress_program: &mut SchedClassifier = ebpf
+        .program_mut("mermin_flow_ingress")
+        .ok_or_else(|| {
+            MerminError::internal("ebpf program 'mermin_flow_ingress' not found in loaded object")
+        })?
+        .try_into()?;
+    ingress_program.load()?;
+    info!(
+        event.name = "test_bpf.program_loaded",
+        "eBPF program loaded successfully"
+    );
+
+    if use_tcx {
+        if bpf_fs_writable {
+            info!(
+                event.name = "test_bpf.bpf_fs_writable",
+                "✓ /sys/fs/bpf is writable - TCX link pinning will work"
+            );
+        } else {
+            warn!(
+                event.name = "test_bpf.bpf_fs_not_writable",
+                "✗ /sys/fs/bpf is not writable - TCX link pinning will fail, mount as hostPath for orphan cleanup"
+            );
+        }
+    } else {
+        info!(
+            event.name = "test_bpf.bpf_fs_check_skipped",
+            reason = "netlink_mode",
+            "BPF filesystem check skipped (not using TCX mode)"
+        );
+    }
+
+    // Test attach operation
+    info!(
+        event.name = "test_bpf.attach_starting",
+        network.interface.name = %interface,
+        "starting attach test"
+    );
+
+    let mut attach_success = false;
+    let mut pin_success = false;
+    let mut link_id: Option<SchedClassifierLinkId> = None;
+
+    // TCX mode: kernel >= 6.6, attach with ordering
+    if use_tcx {
+        info!(
+            event.name = "test_bpf.attaching_tcx",
+            network.interface.name = %interface,
+            "attaching eBPF program with TCX (order=last)"
+        );
+
+        let options = TcAttachOptions::TcxOrder(LinkOrder::last());
+        match ingress_program.attach_with_options(&interface, TcAttachType::Ingress, options) {
+            Ok(attached_id) => {
+                attach_success = true;
+                info!(
+                    event.name = "test_bpf.attach_success",
+                    network.interface.name = %interface,
+                    "✓ successfully attached program to interface"
+                );
+
+                // Try to pin link if BPF FS is writable
+                // Note: taking the link consumes attached_id, so we can't use it for detach anymore
+                // If pinning succeeds, we'll test detach via unpinning.
+                // If it fails, link is consumed but program is still attached (orphaned).
+                if bpf_fs_writable {
+                    let pin_path = format!("/sys/fs/bpf/mermin_tcx_{interface}_ingress");
+                    info!(
+                        event.name = "test_bpf.pinning_link",
+                        pin_path = %pin_path,
+                        "attempting to pin TCX link"
+                    );
+
+                    match ingress_program.take_link(attached_id) {
+                        Ok(link) => {
+                            match TryInto::<aya::programs::links::FdLink>::try_into(link) {
+                                Ok(fd_link) => {
+                                    match fd_link.pin(&pin_path) {
+                                        Ok(pinned_fd_link) => {
+                                            pin_success = true;
+                                            info!(
+                                                event.name = "test_bpf.pin_success",
+                                                pin_path = %pin_path,
+                                                "✓ successfully pinned TCX link"
+                                            );
+                                            std::mem::forget(pinned_fd_link);
+                                            // Link is pinned, so we'll test detach via unpinning
+                                            // Don't set link_id since we can't use it for standard detach
+                                        }
+                                        Err(e) => {
+                                            error!(
+                                                event.name = "test_bpf.pin_failed",
+                                                pin_path = %pin_path,
+                                                error = %e,
+                                                "✗ failed to pin TCX link despite /sys/fs/bpf being writable - link consumed, cannot test standard detach"
+                                            );
+                                            // Link was consumed, can't test standard detach
+                                            // But program is still attached
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        event.name = "test_bpf.link_conversion_failed",
+                                        error = ?e,
+                                        "✗ failed to convert link to fd link - link consumed, cannot test standard detach"
+                                    );
+                                    // Link was consumed, can't test standard detach
+                                }
+                            }
+                        }
+                        Err(_e) => {
+                            // Link not taken, but we can't use attached_id here because borrow checker
+                            // sees it might be moved. We'll skip standard detach in this case since
+                            // the link is still in program storage and can be detached by kernel
+                            // when the program is dropped, but it's not ideal for testing.
+                            warn!(
+                                event.name = "test_bpf.link_take_failed",
+                                "✗ could not take link from program storage - program will stay attached"
+                            );
+                            // Note: attached_id was consumed by take_link attempt even though it failed
+                        }
+                    }
+                } else {
+                    // Store link_id for standard detach test
+                    link_id = Some(attached_id);
+                    warn!(
+                        event.name = "test_bpf.pin_skipped",
+                        reason = "bpf_fs_not_writable",
+                        "skipping link pinning - /sys/fs/bpf is not writable"
+                    );
+                }
+            }
+            Err(e) => {
+                error!(
+                    event.name = "test_bpf.attach_failed",
+                    network.interface.name = %interface,
+                    error = %e,
+                    "✗ failed to attach program to interface"
+                );
+            }
+        }
+    } else {
+        // Netlink mode: kernel < 6.6, use priority
+        info!(
+            event.name = "test_bpf.attaching_netlink",
+            network.interface.name = %interface,
+            "attaching eBPF program with netlink (priority=50)"
+        );
+
+        // Add clsact qdisc if needed (netlink mode requirement)
+        if let Err(e) = aya::programs::tc::qdisc_add_clsact(&interface) {
+            debug!(
+                event.name = "test_bpf.qdisc_add_skipped",
+                network.interface.name = %interface,
+                error = %e,
+                "clsact qdisc add failed (likely already exists)"
+            );
+        }
+
+        let options = TcAttachOptions::Netlink(NlOptions {
+            priority: 50,
+            handle: 0,
+        });
+
+        match ingress_program.attach_with_options(&interface, TcAttachType::Ingress, options) {
+            Ok(id) => {
+                link_id = Some(id);
+                attach_success = true;
+                info!(
+                    event.name = "test_bpf.attach_success",
+                    network.interface.name = %interface,
+                    "✓ successfully attached program to interface (netlink mode)"
+                );
+            }
+            Err(e) => {
+                error!(
+                    event.name = "test_bpf.attach_failed",
+                    network.interface.name = %interface,
+                    error = %e,
+                    "✗ failed to attach program to interface"
+                );
+            }
+        }
+    }
+
+    // Test detach operation
+    let mut detach_success = false;
+
+    if attach_success {
+        info!(
+            event.name = "test_bpf.detach_starting",
+            network.interface.name = %interface,
+            "starting detach test"
+        );
+
+        if use_tcx {
+            // Try to unpin link first
+            let pin_path = format!("/sys/fs/bpf/mermin_tcx_{interface}_ingress");
+            match PinnedLink::from_pin(&pin_path) {
+                Ok(pinned_link) => {
+                    info!(
+                        event.name = "test_bpf.unpinning_link",
+                        pin_path = %pin_path,
+                        "attempting to unpin TCX link"
+                    );
+                    match pinned_link.unpin() {
+                        Ok(_fd_link) => {
+                            detach_success = true;
+                            info!(
+                                event.name = "test_bpf.detach_success",
+                                network.interface.name = %interface,
+                                pin_path = %pin_path,
+                                "✓ successfully detached program via unpinned link"
+                            );
+                        }
+                        Err(e) => {
+                            warn!(
+                                event.name = "test_bpf.unpin_failed",
+                                pin_path = %pin_path,
+                                error = %e,
+                                "✗ failed to unpin link, trying standard detach"
+                            );
+                            // Fall through to standard detach
+                        }
+                    }
+                }
+                Err(e) => {
+                    debug!(
+                        event.name = "test_bpf.pin_not_found",
+                        pin_path = %pin_path,
+                        error = %e,
+                        "pinned link not found, using standard detach"
+                    );
+                    // Fall through to standard detach
+                }
+            }
+
+            // Fallback to standard detach if unpin didn't work
+            if !detach_success && let Some(id) = link_id {
+                match ingress_program.detach(id) {
+                    Ok(_) => {
+                        detach_success = true;
+                        info!(
+                            event.name = "test_bpf.detach_success",
+                            network.interface.name = %interface,
+                            "✓ successfully detached program (standard detach)"
+                        );
+                    }
+                    Err(e) => {
+                        error!(
+                            event.name = "test_bpf.detach_failed",
+                            network.interface.name = %interface,
+                            error = %e,
+                            "✗ failed to detach program"
+                        );
+                    }
+                }
+            }
+        } else {
+            // Netlink mode: standard detach
+            if let Some(id) = link_id {
+                match ingress_program.detach(id) {
+                    Ok(_) => {
+                        detach_success = true;
+                        info!(
+                            event.name = "test_bpf.detach_success",
+                            network.interface.name = %interface,
+                            "✓ successfully detached program (netlink mode)"
+                        );
+                    }
+                    Err(e) => {
+                        error!(
+                            event.name = "test_bpf.detach_failed",
+                            network.interface.name = %interface,
+                            error = %e,
+                            "✗ failed to detach program"
+                        );
+                    }
+                }
+            }
+        }
+    } else {
+        warn!(
+            event.name = "test_bpf.detach_skipped",
+            reason = "attach_failed",
+            "skipping detach test - attach operation failed"
+        );
+    }
+
+    // Print summary
+    println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!("BPF Test Results Summary");
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!("Interface: {interface}");
+    println!("Kernel: {kernel_version}");
+    println!("Mode: {}", if use_tcx { "TCX" } else { "netlink" });
+    println!();
+    println!(
+        "BPF Filesystem Writeable: {}",
+        if bpf_fs_writable {
+            "✓ PASS"
+        } else {
+            "✗ FAIL"
+        }
+    );
+    println!(
+        "Program Attach:           {}",
+        if attach_success {
+            "✓ PASS"
+        } else {
+            "✗ FAIL"
+        }
+    );
+    println!(
+        "Link Pinning:             {}",
+        if pin_success {
+            "✓ PASS"
+        } else {
+            "✗ FAIL (N/A if not TCX or BPF FS not writable)"
+        }
+    );
+    println!(
+        "Program Detach:           {}",
+        if detach_success {
+            "✓ PASS"
+        } else {
+            "✗ FAIL"
+        }
+    );
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+    if !bpf_fs_writable && use_tcx {
+        println!("\n WARNING: /sys/fs/bpf is not writable!");
+        println!("   Mount /sys/fs/bpf as hostPath for orphan cleanup on pod restart.");
+    }
+
+    if !attach_success {
+        return Err(MerminError::internal("attach test failed"));
+    }
+
+    if !detach_success {
+        return Err(MerminError::internal("detach test failed"));
+    }
+
+    Ok(())
 }
 
 /// Display user-friendly error messages with helpful hints

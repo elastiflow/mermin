@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use tracing::Level;
 
@@ -27,7 +27,20 @@ pub struct Cli {
     #[arg(short, long, value_name = "LEVEL", env = "MERMIN_LOG_LEVEL")]
     #[serde(with = "level::option", skip_serializing_if = "Option::is_none")]
     pub log_level: Option<Level>,
+
+    #[command(subcommand)]
+    pub subcommand: Option<CliSubcommand>,
     // TODO: metrics port, API port, API TLS
+}
+
+#[derive(Subcommand, Debug, Clone, Serialize, Deserialize)]
+pub enum CliSubcommand {
+    /// Test BPF filesystem writeability and program attach/detach operations
+    TestBpf {
+        /// Network interface to test attach/detach operations on
+        #[arg(short, long, default_value = "lo")]
+        interface: String,
+    },
 }
 
 fn is_false(v: &bool) -> bool {
