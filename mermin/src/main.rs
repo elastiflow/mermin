@@ -1207,7 +1207,7 @@ async fn handle_test_bpf(test_bpf_cmd: &crate::runtime::cli::CliSubcommand) -> R
         "testing /sys/fs/bpf writeability"
     );
     let bpf_fs_writable = use_tcx && {
-        let test_pin_path = "/sys/fs/bpf/.mermin_test_map";
+        let test_pin_path = "/sys/fs/bpf/mermin_test_map";
         let test_result = ebpf
             .maps()
             .next()
