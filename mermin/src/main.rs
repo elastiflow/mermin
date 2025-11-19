@@ -206,10 +206,14 @@ async fn run() -> Result<()> {
                 env!("OUT_DIR"),
                 "/mermin"
             )))?;
-    
+
     // Verify maps are pinned by checking the filesystem
     let pinned_maps = std::fs::read_dir(map_pin_path)
-        .map(|dir| dir.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().to_string()).collect::<Vec<_>>())
+        .map(|dir| {
+            dir.filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect::<Vec<_>>()
+        })
         .unwrap_or_default();
     if !pinned_maps.is_empty() {
         info!(
