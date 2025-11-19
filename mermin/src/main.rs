@@ -13,6 +13,7 @@ mod span;
 use std::sync::{Arc, atomic::Ordering};
 
 use aya::{
+    EbpfLoader,
     programs::{SchedClassifier, TcAttachType},
     util::KernelVersion,
 };
@@ -189,10 +190,19 @@ async fn run() -> Result<()> {
     // runtime. This approach is recommended for most real-world use cases. If you would
     // like to specify the eBPF program at runtime rather than at compile-time, you can
     // reach for `Bpf::load_file` instead.
-    let mut ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
-        env!("OUT_DIR"),
-        "/mermin"
-    )))?;
+
+    // Create directory for map pinning (silently ignore if it exists)
+    let map_pin_path = "/sys/fs/bpf/mermin";
+    let _ = std::fs::create_dir_all(map_pin_path);
+
+    // Use EbpfLoader with map_pin_path to enable map persistence and reuse across restarts
+    let mut ebpf =
+        EbpfLoader::new()
+            .map_pin_path(map_pin_path)
+            .load(aya::include_bytes_aligned!(concat!(
+                env!("OUT_DIR"),
+                "/mermin"
+            )))?;
     if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
         // This can happen if you remove all log statements from your eBPF program.
         warn!(
