@@ -196,6 +196,9 @@ async fn run() -> Result<()> {
     let _ = std::fs::create_dir_all(map_pin_path);
 
     // Use EbpfLoader with map_pin_path to enable map persistence and reuse across restarts
+    // This will:
+    // 1. Pin all maps to /sys/fs/bpf/mermin/<map_name> when loading
+    // 2. Reuse existing pinned maps if they exist (preserving data across restarts)
     let mut ebpf =
         EbpfLoader::new()
             .map_pin_path(map_pin_path)
@@ -203,6 +206,26 @@ async fn run() -> Result<()> {
                 env!("OUT_DIR"),
                 "/mermin"
             )))?;
+    
+    // Verify maps are pinned by checking the filesystem
+    let pinned_maps = std::fs::read_dir(map_pin_path)
+        .map(|dir| dir.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().to_string()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    if !pinned_maps.is_empty() {
+        info!(
+            event.name = "ebpf.maps_pinned",
+            map.count = pinned_maps.len(),
+            map.pin_path = map_pin_path,
+            map.names = ?pinned_maps,
+            "eBPF maps pinned to filesystem for persistence"
+        );
+    } else {
+        warn!(
+            event.name = "ebpf.maps_not_pinned",
+            map.pin_path = map_pin_path,
+            "no pinned maps found in filesystem - maps may not persist across restarts"
+        );
+    }
     if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
         // This can happen if you remove all log statements from your eBPF program.
         warn!(
@@ -274,6 +297,8 @@ async fn run() -> Result<()> {
 
     // Extract eBPF maps BEFORE moving Ebpf object to controller thread
     // Maps will be owned by FlowSpanProducer (main thread), programs by controller (host namespace thread)
+    // NOTE: take_map() removes maps from the Ebpf object, but the maps remain pinned in the kernel
+    // at /sys/fs/bpf/mermin/<map_name>, so they persist across restarts
     let flow_stats_map = ebpf
         .take_map("FLOW_STATS_MAP")
         .ok_or_else(|| MerminError::internal("FLOW_STATS_MAP not found in eBPF object"))?;
