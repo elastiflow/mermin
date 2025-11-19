@@ -232,7 +232,7 @@ async fn run() -> Result<()> {
     // We test by attempting to pin a BPF map temporarily, since /sys/fs/bpf
     // is a BPF filesystem that only supports pinning BPF objects (not regular files)
     let bpf_fs_writable = use_tcx && {
-        let test_pin_path = "/sys/fs/bpf/.mermin_test_map";
+        let test_pin_path = "/sys/fs/bpf/mermin_test_map";
         let test_result = ebpf
             .maps()
             .next()
