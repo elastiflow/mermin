@@ -364,7 +364,6 @@ async fn run() -> Result<()> {
         }
     };
     if use_tcx {
-        // Update metric to track BPF filesystem writability status
         crate::metrics::registry::BPF_FS_WRITABLE.set(if bpf_fs_writable { 1 } else { 0 });
 
         info!(

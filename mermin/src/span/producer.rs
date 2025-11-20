@@ -1545,7 +1545,6 @@ async fn timeout_and_remove_flow(
                 flow_span.end_time = UNIX_EPOCH + Duration::from_nanos(end_time_nanos);
             }
             Err(e) => {
-                // Check if it's a not found error vs other error
                 if e.to_string().contains("not found") {
                     metrics::flow::inc_flow_stats_map_access(labels::MAP_ACCESS_NOT_FOUND);
                 } else {
@@ -1714,7 +1713,6 @@ async fn flow_poller_task(
 
         // Update metrics: track flow store size for this poller's partition
         metrics::span::set_flow_store_size(poller_id, flows_checked);
-        // Track queue sizes for this poller
         metrics::span::set_flow_poller_queue_size(
             poller_id,
             flows_to_record.len() + flows_to_remove.len(),
