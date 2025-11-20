@@ -431,6 +431,7 @@ mod tests {
 
         let shutdown_manager = ShutdownManager::builder()
             .with_shutdown_config(ShutdownConfig::default())
+            .with_os_shutdown_tx(broadcast::channel(1).0)
             .with_cmd_tx(cmd_tx)
             .with_netlink_shutdown_fd(netlink_fd)
             .with_task_manager(task_manager)
