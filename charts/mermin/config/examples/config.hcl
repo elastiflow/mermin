@@ -138,18 +138,29 @@ discovery "instrument" {
   # ]
 
   # TC priority for program attachment (netlink only, kernel < 6.6)
-  # Higher values = lower priority = runs later in TC chain
-  # Default: 50 (runs after most CNI programs like Cilium which use 1-20)
-  # Range: 1-32767 (values < 30 will log warning - may conflict with CNI programs)
-  tc_priority = 50
+  # Controls execution order in TC chain. Lower priority = runs earlier.
+  # Default: 1 (runs first, before orphaned programs from previous instances)
+  # Range: 1-32767
+  #
+  # Why priority 1?: Ensures new mermin programs execute before orphaned programs
+  # from crashed pods, preventing flow gaps after restart. Orphaned programs still
+  # reference old maps, causing split-brain if they execute first.
+  #
+  # Conflicts?: Rare. Mermin is passive (TC_ACT_UNSPEC), so running first usually
+  # doesn't interfere with CNI programs. If issues occur, increase to 50-100.
+  tc_priority = 1
 
   # TCX ordering strategy (TCX only, kernel >= 6.6)
-  # Controls where mermin attaches in the TCX program chain
+  # Controls where mermin attaches in the TCX program chain.
+  # Default: "first" (prevents orphan program issues on restart)
   # Options:
-  #   "last"  (default) - Attach at tail, runs after all programs (recommended for observability)
-  #   "first"           - Attach at head, runs before all programs (use with caution!)
-  # Default: "last" (ensures mermin runs after Cilium's service load balancing)
-  tcx_order = "last"
+  #   "first" - Runs before all other programs (recommended)
+  #   "last"  - Runs after all other programs
+  #
+  # Technical details: TCX (Traffic Control eXpress) allows multiple programs per hook
+  # with explicit ordering. "first" ensures new mermin programs execute before any
+  # orphaned programs from previous instances, maintaining state continuity.
+  tcx_order = "first"
 
   # Automatically discover and attach to new interfaces matching patterns
   # Recommended for ephemeral interfaces like veth* (created/destroyed with pods)

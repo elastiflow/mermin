@@ -37,7 +37,7 @@ pub enum TcxOrderStrategy {
 
 impl Default for TcxOrderStrategy {
     fn default() -> Self {
-        Self::Last
+        Self::First
     }
 }
 
@@ -374,8 +374,8 @@ pub struct InstrumentOptions {
     pub auto_discover_interfaces: bool,
     /// TC priority for program attachment (netlink only, kernel < 6.6)
     /// Higher values = lower priority = runs later in TC chain
-    /// Default: 50 (runs after most CNI programs like Cilium)
-    /// Range: 1-32767 (values < 30 will log warning - may conflict with CNI programs)
+    /// Default: 1 (runs first - consistent with tcx_order=first)
+    /// Range: 1-32767 (values < 30 may run before CNI programs)
     pub tc_priority: u16,
     /// TCX ordering strategy (TCX only, kernel >= 6.6)
     /// Controls where mermin attaches in the TCX program chain
@@ -419,7 +419,7 @@ impl Default for InstrumentOptions {
                 "ovn-k8s*".to_string(), // OVN-Kubernetes interfaces
             ],
             auto_discover_interfaces: true,
-            tc_priority: 50,
+            tc_priority: 1,
             tcx_order: TcxOrderStrategy::default(),
         }
     }
@@ -429,10 +429,8 @@ impl InstrumentOptions {
     /// Validate tc_priority and tcx_order settings
     pub fn validate(&self) -> Result<(), String> {
         const MIN_PRIORITY: u16 = 1;
-        const SAFE_MIN_PRIORITY: u16 = 30;
         const MAX_PRIORITY: u16 = 32767;
 
-        // Validate TC priority (netlink mode, kernel < 6.6)
         if self.tc_priority < MIN_PRIORITY {
             return Err(format!(
                 "tc_priority {} is too low (min: {})",
@@ -440,30 +438,11 @@ impl InstrumentOptions {
             ));
         }
 
-        if self.tc_priority < SAFE_MIN_PRIORITY {
-            warn!(
-                "tc_priority {} is below recommended minimum ({}). \
-                 Values < {} may run before CNI programs (like Cilium which uses 1-20) and break networking. \
-                 Only use lower priorities if you understand TC program ordering!",
-                self.tc_priority, SAFE_MIN_PRIORITY, SAFE_MIN_PRIORITY
-            );
-        }
-
         if self.tc_priority > MAX_PRIORITY {
             return Err(format!(
                 "tc_priority {} exceeds netlink limit (max: {})",
                 self.tc_priority, MAX_PRIORITY
             ));
-        }
-
-        // Validate TCX ordering (TCX mode, kernel >= 6.6)
-        if self.tcx_order == TcxOrderStrategy::First {
-            warn!(
-                "tcx_order is set to 'first' which attaches at the head of the tcx chain. \
-                 this may run before cni programs (like cilium) and break service resolution/networking. \
-                 recommended: use 'last' (default) for observability tools. \
-                 only use 'first' if you understand tcx program ordering!"
-            );
         }
 
         Ok(())
@@ -802,7 +781,7 @@ mod tests {
     use super::{ApiConf, Conf, InstrumentOptions, MetricsOptions, ParserConf};
     use crate::{
         otlp::opts::{ExportOptions, ExporterProtocol},
-        runtime::{cli::Cli, opts::InternalOptions},
+        runtime::{cli::Cli, conf::TcxOrderStrategy, opts::InternalOptions},
         span::opts::SpanOptions,
     };
 
@@ -2723,7 +2702,14 @@ discovery:
     fn test_tc_priority_default_is_valid() {
         let conf = InstrumentOptions::default();
         assert!(conf.validate().is_ok());
-        assert_eq!(conf.tc_priority, 50);
+        assert_eq!(conf.tc_priority, 1);
+    }
+
+    #[test]
+    fn test_tcx_order_default_is_first() {
+        let conf = InstrumentOptions::default();
+        assert!(conf.validate().is_ok());
+        assert_eq!(conf.tcx_order, TcxOrderStrategy::First);
     }
 
     #[test]

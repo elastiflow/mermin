@@ -132,37 +132,61 @@ GKE Dataplane V2 uses Cilium for advanced networking features.
 
 **How it works:**
 
-- **Kernel >= 6.6**: Uses TCX (Traffic Control eXpress) with automatic multi-program support
-- **Kernel < 6.6**: Uses netlink with configurable priority (default 50, runs after Cilium)
+- **Kernel >= 6.6**: Uses TCX (Traffic Control eXpress) with `tcx_order = "first"` (runs before other programs)
+- **Kernel < 6.6**: Uses netlink with `tc_priority = 1` (runs first in chain)
 
 **Observability characteristics:**
 
-Mermin observes packets **after** Cilium's processing, meaning:
+Mermin runs **first** in the TC chain (default behavior), meaning:
 
 - ✅ All traffic flows are captured
-- ✅ Network policies are already applied
-- ℹ️ IP addresses may be NATed (post-SNAT/DNAT)
-- ℹ️ Packets may be encapsulated (if using overlays)
+- ✅ State continuity: Flow statistics persist across mermin restarts via map pinning
+- ✅ No flow gaps: Existing pods generate flows immediately after mermin restart
+- ℹ️ First-execution prevents orphan program issues on restart
 
-This provides accurate flow visibility for monitoring and troubleshooting while maintaining cluster stability.
+This provides accurate flow visibility for monitoring and troubleshooting while maintaining cluster stability. Mermin operates passively (TC_ACT_UNSPEC) so running first doesn't interfere with Cilium's networking.
 
 **Verification:**
 
-After deployment, verify TC priority using:
+After deployment, verify TC attachment and map pinning:
 
 ```bash
 # Check TC filters on a gke interface
 kubectl exec -it mermin-xxxxx -- tc filter show dev gke<xyz> ingress
 
-# You should see mermin's filter with priority 50
+# You should see mermin's filter with priority 1 (or tcx programs)
+
+# Verify map pinning for state continuity
+kubectl exec -it mermin-xxxxx -- ls -la /sys/fs/bpf/mermin_*
+# You should see mermin_flow_stats_map_v1 and mermin_flow_events_v1
 ```
 
 {% hint style="info" %}
-**Priority Tuning:** If you experience conflicts with other TC programs, adjust `tc_priority`:
+**Priority Tuning:** If you experience CNI conflicts (rare), adjust execution order:
 
-- Increase (e.g., 100) to run later in the chain
-- Decrease (min: 30) for earlier visibility
-- Default (50) works for most GKE Dataplane V2 setups
+**For TCX mode (kernel >= 6.6):**
+
+```hcl
+discovery "instrument" {
+  tcx_order = "last"  # Run after Cilium TC programs
+}
+```
+
+**For Netlink mode (kernel < 6.6):**
+
+```hcl
+discovery "instrument" {
+  tc_priority = 100  # Run after other TC programs (higher = later)
+}
+```
+
+**Note:** The default first-execution strategy (`tcx_order = "first"`, `tc_priority = 1`):
+
+- Ensures immediate flow visibility after restart (prevents orphan issues)
+- Doesn't affect what IP addresses you see (Cilium's service LB happens at socket/cgroup layer, before TC)
+- Rarely causes conflicts because mermin is passive (TC_ACT_UNSPEC)
+
+Only adjust if you experience specific integration issues with Cilium or other TC programs.
 {% endhint %}
 
 ## Amazon Elastic Kubernetes Service (EKS)
