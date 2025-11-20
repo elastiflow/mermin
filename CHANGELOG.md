@@ -1,3 +1,13 @@
+## [v0.1.0-beta.33] - 2025-11-20
+
+### Features
+
+- **ebpf:** Implement map pinning and first-execution strategy (#299)
+
+[v0.1.0-beta.32..v0.1.0-beta.33](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.32...v0.1.0-beta.33)
+
+
+
 ## [v0.1.0-beta.32] - 2025-11-17
 
 ### Features
