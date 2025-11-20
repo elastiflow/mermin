@@ -1188,7 +1188,7 @@ impl FlowPoller {
                 iteration_count += 1;
 
                 if last_stats_log.elapsed() >= Duration::from_secs(30) {
-                    info!(
+                    debug!(
                         event.name = "flow_poller.stats",
                         poller.id = self.id,
                         iteration.count = iteration_count,
