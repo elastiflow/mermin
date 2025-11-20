@@ -6,7 +6,7 @@ We plan to update the beta image multiple times throughout this beta period. We 
 
 ### Accessing the Beta Image
 
-> **Version Requirement**: v0.1.0-beta.30 or higher
+> **Version Requirement**: v0.1.0-beta.33 or higher
 
 Before starting, add the beta Helm chart:
 
@@ -26,7 +26,7 @@ An example configuration is available here: [Example Configuration](https://elas
 
 <summary>Network Interface Discovery</summary>
 
-#### **CNI-Specific Patterns**
+**CNI-Specific Patterns**
 
 ```hcl
 discovery "instrument" {
@@ -64,7 +64,7 @@ Default:
 Mermin's goal is to show you pod-to-pod traffic which is exposed by Virtual Ethernet Devices, which match patterns like `"veth*", "gke*", "cali*"`. Currently, bridge interfaces like `"tun*"` or `flannel*` are ignored, because Mermin does not support parsing tunneled/encapsulated traffic. This feature will come very soon.
 {% endhint %}
 
-#### **Physical Interfaces Only**
+**Physical Interfaces Only**
 
 {% hint style="warning" %}
 Most of the traffic on the physical interfaces will be ignored, because Mermin currently lacks support for tunneled/encapsulated traffic.
@@ -134,9 +134,9 @@ kubectl -n elastiflow get pods -l app.kubernetes.io/name=mermin
 ```
 
 * **Additional Helm deployment examples**
-  * [Mermin with OpenTelemetry Collector](../deployment/examples/local_otel/README.md)
-  * [Mermin with NetObserv Flow and OpenSearch](../deployment/examples/netobserv_os_simple_svc/README.md)
-  * [Mermin with NetObserv Flow and OpenSearch in GKE with Gateway](../deployment/examples/netobserv_os_simple_gke_gw/README.md)
+  * [Mermin with OpenTelemetry Collector](../deployment/examples/local_otel/)
+  * [Mermin with NetObserv Flow and OpenSearch](../deployment/examples/netobserv_os_simple_svc/)
+  * [Mermin with NetObserv Flow and OpenSearch in GKE with Gateway](../deployment/examples/netobserv_os_simple_gke_gw/)
 
 ### See Your First Flows
 
@@ -205,7 +205,7 @@ Mermin has been tested and verified on the following platforms:
 
 ### eBPF Errors
 
-When deploying Mermin for the first time, you may encounter issues. Depending on your kernel version, you may encounter eBPF verifier errors, as shown [here](https://app.gitbook.com/o/YQl6hRr9OfcQwPhzjYYh/s/mj0i8oypT20U3rYftS6q/~/changes/13/troubleshooting/common-ebpf-errors).&#x20;
+When deploying Mermin for the first time, you may encounter issues. Depending on your kernel version, you may encounter eBPF verifier errors, as shown [here](../troubleshooting/common-ebpf-errors.md).
 
 **Minimum requirements:**
 
@@ -213,7 +213,7 @@ When deploying Mermin for the first time, you may encounter issues. Depending on
 * BTF support enabled
 * eBPF support enabled
 
-**Note:** While Mermin may work on kernels older than 6.1, it has been  tested and validated on 6.1+. If you encounter verifier errors on older kernels, please report the issue with your kernel version using the template below.
+**Note:** While Mermin may work on kernels older than 6.1, it has been tested and validated on 6.1+. If you encounter verifier errors on older kernels, please report the issue with your kernel version using the template below.
 
 ### Reporting Issues
 
