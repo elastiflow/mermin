@@ -4,6 +4,17 @@ use std::time::Duration;
 
 use crate::metrics::registry;
 
+/// Increment the export flow spans counter.
+///
+/// ### Arguments
+///
+/// - `status` - Export status: "queued", "dropped", "ok", or "error"
+pub fn inc_export_flow_spans(status: &str) {
+    registry::EXPORT_FLOW_SPANS_TOTAL
+        .with_label_values(&[status])
+        .inc();
+}
+
 /// Increment the spans exported counter.
 ///
 /// ### Arguments

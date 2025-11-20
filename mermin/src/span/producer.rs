@@ -7,7 +7,7 @@ use std::{
 use aya::maps::{HashMap as EbpfHashMap, RingBuf};
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
-use mermin_common::{FlowEvent, FlowKey, FlowStats};
+use mermin_common::{FlowEvent, FlowKey, FlowStats, IpVersion};
 use network_types::{
     eth::EtherType,
     ip::{IpDscp, IpEcn, IpProto},
@@ -24,7 +24,7 @@ use tracing::{debug, error, info, trace, warn};
 use crate::{
     filter::source::PacketFilter,
     ip::{Error, flow_key_to_ip_addrs},
-    metrics,
+    metrics::{self, labels},
     packet::{
         parser::{is_tunnel, parse_packet_from_offset},
         types::ParsedPacket,
@@ -61,6 +61,40 @@ use crate::{
 /// - Packet update vs. Timeout removal: Safe - packet finds flow missing, no-op
 /// - Record vs. Timeout: Safe - timeout waits for record to complete removal
 pub type FlowStore = Arc<DashMap<String, FlowEntry, FxBuildHasher>>;
+
+/// Validates a FlowEvent read from the ring buffer to detect corrupted or invalid data.
+///
+/// Returns `true` if the event is valid, `false` if it should be dropped.
+///
+/// ### Validation Checks
+///
+/// - IP version must be V4 or V6 (not Unknown)
+/// - Protocol must be a valid enum value
+/// - snaplen must be non-zero and reasonable (max 65535)
+/// - parsed_offset must not exceed snaplen
+/// - IP addresses must not be all zeros (invalid state)
+fn is_valid_flow_event(event: &FlowEvent) -> bool {
+    match event.flow_key.ip_version {
+        IpVersion::V4 | IpVersion::V6 => {}
+        IpVersion::Unknown => return false,
+    }
+
+    if event.snaplen == 0 {
+        return false;
+    }
+
+    if event.parsed_offset > event.snaplen {
+        return false;
+    }
+
+    let src_all_zero = event.flow_key.src_ip.iter().all(|&b| b == 0);
+    let dst_all_zero = event.flow_key.dst_ip.iter().all(|&b| b == 0);
+    if src_all_zero && dst_all_zero {
+        return false;
+    }
+
+    true
+}
 
 /// Entry in the flow map containing the flow span.
 /// Polling tasks will handle record intervals and timeouts.
@@ -185,7 +219,10 @@ impl FlowSpanProducer {
             let (worker_tx, worker_rx) = mpsc::channel(worker_capacity);
             worker_channels.push(worker_tx);
 
-            metrics::userspace::set_channel_capacity("packet_worker", worker_capacity);
+            metrics::userspace::set_channel_capacity(
+                labels::CHANNEL_PACKET_WORKER,
+                worker_capacity,
+            );
 
             let flow_worker = FlowWorker::new(
                 worker_id,
@@ -496,6 +533,11 @@ impl FlowWorker {
         );
 
         while let Some(flow_event) = self.flow_event_rx.recv().await {
+            metrics::userspace::set_channel_size(
+                labels::CHANNEL_PACKET_WORKER,
+                self.flow_event_rx.len(),
+            );
+
             if let Err(e) = self.process_new_flow(flow_event).await {
                 warn!(
                     event.name = "flow.processing_failed",
@@ -568,14 +610,33 @@ impl FlowWorker {
         // The scoped block ensures the lock is dropped before expensive filtering logic.
         let stats = {
             let map = self.flow_stats_map.lock().await;
-            map.get(&event.flow_key, 0)
-                .map_err(|_| Error::FlowNotFound)?
+            match map.get(&event.flow_key, 0) {
+                Ok(s) => {
+                    metrics::flow::inc_flow_stats_map_access(labels::MAP_ACCESS_OK);
+                    s
+                }
+                Err(e) => {
+                    if e.to_string().contains("not found") {
+                        metrics::flow::inc_flow_stats_map_access(labels::MAP_ACCESS_NOT_FOUND);
+                    } else {
+                        metrics::flow::inc_flow_stats_map_access(labels::MAP_ACCESS_ERROR);
+                    }
+                    return Err(Error::FlowNotFound);
+                }
+            }
         };
 
         // Early flow filtering: Check if this flow should be tracked
         // If filtered out, immediately remove from eBPF map to prevent memory leaks
         if !self.should_process_flow(&event.flow_key, &stats) {
-            metrics::userspace::inc_ringbuf_packets("filtered", 1);
+            metrics::userspace::inc_ringbuf_packets(labels::PACKET_FILTERED, 1);
+
+            let iface_name = if let Some(entry) = self.iface_map.get(&stats.ifindex) {
+                entry.value().clone()
+            } else {
+                "unknown".to_string()
+            };
+            metrics::flow::inc_producer_flow_spans(&iface_name, labels::SPAN_DROPPED);
 
             let mut map = self.flow_stats_map.lock().await;
             if let Err(e) = map.remove(&event.flow_key) {
@@ -846,6 +907,10 @@ impl FlowWorker {
         };
 
         self.insert_flow(community_id.to_string(), span, timeout);
+
+        // Track flow span creation
+        let interface_name = iface_name.as_deref().unwrap_or("unknown");
+        metrics::flow::inc_producer_flow_spans(interface_name, labels::SPAN_CREATED);
 
         trace!(
             event.name = "span.producer.created_flow",
@@ -1246,8 +1311,16 @@ async fn record_flow(
         );
     }
     let stats = match map.get(&flow_key, 0) {
-        Ok(s) => s,
+        Ok(s) => {
+            metrics::flow::inc_flow_stats_map_access(labels::MAP_ACCESS_OK);
+            s
+        }
         Err(e) => {
+            if e.to_string().contains("not found") {
+                metrics::flow::inc_flow_stats_map_access(labels::MAP_ACCESS_NOT_FOUND);
+            } else {
+                metrics::flow::inc_flow_stats_map_access(labels::MAP_ACCESS_ERROR);
+            }
             warn!(
                 event.name = "record.ebpf_read_failed",
                 flow.community_id = %community_id,
@@ -1296,6 +1369,14 @@ async fn record_flow(
     let end_time = UNIX_EPOCH + Duration::from_nanos(end_time_nanos);
     flow_span.end_time = end_time;
     flow_span.last_activity_time = end_time;
+
+    // Track flow span recorded
+    let interface_name = flow_span
+        .attributes
+        .network_interface_name
+        .as_deref()
+        .unwrap_or("unknown");
+    metrics::flow::inc_producer_flow_spans(interface_name, labels::SPAN_RECORDED);
 
     // Update IP metadata from eBPF stats
     let is_ip_flow = stats.ether_type == EtherType::Ipv4 || stats.ether_type == EtherType::Ipv6;
@@ -1359,7 +1440,7 @@ async fn record_flow(
     match flow_span_tx.try_send(recorded_span) {
         Ok(_) => {}
         Err(mpsc::error::TrySendError::Full(_)) => {
-            metrics::registry::FLOW_SPANS_DROPPED_EXPORT_FAILURE.inc();
+            metrics::export::inc_export_flow_spans(labels::EXPORT_DROPPED);
             debug!(
                 event.name = "span.dropped",
                 flow.community_id = %community_id,
@@ -1457,9 +1538,20 @@ async fn timeout_and_remove_flow(
             );
         }
 
-        if let Ok(stats) = map.get(&key, 0) {
-            let end_time_nanos = stats.last_seen_ns + boot_time_offset;
-            flow_span.end_time = UNIX_EPOCH + Duration::from_nanos(end_time_nanos);
+        match map.get(&key, 0) {
+            Ok(stats) => {
+                metrics::flow::inc_flow_stats_map_access(labels::MAP_ACCESS_OK);
+                let end_time_nanos = stats.last_seen_ns + boot_time_offset;
+                flow_span.end_time = UNIX_EPOCH + Duration::from_nanos(end_time_nanos);
+            }
+            Err(e) => {
+                // Check if it's a not found error vs other error
+                if e.to_string().contains("not found") {
+                    metrics::flow::inc_flow_stats_map_access(labels::MAP_ACCESS_NOT_FOUND);
+                } else {
+                    metrics::flow::inc_flow_stats_map_access(labels::MAP_ACCESS_ERROR);
+                }
+            }
         }
         drop(map);
     }
@@ -1483,7 +1575,7 @@ async fn timeout_and_remove_flow(
         match flow_span_tx.try_send(recorded_span) {
             Ok(_) => {}
             Err(mpsc::error::TrySendError::Full(_)) => {
-                metrics::registry::FLOW_SPANS_DROPPED_EXPORT_FAILURE.inc();
+                metrics::export::inc_export_flow_spans(labels::EXPORT_DROPPED);
                 debug!(
                     event.name = "span.dropped",
                     flow.community_id = %community_id,
@@ -1538,7 +1630,8 @@ async fn timeout_and_remove_flow(
         .network_interface_name
         .as_deref()
         .unwrap_or("unknown");
-    metrics::flow::inc_flows_expired(iface_name, "timeout");
+    metrics::flow::inc_producer_flow_spans(interface_name, labels::SPAN_IDLED);
+    metrics::flow::dec_flows_active(interface_name);
 }
 
 /// Individual poller task - handles flows hashed to this poller.

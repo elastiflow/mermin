@@ -12,13 +12,6 @@ pub fn inc_flow_spans_processed() {
     registry::FLOW_SPANS_PROCESSED_TOTAL.inc();
 }
 
-/// Increment the flow spans decorated counter.
-///
-/// Called when a flow span is enriched with Kubernetes metadata.
-pub fn inc_flow_spans_decorated() {
-    registry::FLOW_SPANS_DECORATED_TOTAL.inc();
-}
-
 /// Increment the flow spans sent to exporter counter.
 ///
 /// Called when a flow span is successfully sent to the export channel.

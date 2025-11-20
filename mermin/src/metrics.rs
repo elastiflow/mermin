@@ -2,6 +2,8 @@ pub mod ebpf;
 pub mod error;
 pub mod export;
 pub mod flow;
+pub mod k8s;
+pub mod labels;
 pub mod opts;
 pub mod registry;
 pub mod server;

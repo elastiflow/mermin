@@ -48,7 +48,7 @@ use mermin_common::FlowKey;
 use tokio::sync::Mutex;
 use tracing::warn;
 
-use crate::metrics::flow::inc_flows_expired;
+use crate::metrics::flow::{dec_flows_active, inc_producer_flow_spans};
 
 /// RAII guard for eBPF flow map entries.
 ///
@@ -118,7 +118,8 @@ impl Drop for EbpfFlowGuard {
                     );
 
                     // Metrics: Flow expired via guard cleanup (error path)
-                    inc_flows_expired("unknown", "guard_cleanup");
+                    inc_producer_flow_spans("unknown", "guard_cleanup");
+                    dec_flows_active("unknown");
                 }
             });
         }

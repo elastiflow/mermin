@@ -481,7 +481,7 @@ async fn run() -> Result<()> {
         as usize;
 
     let (flow_span_tx, mut flow_span_rx) = mpsc::channel(flow_span_capacity);
-    metrics::userspace::set_channel_capacity("exporter", flow_span_capacity);
+    metrics::userspace::set_channel_capacity(metrics::labels::CHANNEL_EXPORTER, flow_span_capacity);
     let (k8s_decorated_flow_span_tx, mut k8s_decorated_flow_span_rx) =
         mpsc::channel(decorated_span_capacity);
 
@@ -626,7 +626,7 @@ async fn run() -> Result<()> {
                         trace!(event.name = "decorator.sending_to_exporter", flow.community_id = %flow_span.attributes.flow_community_id);
 
                         if let Err(e) = k8s_decorated_flow_span_tx.send(flow_span).await {
-                            metrics::registry::FLOW_SPANS_DROPPED_EXPORT_FAILURE.inc();
+                            metrics::k8s::inc_k8s_decorator_flow_spans("dropped");
                             error!(
                                 event.name = "channel.send_failed",
                                 channel.name = "k8s_decorated_flow_span",
@@ -634,8 +634,10 @@ async fn run() -> Result<()> {
                                 "failed to send flow span to export channel"
                             );
                                 
+                                
                         }
 						metrics::span::inc_flow_spans_sent_to_exporter();
+						metrics::k8s::inc_k8s_decorator_flow_spans("undecorated");
                     }
                 }
             }
@@ -668,6 +670,9 @@ async fn run() -> Result<()> {
     task_manager.spawn("exporter", async move {
         while let Some(flow_span) = k8s_decorated_flow_span_rx.recv().await {
             let flow_span_clone = flow_span.clone();
+            let queue_size = k8s_decorated_flow_span_rx.len();
+            metrics::userspace::set_channel_size("exporter_input", queue_size);
+            metrics::export::inc_export_flow_spans(metrics::labels::EXPORT_QUEUED);
             let traceable: TraceableRecord = Arc::new(flow_span);
             trace!(event.name = "flow.exporting", "exporting flow span");
 

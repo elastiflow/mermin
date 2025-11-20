@@ -11,7 +11,7 @@ use opentelemetry_sdk::{
 };
 use tracing::trace;
 
-use crate::metrics::export::{inc_spans_exported, observe_export_latency};
+use crate::metrics::export::{inc_export_flow_spans, inc_spans_exported, observe_export_latency};
 
 pub struct TraceExporterAdapter {
     provider: SdkTracerProvider,
@@ -133,8 +133,9 @@ impl TraceableExporter for TraceExporterAdapter {
         opentelemetry::trace::Span::end_with_timestamp(&mut span, traceable.end_time());
 
         // Metrics: Span exported successfully
-        inc_spans_exported(1);
         observe_export_latency(start.elapsed());
+        inc_export_flow_spans(crate::metrics::labels::EXPORT_OK);
+        inc_spans_exported(1);
 
         trace!(
             event.name = "span.exported",
