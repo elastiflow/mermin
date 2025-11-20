@@ -208,6 +208,55 @@ jobs:
       test-path: "./mermin/tests/e2e/cni/test.sh"
       image-tag: "cni-e2e-test"
 
+  schema_version_check:
+    name: Check eBPF Map Schema Version
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Check if FlowKey or FlowStats changed without version increment
+        run: |
+          # Get the base branch to compare against
+          BASE_REF="${{ github.event.pull_request.base.sha }}"
+          HEAD_REF="${{ github.sha }}"
+
+          echo "Comparing ${BASE_REF} -> ${HEAD_REF}"
+
+          # Check if FlowKey or FlowStats structs changed
+          STRUCT_CHANGES=$(git diff ${BASE_REF}..${HEAD_REF} -- mermin-common/src/lib.rs | grep -E '^\+.*pub struct (FlowKey|FlowStats)' || true)
+          FIELD_CHANGES=$(git diff ${BASE_REF}..${HEAD_REF} -- mermin-common/src/lib.rs | grep -E '^\+[[:space:]]+(pub [[:alnum:]_]+:|///)' | grep -v '^\+[[:space:]]*///' || true)
+
+          if [ -n "$STRUCT_CHANGES" ] || [ -n "$FIELD_CHANGES" ]; then
+            echo "✗ Detected changes to FlowKey or FlowStats structs in mermin-common/src/lib.rs"
+
+            # Check if EBPF_MAP_SCHEMA_VERSION was incremented
+            OLD_VERSION=$(git show ${BASE_REF}:mermin/src/main.rs | grep 'const EBPF_MAP_SCHEMA_VERSION:' | grep -oE '[0-9]+')
+            NEW_VERSION=$(git show ${HEAD_REF}:mermin/src/main.rs | grep 'const EBPF_MAP_SCHEMA_VERSION:' | grep -oE '[0-9]+')
+
+            echo "Old schema version: ${OLD_VERSION}"
+            echo "New schema version: ${NEW_VERSION}"
+
+            if [ "$NEW_VERSION" -le "$OLD_VERSION" ]; then
+              echo ""
+              echo "❌ ERROR: FlowKey or FlowStats structs changed but EBPF_MAP_SCHEMA_VERSION was not incremented!"
+              echo ""
+              echo "REQUIRED ACTION:"
+              echo "  Increment EBPF_MAP_SCHEMA_VERSION in mermin/src/main.rs from ${OLD_VERSION} to $((OLD_VERSION + 1))"
+              echo ""
+              echo "WHY: Changing FlowKey/FlowStats layout breaks eBPF map compatibility."
+              echo "     Incrementing the version ensures old pinned maps are not reused."
+              echo ""
+              exit 1
+            else
+              echo "✓ Schema version was correctly incremented from ${OLD_VERSION} to ${NEW_VERSION}"
+            fi
+          else
+            echo "✓ No changes detected to FlowKey or FlowStats structs"
+          fi
+
   all_checks:
     name: All Checks
     if: always()
@@ -220,9 +269,10 @@ jobs:
       - helm_checks
       - docker_build
       - cni_tests
+      - schema_version_check
     steps:
       - name: Check if all checks passed
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe
         with:
           jobs: ${{ toJson(needs) }}
-          allowed-skips: '["pr_checks"]'
+          allowed-skips: '["pr_checks", "schema_version_check"]'
