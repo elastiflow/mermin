@@ -770,14 +770,6 @@ async fn run() -> Result<()> {
         "received shutdown signal, starting graceful cleanup"
     );
 
-    // Signal OS threads to shutdown
-    if os_shutdown_tx.send(()).is_err() {
-        debug!(
-            event.name = "application.shutdown_signal_send_failed",
-            "failed to broadcast shutdown signal; receivers already dropped"
-        );
-    }
-
     let shutdown_config = ShutdownConfig {
         timeout: conf.shutdown_timeout,
         preserve_flows: true,

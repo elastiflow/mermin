@@ -203,7 +203,6 @@ impl ShutdownManager {
             "starting enhanced shutdown sequence"
         );
 
-        // Phase 1: Preserve active flows if configured
         if self.shutdown_config.preserve_flows {
             info!(
                 event.name = "application.shutdown.preserving_flows",
@@ -234,7 +233,6 @@ impl ShutdownManager {
             }
         }
 
-        // Now destructure after using self methods
         let Self {
             shutdown_config,
             os_shutdown_tx,
