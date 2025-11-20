@@ -56,9 +56,7 @@ pub trait Traceable {
     /// If `Some(TraceId)` is returned, it will be used as the trace ID for this span,
     /// enabling correlation of multiple spans under the same trace. If `None` is returned,
     /// OpenTelemetry will generate a new random trace ID.
-    fn trace_id(&self) -> Option<TraceId> {
-        None
-    }
+    fn trace_id(&self) -> Option<TraceId>;
 
     /// Populates a pre-configured `Span` with the record's specific attributes.
     ///
@@ -100,9 +98,7 @@ impl TraceableExporter for TraceExporterAdapter {
             "flow".to_string()
         };
 
-        // Build the span, injecting custom trace ID if provided
         let mut span = if let Some(custom_trace_id) = traceable.trace_id() {
-            // Generate a new span ID for this specific span within the trace
             let span_id_bytes: [u8; 8] = opentelemetry_sdk::trace::RandomIdGenerator::default()
                 .new_span_id()
                 .to_bytes();
@@ -112,22 +108,19 @@ impl TraceableExporter for TraceExporterAdapter {
                 custom_trace_id,
                 span_id,
                 TraceFlags::SAMPLED,
-                true, // is_remote (this acts as a parent from "outside")
+                true,
                 TraceState::default(),
             );
 
-            // Create a context with the parent span context
             let parent_cx =
                 opentelemetry::Context::current().with_remote_span_context(parent_span_context);
 
-            // Build and start the span with the parent context
             tracer
                 .span_builder(name.clone())
                 .with_kind(SpanKind::Internal)
                 .with_start_time(traceable.start_time())
                 .start_with_context(&tracer, &parent_cx)
         } else {
-            // No custom trace ID, generate one normally
             tracer
                 .span_builder(name.clone())
                 .with_kind(SpanKind::Internal)

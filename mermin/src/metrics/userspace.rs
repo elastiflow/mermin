@@ -3,7 +3,7 @@
 //! This module provides convenient functions for updating userspace-related metrics
 //! such as ring buffer statistics and channel capacity/size tracking.
 
-use super::registry;
+use crate::metrics::registry;
 
 /// Set the capacity of an internal channel.
 ///

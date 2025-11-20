@@ -77,6 +77,9 @@ impl FlowEndReason {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FlowSpan {
+    // Trace ID for correlating flows with the same community ID
+    #[serde(serialize_with = "serialize_option_trace_id")]
+    pub trace_id: Option<opentelemetry::trace::TraceId>,
     pub start_time: SystemTime,
     pub end_time: SystemTime,
     #[serde(serialize_with = "serialize_span_kind")]
@@ -98,9 +101,6 @@ pub struct FlowSpan {
     #[allow(dead_code)]
     pub boot_time_offset: u64,
 
-    // Trace ID for correlating flows with the same community ID
-    #[serde(skip)]
-    pub trace_id: Option<opentelemetry::trace::TraceId>,
     // Timing metadata for polling architecture
     #[serde(skip)]
     pub last_recorded_time: SystemTime,
@@ -381,6 +381,10 @@ impl Default for SpanAttributes {
 }
 
 impl Traceable for FlowSpan {
+    fn trace_id(&self) -> Option<opentelemetry::trace::TraceId> {
+        self.trace_id
+    }
+
     fn start_time(&self) -> SystemTime {
         self.start_time
     }
@@ -395,10 +399,6 @@ impl Traceable for FlowSpan {
             self.attributes.network_type.as_str(),
             self.attributes.network_transport.to_string().as_str()
         ))
-    }
-
-    fn trace_id(&self) -> Option<opentelemetry::trace::TraceId> {
-        self.trace_id
     }
 
     fn record(&self, mut span: opentelemetry_sdk::trace::Span) -> opentelemetry_sdk::trace::Span {
@@ -903,6 +903,19 @@ where
         SpanKind::Internal => "INTERNAL",
     };
     serializer.serialize_str(kind_str)
+}
+
+fn serialize_option_trace_id<S>(
+    trace_id: &Option<opentelemetry::trace::TraceId>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match trace_id {
+        Some(id) => serializer.serialize_str(&id.to_string()),
+        None => serializer.serialize_none(),
+    }
 }
 
 fn serialize_option_mac_addr<S>(
@@ -1443,9 +1456,47 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_traceable_trace_id_none() {
-        // Test that FlowSpan returns None when trace_id is not set
+    #[tokio::test]
+    async fn test_traceable_export_trace_id_none() {
+        use std::sync::{Arc, Mutex};
+
+        use futures::future::BoxFuture;
+        use opentelemetry::trace::TraceId;
+        use opentelemetry_sdk::trace::{
+            SdkTracerProvider, SimpleSpanProcessor, SpanData, SpanExporter,
+        };
+
+        use crate::otlp::trace::{TraceExporterAdapter, TraceableExporter};
+
+        #[derive(Debug, Clone)]
+        struct MockExporter {
+            spans: Arc<Mutex<Vec<SpanData>>>,
+        }
+
+        impl SpanExporter for MockExporter {
+            #[allow(refining_impl_trait)]
+            fn export(
+                &self,
+                batch: Vec<SpanData>,
+            ) -> BoxFuture<'static, opentelemetry_sdk::error::OTelSdkResult> {
+                let spans = self.spans.clone();
+                Box::pin(async move {
+                    spans.lock().unwrap().extend(batch);
+                    Ok(())
+                })
+            }
+        }
+
+        let captured_spans = Arc::new(Mutex::new(Vec::new()));
+        let exporter = MockExporter {
+            spans: captured_spans.clone(),
+        };
+        let processor = SimpleSpanProcessor::new(exporter);
+        let provider = SdkTracerProvider::builder()
+            .with_span_processor(processor)
+            .build();
+        let adapter = TraceExporterAdapter::new(provider);
+
         let flow_span = FlowSpan {
             start_time: std::time::UNIX_EPOCH,
             end_time: std::time::UNIX_EPOCH + Duration::from_secs(10),
@@ -1463,14 +1514,58 @@ mod tests {
             timeout_duration: Duration::from_secs(0),
         };
 
-        assert_eq!(flow_span.trace_id(), None);
+        adapter.export(Arc::new(flow_span)).await;
+
+        // Force flush/shutdown to ensure spans are processed (though SimpleSpanProcessor handles it synchronously usually, but adapter is async)
+        // The adapter just calls start/end on span.
+        // SimpleSpanProcessor processes on end.
+
+        let spans = captured_spans.lock().unwrap();
+        assert_eq!(spans.len(), 1);
+        assert_ne!(spans[0].span_context.trace_id(), TraceId::INVALID);
     }
 
-    #[test]
-    fn test_traceable_trace_id_some() {
-        use opentelemetry::trace::TraceId;
+    #[tokio::test]
+    async fn test_traceable_export_trace_id_some() {
+        use std::sync::{Arc, Mutex};
 
-        // Create a test trace ID
+        use futures::future::BoxFuture;
+        use opentelemetry::trace::TraceId;
+        use opentelemetry_sdk::trace::{
+            SdkTracerProvider, SimpleSpanProcessor, SpanData, SpanExporter,
+        };
+
+        use crate::otlp::trace::{TraceExporterAdapter, TraceableExporter};
+
+        #[derive(Debug, Clone)]
+        struct MockExporter {
+            spans: Arc<Mutex<Vec<SpanData>>>,
+        }
+
+        impl SpanExporter for MockExporter {
+            #[allow(refining_impl_trait)]
+            fn export(
+                &self,
+                batch: Vec<SpanData>,
+            ) -> BoxFuture<'static, opentelemetry_sdk::error::OTelSdkResult> {
+                let spans = self.spans.clone();
+                Box::pin(async move {
+                    spans.lock().unwrap().extend(batch);
+                    Ok(())
+                })
+            }
+        }
+
+        let captured_spans = Arc::new(Mutex::new(Vec::new()));
+        let exporter = MockExporter {
+            spans: captured_spans.clone(),
+        };
+        let processor = SimpleSpanProcessor::new(exporter);
+        let provider = SdkTracerProvider::builder()
+            .with_span_processor(processor)
+            .build();
+        let adapter = TraceExporterAdapter::new(provider);
+
         let test_trace_id = TraceId::from_bytes([
             0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
             0x0f, 0x10,
@@ -1493,37 +1588,10 @@ mod tests {
             timeout_duration: Duration::from_secs(0),
         };
 
-        assert_eq!(flow_span.trace_id(), Some(test_trace_id));
-    }
+        adapter.export(Arc::new(flow_span)).await;
 
-    #[test]
-    fn test_flow_span_with_trace_id_clones_correctly() {
-        use opentelemetry::trace::TraceId;
-
-        let test_trace_id = TraceId::from_bytes([
-            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
-            0x0f, 0x10,
-        ]);
-
-        let flow_span = FlowSpan {
-            start_time: std::time::UNIX_EPOCH,
-            end_time: std::time::UNIX_EPOCH + Duration::from_secs(10),
-            span_kind: SpanKind::Internal,
-            attributes: SpanAttributes::default(),
-            flow_key: None,
-            last_recorded_packets: 0,
-            last_recorded_bytes: 0,
-            last_recorded_reverse_packets: 0,
-            last_recorded_reverse_bytes: 0,
-            boot_time_offset: 0,
-            trace_id: Some(test_trace_id),
-            last_recorded_time: std::time::UNIX_EPOCH,
-            last_activity_time: std::time::UNIX_EPOCH,
-            timeout_duration: Duration::from_secs(0),
-        };
-
-        let cloned = flow_span.clone();
-        assert_eq!(flow_span.trace_id, cloned.trace_id);
-        assert_eq!(cloned.trace_id(), Some(test_trace_id));
+        let spans = captured_spans.lock().unwrap();
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].span_context.trace_id(), test_trace_id);
     }
 }

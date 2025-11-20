@@ -125,6 +125,6 @@ mod defaults {
         0
     }
     pub fn trace_id_timeout() -> Duration {
-        Duration::from_secs(86400) // 24 hours
+        Duration::from_secs(24 * 60 * 60)
     }
 }

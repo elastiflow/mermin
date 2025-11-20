@@ -169,6 +169,19 @@ impl TraceIdCache {
         (scanned, removed)
     }
 
+    /// Removes an entry from the cache by community ID.
+    ///
+    /// This method should be called when a flow is timed out, indicating that
+    /// the connection is closed or the flow is done. Removing the cache entry
+    /// ensures that future flows with the same community ID will get a new trace ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `community_id` - The community ID of the entry to remove
+    pub fn remove(&self, community_id: &str) {
+        self.cache.remove(community_id);
+    }
+
     /// Clears all entries from the cache (primarily for testing)
     #[cfg(test)]
     pub fn clear(&self) {
