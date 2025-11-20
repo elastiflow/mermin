@@ -397,10 +397,12 @@ discovery "instrument" {
 
 ### Troubleshooting Priority Conflicts
 
-**Symptom**: Network connectivity issues after deploying Mermin
+**Default Behavior**: Mermin now runs first by default (`tc_priority = 1`, `tcx_order = "first"`) to prevent orphan program issues on restart. This ensures new mermin programs execute before any orphaned programs from previous instances.
+
+**Symptom**: Network connectivity issues after deploying Mermin (rare with default settings)
 
 **Potential causes:**
-1. TC priority is too low (< 30), causing Mermin to run before CNI programs
+1. Mermin running before critical CNI programs (default behavior prioritizes observability over CNI ordering)
 2. Multiple programs are using the same priority
 3. CNI is using non-standard priority values
 
@@ -413,15 +415,21 @@ discovery "instrument" {
 kubectl exec -it $MERMIN_POD -- sh -c 'for iface in $(ip -o link show | awk -F: "{print \$2}" | tr -d " "); do echo "=== $iface ==="; tc filter show dev $iface ingress 2>/dev/null; done'
 ```
 
-2. **Adjust Mermin's priority** to run after all CNI programs:
+2. **If CNI conflicts occur**, adjust Mermin's priority to run after CNI programs (netlink mode only):
 
 ```hcl
 discovery "instrument" {
-  tc_priority = 100  # Safely after most CNI programs
+  tc_priority = 100  # Run after most CNI programs (netlink mode, kernel < 6.6)
 }
 ```
 
-3. **On kernel >= 6.6**: TCX mode is used automatically (no priority conflicts)
+3. **For TCX mode** (kernel >= 6.6), adjust ordering if needed:
+
+```hcl
+discovery "instrument" {
+  tcx_order = "last"  # Run after all programs (kernel >= 6.6)
+}
+```
 
 Check your kernel version:
 
@@ -433,10 +441,93 @@ If version is >= 6.6.0, you'll see log messages indicating TCX mode is active, a
 
 ### Additional Notes
 
+- **New default**: `tc_priority = 1` and `tcx_order = "first"` for consistent first-execution
 - **TCX mode (kernel >= 6.6)**: Multiple programs can coexist without priority conflicts using link ordering
 - **Netlink mode (kernel < 6.6)**: Requires manual priority management
 - Priority only affects attachment order, not performance
-- Mermin operates passively (read-only observation), so running later in the chain is typically safe
+- Mermin operates passively (TC_ACT_UNSPEC), so running first rarely causes issues
+- First-execution prevents flow gaps after restart by ensuring new programs execute before orphans
+
+## Flow Gaps After Restart
+
+### Symptom
+
+After restarting mermin pods, no flow spans are generated for pods that existed before the restart. Only newly created pods show flows.
+
+### Cause
+
+This was caused by orphaned eBPF programs from previous mermin instances executing before new programs (in TCX mode with `tcx_order=last`). The orphaned programs referenced old maps, while new programs used new maps, causing a split-brain scenario where packets were processed by old programs with inaccessible map state.
+
+### Solution (Current Version)
+
+Starting in recent versions, mermin defaults to `tcx_order=first` and `tc_priority=1`, ensuring new programs execute before any orphans. Additionally, eBPF maps are now pinned with schema versioning for state continuity.
+
+**Default behavior includes:**
+
+- Map pinning to `/sys/fs/bpf/mermin_*_v1` (when `/sys/fs/bpf` is writable)
+- First-execution strategy (`tcx_order=first`, `tc_priority=1`)
+- Schema versioning for safe upgrades
+- Automatic format validation and reuse
+
+If you're experiencing this issue on older versions or custom configurations, update your configuration:
+
+```hcl
+discovery "instrument" {
+  tc_priority = 1      # Run first (netlink mode, kernel < 6.6)
+  tcx_order = "first"  # Run first (TCX mode, kernel >= 6.6)
+}
+```
+
+### Verification
+
+After deployment or restart, verify the configuration is working:
+
+```bash
+# 1. Check for orphaned programs (should be cleaned up or run after new programs)
+kubectl exec -it $MERMIN_POD -- tc filter show dev <interface> ingress
+
+# 2. Verify map pinning for state continuity
+kubectl exec -it $MERMIN_POD -- ls -la /sys/fs/bpf/mermin_*
+# You should see:
+#   mermin_flow_stats_map_v1
+#   mermin_flow_events_v1
+
+# 3. Check logs for map reuse on restart
+kubectl logs $MERMIN_POD | grep "ebpf.map_reused"
+# On restart, you should see messages about reusing pinned maps
+
+# 4. Verify flows appear for existing pods after restart
+# Deploy a test pod, restart mermin, verify flows continue immediately
+```
+
+### State Continuity Benefits
+
+With map pinning enabled:
+
+- **No data loss**: Flow statistics persist across restarts
+- **No visibility gaps**: Existing pods generate flows immediately after restart
+- **Seamless updates**: Rolling updates maintain continuous observability
+- **Safe upgrades**: Schema versioning prevents incompatible map reuse
+
+### Mounting /sys/fs/bpf
+
+For map pinning to work, ensure `/sys/fs/bpf` is mounted as a hostPath:
+
+```yaml
+# In your Helm values or DaemonSet spec
+volumeMounts:
+  - name: bpf-fs
+    mountPath: /sys/fs/bpf
+    mountPropagation: Bidirectional
+
+volumes:
+  - name: bpf-fs
+    hostPath:
+      path: /sys/fs/bpf
+      type: DirectoryOrCreate
+```
+
+If `/sys/fs/bpf` is not writable, mermin continues in best-effort mode (unpinned maps) with a warning logged.
 
 ## Configuration Syntax Errors
 

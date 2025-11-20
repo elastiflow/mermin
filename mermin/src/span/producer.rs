@@ -159,7 +159,7 @@ impl FlowSpanProducer {
             event.name = "task.started",
             task.name = "span.producer",
             task.description = "producing flow spans from eBPF flow events",
-            "userspace task started (event-driven architecture)"
+            "userspace task started"
         );
 
         let flow_stats_map = self.flow_stats_map;
@@ -1387,7 +1387,7 @@ async fn flow_poller_task(
         iteration_count += 1;
 
         if last_stats_log.elapsed() >= Duration::from_secs(30) {
-            info!(
+            debug!(
                 event.name = "flow_poller.stats",
                 poller.id = poller_id,
                 iteration.count = iteration_count,

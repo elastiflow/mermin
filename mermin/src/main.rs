@@ -13,6 +13,7 @@ mod span;
 use std::sync::{Arc, atomic::Ordering};
 
 use aya::{
+    EbpfLoader,
     programs::{SchedClassifier, TcAttachType},
     util::KernelVersion,
 };
@@ -48,6 +49,22 @@ async fn main() {
         std::process::exit(1);
     }
 }
+
+/// eBPF map schema version - MUST be incremented when FlowKey or FlowStats struct layout changes
+/// Versioning prevents incompatible map formats from being reused across upgrades
+/// Schema version is used in map pin path: /sys/fs/bpf/mermin_v{VERSION}/
+///
+/// IMPORTANT: Increment this when ANY of the following change:
+/// - FlowKey struct layout (in mermin-ebpf/src/*.rs)
+/// - FlowStats struct layout (in mermin-ebpf/src/*.rs)
+/// - Map max_entries values
+/// - Map key/value types
+///
+/// History:
+/// - v1: Initial schema version (current)
+///
+/// CI check in place: .github/workflows/ci.yml (schema_version_check job)
+const EBPF_MAP_SCHEMA_VERSION: u8 = 1;
 
 async fn run() -> Result<()> {
     // TODO: runtime should be aware of all threads and tasks spawned by the eBPF program so that they can be gracefully shutdown and restarted.
@@ -189,10 +206,31 @@ async fn run() -> Result<()> {
     // runtime. This approach is recommended for most real-world use cases. If you would
     // like to specify the eBPF program at runtime rather than at compile-time, you can
     // reach for `Bpf::load_file` instead.
-    let mut ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
-        env!("OUT_DIR"),
-        "/mermin"
-    )))?;
+
+    // Load eBPF program with versioned map pinning for state persistence
+    // Maps will be pinned to /sys/fs/bpf/mermin_v{version}/<map_name>
+    // On restart, existing pinned maps will be automatically reused (state continuity)
+    // Schema version in path allows breaking changes without manual cleanup
+    let map_pin_path = format!("/sys/fs/bpf/mermin_v{EBPF_MAP_SCHEMA_VERSION}");
+    if let Err(e) = std::fs::create_dir_all(&map_pin_path) {
+        warn!(
+            "failed to create eBPF map pin path '{map_pin_path}': {e} - ensure /sys/fs/bpf is mounted and writable - map pinning is required for state persistence across restarts",
+        );
+    }
+    let mut ebpf =
+        EbpfLoader::new()
+            .map_pin_path(&map_pin_path)
+            .load(aya::include_bytes_aligned!(concat!(
+                env!("OUT_DIR"),
+                "/mermin"
+            )))?;
+
+    debug!(
+        event.name = "ebpf.loaded",
+        map.pin_path = %map_pin_path,
+        map.schema_version = EBPF_MAP_SCHEMA_VERSION,
+        "eBPF program loaded, maps will persist with versioned pinning"
+    );
     if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
         // This can happen if you remove all log statements from your eBPF program.
         warn!(
@@ -224,36 +262,51 @@ async fn run() -> Result<()> {
         "tc programs loaded into kernel"
     );
 
-    // Determine TC attachment method based on kernel version
     let kernel_version = KernelVersion::current().unwrap_or(KernelVersion::new(0, 0, 0));
     let use_tcx = kernel_version >= KernelVersion::new(6, 6, 0);
+    let bpf_fs_writable = if !use_tcx {
+        false
+    } else {
+        let test_pin_path = format!("/sys/fs/bpf/mermin_test_map_{}", std::process::id());
 
-    // Check /sys/fs/bpf writability for TCX link pinning BEFORE extracting maps
-    // We test by attempting to pin a BPF map temporarily, since /sys/fs/bpf
-    // is a BPF filesystem that only supports pinning BPF objects (not regular files)
-    let bpf_fs_writable = use_tcx && {
-        let test_pin_path = "/sys/fs/bpf/.mermin_test_map";
-        let test_result = ebpf
-            .maps()
-            .next()
-            .and_then(|(_, map)| match map.pin(test_pin_path) {
-                Ok(_) => match std::fs::remove_file(test_pin_path) {
-                    Ok(_) => Some(()),
+        match ebpf.maps().next() {
+            Some((_, map)) => match map.pin(&test_pin_path) {
+                Ok(_) => match std::fs::remove_file(&test_pin_path) {
+                    Ok(_) => {
+                        info!(
+                            event.name = "ebpf.bpf_fs_writable",
+                            "/sys/fs/bpf is writable, tcx link pinning enabled"
+                        );
+                        true
+                    }
                     Err(e) => {
                         warn!(
                             event.name = "ebpf.bpf_test_cleanup_failed",
+                            path = %test_pin_path,
                             error = %e,
-                            "failed to cleanup test pin at {}, but /sys/fs/bpf is writable",
-                            test_pin_path
+                            "failed to cleanup test pin, but /sys/fs/bpf is confirmed writable"
                         );
-                        Some(())
+                        true
                     }
                 },
-                Err(_) => None,
-            });
-        test_result.is_some()
+                Err(e) => {
+                    info!(
+                        event.name = "ebpf.bpf_fs_not_writable",
+                        error = %e,
+                        "/sys/fs/bpf is not writable, tcx link pinning disabled"
+                    );
+                    false
+                }
+            },
+            None => {
+                error!(
+                    event.name = "ebpf.unexpected_error",
+                    "no ebpf maps found in loaded program, cannot test /sys/fs/bpf writability - this is unexpected and indicates a problem with the eBPF program."
+                );
+                false
+            }
+        }
     };
-
     if use_tcx {
         info!(
             event.name = "ebpf.bpf_fs_check_complete",
@@ -262,26 +315,27 @@ async fn run() -> Result<()> {
         );
     }
 
-    // Extract eBPF maps BEFORE moving Ebpf object to controller thread
-    // Maps will be owned by FlowSpanProducer (main thread), programs by controller (host namespace thread)
-    let flow_stats_map = ebpf
-        .take_map("FLOW_STATS_MAP")
-        .ok_or_else(|| MerminError::internal("FLOW_STATS_MAP not found in eBPF object"))?;
-    let flow_events_map = ebpf
-        .take_map("FLOW_EVENTS")
-        .ok_or_else(|| MerminError::internal("FLOW_EVENTS not found in eBPF object"))?;
-
+    // Extract eBPF maps - they're already pinned/reused automatically by EbpfLoader
+    // Maps are pinned to /sys/fs/bpf/mermin_v{version}/<map_name> and reused across restarts
     let flow_stats_map = Arc::new(tokio::sync::Mutex::new(
-        aya::maps::HashMap::try_from(flow_stats_map)
-            .map_err(|e| MerminError::internal(format!("failed to convert FLOW_STATS_MAP: {e}")))?,
+        aya::maps::HashMap::try_from(
+            ebpf.take_map("FLOW_STATS_MAP")
+                .ok_or_else(|| MerminError::internal("FLOW_STATS_MAP not found in eBPF object"))?,
+        )
+        .map_err(|e| MerminError::internal(format!("failed to convert FLOW_STATS_MAP: {e}")))?,
     ));
-    let flow_events_ringbuf = aya::maps::RingBuf::try_from(flow_events_map).map_err(|e| {
+    let flow_events_ringbuf = aya::maps::RingBuf::try_from(
+        ebpf.take_map("FLOW_EVENTS")
+            .ok_or_else(|| MerminError::internal("FLOW_EVENTS not found in eBPF object"))?,
+    )
+    .map_err(|e| {
         MerminError::internal(format!("failed to convert FLOW_EVENTS ring buffer: {e}"))
     })?;
 
     info!(
-        event.name = "ebpf.maps_extracted",
-        "eBPF maps extracted successfully for flow producer"
+        event.name = "ebpf.maps_ready",
+        schema_version = EBPF_MAP_SCHEMA_VERSION,
+        "eBPF maps ready for flow producer"
     );
 
     let attach_method = if use_tcx { "TCX" } else { "netlink" };
