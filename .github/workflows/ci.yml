@@ -104,6 +104,9 @@ jobs:
       - name: Run default tests
         run: cargo nextest run -r --workspace --exclude mermin-ebpf --exclude integration --exclude integration-common --exclude integration-ebpf --no-fail-fast
 
+      - name: Run doc tests
+        run: cargo test --doc
+
       - name: Run eBPF tests
         run: cargo test -r -p mermin-ebpf --features test
 

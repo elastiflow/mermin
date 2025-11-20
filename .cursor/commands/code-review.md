@@ -80,17 +80,58 @@ Review the code changes compared to the `{{base_branch}}` branch with particular
 
 ## 6. Documentation
 
-- [ ] All public functions have `///` doc comments with:
-  - Description of what the function does
-  - `Arguments` section for parameters
-  - `Returns` section for return values
-  - `Errors` section if returning `Result`
-  - `Panics` section if function can panic
-  - `Examples` for non-obvious usage
-- [ ] All public structs and enums are documented
-- [ ] All public fields on structs are documented
-- [ ] Module-level documentation (`//!`) provides overview
+### Documentation Hierarchy & Content
+
+- [ ] **Crate-level** (`lib.rs`/`main.rs`): Documents the "big What" (purpose) and "big How" (getting started, examples)
+- [ ] **Module-level** (`//!`): Describes types in the module and how they interact with the rest of the crate
+- [ ] **Type-level**: Documents construction, destruction/dropping behavior, and performance characteristics
+- [ ] **Function-level**: Provides semantic descriptions and code examples showing the detailed "How"
+
+### Documentation Standards
+
+- [ ] All public items (functions, structs, enums, traits) have `///` doc comments
+- [ ] Documentation focuses on **What** (what it does) and **How** (how to use it), not implementation details
+- [ ] Documentation is concise - assumes users know Rust, avoids over-explaining
+- [ ] All public fields on structs have doc comments
 - [ ] Private items are documented only when complexity warrants it
+
+### Required Documentation Sections (in priority order)
+
+- [ ] **`# Examples`** (plural, even if only one):
+  - Present on all public items where usage isn't completely obvious
+  - Examples should compile and run as doc-tests (avoid `ignore` unless necessary)
+  - Cover both common use cases and edge cases
+  - Use ` ```ignore` or ` ```text` only for intentionally non-compiling examples
+
+- [ ] **`# Errors`** (for functions returning `Result`):
+  - Explains **why** each error variant can occur (rare case where "why" is needed)
+  - Links to error type variants using `[ErrorVariant](path::to::ErrorType::ErrorVariant)`
+
+- [ ] **`# Panics`**:
+  - Documents any conditions under which the function will panic
+  - Required if function can panic in normal usage
+
+- [ ] **`# Safety`**:
+  - Required for all `unsafe` functions
+  - Documents safety invariants that callers must uphold
+
+### Documentation Anti-patterns to Avoid
+
+- [ ] **No `# Arguments` sections** - parameter names and types should be self-documenting
+  - Exception: Only if there's a non-obvious assumption or undefined behavior with certain values
+
+- [ ] **No `# Returns` sections** - return type and function description should be clear enough
+
+- [ ] **No redundant documentation** - don't repeat what the code/types already express
+
+### Documentation Quality
+
+- [ ] All code references link to their definitions using rustdoc link syntax: `` [`Type`](path::to::Type) ``
+- [ ] References to std types are also linked: `` [`String`](std::string::String) ``
+- [ ] Document traits themselves, not trait implementations (implementations inherit trait docs)
+- [ ] Non-obvious design decisions are documented (especially those that go against intuition)
+- [ ] Lifetimes are documented if they serve a non-obvious purpose
+- [ ] Documentation is kept up-to-date with code changes
 
 ## 7. Comment Quality
 
