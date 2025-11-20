@@ -22,6 +22,8 @@ use aya::{
 };
 use dashmap::DashMap;
 use error::{MerminError, Result};
+#[cfg(unix)]
+use tokio::signal::unix::{SignalKind, signal as unix_signal};
 use tokio::{
     signal,
     sync::{broadcast, mpsc},
@@ -48,7 +50,10 @@ use crate::{
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
     },
     runtime::{
-        capabilities, context::Context, shutdown::ShutdownManager, task_manager::TaskManager,
+        capabilities,
+        context::Context,
+        shutdown::{ShutdownConfig, ShutdownManager},
+        task_manager::{ShutdownResult, TaskManager},
     },
     span::producer::FlowSpanProducer,
 };
@@ -67,14 +72,13 @@ async fn shutdown_exporter_gracefully(
 
     let join_handle_result = tokio::time::timeout(timeout_duration, shutdown_future)
         .await
-        .map_err(|_| MerminError::internal("OpenTelemetry provider shutdown timed out"))?;
+        .map_err(|_| MerminError::internal("otel provider shutdown timed out"))?;
 
     let shutdown_result = join_handle_result
         .map_err(|join_err| MerminError::internal(format!("shutdown task panicked: {join_err}")))?;
 
-    shutdown_result.map_err(|e| {
-        MerminError::internal(format!("OpenTelemetry provider failed to shut down: {e}"))
-    })?;
+    shutdown_result
+        .map_err(|e| MerminError::internal(format!("otel provider failed to shut down: {e}")))?;
 
     Ok(())
 }
@@ -106,7 +110,6 @@ const EBPF_MAP_SCHEMA_VERSION: u8 = 1;
 async fn run() -> Result<()> {
     // TODO: runtime should be aware of all threads and tasks spawned by the eBPF program so that they can be gracefully shutdown and restarted.
     // TODO: listen for SIGUP `kill -HUP $(pidof mermin)` to reload the eBPF program and all configuration
-    // TODO: listen for SIGTERM `kill -TERM $(pidof mermin)` to gracefully shutdown the eBPF program and all configuration.
     // TODO: do not reload global configuration found in CLI
 
     let runtime = Context::new()?;
@@ -126,13 +129,13 @@ async fn run() -> Result<()> {
         );
     }
 
-    let (shutdown_tx, _) = broadcast::channel::<()>(1);
-    let mut task_manager = TaskManager::new();
+    let (mut task_manager, _) = TaskManager::new();
+    let (os_shutdown_tx, _) = broadcast::channel::<()>(1);
     let mut os_thread_handles = Vec::new();
 
     if conf.metrics.enabled {
         let metrics_conf = conf.metrics.clone();
-        let mut shutdown_rx = shutdown_tx.subscribe();
+        let mut shutdown_rx = os_shutdown_tx.subscribe();
 
         // Start metrics server on a dedicated runtime thread to prevent starvation
         // This ensures /metrics endpoint always responds even when main runtime is under heavy load
@@ -170,7 +173,7 @@ async fn run() -> Result<()> {
     if conf.api.enabled {
         let health_state_clone = health_state.clone();
         let api_conf = conf.api.clone();
-        let mut shutdown_rx = shutdown_tx.subscribe();
+        let mut shutdown_rx = os_shutdown_tx.subscribe();
 
         // Start API server on a dedicated runtime thread to prevent starvation
         // This ensures health checks always respond even when main runtime is under heavy load
@@ -466,7 +469,7 @@ async fn run() -> Result<()> {
         .send(ControllerCommand::Initialize)
         .map_err(|e| MerminError::internal(format!("failed to send initialize command: {e}")))?;
 
-    let _interface_count = wait_for_controller_initialized(&event_rx, &cmd_tx)?;
+    wait_for_controller_initialized(&event_rx, &cmd_tx)?;
     health_state.ebpf_loaded.store(true, Ordering::Relaxed);
 
     let event_handler_handle = spawn_controller_event_handler(event_rx)
@@ -499,6 +502,7 @@ async fn run() -> Result<()> {
         flow_span_tx,
         &conf,
     )?;
+    let flow_span_components = flow_span_producer.components();
 
     info!(
         event.name = "task.started",
@@ -553,7 +557,7 @@ async fn run() -> Result<()> {
 
     // K8s decorator runs on dedicated thread pool to prevent K8s API lookups from blocking main runtime
     let decorator_threads = conf.pipeline.k8s_decorator_threads;
-    let mut decorator_shutdown_rx = shutdown_tx.subscribe();
+    let mut decorator_shutdown_rx = os_shutdown_tx.subscribe();
     let decorator_handle = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(decorator_threads)
@@ -674,14 +678,15 @@ async fn run() -> Result<()> {
         .k8s_caches_synced
         .store(true, Ordering::Relaxed);
 
-    let producer_shutdown_rx = shutdown_tx.subscribe();
-    task_manager.spawn("span-producer", async move {
-        flow_span_producer.run(producer_shutdown_rx).await;
-        info!(
-            event.name = "task.exited",
-            task.name = "span.producer",
-            "flow span producer task exited"
-        );
+    task_manager.spawn_with_shutdown("span-producer", |shutdown_rx| {
+        Box::pin(async move {
+            flow_span_producer.run(shutdown_rx).await;
+            info!(
+                event.name = "task.exited",
+                task.name = "span.producer",
+                "flow span producer task exited"
+            );
+        })
     });
     health_state.ready_to_process.store(true, Ordering::Relaxed);
 
@@ -755,52 +760,112 @@ async fn run() -> Result<()> {
         );
     }
 
-    info!("waiting for ctrl+c");
+    info!("waiting for shutdown signal (ctrl+c or SIGTERM)");
 
-    signal::ctrl_c().await?;
+    let shutdown_signal = wait_for_shutdown_signal().await?;
 
     info!(
-        event.name = "application.shutdown_initiated",
+        event.name = "application.shutdown_signal_received",
+        signal.kind = %shutdown_signal,
         "received shutdown signal, starting graceful cleanup"
     );
 
-    if shutdown_tx.send(()).is_err() {
-        warn!(
-            event.name = "application.shutdown.signal_failed",
-            "no tasks were listening for the broadcast shutdown signal"
+    // Signal OS threads to shutdown
+    if os_shutdown_tx.send(()).is_err() {
+        debug!(
+            event.name = "application.shutdown_signal_send_failed",
+            "failed to broadcast shutdown signal; receivers already dropped"
         );
     }
 
-    // Signal control-plane controller thread
-    if let Err(e) = cmd_tx.send(ControllerCommand::Shutdown) {
-        warn!(
-            event.name = "interface_controller.shutdown_send_failed",
-            error = %e,
-            "failed to send shutdown command, controller thread may have already exited"
-        );
-    }
-
-    let shutdown_manager = ShutdownManager {
-        shutdown_tx,
-        cmd_tx,
-        netlink_shutdown_fd,
-        task_manager,
-        decorator_join_handle,
-        os_thread_handles,
-        controller_handle,
-        netlink_handle,
+    let shutdown_config = ShutdownConfig {
+        timeout: conf.shutdown_timeout,
+        preserve_flows: true,
+        //TODO: Review if this value should be a global config
+        flow_preservation_timeout: Duration::from_secs(10),
     };
 
-    shutdown_manager.shutdown().await;
+    let shutdown_manager = ShutdownManager::builder()
+        .with_shutdown_config(shutdown_config)
+        .with_os_shutdown_tx(os_shutdown_tx)
+        .with_cmd_tx(cmd_tx)
+        .with_netlink_shutdown_fd(netlink_shutdown_fd)
+        .with_task_manager(task_manager)
+        .with_decorator_join_handle(decorator_join_handle)
+        .with_os_thread_handles(os_thread_handles)
+        .with_controller_handle(controller_handle)
+        .with_netlink_handle(netlink_handle)
+        .with_flow_span_components(flow_span_components)
+        .build();
 
-    info!(
-        event.name = "application.cleanup_complete",
-        "graceful cleanup completed"
-    );
+    let shutdown_result = shutdown_manager.shutdown().await;
+
+    match shutdown_result {
+        ShutdownResult::Graceful {
+            duration,
+            tasks_completed,
+        } => {
+            info!(
+                event.name = "application.cleanup_complete",
+                duration_ms = duration.as_millis(),
+                tasks_completed = tasks_completed,
+                "graceful cleanup completed successfully"
+            );
+        }
+        ShutdownResult::ForcedCancellation {
+            duration,
+            tasks_cancelled,
+            tasks_completed,
+        } => {
+            warn!(
+                event.name = "application.cleanup_complete_with_cancellation",
+                duration_ms = duration.as_millis(),
+                tasks_completed = tasks_completed,
+                tasks_cancelled = tasks_cancelled,
+                "cleanup completed but some tasks were forcefully cancelled"
+            );
+        }
+    }
 
     info!("exiting");
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ShutdownSignal {
+    CtrlC,
+    SigTerm,
+}
+
+impl std::fmt::Display for ShutdownSignal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ShutdownSignal::CtrlC => write!(f, "CTRL_C"),
+            ShutdownSignal::SigTerm => write!(f, "SIGTERM"),
+        }
+    }
+}
+
+async fn wait_for_shutdown_signal() -> Result<ShutdownSignal> {
+    #[cfg(unix)]
+    {
+        let mut sigterm = unix_signal(SignalKind::terminate()).map_err(|e| {
+            MerminError::internal(format!("failed to install SIGTERM handler: {e}"))
+        })?;
+        tokio::select! {
+            result = signal::ctrl_c() => {
+                result?;
+                Ok(ShutdownSignal::CtrlC)
+            },
+            _ = sigterm.recv() => Ok(ShutdownSignal::SigTerm),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        signal::ctrl_c().await?;
+        Ok(ShutdownSignal::CtrlC)
+    }
 }
 
 /// Display user-friendly error messages with helpful hints
