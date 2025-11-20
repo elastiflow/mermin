@@ -7,7 +7,6 @@ use dashmap::DashMap;
 use fxhash::FxBuildHasher;
 use opentelemetry::trace::TraceId;
 use opentelemetry_sdk::trace::IdGenerator;
-use tracing::{debug, trace};
 
 /// Entry in the trace ID cache containing the trace ID and timestamp
 #[derive(Debug, Clone)]
@@ -75,53 +74,30 @@ impl TraceIdCache {
     pub fn get_or_create(&self, community_id: &str) -> TraceId {
         let now = Instant::now();
 
-        loop {
-            let entry = self
-                .cache
-                .entry(community_id.to_string())
-                .or_insert_with(|| {
-                    // First time seeing this community ID - create new entry
-                    CacheEntry {
-                        trace_id: self.id_generator.new_trace_id(),
-                        created_at: now,
-                    }
-                });
-
-            // Check if entry is still valid
-            let age = now.duration_since(entry.value().created_at);
+        // Fast path: check existing entry with read-only lock
+        if let Some(entry) = self.cache.get(community_id) {
+            let age = now.duration_since(entry.created_at);
             if age < self.timeout {
-                // Cache hit - entry is still valid
-                let trace_id = entry.value().trace_id;
-                drop(entry); // Release lock
-
-                trace!(
-                    event.name = "trace_cache.hit",
-                    community_id = %community_id,
-                    age_secs = age.as_secs(),
-                    "trace ID cache hit"
-                );
-                return trace_id;
+                return entry.trace_id;
             }
-
-            // Entry has expired - need to replace it
-            // Drop the entry reference before removal to avoid deadlock
-            drop(entry);
-
-            // Atomically remove the expired entry if it still exists
-            // Another thread might have already removed it, which is fine
-            if self.cache.remove(community_id).is_some() {
-                trace!(
-                    event.name = "trace_cache.expired",
-                    community_id = %community_id,
-                    age_secs = age.as_secs(),
-                    "removed expired trace ID entry"
-                );
-            }
-
-            // Loop back to create a fresh entry
-            // The or_insert_with() will atomically create a new one
-            // This ensures only one thread creates the replacement entry
         }
+
+        // Slow path: entry doesn't exist or is expired, need write lock
+        self.cache
+            .entry(community_id.to_string())
+            .and_modify(|entry| {
+                // Double-check: another thread may have just updated it
+                let age = now.duration_since(entry.created_at);
+                if age >= self.timeout {
+                    entry.trace_id = self.id_generator.new_trace_id();
+                    entry.created_at = now;
+                }
+            })
+            .or_insert_with(|| CacheEntry {
+                trace_id: self.id_generator.new_trace_id(),
+                created_at: now,
+            })
+            .trace_id
     }
 
     /// Removes expired entries from the cache.
@@ -134,39 +110,22 @@ impl TraceIdCache {
     /// A tuple containing (entries_scanned, entries_removed)
     pub fn cleanup_expired(&self) -> (usize, usize) {
         let now = Instant::now();
-        let mut scanned = 0;
 
-        // Collect expired keys first to avoid holding locks during removal
         let expired_keys: Vec<String> = self
             .cache
             .iter()
             .filter_map(|entry| {
-                scanned += 1;
                 let age = now.duration_since(entry.value().created_at);
-                if age >= self.timeout {
-                    Some(entry.key().clone())
-                } else {
-                    None
-                }
+                (age >= self.timeout).then(|| entry.key().clone())
             })
             .collect();
 
-        // Remove expired entries
         let removed = expired_keys.len();
         for key in expired_keys {
             self.cache.remove(&key);
         }
 
-        if removed > 0 {
-            debug!(
-                event.name = "trace_cache.cleanup",
-                entries.scanned = scanned,
-                entries.removed = removed,
-                "cleaned up expired trace ID mappings"
-            );
-        }
-
-        (scanned, removed)
+        (self.cache.len(), removed)
     }
 
     /// Removes an entry from the cache by community ID.
@@ -287,8 +246,8 @@ mod tests {
         std::thread::sleep(Duration::from_millis(150));
 
         // Cleanup should remove all expired entries
-        let (scanned, removed) = cache.cleanup_expired();
-        assert_eq!(scanned, 3);
+        let (remaining, removed) = cache.cleanup_expired();
+        assert_eq!(remaining, 0);
         assert_eq!(removed, 3);
         assert_eq!(cache.cache.len(), 0);
     }
@@ -304,8 +263,8 @@ mod tests {
         assert_eq!(cache.cache.len(), 2);
 
         // Cleanup should not remove valid entries
-        let (scanned, removed) = cache.cleanup_expired();
-        assert_eq!(scanned, 2);
+        let (remaining, removed) = cache.cleanup_expired();
+        assert_eq!(remaining, 2);
         assert_eq!(removed, 0);
         assert_eq!(cache.cache.len(), 2);
     }
@@ -329,8 +288,8 @@ mod tests {
         assert_eq!(cache.cache.len(), 2);
 
         // Cleanup should only remove the first entry
-        let (scanned, removed) = cache.cleanup_expired();
-        assert_eq!(scanned, 2);
+        let (remaining, removed) = cache.cleanup_expired();
+        assert_eq!(remaining, 1);
         assert_eq!(removed, 1);
         assert_eq!(cache.cache.len(), 1);
 
