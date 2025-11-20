@@ -105,17 +105,34 @@ use network_types::{
     tcp, udp,
 };
 
+/// Size of unparsed packet data captured per flow event (in bytes).
+///
+/// Limited to 192 bytes to balance deep packet inspection needs with ring buffer capacity.
+/// This captures most application headers while keeping FlowEvent structure under 256 bytes.
+#[cfg(not(feature = "test"))]
+const FLOW_EVENT_PACKET_DATA_SIZE: usize = 192;
+
+/// Maximum number of flows to track in the eBPF map.
+///
+/// This limits memory usage to approximately 232 MB (232 bytes per flow * 1M flows).
+/// When the map is full, new flows will be dropped until space is freed by userspace.
+#[cfg(not(feature = "test"))]
+const MAX_FLOWS: u32 = 1_000_000;
+
 // New eBPF map aggregation architecture
 // Flow statistics map: normalized FlowKey -> FlowStats
 #[cfg(not(feature = "test"))]
 #[map]
-static mut FLOW_STATS_MAP: HashMap<FlowKey, FlowStats> = HashMap::with_max_entries(1_000_000, 0);
+static mut FLOW_STATS_MAP: HashMap<FlowKey, FlowStats> = HashMap::with_max_entries(MAX_FLOWS, 0);
 
-// Flow events ring buffer: signals userspace about new flows
 // Size: 256 KB (~10K flow events before overflow)
 #[cfg(not(feature = "test"))]
+const RING_BUF_SIZE_BYTES: u32 = 256 * 1024;
+
+// Flow events ring buffer: signals userspace about new flows
+#[cfg(not(feature = "test"))]
 #[map]
-static mut FLOW_EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
+static mut FLOW_EVENTS: RingBuf = RingBuf::with_byte_size(RING_BUF_SIZE_BYTES, 0);
 
 // Per-CPU scratch space for FlowStats initialization
 // Used to avoid stack overflow (FlowStats is 232 bytes, eBPF stack limit is 512 bytes)
@@ -153,7 +170,11 @@ pub enum Error {
     InternalError,
 }
 
-/// Log errors based on severity level
+/// Log errors at appropriate severity levels.
+///
+/// Uses `error!` for critical errors (OutOfBounds, MalformedHeader, InternalError)
+/// and `trace!` for expected non-critical errors (unsupported protocols/ethertypes).
+/// This prevents log spam from legitimate non-IP traffic (ARP, LLDP, etc.).
 #[cfg(not(feature = "test"))]
 #[inline(always)]
 fn log_error(ctx: &TcContext, err: Error, direction: Direction) {
@@ -225,7 +246,6 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
 
     let timestamp = unsafe { bpf_ktime_get_boot_ns() };
 
-    // Get or create flow stats entry
     #[allow(static_mut_refs)]
     let stats_ptr = if is_new_flow {
         let ifindex = unsafe { (*ctx.skb.skb).ifindex };
@@ -278,7 +298,7 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             // Copy unparsed data (if any) for userspace deep parsing.
             // Load bytes one at a time until we hit the end of the packet or reach 192 bytes.
             // The verifier can track this bounded loop easily.
-            for i in 0..192 {
+            for i in 0..FLOW_EVENT_PACKET_DATA_SIZE {
                 let offset = parsed_offset + i;
                 if let Ok(byte) = ctx.load::<u8>(offset) {
                     flow_event.packet_data[i] = byte;
@@ -297,13 +317,11 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             );
         }
 
-        // Get pointer to the entry we just inserted
         #[allow(static_mut_refs)]
         unsafe {
             FLOW_STATS_MAP.get_ptr_mut(&normalized_key)
         }
     } else {
-        // Get pointer to existing entry
         #[allow(static_mut_refs)]
         unsafe {
             FLOW_STATS_MAP.get_ptr_mut(&normalized_key)
@@ -333,89 +351,13 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             l4_offset += ipv6::IPV6_LEN;
         }
 
+        // Capture metadata if userspace has reset the flags for re-capture
+        // (userspace resets flags after each recording interval to detect changes in DSCP, TTL, etc.)
         if is_forward && stats.forward_metadata_seen == 0 {
-            match eth_type {
-                EtherType::Ipv4 => {
-                    let dscp_ecn: ipv4::DscpEcn = ctx
-                        .load(eth::ETH_LEN + ipv4::IPV4_DSCP_ECN_OFFSET)
-                        .map_err(|_| Error::OutOfBounds)?;
-                    stats.ip_dscp = ipv4::dscp(dscp_ecn);
-                    stats.ip_ecn = ipv4::ecn(dscp_ecn);
-
-                    let ttl: ipv4::Ttl = ctx
-                        .load(eth::ETH_LEN + ipv4::IPV4_TTL_OFFSET)
-                        .map_err(|_| Error::OutOfBounds)?;
-                    stats.ip_ttl = ttl;
-                }
-                EtherType::Ipv6 => {
-                    let vtcfl: ipv6::Vcf =
-                        ctx.load(eth::ETH_LEN).map_err(|_| Error::OutOfBounds)?;
-                    stats.ip_dscp = ipv6::dscp(vtcfl);
-                    stats.ip_ecn = ipv6::ecn(vtcfl);
-                    stats.ip_flow_label = ipv6::flow_label(vtcfl);
-
-                    let hop_limit: ipv6::HopLimit = ctx
-                        .load(eth::ETH_LEN + ipv6::IPV6_HOP_LIMIT_OFFSET)
-                        .map_err(|_| Error::OutOfBounds)?;
-                    stats.ip_ttl = hop_limit;
-                }
-                _ => {}
-            }
-
-            if stats.protocol == IpProto::Icmp || stats.protocol == IpProto::Ipv6Icmp {
-                let icmp_type: u8 = ctx
-                    .load(l4_offset + icmp::ICMP_TYPE_OFFSET)
-                    .map_err(|_| Error::OutOfBounds)?;
-                stats.icmp_type = icmp_type;
-
-                let icmp_code: u8 = ctx
-                    .load(l4_offset + icmp::ICMP_CODE_OFFSET)
-                    .map_err(|_| Error::OutOfBounds)?;
-                stats.icmp_code = icmp_code;
-            }
-
+            capture_direction_metadata(ctx, stats, eth_type, l4_offset, true)?;
             stats.forward_metadata_seen = 1;
         } else if !is_forward && stats.reverse_metadata_seen == 0 {
-            match eth_type {
-                EtherType::Ipv4 => {
-                    let dscp_ecn: ipv4::DscpEcn = ctx
-                        .load(eth::ETH_LEN + ipv4::IPV4_DSCP_ECN_OFFSET)
-                        .map_err(|_| Error::OutOfBounds)?;
-                    stats.reverse_ip_dscp = ipv4::dscp(dscp_ecn);
-                    stats.reverse_ip_ecn = ipv4::ecn(dscp_ecn);
-
-                    let ttl: ipv4::Ttl = ctx
-                        .load(eth::ETH_LEN + ipv4::IPV4_TTL_OFFSET)
-                        .map_err(|_| Error::OutOfBounds)?;
-                    stats.reverse_ip_ttl = ttl;
-                }
-                EtherType::Ipv6 => {
-                    let vtcfl: ipv6::Vcf =
-                        ctx.load(eth::ETH_LEN).map_err(|_| Error::OutOfBounds)?;
-                    stats.reverse_ip_dscp = ipv6::dscp(vtcfl);
-                    stats.reverse_ip_ecn = ipv6::ecn(vtcfl);
-                    stats.reverse_ip_flow_label = ipv6::flow_label(vtcfl);
-
-                    let hop_limit: ipv6::HopLimit = ctx
-                        .load(eth::ETH_LEN + ipv6::IPV6_HOP_LIMIT_OFFSET)
-                        .map_err(|_| Error::OutOfBounds)?;
-                    stats.reverse_ip_ttl = hop_limit;
-                }
-                _ => {}
-            }
-
-            if stats.protocol == IpProto::Icmp || stats.protocol == IpProto::Ipv6Icmp {
-                let icmp_type: u8 = ctx
-                    .load(l4_offset + icmp::ICMP_TYPE_OFFSET)
-                    .map_err(|_| Error::OutOfBounds)?;
-                stats.reverse_icmp_type = icmp_type;
-
-                let icmp_code: u8 = ctx
-                    .load(l4_offset + icmp::ICMP_CODE_OFFSET)
-                    .map_err(|_| Error::OutOfBounds)?;
-                stats.reverse_icmp_code = icmp_code;
-            }
-
+            capture_direction_metadata(ctx, stats, eth_type, l4_offset, false)?;
             stats.reverse_metadata_seen = 1;
         }
 
@@ -444,7 +386,6 @@ fn parse_flow_key(ctx: &TcContext, key: &mut FlowKey) -> Result<EtherType, Error
         return Err(Error::MalformedHeader);
     }
 
-    // Initialize the key
     key.src_ip = [0u8; 16];
     key.dst_ip = [0u8; 16];
     key.ip_version = IpVersion::Unknown;
@@ -563,10 +504,85 @@ fn parse_flow_key(ctx: &TcContext, key: &mut FlowKey) -> Result<EtherType, Error
     Ok(eth_type)
 }
 
+/// Capture metadata (DSCP, ECN, TTL, flow label, ICMP type/code) for a specific direction.
+/// Used both during initial flow creation and when userspace resets metadata flags for re-capture.
+#[inline(always)]
+fn capture_direction_metadata(
+    ctx: &TcContext,
+    stats: &mut FlowStats,
+    eth_type: EtherType,
+    l4_offset: usize,
+    is_forward: bool,
+) -> Result<(), Error> {
+    match eth_type {
+        EtherType::Ipv4 => {
+            let dscp_ecn: ipv4::DscpEcn = ctx
+                .load(eth::ETH_LEN + ipv4::IPV4_DSCP_ECN_OFFSET)
+                .map_err(|_| Error::OutOfBounds)?;
+            let ttl: ipv4::Ttl = ctx
+                .load(eth::ETH_LEN + ipv4::IPV4_TTL_OFFSET)
+                .map_err(|_| Error::OutOfBounds)?;
+
+            if is_forward {
+                stats.ip_dscp = ipv4::dscp(dscp_ecn);
+                stats.ip_ecn = ipv4::ecn(dscp_ecn);
+                stats.ip_ttl = ttl;
+            } else {
+                stats.reverse_ip_dscp = ipv4::dscp(dscp_ecn);
+                stats.reverse_ip_ecn = ipv4::ecn(dscp_ecn);
+                stats.reverse_ip_ttl = ttl;
+            }
+        }
+        EtherType::Ipv6 => {
+            let vtcfl: ipv6::Vcf = ctx.load(eth::ETH_LEN).map_err(|_| Error::OutOfBounds)?;
+            let hop_limit: ipv6::HopLimit = ctx
+                .load(eth::ETH_LEN + ipv6::IPV6_HOP_LIMIT_OFFSET)
+                .map_err(|_| Error::OutOfBounds)?;
+
+            if is_forward {
+                stats.ip_dscp = ipv6::dscp(vtcfl);
+                stats.ip_ecn = ipv6::ecn(vtcfl);
+                stats.ip_flow_label = ipv6::flow_label(vtcfl);
+                stats.ip_ttl = hop_limit;
+            } else {
+                stats.reverse_ip_dscp = ipv6::dscp(vtcfl);
+                stats.reverse_ip_ecn = ipv6::ecn(vtcfl);
+                stats.reverse_ip_flow_label = ipv6::flow_label(vtcfl);
+                stats.reverse_ip_ttl = hop_limit;
+            }
+        }
+        _ => {}
+    }
+
+    if stats.protocol == IpProto::Icmp || stats.protocol == IpProto::Ipv6Icmp {
+        let icmp_type: u8 = ctx
+            .load(l4_offset + icmp::ICMP_TYPE_OFFSET)
+            .map_err(|_| Error::OutOfBounds)?;
+        let icmp_code: u8 = ctx
+            .load(l4_offset + icmp::ICMP_CODE_OFFSET)
+            .map_err(|_| Error::OutOfBounds)?;
+
+        if is_forward {
+            stats.icmp_type = icmp_type;
+            stats.icmp_code = icmp_code;
+        } else {
+            stats.reverse_icmp_type = icmp_type;
+            stats.reverse_icmp_code = icmp_code;
+        }
+    }
+
+    Ok(())
+}
+
 /// Parse full packet metadata into FlowStats (MACs, DSCP, TTL, ICMP type/code, etc.)
-/// TCP flags are accumulated separately in try_packet_monitor() for all packets.
+///
+/// TCP flags are accumulated separately in `try_flow_stats()` for all packets.
 /// Returns the offset where parsing stopped (= start of unparsed data for FlowEvent).
-/// Returns Error if parsing fails (bounds check, load failure, etc.)
+///
+/// # Errors
+///
+/// Returns [`Error::OutOfBounds`] if packet data cannot be read, or
+/// [`Error::UnsupportedProtocol`] for unsupported L4 protocols.
 #[inline(never)]
 fn parse_metadata(ctx: &TcContext, stats: &mut FlowStats) -> Result<usize, Error> {
     let mut offset = 0usize;
@@ -576,73 +592,38 @@ fn parse_metadata(ctx: &TcContext, stats: &mut FlowStats) -> Result<usize, Error
         .map_err(|_| Error::OutOfBounds)?;
     offset += eth::ETH_LEN;
 
-    // Parse IP metadata (DSCP, ECN, TTL, flow label) - first packet is always forward direction
-    offset = match stats.ether_type {
+    // Calculate L4 offset for metadata capture
+    let l4_offset = match stats.ether_type {
         EtherType::Ipv4 => {
             let ihl = ipv4::ihl(
                 ctx.load::<ipv4::Vihl>(offset)
                     .map_err(|_| Error::OutOfBounds)?,
             ) as usize;
-
-            let dscp_ecn: ipv4::DscpEcn = ctx
-                .load(offset + ipv4::IPV4_DSCP_ECN_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
-            stats.ip_dscp = ipv4::dscp(dscp_ecn);
-            stats.ip_ecn = ipv4::ecn(dscp_ecn);
-
-            let ttl: ipv4::Ttl = ctx
-                .load(offset + ipv4::IPV4_TTL_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
-            stats.ip_ttl = ttl;
-
             offset + ihl
         }
-        EtherType::Ipv6 => {
-            let vtcfl: ipv6::Vcf = ctx.load(offset).map_err(|_| Error::OutOfBounds)?;
-            stats.ip_dscp = ipv6::dscp(vtcfl);
-            stats.ip_ecn = ipv6::ecn(vtcfl);
-            stats.ip_flow_label = ipv6::flow_label(vtcfl);
-
-            let hop_limit: ipv6::HopLimit = ctx
-                .load(offset + ipv6::IPV6_HOP_LIMIT_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
-            stats.ip_ttl = hop_limit;
-
-            offset + ipv6::IPV6_LEN
-        }
+        EtherType::Ipv6 => offset + ipv6::IPV6_LEN,
         _ => return Err(Error::UnsupportedEtherType),
     };
 
-    match stats.protocol {
+    // Parse IP and ICMP metadata (DSCP, ECN, TTL, flow label, ICMP type/code)
+    // First packet is always forward direction
+    capture_direction_metadata(ctx, stats, stats.ether_type, l4_offset, true)?;
+
+    // Calculate final offset (start of unparsed payload data)
+    let offset = match stats.protocol {
         IpProto::Tcp => {
-            // TCP flags are accumulated in try_packet_monitor() for all packets
+            // TCP flags are accumulated in try_flow_stats() for all packets
             // No need to capture here - accumulation handles both first and subsequent packets
             let data_offset: tcp::OffRes = ctx
-                .load(offset + tcp::TCP_OFF_RES_OFFSET)
+                .load(l4_offset + tcp::TCP_OFF_RES_OFFSET)
                 .map_err(|_| Error::OutOfBounds)?;
             let tcp_hdr_len = tcp::hdr_len(data_offset);
-
-            offset += tcp_hdr_len;
+            l4_offset + tcp_hdr_len
         }
-        IpProto::Udp => {
-            offset += udp::UDP_LEN;
-        }
-        IpProto::Icmp | IpProto::Ipv6Icmp => {
-            let icmp_type: u8 = ctx
-                .load(offset + icmp::ICMP_TYPE_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
-            let icmp_code: u8 = ctx
-                .load(offset + icmp::ICMP_CODE_OFFSET)
-                .map_err(|_| Error::OutOfBounds)?;
-            stats.icmp_type = icmp_type;
-            stats.icmp_code = icmp_code;
-
-            offset += icmp::ICMP_LEN;
-        }
-        _ => {
-            return Err(Error::UnsupportedProtocol);
-        }
-    }
+        IpProto::Udp => l4_offset + udp::UDP_LEN,
+        IpProto::Icmp | IpProto::Ipv6Icmp => l4_offset + icmp::ICMP_LEN,
+        _ => return Err(Error::UnsupportedProtocol),
+    };
 
     Ok(offset)
 }
@@ -656,7 +637,7 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 #[cfg(not(test))]
 #[unsafe(link_section = "license")]
 #[unsafe(no_mangle)]
-static LICENSE: [u8; 13] = *b"Dual MIT/GPL\0"; // Corrected license string length and array size
+static LICENSE: [u8; 13] = *b"Dual MIT/GPL\0";
 
 #[cfg(feature = "test")]
 mod host_test_shim {
@@ -666,19 +647,16 @@ mod host_test_shim {
 
     use crate::Error;
 
-    // Mock __sk_buff that mimics the real structure's ifindex field
     #[repr(C)]
     pub struct MockSkBuff {
         pub ifindex: u32,
-        // Add other fields as needed for future testing
     }
 
-    // Mock SkBuff that wraps the mock __sk_buff like the real one
     pub struct SkBuff {
         #[allow(dead_code)]
         pub skb: *mut MockSkBuff,
-        _data: Vec<u8>,                           // Keep data alive
-        _mock_skb: alloc::boxed::Box<MockSkBuff>, // Keep mock alive
+        _data: Vec<u8>,
+        _mock_skb: alloc::boxed::Box<MockSkBuff>,
     }
 
     impl SkBuff {
@@ -701,7 +679,6 @@ mod host_test_shim {
             if offset + mem::size_of::<T>() > self._data.len() {
                 return Err(Error::OutOfBounds);
             }
-            // Use proper memory copy to avoid alignment issues
             let mut value = core::mem::MaybeUninit::<T>::uninit();
             unsafe {
                 core::ptr::copy_nonoverlapping(
@@ -721,7 +698,7 @@ mod host_test_shim {
 
     impl TcContext {
         pub fn new(data: Vec<u8>) -> Self {
-            let skb = SkBuff::new(data, 42); // Use test ifindex of 42
+            let skb = SkBuff::new(data, 42);
             Self { skb }
         }
 
@@ -805,11 +782,10 @@ mod tests {
     fn build_ipv4_tcp_packet() -> Vec<u8> {
         let mut pkt = Vec::new();
 
-        // Ethernet header (14 bytes)
+        // Ethernet header
         pkt.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]); // Dst MAC
         pkt.extend_from_slice(&[0x11, 0x22, 0x33, 0x44, 0x55, 0x66]); // Src MAC
         pkt.extend_from_slice(&[0x08, 0x00]); // EtherType: IPv4
-
         // IPv4 header (20 bytes, no options)
         pkt.push(0x45); // Version=4, IHL=5 (20 bytes)
         pkt.push(0xB8); // DSCP=46 (0xB8 = 10111000, DSCP=101110=46), ECN=0
@@ -847,7 +823,6 @@ mod tests {
         pkt.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
         pkt.extend_from_slice(&[0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
         pkt.extend_from_slice(&[0x08, 0x00]); // IPv4
-
         // IPv4 header
         pkt.push(0x45); // IHL=5
         pkt.push(0x00); // DSCP=0, ECN=0
@@ -858,13 +833,11 @@ mod tests {
         pkt.extend_from_slice(&[0x00, 0x00]); // Checksum
         pkt.extend_from_slice(&[10, 0, 0, 1]); // Src IP
         pkt.extend_from_slice(&[10, 0, 0, 2]); // Dst IP
-
         // UDP header
         pkt.extend_from_slice(&[0x04, 0xD2]); // Src port: 1234
         pkt.extend_from_slice(&[0x16, 0x2E]); // Dst port: 5678
         pkt.extend_from_slice(&[0x00, 0x10]); // Length: 16 bytes
         pkt.extend_from_slice(&[0x00, 0x00]); // Checksum
-
         // Payload (8 bytes)
         pkt.extend_from_slice(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
 
@@ -879,7 +852,6 @@ mod tests {
         pkt.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
         pkt.extend_from_slice(&[0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
         pkt.extend_from_slice(&[0x08, 0x00]); // IPv4
-
         // IPv4 header
         pkt.push(0x45);
         pkt.push(0x00);
@@ -890,7 +862,6 @@ mod tests {
         pkt.extend_from_slice(&[0x00, 0x00]);
         pkt.extend_from_slice(&[192, 168, 1, 1]); // Src IP
         pkt.extend_from_slice(&[8, 8, 8, 8]); // Dst IP
-
         // ICMP header
         pkt.push(8); // Type: Echo Request
         pkt.push(0); // Code: 0
@@ -909,7 +880,6 @@ mod tests {
         pkt.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
         pkt.extend_from_slice(&[0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
         pkt.extend_from_slice(&[0x86, 0xDD]); // EtherType: IPv6
-
         // IPv6 header (40 bytes)
         // Version (4 bits) = 6, Traffic Class (8 bits) = 0x0E (DSCP=3, ECN=2)
         // Bits layout: |Version(4)|TC_upper(4)||TC_lower(4)|FlowLabel_upper(4)||FlowLabel_mid(8)||FlowLabel_lower(8)|
@@ -929,7 +899,6 @@ mod tests {
             0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x02,
         ]);
-
         // TCP header (20 bytes)
         pkt.extend_from_slice(&[0x1F, 0x90]); // Src port: 8080
         pkt.extend_from_slice(&[0x00, 0x50]); // Dst port: 80
@@ -947,23 +916,18 @@ mod tests {
     fn test_parse_flow_key_ipv4_tcp() {
         let pkt = build_ipv4_tcp_packet();
         let ctx = TcContext::new(pkt);
-
         let mut flow_key = FlowKey::default();
         let result = parse_flow_key(&ctx, &mut flow_key);
-        assert!(result.is_ok());
-
         let ether_type = result.unwrap();
+        let expected_src = [192, 168, 1, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let expected_dst = [10, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+        assert!(result.is_ok());
         assert_eq!(ether_type, EtherType::Ipv4);
         assert_eq!(flow_key.ip_version, IpVersion::V4);
         assert_eq!(flow_key.protocol, IpProto::Tcp);
-
-        // Check IP addresses (should be in [u8; 16] format)
-        let expected_src = [192, 168, 1, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let expected_dst = [10, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         assert_eq!(flow_key.src_ip, expected_src);
         assert_eq!(flow_key.dst_ip, expected_dst);
-
-        // Check ports
         assert_eq!(flow_key.src_port, 12345);
         assert_eq!(flow_key.dst_port, 443);
     }
@@ -972,12 +936,11 @@ mod tests {
     fn test_parse_flow_key_ipv4_udp() {
         let pkt = build_ipv4_udp_packet();
         let ctx = TcContext::new(pkt);
-
         let mut flow_key = FlowKey::default();
         let result = parse_flow_key(&ctx, &mut flow_key);
-        assert!(result.is_ok());
-
         let ether_type = result.unwrap();
+
+        assert!(result.is_ok());
         assert_eq!(ether_type, EtherType::Ipv4);
         assert_eq!(flow_key.protocol, IpProto::Udp);
         assert_eq!(flow_key.src_port, 1234);
@@ -988,34 +951,26 @@ mod tests {
     fn test_parse_flow_key_ipv4_icmp() {
         let pkt = build_ipv4_icmp_packet();
         let ctx = TcContext::new(pkt);
-
         let mut flow_key = FlowKey::default();
         let result = parse_flow_key(&ctx, &mut flow_key);
-        if result.is_err() {
-            panic!(
-                "parse_flow_key failed with error: {:?}",
-                result.unwrap_err()
-            );
-        }
-
         let ether_type = result.unwrap();
+
+        assert!(result.is_ok());
         assert_eq!(ether_type, EtherType::Ipv4);
         assert_eq!(flow_key.protocol, IpProto::Icmp);
-        // ICMP: type=8, code=0 encoded as ports
-        assert_eq!(flow_key.src_port, 8); // Type
-        assert_eq!(flow_key.dst_port, 0); // Code
+        assert_eq!(flow_key.src_port, 8);
+        assert_eq!(flow_key.dst_port, 0);
     }
 
     #[test]
     fn test_parse_flow_key_ipv6_tcp() {
         let pkt = build_ipv6_tcp_packet();
         let ctx = TcContext::new(pkt);
-
         let mut flow_key = FlowKey::default();
         let result = parse_flow_key(&ctx, &mut flow_key);
-        assert!(result.is_ok());
-
         let ether_type = result.unwrap();
+
+        assert!(result.is_ok());
         assert_eq!(ether_type, EtherType::Ipv6);
         assert_eq!(flow_key.ip_version, IpVersion::V6);
         assert_eq!(flow_key.protocol, IpProto::Tcp);
@@ -1025,11 +980,11 @@ mod tests {
 
     #[test]
     fn test_parse_flow_key_truncated_ethernet() {
-        let pkt = vec![0x00, 0x01, 0x02]; // Only 3 bytes
+        let pkt = vec![0x00, 0x01, 0x02];
         let ctx = TcContext::new(pkt);
-
         let mut flow_key = FlowKey::default();
         let result = parse_flow_key(&ctx, &mut flow_key);
+
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), Error::MalformedHeader);
     }
@@ -1037,33 +992,30 @@ mod tests {
     #[test]
     fn test_parse_flow_key_truncated_ipv4() {
         let mut pkt = Vec::new();
-        // Ethernet header
         pkt.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
         pkt.extend_from_slice(&[0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
         pkt.extend_from_slice(&[0x08, 0x00]);
-        // Only 10 bytes of IPv4 header (should be 20)
         pkt.extend_from_slice(&[0x45, 0x00, 0x00, 0x3C, 0x1C, 0x46, 0x40, 0x00, 0x40, 0x06]);
-
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
         let result = parse_flow_key(&ctx, &mut flow_key);
+
         assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), Error::OutOfBounds);
     }
 
     #[test]
     fn test_parse_flow_key_invalid_ihl() {
         let mut pkt = Vec::new();
-        // Ethernet
         pkt.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
         pkt.extend_from_slice(&[0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
         pkt.extend_from_slice(&[0x08, 0x00]);
-        // IPv4 with IHL=2 (invalid, minimum is 5)
-        pkt.push(0x42); // Version=4, IHL=2
-        pkt.extend_from_slice(&[0x00; 19]); // Rest of header
-
+        pkt.push(0x42);
+        pkt.extend_from_slice(&[0x00; 19]);
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
         let result = parse_flow_key(&ctx, &mut flow_key);
+
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), Error::MalformedHeader);
     }
@@ -1071,14 +1023,13 @@ mod tests {
     #[test]
     fn test_parse_flow_key_unsupported_ethertype() {
         let mut pkt = Vec::new();
-        // Ethernet with ARP EtherType
         pkt.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
         pkt.extend_from_slice(&[0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
         pkt.extend_from_slice(&[0x08, 0x06]); // ARP
-
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
         let result = parse_flow_key(&ctx, &mut flow_key);
+
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), Error::UnsupportedEtherType);
     }
@@ -1087,36 +1038,19 @@ mod tests {
     fn test_parse_metadata_ipv4_tcp() {
         let pkt = build_ipv4_tcp_packet();
         let ctx = TcContext::new(pkt);
-
-        // Parse flow key first
         let mut flow_key = FlowKey::default();
         let ether_type = parse_flow_key(&ctx, &mut flow_key).unwrap();
-
-        // Create FlowStats
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
-
         let result = parse_metadata(&ctx, &mut stats);
-        assert!(result.is_ok());
-
         let parsed_offset = result.unwrap();
 
-        // Check MACs
+        assert!(result.is_ok());
         assert_eq!(stats.src_mac, [0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
-
-        // Check DSCP/ECN (DSCP=46, ECN=0)
         assert_eq!(stats.ip_dscp, 46);
         assert_eq!(stats.ip_ecn, 0);
-
-        // Check TTL
         assert_eq!(stats.ip_ttl, 64);
-
-        // Check Flow Label (IPv4 = 0)
         assert_eq!(stats.ip_flow_label, 0);
-
-        // Check TCP flags (not parsed in parse_metadata, but should be 0)
         assert_eq!(stats.tcp_flags, 0);
-
-        // Check parsed offset (Ethernet 14 + IPv4 20 + TCP 20 = 54)
         assert_eq!(parsed_offset, 54);
     }
 
@@ -1124,31 +1058,18 @@ mod tests {
     fn test_parse_metadata_ipv6_tcp() {
         let pkt = build_ipv6_tcp_packet();
         let ctx = TcContext::new(pkt);
-
         let mut flow_key = FlowKey::default();
         let ether_type = parse_flow_key(&ctx, &mut flow_key).unwrap();
-
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
-
         let result = parse_metadata(&ctx, &mut stats);
-        assert!(result.is_ok());
-
         let parsed_offset = result.unwrap();
 
-        // Check MACs
+        assert!(result.is_ok());
         assert_eq!(stats.src_mac, [0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
-
-        // Check DSCP/ECN (Traffic Class = 0xE = 00001110, DSCP=000011=3, ECN=10=2)
         assert_eq!(stats.ip_dscp, 3);
         assert_eq!(stats.ip_ecn, 2);
-
-        // Check Hop Limit (TTL equivalent)
         assert_eq!(stats.ip_ttl, 255);
-
-        // Check Flow Label (0x012345 & 0xFFFFF = 0x12345)
         assert_eq!(stats.ip_flow_label, 0x12345);
-
-        // Check parsed offset (Ethernet 14 + IPv6 40 + TCP 20 = 74)
         assert_eq!(parsed_offset, 74);
     }
 
@@ -1156,21 +1077,14 @@ mod tests {
     fn test_parse_metadata_ipv4_udp() {
         let pkt = build_ipv4_udp_packet();
         let ctx = TcContext::new(pkt);
-
         let mut flow_key = FlowKey::default();
         let ether_type = parse_flow_key(&ctx, &mut flow_key).unwrap();
-
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
-
         let result = parse_metadata(&ctx, &mut stats);
-        assert!(result.is_ok());
-
         let parsed_offset = result.unwrap();
 
-        // Check TTL
+        assert!(result.is_ok());
         assert_eq!(stats.ip_ttl, 128);
-
-        // Check parsed offset (Ethernet 14 + IPv4 20 + UDP 8 = 42)
         assert_eq!(parsed_offset, 42);
     }
 
@@ -1178,22 +1092,15 @@ mod tests {
     fn test_parse_metadata_ipv4_icmp() {
         let pkt = build_ipv4_icmp_packet();
         let ctx = TcContext::new(pkt);
-
         let mut flow_key = FlowKey::default();
         let ether_type = parse_flow_key(&ctx, &mut flow_key).unwrap();
-
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
-
         let result = parse_metadata(&ctx, &mut stats);
-        assert!(result.is_ok());
-
         let parsed_offset = result.unwrap();
 
-        // Check ICMP type/code
-        assert_eq!(stats.icmp_type, 8); // Echo Request
+        assert!(result.is_ok());
+        assert_eq!(stats.icmp_type, 8);
         assert_eq!(stats.icmp_code, 0);
-
-        // Check parsed offset (Ethernet 14 + IPv4 20 + ICMP 8 = 42)
         assert_eq!(parsed_offset, 42);
     }
 
@@ -1201,42 +1108,159 @@ mod tests {
     fn test_parse_metadata_tcp_with_options() {
         let mut pkt = Vec::new();
 
-        // Ethernet
         pkt.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
         pkt.extend_from_slice(&[0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
         pkt.extend_from_slice(&[0x08, 0x00]);
-
-        // IPv4
         pkt.push(0x45);
         pkt.push(0x00);
-        pkt.extend_from_slice(&[0x00, 0x40]); // Total length: 64 bytes
+        pkt.extend_from_slice(&[0x00, 0x40]);
         pkt.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
         pkt.push(64);
-        pkt.push(6); // TCP
+        pkt.push(6);
         pkt.extend_from_slice(&[0x00, 0x00]);
         pkt.extend_from_slice(&[192, 168, 1, 1, 10, 0, 0, 1]);
-
-        // TCP with options (data offset = 8, meaning 32 bytes)
-        pkt.extend_from_slice(&[0x00, 0x50, 0x01, 0xBB]); // Ports
-        pkt.extend_from_slice(&[0x00; 8]); // Seq + Ack
-        pkt.push(0x80); // Data offset: 8 (32 bytes)
-        pkt.push(0x02); // Flags
-        pkt.extend_from_slice(&[0x71, 0x10, 0x00, 0x00, 0x00, 0x00]); // Window + Checksum + Urgent
-        // 12 bytes of options
+        pkt.extend_from_slice(&[0x00, 0x50, 0x01, 0xBB]);
+        pkt.extend_from_slice(&[0x00; 8]);
+        pkt.push(0x80);
+        pkt.push(0x02);
+        pkt.extend_from_slice(&[0x71, 0x10, 0x00, 0x00, 0x00, 0x00]);
         pkt.extend_from_slice(&[0x00; 12]);
 
         let ctx = TcContext::new(pkt);
         let mut flow_key = FlowKey::default();
         let ether_type = parse_flow_key(&ctx, &mut flow_key).unwrap();
-
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
-
         let result = parse_metadata(&ctx, &mut stats);
-        assert!(result.is_ok());
-
         let parsed_offset = result.unwrap();
 
-        // Check parsed offset (Ethernet 14 + IPv4 20 + TCP 32 = 66)
+        assert!(result.is_ok());
         assert_eq!(parsed_offset, 66);
+    }
+
+    #[test]
+    fn test_capture_direction_metadata_forward_ipv4() {
+        let pkt = build_ipv4_tcp_packet();
+        let ctx = TcContext::new(pkt);
+        let mut stats = create_test_flow_stats(EtherType::Ipv4, IpProto::Tcp);
+        let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv4, 34, true);
+
+        assert!(result.is_ok());
+        assert_eq!(stats.ip_dscp, 46);
+        assert_eq!(stats.ip_ecn, 0);
+        assert_eq!(stats.ip_ttl, 64);
+        assert_eq!(stats.ip_flow_label, 0);
+        assert_eq!(stats.reverse_ip_dscp, 0);
+        assert_eq!(stats.reverse_ip_ecn, 0);
+        assert_eq!(stats.reverse_ip_ttl, 0);
+        assert_eq!(stats.reverse_ip_flow_label, 0);
+    }
+
+    #[test]
+    fn test_capture_direction_metadata_reverse_ipv4() {
+        let pkt = build_ipv4_tcp_packet();
+        let ctx = TcContext::new(pkt);
+        let mut stats = create_test_flow_stats(EtherType::Ipv4, IpProto::Tcp);
+        let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv4, 34, false);
+
+        assert!(result.is_ok());
+        assert_eq!(stats.ip_dscp, 0);
+        assert_eq!(stats.ip_ecn, 0);
+        assert_eq!(stats.ip_ttl, 0);
+        assert_eq!(stats.reverse_ip_dscp, 46);
+        assert_eq!(stats.reverse_ip_ecn, 0);
+        assert_eq!(stats.reverse_ip_ttl, 64);
+    }
+
+    #[test]
+    fn test_capture_direction_metadata_forward_ipv6() {
+        let pkt = build_ipv6_tcp_packet();
+        let ctx = TcContext::new(pkt);
+        let mut stats = create_test_flow_stats(EtherType::Ipv6, IpProto::Tcp);
+        let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv6, 54, true);
+
+        assert!(result.is_ok());
+        assert_eq!(stats.ip_dscp, 3);
+        assert_eq!(stats.ip_ecn, 2);
+        assert_eq!(stats.ip_ttl, 255);
+        assert_eq!(stats.ip_flow_label, 0x12345);
+        assert_eq!(stats.reverse_ip_dscp, 0);
+        assert_eq!(stats.reverse_ip_ecn, 0);
+        assert_eq!(stats.reverse_ip_ttl, 0);
+        assert_eq!(stats.reverse_ip_flow_label, 0);
+    }
+
+    #[test]
+    fn test_capture_direction_metadata_reverse_ipv6() {
+        let pkt = build_ipv6_tcp_packet();
+        let ctx = TcContext::new(pkt);
+        let mut stats = create_test_flow_stats(EtherType::Ipv6, IpProto::Tcp);
+        let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv6, 54, false);
+
+        assert!(result.is_ok());
+        assert_eq!(stats.ip_dscp, 0);
+        assert_eq!(stats.ip_ecn, 0);
+        assert_eq!(stats.ip_ttl, 0);
+        assert_eq!(stats.ip_flow_label, 0);
+        assert_eq!(stats.reverse_ip_dscp, 3);
+        assert_eq!(stats.reverse_ip_ecn, 2);
+        assert_eq!(stats.reverse_ip_ttl, 255);
+        assert_eq!(stats.reverse_ip_flow_label, 0x12345);
+    }
+
+    #[test]
+    fn test_capture_direction_metadata_icmp_forward() {
+        let pkt = build_ipv4_icmp_packet();
+        let ctx = TcContext::new(pkt);
+        let mut stats = create_test_flow_stats(EtherType::Ipv4, IpProto::Icmp);
+        let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv4, 34, true);
+
+        assert!(result.is_ok());
+        assert_eq!(stats.icmp_type, 8); // Echo Request
+        assert_eq!(stats.icmp_code, 0);
+        assert_eq!(stats.reverse_icmp_type, 0);
+        assert_eq!(stats.reverse_icmp_code, 0);
+    }
+
+    #[test]
+    fn test_capture_direction_metadata_icmp_reverse() {
+        let pkt = build_ipv4_icmp_packet();
+        let ctx = TcContext::new(pkt);
+        let mut stats = create_test_flow_stats(EtherType::Ipv4, IpProto::Icmp);
+        let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv4, 34, false);
+
+        assert!(result.is_ok());
+        assert_eq!(stats.icmp_type, 0);
+        assert_eq!(stats.icmp_code, 0);
+        assert_eq!(stats.reverse_icmp_type, 8);
+        assert_eq!(stats.reverse_icmp_code, 0);
+    }
+
+    #[test]
+    fn test_parse_flow_key_unsupported_protocol() {
+        let mut pkt = Vec::new();
+
+        // Ethernet header
+        pkt.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
+        pkt.extend_from_slice(&[0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
+        pkt.extend_from_slice(&[0x08, 0x00]); // IPv4
+        // IPv4 header with protocol 255 (Reserved)
+        pkt.push(0x45); // IHL=5
+        pkt.push(0x00); // DSCP=0, ECN=0
+        pkt.extend_from_slice(&[0x00, 0x28]); // Total length: 40 bytes
+        pkt.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // ID + Flags
+        pkt.push(64); // TTL
+        pkt.push(255); // Protocol: 255 (Reserved)
+        pkt.extend_from_slice(&[0x00, 0x00]); // Checksum
+        pkt.extend_from_slice(&[192, 168, 1, 1]); // Src IP
+        pkt.extend_from_slice(&[192, 168, 1, 2]); // Dst IP
+        // Some payload
+        pkt.extend_from_slice(&[0x00; 20]);
+
+        let ctx = TcContext::new(pkt);
+        let mut flow_key = FlowKey::default();
+        let result = parse_flow_key(&ctx, &mut flow_key);
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), Error::UnsupportedProtocol);
     }
 }

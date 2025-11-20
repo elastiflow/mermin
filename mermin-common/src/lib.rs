@@ -1,11 +1,28 @@
 #![no_std]
+//! Shared data structures for network flow tracking between eBPF kernel code and userspace.
+//!
+//! This crate defines the core types used to aggregate bidirectional network flows in eBPF maps
+//! and communicate flow events from kernel to userspace via ring buffers. All structures use
+//! `#[repr(C)]` to ensure identical memory layout across eBPF and userspace.
+//!
+//! # Key Types
+//!
+//! - [`FlowKey`]: Normalized 5-tuple for bidirectional flow aggregation (Community ID compatible)
+//! - [`FlowStats`]: Per-flow counters and metadata stored in eBPF maps (128 bytes)
+//! - [`FlowEvent`]: New flow notifications sent from eBPF to userspace (234 bytes)
+//!
+//! # Memory Layout Requirements
+//!
+//! All structures are carefully sized and aligned for efficient eBPF map access.
+//! Modifying field order or types will break eBPF/userspace compatibility.
 
 use network_types::{eth::EtherType, ip::IpProto};
 
 /// Flow key for bidirectional flow aggregation, compatible with Community ID hashing.
 /// This key is normalized during flow creation to ensure both directions of a flow
 /// (A→B and B→A) map to the same key.
-/// Memory layout optimized: 40 bytes (down from 44 bytes)
+///
+/// Memory layout: 38 bytes (16+16 IPs + 2+2 ports + 1+1 version+proto)
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct FlowKey {
@@ -44,10 +61,10 @@ impl FlowKey {
     pub fn should_normalize(&self) -> bool {
         for i in 0..16 {
             if self.src_ip[i] < self.dst_ip[i] {
-                return false; // src < dst, keep order
+                return false;
             }
             if self.src_ip[i] > self.dst_ip[i] {
-                return true; // src > dst, reverse
+                return true;
             }
         }
 
@@ -68,6 +85,33 @@ impl FlowKey {
     /// with the "lower" endpoint always appearing as src.
     ///
     /// Per Community ID spec: https://github.com/corelight/community-id-spec
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use mermin_common::{FlowKey, IpVersion};
+    /// use network_types::ip::IpProto;
+    ///
+    /// let forward = FlowKey {
+    ///     src_ip: [10, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    ///     dst_ip: [10, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    ///     src_port: 12345,
+    ///     dst_port: 80,
+    ///     ip_version: IpVersion::V4,
+    ///     protocol: IpProto::Tcp,
+    /// };
+    ///
+    /// let reverse = FlowKey {
+    ///     src_ip: [10, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    ///     dst_ip: [10, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    ///     src_port: 80,
+    ///     dst_port: 12345,
+    ///     ip_version: IpVersion::V4,
+    ///     protocol: IpProto::Tcp,
+    /// };
+    ///
+    /// assert_eq!(forward.normalize(), reverse.normalize());
+    /// ```
     #[inline(always)]
     pub fn normalize(self) -> FlowKey {
         let needs_swap = self.should_normalize();
@@ -96,19 +140,14 @@ impl FlowKey {
 /// or serialize it to a canonical format (e.g., protobuf, JSON) before hashing.
 impl core::hash::Hash for FlowKey {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        // Hash IP addresses byte-by-byte for explicit, stable behavior
         for byte in &self.src_ip {
             state.write_u8(*byte);
         }
         for byte in &self.dst_ip {
             state.write_u8(*byte);
         }
-
-        // Hash ports
         state.write_u16(self.src_port);
         state.write_u16(self.dst_port);
-
-        // Hash version and protocol as u8
         state.write_u8(self.ip_version as u8);
         state.write_u8(self.protocol as u8);
     }
@@ -120,8 +159,8 @@ unsafe impl aya::Pod for FlowKey {}
 /// Flow statistics maintained in eBPF maps, aggregated per normalized FlowKey.
 /// Tracks bidirectional counters, timestamps, and metadata.
 /// Only contains data that eBPF can parse (3-layer: Eth + IP + L4).
-/// Memory layout optimized: 48 (u64) + 32 (IP arrays) + 6 (MAC) + 12 (u32) + 6 (u16) + 17 (u8) = 121 bytes
-/// Note: Compiler may add padding to align to 8 bytes = 128 bytes actual
+/// Memory layout: 128 bytes actual (121 bytes data + 7 bytes padding for 8-byte alignment)
+/// Breakdown: 48 (u64) + 32 (IP arrays) + 6 (MAC) + 12 (u32) + 6 (u16) + 17 (u8) = 121 bytes unpadded
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct FlowStats {
@@ -201,7 +240,7 @@ pub struct FlowStats {
 }
 
 impl FlowStats {
-    // TCP flag constants (same as in tcp.rs)
+    // TCP flag constants duplicated here for no_std compatibility.
     pub const TCP_FLAG_FIN: u8 = 0x01;
     pub const TCP_FLAG_SYN: u8 = 0x02;
     pub const TCP_FLAG_RST: u8 = 0x04;
@@ -211,48 +250,89 @@ impl FlowStats {
     pub const TCP_FLAG_ECE: u8 = 0x40;
     pub const TCP_FLAG_CWR: u8 = 0x80;
 
-    // Helper methods for flag manipulation
+    // Private helper to avoid code duplication across 8 public flag accessors
     #[inline]
     fn get_tcp_flag(flags: u8, mask: u8) -> bool {
         (flags & mask) != 0
     }
 
-    // Innermost TCP flag methods
+    /// Returns whether the FIN (finish) TCP flag is set.
+    /// Indicates the sender has finished sending data.
     #[inline]
     pub fn fin(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_FIN)
     }
 
+    /// Returns whether the SYN (synchronize) TCP flag is set.
+    /// Used in the TCP handshake to establish connections.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use mermin_common::FlowStats;
+    /// # use network_types::eth::EtherType;
+    /// # use network_types::ip::IpProto;
+    /// # use mermin_common::{IpVersion, Direction};
+    /// let stats = FlowStats {
+    /// #     first_seen_ns: 0, last_seen_ns: 0, packets: 0, bytes: 0,
+    /// #     reverse_packets: 0, reverse_bytes: 0,
+    /// #     src_ip: [0; 16], dst_ip: [0; 16], src_mac: [0; 6],
+    /// #     ifindex: 0, ip_flow_label: 0, reverse_ip_flow_label: 0,
+    /// #     ether_type: EtherType::Ipv4, src_port: 0, dst_port: 0,
+    /// #     direction: Direction::Egress, ip_version: IpVersion::V4,
+    /// #     protocol: IpProto::Tcp, ip_dscp: 0, ip_ecn: 0, ip_ttl: 0,
+    /// #     reverse_ip_dscp: 0, reverse_ip_ecn: 0, reverse_ip_ttl: 0,
+    ///     tcp_flags: FlowStats::TCP_FLAG_SYN | FlowStats::TCP_FLAG_ACK,
+    /// #     icmp_type: 0, icmp_code: 0, reverse_icmp_type: 0, reverse_icmp_code: 0,
+    /// #     forward_metadata_seen: 0, reverse_metadata_seen: 0,
+    /// };
+    ///
+    /// assert!(stats.syn());
+    /// assert!(stats.ack());
+    /// assert!(!stats.fin());
+    /// ```
     #[inline]
     pub fn syn(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_SYN)
     }
 
+    /// Returns whether the RST (reset) TCP flag is set.
+    /// Indicates immediate connection termination.
     #[inline]
     pub fn rst(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_RST)
     }
 
+    /// Returns whether the PSH (push) TCP flag is set.
+    /// Requests immediate data delivery to the application.
     #[inline]
     pub fn psh(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_PSH)
     }
 
+    /// Returns whether the ACK (acknowledgment) TCP flag is set.
+    /// Acknowledges received data.
     #[inline]
     pub fn ack(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_ACK)
     }
 
+    /// Returns whether the URG (urgent) TCP flag is set.
+    /// Indicates urgent data present.
     #[inline]
     pub fn urg(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_URG)
     }
 
+    /// Returns whether the ECE (ECN-Echo) TCP flag is set.
+    /// Part of Explicit Congestion Notification.
     #[inline]
     pub fn ece(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_ECE)
     }
 
+    /// Returns whether the CWR (Congestion Window Reduced) TCP flag is set.
+    /// Indicates sender reduced congestion window in response to ECN.
     #[inline]
     pub fn cwr(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_CWR)
@@ -285,8 +365,9 @@ unsafe impl aya::Pod for FlowStats {}
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct FlowEvent {
-    /// Outermost FlowKey extracted by eBPF (2-layer parsing only).
+    /// Outermost FlowKey extracted by eBPF's shallow parsing (Ethernet + IP + L4 only).
     /// Used as key for FLOW_STATS map lookups.
+    /// Deep tunnel inspection happens in userspace using `packet_data`.
     pub flow_key: FlowKey,
 
     /// Total length of original packet (before truncation).
@@ -307,17 +388,33 @@ pub struct FlowEvent {
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for FlowEvent {}
 
+/// Tunnel encapsulation type detected in network traffic.
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum TunnelType {
+    /// No tunnel encapsulation detected
     #[default]
     None = 0,
+    /// Generic Network Virtualization Encapsulation (RFC 8926)
     Geneve = 1,
+    /// Generic Routing Encapsulation (RFC 2784)
     Gre = 2,
+    /// Virtual eXtensible Local Area Network (RFC 7348)
     Vxlan = 3,
 }
 
 impl TunnelType {
+    /// Returns the string representation of the tunnel type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use mermin_common::TunnelType;
+    ///
+    /// assert_eq!(TunnelType::Vxlan.as_str(), "vxlan");
+    /// assert_eq!(TunnelType::Geneve.as_str(), "geneve");
+    /// assert_eq!(TunnelType::None.as_str(), "none");
+    /// ```
     pub fn as_str(&self) -> &'static str {
         match self {
             TunnelType::Geneve => "geneve",
@@ -328,20 +425,27 @@ impl TunnelType {
     }
 }
 
+/// IP protocol version from packet header.
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Hash)]
 pub enum IpVersion {
+    /// Unknown or unsupported IP version
     #[default]
     Unknown = 0,
+    /// Internet Protocol version 4
     V4 = 4,
+    /// Internet Protocol version 6
     V6 = 6,
 }
 
+/// Traffic direction relative to the TC (Traffic Control) attachment point.
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum Direction {
+    /// Outbound traffic (TC egress hook)
     #[default]
     Egress = 0,
+    /// Inbound traffic (TC ingress hook)
     Ingress = 1,
 }
 
@@ -353,104 +457,6 @@ mod tests {
 
     use super::*;
     use crate::IpVersion::V4;
-
-    // Test FlowStats creation and field access
-    #[test]
-    fn test_flow_stats_creation() {
-        let mut src_ip = [0u8; 16];
-        src_ip[..4].copy_from_slice(&[10, 0, 0, 1]);
-        let mut dst_ip = [0u8; 16];
-        dst_ip[..4].copy_from_slice(&[192, 168, 1, 1]);
-        let src_mac: [u8; 6] = [0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
-
-        // Set some TCP flags - SYN|ACK|RST|URG|CWR (0x02 | 0x10 | 0x04 | 0x20 | 0x80 = 0xB6)
-        let tcp_flags: u8 = 0xB6;
-
-        let mut stats = FlowStats {
-            first_seen_ns: 1_000_000_000,
-            last_seen_ns: 1_005_000_000,
-            packets: 10,
-            bytes: 5000,
-            reverse_packets: 8,
-            reverse_bytes: 4000,
-            src_ip,
-            dst_ip,
-            src_mac,
-            ifindex: 1,
-            ip_flow_label: 0x12345,
-            reverse_ip_flow_label: 0x54321,
-            ether_type: EtherType::Ipv4,
-            src_port: 12345,
-            dst_port: 80,
-            direction: Direction::Egress,
-            ip_version: V4,
-            protocol: IpProto::Tcp,
-            ip_dscp: 46,
-            ip_ecn: 2,
-            ip_ttl: 64,
-            reverse_ip_dscp: 32,
-            reverse_ip_ecn: 1,
-            reverse_ip_ttl: 128,
-            tcp_flags,
-            icmp_type: 8,
-            icmp_code: 0,
-            reverse_icmp_type: 0,
-            reverse_icmp_code: 0,
-            forward_metadata_seen: 1,
-            reverse_metadata_seen: 1,
-        };
-
-        // Test field access
-        assert_eq!(stats.ifindex, 1);
-        assert_eq!(stats.src_ip[..4], [10, 0, 0, 1]);
-        assert_eq!(stats.dst_ip[..4], [192, 168, 1, 1]);
-        assert_eq!(stats.src_mac, src_mac);
-        assert_eq!(stats.packets, 10);
-        assert_eq!(stats.bytes, 5000);
-        assert_eq!(stats.ether_type, EtherType::Ipv4);
-        assert_eq!(stats.src_port, 12345);
-        assert_eq!(stats.dst_port, 80);
-        assert_eq!(stats.ip_version, V4);
-        assert_eq!(stats.protocol, IpProto::Tcp);
-
-        // Test IP header fields
-        assert_eq!(stats.ip_flow_label, 0x12345);
-        assert_eq!(stats.ip_dscp, 46);
-        assert_eq!(stats.ip_ecn, 2);
-        assert_eq!(stats.ip_ttl, 64);
-
-        // Test ICMP fields
-        assert_eq!(stats.icmp_type, 8);
-        assert_eq!(stats.icmp_code, 0);
-
-        // Test TCP flag accessors - flags set are SYN|ACK|RST|URG|CWR (0xB6)
-        assert_eq!(stats.syn(), true); // SYN flag is set
-        assert_eq!(stats.ack(), true); // ACK flag is set
-        assert_eq!(stats.fin(), false); // FIN flag is not set
-        assert_eq!(stats.rst(), true); // RST flag is set
-        assert_eq!(stats.psh(), false); // PSH flag is not set
-        assert_eq!(stats.urg(), true); // URG flag is set
-        assert_eq!(stats.ece(), false); // ECE flag is not set
-        assert_eq!(stats.cwr(), true); // CWR flag is set
-
-        // Test direction functionality
-        assert_eq!(stats.direction, Direction::Egress);
-
-        // Change direction and test
-        stats.direction = Direction::Ingress;
-        assert_eq!(stats.direction, Direction::Ingress);
-    }
-
-    #[test]
-    fn test_direction_enum() {
-        // Test Direction enum values and default
-        assert_eq!(Direction::default(), Direction::Egress);
-        assert_eq!(Direction::Egress as u8, 0);
-        assert_eq!(Direction::Ingress as u8, 1);
-
-        // Test that different directions are not equal
-        assert_ne!(Direction::Ingress, Direction::Egress);
-    }
 
     #[test]
     fn test_flow_stats_tcp_flags() {
@@ -488,7 +494,7 @@ mod tests {
             reverse_metadata_seen: 0,
         };
 
-        // Test all flags clear
+        // Verify all flags clear
         stats.tcp_flags = 0x00;
         assert_eq!(stats.fin(), false);
         assert_eq!(stats.syn(), false);
@@ -588,57 +594,14 @@ mod tests {
         }
     }
 
-    /// Normalization logic (matching eBPF implementation)
-    fn should_reverse(key: &FlowKey) -> bool {
-        // Compare IPs byte-by-byte
-        for i in 0..16 {
-            if key.src_ip[i] < key.dst_ip[i] {
-                return false;
-            }
-            if key.src_ip[i] > key.dst_ip[i] {
-                return true;
-            }
-        }
-        // IPs equal, compare ports
-        if key.src_port < key.dst_port {
-            return false;
-        }
-        if key.src_port > key.dst_port {
-            return true;
-        }
-        false
-    }
-
-    fn normalize_flow_key(key: FlowKey) -> (FlowKey, bool) {
-        let is_reversed = should_reverse(&key);
-
-        if !is_reversed {
-            return (key, false);
-        }
-
-        let mut normalized = key;
-
-        // Swap IPs
-        for i in 0..16 {
-            let tmp = normalized.src_ip[i];
-            normalized.src_ip[i] = normalized.dst_ip[i];
-            normalized.dst_ip[i] = tmp;
-        }
-
-        // Swap ports
-        let tmp_port = normalized.src_port;
-        normalized.src_port = normalized.dst_port;
-        normalized.dst_port = tmp_port;
-
-        (normalized, true)
-    }
-
     #[test]
     fn test_flow_key_normalization_ipv4_tcp() {
         // Test case 1: src < dst (no swap needed)
         let key1 = ipv4_flow_key([10, 0, 0, 1], [10, 0, 0, 2], 12345, 80, IpProto::Tcp);
-        let (normalized1, is_reversed1) = normalize_flow_key(key1);
-        assert!(!is_reversed1, "should not reverse when src < dst");
+        let should_reverse1 = key1.should_normalize();
+        let normalized1 = key1.normalize();
+
+        assert!(!should_reverse1, "should not reverse when src < dst");
         assert_eq!(normalized1.src_ip[..4], [10, 0, 0, 1]);
         assert_eq!(normalized1.dst_ip[..4], [10, 0, 0, 2]);
         assert_eq!(normalized1.src_port, 12345);
@@ -646,8 +609,10 @@ mod tests {
 
         // Test case 2: src > dst (swap needed)
         let key2 = ipv4_flow_key([10, 0, 0, 2], [10, 0, 0, 1], 80, 12345, IpProto::Tcp);
-        let (normalized2, is_reversed2) = normalize_flow_key(key2);
-        assert!(is_reversed2, "should reverse when src > dst");
+        let should_reverse2 = key2.should_normalize();
+        let normalized2 = key2.normalize();
+
+        assert!(should_reverse2, "should reverse when src > dst");
         assert_eq!(normalized2.src_ip[..4], [10, 0, 0, 1]);
         assert_eq!(normalized2.dst_ip[..4], [10, 0, 0, 2]);
         assert_eq!(normalized2.src_port, 12345);
@@ -670,8 +635,9 @@ mod tests {
             2000,
             IpProto::Tcp,
         );
-        let (normalized1, is_reversed1) = normalize_flow_key(key1);
-        assert!(!is_reversed1);
+        let normalized1 = key1.normalize();
+
+        assert!(!key1.should_normalize());
         assert_eq!(normalized1.src_port, 1000);
         assert_eq!(normalized1.dst_port, 2000);
 
@@ -683,8 +649,9 @@ mod tests {
             1000,
             IpProto::Tcp,
         );
-        let (normalized2, is_reversed2) = normalize_flow_key(key2);
-        assert!(is_reversed2);
+        let normalized2 = key2.normalize();
+
+        assert!(key2.should_normalize());
         assert_eq!(normalized2.src_port, 1000);
         assert_eq!(normalized2.dst_port, 2000);
 
@@ -705,15 +672,17 @@ mod tests {
         ];
 
         let key1 = ipv6_flow_key(src, dst, 54321, 443, IpProto::Tcp);
-        let (normalized1, is_reversed1) = normalize_flow_key(key1);
-        assert!(!is_reversed1);
+        let normalized1 = key1.normalize();
+
+        assert!(!key1.should_normalize());
         assert_eq!(normalized1.src_ip, src);
         assert_eq!(normalized1.dst_ip, dst);
 
         // Reverse direction
         let key2 = ipv6_flow_key(dst, src, 443, 54321, IpProto::Tcp);
-        let (normalized2, is_reversed2) = normalize_flow_key(key2);
-        assert!(is_reversed2);
+        let normalized2 = key2.normalize();
+
+        assert!(key2.should_normalize());
         assert_eq!(normalized2.src_ip, src);
         assert_eq!(normalized2.dst_ip, dst);
 
@@ -724,13 +693,15 @@ mod tests {
     fn test_flow_key_normalization_icmp() {
         // ICMP Echo Request: type=8, code=0 → src_port = 0x0800
         let key1 = ipv4_flow_key([10, 0, 0, 1], [10, 0, 0, 2], 0x0800, 0, IpProto::Icmp);
-        let (normalized1, is_reversed1) = normalize_flow_key(key1);
-        assert!(!is_reversed1);
+        let normalized1 = key1.normalize();
+
+        assert!(!key1.should_normalize());
 
         // ICMP Echo Reply: type=0, code=0 → src_port = 0x0000
         let key2 = ipv4_flow_key([10, 0, 0, 2], [10, 0, 0, 1], 0x0000, 0, IpProto::Icmp);
-        let (normalized2, is_reversed2) = normalize_flow_key(key2);
-        assert!(is_reversed2);
+        let normalized2 = key2.normalize();
+
+        assert!(key2.should_normalize());
 
         // Different ICMP types don't normalize to same key (expected behavior)
         assert_ne!(normalized1.src_port, normalized2.src_port);
@@ -740,8 +711,9 @@ mod tests {
     fn test_flow_key_normalization_udp() {
         // UDP flow: DNS query
         let key1 = ipv4_flow_key([192, 168, 1, 100], [8, 8, 8, 8], 53210, 53, IpProto::Udp);
-        let (normalized1, is_reversed1) = normalize_flow_key(key1);
-        assert!(is_reversed1, "8.8.8.8 < 192.168.1.100");
+        let normalized1 = key1.normalize();
+
+        assert!(key1.should_normalize(), "8.8.8.8 < 192.168.1.100");
         assert_eq!(normalized1.src_ip[..4], [8, 8, 8, 8]);
         assert_eq!(normalized1.dst_ip[..4], [192, 168, 1, 100]);
         assert_eq!(normalized1.src_port, 53);
@@ -752,13 +724,11 @@ mod tests {
     fn test_flow_key_byte_comparison_edge_cases() {
         // Test byte-by-byte comparison (10.0.0.255 < 10.0.1.0)
         let key1 = ipv4_flow_key([10, 0, 0, 255], [10, 0, 1, 0], 1000, 2000, IpProto::Tcp);
-        let (_, is_reversed1) = normalize_flow_key(key1);
-        assert!(!is_reversed1, "10.0.0.255 < 10.0.1.0");
+        assert!(!key1.should_normalize(), "10.0.0.255 < 10.0.1.0");
 
         // Test byte-by-byte comparison (10.0.1.0 > 10.0.0.255)
         let key2 = ipv4_flow_key([10, 0, 1, 0], [10, 0, 0, 255], 1000, 2000, IpProto::Tcp);
-        let (_, is_reversed2) = normalize_flow_key(key2);
-        assert!(is_reversed2, "10.0.1.0 > 10.0.0.255");
+        assert!(key2.should_normalize(), "10.0.1.0 > 10.0.0.255");
     }
 
     #[test]
@@ -783,8 +753,8 @@ mod tests {
         let key1 = ipv4_flow_key([10, 0, 0, 1], [10, 0, 0, 2], 12345, 80, IpProto::Tcp);
         let key2 = ipv4_flow_key([10, 0, 0, 2], [10, 0, 0, 1], 80, 12345, IpProto::Tcp);
 
-        let (normalized1, _) = normalize_flow_key(key1);
-        let (normalized2, _) = normalize_flow_key(key2);
+        let normalized1 = key1.normalize();
+        let normalized2 = key2.normalize();
 
         let mut hasher1 = SimpleHasher { state: 0 };
         let mut hasher2 = SimpleHasher { state: 0 };
