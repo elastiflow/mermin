@@ -19,7 +19,10 @@ use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, warn};
 
-use crate::{metrics::registry, runtime::conf::ApiConf};
+use crate::{
+    metrics::{export::ExportStatus, registry},
+    runtime::conf::ApiConf,
+};
 
 #[derive(Clone)]
 pub struct HealthState {
@@ -74,7 +77,7 @@ pub async fn liveness_handler(State(state): State<HealthState>) -> impl IntoResp
     );
 
     let dropped_export_spans = registry::EXPORT_FLOW_SPANS_TOTAL
-        .with_label_values(&["dropped"])
+        .with_label_values(&[ExportStatus::Dropped.as_ref()])
         .get();
     let pipeline_healthy = ebpf_loaded && ready_to_process;
 
@@ -101,7 +104,7 @@ pub async fn readiness_handler(State(state): State<HealthState>) -> impl IntoRes
     let is_ready = ebpf_loaded && k8s_caches_synced && ready_to_process;
 
     let dropped_export_spans = registry::EXPORT_FLOW_SPANS_TOTAL
-        .with_label_values(&["dropped"])
+        .with_label_values(&[ExportStatus::Dropped.as_ref()])
         .get();
     let pipeline_healthy = ebpf_loaded && ready_to_process;
 
