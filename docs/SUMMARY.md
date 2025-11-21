@@ -46,11 +46,15 @@
 
 ## Troubleshooting
 
-* [Troubleshooting Overview](troubleshooting/troubleshooting.md)
+* [Overview](troubleshooting/troubleshooting.md)
 * [Deployment Issues](troubleshooting/deployment-issues.md)
-* [No Flow Traces](troubleshooting/no-flows.md)
-* [Performance Issues](troubleshooting/performance.md)
-* [Kubernetes Metadata Issues](troubleshooting/kubernetes-metadata.md)
-* [Export Issues](troubleshooting/export-issues.md)
 * [Interface Visibility and Traffic Decapsulation](troubleshooting/interface-visibility-and-traffic-decapsulation.md)
 * [Common eBPF Errors](troubleshooting/common-ebpf-errors.md)
+
+## Contributor Guide
+
+* [Contributing to Mermin](contributor-guide/contributing.md)
+* [Development Workflow](contributor-guide/development-workflow.md)
+* [Debugging eBPF](contributor-guide/debugging-ebpf.md)
+* [Debugging Network](contributor-guide/debugging-network.md)
+* [Code of Conduct](contributor-guide/code-of-conduct.md)

@@ -1,106 +1,86 @@
----
-hidden: true
----
+# Troubleshooting
 
-# Troubleshooting Overview
+This guide will help you diagnose and resolve common issues when deploying and operating Mermin.
 
-This section helps you diagnose and resolve common issues when deploying and operating Mermin.
+## Quick Diagnostic Checklist
 
-## Diagnostic Approaches
+When something goes wrong, start with these quick checks to identify the issue:
 
-When troubleshooting Mermin:
-
-1. **Check Pod Status**: Ensure Mermin pods are running
-2. **Review Logs**: Examine Mermin agent logs for errors
-3. **Verify Configuration**: Check HCL configuration syntax and values
-4. **Test Connectivity**: Verify network access to OTLP endpoints
-5. **Check Permissions**: Ensure RBAC and Linux capabilities are correct
-6. **Validate eBPF**: Confirm kernel eBPF support
+1. **Pod Status**: Check if pods are running with `kubectl get pods -n mermin`
+2. **Pod Logs**: Review logs using `kubectl logs -l app.kubernetes.io/name=mermin -n mermin`
+3. **Configuration**: Verify your HCL syntax and configuration values
+4. **Connectivity**: Test network access to your OTLP endpoints
+5. **Permissions**: Confirm RBAC roles and Linux capabilities are properly set
+6. **eBPF Support**: Verify your kernel version supports eBPF
 
 ## Common Issue Categories
 
+We've organized troubleshooting guides into three main categories based on the type of issue you're experiencing:
+
 ### [Deployment Issues](deployment-issues.md)
 
-Problems getting Mermin pods to start or run correctly:
+If Mermin won't start or keeps crashing, this guide covers pod startup failures, permission errors, CNI conflicts, and TC/TCX priority configuration.
 
-* Pod not starting
-* eBPF program loading failures
-* Permission errors
-* Kernel compatibility issues
-* CNI conflicts
+**You'll want this guide if you're seeing:**
 
-### [No Flow Traces](no-flows.md)
+- Pods stuck in `Pending`, `CrashLoopBackOff`, or `Error` states
+- eBPF programs that fail to load
+- Permission or capability errors
+- TC priority conflicts with your CNI plugin
+- Flow gaps after pod restarts
 
-Mermin is running but not capturing or exporting Flow Traces:
+### [Common eBPF Errors](common-ebpf-errors.md)
 
-* No network flows being generated
-* Interface not found errors
-* eBPF attachment issues
-* Verifying packet capture
+This guide helps you diagnose verifier failures, program loading errors, and kernel compatibility issues.
 
-### [Performance Issues](performance.md)
+**Check this guide when you encounter:**
 
-Mermin is consuming excessive resources or dropping data:
+- Verifier instruction limit exceeded errors
+- Invalid memory access errors
+- Kernel version incompatibilities
+- BTF (BPF Type Format) support issues
 
-* High CPU usage
-* High memory usage
-* Packet loss / flow drops
-* Tuning parameters
-* Resource limits
+### [Interface Visibility and Traffic Decapsulation](interface-visibility-and-traffic-decapsulation.md)
 
-### [Kubernetes Metadata Issues](kubernetes-metadata.md)
+Not seeing the traffic you expect? This guide explains traffic visibility at different network layers and how to configure interface monitoring correctly.
 
-Missing or incomplete Kubernetes context in flows:
+**This guide helps with:**
 
-* Missing pod metadata
-* Incomplete owner information
-* Informer sync failures
-* RBAC permission issues
+- Missing or incomplete traffic capture
+- Partial flow visibility
+- CNI-specific interface configuration questions
+- Understanding tunnel encapsulation behavior
 
-### [Export Issues](export-issues.md)
+## Diagnostic Commands
 
-Problems sending Flow Traces to observability backends:
+These commands will help you gather information and diagnose issues:
 
-* OTLP connection failures
-* TLS certificate errors
-* Authentication failures
-* Batching and backpressure
+### View Pod Logs
 
-## Getting Logs
-
-### View Mermin Pod Logs
+Check what Mermin is reporting:
 
 ```bash
-# All Mermin pods
+# View logs from all Mermin pods
 kubectl logs -l app.kubernetes.io/name=mermin -n mermin
 
-# Specific pod
-kubectl logs mermin-xxxxx -n mermin
-
-# Follow logs in real-time
+# Follow logs in real-time as they're generated
 kubectl logs -f -l app.kubernetes.io/name=mermin -n mermin
 
-# Previous pod instance (after crash)
+# View logs from a crashed pod (previous instance)
 kubectl logs mermin-xxxxx -n mermin --previous
 ```
 
-### Increase Log Verbosity
+### Enable Debug Logging
 
-Set `log_level` to `debug` for detailed diagnostics:
+If you need more detailed information, enable debug mode in your configuration:
 
 ```hcl
 log_level = "debug"
 ```
 
-Or via Helm:
+### Health Check Endpoints
 
-```bash
-helm upgrade mermin mermin/mermin -n mermin --set logLevel=debug
-```
-
-## Checking Mermin Health
-
-If API server is enabled:
+If you have the API server enabled, you can check Mermin's health status:
 
 ```bash
 kubectl port-forward daemonset/mermin 8080:8080 -n mermin
@@ -108,43 +88,41 @@ curl http://localhost:8080/livez
 curl http://localhost:8080/readyz
 ```
 
-## Checking Metrics
+### Metrics Monitoring
 
-If metrics server is enabled:
+Mermin exposes Prometheus metrics that can help identify performance issues and verify operations:
 
 ```bash
 kubectl port-forward daemonset/mermin 10250:10250 -n mermin
 curl http://localhost:10250/metrics
 ```
 
-Key metrics to monitor:
+Key metrics to monitor include:
 
-* `mermin_flows_total`: Total flows captured
-* `mermin_packets_processed_total`: Packets processed
-* `mermin_export_errors_total`: Export failures
+- `mermin_flow_spans_created_total` - Total flow spans created
+- `mermin_packets_total` - Packets processed by interface and direction
+- `mermin_export_errors_total` - Export failures (investigate if increasing)
 
 ## Getting Help
 
-If you can't resolve the issue:
+Still stuck? We're here to help!
 
-1. **Search GitHub Issues**: Check if others have encountered the same problem
-   * [https://github.com/elastiflow/mermin/issues](https://github.com/elastiflow/mermin/issues)
-2. **Open a New Issue**: Provide:
-   * Mermin version
-   * Kubernetes version
-   * CNI plugin
-   * Full error logs
-   * Configuration (sanitized)
-   * Steps to reproduce
-3. **Ask in Discussions**: For questions and general troubleshooting
-   * [https://github.com/elastiflow/mermin/discussions](https://github.com/elastiflow/mermin/discussions)
+### Search Existing Issues
 
-## Next Steps
+Check if someone else has encountered the same problem: [GitHub Issues](https://github.com/elastiflow/mermin/issues)
 
-Choose the category that matches your issue:
+### Open a New Issue
 
-* [**Deployment Issues**](deployment-issues.md)
-* [**No Flow Traces**](no-flows.md)
-* [**Performance Issues**](performance.md)
-* [**Kubernetes Metadata Issues**](kubernetes-metadata.md)
-* [**Export Issues**](export-issues.md)
+If you've found a bug or need help, open an issue and include:
+
+- Mermin version and Kubernetes version
+- Your CNI plugin (e.g., Calico, Cilium, Flannel)
+- Complete error logs from affected pods
+- Your configuration (with sensitive values removed)
+- Steps to reproduce the issue
+
+[Create an Issue →](https://github.com/elastiflow/mermin/issues/new)
+
+### Ask Questions
+
+Have a question or want to discuss best practices? Join the conversation in [GitHub Discussions](https://github.com/elastiflow/mermin/discussions).
