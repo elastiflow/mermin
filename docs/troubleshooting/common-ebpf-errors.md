@@ -1,152 +1,156 @@
----
-description: >-
-  This guide helps diagnose and resolve eBPF verifier errors that may occur when
-  deploying Mermin on different kernel versions.
----
-
 # Common eBPF Errors
 
-### Overview
+eBPF programs must pass the kernel's verifier before they can run. The verifier is like a strict security guard—it checks that your program is safe, won't crash the kernel, and will eventually terminate. Understanding verifier errors can be tricky, especially since verifier behavior changes significantly between kernel versions.
 
-The eBPF verifier is a kernel component that validates eBPF programs before loading them. It ensures programs are safe, terminate, and don't access invalid memory. Verifier behavior and strictness varies across kernel versions, which can cause programs that work on newer kernels to fail on older ones.
+## What You Need to Know About the Verifier
 
-**Key points:**
+**Good news**: Verifier errors are rare, especially on modern kernels. Most Mermin deployments work out of the box without any issues.
 
-* eBPF verifier strictness varies by kernel version
-* Older kernels have stricter or less sophisticated verifiers
-* Mermin has been optimized for compatibility but some edge cases may still occur
-* Most verifier errors are resolved in beta.21 and later
+**When problems do occur**, they're typically on older kernel versions (< 5.16) that can't perform the sophisticated complexity analysis that newer kernels can. Older kernels are more conservative and may reject programs that newer kernels accept without issue.
+
+The eBPF verifier has evolved considerably over time. A program that loads perfectly on a newer kernel might fail on an older one:
+
+- **Kernel 5.4-5.10**: The early days - stricter bounds checking, more conservative validation
+- **Kernel 5.11-5.15**: Getting smarter - improved range tracking and better loop handling
+- **Kernel 5.16+**: Even better - enhanced state pruning for more complex programs
+- **Kernel 6.0+**: Most sophisticated - relaxed restrictions and the most permissive verifier
+
+**Recommended**: Use kernel 5.14+ (preferably 6.6+) for the best experience and fewest compatibility issues.
 
 {% hint style="info" %}
-If you encounter eBPF verifier issues or program loading failures not covered by the solutions in this guide, please reach out to the Mermin team. We continuously improve kernel compatibility and your feedback helps us identify and resolve edge cases.
+Hit a verifier error we haven't covered? Reach out to the Mermin team! We're constantly improving kernel compatibility based on real-world feedback.
 {% endhint %}
 
-### Symptoms
+## How to Recognize Verifier Errors
 
-Mermin pods fail to start with errors in logs like:
+When the verifier rejects a program, your pods won't start. You'll see errors like this in the logs:
 
-```
+```shell
 ERROR Failed to load eBPF program
 verification time XXXXX usec
 processed XXXX insns (limit 1000000)
 ```
 
-The pod may be in `CrashLoopBackOff` or `Error` state.
+Your pods will be stuck in `CrashLoopBackOff` or `Error` state.
 
-### Common eBPF Verifier Error Patterns
+## Common Verifier Errors (And What They Mean)
 
-#### Invalid Zero-Sized Read
+Let's break down the most common verifier errors you might encounter and what's actually going wrong.
 
-**Error Pattern:**
+### Invalid Zero-Sized Read
 
-```
+This one shows up when the verifier thinks you're trying to read zero bytes of memory.
+
+**What you'll see:**
+
+```shell
 R4 invalid zero-sized read: u64=[0,191]
 verification time 38379 usec
-stack depth 208+56+0+0+16+0+0
 processed 8264 insns (limit 1000000)
 ```
 
-**What it means:**
+**What's happening**: The verifier detected a potential zero-byte memory read. This typically happens when your length calculations might result in zero, or when the verifier can't prove that the length is definitely non-zero.
 
-The verifier detected an attempt to read zero bytes from memory, which it considers invalid. This typically happens when:
+**Real-world example:**
 
-* Length calculation results in zero
-* Bounds checking doesn't prove non-zero length to the verifier
-
-**Example:**
-
-```
+```shell
 979: (2d) if r1 > r4 goto pc+1 981
-981: (07) r9 += 42
-982: (bf) r1 = r8
-983: (79) r2 = *(u64 *)(r10 -80)
-984: (bf) r3 = r9
 985: (85) call bpf_skb_load_bytes#26
 R4 invalid zero-sized read: u64=[0,191]
 ```
 
-#### Invalid Map Access / Out of Range
+The verifier sees that R4 (the length parameter) could be anywhere from 0 to 191, including zero. Since reading zero bytes doesn't make sense, it rejects the program.
 
-**Error Pattern:**
+### Invalid Map Access
 
-```
+This error means you're trying to access a map in a way the verifier can't verify is safe.
+
+**What you'll see:**
+
+```shell
 invalid access to map value, value_size=234 off=42 size=0
 R3 min value is outside of the allowed memory range
 verification time 27928 usec
-processed 8264 insns (limit 1000000)
 ```
 
-**What it means:**
+**What's happening**: The verifier can't prove your map access stays within bounds. Maybe your offset + size exceeds the map's value size, or the verifier's range tracking shows you could potentially access memory outside the allowed range.
 
-The verifier cannot prove that a map access is within bounds. This occurs when:
+Think of it like this: if you have a 234-byte map value and try to access byte 235, that's out of bounds. The verifier catches these potential violations before they can crash anything.
 
-* Offset + size exceeds map value size
-* The verifier's range tracking shows potential out-of-bounds access
-* Zero-size reads/writes to maps
+**Real-world example:**
 
-**Example**
-
-```
-2484: (bf) r4 = r1
+```shell
 2485: (0f) r4 += r3              ; R3_w=1 R4_w=map_value(off=0,ks=4,vs=234,imm=0)
-2486: (bf) r5 = r2
-2487: (0f) r5 += r3              ; R3_w=1 R5_w=fp-56
-2488: (71) r5 = *(u8 *)(r5 +0)
 2489: (73) *(u8 *)(r4 +0) = r5
-...
-985: (85) call bpf_skb_load_bytes#26
 invalid access to map value, value_size=234 off=42 size=0
 ```
 
-#### Instruction Limit Exceeded
+The verifier is concerned that after adding R3 to R4, the resulting offset (42) might be too close to the end of the 234-byte value.
 
-**Error Pattern:**
+### Instruction Limit Exceeded
 
-```
+Your program is doing too much! The kernel has a limit on how complex an eBPF program can be.
+
+**What you'll see:**
+
+```shell
 BPF program is too large. processed 1000001 insns
-processed 1000001 insns (limit 1000000) max_states_per_insn 10 total_states 25000
+processed 1000001 insns (limit 1000000)
 ```
 
-**What it means:**
+**What's happening**: Your program exceeds the kernel's instruction limit (typically 1 million instructions). This usually happens when parsing deeply nested network headers or processing complex protocols.
 
-The eBPF program contains too many instructions. The kernel enforces a limit (typically 1 million instructions) to ensure programs terminate.
+**What to do**: See the [Deployment Issues guide](deployment-issues.md#5-ebpf-verifier-rejection-program-too-large) for solutions, including reducing parser complexity or limiting the number of protocol layers processed.
 
-#### Unbounded Loop Detection
+### Unbounded Loop Detection
 
-**Error Pattern:**
+eBPF programs must always terminate—no infinite loops allowed!
 
-```
+**What you'll see:**
+
+```shell
 back-edge from insn X to Y
 infinite loop detected at insn X
-processed XXXX insns (limit 1000000)
 ```
 
-**What it means:**
+**What's happening**: The verifier found a loop without a provable upper bound. In eBPF, every loop must have a maximum number of iterations that the verifier can determine at verification time. If the verifier can't prove your loop will eventually exit, it rejects the program.
 
-The verifier detected a loop without a provable upper bound. eBPF requires all loops to have bounded iterations.
+This is a fundamental eBPF safety requirement—infinite loops could freeze the kernel.
 
-#### Stack Size Exceeded
+### Stack Size Exceeded
 
-**Error Pattern:**
+You've used too much stack space across your function calls.
 
-```
+**What you'll see:**
+
+```shell
 combined stack size of N calls is XXXX. Too large
 max stack depth exceeded
 ```
 
-#### Why Verifier Errors Vary by Kernel
+**What's happening**: The combined stack usage across all your function calls exceeds the kernel's limit (typically 512 bytes). Each function call adds to the stack, and nested calls add up quickly.
 
-The eBPF verifier has evolved significantly across kernel versions:
+## Understanding TC Priority and TCX Order
 
-* **Kernel 5.4-5.10**: Basic verifier, stricter bounds checking
-* **Kernel 5.11-5.15**: Improved range tracking, better loop handling
-* **Kernel 5.16+**: Enhanced verifier with better state pruning
-* **Kernel 6.0+**: Most sophisticated verifier, relaxed some restrictions
+Beyond verifier errors, there's another important aspect of eBPF program loading: execution order. When multiple eBPF programs are attached to the same network interface, the order they run in matters—a lot.
 
-Older kernels may reject programs that newer kernels accept because:
+TC (Traffic Control) priority and TCX ordering control when your eBPF program runs relative to other programs (like your CNI). This affects which packets Mermin sees and in what state (before or after CNI modifications like NAT or encapsulation).
 
-* Less sophisticated range tracking
-* Stricter bounds checking requirements
-* Different handling of helper function return values
-* More conservative loop analysis
+### Want to Learn More?
 
+For the complete guide on TC priority, including troubleshooting conflicts with your CNI, see the [Understanding TC Priority](deployment-issues.md#understanding-tc-priority) section in the Deployment Issues guide. It covers:
+
+- How priority values work and why they matter
+- Troubleshooting priority conflicts between Mermin and your CNI
+- CNI-specific recommendations and gotchas
+- How to verify and test your configuration
+
+### Quick Reference
+
+**Mermin's defaults:**
+
+- `tc_priority = 1` and `tcx_order = "first"` - Mermin runs first to capture unfiltered packets
+- **Kernel < 6.6**: Uses netlink-based TC with numeric priority values (1-32767, lower = earlier)
+- **Kernel >= 6.6**: Uses TCX mode with explicit ordering ("first" or "last")
+
+**Why this matters**: Mermin operates passively (observes without modifying packets), so running first is usually safe and provides the most accurate observability data.

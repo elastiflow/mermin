@@ -222,7 +222,7 @@ If you encounter problems during the beta, please report them using the template
 Feedback Channels
 
 * **Email**: [merminbeta@elastiflow.com](mailto:merminbeta@elastiflow.com)​
-* **Slack:** [**https://elastiflowcommunity.slack.com/archives/C09MANJTSP3**](https://elastiflowcommunity.slack.com/archives/C09MANJTSP3)
+* **Slack:** [Click to Join](https://join.slack.com/t/elastiflowcommunity/shared_invite/zt-23jpnlw9g-Q4nKOwKKOE1N2MjfA2mXpg)
 
 {% code expandable="true" %}
 ```markup

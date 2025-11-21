@@ -149,7 +149,7 @@ All contributors are expected to follow our code of conduct and maintain a welco
 
 **Get Help:**
 
-- 💬 [Slack Channel](https://elastiflowcommunity.slack.com/archives/C09MANJTSP3) - Live chat with maintainers and community.
+- 💬 [Slack Channel](https://join.slack.com/t/elastiflowcommunity/shared_invite/zt-23jpnlw9g-Q4nKOwKKOE1N2MjfA2mXpg) - Live chat with maintainers and community.
 - 💭 [GitHub Discussions](https://github.com/elastiflow/mermin/discussions) - Ask questions and share knowledge.
 - 🐛 [GitHub Issues](https://github.com/elastiflow/mermin/issues) - Report bugs and track feature requests.
 - 📖 [Documentation](docs/README.md) - Comprehensive guides and references.

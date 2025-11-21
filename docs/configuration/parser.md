@@ -24,192 +24,10 @@ parser {
   geneve_port = 6081
   vxlan_port = 4789
   wireguard_port = 51820
-
-  # Protocol parsing controls
-  max_header_depth = 6
-
-  # IPv6 extension header parsing (disabled by default for Kubernetes)
-  parse_ipv6_hopopt = false
-  parse_ipv6_fragment = false
-  parse_ipv6_routing = false
-  parse_ipv6_dest_opts = false
 }
 ```
 
 ## Configuration Options
-
-### Protocol Parsing Controls
-
-#### `max_header_depth`
-
-**Type:** Integer (1-8) **Default:** `6`
-
-Maximum number of nested protocol headers to parse per packet.
-
-**Description:**
-
-Limits how deep the eBPF program will parse through nested encapsulation layers. Lower values reduce eBPF verifier complexity, which is critical for deployment in constrained kernel environments.
-
-**Example header stack** (depth = 7):
-
-```text
-Ethernet → IPv6 → UDP → VXLAN → Ethernet → IPv4 → TCP
-```
-
-**When to customize:**
-
-- **Reduce to 4-5**: If experiencing eBPF verifier failures ("BPF program is too large")
-- **Reduce to 4-5**: In K3s or older kernel environments
-- **Keep at 6**: Standard Kubernetes deployments (default)
-- **Increase to 7-8**: Complex multi-layer tunneling scenarios (rare)
-
-**Verifier Impact:**
-
-Lower values significantly reduce eBPF instruction count:
-
-- Depth 8: ~1M+ verifier instructions (may fail verification)
-- Depth 6: ~300-500K verifier instructions (recommended)
-- Depth 4: ~100-200K verifier instructions (minimal)
-
-**Example:**
-
-```hcl
-parser {
-  max_header_depth = 6  # Standard Kubernetes (default)
-}
-```
-
-**For constrained environments:**
-
-```hcl
-parser {
-  max_header_depth = 4  # Reduce for K3s or older kernels
-}
-```
-
-#### `parse_ipv6_hopopt`
-
-**Type:** Boolean **Default:** `false`
-
-Enable parsing of IPv6 Hop-by-Hop Options header.
-
-**Description:**
-
-Controls whether the parser processes IPv6 Hop-by-Hop Options headers. These headers are rarely used in standard Kubernetes networking and are disabled by default to reduce verifier complexity.
-
-**Use cases:**
-
-- Router Alert for multicast protocols (RSVP, MLD)
-- Jumbo Payloads (>65KB packets)
-- Custom IPv6 options in specialized networks
-
-**When to enable:**
-
-- Your network uses IPv6 multicast with Router Alert
-- Large MTU environments with Jumbo Payload option
-- Specialized telco/carrier networks
-
-**Verifier Impact:** Minimal (~5K instructions when enabled)
-
-**Example:**
-
-```hcl
-parser {
-  parse_ipv6_hopopt = false  # Default - disabled for Kubernetes
-}
-```
-
-**Enable for multicast:**
-
-```hcl
-parser {
-  parse_ipv6_hopopt = true  # Enable if using multicast
-}
-```
-
-#### `parse_ipv6_fragment`
-
-**Type:** Boolean **Default:** `false`
-
-Enable parsing of IPv6 Fragment Header.
-
-**Description:**
-
-Controls whether the parser processes IPv6 fragmentation headers. Most Kubernetes CNIs perform path MTU discovery to avoid fragmentation, making this header rare in practice.
-
-**When to enable:**
-
-- Environments with MTU mismatches causing fragmentation
-- Networks without proper PMTU discovery
-- Troubleshooting fragmentation-related issues
-
-**Verifier Impact:** Minimal (~5K instructions when enabled)
-
-**Example:**
-
-```hcl
-parser {
-  parse_ipv6_fragment = false  # Default - disabled for Kubernetes
-}
-```
-
-#### `parse_ipv6_routing`
-
-**Type:** Boolean **Default:** `false`
-
-Enable parsing of IPv6 Routing Header.
-
-**Description:**
-
-Controls whether the parser processes IPv6 Routing headers (Type 2, RPL Source Route, Segment Routing, etc.). These are rarely used in Kubernetes environments.
-
-**Use cases:**
-
-- IPv6 Segment Routing (SRv6)
-- Mobile IPv6 (uncommon in K8s)
-- Specialized routing scenarios
-
-**When to enable:**
-
-- Service meshes using SRv6
-- Mobile IPv6 deployments
-- Networks with custom routing requirements
-
-**Verifier Impact:** Minimal (~5K instructions when enabled)
-
-**Example:**
-
-```hcl
-parser {
-  parse_ipv6_routing = false  # Default - disabled for Kubernetes
-}
-```
-
-#### `parse_ipv6_dest_opts`
-
-**Type:** Boolean **Default:** `false`
-
-Enable parsing of IPv6 Destination Options header.
-
-**Description:**
-
-Controls whether the parser processes IPv6 Destination Options headers. These are rarely seen in standard Kubernetes networking.
-
-**When to enable:**
-
-- Networks using custom IPv6 options
-- Specialized security or telemetry scenarios
-- Troubleshooting specific IPv6 option-related issues
-
-**Verifier Impact:** Minimal (~5K instructions when enabled)
-
-**Example:**
-
-```hcl
-parser {
-  parse_ipv6_dest_opts = false  # Default - disabled for Kubernetes
-}
-```
 
 ### Tunnel Port Detection
 
@@ -516,12 +334,6 @@ kubectl logs -l app.kubernetes.io/name=mermin --tail=20
 
 The Linux eBPF verifier analyzes all possible execution paths in the program to ensure safety. Parser configuration directly impacts verifier complexity:
 
-**Primary factors:**
-
-- `max_header_depth`: Major impact - each additional depth level exponentially increases paths
-- IPv6 extension headers: Minor impact - each enabled header adds ~5K instructions
-- Tunnel types: Fixed impact - already optimized
-
 **Symptoms of verifier failure:**
 
 ```text
@@ -531,26 +343,7 @@ verification time 3775231 usec
 
 **Resolution steps:**
 
-1. **Reduce max_header_depth** (most effective):
-
-   ```hcl
-   parser {
-     max_header_depth = 5  # Or even 4 for K3s
-   }
-   ```
-
-2. **Disable unused IPv6 options** (already default):
-
-   ```hcl
-   parser {
-     parse_ipv6_hopopt = false
-     parse_ipv6_fragment = false
-     parse_ipv6_routing = false
-     parse_ipv6_dest_opts = false
-   }
-   ```
-
-3. **Update kernel** (if possible): Newer kernels (5.10+) have improved verifier efficiency
+1. **Update kernel** (if possible): Newer kernels (5.14+) have improved verifier efficiency
 
 ### Recommended Configurations by Environment
 
@@ -562,15 +355,6 @@ parser {
   geneve_port = 6081
   vxlan_port = 4789
   wireguard_port = 51820
-
-  # Parsing limits
-  max_header_depth = 6  # Handles most scenarios
-
-  # IPv6 extensions (disabled for typical K8s)
-  parse_ipv6_hopopt = false
-  parse_ipv6_fragment = false
-  parse_ipv6_routing = false
-  parse_ipv6_dest_opts = false
 }
 ```
 
@@ -582,15 +366,6 @@ parser {
   geneve_port = 6081
   vxlan_port = 4789
   wireguard_port = 51820
-
-  # Reduced parsing depth
-  max_header_depth = 4  # Lower for verifier compatibility
-
-  # IPv6 extensions disabled
-  parse_ipv6_hopopt = false
-  parse_ipv6_fragment = false
-  parse_ipv6_routing = false
-  parse_ipv6_dest_opts = false
 }
 ```
 
@@ -602,15 +377,6 @@ parser {
   geneve_port = 6081
   vxlan_port = 4789
   wireguard_port = 51820
-
-  # Standard depth
-  max_header_depth = 6
-
-  # Enable specific IPv6 extensions as needed
-  parse_ipv6_hopopt = true      # For multicast Router Alert
-  parse_ipv6_fragment = false
-  parse_ipv6_routing = true     # For SRv6
-  parse_ipv6_dest_opts = false
 }
 ```
 
@@ -623,16 +389,6 @@ parser {
   geneve_port = 6081      # Cilium, NSX-T (IANA standard)
   vxlan_port = 4789       # Flannel, Calico (IANA standard)
   wireguard_port = 51820  # WireGuard VPN (default port)
-
-  # Protocol parsing depth (affects eBPF verifier complexity)
-  max_header_depth = 6    # Standard for Kubernetes (range: 1-8)
-
-  # IPv6 extension header parsing (disabled by default)
-  # Only enable if your network specifically requires these headers
-  parse_ipv6_hopopt = false    # Hop-by-Hop Options (multicast, jumbo frames)
-  parse_ipv6_fragment = false  # Fragment Header (typically avoided via PMTU)
-  parse_ipv6_routing = false   # Routing Header (SRv6, Mobile IPv6)
-  parse_ipv6_dest_opts = false # Destination Options (custom options)
 }
 ```
 
