@@ -1595,8 +1595,8 @@ async fn timeout_and_remove_flow(
         .network_interface_name
         .as_deref()
         .unwrap_or("unknown");
-    metrics::flow::inc_producer_flow_spans(interface_name, labels::SPAN_IDLED);
-    metrics::flow::dec_flows_active(interface_name);
+    metrics::flow::inc_producer_flow_spans(iface_name, labels::SPAN_IDLED);
+    metrics::flow::dec_flows_active(iface_name);
 }
 
 /// Periodic orphan scanner task - safety net for cleaning up stale eBPF entries.

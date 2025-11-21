@@ -637,6 +637,7 @@ async fn run() -> Result<()> {
                                 metrics::k8s::inc_k8s_decorator_flow_spans("undecorated");
                             }
                             Err(e) => {
+                                metrics::export::inc_export_flow_spans(metrics::labels::EXPORT_DROPPED);
                                 metrics::k8s::inc_k8s_decorator_flow_spans("dropped");
                                 error!(
                                     event.name = "channel.send_failed",
