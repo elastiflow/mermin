@@ -39,7 +39,10 @@ use crate::{
         types::ControllerCommand,
     },
     k8s::{attributor::Attributor, decorator::Decorator},
-    metrics::server::start_metrics_server,
+    metrics::{
+        export::ExportStatus, k8s::K8sDecoratorStatus, server::start_metrics_server,
+        userspace::ChannelName,
+    },
     otlp::{
         provider::{init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
@@ -364,6 +367,8 @@ async fn run() -> Result<()> {
         }
     };
     if use_tcx {
+        crate::metrics::registry::BPF_FS_WRITABLE.set(if bpf_fs_writable { 1 } else { 0 });
+
         info!(
             event.name = "ebpf.bpf_fs_check_complete",
             bpf_fs_writable = bpf_fs_writable,
@@ -478,7 +483,7 @@ async fn run() -> Result<()> {
         as usize;
 
     let (flow_span_tx, mut flow_span_rx) = mpsc::channel(flow_span_capacity);
-    metrics::userspace::set_channel_capacity("exporter", flow_span_capacity);
+    metrics::userspace::set_channel_capacity(ChannelName::Exporter, flow_span_capacity);
     let (k8s_decorated_flow_span_tx, mut k8s_decorated_flow_span_rx) =
         mpsc::channel(decorated_span_capacity);
 
@@ -578,7 +583,7 @@ async fn run() -> Result<()> {
                         maybe_span = flow_span_rx.recv() => {
                             let Some(flow_span) = maybe_span else { break };
 
-                            metrics::userspace::set_channel_size("decorator_input", flow_span_rx.len());
+                            metrics::userspace::set_channel_size(ChannelName::DecoratorInput, flow_span_rx.len());
 
                             let timer = metrics::registry::PROCESSING_LATENCY
                                 .with_label_values(&["k8s_decoration"])
@@ -587,27 +592,38 @@ async fn run() -> Result<()> {
                             timer.observe_duration();
 
                             match err {
-                                Some(e) => debug!(
-                                    event.name = "k8s.decorator.failed",
-                                    flow.community_id = %span.attributes.flow_community_id,
-                                    error.message = %e,
-                                    "failed to decorate flow attributes with kubernetes metadata, sending undecorated span"
-                                ),
-                                None => trace!(
-                                    event.name = "k8s.decorator.decorated",
-                                    flow.community_id = %span.attributes.flow_community_id,
-                                    "successfully decorated flow attributes with kubernetes metadata"
-                                ),
+                                Some(e) => {
+                                    metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Error);
+                                    debug!(
+                                        event.name = "k8s.decorator.failed",
+                                        flow.community_id = %span.attributes.flow_community_id,
+                                        error.message = %e,
+                                        "failed to decorate flow attributes with kubernetes metadata, sending undecorated span"
+                                    );
+                                }
+                                None => {
+                                    metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Ok);
+                                    trace!(
+                                        event.name = "k8s.decorator.decorated",
+                                        flow.community_id = %span.attributes.flow_community_id,
+                                        "successfully decorated flow attributes with kubernetes metadata"
+                                    );
+                                }
                             }
 
-                            if let Err(e) = k8s_decorated_flow_span_tx.send(span).await {
-                                metrics::registry::FLOW_SPANS_DROPPED_EXPORT_FAILURE.inc();
-                                error!(
-                                    event.name = "channel.send_failed",
-                                    channel.name = "k8s_decorated_flow_span",
-                                    error.message = %e,
-                                    "failed to send flow span to export channel"
-                                );
+                            match k8s_decorated_flow_span_tx.send(span).await {
+                                Ok(_) => {
+                                    metrics::export::inc_export_flow_spans(ExportStatus::Queued);
+                                }
+                                Err(e) => {
+                                    metrics::export::inc_export_flow_spans(ExportStatus::Dropped);
+                                    error!(
+                                        event.name = "channel.send_failed",
+                                        channel.name = "k8s_decorated_flow_span",
+                                        error.message = %e,
+                                        "failed to send flow span to export channel"
+                                    );
+                                }
                             }
                         }
                     }
@@ -622,14 +638,21 @@ async fn run() -> Result<()> {
                     while let Some(flow_span) = flow_span_rx.recv().await {
                         trace!(event.name = "decorator.sending_to_exporter", flow.community_id = %flow_span.attributes.flow_community_id);
 
-                        if let Err(e) = k8s_decorated_flow_span_tx.send(flow_span).await {
-                            metrics::registry::FLOW_SPANS_DROPPED_EXPORT_FAILURE.inc();
-                            error!(
-                                event.name = "channel.send_failed",
-                                channel.name = "k8s_decorated_flow_span",
-                                error.message = %e,
-                                "failed to send flow span to export channel"
-                            );
+                        match k8s_decorated_flow_span_tx.send(flow_span).await {
+                            Ok(_) => {
+                                metrics::export::inc_export_flow_spans(ExportStatus::Queued);
+                                metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Undecorated);
+                            }
+                            Err(e) => {
+                                metrics::export::inc_export_flow_spans(ExportStatus::Dropped);
+                                metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Dropped);
+                                error!(
+                                    event.name = "channel.send_failed",
+                                    channel.name = "k8s_decorated_flow_span",
+                                    error.message = %e,
+                                    "failed to send flow span to export channel"
+                                );
+                            }
                         }
                     }
                 }
@@ -663,6 +686,9 @@ async fn run() -> Result<()> {
     task_manager.spawn("exporter", async move {
         while let Some(flow_span) = k8s_decorated_flow_span_rx.recv().await {
             let flow_span_clone = flow_span.clone();
+            let queue_size = k8s_decorated_flow_span_rx.len();
+            metrics::userspace::set_channel_size(ChannelName::ExporterInput, queue_size);
+            // Note: EXPORT_QUEUED is tracked when span is sent from decorator, not when received here
             let traceable: TraceableRecord = Arc::new(flow_span);
             trace!(event.name = "flow.exporting", "exporting flow span");
 

@@ -1,58 +1,88 @@
-//! Userspace metrics helper functions.
-//!
-//! This module provides convenient functions for updating userspace-related metrics
-//! such as ring buffer statistics and channel capacity/size tracking.
+//! Helper functions for userspace ring buffer and channel metrics.
 
 use crate::metrics::registry;
 
-/// Set the capacity of an internal channel.
-///
-/// # Arguments
-/// * `channel` - The name of the channel (e.g., "packet_worker", "exporter")
-/// * `capacity` - The capacity of the channel
-pub fn set_channel_capacity(channel: &str, capacity: usize) {
-    registry::USERSPACE_CHANNEL_CAPACITY
-        .with_label_values(&[channel])
-        .set(capacity as i64);
+/// Type of packet in the ring buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PacketType {
+    Received,
+    Filtered,
 }
 
-/// Set the current size (number of items) in an internal channel.
-///
-/// # Arguments
-/// * `channel` - The name of the channel (e.g., "decorator_input", "exporter_input")
-/// * `size` - The current number of items in the channel
-pub fn set_channel_size(channel: &str, size: usize) {
-    registry::USERSPACE_CHANNEL_SIZE
-        .with_label_values(&[channel])
-        .set(size as i64);
+impl AsRef<str> for PacketType {
+    fn as_ref(&self) -> &str {
+        match self {
+            PacketType::Received => "received",
+            PacketType::Filtered => "filtered",
+        }
+    }
 }
 
-/// Increment the ring buffer packet counter.
-///
-/// # Arguments
-/// * `typ` - The type of packet event (e.g., "received", "filtered", "dropped")
-/// * `count` - The number of packets to increment by
-pub fn inc_ringbuf_packets(typ: &str, count: u64) {
+/// Channel name for metrics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelName {
+    PacketWorker,
+    Exporter,
+    DecoratorInput,
+    ExporterInput,
+}
+
+impl AsRef<str> for ChannelName {
+    fn as_ref(&self) -> &str {
+        match self {
+            ChannelName::PacketWorker => "packet_worker",
+            ChannelName::Exporter => "exporter",
+            ChannelName::DecoratorInput => "decorator_input",
+            ChannelName::ExporterInput => "exporter_input",
+        }
+    }
+}
+
+/// Channel send operation status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelSendStatus {
+    Success,
+    Error,
+}
+
+impl AsRef<str> for ChannelSendStatus {
+    fn as_ref(&self) -> &str {
+        match self {
+            ChannelSendStatus::Success => "success",
+            ChannelSendStatus::Error => "error",
+        }
+    }
+}
+
+/// Increment the ring buffer packets counter.
+pub fn inc_ringbuf_packets(packet_type: PacketType, count: u64) {
     registry::USERSPACE_RINGBUF_PACKETS
-        .with_label_values(&[typ])
+        .with_label_values(&[packet_type.as_ref()])
         .inc_by(count);
 }
 
-/// Increment the ring buffer byte counter.
-///
-/// # Arguments
-/// * `bytes` - The number of bytes to increment by
+/// Increment the ring buffer bytes counter.
 pub fn inc_ringbuf_bytes(bytes: u64) {
     registry::USERSPACE_RINGBUF_BYTES.inc_by(bytes);
 }
 
-/// Increment the channel send counter.
-///
-/// # Arguments
-/// * `channel` - The name of the channel (e.g., "packet_worker", "exporter")
-/// * `status` - The status of the send operation (e.g., "success", "error")
-pub fn inc_channel_sends(channel: &str, status: &str) {
+/// Set the capacity of a channel.
+pub fn set_channel_capacity(channel: ChannelName, capacity: usize) {
+    registry::USERSPACE_CHANNEL_CAPACITY
+        .with_label_values(&[channel.as_ref()])
+        .set(capacity as i64);
+}
+
+/// Set the current size of a channel.
+pub fn set_channel_size(channel: ChannelName, size: usize) {
+    registry::USERSPACE_CHANNEL_SIZE
+        .with_label_values(&[channel.as_ref()])
+        .set(size as i64);
+}
+
+/// Increment the channel send operations counter.
+pub fn inc_channel_sends(channel: ChannelName, status: ChannelSendStatus) {
     registry::USERSPACE_CHANNEL_SENDS
-        .with_label_values(&[channel, status])
+        .with_label_values(&[channel.as_ref(), status.as_ref()])
         .inc();
 }
