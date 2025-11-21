@@ -1,5 +1,5 @@
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::{debug, error};
 
 /// A simple manager to track spawned Tokio tasks with descriptive names.
 pub struct TaskManager {
@@ -24,11 +24,11 @@ impl TaskManager {
     /// Waits for all tracked tasks to complete.
     pub async fn wait_for_all(self) {
         for (name, handle) in self.tasks {
-            info!(event.name = "task.waiting", task.name = %name, "waiting for task to complete");
+            debug!(event.name = "task.waiting", task.name = %name, "waiting for task to complete");
 
             match handle.await {
                 Ok(()) => {
-                    info!(event.name = "task.completed", task.name = %name, "task completed successfully");
+                    debug!(event.name = "task.completed", task.name = %name, "task completed successfully");
                 }
                 Err(e) => {
                     error!(

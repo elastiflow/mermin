@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use tokio::sync::broadcast;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::{
     iface::{self, types::ControllerCommand},
@@ -42,7 +42,7 @@ impl ShutdownManager {
         let _ = cmd_tx.send(ControllerCommand::Shutdown);
         let _ = netlink_shutdown_fd.signal();
 
-        info!(
+        debug!(
             event.name = "application.shutdown.waiting_on_decorator",
             "waiting for k8s decorator thread to finish..."
         );
@@ -50,13 +50,13 @@ impl ShutdownManager {
             error!(event.name = "os_thread.join_error", task.name = "k8s-decorator", error.message = ?e);
         }
 
-        info!(
+        debug!(
             event.name = "application.shutdown.waiting_on_tokio_tasks",
             "waiting for main data plane tasks to finish..."
         );
         task_manager.wait_for_all().await;
 
-        info!(
+        debug!(
             event.name = "application.shutdown.waiting_on_os_threads",
             "waiting for control plane and helper OS threads to finish..."
         );

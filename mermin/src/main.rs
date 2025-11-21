@@ -193,7 +193,7 @@ async fn run() -> Result<()> {
                         info!(event.name = "api.shutdown_signal_received", "api server received shutdown signal");
                     }
                 }
-                info!(event.name = "api.server_exited", "api server has shut down");
+                debug!(event.name = "api.server_exited", "api server has shut down");
             });
         });
         os_thread_handles.push(("api-server".to_string(), api_handle));
@@ -576,41 +576,39 @@ async fn run() -> Result<()> {
                             break;
                         },
                         maybe_span = flow_span_rx.recv() => {
-                            if let Some(flow_span) = maybe_span {
-                                metrics::userspace::set_channel_size("decorator_input", flow_span_rx.len());
-                                let timer = metrics::registry::PROCESSING_LATENCY
+                            let Some(flow_span) = maybe_span else { break };
+
+                            metrics::userspace::set_channel_size("decorator_input", flow_span_rx.len());
+
+                            let timer = metrics::registry::PROCESSING_LATENCY
                                 .with_label_values(&["k8s_decoration"])
                                 .start_timer();
-                                let (span, err) = decorator.decorate_or_fallback(flow_span).await;
-                                timer.observe_duration();
+                            let (span, err) = decorator.decorate_or_fallback(flow_span).await;
+                            timer.observe_duration();
 
-                                if let Some(e) = &err {
-                                    debug!(
-                                        event.name = "k8s.decorator.failed",
-                                        flow.community_id = %span.attributes.flow_community_id,
-                                        error.message = %e,
-                                        "failed to decorate flow attributes with kubernetes metadata, sending undecorated span"
-                                    );
-                                } else {
-                                    trace!(
-                                        event.name = "k8s.decorator.decorated",
-                                        flow.community_id = %span.attributes.flow_community_id,
-                                        "successfully decorated flow attributes with kubernetes metadata"
-                                    );
-                                }
+                            match err {
+                                Some(e) => debug!(
+                                    event.name = "k8s.decorator.failed",
+                                    flow.community_id = %span.attributes.flow_community_id,
+                                    error.message = %e,
+                                    "failed to decorate flow attributes with kubernetes metadata, sending undecorated span"
+                                ),
+                                None => trace!(
+                                    event.name = "k8s.decorator.decorated",
+                                    flow.community_id = %span.attributes.flow_community_id,
+                                    "successfully decorated flow attributes with kubernetes metadata"
+                                ),
+                            }
 
-                                if let Err(e) = k8s_decorated_flow_span_tx.send(span).await {
-                                    metrics::registry::FLOW_SPANS_DROPPED_EXPORT_FAILURE.inc();
-                                    error!(
-                                        event.name = "channel.send_failed",
-                                        channel.name = "k8s_decorated_flow_span",
-                                        error.message = %e,
-                                        "failed to send flow span to export channel"
-                                    );
-                                }
-                            } else {
-                                break;
-                            };
+                            if let Err(e) = k8s_decorated_flow_span_tx.send(span).await {
+                                metrics::registry::FLOW_SPANS_DROPPED_EXPORT_FAILURE.inc();
+                                error!(
+                                    event.name = "channel.send_failed",
+                                    channel.name = "k8s_decorated_flow_span",
+                                    error.message = %e,
+                                    "failed to send flow span to export channel"
+                                );
+                            }
                         }
                     }
                 },
@@ -672,7 +670,6 @@ async fn run() -> Result<()> {
 
             trace!(event.name = "exporter.received_from_decorator", flow.community_id = %community_id);
 
-
             if tokio::time::timeout(Duration::from_secs(10), exporter.export(traceable)).await.is_err() {
                 warn!(event.name = "flow.export_timeout", "export call timed out, span may be lost");
             } else {
@@ -680,7 +677,7 @@ async fn run() -> Result<()> {
             }
         }
 
-        info!(
+        trace!(
             event.name = "task.exited",
             task.name = "exporter",
             "exporter task exited because its channel was closed, flushing remaining spans via provider shutdown."
@@ -693,7 +690,7 @@ async fn run() -> Result<()> {
                 "OpenTelemetry provider failed to shut down cleanly during exit."
             );
         } else {
-            info!(
+            debug!(
                 event.name = "exporter.otlp_shutdown_success",
                 "OpenTelemetry provider shut down cleanly."
             );

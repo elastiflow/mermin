@@ -251,7 +251,6 @@ impl FlowSpanProducer {
                 shutdown_rx: poller_shutdown_rx,
             };
 
-            // Spawn a task that calls the poller's run method
             let poller_handle = tokio::spawn(async move {
                 poller.run().await;
             });
@@ -282,7 +281,7 @@ impl FlowSpanProducer {
         loop {
             tokio::select! {
             _ = shutdown_rx.recv() => {
-                info!(
+                trace!(
                     event.name = "task.stopped",
                     task.name = "span.producer",
                     "userspace task stopping gracefully"
@@ -376,13 +375,12 @@ impl FlowSpanProducer {
             }
         }
 
-        info!(
+        trace!(
             event.name = "shutdown.cleanup",
             task.name = "span.producer",
             "shutting down workers and pollers"
         );
 
-        // Dropping the senders signals the FlowWorkers to shut down their `recv()` loops.
         drop(worker_channels);
 
         // Wait for all spawned background tasks (workers, pollers, scanner) to finish concurrently.
@@ -898,9 +896,9 @@ impl FlowPoller {
         loop {
             tokio::select! {
                 _ = self.shutdown_rx.recv() => {
-                    info!(event.name = "task.shutdown", task.name = "flow_poller", poller.id = self.id, "shutdown signal received");
+                    trace!(event.name = "task.shutdown", task.name = "flow_poller", poller.id = self.id, "shutdown signal received");
 
-                    info!(event.name = "flow_poller.final_flush", poller.id = self.id, "performing final flush of remaining flows");
+                    debug!(event.name = "flow_poller.final_flush", poller.id = self.id, "performing final flush of remaining flows");
 
                     let mut flows_to_flush = Vec::new();
                     for entry in self.flow_store.iter() {
@@ -910,7 +908,7 @@ impl FlowPoller {
                         }
                     }
 
-                    info!(
+                    trace!(
                         event.name = "flow_poller.final_flush.start",
                         poller.id = self.id,
                         flow.count = flows_to_flush.len(),
@@ -927,7 +925,7 @@ impl FlowPoller {
                         .await;
                     }
 
-                    info!(event.name = "flow_poller.final_flush.complete", poller.id = self.id, "final flush completed.");
+                    trace!(event.name = "flow_poller.final_flush.complete", poller.id = self.id, "final flush completed.");
 
                     break;
                 },
