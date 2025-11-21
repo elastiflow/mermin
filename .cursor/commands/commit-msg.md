@@ -9,11 +9,24 @@ Analyze the currently staged git changes and generate a concise, descriptive com
    - What functionality was added, modified, or removed
    - Bug fixes or refactoring that was done
    - Any configuration or structural changes
-3. Generate a commit message that:
-   - Uses imperative mood (e.g., "Fix", "Add", "Refactor", not "Fixed", "Added")
-   - Has a clear, concise subject line (50-72 characters)
-   - Optionally includes bullet points for multiple significant changes
-   - Groups related changes together logically
+3. Generate a commit message using **Conventional Commits format**:
+   - Format: `<type>: <description>`
+   - Use one of these types:
+     - `feat`: new feature
+     - `fix`: bug fix
+     - `docs`: documentation changes
+     - `style`: formatting, missing semicolons, etc.
+     - `refactor`: code restructuring without changing behavior
+     - `perf`: performance improvements
+     - `test`: adding or updating tests
+     - `build`: build system or dependency changes
+     - `ci`: CI/CD pipeline changes
+     - `chore`: other changes (tooling, configs, etc.)
+   - **Title must be entirely lowercase** (e.g., "feat: add user authentication")
+   - Use imperative mood in description (e.g., "add", "fix", "update", not "added", "fixed")
+   - Keep the subject line under 72 characters
+   - Optionally add a body with bullet points for multiple significant changes
+   - Group related changes together logically
 4. Provide both a single-line version and a detailed version (if needed)
 
 ## Output Format
