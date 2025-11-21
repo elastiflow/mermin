@@ -5,8 +5,10 @@ use opentelemetry::trace::{
     SpanContext, SpanId, SpanKind, TraceContextExt, TraceFlags, TraceId, TraceState, Tracer,
     TracerProvider,
 };
-use opentelemetry_sdk::trace::{IdGenerator, SdkTracerProvider};
-use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::{
+    error::OTelSdkResult,
+    trace::{IdGenerator, SdkTracerProvider},
+};
 use tracing::trace;
 
 use crate::metrics::export::{inc_spans_exported, observe_export_latency};

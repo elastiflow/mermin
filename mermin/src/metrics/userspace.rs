@@ -45,3 +45,14 @@ pub fn inc_ringbuf_packets(typ: &str, count: u64) {
 pub fn inc_ringbuf_bytes(bytes: u64) {
     registry::USERSPACE_RINGBUF_BYTES.inc_by(bytes);
 }
+
+/// Increment the channel send counter.
+///
+/// # Arguments
+/// * `channel` - The name of the channel (e.g., "packet_worker", "exporter")
+/// * `status` - The status of the send operation (e.g., "success", "error")
+pub fn inc_channel_sends(channel: &str, status: &str) {
+    registry::USERSPACE_CHANNEL_SENDS
+        .with_label_values(&[channel, status])
+        .inc();
+}

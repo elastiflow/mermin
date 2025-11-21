@@ -279,7 +279,7 @@ impl FlowSpanProducer {
                 flow_span_tx: poller_span_tx,
                 max_record_interval,
                 poll_interval,
-				poller_trace_id_cache,
+                trace_id_cache: poller_trace_id_cache,
                 shutdown_rx: poller_shutdown_rx,
             };
 
@@ -908,6 +908,7 @@ struct FlowPoller {
     flow_store: FlowStore,
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     flow_span_tx: mpsc::Sender<FlowSpan>,
+    trace_id_cache: TraceIdCache,
     max_record_interval: Duration,
     poll_interval: Duration,
     shutdown_rx: broadcast::Receiver<()>,
@@ -956,6 +957,7 @@ impl FlowPoller {
                             &self.flow_store,
                             &self.flow_stats_map,
                             &self.flow_span_tx,
+                            &self.trace_id_cache,
                         )
                         .await;
                     }
@@ -1074,6 +1076,7 @@ impl FlowPoller {
                         &self.flow_store,
                         &self.flow_stats_map,
                         &self.flow_span_tx,
+                        &self.trace_id_cache,
                     )
                     .await;
                 }
@@ -1533,193 +1536,6 @@ async fn timeout_and_remove_flow(
         .as_deref()
         .unwrap_or("unknown");
     metrics::flow::inc_flows_expired(iface_name, "timeout");
-}
-
-/// Individual poller task - handles flows hashed to this poller.
-/// Polls at configured interval to check for record intervals and timeouts.
-#[allow(clippy::too_many_arguments)]
-async fn flow_poller_task(
-    poller_id: usize,
-    num_pollers: usize,
-    flow_store: FlowStore,
-    flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
-    flow_span_tx: mpsc::Sender<FlowSpan>,
-    max_record_interval: Duration,
-    poll_interval: Duration,
-    trace_id_cache: TraceIdCache,
-) {
-    let mut interval = tokio::time::interval(poll_interval);
-
-    debug!(
-        event.name = "flow_poller.started",
-        poller.id = poller_id,
-        poller.total = num_pollers,
-        "flow poller started"
-    );
-
-    let mut iteration_count = 0u64;
-    let mut last_stats_log = std::time::Instant::now();
-
-    loop {
-        interval.tick().await;
-
-        let tick_start = std::time::Instant::now();
-        let now = std::time::SystemTime::now();
-        let mut flows_to_remove = Vec::new();
-        let mut flows_checked = 0usize;
-        let mut flows_recorded = 0usize;
-        let mut flows_skipped_partition = 0usize;
-
-        trace!(
-            event.name = "flow_poller.tick_start",
-            poller.id = poller_id,
-            iteration.count = iteration_count + 1,
-            "poller tick started"
-        );
-
-        // Collect flows to process - CRITICAL: Must collect IDs first, then drop iterator
-        // before calling record_flow/timeout_and_remove_flow to avoid iterator deadlock
-        let mut flows_to_record = Vec::new();
-
-        let collection_start = std::time::Instant::now();
-        for entry in flow_store.iter() {
-            let community_id = entry.key();
-
-            // Partition: only process flows hashed to this poller
-            if hash_string(community_id) % num_pollers != poller_id {
-                flows_skipped_partition += 1;
-                continue;
-            }
-
-            // Extract all needed data from entry
-            let flow_span = &entry.flow_span;
-            let last_recorded_time = flow_span.last_recorded_time;
-            let last_activity_time = flow_span.last_activity_time;
-            let timeout_duration = flow_span.timeout_duration;
-
-            flows_checked += 1;
-
-            // Check if record interval elapsed
-            if let Ok(elapsed) = now.duration_since(last_recorded_time)
-                && elapsed >= max_record_interval
-            {
-                flows_to_record.push(community_id.clone());
-            }
-
-            // Check if timeout elapsed
-            if let Ok(elapsed) = now.duration_since(last_activity_time)
-                && elapsed >= timeout_duration
-            {
-                flows_to_remove.push(community_id.clone());
-            }
-        } // Iterator dropped here - no longer holding DashMap locks
-        let collection_duration = collection_start.elapsed();
-
-        trace!(
-            event.name = "flow_poller.collection_phase",
-            poller.id = poller_id,
-            flows.total_checked = flows_checked,
-            flows.to_record = flows_to_record.len(),
-            flows.to_timeout = flows_to_remove.len(),
-            collection.duration_ms = collection_duration.as_millis(),
-            "collection phase completed"
-        );
-
-        // Now process flows WITHOUT holding iterator locks
-        let record_start = std::time::Instant::now();
-        for community_id in &flows_to_record {
-            flows_recorded += 1;
-            trace!(
-                event.name = "flow_poller.recording",
-                poller.id = poller_id,
-                flow.community_id = %community_id,
-                "calling record_flow"
-            );
-            if !record_flow(community_id, &flow_store, &flow_stats_map, &flow_span_tx).await {
-                // Export channel closed, stop poller
-                warn!(
-                    event.name = "flow_poller.stopped",
-                    poller.id = poller_id,
-                    reason = "export_channel_closed",
-                    "flow poller stopping due to closed export channel"
-                );
-                return;
-            }
-        }
-        let record_duration = record_start.elapsed();
-
-        if !flows_to_record.is_empty() {
-            trace!(
-                event.name = "flow_poller.record_phase",
-                poller.id = poller_id,
-                flows.recorded = flows_to_record.len(),
-                record.duration_ms = record_duration.as_millis(),
-                "record phase completed"
-            );
-        }
-
-        // Remove timed out flows
-        let timeout_start = std::time::Instant::now();
-        for community_id in flows_to_remove.iter() {
-            trace!(
-                event.name = "flow_poller.timing_out",
-                poller.id = poller_id,
-                flow.community_id = %community_id,
-                "calling timeout_and_remove_flow"
-            );
-            timeout_and_remove_flow(
-                community_id.clone(),
-                &flow_store,
-                &flow_stats_map,
-                &flow_span_tx,
-                &trace_id_cache,
-            )
-            .await;
-        }
-        let timeout_duration_elapsed = timeout_start.elapsed();
-
-        if !flows_to_remove.is_empty() {
-            trace!(
-                event.name = "flow_poller.timeout_phase",
-                poller.id = poller_id,
-                flows.timed_out = flows_to_remove.len(),
-                timeout.duration_ms = timeout_duration_elapsed.as_millis(),
-                "timeout phase completed"
-            );
-        }
-
-        let tick_duration = tick_start.elapsed();
-        iteration_count += 1;
-
-        if last_stats_log.elapsed() >= Duration::from_secs(30) {
-            info!(
-                event.name = "flow_poller.stats",
-                poller.id = poller_id,
-                iteration.count = iteration_count,
-                flows.checked = flows_checked,
-                flows.recorded = flows_recorded,
-                flows.timed_out = flows_to_remove.len(),
-                flows.skipped_partition = flows_skipped_partition,
-                tick.duration_ms = tick_duration.as_millis(),
-                collection.duration_ms = collection_duration.as_millis(),
-                record.duration_ms = record_duration.as_millis(),
-                timeout.duration_ms = timeout_duration_elapsed.as_millis(),
-                "flow poller iteration stats"
-            );
-            last_stats_log = std::time::Instant::now();
-        }
-
-        // Warn if iteration took > 500ms (should complete much faster)
-        if tick_duration.as_millis() > 500 {
-            warn!(
-                event.name = "flow_poller.slow_iteration",
-                poller.id = poller_id,
-                tick.duration_ms = tick_duration.as_millis(),
-                flows.checked = flows_checked,
-                "flow poller iteration took longer than expected"
-            );
-        }
-    }
 }
 
 /// Periodic orphan scanner task - safety net for cleaning up stale eBPF entries.
