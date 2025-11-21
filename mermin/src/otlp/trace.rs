@@ -134,7 +134,7 @@ impl TraceableExporter for TraceExporterAdapter {
 
         // Metrics: Span exported successfully
         observe_export_latency(start.elapsed());
-        inc_export_flow_spans(crate::metrics::labels::EXPORT_OK);
+        inc_export_flow_spans(crate::metrics::export::ExportStatus::Ok);
 
         trace!(
             event.name = "span.exported",

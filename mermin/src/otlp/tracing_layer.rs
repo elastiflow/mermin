@@ -3,7 +3,7 @@
 use tracing::{Event, Level, Subscriber};
 use tracing_subscriber::{Layer, layer::Context, registry::LookupSpan};
 
-use crate::metrics::export::inc_export_flow_spans;
+use crate::metrics::export::{ExportStatus, inc_export_flow_spans};
 
 pub struct OtelErrorLayer;
 
@@ -21,11 +21,8 @@ where
 
         let target = metadata.target();
 
-        if target.starts_with("opentelemetry_sdk")
-            || target.starts_with("opentelemetry_otlp")
-            || target.starts_with("opentelemetry::")
-        {
-            inc_export_flow_spans(crate::metrics::labels::EXPORT_ERROR);
+        if target.starts_with("opentelemetry") {
+            inc_export_flow_spans(ExportStatus::Error);
         }
     }
 }

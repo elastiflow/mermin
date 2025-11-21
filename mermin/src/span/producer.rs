@@ -24,7 +24,12 @@ use tracing::{debug, error, info, trace, warn};
 use crate::{
     filter::source::PacketFilter,
     ip::{Error, flow_key_to_ip_addrs},
-    metrics::{self, labels},
+    metrics::{
+        self,
+        export::ExportStatus,
+        flow::{FlowEventResult, FlowSpanProducerStatus, FlowStatsStatus},
+        userspace::{ChannelName, ChannelSendStatus, PacketType},
+    },
     packet::{
         parser::{is_tunnel, parse_packet_from_offset},
         types::ParsedPacket,
@@ -185,10 +190,7 @@ impl FlowSpanProducer {
             let (worker_tx, worker_rx) = mpsc::channel(worker_capacity);
             worker_channels.push(worker_tx);
 
-            metrics::userspace::set_channel_capacity(
-                labels::CHANNEL_PACKET_WORKER,
-                worker_capacity,
-            );
+            metrics::userspace::set_channel_capacity(ChannelName::PacketWorker, worker_capacity);
 
             let flow_worker = FlowWorker::new(
                 worker_id,
@@ -332,6 +334,7 @@ impl FlowSpanProducer {
                                 error.message = %e,
                                 "error waiting for ring buffer readability"
                             );
+                            metrics::flow::inc_flow_events(FlowEventResult::DroppedError);
                             break;
                         }
                     };
@@ -344,8 +347,9 @@ impl FlowSpanProducer {
                         let flow_event: FlowEvent =
                             unsafe { std::ptr::read_unaligned(item.as_ptr() as *const FlowEvent) };
 
-                        metrics::userspace::inc_ringbuf_packets(labels::PACKET_RECEIVED, 1);
+                        metrics::userspace::inc_ringbuf_packets(PacketType::Received, 1);
                         metrics::userspace::inc_ringbuf_bytes(flow_event.snaplen as u64);
+                        metrics::flow::inc_flow_events(FlowEventResult::Received);
 
                         let mut sent = false;
                         for attempt in 0..worker_count {
@@ -354,7 +358,7 @@ impl FlowSpanProducer {
 
                             match worker_tx.try_send(flow_event) {
                                 Ok(_) => {
-                                    metrics::userspace::inc_channel_sends(labels::CHANNEL_PACKET_WORKER, labels::SEND_SUCCESS);
+                                    metrics::userspace::inc_channel_sends(ChannelName::PacketWorker, ChannelSendStatus::Success);
                                     worker_index = (current_worker + 1) % worker_count;
                                     sent = true;
                                     break;
@@ -365,7 +369,7 @@ impl FlowSpanProducer {
                                 }
                                 Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
                                     // Worker is gone, try next one
-                                    metrics::userspace::inc_channel_sends(labels::CHANNEL_PACKET_WORKER, labels::SEND_ERROR);
+                                    metrics::userspace::inc_channel_sends(ChannelName::PacketWorker, ChannelSendStatus::Error);
                                     continue;
                                 }
                             }
@@ -375,7 +379,7 @@ impl FlowSpanProducer {
                             // All workers are full - drop event to prevent ring buffer backup
                             // CRITICAL: Blocking here prevents draining ring buffer, causing eBPF to drop MORE events
                             // This is a fail-safe to maintain pipeline throughput under extreme load.
-                            metrics::flow::inc_flow_events(labels::EVENT_DROPPED_BACKPRESSURE);
+                            metrics::flow::inc_flow_events(FlowEventResult::DroppedBackpressure);
 
                             // Log detailed backpressure info every 1000 drops (avoid log spam)
                             static BACKPRESSURE_DROP_COUNT: std::sync::atomic::AtomicU64 =
@@ -500,7 +504,7 @@ impl FlowWorker {
 
         while let Some(flow_event) = self.flow_event_rx.recv().await {
             metrics::userspace::set_channel_size(
-                labels::CHANNEL_PACKET_WORKER,
+                ChannelName::PacketWorker,
                 self.flow_event_rx.len(),
             );
 
@@ -578,14 +582,14 @@ impl FlowWorker {
             let map = self.flow_stats_map.lock().await;
             match map.get(&event.flow_key, 0) {
                 Ok(s) => {
-                    metrics::flow::inc_flow_stats_map_access(labels::MAP_ACCESS_OK);
+                    metrics::flow::inc_flow_stats_map_access(FlowStatsStatus::Ok);
                     s
                 }
                 Err(e) => {
                     if e.to_string().contains("not found") {
-                        metrics::flow::inc_flow_stats_map_access(labels::MAP_ACCESS_NOT_FOUND);
+                        metrics::flow::inc_flow_stats_map_access(FlowStatsStatus::NotFound);
                     } else {
-                        metrics::flow::inc_flow_stats_map_access(labels::MAP_ACCESS_ERROR);
+                        metrics::flow::inc_flow_stats_map_access(FlowStatsStatus::Error);
                     }
                     return Err(Error::FlowNotFound);
                 }
@@ -595,14 +599,14 @@ impl FlowWorker {
         // Early flow filtering: Check if this flow should be tracked
         // If filtered out, immediately remove from eBPF map to prevent memory leaks
         if !self.should_process_flow(&event.flow_key, &stats) {
-            metrics::userspace::inc_ringbuf_packets(labels::PACKET_FILTERED, 1);
+            metrics::userspace::inc_ringbuf_packets(PacketType::Filtered, 1);
 
             let iface_name = if let Some(entry) = self.iface_map.get(&stats.ifindex) {
                 entry.value().clone()
             } else {
                 "unknown".to_string()
             };
-            metrics::flow::inc_producer_flow_spans(&iface_name, labels::SPAN_DROPPED);
+            metrics::flow::inc_producer_flow_spans(&iface_name, FlowSpanProducerStatus::Dropped);
 
             let mut map = self.flow_stats_map.lock().await;
             if let Err(e) = map.remove(&event.flow_key) {
@@ -644,7 +648,6 @@ impl FlowWorker {
         // The entry is now managed by flow_store and will be cleaned up by timeout task
         guard.keep();
 
-        // Track successful flow span processing
         metrics::span::inc_flow_spans_processed();
 
         Ok(())
@@ -874,9 +877,9 @@ impl FlowWorker {
 
         self.insert_flow(community_id.to_string(), span, timeout);
 
-        // Track flow span creation
         let interface_name = iface_name.as_deref().unwrap_or("unknown");
-        metrics::flow::inc_producer_flow_spans(interface_name, labels::SPAN_CREATED);
+        metrics::flow::inc_producer_flow_spans(interface_name, FlowSpanProducerStatus::Created);
+        metrics::flow::inc_producer_flow_spans(interface_name, FlowSpanProducerStatus::Active);
 
         trace!(
             event.name = "span.producer.created_flow",
@@ -1278,14 +1281,14 @@ async fn record_flow(
     }
     let stats = match map.get(&flow_key, 0) {
         Ok(s) => {
-            metrics::flow::inc_flow_stats_map_access(labels::MAP_ACCESS_OK);
+            metrics::flow::inc_flow_stats_map_access(FlowStatsStatus::Ok);
             s
         }
         Err(e) => {
             if e.to_string().contains("not found") {
-                metrics::flow::inc_flow_stats_map_access(labels::MAP_ACCESS_NOT_FOUND);
+                metrics::flow::inc_flow_stats_map_access(FlowStatsStatus::NotFound);
             } else {
-                metrics::flow::inc_flow_stats_map_access(labels::MAP_ACCESS_ERROR);
+                metrics::flow::inc_flow_stats_map_access(FlowStatsStatus::Error);
             }
             warn!(
                 event.name = "record.ebpf_read_failed",
@@ -1336,13 +1339,12 @@ async fn record_flow(
     flow_span.end_time = end_time;
     flow_span.last_activity_time = end_time;
 
-    // Track flow span recorded
     let interface_name = flow_span
         .attributes
         .network_interface_name
         .as_deref()
         .unwrap_or("unknown");
-    metrics::flow::inc_producer_flow_spans(interface_name, labels::SPAN_RECORDED);
+    metrics::flow::inc_producer_flow_spans(interface_name, FlowSpanProducerStatus::Recorded);
 
     // Update IP metadata from eBPF stats
     let is_ip_flow = stats.ether_type == EtherType::Ipv4 || stats.ether_type == EtherType::Ipv6;
@@ -1406,7 +1408,7 @@ async fn record_flow(
     match flow_span_tx.try_send(recorded_span) {
         Ok(_) => {}
         Err(mpsc::error::TrySendError::Full(_)) => {
-            metrics::export::inc_export_flow_spans(labels::EXPORT_DROPPED);
+            metrics::export::inc_export_flow_spans(ExportStatus::Dropped);
             debug!(
                 event.name = "span.dropped",
                 flow.community_id = %community_id,
@@ -1506,15 +1508,15 @@ async fn timeout_and_remove_flow(
 
         match map.get(&key, 0) {
             Ok(stats) => {
-                metrics::flow::inc_flow_stats_map_access(labels::MAP_ACCESS_OK);
+                metrics::flow::inc_flow_stats_map_access(FlowStatsStatus::Ok);
                 let end_time_nanos = stats.last_seen_ns + boot_time_offset;
                 flow_span.end_time = UNIX_EPOCH + Duration::from_nanos(end_time_nanos);
             }
             Err(e) => {
                 if e.to_string().contains("not found") {
-                    metrics::flow::inc_flow_stats_map_access(labels::MAP_ACCESS_NOT_FOUND);
+                    metrics::flow::inc_flow_stats_map_access(FlowStatsStatus::NotFound);
                 } else {
-                    metrics::flow::inc_flow_stats_map_access(labels::MAP_ACCESS_ERROR);
+                    metrics::flow::inc_flow_stats_map_access(FlowStatsStatus::Error);
                 }
             }
         }
@@ -1540,7 +1542,7 @@ async fn timeout_and_remove_flow(
         match flow_span_tx.try_send(recorded_span) {
             Ok(_) => {}
             Err(mpsc::error::TrySendError::Full(_)) => {
-                metrics::export::inc_export_flow_spans(labels::EXPORT_DROPPED);
+                metrics::export::inc_export_flow_spans(ExportStatus::Dropped);
                 debug!(
                     event.name = "span.dropped",
                     flow.community_id = %community_id,
@@ -1595,7 +1597,7 @@ async fn timeout_and_remove_flow(
         .network_interface_name
         .as_deref()
         .unwrap_or("unknown");
-    metrics::flow::inc_producer_flow_spans(iface_name, labels::SPAN_IDLED);
+    metrics::flow::inc_producer_flow_spans(iface_name, FlowSpanProducerStatus::Idled);
     metrics::flow::dec_flows_active(iface_name);
 }
 

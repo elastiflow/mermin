@@ -2,59 +2,87 @@
 
 use crate::metrics::registry;
 
+/// Type of packet in the ring buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PacketType {
+    Received,
+    Filtered,
+}
+
+impl AsRef<str> for PacketType {
+    fn as_ref(&self) -> &str {
+        match self {
+            PacketType::Received => "received",
+            PacketType::Filtered => "filtered",
+        }
+    }
+}
+
+/// Channel name for metrics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelName {
+    PacketWorker,
+    Exporter,
+    DecoratorInput,
+    ExporterInput,
+}
+
+impl AsRef<str> for ChannelName {
+    fn as_ref(&self) -> &str {
+        match self {
+            ChannelName::PacketWorker => "packet_worker",
+            ChannelName::Exporter => "exporter",
+            ChannelName::DecoratorInput => "decorator_input",
+            ChannelName::ExporterInput => "exporter_input",
+        }
+    }
+}
+
+/// Channel send operation status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelSendStatus {
+    Success,
+    Error,
+}
+
+impl AsRef<str> for ChannelSendStatus {
+    fn as_ref(&self) -> &str {
+        match self {
+            ChannelSendStatus::Success => "success",
+            ChannelSendStatus::Error => "error",
+        }
+    }
+}
+
 /// Increment the ring buffer packets counter.
-///
-/// ### Arguments:
-///
-/// - `packet_type` - Type of packet: "received" or "filtered"
-/// - `count` - Number of packets
-pub fn inc_ringbuf_packets(packet_type: &str, count: u64) {
+pub fn inc_ringbuf_packets(packet_type: PacketType, count: u64) {
     registry::USERSPACE_RINGBUF_PACKETS
-        .with_label_values(&[packet_type])
+        .with_label_values(&[packet_type.as_ref()])
         .inc_by(count);
 }
 
 /// Increment the ring buffer bytes counter.
-///
-/// ### Arguments:
-///
-/// - `bytes` - Number of bytes received
 pub fn inc_ringbuf_bytes(bytes: u64) {
     registry::USERSPACE_RINGBUF_BYTES.inc_by(bytes);
 }
 
 /// Set the capacity of a channel.
-///
-/// ### Arguments:
-///
-/// - `channel` - Channel name: "packet_worker" or "exporter"
-/// - `capacity` - Channel capacity
-pub fn set_channel_capacity(channel: &str, capacity: usize) {
+pub fn set_channel_capacity(channel: ChannelName, capacity: usize) {
     registry::USERSPACE_CHANNEL_CAPACITY
-        .with_label_values(&[channel])
+        .with_label_values(&[channel.as_ref()])
         .set(capacity as i64);
 }
 
 /// Set the current size of a channel.
-///
-/// ### Arguments:
-///
-/// - `channel` - Channel name: "packet_worker", "decorator_input", or "exporter_input"
-/// - `size` - Current number of items in channel
-pub fn set_channel_size(channel: &str, size: usize) {
+pub fn set_channel_size(channel: ChannelName, size: usize) {
     registry::USERSPACE_CHANNEL_SIZE
-        .with_label_values(&[channel])
+        .with_label_values(&[channel.as_ref()])
         .set(size as i64);
 }
 
 /// Increment the channel send operations counter.
-///
-/// ### Arguments:
-///
-/// - `channel` - Channel name: "packet_worker" or "exporter"
-/// - `status` - Send status: "success" or "error"
-pub fn inc_channel_sends(channel: &str, status: &str) {
+pub fn inc_channel_sends(channel: ChannelName, status: ChannelSendStatus) {
     registry::USERSPACE_CHANNEL_SENDS
-        .with_label_values(&[channel, status])
+        .with_label_values(&[channel.as_ref(), status.as_ref()])
         .inc();
 }
