@@ -53,8 +53,8 @@
 
 ## Contributor Guide
 
-* [Contributing to Mermin](contributor-guide/contributing.md)
+* [Contributing to Mermin](CONTRIBUTING.md)
 * [Development Workflow](contributor-guide/development-workflow.md)
 * [Debugging eBPF](contributor-guide/debugging-ebpf.md)
 * [Debugging Network](contributor-guide/debugging-network.md)
-* [Code of Conduct](contributor-guide/code-of-conduct.md)
+* [Code of Conduct](CODE_OF_CONDUCT.md)
