@@ -1,8 +1,8 @@
-use std::{sync::Arc, time::SystemTime};
+use std::{any::Any, sync::Arc, time::SystemTime};
 
 use async_trait::async_trait;
 use opentelemetry::trace::{SpanKind, Tracer, TracerProvider};
-use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::{error::OTelSdkResult, trace::SdkTracerProvider};
 use tracing::trace;
 
 use crate::metrics::export::{inc_spans_exported, observe_export_latency};
@@ -14,6 +14,13 @@ pub struct TraceExporterAdapter {
 impl TraceExporterAdapter {
     pub fn new(provider: SdkTracerProvider) -> Self {
         Self { provider }
+    }
+
+    /// Explicitly shutdown the OpenTelemetry provider with a timeout
+    pub fn shutdown(&self) -> OTelSdkResult {
+        // The OpenTelemetry SDK provider has a shutdown method that should be called
+        // to gracefully flush remaining spans and close connections
+        self.provider.shutdown()
     }
 }
 
@@ -63,6 +70,9 @@ pub trait Traceable {
 #[async_trait]
 pub trait TraceableExporter: Send + Sync {
     async fn export(&self, traceable_record: TraceableRecord);
+
+    /// Allow downcasting to concrete types for shutdown operations
+    fn as_any(&self) -> &dyn Any;
 }
 
 #[async_trait]
@@ -96,6 +106,10 @@ impl TraceableExporter for TraceExporterAdapter {
             "exported traceable record as span"
         );
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 #[derive(Default)]
@@ -109,5 +123,9 @@ impl TraceableExporter for NoOpExporterAdapter {
             reason = "no_op_exporter_configured",
             "skipping span export"
         );
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
