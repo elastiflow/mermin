@@ -119,7 +119,7 @@ If you encounter issues or have questions:
 
 - [**GitHub Issues**](https://github.com/elastiflow/mermin/issues): Report bugs or request features.
 - [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions and engage with the community.
-- [**Slack Channel**](https://elastiflowcommunity.slack.com/archives/C09MANJTSP3): Live chat with us or other beta users.
+- [**Slack Channel**](https://join.slack.com/t/elastiflowcommunity/shared_invite/zt-23jpnlw9g-Q4nKOwKKOE1N2MjfA2mXpg): Live chat with us or other beta users.
 - [**Troubleshooting Guide**](troubleshooting/troubleshooting.md): Check common issues and solutions.
 
 ## Next Steps

@@ -1,39 +1,28 @@
----
-hidden: true
----
-
 # Deployment Issues
 
-This guide helps resolve issues preventing Mermin pods from starting or running correctly.
+This guide will help you diagnose and resolve pod startup failures, eBPF loading errors, permission issues, and network interface configuration problems.
 
 ## Pod Not Starting
 
-### Symptom
+If your Mermin pods won't start, they're likely stuck in one of these states: `Pending`, `CrashLoopBackOff`, or `Error`. Let's figure out what's going on.
 
-Mermin pods stuck in `Pending`, `CrashLoopBackOff`, or `Error` state.
+### Check Pod Status
 
-### Diagnosis
-
-Check pod status:
+Start by gathering information about the pod:
 
 ```bash
 kubectl get pods -l app.kubernetes.io/name=mermin -n mermin
 kubectl describe pod mermin-xxxxx -n mermin
-```
-
-Check pod events:
-
-```bash
 kubectl get events -n mermin --field-selector involvedObject.name=mermin-xxxxx
 ```
 
-### Common Causes
+### Common Causes and Solutions
 
 #### 1. Insufficient Node Resources
 
-**Symptom**: Pod stuck in `Pending` state with event: `Insufficient cpu` or `Insufficient memory`
+If you see `Insufficient cpu` or `Insufficient memory` in the events, your nodes don't have enough resources available.
 
-**Solution**: Adjust resource requests or add more nodes:
+**Fix it by adjusting resource requests** in your Helm values:
 
 ```yaml
 # In values.yaml
@@ -46,17 +35,40 @@ resources:
     memory: 512Mi
 ```
 
+**Note**: The Helm chart doesn't set default resource limits to avoid scheduling issues. You should configure these based on your expected traffic volume and node capacity.
+
 #### 2. Pod Security Policy Restrictions
 
-**Symptom**: `Error: container has runAsNonRoot and image will run as root`
+Seeing `Error: container has runAsNonRoot and image will run as root`? This happens because Mermin needs privileged access to load eBPF programs, but your cluster's security policies are blocking it.
 
-**Solution**: Mermin requires privileged mode for eBPF. Ensure your PSP/PSS allows privileged containers or create an exception for Mermin's namespace.
+**The fix**: Configure your Pod Security Policy (PSP) or Pod Security Standards (PSS) to allow privileged containers in the Mermin namespace. This is safe because Mermin only uses these privileges for eBPF operations and network monitoring.
+
+The default Helm chart includes the necessary security context settings:
+
+```yaml
+# In charts/mermin/values.yaml
+securityContext:
+  privileged: true # Required for eBPF operations
+  readOnlyRootFilesystem: true
+  runAsNonRoot: false # Must run as root for eBPF
+  runAsUser: 0
+  runAsGroup: 0
+
+hostPID: true # Required to access host network namespace
+```
+
+If your cluster uses Pod Security Standards (PSS), you may need to label the namespace appropriately:
+
+```bash
+# For PSS "privileged" policy
+kubectl label namespace mermin pod-security.kubernetes.io/enforce=privileged
+```
 
 #### 3. Image Pull Failures
 
-**Symptom**: `ImagePullBackOff` or `ErrImagePull`
+Can't pull the Mermin image? You'll see `ImagePullBackOff` or `ErrImagePull` in the pod status.
 
-**Solution**:
+**Troubleshoot it with these commands**:
 
 ```bash
 # Check image pull status
@@ -64,454 +76,106 @@ kubectl describe pod mermin-xxxxx -n mermin | grep -A5 Events
 
 # Verify image exists
 docker pull ghcr.io/elastiflow/mermin:latest
-
-# Check image pull secrets if using private registry
-kubectl get secrets -n mermin
 ```
 
 ## eBPF Program Loading Failures
 
-### Symptom
+eBPF requires specific kernel features and permissions. If Mermin can't load its eBPF programs, you'll see errors like:
 
-Pod starts but logs show eBPF loading errors:
-
-```
+```text
 ERROR Failed to load eBPF program: Operation not permitted
 ```
 
-### Diagnosis
+### Check the Logs
 
-Check pod logs:
+Search the logs for eBPF-related errors:
 
 ```bash
 kubectl logs mermin-xxxxx -n mermin | grep -i ebpf
 ```
 
-### Common Causes
+### What's Going Wrong?
 
 #### 1. Missing Linux Capabilities
 
-**Symptom**: `Operation not permitted` when loading eBPF
+The most common issue! If you see `Operation not permitted`, Mermin doesn't have the Linux capabilities it needs.
 
-**Solution**: Verify privileged mode and capabilities in DaemonSet:
+**The Helm chart sets `privileged: true` by default**, which grants all necessary capabilities. This is the simplest and most reliable approach:
 
 ```yaml
+# In charts/mermin/values.yaml (default configuration)
 securityContext:
-  privileged: true
+  privileged: true    # Grants all required capabilities
+```
+
+**If you can't use privileged mode** (due to security policies), you can grant specific capabilities instead:
+
+```yaml
+# In charts/mermin/values.yaml (capability-based approach)
+securityContext:
+  privileged: false
   capabilities:
     add:
-      - NET_ADMIN    # TC attachment
-      - BPF          # eBPF operations (kernel 5.8+)
-      - PERFMON      # Ring buffers (kernel 5.8+)
-      - SYS_ADMIN    # Namespace switching and BPF filesystem access
-      - SYS_PTRACE   # Access process namespaces (/proc/1/ns/net)
-      - SYS_RESOURCE # memlock limits
+      - NET_ADMIN    # Attach TC programs to network interfaces
+      - BPF          # Load and manage eBPF programs (kernel 5.8+)
+      - PERFMON      # Performance monitoring and ring buffers (kernel 5.8+)
+      - SYS_ADMIN    # Network namespace switching and kernel operations
+      - SYS_PTRACE   # Access host network namespace via /proc/1/ns/net
+      - SYS_RESOURCE # Modify resource limits (e.g., memlock rlimit)
 ```
+
+**Note**: Using specific capabilities requires kernel 5.8+ for the `BPF` and `PERFMON` capabilities. On older kernels, `privileged: true` is required.
+
+**Also required**: `hostPID: true` to access the host network namespace:
+
+```yaml
+# In charts/mermin/values.yaml
+hostPID: true # Required to access /proc/1/ns/net (host network namespace)
+```
+
+Without `hostPID: true`, Mermin can't attach eBPF programs to host network interfaces.
 
 #### 2. Kernel Version Too Old
 
-**Symptom**: `Invalid argument` or `Function not implemented`
+Seeing `Invalid argument` or `Function not implemented`? Your kernel might be too old to support eBPF.
 
-**Requirements**: Linux kernel 4.9+ (5.4+ recommended)
-
-**Check kernel version**:
+**Check your kernel version**:
 
 ```bash
 kubectl debug node/worker-node -it --image=ubuntu -- uname -r
 ```
 
-**Solution**: Upgrade nodes to a newer kernel version.
+**Requirements**: For Mermin, you need Linux kernel 5.14 or newer (we recommend 6.6+). If your kernel is older, you'll need to upgrade your nodes to a supported version.
 
 #### 3. BTF (BPF Type Format) Not Available
 
-**Symptom**: `BTF is not supported`
+BTF provides type information for eBPF programs. If you see `BTF is not supported`, your kernel wasn't compiled with BTF enabled.
 
-**Check BTF availability**:
+**Check if BTF is available**:
 
 ```bash
 kubectl debug node/worker-node -it --image=ubuntu -- ls /sys/kernel/btf/vmlinux
 ```
 
-**Solution**: Use a kernel with BTF support or ensure BTF is enabled.
+If the file doesn't exist, you'll need to either enable BTF in your kernel configuration or switch to a kernel distribution that includes BTF support (most modern kernels do).
 
 #### 4. eBPF File System Not Mounted
 
-**Symptom**: `No such file or directory: /sys/fs/bpf`
+The BPF filesystem at `/sys/fs/bpf` is where Mermin pins its eBPF maps for state persistence. Without it, you'll see `No such file or directory: /sys/fs/bpf`.
 
-**Solution**: Ensure eBPF filesystem is mounted on nodes:
+**Quick fix on the host node**:
 
 ```bash
 mount -t bpf bpf /sys/fs/bpf
 ```
 
-For persistent mounting, add to `/etc/fstab`:
+To make this permanent across reboots, add it to `/etc/fstab`:
 
-```
+```text
 bpf /sys/fs/bpf bpf defaults 0 0
 ```
 
-#### 5. eBPF Verifier Rejection (Program Too Large)
-
-**Symptom**: Pod starts but eBPF program fails to load with:
-
-```
-BPF program is too large. Processed 1000001 insn
-verification time 3775231 usec
-stack depth 0+144+0+0+0+0+32 processed 1000001 insns (limit 1000000)
-```
-
-**Root Cause**: The eBPF verifier analyzes all possible execution paths in the program. Complex packet parsing with deep header nesting can exceed the verifier's instruction limit, even though the static program size is small.
-
-**Diagnosis**:
-
-Check pod logs for verifier errors:
-
-```bash
-kubectl logs mermin-xxxxx -n mermin | grep -A20 "BPF program is too large"
-```
-
-This typically occurs in:
-- K3s or other lightweight Kubernetes distributions
-- Older kernel versions (<5.8)
-- Complex networking with many encapsulation layers
-
-**Solution**:
-
-**Option 1 - Reduce parser depth** (most effective):
-
-```hcl
-parser {
-  max_header_depth = 5  # Default is 6, reduce to 4-5
-}
-```
-
-This limits how many nested protocol headers (e.g., Ethernet → IPv6 → UDP → VXLAN → Ethernet → IPv4 → TCP) the eBPF program will parse. Most Kubernetes environments work fine with depth 4-6.
-
-**Option 2 - Verify IPv6 options are disabled** (default, but confirm):
-
-```hcl
-parser {
-  # These should be false (default) unless specifically needed
-  parse_ipv6_hopopt = false
-  parse_ipv6_fragment = false
-  parse_ipv6_routing = false
-  parse_ipv6_dest_opts = false
-}
-```
-
-**Option 3 - Upgrade kernel** (if possible):
-
-Newer kernels (5.10+) have significantly improved verifier efficiency and higher instruction limits:
-
-```bash
-# Check current kernel version
-kubectl debug node/worker-node -it --image=ubuntu -- uname -r
-```
-
-**Validation**:
-
-After applying configuration changes and restarting:
-
-```bash
-# Pod should start successfully
-kubectl get pods -l app.kubernetes.io/name=mermin -n mermin
-
-# Check logs for successful eBPF load
-kubectl logs mermin-xxxxx -n mermin | grep -i "ebpf.*loaded\|configured ebpf"
-```
-
-**Environment-Specific Recommendations**:
-
-| Environment | Recommended `max_header_depth` | Notes |
-|-------------|-------------------------------|-------|
-| Standard K8s (Kind, cloud) | 6 (default) | Handles most scenarios |
-| K3s | 4-5 | Lightweight, may need reduced depth |
-| Edge/IoT | 4 | Minimal complexity |
-| Complex multi-tunnel | 7-8 | May require kernel 5.10+ |
-
-**Prevention**:
-
-Test eBPF loading in target environment during development:
-
-```bash
-# Deploy to test cluster first
-helm install mermin-test ./charts/mermin -n mermin-test --create-namespace
-
-# Verify eBPF loads successfully
-kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=mermin -n mermin-test --timeout=60s
-```
-
-See [Parser Configuration](../configuration/parser.md#ebpf-verifier-considerations) for detailed information on tuning parser settings.
-
-## Permission Errors
-
-### Symptom
-
-Logs show Kubernetes API permission errors:
-
-```
-ERROR Failed to list pods: pods is forbidden: User "system:serviceaccount:mermin:mermin" cannot list resource "pods"
-```
-
-### Solution
-
-Verify RBAC configuration:
-
-```bash
-# Check ServiceAccount
-kubectl get sa -n mermin
-
-# Check ClusterRole
-kubectl get clusterrole mermin
-
-# Check ClusterRoleBinding
-kubectl get clusterrolebinding mermin
-```
-
-Ensure Mermin has required permissions:
-
-```yaml
-rules:
-  - apiGroups: [""]
-    resources: ["pods", "services", "endpoints", "nodes"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["apps"]
-    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
-    verbs: ["get", "list", "watch"]
-```
-
-## CNI Conflicts
-
-### Symptom
-
-Mermin starts but cannot attach to network interfaces, or network connectivity issues occur.
-
-### Diagnosis
-
-Check which CNI you're using:
-
-```bash
-kubectl get pods -n kube-system | grep -i cni
-```
-
-### Solution
-
-Configure Mermin to monitor the correct interfaces for your CNI:
-
-**Cilium**:
-
-```hcl
-discovery "instrument" {
-  interfaces = ["eth*", "cilium_*"]
-}
-```
-
-**Calico**:
-
-```hcl
-discovery "instrument" {
-  interfaces = ["eth*", "cali*"]
-}
-```
-
-**Flannel**:
-
-```hcl
-discovery "instrument" {
-  interfaces = ["eth*", "cni*", "flannel*"]
-}
-```
-
-**GKE Dataplane V2 (Cilium)**:
-
-```hcl
-discovery "instrument" {
-  # Recommended configuration for Dataplane V2
-  interfaces = ["gke*", "cilium_*", "lxc*"]
-
-  # TC priority - runs after Cilium (priority 1-20)
-  tc_priority = 50  # Default, adjust if needed (range: 1-32767, < 30 warns)
-}
-```
-
-For more details and future updates, see [GKE with Dataplane V2](../deployment/cloud-platforms.md#gke-with-dataplane-v2-cilium).
-
-See [Advanced Scenarios](../deployment/advanced-scenarios.md#custom-cni-configurations) for more CNI-specific configurations.
-
-## Verifying TC Priority
-
-### Overview
-
-When running on kernels < 6.6 (using netlink-based TC attachment), Mermin uses configurable priority to control its position in the TC (Traffic Control) program execution chain. This verification helps ensure Mermin is attached correctly and won't conflict with other TC programs.
-
-### How to Check TC Priority
-
-To verify that Mermin is attached with the correct priority:
-
-```bash
-# Get a Mermin pod name
-MERMIN_POD=$(kubectl get pods -l app=mermin -o jsonpath='{.items[0].metadata.name}')
-
-# Check TC filters on an interface (replace gke0 with your interface name)
-kubectl exec -it $MERMIN_POD -- tc filter show dev gke0 ingress
-```
-
-**Expected output:**
-
-```
-filter protocol all pref 50 bpf chain 0
-filter protocol all pref 50 bpf chain 0 handle 0x1 mermin_ingress direct-action not_in_hw id 123 tag abc123def456
-```
-
-The `pref 50` value indicates Mermin's priority. Lower values run first (e.g., Cilium typically uses `pref 1`).
-
-### Understanding Priority Values
-
-- **Lower number = Higher priority = Runs earlier** in the TC chain
-- **Higher number = Lower priority = Runs later** in the TC chain
-
-**Common priority ranges:**
-
-| Program Type | Typical Priority | Purpose |
-|-------------|-----------------|---------|
-| CNI programs (Cilium, Calico) | 1-20 | Network policy enforcement, routing |
-| Observability tools (Mermin) | 50-100 | Passive monitoring, don't modify traffic |
-| Custom filters | 100+ | Application-specific filtering |
-
-### Adjusting TC Priority
-
-If you need to change Mermin's priority (default: 50):
-
-```hcl
-discovery "instrument" {
-  # Increase to run later (after more programs)
-  tc_priority = 100
-
-  # Or decrease to run earlier (minimum safe value: 30)
-  # tc_priority = 30
-
-  # Valid range: 1-32767
-  # Warning: Values < 30 may conflict with CNI programs
-}
-```
-
-### Troubleshooting Priority Conflicts
-
-**Default Behavior**: Mermin now runs first by default (`tc_priority = 1`, `tcx_order = "first"`) to prevent orphan program issues on restart. This ensures new mermin programs execute before any orphaned programs from previous instances.
-
-**Symptom**: Network connectivity issues after deploying Mermin (rare with default settings)
-
-**Potential causes:**
-1. Mermin running before critical CNI programs (default behavior prioritizes observability over CNI ordering)
-2. Multiple programs are using the same priority
-3. CNI is using non-standard priority values
-
-**Solutions:**
-
-1. **Check current priorities on all interfaces:**
-
-```bash
-# List all TC filters with priorities
-kubectl exec -it $MERMIN_POD -- sh -c 'for iface in $(ip -o link show | awk -F: "{print \$2}" | tr -d " "); do echo "=== $iface ==="; tc filter show dev $iface ingress 2>/dev/null; done'
-```
-
-2. **If CNI conflicts occur**, adjust Mermin's priority to run after CNI programs (netlink mode only):
-
-```hcl
-discovery "instrument" {
-  tc_priority = 100  # Run after most CNI programs (netlink mode, kernel < 6.6)
-}
-```
-
-3. **For TCX mode** (kernel >= 6.6), adjust ordering if needed:
-
-```hcl
-discovery "instrument" {
-  tcx_order = "last"  # Run after all programs (kernel >= 6.6)
-}
-```
-
-Check your kernel version:
-
-```bash
-kubectl exec -it $MERMIN_POD -- uname -r
-```
-
-If version is >= 6.6.0, you'll see log messages indicating TCX mode is active, and `tc_priority` is ignored.
-
-### Additional Notes
-
-- **New default**: `tc_priority = 1` and `tcx_order = "first"` for consistent first-execution
-- **TCX mode (kernel >= 6.6)**: Multiple programs can coexist without priority conflicts using link ordering
-- **Netlink mode (kernel < 6.6)**: Requires manual priority management
-- Priority only affects attachment order, not performance
-- Mermin operates passively (TC_ACT_UNSPEC), so running first rarely causes issues
-- First-execution prevents flow gaps after restart by ensuring new programs execute before orphans
-
-## Flow Gaps After Restart
-
-### Symptom
-
-After restarting mermin pods, no flow spans are generated for pods that existed before the restart. Only newly created pods show flows.
-
-### Cause
-
-This was caused by orphaned eBPF programs from previous mermin instances executing before new programs (in TCX mode with `tcx_order=last`). The orphaned programs referenced old maps, while new programs used new maps, causing a split-brain scenario where packets were processed by old programs with inaccessible map state.
-
-### Solution (Current Version)
-
-Starting in recent versions, mermin defaults to `tcx_order=first` and `tc_priority=1`, ensuring new programs execute before any orphans. Additionally, eBPF maps are now pinned with schema versioning for state continuity.
-
-**Default behavior includes:**
-
-- Map pinning to `/sys/fs/bpf/mermin_*_v1` (when `/sys/fs/bpf` is writable)
-- First-execution strategy (`tcx_order=first`, `tc_priority=1`)
-- Schema versioning for safe upgrades
-- Automatic format validation and reuse
-
-If you're experiencing this issue on older versions or custom configurations, update your configuration:
-
-```hcl
-discovery "instrument" {
-  tc_priority = 1      # Run first (netlink mode, kernel < 6.6)
-  tcx_order = "first"  # Run first (TCX mode, kernel >= 6.6)
-}
-```
-
-### Verification
-
-After deployment or restart, verify the configuration is working:
-
-```bash
-# 1. Check for orphaned programs (should be cleaned up or run after new programs)
-kubectl exec -it $MERMIN_POD -- tc filter show dev <interface> ingress
-
-# 2. Verify map pinning for state continuity
-kubectl exec -it $MERMIN_POD -- ls -la /sys/fs/bpf/mermin_*
-# You should see:
-#   mermin_flow_stats_map_v1
-#   mermin_flow_events_v1
-
-# 3. Check logs for map reuse on restart
-kubectl logs $MERMIN_POD | grep "ebpf.map_reused"
-# On restart, you should see messages about reusing pinned maps
-
-# 4. Verify flows appear for existing pods after restart
-# Deploy a test pod, restart mermin, verify flows continue immediately
-```
-
-### State Continuity Benefits
-
-With map pinning enabled:
-
-- **No data loss**: Flow statistics persist across restarts
-- **No visibility gaps**: Existing pods generate flows immediately after restart
-- **Seamless updates**: Rolling updates maintain continuous observability
-- **Safe upgrades**: Schema versioning prevents incompatible map reuse
-
-### Mounting /sys/fs/bpf
-
-For map pinning to work, ensure `/sys/fs/bpf` is mounted as a hostPath:
+**Better yet, configure it in Kubernetes**:
 
 ```yaml
 # In your Helm values or DaemonSet spec
@@ -527,35 +191,202 @@ volumes:
       type: DirectoryOrCreate
 ```
 
-If `/sys/fs/bpf` is not writable, mermin continues in best-effort mode (unpinned maps) with a warning logged.
+{% hint style="info" %}
+Without writable `/sys/fs/bpf`, Mermin runs in best-effort mode (unpinned maps). Flow state will not persist across pod restarts.
+{% endhint %}
+
+#### 5. eBPF Verifier Rejection (Program Too Large)
+
+The eBPF verifier has limits on program complexity. If your program exceeds these limits, you'll see `Verifier instruction limit exceeded`.
+
+For more detailed guidance on verifier errors, see [Common eBPF Errors](common-ebpf-errors.md).
+
+## Permission Errors
+
+If Mermin can't access Kubernetes resources, you'll see RBAC permission errors like:
+
+```text
+ERROR Failed to list pods: pods is forbidden: User "system:serviceaccount:mermin:mermin" cannot list resource "pods"
+```
+
+This means the service account doesn't have the necessary permissions.
+
+### Check Your RBAC Configuration
+
+```bash
+kubectl get sa -n mermin
+kubectl get clusterrole mermin
+kubectl get clusterrolebinding mermin
+```
+
+Make sure your ClusterRole has these permissions:
+
+```yaml
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints", "nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+```
+
+## CNI and Interface Configuration
+
+Not seeing the traffic you expect? This is often because Mermin isn't monitoring the right network interfaces for your CNI plugin.
+
+### Configure Interfaces for Your CNI
+
+Each CNI plugin creates different interface types. Here's what to use:
+
+- **Calico**: `interfaces = ["veth*", "cali*", "tunl*"]`
+- **Cilium**: `interfaces = ["veth*", "cilium_*", "lxc*"]`
+- **Flannel**: `interfaces = ["veth*", "flannel*"]`
+- **GKE Dataplane V2**: `interfaces = ["gke*", "cilium_*", "lxc*"]`
+
+Different interface types show different traffic - veth interfaces capture pod-to-pod traffic, while tunnel interfaces capture encapsulated traffic.
+
+**Want to learn more?** Check out these guides:
+
+- [Interface Visibility and Traffic Decapsulation](interface-visibility-and-traffic-decapsulation.md) - Understand what traffic each interface type captures
+- [Advanced Scenarios: Custom CNI Configurations](../deployment/advanced-scenarios.md#custom-cni-configurations) - Complex CNI setups
+
+## Understanding TC Priority
+
+TC (Traffic Control) priority determines the order in which eBPF programs execute in the networking stack. On older kernels (< 6.6), this is managed through netlink-based TC with numeric priorities. On newer kernels (>= 6.6), TCX mode uses explicit ordering.
+
+### Check What Priority Mermin is Using
+
+```bash
+# Get a Mermin pod name
+MERMIN_POD=$(kubectl get pods -l app=mermin -o jsonpath='{.items[0].metadata.name}')
+
+# Check TC filters on an interface (replace gke0 with your interface name)
+kubectl exec -it $MERMIN_POD -- tc filter show dev gke0 ingress
+```
+
+You should see output like this:
+
+```text
+filter protocol all pref 1 bpf chain 0
+filter protocol all pref 1 bpf chain 0 handle 0x1 mermin_ingress direct-action not_in_hw id 123 tag abc123def456
+```
+
+### How Priority Works
+
+Think of priority as a queue - lower numbers cut to the front of the line:
+
+- **Lower number = Higher priority = Runs earlier** in the TC chain
+- **Higher number = Lower priority = Runs later** in the TC chain
+
+**Mermin's default: Priority 1** - Mermin runs first to capture an unfiltered, unprocessed view of network packets.
+
+**The Priority Conflict**:
+
+Most CNI programs (Cilium, Calico) also default to priority 1 for early packet processing. This creates a conflict - only one program can use each priority value.
+
+**Resolving the Conflict**:
+
+Since Mermin uses `TC_ACT_UNSPEC` (pass-through), it observes packets without modifying or blocking them. Running Mermin at priority 1 provides the most accurate observability data.
+
+**If your CNI also uses priority 1**, you need to choose:
+
+1. **Recommended**: Keep Mermin at priority 1, adjust your CNI to priority 2+ (e.g., Cilium priority 2)
+2. **Alternative**: Move Mermin to a higher priority if you prefer CNI to run first (loses unfiltered view)
+
+{% hint style="warning" %}
+**Test any priority changes thoroughly!** Adjusting either Mermin's or your CNI's priority can affect network behavior differently depending on your CNI plugin. Validate in a non-production environment that flows are captured correctly and network connectivity works as expected.
+{% endhint %}
+
+**Why priority 1 matters for Mermin**:
+
+- Prevents flow gaps from orphaned programs after restarts
+- Provides the most complete and accurate network observability
+
+### Troubleshooting Priority Conflicts
+
+Priority conflicts are rare, but they can happen. You'll typically notice network connectivity issues if Mermin interferes with your CNI.
+
+**Common causes:**
+
+1. Mermin running before critical CNI programs that need to see traffic first
+2. Multiple programs using the same priority value
+3. Non-standard CNI priority configurations
+
+**Debug it step by step:**
+
+First, check what priorities are in use:
+
+```bash
+# List all TC filters with priorities
+kubectl exec -it $MERMIN_POD -- sh -c 'for iface in $(ip -o link show | awk -F: "{print \$2}" | tr -d " "); do echo "=== $iface ==="; tc filter show dev $iface ingress 2>/dev/null; done'
+```
+
+Then adjust based on your kernel version:
+
+**For older kernels (< 6.6) - netlink mode:**
+
+```hcl
+discovery "instrument" {
+  tc_priority = 100 # Run after most CNI programs
+}
+```
+
+**For newer kernels (>= 6.6) - TCX mode:**
+
+```hcl
+discovery "instrument" {
+  tcx_order = "last" # Run after all other programs
+}
+```
+
+{% hint style="warning" %}
+**Important**: Changing from the default priority/order settings can cause issues with some CNI plugins, including missing flows or network connectivity problems. Test thoroughly in a non-production environment first and verify that flows are being captured correctly for your specific CNI.
+{% endhint %}
+
+Not sure which kernel you're running?
+
+```bash
+kubectl exec -it $MERMIN_POD -- uname -r
+```
+
+If it's >= 6.6.0, you're using TCX mode (you'll also see this in the logs). In TCX mode, `tc_priority` is ignored in favor of `tcx_order`.
+
+**Quick reference:**
+
+- **TCX mode** (kernel >= 6.6): Programs are ordered explicitly using `tcx_order` (first/last)
+- **Netlink mode** (kernel < 6.6): Programs are ordered by numeric priority (lower = earlier)
+- Priority only affects execution order, not performance
+- Running first helps prevent flow gaps after restarts
 
 ## Configuration Syntax Errors
 
-### Symptom
+HCL syntax errors can be tricky to debug. If Mermin won't start and you see something like:
 
-Pod crashes immediately with configuration parsing error:
-
-```
+```text
 ERROR Failed to parse configuration: unexpected token at line 10
 ```
 
-### Solution
+Your configuration file has a syntax error.
 
-1. Validate HCL syntax:
+### Validate Your Configuration
+
+Use Terraform's formatter to check for syntax errors:
 
 ```bash
-# Use an HCL formatter/validator
 terraform fmt -check config.hcl
 ```
 
-2. Check for common syntax mistakes:
-   * Missing closing braces `}`
-   * Mismatched quotes
-   * Invalid key names (use underscores, not hyphens)
-3. Enable debug logging to see full config parsing output.
+### Common Mistakes to Watch For
 
-## Next Steps
+- **Missing closing braces** - Every `{` needs a matching `}`
+- **Mismatched quotes** - Use `"quotes"` consistently
+- **Invalid key names** - Use underscores (`tcp_priority`), not hyphens (`tcp-priority`)
 
-* [**No Flow Traces**](no-flows.md): If pods are running but not capturing flows
-* [**Performance Issues**](performance.md): If Mermin is using too many resources
-* [**Configuration Reference**](../configuration/configuration.md): Review configuration options
+## Related Documentation
+
+Want to dive deeper? These guides provide additional context:
+
+- [**Common eBPF Errors**](common-ebpf-errors.md) - Detailed eBPF verifier error diagnosis and solutions
+- [**Interface Visibility**](interface-visibility-and-traffic-decapsulation.md) - Understanding network traffic visibility at different layers
+- [**Configuration Reference**](../configuration/configuration.md) - Complete configuration options
