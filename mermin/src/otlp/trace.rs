@@ -1,8 +1,14 @@
 use std::{any::Any, sync::Arc, time::SystemTime};
 
 use async_trait::async_trait;
-use opentelemetry::trace::{SpanKind, Tracer, TracerProvider};
-use opentelemetry_sdk::{error::OTelSdkResult, trace::SdkTracerProvider};
+use opentelemetry::trace::{
+    SpanContext, SpanId, SpanKind, TraceContextExt, TraceFlags, TraceId, TraceState, Tracer,
+    TracerProvider,
+};
+use opentelemetry_sdk::{
+    error::OTelSdkResult,
+    trace::{IdGenerator, SdkTracerProvider},
+};
 use tracing::trace;
 
 use crate::metrics::export::{inc_spans_exported, observe_export_latency};
@@ -47,6 +53,13 @@ pub trait Traceable {
     /// returned, the exporter is expected to use a default or generic name.
     fn name(&self) -> Option<String>;
 
+    /// Returns a custom trace ID for this span, if available.
+    ///
+    /// If `Some(TraceId)` is returned, it will be used as the trace ID for this span,
+    /// enabling correlation of multiple spans under the same trace. If `None` is returned,
+    /// OpenTelemetry will generate a new random trace ID.
+    fn trace_id(&self) -> Option<TraceId>;
+
     /// Populates a pre-configured `Span` with the record's specific attributes.
     ///
     /// This is the core method where the implementing type is responsible for mapping
@@ -87,12 +100,35 @@ impl TraceableExporter for TraceExporterAdapter {
             "flow".to_string()
         };
 
-        let mut span = tracer
-            .span_builder(name.clone())
-            // TODO: Once SOURCE & DESTINATION are span kind are available, use them here
-            .with_kind(SpanKind::Internal)
-            .with_start_time(traceable.start_time())
-            .start(&tracer);
+        let mut span = if let Some(custom_trace_id) = traceable.trace_id() {
+            let span_id_bytes: [u8; 8] = opentelemetry_sdk::trace::RandomIdGenerator::default()
+                .new_span_id()
+                .to_bytes();
+            let span_id = SpanId::from_bytes(span_id_bytes);
+
+            let parent_span_context = SpanContext::new(
+                custom_trace_id,
+                span_id,
+                TraceFlags::SAMPLED,
+                true,
+                TraceState::default(),
+            );
+
+            let parent_cx =
+                opentelemetry::Context::current().with_remote_span_context(parent_span_context);
+
+            tracer
+                .span_builder(name.clone())
+                .with_kind(SpanKind::Internal)
+                .with_start_time(traceable.start_time())
+                .start_with_context(&tracer, &parent_cx)
+        } else {
+            tracer
+                .span_builder(name.clone())
+                .with_kind(SpanKind::Internal)
+                .with_start_time(traceable.start_time())
+                .start(&tracer)
+        };
         span = traceable.record(span);
         opentelemetry::trace::Span::end_with_timestamp(&mut span, traceable.end_time());
 

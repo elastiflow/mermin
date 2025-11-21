@@ -744,6 +744,7 @@ span {
   tcp_rst_timeout     = "5s"
   udp_timeout         = "60s"
   community_id_seed   = 0
+  trace_id_timeout = "24h"
 }
 
 # OTLP exporter configuration
