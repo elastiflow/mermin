@@ -43,7 +43,7 @@ Flow data provides **granular, connection-level detail that's lightweight enough
 
 The fastest way to get started with Mermin is to deploy it to a local Kubernetes cluster using our quickstart guide:
 
-**[📚 Follow the Complete Quickstart Guide](docs/getting-started/quickstart.md)**
+**[Follow the Complete Quickstart Guide](https://docs.mermin.dev/getting-started/quickstart)**
 
 Or deploy directly with Helm:
 
@@ -116,14 +116,16 @@ Comprehensive documentation is available in the `docs/` directory:
 **Troubleshooting**
 
 - [Troubleshooting Guide](docs/troubleshooting/troubleshooting.md) - Common issues and solutions
-- [No Flows?](docs/troubleshooting/no-flows.md) - Why aren't flows appearing?
-- [Performance Tuning](docs/troubleshooting/performance.md) - Optimize for your workload
+- [Deployment Issues](docs/troubleshooting/deployment-issues.md) - Pod startup and configuration problems
+- [Interface Visibility](docs/troubleshooting/interface-visibility-and-traffic-decapsulation.md) - Traffic capture and CNI configuration
+- [Common eBPF Errors](docs/troubleshooting/common-ebpf-errors.md) - Verifier failures and kernel compatibility
 
 **Development & Contributing**
 
-- [Contributor Guide](docs/development/contributor-guide.md) - Build, test, and contribute
-- [Debugging eBPF Programs](docs/development/debugging-ebpf.md) - eBPF debugging techniques
-- [Debugging Network Traffic](docs/development/debugging-network.md) - Wireshark and packet analysis
+- [Contributing Guide](docs/contributor-guide/contributing.md) - How to contribute to Mermin
+- [Development Workflow](docs/contributor-guide/development-workflow.md) - Build, test, and contribute
+- [Debugging eBPF Programs](docs/contributor-guide/debugging-ebpf.md) - eBPF debugging techniques
+- [Debugging Network Traffic](docs/contributor-guide/debugging-network.md) - Wireshark and packet analysis
 
 ## Contributing
 
@@ -134,12 +136,12 @@ We welcome contributions from the community! Whether you're fixing bugs, adding 
 - 🐛 **Report bugs** via [GitHub Issues](https://github.com/elastiflow/mermin/issues).
 - 💡 **Request features** or share ideas in [GitHub Discussions](https://github.com/elastiflow/mermin/discussions).
 - 📝 **Improve documentation** - PRs for doc improvements are always welcome.
-- 🔧 **Submit code** - See our [Contributor Guide](docs/development/contributor-guide.md) to get started.
+- 🔧 **Submit code** - See our [Development Workflow](docs/contributor-guide/development-workflow.md) to get started.
 - 💬 **Help others** - Answer questions in Discussions or Slack.
 
 **Getting Started as a Contributor:**
 
-1. **Read the [Contributor Guide](docs/development/contributor-guide.md)** - Learn how to build, test, and develop Mermin.
+1. **Read the [Development Workflow](docs/contributor-guide/development-workflow.md)** - Learn how to build, test, and develop Mermin.
 2. **Check out [Good First Issues](https://github.com/elastiflow/mermin/labels/good%20first%20issue)** - Find beginner-friendly tasks.
 3. **Join the conversation** - Connect with us on Slack or GitHub Discussions.
 
