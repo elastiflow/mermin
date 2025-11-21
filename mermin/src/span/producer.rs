@@ -7,7 +7,7 @@ use std::{
 use aya::maps::{HashMap as EbpfHashMap, RingBuf};
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
-use mermin_common::{FlowEvent, FlowKey, FlowStats, IpVersion};
+use mermin_common::{FlowEvent, FlowKey, FlowStats};
 use network_types::{
     eth::EtherType,
     ip::{IpDscp, IpEcn, IpProto},
@@ -61,40 +61,6 @@ use crate::{
 /// - Packet update vs. Timeout removal: Safe - packet finds flow missing, no-op
 /// - Record vs. Timeout: Safe - timeout waits for record to complete removal
 pub type FlowStore = Arc<DashMap<String, FlowEntry, FxBuildHasher>>;
-
-/// Validates a FlowEvent read from the ring buffer to detect corrupted or invalid data.
-///
-/// Returns `true` if the event is valid, `false` if it should be dropped.
-///
-/// ### Validation Checks
-///
-/// - IP version must be V4 or V6 (not Unknown)
-/// - Protocol must be a valid enum value
-/// - snaplen must be non-zero and reasonable (max 65535)
-/// - parsed_offset must not exceed snaplen
-/// - IP addresses must not be all zeros (invalid state)
-fn is_valid_flow_event(event: &FlowEvent) -> bool {
-    match event.flow_key.ip_version {
-        IpVersion::V4 | IpVersion::V6 => {}
-        IpVersion::Unknown => return false,
-    }
-
-    if event.snaplen == 0 {
-        return false;
-    }
-
-    if event.parsed_offset > event.snaplen {
-        return false;
-    }
-
-    let src_all_zero = event.flow_key.src_ip.iter().all(|&b| b == 0);
-    let dst_all_zero = event.flow_key.dst_ip.iter().all(|&b| b == 0);
-    if src_all_zero && dst_all_zero {
-        return false;
-    }
-
-    true
-}
 
 /// Entry in the flow map containing the flow span.
 /// Polling tasks will handle record intervals and timeouts.
@@ -378,7 +344,7 @@ impl FlowSpanProducer {
                         let flow_event: FlowEvent =
                             unsafe { std::ptr::read_unaligned(item.as_ptr() as *const FlowEvent) };
 
-                        metrics::userspace::inc_ringbuf_packets("received", 1);
+                        metrics::userspace::inc_ringbuf_packets(labels::PACKET_RECEIVED, 1);
                         metrics::userspace::inc_ringbuf_bytes(flow_event.snaplen as u64);
 
                         let mut sent = false;
@@ -388,7 +354,7 @@ impl FlowSpanProducer {
 
                             match worker_tx.try_send(flow_event) {
                                 Ok(_) => {
-                                    metrics::userspace::inc_channel_sends("packet_worker", "success");
+                                    metrics::userspace::inc_channel_sends(labels::CHANNEL_PACKET_WORKER, labels::SEND_SUCCESS);
                                     worker_index = (current_worker + 1) % worker_count;
                                     sent = true;
                                     break;
@@ -399,7 +365,7 @@ impl FlowSpanProducer {
                                 }
                                 Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
                                     // Worker is gone, try next one
-                                    metrics::userspace::inc_channel_sends("packet_worker", "error");
+                                    metrics::userspace::inc_channel_sends(labels::CHANNEL_PACKET_WORKER, labels::SEND_ERROR);
                                     continue;
                                 }
                             }
@@ -409,7 +375,7 @@ impl FlowSpanProducer {
                             // All workers are full - drop event to prevent ring buffer backup
                             // CRITICAL: Blocking here prevents draining ring buffer, causing eBPF to drop MORE events
                             // This is a fail-safe to maintain pipeline throughput under extreme load.
-                            metrics::registry::FLOW_EVENTS_DROPPED_BACKPRESSURE.inc();
+                            metrics::flow::inc_flow_events(labels::EVENT_DROPPED_BACKPRESSURE);
 
                             // Log detailed backpressure info every 1000 drops (avoid log spam)
                             static BACKPRESSURE_DROP_COUNT: std::sync::atomic::AtomicU64 =
@@ -1631,197 +1597,6 @@ async fn timeout_and_remove_flow(
         .unwrap_or("unknown");
     metrics::flow::inc_producer_flow_spans(interface_name, labels::SPAN_IDLED);
     metrics::flow::dec_flows_active(interface_name);
-}
-
-/// Individual poller task - handles flows hashed to this poller.
-/// Polls at configured interval to check for record intervals and timeouts.
-async fn flow_poller_task(
-    poller_id: usize,
-    num_pollers: usize,
-    flow_store: FlowStore,
-    flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
-    flow_span_tx: mpsc::Sender<FlowSpan>,
-    max_record_interval: Duration,
-    poll_interval: Duration,
-) {
-    let mut interval = tokio::time::interval(poll_interval);
-
-    debug!(
-        event.name = "flow_poller.started",
-        poller.id = poller_id,
-        poller.total = num_pollers,
-        "flow poller started"
-    );
-
-    let mut iteration_count = 0u64;
-    let mut last_stats_log = std::time::Instant::now();
-
-    loop {
-        interval.tick().await;
-
-        let tick_start = std::time::Instant::now();
-        let now = std::time::SystemTime::now();
-        let mut flows_to_remove = Vec::new();
-        let mut flows_checked = 0usize;
-        let mut flows_recorded = 0usize;
-        let mut flows_skipped_partition = 0usize;
-
-        trace!(
-            event.name = "flow_poller.tick_start",
-            poller.id = poller_id,
-            iteration.count = iteration_count + 1,
-            "poller tick started"
-        );
-
-        // Collect flows to process - CRITICAL: Must collect IDs first, then drop iterator
-        // before calling record_flow/timeout_and_remove_flow to avoid iterator deadlock
-        let mut flows_to_record = Vec::new();
-
-        let collection_start = std::time::Instant::now();
-        for entry in flow_store.iter() {
-            let community_id = entry.key();
-
-            // Partition: only process flows hashed to this poller
-            if hash_string(community_id) % num_pollers != poller_id {
-                flows_skipped_partition += 1;
-                continue;
-            }
-
-            // Extract all needed data from entry
-            let flow_span = &entry.flow_span;
-            let last_recorded_time = flow_span.last_recorded_time;
-            let last_activity_time = flow_span.last_activity_time;
-            let timeout_duration = flow_span.timeout_duration;
-
-            flows_checked += 1;
-
-            // Check if record interval elapsed
-            if let Ok(elapsed) = now.duration_since(last_recorded_time)
-                && elapsed >= max_record_interval
-            {
-                flows_to_record.push(community_id.clone());
-            }
-
-            // Check if timeout elapsed
-            if let Ok(elapsed) = now.duration_since(last_activity_time)
-                && elapsed >= timeout_duration
-            {
-                flows_to_remove.push(community_id.clone());
-            }
-        } // Iterator dropped here - no longer holding DashMap locks
-        let collection_duration = collection_start.elapsed();
-
-        // Update metrics: track flow store size for this poller's partition
-        metrics::span::set_flow_store_size(poller_id, flows_checked);
-        metrics::span::set_flow_poller_queue_size(
-            poller_id,
-            flows_to_record.len() + flows_to_remove.len(),
-        );
-
-        trace!(
-            event.name = "flow_poller.collection_phase",
-            poller.id = poller_id,
-            flows.total_checked = flows_checked,
-            flows.to_record = flows_to_record.len(),
-            flows.to_timeout = flows_to_remove.len(),
-            collection.duration_ms = collection_duration.as_millis(),
-            "collection phase completed"
-        );
-
-        // Now process flows WITHOUT holding iterator locks
-        let record_start = std::time::Instant::now();
-        for community_id in &flows_to_record {
-            flows_recorded += 1;
-            trace!(
-                event.name = "flow_poller.recording",
-                poller.id = poller_id,
-                flow.community_id = %community_id,
-                "calling record_flow"
-            );
-            if !record_flow(community_id, &flow_store, &flow_stats_map, &flow_span_tx).await {
-                // Export channel closed, stop poller
-                warn!(
-                    event.name = "flow_poller.stopped",
-                    poller.id = poller_id,
-                    reason = "export_channel_closed",
-                    "flow poller stopping due to closed export channel"
-                );
-                return;
-            }
-        }
-        let record_duration = record_start.elapsed();
-
-        if !flows_to_record.is_empty() {
-            trace!(
-                event.name = "flow_poller.record_phase",
-                poller.id = poller_id,
-                flows.recorded = flows_to_record.len(),
-                record.duration_ms = record_duration.as_millis(),
-                "record phase completed"
-            );
-        }
-
-        // Remove timed out flows
-        let timeout_start = std::time::Instant::now();
-        for community_id in flows_to_remove.iter() {
-            trace!(
-                event.name = "flow_poller.timing_out",
-                poller.id = poller_id,
-                flow.community_id = %community_id,
-                "calling timeout_and_remove_flow"
-            );
-            timeout_and_remove_flow(
-                community_id.clone(),
-                &flow_store,
-                &flow_stats_map,
-                &flow_span_tx,
-            )
-            .await;
-        }
-        let timeout_duration_elapsed = timeout_start.elapsed();
-
-        if !flows_to_remove.is_empty() {
-            trace!(
-                event.name = "flow_poller.timeout_phase",
-                poller.id = poller_id,
-                flows.timed_out = flows_to_remove.len(),
-                timeout.duration_ms = timeout_duration_elapsed.as_millis(),
-                "timeout phase completed"
-            );
-        }
-
-        let tick_duration = tick_start.elapsed();
-        iteration_count += 1;
-
-        if last_stats_log.elapsed() >= Duration::from_secs(30) {
-            debug!(
-                event.name = "flow_poller.stats",
-                poller.id = poller_id,
-                iteration.count = iteration_count,
-                flows.checked = flows_checked,
-                flows.recorded = flows_recorded,
-                flows.timed_out = flows_to_remove.len(),
-                flows.skipped_partition = flows_skipped_partition,
-                tick.duration_ms = tick_duration.as_millis(),
-                collection.duration_ms = collection_duration.as_millis(),
-                record.duration_ms = record_duration.as_millis(),
-                timeout.duration_ms = timeout_duration_elapsed.as_millis(),
-                "flow poller iteration stats"
-            );
-            last_stats_log = std::time::Instant::now();
-        }
-
-        // Warn if iteration took > 500ms (should complete much faster)
-        if tick_duration.as_millis() > 500 {
-            warn!(
-                event.name = "flow_poller.slow_iteration",
-                poller.id = poller_id,
-                tick.duration_ms = tick_duration.as_millis(),
-                flows.checked = flows_checked,
-                "flow poller iteration took longer than expected"
-            );
-        }
-    }
 }
 
 /// Periodic orphan scanner task - safety net for cleaning up stale eBPF entries.

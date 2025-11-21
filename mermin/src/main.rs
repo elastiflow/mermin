@@ -602,14 +602,20 @@ async fn run() -> Result<()> {
                                 ),
                             }
 
-                            if let Err(e) = k8s_decorated_flow_span_tx.send(span).await {
-                                metrics::registry::FLOW_SPANS_DROPPED_EXPORT_FAILURE.inc();
-                                error!(
-                                    event.name = "channel.send_failed",
-                                    channel.name = "k8s_decorated_flow_span",
-                                    error.message = %e,
-                                    "failed to send flow span to export channel"
-                                );
+                            match k8s_decorated_flow_span_tx.send(span).await {
+                                Ok(_) => {
+                                    // Track successful send to export channel
+                                    metrics::export::inc_export_flow_spans(metrics::labels::EXPORT_QUEUED);
+                                }
+                                Err(e) => {
+                                    metrics::export::inc_export_flow_spans(metrics::labels::EXPORT_DROPPED);
+                                    error!(
+                                        event.name = "channel.send_failed",
+                                        channel.name = "k8s_decorated_flow_span",
+                                        error.message = %e,
+                                        "failed to send flow span to export channel"
+                                    );
+                                }
                             }
                         }
                     }
@@ -624,19 +630,22 @@ async fn run() -> Result<()> {
                     while let Some(flow_span) = flow_span_rx.recv().await {
                         trace!(event.name = "decorator.sending_to_exporter", flow.community_id = %flow_span.attributes.flow_community_id);
 
-                        if let Err(e) = k8s_decorated_flow_span_tx.send(flow_span).await {
-                            metrics::k8s::inc_k8s_decorator_flow_spans("dropped");
-                            error!(
-                                event.name = "channel.send_failed",
-                                channel.name = "k8s_decorated_flow_span",
-                                error.message = %e,
-                                "failed to send flow span to export channel"
-                            );
-                                
-                                
+                        match k8s_decorated_flow_span_tx.send(flow_span).await {
+                            Ok(_) => {
+                                // Track successful send to export channel
+                                metrics::export::inc_export_flow_spans(metrics::labels::EXPORT_QUEUED);
+                                metrics::k8s::inc_k8s_decorator_flow_spans("undecorated");
+                            }
+                            Err(e) => {
+                                metrics::k8s::inc_k8s_decorator_flow_spans("dropped");
+                                error!(
+                                    event.name = "channel.send_failed",
+                                    channel.name = "k8s_decorated_flow_span",
+                                    error.message = %e,
+                                    "failed to send flow span to export channel"
+                                );
+                            }
                         }
-						metrics::span::inc_flow_spans_sent_to_exporter();
-						metrics::k8s::inc_k8s_decorator_flow_spans("undecorated");
                     }
                 }
             }
@@ -671,7 +680,7 @@ async fn run() -> Result<()> {
             let flow_span_clone = flow_span.clone();
             let queue_size = k8s_decorated_flow_span_rx.len();
             metrics::userspace::set_channel_size("exporter_input", queue_size);
-            metrics::export::inc_export_flow_spans(metrics::labels::EXPORT_QUEUED);
+            // Note: EXPORT_QUEUED is tracked when span is sent from decorator, not when received here
             let traceable: TraceableRecord = Arc::new(flow_span);
             trace!(event.name = "flow.exporting", "exporting flow span");
 

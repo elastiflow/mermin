@@ -15,15 +15,6 @@ pub fn inc_export_flow_spans(status: &str) {
         .inc();
 }
 
-/// Increment the spans exported counter.
-///
-/// ### Arguments
-///
-/// - `count` - Number of spans successfully exported
-pub fn inc_spans_exported(count: u64) {
-    registry::SPANS_EXPORTED.inc_by(count);
-}
-
 /// Record export operation latency.
 ///
 /// ### Arguments

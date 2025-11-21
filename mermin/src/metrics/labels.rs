@@ -1,9 +1,7 @@
 //! Constants for metric labels.
 
 // Flow Event Status
-pub const EVENT_RECEIVED: &str = "received";
 pub const EVENT_DROPPED_BACKPRESSURE: &str = "dropped_backpressure";
-pub const EVENT_DROPPED_ERROR: &str = "dropped_error";
 
 // Flow Span Status
 pub const SPAN_CREATED: &str = "created";

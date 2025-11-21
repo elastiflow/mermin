@@ -69,7 +69,7 @@ lazy_static! {
     pub static ref USERSPACE_RINGBUF_PACKETS: IntCounterVec = IntCounterVec::new(
         Opts::new("ringbuf_packets_total", "Total number of packets in the userspace ring buffer")
             .namespace("mermin"),
-        &["type"]  // received, dropped, filtered
+        &["type"]  // received, filtered
     ).expect("failed to create ringbuf_packets metric");
 
     pub static ref USERSPACE_RINGBUF_BYTES: IntCounter = IntCounter::with_opts(
@@ -104,10 +104,6 @@ lazy_static! {
             .namespace("mermin")
     ).expect("failed to create flow_spans_processed_total metric");
 
-    pub static ref FLOW_SPANS_SENT_TO_EXPORTER_TOTAL: IntCounter = IntCounter::with_opts(
-        Opts::new("flow_spans_sent_to_exporter_total", "Total number of flow spans sent to export channel")
-            .namespace("mermin")
-    ).expect("failed to create flow_spans_sent_to_exporter_total metric");
 
     pub static ref FLOW_STORE_SIZE: IntGaugeVec = IntGaugeVec::new(
         Opts::new("flow_span_store_size", "Current number of flows in flow_store")
@@ -237,10 +233,6 @@ lazy_static! {
     ).expect("failed to create export_flow_spans_total metric");
 
 
-    pub static ref SPANS_EXPORTED: IntCounter = IntCounter::with_opts(
-        Opts::new("export_spans_total", "Total number of flow spans successfully exported")
-            .namespace("mermin")
-    ).expect("failed to create spans_exported metric");
 
     pub static ref SPANS_EXPORT_ERRORS: IntCounterVec = IntCounterVec::new(
         Opts::new("export_errors_total", "Total number of span export errors")
@@ -343,7 +335,6 @@ pub fn init_registry() -> Result<(), prometheus::Error> {
     // Flow metrics
     REGISTRY.register(Box::new(FLOW_EVENTS_TOTAL.clone()))?;
     REGISTRY.register(Box::new(FLOW_SPANS_PROCESSED_TOTAL.clone()))?;
-    REGISTRY.register(Box::new(FLOW_SPANS_SENT_TO_EXPORTER_TOTAL.clone()))?;
     REGISTRY.register(Box::new(FLOW_STORE_SIZE.clone()))?;
     REGISTRY.register(Box::new(FLOW_POLLER_QUEUE_SIZE.clone()))?;
     REGISTRY.register(Box::new(FLOW_EVENTS_SAMPLED.clone()))?;
@@ -360,7 +351,6 @@ pub fn init_registry() -> Result<(), prometheus::Error> {
 
     // Export metrics
     REGISTRY.register(Box::new(EXPORT_FLOW_SPANS_TOTAL.clone()))?;
-    REGISTRY.register(Box::new(SPANS_EXPORTED.clone()))?;
     REGISTRY.register(Box::new(SPANS_EXPORT_ERRORS.clone()))?;
     REGISTRY.register(Box::new(EXPORT_BATCH_SIZE.clone()))?;
     REGISTRY.register(Box::new(EXPORT_LATENCY.clone()))?;
