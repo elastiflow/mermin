@@ -57,6 +57,11 @@ lazy_static! {
         &["interface", "direction"]
     ).expect("failed to create tc_programs_detached metric");
 
+    pub static ref BPF_FS_WRITABLE: prometheus::IntGauge = prometheus::IntGauge::with_opts(
+        Opts::new("ebpf_bpf_fs_writable", "Whether /sys/fs/bpf is writable for TCX link pinning (1 = writable, 0 = not writable)")
+            .namespace("mermin")
+    ).expect("failed to create bpf_fs_writable metric");
+
     // ============================================================================
     // Userspace Ring Buffer Metrics (subsystem: userspace)
     // ============================================================================
@@ -64,7 +69,7 @@ lazy_static! {
     pub static ref USERSPACE_RINGBUF_PACKETS: IntCounterVec = IntCounterVec::new(
         Opts::new("ringbuf_packets_total", "Total number of packets in the userspace ring buffer")
             .namespace("mermin"),
-        &["type"]  // received, dropped, filtered
+        &["type"]  // received, filtered
     ).expect("failed to create ringbuf_packets metric");
 
     pub static ref USERSPACE_RINGBUF_BYTES: IntCounter = IntCounter::with_opts(
@@ -94,10 +99,31 @@ lazy_static! {
     // Flow Span Lifecycle Metrics (subsystem: span)
     // ============================================================================
 
-    pub static ref FLOW_EVENTS_DROPPED_BACKPRESSURE: IntCounter = IntCounter::with_opts(
-        Opts::new("flow_events_dropped_backpressure_total", "Flow events dropped due to worker channel backpressure")
+    pub static ref FLOW_SPANS_PROCESSED_TOTAL: IntCounter = IntCounter::with_opts(
+        Opts::new("flow_spans_processed_total", "Total number of flow spans processed by FlowWorker")
             .namespace("mermin")
-    ).expect("failed to create flow_events_dropped_backpressure metric");
+    ).expect("failed to create flow_spans_processed_total metric");
+
+
+    pub static ref FLOW_STORE_SIZE: IntGaugeVec = IntGaugeVec::new(
+        Opts::new("flow_span_store_size", "Current number of flows in flow_store")
+            .namespace("mermin"),
+        &["poller_id"]  // Track per poller for sharded architecture
+    ).expect("failed to create flow_span_store_size metric");
+
+    pub static ref FLOW_POLLER_QUEUE_SIZE: IntGaugeVec = IntGaugeVec::new(
+        Opts::new("producer_queue_size", "Current number of flows queued for processing per poller")
+            .namespace("mermin"),
+        &["poller_id"]  // Track per poller
+    ).expect("failed to create producer_queue_size metric");
+
+    /// Total number of flow events processed by ring buffer stage.
+    /// Labels: type = "received" | "dropped_backpressure" | "dropped_error"
+    pub static ref FLOW_EVENTS_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("flow_events_total", "Total number of flow events processed by ring buffer stage")
+            .namespace("mermin"),
+        &["type"]
+    ).expect("failed to create flow_events_total metric");
 
     // TODO: Implement adaptive sampling in ring buffer consumer (mermin-ebpf/src/main.rs)
     // This metric tracks intentional drops when worker channels are full to prevent complete stalls.
@@ -152,12 +178,6 @@ lazy_static! {
         &["stage"]
     ).expect("failed to create processing_latency metric");
 
-    /// Total number of flow spans dropped due to export channel full.
-    pub static ref FLOW_SPANS_DROPPED_EXPORT_FAILURE: IntCounter = IntCounter::with_opts(
-        Opts::new("flow_spans_dropped_export_failure_total", "Flow spans dropped due to export channel full")
-            .namespace("mermin")
-    ).expect("failed to create flow_spans_dropped_export_failure metric");
-
     /// Total number of export operations that timed out.
     pub static ref EXPORT_TIMEOUTS: IntCounter = IntCounter::with_opts(
         Opts::new("export_timeouts_total", "Total number of export operations that timed out")
@@ -178,11 +198,21 @@ lazy_static! {
         &["interface"]
     ).expect("failed to create flows_created metric");
 
-    pub static ref FLOWS_EXPIRED: IntCounterVec = IntCounterVec::new(
-        Opts::new("flow_spans_expired_total", "Total number of flow spans expired")
+    /// Total number of flow spans processed by producer workers.
+    /// Labels: interface = interface name, status = "created" | "active" | "recorded" | "idled" | "dropped"
+    pub static ref PRODUCER_FLOW_SPANS_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("producer_flow_spans_total", "Total number of flow spans processed by producer workers")
             .namespace("mermin"),
-        &["reason"]  // timeout, recorded, error, guard_cleanup
-    ).expect("failed to create flows_expired metric");
+        &["interface", "status"]
+    ).expect("failed to create producer_flow_spans_total metric");
+
+    /// Total number of eBPF flow stats map access operations.
+    /// Labels: status = "ok" | "error" | "not_found"
+    pub static ref FLOW_STATS_MAP_ACCESS_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("flow_stats_map_access_total", "Total number of eBPF flow stats map access operations")
+            .namespace("mermin"),
+        &["status"]
+    ).expect("failed to create flow_stats_map_access_total metric");
 
     pub static ref FLOWS_ACTIVE: IntGaugeVec = IntGaugeVec::new(
         Opts::new("flow_spans_active", "Current number of active flow traces")
@@ -194,10 +224,15 @@ lazy_static! {
     // Export Metrics
     // ============================================================================
 
-    pub static ref SPANS_EXPORTED: IntCounter = IntCounter::with_opts(
-        Opts::new("export_spans_total", "Total number of flow spans successfully exported")
-            .namespace("mermin")
-    ).expect("failed to create spans_exported metric");
+    /// Total number of flow spans processed by export stage.
+    /// Labels: status = "queued" | "dropped" | "ok" | "error"
+    pub static ref EXPORT_FLOW_SPANS_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("export_flow_spans_total", "Total number of flow spans processed by export stage")
+            .namespace("mermin"),
+        &["status"]
+    ).expect("failed to create export_flow_spans_total metric");
+
+
 
     pub static ref SPANS_EXPORT_ERRORS: IntCounterVec = IntCounterVec::new(
         Opts::new("export_errors_total", "Total number of span export errors")
@@ -216,6 +251,19 @@ lazy_static! {
             .namespace("mermin")
             .buckets(vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0])
     ).expect("failed to create export_latency metric");
+
+    // ============================================================================
+    // Kubernetes Decorator Metrics
+    // ============================================================================
+
+    /// Total number of flow spans processed by K8s decorator.
+    /// Labels: status = "dropped" | "ok" | "error" | "undecorated"
+    pub static ref K8S_DECORATOR_FLOW_SPANS_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("k8s_decorator_flow_spans_total", "Total number of flow spans processed by K8s decorator")
+            .namespace("mermin"),
+        &["status"]
+    ).expect("failed to create k8s_decorator_flow_spans_total metric");
+
 
     // ============================================================================
     // Kubernetes Watcher Metrics
@@ -275,6 +323,7 @@ pub fn init_registry() -> Result<(), prometheus::Error> {
     REGISTRY.register(Box::new(EBPF_ORPHANS_CLEANED.clone()))?;
     REGISTRY.register(Box::new(TC_PROGRAMS_ATTACHED.clone()))?;
     REGISTRY.register(Box::new(TC_PROGRAMS_DETACHED.clone()))?;
+    REGISTRY.register(Box::new(BPF_FS_WRITABLE.clone()))?;
 
     // Userspace metrics
     REGISTRY.register(Box::new(USERSPACE_RINGBUF_PACKETS.clone()))?;
@@ -284,24 +333,30 @@ pub fn init_registry() -> Result<(), prometheus::Error> {
     REGISTRY.register(Box::new(USERSPACE_CHANNEL_SENDS.clone()))?;
 
     // Flow metrics
-    REGISTRY.register(Box::new(FLOW_EVENTS_DROPPED_BACKPRESSURE.clone()))?;
+    REGISTRY.register(Box::new(FLOW_EVENTS_TOTAL.clone()))?;
+    REGISTRY.register(Box::new(FLOW_SPANS_PROCESSED_TOTAL.clone()))?;
+    REGISTRY.register(Box::new(FLOW_STORE_SIZE.clone()))?;
+    REGISTRY.register(Box::new(FLOW_POLLER_QUEUE_SIZE.clone()))?;
     REGISTRY.register(Box::new(FLOW_EVENTS_SAMPLED.clone()))?;
     REGISTRY.register(Box::new(FLOW_EVENTS_SAMPLING_RATE.clone()))?;
     REGISTRY.register(Box::new(CHANNEL_CAPACITY_USED_RATIO.clone()))?;
     REGISTRY.register(Box::new(CHANNEL_FULL_EVENTS.clone()))?;
     REGISTRY.register(Box::new(PROCESSING_LATENCY.clone()))?;
-    REGISTRY.register(Box::new(FLOW_SPANS_DROPPED_EXPORT_FAILURE.clone()))?;
     REGISTRY.register(Box::new(EXPORT_TIMEOUTS.clone()))?;
     REGISTRY.register(Box::new(EXPORT_BLOCKING_TIME.clone()))?;
     REGISTRY.register(Box::new(FLOWS_CREATED.clone()))?;
-    REGISTRY.register(Box::new(FLOWS_EXPIRED.clone()))?;
     REGISTRY.register(Box::new(FLOWS_ACTIVE.clone()))?;
+    REGISTRY.register(Box::new(PRODUCER_FLOW_SPANS_TOTAL.clone()))?;
+    REGISTRY.register(Box::new(FLOW_STATS_MAP_ACCESS_TOTAL.clone()))?;
 
     // Export metrics
-    REGISTRY.register(Box::new(SPANS_EXPORTED.clone()))?;
+    REGISTRY.register(Box::new(EXPORT_FLOW_SPANS_TOTAL.clone()))?;
     REGISTRY.register(Box::new(SPANS_EXPORT_ERRORS.clone()))?;
     REGISTRY.register(Box::new(EXPORT_BATCH_SIZE.clone()))?;
     REGISTRY.register(Box::new(EXPORT_LATENCY.clone()))?;
+
+    // K8s decorator metrics
+    REGISTRY.register(Box::new(K8S_DECORATOR_FLOW_SPANS_TOTAL.clone()))?;
 
     // K8s watcher metrics
     REGISTRY.register(Box::new(K8S_WATCHER_EVENTS.clone()))?;

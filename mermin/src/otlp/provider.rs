@@ -33,6 +33,7 @@ use crate::{
     otlp::{
         OtlpError,
         opts::{OtlpExportOptions, StdoutExportOptions, defaults},
+        tracing_layer::OtelErrorLayer,
     },
     runtime::opts::SpanFmt,
 };
@@ -518,6 +519,7 @@ pub async fn init_internal_tracing(
     tracing_subscriber::registry()
         .with(filter)
         .with(fmt_layer)
+        .with(OtelErrorLayer)
         .init();
 
     global::set_tracer_provider(provider);
