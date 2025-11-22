@@ -486,6 +486,11 @@ impl FlowSpanProducer {
     pub fn components(&self) -> Arc<FlowSpanComponents> {
         Arc::clone(&self.components)
     }
+
+    /// Returns a clone of the producer's trace ID cache.
+    pub fn trace_id_cache(&self) -> TraceIdCache {
+        self.trace_id_cache.clone()
+    }
 }
 
 /// Flow worker that processes new flow events from the eBPF ring buffer.
@@ -1938,6 +1943,7 @@ mod tests {
 
     fn create_test_flow_span(key: FlowKey) -> FlowSpan {
         FlowSpan {
+            trace_id: None,
             start_time: SystemTime::now(),
             end_time: SystemTime::now(),
             span_kind: SpanKind::Internal,

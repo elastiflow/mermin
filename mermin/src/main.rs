@@ -503,6 +503,7 @@ async fn run() -> Result<()> {
         &conf,
     )?;
     let flow_span_components = flow_span_producer.components();
+    let trace_id_cache = flow_span_producer.trace_id_cache();
 
     info!(
         event.name = "task.started",
@@ -788,6 +789,7 @@ async fn run() -> Result<()> {
         .with_controller_handle(controller_handle)
         .with_netlink_handle(netlink_handle)
         .with_flow_span_components(flow_span_components)
+        .with_trace_id_cache(trace_id_cache)
         .build();
 
     let shutdown_result = shutdown_manager.shutdown().await;

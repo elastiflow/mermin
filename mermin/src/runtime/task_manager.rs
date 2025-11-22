@@ -10,7 +10,7 @@ use tokio::{
     task::{AbortHandle, JoinHandle},
     time::timeout,
 };
-use tracing::{error, debug, warn};
+use tracing::{debug, error, trace, warn};
 
 use crate::metrics::registry::{
     SHUTDOWN_DURATION, SHUTDOWN_TIMEOUTS, TASKS_ACTIVE, TASKS_CANCELLED, TASKS_COMPLETED,
@@ -80,7 +80,7 @@ impl TaskManager {
         TASKS_SPAWNED.with_label_values(&[name]).inc();
         TASKS_ACTIVE.with_label_values(&[name]).inc();
 
-        info!(
+        trace!(
             event.name = "task.spawned",
             task.id = task_id,
             task.name = %name,
@@ -143,7 +143,7 @@ impl TaskManager {
     /// Initiate graceful shutdown by broadcasting shutdown signal
     pub fn initiate_shutdown(&self) {
         if let Some(shutdown_tx) = &self.shutdown_tx {
-            info!(
+            trace!(
                 event.name = "task_manager.shutdown_initiated",
                 active_tasks = self.tasks.len(),
                 "broadcasting shutdown signal to all tasks"
@@ -185,7 +185,7 @@ impl TaskManager {
     pub async fn shutdown_with_timeout(mut self, timeout_duration: Duration) -> ShutdownResult {
         let shutdown_start = Instant::now();
 
-        info!(
+        trace!(
             event.name = "task_manager.shutdown_started",
             timeout_seconds = timeout_duration.as_secs(),
             active_tasks = self.tasks.len(),
@@ -201,7 +201,7 @@ impl TaskManager {
                 let shutdown_duration = shutdown_start.elapsed();
                 SHUTDOWN_DURATION.observe(shutdown_duration.as_secs_f64());
 
-                info!(
+                trace!(
                     event.name = "task_manager.shutdown_completed",
                     duration_ms = shutdown_duration.as_millis(),
                     "all tasks completed gracefully"

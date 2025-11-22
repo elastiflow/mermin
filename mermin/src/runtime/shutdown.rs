@@ -1,13 +1,16 @@
 use std::{sync::Arc, time::Duration};
 
 use tokio::sync::broadcast;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     iface::{self, types::ControllerCommand},
     metrics::registry::{FLOWS_LOST_SHUTDOWN, FLOWS_PRESERVED_SHUTDOWN},
     runtime::task_manager::{ShutdownResult, TaskManager},
-    span::producer::{FlowSpanComponents, timeout_and_remove_flow},
+    span::{
+        producer::{FlowSpanComponents, timeout_and_remove_flow},
+        trace_id::TraceIdCache,
+    },
 };
 
 /// Configuration for shutdown behavior
@@ -43,6 +46,7 @@ pub struct ShutdownManager {
     pub controller_handle: std::thread::JoinHandle<()>,
     pub netlink_handle: std::thread::JoinHandle<()>,
     pub flow_span_components: Arc<FlowSpanComponents>,
+    pub trace_id_cache: TraceIdCache,
 }
 
 /// Builder for creating ShutdownManager instances with a fluent API
@@ -57,6 +61,7 @@ pub struct ShutdownManagerBuilder {
     controller_handle: Option<std::thread::JoinHandle<()>>,
     netlink_handle: Option<std::thread::JoinHandle<()>>,
     flow_span_components: Option<Arc<FlowSpanComponents>>,
+    trace_id_cache: Option<TraceIdCache>,
 }
 
 impl ShutdownManagerBuilder {
@@ -73,6 +78,7 @@ impl ShutdownManagerBuilder {
             controller_handle: None,
             netlink_handle: None,
             flow_span_components: None,
+            trace_id_cache: None,
         }
     }
 
@@ -151,6 +157,11 @@ impl ShutdownManagerBuilder {
         self
     }
 
+    pub fn with_trace_id_cache(mut self, trace_id_cache: TraceIdCache) -> Self {
+        self.trace_id_cache = Some(trace_id_cache);
+        self
+    }
+
     /// Builds the ShutdownManager instance
     ///
     /// # Panics
@@ -178,6 +189,7 @@ impl ShutdownManagerBuilder {
             flow_span_components: self
                 .flow_span_components
                 .expect("flow_span_components is required"),
+            trace_id_cache: self.trace_id_cache.expect("trace_id_cache is required"),
         }
     }
 }
@@ -244,6 +256,7 @@ impl ShutdownManager {
             controller_handle,
             netlink_handle,
             flow_span_components: _,
+            trace_id_cache: _,
         } = self;
 
         info!(
@@ -273,12 +286,6 @@ impl ShutdownManager {
         if let Err(e) = tokio::task::spawn_blocking(move || decorator_join_handle.join()).await {
             error!(event.name = "os_thread.join_error", task.name = "k8s-decorator", error.message = ?e);
         }
-
-        debug!(
-            event.name = "application.shutdown.waiting_on_tokio_tasks",
-            "waiting for main data plane tasks to finish..."
-        );
-        task_manager.wait_for_all().await;
 
         debug!(
             event.name = "application.shutdown.waiting_on_os_threads",
@@ -335,6 +342,7 @@ impl ShutdownManager {
         let flow_store = Arc::clone(&self.flow_span_components.flow_store);
         let flow_stats_map = Arc::clone(&self.flow_span_components.flow_stats_map);
         let flow_span_tx = self.flow_span_components.flow_span_tx.clone();
+        let trace_id_cache = &self.trace_id_cache;
 
         let flush_future = async {
             let flow_keys: Vec<String> =
@@ -351,9 +359,15 @@ impl ShutdownManager {
                 "triggering final export for all active flows."
             );
 
-            let flush_futures = flow_keys
-                .into_iter()
-                .map(|id| timeout_and_remove_flow(id, &flow_store, &flow_stats_map, &flow_span_tx));
+            let flush_futures = flow_keys.into_iter().map(|id| {
+                timeout_and_remove_flow(
+                    id,
+                    &flow_store,
+                    &flow_stats_map,
+                    &flow_span_tx,
+                    trace_id_cache,
+                )
+            });
 
             futures::future::join_all(flush_futures).await;
 
@@ -420,6 +434,7 @@ mod tests {
         let flow_stats_map = Arc::new(Mutex::new(unsafe {
             std::mem::zeroed::<HashMap<aya::maps::MapData, FlowKey, FlowStats>>()
         }));
+        let cache = TraceIdCache::new(Duration::from_secs(3600), 100);
 
         let mock_components = Arc::new(FlowSpanComponents {
             flow_store: Default::default(),
@@ -438,6 +453,7 @@ mod tests {
             .with_controller_handle(controller_handle)
             .with_netlink_handle(netlink_handle)
             .with_flow_span_components(mock_components)
+            .with_trace_id_cache(cache)
             .build();
 
         let shutdown_result =
