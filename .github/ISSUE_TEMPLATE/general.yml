@@ -1,0 +1,52 @@
+name: General Issue
+description: Quick issue report for questions, documentation feedback, or smaller concerns
+title: ""
+labels: ["needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for quick questions, documentation feedback, or issues that don't fit the bug/feature templates.
+        For detailed bug reports or feature requests, please use the specific templates.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What would you like to share or ask about?
+      placeholder: Describe your question, concern, or feedback...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      description: What does this relate to?
+      options:
+        - Question
+        - Documentation
+        - Build / Development
+        - Configuration help
+        - General feedback
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context (Optional)
+      description: Any relevant details like version, environment, or links
+      placeholder: |
+        Version: v0.1.0
+        Environment: Kubernetes 1.28 on EKS
+        Related docs: https://...
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues and discussions
+          required: true
