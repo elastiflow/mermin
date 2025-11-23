@@ -6,9 +6,6 @@ contact_links:
   - name: 📖 Documentation
     url: https://github.com/elastiflow/mermin/tree/main/docs
     about: Browse the complete documentation including guides and troubleshooting
-  - name: 💼 Enterprise Support
-    url: https://www.elastiflow.com
-    about: Commercial support and enterprise features
   - name: 💭 Slack Community
     url: https://join.slack.com/t/elastiflowcommunity/shared_invite/zt-23jpnlw9g-Q4nKOwKKOE1N2MjfA2mXpg
     about: Join our Slack workspace for live chat with maintainers and community
