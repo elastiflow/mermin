@@ -1,0 +1,66 @@
+name: Bug Report or Feature Request
+description: Report a bug or request a new feature
+labels: ["needs-triage"]
+body:
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      options:
+        - Bug
+        - Feature Request
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: |
+        **Bug:** What went wrong? What did you expect?
+        **Feature:** What problem are you trying to solve? What's your proposed solution?
+    validations:
+      required: true
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Additional Details
+      description: |
+        **Bug:** Steps to reproduce, logs, error messages
+        **Feature:** Use case, example configuration, similar features in other tools
+      placeholder: |
+        Steps to reproduce / Use case details...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version & Environment
+      description: "Mermin version, Kubernetes version, platform (e.g., v0.1.0, K8s 1.28, EKS)"
+      placeholder: "v0.1.0, Kubernetes 1.28, EKS"
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - eBPF / Flow capture
+        - OTLP export
+        - Kubernetes metadata
+        - Configuration
+        - Performance
+        - Deployment
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues
+          required: true
