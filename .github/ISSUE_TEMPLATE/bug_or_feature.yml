@@ -1,0 +1,119 @@
+name: Bug Report or Feature Request
+description: Report a bug or request a new feature
+title: ""
+labels: ["needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for contributing to Mermin! Please fill out the relevant sections below.
+        Not all fields may apply to your issue - fill out what's relevant.
+
+  - type: dropdown
+    id: issue-type
+    attributes:
+      label: Issue Type
+      description: Is this a bug report or feature request?
+      options:
+        - Bug Report
+        - Feature Request
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: |
+        **For bugs:** Describe what's wrong and what you expected to happen
+        **For features:** Describe the problem you're trying to solve and your proposed solution
+      placeholder: |
+        Bug: Mermin crashes when...
+        Feature: I need the ability to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction-or-usecase
+    attributes:
+      label: Steps to Reproduce (bugs) / Use Case Details (features)
+      description: |
+        **For bugs:** Detailed steps to reproduce the issue
+        **For features:** Context about your use case and how this would be used
+      placeholder: |
+        Bug reproduction:
+        1. Deploy Mermin with configuration...
+        2. Generate traffic by...
+        3. Observe...
+
+        Feature use case:
+        We're running Mermin on... and need this to...
+
+  - type: input
+    id: version
+    attributes:
+      label: Mermin Version (if applicable)
+      description: Which version are you running? (for bugs or compatibility questions)
+      placeholder: "e.g., v0.1.0, latest, commit SHA"
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment (if applicable)
+      description: Where is this relevant?
+      options:
+        - Kubernetes (Helm)
+        - Kubernetes (kubectl)
+        - Docker (bare metal)
+        - Local (kind/minikube/k3s)
+        - AWS (EKS)
+        - Google Cloud (GKE)
+        - Azure (AKS)
+        - Not applicable
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Component / Area
+      description: Which part of Mermin does this relate to?
+      options:
+        - Flow capture / eBPF
+        - Protocol support / parsing
+        - OTLP export
+        - Kubernetes metadata
+        - Configuration
+        - Performance
+        - Deployment / installation
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs-or-examples
+    attributes:
+      label: Logs / Configuration / Examples
+      description: |
+        **For bugs:** Relevant logs, configuration, or error messages
+        **For features:** Example configuration or API you envision
+      placeholder: Paste logs, config, or examples here...
+      render: shell
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other information, links, or context that would be helpful
+      placeholder: |
+        - Related issues
+        - Workarounds tried
+        - Similar features in other tools
+        - Diagrams or screenshots
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues and discussions
+          required: true
