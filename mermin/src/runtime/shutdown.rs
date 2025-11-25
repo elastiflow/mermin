@@ -206,7 +206,13 @@ impl ShutdownManager {
         ShutdownManagerBuilder::new()
     }
 
-    /// Executes the full graceful shutdown sequence with enhanced flow preservation and timeout handling.
+    /// Executes a robust, multi-phase graceful shutdown.
+    ///
+    /// The sequence is ordered to prevent data loss:
+    /// 1. **Preserve Flows:** Triggers a final flush of all active flows, sending them through the
+    ///    configured exporter pipeline. This prevents data loss for in-flight connections.
+    /// 2. **Signal:** Broadcasts a shutdown signal to all application components.
+    /// 3. **Await:** Waits for all tasks and threads to terminate in a deadlock-free order.
     pub async fn shutdown(self) -> ShutdownResult {
         info!(
             event.name = "application.shutdown.started",
