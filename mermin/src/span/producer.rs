@@ -34,7 +34,7 @@ use crate::{
         parser::{is_tunnel, parse_packet_from_offset},
         types::ParsedPacket,
     },
-    runtime::conf::Conf,
+    runtime::{conf::Conf, memory, memory::ShrinkPolicy},
     span::{
         community_id::CommunityIdGenerator,
         ebpf_guard::EbpfFlowGuard,
@@ -104,19 +104,13 @@ impl FlowSpanProducer {
         flow_span_tx: mpsc::Sender<FlowSpan>,
         conf: &Conf,
     ) -> Result<Self, BootTimeError> {
-        // Scale flow store capacity based on expected concurrent flows
-        // At 100k flows/sec with 10s avg lifetime = 1M concurrent flows
-        // Capacity: ring_buffer_capacity (8192) * 128 = 1,048,576 (~400MB)
-        // DashMap will resize if needed, but this minimizes expensive resizing operations
-        const FLOW_STORE_CAPACITY_MULTIPLIER: usize = 128;
-        let flow_store_capacity = ring_buffer_capacity * FLOW_STORE_CAPACITY_MULTIPLIER;
+        let flow_store_capacity =
+            memory::initial_capacity::from_ring_buffer_size(ring_buffer_capacity);
         info!(
             event.name = "flow_store.initialized",
             capacity = flow_store_capacity,
             ring_buffer_capacity = ring_buffer_capacity,
-            capacity_multiplier = FLOW_STORE_CAPACITY_MULTIPLIER,
-            estimated_memory_mb = (flow_store_capacity * 400) / 1_048_576, // ~400 bytes per entry
-            "flow store initialized with capacity for high-throughput operation"
+            "flow store initialized"
         );
         let flow_store = Arc::new(DashMap::with_capacity_and_hasher(
             flow_store_capacity,
@@ -261,6 +255,53 @@ impl FlowSpanProducer {
             event.name = "trace_id_cache.cleanup_task.started",
             cleanup.interval_secs = 300,
             "trace ID cache cleanup task started"
+        );
+
+        // Spawn capacity shrinking task to prevent memory bloat from DashMap capacity retention.
+        // DashMap allocates capacity but never shrinks it when entries are removed, causing
+        // unbounded memory growth even though cleanup logic is working correctly.
+        // This task periodically checks for excess capacity and shrinks when needed.
+        const SHRINK_INTERVAL_SECS: u64 = 180;
+        let shrink_policy = ShrinkPolicy::userspace_flows();
+        let flow_store_shrink = Arc::clone(&self.flow_store);
+        let trace_id_cache_shrink = self.trace_id_cache.clone();
+        let iface_map_shrink = Arc::clone(&self.iface_map);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(SHRINK_INTERVAL_SECS));
+            loop {
+                interval.tick().await;
+
+                let flow_capacity = flow_store_shrink.capacity();
+                let flow_len = flow_store_shrink.len();
+                if shrink_policy.should_shrink(flow_capacity, flow_len) {
+                    flow_store_shrink.shrink_to_fit();
+                }
+
+                let trace_capacity = trace_id_cache_shrink.capacity();
+                let trace_len = trace_id_cache_shrink.len();
+                if shrink_policy.should_shrink(trace_capacity, trace_len) {
+                    trace_id_cache_shrink.shrink_to_fit();
+                }
+
+                let iface_capacity = iface_map_shrink.capacity();
+                let iface_len = iface_map_shrink.len();
+                if shrink_policy.should_shrink(iface_capacity, iface_len) {
+                    iface_map_shrink.shrink_to_fit();
+                }
+            }
+        });
+        trace!(
+            event.name = "capacity.shrink_task.started",
+            shrink.interval_secs = SHRINK_INTERVAL_SECS,
+            shrink.policy.threshold = format!(
+                "{}/{}x ({}x)",
+                shrink_policy.waste_ratio_numerator,
+                shrink_policy.waste_ratio_denominator,
+                shrink_policy.waste_ratio_numerator as f64
+                    / shrink_policy.waste_ratio_denominator as f64
+            ),
+            shrink.policy.min_capacity = shrink_policy.min_capacity,
+            "capacity shrinking task started (each map checked independently, shrinks after ~20% entry removal post-resize)"
         );
 
         // Spawn flow pollers (sharded by community_id hash) to replace per-flow tasks

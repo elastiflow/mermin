@@ -141,6 +141,25 @@ impl TraceIdCache {
         self.cache.remove(community_id);
     }
 
+    /// Shrinks the cache capacity to fit the current number of entries.
+    ///
+    /// This method releases excess allocated memory back to the allocator.
+    /// Should be called periodically to prevent capacity retention issues
+    /// where DashMap retains capacity even after entries are removed.
+    pub fn shrink_to_fit(&self) {
+        self.cache.shrink_to_fit();
+    }
+
+    /// Returns the current number of entries in the cache.
+    pub fn len(&self) -> usize {
+        self.cache.len()
+    }
+
+    /// Returns the current allocated capacity of the cache.
+    pub fn capacity(&self) -> usize {
+        self.cache.capacity()
+    }
+
     /// Clears all entries from the cache (primarily for testing)
     #[cfg(test)]
     pub fn clear(&self) {

@@ -55,7 +55,7 @@ use crate::{
         selector_relations::{SelectorRelationRule, SelectorRelationsManager},
     },
     metrics,
-    runtime::conf::Conf,
+    runtime::{self, conf::Conf, memory::ShrinkPolicy},
     span::flow::FlowSpan,
 };
 
@@ -711,7 +711,9 @@ impl Attributor {
         required_kinds.insert("job".to_string());
         required_kinds.insert("cronjob".to_string());
 
-        let ip_index = Arc::new(DashMap::new());
+        let ip_index = Arc::new(DashMap::with_capacity(
+            runtime::memory::initial_capacity::K8S_IP_INDEX,
+        ));
         let resource_store = ResourceStore::new(
             client.clone(),
             health_state,
@@ -1402,7 +1404,9 @@ fn spawn_ip_resource_watcher<K, F>(
         let api = Api::<K>::all(client);
 
         // Cache of resource UID -> IP addresses for smart change detection
-        let ip_cache: DashMap<String, HashSet<String>> = DashMap::new();
+        let ip_cache: DashMap<String, HashSet<String>> =
+            DashMap::with_capacity(runtime::memory::initial_capacity::K8S_WATCHER_CACHE);
+        let k8s_shrink_policy = ShrinkPolicy::k8s_cache();
 
         loop {
             debug!(
@@ -1472,6 +1476,15 @@ fn spawn_ip_resource_watcher<K, F>(
                         // Remove from cache and trigger rebuild since IPs are being removed
                         let uid = obj.meta().uid.clone().unwrap_or_default();
                         ip_cache.remove(&uid);
+
+                        // Shrink ip_cache capacity if it's significantly oversized.
+                        // This prevents capacity retention when many K8s resources are deleted
+                        // (e.g., during scale-down, pod churn, or cluster drain).
+                        let cache_capacity = ip_cache.capacity();
+                        let cache_len = ip_cache.len();
+                        if k8s_shrink_policy.should_shrink(cache_capacity, cache_len) {
+                            ip_cache.shrink_to_fit();
+                        }
 
                         if event_tx.send(()).is_err() {
                             warn!(
@@ -1585,6 +1598,11 @@ async fn update_ip_index(
     for (ip, metas) in new_index {
         index.insert(ip, metas);
     }
+
+    // Shrink capacity after rebuild to release excess memory.
+    // The clear() above removes entries but retains capacity, which can
+    // cause memory bloat in large clusters where the IP index size fluctuates.
+    index.shrink_to_fit();
 
     trace!(
         event.name = "k8s.ip_index.updated",
