@@ -422,7 +422,9 @@ async fn run() -> Result<()> {
     } else {
         conf.discovery.instrument.interfaces.clone()
     };
-    let iface_map = Arc::new(DashMap::new());
+    let iface_map = Arc::new(DashMap::with_capacity(
+        runtime::memory::initial_capacity::INTERFACE_MAP,
+    ));
     let host_netns = Arc::new(std::fs::File::open("/proc/1/ns/net").map_err(|e| {
         MerminError::internal(format!(
             "failed to open host network namespace: {e} - requires hostPID: true in pod spec"
