@@ -12,11 +12,12 @@ shutdown_timeout = "5s"
 
 # Pipeline performance and channel configuration options
 pipeline {
-  ring_buffer_capacity             = 8192
-  worker_count                     = 4
-  worker_poll_interval             = "5s"
-  k8s_decorator_threads            = 12
-  flow_span_channel_multiplier     = 2.0
+  ebpf_max_flows                    = 100000
+  ring_buffer_capacity              = 8192
+  worker_count                      = 4
+  worker_poll_interval              = "5s"
+  k8s_decorator_threads             = 4
+  flow_span_channel_multiplier      = 2.0
   decorated_span_channel_multiplier = 4.0
 }
 

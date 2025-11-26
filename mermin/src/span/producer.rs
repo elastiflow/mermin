@@ -305,8 +305,8 @@ impl FlowSpanProducer {
         );
 
         // Spawn flow pollers (sharded by community_id hash) to replace per-flow tasks
-        // Scale with worker count but cap at 32 for high-throughput (100k flows/sec)
-        // Each poller can handle ~100K active flows efficiently
+        // Scale with worker count but cap at 32 for scalability
+        // Each poller can handle ~100K active flows efficiently (typical: 3-10K per poller)
         let num_pollers = self.worker_count.clamp(1, 32);
         let max_record_interval = self.span_opts.max_record_interval;
         let poll_interval = self.worker_poll_interval;

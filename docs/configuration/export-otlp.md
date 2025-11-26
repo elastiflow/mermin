@@ -229,9 +229,9 @@ This is the internal queue capacity of OpenTelemetry's `BatchSpanProcessor`. Whe
 ```hcl
 export "traces" {
   otlp = {
-    max_queue_size = 32768  # Default (sized for 100K flows/sec)
+    max_queue_size = 32768  # Default (sized for typical enterprise workloads)
 
-    # For higher burst tolerance or very high throughput
+    # For very high throughput (>10K flows/sec) or higher burst tolerance
     # max_queue_size = 65536
 
     # For lower traffic environments
@@ -247,7 +247,7 @@ export "traces" {
 
 * Acts as buffer during temporary collector unavailability or slow exports
 * When full, `export()` calls block until space is available (with 60s timeout protection)
-* Default sized to buffer ~5 minutes at 100K flows/sec throughput
+* Default sized to buffer ~30 minutes at typical enterprise workloads (1K-5K flows/sec)
 * Monitor `mermin_export_timeouts_total` and `mermin_export_blocking_time_seconds` metrics
 
 ### `max_concurrent_exports`
