@@ -1,3 +1,13 @@
+## [v0.1.0-beta.35] - 2025-11-26
+
+### Features
+
+- Add configurable ebpf map sizing and adjust performance defaults (#318)
+
+[v0.1.0-beta.34..v0.1.0-beta.35](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.34...v0.1.0-beta.35)
+
+
+
 ## [v0.1.0-beta.34] - 2025-11-26
 
 ### Bug Fixes
