@@ -64,7 +64,7 @@ impl Drop for NetlinkSocket {
 pub struct ShutdownEventFd(RawFd);
 
 impl ShutdownEventFd {
-    fn new() -> Result<Self, std::io::Error> {
+    pub fn new() -> Result<Self, std::io::Error> {
         // SAFETY: eventfd() is safe to call, we check for errors
         let fd = unsafe { eventfd(0, EFD_NONBLOCK) };
         if fd < 0 {

@@ -160,6 +160,17 @@ shutdown_timeout = "10s"
 
 * `export.otlp.max_export_timeout`: Should be less than `shutdown_timeout`
 
+## Monitoring Shutdown Behavior
+
+Mermin provides metrics to monitor shutdown behavior:
+
+### Shutdown Metrics
+
+- `shutdown_duration_seconds`: Histogram of actual shutdown durations
+- `shutdown_timeouts_total`: Count of shutdowns that exceeded timeout
+- `flows_preserved_shutdown_total`: Flows successfully exported during shutdown
+- `flows_lost_shutdown_total`: Flows lost due to shutdown timeout
+
 ## Pipeline Tuning Options
 
 The `pipeline` block provides advanced configuration for flow processing pipeline optimization, including base channel sizing, worker threading, Kubernetes decoration, backpressure management, and buffer multipliers.

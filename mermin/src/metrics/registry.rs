@@ -297,6 +297,70 @@ lazy_static! {
     ).expect("failed to create k8s_ip_index_update_duration metric");
 
     // ============================================================================
+    // Task Lifecycle Metrics
+    // ============================================================================
+
+    /// Total number of tasks spawned by name.
+    pub static ref TASKS_SPAWNED: IntCounterVec = IntCounterVec::new(
+        Opts::new("tasks_spawned_total", "Total number of tasks spawned")
+            .namespace("mermin"),
+        &["task_name"]
+    ).expect("failed to create tasks_spawned metric");
+
+    /// Total number of tasks completed successfully by name.
+    pub static ref TASKS_COMPLETED: IntCounterVec = IntCounterVec::new(
+        Opts::new("tasks_completed_total", "Total number of tasks completed successfully")
+            .namespace("mermin"),
+        &["task_name"]
+    ).expect("failed to create tasks_completed metric");
+
+    /// Total number of tasks cancelled by name.
+    pub static ref TASKS_CANCELLED: IntCounterVec = IntCounterVec::new(
+        Opts::new("tasks_cancelled_total", "Total number of tasks cancelled")
+            .namespace("mermin"),
+        &["task_name"]
+    ).expect("failed to create tasks_cancelled metric");
+
+    /// Total number of tasks that panicked by name.
+    pub static ref TASKS_PANICKED: IntCounterVec = IntCounterVec::new(
+        Opts::new("tasks_panicked_total", "Total number of tasks that panicked")
+            .namespace("mermin"),
+        &["task_name"]
+    ).expect("failed to create tasks_panicked metric");
+
+    /// Current number of active (running) tasks by name.
+    pub static ref TASKS_ACTIVE: IntGaugeVec = IntGaugeVec::new(
+        Opts::new("tasks_active", "Current number of active tasks")
+            .namespace("mermin"),
+        &["task_name"]
+    ).expect("failed to create tasks_active metric");
+
+    /// Duration of shutdown operations.
+    pub static ref SHUTDOWN_DURATION: Histogram = Histogram::with_opts(
+        HistogramOpts::new("shutdown_duration_seconds", "Duration of shutdown operations")
+            .namespace("mermin")
+            .buckets(vec![0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0])
+    ).expect("failed to create shutdown_duration metric");
+
+    /// Total number of shutdown operations that timed out.
+    pub static ref SHUTDOWN_TIMEOUTS: IntCounter = IntCounter::with_opts(
+        Opts::new("shutdown_timeouts_total", "Total number of shutdown operations that timed out")
+            .namespace("mermin")
+    ).expect("failed to create shutdown_timeouts metric");
+
+    /// Total number of flows preserved during shutdown.
+    pub static ref FLOWS_PRESERVED_SHUTDOWN: IntCounter = IntCounter::with_opts(
+        Opts::new("flows_preserved_shutdown_total", "Total number of flows preserved during shutdown")
+            .namespace("mermin")
+    ).expect("failed to create flows_preserved_shutdown metric");
+
+    /// Total number of flows lost during shutdown.
+    pub static ref FLOWS_LOST_SHUTDOWN: IntCounter = IntCounter::with_opts(
+        Opts::new("flows_lost_shutdown_total", "Total number of flows lost during shutdown")
+            .namespace("mermin")
+    ).expect("failed to create flows_lost_shutdown metric");
+
+    // ============================================================================
     // Per-Interface Statistics
     // ============================================================================
 
@@ -363,6 +427,17 @@ pub fn init_registry() -> Result<(), prometheus::Error> {
     REGISTRY.register(Box::new(K8S_WATCHER_ERRORS.clone()))?;
     REGISTRY.register(Box::new(K8S_IP_INDEX_UPDATES.clone()))?;
     REGISTRY.register(Box::new(K8S_IP_INDEX_UPDATE_DURATION.clone()))?;
+
+    // Task lifecycle metrics
+    REGISTRY.register(Box::new(TASKS_SPAWNED.clone()))?;
+    REGISTRY.register(Box::new(TASKS_COMPLETED.clone()))?;
+    REGISTRY.register(Box::new(TASKS_CANCELLED.clone()))?;
+    REGISTRY.register(Box::new(TASKS_PANICKED.clone()))?;
+    REGISTRY.register(Box::new(TASKS_ACTIVE.clone()))?;
+    REGISTRY.register(Box::new(SHUTDOWN_DURATION.clone()))?;
+    REGISTRY.register(Box::new(SHUTDOWN_TIMEOUTS.clone()))?;
+    REGISTRY.register(Box::new(FLOWS_PRESERVED_SHUTDOWN.clone()))?;
+    REGISTRY.register(Box::new(FLOWS_LOST_SHUTDOWN.clone()))?;
 
     // Interface metrics
     REGISTRY.register(Box::new(PACKETS_TOTAL.clone()))?;
