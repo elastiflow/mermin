@@ -1994,6 +1994,7 @@ dependencies = [
  "fxhash",
  "globset",
  "hcl-rs",
+ "http",
  "humantime",
  "hyper-rustls",
  "hyper-util",
