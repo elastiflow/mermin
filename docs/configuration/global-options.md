@@ -170,17 +170,17 @@ The `pipeline` block provides advanced configuration for flow processing pipelin
 
 ```hcl
 pipeline {
-  # Base ring buffer capacity (default: 8192 for 100K flows/sec)
+  # Base ring buffer capacity (default: 8192, good for typical enterprise)
   ring_buffer_capacity = 8192
 
-  # Number of parallel flow workers (default: 4 for 100K flows/sec)
+  # Number of parallel flow workers (default: 4, suitable for most deployments)
   worker_count = 4
 
   # Worker polling interval (default: 5s)
   worker_poll_interval = "5s"
 
-  # Kubernetes decorator threading (default: 12 for 100K flows/sec)
-  k8s_decorator_threads = 12
+  # Kubernetes decorator threading (default: 4 for typical enterprise)
+  k8s_decorator_threads = 4
 
   # Channel multipliers
   flow_span_channel_multiplier = 2.0
@@ -285,7 +285,7 @@ Interval at which flow pollers check for flow records and timeouts. Pollers iter
 
 * Lower values = more responsive timeout detection and flow recording
 * Higher values = less CPU overhead
-* At 100K flows/sec with 1M active flows and 32 pollers: ~6K flow checks/sec per poller
+* At typical enterprise scale (10K flows/sec with 100K active flows and 32 pollers): ~600 flow checks/sec per poller
 * Modern CPUs handle flow checking very efficiently (microseconds per check)
 
 **Tuning Guidelines:**
@@ -318,18 +318,19 @@ Interval at which flow pollers check for flow records and timeouts. Pollers iter
 ### `k8s_decorator_threads`
 
 **Type:** Integer
-**Default:** `12`
+**Default:** `4`
 
-Number of dedicated threads for Kubernetes metadata decoration. Running decoration on separate threads prevents K8s API lookups from blocking flow processing. After DashMap optimization, each thread handles ~8K flows/sec (~100-150μs per flow).
+Number of dedicated threads for Kubernetes metadata decoration. Running decoration on separate threads prevents K8s API lookups from blocking flow processing. Each thread handles ~8K flows/sec (~100-150μs per flow), so 4 threads provide 32K flows/sec capacity.
 
-**Recommendations:**
+**Recommendations based on typical FPS (flows per second):**
 
-| Traffic Volume             | Recommended Threads |
-|----------------------------|---------------------|
-| Low (< 25K flows/s)        | 4                   |
-| Medium (25K-50K flows/s)   | 8                   |
-| High (50K-100K flows/s)    | 12 (default)        |
-| Very High (> 100K flows/s) | 16-24               |
+| Cluster Type               | Typical FPS | Recommended Threads |
+|----------------------------|-------------|---------------------|
+| General/Mixed              | 50-200      | 2-4 (default: 4)    |
+| Service Mesh               | 100-300     | 4 (default)         |
+| Public Ingress             | 1K-5K       | 4-8                 |
+| High-Traffic Ingress       | 5K-25K      | 8-12                |
+| Extreme Scale (Edge/CDN)   | >25K        | 12-24               |
 
 ### `sampling_enabled`
 
@@ -459,7 +460,7 @@ shutdown_timeout = "10s"
 pipeline {
   ring_buffer_capacity = 8192
   worker_count = 4
-  k8s_decorator_threads = 12
+  k8s_decorator_threads = 4
 }
 
 ```
