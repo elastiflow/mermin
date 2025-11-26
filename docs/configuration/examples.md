@@ -15,11 +15,11 @@ Optimized for reliability, security, and comprehensive observability in producti
 log_level = "info"
 shutdown_timeout = "30s"
 
-# Optimized for production load
+# Defaults are optimized for typical production workloads (1K-5K flows/sec)
 pipeline {
-  ring_buffer_capacity = 8192
-  worker_count = 8
-  k8s_decorator_threads = 12
+  ebpf_max_flows = 500000        # For high-traffic ingress (>10K flows/sec)
+  worker_count = 8               # For very busy nodes
+  k8s_decorator_threads = 12     # For very large clusters
 }
 
 # API for health checks (required for liveness/readiness probes)
@@ -396,13 +396,14 @@ export "traces" {
 
 ## High-Throughput Configuration
 
-Optimized for high packet rate environments (>10 Gbps).
+Optimized for extreme scale environments (>10 Gbps, edge/CDN deployments with >25K flows/sec).
 
 ```hcl
 log_level = "warn"  # Reduce logging overhead
 
-# Maximize worker parallelism
+# Maximize capacity and worker parallelism for extreme scale
 pipeline {
+  ebpf_max_flows = 1000000
   ring_buffer_capacity = 16384
   worker_count = 16
   k8s_decorator_threads = 24

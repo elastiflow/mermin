@@ -55,7 +55,7 @@
 //!                    │                      │
 //!          ┌─────────▼────────┐             │
 //!          │  FLOW_STATS Map  │             │ New flow event
-//!          │  (1M flows max)  │             ▼
+//!          │ (100K-1M flows)  │             ▼
 //!          │                  │  ┌──────────────────────┐
 //!          │  FlowKey →       │  │  FLOW_EVENTS RingBuf │
 //!          │  FlowStats       │  │  (256 KB)            │
@@ -114,10 +114,19 @@ const FLOW_EVENT_PACKET_DATA_SIZE: usize = 192;
 
 /// Maximum number of flows to track in the eBPF map.
 ///
-/// This limits memory usage to approximately 232 MB (232 bytes per flow * 1M flows).
-/// When the map is full, new flows will be dropped until space is freed by userspace.
+/// This is an upper bound that can be overridden at runtime by the userspace
+/// loader using aya's `set_max_entries()` API. The actual size is configured
+/// via the `pipeline.ebpf_max_flows` config field (see runtime/conf.rs).
+///
+/// Default at runtime: 100,000 flows (~23 MB)
+/// Configurable in config.hcl:
+///   pipeline {
+///     ebpf_max_flows = 500000  # For high-traffic (500K flows, ~116 MB)
+///   }
+///
+/// Memory calculation: flows × 232 bytes
 #[cfg(not(feature = "test"))]
-const MAX_FLOWS: u32 = 1_000_000;
+const MAX_FLOWS: u32 = 10_000_000; // Upper bound, overridden at runtime
 
 // New eBPF map aggregation architecture
 // Flow statistics map: normalized FlowKey -> FlowStats

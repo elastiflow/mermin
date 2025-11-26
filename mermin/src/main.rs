@@ -276,20 +276,20 @@ async fn run() -> Result<()> {
             "failed to create eBPF map pin path '{map_pin_path}': {e} - ensure /sys/fs/bpf is mounted and writable - map pinning is required for state persistence across restarts",
         );
     }
-    let mut ebpf =
-        EbpfLoader::new()
-            .map_pin_path(&map_pin_path)
-            .load(aya::include_bytes_aligned!(concat!(
-                env!("OUT_DIR"),
-                "/mermin"
-            )))?;
-
+    let mut ebpf = EbpfLoader::new()
+        .map_pin_path(&map_pin_path)
+        .set_max_entries("FLOW_STATS_MAP", conf.pipeline.ebpf_max_flows)
+        .load(aya::include_bytes_aligned!(concat!(
+            env!("OUT_DIR"),
+            "/mermin"
+        )))?;
     debug!(
         event.name = "ebpf.loaded",
         map.pin_path = %map_pin_path,
         map.schema_version = EBPF_MAP_SCHEMA_VERSION,
         "eBPF program loaded, maps will persist with versioned pinning"
     );
+
     if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
         // This can happen if you remove all log statements from your eBPF program.
         warn!(

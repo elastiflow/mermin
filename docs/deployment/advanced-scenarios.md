@@ -264,11 +264,12 @@ readinessProbe:
 
 ### High-Traffic Configuration
 
-For environments with high network traffic (> 10,000 flows/second):
+For environments with very high network traffic (> 10,000 flows/second), such as public ingress nodes or edge deployments:
 
 ```hcl
-# Increase internal buffering
+# Increase internal buffering and parallelism for extreme scale
 pipeline {
+  ebpf_max_flows = 500000          # Support up to 50K flows/sec
   ring_buffer_capacity = 8192
   worker_count = 8
   k8s_decorator_threads = 12

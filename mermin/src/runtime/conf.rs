@@ -658,14 +658,33 @@ pub mod conf_serde {
 
 /// Pipeline tuning configuration for flow processing optimization
 ///
-/// Defaults are tuned for 100K flows/sec throughput:
-/// - `ring_buffer_capacity = 8192` (80ms burst buffer at 100K/s)
-/// - `worker_count = 4` (parallel flow processing, 2048 slots per worker)
-/// - `k8s_decorator_threads = 12` (12 threads × 8K flows/s = 96K/s capacity)
-/// - `worker_poll_interval = 5s` (responsive timeout/record checking with low overhead)
+/// Defaults are tuned for typical enterprise deployments (1K-5K flows/sec):
+/// - `ebpf_max_flows = 100000` (supports ~10K flows/sec with 10x headroom)
+/// - `ring_buffer_capacity = 8192` (good burst buffer for traffic spikes)
+/// - `worker_count = 4` (parallel flow processing across cores)
+/// - `k8s_decorator_threads = 4` (handles typical K8s clusters efficiently)
+/// - `worker_poll_interval = 5s` (responsive timeout checking with low CPU overhead)
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct PipelineOptions {
+    /// Maximum concurrent flows in eBPF map (default: 100,000)
+    ///
+    /// Controls memory usage of the eBPF FLOW_STATS_MAP.
+    /// Memory: flows × 232 bytes
+    ///
+    /// Sizing guide based on typical cluster FPS (flows per second) per node:
+    /// - General/Mixed (50-200 FPS):         50,000 (~12 MB) - dev/testing, 2.5-50x headroom
+    /// - Service Mesh (100-300 FPS):        100,000 (~23 MB) - default ✓, 33-100x headroom
+    /// - Public Ingress (1K-5K FPS):        100,000-500,000 (~23-116 MB) - scale based on traffic
+    /// - Extreme Ingress (>5K FPS):         500,000-1,000,000 (~116-232 MB) - edge/CDN scale
+    ///
+    /// Formula: concurrent_flows = flows_per_sec × avg_flow_lifetime_seconds
+    /// Example: 200 FPS (service mesh) × 10s timeout = 2,000 concurrent flows
+    ///          → 100K default provides 50x headroom for bursts
+    ///          1,000 FPS (low-end public ingress) × 10s = 10,000 concurrent flows
+    ///          → 100K default provides 10x headroom (adequate, consider 200K-500K for 3K+ FPS)
+    pub ebpf_max_flows: u32,
+
     /// eBPF ring buffer capacity (default: 8192)
     /// This is the base capacity for the ring buffer between eBPF and userspace.
     /// Also used as the base for flow_span and decorated_span channel multipliers.
@@ -679,22 +698,24 @@ pub struct PipelineOptions {
     /// Worker polling interval (default: 5s)
     /// Pollers check for record intervals and timeouts at this frequency.
     /// Lower values = more responsive but higher CPU. Higher values = less overhead.
-    /// At 100K flows/sec with 1M active flows and 32 pollers: ~6K checks/sec per poller.
+    /// At 10K flows/sec with 100K active flows and 32 pollers: ~600 checks/sec per poller.
     #[serde(with = "conf_serde::duration")]
     pub worker_poll_interval: Duration,
 
-    /// Number of dedicated threads for K8s decorator (default: 12)
+    /// Number of dedicated threads for K8s decorator (default: 4)
     /// Creates a dedicated multi-threaded Tokio runtime for Kubernetes metadata decoration.
+    /// Each thread handles ~8K flows/sec, so 4 threads = 32K flows/sec capacity (3x headroom for 10K target).
+    /// Increase for large clusters: 8 threads for 50K flows/sec, 12 threads for 100K flows/sec.
     pub k8s_decorator_threads: usize,
 
     /// Multiplier for flow span channel capacity (default: 2.0)
     /// Provides buffering between workers and K8s decorator. Channel size = ring_buffer_capacity * multiplier.
-    /// With defaults: 8192 × 2.0 = 16,384 slots (~160ms buffer at 100K/s).
+    /// With defaults: 8192 × 2.0 = 16,384 slots (~1.6s buffer at 10K/s, handles export delays).
     pub flow_span_channel_multiplier: f32,
 
     /// Multiplier for decorated span channel capacity (default: 4.0)
     /// Provides buffering between K8s decorator and OTLP exporter. Channel size = ring_buffer_capacity * multiplier.
-    /// With defaults: 8192 × 4.0 = 32,768 slots (~320ms buffer at 100K/s).
+    /// With defaults: 8192 × 4.0 = 32,768 slots (~3.2s buffer at 10K/s, prevents backpressure).
     pub decorated_span_channel_multiplier: f32,
 
     // TODO: Implement adaptive sampling (ring buffer consumer in mermin-ebpf/src/main.rs)
@@ -716,10 +737,11 @@ pub struct PipelineOptions {
 impl Default for PipelineOptions {
     fn default() -> Self {
         Self {
+            ebpf_max_flows: 100_000,
             ring_buffer_capacity: 8192,
             worker_count: 4,
             worker_poll_interval: Duration::from_secs(5),
-            k8s_decorator_threads: 12,
+            k8s_decorator_threads: 4,
             flow_span_channel_multiplier: 2.0,
             decorated_span_channel_multiplier: 4.0,
             sampling_enabled: true,
