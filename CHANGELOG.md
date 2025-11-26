@@ -1,3 +1,18 @@
+## [v0.1.0-beta.34] - 2025-11-26
+
+### Bug Fixes
+
+- Unmanaged background tasks (#282)
+### Features
+
+- Improve trace-id retention (#281)
+- Improve metrics for gke debugging (#297)
+- Implement dashmap capacity shrinking and optimized initial allocations (#317)
+
+[v0.1.0-beta.33..v0.1.0-beta.34](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.33...v0.1.0-beta.34)
+
+
+
 ## [v0.1.0-beta.33] - 2025-11-20
 
 ### Features
