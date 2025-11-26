@@ -272,7 +272,7 @@ impl FlowSpanProducer {
         // This task periodically checks for excess capacity and shrinks when needed.
         const SHRINK_INTERVAL_SECS: u64 = 180;
         let shrink_policy = ShrinkPolicy::userspace_flows();
-        let flow_store_shrink = Arc::clone(&self.flow_store);
+        let flow_store_shrink = Arc::clone(&self.components.flow_store);
         let trace_id_cache_shrink = self.trace_id_cache.clone();
         let iface_map_shrink = Arc::clone(&self.iface_map);
         tokio::spawn(async move {
