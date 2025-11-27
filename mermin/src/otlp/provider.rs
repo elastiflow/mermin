@@ -1,6 +1,6 @@
-use std::{fs, sync::Arc};
+use std::{fs, str::FromStr, sync::Arc};
 
-use axum::http::Uri;
+use http::{HeaderMap, HeaderName, HeaderValue, Uri};
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::client::legacy::connect::HttpConnector;
 use opentelemetry::{KeyValue, global};
@@ -20,7 +20,7 @@ use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime},
 };
 use rustls_pemfile::{certs, private_key};
-use tonic::transport::Channel;
+use tonic::{metadata::MetadataMap, transport::Channel};
 use tracing::{Level, debug, info, warn};
 use tracing_subscriber::{
     EnvFilter,
@@ -163,7 +163,7 @@ impl ProviderBuilder {
             _ => Self::build_secure_channel(uri, is_https, options.tls.as_ref())?,
         };
 
-        let builder = opentelemetry_otlp::SpanExporter::builder()
+        let mut builder = opentelemetry_otlp::SpanExporter::builder()
             .with_tonic() // for gRPC
             .with_channel(channel)
             .with_protocol(opentelemetry_otlp::Protocol::Grpc);
@@ -179,9 +179,24 @@ impl ProviderBuilder {
                 exporter.otlp.auth.header_count = auth_headers.len(),
                 "authentication headers configured for otlp exporter"
             );
-            // TODO: Apply headers to the exporter builder - ENG-120
-            // Note: The opentelemetry_otlp crate may need to be updated to support custom headers
-            // For now, this is a placeholder for where header configuration would go
+            let mut header_map = HeaderMap::new();
+            for (key, value) in auth_headers {
+                let header_name = HeaderName::from_str(&key).map_err(|e| {
+                    OtlpError::ExporterConfiguration(format!(
+                        "Invalid auth header name '{key}': {e}"
+                    ))
+                })?;
+                let header_value = HeaderValue::from_str(&value).map_err(|e| {
+                    OtlpError::ExporterConfiguration(format!(
+                        "Invalid auth header value for key '{key}': {e}"
+                    ))
+                })?;
+                header_map.insert(header_name, header_value);
+            }
+
+            let metadata = MetadataMap::from_headers(header_map);
+
+            builder = builder.with_metadata(metadata);
         }
 
         match builder.build() {

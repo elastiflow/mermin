@@ -4,25 +4,28 @@ hidden: true
 
 # OTLP Exporter
 
-This page documents the OpenTelemetry Protocol (OTLP) exporter configuration, which controls how Mermin exports flow records to your observability backend.
+This page documents the OpenTelemetry Protocol (OTLP) exporter configuration, which controls how Mermin exports flow
+records to your observability backend.
 
 ## Overview
 
-OTLP is the standard protocol for OpenTelemetry telemetry data. Mermin exports network flows as OTLP trace spans, enabling integration with any OTLP-compatible backend including OpenTelemetry Collector, Grafana Tempo, Jaeger, and more.
+OTLP is the standard protocol for OpenTelemetry telemetry data. Mermin exports network flows as OTLP trace spans,
+enabling integration with any OTLP-compatible backend including OpenTelemetry Collector, Grafana Tempo, Jaeger, and
+more.
 
 ## Configuration
 
 ```hcl
 export "traces" {
   otlp = {
-    endpoint = "http://otel-collector:4317"
-    protocol = "grpc"
-    timeout = "10s"
-    max_batch_size = 512
-    max_batch_interval = "5s"
-    max_queue_size = 32768
+    endpoint               = "http://otel-collector:4317"
+    protocol               = "grpc"
+    timeout                = "10s"
+    max_batch_size         = 512
+    max_batch_interval     = "5s"
+    max_queue_size         = 32768
     max_concurrent_exports = 1
-    max_export_timeout = "10s"
+    max_export_timeout     = "10s"
 
     auth = {
       basic = {
@@ -33,9 +36,9 @@ export "traces" {
 
     tls = {
       insecure_skip_verify = false
-      ca_cert = "/etc/certs/ca.crt"
-      client_cert = "/etc/certs/client.crt"
-      client_key = "/etc/certs/client.key"
+      ca_cert              = "/etc/certs/ca.crt"
+      client_cert          = "/etc/certs/client.crt"
+      client_key           = "/etc/certs/client.key"
     }
   }
 }
@@ -118,7 +121,7 @@ export "traces" {
 **Protocol Comparison:**
 
 | Feature               | gRPC   | HTTP     |
-| --------------------- | ------ | -------- |
+|-----------------------|--------|----------|
 | **Performance**       | Higher | Moderate |
 | **Streaming**         | Yes    | No       |
 | **Firewall Friendly** | Less   | More     |
@@ -155,7 +158,8 @@ export "traces" {
 
 ## Batching Configuration
 
-Mermin uses OpenTelemetry's `BatchSpanProcessor` for efficient batching and export of flow spans. The processor queues spans asynchronously and exports them in batches, providing natural backpressure when the queue fills up.
+Mermin uses OpenTelemetry's `BatchSpanProcessor` for efficient batching and export of flow spans. The processor queues
+spans asynchronously and exports them in batches, providing natural backpressure when the queue fills up.
 
 ### `max_batch_size`
 
@@ -220,6 +224,7 @@ Maximum number of spans queued in the `BatchSpanProcessor` before they are expor
 **Critical for High Throughput:**
 
 This is the internal queue capacity of OpenTelemetry's `BatchSpanProcessor`. When this queue fills up:
+
 - New spans are **dropped silently** (OpenTelemetry will log a warning)
 - The queue uses `try_send` which is **non-blocking**, so your pipeline won't deadlock
 - This provides natural backpressure during export slowdowns
@@ -259,11 +264,13 @@ Maximum number of concurrent export requests to the backend.
 **Tuning for Throughput:**
 
 This setting is **critical** for high-throughput scenarios. With the defaults:
+
 - `1024 spans/batch × 100 batches/sec/worker = 102,400 flows/sec capacity`
 - Each worker needs ~40ms per export (including network + backend processing)
 - If exports take longer, increase this value
 
 **Recommendations:**
+
 - **2-4:** Good for most scenarios (default is 4)
 - **6-8:** High backend latency (>50ms per export)
 - **1:** Low-latency, high-performance backends only
@@ -370,6 +377,20 @@ env:
         key: password
 ```
 
+### Bearer Authentication
+
+```hcl
+export "traces" {
+  otlp = {
+    endpoint = "https://collector.example.com:4317"
+
+    auth = {
+      bearer = "secret_password"
+    }
+  }
+}
+```
+
 ## TLS Configuration
 
 ### TLS with System CA Certificates
@@ -399,7 +420,7 @@ export "traces" {
 
     tls = {
       insecure_skip_verify = false
-      ca_cert = "/etc/mermin/certs/ca.crt"
+      ca_cert              = "/etc/mermin/certs/ca.crt"
     }
   }
 }
@@ -433,9 +454,9 @@ export "traces" {
 
     tls = {
       insecure_skip_verify = false
-      ca_cert = "/etc/mermin/certs/ca.crt"
-      client_cert = "/etc/mermin/certs/client.crt"
-      client_key = "/etc/mermin/certs/client.key"
+      ca_cert              = "/etc/mermin/certs/ca.crt"
+      client_cert          = "/etc/mermin/certs/client.crt"
+      client_key           = "/etc/mermin/certs/client.key"
     }
   }
 }
@@ -458,7 +479,8 @@ volumeMounts:
 ### Insecure Mode (Development Only)
 
 {% hint style="danger" %}
-**Never use in production!** This disables all certificate verification and makes connections vulnerable to man-in-the-middle attacks.
+**Never use in production!** This disables all certificate verification and makes connections vulnerable to
+man-in-the-middle attacks.
 {% endhint %}
 
 ```hcl
@@ -544,7 +566,7 @@ export "traces" {
     max_queue_size = 4096
 
     # Long timeouts
-    timeout = "30s"
+    timeout            = "30s"
     max_export_timeout = "60s"
   }
 }
@@ -568,12 +590,12 @@ export "traces" {
 ```hcl
 export "traces" {
   otlp = {
-    endpoint = "http://otel-collector:4317"
-    protocol = "grpc"
-    timeout = "10s"
-    max_batch_size = 512
+    endpoint           = "http://otel-collector:4317"
+    protocol           = "grpc"
+    timeout            = "10s"
+    max_batch_size     = 512
     max_batch_interval = "5s"
-    max_queue_size = 2048
+    max_queue_size     = 2048
   }
 }
 ```
@@ -583,12 +605,12 @@ export "traces" {
 ```hcl
 export "traces" {
   otlp = {
-    endpoint = "https://collector.example.com:4317"
-    protocol = "grpc"
-    timeout = "15s"
-    max_batch_size = 512
+    endpoint           = "https://collector.example.com:4317"
+    protocol           = "grpc"
+    timeout            = "15s"
+    max_batch_size     = 512
     max_batch_interval = "5s"
-    max_queue_size = 2048
+    max_queue_size     = 2048
 
     auth = {
       basic = {
@@ -599,9 +621,9 @@ export "traces" {
 
     tls = {
       insecure_skip_verify = false
-      ca_cert = "/etc/mermin/certs/ca.crt"
-      client_cert = "/etc/mermin/certs/client.crt"
-      client_key = "/etc/mermin/certs/client.key"
+      ca_cert              = "/etc/mermin/certs/ca.crt"
+      client_cert          = "/etc/mermin/certs/client.crt"
+      client_key           = "/etc/mermin/certs/client.key"
     }
   }
 }

@@ -199,7 +199,7 @@ pub struct OtlpExportOptions {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AuthOptions {
     pub basic: Option<BasicAuthOptions>,
-    // TODO: Add support for bearer, api_key, oauth2, mtls, etc. - ENG-120
+    pub bearer: Option<String>, // TODO: Add support for api_key, oauth2, mtls, etc. - ENG-120
 }
 
 /// Configuration for HTTP Basic Authentication credentials.
@@ -324,7 +324,11 @@ impl AuthOptions {
             headers.insert("Authorization".to_string(), format!("Basic {credentials}"));
         }
 
-        // TODO: Add support for other auth methods like bearer, api_key, oauth2, mtls, etc. - ENG-120
+        if let Some(bearer) = &self.bearer {
+            headers.insert("Authorization".to_string(), format!("Bearer {bearer}"));
+        }
+
+        // TODO: Add support for other auth methods like api_key, oauth2, mtls, etc. - ENG-120
 
         Ok(headers)
     }
