@@ -20,7 +20,7 @@ helm repo update
 
 To view flows with Kubernetes metadata enrichment, Mermin requires four core configuration blocks: Network Interface Discovery, Kubernetes Informer, Flow-to-Kubernetes Attribute Mapping & Export.
 
-An example configuration is available here: [Example Configuration](https://elastiflow-1.gitbook.io/mermin-documentation/welcome/beta-program#configuration-essentials)
+A minimal example configuration is available here: [Example Configuration](../deployment/examples/local/config.example.hcl), for more comprehensive example please see [The Default Config](https://github.com/elastiflow/mermin/tree/beta/charts/mermin/config/default/config.hcl)
 
 <details>
 
@@ -53,7 +53,7 @@ discovery "instrument" {
 Default:
 
 ```
-"veth*", "tunl*", "ip6tnl*", "vxlan*", "flannel*", "cali*", "cilium_", "lxc", "gke*", "eni*", "ovn-k8s*"
+"veth*", "tunl*", "ip6tnl*", "vxlan*", "flannel*", "cali*", "cilium_*", "lxc", "gke*", "eni*", "ovn-k8s*"
 ```
 
 **What you'll see**: All pod-to-pod traffic (inter-node and intra-node)\
