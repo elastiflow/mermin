@@ -49,7 +49,7 @@ hostPID: true
 podSecurityContext:
   runAsNonRoot: true
 
-# TODO(Cleanup for GA): Use a public link once available docs/getting-started/architecture.md#Security_Considerations
+# https://docs.mermin.dev/getting-started/security-considerations
 securityContext:
   privileged: true
   readOnlyRootFilesystem: true
