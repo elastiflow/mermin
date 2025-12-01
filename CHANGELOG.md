@@ -1,3 +1,17 @@
+## [v0.1.0-beta.36] - 2025-12-01
+
+### Bug Fixes
+
+- Unmanaged background tasks enhancement (#301)
+### Features
+
+- Implement basic and bearer auth for otlp exporter (#322)
+- Implement discovery.informer.k8s.selectors config (#324)
+
+[v0.1.0-beta.35..v0.1.0-beta.36](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.35...v0.1.0-beta.36)
+
+
+
 ## [v0.1.0-beta.35] - 2025-11-26
 
 ### Features
