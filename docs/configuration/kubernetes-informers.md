@@ -4,18 +4,21 @@ hidden: true
 
 # Kubernetes Informers
 
-This page documents how to configure Mermin's Kubernetes informers, which watch and cache Kubernetes resources for flow metadata enrichment.
+This page documents how to configure Mermin's Kubernetes informers, which watch and cache Kubernetes resources for flow
+metadata enrichment.
 
 ## Overview
 
-Mermin uses Kubernetes informers to maintain an in-memory cache of cluster resources. This enables enriching network flows with Kubernetes metadata like pod names, labels, services, and owner references without querying the API server for every flow.
+Mermin uses Kubernetes informers to maintain an in-memory cache of cluster resources. This enables enriching network
+flows with Kubernetes metadata like pod names, labels, services, and owner references without querying the API server
+for every flow.
 
 ## Configuration
 
 ```hcl
 discovery "informer" "k8s" {
   # K8s API connection configuration
-  kubeconfig_path = ""
+  kubeconfig_path        = ""
   informers_sync_timeout = "30s"
 
   selectors = [
@@ -98,11 +101,10 @@ The `selectors` array determines which Kubernetes resources to watch.
 
 ```hcl
 {
-  kind = "Pod"               # Required: resource kind
-  namespaces = []            # Optional: namespace filter
-  include = true             # Optional: include/exclude
-  match_labels = {}          # Optional: label selector
-  match_expressions = []     # Optional: label expressions
+kind = "Pod"               # Required: resource kind
+namespaces = []            # Optional: namespace filter
+match_labels = {}          # Optional: label selector
+match_expressions = []     # Optional: label expressions
 }
 ```
 
@@ -170,12 +172,12 @@ discovery "informer" "k8s" {
       kind = "Pod"
       match_expressions = [
         {
-          key = "tier"
+          key      = "tier"
           operator = "In"
           values = ["frontend", "backend"]
         },
         {
-          key = "deprecated"
+          key      = "deprecated"
           operator = "DoesNotExist"
         }
       ]
@@ -205,7 +207,6 @@ discovery "informer" "k8s" {
     {
       kind = "Gateway"
       namespaces = ["loggers"]
-      include = false
     },
   ]
 }
@@ -216,7 +217,7 @@ discovery "informer" "k8s" {
 Mermin supports watching these Kubernetes resources:
 
 | Kind            | Purpose                             |
-| --------------- | ----------------------------------- |
+|-----------------|-------------------------------------|
 | `Pod`           | Primary source for flow attribution |
 | `Service`       | Service endpoints and selectors     |
 | `Endpoint`      | (Deprecated) Service endpoints      |

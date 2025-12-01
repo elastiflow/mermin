@@ -52,6 +52,7 @@ use crate::{
     k8s::{
         K8sError,
         owner_relations::{OwnerRelationsManager, OwnerRelationsRules},
+        selector::ResourceFilter,
         selector_relations::{SelectorRelationRule, SelectorRelationsManager},
     },
     metrics,
@@ -663,6 +664,7 @@ pub struct Attributor {
     pub resource_store: ResourceStore,
     pub owner_relations_manager: OwnerRelationsManager,
     pub selector_relations_manager: Option<SelectorRelationsManager>,
+    pub filter: ResourceFilter,
     ip_index: Arc<DashMap<String, Vec<K8sObjectMeta>>>,
 }
 
@@ -677,6 +679,14 @@ impl Attributor {
         let client = Client::try_default()
             .await
             .map_err(|e| K8sError::ClientInitialization(Box::new(e)))?;
+        let selectors = conf
+            .discovery
+            .informer
+            .as_ref()
+            .and_then(|i| i.k8s.as_ref())
+            .map(|k| k.selectors.clone())
+            .unwrap_or_default();
+        let filter = ResourceFilter::new(selectors);
 
         let mut required_kinds = HashSet::new();
         if let Some(attributes_map) = &conf.attributes {
@@ -740,6 +750,7 @@ impl Attributor {
             resource_store,
             owner_relations_manager,
             selector_relations_manager,
+            filter,
             ip_index,
         })
     }
@@ -784,7 +795,16 @@ impl Attributor {
                     let key = ObjectRef::new(&meta.name)
                         .within(meta.namespace.as_deref().unwrap_or_default());
                     if let Some(obj) = store.get(&key) {
-                        results.push(obj);
+                        if self.filter.is_allowed(obj.as_ref()) {
+                            results.push(obj);
+                        } else {
+                            debug!(
+                                event.name = "k8s.attributor.filtered",
+                                k8s.kind = %meta.kind,
+                                k8s.name = %meta.name,
+                                "resource found but excluded by selector configuration"
+                            );
+                        }
                     }
                 }
             }
