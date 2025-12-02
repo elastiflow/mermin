@@ -226,6 +226,46 @@ async fn run() -> Result<()> {
         )
         .await?;
 
+        // Log filter configuration at debug level (after tracing is initialized)
+        if let Some(ref filters) = conf.filter {
+            for (filter_name, filter_opts) in filters {
+                debug!(
+                    event.name = "config.filter.loaded",
+                    filter.name = %filter_name,
+                    "filter configuration loaded"
+                );
+
+                if let Some(ref address) = filter_opts.address
+                    && (!address.match_glob.is_empty() || !address.not_match_glob.is_empty())
+                {
+                    debug!(
+                        event.name = "config.filter.address",
+                        filter.name = %filter_name,
+                        match = %address.match_glob,
+                        not_match = %address.not_match_glob,
+                        "address filter configuration"
+                    );
+                }
+
+                if let Some(ref port) = filter_opts.port
+                    && (!port.match_glob.is_empty() || !port.not_match_glob.is_empty())
+                {
+                    debug!(
+                        event.name = "config.filter.port",
+                        filter.name = %filter_name,
+                        match = %port.match_glob,
+                        not_match = %port.not_match_glob,
+                        "port filter configuration"
+                    );
+                }
+            }
+        } else {
+            debug!(
+                event.name = "config.filter.none",
+                "no filter configuration loaded"
+            );
+        }
+
         if conf.export.traces.stdout.is_some() || conf.export.traces.otlp.is_some() {
             let app_tracer_provider = init_provider(
                 conf.export.traces.stdout.clone(),
