@@ -158,8 +158,8 @@ discovery "instrument" {
 
 discovery "informer" "k8s" {
   # K8s API connection configuration
-  kubeconfig_path         = "" # Empty uses in-cluster config (default for pods)
-  informers_sync_timeout  = "30s"  # Timeout for initial cache sync (increase for large clusters)
+  kubeconfig_path        = ""    # Empty uses in-cluster config (default for pods)
+  informers_sync_timeout = "30s" # Timeout for initial cache sync (increase for large clusters)
 
   /*
     Define which flow will be processed and sent to the output.
@@ -745,7 +745,7 @@ span {
   tcp_rst_timeout     = "5s"
   udp_timeout         = "60s"
   community_id_seed   = 0
-  trace_id_timeout = "24h"
+  trace_id_timeout    = "24h"
 }
 
 # OTLP exporter configuration
