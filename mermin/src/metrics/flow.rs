@@ -1,5 +1,7 @@
 //! Helper functions for flow lifecycle metrics.
 
+use mermin_common::Direction;
+
 use crate::metrics::registry;
 
 /// Type of flow event.
@@ -93,4 +95,20 @@ pub fn inc_flow_stats_map_access(status: FlowStatsStatus) {
     registry::FLOW_STATS_MAP_ACCESS_TOTAL
         .with_label_values(&[status.as_ref()])
         .inc();
+}
+
+/// Increment the packets total counter.
+///
+/// Tracks packet deltas by interface and direction.
+/// For bidirectional flows:
+/// - If direction = Ingress: forward packets came via ingress, reverse via egress
+/// - If direction = Egress: forward packets came via egress, reverse via ingress
+pub fn inc_packets_total(interface: &str, direction: Direction, count: u64) {
+    let direction_str = match direction {
+        Direction::Ingress => "ingress",
+        Direction::Egress => "egress",
+    };
+    registry::PACKETS_TOTAL
+        .with_label_values(&[interface, direction_str])
+        .inc_by(count);
 }
