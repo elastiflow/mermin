@@ -117,8 +117,6 @@ FROM gcr.io/distroless/cc-debian12 AS runner
 ARG APP_ROOT APP
 
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
-# TODO(Cleanup for GA): Remove example config once repo is public and config is available publicly
-COPY docs/deployment/examples/local/config.example.hcl /etc/mermin/config.hcl
 ENTRYPOINT ["/usr/bin/mermin"]
 
 # ---- Runtime Stage ----
@@ -128,6 +126,4 @@ ARG APP_ROOT APP
 
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
 COPY --from=builder /usr/bin/bpftool /usr/bin/bpftool
-# TODO(Cleanup for GA): Remove example config once repo is public and config is available publicly
-COPY docs/deployment/examples/local/config.example.hcl /etc/mermin/config.hcl
 ENTRYPOINT ["/usr/bin/mermin"]

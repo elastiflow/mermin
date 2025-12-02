@@ -25,15 +25,10 @@ export "traces" {
   #   # }
   # }
 }
-# Metrics server configuration (for Prometheus scraping)
-metrics {
-  enabled        = true
-  listen_address = "0.0.0.0"
-  port           = 10250
-}
+
 # Test configuration optimized for fast CI runs
 # Reduce flow export intervals for faster test feedback
 span {
-  max_record_interval = "10s"   # Export active flows every 5s (default: 60s)
-  icmp_timeout = "5s"          # ICMP flows timeout after 3s (default: 10s)
+  max_record_interval = "10s" # Export active flows every 5s (default: 60s)
+  icmp_timeout        = "5s"  # ICMP flows timeout after 3s (default: 10s)
 }
