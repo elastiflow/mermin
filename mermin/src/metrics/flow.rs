@@ -74,7 +74,10 @@ pub fn inc_flows_created(interface: &str) {
     registry::FLOWS_CREATED
         .with_label_values(&[interface])
         .inc();
+}
 
+/// Increment the active flows gauge.
+pub fn inc_flows_active(interface: &str) {
     registry::FLOWS_ACTIVE.with_label_values(&[interface]).inc();
 }
 

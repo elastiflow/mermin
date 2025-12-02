@@ -246,18 +246,29 @@ impl FlowSpanProducer {
 
         // Spawn trace ID cache cleanup task
         let trace_id_cache_clone = self.trace_id_cache.clone();
+        let mut cleanup_shutdown_rx = shutdown_rx.resubscribe();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(5 * 60));
             loop {
-                interval.tick().await;
-                let (scanned, removed) = trace_id_cache_clone.cleanup_expired();
-                if removed > 0 {
-                    trace!(
-                        event.name = "trace_id_cache.cleanup",
-                        entries.scanned = scanned,
-                        entries.removed = removed,
-                        "trace ID cache cleanup completed"
-                    );
+                tokio::select! {
+                    _ = cleanup_shutdown_rx.recv() => {
+                        trace!(
+                            event.name = "trace_id_cache.cleanup_task.stopped",
+                            "trace ID cache cleanup task stopping gracefully"
+                        );
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        let (scanned, removed) = trace_id_cache_clone.cleanup_expired();
+                        if removed > 0 {
+                            trace!(
+                                event.name = "trace_id_cache.cleanup",
+                                entries.scanned = scanned,
+                                entries.removed = removed,
+                                "trace ID cache cleanup completed"
+                            );
+                        }
+                    }
                 }
             }
         });
@@ -276,27 +287,37 @@ impl FlowSpanProducer {
         let flow_store_shrink = Arc::clone(&self.components.flow_store);
         let trace_id_cache_shrink = self.trace_id_cache.clone();
         let iface_map_shrink = Arc::clone(&self.iface_map);
+        let mut shrink_shutdown_rx = shutdown_rx.resubscribe();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(SHRINK_INTERVAL_SECS));
             loop {
-                interval.tick().await;
+                tokio::select! {
+                    _ = shrink_shutdown_rx.recv() => {
+                        trace!(
+                            event.name = "capacity.shrink_task.stopped",
+                            "capacity shrinking task stopping gracefully"
+                        );
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        let flow_capacity = flow_store_shrink.capacity();
+                        let flow_len = flow_store_shrink.len();
+                        if shrink_policy.should_shrink(flow_capacity, flow_len) {
+                            flow_store_shrink.shrink_to_fit();
+                        }
 
-                let flow_capacity = flow_store_shrink.capacity();
-                let flow_len = flow_store_shrink.len();
-                if shrink_policy.should_shrink(flow_capacity, flow_len) {
-                    flow_store_shrink.shrink_to_fit();
-                }
+                        let trace_capacity = trace_id_cache_shrink.capacity();
+                        let trace_len = trace_id_cache_shrink.len();
+                        if shrink_policy.should_shrink(trace_capacity, trace_len) {
+                            trace_id_cache_shrink.shrink_to_fit();
+                        }
 
-                let trace_capacity = trace_id_cache_shrink.capacity();
-                let trace_len = trace_id_cache_shrink.len();
-                if shrink_policy.should_shrink(trace_capacity, trace_len) {
-                    trace_id_cache_shrink.shrink_to_fit();
-                }
-
-                let iface_capacity = iface_map_shrink.capacity();
-                let iface_len = iface_map_shrink.len();
-                if shrink_policy.should_shrink(iface_capacity, iface_len) {
-                    iface_map_shrink.shrink_to_fit();
+                        let iface_capacity = iface_map_shrink.capacity();
+                        let iface_len = iface_map_shrink.len();
+                        if shrink_policy.should_shrink(iface_capacity, iface_len) {
+                            iface_map_shrink.shrink_to_fit();
+                        }
+                    }
                 }
             }
         });
@@ -989,12 +1010,35 @@ impl FlowWorker {
             .attributes
             .network_interface_name
             .as_deref()
-            .unwrap_or("unknown");
-        metrics::flow::inc_flows_created(iface_name);
+            .unwrap_or("unknown")
+            .to_string();
+        metrics::flow::inc_flows_created(&iface_name);
 
         let flow_entry = FlowEntry { flow_span };
 
-        self.flow_store.insert(community_id, flow_entry);
+        let old_entry = self.flow_store.insert(community_id, flow_entry);
+
+        match old_entry {
+            None => {
+                // New flow: increment active gauge
+                metrics::flow::inc_flows_active(&iface_name);
+            }
+            Some(old) => {
+                // Replaced existing flow: check if interface changed (handles interface migration edge cases)
+                let old_iface = old
+                    .flow_span
+                    .attributes
+                    .network_interface_name
+                    .as_deref()
+                    .unwrap_or("unknown")
+                    .to_string();
+
+                if old_iface != iface_name {
+                    metrics::flow::dec_flows_active(&old_iface);
+                    metrics::flow::inc_flows_active(&iface_name);
+                }
+            }
+        }
     }
 }
 
@@ -1395,7 +1439,6 @@ async fn record_flow(
         );
     }
     if delta_reverse_packets > 0 {
-        // Reverse packets came via the opposite direction
         let reverse_direction = match stats.direction {
             mermin_common::Direction::Ingress => mermin_common::Direction::Egress,
             mermin_common::Direction::Egress => mermin_common::Direction::Ingress,
