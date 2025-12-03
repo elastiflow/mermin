@@ -798,7 +798,7 @@ impl Attributor {
                         if self.filter.is_allowed(obj.as_ref()) {
                             results.push(obj);
                         } else {
-                            debug!(
+                            trace!(
                                 event.name = "k8s.attributor.filtered",
                                 k8s.kind = %meta.kind,
                                 k8s.name = %meta.name,

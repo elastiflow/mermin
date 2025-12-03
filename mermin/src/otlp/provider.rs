@@ -1,4 +1,4 @@
-use std::{fs, str::FromStr, sync::Arc};
+use std::{fmt::Debug, fs, str::FromStr, sync::Arc};
 
 use http::{HeaderMap, HeaderName, HeaderValue, Uri};
 use hyper_rustls::HttpsConnectorBuilder;
@@ -23,9 +23,11 @@ use rustls_pemfile::{certs, private_key};
 use tonic::{metadata::MetadataMap, transport::Channel};
 use tracing::{Level, debug, info, warn};
 use tracing_subscriber::{
-    EnvFilter,
+    EnvFilter, Registry,
     fmt::{Layer, format::FmtSpan},
+    layer::Layered,
     prelude::__tracing_subscriber_SubscriberExt,
+    reload,
     util::SubscriberInitExt,
 };
 
@@ -490,6 +492,7 @@ pub async fn init_provider(
 }
 
 pub async fn init_internal_tracing(
+    handles: LogReloadHandles,
     log_level: Level,
     span_fmt: SpanFmt,
     log_color: bool,
@@ -497,14 +500,14 @@ pub async fn init_internal_tracing(
     otlp: Option<OtlpExportOptions>,
 ) -> Result<(), OtlpError> {
     let provider = init_provider(stdout, otlp).await?;
-    let mut fmt_layer = Layer::new()
+    let mut new_fmt_layer = Layer::new()
         .with_span_events(FmtSpan::from(span_fmt))
         .with_ansi(log_color);
 
     match log_level {
-        Level::DEBUG => fmt_layer = fmt_layer.with_file(true).with_line_number(true),
+        Level::DEBUG => new_fmt_layer = new_fmt_layer.with_file(true).with_line_number(true),
         Level::TRACE => {
-            fmt_layer = fmt_layer
+            new_fmt_layer = new_fmt_layer
                 .with_thread_ids(true)
                 .with_thread_names(true)
                 .with_file(true)
@@ -527,15 +530,26 @@ pub async fn init_internal_tracing(
         }
     }
 
-    let filter = EnvFilter::new(format!(
+    let new_filter = EnvFilter::new(format!(
         "warn,mermin={log_level},opentelemetry_sdk={log_level},opentelemetry={log_level},opentelemetry_otlp={log_level}"
     ));
 
-    tracing_subscriber::registry()
-        .with(filter)
-        .with(fmt_layer)
-        .with(OtelErrorLayer)
-        .init();
+    if let Err(e) = handles.filter.modify(|filter| *filter = new_filter) {
+        warn!(
+            event.name = "system.logger_reload_failed",
+            error.message = %e,
+            error.kind = "filter",
+            "failed to reload logger filter"
+        );
+    }
+    if let Err(e) = handles.fmt.modify(|layer| *layer = new_fmt_layer) {
+        warn!(
+            event.name = "system.logger_reload_failed",
+            error.message = %e,
+            error.kind = "formatter",
+            "failed to reload logger formatter"
+        );
+    }
 
     global::set_tracer_provider(provider);
     global::set_text_map_propagator(TraceContextPropagator::new());
@@ -547,6 +561,39 @@ pub async fn init_internal_tracing(
     );
 
     Ok(())
+}
+
+type SubscriberWithFilter = Layered<reload::Layer<EnvFilter, Registry>, Registry>;
+type FmtReloadHandle = reload::Handle<Layer<SubscriberWithFilter>, SubscriberWithFilter>;
+pub struct LogReloadHandles {
+    pub filter: reload::Handle<EnvFilter, Registry>,
+    pub fmt: FmtReloadHandle,
+}
+
+/// Initializes a simple, console-only logger and returns a handle to reconfigure it.
+pub fn init_bootstrap_logger() -> LogReloadHandles {
+    let (filter_layer, filter_handle) = reload::Layer::new(EnvFilter::new("debug"));
+
+    let default_layer = Layer::new()
+        .with_span_events(FmtSpan::FULL)
+        .with_ansi(false);
+    let (fmt_layer, fmt_handle) = reload::Layer::new(default_layer);
+
+    tracing_subscriber::registry()
+        .with(filter_layer)
+        .with(fmt_layer)
+        .with(OtelErrorLayer)
+        .init();
+
+    info!(
+        event.name = "system.bootstrap_logger_initialized",
+        "bootstrap logger initialized, awaiting full configuration"
+    );
+
+    LogReloadHandles {
+        filter: filter_handle,
+        fmt: fmt_handle,
+    }
 }
 
 #[cfg(test)]
