@@ -134,23 +134,26 @@ async fn run() -> Result<()> {
     let (mut task_manager, _) = TaskManager::new();
     let (os_shutdown_tx, _) = broadcast::channel::<()>(1);
     let mut os_thread_handles = Vec::new();
-    // Initialize debug metrics registry
-    if let Err(e) = metrics::registry::init_debug_registry() {
-        error!(
-            event.name = "metrics.debug_registry_init_failed",
-            error.message = %e,
-            "failed to initialize debug metrics registry"
-        );
-    } else {
-        info!(
-            event.name = "metrics.debug_registry_initialized",
-            "prometheus debug metrics registry initialized"
-        );
-    }
 
     // Initialize the global debug metrics flag based on configuration
     // This allows debug metric functions to check the flag without passing it around
     conf.metrics.init_debug_flag();
+
+    // Initialize debug metrics registry only if debug metrics are enabled
+    if conf.metrics.debug_enabled {
+        if let Err(e) = metrics::registry::init_debug_registry() {
+            error!(
+                event.name = "metrics.debug_registry_init_failed",
+                error.message = %e,
+                "failed to initialize debug metrics registry"
+            );
+        } else {
+            info!(
+                event.name = "metrics.debug_registry_initialized",
+                "prometheus debug metrics registry initialized"
+            );
+        }
+    }
 
     if conf.metrics.enabled {
         let metrics_conf = conf.metrics.clone();

@@ -675,12 +675,7 @@ impl FlowWorker {
         if !self.should_process_flow(&event.flow_key, &stats) {
             metrics::userspace::inc_ringbuf_packets(PacketType::Filtered, 1);
 
-            let iface_name = if let Some(entry) = self.iface_map.get(&stats.ifindex) {
-                entry.value().clone()
-            } else {
-                "unknown".to_string()
-            };
-            metrics::flow::inc_producer_flow_spans(&iface_name, FlowSpanProducerStatus::Dropped);
+            metrics::flow::inc_producer_flow_spans(FlowSpanProducerStatus::Dropped);
 
             let mut map = self.flow_stats_map.lock().await;
             if let Err(e) = map.remove(&event.flow_key) {
@@ -951,9 +946,8 @@ impl FlowWorker {
 
         self.insert_flow(community_id.to_string(), span, timeout);
 
-        let interface_name = iface_name.as_deref().unwrap_or("unknown");
-        metrics::flow::inc_producer_flow_spans(interface_name, FlowSpanProducerStatus::Created);
-        metrics::flow::inc_producer_flow_spans(interface_name, FlowSpanProducerStatus::Active);
+        metrics::flow::inc_producer_flow_spans(FlowSpanProducerStatus::Created);
+        metrics::flow::inc_producer_flow_spans(FlowSpanProducerStatus::Active);
 
         trace!(
             event.name = "span.producer.created_flow",
@@ -998,38 +992,14 @@ impl FlowWorker {
         flow_span.last_activity_time = flow_span.end_time;
         flow_span.timeout_duration = timeout;
 
-        let iface_name = flow_span
-            .attributes
-            .network_interface_name
-            .as_deref()
-            .unwrap_or("unknown")
-            .to_string();
-        metrics::flow::inc_flows_created(&iface_name);
+        metrics::flow::inc_flows_created();
 
         let flow_entry = FlowEntry { flow_span };
 
         let old_entry = self.flow_store.insert(community_id, flow_entry);
 
-        match old_entry {
-            None => {
-                // New flow: increment active gauge
-                metrics::flow::inc_flows_active(&iface_name);
-            }
-            Some(old) => {
-                // Replaced existing flow: check if interface changed (handles interface migration edge cases)
-                let old_iface = old
-                    .flow_span
-                    .attributes
-                    .network_interface_name
-                    .as_deref()
-                    .unwrap_or("unknown")
-                    .to_string();
-
-                if old_iface != iface_name {
-                    metrics::flow::dec_flows_active(&old_iface);
-                    metrics::flow::inc_flows_active(&iface_name);
-                }
-            }
+        if old_entry.is_none() {
+            metrics::flow::inc_flows_active();
         }
     }
 }
@@ -1409,37 +1379,25 @@ async fn record_flow(
         .reverse_bytes
         .saturating_sub(last_recorded_reverse_bytes);
 
-    if delta_packets > 0 || delta_reverse_packets > 0 {
-        let interface_name_for_metrics = flow_store
-            .get(community_id)
-            .and_then(|entry| {
-                entry
-                    .flow_span
-                    .attributes
-                    .network_interface_name
-                    .as_deref()
-                    .map(|s| s.to_string())
-            })
-            .unwrap_or_else(|| "unknown".to_string());
-
-        if delta_packets > 0 {
-            metrics::flow::inc_packets_total(
-                &interface_name_for_metrics,
-                stats.direction,
-                delta_packets,
-            );
-        }
-        if delta_reverse_packets > 0 {
-            let reverse_direction = match stats.direction {
-                mermin_common::Direction::Ingress => mermin_common::Direction::Egress,
-                mermin_common::Direction::Egress => mermin_common::Direction::Ingress,
-            };
-            metrics::flow::inc_packets_total(
-                &interface_name_for_metrics,
-                reverse_direction,
-                delta_reverse_packets,
-            );
-        }
+    if delta_packets > 0 {
+        metrics::flow::inc_packets_total(stats.direction, delta_packets);
+    }
+    if delta_reverse_packets > 0 {
+        let reverse_direction = match stats.direction {
+            mermin_common::Direction::Ingress => mermin_common::Direction::Egress,
+            mermin_common::Direction::Egress => mermin_common::Direction::Ingress,
+        };
+        metrics::flow::inc_packets_total(reverse_direction, delta_reverse_packets);
+    }
+    if delta_bytes > 0 {
+        metrics::flow::inc_bytes_total(stats.direction, delta_bytes);
+    }
+    if delta_reverse_bytes > 0 {
+        let reverse_direction = match stats.direction {
+            mermin_common::Direction::Ingress => mermin_common::Direction::Egress,
+            mermin_common::Direction::Egress => mermin_common::Direction::Ingress,
+        };
+        metrics::flow::inc_bytes_total(reverse_direction, delta_reverse_bytes);
     }
 
     // Now get mutable reference to update flow span attributes
@@ -1469,12 +1427,7 @@ async fn record_flow(
     flow_span.end_time = end_time;
     flow_span.last_activity_time = end_time;
 
-    let interface_name = flow_span
-        .attributes
-        .network_interface_name
-        .as_deref()
-        .unwrap_or("unknown");
-    metrics::flow::inc_producer_flow_spans(interface_name, FlowSpanProducerStatus::Recorded);
+    metrics::flow::inc_producer_flow_spans(FlowSpanProducerStatus::Recorded);
 
     // Update IP metadata from eBPF stats
     let is_ip_flow = stats.ether_type == EtherType::Ipv4 || stats.ether_type == EtherType::Ipv6;
@@ -1737,13 +1690,8 @@ pub async fn timeout_and_remove_flow(
     trace_id_cache.remove(&community_id);
 
     // Metrics
-    let iface_name = flow_span
-        .attributes
-        .network_interface_name
-        .as_deref()
-        .unwrap_or("unknown");
-    metrics::flow::inc_producer_flow_spans(iface_name, FlowSpanProducerStatus::Idled);
-    metrics::flow::dec_flows_active(iface_name);
+    metrics::flow::inc_producer_flow_spans(FlowSpanProducerStatus::Idled);
+    metrics::flow::dec_flows_active();
 }
 
 /// Periodic orphan scanner task - safety net for cleaning up stale eBPF entries.

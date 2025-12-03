@@ -5,8 +5,8 @@
 
 use lazy_static::lazy_static;
 use prometheus::{
-    GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGaugeVec, Opts,
-    Registry,
+    GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge,
+    IntGaugeVec, Opts, Registry,
 };
 
 lazy_static! {
@@ -196,18 +196,17 @@ lazy_static! {
     ).expect("failed to create export_blocking_time metric");
 
     /// Total number of flows created.
-    pub static ref FLOWS_CREATED: IntCounterVec = IntCounterVec::new(
+    pub static ref FLOWS_CREATED: IntCounter = IntCounter::with_opts(
         Opts::new("flow_spans_created_total", "Total number of flow spans created")
-            .namespace("mermin"),
-        &["interface"]
+            .namespace("mermin")
     ).expect("failed to create flows_created metric");
 
     /// Total number of flow spans processed by producer workers.
-    /// Labels: interface = interface name, status = "created" | "active" | "recorded" | "idled" | "dropped"
+    /// Labels: status = "created" | "active" | "recorded" | "idled" | "dropped"
     pub static ref PRODUCER_FLOW_SPANS_TOTAL: IntCounterVec = IntCounterVec::new(
         Opts::new("producer_flow_spans_total", "Total number of flow spans processed by producer workers")
             .namespace("mermin"),
-        &["interface", "status"]
+        &["status"]
     ).expect("failed to create producer_flow_spans_total metric");
 
     /// Total number of eBPF flow stats map access operations.
@@ -218,10 +217,9 @@ lazy_static! {
         &["status"]
     ).expect("failed to create flow_stats_map_access_total metric");
 
-    pub static ref FLOWS_ACTIVE: IntGaugeVec = IntGaugeVec::new(
+    pub static ref FLOWS_ACTIVE: IntGauge = IntGauge::with_opts(
         Opts::new("flow_spans_active", "Current number of active flow traces")
-            .namespace("mermin"),
-        &["interface"]
+            .namespace("mermin")
     ).expect("failed to create flows_active metric");
 
     // ============================================================================
@@ -364,13 +362,13 @@ lazy_static! {
     pub static ref PACKETS_TOTAL: IntCounterVec = IntCounterVec::new(
         Opts::new("packets_total", "Total number of packets processed")
             .namespace("mermin"),
-        &["interface", "direction"]  // direction: ingress/egress
+        &["direction"]  // direction: ingress/egress
     ).expect("failed to create packets_total metric");
 
     pub static ref BYTES_TOTAL: IntCounterVec = IntCounterVec::new(
         Opts::new("bytes_total", "Total number of bytes processed")
             .namespace("mermin"),
-        &["interface", "direction"]
+        &["direction"]
     ).expect("failed to create bytes_total metric");
 }
 
@@ -382,8 +380,6 @@ pub fn init_registry() -> Result<(), prometheus::Error> {
     REGISTRY.register(Box::new(EBPF_MAP_UTILIZATION.clone()))?;
     REGISTRY.register(Box::new(EBPF_FLOW_RING_BUFFER_DROPS.clone()))?;
     REGISTRY.register(Box::new(EBPF_ORPHANS_CLEANED.clone()))?;
-    REGISTRY.register(Box::new(TC_PROGRAMS_ATTACHED.clone()))?;
-    REGISTRY.register(Box::new(TC_PROGRAMS_DETACHED.clone()))?;
     REGISTRY.register(Box::new(BPF_FS_WRITABLE.clone()))?;
 
     // Userspace metrics

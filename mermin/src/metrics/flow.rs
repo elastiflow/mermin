@@ -70,26 +70,24 @@ pub fn inc_flow_events(event_type: FlowEventResult) {
 }
 
 /// Increment the flow creation counter.
-pub fn inc_flows_created(interface: &str) {
-    registry::FLOWS_CREATED
-        .with_label_values(&[interface])
-        .inc();
+pub fn inc_flows_created() {
+    registry::FLOWS_CREATED.inc();
 }
 
 /// Increment the active flows gauge.
-pub fn inc_flows_active(interface: &str) {
-    registry::FLOWS_ACTIVE.with_label_values(&[interface]).inc();
+pub fn inc_flows_active() {
+    registry::FLOWS_ACTIVE.inc();
 }
 
 /// Decrement the active flows gauge.
-pub fn dec_flows_active(interface: &str) {
-    registry::FLOWS_ACTIVE.with_label_values(&[interface]).dec();
+pub fn dec_flows_active() {
+    registry::FLOWS_ACTIVE.dec();
 }
 
 /// Increment the producer flow spans counter.
-pub fn inc_producer_flow_spans(interface: &str, status: FlowSpanProducerStatus) {
+pub fn inc_producer_flow_spans(status: FlowSpanProducerStatus) {
     registry::PRODUCER_FLOW_SPANS_TOTAL
-        .with_label_values(&[interface, status.as_ref()])
+        .with_label_values(&[status.as_ref()])
         .inc();
 }
 
@@ -102,16 +100,32 @@ pub fn inc_flow_stats_map_access(status: FlowStatsStatus) {
 
 /// Increment the packets total counter.
 ///
-/// Tracks packet deltas by interface and direction.
+/// Tracks packet deltas by direction.
 /// For bidirectional flows:
 /// - If direction = Ingress: forward packets came via ingress, reverse via egress
 /// - If direction = Egress: forward packets came via egress, reverse via ingress
-pub fn inc_packets_total(interface: &str, direction: Direction, count: u64) {
+pub fn inc_packets_total(direction: Direction, count: u64) {
     let direction_str = match direction {
         Direction::Ingress => "ingress",
         Direction::Egress => "egress",
     };
     registry::PACKETS_TOTAL
-        .with_label_values(&[interface, direction_str])
+        .with_label_values(&[direction_str])
+        .inc_by(count);
+}
+
+/// Increment the bytes total counter.
+///
+/// Tracks byte deltas by direction.
+/// For bidirectional flows:
+/// - If direction = Ingress: forward bytes came via ingress, reverse via egress
+/// - If direction = Egress: forward bytes came via egress, reverse via ingress
+pub fn inc_bytes_total(direction: Direction, count: u64) {
+    let direction_str = match direction {
+        Direction::Ingress => "ingress",
+        Direction::Egress => "egress",
+    };
+    registry::BYTES_TOTAL
+        .with_label_values(&[direction_str])
         .inc_by(count);
 }
