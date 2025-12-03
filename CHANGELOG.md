@@ -1,3 +1,13 @@
+## [v0.1.0-beta.37] - 2025-12-03
+
+### Features
+
+- Improve metric clarity and cleanup metric threads (#326)
+
+[v0.1.0-beta.36..v0.1.0-beta.37](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.36...v0.1.0-beta.37)
+
+
+
 ## [v0.1.0-beta.36] - 2025-12-01
 
 ### Bug Fixes
