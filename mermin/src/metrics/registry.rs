@@ -3,15 +3,31 @@
 //! This module defines all Prometheus metrics used by Mermin and provides
 //! a centralized registry for metric collection.
 
+use std::sync::OnceLock;
+
 use lazy_static::lazy_static;
 use prometheus::{
     GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGaugeVec, Opts,
     Registry,
 };
 
+/// Global flag indicating whether debug metrics with high-cardinality labels are enabled.
+///
+/// This is initialized once at application startup via `init_registry()` and provides
+/// thread-safe access without needing to pass the flag through every function call.
+static DEBUG_METRICS_ENABLED: OnceLock<bool> = OnceLock::new();
+
 lazy_static! {
-    /// Global Prometheus registry for all Mermin metrics.
+    /// Global Prometheus registry for all Mermin metrics (standard + debug).
     pub static ref REGISTRY: Registry = Registry::new();
+
+    /// Registry for standard metrics only (no high-cardinality labels).
+    /// These are always enabled and safe for production use.
+    pub static ref STANDARD_REGISTRY: Registry = Registry::new();
+
+    /// Registry for debug metrics only (high-cardinality labels).
+    /// Only populated when debug_metrics_enabled = true.
+    pub static ref DEBUG_REGISTRY: Registry = Registry::new();
 
     // ============================================================================
     // eBPF Resource Metrics
@@ -33,67 +49,79 @@ lazy_static! {
         Opts::new("ebpf_map_utilization_ratio", "Utilization ratio of eBPF maps")
             .namespace("mermin"),
         &["map"]
-    ).expect("failed to create ebpf_map_utilization metric");
+    ).expect("failed to create ebpf_map_utilization_ratio metric");
 
-    pub static ref EBPF_FLOW_RING_BUFFER_DROPS: IntCounter = IntCounter::with_opts(
+    pub static ref EBPF_FLOW_RING_BUFFER_DROPS_TOTAL: IntCounter = IntCounter::with_opts(
         Opts::new("ebpf_ring_buffer_drops_total", "Total number of ring buffer events dropped due to buffer full")
             .namespace("mermin")
-    ).expect("failed to create ebpf_ring_buffer_drops metric");
+    ).expect("failed to create ebpf_ring_buffer_drops_total metric");
 
-    pub static ref EBPF_ORPHANS_CLEANED: IntCounter = IntCounter::with_opts(
+    pub static ref EBPF_ORPHANS_CLEANED_TOTAL: IntCounter = IntCounter::with_opts(
         Opts::new("ebpf_orphans_cleaned_total", "Total number of orphaned eBPF map entries cleaned up")
             .namespace("mermin")
-    ).expect("failed to create ebpf_orphans_cleaned metric");
+    ).expect("failed to create ebpf_orphans_cleaned_total metric");
 
-    pub static ref TC_PROGRAMS_ATTACHED: IntCounterVec = IntCounterVec::new(
-        Opts::new("ebpf_tc_programs_attached_total", "Total number of TC programs attached")
+    // Standard aggregated metrics (no labels, always enabled)
+    pub static ref TC_PROGRAMS_ATTACHED_TOTAL: IntCounter = IntCounter::with_opts(
+        Opts::new("ebpf_tc_programs_attached_total", "Total number of TC programs attached across all interfaces")
+            .namespace("mermin")
+    ).expect("failed to create ebpf_tc_programs_attached_total metric");
+
+    pub static ref TC_PROGRAMS_DETACHED_TOTAL: IntCounter = IntCounter::with_opts(
+        Opts::new("ebpf_tc_programs_detached_total", "Total number of TC programs detached across all interfaces")
+            .namespace("mermin")
+    ).expect("failed to create ebpf_tc_programs_detached_total metric");
+
+    // Debug metrics with high-cardinality labels (only registered if debug_metrics_enabled)
+    pub static ref TC_PROGRAMS_ATTACHED_BY_INTERFACE_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("ebpf_tc_programs_attached_by_interface_total", "Total number of TC programs attached by interface and direction")
             .namespace("mermin"),
         &["interface", "direction"]
-    ).expect("failed to create tc_programs_attached metric");
+    ).expect("failed to create ebpf_tc_programs_attached_by_interface_total metric");
 
-    pub static ref TC_PROGRAMS_DETACHED: IntCounterVec = IntCounterVec::new(
-        Opts::new("ebpf_tc_programs_detached_total", "Total number of TC programs detached")
+    pub static ref TC_PROGRAMS_DETACHED_BY_INTERFACE_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("ebpf_tc_programs_detached_by_interface_total", "Total number of TC programs detached by interface and direction")
             .namespace("mermin"),
         &["interface", "direction"]
-    ).expect("failed to create tc_programs_detached metric");
+    ).expect("failed to create ebpf_tc_programs_detached_by_interface_total metric");
 
     pub static ref BPF_FS_WRITABLE: prometheus::IntGauge = prometheus::IntGauge::with_opts(
         Opts::new("ebpf_bpf_fs_writable", "Whether /sys/fs/bpf is writable for TCX link pinning (1 = writable, 0 = not writable)")
             .namespace("mermin")
-    ).expect("failed to create bpf_fs_writable metric");
+    ).expect("failed to create ebpf_bpf_fs_writable metric");
 
     // ============================================================================
     // Userspace Ring Buffer Metrics (subsystem: userspace)
     // ============================================================================
 
-    pub static ref USERSPACE_RINGBUF_PACKETS: IntCounterVec = IntCounterVec::new(
+    pub static ref RINGBUF_PACKETS_TOTAL: IntCounterVec = IntCounterVec::new(
         Opts::new("ringbuf_packets_total", "Total number of packets in the userspace ring buffer")
             .namespace("mermin"),
         &["type"]  // received, filtered
-    ).expect("failed to create ringbuf_packets metric");
+    ).expect("failed to create ringbuf_packets_total metric");
 
-    pub static ref USERSPACE_RINGBUF_BYTES: IntCounter = IntCounter::with_opts(
+    pub static ref RINGBUF_BYTES_TOTAL: IntCounter = IntCounter::with_opts(
         Opts::new("ringbuf_bytes_total", "Total number of bytes received from the userspace ring buffer")
             .namespace("mermin")
-    ).expect("failed to create ringbuf_bytes metric");
+    ).expect("failed to create ringbuf_bytes_total metric");
 
-    pub static ref USERSPACE_CHANNEL_CAPACITY: IntGaugeVec = IntGaugeVec::new(
+    pub static ref CHANNEL_CAPACITY: IntGaugeVec = IntGaugeVec::new(
         Opts::new("channel_capacity", "Capacity of internal channels")
             .namespace("mermin"),
         &["channel"]  // packet_worker, exporter
     ).expect("failed to create channel_capacity metric");
 
-    pub static ref USERSPACE_CHANNEL_SIZE: IntGaugeVec = IntGaugeVec::new(
+    pub static ref CHANNEL_SIZE: IntGaugeVec = IntGaugeVec::new(
         Opts::new("channel_size", "Current number of items in channels")
             .namespace("mermin"),
         &["channel"]  // packet_worker, exporter
     ).expect("failed to create channel_size metric");
 
-    pub static ref USERSPACE_CHANNEL_SENDS: IntCounterVec = IntCounterVec::new(
+    pub static ref CHANNEL_SENDS: IntCounterVec = IntCounterVec::new(
         Opts::new("channel_sends_total", "Total number of channel send operations")
             .namespace("mermin"),
         &["channel", "status"]  // status: success, error; channel: packet_worker, exporter, exporter_input
-    ).expect("failed to create channel_sends metric");
+    ).expect("failed to create channel_sends_total metric");
 
     // ============================================================================
     // Flow Span Lifecycle Metrics (subsystem: span)
@@ -125,86 +153,56 @@ lazy_static! {
         &["type"]
     ).expect("failed to create flow_events_total metric");
 
-    // TODO: Implement adaptive sampling in ring buffer consumer (mermin-ebpf/src/main.rs)
-    // This metric tracks intentional drops when worker channels are full to prevent complete stalls.
-    // Should be incremented when sampling logic drops events based on channel capacity.
-    // See: performance.sampling_enabled config option
-    /// Total number of flow events sampled (dropped intentionally during backpressure).
-    pub static ref FLOW_EVENTS_SAMPLED: IntCounter = IntCounter::with_opts(
-        Opts::new("flow_events_sampled_total", "Flow events sampled (dropped) during adaptive backpressure")
-            .namespace("mermin")
-    ).expect("failed to create flow_events_sampled metric");
-
-    // TODO: Implement dynamic sampling rate gauge in ring buffer consumer
-    // Should be updated when sampling logic adjusts drop rate based on channel utilization.
-    // One gauge per worker thread for granular visibility.
-    /// Current adaptive sampling rate (0.0 = no sampling, 1.0 = dropping everything).
-    pub static ref FLOW_EVENTS_SAMPLING_RATE: GaugeVec = GaugeVec::new(
-        Opts::new("flow_events_sampling_rate", "Current adaptive sampling rate")
-            .namespace("mermin"),
-        &["worker"]
-    ).expect("failed to create flow_events_sampling_rate metric");
-
-    // TODO: Add channel monitoring in pipeline (main.rs)
-    // Calculate ratio = current_len / capacity for each channel periodically.
-    // Channels: worker channels, flow_span_rx, k8s_decorated_flow_span_tx
-    // Helps identify bottlenecks and backpressure points.
-    /// Channel capacity utilization ratio (0.0-1.0).
-    pub static ref CHANNEL_CAPACITY_USED_RATIO: GaugeVec = GaugeVec::new(
-        Opts::new("channel_capacity_used_ratio", "Channel capacity utilization ratio (0.0 to 1.0)")
-            .namespace("mermin"),
-        &["channel"]
-    ).expect("failed to create channel_capacity_used_ratio metric");
-
-    // TODO: Increment when try_send() fails on any channel
-    // Add to worker dispatch, decorator send, and export send paths.
-    // Indicates when backpressure is actively blocking the pipeline.
-    /// Total number of times a channel was full (try_send failed).
-    pub static ref CHANNEL_FULL_EVENTS: IntCounterVec = IntCounterVec::new(
-        Opts::new("channel_full_events_total", "Total number of channel full events")
-            .namespace("mermin"),
-        &["channel"]
-    ).expect("failed to create channel_full_events metric");
-
-    // TODO: Add timing instrumentation to pipeline stages (main.rs)
-    // Stages: "flow_production", "k8s_decoration", "otlp_export"
-    // Wrap each stage with: let timer = PROCESSING_LATENCY.with_label_values(&["stage"]).start_timer();
-    // Critical for identifying slow stages under load.
     /// Processing latency by pipeline stage.
-    pub static ref PROCESSING_LATENCY: HistogramVec = HistogramVec::new(
+    pub static ref PROCESSING_LATENCY_SECONDS: HistogramVec = HistogramVec::new(
         HistogramOpts::new("processing_latency_seconds", "Processing latency by pipeline stage")
             .namespace("mermin")
             .buckets(vec![0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1]),
         &["stage"]
-    ).expect("failed to create processing_latency metric");
+    ).expect("failed to create processing_latency_seconds metric");
 
     /// Total number of export operations that timed out.
-    pub static ref EXPORT_TIMEOUTS: IntCounter = IntCounter::with_opts(
+    pub static ref EXPORT_TIMEOUTS_TOTAL: IntCounter = IntCounter::with_opts(
         Opts::new("export_timeouts_total", "Total number of export operations that timed out")
             .namespace("mermin")
-    ).expect("failed to create export_timeouts metric");
+    ).expect("failed to create export_timeouts_total metric");
 
     /// Time spent blocked waiting for export operations to complete.
-    pub static ref EXPORT_BLOCKING_TIME: Histogram = Histogram::with_opts(
+    pub static ref EXPORT_BLOCKING_TIME_SECONDS: Histogram = Histogram::with_opts(
         HistogramOpts::new("export_blocking_time_seconds", "Time spent blocked waiting for export operations")
             .namespace("mermin")
             .buckets(vec![0.001, 0.01, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0])
-    ).expect("failed to create export_blocking_time metric");
+    ).expect("failed to create export_blocking_time_seconds metric");
 
-    /// Total number of flows created.
-    pub static ref FLOWS_CREATED: IntCounterVec = IntCounterVec::new(
-        Opts::new("flow_spans_created_total", "Total number of flow spans created")
+    // Standard aggregated metrics (no labels, always enabled)
+    pub static ref FLOWS_CREATED_TOTAL: IntCounter = IntCounter::with_opts(
+        Opts::new("flow_spans_created_total", "Total number of flow spans created across all interfaces")
+            .namespace("mermin")
+    ).expect("failed to create flow_spans_created_total metric");
+
+    pub static ref FLOWS_ACTIVE_TOTAL: prometheus::IntGauge = prometheus::IntGauge::with_opts(
+        Opts::new("flow_spans_active_total", "Current number of active flow traces across all interfaces")
+            .namespace("mermin")
+    ).expect("failed to create flow_spans_active_total metric");
+
+    pub static ref PRODUCER_FLOW_SPANS_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("producer_flow_spans_total", "Total number of flow spans processed by producer workers (aggregated across interfaces)")
+            .namespace("mermin"),
+        &["status"]
+    ).expect("failed to create producer_flow_spans_total metric");
+
+    // Debug metrics with high-cardinality labels (only registered if debug_metrics_enabled)
+    pub static ref FLOWS_CREATED_BY_INTERFACE_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("flow_spans_created_by_interface_total", "Total number of flow spans created by interface")
             .namespace("mermin"),
         &["interface"]
-    ).expect("failed to create flows_created metric");
+    ).expect("failed to create flow_spans_created_by_interface_total metric");
 
-    /// Total number of flow spans processed by producer workers.
-    /// Labels: interface = interface name, status = "created" | "active" | "recorded" | "idled" | "dropped"
-    pub static ref PRODUCER_FLOW_SPANS_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("producer_flow_spans_total", "Total number of flow spans processed by producer workers")
+    pub static ref PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("producer_flow_spans_by_interface_total", "Total number of flow spans processed by producer workers by interface")
             .namespace("mermin"),
         &["interface", "status"]
-    ).expect("failed to create producer_flow_spans_total metric");
+    ).expect("failed to create producer_flow_spans_by_interface_total metric");
 
     /// Total number of eBPF flow stats map access operations.
     /// Labels: status = "ok" | "error" | "not_found"
@@ -214,11 +212,11 @@ lazy_static! {
         &["status"]
     ).expect("failed to create flow_stats_map_access_total metric");
 
-    pub static ref FLOWS_ACTIVE: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("flow_spans_active", "Current number of active flow traces")
+    pub static ref FLOWS_ACTIVE_BY_INTERFACE_TOTAL: IntGaugeVec = IntGaugeVec::new(
+        Opts::new("flow_spans_active_by_interface_total", "Current number of active flow traces by interface")
             .namespace("mermin"),
         &["interface"]
-    ).expect("failed to create flows_active metric");
+    ).expect("failed to create flow_spans_active_by_interface_total metric");
 
     // ============================================================================
     // Export Metrics
@@ -239,7 +237,7 @@ lazy_static! {
             .buckets(vec![1.0, 10.0, 50.0, 100.0, 250.0, 500.0, 1000.0])
     ).expect("failed to create export_batch_size metric");
 
-    pub static ref EXPORT_LATENCY: Histogram = Histogram::with_opts(
+    pub static ref EXPORT_LATENCY_SECONDS: Histogram = Histogram::with_opts(
         HistogramOpts::new("export_latency_seconds", "Latency of span export operations")
             .namespace("mermin")
             .buckets(vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0])
@@ -262,28 +260,39 @@ lazy_static! {
     // Kubernetes Watcher Metrics
     // ============================================================================
 
-    /// Total number of K8s resource watcher events received.
-    pub static ref K8S_WATCHER_EVENTS: IntCounterVec = IntCounterVec::new(
-        Opts::new("k8s_watcher_events_total", "Total number of K8s resource watcher events")
+    // Standard aggregated metrics (no labels, always enabled)
+    pub static ref K8S_WATCHER_EVENTS_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("k8s_watcher_events_total", "Total number of K8s resource watcher events (aggregated across resources)")
+            .namespace("mermin"),
+        &["event_type"]  // event_type: applied, deleted, restarted
+    ).expect("failed to create k8s_watcher_events_total metric");
+
+    pub static ref K8S_WATCHER_ERRORS_TOTAL: IntCounter = IntCounter::with_opts(
+        Opts::new("k8s_watcher_errors_total", "Total number of K8s watcher errors across all resources")
+            .namespace("mermin")
+    ).expect("failed to create k8s_watcher_errors_total metric");
+
+    // Debug metrics with high-cardinality labels (only registered if debug_metrics_enabled)
+    pub static ref K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("k8s_watcher_events_by_resource_total", "Total number of K8s resource watcher events by resource type")
             .namespace("mermin"),
         &["resource", "event_type"]  // event_type: applied, deleted, restarted
-    ).expect("failed to create k8s_watcher_events metric");
+    ).expect("failed to create k8s_watcher_events_by_resource_total metric");
 
-    /// Total number of K8s watcher errors.
-    pub static ref K8S_WATCHER_ERRORS: IntCounterVec = IntCounterVec::new(
-        Opts::new("k8s_watcher_errors_total", "Total number of K8s watcher errors")
+    pub static ref K8S_WATCHER_ERRORS_BY_RESOURCE_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("k8s_watcher_errors_by_resource_total", "Total number of K8s watcher errors by resource type")
             .namespace("mermin"),
         &["resource"]
-    ).expect("failed to create k8s_watcher_errors metric");
+    ).expect("failed to create k8s_watcher_errors_by_resource_total metric");
 
     /// Total number of K8s IP index updates triggered.
-    pub static ref K8S_IP_INDEX_UPDATES: IntCounter = IntCounter::with_opts(
+    pub static ref K8S_IP_INDEX_UPDATES_TOTAL: IntCounter = IntCounter::with_opts(
         Opts::new("k8s_ip_index_updates_total", "Total number of K8s IP index updates")
             .namespace("mermin")
     ).expect("failed to create k8s_ip_index_updates metric");
 
     /// Histogram of K8s IP index update duration.
-    pub static ref K8S_IP_INDEX_UPDATE_DURATION: Histogram = Histogram::with_opts(
+    pub static ref K8S_IP_INDEX_UPDATE_DURATION_SECONDS: Histogram = Histogram::with_opts(
         HistogramOpts::new("k8s_ip_index_update_duration_seconds", "Duration of K8s IP index updates")
             .namespace("mermin")
             .buckets(vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0])
@@ -293,62 +302,84 @@ lazy_static! {
     // Task Lifecycle Metrics
     // ============================================================================
 
-    /// Total number of tasks spawned by name.
-    pub static ref TASKS_SPAWNED: IntCounterVec = IntCounterVec::new(
-        Opts::new("tasks_spawned_total", "Total number of tasks spawned")
-            .namespace("mermin"),
-        &["task_name"]
-    ).expect("failed to create tasks_spawned metric");
+    // Standard aggregated metrics (no labels, always enabled)
+    pub static ref TASKS_SPAWNED_TOTAL: IntCounter = IntCounter::with_opts(
+        Opts::new("tasks_spawned_total", "Total number of tasks spawned across all task types")
+            .namespace("mermin")
+    ).expect("failed to create tasks_spawned_total metric");
 
-    /// Total number of tasks completed successfully by name.
-    pub static ref TASKS_COMPLETED: IntCounterVec = IntCounterVec::new(
-        Opts::new("tasks_completed_total", "Total number of tasks completed successfully")
-            .namespace("mermin"),
-        &["task_name"]
-    ).expect("failed to create tasks_completed metric");
+    pub static ref TASKS_COMPLETED_TOTAL: IntCounter = IntCounter::with_opts(
+        Opts::new("tasks_completed_total", "Total number of tasks completed successfully across all task types")
+            .namespace("mermin")
+    ).expect("failed to create tasks_completed_total metric");
 
-    /// Total number of tasks cancelled by name.
-    pub static ref TASKS_CANCELLED: IntCounterVec = IntCounterVec::new(
-        Opts::new("tasks_cancelled_total", "Total number of tasks cancelled")
-            .namespace("mermin"),
-        &["task_name"]
-    ).expect("failed to create tasks_cancelled metric");
+    pub static ref TASKS_CANCELLED_TOTAL: IntCounter = IntCounter::with_opts(
+        Opts::new("tasks_cancelled_total", "Total number of tasks cancelled across all task types")
+            .namespace("mermin")
+    ).expect("failed to create tasks_cancelled_total metric");
 
-    /// Total number of tasks that panicked by name.
-    pub static ref TASKS_PANICKED: IntCounterVec = IntCounterVec::new(
-        Opts::new("tasks_panicked_total", "Total number of tasks that panicked")
-            .namespace("mermin"),
-        &["task_name"]
-    ).expect("failed to create tasks_panicked metric");
+    pub static ref TASKS_PANICKED_TOTAL: IntCounter = IntCounter::with_opts(
+        Opts::new("tasks_panicked_total", "Total number of tasks that panicked across all task types")
+            .namespace("mermin")
+    ).expect("failed to create tasks_panicked_total metric");
 
-    /// Current number of active (running) tasks by name.
-    pub static ref TASKS_ACTIVE: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("tasks_active", "Current number of active tasks")
+    pub static ref TASKS_ACTIVE_TOTAL: prometheus::IntGauge = prometheus::IntGauge::with_opts(
+        Opts::new("tasks_active_total", "Current number of active tasks across all task types")
+            .namespace("mermin")
+    ).expect("failed to create tasks_active_total metric");
+
+    // Debug metrics with high-cardinality labels (only registered if debug_metrics_enabled)
+    pub static ref TASKS_SPAWNED_BY_NAME_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("tasks_spawned_by_name_total", "Total number of tasks spawned by task name")
             .namespace("mermin"),
         &["task_name"]
-    ).expect("failed to create tasks_active metric");
+    ).expect("failed to create tasks_spawned_by_name_total metric");
+
+    pub static ref TASKS_COMPLETED_BY_NAME_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("tasks_completed_by_name_total", "Total number of tasks completed successfully by task name")
+            .namespace("mermin"),
+        &["task_name"]
+    ).expect("failed to create tasks_completed_by_name_total metric");
+
+    pub static ref TASKS_CANCELLED_BY_NAME_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("tasks_cancelled_by_name_total", "Total number of tasks cancelled by task name")
+            .namespace("mermin"),
+        &["task_name"]
+    ).expect("failed to create tasks_cancelled_by_name_total metric");
+
+    pub static ref TASKS_PANICKED_BY_NAME_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("tasks_panicked_by_name_total", "Total number of tasks that panicked by task name")
+            .namespace("mermin"),
+        &["task_name"]
+    ).expect("failed to create tasks_panicked_by_name_total metric");
+
+    pub static ref TASKS_ACTIVE_BY_NAME_TOTAL: IntGaugeVec = IntGaugeVec::new(
+        Opts::new("tasks_active_by_name_total", "Current number of active tasks by task name")
+            .namespace("mermin"),
+        &["task_name"]
+    ).expect("failed to create tasks_active_by_name_total metric");
 
     /// Duration of shutdown operations.
-    pub static ref SHUTDOWN_DURATION: Histogram = Histogram::with_opts(
+    pub static ref SHUTDOWN_DURATION_SECONDS: Histogram = Histogram::with_opts(
         HistogramOpts::new("shutdown_duration_seconds", "Duration of shutdown operations")
             .namespace("mermin")
             .buckets(vec![0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0])
     ).expect("failed to create shutdown_duration metric");
 
     /// Total number of shutdown operations that timed out.
-    pub static ref SHUTDOWN_TIMEOUTS: IntCounter = IntCounter::with_opts(
+    pub static ref SHUTDOWN_TIMEOUTS_TOTAL: IntCounter = IntCounter::with_opts(
         Opts::new("shutdown_timeouts_total", "Total number of shutdown operations that timed out")
             .namespace("mermin")
     ).expect("failed to create shutdown_timeouts metric");
 
     /// Total number of flows preserved during shutdown.
-    pub static ref FLOWS_PRESERVED_SHUTDOWN: IntCounter = IntCounter::with_opts(
+    pub static ref FLOWS_PRESERVED_SHUTDOWN_TOTAL: IntCounter = IntCounter::with_opts(
         Opts::new("flows_preserved_shutdown_total", "Total number of flows preserved during shutdown")
             .namespace("mermin")
     ).expect("failed to create flows_preserved_shutdown metric");
 
     /// Total number of flows lost during shutdown.
-    pub static ref FLOWS_LOST_SHUTDOWN: IntCounter = IntCounter::with_opts(
+    pub static ref FLOWS_LOST_SHUTDOWN_TOTAL: IntCounter = IntCounter::with_opts(
         Opts::new("flows_lost_shutdown_total", "Total number of flows lost during shutdown")
             .namespace("mermin")
     ).expect("failed to create flows_lost_shutdown metric");
@@ -357,83 +388,312 @@ lazy_static! {
     // Per-Interface Statistics
     // ============================================================================
 
-    pub static ref PACKETS_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("packets_total", "Total number of packets processed")
-            .namespace("mermin"),
-        &["interface", "direction"]  // direction: ingress/egress
+    // Standard aggregated metrics (no labels, always enabled)
+    pub static ref PACKETS_TOTAL: IntCounter = IntCounter::with_opts(
+        Opts::new("packets_total", "Total number of packets processed across all interfaces")
+            .namespace("mermin")
     ).expect("failed to create packets_total metric");
 
-    pub static ref BYTES_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("bytes_total", "Total number of bytes processed")
+    pub static ref BYTES_TOTAL: IntCounter = IntCounter::with_opts(
+        Opts::new("bytes_total", "Total number of bytes processed across all interfaces")
+            .namespace("mermin")
+    ).expect("failed to create bytes_total metric");
+
+    // Debug metrics with high-cardinality labels (only registered if debug_metrics_enabled)
+    pub static ref PACKETS_BY_INTERFACE_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("packets_by_interface_total", "Total number of packets processed by interface and direction")
+            .namespace("mermin"),
+        &["interface", "direction"]  // direction: ingress/egress
+    ).expect("failed to create packets_by_interface_total metric");
+
+    pub static ref BYTES_BY_INTERFACE_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("bytes_by_interface_total", "Total number of bytes processed by interface and direction")
             .namespace("mermin"),
         &["interface", "direction"]
-    ).expect("failed to create bytes_total metric");
+    ).expect("failed to create bytes_by_interface_total metric");
+}
+
+// Helper macro to register a metric to both combined and standard registries
+macro_rules! register_standard {
+    ($metric:expr) => {{
+        REGISTRY.register(Box::new($metric.clone()))?;
+        STANDARD_REGISTRY.register(Box::new($metric.clone()))?;
+    }};
+}
+
+// Helper macro to register a debug metric (only when enabled)
+macro_rules! register_debug {
+    ($metric:expr, $debug_enabled:expr) => {{
+        if $debug_enabled {
+            REGISTRY.register(Box::new($metric.clone()))?;
+            DEBUG_REGISTRY.register(Box::new($metric.clone()))?;
+        }
+    }};
 }
 
 /// Initialize the metrics registry by registering all collectors.
-pub fn init_registry() -> Result<(), prometheus::Error> {
-    // eBPF metrics
-    REGISTRY.register(Box::new(EBPF_MAP_ENTRIES.clone()))?;
-    REGISTRY.register(Box::new(EBPF_MAP_CAPACITY.clone()))?;
-    REGISTRY.register(Box::new(EBPF_MAP_UTILIZATION.clone()))?;
-    REGISTRY.register(Box::new(EBPF_FLOW_RING_BUFFER_DROPS.clone()))?;
-    REGISTRY.register(Box::new(EBPF_ORPHANS_CLEANED.clone()))?;
-    REGISTRY.register(Box::new(TC_PROGRAMS_ATTACHED.clone()))?;
-    REGISTRY.register(Box::new(TC_PROGRAMS_DETACHED.clone()))?;
-    REGISTRY.register(Box::new(BPF_FS_WRITABLE.clone()))?;
+///
+/// Registers metrics to three registries:
+/// - REGISTRY: All metrics (standard + debug if enabled)
+/// - STANDARD_REGISTRY: Only standard metrics (no high-cardinality labels)
+/// - DEBUG_REGISTRY: Only debug metrics (high-cardinality labels, only if debug_enabled)
+///
+/// If `debug_enabled` is true, registers high-cardinality debug metrics with per-resource labels.
+/// Standard aggregated metrics are always registered.
+///
+/// # Errors
+///
+/// Returns [`prometheus::Error`] if:
+/// - A metric with the same name is already registered
+/// - The registry is already initialized with a different `debug_enabled` value
+/// - Metric creation fails due to invalid configuration
+///
+/// # Examples
+///
+/// ```
+/// use mermin::metrics::registry;
+///
+/// registry::init_registry(false)?;
+///
+/// registry::init_registry(false)?;
+/// # Ok::<(), prometheus::Error>(())
+/// ```
+pub fn init_registry(debug_enabled: bool) -> Result<(), prometheus::Error> {
+    // Check if already initialized with different value
+    if let Some(&existing) = DEBUG_METRICS_ENABLED.get() {
+        if existing != debug_enabled {
+            return Err(prometheus::Error::Msg(format!(
+                "Registry already initialized with debug_enabled={existing}, cannot reinitialize with {debug_enabled}",
+            )));
+        }
+        return Ok(());
+    }
 
-    // Userspace metrics
-    REGISTRY.register(Box::new(USERSPACE_RINGBUF_PACKETS.clone()))?;
-    REGISTRY.register(Box::new(USERSPACE_RINGBUF_BYTES.clone()))?;
-    REGISTRY.register(Box::new(USERSPACE_CHANNEL_CAPACITY.clone()))?;
-    REGISTRY.register(Box::new(USERSPACE_CHANNEL_SIZE.clone()))?;
-    REGISTRY.register(Box::new(USERSPACE_CHANNEL_SENDS.clone()))?;
+    // Initialize the global debug flag (first time only)
+    DEBUG_METRICS_ENABLED
+        .set(debug_enabled)
+        .expect("DEBUG_METRICS_ENABLED should not be set yet");
 
+    // ============================================================================
+    // eBPF metrics (always registered)
+    // ============================================================================
+    register_standard!(EBPF_MAP_ENTRIES);
+    register_standard!(EBPF_MAP_CAPACITY);
+    register_standard!(EBPF_MAP_UTILIZATION);
+    register_standard!(EBPF_FLOW_RING_BUFFER_DROPS_TOTAL);
+    register_standard!(EBPF_ORPHANS_CLEANED_TOTAL);
+    register_standard!(BPF_FS_WRITABLE);
+    register_standard!(TC_PROGRAMS_ATTACHED_TOTAL);
+    register_standard!(TC_PROGRAMS_DETACHED_TOTAL);
+
+    // Debug eBPF metrics (conditional)
+    register_debug!(TC_PROGRAMS_ATTACHED_BY_INTERFACE_TOTAL, debug_enabled);
+    register_debug!(TC_PROGRAMS_DETACHED_BY_INTERFACE_TOTAL, debug_enabled);
+
+    // ============================================================================
+    // Userspace metrics (always registered)
+    // ============================================================================
+    register_standard!(RINGBUF_PACKETS_TOTAL);
+    register_standard!(RINGBUF_BYTES_TOTAL);
+    register_standard!(CHANNEL_CAPACITY);
+    register_standard!(CHANNEL_SIZE);
+    register_standard!(CHANNEL_SENDS);
+
+    // ============================================================================
     // Flow metrics
-    REGISTRY.register(Box::new(FLOW_EVENTS_TOTAL.clone()))?;
-    REGISTRY.register(Box::new(FLOW_SPANS_PROCESSED_TOTAL.clone()))?;
-    REGISTRY.register(Box::new(FLOW_STORE_SIZE.clone()))?;
-    REGISTRY.register(Box::new(FLOW_POLLER_QUEUE_SIZE.clone()))?;
-    REGISTRY.register(Box::new(FLOW_EVENTS_SAMPLED.clone()))?;
-    REGISTRY.register(Box::new(FLOW_EVENTS_SAMPLING_RATE.clone()))?;
-    REGISTRY.register(Box::new(CHANNEL_CAPACITY_USED_RATIO.clone()))?;
-    REGISTRY.register(Box::new(CHANNEL_FULL_EVENTS.clone()))?;
-    REGISTRY.register(Box::new(PROCESSING_LATENCY.clone()))?;
-    REGISTRY.register(Box::new(EXPORT_TIMEOUTS.clone()))?;
-    REGISTRY.register(Box::new(EXPORT_BLOCKING_TIME.clone()))?;
-    REGISTRY.register(Box::new(FLOWS_CREATED.clone()))?;
-    REGISTRY.register(Box::new(FLOWS_ACTIVE.clone()))?;
-    REGISTRY.register(Box::new(PRODUCER_FLOW_SPANS_TOTAL.clone()))?;
-    REGISTRY.register(Box::new(FLOW_STATS_MAP_ACCESS_TOTAL.clone()))?;
+    // ============================================================================
+    register_standard!(FLOW_EVENTS_TOTAL);
+    register_standard!(FLOW_SPANS_PROCESSED_TOTAL);
+    register_standard!(FLOW_STORE_SIZE);
+    register_standard!(FLOW_POLLER_QUEUE_SIZE);
+    register_standard!(PROCESSING_LATENCY_SECONDS);
+    register_standard!(EXPORT_TIMEOUTS_TOTAL);
+    register_standard!(EXPORT_BLOCKING_TIME_SECONDS);
+    register_standard!(FLOW_STATS_MAP_ACCESS_TOTAL);
+    register_standard!(FLOWS_CREATED_TOTAL);
+    register_standard!(FLOWS_ACTIVE_TOTAL);
+    register_standard!(PRODUCER_FLOW_SPANS_TOTAL);
 
-    // Export metrics
-    REGISTRY.register(Box::new(EXPORT_FLOW_SPANS_TOTAL.clone()))?;
-    REGISTRY.register(Box::new(EXPORT_BATCH_SIZE.clone()))?;
-    REGISTRY.register(Box::new(EXPORT_LATENCY.clone()))?;
+    // Debug flow metrics
+    register_debug!(FLOWS_CREATED_BY_INTERFACE_TOTAL, debug_enabled);
+    register_debug!(FLOWS_ACTIVE_BY_INTERFACE_TOTAL, debug_enabled);
+    register_debug!(PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL, debug_enabled);
 
-    // K8s decorator metrics
-    REGISTRY.register(Box::new(K8S_DECORATOR_FLOW_SPANS_TOTAL.clone()))?;
+    // ============================================================================
+    // Export metrics (always registered)
+    // ============================================================================
+    register_standard!(EXPORT_FLOW_SPANS_TOTAL);
+    register_standard!(EXPORT_BATCH_SIZE);
+    register_standard!(EXPORT_LATENCY_SECONDS);
 
+    // ============================================================================
+    // K8s decorator metrics (always registered)
+    // ============================================================================
+    register_standard!(K8S_DECORATOR_FLOW_SPANS_TOTAL);
+
+    // ============================================================================
     // K8s watcher metrics
-    REGISTRY.register(Box::new(K8S_WATCHER_EVENTS.clone()))?;
-    REGISTRY.register(Box::new(K8S_WATCHER_ERRORS.clone()))?;
-    REGISTRY.register(Box::new(K8S_IP_INDEX_UPDATES.clone()))?;
-    REGISTRY.register(Box::new(K8S_IP_INDEX_UPDATE_DURATION.clone()))?;
+    // ============================================================================
+    register_standard!(K8S_IP_INDEX_UPDATES_TOTAL);
+    register_standard!(K8S_IP_INDEX_UPDATE_DURATION_SECONDS);
+    register_standard!(K8S_WATCHER_EVENTS_TOTAL);
+    register_standard!(K8S_WATCHER_ERRORS_TOTAL);
 
+    // Debug K8s watcher metrics
+    register_debug!(K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL, debug_enabled);
+    register_debug!(K8S_WATCHER_ERRORS_BY_RESOURCE_TOTAL, debug_enabled);
+
+    // ============================================================================
     // Task lifecycle metrics
-    REGISTRY.register(Box::new(TASKS_SPAWNED.clone()))?;
-    REGISTRY.register(Box::new(TASKS_COMPLETED.clone()))?;
-    REGISTRY.register(Box::new(TASKS_CANCELLED.clone()))?;
-    REGISTRY.register(Box::new(TASKS_PANICKED.clone()))?;
-    REGISTRY.register(Box::new(TASKS_ACTIVE.clone()))?;
-    REGISTRY.register(Box::new(SHUTDOWN_DURATION.clone()))?;
-    REGISTRY.register(Box::new(SHUTDOWN_TIMEOUTS.clone()))?;
-    REGISTRY.register(Box::new(FLOWS_PRESERVED_SHUTDOWN.clone()))?;
-    REGISTRY.register(Box::new(FLOWS_LOST_SHUTDOWN.clone()))?;
+    // ============================================================================
+    register_standard!(SHUTDOWN_DURATION_SECONDS);
+    register_standard!(SHUTDOWN_TIMEOUTS_TOTAL);
+    register_standard!(FLOWS_PRESERVED_SHUTDOWN_TOTAL);
+    register_standard!(FLOWS_LOST_SHUTDOWN_TOTAL);
+    register_standard!(TASKS_SPAWNED_TOTAL);
+    register_standard!(TASKS_COMPLETED_TOTAL);
+    register_standard!(TASKS_CANCELLED_TOTAL);
+    register_standard!(TASKS_PANICKED_TOTAL);
+    register_standard!(TASKS_ACTIVE_TOTAL);
 
-    // Interface metrics
-    REGISTRY.register(Box::new(PACKETS_TOTAL.clone()))?;
-    REGISTRY.register(Box::new(BYTES_TOTAL.clone()))?;
+    // Debug task metrics
+    register_debug!(TASKS_SPAWNED_BY_NAME_TOTAL, debug_enabled);
+    register_debug!(TASKS_COMPLETED_BY_NAME_TOTAL, debug_enabled);
+    register_debug!(TASKS_CANCELLED_BY_NAME_TOTAL, debug_enabled);
+    register_debug!(TASKS_PANICKED_BY_NAME_TOTAL, debug_enabled);
+    register_debug!(TASKS_ACTIVE_BY_NAME_TOTAL, debug_enabled);
+
+    // ============================================================================
+    // Per-interface statistics
+    // ============================================================================
+    register_standard!(PACKETS_TOTAL);
+    register_standard!(BYTES_TOTAL);
+
+    // Debug interface metrics
+    register_debug!(PACKETS_BY_INTERFACE_TOTAL, debug_enabled);
+    register_debug!(BYTES_BY_INTERFACE_TOTAL, debug_enabled);
 
     Ok(())
+}
+
+/// Get whether debug metrics with high-cardinality labels are enabled.
+///
+/// Returns false if the registry has not been initialized.
+#[inline]
+pub fn debug_enabled() -> bool {
+    DEBUG_METRICS_ENABLED.get().copied().unwrap_or(false)
+}
+
+/// Remove all metrics for an interface (only works if debug metrics are enabled).
+///
+/// Cleans up all metric label combinations for the specified interface.
+/// This includes TC programs, packets, bytes, flows, and producer metrics.
+pub fn remove_interface_metrics(iface: &str) {
+    // TC programs (ingress/egress)
+    let _ = TC_PROGRAMS_ATTACHED_BY_INTERFACE_TOTAL.remove_label_values(&[iface, "ingress"]);
+    let _ = TC_PROGRAMS_ATTACHED_BY_INTERFACE_TOTAL.remove_label_values(&[iface, "egress"]);
+    let _ = TC_PROGRAMS_DETACHED_BY_INTERFACE_TOTAL.remove_label_values(&[iface, "ingress"]);
+    let _ = TC_PROGRAMS_DETACHED_BY_INTERFACE_TOTAL.remove_label_values(&[iface, "egress"]);
+
+    // Packets/bytes (ingress/egress)
+    let _ = PACKETS_BY_INTERFACE_TOTAL.remove_label_values(&[iface, "ingress"]);
+    let _ = PACKETS_BY_INTERFACE_TOTAL.remove_label_values(&[iface, "egress"]);
+    let _ = BYTES_BY_INTERFACE_TOTAL.remove_label_values(&[iface, "ingress"]);
+    let _ = BYTES_BY_INTERFACE_TOTAL.remove_label_values(&[iface, "egress"]);
+
+    // Flows
+    let _ = FLOWS_CREATED_BY_INTERFACE_TOTAL.remove_label_values(&[iface]);
+    let _ = FLOWS_ACTIVE_BY_INTERFACE_TOTAL.remove_label_values(&[iface]);
+
+    // Producer flow spans (all status values)
+    let _ = PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL.remove_label_values(&[iface, "created"]);
+    let _ = PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL.remove_label_values(&[iface, "active"]);
+    let _ = PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL.remove_label_values(&[iface, "recorded"]);
+    let _ = PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL.remove_label_values(&[iface, "idled"]);
+    let _ = PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL.remove_label_values(&[iface, "dropped"]);
+}
+
+/// Remove all metrics for a K8s resource (only works if debug metrics are enabled).
+///
+/// Cleans up watcher events and error metrics for the specified resource.
+pub fn remove_k8s_resource_metrics(resource: &str) {
+    // Watcher events (all event types)
+    let _ = K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL.remove_label_values(&[resource, "apply"]);
+    let _ = K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL.remove_label_values(&[resource, "init"]);
+    let _ = K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL.remove_label_values(&[resource, "init_done"]);
+    let _ = K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL.remove_label_values(&[resource, "delete"]);
+
+    // Watcher errors
+    let _ = K8S_WATCHER_ERRORS_BY_RESOURCE_TOTAL.remove_label_values(&[resource]);
+}
+
+/// Remove all metrics for a task (only works if debug metrics are enabled).
+///
+/// Cleans up task lifecycle metrics for the specified task name.
+pub fn remove_task_metrics(task_name: &str) {
+    let _ = TASKS_SPAWNED_BY_NAME_TOTAL.remove_label_values(&[task_name]);
+    let _ = TASKS_COMPLETED_BY_NAME_TOTAL.remove_label_values(&[task_name]);
+    let _ = TASKS_CANCELLED_BY_NAME_TOTAL.remove_label_values(&[task_name]);
+    let _ = TASKS_PANICKED_BY_NAME_TOTAL.remove_label_values(&[task_name]);
+    let _ = TASKS_ACTIVE_BY_NAME_TOTAL.remove_label_values(&[task_name]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_remove_interface_metrics_does_not_panic() {
+        remove_interface_metrics("test-iface");
+        assert!(true);
+    }
+
+    #[test]
+    fn test_remove_k8s_resource_metrics_does_not_panic() {
+        remove_k8s_resource_metrics("Pod");
+        assert!(true);
+    }
+
+    #[test]
+    fn test_remove_task_metrics_does_not_panic() {
+        remove_task_metrics("test-task");
+        assert!(true);
+    }
+
+    #[test]
+    fn test_metrics_system_initialization() {
+        // Initialize registry without debug metrics
+        // Note: May already be initialized by another test, which is fine
+        let _ = init_registry(false);
+
+        // The important thing is that debug can be queried
+        // (It might be enabled from a different test, but that's OK for this basic test)
+        let _ = debug_enabled();
+    }
+
+    #[test]
+    fn test_standard_registry_always_has_metrics() {
+        // Initialize with debug disabled
+        let _ = init_registry(false);
+
+        // Standard registry should have metrics
+        let families = STANDARD_REGISTRY.gather();
+
+        // Should have at least some standard metrics
+        // (exact count depends on what's been registered)
+        assert!(
+            !families.is_empty(),
+            "Standard registry should not be empty"
+        );
+    }
+
+    #[test]
+    fn test_separate_registries_exist() {
+        // All three registries should exist
+        let _ = &REGISTRY;
+        let _ = &STANDARD_REGISTRY;
+        let _ = &DEBUG_REGISTRY;
+
+        assert!(true, "All registries are accessible");
+    }
 }

@@ -35,7 +35,7 @@ pub fn inc_export_flow_spans(status: ExportStatus) {
 
 /// Record export operation latency.
 pub fn observe_export_latency(duration: Duration) {
-    registry::EXPORT_LATENCY.observe(duration.as_secs_f64());
+    registry::EXPORT_LATENCY_SECONDS.observe(duration.as_secs_f64());
 }
 
 /// Record export batch size.

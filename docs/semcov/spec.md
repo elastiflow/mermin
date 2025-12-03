@@ -163,55 +163,56 @@ Time-based metrics calculated for the flow, stored in nanoseconds (`ns`).
 
 | Proposed Field Name                | Data Type  | Description                                                         | Notes / Decisions                          | Std OTel | Required |
 |:-----------------------------------|:-----------|:--------------------------------------------------------------------|--------------------------------------------|:---------|:---------|
-| `source.k8s.cluster.name`          | `string`   | The name of the Kubernetes cluster for the source.                  |                                            | ✓        | ○        |
+| `source.k8s.cluster.name`          | `string`   | The name of the Kubernetes cluster for the source.                  |                                            | ✓        | ~        |
 | `source.k8s.cluster.uid`           | `string`   | The uid of the Kubernetes cluster for the source.                   |                                            | ✓        | ○        |
-| `source.k8s.node.name`             | `string`   | The name of the Kubernetes Node for the source.                     |                                            | ✓        | ○        |
+| `source.k8s.node.name`             | `string`   | The name of the Kubernetes Node for the source.                     |                                            | ✓        | ~        |
 | `source.k8s.node.uid`              | `string`   | The uid of the Kubernetes Node for the source.                      |                                            | ✓        | ○        |
-| `source.k8s.namespace.name`        | `string`   | The name of the Kubernetes Namespace for the source.                |                                            | ✓        | ○        |
-| `source.k8s.pod.name`              | `string`   | The name of the Kubernetes Pod for the source.                      |                                            | ✓        | ○        |
+| `source.k8s.namespace.name`        | `string`   | The name of the Kubernetes Namespace for the source.                |                                            | ✓        | ~        |
+| `source.k8s.pod.name`              | `string`   | The name of the Kubernetes Pod for the source.                      |                                            | ✓        | ~        |
 | `source.k8s.pod.uid`               | `string`   | The uid of the Kubernetes Pod for the source.                       |                                            | ✓        | ○        |
-| `source.k8s.container.name`        | `string`   | The name of the Kubernetes Container for the source.                |                                            | ✓        | ○        |
-| `source.k8s.deployment.name`       | `string`   | The name of the Kubernetes Deployment for the source.               |                                            | ✓        | ○        |
+| `source.k8s.container.name`        | `string`   | The name of the Kubernetes Container for the source.                |                                            | ✓        | ~        |
+| `source.k8s.deployment.name`       | `string`   | The name of the Kubernetes Deployment for the source.               |                                            | ✓        | ~        |
 | `source.k8s.deployment.uid`        | `string`   | The uid of the Kubernetes Deployment for the source.                |                                            | ✓        | ○        |
-| `source.k8s.replicaset.name`       | `string`   | The name of the Kubernetes ReplicaSet for the source.               |                                            | ✓        | ○        |
+| `source.k8s.replicaset.name`       | `string`   | The name of the Kubernetes ReplicaSet for the source.               |                                            | ✓        | ~        |
 | `source.k8s.replicaset.uid`        | `string`   | The uid of the Kubernetes ReplicaSet for the source.                |                                            | ✓        | ○        |
-| `source.k8s.statefulset.name`      | `string`   | The name of the Kubernetes StatefulSet for the source.              |                                            | ✓        | ○        |
+| `source.k8s.statefulset.name`      | `string`   | The name of the Kubernetes StatefulSet for the source.              |                                            | ✓        | ~        |
 | `source.k8s.statefulset.uid`       | `string`   | The uid of the Kubernetes StatefulSet for the source.               |                                            | ✓        | ○        |
-| `source.k8s.daemonset.name`        | `string`   | The name of the Kubernetes DaemonSet for the source.                |                                            | ✓        | ○        |
+| `source.k8s.daemonset.name`        | `string`   | The name of the Kubernetes DaemonSet for the source.                |                                            | ✓        | ~        |
 | `source.k8s.daemonset.uid`         | `string`   | The uid of the Kubernetes DaemonSet for the source.                 |                                            | ✓        | ○        |
-| `source.k8s.job.name`              | `string`   | The name of the Kubernetes Job for the source.                      |                                            | ✓        | ○        |
+| `source.k8s.job.name`              | `string`   | The name of the Kubernetes Job for the source.                      |                                            | ✓        | ~        |
 | `source.k8s.job.uid`               | `string`   | The uid of the Kubernetes Job for the source.                       |                                            | ✓        | ○        |
-| `source.k8s.cronjob.name`          | `string`   | The name of the Kubernetes CronJob for the source.                  |                                            | ✓        | ○        |
+| `source.k8s.cronjob.name`          | `string`   | The name of the Kubernetes CronJob for the source.                  |                                            | ✓        | ~        |
 | `source.k8s.cronjob.uid`           | `string`   | The uid of the Kubernetes CronJob for the source.                   |                                            | ✓        | ○        |
-| `source.k8s.service.name`          | `string`   | The name of the Kubernetes Service for the source.                  |                                            | ✓        | ○        |
+| `source.k8s.service.name`          | `string`   | The name of the Kubernetes Service for the source.                  |                                            | ✓        | ~        |
 | `source.k8s.service.uid`           | `string`   | The uid of the Kubernetes Service for the source.                   |                                            | ✓        | ○        |
-| `destination.k8s.cluster.name`     | `string`   | The name of the Kubernetes cluster for the destination.             |                                            | ✓        | ○        |
+| `destination.k8s.cluster.name`     | `string`   | The name of the Kubernetes cluster for the destination.             |                                            | ✓        | ~        |
 | `destination.k8s.cluster.uid`      | `string`   | The uid of the Kubernetes cluster for the destination.              |                                            | ✓        | ○        |
-| `destination.k8s.node.name`        | `string`   | The name of the Kubernetes Node for the destination.                |                                            | ✓        | ○        |
+| `destination.k8s.node.name`        | `string`   | The name of the Kubernetes Node for the destination.                |                                            | ✓        | ~        |
 | `destination.k8s.node.uid`         | `string`   | The uid of the Kubernetes Node for the destination.                 |                                            | ✓        | ○        |
-| `destination.k8s.namespace.name`   | `string`   | The name of the Kubernetes Namespace for the destination.           |                                            | ✓        | ○        |
-| `destination.k8s.pod.name`         | `string`   | The name of the Kubernetes Pod for the destination.                 |                                            | ✓        | ○        |
+| `destination.k8s.namespace.name`   | `string`   | The name of the Kubernetes Namespace for the destination.           |                                            | ✓        | ~        |
+| `destination.k8s.pod.name`         | `string`   | The name of the Kubernetes Pod for the destination.                 |                                            | ✓        | ~        |
 | `destination.k8s.pod.uid`          | `string`   | The uid of the Kubernetes Pod for the destination.                  |                                            | ✓        | ○        |
-| `destination.k8s.container.name`   | `string`   | The name of the Kubernetes Container for the destination.           |                                            | ✓        | ○        |
-| `destination.k8s.deployment.name`  | `string`   | The name of the Kubernetes Deployment for the destination.          |                                            | ✓        | ○        |
+| `destination.k8s.container.name`   | `string`   | The name of the Kubernetes Container for the destination.           |                                            | ✓        | ~        |
+| `destination.k8s.deployment.name`  | `string`   | The name of the Kubernetes Deployment for the destination.          |                                            | ✓        | ~        |
 | `destination.k8s.deployment.uid`   | `string`   | The uid of the Kubernetes Deployment for the destination.           |                                            | ✓        | ○        |
-| `destination.k8s.replicaset.name`  | `string`   | The name of the Kubernetes ReplicaSet for the destination.          |                                            | ✓        | ○        |
+| `destination.k8s.replicaset.name`  | `string`   | The name of the Kubernetes ReplicaSet for the destination.          |                                            | ✓        | ~        |
 | `destination.k8s.replicaset.uid`   | `string`   | The uid of the Kubernetes ReplicaSet for the destination.           |                                            | ✓        | ○        |
-| `destination.k8s.statefulset.name` | `string`   | The name of the Kubernetes StatefulSet for the destination.         |                                            | ✓        | ○        |
+| `destination.k8s.statefulset.name` | `string`   | The name of the Kubernetes StatefulSet for the destination.         |                                            | ✓        | ~        |
 | `destination.k8s.statefulset.uid`  | `string`   | The uid of the Kubernetes StatefulSet for the destination.          |                                            | ✓        | ○        |
-| `destination.k8s.daemonset.name`   | `string`   | The name of the Kubernetes DaemonSet for the destination.           |                                            | ✓        | ○        |
+| `destination.k8s.daemonset.name`   | `string`   | The name of the Kubernetes DaemonSet for the destination.           |                                            | ✓        | ~        |
 | `destination.k8s.daemonset.uid`    | `string`   | The uid of the Kubernetes DaemonSet for the destination.            |                                            | ✓        | ○        |
-| `destination.k8s.job.name`         | `string`   | The name of the Kubernetes Job for the destination.                 |                                            | ✓        | ○        |
+| `destination.k8s.job.name`         | `string`   | The name of the Kubernetes Job for the destination.                 |                                            | ✓        | ~        |
 | `destination.k8s.job.uid`          | `string`   | The uid of the Kubernetes Job for the destination.                  |                                            | ✓        | ○        |
-| `destination.k8s.cronjob.name`     | `string`   | The name of the Kubernetes CronJob for the destination.             |                                            | ✓        | ○        |
+| `destination.k8s.cronjob.name`     | `string`   | The name of the Kubernetes CronJob for the destination.             |                                            | ✓        | ~        |
 | `destination.k8s.cronjob.uid`      | `string`   | The uid of the Kubernetes CronJob for the destination.              |                                            | ✓        | ○        |
-| `destination.k8s.service.name`     | `string`   | The name of the Kubernetes Service for the destination.             |                                            | ✓        | ○        |
+| `destination.k8s.service.name`     | `string`   | The name of the Kubernetes Service for the destination.             |                                            | ✓        | ~        |
 | `destination.k8s.service.uid`      | `string`   | The uid of the Kubernetes Service for the destination.              |                                            | ✓        | ○        |
 | `network.policy.ingress`           | `string[]` | A list of network policy names affecting ingress traffic.           | This could be multiple policies.           | ✓        | ○        |
 | `network.policy.egress`            | `string[]` | A list of network policy names affecting egress traffic.            | This could be multiple policies.           | ✓        | ○        |
-| `process.executable.name`          | `string`   | The name of the binary associated with the socket for this flow.    | Provides application-level identification. | ✓        | ○        |
-| `container.image.name`             | `string`   | The name of the container image (e.g., `nginx:1.21`, `app:v1.0.0`). | Provides application-level identification. | ✓        | ○        |
-| `container.name`                   | `string`   | The name of the container instance.                                 | Provides application-level identification. | ✓        | ○        |
+| `process.executable.name`          | `string`   | The name of the binary associated with the socket for this flow.    | Provides application-level identification. | ✓        | ~        |
+| `process.pid`                      | `string`   | The pid of the process associated with the socket for this flow.    | Provides application-level identification. | ✓        | ~        |
+| `container.image.name`             | `string`   | The name of the container image (e.g., `nginx:1.21`, `app:v1.0.0`). | Provides application-level identification. | ✓        | ~        |
+| `container.name`                   | `string`   | The name of the container instance.                                 | Provides application-level identification. | ✓        | ~        |
 
 ---
 

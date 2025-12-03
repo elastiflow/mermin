@@ -173,10 +173,18 @@ metrics {
   enabled = true
   listen_address = "0.0.0.0"
   port = 10250
+
+  # Debug metrics (optional) - see warning below
+  debug_metrics_enabled = false
+  stale_metric_ttl = "5m"
 }
 ```
 
-See [API and Metrics](api-metrics.md) for details.
+{% hint style="warning" %}
+**Debug Metrics Warning**: Setting `debug_metrics_enabled = true` enables high-cardinality metrics with per-resource labels. This can cause significant memory growth in production. Only enable for debugging. See [Debug Metrics Configuration](metrics-debug.md) for details.
+{% endhint %}
+
+See [API and Metrics](api-metrics.md) and [Debug Metrics](metrics-debug.md) for details.
 
 ### Parser Configuration
 
