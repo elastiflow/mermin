@@ -1379,24 +1379,22 @@ async fn record_flow(
         .reverse_bytes
         .saturating_sub(last_recorded_reverse_bytes);
 
+    // Calculate reverse direction once for use in reverse metrics
+    let reverse_direction = match stats.direction {
+        mermin_common::Direction::Ingress => mermin_common::Direction::Egress,
+        mermin_common::Direction::Egress => mermin_common::Direction::Ingress,
+    };
+
     if delta_packets > 0 {
         metrics::flow::inc_packets_total(stats.direction, delta_packets);
     }
     if delta_reverse_packets > 0 {
-        let reverse_direction = match stats.direction {
-            mermin_common::Direction::Ingress => mermin_common::Direction::Egress,
-            mermin_common::Direction::Egress => mermin_common::Direction::Ingress,
-        };
         metrics::flow::inc_packets_total(reverse_direction, delta_reverse_packets);
     }
     if delta_bytes > 0 {
         metrics::flow::inc_bytes_total(stats.direction, delta_bytes);
     }
     if delta_reverse_bytes > 0 {
-        let reverse_direction = match stats.direction {
-            mermin_common::Direction::Ingress => mermin_common::Direction::Egress,
-            mermin_common::Direction::Egress => mermin_common::Direction::Ingress,
-        };
         metrics::flow::inc_bytes_total(reverse_direction, delta_reverse_bytes);
     }
 

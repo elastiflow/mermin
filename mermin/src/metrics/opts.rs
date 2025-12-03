@@ -6,7 +6,6 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 /// Global flag indicating whether debug metrics are enabled.
-/// This is set during initialization and checked before executing debug metric operations.
 static DEBUG_METRICS_ENABLED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -35,9 +34,7 @@ impl Default for MetricsOptions {
 impl MetricsOptions {
     /// Initialize the global debug metrics flag based on the configuration.
     ///
-    /// This should be called once during application startup after loading configuration.
-    /// The flag is used by `with_debug_metrics` to avoid executing debug metric operations
-    /// when debug metrics are disabled, saving resources.
+    /// Must be called once during startup after configuration is loaded.
     pub fn init_debug_flag(&self) {
         DEBUG_METRICS_ENABLED.store(self.debug_enabled, Ordering::Relaxed);
     }
@@ -45,9 +42,7 @@ impl MetricsOptions {
 
 /// Execute a closure only if debug metrics are enabled.
 ///
-/// This function checks the global debug metrics flag before executing the provided closure.
-/// When debug metrics are disabled, the closure is not executed, avoiding unnecessary
-/// work and resource usage.
+/// Avoids metric overhead when debug metrics are disabled.
 pub fn with_debug_metrics<F>(f: F)
 where
     F: FnOnce(),

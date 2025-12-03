@@ -98,6 +98,14 @@ pub fn inc_flow_stats_map_access(status: FlowStatsStatus) {
         .inc();
 }
 
+/// Convert a direction to its string representation for metrics labels.
+fn direction_to_str(direction: Direction) -> &'static str {
+    match direction {
+        Direction::Ingress => "ingress",
+        Direction::Egress => "egress",
+    }
+}
+
 /// Increment the packets total counter.
 ///
 /// Tracks packet deltas by direction.
@@ -105,12 +113,8 @@ pub fn inc_flow_stats_map_access(status: FlowStatsStatus) {
 /// - If direction = Ingress: forward packets came via ingress, reverse via egress
 /// - If direction = Egress: forward packets came via egress, reverse via ingress
 pub fn inc_packets_total(direction: Direction, count: u64) {
-    let direction_str = match direction {
-        Direction::Ingress => "ingress",
-        Direction::Egress => "egress",
-    };
     registry::PACKETS_TOTAL
-        .with_label_values(&[direction_str])
+        .with_label_values(&[direction_to_str(direction)])
         .inc_by(count);
 }
 
@@ -121,11 +125,7 @@ pub fn inc_packets_total(direction: Direction, count: u64) {
 /// - If direction = Ingress: forward bytes came via ingress, reverse via egress
 /// - If direction = Egress: forward bytes came via egress, reverse via ingress
 pub fn inc_bytes_total(direction: Direction, count: u64) {
-    let direction_str = match direction {
-        Direction::Ingress => "ingress",
-        Direction::Egress => "egress",
-    };
     registry::BYTES_TOTAL
-        .with_label_values(&[direction_str])
+        .with_label_values(&[direction_to_str(direction)])
         .inc_by(count);
 }

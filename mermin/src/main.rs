@@ -135,11 +135,8 @@ async fn run() -> Result<()> {
     let (os_shutdown_tx, _) = broadcast::channel::<()>(1);
     let mut os_thread_handles = Vec::new();
 
-    // Initialize the global debug metrics flag based on configuration
-    // This allows debug metric functions to check the flag without passing it around
     conf.metrics.init_debug_flag();
 
-    // Initialize debug metrics registry only if debug metrics are enabled
     if conf.metrics.debug_enabled {
         if let Err(e) = metrics::registry::init_debug_registry() {
             error!(
