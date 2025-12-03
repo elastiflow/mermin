@@ -252,10 +252,6 @@ impl FlowSpanProducer {
             loop {
                 tokio::select! {
                     _ = cleanup_shutdown_rx.recv() => {
-                        trace!(
-                            event.name = "trace_id_cache.cleanup_task.stopped",
-                            "trace ID cache cleanup task stopping gracefully"
-                        );
                         break;
                     }
                     _ = interval.tick() => {
@@ -293,10 +289,6 @@ impl FlowSpanProducer {
             loop {
                 tokio::select! {
                     _ = shrink_shutdown_rx.recv() => {
-                        trace!(
-                            event.name = "capacity.shrink_task.stopped",
-                            "capacity shrinking task stopping gracefully"
-                        );
                         break;
                     }
                     _ = interval.tick() => {
@@ -1417,37 +1409,37 @@ async fn record_flow(
         .reverse_bytes
         .saturating_sub(last_recorded_reverse_bytes);
 
-    // Get interface name for metrics before acquiring mutable reference
-    let interface_name_for_metrics = flow_store
-        .get(community_id)
-        .and_then(|entry| {
-            entry
-                .flow_span
-                .attributes
-                .network_interface_name
-                .as_deref()
-                .map(|s| s.to_string())
-        })
-        .unwrap_or_else(|| "unknown".to_string());
+    if delta_packets > 0 || delta_reverse_packets > 0 {
+        let interface_name_for_metrics = flow_store
+            .get(community_id)
+            .and_then(|entry| {
+                entry
+                    .flow_span
+                    .attributes
+                    .network_interface_name
+                    .as_deref()
+                    .map(|s| s.to_string())
+            })
+            .unwrap_or_else(|| "unknown".to_string());
 
-    // Track packet deltas in metrics
-    if delta_packets > 0 {
-        metrics::flow::inc_packets_total(
-            &interface_name_for_metrics,
-            stats.direction,
-            delta_packets,
-        );
-    }
-    if delta_reverse_packets > 0 {
-        let reverse_direction = match stats.direction {
-            mermin_common::Direction::Ingress => mermin_common::Direction::Egress,
-            mermin_common::Direction::Egress => mermin_common::Direction::Ingress,
-        };
-        metrics::flow::inc_packets_total(
-            &interface_name_for_metrics,
-            reverse_direction,
-            delta_reverse_packets,
-        );
+        if delta_packets > 0 {
+            metrics::flow::inc_packets_total(
+                &interface_name_for_metrics,
+                stats.direction,
+                delta_packets,
+            );
+        }
+        if delta_reverse_packets > 0 {
+            let reverse_direction = match stats.direction {
+                mermin_common::Direction::Ingress => mermin_common::Direction::Egress,
+                mermin_common::Direction::Egress => mermin_common::Direction::Ingress,
+            };
+            metrics::flow::inc_packets_total(
+                &interface_name_for_metrics,
+                reverse_direction,
+                delta_reverse_packets,
+            );
+        }
     }
 
     // Now get mutable reference to update flow span attributes

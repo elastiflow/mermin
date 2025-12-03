@@ -90,10 +90,10 @@ lazy_static! {
     ).expect("failed to create channel_size metric");
 
     pub static ref USERSPACE_CHANNEL_SENDS: IntCounterVec = IntCounterVec::new(
-        Opts::new("channel_io_total", "Total number of channel I/O operations (sends)")
+        Opts::new("channel_sends_total", "Total number of channel send operations")
             .namespace("mermin"),
         &["channel", "status"]  // status: success, error; channel: packet_worker, exporter, exporter_input
-    ).expect("failed to create channel_io metric");
+    ).expect("failed to create channel_sends metric");
 
     // ============================================================================
     // Flow Span Lifecycle Metrics (subsystem: span)
