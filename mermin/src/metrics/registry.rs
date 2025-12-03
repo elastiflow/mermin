@@ -92,7 +92,7 @@ lazy_static! {
     pub static ref USERSPACE_CHANNEL_SENDS: IntCounterVec = IntCounterVec::new(
         Opts::new("channel_sends_total", "Total number of channel send operations")
             .namespace("mermin"),
-        &["channel", "status"]  // status: success, error; channel: packet_worker, exporter
+        &["channel", "status"]  // status: success, error; channel: packet_worker, exporter, exporter_input
     ).expect("failed to create channel_sends metric");
 
     // ============================================================================
@@ -225,20 +225,13 @@ lazy_static! {
     // ============================================================================
 
     /// Total number of flow spans processed by export stage.
-    /// Labels: status = "queued" | "dropped" | "ok" | "error"
+    /// Labels: status = "queued" | "dropped" | "ok" | "error" | "noop"
     pub static ref EXPORT_FLOW_SPANS_TOTAL: IntCounterVec = IntCounterVec::new(
         Opts::new("export_flow_spans_total", "Total number of flow spans processed by export stage")
             .namespace("mermin"),
         &["status"]
     ).expect("failed to create export_flow_spans_total metric");
 
-
-
-    pub static ref SPANS_EXPORT_ERRORS: IntCounterVec = IntCounterVec::new(
-        Opts::new("export_errors_total", "Total number of span export errors")
-            .namespace("mermin"),
-        &["reason"]
-    ).expect("failed to create spans_export_errors metric");
 
     pub static ref EXPORT_BATCH_SIZE: Histogram = Histogram::with_opts(
         HistogramOpts::new("export_batch_size", "Number of spans per export batch")
@@ -415,7 +408,6 @@ pub fn init_registry() -> Result<(), prometheus::Error> {
 
     // Export metrics
     REGISTRY.register(Box::new(EXPORT_FLOW_SPANS_TOTAL.clone()))?;
-    REGISTRY.register(Box::new(SPANS_EXPORT_ERRORS.clone()))?;
     REGISTRY.register(Box::new(EXPORT_BATCH_SIZE.clone()))?;
     REGISTRY.register(Box::new(EXPORT_LATENCY.clone()))?;
 

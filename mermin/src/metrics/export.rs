@@ -11,6 +11,7 @@ pub enum ExportStatus {
     Dropped,
     Ok,
     Error,
+    NoOp,
 }
 
 impl AsRef<str> for ExportStatus {
@@ -20,6 +21,7 @@ impl AsRef<str> for ExportStatus {
             ExportStatus::Dropped => "dropped",
             ExportStatus::Ok => "ok",
             ExportStatus::Error => "error",
+            ExportStatus::NoOp => "noop",
         }
     }
 }
@@ -34,4 +36,9 @@ pub fn inc_export_flow_spans(status: ExportStatus) {
 /// Record export operation latency.
 pub fn observe_export_latency(duration: Duration) {
     registry::EXPORT_LATENCY.observe(duration.as_secs_f64());
+}
+
+/// Record export batch size.
+pub fn observe_export_batch_size(size: usize) {
+    registry::EXPORT_BATCH_SIZE.observe(size as f64);
 }

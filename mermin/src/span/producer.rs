@@ -194,6 +194,7 @@ impl FlowSpanProducer {
             worker_channels.push(worker_tx);
 
             metrics::userspace::set_channel_capacity(ChannelName::PacketWorker, worker_capacity);
+            metrics::userspace::set_channel_size(ChannelName::PacketWorker, 0);
 
             let flow_worker = FlowWorker::new(
                 worker_id,
@@ -245,18 +246,25 @@ impl FlowSpanProducer {
 
         // Spawn trace ID cache cleanup task
         let trace_id_cache_clone = self.trace_id_cache.clone();
+        let mut cleanup_shutdown_rx = shutdown_rx.resubscribe();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(5 * 60));
             loop {
-                interval.tick().await;
-                let (scanned, removed) = trace_id_cache_clone.cleanup_expired();
-                if removed > 0 {
-                    trace!(
-                        event.name = "trace_id_cache.cleanup",
-                        entries.scanned = scanned,
-                        entries.removed = removed,
-                        "trace ID cache cleanup completed"
-                    );
+                tokio::select! {
+                    _ = cleanup_shutdown_rx.recv() => {
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        let (scanned, removed) = trace_id_cache_clone.cleanup_expired();
+                        if removed > 0 {
+                            trace!(
+                                event.name = "trace_id_cache.cleanup",
+                                entries.scanned = scanned,
+                                entries.removed = removed,
+                                "trace ID cache cleanup completed"
+                            );
+                        }
+                    }
                 }
             }
         });
@@ -275,27 +283,33 @@ impl FlowSpanProducer {
         let flow_store_shrink = Arc::clone(&self.components.flow_store);
         let trace_id_cache_shrink = self.trace_id_cache.clone();
         let iface_map_shrink = Arc::clone(&self.iface_map);
+        let mut shrink_shutdown_rx = shutdown_rx.resubscribe();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(SHRINK_INTERVAL_SECS));
             loop {
-                interval.tick().await;
+                tokio::select! {
+                    _ = shrink_shutdown_rx.recv() => {
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        let flow_capacity = flow_store_shrink.capacity();
+                        let flow_len = flow_store_shrink.len();
+                        if shrink_policy.should_shrink(flow_capacity, flow_len) {
+                            flow_store_shrink.shrink_to_fit();
+                        }
 
-                let flow_capacity = flow_store_shrink.capacity();
-                let flow_len = flow_store_shrink.len();
-                if shrink_policy.should_shrink(flow_capacity, flow_len) {
-                    flow_store_shrink.shrink_to_fit();
-                }
+                        let trace_capacity = trace_id_cache_shrink.capacity();
+                        let trace_len = trace_id_cache_shrink.len();
+                        if shrink_policy.should_shrink(trace_capacity, trace_len) {
+                            trace_id_cache_shrink.shrink_to_fit();
+                        }
 
-                let trace_capacity = trace_id_cache_shrink.capacity();
-                let trace_len = trace_id_cache_shrink.len();
-                if shrink_policy.should_shrink(trace_capacity, trace_len) {
-                    trace_id_cache_shrink.shrink_to_fit();
-                }
-
-                let iface_capacity = iface_map_shrink.capacity();
-                let iface_len = iface_map_shrink.len();
-                if shrink_policy.should_shrink(iface_capacity, iface_len) {
-                    iface_map_shrink.shrink_to_fit();
+                        let iface_capacity = iface_map_shrink.capacity();
+                        let iface_len = iface_map_shrink.len();
+                        if shrink_policy.should_shrink(iface_capacity, iface_len) {
+                            iface_map_shrink.shrink_to_fit();
+                        }
+                    }
                 }
             }
         });
@@ -988,12 +1002,35 @@ impl FlowWorker {
             .attributes
             .network_interface_name
             .as_deref()
-            .unwrap_or("unknown");
-        metrics::flow::inc_flows_created(iface_name);
+            .unwrap_or("unknown")
+            .to_string();
+        metrics::flow::inc_flows_created(&iface_name);
 
         let flow_entry = FlowEntry { flow_span };
 
-        self.flow_store.insert(community_id, flow_entry);
+        let old_entry = self.flow_store.insert(community_id, flow_entry);
+
+        match old_entry {
+            None => {
+                // New flow: increment active gauge
+                metrics::flow::inc_flows_active(&iface_name);
+            }
+            Some(old) => {
+                // Replaced existing flow: check if interface changed (handles interface migration edge cases)
+                let old_iface = old
+                    .flow_span
+                    .attributes
+                    .network_interface_name
+                    .as_deref()
+                    .unwrap_or("unknown")
+                    .to_string();
+
+                if old_iface != iface_name {
+                    metrics::flow::dec_flows_active(&old_iface);
+                    metrics::flow::inc_flows_active(&iface_name);
+                }
+            }
+        }
     }
 }
 
@@ -1372,6 +1409,39 @@ async fn record_flow(
         .reverse_bytes
         .saturating_sub(last_recorded_reverse_bytes);
 
+    if delta_packets > 0 || delta_reverse_packets > 0 {
+        let interface_name_for_metrics = flow_store
+            .get(community_id)
+            .and_then(|entry| {
+                entry
+                    .flow_span
+                    .attributes
+                    .network_interface_name
+                    .as_deref()
+                    .map(|s| s.to_string())
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+
+        if delta_packets > 0 {
+            metrics::flow::inc_packets_total(
+                &interface_name_for_metrics,
+                stats.direction,
+                delta_packets,
+            );
+        }
+        if delta_reverse_packets > 0 {
+            let reverse_direction = match stats.direction {
+                mermin_common::Direction::Ingress => mermin_common::Direction::Egress,
+                mermin_common::Direction::Egress => mermin_common::Direction::Ingress,
+            };
+            metrics::flow::inc_packets_total(
+                &interface_name_for_metrics,
+                reverse_direction,
+                delta_reverse_packets,
+            );
+        }
+    }
+
     // Now get mutable reference to update flow span attributes
     let mut entry_ref = match flow_store.get_mut(community_id) {
         Some(entry) => entry,
@@ -1466,7 +1536,12 @@ async fn record_flow(
 
     // Send to exporter
     match flow_span_tx.try_send(recorded_span) {
-        Ok(_) => {}
+        Ok(_) => {
+            metrics::userspace::inc_channel_sends(
+                ChannelName::Exporter,
+                ChannelSendStatus::Success,
+            );
+        }
         Err(mpsc::error::TrySendError::Full(_)) => {
             metrics::export::inc_export_flow_spans(ExportStatus::Dropped);
             debug!(
@@ -1478,6 +1553,7 @@ async fn record_flow(
             );
         }
         Err(mpsc::error::TrySendError::Closed(_)) => {
+            metrics::userspace::inc_channel_sends(ChannelName::Exporter, ChannelSendStatus::Error);
             error!(
                 event.name = "span.export_failed",
                 flow.community_id = %community_id,
@@ -1600,7 +1676,12 @@ pub async fn timeout_and_remove_flow(
         }
 
         match flow_span_tx.try_send(recorded_span) {
-            Ok(_) => {}
+            Ok(_) => {
+                metrics::userspace::inc_channel_sends(
+                    ChannelName::Exporter,
+                    ChannelSendStatus::Success,
+                );
+            }
             Err(mpsc::error::TrySendError::Full(_)) => {
                 metrics::export::inc_export_flow_spans(ExportStatus::Dropped);
                 debug!(
@@ -1612,6 +1693,10 @@ pub async fn timeout_and_remove_flow(
                 );
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
+                metrics::userspace::inc_channel_sends(
+                    ChannelName::Exporter,
+                    ChannelSendStatus::Error,
+                );
                 error!(
                     event.name = "span.export_failed",
                     flow.community_id = %community_id,

@@ -31,7 +31,7 @@ use tracing_subscriber::{
 
 use crate::{
     otlp::{
-        OtlpError,
+        MetricsSpanExporter, OtlpError,
         opts::{OtlpExportOptions, StdoutExportOptions, defaults},
         tracing_layer::OtelErrorLayer,
     },
@@ -205,6 +205,8 @@ impl ProviderBuilder {
                     event.name = "exporter.otlp.build_success",
                     "otlp exporter built successfully"
                 );
+                // Wrap exporter to observe batch sizes
+                let wrapped_exporter = MetricsSpanExporter::new(exporter);
                 let batch_config = BatchConfigBuilder::default()
                     .with_max_export_batch_size(options.max_batch_size)
                     .with_scheduled_delay(options.max_batch_interval)
@@ -220,7 +222,7 @@ impl ProviderBuilder {
                     "configuring batch span processor for high throughput"
                 );
 
-                let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio)
+                let processor = BatchSpanProcessor::builder(wrapped_exporter, runtime::Tokio)
                     .with_batch_config(batch_config)
                     .build();
                 Ok(ProviderBuilder {
@@ -242,6 +244,8 @@ impl ProviderBuilder {
         max_export_timeout: std::time::Duration,
     ) -> ProviderBuilder {
         let exporter = opentelemetry_stdout::SpanExporter::default();
+        // Wrap exporter to observe batch sizes
+        let wrapped_exporter = MetricsSpanExporter::new(exporter);
 
         let batch_config = BatchConfigBuilder::default()
             .with_max_export_batch_size(max_batch_size)
@@ -251,7 +255,7 @@ impl ProviderBuilder {
             .with_max_export_timeout(max_export_timeout)
             .build();
 
-        let processor = BatchSpanProcessor::builder(exporter, runtime::Tokio)
+        let processor = BatchSpanProcessor::builder(wrapped_exporter, runtime::Tokio)
             .with_batch_config(batch_config)
             .build();
         ProviderBuilder {

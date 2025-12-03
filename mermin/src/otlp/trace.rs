@@ -11,7 +11,7 @@ use opentelemetry_sdk::{
 };
 use tracing::trace;
 
-use crate::metrics::export::{inc_export_flow_spans, observe_export_latency};
+use crate::metrics::export::{ExportStatus, inc_export_flow_spans, observe_export_latency};
 
 pub struct TraceExporterAdapter {
     provider: SdkTracerProvider,
@@ -154,6 +154,8 @@ pub struct NoOpExporterAdapter {}
 #[async_trait]
 impl TraceableExporter for NoOpExporterAdapter {
     async fn export(&self, _traceable: TraceableRecord) {
+        // Track as "noop" - span was processed but not exported (no exporter configured)
+        inc_export_flow_spans(ExportStatus::NoOp);
         trace!(
             event.name = "span.export_skipped",
             reason = "no_op_exporter_configured",

@@ -6,7 +6,7 @@ use hcl::{
     eval::{Context, FuncArgs, FuncDef, ParamType},
 };
 use serde::{Deserialize, Serialize};
-use tracing::{Level, warn};
+use tracing::{Level, debug, warn};
 
 use crate::{
     filter::opts::FilteringOptions,
@@ -305,6 +305,129 @@ impl Conf {
             Some("hcl") => Ok(figment.merge(Hcl::file(path))),
             Some(ext) => Err(ConfError::InvalidExtension(ext.to_string())),
             None => Err(ConfError::InvalidExtension("none".to_string())),
+        }
+    }
+
+    /// Display all configuration at debug level using structured logging.
+    pub fn display_conf(&self) {
+        debug!(
+            event.name = "config.loaded",
+            config.path = ?self.config_path,
+            log.level = ?self.log_level,
+            log.color = self.log_color,
+            auto.reload = self.auto_reload,
+            shutdown.timeout.secs = self.shutdown_timeout.as_secs(),
+            "configuration loaded"
+        );
+
+        // Filter configuration
+        if let Some(ref filters) = self.filter {
+            for (filter_name, filter_opts) in filters {
+                debug!(
+                    event.name = "config.filter.loaded",
+                    filter.name = %filter_name,
+                    "filter configuration loaded"
+                );
+
+                if let Some(ref address) = filter_opts.address
+                    && (!address.match_glob.is_empty() || !address.not_match_glob.is_empty())
+                {
+                    debug!(
+                        event.name = "config.filter.address",
+                        filter.name = %filter_name,
+                        match = %address.match_glob,
+                        not_match = %address.not_match_glob,
+                        "address filter configuration"
+                    );
+                }
+
+                if let Some(ref port) = filter_opts.port
+                    && (!port.match_glob.is_empty() || !port.not_match_glob.is_empty())
+                {
+                    debug!(
+                        event.name = "config.filter.port",
+                        filter.name = %filter_name,
+                        match = %port.match_glob,
+                        not_match = %port.not_match_glob,
+                        "port filter configuration"
+                    );
+                }
+
+                if let Some(ref transport) = filter_opts.transport
+                    && (!transport.match_glob.is_empty() || !transport.not_match_glob.is_empty())
+                {
+                    debug!(
+                        event.name = "config.filter.transport",
+                        filter.name = %filter_name,
+                        match = %transport.match_glob,
+                        not_match = %transport.not_match_glob,
+                        "transport filter configuration"
+                    );
+                }
+
+                if let Some(ref type_) = filter_opts.type_
+                    && (!type_.match_glob.is_empty() || !type_.not_match_glob.is_empty())
+                {
+                    debug!(
+                        event.name = "config.filter.type",
+                        filter.name = %filter_name,
+                        match = %type_.match_glob,
+                        not_match = %type_.not_match_glob,
+                        "type filter configuration"
+                    );
+                }
+
+                if let Some(ref interface_name) = filter_opts.interface_name
+                    && (!interface_name.match_glob.is_empty()
+                        || !interface_name.not_match_glob.is_empty())
+                {
+                    debug!(
+                        event.name = "config.filter.interface_name",
+                        filter.name = %filter_name,
+                        match = %interface_name.match_glob,
+                        not_match = %interface_name.not_match_glob,
+                        "interface_name filter configuration"
+                    );
+                }
+            }
+        } else {
+            debug!(
+                event.name = "config.filter.none",
+                "no filter configuration loaded"
+            );
+        }
+
+        // Discovery configuration
+        debug!(
+            event.name = "config.discovery",
+            interfaces = ?self.discovery.instrument.interfaces,
+            auto.discover = self.discovery.instrument.auto_discover_interfaces,
+            tc.priority = self.discovery.instrument.tc_priority,
+            tcx.order = %self.discovery.instrument.tcx_order,
+            "discovery configuration"
+        );
+
+        // Parser configuration
+        debug!(
+            event.name = "config.parser",
+            geneve.port = self.parser.geneve_port,
+            vxlan.port = self.parser.vxlan_port,
+            wireguard.port = self.parser.wireguard_port,
+            "parser configuration"
+        );
+
+        // Attributes configuration
+        if let Some(ref attributes) = self.attributes {
+            debug!(
+                event.name = "config.attributes",
+                attribute.count = attributes.len(),
+                "attributes configuration loaded"
+            );
+        } else {
+            debug!(
+                event.name = "config.attributes.none",
+                "no attributes configuration"
+            );
         }
     }
 }
