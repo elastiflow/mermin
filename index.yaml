@@ -7,6 +7,32 @@ entries:
         - name: Chart Source
           url: https://github.com/elastiflow/mermin
     apiVersion: v2
+    appVersion: 0.1.0-beta.37
+    created: "2025-12-03T05:12:48.039422879Z"
+    description: A Helm chart for deploying the Mermin eBPF agent
+    digest: 289b2109664eef6f35163247940961557421c61420539d6841b60c4b78303c0e
+    icon: https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1746227898/mermin-horizontal_kxhvzo.png
+    keywords:
+    - netflow
+    - network
+    - flow
+    - observability
+    maintainers:
+    - email: engineering@elastiflow.com
+      name: ElastiFlow Engineering Team
+    name: mermin
+    sources:
+    - https://github.com/elastiflow/mermin
+    type: application
+    urls:
+    - https://github.com/elastiflow/mermin/releases/download/mermin-0.1.0-beta.37/mermin-0.1.0-beta.37.tgz
+    version: 0.1.0-beta.37
+  - annotations:
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: Chart Source
+          url: https://github.com/elastiflow/mermin
+    apiVersion: v2
     appVersion: 0.1.0-beta.36
     created: "2025-12-01T19:33:26.323859201Z"
     description: A Helm chart for deploying the Mermin eBPF agent
@@ -762,9 +788,9 @@ entries:
           url: https://github.com/elastiflow/mermin
     apiVersion: v2
     appVersion: 0.1.0-beta.7
-    created: "2025-10-22T17:17:19.033073579Z"
+    created: "2025-10-22T19:43:45.000301781Z"
     description: A Helm chart for deploying the Mermin eBPF agent
-    digest: 2e98144fd587753341ac34c94d3c2e03d812d9050c0ae39b8f1889fe3490ad99
+    digest: 3745477551f4c991857f6a7bc356222858065fcbc158dc0ac0325aacdeebc808
     icon: https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1746227898/mermin-horizontal_kxhvzo.png
     keywords:
     - netflow
@@ -788,9 +814,9 @@ entries:
           url: https://github.com/elastiflow/mermin
     apiVersion: v2
     appVersion: 0.1.0-beta.7
-    created: "2025-10-22T19:43:45.000301781Z"
+    created: "2025-10-22T17:17:19.033073579Z"
     description: A Helm chart for deploying the Mermin eBPF agent
-    digest: 3745477551f4c991857f6a7bc356222858065fcbc158dc0ac0325aacdeebc808
+    digest: 2e98144fd587753341ac34c94d3c2e03d812d9050c0ae39b8f1889fe3490ad99
     icon: https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1746227898/mermin-horizontal_kxhvzo.png
     keywords:
     - netflow
@@ -1368,4 +1394,4 @@ entries:
     urls:
     - mermin-netobserv-os-stack-0.1.0-beta.1.tgz
     version: 0.1.0-beta.1
-generated: "2025-12-01T19:33:26.324318249Z"
+generated: "2025-12-03T05:12:48.040098845Z"
