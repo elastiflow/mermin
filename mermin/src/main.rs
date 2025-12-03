@@ -42,8 +42,10 @@ use crate::{
     },
     k8s::{attributor::Attributor, decorator::Decorator},
     metrics::{
-        export::ExportStatus, k8s::K8sDecoratorStatus, server::start_metrics_server,
-        userspace::ChannelName,
+        export::ExportStatus,
+        k8s::K8sDecoratorStatus,
+        server::start_metrics_server,
+        userspace::{ChannelName, ChannelSendStatus},
     },
     otlp::{
         provider::{init_internal_tracing, init_provider},
@@ -223,6 +225,9 @@ async fn run() -> Result<()> {
             conf.internal.traces.otlp.clone(),
         )
         .await?;
+
+        // Display all configuration at debug level
+        conf.display_conf();
 
         if conf.export.traces.stdout.is_some() || conf.export.traces.otlp.is_some() {
             let app_tracer_provider = init_provider(
@@ -489,8 +494,11 @@ async fn run() -> Result<()> {
 
     let (flow_span_tx, mut flow_span_rx) = mpsc::channel(flow_span_capacity);
     metrics::userspace::set_channel_capacity(ChannelName::Exporter, flow_span_capacity);
+    metrics::userspace::set_channel_size(ChannelName::Exporter, 0);
     let (k8s_decorated_flow_span_tx, mut k8s_decorated_flow_span_rx) =
         mpsc::channel(decorated_span_capacity);
+    metrics::userspace::set_channel_size(ChannelName::ExporterInput, 0);
+    metrics::userspace::set_channel_size(ChannelName::DecoratorInput, 0);
 
     let flow_span_producer = FlowSpanProducer::new(
         conf.clone().span,
@@ -590,7 +598,9 @@ async fn run() -> Result<()> {
                         maybe_span = flow_span_rx.recv() => {
                             let Some(flow_span) = maybe_span else { break };
 
-                            metrics::userspace::set_channel_size(ChannelName::DecoratorInput, flow_span_rx.len());
+                            let channel_size = flow_span_rx.len();
+                            metrics::userspace::set_channel_size(ChannelName::Exporter, channel_size);
+                            metrics::userspace::set_channel_size(ChannelName::DecoratorInput, channel_size);
 
                             let timer = metrics::registry::PROCESSING_LATENCY
                                 .with_label_values(&["k8s_decoration"])
@@ -620,9 +630,11 @@ async fn run() -> Result<()> {
 
                             match k8s_decorated_flow_span_tx.send(span).await {
                                 Ok(_) => {
+                                    metrics::userspace::inc_channel_sends(ChannelName::ExporterInput, ChannelSendStatus::Success);
                                     metrics::export::inc_export_flow_spans(ExportStatus::Queued);
                                 }
                                 Err(e) => {
+                                    metrics::userspace::inc_channel_sends(ChannelName::ExporterInput, ChannelSendStatus::Error);
                                     metrics::export::inc_export_flow_spans(ExportStatus::Dropped);
                                     error!(
                                         event.name = "channel.send_failed",
@@ -643,14 +655,19 @@ async fn run() -> Result<()> {
                     );
 
                     while let Some(flow_span) = flow_span_rx.recv().await {
+                        let channel_size = flow_span_rx.len();
+                        metrics::userspace::set_channel_size(ChannelName::Exporter, channel_size);
+                        metrics::userspace::set_channel_size(ChannelName::DecoratorInput, channel_size);
                         trace!(event.name = "decorator.sending_to_exporter", flow.community_id = %flow_span.attributes.flow_community_id);
 
                         match k8s_decorated_flow_span_tx.send(flow_span).await {
                             Ok(_) => {
+                                metrics::userspace::inc_channel_sends(ChannelName::ExporterInput, ChannelSendStatus::Success);
                                 metrics::export::inc_export_flow_spans(ExportStatus::Queued);
                                 metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Undecorated);
                             }
                             Err(e) => {
+                                metrics::userspace::inc_channel_sends(ChannelName::ExporterInput, ChannelSendStatus::Error);
                                 metrics::export::inc_export_flow_spans(ExportStatus::Dropped);
                                 metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Dropped);
                                 error!(

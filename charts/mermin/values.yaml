@@ -49,7 +49,7 @@ hostPID: true
 podSecurityContext:
   runAsNonRoot: true
 
-# TODO(Cleanup for GA): Use a public link once available docs/getting-started/architecture.md#Security_Considerations
+# https://docs.mermin.dev/getting-started/security-considerations
 securityContext:
   privileged: true
   readOnlyRootFilesystem: true
@@ -60,11 +60,11 @@ securityContext:
 resources: {}
   # TODO(mack#ENG-123|2025-09-29): Set default resources relative to the flows per second
   # limits:
-  #   cpu: 1
-  #   memory: 256Mi
+  #   cpu: 200m
+  #   memory: 400Mi
   # requests:
-  #   cpu: 1
-  #   memory: 256Mi
+  #   cpu:200m
+  #   memory: 400Mi
 
 ports:
   - name: api
