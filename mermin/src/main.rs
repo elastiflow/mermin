@@ -20,6 +20,7 @@ use aya::{
     programs::{SchedClassifier, TcAttachType},
     util::KernelVersion,
 };
+use clap::Parser;
 use dashmap::DashMap;
 use error::{MerminError, Result};
 #[cfg(unix)]
@@ -51,6 +52,7 @@ use crate::{
     },
     runtime::{
         capabilities,
+        cli::Cli,
         context::Context,
         shutdown::{ShutdownConfig, ShutdownManager},
         task_manager::{ShutdownResult, TaskManager},
@@ -111,8 +113,9 @@ async fn run() -> Result<()> {
     // TODO: runtime should be aware of all threads and tasks spawned by the eBPF program so that they can be gracefully shutdown and restarted.
     // TODO: listen for SIGUP `kill -HUP $(pidof mermin)` to reload the eBPF program and all configuration
     // TODO: do not reload global configuration found in CLI
-    let reload_handles = init_bootstrap_logger();
-    let runtime = Context::new()?;
+    let cli = Cli::parse();
+    let reload_handles = init_bootstrap_logger(&cli);
+    let runtime = Context::new(cli)?;
     let Context { conf, .. } = runtime;
 
     // Initialize Prometheus metrics registry early, before any subsystems that might record metrics

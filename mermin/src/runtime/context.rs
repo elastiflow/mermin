@@ -1,4 +1,3 @@
-use clap::Parser;
 use thiserror::Error;
 
 use crate::runtime::{
@@ -13,8 +12,7 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn new() -> Result<Self, ContextError> {
-        let cli = Cli::parse();
+    pub fn new(cli: Cli) -> Result<Self, ContextError> {
         let (conf, cli) = Conf::new(cli)?;
 
         Ok(Context { cli, conf })

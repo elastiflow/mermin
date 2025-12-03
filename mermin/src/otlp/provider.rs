@@ -1,5 +1,9 @@
 use std::{fmt::Debug, fs, str::FromStr, sync::Arc};
 
+use figment::{
+    Figment,
+    providers::{Format, Serialized},
+};
 use http::{HeaderMap, HeaderName, HeaderValue, Uri};
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::client::legacy::connect::HttpConnector;
@@ -20,6 +24,7 @@ use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime},
 };
 use rustls_pemfile::{certs, private_key};
+use serde::{Deserialize, Serialize};
 use tonic::{metadata::MetadataMap, transport::Channel};
 use tracing::{Level, debug, info, warn};
 use tracing_subscriber::{
@@ -37,7 +42,11 @@ use crate::{
         opts::{OtlpExportOptions, StdoutExportOptions, defaults},
         tracing_layer::OtelErrorLayer,
     },
-    runtime::opts::SpanFmt,
+    runtime::{
+        cli::Cli,
+        conf::{Hcl, conf_serde::level},
+        opts::SpanFmt,
+    },
 };
 
 #[derive(Debug)]
@@ -563,6 +572,23 @@ pub async fn init_internal_tracing(
     Ok(())
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(default)]
+struct BootstrapLogConf {
+    #[serde(with = "level")]
+    log_level: Level,
+    log_color: bool,
+}
+
+impl Default for BootstrapLogConf {
+    fn default() -> Self {
+        Self {
+            log_level: Level::INFO,
+            log_color: false,
+        }
+    }
+}
+
 type SubscriberWithFilter = Layered<reload::Layer<EnvFilter, Registry>, Registry>;
 type FmtReloadHandle = reload::Handle<Layer<SubscriberWithFilter>, SubscriberWithFilter>;
 pub struct LogReloadHandles {
@@ -571,12 +597,23 @@ pub struct LogReloadHandles {
 }
 
 /// Initializes a simple, console-only logger and returns a handle to reconfigure it.
-pub fn init_bootstrap_logger() -> LogReloadHandles {
-    let (filter_layer, filter_handle) = reload::Layer::new(EnvFilter::new("debug"));
+pub fn init_bootstrap_logger(cli: &Cli) -> LogReloadHandles {
+    let mut figment = Figment::new().merge(Serialized::defaults(BootstrapLogConf::default()));
+
+    if let Some(config_path) = &cli.config
+        && config_path.exists()
+    {
+        figment = figment.merge(Hcl::file(config_path));
+    }
+
+    let bootstrap_conf: BootstrapLogConf = figment.extract().unwrap_or_default();
+
+    let (filter_layer, filter_handle) =
+        reload::Layer::new(EnvFilter::new(bootstrap_conf.log_level.to_string()));
 
     let default_layer = Layer::new()
         .with_span_events(FmtSpan::FULL)
-        .with_ansi(false);
+        .with_ansi(bootstrap_conf.log_color);
     let (fmt_layer, fmt_handle) = reload::Layer::new(default_layer);
 
     tracing_subscriber::registry()

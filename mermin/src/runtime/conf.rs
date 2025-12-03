@@ -69,7 +69,7 @@ fn env_func(args: FuncArgs) -> Result<Value, String> {
 
     match std::env::var(var_name) {
         Ok(value) => {
-            debug!(event.name = "hcl.func.env.call", variable.name = %var_name, variable.value = %value);
+            debug!(event.name = "hcl.func.env.call", variable.name = %var_name);
             Ok(Value::String(value))
         }
         Err(_) => {
