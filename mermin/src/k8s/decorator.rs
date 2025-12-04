@@ -94,10 +94,12 @@ impl<'a> Decorator<'a> {
     async fn enrich(&self, pod: Option<&Pod>, ip: IpAddr) -> Option<DecorationInfo> {
         if let Some(pod) = pod {
             let pod_meta = K8sObjectMeta::from(pod);
+            let node_name = pod.spec.clone()?.node_name;
             let owners = self.attributor.get_owners(pod);
             let selector_relations = self.attributor.get_selector_based_metadata(pod);
             return Some(DecorationInfo::Pod {
                 pod: pod_meta,
+                node_name,
                 owners,
                 selector_relations,
             });
@@ -147,11 +149,19 @@ impl<'a> Decorator<'a> {
         match decoration_info {
             DecorationInfo::Pod {
                 pod,
+                node_name,
                 owners,
                 selector_relations,
             } => {
+                let node_name = node_name.clone();
                 self.set_k8s_attr(flow_span, "pod.name", &pod.name, is_source);
                 self.set_k8s_attr_opt(flow_span, "namespace.name", &pod.namespace, is_source);
+                self.set_k8s_attr(
+                    flow_span,
+                    "node.name",
+                    node_name.unwrap().as_str(),
+                    is_source,
+                );
 
                 // Populate workload controller information for all owners in the chain
                 if let Some(workload_owners) = owners {
