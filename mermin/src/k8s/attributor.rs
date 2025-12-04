@@ -271,6 +271,7 @@ pub enum WorkloadOwner {
 pub enum DecorationInfo {
     Pod {
         pod: K8sObjectMeta,
+        node_name: Option<String>,
         owners: Option<Vec<WorkloadOwner>>,
         /// Resources that have selectors matching this pod's labels
         /// (e.g., NetworkPolicies, Services that select this pod)
