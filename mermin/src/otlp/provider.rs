@@ -509,14 +509,14 @@ pub async fn init_internal_tracing(
     otlp: Option<OtlpExportOptions>,
 ) -> Result<(), OtlpError> {
     let provider = init_provider(stdout, otlp).await?;
-    let mut new_fmt_layer = Layer::new()
+    let mut fmt_layer = Layer::new()
         .with_span_events(FmtSpan::from(span_fmt))
         .with_ansi(log_color);
 
     match log_level {
-        Level::DEBUG => new_fmt_layer = new_fmt_layer.with_file(true).with_line_number(true),
+        Level::DEBUG => fmt_layer = fmt_layer.with_file(true).with_line_number(true),
         Level::TRACE => {
-            new_fmt_layer = new_fmt_layer
+            fmt_layer = fmt_layer
                 .with_thread_ids(true)
                 .with_thread_names(true)
                 .with_file(true)
@@ -539,11 +539,11 @@ pub async fn init_internal_tracing(
         }
     }
 
-    let new_filter = EnvFilter::new(format!(
+    let filter = EnvFilter::new(format!(
         "warn,mermin={log_level},opentelemetry_sdk={log_level},opentelemetry={log_level},opentelemetry_otlp={log_level}"
     ));
 
-    if let Err(e) = handles.filter.modify(|filter| *filter = new_filter) {
+    if let Err(e) = handles.filter.modify(|f| *f = filter) {
         warn!(
             event.name = "system.logger_reload_failed",
             error.message = %e,
@@ -551,7 +551,7 @@ pub async fn init_internal_tracing(
             "failed to reload logger filter"
         );
     }
-    if let Err(e) = handles.fmt.modify(|layer| *layer = new_fmt_layer) {
+    if let Err(e) = handles.fmt.modify(|l| *l = fmt_layer) {
         warn!(
             event.name = "system.logger_reload_failed",
             error.message = %e,
