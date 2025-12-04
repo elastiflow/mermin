@@ -404,7 +404,7 @@ impl FlowSpanProducer {
                     };
 
                     while let Some(item) = flow_events.next() {
-                        let timer = metrics::registry::PROCESSING_LATENCY
+                        let _timer = metrics::registry::PROCESSING_LATENCY_SECONDS
                             .with_label_values(&["flow_ingestion"])
                             .start_timer();
 
@@ -469,8 +469,6 @@ impl FlowSpanProducer {
                             // 2. Sampling (keep 1 in N flows during overload)
                             // 3. Protocol-based priority (TCP > UDP > ICMP)
                         }
-
-                        timer.observe_duration();
                     }
 
                     guard.clear_ready();

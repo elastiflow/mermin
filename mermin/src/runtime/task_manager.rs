@@ -12,9 +12,14 @@ use tokio::{
 };
 use tracing::{debug, error, trace, warn};
 
-use crate::metrics::registry::{
-    SHUTDOWN_DURATION, SHUTDOWN_TIMEOUTS, TASKS_ACTIVE, TASKS_CANCELLED, TASKS_COMPLETED,
-    TASKS_PANICKED, TASKS_SPAWNED,
+use crate::metrics::{
+    self,
+    registry::{
+        SHUTDOWN_DURATION_SECONDS, SHUTDOWN_TIMEOUTS_TOTAL, TASKS_ACTIVE_BY_NAME_TOTAL,
+        TASKS_ACTIVE_TOTAL, TASKS_CANCELLED_BY_NAME_TOTAL, TASKS_CANCELLED_TOTAL,
+        TASKS_COMPLETED_BY_NAME_TOTAL, TASKS_COMPLETED_TOTAL, TASKS_PANICKED_BY_NAME_TOTAL,
+        TASKS_PANICKED_TOTAL, TASKS_SPAWNED_BY_NAME_TOTAL, TASKS_SPAWNED_TOTAL,
+    },
 };
 
 /// Task state for tracking lifecycle
@@ -76,9 +81,12 @@ impl TaskManager {
 
         self.tasks.insert(task_id, task_info);
 
-        // Update metrics
-        TASKS_SPAWNED.with_label_values(&[name]).inc();
-        TASKS_ACTIVE.with_label_values(&[name]).inc();
+        TASKS_SPAWNED_TOTAL.inc();
+        TASKS_ACTIVE_TOTAL.inc();
+        if metrics::registry::debug_enabled() {
+            TASKS_SPAWNED_BY_NAME_TOTAL.with_label_values(&[name]).inc();
+            TASKS_ACTIVE_BY_NAME_TOTAL.with_label_values(&[name]).inc();
+        }
 
         trace!(
             event.name = "task.spawned",
@@ -167,9 +175,16 @@ impl TaskManager {
                 task.state = TaskState::Cancelled;
                 task.completion_time = Some(Instant::now());
 
-                // Update metrics
-                TASKS_CANCELLED.with_label_values(&[&task_name]).inc();
-                TASKS_ACTIVE.with_label_values(&[&task_name]).dec();
+                TASKS_CANCELLED_TOTAL.inc();
+                TASKS_ACTIVE_TOTAL.dec();
+                if crate::metrics::registry::debug_enabled() {
+                    TASKS_CANCELLED_BY_NAME_TOTAL
+                        .with_label_values(&[&task_name])
+                        .inc();
+                    TASKS_ACTIVE_BY_NAME_TOTAL
+                        .with_label_values(&[&task_name])
+                        .dec();
+                }
 
                 warn!(
                     event.name = "task.cancelled",
@@ -199,7 +214,7 @@ impl TaskManager {
         match graceful_result {
             Ok(()) => {
                 let shutdown_duration = shutdown_start.elapsed();
-                SHUTDOWN_DURATION.observe(shutdown_duration.as_secs_f64());
+                SHUTDOWN_DURATION_SECONDS.observe(shutdown_duration.as_secs_f64());
 
                 trace!(
                     event.name = "task_manager.shutdown_completed",
@@ -219,13 +234,13 @@ impl TaskManager {
                     "graceful shutdown timed out, cancelling remaining tasks"
                 );
 
-                SHUTDOWN_TIMEOUTS.inc();
+                SHUTDOWN_TIMEOUTS_TOTAL.inc();
                 self.cancel_all_tasks();
 
                 let _ = timeout(Duration::from_secs(5), self.wait_for_running_tasks()).await;
 
                 let shutdown_duration = shutdown_start.elapsed();
-                SHUTDOWN_DURATION.observe(shutdown_duration.as_secs_f64());
+                SHUTDOWN_DURATION_SECONDS.observe(shutdown_duration.as_secs_f64());
 
                 ShutdownResult::ForcedCancellation {
                     duration: shutdown_duration,
@@ -261,8 +276,16 @@ impl TaskManager {
                     if let Some(task_info) = self.tasks.get_mut(&task_id) {
                         task_info.state = TaskState::Completed;
                         task_info.completion_time = Some(Instant::now());
-                        TASKS_COMPLETED.with_label_values(&[&task_name]).inc();
-                        TASKS_ACTIVE.with_label_values(&[&task_name]).dec();
+                        TASKS_COMPLETED_TOTAL.inc();
+                        TASKS_ACTIVE_TOTAL.dec();
+                        if metrics::registry::debug_enabled() {
+                            TASKS_COMPLETED_BY_NAME_TOTAL
+                                .with_label_values(&[&task_name])
+                                .inc();
+                            TASKS_ACTIVE_BY_NAME_TOTAL
+                                .with_label_values(&[&task_name])
+                                .dec();
+                        }
                         debug!(event.name = "task.completed", task.id = task_id, task.name = %task_name, "task completed successfully");
                     }
                 }
@@ -270,8 +293,16 @@ impl TaskManager {
                     if let Some(task_info) = self.tasks.get_mut(&task_id) {
                         task_info.state = TaskState::Cancelled;
                         task_info.completion_time = Some(Instant::now());
-                        TASKS_CANCELLED.with_label_values(&[&task_name]).inc();
-                        TASKS_ACTIVE.with_label_values(&[&task_name]).dec();
+                        TASKS_CANCELLED_TOTAL.inc();
+                        TASKS_ACTIVE_TOTAL.dec();
+                        if metrics::registry::debug_enabled() {
+                            TASKS_CANCELLED_BY_NAME_TOTAL
+                                .with_label_values(&[&task_name])
+                                .inc();
+                            TASKS_ACTIVE_BY_NAME_TOTAL
+                                .with_label_values(&[&task_name])
+                                .dec();
+                        }
                         debug!(event.name = "task.cancelled", task.id = task_id, task.name = %task_name, "task was cancelled");
                     }
                 }
@@ -279,8 +310,16 @@ impl TaskManager {
                     if let Some(task_info) = self.tasks.get_mut(&task_id) {
                         task_info.state = TaskState::Panicked;
                         task_info.completion_time = Some(Instant::now());
-                        TASKS_PANICKED.with_label_values(&[&task_name]).inc();
-                        TASKS_ACTIVE.with_label_values(&[&task_name]).dec();
+                        TASKS_PANICKED_TOTAL.inc();
+                        TASKS_ACTIVE_TOTAL.dec();
+                        if metrics::registry::debug_enabled() {
+                            TASKS_PANICKED_BY_NAME_TOTAL
+                                .with_label_values(&[&task_name])
+                                .inc();
+                            TASKS_ACTIVE_BY_NAME_TOTAL
+                                .with_label_values(&[&task_name])
+                                .dec();
+                        }
                         error!(event.name = "task.panic", task.id = task_id, task.name = %task_name, error.message = ?e, "task panicked");
                     }
                 }

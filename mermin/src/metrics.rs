@@ -1,3 +1,4 @@
+pub mod cleanup;
 pub mod ebpf;
 pub mod error;
 pub mod export;
