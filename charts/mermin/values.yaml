@@ -20,6 +20,21 @@ extraArgs: []
   # - "--foo"
   # - "bar"
 
+# Extra environment variables
+env: []
+  # - name: SOME_VAR
+  #   value: "SOME_VAL"
+  # - name: POD_IP
+  #   valueFrom:
+  #     fieldRef:
+  #       apiVersion: v1
+  #       fieldPath: status.podIP
+  # - name: "SOME_VAL_FROM_CM"
+  #   valueFrom:
+  #     configMapKeyRef:
+  #       name: cm_name
+  #       key: cm_key
+
 serviceAccount:
   # Specifies whether a service account should be created
   create: true

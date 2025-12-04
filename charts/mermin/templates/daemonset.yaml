@@ -64,6 +64,11 @@ spec:
             {{- end }}
           {{- end }}
           env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
             - name: POD_NODE_NAME
               valueFrom:
                 fieldRef:
@@ -74,13 +79,16 @@ spec:
                 fieldRef:
                   apiVersion: v1
                   fieldPath: metadata.name
-            - name: POD_NAMESPACE
+            - name: POD_IP
               valueFrom:
                 fieldRef:
                   apiVersion: v1
-                  fieldPath: metadata.namespace
+                  fieldPath: status.podIP
             - name: MERMIN_PLATFORM
               value: "kubernetes"
+          {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           resources:
