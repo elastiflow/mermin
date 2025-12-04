@@ -55,7 +55,7 @@ use crate::{
         selector::ResourceFilter,
         selector_relations::{SelectorRelationRule, SelectorRelationsManager},
     },
-    metrics,
+    metrics::{self, cleanup::MetricCleanupTracker},
     runtime::{self, conf::Conf, memory::ShrinkPolicy},
     span::flow::FlowSpan,
 };
@@ -350,6 +350,7 @@ impl ResourceStore {
         required_kinds: &HashSet<String>,
         ip_index: Arc<DashMap<String, Vec<K8sObjectMeta>>>,
         conf: &Conf,
+        cleanup_tracker: Option<MetricCleanupTracker>,
     ) -> Result<Self, K8sError> {
         let mut readiness_handles = Vec::new();
 
@@ -464,10 +465,10 @@ impl ResourceStore {
                     }
                     _ = debounce_timer.tick() => {
                         if pending_update {
-                            let timer = metrics::registry::K8S_IP_INDEX_UPDATE_DURATION.start_timer();
+                            let timer = metrics::registry::K8S_IP_INDEX_UPDATE_DURATION_SECONDS.start_timer();
                             update_ip_index(&store_clone, &ip_index_clone, &conf_clone).await;
                             timer.observe_duration();
-                            metrics::registry::K8S_IP_INDEX_UPDATES.inc();
+                            metrics::registry::K8S_IP_INDEX_UPDATES_TOTAL.inc();
                             pending_update = false;
                             trace!(
                                 event.name = "k8s.ip_index.updated",
@@ -481,22 +482,35 @@ impl ResourceStore {
 
         // Spawn watchers for resources that have IP addresses
         // These will trigger IP index rebuilds ONLY when IPs actually change (not on status-only updates)
-        spawn_ip_resource_watcher::<Pod, _>(client.clone(), event_tx.clone(), extract_pod_ips);
-        spawn_ip_resource_watcher::<Node, _>(client.clone(), event_tx.clone(), extract_node_ips);
+        spawn_ip_resource_watcher::<Pod, _>(
+            client.clone(),
+            event_tx.clone(),
+            extract_pod_ips,
+            cleanup_tracker.clone(),
+        );
+        spawn_ip_resource_watcher::<Node, _>(
+            client.clone(),
+            event_tx.clone(),
+            extract_node_ips,
+            cleanup_tracker.clone(),
+        );
         spawn_ip_resource_watcher::<Service, _>(
             client.clone(),
             event_tx.clone(),
             extract_service_ips,
+            cleanup_tracker.clone(),
         );
         spawn_ip_resource_watcher::<Ingress, _>(
             client.clone(),
             event_tx.clone(),
             extract_ingress_ips,
+            cleanup_tracker.clone(),
         );
         spawn_ip_resource_watcher::<EndpointSlice, _>(
             client.clone(),
             event_tx,
             extract_endpointslice_ips,
+            cleanup_tracker,
         );
 
         health_state
@@ -675,6 +689,7 @@ impl Attributor {
         owner_relations_opts: Option<OwnerRelationsRules>,
         selector_relations_opts: Option<Vec<SelectorRelationRule>>,
         conf: &Conf,
+        cleanup_tracker: Option<MetricCleanupTracker>,
     ) -> Result<Self, K8sError> {
         let client = Client::try_default()
             .await
@@ -730,6 +745,7 @@ impl Attributor {
             &required_kinds,
             ip_index.clone(),
             conf,
+            cleanup_tracker,
         )
         .await?;
 
@@ -1414,6 +1430,7 @@ fn spawn_ip_resource_watcher<K, F>(
     client: Client,
     event_tx: tokio::sync::mpsc::UnboundedSender<()>,
     extract_ips: F,
+    cleanup_tracker: Option<MetricCleanupTracker>,
 ) where
     K: Resource + Clone + Debug + Send + 'static + for<'de> serde::Deserialize<'de>,
     K::DynamicType: Default,
@@ -1441,9 +1458,14 @@ fn spawn_ip_resource_watcher<K, F>(
             while let Some(event) = stream.next().await {
                 match event {
                     Ok(watcher::Event::Apply(obj)) => {
-                        metrics::registry::K8S_WATCHER_EVENTS
-                            .with_label_values(&[&resource_name, "apply"])
+                        metrics::registry::K8S_WATCHER_EVENTS_TOTAL
+                            .with_label_values(&["apply"])
                             .inc();
+                        if metrics::registry::debug_enabled() {
+                            metrics::registry::K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL
+                                .with_label_values(&[&resource_name, "apply"])
+                                .inc();
+                        }
 
                         // Extract current IPs from this resource
                         let current_ips = extract_ips(&obj);
@@ -1489,13 +1511,23 @@ fn spawn_ip_resource_watcher<K, F>(
                         }
                     }
                     Ok(watcher::Event::Delete(obj)) => {
-                        metrics::registry::K8S_WATCHER_EVENTS
-                            .with_label_values(&[&resource_name, "delete"])
+                        metrics::registry::K8S_WATCHER_EVENTS_TOTAL
+                            .with_label_values(&["delete"])
                             .inc();
+                        if metrics::registry::debug_enabled() {
+                            metrics::registry::K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL
+                                .with_label_values(&[&resource_name, "delete"])
+                                .inc();
+                        }
 
                         // Remove from cache and trigger rebuild since IPs are being removed
                         let uid = obj.meta().uid.clone().unwrap_or_default();
                         ip_cache.remove(&uid);
+
+                        // Schedule cleanup of metrics for this resource
+                        if let Some(ref tracker) = cleanup_tracker {
+                            tracker.schedule_k8s_cleanup(resource_name.clone());
+                        }
 
                         // Shrink ip_cache capacity if it's significantly oversized.
                         // This prevents capacity retention when many K8s resources are deleted
@@ -1524,9 +1556,14 @@ fn spawn_ip_resource_watcher<K, F>(
                         );
                     }
                     Ok(watcher::Event::Init) => {
-                        metrics::registry::K8S_WATCHER_EVENTS
-                            .with_label_values(&[&resource_name, "init"])
+                        metrics::registry::K8S_WATCHER_EVENTS_TOTAL
+                            .with_label_values(&["init"])
                             .inc();
+                        if metrics::registry::debug_enabled() {
+                            metrics::registry::K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL
+                                .with_label_values(&[&resource_name, "init"])
+                                .inc();
+                        }
 
                         debug!(
                             event.name = "k8s.watcher.init",
@@ -1542,9 +1579,14 @@ fn spawn_ip_resource_watcher<K, F>(
                         );
                     }
                     Ok(watcher::Event::InitDone) => {
-                        metrics::registry::K8S_WATCHER_EVENTS
-                            .with_label_values(&[&resource_name, "init_done"])
+                        metrics::registry::K8S_WATCHER_EVENTS_TOTAL
+                            .with_label_values(&["init_done"])
                             .inc();
+                        if metrics::registry::debug_enabled() {
+                            metrics::registry::K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL
+                                .with_label_values(&[&resource_name, "init_done"])
+                                .inc();
+                        }
 
                         if event_tx.send(()).is_err() {
                             return;
@@ -1556,9 +1598,12 @@ fn spawn_ip_resource_watcher<K, F>(
                         );
                     }
                     Err(e) => {
-                        metrics::registry::K8S_WATCHER_ERRORS
-                            .with_label_values(&[&resource_name])
-                            .inc();
+                        metrics::registry::K8S_WATCHER_ERRORS_TOTAL.inc();
+                        if metrics::registry::debug_enabled() {
+                            metrics::registry::K8S_WATCHER_ERRORS_BY_RESOURCE_TOTAL
+                                .with_label_values(&[&resource_name])
+                                .inc();
+                        }
 
                         error!(
                             event.name = "k8s.watcher.error",

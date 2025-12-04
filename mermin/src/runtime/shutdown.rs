@@ -5,7 +5,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     iface::{self, types::ControllerCommand},
-    metrics::registry::{FLOWS_LOST_SHUTDOWN, FLOWS_PRESERVED_SHUTDOWN},
+    metrics::registry::{FLOWS_LOST_SHUTDOWN_TOTAL, FLOWS_PRESERVED_SHUTDOWN_TOTAL},
     runtime::task_manager::{ShutdownResult, TaskManager},
     span::{
         producer::{FlowSpanComponents, timeout_and_remove_flow},
@@ -233,7 +233,7 @@ impl ShutdownManager {
                 .await
             {
                 Ok(preserved_count) => {
-                    FLOWS_PRESERVED_SHUTDOWN.inc_by(preserved_count as u64);
+                    FLOWS_PRESERVED_SHUTDOWN_TOTAL.inc_by(preserved_count as u64);
                     info!(
                         event.name = "application.shutdown.flows_preserved",
                         count = preserved_count,
@@ -241,7 +241,7 @@ impl ShutdownManager {
                     );
                 }
                 Err(lost_count) => {
-                    FLOWS_LOST_SHUTDOWN.inc_by(lost_count as u64);
+                    FLOWS_LOST_SHUTDOWN_TOTAL.inc_by(lost_count as u64);
                     warn!(
                         event.name = "application.shutdown.flows_lost",
                         count = lost_count,

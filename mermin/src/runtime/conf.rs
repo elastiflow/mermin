@@ -653,7 +653,9 @@ impl From<figment::Error> for ConfError {
     }
 }
 
+/// Serde helper modules for configuration types.
 pub mod conf_serde {
+    /// Serde helpers for tracing::Level
     pub mod level {
         use serde::{self, Deserialize, Deserializer, Serializer};
         use tracing::Level;
@@ -673,6 +675,7 @@ pub mod conf_serde {
             s.parse::<Level>().map_err(serde::de::Error::custom)
         }
 
+        /// Serde helpers for Option<Level>
         pub mod option {
             use super::*;
 
@@ -699,6 +702,7 @@ pub mod conf_serde {
         }
     }
 
+    /// Serde helpers for humantime Duration (e.g., "5m", "30s", "1h")
     pub mod duration {
         use std::time::Duration;
 
@@ -720,6 +724,7 @@ pub mod conf_serde {
         }
     }
 
+    /// Serde helpers for StdoutFmt
     pub mod stdout_fmt {
         use serde::{Deserialize, Deserializer, Serializer};
 
@@ -757,6 +762,7 @@ pub mod conf_serde {
         }
     }
 
+    /// Serde helpers for ExporterProtocol
     pub mod exporter_protocol {
         use serde::{Deserialize, Deserializer, Serializer};
 
@@ -822,7 +828,7 @@ pub struct PipelineOptions {
     /// Pollers check for record intervals and timeouts at this frequency.
     /// Lower values = more responsive but higher CPU. Higher values = less overhead.
     /// At 10K flows/sec with 100K active flows and 32 pollers: ~600 checks/sec per poller.
-    #[serde(with = "conf_serde::duration")]
+    #[serde(with = "duration")]
     pub worker_poll_interval: Duration,
 
     /// Number of dedicated threads for K8s decorator (default: 4)

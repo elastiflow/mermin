@@ -118,7 +118,8 @@ async fn run() -> Result<()> {
     let Context { conf, .. } = runtime;
 
     // Initialize Prometheus metrics registry early, before any subsystems that might record metrics
-    if let Err(e) = metrics::registry::init_registry() {
+    // This also initializes the global debug_enabled flag
+    if let Err(e) = metrics::registry::init_registry(conf.metrics.debug_metrics_enabled) {
         error!(
             event.name = "metrics.registry_init_failed",
             error.message = %e,
@@ -127,13 +128,42 @@ async fn run() -> Result<()> {
     } else {
         info!(
             event.name = "metrics.registry_initialized",
+            debug_metrics_enabled = conf.metrics.debug_metrics_enabled,
             "prometheus metrics registry initialized"
         );
     }
 
+    // Warn if debug metrics are enabled - they cause significant memory growth
+    if conf.metrics.debug_metrics_enabled {
+        warn!(
+            event.name = "metrics.debug_metrics_enabled",
+            stale_metric_ttl = ?conf.metrics.stale_metric_ttl,
+            "DEBUG METRICS ENABLED: High-cardinality metrics with per-resource labels are active. \
+             Memory usage will increase significantly. DO NOT USE IN PRODUCTION unless necessary for debugging."
+        );
+    }
+
+    // Create metric cleanup tracker if debug metrics are enabled
+    let cleanup_tracker = if conf.metrics.debug_metrics_enabled {
+        Some(metrics::cleanup::MetricCleanupTracker::new(
+            conf.metrics.stale_metric_ttl,
+            conf.metrics.debug_metrics_enabled,
+        ))
+    } else {
+        None
+    };
+
     let (mut task_manager, _) = TaskManager::new();
     let (os_shutdown_tx, _) = broadcast::channel::<()>(1);
     let mut os_thread_handles = Vec::new();
+
+    // Spawn metric cleanup background task if debug metrics are enabled
+    if let Some(tracker) = cleanup_tracker.clone() {
+        let shutdown_rx = os_shutdown_tx.subscribe();
+        task_manager.spawn("metrics-cleanup", async move {
+            tracker.run_cleanup_loop(shutdown_rx).await;
+        });
+    }
 
     if conf.metrics.enabled {
         let metrics_conf = conf.metrics.clone();
@@ -450,6 +480,7 @@ async fn run() -> Result<()> {
         conf.discovery.instrument.tc_priority,
         conf.discovery.instrument.tcx_order.clone(),
         Some(event_tx.clone()),
+        cleanup_tracker.clone(),
     )?;
     let (netlink_handle, netlink_shutdown_fd) =
         spawn_netlink_thread(Arc::clone(&host_netns), netlink_tx).map_err(|e| {
@@ -541,6 +572,7 @@ async fn run() -> Result<()> {
         owner_relations_opts,
         selector_relations_opts,
         &conf,
+        cleanup_tracker.clone(),
     )
     .await
     {
@@ -602,11 +634,10 @@ async fn run() -> Result<()> {
                             metrics::userspace::set_channel_size(ChannelName::Exporter, channel_size);
                             metrics::userspace::set_channel_size(ChannelName::DecoratorInput, channel_size);
 
-                            let timer = metrics::registry::PROCESSING_LATENCY
+                            let _timer = metrics::registry::PROCESSING_LATENCY_SECONDS
                                 .with_label_values(&["k8s_decoration"])
                                 .start_timer();
                             let (span, err) = decorator.decorate_or_fallback(flow_span).await;
-                            timer.observe_duration();
 
                             match err {
                                 Some(e) => {

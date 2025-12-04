@@ -67,6 +67,21 @@ metrics {
   enabled        = true
   listen_address = "0.0.0.0"
   port           = 10250
+
+  # Debug metrics configuration
+  # WARNING: Enabling debug metrics can cause significant memory growth in production
+  # Only enable for debugging purposes in development/staging environments
+  debug_metrics_enabled = false  # Set to true for per-resource metrics (interface, task, K8s resource labels)
+
+  # Time-to-live for stale metrics after resource deletion (only applies when debug_metrics_enabled = true)
+  # Examples: "5m", "300s", "1h", "0s" for immediate cleanup
+  # Recommended: "5m" handles pod restarts while preventing unbounded growth
+  stale_metric_ttl = "5m"
+
+  # Endpoints available:
+  # - /metrics          - All metrics (standard + debug if enabled)
+  # - /metrics/standard - Standard metrics only (aggregated, no high-cardinality labels)
+  # - /metrics/debug    - Debug metrics only (returns 404 if debug not enabled)
 }
 
 # Parser configuration for eBPF packet parsing

@@ -149,7 +149,10 @@ use tracing::{debug, error, info, trace, warn};
 use crate::{
     error::MerminError,
     iface::types::{ControllerEvent, NetlinkEvent},
-    metrics::ebpf::{inc_tc_programs_attached, inc_tc_programs_detached},
+    metrics::{
+        cleanup::MetricCleanupTracker,
+        ebpf::{inc_tc_programs_attached, inc_tc_programs_detached},
+    },
     runtime::conf::TcxOrderStrategy,
 };
 
@@ -223,6 +226,8 @@ pub struct IfaceController {
     bpf_fs_writable: bool,
     /// Optional channel for sending controller events to main thread for observability
     event_tx: Option<Sender<ControllerEvent>>,
+    /// Optional cleanup tracker for removing stale metrics
+    cleanup_tracker: Option<MetricCleanupTracker>,
 }
 
 /// Direction string constants
@@ -254,6 +259,7 @@ impl IfaceController {
     /// - `tc_priority` - TC priority for netlink mode (lower number = higher priority)
     /// - `tcx_order` - TCX ordering strategy (First or Last in chain)
     /// - `event_tx` - Optional channel for sending controller events for observability
+    /// - `cleanup_tracker` - Optional cleanup tracker for removing stale metrics
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         patterns: Vec<String>,
@@ -264,6 +270,7 @@ impl IfaceController {
         tc_priority: u16,
         tcx_order: TcxOrderStrategy,
         event_tx: Option<Sender<ControllerEvent>>,
+        cleanup_tracker: Option<MetricCleanupTracker>,
     ) -> Result<Self, MerminError> {
         info!(
             event.name = "interface_controller.created",
@@ -284,6 +291,7 @@ impl IfaceController {
             tcx_order,
             bpf_fs_writable,
             event_tx,
+            cleanup_tracker,
         })
     }
 
@@ -612,6 +620,11 @@ impl IfaceController {
 
                     self.active_ifaces.insert(name.clone());
 
+                    // Mark interface as active to prevent metric cleanup
+                    if let Some(ref cleanup_tracker) = self.cleanup_tracker {
+                        cleanup_tracker.mark_interface_active(&name);
+                    }
+
                     if let Some(ref tx) = self.event_tx {
                         let _ = tx.send(ControllerEvent::InterfaceAttached { iface: name });
                     }
@@ -639,6 +652,11 @@ impl IfaceController {
                                 "failed to detach program from removed interface"
                             );
                         }
+                    }
+
+                    // Schedule cleanup of metrics for this interface
+                    if let Some(ref cleanup_tracker) = self.cleanup_tracker {
+                        cleanup_tracker.schedule_interface_cleanup(name.clone());
                     }
 
                     if let Some(ref tx) = self.event_tx {
