@@ -1,3 +1,13 @@
+## [v0.1.0-beta.38] - 2025-12-04
+
+### Features
+
+- **metrics:** Add tiered metrics system with automatic cleanup for high-cardinality debug metrics (#330)
+
+[v0.1.0-beta.37..v0.1.0-beta.38](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.37...v0.1.0-beta.38)
+
+
+
 ## [v0.1.0-beta.37] - 2025-12-03
 
 ### Features
