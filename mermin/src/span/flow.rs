@@ -529,7 +529,7 @@ impl Traceable for FlowSpan {
             ));
         }
         if let Some(value) = self.attributes.flow_tcp_flags_bits {
-            kvs.push(KeyValue::new("flow.tcp.flags.bits", value as i64));
+            kvs.push(KeyValue::new("flow.tcp.flags.bits", value as u64));
         }
         if let Some(ref value) = self.attributes.flow_tcp_flags_tags {
             let flag_values: Vec<StringValue> = value
