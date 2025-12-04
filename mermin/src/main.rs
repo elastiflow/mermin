@@ -20,6 +20,7 @@ use aya::{
     programs::{SchedClassifier, TcAttachType},
     util::KernelVersion,
 };
+use clap::Parser;
 use dashmap::DashMap;
 use error::{MerminError, Result};
 #[cfg(unix)]
@@ -48,11 +49,12 @@ use crate::{
         userspace::{ChannelName, ChannelSendStatus},
     },
     otlp::{
-        provider::{init_internal_tracing, init_provider},
+        provider::{init_bootstrap_logger, init_internal_tracing, init_provider},
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
     },
     runtime::{
         capabilities,
+        cli::Cli,
         context::Context,
         shutdown::{ShutdownConfig, ShutdownManager},
         task_manager::{ShutdownResult, TaskManager},
@@ -113,8 +115,9 @@ async fn run() -> Result<()> {
     // TODO: runtime should be aware of all threads and tasks spawned by the eBPF program so that they can be gracefully shutdown and restarted.
     // TODO: listen for SIGUP `kill -HUP $(pidof mermin)` to reload the eBPF program and all configuration
     // TODO: do not reload global configuration found in CLI
-
-    let runtime = Context::new()?;
+    let cli = Cli::parse();
+    let reload_handles = init_bootstrap_logger(&cli);
+    let runtime = Context::new(cli)?;
     let Context { conf, .. } = runtime;
 
     // Initialize Prometheus metrics registry early, before any subsystems that might record metrics
@@ -248,6 +251,7 @@ async fn run() -> Result<()> {
 
     let exporter: Arc<dyn TraceableExporter> = {
         init_internal_tracing(
+            reload_handles,
             conf.log_level,
             conf.internal.traces.span_fmt,
             conf.log_color,

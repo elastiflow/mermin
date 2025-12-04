@@ -1,5 +1,9 @@
-use std::{fs, str::FromStr, sync::Arc};
+use std::{fmt::Debug, fs, str::FromStr, sync::Arc};
 
+use figment::{
+    Figment,
+    providers::{Format, Serialized},
+};
 use http::{HeaderMap, HeaderName, HeaderValue, Uri};
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::client::legacy::connect::HttpConnector;
@@ -20,12 +24,15 @@ use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime},
 };
 use rustls_pemfile::{certs, private_key};
+use serde::{Deserialize, Serialize};
 use tonic::{metadata::MetadataMap, transport::Channel};
 use tracing::{Level, debug, info, warn};
 use tracing_subscriber::{
-    EnvFilter,
+    EnvFilter, Registry,
     fmt::{Layer, format::FmtSpan},
+    layer::Layered,
     prelude::__tracing_subscriber_SubscriberExt,
+    reload,
     util::SubscriberInitExt,
 };
 
@@ -35,7 +42,11 @@ use crate::{
         opts::{OtlpExportOptions, StdoutExportOptions, defaults},
         tracing_layer::OtelErrorLayer,
     },
-    runtime::opts::SpanFmt,
+    runtime::{
+        cli::Cli,
+        conf::{Hcl, conf_serde::level},
+        opts::SpanFmt,
+    },
 };
 
 #[derive(Debug)]
@@ -494,6 +505,7 @@ pub async fn init_provider(
 }
 
 pub async fn init_internal_tracing(
+    handles: LogReloadHandles,
     log_level: Level,
     span_fmt: SpanFmt,
     log_color: bool,
@@ -535,11 +547,22 @@ pub async fn init_internal_tracing(
         "warn,mermin={log_level},opentelemetry_sdk={log_level},opentelemetry={log_level},opentelemetry_otlp={log_level}"
     ));
 
-    tracing_subscriber::registry()
-        .with(filter)
-        .with(fmt_layer)
-        .with(OtelErrorLayer)
-        .init();
+    if let Err(e) = handles.filter.modify(|f| *f = filter) {
+        warn!(
+            event.name = "system.logger_reload_failed",
+            error.message = %e,
+            error.kind = "filter",
+            "failed to reload logger filter"
+        );
+    }
+    if let Err(e) = handles.fmt.modify(|l| *l = fmt_layer) {
+        warn!(
+            event.name = "system.logger_reload_failed",
+            error.message = %e,
+            error.kind = "formatter",
+            "failed to reload logger formatter"
+        );
+    }
 
     global::set_tracer_provider(provider);
     global::set_text_map_propagator(TraceContextPropagator::new());
@@ -551,6 +574,67 @@ pub async fn init_internal_tracing(
     );
 
     Ok(())
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(default)]
+struct BootstrapLogConf {
+    #[serde(with = "level")]
+    log_level: Level,
+    log_color: bool,
+}
+
+impl Default for BootstrapLogConf {
+    fn default() -> Self {
+        Self {
+            log_level: Level::INFO,
+            log_color: false,
+        }
+    }
+}
+
+type SubscriberWithFilter = Layered<reload::Layer<EnvFilter, Registry>, Registry>;
+type FmtReloadHandle = reload::Handle<Layer<SubscriberWithFilter>, SubscriberWithFilter>;
+pub struct LogReloadHandles {
+    pub filter: reload::Handle<EnvFilter, Registry>,
+    pub fmt: FmtReloadHandle,
+}
+
+/// Initializes a simple, console-only logger and returns a handle to reconfigure it.
+pub fn init_bootstrap_logger(cli: &Cli) -> LogReloadHandles {
+    let mut figment = Figment::new().merge(Serialized::defaults(BootstrapLogConf::default()));
+
+    if let Some(config_path) = &cli.config
+        && config_path.exists()
+    {
+        figment = figment.merge(Hcl::file(config_path));
+    }
+
+    let bootstrap_conf: BootstrapLogConf = figment.extract().unwrap_or_default();
+
+    let (filter_layer, filter_handle) =
+        reload::Layer::new(EnvFilter::new(bootstrap_conf.log_level.to_string()));
+
+    let default_layer = Layer::new()
+        .with_span_events(FmtSpan::FULL)
+        .with_ansi(bootstrap_conf.log_color);
+    let (fmt_layer, fmt_handle) = reload::Layer::new(default_layer);
+
+    tracing_subscriber::registry()
+        .with(filter_layer)
+        .with(fmt_layer)
+        .with(OtelErrorLayer)
+        .init();
+
+    info!(
+        event.name = "system.bootstrap_logger_initialized",
+        "bootstrap logger initialized, awaiting full configuration"
+    );
+
+    LogReloadHandles {
+        filter: filter_handle,
+        fmt: fmt_handle,
+    }
 }
 
 #[cfg(test)]
