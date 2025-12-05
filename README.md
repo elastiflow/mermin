@@ -2,11 +2,9 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1762568258/mermin/Mermin_Primary_Logo_Gradient_Light_uljb3t.png">
     <source media="(prefers-color-scheme: light)" srcset="https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1762568258/mermin/Mermin_Primary_Logo_Gradient_Dark_vmjdoq.png">
-    <img alt="Fallback image description" src="https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1762568258/mermin/Mermin_Primary_Logo_Gradient_Dark_vmjdoq.png">
+    <img alt="Mermin" src="https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1762568258/mermin/Mermin_Primary_Logo_Gradient_Dark_vmjdoq.png">
   </picture>
 </h1>
-
-# Mermin
 
 **Mermin** is a powerful, Kubernetes-native network observability tool that uses eBPF to efficiently capture network traffic and export it as **Flow Traces** via the OpenTelemetry Protocol (OTLP). It provides deep visibility into your cluster's network communications with zero application changes required.
 
