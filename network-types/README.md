@@ -4,7 +4,7 @@ A lightweight, no_std compatible Rust crate that provides network protocol data 
 and generating network packets. This crate is designed for high-performance, low-level networking in both userspace and
 eBPF environments.
 
-### 🎯 Core Purpose
+## 🎯 Core Purpose
 
 The primary goal of network-types is to provide a set of pure Rust, no_std-compatible data structures for working with
 network packets.
@@ -15,7 +15,7 @@ which are essential in performance-critical applications and restrictive environ
 
 ## ✨ Key Features
 
-#![no_std] Compatible: Use it in any environment, from bare-metal to kernel space, without the standard library.
+`#![no_std]` Compatible: Use it in any environment, from bare-metal to kernel space, without the standard library.
 
 - Guaranteed Binary Compatibility: Structures are defined with #[repr(C, packed)] to ensure their memory layout is
   identical to the on-the-wire network protocol specifications.
@@ -67,8 +67,6 @@ fn parse_ethernet_frame(raw_bytes: &[u8]) {
     }
 }
 ```
-
------
 
 ## 🧪 Rigorous Integration Testing
 
@@ -128,9 +126,7 @@ cd network-types/tests
    order, avoiding common test failures.
 4. `make clean`: Cleans up all build artifacts.
 
-> Important: The Makefile commands use sudo because loading eBPF programs requires elevated privileges. The script
-> correctly preserves your user's environment variables (PATH, CARGO_HOME, etc.) to ensure the right Rust toolchain is
-> used.
+> Important: The Makefile commands use sudo because loading eBPF programs requires elevated privileges. The script correctly preserves your user's environment variables (PATH, CARGO_HOME, etc.) to ensure the right Rust toolchain is used.
 
 The tests will:
 

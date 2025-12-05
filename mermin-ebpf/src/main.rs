@@ -646,7 +646,7 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 #[cfg(not(test))]
 #[unsafe(link_section = "license")]
 #[unsafe(no_mangle)]
-static LICENSE: [u8; 13] = *b"Dual MIT/GPL\0";
+static LICENSE: [u8; 4] = *b"GPL\0";
 
 #[cfg(feature = "test")]
 mod host_test_shim {
