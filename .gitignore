@@ -17,7 +17,9 @@ helm_rendered
 /docs/deployment/examples/local/config.hcl
 
 # IDEs
+.cursor
 .idea
+.junie
 .vscode
 
 # Development artifacts
