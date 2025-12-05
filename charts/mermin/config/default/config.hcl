@@ -68,7 +68,7 @@ metrics {
   listen_address = "0.0.0.0"
   port           = 10250
 
-  # Debug metrics configuration
+  # Enable debug metrics
   # WARNING: Enabling debug metrics can cause significant memory growth in production
   # Only enable for debugging purposes in development/staging environments
   debug_metrics_enabled = false  # Set to true for per-resource metrics (interface, task, K8s resource labels)
