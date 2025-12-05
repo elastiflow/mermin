@@ -622,11 +622,12 @@ mod tests {
         );
     }
 
+    #[test]
     fn test_parse_wildcards() {
         // "192.168.1.*" -> 192.168.1.0/24
-        // "10.*"       -> 10.0.0.0/8
+        // "10.*.*.*"       -> 10.0.0.0/8
         // "172.16.0.1" -> 172.16.0.1/32
-        let table = build_ip_network_table("192.168.1.*, 10.*, 172.16.0.1");
+        let table = build_ip_network_table("192.168.1.*, 10.*.*.*, 172.16.0.1");
 
         assert!(
             table
