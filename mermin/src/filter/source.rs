@@ -146,7 +146,11 @@ impl CompiledRules {
     }
 }
 
-/// Parses a comma-separated string of CIDRs into an IpNetworkTable.
+/// Parses a comma-separated string of CIDRs, IPs, OR Wildcards into an IpNetworkTable.
+/// Supports:
+/// - CIDR: "192.168.1.0/24"
+/// - IP: "192.168.1.1" (implies /32)
+/// - Wildcard: "192.168.1.*" (implies /24), "10.*" (implies /8)
 fn build_ip_network_table(s: &str) -> IpNetworkTable<()> {
     let mut table = IpNetworkTable::new();
     if s.is_empty() {
@@ -157,17 +161,57 @@ fn build_ip_network_table(s: &str) -> IpNetworkTable<()> {
         if part.is_empty() {
             continue;
         }
-        if let Ok(net) = part.parse::<IpNetwork>() {
-            table.insert(net, ());
-        } else {
-            warn!(
-                event_name = "filter.cidr_parse_failed",
-                cidr = %part,
-                "invalid cidr in filter config, skipping."
-            );
+        let network = part
+            .parse::<IpNetwork>()
+            .ok()
+            .or_else(|| part.parse::<IpAddr>().ok().map(IpNetwork::from))
+            .or_else(|| parse_ipv4_wildcard(part));
+
+        match network {
+            Some(net) => {
+                table.insert(net, ());
+            }
+            None => {
+                warn!(
+                    event_name = "filter.cidr_parse_failed",
+                    input = %part,
+                    "invalid cidr, ip, or wildcard pattern in filter config, skipping."
+                );
+            }
         }
     }
     table
+}
+
+/// Helper to convert "192.168.*" -> "192.168.0.0/16"
+fn parse_ipv4_wildcard(s: &str) -> Option<IpNetwork> {
+    if !s.contains('*') || s.contains(':') {
+        return None;
+    }
+
+    let parts: Vec<&str> = s.split('.').collect();
+    if parts.len() != 4 {
+        return None;
+    }
+
+    let mut octets = [0u8; 4];
+    let mut prefix_len = 0;
+    let mut wildcard_seen = false;
+
+    for (i, part) in parts.iter().enumerate() {
+        if *part == "*" {
+            wildcard_seen = true;
+        } else if wildcard_seen {
+            return None;
+        } else {
+            let octet = part.parse::<u8>().ok()?;
+            octets[i] = octet;
+            prefix_len += 8;
+        }
+    }
+
+    let ip = IpAddr::from(octets);
+    IpNetwork::new(ip, prefix_len).ok()
 }
 
 /// Parses a comma-separated string of numbers and ranges into a HashSet.
@@ -559,8 +603,8 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_cidrs() {
-        let table = build_ip_network_table("192.168.1.0/24, 10.0.0.1/32");
+    fn test_parse_cidrs_and_ips() {
+        let table = build_ip_network_table("192.168.1.0/24, 10.0.0.1");
         assert!(
             table
                 .longest_match("192.168.1.50".parse::<IpAddr>().unwrap())
@@ -575,6 +619,35 @@ mod tests {
             table
                 .longest_match("10.0.0.2".parse::<IpAddr>().unwrap())
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn test_parse_wildcards() {
+        // "192.168.1.*" -> 192.168.1.0/24
+        // "10.*.*.*"       -> 10.0.0.0/8
+        // "172.16.0.1" -> 172.16.0.1/32
+        let table = build_ip_network_table("192.168.1.*, 10.*.*.*, 172.16.0.1");
+
+        assert!(
+            table
+                .longest_match("192.168.1.55".parse::<IpAddr>().unwrap())
+                .is_some()
+        );
+        assert!(
+            table
+                .longest_match("192.168.2.55".parse::<IpAddr>().unwrap())
+                .is_none()
+        );
+        assert!(
+            table
+                .longest_match("10.1.2.3".parse::<IpAddr>().unwrap())
+                .is_some()
+        );
+        assert!(
+            table
+                .longest_match("172.16.0.1".parse::<IpAddr>().unwrap())
+                .is_some()
         );
     }
 
