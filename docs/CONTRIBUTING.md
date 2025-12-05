@@ -36,7 +36,7 @@ If you want to work on something not yet tracked, please **open an issue first**
 
 Fork the repository on GitHub, then clone your fork:
 
-```bash
+```shell
 git clone https://github.com/YOUR_USERNAME/mermin.git
 cd mermin
 git remote add upstream https://github.com/elastiflow/mermin.git
@@ -46,7 +46,7 @@ git remote add upstream https://github.com/elastiflow/mermin.git
 
 Always create a new branch for your work:
 
-```bash
+```shell
 # Fetch latest changes from upstream
 git fetch upstream
 git checkout -b feature/my-new-feature upstream/beta
@@ -76,7 +76,7 @@ git checkout -b fix/issue-123 upstream/beta
 
 Before submitting, ensure all checks pass locally:
 
-```bash
+```shell
 # Format your code
 cargo fmt
 
@@ -97,7 +97,7 @@ See the [Development Workflow](development-workflow.md) guide for more testing d
 
 ### 5. Push and Create Pull Request
 
-```bash
+```shell
 git push origin feature/my-new-feature
 ```
 
@@ -109,7 +109,7 @@ Mermin uses **Conventional Commits** for all commit messages. This enables autom
 
 ### Commit Message Format
 
-```
+```text
 <type>[optional scope]: <description>
 
 [optional body]
@@ -132,7 +132,7 @@ Mermin uses **Conventional Commits** for all commit messages. This enables autom
 
 ### Examples
 
-```
+```text
 feat(ebpf): add support for GRE tunnel detection
 
 Add GRE header parsing to the eBPF packet parser to enable
@@ -141,7 +141,7 @@ flow tracking through GRE tunnels.
 Closes #123
 ```
 
-```
+```text
 fix(k8s): resolve pod metadata race condition
 
 Ensure pod informer cache is synced before processing flows
@@ -150,7 +150,7 @@ to prevent missing metadata enrichment.
 Fixes #456
 ```
 
-```
+```text
 docs: update quickstart guide with new configuration options
 ```
 
@@ -158,7 +158,7 @@ docs: update quickstart guide with new configuration options
 
 If your change introduces a breaking change, add `BREAKING CHANGE:` in the footer:
 
-```
+```text
 feat(config)!: change default log level to warn
 
 BREAKING CHANGE: The default log_level has changed from "info" to "warn".
@@ -210,7 +210,8 @@ When creating a PR, provide:
 
 - Delete your feature branch
 - Update your local repository:
-  ```bash
+
+  ```shell
   git checkout beta
   git pull upstream beta
   ```
@@ -263,7 +264,7 @@ If you modify `FlowKey` or `FlowStats` structs in `mermin-common/src/lib.rs`, yo
 
 You can run most CI checks locally before pushing:
 
-```bash
+```shell
 # Format check
 cargo fmt -- --check
 
@@ -307,9 +308,9 @@ All contributors must adhere to our [Code of Conduct](code-of-conduct.md). We ar
 By contributing to Mermin, you agree that your contributions will be licensed under the same licenses as the project:
 
 - **GPL-2.0** for eBPF code (`mermin-ebpf/`)
-- **Apache-2.0 OR MIT** for userspace code
+- **Apache-2.0** for user space code
 
-See [LICENSE-GPL2](../../LICENSE-GPL2), [LICENSE-APACHE](../../LICENSE-APACHE), and [LICENSE-MIT](../../LICENSE-MIT) for full license text.
+See [LICENSE-GPL2](../../LICENSE-GPL2) and [LICENSE-APACHE](../../LICENSE-APACHE) for full license text.
 
 ## Questions?
 

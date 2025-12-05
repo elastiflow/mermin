@@ -6,6 +6,8 @@
   </picture>
 </h1>
 
+# Mermin
+
 **Mermin** is a powerful, Kubernetes-native network observability tool that uses eBPF to efficiently capture network traffic and export it as **Flow Traces** via the OpenTelemetry Protocol (OTLP). It provides deep visibility into your cluster's network communications with zero application changes required.
 
 ---
@@ -90,37 +92,37 @@ For a deeper dive into Mermin's architecture, see our [Architecture Overview](do
 
 Comprehensive documentation is available in the `docs/` directory:
 
-**Getting Started**
+### Getting Started
 
 - [Quickstart Guide](docs/getting-started/quickstart.md) - Get up and running in minutes
 - [Architecture Overview](docs/getting-started/architecture.md) - Understand how Mermin works
 
-**Deployment**
+### Deployment
 
 - [Deployment Guide](docs/deployment/deployment.md) - Deployment strategies and best practices
 - [Kubernetes with Helm](docs/deployment/kubernetes-helm.md) - Kubernetes deployment details
 - [Cloud Platforms](docs/deployment/cloud-platforms.md) - AWS, GCP, Azure specifics
 - [Docker & Bare Metal](docs/deployment/docker-bare-metal.md) - Non-Kubernetes deployments
 
-**Configuration**
+### Configuration
 
 - [Configuration Reference](docs/configuration/configuration.md) - Complete configuration options
 - [OTLP Export](docs/configuration/export-otlp.md) - Configure OpenTelemetry export
 - [Filtering](docs/configuration/filtering.md) - Control which flows are captured
 - [Kubernetes Metadata](docs/configuration/kubernetes-informers.md) - Kubernetes integration options
 
-**Observability Backends**
+### Observability Backends
 
 - [Supported Backends](docs/observability/backends.md) - Elastic, Grafana, Tempo, Jaeger, and more
 
-**Troubleshooting**
+### Troubleshooting
 
 - [Troubleshooting Guide](docs/troubleshooting/troubleshooting.md) - Common issues and solutions
 - [Deployment Issues](docs/troubleshooting/deployment-issues.md) - Pod startup and configuration problems
 - [Interface Visibility](docs/troubleshooting/interface-visibility-and-traffic-decapsulation.md) - Traffic capture and CNI configuration
 - [Common eBPF Errors](docs/troubleshooting/common-ebpf-errors.md) - Verifier failures and kernel compatibility
 
-**Development & Contributing**
+### Development & Contributing
 
 - [Contributing Guide](docs/contributor-guide/contributing.md) - How to contribute to Mermin
 - [Development Workflow](docs/contributor-guide/development-workflow.md) - Build, test, and contribute
@@ -131,7 +133,7 @@ Comprehensive documentation is available in the `docs/` directory:
 
 We welcome contributions from the community! Whether you're fixing bugs, adding features, improving documentation, or sharing feedback, your contributions help make Mermin better for everyone.
 
-**Ways to Contribute:**
+### Ways to Contribute
 
 - 🐛 **Report bugs** via [GitHub Issues](https://github.com/elastiflow/mermin/issues).
 - 💡 **Request features** or share ideas in [GitHub Discussions](https://github.com/elastiflow/mermin/discussions).
@@ -139,7 +141,7 @@ We welcome contributions from the community! Whether you're fixing bugs, adding 
 - 🔧 **Submit code** - See our [Development Workflow](docs/contributor-guide/development-workflow.md) to get started.
 - 💬 **Help others** - Answer questions in Discussions or Slack.
 
-**Getting Started as a Contributor:**
+### Getting Started as a Contributor
 
 1. **Read the [Development Workflow](docs/contributor-guide/development-workflow.md)** - Learn how to build, test, and develop Mermin.
 2. **Check out [Good First Issues](https://github.com/elastiflow/mermin/labels/good%20first%20issue)** - Find beginner-friendly tasks.
@@ -156,13 +158,13 @@ All contributors are expected to follow our code of conduct and maintain a welco
 - 🐛 [GitHub Issues](https://github.com/elastiflow/mermin/issues) - Report bugs and track feature requests.
 - 📖 [Documentation](docs/README.md) - Comprehensive guides and references.
 
-**Stay Updated:**
+### Stay Updated
 
 - ⭐ Star the repo on GitHub to stay notified of new releases.
 - 📢 Follow us for announcements and updates.
 - 🔔 Watch the repository for issue and discussion notifications.
 
-**Enterprise Support:**
+### Enterprise Support
 
 - For commercial support, visit [ElastiFlow](https://www.elastiflow.com).
 
@@ -170,15 +172,15 @@ All contributors are expected to follow our code of conduct and maintain a welco
 
 Docker images are available in the GitHub Container Registry:
 
-**Standard production image**
+### Standard Production Image
 
 ```shell
 docker pull ghcr.io/elastiflow/mermin:latest
 ```
 
-**Debug image (includes shell and debugging tools)**
+### Debug Image (includes shell and debugging tools)
 
-```
+```shell
 docker pull ghcr.io/elastiflow/mermin:latest-debug
 ```
 
@@ -186,12 +188,12 @@ The debug image is built using the `gcr.io/distroless/cc-debian12:debug` base im
 
 ## License
 
-With the exception of eBPF code, Mermin is distributed under the terms of either the [MIT license](LICENSE-MIT) or the [Apache License](LICENSE-APACHE) (version 2.0), at your option.
+With the exception of eBPF code, Mermin is distributed under the terms of the [Apache License](LICENSE-APACHE) (version 2.0).
 
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this crate by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+Any contribution intentionally submitted for inclusion in this crate by you, shall be licensed Apache-2.0, without any additional terms or conditions.
 
 ### eBPF
 
-All eBPF code is distributed under either the terms of the [GNU General Public License, Version 2](LICENSE-GPL2) or the [MIT license](LICENSE-MIT), at your option.
+All eBPF code is distributed under the terms of the [GNU General Public License, Version 2](LICENSE-GPL2).
 
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this project by you, as defined in the GPL-2 license, shall be dual licensed as above, without any additional terms or conditions.
+Any contribution intentionally submitted for inclusion in this project by you, shall be dual licensed GPL-2, without any additional terms or conditions.
