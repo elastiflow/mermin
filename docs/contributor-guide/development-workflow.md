@@ -50,10 +50,10 @@ You may optionally pull the existing image for testing purposes instead of build
 
 ```sh
 # Pull the standard image
-docker pull ghcr.io/elastiflow/mermin:v0.1.0-beta.33
+docker pull ghcr.io/elastiflow/mermin:v0.1.0-beta.40
 
 # Pull the debug image (includes shell for troubleshooting)
-docker pull ghcr.io/elastiflow/mermin:v0.1.0-beta.33-debug
+docker pull ghcr.io/elastiflow/mermin:v0.1.0-beta.40-debug
 ```
 
 ### 2. Configuration Files

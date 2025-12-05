@@ -6,7 +6,7 @@ We plan to update the beta image multiple times throughout this beta period. We 
 
 ### Accessing the Beta Image
 
-> **Version Requirement**: v0.1.0-beta.35 or higher
+> **Version Requirement**: v0.1.0-beta.40 or higher
 
 Before starting, add the beta Helm chart:
 
@@ -192,12 +192,12 @@ The default configuration monitors veth interfaces and CNI-specific interfaces w
 
 Mermin has been tested and verified on the following platforms:
 
-| Platform         | Status    | Minimum Version |
-| ---------------- | --------- | --------------- |
-| Debian 13        | Supported | All versions    |
-| Debian 12        | Supported | As of beta.21   |
-| GKE Standard     | Supported | As of beta.30   |
-| Kind (local dev) | Supported | As of beta.21   |
+| Platform         | Status    |
+| ---------------- | --------- |
+| Debian 13        | Supported |
+| Debian 12        | Supported |
+| GKE Standard     | Supported |
+| Kind (local dev) | Supported |
 
 **Important:** eBPF verifier requirements vary between kernel versions. If you encounter eBPF program loading failures, include your kernel version when reporting the issue.
 
@@ -232,7 +232,7 @@ Feedback Channels
 **Error Messages:***
 **Config File:**
 **Environment:**
-- Mermin Version: [e.g., v0.1.0-beta.30]
+- Mermin Version: [e.g., v0.1.0-beta.40]
 - Platform: [GKE/EKS/AKS/bare metal/Kind/other]
 - Kubernetes Version: [output of `kubectl version --short`]
 - Kernel Version: [output of `uname -r`]
