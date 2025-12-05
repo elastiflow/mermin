@@ -112,7 +112,6 @@ async fn main() {
 const EBPF_MAP_SCHEMA_VERSION: u8 = 1;
 
 async fn run() -> Result<()> {
-    // TODO: runtime should be aware of all threads and tasks spawned by the eBPF program so that they can be gracefully shutdown and restarted.
     // TODO: listen for SIGUP `kill -HUP $(pidof mermin)` to reload the eBPF program and all configuration
     // TODO: do not reload global configuration found in CLI
     let cli = Cli::parse();
