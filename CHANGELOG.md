@@ -1,3 +1,18 @@
+## [v0.1.0-beta.39] - 2025-12-05
+
+### Bug Fixes
+
+- Set Mermin resources requests/limits (#337)
+- **config:** Filter.source.address.match/not_match should accept ip glob (#335)
+### Features
+
+- Add arbitrary env. var to mermin chart (#332)
+- Include node name in records (#334)
+
+[v0.1.0-beta.38..v0.1.0-beta.39](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.38...v0.1.0-beta.39)
+
+
+
 ## [v0.1.0-beta.38] - 2025-12-04
 
 ### Features
