@@ -26,12 +26,14 @@
 ## Observability
 
 * [Backends](observability/backends.md)
+* [Mermin application metrics](observability/app-metrics.md)
 
 ## Configuration
 
 * [Configuration Overview](configuration/configuration.md)
 * [Global Options](configuration/global-options.md)
-* [API and Metrics](configuration/api-metrics.md)
+* [API](configuration/api.md)
+* [Metrics](configuration/metrics.md)
 * [Parser Configuration](configuration/parser.md)
 * [Network Interface Discovery](configuration/discovery-interfaces.md)
 * [Kubernetes Informers](configuration/kubernetes-informers.md)

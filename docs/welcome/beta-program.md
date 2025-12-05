@@ -20,7 +20,7 @@ helm repo update
 
 To view flows with Kubernetes metadata enrichment, Mermin requires four core configuration blocks: Network Interface Discovery, Kubernetes Informer, Flow-to-Kubernetes Attribute Mapping & Export.
 
-A minimal example configuration is available here: [Example Configuration](../deployment/examples/local/config.example.hcl), for a more comprehensive example, please see [The Default Config](https://github.com/elastiflow/mermin/tree/beta/charts/mermin/config/default/config.hcl)
+A minimal example configuration is available here: [Example Configuration](../deployment/examples/local/config.example.hcl), for a more comprehensive example, please see the [Default Config](https://github.com/elastiflow/mermin/tree/beta/charts/mermin/config/default/config.hcl)
 
 <details>
 
