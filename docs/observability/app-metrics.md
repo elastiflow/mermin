@@ -46,7 +46,8 @@ Metrics are categorized into logical subsystems that correspond to different com
 
 ## eBPF Metrics (`mermin_ebpf_*`)
 
-This section focuses on metrics originating from the eBPF layer, which is responsible for capturing low-level packets. These metrics provide visibility into the status of loaded eBPF programs and the usage of eBPF maps. Monitoring these is crucial for ensuring that Mermin's foundational data collection mechanism functions as expected.
+This section focuses on metrics originating from the eBPF layer, which is responsible for capturing low-level packets. These metrics provide visibility into the status of loaded eBPF programs and the usage of eBPF maps.  
+Monitoring these is crucial for ensuring that Mermin's foundational data collection mechanism functions as expected.
 
 - `mermin_ebpf_map_entries{map}`: A gauge for the number of entries in an eBPF maps, `map`'s:
   <!-- TODO(#lgo-421) What are possible `map` for `mermin_ebpf_map_entries` metric, details on each of those  -->
@@ -59,10 +60,13 @@ This section focuses on metrics originating from the eBPF layer, which is respon
 - `mermin_ebpf_tc_programs_detached_total` A counter of the total number of TC programs detached across all interfaces
 - `mermin_ebpf_bpf_fs_writable`: Gauge indicating if `/sys/fs/bpf` is writable by Mermin (`0` not writable, `1` writable)
 
-## Userspace Ring Buffer metrics (`mermin_`)
+## Userspace Ring Buffer metrics (`mermin_ringbuf_*`)
+
+Ring Buffer is used to "transport" packets from the eBPF (kernel space) to userspace (references: [packet capture](../getting-started/architecture.md), [flow aggregation](../getting-started/architecture.md))
 
 - `mermin_ringbuf_bytes_total` Total number of bytes received from the userspace ring buffer
 - `mermin_ringbuf_packets_total` Total number of packets in the userspace ring buffer
+<!-- TODO(lgo-421):  Add link to the `docs/configuration/span.md` configuration -->
 
 ## Application/System Metrics (`mermin_*`)
 
