@@ -127,7 +127,7 @@ helm upgrade -i mermin mermin/mermin \
   --namespace elastiflow \
   --create-namespace \
   --set-file config.content=config.hcl \
-  --wait
+  --wait --devel
 
 # Verify deployment
 kubectl -n elastiflow get pods -l app.kubernetes.io/name=mermin
