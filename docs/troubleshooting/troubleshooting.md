@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Troubleshooting
 
 This guide will help you diagnose and resolve common issues when deploying and operating Mermin.
@@ -102,6 +106,13 @@ Key metrics to monitor include:
 - `mermin_flow_spans_created_total` - Total flow spans created
 - `mermin_packets_total` - Packets processed by interface and direction
 - `mermin_export_errors_total` - Export failures (investigate if increasing)
+
+<!-- TODO(GA Documentation): Iterate on the section -->
+## Troubleshooting
+
+- **Interface Unavailable**: Mermin logs a warning and continues monitoring other interfaces
+- **eBPF Load Failure**: Agent fails to start; check kernel version and eBPF support
+- **High Packet Loss**: Increase `pipeline.ring_buffer_capacity` or reduce monitored interfaces
 
 ## Getting Help
 

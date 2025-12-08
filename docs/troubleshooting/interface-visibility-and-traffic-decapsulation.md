@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Interface Visibility and Traffic Decapsulation
 
 Not seeing the traffic you expect from Mermin? The issue is often related to *which* network interfaces you're monitoring. Different interface types show you completely different views of the same traffic, and understanding these differences is crucial for getting Mermin configured correctly.

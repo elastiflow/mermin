@@ -48,14 +48,17 @@ This section focuses on metrics originating from the eBPF layer, which is respon
   <!-- TODO(#lgo-421) What are possible `map` for `mermin_ebpf_map_entries` metric, details on each of those  -->
   - `flow_stats`:  
 <!-- TODO(#lgo-421) Rename `ring_buffer` to `ringbuf` or vise versa for consistency -->
-- `mermin_ebpf_ring_buffer_drops_total`: A counter of the total number of ring buffer events dropped due to buffer full
+- `mermin_ebpf_ring_buffer_drops_total`: A counter of the total number of ring buffer events (packets) dropped due to buffer full
 <!-- TODO(#lgo-421)  "orphaned eBPF map entries" or "orphaned TC programs detached"? -->
 - `mermin_ebpf_orphans_cleaned_total`: A counter of the total number of orphaned eBPF map entries cleaned up
 - `mermin_ebpf_tc_programs_attached_total`: A counter of the total number of TC programs attached across all interfaces
 - `mermin_ebpf_tc_programs_detached_total` A counter of the total number of TC programs detached across all interfaces
 - `mermin_ebpf_bpf_fs_writable`: Gauge indicating if `/sys/fs/bpf` is writable by Mermin (`0` not writable, `1` writable)
 
-## Userspace Rung Buffer metrics (`mermin_)
+## Userspace Ring Buffer metrics (`mermin_`)
+
+- `mermin_ringbuf_bytes_total` Total number of bytes received from the userspace ring buffer
+- `mermin_ringbuf_packets_total` Total number of packets in the userspace ring buffer
 
 ## Application/System Metrics (`mermin_*`)
 
