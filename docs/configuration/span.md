@@ -8,12 +8,12 @@ This page documents the `span` configuration block, which controls how Mermin ge
 
 ## Overview
 
-Mermin aggregates network packets into bidirectional flows. The span configuration determines:
+Mermin aggregates network packets into bidirectional Flows Trace Spans. The span configuration determines:
 
 * How long flows remain active before being exported
 * When inactive flows are considered complete
 * Protocol-specific timeout behavior
-* Community ID generation for flow correlation
+* Community ID generation for a Flow Trace correlation
 
 ## Configuration
 
