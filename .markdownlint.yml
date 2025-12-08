@@ -1,1 +1,4 @@
+MD013:
+  # Number of characters
+  line_length: 250
 MD033: false # Expandable blocks are inline HTML
