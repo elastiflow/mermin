@@ -2,7 +2,7 @@
 hidden: true
 ---
 
-# Kubernetes Informers
+# Discovery: Kubernetes Informer
 
 This page documents how to configure Mermin's Kubernetes informers, which watch and cache Kubernetes resources for flow
 metadata enrichment.

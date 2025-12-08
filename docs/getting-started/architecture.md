@@ -92,7 +92,7 @@ Mermin uses [eBPF](https://ebpf.io/what-is-ebpf/) (extended Berkeley Packet Filt
 
 <details>
 
-<summary>eBPF provides several advantages:</summary>
+<summary><b>eBPF provides several advantages</b></summary>
 
 - **High Performance**: Executes directly in the kernel, avoiding context switches
 - **Low Overhead**: Processes only necessary packet headers, not full payloads
@@ -101,37 +101,36 @@ Mermin uses [eBPF](https://ebpf.io/what-is-ebpf/) (extended Berkeley Packet Filt
 
 </details>
 
-### Flow Generation Engine
+### Flow Span Generation Engine
 
-The userspace Mermin agent receives packets from eBPF and aggregates them into network flows:
+The userspace Mermin agent receives packets from eBPF and aggregates them into network flow trace spans:
 
-- **Bidirectional Flows**: Groups packets by 5-tuple (source IP/port, dest IP/port, protocol)
+- **Bidirectional Flow Spans**: Groups packets by 5-tuple (source IP/port, dest IP/port, protocol)
 - **State Tracking**: Maintains connection state for TCP (SYN, FIN, RST flags)
+<!-- TODO(GA Documentation):  Add link to the `docs/configuration/span-options.md` configuration -->
 - **Timeout Management**: Expires inactive flows based on configurable timeouts
 - **Protocol Parsing**: Deep packet inspection for tunneling protocols (VXLAN, Geneve, WireGuard)
 - **Community ID**: Generates standard Community ID hashes for flow correlation
 
-A Flow Trace includes:
-
-* Source and destination IP addresses and ports
-* Network protocol (TCP, UDP, ICMP, etc.)
-* Packet and byte counters (bidirectional)
-* TCP flags and connection state
-* Flow start and end timestamps
-* Community ID hash
-
-// TODO: LINK TO FLOW TRACE SPEC
+A Flow Trace Span includes:
+<!-- TODO(GA Documentation): Add a link to flow trace spec -->
+- Source and destination IP addresses and ports
+- Network protocol (TCP, UDP, ICMP, etc.)
+- Packet and byte counters (bidirectional)
+- TCP flags and connection state
+- Flow start and end timestamps
+- Community ID hash
 
 #### State Persistence
 
 Mermin preserves flow state across pod restarts through eBPF map pinning, ensuring continuous visibility without data loss:
 
-* **Map Pinning**: `FLOW_STATS` and `FLOW_EVENTS` are pinned to `/sys/fs/bpf/` when writable (requires `/sys/fs/bpf` hostPath mount)
-* **Schema Versioning**: Maps use versioned directory paths (e.g., `/sys/fs/bpf/mermin_v1/`) to prevent incompatible format reuse across upgrades
-* **State Continuity**: Flow statistics persist across mermin restarts, eliminating visibility gaps during rolling updates
-* **Format Validation**: Pinned maps are reused only if schema version and format match current version
-* **Graceful Degradation**: If pinning fails, mermin continues with unpinned maps (logged as warning)
-* **Upgrade Safety**: When struct layouts change, increment `EBPF_MAP_SCHEMA_VERSION` to create new versioned maps
+- **Map Pinning**: `FLOW_STATS_MAP` and `FLOW_EVENTS` are pinned to `/sys/fs/bpf/` when writable (requires `/sys/fs/bpf` mount, refer to the [security-considerations](security-considerations.md#host-mounts-required) document)
+- **Schema Versioning**: Maps use versioned paths (e.g., `mermin_flow_stats_map_v1`) to prevent incompatible format reuse across upgrades
+- **State Continuity**: Flow statistics persist across mermin restarts, eliminating visibility gaps during rolling updates
+- **Format Validation**: Pinned maps are reused only if schema version and format match current version
+- **Graceful Degradation**: If pinning fails, mermin continues with unpinned maps (logged as warning)
+- **Upgrade Safety**: When struct layouts change, increment `EBPF_MAP_SCHEMA_VERSION` to create new versioned maps
 
 This ensures:
 
@@ -186,7 +185,7 @@ Let's trace a network packet through Mermin's pipeline:
 
 ### 1. Packet Capture (eBPF)
 
-```
+```text
 Network Interface (eth0)
          ↓
    TC Hook (eBPF)
@@ -199,6 +198,7 @@ Network Interface (eth0)
 * eBPF program attached to `eth0` captures incoming and outgoing packets
 <!-- TODO(#lgo-421): Is it still true? -->
 * Parses Ethernet, IP, TCP/UDP, and tunnel protocol headers
+<!-- TODO(#lgo-421): Is it still true? -->
 * Extracts 5-tuple and other flow identifiers
 * Sends packet metadata to userspace via ring buffer (not full payload)
 
