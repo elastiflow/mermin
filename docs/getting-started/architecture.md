@@ -8,20 +8,25 @@ This page explains how Mermin works, its architecture, and the flow of data from
 
 ## What are Flow Traces?
 
-**Flow Traces** are OpenTelemetry trace spans that represent network flows with NetFlow-like semantics. Unlike traditional NetFlow or IPFIX:
+**Flow Traces** are OpenTelemetry traces, which are combined from multiple Flow Trace Spans and represent a long lived connection.
+**Flow Trace Spans** are OpenTelemetry trace spans that represent network flows with NetFlow-like semantics. Unlike traditional NetFlow or IPFIX:
 
-* **OpenTelemetry Native**: Flow Traces are OTLP trace spans, not proprietary flow protocols
-* **Bidirectional**: A single span represents both directions of a flow
-* **Rich Metadata**: Includes Kubernetes context (pods, services, deployments, labels)
-* **Standardized Format**: Works with any OTLP-compatible observability platform
+- **OpenTelemetry Native**: Flow Traces are OTLP trace spans, not proprietary flow protocols
+- **Bidirectional**: A single span represents both directions of a flow
+- **Rich Metadata**: Includes Kubernetes context (pods, services, deployments, labels)
+- **Standardized Format**: Works with any OTLP-compatible observability platform
 
-Mermin generates Flow Traces by capturing network packets, aggregating them into flows, decorating with Kubernetes metadata, and exporting as OpenTelemetry spans.
+Mermin generates Flow Trace Spans by capturing network packets, aggregating them into flows, decorating with Kubernetes metadata, and exporting as OpenTelemetry spans.
+
+```text
+network packet → Mermin → flow span (network flow) → flow trace (network connection)
+```
 
 ## High-Level Architecture
 
 Mermin is deployed as a DaemonSet in Kubernetes, with one agent instance running on each node in your cluster. Each agent independently captures and processes network traffic from its host node.
 
-```
+```text
 ┌─────────────────────────────────────────────┐
 │             Kubernetes Cluster              │
 │                                             │
@@ -57,31 +62,54 @@ Mermin is deployed as a DaemonSet in Kubernetes, with one agent instance running
 
 ## Components
 
+Data pipeline overview, more details on the pipeline are documented in the [data-flow block](architecture.md#data-flow)
+
+```text
+Network Interface (eth0)
+         ↓
+     eBPF Map
+         ↓
+     Ring Buffer
+         ↓
+     Userspace
+         ↓
+     Flow Aggregation
+         ↓
+     K8s Attribution
+         ↓
+     OTLP Export
+```
+
 ### eBPF Programs
 
-Mermin uses eBPF (extended Berkeley Packet Filter) programs loaded into the Linux kernel to capture network packets with minimal overhead. These programs:
+Mermin uses [eBPF](https://ebpf.io/what-is-ebpf/) (extended Berkeley Packet Filter) programs loaded into the Linux kernel to capture network packets with minimal overhead. These programs:
 
-* Attach to network interfaces specified in your configuration
-* Capture packets at the TC (Traffic Control) layer
-* Perform initial packet parsing for protocol headers
-* Send packet data to userspace via eBPF ring buffers
+- Attach to network interfaces specified in your configuration
+- Capture packets at the TC (Traffic Control) layer
+<!-- TODO(#lgo-421): Is it still true? -->
+- Perform initial packet parsing for protocol headers
+- Send packet data to userspace via eBPF ring buffers
 
-eBPF provides several advantages:
+<details>
 
-* **High Performance**: Executes directly in the kernel, avoiding context switches
-* **Low Overhead**: Processes only necessary packet headers, not full payloads
-* **Safety**: Verified by the kernel to ensure it cannot crash or hang the system
-* **No Kernel Modules**: No need to compile or load custom kernel modules
+<summary>eBPF provides several advantages:</summary>
+
+- **High Performance**: Executes directly in the kernel, avoiding context switches
+- **Low Overhead**: Processes only necessary packet headers, not full payloads
+- **Safety**: Verified by the kernel to ensure it cannot crash or hang the system
+- **No Kernel Modules**: No need to compile or load custom kernel modules
+
+</details>
 
 ### Flow Generation Engine
 
 The userspace Mermin agent receives packets from eBPF and aggregates them into network flows:
 
-* **Bidirectional Flows**: Groups packets by 5-tuple (source IP/port, dest IP/port, protocol)
-* **State Tracking**: Maintains connection state for TCP (SYN, FIN, RST flags)
-* **Timeout Management**: Expires inactive flows based on configurable timeouts
-* **Protocol Parsing**: Deep packet inspection for tunneling protocols (VXLAN, Geneve, WireGuard)
-* **Community ID**: Generates standard Community ID hashes for flow correlation
+- **Bidirectional Flows**: Groups packets by 5-tuple (source IP/port, dest IP/port, protocol)
+- **State Tracking**: Maintains connection state for TCP (SYN, FIN, RST flags)
+- **Timeout Management**: Expires inactive flows based on configurable timeouts
+- **Protocol Parsing**: Deep packet inspection for tunneling protocols (VXLAN, Geneve, WireGuard)
+- **Community ID**: Generates standard Community ID hashes for flow correlation
 
 A Flow Trace includes:
 
@@ -169,6 +197,7 @@ Network Interface (eth0)
 ```
 
 * eBPF program attached to `eth0` captures incoming and outgoing packets
+<!-- TODO(#lgo-421): Is it still true? -->
 * Parses Ethernet, IP, TCP/UDP, and tunnel protocol headers
 * Extracts 5-tuple and other flow identifiers
 * Sends packet metadata to userspace via ring buffer (not full payload)

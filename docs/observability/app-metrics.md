@@ -1,18 +1,25 @@
+# Mermin Application Metrics
+
 This guide describes the Prometheus metrics endpoint exposed by Mermin and provides a comprehensive breakdown of all available metrics, their types, and descriptions.
+Please find more details on the metrics configuration in [this document](../configuration/metrics.md)
 
 ## Metrics Endpoint
 
-Mermin exposes Prometheus metrics in the standard Prometheus text format at the `/metrics` HTTP endpoint. The metrics server is enabled by default and listens on port `10250` (configurable via the `metrics.port` configuration option).
+Mermin exposes Prometheus metrics in the standard Prometheus text format at the `/metrics` HTTP endpoint. The metrics server is enabled by default and listens on port `10250`.
 
 **Endpoint URL:** `http://<listen_address>:<port>/metrics`
-
-By default, this resolves to: `http://localhost:10250/metrics`
 
 The endpoint returns all registered metrics in Prometheus text format, which can be scraped by Prometheus or queried directly using tools like `curl` or `wget`.
 
 ## Metrics Reference
 
-All metrics follow the naming convention: `mermin_<subsystem>_<name>_(optional<type>)`
+All metrics follow the naming convention
+
+```text
+<namespace>_<subsytem>_<name>_(optional<type>)
+# For example
+mermin_<ringbuf>_<packets>_<total>
+```
 
 ### Metric Types
 
@@ -27,12 +34,28 @@ The suffix of a metric name indicates its type:
 
 Metrics are categorized into logical subsystems that correspond to different components of Mermin:
 
-- `(none)`: For application-wide metrics
 - `ebpf`: For eBPF-specific metrics
-- `mermin`: For userspace ring buffer and packet source metrics
 - `span`: For flow span producer metrics
 - `k8s`: For Kubernetes integration metrics
 - `export`: For metrics related to the export subsystem
+- `(none)`: For application-wide metrics
+
+## eBPF Metrics (`mermin_ebpf_*`)
+
+This section focuses on metrics originating from the eBPF layer, which is responsible for capturing low-level packets. These metrics provide visibility into the status of loaded eBPF programs and the usage of eBPF maps. Monitoring these is crucial for ensuring that Mermin's foundational data collection mechanism functions as expected.
+
+- `mermin_ebpf_map_entries{map}`: A gauge for the number of entries in an eBPF maps, `map`'s:
+  <!-- TODO(#lgo-421) What are possible `map` for `mermin_ebpf_map_entries` metric, details on each of those  -->
+  - `flow_stats`:  
+<!-- TODO(#lgo-421) Rename `ring_buffer` to `ringbuf` or vise versa for consistency -->
+- `mermin_ebpf_ring_buffer_drops_total`: A counter of the total number of ring buffer events dropped due to buffer full
+<!-- TODO(#lgo-421)  "orphaned eBPF map entries" or "orphaned TC programs detached"? -->
+- `mermin_ebpf_orphans_cleaned_total`: A counter of the total number of orphaned eBPF map entries cleaned up
+- `mermin_ebpf_tc_programs_attached_total`: A counter of the total number of TC programs attached across all interfaces
+- `mermin_ebpf_tc_programs_detached_total` A counter of the total number of TC programs detached across all interfaces
+- `mermin_ebpf_bpf_fs_writable`: Gauge indicating if `/sys/fs/bpf` is writable by Mermin (`0` not writable, `1` writable)
+
+## Userspace Rung Buffer metrics (`mermin_)
 
 ## Application/System Metrics (`mermin_*`)
 
@@ -279,160 +302,3 @@ The pipeline tracks flow spans through their complete lifecycle using the follow
 - **Store → Decoration**: Flow spans sent via channel 
     (tracked via `mermin_export_flow_spans_total{status="queued"}` when received by export thread)
 - **Decoration → Export**: `mermin_export_flow_spans_total{status="queued"}` → 
-
-┌──────────────────┐
-│   eBPF Kernel    │
-│   (Packet Hook)  │
-└────────┬─────────┘
-         │ First packet 
-         │ Packet aggregation 
-         │ Flow events emitted
-         ▼
-┌───────────────────────────────────────────────────────────────────────────────────────┐
-│  RING BUFFER STAGE                                                                    │
-│  ┌─────────────────────────────────────────────────────────────────────────────┐      │
-│  │ File: producer.rs (FlowSpanProducer::run)                                   │      │
-│  │ Location: Lines 285-295                                                     │      │
-│  └─────────────────────────────────────────────────────────────────────────────┘      │
-│                                                                                       │
-│  📊 METRICS:                                                                          │
-│  • mermin_flow_events_total{type="received|dropped_backpressure|dropped_error"}      │
-│    - "received": successfully read and validated from ring buffer                     │
-│    - "dropped_backpressure": all worker channels full, event dropped                  │
-│    - "dropped_error": invalid/corrupted event detected, validation failed            │
-│                                                                                       │
-│  ⚠️  FAILURE POINTS:                                                                  │
-│  • Ring buffer full → drops occur (handled by eBPF)                                   │
-│  • Worker channels full → backpressure drops (`dropped_backpressure`)                │
-│  • Corrupted/invalid event data → validation fails (`dropped_error`)                 │
-└──────────────────┬────────────────────────────────────────────────────────────────────┘
-                   │ FlowEvent dispatched to workers
-                   ▼
-┌───────────────────────────────────────────────────────────────────────────────────────┐
-│  WORKER PROCESSING STAGE                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────────────┐      │
-│  │ File: producer.rs (FlowWorker::create_direct_flow)                          │      │
-│  │ Location: Lines 490-551                                                     │      │
-│  └─────────────────────────────────────────────────────────────────────────────┘      │
-│                                                                                       │
-│  📊 METRICS:                                                                          │
-│  • mermin_producer_flow_spans_total{interface="<name>",                               |
-│      status="<status>"}                                                               │
-│    - status values: "created", "dropped", "recorded", "idled", "active"               │
-│    - interface: actual interface name or "unknown"                                    │
-│    - "created": flow span created successfully (producer.rs)                          │
-│    - "active": flow span marked as active (producer.rs)                               │
-│    - "dropped": flow filtered/removed during processing (producer.rs)                 │
-│    - "recorded": flow sent to K8s decorator (producer.rs:record_flow)                 │
-│    - "idled": flow timed out and removed (producer.rs:timeout_and_remove_flow)        │
-│  • mermin_flow_spans_processed_total ← Successful flow span creation                  │
-│  • mermin_flow_stats_map_access_total{status="ok|error|not_found"} ← BPF map read ops |
-│                                                                                       │
-│  ⚠️  FAILURE POINTS:                                                                  │
-│  • Flow filtering → filtered flows removed (not counted in processed)                │
-│  • eBPF map read failures → flow creation fails                                      │
-│  • Invalid flow keys → processing errors                                             │
-└──────────────────┬───────────────────────────────────────────────────────────────────┘
-                   │ FlowSpan → flow_store
-                   ▼
-┌───────────────────────────────────────────────────────────────────────────────────────┐
-│  FLOW STORE & POLLER STAGE (Sharded by poller_id)                                     │
-│  ┌─────────────────────────────────────────────────────────────────────────────┐      │
-│  │ File: producer.rs (flow_poller_task)                                        │      │
-│  │ Location: Lines 1242-1418                                                   │      │
-│  └─────────────────────────────────────────────────────────────────────────────┘      │
-│                                                                                       │
-│  📊 METRICS:                                                                          │
-│  • mermin_flow_span_store_size{poller_id="<id>"}     ← Current flows per poller       │
-│  • mermin_producer_queue_size{poller_id="<id>"}      ← Queued flows per poller        │
-│  • mermin_producer_flow_spans_total{status="recorded"} ← Flows recorded (sent to K8s)│
-│  • mermin_producer_flow_spans_total{status="idled"} ← Flows expired/timed out         │
-│    - Note: "recorded" and "idled" are status values of producer_flow_spans_total      │
-│                                                                                       │
-│  🔍 DIAGNOSTIC INSIGHTS:                                                              │
-│  • Monitor poller imbalance: compare flow_store_size across pollers                  │
-│  • High queue_size → poller overload / slow processing                               │
-│  • Cyclic patterns → check poller processing times                                   │
-└──────────────────┬───────────────────────────────────────────────────────────────────┘
-                   │ FlowSpan → record_flow() → flow_span_tx
-                   ▼
-┌───────────────────────────────────────────────────────────────────────────────────────┐
-│  K8S DECORATION STAGE                                                                 │
-│  ┌─────────────────────────────────────────────────────────────────────────────┐      │
-│  │ File: main.rs (K8s decorator thread)                                        │      │
-│  │ Location: Lines 516-585                                                     │      │
-│  └─────────────────────────────────────────────────────────────────────────────┘      │
-│                                                                                       │
-│  📊 METRICS:                                                                          │
-│  • mermin_k8s_decorator_flow_spans_total{status="dropped|ok|error|undecorated"}       │
-│    - "dropped": export channel full, span dropped (main.rs)                           │
-│    - "ok": successful decoration (main.rs)                                            │
-│    - "error": decoration failed, span sent undecorated (main.rs)                      │
-│    - "undecorated": K8s client unavailable, span sent without decoration (main.rs)    │
-│  • mermin_channel_size{channel="decorator_input"}     ← Decorator Q size (consolidated)│
-│  • mermin_channel_size{channel="exporter"}           ← Exporter channel size          │
-│  • mermin_processing_latency_seconds{stage="k8s_decoration"} ← Decoration time (consolidated)│
-│ Export channel is tracked via `mermin_export_flow_spans_total{status="queued"}` when received by export thread│
-│                                                                                       │
-│  ⚠️  FAILURE POINTS:                                                                  │
-│  • Decoration failures → spans sent undecorated (still counted)                       │
-│  • Export channel full → spans dropped                                                │
-└──────────────────┬────────────────────────────────────────────────────────────────────┘
-                   │ Decorated FlowSpan → export channel
-                   ▼
-┌───────────────────────────────────────────────────────────────────────────────────────┐
-│  EXPORT STAGE                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────────────────┐      │
-│  │ File: main.rs (Export thread)                                               │      │
-│  │ Location: Lines 608-627                                                     │      │
-│  └─────────────────────────────────────────────────────────────────────────────┘      │
-│                                                                                       │
-│  📊 METRICS:                                                                          │
-│  • mermin_export_flow_spans_total{status="queued|dropped|ok|error|noop"}              │
-│    - "queued": span received by export thread                                         │
-│    - "dropped": export channel full (from producer/decoration stages)                 │
-│    - "ok": span successfully sent to OTEL BatchSpanProcessor                          │
-│    - "error": OTEL export failure (captured via tracing layer)                        │
-│    - "noop": span processed but not exported (NoOpExporterAdapter)                    │
-│  • mermin_export_latency_seconds                      ← Export operation time         │
-│  • mermin_channel_size{channel="exporter_input"}   ← Export Queue size (consolidated) │
-│  • mermin_export_batch_size                           ← Spans per batch               │
-│  • mermin_processing_latency_seconds{stage="otlp_export"} ← Export processing time    │
-│                                                                                       │
-│  📝 NOTE: Export errors are captured via tracing layer intercepting OTEL ERROR logs   │
-│                                                                                       │
-│  ⚠️  FAILURE POINTS:                                                                  │
-│  • Export channel full → spans dropped (`export_flow_spans_total{status="dropped"}`)  │
-│  • Export backend failures → OTEL errors logged, captured by tracing layer            │
-│    (`export_flow_spans_total{status="error"}`)                                        │
-└───────────────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Key Diagnostic Queries for Cyclic Spikes/Fall-offs
-
-### 1. Flow Attrition
-
-Once spans are created, need to track flow spans through each pipeline stage to identify
-where drops or slowdowns may be occuring.
-
-```
-mermin_flow_events_total{type="received"}
-  ↓ (should match or be ~same rate)
-mermin_flow_spans_processed_total
-  ↓ (should be ~equal)
-mermin_producer_flow_spans_total{status="recorded"}
-  ↓ (should be ~equal)
-mermin_export_flow_spans_total{status="queued"}
-  ↓ (should be ~equal)
-mermin_export_flow_spans_total{status="ok"}
-```
-
-**Additional Lifecycle Queries:**
-
-- **Flow Creation**: `mermin_producer_flow_spans_total{status="created"}` per interface
-- **Flow Expiration**: `mermin_producer_flow_spans_total{status="idled"}` - flows that timed out
-- **Decoration Success Rate**: `mermin_k8s_decorator_flow_spans_total{status="ok"}` / `mermin_k8s_decorator_flow_spans_total{status="ok|error|undecorated"}`
-- **Export Success Rate**: `mermin_export_flow_spans_total{status="ok"}` / `mermin_export_flow_spans_total`
-- **Export Errors**: `mermin_export_flow_spans_total{status="error"}` - captured from OTEL tracing layer

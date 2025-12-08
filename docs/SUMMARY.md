@@ -26,7 +26,7 @@
 ## Observability
 
 * [Backends](observability/backends.md)
-* [Mermin application metrics](observability/app-metrics.md)
+* [Mermin Application Metrics](observability/app-metrics.md)
 
 ## Configuration
 
