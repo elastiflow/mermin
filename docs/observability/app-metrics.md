@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Mermin Application Metrics
 
 This guide describes the Prometheus metrics endpoint exposed by Mermin and provides a comprehensive breakdown of all available metrics, their types, and descriptions.
