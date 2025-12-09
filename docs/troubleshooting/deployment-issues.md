@@ -218,7 +218,7 @@ This means the service account doesn't have the necessary permissions.
 
 ```bash
 kubectl get sa -n ${MERMIN_NAMESPACE}
-kubectl get clusterrole mermin  -o yaml 
+kubectl get clusterrole mermin -o yaml 
 kubectl get clusterrolebinding mermin
 ```
 
