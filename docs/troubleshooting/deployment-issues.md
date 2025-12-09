@@ -28,14 +28,14 @@ If you see `Insufficient cpu` or `Insufficient memory` in the events, your nodes
 # In values.yaml
 resources:
   requests:
-    cpu: 100m
-    memory: 128Mi
+    cpu: 200m
+    memory: 220Mi
   limits:
     cpu: 1
     memory: 512Mi
 ```
 
-**Note**: The Helm chart doesn't set default resource limits to avoid scheduling issues. You should configure these based on your expected traffic volume and node capacity.
+**Note**: The Helm chart sets the default limits to prevent the Mermin pods from disrupting existing workloads, please see the [default values](https://github.com/elastiflow/mermin/blob/beta/charts/mermin/values.yaml) for details.
 
 #### 2. Pod Security Policy Restrictions
 
