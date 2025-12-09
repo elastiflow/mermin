@@ -6,7 +6,7 @@ The configuration options become useful to take advantage of additional resource
 
 ## Configuration
 
-Full configuration example may be found in the [Default Config](https://github.com/elastiflow/mermin/tree/beta/charts/mermin/config/default/config.hcl)
+Full configuration example may be found in the [Default Config](https://github.com/elastiflow/mermin/tree/beta/charts/mermin/config/default/config.hcl).
 
 ## Configuration Options
 
