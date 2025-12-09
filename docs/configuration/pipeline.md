@@ -2,7 +2,7 @@
 
 The `pipeline` block provides advanced configuration for flow processing pipeline optimization, including base channel sizing, worker threading, Kubernetes decoration, backpressure management, and buffer multipliers.
 
-The configuration options become useful take advantage of additional resources allocated for Mermin or to generally optimize the performance for your specific use-case.
+The configuration options become useful to take advantage of additional resources allocated for Mermin or to generally optimize the performance for your specific use-case.
 
 ## Configuration
 
