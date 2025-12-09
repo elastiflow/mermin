@@ -157,8 +157,8 @@ kubectl exec -it mermin-xxxxx -- tc filter show dev gke<xyz> ingress
 # You should see mermin's filter with priority 1 (or tcx programs)
 
 # Verify map pinning for state continuity
-kubectl exec -it mermin-xxxxx -- ls -la /sys/fs/bpf/mermin_*
-# You should see mermin_flow_stats_map_v1 and mermin_flow_events_v1
+kubectl exec -it mermin-xxxxx -- ls -la /sys/fs/bpf/mermin_v1/
+# You should see FLOW_STATS, FLOW_EVENTS, and FLOW_STATS_SCRATCH maps
 ```
 
 {% hint style="info" %}

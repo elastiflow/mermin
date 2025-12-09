@@ -1,7 +1,7 @@
 //! RAII guard for eBPF flow map entries to ensure cleanup on error paths.
 //!
 //! This module provides `EbpfFlowGuard`, a guard that automatically removes
-//! entries from the eBPF `FLOW_STATS_MAP` when dropped, unless explicitly
+//! entries from the eBPF `FLOW_STATS` when dropped, unless explicitly
 //! marked as "kept" (managed by flow_store).
 //!
 //! ## Problem
@@ -50,7 +50,7 @@ use tracing::warn;
 
 /// RAII guard for eBPF flow map entries.
 ///
-/// Automatically removes entries from `FLOW_STATS_MAP` when dropped,
+/// Automatically removes entries from `FLOW_STATS` when dropped,
 /// unless explicitly marked as "kept" via [`keep()`](Self::keep).
 ///
 /// This prevents orphaned entries when errors occur during flow creation.
@@ -69,7 +69,7 @@ impl EbpfFlowGuard {
     /// ### Arguments
     ///
     /// - `key` - Flow key identifying the entry in the eBPF map
-    /// - `map` - Shared reference to the eBPF `FLOW_STATS_MAP`
+    /// - `map` - Shared reference to the eBPF `FLOW_STATS`
     pub fn new(
         key: FlowKey,
         map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, mermin_common::FlowStats>>>,

@@ -128,7 +128,7 @@ pub fn inc_producer_flow_spans(interface: &str, status: FlowSpanProducerStatus) 
 
 /// Increment the flow stats map access counter.
 pub fn inc_flow_stats_map_access(status: FlowStatsStatus) {
-    registry::FLOW_STATS_MAP_ACCESS_TOTAL
+    registry::FLOW_STATS_ACCESS_TOTAL
         .with_label_values(&[status.as_ref()])
         .inc();
 }

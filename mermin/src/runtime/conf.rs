@@ -801,7 +801,7 @@ pub mod conf_serde {
 pub struct PipelineOptions {
     /// Maximum concurrent flows in eBPF map (default: 100,000)
     ///
-    /// Controls memory usage of the eBPF FLOW_STATS_MAP.
+    /// Controls memory usage of the eBPF FLOW_STATS.
     /// Memory: flows × 232 bytes
     ///
     /// Sizing guide based on typical cluster FPS (flows per second) per node:

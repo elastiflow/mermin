@@ -1,4 +1,5 @@
 use std::{
+    net::IpAddr,
     os::fd::AsRawFd,
     sync::Arc,
     time::{Duration, UNIX_EPOCH},
@@ -7,13 +8,13 @@ use std::{
 use aya::maps::{HashMap as EbpfHashMap, RingBuf};
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
-use mermin_common::{FlowEvent, FlowKey, FlowStats};
+use mermin_common::{FlowEvent, FlowKey, FlowStats, ListeningPortKey};
+use moka::future::Cache;
 use network_types::{
     eth::EtherType,
     ip::{IpDscp, IpEcn, IpProto},
     tcp::{TCP_FLAG_FIN, TCP_FLAG_RST},
 };
-use opentelemetry::trace::SpanKind;
 use pnet::datalink::MacAddr;
 use tokio::{
     io::unix::AsyncFd,
@@ -37,6 +38,7 @@ use crate::{
     runtime::{conf::Conf, memory, memory::ShrinkPolicy},
     span::{
         community_id::CommunityIdGenerator,
+        direction::DirectionInferrer,
         ebpf_guard::EbpfFlowGuard,
         flow::{FlowEndReason, FlowSpan, SpanAttributes},
         opts::SpanOptions,
@@ -95,6 +97,10 @@ pub struct FlowSpanProducer {
     geneve_port: u16,
     wireguard_port: u16,
     components: Arc<FlowSpanComponents>,
+    direction_inferrer: Arc<DirectionInferrer>,
+    hostname_cache: Cache<IpAddr, String>,
+    hostname_resolve_timeout: Duration,
+    enable_hostname_resolution: bool,
 }
 
 impl FlowSpanProducer {
@@ -107,6 +113,7 @@ impl FlowSpanProducer {
         flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
         flow_events_ringbuf: RingBuf<aya::maps::MapData>,
         flow_span_tx: mpsc::Sender<FlowSpan>,
+        listening_ports_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, ListeningPortKey, u8>>>,
         conf: &Conf,
     ) -> Result<Self, BootTimeError> {
         let flow_store_capacity =
@@ -144,6 +151,16 @@ impl FlowSpanProducer {
             None
         };
 
+        let direction_inferrer = Arc::new(DirectionInferrer::new(listening_ports_map));
+
+        // Initialize hostname resolution cache
+        // Cache capacity = ebpf_max_flows / 2 (each flow has 2 IPs, typical cardinality is ~10-30%)
+        // Example: 100K flows → 50K cache entries → ~5MB memory
+        let hostname_cache_capacity = (conf.pipeline.ebpf_max_flows / 2) as u64;
+        let hostname_cache = Cache::builder()
+            .max_capacity(hostname_cache_capacity)
+            .build();
+
         let components = Arc::new(FlowSpanComponents {
             flow_store,
             flow_stats_map,
@@ -151,7 +168,7 @@ impl FlowSpanProducer {
         });
 
         Ok(Self {
-            span_opts,
+            span_opts: span_opts.clone(),
             ring_buffer_capacity,
             worker_count,
             worker_poll_interval: conf.pipeline.worker_poll_interval,
@@ -165,6 +182,10 @@ impl FlowSpanProducer {
             geneve_port: conf.parser.geneve_port,
             wireguard_port: conf.parser.wireguard_port,
             components,
+            direction_inferrer,
+            hostname_cache,
+            hostname_resolve_timeout: span_opts.hostname_resolve_timeout,
+            enable_hostname_resolution: span_opts.enable_hostname_resolution,
         })
     }
 
@@ -210,6 +231,10 @@ impl FlowSpanProducer {
                 self.vxlan_port,
                 self.geneve_port,
                 self.wireguard_port,
+                Arc::clone(&self.direction_inferrer),
+                self.hostname_cache.clone(),
+                self.hostname_resolve_timeout,
+                self.enable_hostname_resolution,
             );
 
             let worker_handle = tokio::spawn(async move {
@@ -526,6 +551,10 @@ pub struct FlowWorker {
     vxlan_port: u16,
     geneve_port: u16,
     wireguard_port: u16,
+    direction_inferrer: Arc<DirectionInferrer>,
+    hostname_cache: Cache<IpAddr, String>,
+    hostname_resolve_timeout: Duration,
+    enable_hostname_resolution: bool,
 }
 
 impl FlowWorker {
@@ -544,6 +573,10 @@ impl FlowWorker {
         vxlan_port: u16,
         geneve_port: u16,
         wireguard_port: u16,
+        direction_inferrer: Arc<DirectionInferrer>,
+        hostname_cache: Cache<IpAddr, String>,
+        hostname_resolve_timeout: Duration,
+        enable_hostname_resolution: bool,
     ) -> Self {
         Self {
             worker_id,
@@ -564,6 +597,10 @@ impl FlowWorker {
             vxlan_port,
             geneve_port,
             wireguard_port,
+            direction_inferrer,
+            hostname_cache,
+            hostname_resolve_timeout,
+            enable_hostname_resolution,
         }
     }
 
@@ -599,6 +636,40 @@ impl FlowWorker {
             worker.id = self.worker_id,
             "flow worker stopped"
         );
+    }
+
+    /// Resolve an IP address to a hostname with caching and timeout.
+    ///
+    /// Uses an LRU cache to avoid redundant DNS lookups. The cache automatically
+    /// evicts least-recently-used entries when capacity is reached.
+    ///
+    /// Returns the hostname if resolution succeeds, otherwise returns the IP as a string.
+    async fn resolve_hostname(&self, ip: IpAddr) -> String {
+        if !self.enable_hostname_resolution {
+            return ip.to_string();
+        }
+
+        // Check cache first (fast path)
+        if let Some(cached) = self.hostname_cache.get(&ip).await {
+            return cached;
+        }
+
+        // Perform DNS resolution
+        let result = tokio::time::timeout(
+            self.hostname_resolve_timeout,
+            tokio::task::spawn_blocking(move || dns_lookup::lookup_addr(&ip)),
+        )
+        .await;
+
+        let resolved = result
+            .ok()
+            .and_then(|r| r.ok())
+            .and_then(|r| r.ok())
+            .unwrap_or_else(|| ip.to_string());
+
+        // Insert into cache (LRU eviction happens automatically at max_capacity)
+        self.hostname_cache.insert(ip, resolved.clone()).await;
+        resolved
     }
 
     /// Process a new flow event from eBPF.
@@ -809,12 +880,27 @@ impl FlowWorker {
             .map(|r| r.value().clone());
         let (src_addr, dst_addr) = flow_key_to_ip_addrs(flow_key)?;
         let timeout = self.calculate_timeout(flow_key.protocol, stats);
+        let (span_kind, client_server) = self
+            .direction_inferrer
+            .infer_from_stats(flow_key, stats)
+            .await;
+        let (client_address, client_port, server_address, server_port) =
+            if let Some(ref cs) = client_server {
+                (
+                    Some(self.resolve_hostname(cs.client_ip).await),
+                    Some(cs.client_port),
+                    Some(self.resolve_hostname(cs.server_ip).await),
+                    Some(cs.server_port),
+                )
+            } else {
+                (None, None, None, None)
+            };
 
         let span = FlowSpan {
             trace_id: Some(self.trace_id_cache.get_or_create(community_id)),
             start_time: UNIX_EPOCH + Duration::from_nanos(start_time_nanos),
             end_time: UNIX_EPOCH + Duration::from_nanos(end_time_nanos),
-            span_kind: SpanKind::Internal,
+            span_kind,
             attributes: SpanAttributes {
                 // General flow attributes
                 flow_community_id: community_id.to_string(),
@@ -873,6 +959,15 @@ impl FlowWorker {
                 // TCP metadata
                 flow_tcp_flags_bits: is_tcp.then_some(stats.tcp_flags),
                 flow_tcp_flags_tags: is_tcp.then(|| TcpFlags::from_stats(stats).active_flags()),
+                flow_reverse_tcp_flags_bits: is_tcp.then_some(stats.reverse_tcp_flags),
+                flow_reverse_tcp_flags_tags: is_tcp
+                    .then(|| TcpFlags::flags_from_bits(stats.reverse_tcp_flags)),
+
+                // Client/Server attributes (from direction inference)
+                client_address,
+                client_port,
+                server_address,
+                server_port,
 
                 // ICMP metadata
                 flow_icmp_type_id: is_icmp_any.then_some(stats.icmp_type),
@@ -1746,7 +1841,7 @@ pub async fn timeout_and_remove_flow(
 
 /// Periodic orphan scanner task - safety net for cleaning up stale eBPF entries.
 ///
-/// Scans the eBPF `FLOW_STATS_MAP` periodically and removes entries that are:
+/// Scans the eBPF `FLOW_STATS` periodically and removes entries that are:
 /// - Old (exceed max_age threshold, typically 4x max_record_interval)
 /// - Not tracked in the userspace `flow_store`
 ///
@@ -1946,6 +2041,7 @@ mod tests {
     use std::time::SystemTime;
 
     use mermin_common::IpVersion;
+    use opentelemetry::trace::SpanKind;
 
     use super::*;
 
@@ -1977,6 +2073,8 @@ mod tests {
             reverse_ip_ecn: 0,
             reverse_ip_ttl: 0,
             tcp_flags,
+            forward_tcp_flags: tcp_flags,
+            reverse_tcp_flags: 0,
             icmp_type: 0,
             icmp_code: 0,
             reverse_icmp_type: 0,
@@ -2001,6 +2099,11 @@ mod tests {
         let flow_stats_map = Arc::new(Mutex::new(unsafe {
             std::mem::zeroed::<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>()
         }));
+        let listening_ports_map = Arc::new(Mutex::new(unsafe {
+            std::mem::zeroed::<EbpfHashMap<aya::maps::MapData, ListeningPortKey, u8>>()
+        }));
+        let direction_inferrer = Arc::new(DirectionInferrer::new(listening_ports_map));
+        let hostname_cache = Cache::builder().max_capacity(1000).build();
 
         FlowWorker {
             worker_id: 0,
@@ -2021,6 +2124,10 @@ mod tests {
             vxlan_port: 4789,
             geneve_port: 6081,
             wireguard_port: 51820,
+            direction_inferrer,
+            hostname_cache,
+            hostname_resolve_timeout: span_opts.hostname_resolve_timeout,
+            enable_hostname_resolution: span_opts.enable_hostname_resolution,
         }
     }
 

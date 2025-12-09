@@ -155,10 +155,19 @@ pub struct SpanAttributes {
     pub flow_tcp_flags_bits: Option<u8>,
     #[serde(serialize_with = "serialize_option_tcp_flags")]
     pub flow_tcp_flags_tags: Option<Vec<TcpFlag>>,
+    pub flow_reverse_tcp_flags_bits: Option<u8>,
+    #[serde(serialize_with = "serialize_option_tcp_flags")]
+    pub flow_reverse_tcp_flags_tags: Option<Vec<TcpFlag>>,
     pub flow_ipsec_ah_spi: Option<u32>,
     pub flow_ipsec_esp_spi: Option<u32>,
     pub flow_ipsec_sender_index: Option<u32>,
     pub flow_ipsec_receiver_index: Option<u32>,
+
+    // Client/Server Attributes (populated when direction is known)
+    pub client_address: Option<String>,
+    pub client_port: Option<u16>,
+    pub server_address: Option<String>,
+    pub server_port: Option<u16>,
 
     // Flow Metrics
     pub flow_bytes_delta: i64,
@@ -293,10 +302,16 @@ impl Default for SpanAttributes {
             flow_reverse_icmp_code_name: None,
             flow_tcp_flags_bits: None,
             flow_tcp_flags_tags: None,
+            flow_reverse_tcp_flags_bits: None,
+            flow_reverse_tcp_flags_tags: None,
             flow_ipsec_ah_spi: None,
             flow_ipsec_esp_spi: None,
             flow_ipsec_sender_index: None,
             flow_ipsec_receiver_index: None,
+            client_address: None,
+            client_port: None,
+            server_address: None,
+            server_port: None,
             flow_bytes_delta: 0,
             flow_bytes_total: 0,
             flow_packets_delta: 0,
@@ -399,6 +414,10 @@ impl Traceable for FlowSpan {
             self.attributes.network_type.as_str(),
             self.attributes.network_transport.to_string().as_str()
         ))
+    }
+
+    fn span_kind(&self) -> opentelemetry::trace::SpanKind {
+        self.span_kind.clone()
     }
 
     fn record(&self, mut span: opentelemetry_sdk::trace::Span) -> opentelemetry_sdk::trace::Span {
@@ -540,6 +559,31 @@ impl Traceable for FlowSpan {
                 "flow.tcp.flags.tags",
                 Value::Array(flag_values.into()),
             ));
+        }
+        if let Some(value) = self.attributes.flow_reverse_tcp_flags_bits {
+            kvs.push(KeyValue::new("flow.reverse.tcp.flags.bits", value as i64));
+        }
+        if let Some(ref value) = self.attributes.flow_reverse_tcp_flags_tags {
+            let flag_values: Vec<StringValue> = value
+                .iter()
+                .map(|f| StringValue::from(f.to_string()))
+                .collect();
+            kvs.push(KeyValue::new(
+                "flow.reverse.tcp.flags.tags",
+                Value::Array(flag_values.into()),
+            ));
+        }
+        if let Some(ref value) = self.attributes.client_address {
+            kvs.push(KeyValue::new("client.address", value.to_owned()));
+        }
+        if let Some(value) = self.attributes.client_port {
+            kvs.push(KeyValue::new("client.port", value as i64));
+        }
+        if let Some(ref value) = self.attributes.server_address {
+            kvs.push(KeyValue::new("server.address", value.to_owned()));
+        }
+        if let Some(value) = self.attributes.server_port {
+            kvs.push(KeyValue::new("server.port", value as i64));
         }
         if let Some(value) = self.attributes.flow_ipsec_ah_spi {
             kvs.push(KeyValue::new("flow.ipsec.ah.spi", value as i64));

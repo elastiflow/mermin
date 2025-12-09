@@ -225,6 +225,10 @@ pub struct FlowStats {
     pub reverse_ip_ttl: u8,
     /// Accumulated TCP flags (OR of all flags seen)
     pub tcp_flags: u8,
+    /// TCP flags in forward direction only (for handshake analysis)
+    pub forward_tcp_flags: u8,
+    /// TCP flags in reverse direction only (for handshake analysis)
+    pub reverse_tcp_flags: u8,
     /// ICMP type
     pub icmp_type: u8,
     /// ICMP code
@@ -283,6 +287,7 @@ impl FlowStats {
     /// #     protocol: IpProto::Tcp, ip_dscp: 0, ip_ecn: 0, ip_ttl: 0,
     /// #     reverse_ip_dscp: 0, reverse_ip_ecn: 0, reverse_ip_ttl: 0,
     ///     tcp_flags: FlowStats::TCP_FLAG_SYN | FlowStats::TCP_FLAG_ACK,
+    /// #     forward_tcp_flags: 0, reverse_tcp_flags: 0,
     /// #     icmp_type: 0, icmp_code: 0, reverse_icmp_type: 0, reverse_icmp_code: 0,
     /// #     forward_metadata_seen: 0, reverse_metadata_seen: 0,
     /// };
@@ -449,6 +454,28 @@ pub enum Direction {
     Ingress = 1,
 }
 
+/// Key for tracking listening ports in eBPF map.
+/// Used to identify which ports have local processes listening (for client/server inference).
+/// Memory layout: 3 bytes (2 for port + 1 for protocol)
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ListeningPortKey {
+    /// Port number in host byte order
+    pub port: u16,
+    /// IP protocol (TCP or UDP)
+    pub protocol: IpProto,
+}
+
+#[cfg(feature = "user")]
+// SAFETY: ListeningPortKey is repr(C) with only POD (Plain Old Data) fields:
+// - `port` is u16 (primitive type, all bit patterns valid)
+// - `protocol` is IpProto which is repr(u8) (all bit patterns valid for u8)
+// The struct has natural alignment (u16 aligned on 2-byte boundary, followed by u8),
+// with no padding between fields due to field ordering. All possible bit patterns
+// represent valid values. This makes it safe to treat as plain old data for eBPF
+// map interoperability via aya::Pod.
+unsafe impl aya::Pod for ListeningPortKey {}
+
 #[cfg(test)]
 mod tests {
     use core::mem::{align_of, size_of};
@@ -486,6 +513,8 @@ mod tests {
             reverse_ip_ecn: 0,
             reverse_ip_ttl: 0,
             tcp_flags: 0,
+            forward_tcp_flags: 0,
+            reverse_tcp_flags: 0,
             icmp_type: 0,
             icmp_code: 0,
             reverse_icmp_type: 0,

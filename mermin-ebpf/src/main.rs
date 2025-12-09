@@ -31,7 +31,7 @@
 //!
 //! Userspace consumers poll `FLOW_EVENTS` ring buffer for new flows, then:
 //! 1. Perform deep parsing on the unparsed packet data (tunnels, application protocols, etc.)
-//! 2. Periodically read `FLOW_STATS_MAP` for statistics updates (active/idle timeouts)
+//! 2. Periodically read `FLOW_STATS` for statistics updates (active/idle timeouts)
 //! 3. Export aggregated flows to telemetry systems (OpenTelemetry, etc.)
 //! 4. Remove expired flows from the map
 //!
@@ -132,7 +132,7 @@ const MAX_FLOWS: u32 = 10_000_000; // Upper bound, overridden at runtime
 // Flow statistics map: normalized FlowKey -> FlowStats
 #[cfg(not(feature = "test"))]
 #[map]
-static mut FLOW_STATS_MAP: HashMap<FlowKey, FlowStats> = HashMap::with_max_entries(MAX_FLOWS, 0);
+static mut FLOW_STATS: HashMap<FlowKey, FlowStats> = HashMap::with_max_entries(MAX_FLOWS, 0);
 
 // Size: 256 KB (~10K flow events before overflow)
 #[cfg(not(feature = "test"))]
@@ -147,7 +147,7 @@ static mut FLOW_EVENTS: RingBuf = RingBuf::with_byte_size(RING_BUF_SIZE_BYTES, 0
 // Used to avoid stack overflow (FlowStats is 232 bytes, eBPF stack limit is 512 bytes)
 #[cfg(not(feature = "test"))]
 #[map]
-static mut FLOW_STATS: PerCpuArray<FlowStats> = PerCpuArray::with_max_entries(1, 0);
+static mut FLOW_STATS_SCRATCH: PerCpuArray<FlowStats> = PerCpuArray::with_max_entries(1, 0);
 
 /// Per-CPU scratch space for building FlowEvent (avoids stack overflow).
 #[cfg(not(feature = "test"))]
@@ -158,6 +158,14 @@ static mut FLOW_EVENT_SCRATCH: PerCpuArray<FlowEvent> = PerCpuArray::with_max_en
 #[cfg(not(feature = "test"))]
 #[map]
 static mut FLOW_KEY_SCRATCH: PerCpuArray<FlowKey> = PerCpuArray::with_max_entries(1, 0);
+
+/// Map to track listening ports for client/server direction inference.
+/// Key: ListeningPortKey (port + protocol), Value: 1 (presence marker)
+/// Max entries: 65536 (all possible ports, though typically < 1000 in practice)
+#[cfg(not(feature = "test"))]
+#[map]
+static mut LISTENING_PORTS: HashMap<mermin_common::ListeningPortKey, u8> =
+    HashMap::with_max_entries(65536, 0);
 
 /// Error types that can occur during packet parsing.
 ///
@@ -250,7 +258,7 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
     let normalized_key = flow_key.normalize();
     let is_new_flow = unsafe {
         #[allow(static_mut_refs)]
-        FLOW_STATS_MAP.get(&normalized_key).is_none()
+        FLOW_STATS.get(&normalized_key).is_none()
     };
 
     let timestamp = unsafe { bpf_ktime_get_boot_ns() };
@@ -261,7 +269,11 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
 
         // Use per-CPU scratch space to initialize FlowStats (avoids stack overflow)
         #[allow(static_mut_refs)]
-        let flow_stats = unsafe { FLOW_STATS.get_ptr_mut(0).ok_or(Error::OutOfBounds)? };
+        let flow_stats = unsafe {
+            FLOW_STATS_SCRATCH
+                .get_ptr_mut(0)
+                .ok_or(Error::OutOfBounds)?
+        };
         unsafe { core::ptr::write_bytes(flow_stats, 0, 1) };
         let stats = unsafe { &mut *flow_stats };
         stats.first_seen_ns = timestamp;
@@ -282,7 +294,7 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
 
         unsafe {
             #[allow(static_mut_refs)]
-            FLOW_STATS_MAP
+            FLOW_STATS
                 .insert(&normalized_key, &*stats, 0)
                 .map_err(|_| Error::OutOfBounds)?;
         }
@@ -328,12 +340,12 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
 
         #[allow(static_mut_refs)]
         unsafe {
-            FLOW_STATS_MAP.get_ptr_mut(&normalized_key)
+            FLOW_STATS.get_ptr_mut(&normalized_key)
         }
     } else {
         #[allow(static_mut_refs)]
         unsafe {
-            FLOW_STATS_MAP.get_ptr_mut(&normalized_key)
+            FLOW_STATS.get_ptr_mut(&normalized_key)
         }
     };
 
@@ -375,6 +387,12 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
                 .load(l4_offset + tcp::TCP_FLAGS_OFFSET)
                 .map_err(|_| Error::OutOfBounds)?;
             stats.tcp_flags |= current_flags;
+
+            if is_forward && stats.forward_tcp_flags == 0 {
+                stats.forward_tcp_flags = current_flags;
+            } else if !is_forward && stats.reverse_tcp_flags == 0 {
+                stats.reverse_tcp_flags = current_flags;
+            }
         }
     }
 
@@ -778,6 +796,8 @@ mod tests {
             ip_flow_label: 0,
             reverse_ip_flow_label: 0,
             tcp_flags: 0,
+            forward_tcp_flags: 0,
+            reverse_tcp_flags: 0,
             icmp_type: 0,
             icmp_code: 0,
             reverse_icmp_type: 0,

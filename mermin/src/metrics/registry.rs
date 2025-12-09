@@ -206,7 +206,7 @@ lazy_static! {
 
     /// Total number of eBPF flow stats map access operations.
     /// Labels: status = "ok" | "error" | "not_found"
-    pub static ref FLOW_STATS_MAP_ACCESS_TOTAL: IntCounterVec = IntCounterVec::new(
+    pub static ref FLOW_STATS_ACCESS_TOTAL: IntCounterVec = IntCounterVec::new(
         Opts::new("flow_stats_map_access_total", "Total number of eBPF flow stats map access operations")
             .namespace("mermin"),
         &["status"]
@@ -509,7 +509,7 @@ pub fn init_registry(debug_enabled: bool) -> Result<(), prometheus::Error> {
     register_standard!(PROCESSING_LATENCY_SECONDS);
     register_standard!(EXPORT_TIMEOUTS_TOTAL);
     register_standard!(EXPORT_BLOCKING_TIME_SECONDS);
-    register_standard!(FLOW_STATS_MAP_ACCESS_TOTAL);
+    register_standard!(FLOW_STATS_ACCESS_TOTAL);
     register_standard!(FLOWS_CREATED_TOTAL);
     register_standard!(FLOWS_ACTIVE_TOTAL);
     register_standard!(PRODUCER_FLOW_SPANS_TOTAL);

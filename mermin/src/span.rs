@@ -1,4 +1,5 @@
 pub mod community_id;
+pub mod direction;
 pub mod ebpf_guard;
 pub mod flow;
 pub mod opts;

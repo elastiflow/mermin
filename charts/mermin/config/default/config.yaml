@@ -419,3 +419,5 @@ span:
   tcp_timeout: 20s
   udp_timeout: 60s
   community_id_seed: 0
+  enable_hostname_resolution: true
+  hostname_resolve_timeout: 100ms
