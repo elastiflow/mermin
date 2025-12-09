@@ -1,4 +1,4 @@
-# Pipeline Configuration Options
+# Pipeline Configuration
 
 The `pipeline` block provides advanced configuration for flow processing pipeline optimization, including base channel sizing, worker threading, Kubernetes decoration, backpressure management, and buffer multipliers.
 
