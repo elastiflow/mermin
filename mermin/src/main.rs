@@ -1149,10 +1149,12 @@ async fn handle_test_bpf(test_bpf_cmd: &CliSubcommand) -> Result<()> {
 
     // Load eBPF program
     info!(event.name = "test_bpf.loading_ebpf", "loading eBPF program");
-    let mut ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
-        env!("OUT_DIR"),
-        "/mermin"
-    )))?;
+    let mut ebpf = aya::EbpfLoader::new()
+        .set_max_entries("FLOW_STATS_MAP", 1000) // Small size for testing
+        .load(aya::include_bytes_aligned!(concat!(
+            env!("OUT_DIR"),
+            "/mermin"
+        )))?;
     if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
         warn!(
             event.name = "test_bpf.logger_init_failed",

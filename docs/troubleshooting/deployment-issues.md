@@ -97,6 +97,95 @@ Search the logs for eBPF-related errors:
 kubectl logs mermin-xxxxx -n ${MERMIN_NAMESPACE} | grep -i ebpf
 ```
 
+### Test eBPF Attach/Detach Operations
+
+You can use the `test-bpf` subcommand to validate eBPF capabilities in a deployed Mermin cluster:
+
+**In a deployed Kubernetes cluster:**
+
+```bash
+# Get the pod name (replace 'mermin' with your namespace if different)
+POD=$(kubectl get pod -n mermin -l app.kubernetes.io/name=mermin -o jsonpath='{.items[0].metadata.name}')
+
+# Test a specific interface
+kubectl exec -n mermin $POD -- mermin test-bpf --interface eth0
+
+# Test all interfaces (useful for discovering which interfaces are available)
+kubectl exec -n mermin $POD -- mermin test-bpf --all
+
+# Test with pattern filtering (matches your configuration)
+kubectl exec -n mermin $POD -- mermin test-bpf --all --pattern "veth*" --skip "veth0"
+```
+
+**Before deploying (using a debug pod):**
+
+```bash
+# In a debug pod or directly on the node
+kubectl debug node/worker-node -it --image=ghcr.io/elastiflow/mermin:latest -- sh
+
+# Test a specific interface
+mermin test-bpf --interface eth0
+
+# Test all interfaces (useful for discovering which interfaces are available)
+mermin test-bpf --all
+
+# Test with pattern filtering (matches your configuration)
+mermin test-bpf --all --pattern "veth*" --skip "veth0"
+```
+
+**What the test validates:**
+
+- Required Linux capabilities (BPF, NET_ADMIN, etc.)
+- eBPF program loading and verification
+- Attach/detach operations on network interfaces
+- BPF filesystem writeability (for TCX link pinning)
+- Kernel version and TCX vs netlink mode detection
+
+**Interpreting results:**
+
+- **All tests pass**: Your environment is ready for Mermin
+- **Attach failures**: Check capabilities, kernel version, or interface availability
+- **BPF FS not writable**: Mount `/sys/fs/bpf` or configure volume mounts (see [eBPF File System Not Mounted](#4-ebpf-file-system-not-mounted))
+- **Capability errors**: Verify security context configuration (see [Missing Linux Capabilities](#1-missing-linux-capabilities))
+
+The subcommand provides structured logging with clear success/failure indicators, making it easy to identify specific issues.
+
+### Finding Available Interfaces
+
+List interfaces in the pod:
+
+```bash
+# Get the pod name (replace 'mermin' with your namespace if different)
+POD=$(kubectl get pod -n mermin -l app.kubernetes.io/name=mermin -o jsonpath='{.items[0].metadata.name}')
+
+# List all network interfaces
+kubectl exec -n mermin $POD -- ip link show
+
+# Get interface names only
+kubectl exec -n mermin $POD -- ip -o link show | awk -F': ' '{print $2}'
+
+# Check interface status (UP/DOWN)
+kubectl exec -n mermin $POD -- ip link show | grep -E "^[0-9]+:|state"
+```
+
+### Debug Logging
+
+Enable debug logging for detailed output:
+
+```bash
+# Get the pod name (replace 'mermin' with your namespace if different)
+POD=$(kubectl get pod -n mermin -l app.kubernetes.io/name=mermin -o jsonpath='{.items[0].metadata.name}')
+
+# Single interface with debug logging
+kubectl exec -n mermin $POD -- env MERMIN_LOG_LEVEL=debug mermin test-bpf --interface eth0
+
+# All interfaces with debug logging
+kubectl exec -n mermin $POD -- env MERMIN_LOG_LEVEL=debug mermin test-bpf --all
+
+# Pattern filtering with debug logging
+kubectl exec -n mermin $POD -- env MERMIN_LOG_LEVEL=debug mermin test-bpf --all --pattern "eth*" --skip "eth0"
+```
+
 ### What's Going Wrong?
 
 #### 1. Missing Linux Capabilities
@@ -197,6 +286,33 @@ volumes:
 {% hint style="info" %}
 Without writable `/sys/fs/bpf`, Mermin runs in best-effort mode (unpinned maps). Flow state will not persist across pod restarts.
 {% endhint %}
+
+**Test BPF filesystem writeability:**
+
+Use the `test-bpf` subcommand to verify the BPF filesystem is writable in a deployed cluster:
+
+```bash
+# Get the pod name (replace 'mermin' with your namespace if different)
+POD=$(kubectl get pod -n mermin -l app.kubernetes.io/name=mermin -o jsonpath='{.items[0].metadata.name}')
+
+# Test on a specific interface
+kubectl exec -n mermin $POD -- mermin test-bpf --interface eth0
+
+# Test all interfaces
+kubectl exec -n mermin $POD -- mermin test-bpf --all
+```
+
+**On bare metal or in a debug pod:**
+
+```bash
+# Test on a specific interface
+sudo mermin test-bpf --interface eth0
+
+# Test all interfaces
+sudo mermin test-bpf --all
+```
+
+The subcommand will report whether `/sys/fs/bpf` is writable. On kernels >= 6.6.0 (TCX mode), this is required for link pinning. If the test fails, ensure the BPF filesystem is properly mounted and the container has write permissions.
 
 #### 5. eBPF Verifier Rejection (Program Too Large)
 
