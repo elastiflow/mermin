@@ -1,36 +1,114 @@
----
-hidden: true
----
-
-# Pipeline Tuning Options
+# Pipeline Configuration Options
 
 The `pipeline` block provides advanced configuration for flow processing pipeline optimization, including base channel sizing, worker threading, Kubernetes decoration, backpressure management, and buffer multipliers.
 
-## Overview
+The configuration options become useful take advantage of additional resources allocated for Mermin or to generally optimize the performance for your specific use-case.
 
-**HCL:**
+## Configuration
+
+Full configuration example may be found in the [Default Config](https://github.com/elastiflow/mermin/tree/beta/charts/mermin/config/default/config.hcl)
+
+## Configuration Options
+
+### `ebpf_max_flows`
+
+**Type:** Integer **Default:** `100000`
+
+Capacity of the `FLOW_STATS` map (refer the [architecture](../getting-started/architecture.md#ebpf-programs) doc)
+
+**Example:**
+
+```hcl
+metrics {
+  ebpf_max_flows = 5000  # Reduce `FLOW_STATS` capacity
+}
+```
+
+### `ring_buffer_capacity`
+
+**Type:** Integer **Default:** `8192`
+
+Default capacity of the `FLOW_EVENTS` ring buffer (refer the [architecture](../getting-started/architecture.md#ebpf-programs) doc for details). Increasing this value can help handle higher flow rates.
+
+**Example:**
 
 ```hcl
 pipeline {
-  # Base ring buffer capacity (default: 8192, good for typical enterprise)
-  ring_buffer_capacity = 8192
+  ring_buffer_capacity = 16384  # Increase buffer for high-throughput environments
+}
+```
 
-  # Number of parallel flow workers (default: 4, suitable for most deployments)
-  worker_count = 4
+### `worker_count`
 
-  # Worker polling interval (default: 5s)
-  worker_poll_interval = "5s"
+**Type:** Integer **Default:** `4`
 
-  # Kubernetes decorator threading (default: 4 for typical enterprise)
-  k8s_decorator_threads = 4
+Number of parallel flow worker threads. Adjust based on available CPU resources.
 
-  # Channel multipliers
-  flow_span_channel_multiplier = 2.0
-  decorated_span_channel_multiplier = 4.0
+**Example:**
 
-  # Adaptive sampling under load (not yet implemented)
-  sampling_enabled = true
-  sampling_min_rate = 0.1
-  backpressure_warning_threshold = 0.01
+```hcl
+pipeline {
+  worker_count = 8  # Use more workers for increased parallelism
+}
+```
+
+### `worker_poll_interval`
+
+**Type:** String (duration) **Default:** `"5s"`
+
+Polling interval for flow workers. Controls how frequently workers polls the flow data from the `FLOW_STATS` map (refer the [architecture](../getting-started/architecture.md#ebpf-programs) doc for details).
+Reducing the interval may increase the CPU usage.
+
+**Example:**
+
+```hcl
+pipeline {
+  worker_poll_interval = "2s"  # Poll more frequently
+}
+```
+
+### `k8s_decorator_threads`
+
+**Type:** Integer **Default:** `4`
+
+Number of threads dedicated to Kubernetes decoration. Increase for larger clusters.
+
+**Example:**
+
+```hcl
+pipeline {
+  k8s_decorator_threads = 8  # More threads for faster decoration
+}
+```
+
+### `flow_span_channel_multiplier`
+
+**Type:** Float **Default:** `2.0`
+
+Multiplier for the flow span channel size, relative to the ring buffer capacity.
+<!-- TODO(lgo-421): Is it true? Clarify -->
+The channel is used in the "Flow Producer" stage, please refer the [architecture](../getting-started/architecture.md#components) for more details.
+
+**Example:**
+
+```hcl
+pipeline {
+  flow_span_channel_multiplier = 3.0  # Larger channel for bursty flows
+}
+```
+
+### `decorated_span_channel_multiplier`
+
+**Type:** Float **Default:** `4.0`
+
+Multiplier for the decorated span channel size, relative to the ring buffer capacity.
+<!-- TODO(lgo-421): Is it true? Clarify -->
+The channel is used in the "K8s Decorator" stage, please refer the [architecture](../getting-started/architecture.md#components) for more details.
+
+**Example:**
+
+```hcl
+pipeline {
+  decorated_span_channel_multiplier = 6.0  # Increase for heavy decoration workloads
 }
 ```

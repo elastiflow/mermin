@@ -61,15 +61,15 @@ Mermin is deployed as a DaemonSet in Kubernetes, with one agent instance running
 Data pipeline overview, more details on the pipeline are documented in the [data-flow block](architecture.md#data-flow)
 
 ```text
+        <kernel space>
           eBPF TC
               ↓
       Network Interface
         ↓           ↓
-Flow Stats map   Flow Events map
+        <kernel space>
+Flow Stats map   Flow Events (ring buffer)
         ↓           ↓
-          Ring Buffer
-              ↓
-          Userspace
+         <user space>
               ↓
         Flow Producer
               ↓
@@ -84,9 +84,6 @@ Mermin uses [eBPF](https://ebpf.io/what-is-ebpf/) (extended Berkeley Packet Filt
 
 - Attach to network interfaces specified in your configuration
 - Capture packets at the TC (Traffic Control) layer
-- Aggregate packet data into flow statistics within the `FLOW_STATS` eBPF HashMap
-- Notify userspace of new flows via the `FLOW_EVENTS` ring buffer
-- For encapsulated or tunneled packets, send inner packet headers to userspace via `FLOW_EVENTS` for decoding
 - Aggregate packet data into flow statistics within the `FLOW_STATS` eBPF HashMap
 - Notify userspace of new flows via the `FLOW_EVENTS` ring buffer
 - For encapsulated or tunneled packets, send inner packet headers to userspace via `FLOW_EVENTS` for decoding
@@ -202,17 +199,7 @@ Mermin is designed to be efficient in production environments:
 
 ### Tunability
 
-Mermin provides extensive configuration for performance tuning under the `pipeline` block:
-
-- `pipeline.ring_buffer_capacity`: eBPF ring buffer size between kernel and userspace
-- `pipeline.worker_count`: Number of parallel flow worker threads
-- `pipeline.k8s_decorator_threads`: Dedicated threads for Kubernetes metadata decoration
-- `span.*_timeout`: Flow expiration times affect memory usage
-- `export.otlp.max_batch_size`: Larger batches reduce network overhead
-- `export.otlp.max_queue_size`: Backpressure buffer for slow backends
-
-<!-- TODO(GA Documentation): Add link to the docs/configuration/pipeline.md -->
-See [Configuration Reference](../configuration/configuration.md) for details.
+Mermin provides extensive configuration for performance tuning under the `pipeline` block, please refer the [pipeline](../configuration/pipeline.md) documentation for the details.
 
 ## Failure Modes and Resilience
 
