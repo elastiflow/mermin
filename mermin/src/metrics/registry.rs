@@ -416,19 +416,8 @@ lazy_static! {
 // Helper macro to register a metric to both combined and standard registries
 macro_rules! register_standard {
     ($metric:expr) => {{
-        if let Err(e) = REGISTRY.register(Box::new($metric.clone())) {
-            let err_str = e.to_string();
-            if !err_str.contains("already registered") && !err_str.contains("duplicate") {
-                return Err(e);
-            }
-        }
-        if let Err(e) = STANDARD_REGISTRY.register(Box::new($metric.clone())) {
-            let err_str = e.to_string();
-            if !err_str.contains("already registered") && !err_str.contains("duplicate") {
-                return Err(e);
-            }
-        }
-        let _ = Ok::<(), prometheus::Error>(());
+        REGISTRY.register(Box::new($metric.clone()))?;
+        STANDARD_REGISTRY.register(Box::new($metric.clone()))?;
     }};
 }
 
@@ -436,20 +425,9 @@ macro_rules! register_standard {
 macro_rules! register_debug {
     ($metric:expr, $debug_enabled:expr) => {{
         if $debug_enabled {
-            if let Err(e) = REGISTRY.register(Box::new($metric.clone())) {
-                let err_str = e.to_string();
-                if !err_str.contains("already registered") && !err_str.contains("duplicate") {
-                    return Err(e);
-                }
-            }
-            if let Err(e) = DEBUG_REGISTRY.register(Box::new($metric.clone())) {
-                let err_str = e.to_string();
-                if !err_str.contains("already registered") && !err_str.contains("duplicate") {
-                    return Err(e);
-                }
-            }
+            REGISTRY.register(Box::new($metric.clone()))?;
+            DEBUG_REGISTRY.register(Box::new($metric.clone()))?;
         }
-        let _ = Ok::<(), prometheus::Error>(());
     }};
 }
 
