@@ -14,7 +14,7 @@ Full configuration example may be found in the [Default Config](https://github.c
 
 **Type:** Integer **Default:** `100000`
 
-Capacity of the `FLOW_STATS` map (refer the [architecture](../getting-started/architecture.md#ebpf-programs) doc)
+The capacity of the `FLOW_STATS` map. (Refer to the [architecture](../getting-started/architecture.md#ebpf-programs) documentation for more information.)
 
 **Example:**
 
