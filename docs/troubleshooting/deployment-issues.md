@@ -312,7 +312,7 @@ First, check what priorities are in use:
 
 ```bash
 # List all TC filters with priorities
-kubectl exec -it $MERMIN_POD -- sh -c 'for iface in $(ip -o link show | awk -F: "{print \$2}" | tr -d " "); do echo "=== $iface ==="; tc filter show dev $iface ingress 2>/dev/null; done'
+kubectl exec -it ${MERMIN_POD} -- sh -c 'for iface in $(ip -o link show | awk -F: "{print \$2}" | tr -d " "); do echo "=== $iface ==="; tc filter show dev $iface ingress 2>/dev/null; done'
 ```
 
 Then adjust based on your kernel version:
@@ -340,7 +340,7 @@ discovery "instrument" {
 Not sure which kernel you're running?
 
 ```bash
-kubectl exec -it $MERMIN_POD -- uname -r
+kubectl exec -it ${MERMIN_POD} -- uname -r
 ```
 
 If it's >= 6.6.0, you're using TCX mode (you'll also see this in the logs). In TCX mode, `tc_priority` is ignored in favor of `tcx_order`.
