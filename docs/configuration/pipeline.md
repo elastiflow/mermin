@@ -42,7 +42,7 @@ pipeline {
 
 **Type:** Integer **Default:** `4`
 
-Number of parallel flow worker threads. Adjust based on available CPU resources.
+The number of parallel flow worker threads. Adjust this value based on the available CPU resources.
 
 **Example:**
 
