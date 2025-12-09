@@ -222,7 +222,7 @@ kubectl get clusterrole mermin -o yaml
 kubectl get clusterrolebinding mermin
 ```
 
-Make sure your ClusterRole has required permissions, the required ones may be found in the [Helm Chart template](https://github.com/elastiflow/mermin/blob/beta/charts/mermin/templates/clusterrole.yaml):
+Make sure your ClusterRole has the required permissions, which can be found in the [Helm Chart template](https://github.com/elastiflow/mermin/blob/beta/charts/mermin/templates/clusterrole.yaml):
 
 ## CNI and Interface Configuration
 
