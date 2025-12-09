@@ -61,21 +61,20 @@ Mermin is deployed as a DaemonSet in Kubernetes, with one agent instance running
 Data pipeline overview, more details on the pipeline are documented in the [data-flow block](architecture.md#data-flow)
 
 ```text
-        <kernel space>
-          eBPF TC
-              ↓
-      Network Interface
-        ↓           ↓
-        <kernel space>
-Flow Stats map   Flow Events (ring buffer)
-        ↓           ↓
-         <user space>
-              ↓
-        Flow Producer
-              ↓
-        K8s Decorator
-              ↓
-        OTLP Export
+            <kernel space>
+              eBPF TC
+                  ↓
+          Network Interface
+            ↓           ↓
+            <kernel space>
+Flow Stats (hashmap)   Flow Events (ring buffer)
+            <user space>
+                  ↓
+            Flow Producer
+                  ↓
+            K8s Decorator
+                  ↓
+            OTLP Export
 ```
 
 ### eBPF Programs
