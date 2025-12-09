@@ -292,24 +292,3 @@ This section covers the final stage of the Mermin pipeline, where processed span
 * Flow event is a singular flow read from eBPF
 * Span (flow span) is a flow record
 * Trace (flow trace) is a connection
-
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                          eBPF FLOW SPAN PRODUCTION PIPELINE                             │
-└─────────────────────────────────────────────────────────────────────────────────────────┘
-
-**Metric Consolidation Note:** Some metrics are consolidated for consistency:
-- Channel sizes: All channels use `mermin_channel_size{channel="<name>"}` 
-(decorator_input, exporter_input, packet_worker)
-- Processing latencies: All stages use `mermin_processing_latency_seconds{stage="<stage>"}` 
-(flow_ingestion, k8s_decoration, otlp_export)
-
-**Flow Span Lifecycle Tracking:**
-The pipeline tracks flow spans through their complete lifecycle using the following metrics:
-- **Ring Buffer → Worker**: `mermin_flow_events_total{type="received"}` → 
-`mermin_flow_spans_processed_total` (successful creation)
-- **Worker → Store**: `mermin_producer_flow_spans_total{status="created"}` → 
-`mermin_producer_flow_spans_total{status="recorded"}` → 
-`mermin_producer_flow_spans_total{status="idled"}`
-- **Store → Decoration**: Flow spans sent via channel 
-    (tracked via `mermin_export_flow_spans_total{status="queued"}` when received by export thread)
-- **Decoration → Export**: `mermin_export_flow_spans_total{status="queued"}` → 

@@ -61,19 +61,21 @@ Mermin is deployed as a DaemonSet in Kubernetes, with one agent instance running
 Data pipeline overview, more details on the pipeline are documented in the [data-flow block](architecture.md#data-flow)
 
 ```text
-Network Interface
-      ↓
-  eBPF Map
-      ↓
-  Ring Buffer
-      ↓
-  Userspace
-      ↓
-  Flow Aggregation
-      ↓
-  K8s Attribution
-      ↓
-  OTLP Export
+          eBPF TC
+              ↓
+      Network Interface
+        ↓           ↓
+Flow Stats map   Flow Events map
+        ↓           ↓
+          Ring Buffer
+              ↓
+          Userspace
+              ↓
+        Flow Producer
+              ↓
+        K8s Decorator
+              ↓
+        OTLP Export
 ```
 
 ### eBPF Programs
@@ -82,9 +84,12 @@ Mermin uses [eBPF](https://ebpf.io/what-is-ebpf/) (extended Berkeley Packet Filt
 
 - Attach to network interfaces specified in your configuration
 - Capture packets at the TC (Traffic Control) layer
-<!-- TODO(#lgo-421): Is it still true? -->
-- Perform initial packet parsing for protocol headers
-- Send packet data to userspace via eBPF ring buffers
+- Aggregate packet data into flow statistics within the `FLOW_STATS` eBPF HashMap
+- Notify userspace of new flows via the `FLOW_EVENTS` ring buffer
+- For encapsulated or tunneled packets, send inner packet headers to userspace via `FLOW_EVENTS` for decoding
+- Aggregate packet data into flow statistics within the `FLOW_STATS` eBPF HashMap
+- Notify userspace of new flows via the `FLOW_EVENTS` ring buffer
+- For encapsulated or tunneled packets, send inner packet headers to userspace via `FLOW_EVENTS` for decoding
 
 <details>
 
@@ -176,88 +181,6 @@ Mermin exports flows as **Flow Traces** using the OpenTelemetry Protocol (OTLP):
 - **Secure Transport**: TLS encryption with custom CA certificate support
 
 Flow Traces are exported as OTLP trace spans, allowing them to be processed by any OTLP-compatible backend without requiring NetFlow collectors.
-
-## Data Flow
-
-Let's trace a network packet through Mermin's pipeline:
-
-### 1. Packet Capture (eBPF)
-
-```text
-Network Interface (eth0)
-         ↓
-   TC Hook (eBPF)
-         ↓
-   Parse Headers (IP, TCP/UDP, Tunnels)
-         ↓
-   Ring Buffer
-```
-
-- eBPF program attached to `eth0` captures incoming and outgoing packets
-<!-- TODO(#lgo-421): Is it still true? -->
-- Parses Ethernet, IP, TCP/UDP, and tunnel protocol headers
-<!-- TODO(#lgo-421): Is it still true? -->
-- Extracts 5-tuple and other flow identifiers
-- Sends packet metadata to userspace via ring buffer (not full payload)
-
-### 2. Flow Aggregation (Userspace)
-
-```text
-Ring Buffer Reader
-         ↓
-   Flow Table Lookup
-         ↓
-   Update Flow State
-         ↓
-   Check Timeout/Completion
-```
-
-- Mermin reads packet metadata from ring buffer
-- Looks up existing flow in a flow table by 5-tuple
-- Updates packet/byte counters, flags, timestamps
-<!-- TODO(GA Documentation): Add link to the docs/configuration/span.md -->
-- Checks if flow should be exported (timeout, connection close, max duration)
-
-### 3. Kubernetes Decoration
-
-```text
-Flow Ready for Export
-         ↓
-   IP to Pod Lookup
-         ↓
-   Extract Pod Metadata
-         ↓
-   Walk Owner References
-         ↓
-   Match Selectors
-         ↓
-   Decorate Trace Record
-```
-
-- Source IP: `10.244.1.5` → Pod: `nginx-abc-123`
-- Owner Reference walk: Pod `nginx-abc-123` → ReplicaSet `nginx-abc` → Deployment `nginx`
-- Destination IP: `10.96.0.1` → Service: `kubernetes`
-- Attaches labels, annotations, namespace, and other metadata
-
-### 4. OTLP Export
-
-<!-- TODO(GA Documentation): Add link to the docs/configuration/export-otlp.md -->
-
-```text
-Trace Flow
-         ↓
-   Batch Accumulator
-         ↓
-   OTLP Trace Span
-         ↓
-   gRPC/HTTP Transport
-         ↓
-   OpenTelemetry Collector
-```
-
-- Flow is converted to an OTLP Trace Span (Flow Trace Span)
-- Batched with other Flow Trace Spans to reduce network overhead
-- Sent to configured OTLP endpoint (collector)
 
 ## Performance Characteristics
 

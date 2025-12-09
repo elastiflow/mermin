@@ -2,7 +2,7 @@
 hidden: true
 ---
 
-# Discovery: Network Interfaces instrumentation
+# Discovery: Network Interfaces Instrumentation
 
 This page explains how Mermin discovers and monitors network interfaces on the host. Interface selection is critical for determining what network traffic Mermin captures.
 
