@@ -49,16 +49,30 @@ Metrics are categorized into logical subsystems that correspond to different com
 This section focuses on metrics originating from the eBPF layer, which is responsible for capturing low-level packets. These metrics provide visibility into the status of loaded eBPF programs and the usage of eBPF maps.  
 Monitoring these is crucial for ensuring that Mermin's foundational data collection mechanism functions as expected.
 
-- `mermin_ebpf_map_entries{map}`: A gauge for the number of entries in an eBPF maps, `map`'s:
-  <!-- TODO(#lgo-421) What are possible `map` for `mermin_ebpf_map_entries` metric, details on each of those  -->
-  - `flow_stats`:  
+- `mermin_ebpf_map_entries{map}`  
+  *Type*: `gauge`  
+  *Description*: A gauge for the number of entries in an eBPF maps  
+  *Labels*:  
+  - `map` - eBPF map name
+    <!-- TODO(#lgo-421) What are possible `map` for `mermin_ebpf_map_entries` metric, details on each of those  -->
+    - `flow_stats`
 <!-- TODO(#lgo-421) Rename `ring_buffer` to `ringbuf` or vise versa for consistency -->
-- `mermin_ebpf_ring_buffer_drops_total`: A counter of the total number of ring buffer events (packets) dropped due to buffer full
-<!-- TODO(#lgo-421)  "orphaned eBPF map entries" or "orphaned TC programs detached"? -->
-- `mermin_ebpf_orphans_cleaned_total`: A counter of the total number of orphaned eBPF map entries cleaned up
-- `mermin_ebpf_tc_programs_attached_total`: A counter of the total number of TC programs attached across all interfaces
-- `mermin_ebpf_tc_programs_detached_total` A counter of the total number of TC programs detached across all interfaces
-- `mermin_ebpf_bpf_fs_writable`: Gauge indicating if `/sys/fs/bpf` is writable by Mermin (`0` not writable, `1` writable)
+- `mermin_ebpf_ring_buffer_drops_total`  
+  *Type*: `counter`  
+  *Description*: Total number of ring buffer events (packets) dropped due to buffer full
+- `mermin_ebpf_orphans_cleaned_total`  
+  *Type*: `counter`  
+  <!-- TODO(#lgo-421)  "orphaned eBPF map entries" or "orphaned TC programs detached"? -->
+  *Description*: Total number of orphaned eBPF map entries cleaned up
+- `mermin_ebpf_tc_programs_attached_total`  
+  *Type*: `counter`  
+  *Description*: Total number of TC programs attached across all interfaces
+- `mermin_ebpf_tc_programs_detached_total`  
+  *Type*: `counter`  
+  *Description*: Total number of TC programs detached across all interfaces
+- `mermin_ebpf_bpf_fs_writable`  
+  *Type*: `gauge`  
+  *Description*: Indicates if `/sys/fs/bpf` is writable by Mermin (`0` not writable, `1` writable)
 
 ## Userspace Ring Buffer metrics (`mermin_ringbuf_*`)
 
@@ -68,91 +82,11 @@ Ring Buffer is used to "transport" packets from the eBPF (kernel space) to users
 - `mermin_ringbuf_packets_total` Total number of packets in the userspace ring buffer
 <!-- TODO(lgo-421):  Add link to the `docs/configuration/span.md` configuration -->
 
-## Application/System Metrics (`mermin_*`)
 
-These metrics cover the overall application health, build information, and the state of high-level components.
 
-### Build and Runtime
 
-**`mermin_build_info{version, git_sha}`**
-- **Type:** Gauge
-- **Description:** Exposes build information, including the version and Git SHA of the build.
+### Channel Metrics
 
-### Health Status
-
-These gauges indicate the health of various Mermin components. A value of `1` indicates healthy, and `0` indicates unhealthy.
-
-**`mermin_health_ebpf_loaded`**
-- **Type:** Gauge
-- **Description:** Indicates if the eBPF programs are successfully loaded.
-
-**`mermin_health_k8s`**
-- **Type:** Gauge
-- **Description:** Indicates if the Kubernetes caches are synced.
-
-**`mermin_health_ready_to_process`**
-- **Type:** Gauge
-- **Description:** Indicates if Mermin is ready to process data.
-
-**`mermin_health_overall`**
-- **Type:** Gauge
-- **Description:** A combined health status gauge for the entire application (e.g., `up`).
-
-### Component States
-
-**`mermin_component_state{component, error_code}`**
-- **Type:** Gauge
-- **Description:** A status gauge for different components with an optional `error_code` label for debugging.
-  - `component="ringbuf_reader"`
-  - `component="flow_span_producer"`
-  - `component="k8s"` (potentially break k8s into further components)
-  - `component="otlp_exporter"`
-
-## eBPF Metrics (`mermin_ebpf_*`)
-
-This section focuses on metrics originating from the eBPF layer, which is responsible for capturing low-level packets.
-
-### Program Status
-
-**`mermin_ebpf_programs_loaded{program}`**
-- **Type:** Gauge
-- **Description:** Indicates if the specified eBPF program (`ingress` or `egress`) is loaded.
-
-### Map and Ring Buffer Statistics
-
-**`mermin_ebpf_map_size_bytes{map_name}`**
-- **Type:** Gauge
-- **Description:** The size in bytes of an eBPF map.
-
-**`mermin_ebpf_map_entries{map_name}`**
-- **Type:** Gauge
-- **Description:** The number of entries in an eBPF map.
-
-**`mermin_ebpf_stack_bytes`**
-- **Type:** Gauge
-- **Description:** The stack memory usage in bytes.
-
-**`mermin_ebpf_ringbuf_packets_total{type, interface}`**
-- **Type:** Counter
-- **Description:** A counter for packets from the eBPF ring buffer. `type` can be `received` or `malformed`.
-
-**`mermin_ebpf_ringbuf_bytes`**
-- **Type:** Counter
-- **Description:** The total bytes received from the eBPF ring buffer.
-
-## Userspace Ring Buffer Metrics (`mermin_*`)
-
-These metrics describe the flow of data from the eBPF programs to the userspace application via the ring buffer.
-
-### Packet Processing
-
-**`mermin_ringbuf_packets_total{type}`**
-- **Type:** Counter
-- **Description:** A counter for packets in the userspace ring buffer. `type` can be `received`, `dropped`, or `filtered`.
-
-**`mermin_ringbuf_bytes`**
-- **Type:** Counter
-- **Description:** The total bytes received in the userspace ring buffer.
 
 ### Channel Metrics
 

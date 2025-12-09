@@ -255,7 +255,7 @@ TC (Traffic Control) priority determines the order in which eBPF programs execut
 MERMIN_POD=$(kubectl get pods -l app.kubernetes.io/name=mermin -o jsonpath='{.items[0].metadata.name}')
 
 # Check TC filters on an interface (replace gke0 with your interface name)
-kubectl exec -it $MERMIN_POD -- tc filter show dev gke0 ingress
+kubectl exec -it ${MERMIN_POD} -- tc filter show dev gke0 ingress
 ```
 
 You should see output like this:

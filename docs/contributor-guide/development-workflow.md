@@ -195,7 +195,7 @@ docker build -t mermin:latest --target runner-debug .
 kind load docker-image -n atlantis mermin:latest
 
 # 3. Deploy mermin using Helm
-helm upgrade -i --wait --timeout 15m -n elastiflow --create-namespace \
+helm upgrade -i --wait --timeout 15m -n default --create-namespace \
   -f docs/deployment/examples/local/values.yaml \
   --set-file config.content=docs/deployment/examples/local/config.example.hcl \
   --devel \
