@@ -28,7 +28,7 @@ metrics {
 
 **Type:** Integer **Default:** `8192`
 
-Default capacity of the `FLOW_EVENTS` ring buffer (refer the [architecture](../getting-started/architecture.md#ebpf-programs) doc for details). Increasing this value can help handle higher flow rates.
+The default capacity of the `FLOW_EVENTS` ring buffer. (Refer to the [architecture](../getting-started/architecture.md#ebpf-programs) documentation for more information.) Increasing this value can help process higher flow rates.
 
 **Example:**
 
