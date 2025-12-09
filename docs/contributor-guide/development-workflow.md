@@ -105,7 +105,7 @@ Running the eBPF agent requires elevated privileges. Use the `--config` flag to 
 
 ```shell
 # Using your local config (recommended for getting started)
-cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config local/config.hcl
+cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config docs/deployment/examples/local/config.example.hcl
 ```
 
 **Using YAML:**
@@ -113,7 +113,7 @@ cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config 
 If you prefer YAML format, you can convert your HCL config on-the-fly:
 
 ```shell
-cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config <(fmtconvert -from hcl -to yaml local/config.hcl)
+cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config <(fmtconvert -from hcl -to yaml docs/deployment/examples/local/config.example.hcl)
 ```
 
 > The `sudo -E` command runs the program as root while preserving the user's environment variables, which is

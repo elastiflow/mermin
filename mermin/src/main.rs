@@ -60,7 +60,7 @@ use crate::{
     },
     runtime::{
         capabilities,
-        cli::Cli,
+        cli::{Cli, CliSubcommand},
         context::Context,
         shutdown::{ShutdownConfig, ShutdownManager},
         task_manager::{ShutdownResult, TaskManager},
@@ -95,10 +95,10 @@ async fn shutdown_exporter_gracefully(
 
 #[tokio::main]
 async fn main() {
-    let cli = crate::runtime::cli::Cli::parse();
+    let cli = Cli::parse();
 
     // Handle subcommands before full runtime initialization
-    if let Some(crate::runtime::cli::CliSubcommand::TestBpf { .. }) = &cli.subcommand {
+    if let Some(CliSubcommand::TestBpf { .. }) = &cli.subcommand {
         if let Err(e) = handle_test_bpf(cli.subcommand.as_ref().unwrap()).await {
             eprintln!("Error: {e}");
             std::process::exit(1);
@@ -106,7 +106,7 @@ async fn main() {
         std::process::exit(0);
     }
 
-    if let Err(e) = run().await {
+    if let Err(e) = run(cli).await {
         display_error(&e);
         std::process::exit(1);
     }
@@ -128,10 +128,9 @@ async fn main() {
 /// CI check in place: .github/workflows/ci.yml (schema_version_check job)
 const EBPF_MAP_SCHEMA_VERSION: u8 = 1;
 
-async fn run() -> Result<()> {
+async fn run(cli: Cli) -> Result<()> {
     // TODO: listen for SIGUP `kill -HUP $(pidof mermin)` to reload the eBPF program and all configuration
     // TODO: do not reload global configuration found in CLI
-    let cli = Cli::parse();
     let reload_handles = init_bootstrap_logger(&cli);
     let runtime = Context::new(cli)?;
     let Context { conf, .. } = runtime;
@@ -979,8 +978,8 @@ fn matches_skip_pattern(name: &str, skip_patterns: &[String]) -> bool {
 }
 
 /// Handle test-bpf subcommand: test BPF filesystem writeability and attach/detach operations
-async fn handle_test_bpf(test_bpf_cmd: &crate::runtime::cli::CliSubcommand) -> Result<()> {
-    let crate::runtime::cli::CliSubcommand::TestBpf {
+async fn handle_test_bpf(test_bpf_cmd: &CliSubcommand) -> Result<()> {
+    let CliSubcommand::TestBpf {
         interface,
         all,
         pattern,
