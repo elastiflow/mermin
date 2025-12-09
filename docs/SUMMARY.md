@@ -42,7 +42,7 @@
 * [Selector Relations](configuration/selector-relations.md)
 * [Flow Attributes](configuration/attributes.md)
 * [Flow Filtering](configuration/filtering.md)
-* [Flow Span Options](configuration/span.md)
+* [Flow Span Producer](configuration/span.md)
 * [OTLP Exporter](configuration/export-otlp.md)
 * [Stdout Exporter](configuration/export-stdout.md)
 * [Internal Tracing](configuration/internal-tracing.md)
