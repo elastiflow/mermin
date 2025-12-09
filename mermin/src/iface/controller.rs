@@ -36,7 +36,7 @@
 //!    ┌─────────────────────────────────────────────────────────┐
 //!    │ main.rs: Load eBPF, extract maps                        │
 //!    │   ├─ Ebpf loaded with programs                          │
-//!    │   └─ Maps extracted: FLOW_STATS_MAP, FLOW_EVENTS        │
+//!    │   └─ Maps extracted: FLOW_STATS, FLOW_EVENTS            │
 //!    └─────────────────────────────────────────────────────────┘
 //!                           │
 //!                           ▼

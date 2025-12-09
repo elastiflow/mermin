@@ -79,6 +79,20 @@ pub struct SpanOptions {
     /// - Example: Set to `1h` for shorter trace correlation windows
     #[serde(default = "defaults::trace_id_timeout", with = "duration")]
     pub trace_id_timeout: Duration,
+
+    /// Enable hostname resolution for client.address and server.address attributes.
+    /// When enabled, IP addresses will be resolved to hostnames via reverse DNS.
+    /// Resolution is async with timeout and results are cached.
+    /// - Default Value: `true`
+    /// - Example: Set to `false` to use IP addresses only
+    #[serde(default = "defaults::enable_hostname_resolution")]
+    pub enable_hostname_resolution: bool,
+
+    /// Timeout for hostname resolution via reverse DNS.
+    /// - Default Value: `100ms`
+    /// - Example: Set to `50ms` for faster failure, or `500ms` for slower networks
+    #[serde(default = "defaults::hostname_resolve_timeout", with = "duration")]
+    pub hostname_resolve_timeout: Duration,
 }
 
 impl Default for SpanOptions {
@@ -93,6 +107,8 @@ impl Default for SpanOptions {
             udp_timeout: defaults::udp_timeout(),
             community_id_seed: defaults::community_id_seed(),
             trace_id_timeout: defaults::trace_id_timeout(),
+            enable_hostname_resolution: defaults::enable_hostname_resolution(),
+            hostname_resolve_timeout: defaults::hostname_resolve_timeout(),
         }
     }
 }
@@ -126,5 +142,11 @@ mod defaults {
     }
     pub fn trace_id_timeout() -> Duration {
         Duration::from_secs(24 * 60 * 60)
+    }
+    pub fn enable_hostname_resolution() -> bool {
+        true
+    }
+    pub fn hostname_resolve_timeout() -> Duration {
+        Duration::from_millis(100)
     }
 }

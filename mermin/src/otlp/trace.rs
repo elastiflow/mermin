@@ -60,6 +60,13 @@ pub trait Traceable {
     /// OpenTelemetry will generate a new random trace ID.
     fn trace_id(&self) -> Option<TraceId>;
 
+    /// Returns the OpenTelemetry span kind for this record.
+    ///
+    /// The span kind indicates the role of the span in the trace (e.g., Client, Server, Internal).
+    /// For network flows, this is determined by direction inference based on listening ports,
+    /// TCP handshake patterns, and port number heuristics.
+    fn span_kind(&self) -> SpanKind;
+
     /// Populates a pre-configured `Span` with the record's specific attributes.
     ///
     /// This is the core method where the implementing type is responsible for mapping
@@ -119,13 +126,13 @@ impl TraceableExporter for TraceExporterAdapter {
 
             tracer
                 .span_builder(name.clone())
-                .with_kind(SpanKind::Internal)
+                .with_kind(traceable.span_kind())
                 .with_start_time(traceable.start_time())
                 .start_with_context(&tracer, &parent_cx)
         } else {
             tracer
                 .span_builder(name.clone())
-                .with_kind(SpanKind::Internal)
+                .with_kind(traceable.span_kind())
                 .with_start_time(traceable.start_time())
                 .start(&tracer)
         };

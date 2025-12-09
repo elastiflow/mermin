@@ -98,8 +98,8 @@ A Flow Trace includes:
 
 Mermin preserves flow state across pod restarts through eBPF map pinning, ensuring continuous visibility without data loss:
 
-* **Map Pinning**: `FLOW_STATS_MAP` and `FLOW_EVENTS` are pinned to `/sys/fs/bpf/` when writable (requires `/sys/fs/bpf` hostPath mount)
-* **Schema Versioning**: Maps use versioned paths (e.g., `mermin_flow_stats_map_v1`) to prevent incompatible format reuse across upgrades
+* **Map Pinning**: `FLOW_STATS` and `FLOW_EVENTS` are pinned to `/sys/fs/bpf/` when writable (requires `/sys/fs/bpf` hostPath mount)
+* **Schema Versioning**: Maps use versioned directory paths (e.g., `/sys/fs/bpf/mermin_v1/`) to prevent incompatible format reuse across upgrades
 * **State Continuity**: Flow statistics persist across mermin restarts, eliminating visibility gaps during rolling updates
 * **Format Validation**: Pinned maps are reused only if schema version and format match current version
 * **Graceful Degradation**: If pinning fails, mermin continues with unpinned maps (logged as warning)

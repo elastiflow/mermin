@@ -68,39 +68,45 @@ The following symbols are used in the "Required" column to indicate [OpenTelemet
 
 ### L2-L4 Attributes
 
-| Proposed Field Name           | Data Type  | Description                                                                             | Notes / Decisions                                                      | Std OTel | Required |
-|:------------------------------|:-----------|:----------------------------------------------------------------------------------------|:-----------------------------------------------------------------------|:---------|:---------|
-| `source.address`              | `string`   | Source IP address.                                                                      |                                                                        | ✓        | ✓        |
-| `source.port`                 | `long`     | Source port number.                                                                     |                                                                        | ✓        | ✓        |
-| `destination.address`         | `string`   | Destination IP address.                                                                 |                                                                        | ✓        | ✓        |
-| `destination.port`            | `long`     | Destination port number.                                                                |                                                                        | ✓        | ✓        |
-| `network.transport`           | `string`   | The transport protocol of the flow (e.g., `tcp`, `udp`).                                | Lowercase IANA protocol name string.                                   | ✓        | ✓        |
-| `network.type`                | `string`   | The network protocol type (EtherType) of the flow (e.g., `ipv4`, `ipv6`).               |                                                                        | ✓        | ✓        |
-| `network.interface.index`     | `long`     | The index value of the network interface where the flow was observed.                   |                                                                        | ✓        | ~        |
-| `network.interface.name`      | `string`   | The name of the network interface where the flow was observed.                          |                                                                        | ✓        | ~        |
-| `network.interface.mac`       | `string`   | Source MAC address.                                                                     | Lowercased, 6 hexidecimal values separated by colons.                  |          | ~        |
-| `flow.ip.dscp.id`             | `long`     | Differentiated Services Code Point (DSCP) value from the IP header (forward direction). | First packet per direction per export interval. Reset between exports. |          | ~        |
-| `flow.ip.dscp.name`           | `string`   | Lowercase DSCP standard name (forward direction).                                       | First packet per direction per export interval. Reset between exports. |          | ~        |
-| `flow.ip.ecn.id`              | `long`     | Explicit Congestion Notification (ECN) value from the IP header (forward direction).    | First packet per direction per export interval. Reset between exports. |          | ~        |
-| `flow.ip.ecn.name`            | `string`   | Lowercase ECN standard name (forward direction).                                        | First packet per direction per export interval. Reset between exports. |          | ~        |
-| `flow.ip.ttl`                 | `long`     | Time to Live (IPv4) or Hop Limit (IPv6) value (forward direction).                      | First packet per direction per export interval. Reset between exports. |          | ~        |
-| `flow.ip.flow_label`          | `long`     | Flow Label from the IPv6 header (forward direction).                                    | First packet per direction per export interval. Reset between exports. |          | ~        |
-| `flow.reverse.ip.dscp.id`     | `long`     | Differentiated Services Code Point (DSCP) value from the IP header (reverse direction). | First packet per direction per export interval. Reset between exports. |          | ~        |
-| `flow.reverse.ip.dscp.name`   | `string`   | Lowercase DSCP standard name (reverse direction).                                       | First packet per direction per export interval. Reset between exports. |          | ~        |
-| `flow.reverse.ip.ecn.id`      | `long`     | Explicit Congestion Notification (ECN) value from the IP header (reverse direction).    | First packet per direction per export interval. Reset between exports. |          | ~        |
-| `flow.reverse.ip.ecn.name`    | `string`   | Lowercase ECN standard name (reverse direction).                                        | First packet per direction per export interval. Reset between exports. |          | ~        |
-| `flow.reverse.ip.ttl`         | `long`     | Time to Live (IPv4) or Hop Limit (IPv6) value (reverse direction).                      | First packet per direction per export interval. Reset between exports. |          | ~        |
-| `flow.reverse.ip.flow_label`  | `long`     | Flow Label from the IPv6 header (reverse direction).                                    | First packet per direction per export interval. Reset between exports. |          | ~        |
-| `flow.icmp.type.id`           | `long`     | ICMP message type id.                                                                   | Based on IANA standard names.                                          |          | ~        |
-| `flow.icmp.type.name`         | `string`   | Lowercase ICMP message type name.                                                       | Based on IANA standard names.                                          |          | ~        |
-| `flow.icmp.code.id`           | `long`     | ICMP message code id.                                                                   | Based on IANA standard names.                                          |          | ~        |
-| `flow.icmp.code.name`         | `string`   | ICMP message code name.                                                                 | Based on IANA standard names.                                          |          | ~        |
-| `flow.reverse.icmp.type.id`   | `long`     | ICMP message type id (reverse direction).                                               | First packet per direction per export interval. Reset between exports. |          | ~        |
-| `flow.reverse.icmp.type.name` | `string`   | Lowercase ICMP message type name (reverse direction).                                   | First packet per direction per export interval. Reset between exports. |          | ~        |
-| `flow.reverse.icmp.code.id`   | `long`     | ICMP message code id (reverse direction).                                               | First packet per direction per export interval. Reset between exports. |          | ~        |
-| `flow.reverse.icmp.code.name` | `string`   | ICMP message code name (reverse direction).                                             | First packet per direction per export interval. Reset between exports. |          | ~        |
-| `flow.tcp.flags.bits`         | `long`     | The integer representation of all TCP flags seen during the observation window.         | Accumulated across entire flow lifetime (never reset).                 |          | ~        |
-| `flow.tcp.flags.tags`         | `string[]` | An array of TCP flag names (e.g., `["SYN", "ACK"]`) for all flags set.                  | Accumulated across entire flow lifetime (never reset).                 |          | ~        |
+| Proposed Field Name           | Data Type  | Description                                                                             | Notes / Decisions                                                      | Std OTel | Required             |
+|:------------------------------|:-----------|:----------------------------------------------------------------------------------------|:-----------------------------------------------------------------------|:---------|:---------------------|
+| `source.address`              | `string`   | Source IP address.                                                                      |                                                                        | ✓        | ✓                    |
+| `source.port`                 | `long`     | Source port number.                                                                     |                                                                        | ✓        | ✓                    |
+| `destination.address`         | `string`   | Destination IP address.                                                                 |                                                                        | ✓        | ✓                    |
+| `destination.port`            | `long`     | Destination port number.                                                                |                                                                        | ✓        | ✓                    |
+| `client.address`              | `string`   | Client IP address or hostname.                                                          | Hostname if resolution enabled, otherwise IP. Complements source/dest. | ✓        | ? CLIENT/SERVER span |
+| `client.port`                 | `long`     | Client port number.                                                                     | Complements source/dest port.                                          | ✓        | ? CLIENT/SERVER span |
+| `server.address`              | `string`   | Server IP address or hostname.                                                          | Hostname if resolution enabled, otherwise IP. Complements source/dest. | ✓        | ? CLIENT/SERVER span |
+| `server.port`                 | `long`     | Server port number.                                                                     | Complements source/dest port.                                          | ✓        | ? CLIENT/SERVER span |
+| `network.transport`           | `string`   | The transport protocol of the flow (e.g., `tcp`, `udp`).                                | Lowercase IANA protocol name string.                                   | ✓        | ✓                    |
+| `network.type`                | `string`   | The network protocol type (EtherType) of the flow (e.g., `ipv4`, `ipv6`).               |                                                                        | ✓        | ✓                    |
+| `network.interface.index`     | `long`     | The index value of the network interface where the flow was observed.                   |                                                                        | ✓        | ~                    |
+| `network.interface.name`      | `string`   | The name of the network interface where the flow was observed.                          |                                                                        | ✓        | ~                    |
+| `network.interface.mac`       | `string`   | Source MAC address.                                                                     | Lowercased, 6 hexidecimal values separated by colons.                  |          | ~                    |
+| `flow.ip.dscp.id`             | `long`     | Differentiated Services Code Point (DSCP) value from the IP header (forward direction). | First packet per direction per export interval. Reset between exports. |          | ~                    |
+| `flow.ip.dscp.name`           | `string`   | Lowercase DSCP standard name (forward direction).                                       | First packet per direction per export interval. Reset between exports. |          | ~                    |
+| `flow.ip.ecn.id`              | `long`     | Explicit Congestion Notification (ECN) value from the IP header (forward direction).    | First packet per direction per export interval. Reset between exports. |          | ~                    |
+| `flow.ip.ecn.name`            | `string`   | Lowercase ECN standard name (forward direction).                                        | First packet per direction per export interval. Reset between exports. |          | ~                    |
+| `flow.ip.ttl`                 | `long`     | Time to Live (IPv4) or Hop Limit (IPv6) value (forward direction).                      | First packet per direction per export interval. Reset between exports. |          | ~                    |
+| `flow.ip.flow_label`          | `long`     | Flow Label from the IPv6 header (forward direction).                                    | First packet per direction per export interval. Reset between exports. |          | ~                    |
+| `flow.reverse.ip.dscp.id`     | `long`     | Differentiated Services Code Point (DSCP) value from the IP header (reverse direction). | First packet per direction per export interval. Reset between exports. |          | ~                    |
+| `flow.reverse.ip.dscp.name`   | `string`   | Lowercase DSCP standard name (reverse direction).                                       | First packet per direction per export interval. Reset between exports. |          | ~                    |
+| `flow.reverse.ip.ecn.id`      | `long`     | Explicit Congestion Notification (ECN) value from the IP header (reverse direction).    | First packet per direction per export interval. Reset between exports. |          | ~                    |
+| `flow.reverse.ip.ecn.name`    | `string`   | Lowercase ECN standard name (reverse direction).                                        | First packet per direction per export interval. Reset between exports. |          | ~                    |
+| `flow.reverse.ip.ttl`         | `long`     | Time to Live (IPv4) or Hop Limit (IPv6) value (reverse direction).                      | First packet per direction per export interval. Reset between exports. |          | ~                    |
+| `flow.reverse.ip.flow_label`  | `long`     | Flow Label from the IPv6 header (reverse direction).                                    | First packet per direction per export interval. Reset between exports. |          | ~                    |
+| `flow.icmp.type.id`           | `long`     | ICMP message type id.                                                                   | Based on IANA standard names.                                          |          | ~                    |
+| `flow.icmp.type.name`         | `string`   | Lowercase ICMP message type name.                                                       | Based on IANA standard names.                                          |          | ~                    |
+| `flow.icmp.code.id`           | `long`     | ICMP message code id.                                                                   | Based on IANA standard names.                                          |          | ~                    |
+| `flow.icmp.code.name`         | `string`   | ICMP message code name.                                                                 | Based on IANA standard names.                                          |          | ~                    |
+| `flow.reverse.icmp.type.id`   | `long`     | ICMP message type id (reverse direction).                                               | First packet per direction per export interval. Reset between exports. |          | ~                    |
+| `flow.reverse.icmp.type.name` | `string`   | Lowercase ICMP message type name (reverse direction).                                   | First packet per direction per export interval. Reset between exports. |          | ~                    |
+| `flow.reverse.icmp.code.id`   | `long`     | ICMP message code id (reverse direction).                                               | First packet per direction per export interval. Reset between exports. |          | ~                    |
+| `flow.reverse.icmp.code.name` | `string`   | ICMP message code name (reverse direction).                                             | First packet per direction per export interval. Reset between exports. |          | ~                    |
+| `flow.tcp.flags.bits`         | `long`     | The integer representation of all TCP flags seen during the observation window.         | Accumulated across entire flow lifetime (never reset).                 |          | ~                    |
+| `flow.tcp.flags.tags`         | `string[]` | An array of TCP flag names (e.g., `["SYN", "ACK"]`) for all flags set.                  | Accumulated across entire flow lifetime (never reset).                 |          | ~                    |
+| `flow.reverse.tcp.flags.bits` | `long`     | The integer representation of all TCP flags seen in reverse direction.                  | Accumulated across entire flow lifetime (never reset).                 |          | ~                    |
+| `flow.reverse.tcp.flags.tags` | `string[]` | An array of TCP flag names for reverse direction (e.g., `["SYN", "ACK"]`).              | Accumulated across entire flow lifetime (never reset).                 |          | ~                    |
 
 ### Flow Metrics
 
@@ -223,12 +229,11 @@ Below is an example of what a resulting flow span might look like in OTLP JSON f
 ```json
 {
   "name": "flow_ipv4_tcp",
-  "kind": "SPAN_KIND_INTERNAL",
+  "kind": "SPAN_KIND_CLIENT",
   "startTimeUnixNano": "1727149620000000000",
   "endTimeUnixNano": "1727149680000000000",
   "attributes": [
     { "key": "flow.community_id", "value": { "stringValue": "1:LQU9qZlK+B+2dM2I2n1kI/M5a/g=" } },
-    { "key": "flow.direction", "value": { "stringValue": "initiator" } },
     { "key": "flow.bytes.delta", "value": { "intValue": "1024" } },
     { "key": "flow.packets.delta", "value": { "intValue": "10" } },
     { "key": "source.address", "value": { "stringValue": "10.1.1.5" } },
@@ -238,8 +243,22 @@ Below is an example of what a resulting flow span might look like in OTLP JSON f
     { "key": "destination.address", "value": { "stringValue": "10.1.2.10" } },
     { "key": "destination.port", "value": { "intValue": "80" } },
     { "key": "destination.k8s.pod.name", "value": { "stringValue": "backend-xyz" } },
+    { "key": "client.address", "value": { "stringValue": "frontend-abcde.production.svc.cluster.local" } },
+    { "key": "client.port", "value": { "intValue": "54211" } },
+    { "key": "server.address", "value": { "stringValue": "backend-xyz.production.svc.cluster.local" } },
+    { "key": "server.port", "value": { "intValue": "80" } },
     { "key": "network.transport", "value": { "stringValue": "tcp" } },
     { "key": "network.type", "value": { "stringValue": "ipv4" } },
-    { "key": "flow.tcp.svc.latency", "value": { "intValue": "500" } }
+    { "key": "flow.tcp.flags.bits", "value": { "intValue": "18" } },
+    { "key": "flow.tcp.flags.tags", "value": { "arrayValue": { "values": [
+      { "stringValue": "SYN" },
+      { "stringValue": "ACK" }
+    ]}}},
+    { "key": "flow.reverse.tcp.flags.bits", "value": { "intValue": "18" } },
+    { "key": "flow.reverse.tcp.flags.tags", "value": { "arrayValue": { "values": [
+      { "stringValue": "SYN" },
+      { "stringValue": "ACK" }
+    ]}}},
+    { "key": "flow.tcp.rndtrip.latency", "value": { "intValue": "2500000" } }
   ]
 }

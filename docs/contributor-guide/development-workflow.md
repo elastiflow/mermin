@@ -8,7 +8,7 @@ Ensure you have the following installed:
 
 1. **Stable Rust Toolchain**: `rustup toolchain install stable`
 2. **Nightly Rust Toolchain**: `rustup toolchain install nightly --component rust-src`
-3. **bpf-linker**: `cargo install bpf-linker` (use `--no-default-features` on macOS)
+3. **bpf-linker**: `cargo install bpf-linker` (use `--no-default-features` on macOS — optionally specify your llvm version with `--features llvm-21`)
 4. (if cross-compiling) **rustup target**: `rustup target add ${ARCH}-unknown-linux-musl`
 5. (if cross-compiling) **LLVM**: (e.g.) `brew install llvm` (on macOS)
 6. (if cross-compiling) **C toolchain**: (e.g.) [`brew install filosottile/musl-cross/musl-cross`](https://github.com/FiloSottile/homebrew-musl-cross) (on macOS)
@@ -287,6 +287,43 @@ CC=${ARCH}-linux-musl-gcc cargo build -p mermin --release \
 
 The final binary will be located at `target/${ARCH}-unknown-linux-musl/release/mermin` and can be copied to a Linux
 server to be executed.
+
+### Setting Up rust-analyzer on macOS
+
+Since Mermin is a Linux eBPF project, rust-analyzer needs to be configured to check code for the Linux target instead of macOS. Without this configuration, you'll encounter proc-macro errors and type mismatches in Cursor/VS Code.
+
+#### Configure VS Code/Cursor settings
+
+Create or update `.vscode/settings.json` in the project root with the following configuration (adjust `ARCH` to match your system):
+
+```json
+{
+    "rust-analyzer.cargo.target": "aarch64-unknown-linux-musl",
+    "rust-analyzer.cargo.extraEnv": {
+        "CC": "aarch64-linux-musl-gcc",
+        "ARCH": "aarch64"
+    },
+    "rust-analyzer.cargo.extraArgs": [
+        "--config=target.aarch64-unknown-linux-musl.linker=\"aarch64-linux-musl-gcc\""
+    ],
+    "rust-analyzer.check.command": "check",
+    "rust-analyzer.check.extraArgs": [
+        "--target=aarch64-unknown-linux-musl",
+        "--config=target.aarch64-unknown-linux-musl.linker=\"aarch64-linux-musl-gcc\""
+    ],
+    "rust-analyzer.check.extraEnv": {
+        "CC": "aarch64-linux-musl-gcc",
+        "ARCH": "aarch64"
+    },
+    "rust-analyzer.linkedProjects": [
+        "./Cargo.toml"
+    ],
+    "rust-analyzer.diagnostics.enable": true,
+    "rust-analyzer.diagnostics.experimental.enable": false
+}
+```
+
+> **Note**: Replace `aarch64` with `x86_64` throughout the configuration if you're on an Intel Mac.
 
 ## Next Steps
 

@@ -4,6 +4,7 @@ mod health;
 mod iface;
 mod ip;
 mod k8s;
+mod listening_ports;
 mod metrics;
 mod otlp;
 mod packet;
@@ -319,7 +320,7 @@ async fn run() -> Result<()> {
     }
     let mut ebpf = EbpfLoader::new()
         .map_pin_path(&map_pin_path)
-        .set_max_entries("FLOW_STATS_MAP", conf.pipeline.ebpf_max_flows)
+        .set_max_entries("FLOW_STATS", conf.pipeline.ebpf_max_flows)
         .load(aya::include_bytes_aligned!(concat!(
             env!("OUT_DIR"),
             "/mermin"
@@ -421,10 +422,10 @@ async fn run() -> Result<()> {
     // Maps are pinned to /sys/fs/bpf/mermin_v{version}/<map_name> and reused across restarts
     let flow_stats_map = Arc::new(tokio::sync::Mutex::new(
         aya::maps::HashMap::try_from(
-            ebpf.take_map("FLOW_STATS_MAP")
-                .ok_or_else(|| MerminError::internal("FLOW_STATS_MAP not found in eBPF object"))?,
+            ebpf.take_map("FLOW_STATS")
+                .ok_or_else(|| MerminError::internal("FLOW_STATS not found in eBPF object"))?,
         )
-        .map_err(|e| MerminError::internal(format!("failed to convert FLOW_STATS_MAP: {e}")))?,
+        .map_err(|e| MerminError::internal(format!("failed to convert FLOW_STATS: {e}")))?,
     ));
     let flow_events_ringbuf = aya::maps::RingBuf::try_from(
         ebpf.take_map("FLOW_EVENTS")
@@ -433,6 +434,13 @@ async fn run() -> Result<()> {
     .map_err(|e| {
         MerminError::internal(format!("failed to convert FLOW_EVENTS ring buffer: {e}"))
     })?;
+    let listening_ports_map = Arc::new(tokio::sync::Mutex::new(
+        aya::maps::HashMap::try_from(
+            ebpf.take_map("LISTENING_PORTS")
+                .ok_or_else(|| MerminError::internal("LISTENING_PORTS not found in eBPF object"))?,
+        )
+        .map_err(|e| MerminError::internal(format!("failed to convert LISTENING_PORTS: {e}")))?,
+    ));
 
     info!(
         event.name = "ebpf.maps_ready",
@@ -534,6 +542,18 @@ async fn run() -> Result<()> {
     metrics::userspace::set_channel_size(ChannelName::ExporterInput, 0);
     metrics::userspace::set_channel_size(ChannelName::DecoratorInput, 0);
 
+    let listening_port_scanner =
+        listening_ports::ListeningPortScanner::new(Arc::clone(&listening_ports_map));
+    let scanned_ports = listening_port_scanner
+        .scan_and_populate()
+        .await
+        .map_err(|e| MerminError::internal(format!("failed to scan listening ports: {e}")))?;
+    info!(
+        event.name = "listening_ports.scan_complete",
+        total_ports = scanned_ports,
+        "populated eBPF map with existing listening ports"
+    );
+
     let flow_span_producer = FlowSpanProducer::new(
         conf.clone().span,
         conf.pipeline.ring_buffer_capacity,
@@ -542,6 +562,7 @@ async fn run() -> Result<()> {
         flow_stats_map,
         flow_events_ringbuf,
         flow_span_tx,
+        listening_ports_map,
         &conf,
     )?;
     let flow_span_components = flow_span_producer.components();
