@@ -1390,13 +1390,22 @@ impl IfaceController {
         Ok(resolved)
     }
 
-    fn matches_pattern(name: &str, patterns: &[String]) -> bool {
+    /// Check if a name matches any of the given patterns.
+    ///
+    /// Returns `true` if any pattern matches the name, `false` otherwise.
+    /// Empty patterns list returns `false`.
+    pub fn matches_pattern(name: &str, patterns: &[String]) -> bool {
         patterns
             .iter()
             .any(|pattern| Self::glob_matches(pattern, name))
     }
 
-    fn glob_matches(pattern: &str, text: &str) -> bool {
+    /// Match a text against a glob pattern.
+    ///
+    /// Returns `true` if the pattern matches the text, `false` otherwise.
+    /// Patterns longer than 256 characters are rejected.
+    /// Invalid glob patterns fall back to literal string matching.
+    pub fn glob_matches(pattern: &str, text: &str) -> bool {
         const MAX_PATTERN_LEN: usize = 256;
 
         if pattern.len() > MAX_PATTERN_LEN {

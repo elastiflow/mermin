@@ -28,7 +28,6 @@ use aya::{
 use clap::Parser;
 use dashmap::DashMap;
 use error::{MerminError, Result};
-use globset::Glob;
 use pnet::datalink;
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal as unix_signal};
@@ -944,34 +943,6 @@ impl InterfaceTestResult {
     }
 }
 
-/// Pattern matching helper using the same logic as IfaceController
-fn glob_matches(pattern: &str, text: &str) -> bool {
-    const MAX_PATTERN_LEN: usize = 256;
-
-    if pattern.len() > MAX_PATTERN_LEN {
-        warn!(
-            event.name = "test_bpf.pattern_too_long",
-            pattern_length = pattern.len(),
-            "pattern exceeds maximum length, rejecting"
-        );
-        return false;
-    }
-
-    match Glob::new(pattern) {
-        Ok(glob) => glob.compile_matcher().is_match(text),
-        Err(e) => {
-            warn!(
-                event.name = "test_bpf.invalid_pattern",
-                pattern = %pattern,
-                error = %e,
-                "invalid glob pattern, treating as literal match"
-            );
-            // Fall back to literal match if pattern is invalid
-            pattern == text
-        }
-    }
-}
-
 async fn wait_for_shutdown_signal() -> Result<ShutdownSignal> {
     #[cfg(unix)]
     {
@@ -997,14 +968,14 @@ fn matches_pattern(name: &str, patterns: &[String]) -> bool {
     if patterns.is_empty() {
         return true; // No patterns means match all
     }
-    patterns.iter().any(|pattern| glob_matches(pattern, name))
+    IfaceController::matches_pattern(name, patterns)
 }
 
 /// Check if interface matches any skip pattern
 fn matches_skip_pattern(name: &str, skip_patterns: &[String]) -> bool {
     skip_patterns
         .iter()
-        .any(|pattern| glob_matches(pattern, name))
+        .any(|pattern| IfaceController::glob_matches(pattern, name))
 }
 
 /// Handle test-bpf subcommand: test BPF filesystem writeability and attach/detach operations
