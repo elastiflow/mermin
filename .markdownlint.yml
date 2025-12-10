@@ -1,4 +1,7 @@
 MD013:
-  # Number of characters
-  line_length: 300
-MD033: false # Expandable blocks are inline HTML
+  line_length: 120
+MD033:
+  allowed_elements: [
+    "b",
+    "summary",
+  ]
