@@ -387,6 +387,7 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
                 .load(l4_offset + tcp::TCP_FLAGS_OFFSET)
                 .map_err(|_| Error::OutOfBounds)?;
             stats.tcp_flags |= current_flags;
+
             let new_state = update_tcp_state(stats.tcp_state, current_flags, is_forward);
             stats.tcp_state = new_state;
 
@@ -419,12 +420,8 @@ fn update_tcp_state(current_state: u8, flags: u8, is_forward: bool) -> u8 {
             }
         }
         tcp::TCP_STATE_SYN_SENT => {
-            if syn && ack {
+            if syn && (ack || !is_forward) {
                 return tcp::TCP_STATE_SYN_RECEIVED;
-            } else if syn && !ack {
-                if !is_forward {
-                    return tcp::TCP_STATE_SYN_RECEIVED;
-                }
             }
         }
         tcp::TCP_STATE_SYN_RECEIVED => {
@@ -1024,9 +1021,6 @@ mod tests {
         pkt
     }
 
-    const FORWARD: bool = true;
-    const REVERSE: bool = false;
-
     #[test]
     fn test_parse_flow_key_ipv4_tcp() {
         let pkt = build_ipv4_tcp_packet();
@@ -1379,9 +1373,11 @@ mod tests {
         assert_eq!(result.unwrap_err(), Error::UnsupportedProtocol);
     }
 
+    const FORWARD: bool = true;
+    const REVERSE: bool = false;
+
     #[test]
     fn test_rst_resets_connection() {
-        // RST should force CLOSED from any state
         let states = [
             tcp::TCP_STATE_SYN_SENT,
             tcp::TCP_STATE_ESTABLISHED,
@@ -1424,11 +1420,7 @@ mod tests {
     #[test]
     fn test_simultaneous_open() {
         assert_eq!(
-            update_tcp_state(
-                tcp::TCP_STATE_SYN_SENT,
-                tcp::TCP_FLAG_SYN, // No ACK
-                REVERSE
-            ),
+            update_tcp_state(tcp::TCP_STATE_SYN_SENT, tcp::TCP_FLAG_SYN, REVERSE),
             tcp::TCP_STATE_SYN_RECEIVED
         );
     }

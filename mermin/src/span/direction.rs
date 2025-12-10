@@ -491,6 +491,7 @@ mod tests {
             reverse_ip_ecn: 0,
             reverse_ip_ttl: 0,
             tcp_flags: 0,
+            tcp_state: 0,
             forward_tcp_flags: 0,
             reverse_tcp_flags: 0,
             icmp_type: 0,
