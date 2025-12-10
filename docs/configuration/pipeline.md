@@ -86,7 +86,6 @@ pipeline {
 **Type:** Float **Default:** `2.0`
 
 The multiplier for the flow span channel size, relative to the ring buffer capacity.
-<!-- TODO(lgo-421): Is it true? -->
 The channel is used in the "Flow Producer" stage, please refer to the [architecture](../getting-started/architecture.md#components) documentation for more information.
 
 **Example:**
@@ -102,7 +101,6 @@ pipeline {
 **Type:** Float **Default:** `4.0`
 
 The multiplier for the decorated span channel size, relative to the ring buffer capacity.
-<!-- TODO(lgo-421): Is it true? -->
 The channel is used in the "K8s Decorator" stage, please refer to the [architecture](../getting-started/architecture.md#components) documentation for more information.
 
 **Example:**
