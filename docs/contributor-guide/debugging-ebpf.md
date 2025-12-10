@@ -183,6 +183,7 @@ cat /proc/sys/kernel/bpf_jit_harden
 
 You can integrate bpftool analysis into your development process:
 
+<!-- TODO(GA Documentation): Following commands needs to be fixed, not working currently-->
 ```shell
 # Quick instruction count check during development
 docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "bpftool prog list | grep mermin && echo 'Instruction counts:' && for id in \$(bpftool prog list | grep mermin | awk '{print \$1}' | tr -d ':'); do echo -n \"Program \$id: \"; bpftool prog dump xlated id \$id | grep -E '^[0-9]+:' | wc -l; done"
@@ -315,6 +316,7 @@ When you see high stack usage:
 
 ### Advanced Analysis Commands
 
+<!-- TODO(GA Documentation): Following commands needs to be fixed, not working currently-->
 For deeper investigation:
 
 ```shell
