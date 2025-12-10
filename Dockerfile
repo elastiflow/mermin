@@ -5,7 +5,7 @@ ARG APP=mermin
 
 
 # ---- Build Stage ----
-FROM rust:1.88.0-bookworm AS base
+FROM rust:1.88.0-trixie AS base
 
 # Switch to root to install system dependencies
 USER root
@@ -18,7 +18,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     lsb-release \
     wget \
-    software-properties-common \
     gnupg \
     # Jetbrains specific dependencies: https://www.jetbrains.com/help/idea/prerequisites-for-dev-containers.html#remote_container
     default-jdk \
@@ -30,6 +29,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxi6 \
     libfreetype6 \
     procps \
+    bpftool \
+    iproute2 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -69,9 +70,6 @@ RUN bpftool --version
 # Also add LLVM's tools (like llvm-config) to the PATH
 ENV LLVM_SYS_200_PREFIX=/usr/lib/llvm-20
 ENV PATH="/usr/lib/llvm-20/bin:${PATH}"
-
-# Switch back to the non-root poseidon user, which is the default user in the base image.
-USER poseidon
 
 # Install the core Aya build tools
 # hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
@@ -113,7 +111,7 @@ RUN cargo build --release
 # ---- Runtime Stage ----
 # Use a distroless base image for the final container without shell support
 # hadolint ignore=DL3006 # gcr.io/distroless/cc-debian12 don't have tags
-FROM gcr.io/distroless/cc-debian12 AS runner
+FROM gcr.io/distroless/cc-debian13 AS runner
 ARG APP_ROOT APP
 
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
@@ -121,9 +119,15 @@ ENTRYPOINT ["/usr/bin/mermin"]
 
 # ---- Runtime Stage ----
 # Use a distroless base image for the final container with shell support
-FROM gcr.io/distroless/cc-debian12:debug AS runner-debug
+FROM debian:13.2-slim AS runner-debug
 ARG APP_ROOT APP
 
 COPY --from=builder ${APP_ROOT}/target/release/${APP} /usr/bin/${APP}
-COPY --from=builder /usr/bin/bpftool /usr/bin/bpftool
+# Ignoring package versions warning, debug image not intended for production usage but for debug purposes
+# hadolint ignore=DL3008
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  bpftool \
+  iproute2 \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
 ENTRYPOINT ["/usr/bin/mermin"]

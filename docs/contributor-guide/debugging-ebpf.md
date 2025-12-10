@@ -244,7 +244,7 @@ The project includes three analysis scripts in the `scripts/` directory:
 
 ```shell
 # Quick health check (30 seconds)
-./scripts/check_stack_usage.sh
+./mermin/tests/e2e/common/check_stack_usage.sh
 
 # Call chain overview (45 seconds)
 ./scripts/analyze_call_chain.sh
@@ -336,9 +336,9 @@ docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:la
 - name: Check eBPF Stack Usage
   run: |
     docker build -t mermin-builder:latest --target builder .
-    ./scripts/check_stack_usage.sh
+    ./mermin/tests/e2e/common/check_stack_usage.sh
     # Exit with error if stack usage is too high
-    MAX_STACK=$(./scripts/check_stack_usage.sh | grep -oE '[0-9]+ bytes' | grep -oE '[0-9]+' | head -1)
+    MAX_STACK=$(./mermin/tests/e2e/common/check_stack_usage.sh | grep -oE '[0-9]+ bytes' | grep -oE '[0-9]+' | head -1)
     if [ "$MAX_STACK" -gt 320 ]; then exit 1; fi
 ```
 
