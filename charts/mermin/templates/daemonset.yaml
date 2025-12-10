@@ -84,6 +84,10 @@ spec:
                 fieldRef:
                   apiVersion: v1
                   fieldPath: status.podIP
+            - name: POD_NAMESPACE
+              value: {{ .Release.Namespace }}
+            - name: POD_DS
+              value: {{ include "mermin.fullname" . }}
             - name: MERMIN_PLATFORM
               value: "kubernetes"
           {{- with .Values.env }}
