@@ -56,7 +56,7 @@ pipeline {
 
 **Type:** String (duration) **Default:** `"5s"`
 
-Polling interval for flow workers. Controls how frequently workers polls the flow data from the `FLOW_STATS` map (refer the [architecture](../getting-started/architecture.md#ebpf-programs) doc for details).
+The polling interval for flow workers. This controls how frequently workers poll the flow data from the `FLOW_STATS` map. (Refer to the [architecture](../getting-started/architecture.md#ebpf-programs) documentation for more information.)
 Reducing the interval may increase the CPU usage.
 
 **Example:**
