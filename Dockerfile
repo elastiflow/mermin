@@ -7,7 +7,8 @@ ARG APP=mermin
 # ---- Build Stage ----
 FROM rust:1.88.0-trixie AS base
 
-# Switch to root to install system dependencies
+# Since Mermin needs root to be ran, switching to non-root in in the base/builder stages does not improve the security.
+# hadolint ignore=DL3002 # root is needed due to eBPF
 USER root
 
 # Install Dev Container essentials
