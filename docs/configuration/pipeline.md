@@ -85,7 +85,7 @@ pipeline {
 
 **Type:** Float **Default:** `2.0`
 
-Multiplier for the flow span channel size, relative to the ring buffer capacity.
+The multiplier for the flow span channel size, relative to the ring buffer capacity.
 <!-- TODO(lgo-421): Is it true? -->
 The channel is used in the "Flow Producer" stage, please refer the [architecture](../getting-started/architecture.md#components) for more details.
 
