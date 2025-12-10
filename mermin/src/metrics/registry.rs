@@ -51,11 +51,6 @@ lazy_static! {
         &["map"]
     ).expect("failed to create ebpf_map_utilization_ratio metric");
 
-    pub static ref EBPF_FLOW_RING_BUFFER_DROPS_TOTAL: IntCounter = IntCounter::with_opts(
-        Opts::new("ebpf_ring_buffer_drops_total", "Total number of ring buffer events dropped due to buffer full")
-            .namespace("mermin")
-    ).expect("failed to create ebpf_ring_buffer_drops_total metric");
-
     pub static ref EBPF_ORPHANS_CLEANED_TOTAL: IntCounter = IntCounter::with_opts(
         Opts::new("ebpf_orphans_cleaned_total", "Total number of orphaned eBPF map entries cleaned up")
             .namespace("mermin")
@@ -486,7 +481,6 @@ pub fn init_registry(debug_enabled: bool) -> Result<(), prometheus::Error> {
     register_standard!(EBPF_MAP_ENTRIES);
     register_standard!(EBPF_MAP_CAPACITY);
     register_standard!(EBPF_MAP_UTILIZATION);
-    register_standard!(EBPF_FLOW_RING_BUFFER_DROPS_TOTAL);
     register_standard!(EBPF_ORPHANS_CLEANED_TOTAL);
     register_standard!(EBPF_ATTACHMENT_MODE);
     register_standard!(BPF_FS_WRITABLE);
