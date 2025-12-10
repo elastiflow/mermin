@@ -387,6 +387,8 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
                 .load(l4_offset + tcp::TCP_FLAGS_OFFSET)
                 .map_err(|_| Error::OutOfBounds)?;
             stats.tcp_flags |= current_flags;
+            let new_state = update_tcp_state(stats.tcp_state, current_flags, is_forward);
+            stats.tcp_state = new_state;
 
             if is_forward && stats.forward_tcp_flags == 0 {
                 stats.forward_tcp_flags = current_flags;
@@ -397,6 +399,86 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
     }
 
     Ok(TC_ACT_UNSPEC)
+}
+
+#[inline(always)]
+fn update_tcp_state(current_state: u8, flags: u8, is_forward: bool) -> u8 {
+    let syn = tcp::syn_flag(flags);
+    let ack = tcp::ack_flag(flags);
+    let fin = tcp::fin_flag(flags);
+    let rst = tcp::rst_flag(flags);
+
+    if rst {
+        return tcp::TCP_STATE_CLOSED;
+    }
+
+    match current_state {
+        tcp::TCP_STATE_CLOSED => {
+            if syn && !ack {
+                return tcp::TCP_STATE_SYN_SENT;
+            }
+        }
+        tcp::TCP_STATE_SYN_SENT => {
+            if syn && ack {
+                return tcp::TCP_STATE_SYN_RECEIVED;
+            } else if syn && !ack {
+                if !is_forward {
+                    return tcp::TCP_STATE_SYN_RECEIVED;
+                }
+            }
+        }
+        tcp::TCP_STATE_SYN_RECEIVED => {
+            if ack {
+                return tcp::TCP_STATE_ESTABLISHED;
+            }
+        }
+        tcp::TCP_STATE_ESTABLISHED => {
+            if fin {
+                if is_forward {
+                    return tcp::TCP_STATE_FIN_WAIT_1;
+                } else {
+                    return tcp::TCP_STATE_CLOSE_WAIT;
+                }
+            }
+        }
+        tcp::TCP_STATE_FIN_WAIT_1 => {
+            if fin && ack {
+                return tcp::TCP_STATE_TIME_WAIT;
+            }
+            if fin {
+                return tcp::TCP_STATE_CLOSING;
+            }
+            if ack {
+                return tcp::TCP_STATE_FIN_WAIT_2;
+            }
+        }
+        tcp::TCP_STATE_FIN_WAIT_2 => {
+            if fin {
+                return tcp::TCP_STATE_TIME_WAIT;
+            }
+        }
+        tcp::TCP_STATE_CLOSING => {
+            if ack {
+                return tcp::TCP_STATE_TIME_WAIT;
+            }
+        }
+        tcp::TCP_STATE_CLOSE_WAIT => {
+            if fin {
+                return tcp::TCP_STATE_LAST_ACK;
+            }
+        }
+        tcp::TCP_STATE_LAST_ACK => {
+            if ack {
+                return tcp::TCP_STATE_CLOSED;
+            }
+        }
+        tcp::TCP_STATE_TIME_WAIT => {
+            // No-op
+        }
+        _ => {}
+    }
+
+    current_state
 }
 
 /// Parse L2 + L3 + L4 headers to extract flow key (Ethernet, IP, Transport/ICMP)
@@ -796,6 +878,7 @@ mod tests {
             ip_flow_label: 0,
             reverse_ip_flow_label: 0,
             tcp_flags: 0,
+            tcp_state: 0,
             forward_tcp_flags: 0,
             reverse_tcp_flags: 0,
             icmp_type: 0,
@@ -940,6 +1023,9 @@ mod tests {
 
         pkt
     }
+
+    const FORWARD: bool = true;
+    const REVERSE: bool = false;
 
     #[test]
     fn test_parse_flow_key_ipv4_tcp() {
@@ -1291,5 +1377,150 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), Error::UnsupportedProtocol);
+    }
+
+    #[test]
+    fn test_rst_resets_connection() {
+        // RST should force CLOSED from any state
+        let states = [
+            tcp::TCP_STATE_SYN_SENT,
+            tcp::TCP_STATE_ESTABLISHED,
+            tcp::TCP_STATE_FIN_WAIT_1,
+            tcp::TCP_STATE_TIME_WAIT,
+        ];
+
+        for state in states {
+            assert_eq!(
+                update_tcp_state(state, tcp::TCP_FLAG_RST, FORWARD),
+                tcp::TCP_STATE_CLOSED,
+                "State {} did not reset on RST",
+                state
+            );
+        }
+    }
+
+    #[test]
+    fn test_handshake_transitions() {
+        assert_eq!(
+            update_tcp_state(tcp::TCP_STATE_CLOSED, tcp::TCP_FLAG_SYN, FORWARD),
+            tcp::TCP_STATE_SYN_SENT
+        );
+
+        assert_eq!(
+            update_tcp_state(
+                tcp::TCP_STATE_SYN_SENT,
+                tcp::TCP_FLAG_SYN | tcp::TCP_FLAG_ACK,
+                REVERSE
+            ),
+            tcp::TCP_STATE_SYN_RECEIVED
+        );
+
+        assert_eq!(
+            update_tcp_state(tcp::TCP_STATE_SYN_RECEIVED, tcp::TCP_FLAG_ACK, FORWARD),
+            tcp::TCP_STATE_ESTABLISHED
+        );
+    }
+
+    #[test]
+    fn test_simultaneous_open() {
+        assert_eq!(
+            update_tcp_state(
+                tcp::TCP_STATE_SYN_SENT,
+                tcp::TCP_FLAG_SYN, // No ACK
+                REVERSE
+            ),
+            tcp::TCP_STATE_SYN_RECEIVED
+        );
+    }
+
+    #[test]
+    fn test_active_close() {
+        assert_eq!(
+            update_tcp_state(
+                tcp::TCP_STATE_ESTABLISHED,
+                tcp::TCP_FLAG_FIN | tcp::TCP_FLAG_ACK,
+                FORWARD
+            ),
+            tcp::TCP_STATE_FIN_WAIT_1
+        );
+
+        assert_eq!(
+            update_tcp_state(tcp::TCP_STATE_FIN_WAIT_1, tcp::TCP_FLAG_ACK, REVERSE),
+            tcp::TCP_STATE_FIN_WAIT_2
+        );
+
+        assert_eq!(
+            update_tcp_state(
+                tcp::TCP_STATE_FIN_WAIT_2,
+                tcp::TCP_FLAG_FIN | tcp::TCP_FLAG_ACK,
+                REVERSE
+            ),
+            tcp::TCP_STATE_TIME_WAIT
+        );
+    }
+
+    #[test]
+    fn test_passive_close() {
+        assert_eq!(
+            update_tcp_state(
+                tcp::TCP_STATE_ESTABLISHED,
+                tcp::TCP_FLAG_FIN | tcp::TCP_FLAG_ACK,
+                REVERSE
+            ),
+            tcp::TCP_STATE_CLOSE_WAIT
+        );
+
+        assert_eq!(
+            update_tcp_state(
+                tcp::TCP_STATE_CLOSE_WAIT,
+                tcp::TCP_FLAG_FIN | tcp::TCP_FLAG_ACK,
+                FORWARD
+            ),
+            tcp::TCP_STATE_LAST_ACK
+        );
+
+        assert_eq!(
+            update_tcp_state(tcp::TCP_STATE_LAST_ACK, tcp::TCP_FLAG_ACK, REVERSE),
+            tcp::TCP_STATE_CLOSED
+        );
+    }
+
+    #[test]
+    fn test_simultaneous_close() {
+        assert_eq!(
+            update_tcp_state(
+                tcp::TCP_STATE_ESTABLISHED,
+                tcp::TCP_FLAG_FIN | tcp::TCP_FLAG_ACK,
+                FORWARD
+            ),
+            tcp::TCP_STATE_FIN_WAIT_1
+        );
+
+        assert_eq!(
+            update_tcp_state(tcp::TCP_STATE_FIN_WAIT_1, tcp::TCP_FLAG_FIN, REVERSE),
+            tcp::TCP_STATE_CLOSING
+        );
+
+        assert_eq!(
+            update_tcp_state(tcp::TCP_STATE_CLOSING, tcp::TCP_FLAG_ACK, REVERSE),
+            tcp::TCP_STATE_TIME_WAIT
+        );
+    }
+
+    #[test]
+    fn test_noise_ignored() {
+        assert_eq!(
+            update_tcp_state(tcp::TCP_STATE_ESTABLISHED, tcp::TCP_FLAG_ACK, FORWARD),
+            tcp::TCP_STATE_ESTABLISHED
+        );
+
+        assert_eq!(
+            update_tcp_state(
+                tcp::TCP_STATE_ESTABLISHED,
+                tcp::TCP_FLAG_PSH | tcp::TCP_FLAG_ACK,
+                REVERSE
+            ),
+            tcp::TCP_STATE_ESTABLISHED
+        );
     }
 }

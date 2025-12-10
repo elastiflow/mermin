@@ -483,10 +483,9 @@ impl Traceable for FlowSpan {
             self.attributes.flow_reverse_packets_total,
         ));
         // Record optional fields only if they have values
-        // TODO: add this back once we can do client / server detection
-        // if let Some(ref value) = self.attributes.flow_connection_state {
-        //     kvs.push(KeyValue::new("flow.connection_state", value.as_str()));
-        // }
+        if let Some(ref value) = self.attributes.flow_connection_state {
+            kvs.push(KeyValue::new("flow.connection_state", value.as_str()));
+        }
         if let Some(ref value) = self.attributes.flow_end_reason {
             kvs.push(KeyValue::new("flow.end_reason", value.as_str()));
         }

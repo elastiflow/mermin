@@ -225,6 +225,8 @@ pub struct FlowStats {
     pub reverse_ip_ttl: u8,
     /// Accumulated TCP flags (OR of all flags seen)
     pub tcp_flags: u8,
+    /// TCP connection state
+    pub tcp_state: u8,
     /// TCP flags in forward direction only (for handshake analysis)
     pub forward_tcp_flags: u8,
     /// TCP flags in reverse direction only (for handshake analysis)
@@ -286,7 +288,8 @@ impl FlowStats {
     /// #     direction: Direction::Egress, ip_version: IpVersion::V4,
     /// #     protocol: IpProto::Tcp, ip_dscp: 0, ip_ecn: 0, ip_ttl: 0,
     /// #     reverse_ip_dscp: 0, reverse_ip_ecn: 0, reverse_ip_ttl: 0,
-    ///     tcp_flags: FlowStats::TCP_FLAG_SYN | FlowStats::TCP_FLAG_ACK,
+    /// #     tcp_flags: FlowStats::TCP_FLAG_SYN | FlowStats::TCP_FLAG_ACK,
+    /// #     tcp_state: 0,
     /// #     forward_tcp_flags: 0, reverse_tcp_flags: 0,
     /// #     icmp_type: 0, icmp_code: 0, reverse_icmp_type: 0, reverse_icmp_code: 0,
     /// #     forward_metadata_seen: 0, reverse_metadata_seen: 0,
@@ -341,6 +344,62 @@ impl FlowStats {
     #[inline]
     pub fn cwr(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_CWR)
+    }
+
+    /// TCP State
+    pub const TCP_STATE_CLOSED: u8 = 0;
+    pub const TCP_STATE_LISTEN: u8 = 1;
+    pub const TCP_STATE_SYN_SENT: u8 = 2;
+    pub const TCP_STATE_SYN_RECEIVED: u8 = 3;
+    pub const TCP_STATE_ESTABLISHED: u8 = 4;
+    pub const TCP_STATE_FIN_WAIT_1: u8 = 5;
+    pub const TCP_STATE_FIN_WAIT_2: u8 = 6;
+    pub const TCP_STATE_CLOSE_WAIT: u8 = 7;
+    pub const TCP_STATE_CLOSING: u8 = 8;
+    pub const TCP_STATE_LAST_ACK: u8 = 9;
+    pub const TCP_STATE_TIME_WAIT: u8 = 10;
+
+    /// Returns true if the connection is currently fully established.
+    #[inline]
+    pub fn is_established(&self) -> bool {
+        self.tcp_state == Self::TCP_STATE_ESTABLISHED
+    }
+
+    /// Returns true if the connection is in the process of being set up (Handshake).
+    #[inline]
+    pub fn is_handshaking(&self) -> bool {
+        self.tcp_state == Self::TCP_STATE_SYN_SENT || self.tcp_state == Self::TCP_STATE_SYN_RECEIVED
+    }
+
+    /// Returns true if the connection is in the process of tearing down (Closing).
+    #[inline]
+    pub fn is_closing(&self) -> bool {
+        self.tcp_state >= Self::TCP_STATE_FIN_WAIT_1 && self.tcp_state <= Self::TCP_STATE_TIME_WAIT
+    }
+
+    /// Returns true if the connection is fully closed.
+    #[inline]
+    pub fn is_closed(&self) -> bool {
+        self.tcp_state == Self::TCP_STATE_CLOSED
+    }
+
+    /// Returns the human-readable string representation of the current TCP state.
+    #[inline]
+    pub fn state_name(&self) -> &'static str {
+        match self.tcp_state {
+            Self::TCP_STATE_CLOSED => "CLOSED",
+            Self::TCP_STATE_LISTEN => "LISTEN",
+            Self::TCP_STATE_SYN_SENT => "SYN_SENT",
+            Self::TCP_STATE_SYN_RECEIVED => "SYN_RECEIVED",
+            Self::TCP_STATE_ESTABLISHED => "ESTABLISHED",
+            Self::TCP_STATE_FIN_WAIT_1 => "FIN_WAIT_1",
+            Self::TCP_STATE_FIN_WAIT_2 => "FIN_WAIT_2",
+            Self::TCP_STATE_CLOSE_WAIT => "CLOSE_WAIT",
+            Self::TCP_STATE_CLOSING => "CLOSING",
+            Self::TCP_STATE_LAST_ACK => "LAST_ACK",
+            Self::TCP_STATE_TIME_WAIT => "TIME_WAIT",
+            _ => "UNKNOWN",
+        }
     }
 }
 
@@ -485,9 +544,8 @@ mod tests {
     use super::*;
     use crate::IpVersion::V4;
 
-    #[test]
-    fn test_flow_stats_tcp_flags() {
-        let mut stats = FlowStats {
+    fn create_flow_stats() -> FlowStats {
+        FlowStats {
             first_seen_ns: 0,
             last_seen_ns: 0,
             packets: 0,
@@ -513,6 +571,7 @@ mod tests {
             reverse_ip_ecn: 0,
             reverse_ip_ttl: 0,
             tcp_flags: 0,
+            tcp_state: FlowStats::TCP_STATE_CLOSED,
             forward_tcp_flags: 0,
             reverse_tcp_flags: 0,
             icmp_type: 0,
@@ -521,7 +580,11 @@ mod tests {
             reverse_icmp_code: 0,
             forward_metadata_seen: 0,
             reverse_metadata_seen: 0,
-        };
+        }
+    }
+    #[test]
+    fn test_flow_stats_tcp_flags() {
+        let mut stats = create_flow_stats();
 
         // Verify all flags clear
         stats.tcp_flags = 0x00;
@@ -1168,5 +1231,65 @@ mod tests {
             false,
             "IPv4 comparison should work with zero-padding"
         );
+    }
+
+    #[test]
+    fn test_flow_stats_tcp_states() {
+        // Initialize with default values
+        let mut stats = create_flow_stats();
+
+        stats.tcp_state = FlowStats::TCP_STATE_CLOSED;
+        assert!(stats.is_closed());
+        assert!(!stats.is_established());
+        assert!(!stats.is_handshaking());
+        assert!(!stats.is_closing());
+        assert_eq!(stats.state_name(), "CLOSED");
+
+        stats.tcp_state = FlowStats::TCP_STATE_SYN_SENT;
+        assert!(stats.is_handshaking());
+        assert!(!stats.is_established());
+        assert!(!stats.is_closing());
+        assert_eq!(stats.state_name(), "SYN_SENT");
+
+        stats.tcp_state = FlowStats::TCP_STATE_SYN_RECEIVED;
+        assert!(stats.is_handshaking());
+        assert!(!stats.is_established());
+        assert_eq!(stats.state_name(), "SYN_RECEIVED");
+
+        stats.tcp_state = FlowStats::TCP_STATE_ESTABLISHED;
+        assert!(stats.is_established());
+        assert!(!stats.is_handshaking());
+        assert!(!stats.is_closing());
+        assert!(!stats.is_closed());
+        assert_eq!(stats.state_name(), "ESTABLISHED");
+
+        let closing_states = [
+            (FlowStats::TCP_STATE_FIN_WAIT_1, "FIN_WAIT_1"),
+            (FlowStats::TCP_STATE_FIN_WAIT_2, "FIN_WAIT_2"),
+            (FlowStats::TCP_STATE_CLOSE_WAIT, "CLOSE_WAIT"),
+            (FlowStats::TCP_STATE_CLOSING, "CLOSING"),
+            (FlowStats::TCP_STATE_LAST_ACK, "LAST_ACK"),
+            (FlowStats::TCP_STATE_TIME_WAIT, "TIME_WAIT"),
+        ];
+
+        for (state, name) in closing_states {
+            stats.tcp_state = state;
+            assert!(stats.is_closing(), "State {} should be closing", name);
+            assert!(!stats.is_established());
+            assert!(!stats.is_handshaking());
+            assert!(!stats.is_closed());
+            assert_eq!(stats.state_name(), name);
+        }
+
+        stats.tcp_state = FlowStats::TCP_STATE_LISTEN;
+        assert!(!stats.is_closing());
+        assert!(!stats.is_established());
+        assert!(!stats.is_handshaking());
+        assert_eq!(stats.state_name(), "LISTEN");
+
+        stats.tcp_state = 255;
+        assert_eq!(stats.state_name(), "UNKNOWN");
+        assert!(!stats.is_established());
+        assert!(!stats.is_closing());
     }
 }
