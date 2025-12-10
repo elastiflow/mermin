@@ -183,6 +183,7 @@ cat /proc/sys/kernel/bpf_jit_harden
 
 You can integrate bpftool analysis into your development process:
 
+<!-- TODO(GA Documentation): Following commands needs to be fixed, not working currently-->
 ```shell
 # Quick instruction count check during development
 docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "bpftool prog list | grep mermin && echo 'Instruction counts:' && for id in \$(bpftool prog list | grep mermin | awk '{print \$1}' | tr -d ':'); do echo -n \"Program \$id: \"; bpftool prog dump xlated id \$id | grep -E '^[0-9]+:' | wc -l; done"
@@ -244,7 +245,7 @@ The project includes three analysis scripts in the `scripts/` directory:
 
 ```shell
 # Quick health check (30 seconds)
-./scripts/check_stack_usage.sh
+./mermin/tests/e2e/common/check_stack_usage.sh
 
 # Call chain overview (45 seconds)
 ./scripts/analyze_call_chain.sh
@@ -315,6 +316,7 @@ When you see high stack usage:
 
 ### Advanced Analysis Commands
 
+<!-- TODO(GA Documentation): Following commands needs to be fixed, not working currently-->
 For deeper investigation:
 
 ```shell
@@ -336,9 +338,9 @@ docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:la
 - name: Check eBPF Stack Usage
   run: |
     docker build -t mermin-builder:latest --target builder .
-    ./scripts/check_stack_usage.sh
+    ./mermin/tests/e2e/common/check_stack_usage.sh
     # Exit with error if stack usage is too high
-    MAX_STACK=$(./scripts/check_stack_usage.sh | grep -oE '[0-9]+ bytes' | grep -oE '[0-9]+' | head -1)
+    MAX_STACK=$(./mermin/tests/e2e/common/check_stack_usage.sh | grep -oE '[0-9]+ bytes' | grep -oE '[0-9]+' | head -1)
     if [ "$MAX_STACK" -gt 320 ]; then exit 1; fi
 ```
 
