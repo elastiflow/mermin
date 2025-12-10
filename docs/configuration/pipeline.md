@@ -103,7 +103,7 @@ pipeline {
 
 The multiplier for the decorated span channel size, relative to the ring buffer capacity.
 <!-- TODO(lgo-421): Is it true? -->
-The channel is used in the "K8s Decorator" stage, please refer the [architecture](../getting-started/architecture.md#components) for more details.
+The channel is used in the "K8s Decorator" stage, please refer to the [architecture](../getting-started/architecture.md#components) documentation for more information.
 
 **Example:**
 
