@@ -71,7 +71,7 @@ pipeline {
 
 **Type:** Integer **Default:** `4`
 
-Number of threads dedicated to Kubernetes decoration. Increase for larger clusters.
+The number of threads dedicated to Kubernetes decoration. Increase this value for larger clusters.
 
 **Example:**
 
