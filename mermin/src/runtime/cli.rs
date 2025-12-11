@@ -30,24 +30,31 @@ pub struct Cli {
 
     #[command(subcommand)]
     pub subcommand: Option<CliSubcommand>,
-    // TODO: metrics port, API port, API TLS
 }
 
 #[derive(Subcommand, Debug, Clone, Serialize, Deserialize)]
 pub enum CliSubcommand {
+    /// Diagnostic and testing commands
+    Diagnose {
+        #[command(subcommand)]
+        command: DiagnoseCommand,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone, Serialize, Deserialize)]
+pub enum DiagnoseCommand {
     /// Test BPF filesystem writeability and program attach/detach operations
-    TestBpf {
-        /// Network interface to test attach/detach operations on
-        #[arg(short, long, default_value = "lo", conflicts_with = "all")]
+    Bpf {
+        /// Test only a specific network interface instead of all interfaces
+        #[arg(short, long, conflicts_with_all = ["pattern", "skip"])]
         interface: Option<String>,
-        /// Test all network interfaces (mutually exclusive with --interface)
-        #[arg(long, action = clap::ArgAction::SetTrue)]
-        all: bool,
-        /// Glob pattern to filter interfaces (only valid with --all, can be specified multiple times)
-        #[arg(long, requires = "all", action = clap::ArgAction::Append)]
+        /// Glob patterns to filter which interfaces to test (e.g., 'eth*', 'en*').
+        /// Can be specified multiple times. Only matching interfaces are tested.
+        #[arg(long, action = clap::ArgAction::Append)]
         pattern: Vec<String>,
-        /// Glob pattern to exclude interfaces (only valid with --all, can be specified multiple times)
-        #[arg(long, requires = "all", action = clap::ArgAction::Append)]
+        /// Glob patterns to exclude interfaces from testing (e.g., 'docker*', 'veth*').
+        /// Can be specified multiple times. Matching interfaces are skipped.
+        #[arg(long, action = clap::ArgAction::Append)]
         skip: Vec<String>,
     },
 }
