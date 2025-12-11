@@ -34,6 +34,11 @@ env: []
   #     configMapKeyRef:
   #       name: cm_name
   #       key: cm_key
+  # - name: SOME_VAL_FROM_SECRET
+  #   valueFrom:
+  #     secretKeyRef:
+  #       name: secret_name
+  #       key: secret_key
 
 serviceAccount:
   # Specifies whether a service account should be created

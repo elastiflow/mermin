@@ -195,7 +195,7 @@ docker build -t mermin:latest --target runner-debug .
 kind load docker-image -n atlantis mermin:latest
 
 # 3. Deploy mermin using Helm
-helm upgrade -i --wait --timeout 15m -n elastiflow --create-namespace \
+helm upgrade -i --wait --timeout 15m -n default --create-namespace \
   -f docs/deployment/examples/local/values.yaml \
   --set-file config.content=docs/deployment/examples/local/config.example.hcl \
   --devel \
@@ -223,8 +223,8 @@ When making changes to the Mermin code, you can quickly rebuild and reload the i
 # Rebuild the image, load it into kind, and restart the DaemonSet
 docker build -t mermin:latest --target runner-debug . && \
 kind load docker-image mermin:latest --name atlantis && \
-kubectl rollout restart daemonset/mermin -n elastiflow && \
-kubectl rollout status daemonset/mermin -n elastiflow
+kubectl rollout restart daemonset/mermin -n default && \
+kubectl rollout status daemonset/mermin -n default
 ```
 
 This workflow is much faster than a full `helm upgrade` when you're only changing the application code.

@@ -26,20 +26,23 @@
 ## Observability
 
 * [Backends](observability/backends.md)
+* [Mermin Application Metrics](observability/app-metrics.md)
 
 ## Configuration
 
 * [Configuration Overview](configuration/configuration.md)
 * [Global Options](configuration/global-options.md)
-* [API and Metrics](configuration/api-metrics.md)
+* [API](configuration/api.md)
+* [Metrics](configuration/metrics.md)
 * [Parser Configuration](configuration/parser.md)
-* [Network Interface Discovery](configuration/discovery-interfaces.md)
-* [Kubernetes Informers](configuration/kubernetes-informers.md)
+* [Pipeline Configuration](configuration/pipeline.md)
+* [Network Interface Discovery](configuration/discovery-instrument.md)
+* [Kubernetes Informers](configuration/discovery-kubernetes-informer.md)
 * [Owner Relations](configuration/owner-relations.md)
 * [Selector Relations](configuration/selector-relations.md)
 * [Flow Attributes](configuration/attributes.md)
 * [Flow Filtering](configuration/filtering.md)
-* [Flow Span Options](configuration/span-options.md)
+* [Flow Span Producer](configuration/span.md)
 * [OTLP Exporter](configuration/export-otlp.md)
 * [Stdout Exporter](configuration/export-stdout.md)
 * [Internal Tracing](configuration/internal-tracing.md)

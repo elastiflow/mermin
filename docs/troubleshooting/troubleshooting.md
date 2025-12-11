@@ -103,6 +103,13 @@ Key metrics to monitor include:
 - `mermin_packets_total` - Packets processed by interface and direction
 - `mermin_export_errors_total` - Export failures (investigate if increasing)
 
+<!-- TODO(GA Documentation): Iterate on the section -->
+<!-- ## Troubleshooting
+
+- **Interface Unavailable**: Mermin logs a warning and continues monitoring other interfaces
+- **eBPF Load Failure**: Agent fails to start; check kernel version and eBPF support
+- **High Packet Loss**: Increase `pipeline.ring_buffer_capacity` or reduce monitored interfaces -->
+
 ## Getting Help
 
 Still stuck? We're here to help!

@@ -11,9 +11,9 @@ If your Mermin pods won't start, they're likely stuck in one of these states: `P
 Start by gathering information about the pod:
 
 ```bash
-kubectl get pods -l app.kubernetes.io/name=mermin -n mermin
-kubectl describe pod mermin-xxxxx -n mermin
-kubectl get events -n mermin --field-selector involvedObject.name=mermin-xxxxx
+kubectl get pods -l app.kubernetes.io/name=mermin -n ${MERMIN_NAMESPACE}
+kubectl describe pod mermin-xxxxx -n ${MERMIN_NAMESPACE}
+kubectl get events -n ${MERMIN_NAMESPACE} --field-selector involvedObject.name=mermin-xxxxx
 ```
 
 ### Common Causes and Solutions
@@ -28,14 +28,14 @@ If you see `Insufficient cpu` or `Insufficient memory` in the events, your nodes
 # In values.yaml
 resources:
   requests:
-    cpu: 100m
-    memory: 128Mi
+    cpu: 200m
+    memory: 220Mi
   limits:
     cpu: 1
     memory: 512Mi
 ```
 
-**Note**: The Helm chart doesn't set default resource limits to avoid scheduling issues. You should configure these based on your expected traffic volume and node capacity.
+**Note**: The Helm chart sets the default limits to prevent the Mermin pods from disrupting existing workloads, please see the [default values](https://github.com/elastiflow/mermin/blob/beta/charts/mermin/values.yaml) for details.
 
 #### 2. Pod Security Policy Restrictions
 
@@ -61,7 +61,7 @@ If your cluster uses Pod Security Standards (PSS), you may need to label the nam
 
 ```bash
 # For PSS "privileged" policy
-kubectl label namespace mermin pod-security.kubernetes.io/enforce=privileged
+kubectl label namespace ${MERMIN_NAMESPACE} pod-security.kubernetes.io/enforce=privileged
 ```
 
 #### 3. Image Pull Failures
@@ -72,10 +72,13 @@ Can't pull the Mermin image? You'll see `ImagePullBackOff` or `ErrImagePull` in 
 
 ```bash
 # Check image pull status
-kubectl describe pod mermin-xxxxx -n mermin | grep -A5 Events
+kubectl describe pod mermin-xxxxx -n ${MERMIN_NAMESPACE} | grep -A5 Events
+
+# Get the image specified in the pod manifest
+kubectl get pod mermin-xxxxx -o jsonpath='{ .spec.containers[*].image }'
 
 # Verify image exists
-docker pull ghcr.io/elastiflow/mermin:latest
+docker pull ghcr.io/elastiflow/mermin:${IMAGE_TAG}
 ```
 
 ## eBPF Program Loading Failures
@@ -91,7 +94,7 @@ ERROR Failed to load eBPF program: Operation not permitted
 Search the logs for eBPF-related errors:
 
 ```bash
-kubectl logs mermin-xxxxx -n mermin | grep -i ebpf
+kubectl logs mermin-xxxxx -n ${MERMIN_NAMESPACE} | grep -i ebpf
 ```
 
 ### What's Going Wrong?
@@ -108,7 +111,7 @@ securityContext:
   privileged: true    # Grants all required capabilities
 ```
 
-**If you can't use privileged mode** (due to security policies), you can grant specific capabilities instead:
+**If you can't use privileged mode** (due to security policies), you can grant specific capabilities instead: (Refer to the [security considerations](../getting-started/security-considerations.md#privileges-required) documentation for more information.)
 
 ```yaml
 # In charts/mermin/values.yaml (capability-based approach)
@@ -214,22 +217,12 @@ This means the service account doesn't have the necessary permissions.
 ### Check Your RBAC Configuration
 
 ```bash
-kubectl get sa -n mermin
-kubectl get clusterrole mermin
+kubectl get sa -n ${MERMIN_NAMESPACE}
+kubectl get clusterrole mermin -o yaml 
 kubectl get clusterrolebinding mermin
 ```
 
-Make sure your ClusterRole has these permissions:
-
-```yaml
-rules:
-  - apiGroups: [""]
-    resources: ["pods", "services", "endpoints", "nodes"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["apps"]
-    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
-    verbs: ["get", "list", "watch"]
-```
+Make sure your ClusterRole has the required permissions, which can be found in the [Helm Chart template](https://github.com/elastiflow/mermin/blob/beta/charts/mermin/templates/clusterrole.yaml):
 
 ## CNI and Interface Configuration
 
@@ -259,10 +252,10 @@ TC (Traffic Control) priority determines the order in which eBPF programs execut
 
 ```bash
 # Get a Mermin pod name
-MERMIN_POD=$(kubectl get pods -l app=mermin -o jsonpath='{.items[0].metadata.name}')
+MERMIN_POD=$(kubectl get pods -l app.kubernetes.io/name=mermin -o jsonpath='{.items[0].metadata.name}')
 
 # Check TC filters on an interface (replace gke0 with your interface name)
-kubectl exec -it $MERMIN_POD -- tc filter show dev gke0 ingress
+kubectl exec -it ${MERMIN_POD} -- tc filter show dev gke0 ingress
 ```
 
 You should see output like this:
@@ -319,7 +312,7 @@ First, check what priorities are in use:
 
 ```bash
 # List all TC filters with priorities
-kubectl exec -it $MERMIN_POD -- sh -c 'for iface in $(ip -o link show | awk -F: "{print \$2}" | tr -d " "); do echo "=== $iface ==="; tc filter show dev $iface ingress 2>/dev/null; done'
+kubectl exec -it ${MERMIN_POD} -- sh -c 'for iface in $(ip -o link show | awk -F: "{print \$2}" | tr -d " "); do echo "=== $iface ==="; tc filter show dev $iface ingress 2>/dev/null; done'
 ```
 
 Then adjust based on your kernel version:
@@ -347,7 +340,7 @@ discovery "instrument" {
 Not sure which kernel you're running?
 
 ```bash
-kubectl exec -it $MERMIN_POD -- uname -r
+kubectl exec -it ${MERMIN_POD} -- uname -r
 ```
 
 If it's >= 6.6.0, you're using TCX mode (you'll also see this in the logs). In TCX mode, `tc_priority` is ignored in favor of `tcx_order`.

@@ -1,15 +1,15 @@
-## Security Considerations
+# Security Considerations
 
-### Host Mounts Required
+## Host Mounts Required
 
-#### TCX Mode and BPF Filesystem (Kernel >= 6.6)
+For **orphan cleanup support** on pod restarts (highly recommended for production), mount `/sys/fs/bpf` as a hostPath volume is required.
+When a Mermin pod crashes unexpectedly (OOM, node failure, etc.), its TC programs remain attached to interfaces. On restart, Mermin can clean up these "orphaned" programs by loading pinned links from `/sys/fs/bpf`.
+
+**TCX Mode and BPF Filesystem (Kernel >= 6.6):**
 
 {% hint style="info" %}
 **Linux Kernel 6.6+** introduced TCX (TC eXpress), an improved TC attachment mechanism that supports multiple programs per hook. Mermin automatically uses TCX when available.
 {% endhint %}
-
-For **orphan cleanup support** on pod restarts (highly recommended for production), mount `/sys/fs/bpf` as a hostPath volume is required.
-When a Mermin pod crashes unexpectedly (OOM, node failure, etc.), its TC programs remain attached to interfaces. On restart, Mermin can clean up these "orphaned" programs by loading pinned links from `/sys/fs/bpf`.
 
 **Verifying TCX mode:**
 
@@ -22,7 +22,7 @@ kubectl logs <mermin-pod> | grep tcx_mode
 
 **For older kernels (< 6.6):** Mermin uses netlink-based TC attachment, which includes automatic orphan cleanup without requiring `/sys/fs/bpf`.
 
-### Privileges Required
+## Privileges Required
 
 Mermin requires elevated privileges to operate:
 
@@ -35,7 +35,7 @@ Mermin requires elevated privileges to operate:
   * `CAP_SYS_PTRACE` - Access other processes' namespace files (`/proc/1/ns/net`)
   * `CAP_SYS_RESOURCE` - Increase memlock limits for eBPF maps
 
-#### Network Namespace Switching
+## Network Namespace Switching
 
 Mermin uses a sophisticated approach to monitor host network interfaces without requiring `hostNetwork: true`:
 
@@ -51,14 +51,14 @@ This approach provides:
 
 The eBPF programs execute in kernel space and remain attached regardless of the userspace process's namespace.
 
-### Data Privacy
+## Data Privacy
 
 * **No Payload Capture**: Mermin only captures packet headers, not application data
 * **Metadata Only**: Flow records contain IPs, ports, protocols – not packet contents
 * **Configurable Filtering**: Filter out sensitive or noisy traffic before export
 * **TLS Transport**: All OTLP exports can be encrypted with TLS
 
-### RBAC
+## RBAC
 
 Mermin needs Kubernetes RBAC permissions to:
 

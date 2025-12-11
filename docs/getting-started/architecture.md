@@ -1,27 +1,28 @@
----
-hidden: true
----
-
 # Architecture
 
 This page explains how Mermin works, its architecture, and the flow of data from network packets to Flow Traces in your observability backend.
 
 ## What are Flow Traces?
 
-**Flow Traces** are OpenTelemetry trace spans that represent network flows with NetFlow-like semantics. Unlike traditional NetFlow or IPFIX:
+**Flow Traces** are OpenTelemetry traces, which are combined from multiple Flow Trace Spans and represent a long lived connection.
+**Flow Trace Spans** are OpenTelemetry trace spans that represent network flows with NetFlow-like semantics. Unlike traditional NetFlow or IPFIX:
 
-* **OpenTelemetry Native**: Flow Traces are OTLP trace spans, not proprietary flow protocols
-* **Bidirectional**: A single span represents both directions of a flow
-* **Rich Metadata**: Includes Kubernetes context (pods, services, deployments, labels)
-* **Standardized Format**: Works with any OTLP-compatible observability platform
+- **OpenTelemetry Native**: Flow Traces are OTLP trace spans, not proprietary flow protocols
+- **Bidirectional**: A single span represents both directions of a flow
+- **Rich Metadata**: Includes Kubernetes context (pods, services, deployments, labels)
+- **Standardized Format**: Works with any OTLP-compatible observability platform
 
-Mermin generates Flow Traces by capturing network packets, aggregating them into flows, decorating with Kubernetes metadata, and exporting as OpenTelemetry spans.
+Mermin generates Flow Trace Spans by capturing network packets, aggregating them into flows, decorating with Kubernetes metadata, and exporting as OpenTelemetry spans.
+
+```text
+network packet → Mermin → flow span (network flow) → flow trace (network connection)
+```
 
 ## High-Level Architecture
 
 Mermin is deployed as a DaemonSet in Kubernetes, with one agent instance running on each node in your cluster. Each agent independently captures and processes network traffic from its host node.
 
-```
+```text
 ┌─────────────────────────────────────────────┐
 │             Kubernetes Cluster              │
 │                                             │
@@ -57,60 +58,83 @@ Mermin is deployed as a DaemonSet in Kubernetes, with one agent instance running
 
 ## Components
 
+Data pipeline overview, more details on the pipeline are documented in the [data-flow block](architecture.md#data-flow)
+
+```text
+            <kernel space>
+              eBPF TC
+                  ↓
+          Network Interface
+            ↓           ↓
+            <kernel space>
+Flow Stats (hashmap)   Flow Events (ring buffer)
+            <user space>
+                  ↓
+            Flow Producer
+                  ↓
+            K8s Decorator
+                  ↓
+            OTLP Export
+```
+
 ### eBPF Programs
 
-Mermin uses eBPF (extended Berkeley Packet Filter) programs loaded into the Linux kernel to capture network packets with minimal overhead. These programs:
+Mermin uses [eBPF](https://ebpf.io/what-is-ebpf/) (extended Berkeley Packet Filter) programs loaded into the Linux kernel to capture network packets with minimal overhead. These programs:
 
-* Attach to network interfaces specified in your configuration
-* Capture packets at the TC (Traffic Control) layer
-* Perform initial packet parsing for protocol headers
-* Send packet data to userspace via eBPF ring buffers
+- Attach to network interfaces specified in your configuration
+- Capture packets at the TC (Traffic Control) layer
+- Aggregate packet data into flow statistics within the `FLOW_STATS` eBPF HashMap
+- Notify userspace of new flows via the `FLOW_EVENTS` ring buffer
+- For encapsulated or tunneled packets, send inner packet headers to userspace via `FLOW_EVENTS` for decoding
 
-eBPF provides several advantages:
+<details>
 
-* **High Performance**: Executes directly in the kernel, avoiding context switches
-* **Low Overhead**: Processes only necessary packet headers, not full payloads
-* **Safety**: Verified by the kernel to ensure it cannot crash or hang the system
-* **No Kernel Modules**: No need to compile or load custom kernel modules
+<summary><b>eBPF provides several advantages</b></summary>
 
-### Flow Generation Engine
+- **High Performance**: Executes directly in the kernel, avoiding context switches
+- **Low Overhead**: Processes only necessary packet headers, not full payloads
+- **Safety**: Verified by the kernel to ensure it cannot crash or hang the system
+- **No Kernel Modules**: No need to compile or load custom kernel modules
 
-The userspace Mermin agent receives packets from eBPF and aggregates them into network flows:
+</details>
 
-* **Bidirectional Flows**: Groups packets by 5-tuple (source IP/port, dest IP/port, protocol)
-* **State Tracking**: Maintains connection state for TCP (SYN, FIN, RST flags)
-* **Timeout Management**: Expires inactive flows based on configurable timeouts
-* **Protocol Parsing**: Deep packet inspection for tunneling protocols (VXLAN, Geneve, WireGuard)
-* **Community ID**: Generates standard Community ID hashes for flow correlation
+### Flow Span Generation Engine
 
-A Flow Trace includes:
+The userspace Mermin agent receives packets from eBPF and aggregates them into network flow trace spans:
 
-* Source and destination IP addresses and ports
-* Network protocol (TCP, UDP, ICMP, etc.)
-* Packet and byte counters (bidirectional)
-* TCP flags and connection state
-* Flow start and end timestamps
-* Community ID hash
+- **Bidirectional Flow Spans**: Groups packets by 5-tuple (source IP/port, dest IP/port, protocol)
+- **State Tracking**: Maintains connection state for TCP (SYN, FIN, RST flags)
+<!-- TODO(GA Documentation):  Add link to the `docs/configuration/span.md` configuration -->
+- **Timeout Management**: Expires inactive flows based on configurable timeouts
+- **Protocol Parsing**: Deep packet inspection for tunneling protocols (VXLAN, Geneve, WireGuard)
+- **Community ID**: Generates standard Community ID hashes for flow correlation
 
-// TODO: LINK TO FLOW TRACE SPEC
+A Flow Trace Span includes:
+<!-- TODO(GA Documentation): Add a link to flow trace spec -->
+- Source and destination IP addresses and ports
+- Network protocol (TCP, UDP, ICMP, etc.)
+- Packet and byte counters (bidirectional)
+- TCP flags and connection state
+- Flow start and end timestamps
+- Community ID hash
 
 #### State Persistence
 
 Mermin preserves flow state across pod restarts through eBPF map pinning, ensuring continuous visibility without data loss:
 
-* **Map Pinning**: `FLOW_STATS` and `FLOW_EVENTS` are pinned to `/sys/fs/bpf/` when writable (requires `/sys/fs/bpf` hostPath mount)
-* **Schema Versioning**: Maps use versioned directory paths (e.g., `/sys/fs/bpf/mermin_v1/`) to prevent incompatible format reuse across upgrades
-* **State Continuity**: Flow statistics persist across mermin restarts, eliminating visibility gaps during rolling updates
-* **Format Validation**: Pinned maps are reused only if schema version and format match current version
-* **Graceful Degradation**: If pinning fails, mermin continues with unpinned maps (logged as warning)
-* **Upgrade Safety**: When struct layouts change, increment `EBPF_MAP_SCHEMA_VERSION` to create new versioned maps
+- **Map Pinning**: `FLOW_STATS` and `FLOW_EVENTS` maps are pinned to `/sys/fs/bpf/` when writable (requires `/sys/fs/bpf` mount, refer to the [security-considerations](security-considerations.md#host-mounts-required) document)
+- **Schema Versioning**: Maps use versioned paths (e.g., `mermin_flow_stats_map_v1`) to prevent incompatible format reuse across upgrades
+- **State Continuity**: Flow statistics persist across mermin restarts, eliminating visibility gaps during rolling updates
+- **Format Validation**: Pinned maps are reused only if schema version and format match current version
+- **Graceful Degradation**: If pinning fails, mermin continues with unpinned maps (logged as warning)
+- **Upgrade Safety**: When struct layouts change, increment `EBPF_MAP_SCHEMA_VERSION` to create new versioned maps
 
 This ensures:
 
-* *No flow data loss during pod restarts or rolling updates
-* *Existing flows continue to accumulate statistics across restarts
-* *Safe upgrades without corrupt data reuse
-* *Easy rollbacks (old map versions remain available)
+- No flow data loss during pod restarts or rolling updates
+- Existing flows continue to accumulate statistics across restarts
+- Safe upgrades without corrupt data reuse
+- Easy rollbacks (old map versions remain available)
 
 ### Kubernetes Integration
 
@@ -120,114 +144,39 @@ Mermin deeply integrates with Kubernetes to decorate flows with contextual metad
 
 Mermin uses Kubernetes informers (watch APIs) to maintain an in-memory cache of cluster resources:
 
-* Pods, Services, Deployments, ReplicaSets, StatefulSets, DaemonSets
-* Jobs, CronJobs, NetworkPolicies
-* Endpoints, EndpointSlices, Ingresses, Gateways
+- Pods, Services, Deployments, ReplicaSets, StatefulSets, DaemonSets
+- Jobs, CronJobs, NetworkPolicies
+- Endpoints, EndpointSlices, Ingresses, Gateways
 
 This cache is continuously updated as resources change, ensuring metadata is always current.
 
 #### Flow Attribution
 
 For each network flow, Mermin:
+<!-- TODO(GA Documentation): Add link to the docs/configuration/discovery-kubernetes-informer.md -->
 
 1. **Identifies Pods**: Matches source/destination IPs to pod IPs
 2. **Extracts Metadata**: Retrieves pod name, namespace, labels, annotations
-3. **Walks Owner References**: Follows ownerReferences from Pod → ReplicaSet → Deployment
-4. **Selector Matching**: Finds Services and NetworkPolicies that select the pod
-5. **Decorates Traces**: Attaches all relevant metadata to the Flow Trace
+3. **Walks Owner References**: Follows ownerReferences from Pod, for example `Pod → ReplicaSet → Deployment`
+4. **Selector Matching**: Finds Services and NetworkPolicies that select the pod via it's selectors.
+5. **Decorates Traces**: Attaches all relevant metadata to the Flow Trace Span
 
 This provides full context for each network flow, enabling powerful filtering and analysis.
 
 ### OTLP Exporter
 
 Mermin exports flows as **Flow Traces** using the OpenTelemetry Protocol (OTLP):
+<!-- TODO(GA Documentation): Add link to the docs/configuration/export-otlp.md -->
 
-* **Flow Traces as Spans**: Each network flow becomes an OpenTelemetry trace span
-* **Standard Protocol**: OTLP is an industry-standard telemetry protocol
-* **Flexible Transport**: Supports both gRPC and HTTP protocols
-* **Batching**: Aggregates multiple Flow Traces before sending to reduce network overhead
-* **Backpressure Handling**: Queues Flow Traces if the backend is unavailable
-* **Authentication**: Supports Basic Auth, TLS client certificates
-* **Secure Transport**: TLS encryption with custom CA certificate support
+- **Flow Traces as Spans**: Each network flow becomes an OpenTelemetry trace span
+- **Standard Protocol**: OTLP is an industry-standard telemetry protocol (OTel [docs](https://opentelemetry.io/docs/), [vendors](https://opentelemetry.io/ecosystem/vendors/))
+- **Flexible Transport**: Supports both gRPC and HTTP protocols
+- **Batching**: Aggregates multiple Flow Trace Spans before sending to reduce network overhead
+- **Backpressure Handling**: Queues Flow Traces if the backend is unavailable
+- **Authentication**: Supports Basic Auth, TLS client certificates
+- **Secure Transport**: TLS encryption with custom CA certificate support
 
 Flow Traces are exported as OTLP trace spans, allowing them to be processed by any OTLP-compatible backend without requiring NetFlow collectors.
-
-## Data Flow
-
-Let's trace a network packet through Mermin's pipeline:
-
-### 1. Packet Capture (eBPF)
-
-```
-Network Interface (eth0)
-         ↓
-   TC Hook (eBPF)
-         ↓
-   Parse Headers (IP, TCP/UDP, Tunnels)
-         ↓
-   Ring Buffer
-```
-
-* eBPF program attached to `eth0` captures incoming and outgoing packets
-* Parses Ethernet, IP, TCP/UDP, and tunnel protocol headers
-* Extracts 5-tuple and other flow identifiers
-* Sends packet metadata to userspace via ring buffer (not full payload)
-
-### 2. Flow Aggregation (Userspace)
-
-```
-Ring Buffer Reader
-         ↓
-   Flow Table Lookup
-         ↓
-   Update Flow State
-         ↓
-   Check Timeout/Completion
-```
-
-* Mermin reads packet metadata from ring buffer
-* Looks up existing flow in flow table by 5-tuple
-* Updates packet/byte counters, flags, timestamps
-* Checks if flow should be exported (timeout, connection close, max duration)
-
-### 3. Kubernetes Decoration
-
-```
-Flow Ready for Export
-         ↓
-   IP to Pod Lookup
-         ↓
-   Extract Pod Metadata
-         ↓
-   Walk Owner References
-         ↓
-   Match Selectors
-         ↓
-   Decorate Trace Record
-```
-
-* Source IP: `10.244.1.5` → Pod: `nginx-abc123` → ReplicaSet: `nginx-xyz` → Deployment: `nginx`
-* Destination IP: `10.96.0.1` → Service: `kubernetes`
-* Attaches labels, annotations, namespace, and other metadata
-
-### 4. OTLP Export
-
-```
-Trace Flow
-         ↓
-   Batch Accumulator
-         ↓
-   OTLP Trace Span
-         ↓
-   gRPC/HTTP Transport
-         ↓
-   OpenTelemetry Collector
-```
-
-* Flow is converted to an OTLP trace span (Flow Trace)
-* Batched with other Flow Traces to reduce network overhead
-* Sent to configured OTLP endpoint
-* Collector receives and processes the Flow Traces
 
 ## Performance Characteristics
 
@@ -235,30 +184,21 @@ Trace Flow
 
 Mermin is designed to be efficient in production environments:
 
-* **CPU**: Typically 0.1-0.5 cores per agent, varies with traffic volume
-* **Memory**: Base usage \~100-200 MB, grows with flow table size
-* **Network**: Outbound OTLP traffic depends on flow rate and batching settings
-* **Kernel**: eBPF programs have minimal impact (< 1% CPU overhead)
+- **CPU**: Typically 0.1-0.5 cores (100-500 mCPUs) per agent, varies with traffic volume
+- **Memory**: Base usage ~100-200 MB, grows with flow table size
+- **Network**: Outbound OTLP traffic depends on flow rate and batching settings
+- **Kernel**: eBPF programs have minimal impact (< 1% CPU overhead)
 
 ### Scalability
 
-* **Flow Rate**: Can handle 10,000+ flows/second per agent on modern hardware
-* **Packet Rate**: Processes 100,000+ packets/second with minimal packet loss
-* **Cluster Size**: Scales linearly – each node runs its own independent agent
-* **Flow Table Size**: Configurable, defaults support \~100,000 concurrent flows
+- **Flow Rate**: Can handle 10,000+ flows/second per agent on modern hardware
+- **Packet Rate**: Processes 100,000+ packets/second with minimal packet loss
+- **Cluster Size**: Scales linearly – each node runs its own independent agent
+- **Flow Table Size**: Configurable, defaults support ~100,000 concurrent flows
 
 ### Tunability
 
-Mermin provides extensive configuration for performance tuning under the `pipeline` block:
-
-* `pipeline.ring_buffer_capacity`: eBPF ring buffer size between kernel and userspace
-* `pipeline.worker_count`: Number of parallel flow worker threads
-* `pipeline.k8s_decorator_threads`: Dedicated threads for Kubernetes metadata decoration
-* `span.*_timeout`: Flow expiration times affect memory usage
-* `export.otlp.max_batch_size`: Larger batches reduce network overhead
-* `export.otlp.max_queue_size`: Backpressure buffer for slow backends
-
-See [Configuration Reference](../configuration/configuration.md) for details.
+Mermin provides extensive configuration for performance tuning under the `pipeline` block, please refer the [pipeline](../configuration/pipeline.md) documentation for the details.
 
 ## Failure Modes and Resilience
 
@@ -266,25 +206,19 @@ See [Configuration Reference](../configuration/configuration.md) for details.
 
 If a Mermin agent crashes or is terminated:
 
-* **Local Impact Only**: Only flows from that node are affected
-* **Kubernetes Restart**: DaemonSet controller automatically restarts the pod
-* **No Data Loss**: Flow state is ephemeral; new flows are captured after restart
-* **No Cluster Impact**: Other nodes continue operating normally
+- **Local Impact Only**: Only flows from that node are affected
+- **Kubernetes Restart**: DaemonSet controller automatically restarts the pod
+- **No Data Loss**: Flow state is ephemeral; new flows are captured after restart
+- **No Cluster Impact**: Other nodes continue operating normally
 
 ### Backend Unavailability
 
 If the OTLP backend is unavailable:
 
-* **Queuing**: Flows are queued up to `max_queue_size`
-* **Backpressure**: If queue fills, oldest flows are dropped (not newest)
-* **Automatic Retry**: Mermin retries failed exports with exponential backoff
-* **Graceful Degradation**: Agent continues capturing flows
-
-### Network Issues
-
-* **Interface Unavailable**: Mermin logs a warning and continues monitoring other interfaces
-* **eBPF Load Failure**: Agent fails to start; check kernel version and eBPF support
-* **High Packet Loss**: Increase `pipeline.ring_buffer_capacity` or reduce monitored interfaces
+- **Queuing**: Flows are queued up to `max_queue_size`
+- **Backpressure**: If queue fills, oldest flows are dropped (not newest)
+- **Automatic Retry**: Mermin retries failed exports with exponential backoff
+- **Graceful Degradation**: Agent continues capturing flows
 
 ## Comparison with Alternatives
 
@@ -292,31 +226,31 @@ If the OTLP backend is unavailable:
 
 **Mermin provides:**
 
-* **Flow-level granularity**: Every individual network flow exported as a Flow Trace with full metadata
-* **CNI Agnostic**: Not tied to a specific CNI implementation (works with Cilium, Calico, Flannel, etc.)
-* Pure OTLP export to any OpenTelemetry-compatible backend
-* Lightweight, focused solely on network flow observability
-* No vendor lock-in or platform dependencies
-* Flexible backend choice (Elastic, Grafana, Jaeger, cloud providers)
-* Historical flow analysis and long-term storage in your observability backend
+- **Flow-level granularity**: Every individual network flow exported as a Flow Trace with full metadata
+- **CNI Agnostic**: Not tied to a specific CNI implementation (works with Cilium, Calico, Flannel, etc.)
+- Pure OTLP export to any OpenTelemetry-compatible backend
+- Lightweight, focused solely on network flow observability
+- No vendor lock-in or platform dependencies
+- Flexible backend choice (Elastic, Grafana, Jaeger, cloud providers)
+- Historical flow analysis and long-term storage in your observability backend
 
 **Cilium Hubble provides:**
 
-* Aggregated network metrics (connection rates, error rates, latencies)
-* Deep integration with Cilium CNI and network policies
-* Service map visualization with Hubble UI
-* Layer 7 protocol visibility (HTTP, gRPC, Kafka, DNS)
-* Requires Cilium as the CNI
-* Limited historical data retention (ephemeral, in-memory)
+- Aggregated network metrics (connection rates, error rates, latencies)
+- Deep integration with Cilium CNI and network policies
+- Service map visualization with Hubble UI
+- Layer 7 protocol visibility (HTTP, gRPC, Kafka, DNS)
+- Requires Cilium as the CNI
+- Limited historical data retention (ephemeral, in-memory)
 
 **Pixie provides:**
 
-* Aggregated network metrics with short-term retention
-* Full application observability (traces, logs, metrics, profiling)
-* Auto-instrumentation for multiple languages
-* In-cluster data processing and querying
-* Requires Pixie platform deployment
-* Limited long-term storage (auto-deletes data after hours/days)
+- Aggregated network metrics with short-term retention
+- Full application observability (traces, logs, metrics, profiling)
+- Auto-instrumentation for multiple languages
+- In-cluster data processing and querying
+- Requires Pixie platform deployment
+- Limited long-term storage (auto-deletes data after hours/days)
 
 **Key Insight:** **Mermin is the only tool that provides flow-level granularity** - each individual network flow becomes a Flow Trace with complete metadata (source/dest pods, services, deployments, labels, packet/byte counts, TCP flags, etc.). Hubble and Pixie provide aggregated network metrics (requests/sec, error rates), which are useful for dashboards but don't give you the raw flow data needed for deep investigation, compliance, or security forensics.
 
@@ -326,19 +260,19 @@ If the OTLP backend is unavailable:
 
 **Mermin Flow Traces provide:**
 
-* OpenTelemetry-native format (OTLP trace spans)
-* Kubernetes metadata: pods, services, deployments, labels, owner references
-* Modern observability backend integration (Tempo, Jaeger, Elastic, OpenSearch)
-* No specialized NetFlow collectors required
-* **CNI Agnostic**: Captures flows regardless of CNI implementation
-* Cloud-native architecture (DaemonSet, Helm charts)
+- OpenTelemetry-native format (OTLP trace spans)
+- Kubernetes metadata: pods, services, deployments, labels, owner references
+- Modern observability backend integration (Tempo, Jaeger, Elastic, OpenSearch)
+- No specialized NetFlow collectors required
+- **CNI Agnostic**: Captures flows regardless of CNI implementation
+- Cloud-native architecture (DaemonSet, Helm charts)
 
 **Traditional NetFlow/IPFIX provides:**
 
-* Established protocol with decades of tooling
-* Hardware switch/router support
-* Legacy network monitoring platform compatibility
-* SNMP integration for traditional network management
+- Established protocol with decades of tooling
+- Hardware switch/router support
+- Legacy network monitoring platform compatibility
+- SNMP integration for traditional network management
 
 **Trade-off:** NetFlow/IPFIX is ideal for traditional network infrastructure. Mermin is purpose-built for cloud-native Kubernetes environments with modern observability stacks.
 
@@ -346,18 +280,18 @@ If the OTLP backend is unavailable:
 
 **Mermin provides:**
 
-* Continuous, automated flow capture without manual intervention
-* Bidirectional flow aggregation with packet/byte counters
-* Kubernetes metadata enrichment (pods, services, deployments)
-* Efficient OTLP export to any observability backend
-* Production-ready with minimal performance overhead
+- Continuous, automated flow capture without manual intervention
+- Bidirectional flow aggregation with packet/byte counters
+- Kubernetes metadata enrichment (pods, services, deployments)
+- Efficient OTLP export to any observability backend
+- Production-ready with minimal performance overhead
 
 **tcpdump/Wireshark provide:**
 
-* Full packet payload capture for deep inspection
-* Interactive analysis and filtering (Wireshark GUI)
-* Protocol dissection for debugging specific issues
-* Manual, on-demand troubleshooting
+- Full packet payload capture for deep inspection
+- Interactive analysis and filtering (Wireshark GUI)
+- Protocol dissection for debugging specific issues
+- Manual, on-demand troubleshooting
 
 **Trade-off:** Use Mermin for continuous observability; use packet capture tools for deep troubleshooting of specific issues.
 
@@ -367,29 +301,29 @@ If the OTLP backend is unavailable:
 
 **Mermin provides (Observability):**
 
-* Network flow visibility across your entire cluster
-* Zero application changes or sidecar injection required
-* Captures all traffic: pod-to-pod, pod-to-external, host network, non-mesh workloads
-* **CNI Agnostic**: Works with any CNI (Cilium, Calico, Flannel, cloud-native CNIs)
-* Lower resource overhead (no sidecar per pod)
-* Network-layer (L3/L4) flow telemetry
+- Network flow visibility across your entire cluster
+- Zero application changes or sidecar injection required
+- Captures all traffic: pod-to-pod, pod-to-external, host network, non-mesh workloads
+- **CNI Agnostic**: Works with any CNI (Cilium, Calico, Flannel, cloud-native CNIs)
+- Lower resource overhead (no sidecar per pod)
+- Network-layer (L3/L4) flow telemetry
 
 **Service Mesh provides (Traffic Management & Security):**
 
-* Layer 7 (HTTP, gRPC) traffic control and policy enforcement
-* Traffic management (retries, timeouts, circuit breaking, canary deployments)
-* Mutual TLS encryption between services
-* Service-to-service authorization and authentication
-* Request routing and load balancing strategies
-* (Also includes L7 observability metrics as a side benefit)
+- Layer 7 (HTTP, gRPC) traffic control and policy enforcement
+- Traffic management (retries, timeouts, circuit breaking, canary deployments)
+- Mutual TLS encryption between services
+- Service-to-service authorization and authentication
+- Request routing and load balancing strategies
+- (Also includes L7 observability metrics as a side benefit)
 
 **Key Insight:** You can run Mermin alongside a service mesh. Mermin observes network flows (L3/L4) across all workloads, while the service mesh manages application traffic (L7) for enrolled services. Many organizations use both together.
 
-## Next Steps
+<!-- TODO(GA Documentation): Cleanup the next steps -->
+<!-- ## Next Steps
 
 Now that you understand how Mermin generates Flow Traces:
-
 1. [**Deploy to Production**](../deployment/deployment.md): Choose your deployment model
 2. [**Configure Mermin**](../configuration/configuration.md): Customize for your environment
 3. [**Choose Your Backend**](../observability/backends.md): Send Flow Traces to your observability platform
-4. [**Troubleshoot Issues**](../troubleshooting/troubleshooting.md): Diagnose and resolve problems
+4. [**Troubleshoot Issues**](../troubleshooting/troubleshooting.md): Diagnose and resolve problems -->
