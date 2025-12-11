@@ -38,7 +38,21 @@ pub fn observe_export_latency(duration: Duration) {
     registry::EXPORT_LATENCY_SECONDS.observe(duration.as_secs_f64());
 }
 
-/// Record export batch size.
-pub fn observe_export_batch_size(size: usize) {
-    registry::EXPORT_BATCH_SIZE.observe(size as f64);
+/// Record export batch span count.
+pub fn observe_export_batch_spans(count: usize) {
+    registry::EXPORT_BATCH_SPANS.observe(count as f64);
+}
+
+/// Increment the export timeouts counter.
+///
+/// Called when an export operation times out.
+pub fn inc_export_timeouts() {
+    registry::EXPORT_TIMEOUTS_TOTAL.inc();
+}
+
+/// Record time spent blocked waiting for export operations.
+///
+/// Called to track how long the pipeline is blocked waiting for export to complete.
+pub fn observe_export_blocking_time(duration: Duration) {
+    registry::EXPORT_BLOCKING_TIME_SECONDS.observe(duration.as_secs_f64());
 }

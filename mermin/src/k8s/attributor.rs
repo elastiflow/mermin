@@ -1599,10 +1599,12 @@ fn spawn_ip_resource_watcher<K, F>(
                         );
                     }
                     Err(e) => {
-                        metrics::registry::K8S_WATCHER_ERRORS_TOTAL.inc();
+                        metrics::registry::K8S_WATCHER_EVENTS_TOTAL
+                            .with_label_values(&["error"])
+                            .inc();
                         if metrics::registry::debug_enabled() {
-                            metrics::registry::K8S_WATCHER_ERRORS_BY_RESOURCE_TOTAL
-                                .with_label_values(&[&resource_name])
+                            metrics::registry::K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL
+                                .with_label_values(&[&resource_name, "error"])
                                 .inc();
                         }
 

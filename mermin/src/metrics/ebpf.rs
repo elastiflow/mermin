@@ -2,6 +2,76 @@
 
 use crate::metrics::registry;
 
+/// eBPF map names for metrics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EbpfMapName {
+    FlowStats,
+    FlowEvents,
+    ListeningPorts,
+}
+
+impl AsRef<str> for EbpfMapName {
+    fn as_ref(&self) -> &str {
+        match self {
+            EbpfMapName::FlowStats => "FLOW_STATS",
+            EbpfMapName::FlowEvents => "FLOW_EVENTS",
+            EbpfMapName::ListeningPorts => "LISTENING_PORTS",
+        }
+    }
+}
+
+/// eBPF map operation types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EbpfMapOperation {
+    Read,
+    Write,
+    Delete,
+}
+
+impl AsRef<str> for EbpfMapOperation {
+    fn as_ref(&self) -> &str {
+        match self {
+            EbpfMapOperation::Read => "read",
+            EbpfMapOperation::Write => "write",
+            EbpfMapOperation::Delete => "delete",
+        }
+    }
+}
+
+/// eBPF map operation status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EbpfMapStatus {
+    Ok,
+    Error,
+    NotFound,
+}
+
+impl AsRef<str> for EbpfMapStatus {
+    fn as_ref(&self) -> &str {
+        match self {
+            EbpfMapStatus::Ok => "ok",
+            EbpfMapStatus::Error => "error",
+            EbpfMapStatus::NotFound => "not_found",
+        }
+    }
+}
+
+/// Increment the eBPF map operations counter.
+pub fn inc_map_operation(map: EbpfMapName, operation: EbpfMapOperation, status: EbpfMapStatus) {
+    registry::EBPF_MAP_OPERATIONS_TOTAL
+        .with_label_values(&[map.as_ref(), operation.as_ref(), status.as_ref()])
+        .inc();
+}
+
+/// Increment the eBPF map bytes counter.
+///
+/// Used to track bytes read from ring buffers (e.g., FLOW_EVENTS).
+pub fn inc_map_bytes(map: EbpfMapName, bytes: u64) {
+    registry::EBPF_MAP_BYTES_TOTAL
+        .with_label_values(&[map.as_ref()])
+        .inc_by(bytes);
+}
+
 /// Increment the orphan cleanup counter.
 ///
 /// Call this when the orphan scanner successfully removes a stale entry.
@@ -10,10 +80,36 @@ pub fn inc_orphans_cleaned(count: u64) {
 }
 
 /// Set the current number of entries in the eBPF map.
-pub fn set_map_entries(entries: u64) {
+///
+/// # Arguments
+/// * `map` - The name of the eBPF map (e.g., "FLOW_STATS", "FLOW_EVENTS", "LISTENING_PORTS")
+/// * `entries` - The current number of entries in the map
+pub fn set_map_entries(map: &str, entries: u64) {
     registry::EBPF_MAP_ENTRIES
-        .with_label_values(&["flow_stats"])
+        .with_label_values(&[map])
         .set(entries as i64);
+}
+
+/// Set the maximum capacity of an eBPF map.
+///
+/// # Arguments
+/// * `map` - The name of the eBPF map (e.g., "FLOW_STATS", "FLOW_EVENTS", "LISTENING_PORTS")
+/// * `capacity` - The maximum capacity of the map
+pub fn set_map_capacity(map: &str, capacity: u64) {
+    registry::EBPF_MAP_CAPACITY
+        .with_label_values(&[map])
+        .set(capacity as i64);
+}
+
+/// Set the utilization ratio of an eBPF map.
+///
+/// # Arguments
+/// * `map` - The name of the eBPF map (e.g., "FLOW_STATS", "FLOW_EVENTS", "LISTENING_PORTS")
+/// * `utilization` - The utilization ratio (entries / capacity) as a float between 0.0 and 1.0
+pub fn set_map_utilization(map: &str, utilization: f64) {
+    registry::EBPF_MAP_UTILIZATION
+        .with_label_values(&[map])
+        .set(utilization);
 }
 
 /// Increment the TC program attached counter.

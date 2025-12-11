@@ -16,9 +16,7 @@ use crate::metrics::{
     self,
     registry::{
         SHUTDOWN_DURATION_SECONDS, SHUTDOWN_TIMEOUTS_TOTAL, TASKS_ACTIVE_BY_NAME_TOTAL,
-        TASKS_ACTIVE_TOTAL, TASKS_CANCELLED_BY_NAME_TOTAL, TASKS_CANCELLED_TOTAL,
-        TASKS_COMPLETED_BY_NAME_TOTAL, TASKS_COMPLETED_TOTAL, TASKS_PANICKED_BY_NAME_TOTAL,
-        TASKS_PANICKED_TOTAL, TASKS_SPAWNED_BY_NAME_TOTAL, TASKS_SPAWNED_TOTAL,
+        TASKS_ACTIVE_TOTAL, TASKS_BY_NAME_TOTAL, TASKS_TOTAL,
     },
 };
 
@@ -81,10 +79,12 @@ impl TaskManager {
 
         self.tasks.insert(task_id, task_info);
 
-        TASKS_SPAWNED_TOTAL.inc();
+        TASKS_TOTAL.with_label_values(&["spawned"]).inc();
         TASKS_ACTIVE_TOTAL.inc();
         if metrics::registry::debug_enabled() {
-            TASKS_SPAWNED_BY_NAME_TOTAL.with_label_values(&[name]).inc();
+            TASKS_BY_NAME_TOTAL
+                .with_label_values(&[name, "spawned"])
+                .inc();
             TASKS_ACTIVE_BY_NAME_TOTAL.with_label_values(&[name]).inc();
         }
 
@@ -175,11 +175,11 @@ impl TaskManager {
                 task.state = TaskState::Cancelled;
                 task.completion_time = Some(Instant::now());
 
-                TASKS_CANCELLED_TOTAL.inc();
+                TASKS_TOTAL.with_label_values(&["cancelled"]).inc();
                 TASKS_ACTIVE_TOTAL.dec();
                 if crate::metrics::registry::debug_enabled() {
-                    TASKS_CANCELLED_BY_NAME_TOTAL
-                        .with_label_values(&[&task_name])
+                    TASKS_BY_NAME_TOTAL
+                        .with_label_values(&[&task_name, "cancelled"])
                         .inc();
                     TASKS_ACTIVE_BY_NAME_TOTAL
                         .with_label_values(&[&task_name])
@@ -276,11 +276,11 @@ impl TaskManager {
                     if let Some(task_info) = self.tasks.get_mut(&task_id) {
                         task_info.state = TaskState::Completed;
                         task_info.completion_time = Some(Instant::now());
-                        TASKS_COMPLETED_TOTAL.inc();
+                        TASKS_TOTAL.with_label_values(&["completed"]).inc();
                         TASKS_ACTIVE_TOTAL.dec();
                         if metrics::registry::debug_enabled() {
-                            TASKS_COMPLETED_BY_NAME_TOTAL
-                                .with_label_values(&[&task_name])
+                            TASKS_BY_NAME_TOTAL
+                                .with_label_values(&[&task_name, "completed"])
                                 .inc();
                             TASKS_ACTIVE_BY_NAME_TOTAL
                                 .with_label_values(&[&task_name])
@@ -293,11 +293,11 @@ impl TaskManager {
                     if let Some(task_info) = self.tasks.get_mut(&task_id) {
                         task_info.state = TaskState::Cancelled;
                         task_info.completion_time = Some(Instant::now());
-                        TASKS_CANCELLED_TOTAL.inc();
+                        TASKS_TOTAL.with_label_values(&["cancelled"]).inc();
                         TASKS_ACTIVE_TOTAL.dec();
                         if metrics::registry::debug_enabled() {
-                            TASKS_CANCELLED_BY_NAME_TOTAL
-                                .with_label_values(&[&task_name])
+                            TASKS_BY_NAME_TOTAL
+                                .with_label_values(&[&task_name, "cancelled"])
                                 .inc();
                             TASKS_ACTIVE_BY_NAME_TOTAL
                                 .with_label_values(&[&task_name])
@@ -310,11 +310,11 @@ impl TaskManager {
                     if let Some(task_info) = self.tasks.get_mut(&task_id) {
                         task_info.state = TaskState::Panicked;
                         task_info.completion_time = Some(Instant::now());
-                        TASKS_PANICKED_TOTAL.inc();
+                        TASKS_TOTAL.with_label_values(&["panicked"]).inc();
                         TASKS_ACTIVE_TOTAL.dec();
                         if metrics::registry::debug_enabled() {
-                            TASKS_PANICKED_BY_NAME_TOTAL
-                                .with_label_values(&[&task_name])
+                            TASKS_BY_NAME_TOTAL
+                                .with_label_values(&[&task_name, "panicked"])
                                 .inc();
                             TASKS_ACTIVE_BY_NAME_TOTAL
                                 .with_label_values(&[&task_name])

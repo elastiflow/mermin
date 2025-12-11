@@ -168,8 +168,8 @@ Mermin provides metrics to monitor shutdown behavior:
 
 - `shutdown_duration_seconds`: Histogram of actual shutdown durations
 - `shutdown_timeouts_total`: Count of shutdowns that exceeded timeout
-- `flows_preserved_shutdown_total`: Flows successfully exported during shutdown
-- `flows_lost_shutdown_total`: Flows lost due to shutdown timeout
+- `shutdown_flows_total{status="preserved"}`: Flows successfully exported during shutdown
+- `shutdown_flows_total{status="lost"}`: Flows lost due to shutdown timeout
 
 ### `ring_buffer_capacity`
 
@@ -376,9 +376,9 @@ After tuning performance settings, monitor these metrics:
 mermin_k8s_cache_hits_total / (mermin_k8s_cache_hits_total + mermin_k8s_cache_misses_total)
 
 # Backpressure and sampling
-rate(mermin_flow_events_dropped_backpressure_total[5m])
-rate(mermin_flow_events_sampled_total[5m])
-mermin_flow_events_sampling_rate
+rate(mermin_flow_events_total{status="dropped_backpressure"}[5m])
+rate(mermin_flow_events_total{status="dropped_error"}[5m])
+# Note: Sampling rate metric does not exist - use flow_events_total{status="received"} vs total to calculate
 
 # Channel utilization
 mermin_channel_capacity_used_ratio

@@ -6,7 +6,7 @@ use opentelemetry_sdk::{
     trace::{SpanData, SpanExporter},
 };
 
-use crate::metrics::export::observe_export_batch_size;
+use crate::metrics::export::observe_export_batch_spans;
 
 #[derive(Debug)]
 pub struct MetricsSpanExporter<E> {
@@ -28,7 +28,7 @@ where
         // Observe batch size before delegating to inner exporter
         let batch_size = batch.len();
         if batch_size > 0 {
-            observe_export_batch_size(batch_size);
+            observe_export_batch_spans(batch_size);
         }
 
         // Delegate to inner exporter - the trait guarantees 'static but compiler can't prove it

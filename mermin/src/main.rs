@@ -124,6 +124,10 @@ async fn main() {
 /// CI check in place: .github/workflows/ci.yml (schema_version_check job)
 const EBPF_MAP_SCHEMA_VERSION: u8 = 1;
 
+/// Timeout for individual export operations (in seconds).
+/// If an export takes longer than this, it's considered timed out and the span may be lost.
+const EXPORT_TIMEOUT_SECS: u64 = 10;
+
 async fn run(cli: Cli) -> Result<()> {
     // TODO: listen for SIGUP `kill -HUP $(pidof mermin)` to reload the eBPF program and all configuration
     // TODO: do not reload global configuration found in CLI
@@ -453,6 +457,16 @@ async fn run(cli: Cli) -> Result<()> {
         .map_err(|e| MerminError::internal(format!("failed to convert LISTENING_PORTS: {e}")))?,
     ));
 
+    // Set eBPF map capacity metrics for monitoring utilization
+    // FLOW_STATS: configurable via pipeline.ebpf_max_flows (hash map, entry count)
+    metrics::ebpf::set_map_capacity("FLOW_STATS", conf.pipeline.ebpf_max_flows as u64);
+    // FLOW_EVENTS: 256 KB ring buffer (matches RING_BUF_SIZE_BYTES in mermin-ebpf/src/main.rs)
+    // Note: Capacity is in BYTES, not entries. Ring buffers don't expose entry counts to userspace,
+    // so entries/utilization metrics are not available for FLOW_EVENTS.
+    metrics::ebpf::set_map_capacity("FLOW_EVENTS", 256 * 1024);
+    // LISTENING_PORTS: 65536 max entries (matches HashMap definition in mermin-ebpf/src/main.rs)
+    metrics::ebpf::set_map_capacity("LISTENING_PORTS", 65536);
+
     info!(
         event.name = "ebpf.maps_ready",
         schema_version = EBPF_MAP_SCHEMA_VERSION,
@@ -559,6 +573,15 @@ async fn run(cli: Cli) -> Result<()> {
         .scan_and_populate()
         .await
         .map_err(|e| MerminError::internal(format!("failed to scan listening ports: {e}")))?;
+
+    // Set LISTENING_PORTS map metrics after initial scan
+    // Note: This only reflects the startup state; eBPF kprobes maintain the map
+    // in real-time after this, but those changes are not reflected in these metrics.
+    metrics::ebpf::set_map_entries("LISTENING_PORTS", scanned_ports as u64);
+    const LISTENING_PORTS_CAPACITY: u64 = 65536;
+    let utilization = scanned_ports as f64 / LISTENING_PORTS_CAPACITY as f64;
+    metrics::ebpf::set_map_utilization("LISTENING_PORTS", utilization);
+
     info!(
         event.name = "listening_ports.scan_complete",
         total_ports = scanned_ports,
@@ -787,7 +810,14 @@ async fn run(cli: Cli) -> Result<()> {
 
             trace!(event.name = "exporter.received_from_decorator", flow.community_id = %community_id);
 
-            if tokio::time::timeout(Duration::from_secs(10), exporter.export(traceable)).await.is_err() {
+            // Track export blocking time and timeouts
+            let export_start = std::time::Instant::now();
+            let export_result = tokio::time::timeout(Duration::from_secs(EXPORT_TIMEOUT_SECS), exporter.export(traceable)).await;
+            let export_duration = export_start.elapsed();
+            metrics::export::observe_export_blocking_time(export_duration);
+
+            if export_result.is_err() {
+                metrics::export::inc_export_timeouts();
                 warn!(event.name = "flow.export_timeout", "export call timed out, span may be lost");
             } else {
                 trace!(event.name = "exporter.export_successful", flow.community_id = %community_id);

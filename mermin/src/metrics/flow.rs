@@ -8,6 +8,7 @@ use crate::metrics::registry;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlowEventResult {
     Received,
+    Filtered,
     DroppedBackpressure,
     DroppedError,
 }
@@ -16,6 +17,7 @@ impl AsRef<str> for FlowEventResult {
     fn as_ref(&self) -> &str {
         match self {
             FlowEventResult::Received => "received",
+            FlowEventResult::Filtered => "filtered",
             FlowEventResult::DroppedBackpressure => "dropped_backpressure",
             FlowEventResult::DroppedError => "dropped_error",
         }
@@ -44,24 +46,6 @@ impl AsRef<str> for FlowSpanProducerStatus {
     }
 }
 
-/// Flow stats map access status.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FlowStatsStatus {
-    Ok,
-    Error,
-    NotFound,
-}
-
-impl AsRef<str> for FlowStatsStatus {
-    fn as_ref(&self) -> &str {
-        match self {
-            FlowStatsStatus::Ok => "ok",
-            FlowStatsStatus::Error => "error",
-            FlowStatsStatus::NotFound => "not_found",
-        }
-    }
-}
-
 /// Increment the flow events counter.
 pub fn inc_flow_events(event_type: FlowEventResult) {
     registry::FLOW_EVENTS_TOTAL
@@ -75,7 +59,7 @@ pub fn inc_flow_events(event_type: FlowEventResult) {
 /// also increments the per-interface debug counter.
 pub fn inc_flows_created(interface: &str) {
     // Always increment aggregated metric
-    registry::FLOWS_CREATED_TOTAL.inc();
+    registry::FLOW_SPANS_CREATED_TOTAL.inc();
 
     // Conditionally increment debug metric with labels
     if registry::debug_enabled() {
@@ -88,7 +72,7 @@ pub fn inc_flows_created(interface: &str) {
 /// Increment the active flows gauge.
 pub fn inc_flows_active(interface: &str) {
     // Always increment aggregated metric
-    registry::FLOWS_ACTIVE_TOTAL.inc();
+    registry::FLOW_SPANS_ACTIVE_TOTAL.inc();
 
     // Conditionally increment debug metric with labels
     if registry::debug_enabled() {
@@ -101,7 +85,7 @@ pub fn inc_flows_active(interface: &str) {
 /// Decrement the active flows gauge.
 pub fn dec_flows_active(interface: &str) {
     // Always decrement aggregated metric
-    registry::FLOWS_ACTIVE_TOTAL.dec();
+    registry::FLOW_SPANS_ACTIVE_TOTAL.dec();
 
     // Conditionally decrement debug metric with labels
     if registry::debug_enabled() {
@@ -126,13 +110,6 @@ pub fn inc_producer_flow_spans(interface: &str, status: FlowSpanProducerStatus) 
     }
 }
 
-/// Increment the flow stats map access counter.
-pub fn inc_flow_stats_map_access(status: FlowStatsStatus) {
-    registry::FLOW_STATS_ACCESS_TOTAL
-        .with_label_values(&[status.as_ref()])
-        .inc();
-}
-
 /// Increment the packets total counter.
 ///
 /// Tracks packet deltas by interface and direction.
@@ -150,6 +127,28 @@ pub fn inc_packets_total(interface: &str, direction: Direction, count: u64) {
             Direction::Egress => "egress",
         };
         registry::PACKETS_BY_INTERFACE_TOTAL
+            .with_label_values(&[interface, direction_str])
+            .inc_by(count);
+    }
+}
+
+/// Increment the bytes total counter.
+///
+/// Tracks byte deltas by interface and direction.
+/// For bidirectional flows:
+/// - If direction = Ingress: forward bytes came via ingress, reverse via egress
+/// - If direction = Egress: forward bytes came via egress, reverse via ingress
+pub fn inc_bytes_total(interface: &str, direction: Direction, count: u64) {
+    // Always increment aggregated metric (no interface or direction labels)
+    registry::BYTES_TOTAL.inc_by(count);
+
+    // Conditionally increment debug metric with labels
+    if registry::debug_enabled() {
+        let direction_str = match direction {
+            Direction::Ingress => "ingress",
+            Direction::Egress => "egress",
+        };
+        registry::BYTES_BY_INTERFACE_TOTAL
             .with_label_values(&[interface, direction_str])
             .inc_by(count);
     }

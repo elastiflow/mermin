@@ -148,9 +148,9 @@ This group of metrics covers the core logic of Mermin, where raw packet data is 
 
 ### Flow Lifecycle
 
-**`mermin_span_active`**
+**`mermin_flow_spans_active_total`**
 - **Type:** Gauge
-- **Description:** The number of currently active flows.
+- **Description:** The number of currently active flow traces across all interfaces.
 
 **`mermin_span_processed_total{reason}`**
 - **Type:** Counter
