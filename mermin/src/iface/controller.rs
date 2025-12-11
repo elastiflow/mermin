@@ -1391,9 +1391,6 @@ impl IfaceController {
     }
 
     /// Check if a name matches any of the given patterns.
-    ///
-    /// Returns `true` if any pattern matches the name, `false` otherwise.
-    /// Empty patterns list returns `false`.
     pub fn matches_pattern(name: &str, patterns: &[String]) -> bool {
         patterns
             .iter()
@@ -1401,10 +1398,6 @@ impl IfaceController {
     }
 
     /// Match a text against a glob pattern.
-    ///
-    /// Returns `true` if the pattern matches the text, `false` otherwise.
-    /// Patterns longer than 256 characters are rejected.
-    /// Invalid glob patterns fall back to literal string matching.
     pub fn glob_matches(pattern: &str, text: &str) -> bool {
         const MAX_PATTERN_LEN: usize = 256;
 
@@ -1433,8 +1426,6 @@ impl IfaceController {
     }
 
     /// Check if an error indicates a "not found" condition.
-    ///
-    /// Returns true if the error message contains common "not found" patterns.
     fn is_not_found_error(e: &impl std::fmt::Display) -> bool {
         let error_str = e.to_string();
         error_str.contains("No such file")

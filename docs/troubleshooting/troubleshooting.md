@@ -111,52 +111,25 @@ Key metrics to monitor include:
 - **High Packet Loss**: Increase `pipeline.ring_buffer_capacity` or reduce monitored interfaces -->
 ### Test eBPF Capabilities
 
-The `test-bpf` subcommand validates eBPF filesystem writeability and tests attach/detach operations on network interfaces. This is especially useful for diagnosing deployment issues in a deployed Mermin cluster.
-
-**In a deployed Kubernetes cluster:**
+Use the `diagnose bpf` subcommand to validate eBPF support and test attach/detach operations:
 
 ```bash
-# Get the pod name
+# In a deployed cluster
 POD=$(kubectl get pod -n mermin -l app.kubernetes.io/name=mermin -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n mermin $POD -- mermin diagnose bpf
 
-# Test a specific interface
-kubectl exec -n mermin $POD -- mermin test-bpf --interface eth0
-
-# Test all interfaces (useful for discovering which interfaces are available)
-kubectl exec -n mermin $POD -- mermin test-bpf --all
-
-# Test all interfaces matching a pattern
-kubectl exec -n mermin $POD -- mermin test-bpf --all --pattern "veth*" --skip "veth0"
+# On bare metal or in a debug pod
+mermin diagnose bpf
 ```
 
-**On bare metal or in a debug pod:**
+This validates:
 
-```bash
-# Test a single interface
-sudo mermin test-bpf --interface eth0
-
-# Test all interfaces matching a pattern
-sudo mermin test-bpf --all --pattern "eth*" --skip "eth0"
-
-# Test all interfaces (no filters)
-sudo mermin test-bpf --all
-```
-
-**What it checks:**
-
-- `/sys/fs/bpf` filesystem writeability (required for TCX link pinning on kernel >= 6.6)
-- eBPF program attach/detach operations on each interface
-- Kernel version and TCX vs netlink mode detection
 - Required Linux capabilities
+- eBPF program loading and attach/detach operations
+- BPF filesystem writeability
+- Kernel version compatibility
 
-**When to use it:**
-
-- Before deploying Mermin to verify eBPF support
-- When troubleshooting attach/detach failures
-- To validate BPF filesystem mount configuration
-- To test interface filtering patterns
-
-The subcommand exits early (no config required) and provides structured logging with clear success/failure indicators for each test. See [Deployment Issues](deployment-issues.md#ebpf-program-loading-failures) for more details on interpreting the results.
+For detailed usage, interpreting results, and troubleshooting failures, see [Deployment Issues: Test eBPF Attach/Detach Operations](deployment-issues.md#test-ebpf-attachdetach-operations).
 
 ## Getting Help
 
