@@ -30,9 +30,9 @@ use crate::{
 /// Result of testing a single interface
 struct InterfaceTestResult {
     interface: String,
-    bpf_fs_writable: bool, // Shared across all interfaces
+    bpf_fs_writable: bool,
     attach_success: bool,
-    pin_success: Option<bool>, // None if not applicable
+    pin_success: Option<bool>,
     detach_success: bool,
 }
 
@@ -59,13 +59,40 @@ fn matches_skip_pattern(name: &str, skip_patterns: &[String]) -> bool {
 
 /// Execute the BPF diagnostic command
 pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String]) -> Result<()> {
-    // Determine interface list
+    // Initialize minimal tracing FIRST so all logs are captured
+    let log_level = std::env::var("MERMIN_LOG_LEVEL")
+        .unwrap_or_else(|_| "info".to_string())
+        .parse::<tracing::Level>()
+        .unwrap_or(tracing::Level::INFO);
+
+    let mut fmt_layer = Layer::new()
+        .with_span_events(FmtSpan::CLOSE)
+        .with_ansi(std::env::var("NO_COLOR").is_err());
+
+    match log_level {
+        tracing::Level::DEBUG => fmt_layer = fmt_layer.with_file(true).with_line_number(true),
+        tracing::Level::TRACE => {
+            fmt_layer = fmt_layer
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .with_file(true)
+                .with_line_number(true)
+        }
+        _ => {}
+    }
+
+    let filter = EnvFilter::new(format!("warn,mermin={log_level}"));
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt_layer)
+        .init();
+
     let interfaces_to_test: Vec<String> = if let Some(iface) = interface {
         // Single interface mode - explicit interface specified
         vec![iface.to_string()]
     } else {
         // Multi-interface mode (default) - discover and filter all interfaces
-        // Discover all interfaces
         let all_interfaces: Vec<_> = datalink::interfaces()
             .into_iter()
             .filter(|iface| {
@@ -101,7 +128,6 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
             "discovered interfaces from host namespace"
         );
 
-        // Apply pattern filter (if provided)
         let pattern_filtered: Vec<String> = if pattern.is_empty() {
             all_interfaces
         } else {
@@ -119,7 +145,6 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
             "applied pattern filter"
         );
 
-        // Apply skip filter
         let final_interfaces: Vec<String> = if skip.is_empty() {
             pattern_filtered
         } else {
@@ -147,35 +172,6 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
         final_interfaces
     };
 
-    // Initialize minimal tracing
-    let log_level = std::env::var("MERMIN_LOG_LEVEL")
-        .unwrap_or_else(|_| "info".to_string())
-        .parse::<tracing::Level>()
-        .unwrap_or(tracing::Level::INFO);
-
-    let mut fmt_layer = Layer::new()
-        .with_span_events(FmtSpan::CLOSE)
-        .with_ansi(std::env::var("NO_COLOR").is_err());
-
-    match log_level {
-        tracing::Level::DEBUG => fmt_layer = fmt_layer.with_file(true).with_line_number(true),
-        tracing::Level::TRACE => {
-            fmt_layer = fmt_layer
-                .with_thread_ids(true)
-                .with_thread_names(true)
-                .with_file(true)
-                .with_line_number(true)
-        }
-        _ => {}
-    }
-
-    let filter = EnvFilter::new(format!("warn,mermin={log_level}"));
-
-    tracing_subscriber::registry()
-        .with(filter)
-        .with(fmt_layer)
-        .init();
-
     info!(
         event.name = "diagnose.bpf.started",
         interface_count = interfaces_to_test.len(),
@@ -183,7 +179,6 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
         "starting BPF filesystem and attach/detach tests"
     );
 
-    // Check required capabilities
     info!(
         event.name = "diagnose.bpf.checking_capabilities",
         "checking required capabilities"
@@ -214,7 +209,6 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
         );
     }
 
-    // Load eBPF program
     info!(
         event.name = "diagnose.bpf.loading_ebpf",
         "loading eBPF program"
@@ -233,7 +227,6 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
         );
     }
 
-    // Determine kernel version and TCX support
     let kernel_version = KernelVersion::current().unwrap_or(KernelVersion::new(0, 0, 0));
     let use_tcx = kernel_version >= KernelVersion::new(6, 6, 0);
     info!(
@@ -243,7 +236,6 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
         "kernel version determined"
     );
 
-    // Test /sys/fs/bpf writeability BEFORE extracting program
     info!(
         event.name = "diagnose.bpf.testing_bpf_fs",
         "testing /sys/fs/bpf writeability"
@@ -293,7 +285,6 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
         test_result.is_some()
     };
 
-    // Extract and load ingress program AFTER BPF FS test
     let ingress_program: &mut SchedClassifier = ebpf
         .program_mut("mermin_flow_ingress")
         .ok_or_else(|| {
@@ -326,7 +317,6 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
         );
     }
 
-    // Test each interface
     let mut results: Vec<InterfaceTestResult> = Vec::new();
 
     for interface in &interfaces_to_test {
@@ -334,10 +324,8 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
         results.push(result);
     }
 
-    // Print results
     print_test_results(&results, &kernel_version, use_tcx, bpf_fs_writable);
 
-    // Determine exit code: 0 if any passed, 1 if all failed
     let passed_count = results.iter().filter(|r| r.overall_status()).count();
     let total_count = results.len();
 
@@ -350,7 +338,6 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
     Ok(())
 }
 
-/// Test a single interface and return the result
 fn test_single_interface(
     interface: &str,
     ingress_program: &mut SchedClassifier,
@@ -385,7 +372,6 @@ fn test_single_interface(
                     "✓ successfully attached program to interface"
                 );
 
-                // Try to pin link if BPF FS is writable
                 if bpf_fs_writable {
                     let pin_path = format!("/sys/fs/bpf/mermin_tcx_{interface}_ingress");
                     info!(
@@ -406,8 +392,8 @@ fn test_single_interface(
                                                 pin_path = %pin_path,
                                                 "✓ successfully pinned TCX link"
                                             );
-                                            std::mem::forget(pinned_fd_link);
-                                            // Link is pinned, so we'll test detach via unpinning
+                                            // Drop pinned_fd_link to close the FD, but keep the pin
+                                            drop(pinned_fd_link);
                                         }
                                         Err(e) => {
                                             pin_success = Some(false);
@@ -462,7 +448,6 @@ fn test_single_interface(
             "attaching eBPF program with netlink (priority=50)"
         );
 
-        // Add clsact qdisc if needed (netlink mode requirement)
         if let Err(e) = aya::programs::tc::qdisc_add_clsact(interface) {
             debug!(
                 event.name = "diagnose.bpf.qdisc_add_skipped",
@@ -498,7 +483,6 @@ fn test_single_interface(
         }
     }
 
-    // Test detach operation
     let mut detach_success = false;
 
     if attach_success {
@@ -549,7 +533,6 @@ fn test_single_interface(
                 }
             }
 
-            // Fallback to standard detach if unpin didn't work
             if !detach_success {
                 if let Some(id) = link_id {
                     match ingress_program.detach(id) {
@@ -627,7 +610,6 @@ fn test_single_interface(
     })
 }
 
-/// Print test results in a formatted table
 fn print_test_results(
     results: &[InterfaceTestResult],
     kernel_version: &KernelVersion,

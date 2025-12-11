@@ -765,7 +765,9 @@ impl IfaceController {
                                     pin_path = %pin_path,
                                     "tcx link pinned successfully - orphan cleanup enabled"
                                 );
-                                std::mem::forget(pinned_fd_link);
+                                // Drop pinned_fd_link to close the FD, but keep the pin
+                                // The pin keeps the link alive, allowing proper cleanup via unpin()
+                                drop(pinned_fd_link);
                             }
                             Err(e) => {
                                 error!(
