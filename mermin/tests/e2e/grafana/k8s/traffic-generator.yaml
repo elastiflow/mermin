@@ -1,0 +1,165 @@
+# Traffic Generator for Mermin Metrics Validation
+#
+# This manifest deploys client and server workloads that generate
+# predictable network traffic for validating Mermin's metrics collection.
+#
+# Usage:
+#   kubectl apply -f traffic-generator.yaml
+#
+# The traffic pattern:
+#   - 2 client pods continuously curl the server every second
+#   - 2 server pods respond with nginx default page
+#   - Creates ~2 requests/second of HTTP traffic
+#
+# This generates:
+#   - TCP connections (tracked as flow spans)
+#   - Ingress/egress traffic on veth interfaces
+#   - K8s-attributable flows (pods have labels for decoration)
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: traffic-test
+  labels:
+    app.kubernetes.io/part-of: mermin-validation
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traffic-client
+  namespace: traffic-test
+  labels:
+    app: traffic-client
+    app.kubernetes.io/name: traffic-client
+    app.kubernetes.io/part-of: mermin-validation
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: traffic-client
+  template:
+    metadata:
+      labels:
+        app: traffic-client
+        app.kubernetes.io/name: traffic-client
+        app.kubernetes.io/part-of: mermin-validation
+    spec:
+      containers:
+        - name: curl
+          image: curlimages/curl:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "Starting traffic generator..."
+              while true; do
+                # Make request to server
+                response=$(curl -s -o /dev/null -w "%{http_code}" http://traffic-server.traffic-test.svc:8080/ 2>/dev/null)
+                if [ "$response" = "200" ]; then
+                  echo "$(date): Request successful (HTTP $response)"
+                else
+                  echo "$(date): Request failed (HTTP $response)"
+                fi
+                # Wait before next request
+                sleep 1
+              done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traffic-server
+  namespace: traffic-test
+  labels:
+    app: traffic-server
+    app.kubernetes.io/name: traffic-server
+    app.kubernetes.io/part-of: mermin-validation
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: traffic-server
+  template:
+    metadata:
+      labels:
+        app: traffic-server
+        app.kubernetes.io/name: traffic-server
+        app.kubernetes.io/part-of: mermin-validation
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: traffic-server
+  namespace: traffic-test
+  labels:
+    app: traffic-server
+    app.kubernetes.io/name: traffic-server
+    app.kubernetes.io/part-of: mermin-validation
+spec:
+  selector:
+    app: traffic-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 80
+      protocol: TCP
+  type: ClusterIP
+
+---
+# Optional: NetworkPolicy for testing network policy decoration
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-traffic-client
+  namespace: traffic-test
+  labels:
+    app.kubernetes.io/part-of: mermin-validation
+spec:
+  podSelector:
+    matchLabels:
+      app: traffic-server
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: traffic-client
+      ports:
+        - protocol: TCP
+          port: 80

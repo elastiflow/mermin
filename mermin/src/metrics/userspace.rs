@@ -6,18 +6,16 @@ use crate::metrics::registry;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelName {
     PacketWorker,
-    Exporter,
-    DecoratorInput,
-    ExporterInput,
+    ProducerOutput,
+    DecoratorOutput,
 }
 
 impl AsRef<str> for ChannelName {
     fn as_ref(&self) -> &str {
         match self {
             ChannelName::PacketWorker => "packet_worker",
-            ChannelName::Exporter => "exporter",
-            ChannelName::DecoratorInput => "decorator_input",
-            ChannelName::ExporterInput => "exporter_input",
+            ChannelName::ProducerOutput => "producer_output",
+            ChannelName::DecoratorOutput => "decorator_output",
         }
     }
 }

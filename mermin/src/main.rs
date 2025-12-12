@@ -560,12 +560,11 @@ async fn run(cli: Cli) -> Result<()> {
         as usize;
 
     let (flow_span_tx, mut flow_span_rx) = mpsc::channel(flow_span_capacity);
-    metrics::userspace::set_channel_capacity(ChannelName::Exporter, flow_span_capacity);
-    metrics::userspace::set_channel_size(ChannelName::Exporter, 0);
+    metrics::userspace::set_channel_capacity(ChannelName::ProducerOutput, flow_span_capacity);
+    metrics::userspace::set_channel_size(ChannelName::ProducerOutput, 0);
     let (k8s_decorated_flow_span_tx, mut k8s_decorated_flow_span_rx) =
         mpsc::channel(decorated_span_capacity);
-    metrics::userspace::set_channel_size(ChannelName::ExporterInput, 0);
-    metrics::userspace::set_channel_size(ChannelName::DecoratorInput, 0);
+    metrics::userspace::set_channel_size(ChannelName::DecoratorOutput, 0);
 
     let listening_port_scanner =
         listening_ports::ListeningPortScanner::new(Arc::clone(&listening_ports_map));
@@ -689,8 +688,7 @@ async fn run(cli: Cli) -> Result<()> {
                             let Some(flow_span) = maybe_span else { break };
 
                             let channel_size = flow_span_rx.len();
-                            metrics::userspace::set_channel_size(ChannelName::Exporter, channel_size);
-                            metrics::userspace::set_channel_size(ChannelName::DecoratorInput, channel_size);
+                            metrics::userspace::set_channel_size(ChannelName::ProducerOutput, channel_size);
 
                             let _timer = metrics::registry::PROCESSING_LATENCY_SECONDS
                                 .with_label_values(&["k8s_decoration"])
@@ -719,11 +717,11 @@ async fn run(cli: Cli) -> Result<()> {
 
                             match k8s_decorated_flow_span_tx.send(span).await {
                                 Ok(_) => {
-                                    metrics::userspace::inc_channel_sends(ChannelName::ExporterInput, ChannelSendStatus::Success);
+                                    metrics::userspace::inc_channel_sends(ChannelName::DecoratorOutput, ChannelSendStatus::Success);
                                     metrics::export::inc_export_flow_spans(ExportStatus::Queued);
                                 }
                                 Err(e) => {
-                                    metrics::userspace::inc_channel_sends(ChannelName::ExporterInput, ChannelSendStatus::Error);
+                                    metrics::userspace::inc_channel_sends(ChannelName::DecoratorOutput, ChannelSendStatus::Error);
                                     metrics::export::inc_export_flow_spans(ExportStatus::Dropped);
                                     error!(
                                         event.name = "channel.send_failed",
@@ -745,18 +743,17 @@ async fn run(cli: Cli) -> Result<()> {
 
                     while let Some(flow_span) = flow_span_rx.recv().await {
                         let channel_size = flow_span_rx.len();
-                        metrics::userspace::set_channel_size(ChannelName::Exporter, channel_size);
-                        metrics::userspace::set_channel_size(ChannelName::DecoratorInput, channel_size);
+                        metrics::userspace::set_channel_size(ChannelName::ProducerOutput, channel_size);
                         trace!(event.name = "decorator.sending_to_exporter", flow.community_id = %flow_span.attributes.flow_community_id);
 
                         match k8s_decorated_flow_span_tx.send(flow_span).await {
                             Ok(_) => {
-                                metrics::userspace::inc_channel_sends(ChannelName::ExporterInput, ChannelSendStatus::Success);
+                                metrics::userspace::inc_channel_sends(ChannelName::DecoratorOutput, ChannelSendStatus::Success);
                                 metrics::export::inc_export_flow_spans(ExportStatus::Queued);
                                 metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Undecorated);
                             }
                             Err(e) => {
-                                metrics::userspace::inc_channel_sends(ChannelName::ExporterInput, ChannelSendStatus::Error);
+                                metrics::userspace::inc_channel_sends(ChannelName::DecoratorOutput, ChannelSendStatus::Error);
                                 metrics::export::inc_export_flow_spans(ExportStatus::Dropped);
                                 metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Dropped);
                                 error!(
@@ -801,7 +798,7 @@ async fn run(cli: Cli) -> Result<()> {
         while let Some(flow_span) = k8s_decorated_flow_span_rx.recv().await {
             let flow_span_clone = flow_span.clone();
             let queue_size = k8s_decorated_flow_span_rx.len();
-            metrics::userspace::set_channel_size(ChannelName::ExporterInput, queue_size);
+            metrics::userspace::set_channel_size(ChannelName::DecoratorOutput, queue_size);
             // Note: EXPORT_QUEUED is tracked when span is sent from decorator, not when received here
             let traceable: TraceableRecord = Arc::new(flow_span);
             trace!(event.name = "flow.exporting", "exporting flow span");

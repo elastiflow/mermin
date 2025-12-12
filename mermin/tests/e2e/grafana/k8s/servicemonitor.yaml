@@ -1,0 +1,80 @@
+# ServiceMonitor for Mermin Metrics
+#
+# This resource configures Prometheus Operator to scrape Mermin metrics.
+# Requires: kube-prometheus-stack or prometheus-operator installed.
+#
+# Usage:
+#   kubectl apply -f servicemonitor.yaml
+#
+# Note: The 'release' label must match your prometheus-stack Helm release name.
+# Common values: 'prometheus', 'kube-prometheus-stack', 'monitoring'
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: mermin
+  namespace: default
+  labels:
+    app.kubernetes.io/name: mermin
+    app.kubernetes.io/part-of: mermin
+    # Match this to your Prometheus Operator release label selector
+    # Check with: kubectl get prometheus -A -o yaml | grep -A5 serviceMonitorSelector
+    release: prometheus
+spec:
+  # Select mermin pods by their standard labels
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mermin
+  
+  # Match pods in any namespace (mermin is a DaemonSet, runs in default usually)
+  namespaceSelector:
+    any: true
+  
+  endpoints:
+    # Standard metrics endpoint
+    - port: metrics
+      interval: 15s
+      path: /metrics
+      scheme: http
+      
+      # Optional: Add relabeling to include node information
+      relabelings:
+        # Add node name as a label
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+        # Add pod name as instance
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: instance
+
+---
+# Optional: PodMonitor as alternative (if ServiceMonitor doesn't work)
+# PodMonitor directly targets pods without needing a Service
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: mermin
+  namespace: default
+  labels:
+    app.kubernetes.io/name: mermin
+    app.kubernetes.io/part-of: mermin
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mermin
+  
+  namespaceSelector:
+    any: true
+  
+  podMetricsEndpoints:
+    - port: metrics
+      interval: 15s
+      path: /metrics
+      scheme: http
+      
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: instance

@@ -49,7 +49,10 @@ use network_types::{
 use opentelemetry::trace::SpanKind;
 use tokio::sync::Mutex;
 
-use crate::ip::flow_key_to_ip_addrs;
+use crate::{
+    ip::flow_key_to_ip_addrs,
+    metrics::ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus, inc_map_operation},
+};
 
 // ICMP (IPv4) Type Constants
 const ICMP_ECHO_REPLY: u8 = 0;
@@ -160,13 +163,31 @@ impl DirectionInferrer {
             port: flow_key.dst_port,
             protocol: stats.protocol,
         };
-        if map.get(&dst_key, 0).is_ok() {
-            return Some(ClientServer {
-                client_ip: *src_ip,
-                client_port: flow_key.src_port,
-                server_ip: *dst_ip,
-                server_port: flow_key.dst_port,
-            });
+        match map.get(&dst_key, 0) {
+            Ok(_) => {
+                inc_map_operation(
+                    EbpfMapName::ListeningPorts,
+                    EbpfMapOperation::Read,
+                    EbpfMapStatus::Ok,
+                );
+                return Some(ClientServer {
+                    client_ip: *src_ip,
+                    client_port: flow_key.src_port,
+                    server_ip: *dst_ip,
+                    server_port: flow_key.dst_port,
+                });
+            }
+            Err(e) => {
+                // Track not_found (expected) vs error (unexpected)
+                let status = if e.to_string().contains("not found")
+                    || e.to_string().contains("No such file")
+                {
+                    EbpfMapStatus::NotFound
+                } else {
+                    EbpfMapStatus::Error
+                };
+                inc_map_operation(EbpfMapName::ListeningPorts, EbpfMapOperation::Read, status);
+            }
         }
 
         // Check if source port is listening (response packets or server-to-server)
@@ -174,13 +195,31 @@ impl DirectionInferrer {
             port: flow_key.src_port,
             protocol: stats.protocol,
         };
-        if map.get(&src_key, 0).is_ok() {
-            return Some(ClientServer {
-                client_ip: *dst_ip,
-                client_port: flow_key.dst_port,
-                server_ip: *src_ip,
-                server_port: flow_key.src_port,
-            });
+        match map.get(&src_key, 0) {
+            Ok(_) => {
+                inc_map_operation(
+                    EbpfMapName::ListeningPorts,
+                    EbpfMapOperation::Read,
+                    EbpfMapStatus::Ok,
+                );
+                return Some(ClientServer {
+                    client_ip: *dst_ip,
+                    client_port: flow_key.dst_port,
+                    server_ip: *src_ip,
+                    server_port: flow_key.src_port,
+                });
+            }
+            Err(e) => {
+                // Track not_found (expected) vs error (unexpected)
+                let status = if e.to_string().contains("not found")
+                    || e.to_string().contains("No such file")
+                {
+                    EbpfMapStatus::NotFound
+                } else {
+                    EbpfMapStatus::Error
+                };
+                inc_map_operation(EbpfMapName::ListeningPorts, EbpfMapOperation::Read, status);
+            }
         }
 
         None

@@ -120,7 +120,7 @@ lazy_static! {
     pub static ref CHANNEL_SENDS_TOTAL: IntCounterVec = IntCounterVec::new(
         Opts::new("channel_sends_total", "Total number of send operations to internal channels")
             .namespace("mermin"),
-        &["channel", "status"]  // channel: packet_worker, exporter, exporter_input, decorator_input; status: success, error
+        &["channel", "status"]  // channel: packet_worker, producer_output, decorator_output; status: success, error
     ).expect("failed to create channel_sends_total metric");
 
     // ============================================================================
@@ -560,7 +560,6 @@ pub fn remove_interface_metrics(iface: &str) {
 
     // Producer flow spans (all status values)
     let _ = PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL.remove_label_values(&[iface, "created"]);
-    let _ = PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL.remove_label_values(&[iface, "active"]);
     let _ = PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL.remove_label_values(&[iface, "recorded"]);
     let _ = PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL.remove_label_values(&[iface, "idled"]);
     let _ = PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL.remove_label_values(&[iface, "dropped"]);

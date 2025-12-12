@@ -1099,11 +1099,12 @@ impl FlowWorker {
 
         let interface_name = iface_name.as_deref().unwrap_or("unknown");
         metrics::flow::inc_producer_flow_spans(interface_name, FlowSpanProducerStatus::Created);
-        metrics::flow::inc_producer_flow_spans(interface_name, FlowSpanProducerStatus::Active);
 
         // Count initial packets and bytes in metrics
         if stats.packets > 0 {
             metrics::flow::inc_packets_total(interface_name, stats.direction, stats.packets);
+        }
+        if stats.bytes > 0 {
             metrics::flow::inc_bytes_total(interface_name, stats.direction, stats.bytes);
         }
         if stats.reverse_packets > 0 {
@@ -1116,6 +1117,12 @@ impl FlowWorker {
                 reverse_direction,
                 stats.reverse_packets,
             );
+        }
+        if stats.reverse_bytes > 0 {
+            let reverse_direction = match stats.direction {
+                mermin_common::Direction::Ingress => mermin_common::Direction::Egress,
+                mermin_common::Direction::Egress => mermin_common::Direction::Ingress,
+            };
             metrics::flow::inc_bytes_total(interface_name, reverse_direction, stats.reverse_bytes);
         }
 
@@ -1741,7 +1748,7 @@ async fn record_flow(
     match flow_span_tx.try_send(recorded_span) {
         Ok(_) => {
             metrics::userspace::inc_channel_sends(
-                ChannelName::Exporter,
+                ChannelName::ProducerOutput,
                 ChannelSendStatus::Success,
             );
         }
@@ -1756,7 +1763,10 @@ async fn record_flow(
             );
         }
         Err(mpsc::error::TrySendError::Closed(_)) => {
-            metrics::userspace::inc_channel_sends(ChannelName::Exporter, ChannelSendStatus::Error);
+            metrics::userspace::inc_channel_sends(
+                ChannelName::ProducerOutput,
+                ChannelSendStatus::Error,
+            );
             error!(
                 event.name = "span.export_failed",
                 flow.community_id = %community_id,
@@ -1907,7 +1917,7 @@ pub async fn timeout_and_remove_flow(
         match flow_span_tx.try_send(recorded_span) {
             Ok(_) => {
                 metrics::userspace::inc_channel_sends(
-                    ChannelName::Exporter,
+                    ChannelName::ProducerOutput,
                     ChannelSendStatus::Success,
                 );
             }
@@ -1923,7 +1933,7 @@ pub async fn timeout_and_remove_flow(
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
                 metrics::userspace::inc_channel_sends(
-                    ChannelName::Exporter,
+                    ChannelName::ProducerOutput,
                     ChannelSendStatus::Error,
                 );
                 error!(

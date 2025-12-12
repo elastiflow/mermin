@@ -6,6 +6,40 @@ scrape_configs:
   - job_name: 'prometheus'
     static_configs:
       - targets: [ '0.0.0.0:9090' ]
+  
   - job_name: 'tempo'
     static_configs:
       - targets: [ '0.0.0.0:3200' ]
+  
+  # Mermin metrics scrape configuration
+  # 
+  # For docker-compose setup with kind cluster:
+  #   1. Port-forward mermin metrics: kubectl port-forward ds/mermin 10250:10250
+  #   2. Use host.docker.internal:10250 as the target
+  #
+  # For multiple mermin pods, add each pod's forwarded port as a target.
+  # Alternatively, use a NodePort service or ingress to expose metrics.
+  - job_name: 'mermin'
+    # Scrape more frequently for validation/debugging
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    
+    static_configs:
+      # Default: assumes mermin metrics are port-forwarded to host
+      # Adjust host.docker.internal to 'host-gateway' on Linux if needed
+      - targets: [ 'host.docker.internal:10250' ]
+        labels:
+          # Add labels to identify the source
+          cluster: 'kind-atlantis'
+          environment: 'local'
+    
+    # Alternative: If running mermin in the same docker network
+    # static_configs:
+    #   - targets: [ 'mermin:10250' ]
+    
+    # Metric relabeling to add useful labels
+    metric_relabel_configs:
+      # Keep all metrics (no filtering)
+      - source_labels: [__name__]
+        regex: 'mermin_.*'
+        action: keep

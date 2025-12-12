@@ -153,18 +153,18 @@ Metrics for internal async channels between pipeline stages.
 
 **`mermin_channel_capacity{channel}`**
 - **Type:** Gauge
-- **Labels:** `channel` = "packet_worker" | "exporter" | "decorator_input" | "exporter_input"
+- **Labels:** `channel` = "packet_worker" | "producer_output" | "decorator_output"
 - **Description:** Maximum capacity of internal channels.
 
 **`mermin_channel_size{channel}`**
 - **Type:** Gauge
-- **Labels:** `channel` = "packet_worker" | "exporter" | "decorator_input" | "exporter_input"
+- **Labels:** `channel` = "packet_worker" | "producer_output" | "decorator_output"
 - **Description:** Current number of items in channels.
 
 **`mermin_channel_sends_total{channel, status}`**
 - **Type:** Counter
 - **Labels:**
-  - `channel` = "packet_worker" | "exporter" | "exporter_input" | "decorator_input"
+  - `channel` = "packet_worker" | "producer_output" | "decorator_output"
   - `status` = "success" | "error"
 - **Description:** Total send operations to internal channels by outcome.
 

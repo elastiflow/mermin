@@ -28,7 +28,6 @@ impl AsRef<str> for FlowEventResult {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlowSpanProducerStatus {
     Created,
-    Active,
     Recorded,
     Idled,
     Dropped,
@@ -38,7 +37,6 @@ impl AsRef<str> for FlowSpanProducerStatus {
     fn as_ref(&self) -> &str {
         match self {
             FlowSpanProducerStatus::Created => "created",
-            FlowSpanProducerStatus::Active => "active",
             FlowSpanProducerStatus::Recorded => "recorded",
             FlowSpanProducerStatus::Idled => "idled",
             FlowSpanProducerStatus::Dropped => "dropped",

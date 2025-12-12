@@ -641,7 +641,7 @@ rate(mermin_export_flow_spans_total{status="ok"}[5m])
 rate(mermin_export_flow_spans_total{status="error"}[5m])
 
 # Channel utilization
-mermin_channel_size{channel="exporter"} / mermin_channel_capacity{channel="exporter"}
+mermin_channel_size{channel="producer_output"} / mermin_channel_capacity{channel="producer_output"}
 
 # Export latency
 histogram_quantile(0.95, mermin_export_latency_seconds_bucket)

@@ -23,6 +23,30 @@ This file tracks all changes made to Mermin metrics, including the reason for ea
   - Variable name `FLOWS_ACTIVE_TOTAL` is just a Rust identifier; the actual Prometheus metric name is what matters
 - **Change**: Updated documentation to use correct metric name `mermin_flow_spans_active_total`
 
+### Channel Label Renaming and Consolidation
+
+#### `mermin_channel_*` metrics channel labels
+- **Status**: Labels renamed for clarity and unified to output-centric perspective
+- **Reason**: 
+  - Original labels `exporter` and `exporter_input` were misleading about data flow direction
+  - `exporter` channel actually represents producer output (producer → decorator)
+  - `exporter_input` channel actually represents decorator output (decorator → exporter)
+  - Unified to output-centric perspective for consistency (track from sender's perspective)
+- **Changes**: 
+  - `exporter` → `producer_output` (producer sends to decorator)
+  - `exporter_input` → `decorator_output` (decorator sends to exporter)
+  - **Removed** `decorator_input` (duplicate of `producer_output`, now unified)
+- **Affected Metrics**: 
+  - `mermin_channel_capacity{channel}`
+  - `mermin_channel_size{channel}`
+  - `mermin_channel_sends_total{channel, status}`
+- **Migration**:
+  | Old Label Value | New Label Value | Pipeline Stage |
+  |----------------|-----------------|----------------|
+  | `channel="exporter"` | `channel="producer_output"` | Producer → Decorator |
+  | `channel="exporter_input"` | `channel="decorator_output"` | Decorator → Exporter |
+  | `channel="decorator_input"` | `channel="producer_output"` | Producer → Decorator (unified) |
+
 ### Help Message Improvements
 
 #### `mermin_channel_sends_total`
@@ -30,8 +54,8 @@ This file tracks all changes made to Mermin metrics, including the reason for ea
 - **Reason**: 
   - Original help message "Total number of channel send operations" was ambiguous about data flow direction
   - Users need to understand that this tracks sends TO channels (data flowing INTO channels from sender's perspective)
-- **Change**: Updated help message to: "Total number of send operations to internal channels (data flows into channels: ringbuf → packet_worker, producer → exporter, decorator → exporter_input)"
-- **Labels**: `channel` (packet_worker, exporter, exporter_input, decorator_input), `status` (success, error)
+- **Change**: Updated help message to: "Total number of send operations to internal channels (data flows into channels: ringbuf → packet_worker, producer → producer_output, decorator → decorator_output)"
+- **Labels**: `channel` (packet_worker, producer_output, decorator_output), `status` (success, error)
 
 #### `mermin_ringbuf_packets_total`
 - **Status**: Help message clarified
@@ -587,4 +611,24 @@ This section documents changes made to standardize metrics according to the 5 cr
   | Old Metric | New Metric |
   |------------|------------|
   | `mermin_ringbuf_bytes_total` | `mermin_ebpf_map_bytes_total{map="FLOW_EVENTS"}` |
+
+---
+
+## Removed "active" Status from Producer Flow Spans Metric
+
+#### `mermin_producer_flow_spans_total{status="active"}` - Status Removed
+- **Status**: Removed from tracking
+- **Reason**: 
+  - The "active" status was being incremented when flows were created, but could never be decremented
+  - `PRODUCER_FLOW_SPANS_TOTAL` is an `IntCounterVec` (counter), which cannot be decremented in Prometheus
+  - This created misleading metrics where "active" would only increase, never decrease
+  - Active flow tracking is already properly handled by `mermin_flow_spans_active_total` (a gauge that can be incremented/decremented)
+- **Changes**:
+  - Removed `inc_producer_flow_spans(interface, FlowSpanProducerStatus::Active)` call from flow creation in `producer.rs`
+  - Removed "active" label value cleanup from `remove_interface_metrics()` in `registry.rs`
+  - The `FlowSpanProducerStatus::Active` enum variant remains for backwards compatibility but is no longer used
+- **Replacement**: Use `mermin_flow_spans_active_total` (gauge) to track current number of active flows
+- **Migration**: 
+  - Old: `mermin_producer_flow_spans_total{status="active"}` (misleading, only incremented)
+  - New: `mermin_flow_spans_active_total` (accurate gauge that tracks current state)
 
