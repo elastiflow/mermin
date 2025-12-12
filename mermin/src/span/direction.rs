@@ -459,7 +459,7 @@ impl DirectionInferrer {
 
 #[cfg(test)]
 mod tests {
-    use mermin_common::{Direction, IpVersion};
+    use mermin_common::{ConnectionState, Direction, IpVersion};
     use network_types::eth::EtherType;
 
     use super::*;
@@ -491,7 +491,7 @@ mod tests {
             reverse_ip_ecn: 0,
             reverse_ip_ttl: 0,
             tcp_flags: 0,
-            tcp_state: 0,
+            tcp_state: ConnectionState::Closed,
             forward_tcp_flags: 0,
             reverse_tcp_flags: 0,
             icmp_type: 0,

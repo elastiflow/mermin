@@ -117,78 +117,9 @@ impl TcpFlags {
     }
 }
 
-/// TCP connection state based on RFC 9293 section 3.3.2:
-/// https://datatracker.ietf.org/doc/html/rfc9293#section-3.3.2
-///
-/// This implementation tracks TCP connection states by observing packet flags and
-/// state transitions. Note that as a passive observer, we may not see all packets
-/// (e.g., LISTEN state), so some transitions are inferred from available information.
-///
-/// States match OpenTelemetry semantic conventions:
-/// https://opentelemetry.io/docs/specs/semconv/attributes/network/
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConnectionState {
-    /// No connection state at all
-    Closed,
-    /// Waiting for a matching connection request after having sent a connection request
-    SynSent,
-    /// Waiting for a confirming connection request acknowledgment after having both received and sent a connection request
-    SynReceived,
-    /// An open connection, data received can be delivered to the user. The normal state for the data transfer phase
-    Established,
-    /// Waiting for a connection termination request from the remote TCP peer, or an acknowledgment of the connection termination request previously sent
-    FinWait1,
-    /// Waiting for a connection termination request from the remote TCP peer
-    FinWait2,
-    /// Waiting for a connection termination request from the local user
-    CloseWait,
-    /// Waiting for a connection termination request acknowledgment from the remote TCP peer
-    Closing,
-    /// Waiting for an acknowledgment of the connection termination request previously sent to the remote TCP peer
-    LastAck,
-    /// Waiting for enough time to pass to be sure the remote TCP peer received the acknowledgment of its connection termination request
-    TimeWait,
-}
-
-impl ConnectionState {
-    /// Convert the connection state to a string representation matching
-    /// OpenTelemetry semantic conventions
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            ConnectionState::Closed => "closed",
-            ConnectionState::SynSent => "syn_sent",
-            ConnectionState::SynReceived => "syn_received",
-            ConnectionState::Established => "established",
-            ConnectionState::FinWait1 => "fin_wait_1",
-            ConnectionState::FinWait2 => "fin_wait_2",
-            ConnectionState::CloseWait => "close_wait",
-            ConnectionState::Closing => "closing",
-            ConnectionState::LastAck => "last_ack",
-            ConnectionState::TimeWait => "time_wait",
-        }
-    }
-
-    /// Convert the raw eBPF u8 state into the strongly typed Enum.
-    pub fn from_ebpf_u8(state: u8) -> Self {
-        // Use the constants we defined in FlowStats
-        match state {
-            1 => ConnectionState::Closed, // Map LISTEN to Closed or add Listen variant
-            2 => ConnectionState::SynSent,
-            3 => ConnectionState::SynReceived,
-            4 => ConnectionState::Established,
-            5 => ConnectionState::FinWait1,
-            6 => ConnectionState::FinWait2,
-            7 => ConnectionState::CloseWait,
-            8 => ConnectionState::Closing,
-            9 => ConnectionState::LastAck,
-            10 => ConnectionState::TimeWait,
-            _ => ConnectionState::Closed, // Default/Unknown
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use mermin_common::ConnectionState;
     use network_types::ip::IpProto;
 
     use super::*;
@@ -226,7 +157,7 @@ mod tests {
                 reverse_ip_ttl: 0,
                 reverse_ip_flow_label: 0,
                 tcp_flags,
-                tcp_state: 0,
+                tcp_state: ConnectionState::Closed,
                 forward_tcp_flags: tcp_flags,
                 reverse_tcp_flags: 0,
                 icmp_type: 0,
@@ -350,7 +281,7 @@ mod tests {
             reverse_ip_ttl: 0,
             reverse_ip_flow_label: 0,
             tcp_flags: 0x12, // SYN+ACK
-            tcp_state: 0,
+            tcp_state: ConnectionState::Closed,
             forward_tcp_flags: 0x12,
             reverse_tcp_flags: 0x00,
             icmp_type: 0,
@@ -363,69 +294,5 @@ mod tests {
         let from_packet = TcpFlags::from_stats(&stats).active_flags();
         let from_bits = TcpFlags::flags_from_bits(0x12);
         assert_eq!(from_packet, from_bits);
-    }
-
-    #[test]
-    fn test_as_str_conversion() {
-        assert_eq!(ConnectionState::SynSent.as_str(), "syn_sent");
-        assert_eq!(ConnectionState::SynReceived.as_str(), "syn_received");
-        assert_eq!(ConnectionState::Established.as_str(), "established");
-        assert_eq!(ConnectionState::FinWait1.as_str(), "fin_wait_1");
-        assert_eq!(ConnectionState::FinWait2.as_str(), "fin_wait_2");
-        assert_eq!(ConnectionState::CloseWait.as_str(), "close_wait");
-        assert_eq!(ConnectionState::Closing.as_str(), "closing");
-        assert_eq!(ConnectionState::LastAck.as_str(), "last_ack");
-        assert_eq!(ConnectionState::TimeWait.as_str(), "time_wait");
-        assert_eq!(ConnectionState::Closed.as_str(), "closed");
-    }
-
-    #[test]
-    fn test_ebpf_state_mapping() {
-        assert_eq!(
-            ConnectionState::from_ebpf_u8(FlowStats::TCP_STATE_CLOSED),
-            ConnectionState::Closed
-        );
-        assert_eq!(
-            ConnectionState::from_ebpf_u8(FlowStats::TCP_STATE_LISTEN),
-            ConnectionState::Closed
-        );
-        assert_eq!(
-            ConnectionState::from_ebpf_u8(FlowStats::TCP_STATE_SYN_SENT),
-            ConnectionState::SynSent
-        );
-        assert_eq!(
-            ConnectionState::from_ebpf_u8(FlowStats::TCP_STATE_SYN_RECEIVED),
-            ConnectionState::SynReceived
-        );
-        assert_eq!(
-            ConnectionState::from_ebpf_u8(FlowStats::TCP_STATE_ESTABLISHED),
-            ConnectionState::Established
-        );
-        assert_eq!(
-            ConnectionState::from_ebpf_u8(FlowStats::TCP_STATE_FIN_WAIT_1),
-            ConnectionState::FinWait1
-        );
-        assert_eq!(
-            ConnectionState::from_ebpf_u8(FlowStats::TCP_STATE_FIN_WAIT_2),
-            ConnectionState::FinWait2
-        );
-        assert_eq!(
-            ConnectionState::from_ebpf_u8(FlowStats::TCP_STATE_CLOSE_WAIT),
-            ConnectionState::CloseWait
-        );
-        assert_eq!(
-            ConnectionState::from_ebpf_u8(FlowStats::TCP_STATE_CLOSING),
-            ConnectionState::Closing
-        );
-        assert_eq!(
-            ConnectionState::from_ebpf_u8(FlowStats::TCP_STATE_LAST_ACK),
-            ConnectionState::LastAck
-        );
-        assert_eq!(
-            ConnectionState::from_ebpf_u8(FlowStats::TCP_STATE_TIME_WAIT),
-            ConnectionState::TimeWait
-        );
-
-        assert_eq!(ConnectionState::from_ebpf_u8(99), ConnectionState::Closed);
     }
 }

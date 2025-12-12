@@ -3,7 +3,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use mermin_common::TunnelType;
+use mermin_common::{ConnectionState, TunnelType};
 use network_types::{eth::EtherType, ip::IpProto};
 use opentelemetry::{
     KeyValue, StringValue, Value,
@@ -13,7 +13,7 @@ use serde::{Serialize, Serializer};
 
 use crate::{
     otlp::trace::Traceable,
-    span::tcp::{ConnectionState, TcpFlag},
+    span::tcp::TcpFlag,
 };
 
 /// Flow End Reason based on RFC 5102 IPFIX Information Model

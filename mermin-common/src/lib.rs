@@ -226,7 +226,7 @@ pub struct FlowStats {
     /// Accumulated TCP flags (OR of all flags seen)
     pub tcp_flags: u8,
     /// TCP connection state
-    pub tcp_state: u8,
+    pub tcp_state: ConnectionState,
     /// TCP flags in forward direction only (for handshake analysis)
     pub forward_tcp_flags: u8,
     /// TCP flags in reverse direction only (for handshake analysis)
@@ -275,7 +275,7 @@ impl FlowStats {
     /// # Examples
     ///
     /// ```
-    /// use mermin_common::FlowStats;
+    /// use mermin_common::{FlowStats, ConnectionState};
     /// # use network_types::eth::EtherType;
     /// # use network_types::ip::IpProto;
     /// # use mermin_common::{IpVersion, Direction};
@@ -289,7 +289,7 @@ impl FlowStats {
     /// #     protocol: IpProto::Tcp, ip_dscp: 0, ip_ecn: 0, ip_ttl: 0,
     /// #     reverse_ip_dscp: 0, reverse_ip_ecn: 0, reverse_ip_ttl: 0,
     /// #     tcp_flags: FlowStats::TCP_FLAG_SYN | FlowStats::TCP_FLAG_ACK,
-    /// #     tcp_state: 0,
+    /// #     tcp_state: ConnectionState::Closed,
     /// #     forward_tcp_flags: 0, reverse_tcp_flags: 0,
     /// #     icmp_type: 0, icmp_code: 0, reverse_icmp_type: 0, reverse_icmp_code: 0,
     /// #     forward_metadata_seen: 0, reverse_metadata_seen: 0,
@@ -345,66 +345,77 @@ impl FlowStats {
     pub fn cwr(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_CWR)
     }
-
-    /// TCP State
-    pub const TCP_STATE_CLOSED: u8 = 0;
-    pub const TCP_STATE_LISTEN: u8 = 1;
-    pub const TCP_STATE_SYN_SENT: u8 = 2;
-    pub const TCP_STATE_SYN_RECEIVED: u8 = 3;
-    pub const TCP_STATE_ESTABLISHED: u8 = 4;
-    pub const TCP_STATE_FIN_WAIT_1: u8 = 5;
-    pub const TCP_STATE_FIN_WAIT_2: u8 = 6;
-    pub const TCP_STATE_CLOSE_WAIT: u8 = 7;
-    pub const TCP_STATE_CLOSING: u8 = 8;
-    pub const TCP_STATE_LAST_ACK: u8 = 9;
-    pub const TCP_STATE_TIME_WAIT: u8 = 10;
-
-    /// Returns true if the connection is currently fully established.
-    #[inline]
-    pub fn is_established(&self) -> bool {
-        self.tcp_state == Self::TCP_STATE_ESTABLISHED
-    }
-
-    /// Returns true if the connection is in the process of being set up (Handshake).
-    #[inline]
-    pub fn is_handshaking(&self) -> bool {
-        self.tcp_state == Self::TCP_STATE_SYN_SENT || self.tcp_state == Self::TCP_STATE_SYN_RECEIVED
-    }
-
-    /// Returns true if the connection is in the process of tearing down (Closing).
-    #[inline]
-    pub fn is_closing(&self) -> bool {
-        self.tcp_state >= Self::TCP_STATE_FIN_WAIT_1 && self.tcp_state <= Self::TCP_STATE_TIME_WAIT
-    }
-
-    /// Returns true if the connection is fully closed.
-    #[inline]
-    pub fn is_closed(&self) -> bool {
-        self.tcp_state == Self::TCP_STATE_CLOSED
-    }
-
-    /// Returns the human-readable string representation of the current TCP state.
-    #[inline]
-    pub fn state_name(&self) -> &'static str {
-        match self.tcp_state {
-            Self::TCP_STATE_CLOSED => "CLOSED",
-            Self::TCP_STATE_LISTEN => "LISTEN",
-            Self::TCP_STATE_SYN_SENT => "SYN_SENT",
-            Self::TCP_STATE_SYN_RECEIVED => "SYN_RECEIVED",
-            Self::TCP_STATE_ESTABLISHED => "ESTABLISHED",
-            Self::TCP_STATE_FIN_WAIT_1 => "FIN_WAIT_1",
-            Self::TCP_STATE_FIN_WAIT_2 => "FIN_WAIT_2",
-            Self::TCP_STATE_CLOSE_WAIT => "CLOSE_WAIT",
-            Self::TCP_STATE_CLOSING => "CLOSING",
-            Self::TCP_STATE_LAST_ACK => "LAST_ACK",
-            Self::TCP_STATE_TIME_WAIT => "TIME_WAIT",
-            _ => "UNKNOWN",
-        }
-    }
 }
 
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for FlowStats {}
+
+/// TCP connection state based on RFC 9293 section 3.3.2:
+/// https://datatracker.ietf.org/doc/html/rfc9293#section-3.3.2
+///
+/// This implementation tracks TCP connection states by observing packet flags and
+/// state transitions. Note that as a passive observer, we may not see all packets
+/// (e.g., LISTEN state), so some transitions are inferred from available information.
+///
+/// States match OpenTelemetry semantic conventions:
+/// https://opentelemetry.io/docs/specs/semconv/attributes/network/
+///
+/// Uses #[repr(u8)] for C-compatible memory layout, allowing direct use in eBPF shared memory.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub enum ConnectionState {
+    /// No connection state at all (RFC 9293: "represents no connection state at all")
+    /// This is the default state when no TCB exists or no connection has been observed
+    #[default]
+    Closed = 0,
+    /// Waiting for a connection request from any remote TCP peer (server listening)
+    /// Note: As a passive observer, this state is never actually observed in practice
+    Listen = 1,
+    /// Waiting for a matching connection request after having sent a connection request
+    SynSent = 2,
+    /// Waiting for a confirming connection request acknowledgment after having both received and sent a connection request
+    SynReceived = 3,
+    /// An open connection, data received can be delivered to the user. The normal state for the data transfer phase
+    Established = 4,
+    /// Waiting for a connection termination request from the remote TCP peer, or an acknowledgment of the connection termination request previously sent
+    FinWait1 = 5,
+    /// Waiting for a connection termination request from the remote TCP peer
+    FinWait2 = 6,
+    /// Waiting for a connection termination request from the local user
+    CloseWait = 7,
+    /// Waiting for a connection termination request acknowledgment from the remote TCP peer
+    Closing = 8,
+    /// Waiting for an acknowledgment of the connection termination request previously sent to the remote TCP peer
+    LastAck = 9,
+    /// Waiting for enough time to pass to be sure the remote TCP peer received the acknowledgment of its connection termination request
+    TimeWait = 10,
+}
+
+impl ConnectionState {
+    /// Convert the connection state to a string representation matching
+    /// OpenTelemetry semantic conventions
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            ConnectionState::Closed => "closed",
+            ConnectionState::Listen => "listen",
+            ConnectionState::SynSent => "syn_sent",
+            ConnectionState::SynReceived => "syn_received",
+            ConnectionState::Established => "established",
+            ConnectionState::FinWait1 => "fin_wait_1",
+            ConnectionState::FinWait2 => "fin_wait_2",
+            ConnectionState::CloseWait => "close_wait",
+            ConnectionState::Closing => "closing",
+            ConnectionState::LastAck => "last_ack",
+            ConnectionState::TimeWait => "time_wait",
+        }
+    }
+}
+
+impl core::fmt::Display for ConnectionState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
 
 /// Event sent from eBPF to userspace for each new flow.
 /// Contains the outermost FlowKey (for eBPF map lookups) plus UNPARSED packet data
@@ -571,7 +582,7 @@ mod tests {
             reverse_ip_ecn: 0,
             reverse_ip_ttl: 0,
             tcp_flags: 0,
-            tcp_state: FlowStats::TCP_STATE_CLOSED,
+            tcp_state: ConnectionState::Closed,
             forward_tcp_flags: 0,
             reverse_tcp_flags: 0,
             icmp_type: 0,
@@ -1234,62 +1245,33 @@ mod tests {
     }
 
     #[test]
-    fn test_flow_stats_tcp_states() {
-        // Initialize with default values
-        let mut stats = create_flow_stats();
+    fn test_connection_state_as_str() {
+        assert_eq!(ConnectionState::Closed.as_str(), "closed");
+        assert_eq!(ConnectionState::Listen.as_str(), "listen");
+        assert_eq!(ConnectionState::SynSent.as_str(), "syn_sent");
+        assert_eq!(ConnectionState::SynReceived.as_str(), "syn_received");
+        assert_eq!(ConnectionState::Established.as_str(), "established");
+        assert_eq!(ConnectionState::FinWait1.as_str(), "fin_wait_1");
+        assert_eq!(ConnectionState::FinWait2.as_str(), "fin_wait_2");
+        assert_eq!(ConnectionState::CloseWait.as_str(), "close_wait");
+        assert_eq!(ConnectionState::Closing.as_str(), "closing");
+        assert_eq!(ConnectionState::LastAck.as_str(), "last_ack");
+        assert_eq!(ConnectionState::TimeWait.as_str(), "time_wait");
+    }
 
-        stats.tcp_state = FlowStats::TCP_STATE_CLOSED;
-        assert!(stats.is_closed());
-        assert!(!stats.is_established());
-        assert!(!stats.is_handshaking());
-        assert!(!stats.is_closing());
-        assert_eq!(stats.state_name(), "CLOSED");
-
-        stats.tcp_state = FlowStats::TCP_STATE_SYN_SENT;
-        assert!(stats.is_handshaking());
-        assert!(!stats.is_established());
-        assert!(!stats.is_closing());
-        assert_eq!(stats.state_name(), "SYN_SENT");
-
-        stats.tcp_state = FlowStats::TCP_STATE_SYN_RECEIVED;
-        assert!(stats.is_handshaking());
-        assert!(!stats.is_established());
-        assert_eq!(stats.state_name(), "SYN_RECEIVED");
-
-        stats.tcp_state = FlowStats::TCP_STATE_ESTABLISHED;
-        assert!(stats.is_established());
-        assert!(!stats.is_handshaking());
-        assert!(!stats.is_closing());
-        assert!(!stats.is_closed());
-        assert_eq!(stats.state_name(), "ESTABLISHED");
-
-        let closing_states = [
-            (FlowStats::TCP_STATE_FIN_WAIT_1, "FIN_WAIT_1"),
-            (FlowStats::TCP_STATE_FIN_WAIT_2, "FIN_WAIT_2"),
-            (FlowStats::TCP_STATE_CLOSE_WAIT, "CLOSE_WAIT"),
-            (FlowStats::TCP_STATE_CLOSING, "CLOSING"),
-            (FlowStats::TCP_STATE_LAST_ACK, "LAST_ACK"),
-            (FlowStats::TCP_STATE_TIME_WAIT, "TIME_WAIT"),
-        ];
-
-        for (state, name) in closing_states {
-            stats.tcp_state = state;
-            assert!(stats.is_closing(), "State {} should be closing", name);
-            assert!(!stats.is_established());
-            assert!(!stats.is_handshaking());
-            assert!(!stats.is_closed());
-            assert_eq!(stats.state_name(), name);
-        }
-
-        stats.tcp_state = FlowStats::TCP_STATE_LISTEN;
-        assert!(!stats.is_closing());
-        assert!(!stats.is_established());
-        assert!(!stats.is_handshaking());
-        assert_eq!(stats.state_name(), "LISTEN");
-
-        stats.tcp_state = 255;
-        assert_eq!(stats.state_name(), "UNKNOWN");
-        assert!(!stats.is_established());
-        assert!(!stats.is_closing());
+    #[test]
+    fn test_connection_state_discriminants() {
+        // Test that enum discriminants match expected u8 values for eBPF compatibility
+        assert_eq!(ConnectionState::Closed as u8, 0);
+        assert_eq!(ConnectionState::Listen as u8, 1);
+        assert_eq!(ConnectionState::SynSent as u8, 2);
+        assert_eq!(ConnectionState::SynReceived as u8, 3);
+        assert_eq!(ConnectionState::Established as u8, 4);
+        assert_eq!(ConnectionState::FinWait1 as u8, 5);
+        assert_eq!(ConnectionState::FinWait2 as u8, 6);
+        assert_eq!(ConnectionState::CloseWait as u8, 7);
+        assert_eq!(ConnectionState::Closing as u8, 8);
+        assert_eq!(ConnectionState::LastAck as u8, 9);
+        assert_eq!(ConnectionState::TimeWait as u8, 10);
     }
 }

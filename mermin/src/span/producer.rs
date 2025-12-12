@@ -8,7 +8,7 @@ use std::{
 use aya::maps::{HashMap as EbpfHashMap, RingBuf};
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
-use mermin_common::{FlowEvent, FlowKey, FlowStats, ListeningPortKey};
+use mermin_common::{ConnectionState, FlowEvent, FlowKey, FlowStats, ListeningPortKey};
 use moka::future::Cache;
 use network_types::{
     eth::EtherType,
@@ -42,7 +42,7 @@ use crate::{
         ebpf_guard::EbpfFlowGuard,
         flow::{FlowEndReason, FlowSpan, SpanAttributes},
         opts::SpanOptions,
-        tcp::{ConnectionState, TcpFlags},
+        tcp::TcpFlags,
         trace_id::TraceIdCache,
     },
 };
@@ -906,7 +906,7 @@ impl FlowWorker {
             attributes: SpanAttributes {
                 // General flow attributes
                 flow_community_id: community_id.to_string(),
-                flow_connection_state: Some(ConnectionState::from_ebpf_u8(stats.tcp_state)),
+                flow_connection_state: is_tcp.then_some(stats.tcp_state),
                 flow_end_reason: None,
 
                 // Network endpoints
@@ -1545,7 +1545,7 @@ async fn record_flow(
 
     let flow_span = &mut entry_ref.flow_span;
     flow_span.attributes.flow_connection_state =
-        Some(ConnectionState::from_ebpf_u8(stats.tcp_state));
+        (stats.protocol == IpProto::Tcp).then_some(stats.tcp_state);
     flow_span.attributes.flow_bytes_delta = delta_bytes as i64;
     flow_span.attributes.flow_packets_delta = delta_packets as i64;
     flow_span.attributes.flow_reverse_bytes_delta = delta_reverse_bytes as i64;
@@ -2077,7 +2077,7 @@ mod tests {
             reverse_ip_ecn: 0,
             reverse_ip_ttl: 0,
             tcp_flags,
-            tcp_state: 0,
+            tcp_state: ConnectionState::Closed,
             forward_tcp_flags: tcp_flags,
             reverse_tcp_flags: 0,
             icmp_type: 0,
