@@ -46,7 +46,6 @@ struct CompiledRules {
     interface_name: Option<CompiledRuleSet<GlobSet>>,
     interface_index: Option<CompiledRuleSet<HashSet<u32>>>,
     interface_mac: Option<CompiledRuleSet<GlobSet>>,
-    #[allow(dead_code)] // TODO: Implement when we add flow-level TCP state tracking
     connection_state: Option<CompiledRuleSet<GlobSet>>,
     ip_dscp_name: Option<CompiledRuleSet<GlobSet>>,
     ip_ecn_name: Option<CompiledRuleSet<GlobSet>>,
@@ -442,36 +441,31 @@ impl PacketFilter {
             check_filter!(&self.flow.icmp_code_name, icmp_code_str.as_str());
         }
 
-        if flow_key.protocol == IpProto::Tcp
-            && let Some(rules) = &self.flow.tcp_flags
-        {
-            let flags_vec = TcpFlags::flags_from_bits(stats.tcp_flags);
-            // Check each flag individually against the patterns
-            // This allows patterns like "syn,ack" to match flows with any of those flags
-            for flag in &flags_vec {
-                let flag_str = flag.as_str();
-                // If any flag matches the not_match rules, reject the flow
-                if RuleCollection::<str>::matches(&rules.not_match_rules, flag_str) {
-                    return Ok(false);
+        if flow_key.protocol == IpProto::Tcp {
+            if let Some(rules) = &self.flow.tcp_flags {
+                let flags_vec = TcpFlags::flags_from_bits(stats.tcp_flags);
+                // Check each flag individually against the patterns
+                // This allows patterns like "syn,ack" to match flows with any of those flags
+                for flag in &flags_vec {
+                    let flag_str = flag.as_str();
+                    // If any flag matches the not_match rules, reject the flow
+                    if RuleCollection::<str>::matches(&rules.not_match_rules, flag_str) {
+                        return Ok(false);
+                    }
+                }
+                // If match_rules is non-empty, at least one flag must match
+                if !RuleCollection::<str>::is_empty(&rules.match_rules) {
+                    let has_match = flags_vec.iter().any(|flag| {
+                        RuleCollection::<str>::matches(&rules.match_rules, flag.as_str())
+                    });
+                    if !has_match {
+                        return Ok(false);
+                    }
                 }
             }
-            // If match_rules is non-empty, at least one flag must match
-            if !RuleCollection::<str>::is_empty(&rules.match_rules) {
-                let has_match = flags_vec
-                    .iter()
-                    .any(|flag| RuleCollection::<str>::matches(&rules.match_rules, flag.as_str()));
-                if !has_match {
-                    return Ok(false);
-                }
-            }
-        }
 
-        // TODO: Add connection_state filter once we implement flow-level TCP state tracking.
-        // Currently, FlowStats.tcp_flags is an accumulated OR of all flags seen across packets,
-        // making it impossible to infer a single connection state (e.g., a flow might have
-        // SYN | ACK | FIN all set). We need to track state separately in FlowStats to support
-        // filters like "only track flows in ESTABLISHED state" or "exclude flows in CLOSED state".
-        // For now, users can filter on TCP flags directly (e.g., "exclude flows with RST").
+            check_filter!(&self.flow.connection_state, stats.tcp_state.as_str());
+        }
 
         // Source/Destination filters (requires IP parsing)
         let (src_addr, dst_addr) = resolve_addrs(
