@@ -128,6 +128,10 @@ const EBPF_MAP_SCHEMA_VERSION: u8 = 1;
 /// If an export takes longer than this, it's considered timed out and the span may be lost.
 const EXPORT_TIMEOUT_SECS: u64 = 10;
 
+// Constants for eBPF map capacities
+const LISTENING_PORTS_CAPACITY: u64 = 65536;
+const FLOW_EVENTS_RINGBUF_SIZE_BYTES: u64 = 256 * 1024;
+
 async fn run(cli: Cli) -> Result<()> {
     // TODO: listen for SIGUP `kill -HUP $(pidof mermin)` to reload the eBPF program and all configuration
     // TODO: do not reload global configuration found in CLI
@@ -463,7 +467,7 @@ async fn run(cli: Cli) -> Result<()> {
     // FLOW_EVENTS: 256 KB ring buffer (matches RING_BUF_SIZE_BYTES in mermin-ebpf/src/main.rs)
     // Note: Capacity is in BYTES, not entries. Ring buffers don't expose entry counts to userspace,
     // so entries/utilization metrics are not available for FLOW_EVENTS.
-    metrics::ebpf::set_map_capacity("FLOW_EVENTS", 256 * 1024);
+    metrics::ebpf::set_map_capacity("FLOW_EVENTS", FLOW_EVENTS_RINGBUF_SIZE_BYTES);
     // LISTENING_PORTS: 65536 max entries (matches HashMap definition in mermin-ebpf/src/main.rs)
     metrics::ebpf::set_map_capacity("LISTENING_PORTS", 65536);
 
@@ -577,7 +581,6 @@ async fn run(cli: Cli) -> Result<()> {
     // Note: This only reflects the startup state; eBPF kprobes maintain the map
     // in real-time after this, but those changes are not reflected in these metrics.
     metrics::ebpf::set_map_entries("LISTENING_PORTS", scanned_ports as u64);
-    const LISTENING_PORTS_CAPACITY: u64 = 65536;
     let utilization = scanned_ports as f64 / LISTENING_PORTS_CAPACITY as f64;
     metrics::ebpf::set_map_utilization("LISTENING_PORTS", utilization);
 

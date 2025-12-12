@@ -81,9 +81,7 @@ pub fn inc_orphans_cleaned(count: u64) {
 
 /// Set the current number of entries in the eBPF map.
 ///
-/// # Arguments
-/// * `map` - The name of the eBPF map (e.g., "FLOW_STATS", "FLOW_EVENTS", "LISTENING_PORTS")
-/// * `entries` - The current number of entries in the map
+/// The `map` parameter should be one of: "FLOW_STATS", "FLOW_EVENTS", or "LISTENING_PORTS".
 pub fn set_map_entries(map: &str, entries: u64) {
     registry::EBPF_MAP_ENTRIES
         .with_label_values(&[map])
@@ -92,9 +90,7 @@ pub fn set_map_entries(map: &str, entries: u64) {
 
 /// Set the maximum capacity of an eBPF map.
 ///
-/// # Arguments
-/// * `map` - The name of the eBPF map (e.g., "FLOW_STATS", "FLOW_EVENTS", "LISTENING_PORTS")
-/// * `capacity` - The maximum capacity of the map
+/// The `map` parameter should be one of: "FLOW_STATS", "FLOW_EVENTS", or "LISTENING_PORTS".
 pub fn set_map_capacity(map: &str, capacity: u64) {
     registry::EBPF_MAP_CAPACITY
         .with_label_values(&[map])
