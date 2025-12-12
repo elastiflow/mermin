@@ -1795,17 +1795,17 @@ async fn record_flow(
 
             match map.insert(ebpf_key, updated_stats, 0) {
                 Ok(_) => {
-                    crate::metrics::ebpf::inc_map_operation(
-                        crate::metrics::ebpf::EbpfMapName::FlowStats,
-                        crate::metrics::ebpf::EbpfMapOperation::Write,
-                        crate::metrics::ebpf::EbpfMapStatus::Ok,
+                    metrics::ebpf::inc_map_operation(
+                        EbpfMapName::FlowStats,
+                        EbpfMapOperation::Write,
+                        EbpfMapStatus::Ok,
                     );
                 }
                 Err(e) => {
-                    crate::metrics::ebpf::inc_map_operation(
-                        crate::metrics::ebpf::EbpfMapName::FlowStats,
-                        crate::metrics::ebpf::EbpfMapOperation::Write,
-                        crate::metrics::ebpf::EbpfMapStatus::Error,
+                    metrics::ebpf::inc_map_operation(
+                        EbpfMapName::FlowStats,
+                        EbpfMapOperation::Write,
+                        EbpfMapStatus::Error,
                     );
                     debug!(
                         event.name = "record.metadata_reset_failed",

@@ -218,14 +218,16 @@ Metrics for flow span creation, processing, and export.
 - **Type:** Counter
 - **Description:** Producer flow spans by interface and status.
 
-### Producer Internal Metrics
+### Producer Internal Metrics (Debug)
 
-**`mermin_flow_span_store_size{poller_id}`**
+**`mermin_flow_span_store_size{poller_id}`** *(debug)*
 - **Type:** Gauge
+- **Labels:** `poller_id` (0 to 31, up to 32 pollers)
 - **Description:** Current number of flows in flow_store per poller.
 
-**`mermin_producer_queue_size{poller_id}`**
+**`mermin_producer_queue_size{poller_id}`** *(debug)*
 - **Type:** Gauge
+- **Labels:** `poller_id` (0 to 31, up to 32 pollers)
 - **Description:** Current number of flows queued for processing per poller.
 
 ---

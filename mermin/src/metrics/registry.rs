@@ -133,16 +133,17 @@ lazy_static! {
     ).expect("failed to create flow_spans_processed_total metric");
 
 
+    // Debug metrics with high-cardinality labels (poller_id can have up to 32 values)
     pub static ref FLOW_SPAN_STORE_SIZE: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("flow_span_store_size", "Current number of flows in flow_store")
+        Opts::new("flow_span_store_size", "Current number of flows in flow_store per poller")
             .namespace("mermin"),
-        &["poller_id"]  // Track per poller for sharded architecture
+        &["poller_id"]  // Track per poller for sharded architecture (max 32 pollers)
     ).expect("failed to create flow_span_store_size metric");
 
     pub static ref PRODUCER_QUEUE_SIZE: IntGaugeVec = IntGaugeVec::new(
         Opts::new("producer_queue_size", "Current number of flows queued for processing per poller")
             .namespace("mermin"),
-        &["poller_id"]  // Track per poller
+        &["poller_id"]  // Track per poller (max 32 pollers)
     ).expect("failed to create producer_queue_size metric");
 
     /// Total number of flow events processed by ring buffer stage.
@@ -465,8 +466,6 @@ pub fn init_registry(debug_enabled: bool) -> Result<(), prometheus::Error> {
     // ============================================================================
     register_standard!(FLOW_EVENTS_TOTAL);
     register_standard!(FLOW_SPANS_PROCESSED_TOTAL);
-    register_standard!(FLOW_SPAN_STORE_SIZE);
-    register_standard!(PRODUCER_QUEUE_SIZE);
     register_standard!(PROCESSING_LATENCY_SECONDS);
     register_standard!(EXPORT_TIMEOUTS_TOTAL);
     register_standard!(EXPORT_BLOCKING_TIME_SECONDS);
@@ -475,7 +474,9 @@ pub fn init_registry(debug_enabled: bool) -> Result<(), prometheus::Error> {
     register_standard!(FLOW_SPANS_ACTIVE_TOTAL);
     register_standard!(PRODUCER_FLOW_SPANS_TOTAL);
 
-    // Debug flow metrics
+    // Debug flow metrics (high-cardinality labels)
+    register_debug!(FLOW_SPAN_STORE_SIZE, debug_enabled);
+    register_debug!(PRODUCER_QUEUE_SIZE, debug_enabled);
     register_debug!(FLOWS_CREATED_BY_INTERFACE_TOTAL, debug_enabled);
     register_debug!(FLOWS_ACTIVE_BY_INTERFACE_TOTAL, debug_enabled);
     register_debug!(PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL, debug_enabled);

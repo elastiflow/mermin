@@ -400,6 +400,23 @@ Having Rust variable names match their Prometheus metric names (in SCREAMING_SNA
 
 ---
 
+## High-Cardinality Metrics Moved to Debug
+
+#### `mermin_flow_span_store_size{poller_id}` and `mermin_producer_queue_size{poller_id}`
+- **Status**: Moved to debug endpoint
+- **Reason**: 
+  - The `poller_id` label can have up to 32 values (one per poller)
+  - This creates up to 32 time series per metric, which is high-cardinality
+  - These metrics are primarily useful for debugging sharded architecture issues
+  - For production monitoring, aggregated flow span metrics are sufficient
+- **Changes**:
+  - Moved from `register_standard!` to `register_debug!` in `registry.rs`
+  - Updated helper functions `set_flow_store_size()` and `set_poller_queue_size()` in `span.rs` to check `debug_enabled()` before setting
+  - Updated documentation in `docs/observability/app-metrics.md` to mark as debug metrics
+- **Access**: Only available via `/metrics/debug` endpoint when `metrics.debug_metrics_enabled = true`
+
+---
+
 ## Metrics Standardization Phase 2
 
 This section documents changes made to standardize metrics according to the 5 criteria:
