@@ -1,3 +1,13 @@
+## [mermin-netobserv-os-stack-0.1.0-beta.13] - 2025-12-12
+
+### Features
+
+- Bump flow chart to 0.6.0 (#353)
+
+[mermin-netobserv-os-stack-0.1.0-beta.12..mermin-netobserv-os-stack-0.1.0-beta.13](https://github.com/elastiflow/mermin/compare/mermin-netobserv-os-stack-0.1.0-beta.12...mermin-netobserv-os-stack-0.1.0-beta.13)
+
+
+
 ## [mermin-netobserv-os-stack-0.1.0-beta.12] - 2025-12-08
 
 ### Bug Fixes
@@ -5,7 +15,3 @@
 - Add umbrella chart lock file back (#345)
 
 [mermin-netobserv-os-stack-0.1.0-beta.11..mermin-netobserv-os-stack-0.1.0-beta.12](https://github.com/elastiflow/mermin/compare/mermin-netobserv-os-stack-0.1.0-beta.11...mermin-netobserv-os-stack-0.1.0-beta.12)
-
-
-
-
