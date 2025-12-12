@@ -418,13 +418,13 @@ Monitor flow table size with metrics:
 
 ```prometheus
 # Current active flows
-mermin_flow_table_size
+mermin_flow_spans_active_total
 
 # Flow creation rate
-rate(mermin_flows_total[5m])
+rate(mermin_flow_spans_created_total[5m])
 
-# Flow timeout distribution
-histogram_quantile(0.95, mermin_flow_duration_seconds_bucket)
+# eBPF map utilization
+mermin_ebpf_map_utilization_ratio{map="FLOW_STATS"}
 ```
 
 **Healthy indicators:**

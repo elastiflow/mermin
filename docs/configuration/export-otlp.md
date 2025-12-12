@@ -635,13 +635,13 @@ export "traces" {
 
 ```prometheus
 # Export success rate
-rate(mermin_export_success_total[5m])
+rate(mermin_export_flow_spans_total{status="ok"}[5m])
 
 # Export errors
-rate(mermin_export_errors_total[5m])
+rate(mermin_export_flow_spans_total{status="error"}[5m])
 
-# Queue size
-mermin_export_queue_size
+# Channel utilization
+mermin_channel_size{channel="exporter"} / mermin_channel_capacity{channel="exporter"}
 
 # Export latency
 histogram_quantile(0.95, mermin_export_latency_seconds_bucket)
@@ -691,7 +691,7 @@ histogram_quantile(0.95, mermin_export_latency_seconds_bucket)
 
 ### Queue Full / Dropped Spans
 
-**Symptoms:** `mermin_export_drops_total` increasing
+**Symptoms:** `mermin_export_flow_spans_total{status="dropped"}` increasing
 
 **Solutions:**
 

@@ -197,7 +197,7 @@ Base capacity for the eBPF ring buffer between kernel and userspace. This is the
 
 **Signs You Need to Increase:**
 
-* Metrics show packet drops (`mermin_packets_dropped_total`)
+* Metrics show dropped events (`mermin_flow_events_total{status="dropped_backpressure"}`)
 * Gaps in Flow Trace exports
 * Warning logs about channel capacity or backpressure
 
@@ -372,16 +372,12 @@ Multiplier for decorated span (export) channel capacity. Provides buffering betw
 After tuning performance settings, monitor these metrics:
 
 ```prometheus
-# Cache effectiveness
-mermin_k8s_cache_hits_total / (mermin_k8s_cache_hits_total + mermin_k8s_cache_misses_total)
-
-# Backpressure and sampling
+# Backpressure detection
 rate(mermin_flow_events_total{status="dropped_backpressure"}[5m])
 rate(mermin_flow_events_total{status="dropped_error"}[5m])
-# Note: Sampling rate metric does not exist - use flow_events_total{status="received"} vs total to calculate
 
 # Channel utilization
-mermin_channel_capacity_used_ratio
+mermin_channel_size / mermin_channel_capacity
 
 # Pipeline latency
 histogram_quantile(0.95, rate(mermin_processing_latency_seconds_bucket[5m]))
@@ -498,7 +494,7 @@ After changing global options, monitor these metrics:
 ```prometheus
 # Packet processing
 rate(mermin_packets_total[5m])
-rate(mermin_packets_dropped_total[5m])
+rate(mermin_flow_events_total{status="dropped_backpressure"}[5m])
 
 # CPU usage
 rate(container_cpu_usage_seconds_total[5m])
@@ -525,7 +521,7 @@ container_memory_working_set_bytes
 
 ### High Packet Drop Rate
 
-**Symptoms:** `mermin_packets_dropped_total` increasing
+**Symptoms:** `mermin_flow_events_total{status="dropped_backpressure"}` increasing
 
 **Solutions:**
 

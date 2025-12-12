@@ -460,11 +460,11 @@ podAnnotations:
 
 Key metrics:
 
-* `mermin_flows_total`: Total flows processed
-* `mermin_packets_total`: Total packets captured
-* `mermin_drops_total`: Packets dropped due to overload
-* `mermin_export_errors_total`: OTLP export failures
-* `mermin_flow_table_size`: Current number of active flows
+* `mermin_flow_spans_created_total`: Total flow spans created
+* `mermin_packets_total`: Total packets processed
+* `mermin_flow_events_total{status="dropped_backpressure"}`: Events dropped due to overload
+* `mermin_export_flow_spans_total{status="error"}`: OTLP export failures
+* `mermin_flow_spans_active_total`: Current number of active flows
 
 ### Tuning Guidelines
 
