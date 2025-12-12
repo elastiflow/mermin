@@ -465,11 +465,9 @@ async fn run(cli: Cli) -> Result<()> {
     // FLOW_STATS: configurable via pipeline.ebpf_max_flows (hash map, entry count)
     metrics::ebpf::set_map_capacity("FLOW_STATS", conf.pipeline.ebpf_max_flows as u64);
     // FLOW_EVENTS: 256 KB ring buffer (matches RING_BUF_SIZE_BYTES in mermin-ebpf/src/main.rs)
-    // Note: Capacity is in BYTES, not entries. Ring buffers don't expose entry counts to userspace,
-    // so entries/utilization metrics are not available for FLOW_EVENTS.
     metrics::ebpf::set_map_capacity("FLOW_EVENTS", FLOW_EVENTS_RINGBUF_SIZE_BYTES);
     // LISTENING_PORTS: 65536 max entries (matches HashMap definition in mermin-ebpf/src/main.rs)
-    metrics::ebpf::set_map_capacity("LISTENING_PORTS", 65536);
+    metrics::ebpf::set_map_capacity("LISTENING_PORTS", LISTENING_PORTS_CAPACITY);
 
     info!(
         event.name = "ebpf.maps_ready",

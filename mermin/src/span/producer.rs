@@ -1964,17 +1964,17 @@ pub async fn timeout_and_remove_flow(
 
         match map.remove(&key) {
             Ok(_) => {
-                crate::metrics::ebpf::inc_map_operation(
-                    crate::metrics::ebpf::EbpfMapName::FlowStats,
-                    crate::metrics::ebpf::EbpfMapOperation::Delete,
-                    crate::metrics::ebpf::EbpfMapStatus::Ok,
+                metrics::ebpf::inc_map_operation(
+                    EbpfMapName::FlowStats,
+                    EbpfMapOperation::Delete,
+                    EbpfMapStatus::Ok,
                 );
             }
             Err(e) => {
-                crate::metrics::ebpf::inc_map_operation(
-                    crate::metrics::ebpf::EbpfMapName::FlowStats,
-                    crate::metrics::ebpf::EbpfMapOperation::Delete,
-                    crate::metrics::ebpf::EbpfMapStatus::Error,
+                metrics::ebpf::inc_map_operation(
+                    EbpfMapName::FlowStats,
+                    EbpfMapOperation::Delete,
+                    EbpfMapStatus::Error,
                 );
                 debug!(
                     event.name = "ebpf.map_cleanup_failed",
