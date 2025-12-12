@@ -225,6 +225,8 @@ pub struct FlowStats {
     pub reverse_ip_ttl: u8,
     /// Accumulated TCP flags (OR of all flags seen)
     pub tcp_flags: u8,
+    /// TCP connection state
+    pub tcp_state: ConnectionState,
     /// TCP flags in forward direction only (for handshake analysis)
     pub forward_tcp_flags: u8,
     /// TCP flags in reverse direction only (for handshake analysis)
@@ -273,7 +275,7 @@ impl FlowStats {
     /// # Examples
     ///
     /// ```
-    /// use mermin_common::FlowStats;
+    /// use mermin_common::{FlowStats, ConnectionState};
     /// # use network_types::eth::EtherType;
     /// # use network_types::ip::IpProto;
     /// # use mermin_common::{IpVersion, Direction};
@@ -286,7 +288,8 @@ impl FlowStats {
     /// #     direction: Direction::Egress, ip_version: IpVersion::V4,
     /// #     protocol: IpProto::Tcp, ip_dscp: 0, ip_ecn: 0, ip_ttl: 0,
     /// #     reverse_ip_dscp: 0, reverse_ip_ecn: 0, reverse_ip_ttl: 0,
-    ///     tcp_flags: FlowStats::TCP_FLAG_SYN | FlowStats::TCP_FLAG_ACK,
+    /// #     tcp_flags: FlowStats::TCP_FLAG_SYN | FlowStats::TCP_FLAG_ACK,
+    /// #     tcp_state: ConnectionState::Closed,
     /// #     forward_tcp_flags: 0, reverse_tcp_flags: 0,
     /// #     icmp_type: 0, icmp_code: 0, reverse_icmp_type: 0, reverse_icmp_code: 0,
     /// #     forward_metadata_seen: 0, reverse_metadata_seen: 0,
@@ -346,6 +349,74 @@ impl FlowStats {
 
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for FlowStats {}
+
+/// TCP connection state based on RFC 9293 section 3.3.2:
+/// https://datatracker.ietf.org/doc/html/rfc9293#section-3.3.2
+///
+/// This implementation tracks TCP connection states by observing packet flags and
+/// state transitions. Note that as a passive observer, we may not see all packets
+/// (e.g., LISTEN state), so some transitions are inferred from available information.
+///
+/// States match OpenTelemetry semantic conventions:
+/// https://opentelemetry.io/docs/specs/semconv/attributes/network/
+///
+/// Uses #[repr(u8)] for C-compatible memory layout, allowing direct use in eBPF shared memory.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub enum ConnectionState {
+    /// No connection state at all (RFC 9293: "represents no connection state at all")
+    /// This is the default state when no TCB exists or no connection has been observed
+    #[default]
+    Closed = 0,
+    /// Waiting for a connection request from any remote TCP peer (server listening)
+    /// Note: As a passive observer, this state is never actually observed in practice
+    Listen = 1,
+    /// Waiting for a matching connection request after having sent a connection request
+    SynSent = 2,
+    /// Waiting for a confirming connection request acknowledgment after having both received and sent a connection request
+    SynReceived = 3,
+    /// An open connection, data received can be delivered to the user. The normal state for the data transfer phase
+    Established = 4,
+    /// Waiting for a connection termination request from the remote TCP peer, or an acknowledgment of the connection termination request previously sent
+    FinWait1 = 5,
+    /// Waiting for a connection termination request from the remote TCP peer
+    FinWait2 = 6,
+    /// Waiting for a connection termination request from the local user
+    CloseWait = 7,
+    /// Waiting for a connection termination request acknowledgment from the remote TCP peer
+    Closing = 8,
+    /// Waiting for an acknowledgment of the connection termination request previously sent to the remote TCP peer
+    LastAck = 9,
+    /// Waiting for enough time to pass to be sure the remote TCP peer received the acknowledgment of its connection termination request
+    TimeWait = 10,
+}
+
+impl ConnectionState {
+    /// Convert the connection state to a string representation matching
+    /// OpenTelemetry semantic conventions
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            ConnectionState::Closed => "closed",
+            ConnectionState::Listen => "listen",
+            ConnectionState::SynSent => "syn_sent",
+            ConnectionState::SynReceived => "syn_received",
+            ConnectionState::Established => "established",
+            ConnectionState::FinWait1 => "fin_wait_1",
+            ConnectionState::FinWait2 => "fin_wait_2",
+            ConnectionState::CloseWait => "close_wait",
+            ConnectionState::Closing => "closing",
+            ConnectionState::LastAck => "last_ack",
+            ConnectionState::TimeWait => "time_wait",
+        }
+    }
+}
+
+impl core::fmt::Display for ConnectionState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
 
 /// Event sent from eBPF to userspace for each new flow.
 /// Contains the outermost FlowKey (for eBPF map lookups) plus UNPARSED packet data
@@ -485,9 +556,8 @@ mod tests {
     use super::*;
     use crate::IpVersion::V4;
 
-    #[test]
-    fn test_flow_stats_tcp_flags() {
-        let mut stats = FlowStats {
+    fn create_flow_stats() -> FlowStats {
+        FlowStats {
             first_seen_ns: 0,
             last_seen_ns: 0,
             packets: 0,
@@ -513,6 +583,7 @@ mod tests {
             reverse_ip_ecn: 0,
             reverse_ip_ttl: 0,
             tcp_flags: 0,
+            tcp_state: ConnectionState::Closed,
             forward_tcp_flags: 0,
             reverse_tcp_flags: 0,
             icmp_type: 0,
@@ -521,7 +592,11 @@ mod tests {
             reverse_icmp_code: 0,
             forward_metadata_seen: 0,
             reverse_metadata_seen: 0,
-        };
+        }
+    }
+    #[test]
+    fn test_flow_stats_tcp_flags() {
+        let mut stats = create_flow_stats();
 
         // Verify all flags clear
         stats.tcp_flags = 0x00;
@@ -1168,5 +1243,36 @@ mod tests {
             false,
             "IPv4 comparison should work with zero-padding"
         );
+    }
+
+    #[test]
+    fn test_connection_state_as_str() {
+        assert_eq!(ConnectionState::Closed.as_str(), "closed");
+        assert_eq!(ConnectionState::Listen.as_str(), "listen");
+        assert_eq!(ConnectionState::SynSent.as_str(), "syn_sent");
+        assert_eq!(ConnectionState::SynReceived.as_str(), "syn_received");
+        assert_eq!(ConnectionState::Established.as_str(), "established");
+        assert_eq!(ConnectionState::FinWait1.as_str(), "fin_wait_1");
+        assert_eq!(ConnectionState::FinWait2.as_str(), "fin_wait_2");
+        assert_eq!(ConnectionState::CloseWait.as_str(), "close_wait");
+        assert_eq!(ConnectionState::Closing.as_str(), "closing");
+        assert_eq!(ConnectionState::LastAck.as_str(), "last_ack");
+        assert_eq!(ConnectionState::TimeWait.as_str(), "time_wait");
+    }
+
+    #[test]
+    fn test_connection_state_discriminants() {
+        // Test that enum discriminants match expected u8 values for eBPF compatibility
+        assert_eq!(ConnectionState::Closed as u8, 0);
+        assert_eq!(ConnectionState::Listen as u8, 1);
+        assert_eq!(ConnectionState::SynSent as u8, 2);
+        assert_eq!(ConnectionState::SynReceived as u8, 3);
+        assert_eq!(ConnectionState::Established as u8, 4);
+        assert_eq!(ConnectionState::FinWait1 as u8, 5);
+        assert_eq!(ConnectionState::FinWait2 as u8, 6);
+        assert_eq!(ConnectionState::CloseWait as u8, 7);
+        assert_eq!(ConnectionState::Closing as u8, 8);
+        assert_eq!(ConnectionState::LastAck as u8, 9);
+        assert_eq!(ConnectionState::TimeWait as u8, 10);
     }
 }

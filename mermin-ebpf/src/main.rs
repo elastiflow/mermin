@@ -95,8 +95,8 @@ use aya_ebpf::{
 #[cfg(not(feature = "test"))]
 use aya_log_ebpf::{error, trace};
 #[cfg(not(feature = "test"))]
-use mermin_common::{Direction, FlowEvent};
-use mermin_common::{FlowKey, FlowStats, IpVersion};
+use mermin_common::FlowEvent;
+use mermin_common::{ConnectionState, Direction, FlowKey, FlowStats, IpVersion};
 use network_types::{
     eth,
     eth::EtherType,
@@ -388,6 +388,9 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
                 .map_err(|_| Error::OutOfBounds)?;
             stats.tcp_flags |= current_flags;
 
+            let new_state = determine_tcp_state(stats.tcp_state, current_flags, direction);
+            stats.tcp_state = new_state;
+
             if is_forward && stats.forward_tcp_flags == 0 {
                 stats.forward_tcp_flags = current_flags;
             } else if !is_forward && stats.reverse_tcp_flags == 0 {
@@ -655,6 +658,275 @@ fn parse_metadata(ctx: &TcContext, stats: &mut FlowStats) -> Result<usize, Error
     Ok(offset)
 }
 
+/// Determines TCP connection state using hybrid stateless/stateful approach.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Normal handshake progression
+/// let state = determine_tcp_state(
+///     ConnectionState::Closed,
+///     tcp::TCP_FLAG_SYN,
+///     Direction::Egress
+/// );
+/// assert_eq!(state, ConnectionState::SynSent);
+///
+/// // Receiving SYN+ACK response
+/// let state = determine_tcp_state(
+///     ConnectionState::SynSent,
+///     tcp::TCP_FLAG_SYN | tcp::TCP_FLAG_ACK,
+///     Direction::Ingress
+/// );
+/// assert_eq!(state, ConnectionState::Established);
+///
+/// // RST always closes connection from any state
+/// let state = determine_tcp_state(
+///     ConnectionState::Established,
+///     tcp::TCP_FLAG_RST,
+///     Direction::Egress
+/// );
+/// assert_eq!(state, ConnectionState::Closed);
+/// ```
+///
+/// # TCP Connection State Machine from RFC 9293: https://datatracker.ietf.org/doc/html/rfc9293#section-3.3.2
+///
+///                             +---------+ ---------\      active OPEN
+///                             |  CLOSED |            \    -----------
+///                             +---------+<---------\   \   create TCB
+///                               |     ^              \   \  snd SYN
+///                  passive OPEN |     |   CLOSE        \   \
+///                  ------------ |     | ----------       \   \
+///                   create TCB  |     | delete TCB         \   \
+///                               V     |                      \   \
+///           rcv RST (note 1)  +---------+            CLOSE    |    \
+///        -------------------->|  LISTEN |          ---------- |     |
+///       /                     +---------+          delete TCB |     |
+///      /           rcv SYN      |     |     SEND              |     |
+///     /           -----------   |     |    -------            |     V
+/// +--------+      snd SYN,ACK  /       \   snd SYN          +--------+
+/// |        |<-----------------           ------------------>|        |
+/// |  SYN   |                    rcv SYN                     |  SYN   |
+/// |  RCVD  |<-----------------------------------------------|  SENT  |
+/// |        |                  snd SYN,ACK                   |        |
+/// |        |------------------           -------------------|        |
+/// +--------+   rcv ACK of SYN  \       /  rcv SYN,ACK       +--------+
+///    |         --------------   |     |   -----------
+///    |                x         |     |     snd ACK
+///    |                          V     V
+///    |  CLOSE                 +---------+
+///    | -------                |  ESTAB  |
+///    | snd FIN                +---------+
+///    |                 CLOSE    |     |    rcv FIN
+///    V                -------   |     |    -------
+/// +---------+         snd FIN  /       \   snd ACK         +---------+
+/// |  FIN    |<----------------          ------------------>|  CLOSE  |
+/// | WAIT-1  |------------------                            |   WAIT  |
+/// +---------+          rcv FIN  \                          +---------+
+///   | rcv ACK of FIN   -------   |                          CLOSE  |
+///   | --------------   snd ACK   |                         ------- |
+///   V        x                   V                         snd FIN V
+/// +---------+               +---------+                    +---------+
+/// |FINWAIT-2|               | CLOSING |                    | LAST-ACK|
+/// +---------+               +---------+                    +---------+
+///   |              rcv ACK of FIN |                 rcv ACK of FIN |
+///   |  rcv FIN     -------------- |    Timeout=2MSL -------------- |
+///   |  -------            x       V    ------------        x       V
+///    \ snd ACK              +---------+delete TCB          +---------+
+///      -------------------->|TIME-WAIT|------------------->| CLOSED  |
+///                           +---------+                    +---------+
+#[inline(always)]
+#[must_use]
+fn determine_tcp_state(
+    current_state: ConnectionState,
+    flags: u8,
+    direction: Direction,
+) -> ConnectionState {
+    if matches!(
+        current_state,
+        ConnectionState::Closed | ConnectionState::SynSent | ConnectionState::SynReceived
+    ) && let Some(new_state) = infer_initial_state(flags, direction)
+    {
+        return new_state;
+    }
+
+    if matches!(
+        current_state,
+        ConnectionState::Established
+            | ConnectionState::FinWait1
+            | ConnectionState::FinWait2
+            | ConnectionState::CloseWait
+            | ConnectionState::Closing
+            | ConnectionState::LastAck
+            | ConnectionState::TimeWait
+    ) {
+        return advance_closing_state(current_state, flags, direction);
+    }
+
+    current_state
+}
+
+/// Infers initial TCP state from a single packet without prior context.
+///
+/// Based on RFC 9293 section 3.3.2: https://datatracker.ietf.org/doc/html/rfc9293#section-3.3.2
+///
+/// This stateless approach handles:
+/// - Connection establishment: SYN → SYN_SENT, SYN+ACK → ESTABLISHED
+/// - Late-start scenarios: First packet seen is ACK/FIN/RST
+/// - Reset handling: RST → CLOSED
+///
+/// Returns None if the packet doesn't provide enough information to infer state,
+/// allowing the caller to fall back to stateful logic.
+///
+/// # Examples
+///
+/// ```ignore
+/// // SYN packet on egress initiates connection
+/// let state = infer_initial_state(tcp::TCP_FLAG_SYN, Direction::Egress);
+/// assert_eq!(state, Some(ConnectionState::SynSent));
+///
+/// // Late-start: seeing ACK packet assumes established connection
+/// let state = infer_initial_state(tcp::TCP_FLAG_ACK, Direction::Ingress);
+/// assert_eq!(state, Some(ConnectionState::Established));
+///
+/// // RST packet closes connection
+/// let state = infer_initial_state(tcp::TCP_FLAG_RST, Direction::Egress);
+/// assert_eq!(state, Some(ConnectionState::Closed));
+///
+/// // Late-start FIN: assumes connection was established
+/// let state = infer_initial_state(tcp::TCP_FLAG_FIN, Direction::Egress);
+/// assert_eq!(state, Some(ConnectionState::FinWait1));
+/// ```
+#[inline(always)]
+#[must_use]
+fn infer_initial_state(flags: u8, direction: Direction) -> Option<ConnectionState> {
+    let syn = tcp::syn_flag(flags);
+    let ack = tcp::ack_flag(flags);
+    let fin = tcp::fin_flag(flags);
+    let rst = tcp::rst_flag(flags);
+
+    // RST always closes connection immediately
+    if rst {
+        return Some(ConnectionState::Closed);
+    }
+
+    // Handle FIN packets for late-start scenarios
+    // If we see FIN as first packet, assume connection was established and transition to closing state
+    if fin {
+        match direction {
+            Direction::Egress => {
+                // This node is sending FIN (active close from established)
+                return Some(ConnectionState::FinWait1);
+            }
+            Direction::Ingress => {
+                // This node is receiving FIN (passive close from established)
+                return Some(ConnectionState::CloseWait);
+            }
+        }
+    }
+
+    // Stateless inference based on current packet only
+    // Note: RST and FIN are already handled above, so they're not set when we reach here
+    match (syn, ack, direction) {
+        // Pure SYN on egress = this node is initiating connection
+        (true, false, Direction::Egress) => Some(ConnectionState::SynSent),
+
+        // Pure SYN on ingress = this node is receiving connection attempt
+        (true, false, Direction::Ingress) => Some(ConnectionState::SynReceived),
+
+        // SYN+ACK on egress = this node is responding to SYN
+        (true, true, Direction::Egress) => Some(ConnectionState::SynReceived),
+
+        // SYN+ACK on ingress = late-start, receiving SYN+ACK response
+        // Jump directly to ESTABLISHED as this is the final handshake packet
+        (true, true, Direction::Ingress) => Some(ConnectionState::Established),
+
+        // Pure ACK (no SYN/FIN/RST) = late-start, connection already established
+        // RST and FIN are guaranteed to be unset due to early returns above
+        (false, true, _) if !fin && !rst => Some(ConnectionState::Established),
+
+        // No recognizable establishment pattern - return None to use stateful logic
+        _ => None,
+    }
+}
+
+/// Advances through the TCP closing handshake states (RFC 9293 FIN handshake).
+///
+/// Maintains granular states: FIN_WAIT_1, FIN_WAIT_2, CLOSE_WAIT, CLOSING, LAST_ACK, TIME_WAIT
+///
+/// Tracks state from THIS NODE's perspective (where Mermin is running):
+/// - Egress: This node sent the packet
+/// - Ingress: This node received the packet
+///
+/// # Examples
+///
+/// ```ignore
+/// // Active close: this node sends FIN
+/// let state = advance_closing_state(
+///     ConnectionState::Established,
+///     tcp::TCP_FLAG_FIN | tcp::TCP_FLAG_ACK,
+///     Direction::Egress
+/// );
+/// assert_eq!(state, ConnectionState::FinWait1);
+///
+/// // Peer ACKs our FIN
+/// let state = advance_closing_state(
+///     ConnectionState::FinWait1,
+///     tcp::TCP_FLAG_ACK,
+///     Direction::Ingress
+/// );
+/// assert_eq!(state, ConnectionState::FinWait2);
+///
+/// // Peer sends their FIN
+/// let state = advance_closing_state(
+///     ConnectionState::FinWait2,
+///     tcp::TCP_FLAG_FIN,
+///     Direction::Ingress
+/// );
+/// assert_eq!(state, ConnectionState::TimeWait);
+/// ```
+#[inline(always)]
+#[must_use]
+fn advance_closing_state(
+    current_state: ConnectionState,
+    flags: u8,
+    direction: Direction,
+) -> ConnectionState {
+    let ack = tcp::ack_flag(flags);
+    let fin = tcp::fin_flag(flags);
+    let rst = tcp::rst_flag(flags);
+
+    // RST always closes connection immediately
+    if rst {
+        return ConnectionState::Closed;
+    }
+
+    match (current_state, fin, ack, direction) {
+        // ESTABLISHED state transitions
+        (ConnectionState::Established, true, _, Direction::Egress) => ConnectionState::FinWait1, // Active close
+        (ConnectionState::Established, true, _, Direction::Ingress) => ConnectionState::CloseWait, // Passive close
+
+        // FIN_WAIT_1 state transitions (we sent FIN, waiting for peer's response)
+        (ConnectionState::FinWait1, true, true, Direction::Ingress) => ConnectionState::TimeWait, // Received FIN+ACK from peer (RFC 9293 Note 2)
+        (ConnectionState::FinWait1, true, false, Direction::Ingress) => ConnectionState::Closing, // Received FIN from peer (simultaneous close)
+        (ConnectionState::FinWait1, false, true, Direction::Ingress) => ConnectionState::FinWait2, // Received ACK of our FIN
+
+        // FIN_WAIT_2 state transitions (waiting for peer's FIN)
+        (ConnectionState::FinWait2, true, _, Direction::Ingress) => ConnectionState::TimeWait,
+
+        // CLOSING state transitions (simultaneous close: waiting for peer's ACK)
+        (ConnectionState::Closing, _, true, Direction::Ingress) => ConnectionState::TimeWait,
+
+        // CLOSE_WAIT state transitions (peer closed, we're now closing our side)
+        (ConnectionState::CloseWait, true, _, Direction::Egress) => ConnectionState::LastAck,
+
+        // LAST_ACK state transitions (waiting for peer's ACK of our FIN)
+        (ConnectionState::LastAck, _, true, Direction::Ingress) => ConnectionState::Closed,
+
+        // TIME_WAIT and default cases
+        _ => current_state,
+    }
+}
+
 #[cfg(not(test))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
@@ -796,6 +1068,7 @@ mod tests {
             ip_flow_label: 0,
             reverse_ip_flow_label: 0,
             tcp_flags: 0,
+            tcp_state: ConnectionState::Closed,
             forward_tcp_flags: 0,
             reverse_tcp_flags: 0,
             icmp_type: 0,
@@ -1291,5 +1564,345 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), Error::UnsupportedProtocol);
+    }
+
+    #[test]
+    fn test_rst_resets_connection() {
+        let states = [
+            ConnectionState::SynSent,
+            ConnectionState::Established,
+            ConnectionState::FinWait1,
+            ConnectionState::TimeWait,
+        ];
+
+        for state in states {
+            assert_eq!(
+                determine_tcp_state(state, tcp::TCP_FLAG_RST, Direction::Egress),
+                ConnectionState::Closed,
+                "State {:?} did not reset on RST",
+                state
+            );
+        }
+    }
+
+    #[test]
+    fn test_handshake_transitions() {
+        // This node sends SYN (egress) from CLOSED state (RFC 9293: initial state)
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::Closed,
+                tcp::TCP_FLAG_SYN,
+                Direction::Egress,
+            ),
+            ConnectionState::SynSent
+        );
+
+        // Receives SYN+ACK (ingress) - jump directly to ESTABLISHED
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::SynSent,
+                tcp::TCP_FLAG_SYN | tcp::TCP_FLAG_ACK,
+                Direction::Ingress,
+            ),
+            ConnectionState::Established
+        );
+
+        // This node sends final ACK (egress) - stays ESTABLISHED
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::Established,
+                tcp::TCP_FLAG_ACK,
+                Direction::Egress,
+            ),
+            ConnectionState::Established
+        );
+    }
+
+    #[test]
+    fn test_simultaneous_open() {
+        // Receive SYN from peer while in SYN_SENT (simultaneous open)
+        // Stateless logic sees SYN on ingress → SYN_RECEIVED
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::SynSent,
+                tcp::TCP_FLAG_SYN,
+                Direction::Ingress,
+            ),
+            ConnectionState::SynReceived
+        );
+    }
+
+    #[test]
+    fn test_active_close() {
+        // This node initiates close with FIN+ACK (egress)
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::Established,
+                tcp::TCP_FLAG_FIN | tcp::TCP_FLAG_ACK,
+                Direction::Egress,
+            ),
+            ConnectionState::FinWait1
+        );
+
+        // Peer ACKs the FIN (ingress)
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::FinWait1,
+                tcp::TCP_FLAG_ACK,
+                Direction::Ingress,
+            ),
+            ConnectionState::FinWait2
+        );
+
+        // Peer sends its own FIN+ACK (ingress)
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::FinWait2,
+                tcp::TCP_FLAG_FIN | tcp::TCP_FLAG_ACK,
+                Direction::Ingress,
+            ),
+            ConnectionState::TimeWait
+        );
+    }
+
+    #[test]
+    fn test_passive_close() {
+        // Peer initiates close with FIN+ACK (ingress)
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::Established,
+                tcp::TCP_FLAG_FIN | tcp::TCP_FLAG_ACK,
+                Direction::Ingress,
+            ),
+            ConnectionState::CloseWait
+        );
+
+        // This node sends its own FIN+ACK (egress)
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::CloseWait,
+                tcp::TCP_FLAG_FIN | tcp::TCP_FLAG_ACK,
+                Direction::Egress,
+            ),
+            ConnectionState::LastAck
+        );
+
+        // Peer ACKs our FIN (ingress)
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::LastAck,
+                tcp::TCP_FLAG_ACK,
+                Direction::Ingress,
+            ),
+            ConnectionState::Closed
+        );
+    }
+
+    #[test]
+    fn test_simultaneous_close() {
+        // This node sends FIN+ACK (egress)
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::Established,
+                tcp::TCP_FLAG_FIN | tcp::TCP_FLAG_ACK,
+                Direction::Egress,
+            ),
+            ConnectionState::FinWait1
+        );
+
+        // Peer also sends FIN before ACKing our FIN (ingress)
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::FinWait1,
+                tcp::TCP_FLAG_FIN,
+                Direction::Ingress,
+            ),
+            ConnectionState::Closing
+        );
+
+        // Peer ACKs our FIN (ingress)
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::Closing,
+                tcp::TCP_FLAG_ACK,
+                Direction::Ingress,
+            ),
+            ConnectionState::TimeWait
+        );
+    }
+
+    #[test]
+    fn test_noise_ignored() {
+        // Pure ACK in ESTABLISHED stays ESTABLISHED (egress)
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::Established,
+                tcp::TCP_FLAG_ACK,
+                Direction::Egress,
+            ),
+            ConnectionState::Established
+        );
+
+        // PSH+ACK (data packets) stay ESTABLISHED (ingress)
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::Established,
+                tcp::TCP_FLAG_PSH | tcp::TCP_FLAG_ACK,
+                Direction::Ingress,
+            ),
+            ConnectionState::Established
+        );
+    }
+
+    // Late-start scenario tests: mermin starts observing mid-connection
+
+    #[test]
+    fn test_late_start_syn_ack() {
+        // Late-start: First packet seen is SYN+ACK (ingress) from CLOSED state
+        // Should infer we're in handshake and jump to ESTABLISHED
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::Closed,
+                tcp::TCP_FLAG_SYN | tcp::TCP_FLAG_ACK,
+                Direction::Ingress,
+            ),
+            ConnectionState::Established
+        );
+    }
+
+    #[test]
+    fn test_late_start_ack_only() {
+        // Late-start: First packet seen is pure ACK from CLOSED state (data transfer already happening)
+        // Should infer connection is ESTABLISHED
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::Closed,
+                tcp::TCP_FLAG_ACK,
+                Direction::Egress,
+            ),
+            ConnectionState::Established
+        );
+    }
+
+    #[test]
+    fn test_late_start_psh_ack() {
+        // Late-start: First packet seen is PSH+ACK from CLOSED state (data transfer)
+        // Should infer connection is ESTABLISHED
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::Closed,
+                tcp::TCP_FLAG_PSH | tcp::TCP_FLAG_ACK,
+                Direction::Ingress,
+            ),
+            ConnectionState::Established
+        );
+    }
+
+    #[test]
+    fn test_late_start_fin_ingress() {
+        // Late-start: First packet seen is FIN+ACK (ingress) from CLOSED state - peer is closing
+        // Assume connection was established, transition directly to CLOSE_WAIT
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::Closed,
+                tcp::TCP_FLAG_FIN | tcp::TCP_FLAG_ACK,
+                Direction::Ingress,
+            ),
+            ConnectionState::CloseWait
+        );
+
+        // This node sends its own FIN (egress)
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::CloseWait,
+                tcp::TCP_FLAG_FIN,
+                Direction::Egress,
+            ),
+            ConnectionState::LastAck
+        );
+
+        // Peer ACKs our FIN (ingress)
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::LastAck,
+                tcp::TCP_FLAG_ACK,
+                Direction::Ingress,
+            ),
+            ConnectionState::Closed
+        );
+    }
+
+    #[test]
+    fn test_late_start_fin_egress() {
+        // Late-start: First packet seen is FIN (egress) from CLOSED state - this node is closing
+        // Assume connection was established, transition directly to FIN_WAIT_1
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::Closed,
+                tcp::TCP_FLAG_FIN,
+                Direction::Egress,
+            ),
+            ConnectionState::FinWait1
+        );
+
+        // Peer ACKs our FIN (ingress)
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::FinWait1,
+                tcp::TCP_FLAG_ACK,
+                Direction::Ingress,
+            ),
+            ConnectionState::FinWait2
+        );
+
+        // Peer sends its own FIN (ingress)
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::FinWait2,
+                tcp::TCP_FLAG_FIN,
+                Direction::Ingress,
+            ),
+            ConnectionState::TimeWait
+        );
+    }
+
+    #[test]
+    fn test_syn_on_egress() {
+        // This node initiating connection on egress from CLOSED should be SYN_SENT
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::Closed,
+                tcp::TCP_FLAG_SYN,
+                Direction::Egress,
+            ),
+            ConnectionState::SynSent
+        );
+    }
+
+    #[test]
+    fn test_closed_state_with_no_flags() {
+        // Verify that CLOSED state (RFC 9293: "no connection state at all")
+        // doesn't incorrectly transition on packets with no flags
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::Closed,
+                0, // No flags
+                Direction::Egress,
+            ),
+            ConnectionState::Closed
+        );
+    }
+
+    #[test]
+    fn test_rst_from_closed() {
+        // RST from CLOSED state should stay CLOSED
+        assert_eq!(
+            determine_tcp_state(
+                ConnectionState::Closed,
+                tcp::TCP_FLAG_RST,
+                Direction::Egress,
+            ),
+            ConnectionState::Closed
+        );
     }
 }

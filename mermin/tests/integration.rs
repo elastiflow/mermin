@@ -182,7 +182,7 @@ fn run_cmd(cmd: &str) {
 mod event_driven_tests {
     use std::{sync::Arc, time::Duration};
 
-    use mermin_common::{Direction, FlowKey, FlowStats, IpVersion};
+    use mermin_common::{ConnectionState, Direction, FlowKey, FlowStats, IpVersion};
     use network_types::{eth::EtherType, ip::IpProto};
     use tokio::sync::Mutex;
 
@@ -315,6 +315,7 @@ mod event_driven_tests {
             reverse_ip_ttl: 0,
             reverse_ip_flow_label: 0,
             tcp_flags: 0x02, // SYN
+            tcp_state: ConnectionState::SynSent,
             forward_tcp_flags: 0x02,
             reverse_tcp_flags: 0x00,
             icmp_type: 0,
@@ -371,6 +372,7 @@ mod event_driven_tests {
             reverse_ip_ttl: 0,
             reverse_ip_flow_label: 0,
             tcp_flags: 0x12, // SYN+ACK
+            tcp_state: ConnectionState::SynReceived,
             forward_tcp_flags: 0x12,
             reverse_tcp_flags: 0x00,
             icmp_type: 0,
@@ -423,6 +425,7 @@ mod event_driven_tests {
             reverse_ip_ttl: 0,
             reverse_ip_flow_label: 0,
             tcp_flags: 0x1A, // SYN+ACK+PSH
+            tcp_state: ConnectionState::Established,
             forward_tcp_flags: 0x1A,
             reverse_tcp_flags: 0x00,
             icmp_type: 0,
@@ -484,6 +487,7 @@ mod event_driven_tests {
             reverse_ip_ttl: 0,
             reverse_ip_flow_label: 0,
             tcp_flags: 0x12,
+            tcp_state: ConnectionState::Established,
             forward_tcp_flags: 0x12,
             reverse_tcp_flags: 0x00,
             icmp_type: 0,
@@ -526,6 +530,7 @@ mod event_driven_tests {
             reverse_ip_ttl: 0,
             reverse_ip_flow_label: 0,
             tcp_flags: 0x1A,
+            tcp_state: ConnectionState::Established,
             forward_tcp_flags: 0x1A,
             reverse_tcp_flags: 0x00,
             icmp_type: 0,
@@ -600,6 +605,11 @@ mod event_driven_tests {
                     reverse_ip_ttl: 0,
                     reverse_ip_flow_label: 0,
                     tcp_flags: 0x02,
+                    tcp_state: if key.protocol == IpProto::Tcp {
+                        ConnectionState::SynSent
+                    } else {
+                        ConnectionState::Closed
+                    },
                     forward_tcp_flags: 0x02,
                     reverse_tcp_flags: 0x00,
                     icmp_type: 0,
