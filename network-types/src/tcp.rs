@@ -174,37 +174,6 @@ pub fn cwr_flag(flags: Flags) -> bool {
     (flags & TCP_FLAG_CWR) != 0
 }
 
-pub const TCP_STATE_CLOSED: u8 = 0;
-pub const TCP_STATE_LISTEN: u8 = 1;
-pub const TCP_STATE_SYN_SENT: u8 = 2;
-pub const TCP_STATE_SYN_RECEIVED: u8 = 3;
-pub const TCP_STATE_ESTABLISHED: u8 = 4;
-pub const TCP_STATE_FIN_WAIT_1: u8 = 5;
-pub const TCP_STATE_FIN_WAIT_2: u8 = 6;
-pub const TCP_STATE_CLOSE_WAIT: u8 = 7;
-pub const TCP_STATE_CLOSING: u8 = 8;
-pub const TCP_STATE_LAST_ACK: u8 = 9;
-pub const TCP_STATE_TIME_WAIT: u8 = 10;
-
-/// Returns the human-readable name of a TCP state.
-#[inline]
-pub fn state_name(state: u8) -> &'static str {
-    match state {
-        TCP_STATE_CLOSED => "CLOSED",
-        TCP_STATE_LISTEN => "LISTEN",
-        TCP_STATE_SYN_SENT => "SYN_SENT",
-        TCP_STATE_SYN_RECEIVED => "SYN_RECEIVED",
-        TCP_STATE_ESTABLISHED => "ESTABLISHED",
-        TCP_STATE_FIN_WAIT_1 => "FIN_WAIT_1",
-        TCP_STATE_FIN_WAIT_2 => "FIN_WAIT_2",
-        TCP_STATE_CLOSE_WAIT => "CLOSE_WAIT",
-        TCP_STATE_CLOSING => "CLOSING",
-        TCP_STATE_LAST_ACK => "LAST_ACK",
-        TCP_STATE_TIME_WAIT => "TIME_WAIT",
-        _ => "UNKNOWN",
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -414,13 +383,5 @@ mod test {
         // Test UrgPtr type alias
         let urg: UrgPtr = [0x00, 0x00];
         assert_eq!(urg, [0x00, 0x00]);
-    }
-
-    #[test]
-    fn test_tcp_states() {
-        assert_eq!(TCP_STATE_ESTABLISHED, 4);
-        assert_eq!(state_name(TCP_STATE_ESTABLISHED), "ESTABLISHED");
-        assert_eq!(state_name(TCP_STATE_TIME_WAIT), "TIME_WAIT");
-        assert_eq!(state_name(99), "UNKNOWN");
     }
 }

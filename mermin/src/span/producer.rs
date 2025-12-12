@@ -42,7 +42,7 @@ use crate::{
         ebpf_guard::EbpfFlowGuard,
         flow::{FlowEndReason, FlowSpan, SpanAttributes},
         opts::SpanOptions,
-        tcp::{ConnectionState, TcpFlags},
+        tcp::TcpFlags,
         trace_id::TraceIdCache,
     },
 };
@@ -729,6 +729,9 @@ impl FlowWorker {
                     s
                 }
                 Err(e) => {
+                    // Entry doesn't exist in map - disable guard cleanup (nothing to clean)
+                    // The guard would attempt to remove from the eBPF map on drop, but since
+                    // the entry doesn't exist, we prevent unnecessary cleanup attempt
                     guard.keep();
                     if e.to_string().contains("not found") {
                         metrics::flow::inc_flow_stats_map_access(FlowStatsStatus::NotFound);
@@ -753,16 +756,24 @@ impl FlowWorker {
             metrics::flow::inc_producer_flow_spans(&iface_name, FlowSpanProducerStatus::Dropped);
 
             let mut map = self.flow_stats_map.lock().await;
-            if let Err(e) = map.remove(&event.flow_key) {
-                warn!(
-                    event.name = "flow.cleanup_failed",
-                    worker.id = self.worker_id,
-                    error.message = %e,
-                    "failed to remove filtered flow from eBPF map"
-                );
+            match map.remove(&event.flow_key) {
+                Ok(_) => {
+                    // Successfully removed from eBPF map - disable guard cleanup to prevent
+                    // double-removal attempt when the guard is dropped
+                    guard.keep();
+                }
+                Err(e) => {
+                    warn!(
+                        event.name = "flow.cleanup_failed",
+                        worker.id = self.worker_id,
+                        error.message = %e,
+                        "failed to remove filtered flow from eBPF map"
+                    );
+                    // Don't call guard.keep() - let the guard retry cleanup on drop as a
+                    // fallback mechanism to ensure the eBPF map entry is eventually removed
+                }
             }
             drop(map);
-            guard.keep();
 
             trace!(
                 event.name = "flow.filtered",
@@ -906,7 +917,7 @@ impl FlowWorker {
             attributes: SpanAttributes {
                 // General flow attributes
                 flow_community_id: community_id.to_string(),
-                flow_connection_state: Some(ConnectionState::from_ebpf_u8(stats.tcp_state)),
+                flow_connection_state: is_tcp.then_some(stats.tcp_state),
                 flow_end_reason: None,
 
                 // Network endpoints
@@ -1545,7 +1556,7 @@ async fn record_flow(
 
     let flow_span = &mut entry_ref.flow_span;
     flow_span.attributes.flow_connection_state =
-        Some(ConnectionState::from_ebpf_u8(stats.tcp_state));
+        (stats.protocol == IpProto::Tcp).then_some(stats.tcp_state);
     flow_span.attributes.flow_bytes_delta = delta_bytes as i64;
     flow_span.attributes.flow_packets_delta = delta_packets as i64;
     flow_span.attributes.flow_reverse_bytes_delta = delta_reverse_bytes as i64;
@@ -2044,7 +2055,7 @@ fn determine_flow_end_reason(
 mod tests {
     use std::time::SystemTime;
 
-    use mermin_common::IpVersion;
+    use mermin_common::{ConnectionState, IpVersion};
     use opentelemetry::trace::SpanKind;
 
     use super::*;
@@ -2077,7 +2088,7 @@ mod tests {
             reverse_ip_ecn: 0,
             reverse_ip_ttl: 0,
             tcp_flags,
-            tcp_state: 0,
+            tcp_state: ConnectionState::Closed,
             forward_tcp_flags: tcp_flags,
             reverse_tcp_flags: 0,
             icmp_type: 0,
