@@ -149,10 +149,10 @@ use tracing::{debug, error, info, trace, warn};
 use crate::{
     error::MerminError,
     iface::types::{ControllerEvent, NetlinkEvent},
-    metrics,
     metrics::{
         cleanup::MetricCleanupTracker,
         ebpf::{inc_tc_programs_attached, inc_tc_programs_detached},
+        registry,
     },
     runtime::conf::TcxOrderStrategy,
 };
@@ -330,7 +330,7 @@ impl IfaceController {
                 tcx_order = %self.tcx_order,
                 "tcx mode enabled (kernel >= 6.6), using bpf_fs for cleanup"
             );
-            metrics::registry::EBPF_ATTACHMENT_MODE
+            registry::EBPF_ATTACHMENT_MODE
                 .with_label_values(&["tcx"])
                 .set(1);
         } else {
@@ -340,7 +340,7 @@ impl IfaceController {
                 tc_priority = self.tc_priority,
                 "legacy tc mode enabled (netlink), using internal cleanup"
             );
-            metrics::registry::EBPF_ATTACHMENT_MODE
+            registry::EBPF_ATTACHMENT_MODE
                 .with_label_values(&["tc"])
                 .set(1);
         }
