@@ -933,13 +933,13 @@ mod tests {
     /// 2. Alignment is consistent
     #[test]
     fn test_flow_stats_memory_layout() {
-        // Verify optimized memory layout (128 bytes)
-        // 48 (u64) + 32 (IP arrays) + 6 (MAC) + 2 (padding) + 12 (u32) + 6 (u16) + 14 (u8) = 120 bytes
+        // Verify optimized memory layout (184 bytes)
+        // 104 (u64) + 32 (IP arrays) + 6 (MAC) + 2 (padding) + 12 (u32) + 6 (u16) + 14 (u8) = 177 bytes
         // Compiler adds padding to align to 8 bytes = 128 bytes
         assert_eq!(
             size_of::<FlowStats>(),
-            128,
-            "FlowStats size MUST be 128 bytes for eBPF/userspace compatibility"
+            184,
+            "FlowStats size MUST be 184 bytes for eBPF/userspace compatibility"
         );
 
         // Verify alignment (critical for correct memory access in eBPF)
