@@ -152,6 +152,7 @@ use crate::{
     metrics::{
         cleanup::MetricCleanupTracker,
         ebpf::{inc_tc_programs_attached, inc_tc_programs_detached},
+        registry,
     },
     runtime::conf::TcxOrderStrategy,
 };
@@ -320,6 +321,29 @@ impl IfaceController {
             interfaces = ?sorted_ifaces,
             "resolved interfaces, beginning initialization"
         );
+
+        if self.use_tcx {
+            info!(
+                event.name = "interface_controller.init_mode_resolved",
+                tcx_mode = true,
+                bpf_fs_writable = self.bpf_fs_writable,
+                tcx_order = %self.tcx_order,
+                "tcx mode enabled (kernel >= 6.6), using bpf_fs for cleanup"
+            );
+            registry::EBPF_ATTACHMENT_MODE
+                .with_label_values(&["tcx"])
+                .set(1);
+        } else {
+            info!(
+                event.name = "interface_controller.init_mode_resolved",
+                tcx_mode = false,
+                tc_priority = self.tc_priority,
+                "legacy tc mode enabled (netlink), using internal cleanup"
+            );
+            registry::EBPF_ATTACHMENT_MODE
+                .with_label_values(&["tc"])
+                .set(1);
+        }
 
         self.build_iface_map()?;
 

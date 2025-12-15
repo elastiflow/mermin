@@ -61,6 +61,12 @@ lazy_static! {
             .namespace("mermin")
     ).expect("failed to create ebpf_orphans_cleaned_total metric");
 
+    pub static ref EBPF_ATTACHMENT_MODE: IntGaugeVec = IntGaugeVec::new(
+        Opts::new("ebpf_method", "Current eBPF attachment method used (tc or tcx)")
+            .namespace("mermin"),
+        &["attachment"]
+    ).expect("failed to create ebpf_method metric");
+
     // Standard aggregated metrics (no labels, always enabled)
     pub static ref TC_PROGRAMS_ATTACHED_TOTAL: IntCounter = IntCounter::with_opts(
         Opts::new("ebpf_tc_programs_attached_total", "Total number of TC programs attached across all interfaces")
@@ -482,6 +488,7 @@ pub fn init_registry(debug_enabled: bool) -> Result<(), prometheus::Error> {
     register_standard!(EBPF_MAP_UTILIZATION);
     register_standard!(EBPF_FLOW_RING_BUFFER_DROPS_TOTAL);
     register_standard!(EBPF_ORPHANS_CLEANED_TOTAL);
+    register_standard!(EBPF_ATTACHMENT_MODE);
     register_standard!(BPF_FS_WRITABLE);
     register_standard!(TC_PROGRAMS_ATTACHED_TOTAL);
     register_standard!(TC_PROGRAMS_DETACHED_TOTAL);
