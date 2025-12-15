@@ -440,10 +440,11 @@ impl core::fmt::Display for ConnectionState {
 /// Key Optimization: eBPF already parsed outer headers into FlowStats, so we only
 /// send the UNPARSED portion to avoid redundant parsing in userspace.
 ///
-/// Memory layout: 234 bytes total (62 bytes saved vs naive approach!)
+/// Memory layout: 238 bytes total (62 bytes saved vs naive approach!)
 /// - FlowKey: 38 bytes (outermost 5-tuple from eBPF)
 /// - snaplen: 2 bytes (total original packet length)
 /// - parsed_offset: 2 bytes (where unparsed data starts in original packet)
+/// - pid: 4 bytes (process ID associated with socket, 0 if unavailable)
 /// - packet_data: 192 bytes (ONLY unparsed portion, for tunnel inner headers)
 ///
 /// Example (Plain TCP/IPv4):
@@ -469,6 +470,11 @@ pub struct FlowEvent {
     /// For plain traffic: equals header length (Eth + IP + L4)
     /// For tunnels: equals outer header length (up to tunnel payload)
     pub parsed_offset: u16,
+
+    /// Process ID (PID) associated with the network socket.
+    /// Set to 0 if PID is unavailable (e.g., forwarded traffic, kernel-generated packets).
+    /// Used in userspace to look up process name via /proc/[pid]/comm.
+    pub pid: u32,
 
     /// Raw packet bytes starting from parsed_offset (up to 192 bytes).
     /// For plain traffic: Usually empty (all headers already parsed).
@@ -958,11 +964,11 @@ mod tests {
     /// so any size/alignment mismatch will cause parsing errors in userspace.
     #[test]
     fn test_flow_event_memory_layout() {
-        // Verify FlowEvent size: FlowKey(38) + snaplen(2) + parsed_offset(2) + packet_data(192) = 234
+        // Verify FlowEvent size: FlowKey(38) + snaplen(2) + parsed_offset(2) + pid(4) + packet_data(192) = 238
         assert_eq!(
             size_of::<FlowEvent>(),
-            234,
-            "FlowEvent size MUST be 234 bytes for eBPF/userspace compatibility (62 bytes saved vs old design!)"
+            238,
+            "FlowEvent size MUST be 238 bytes for eBPF/userspace compatibility (62 bytes saved vs old design!)"
         );
 
         // Verify alignment (2-byte aligned, inherited from FlowKey)

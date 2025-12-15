@@ -8,6 +8,7 @@ mod listening_ports;
 mod metrics;
 mod otlp;
 mod packet;
+mod process_name;
 mod runtime;
 mod span;
 
@@ -116,14 +117,16 @@ async fn main() {
 /// IMPORTANT: Increment this when ANY of the following change:
 /// - FlowKey struct layout (in mermin-ebpf/src/*.rs)
 /// - FlowStats struct layout (in mermin-ebpf/src/*.rs)
+/// - FlowEvent struct layout (in mermin-common/src/*.rs)
 /// - Map max_entries values
 /// - Map key/value types
 ///
 /// History:
-/// - v1: Initial schema version (current)
+/// - v1: Initial schema version
+/// - v2: Added pid field to FlowEvent
 ///
-/// CI check in place: .github/workflows/ci.yaml (schema_version_check job)
-const EBPF_MAP_SCHEMA_VERSION: u8 = 1;
+/// CI check in place: .github/workflows/ci.yml (schema_version_check job)
+const EBPF_MAP_SCHEMA_VERSION: u8 = 2;
 
 /// Timeout for individual export operations (in seconds).
 /// If an export takes longer than this, it's considered timed out and the span may be lost.
@@ -603,6 +606,12 @@ async fn run(cli: Cli) -> Result<()> {
         "populated eBPF map with existing listening ports"
     );
 
+    let process_name_resolver = Arc::new(process_name::ProcessNameResolver::new());
+    info!(
+        event.name = "process_name.resolver.initialized",
+        "process name resolver initialized"
+    );
+
     let flow_span_producer = FlowSpanProducer::new(
         conf.clone().span,
         conf.pipeline.base_capacity,
@@ -612,6 +621,7 @@ async fn run(cli: Cli) -> Result<()> {
         flow_events_ringbuf,
         flow_span_tx,
         listening_ports_map,
+        process_name_resolver,
         &conf,
     )?;
     let flow_span_components = flow_span_producer.components();

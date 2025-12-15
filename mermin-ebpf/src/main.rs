@@ -87,7 +87,7 @@
 #[cfg(not(feature = "test"))]
 use aya_ebpf::{
     bindings::TC_ACT_UNSPEC,
-    helpers::bpf_ktime_get_boot_ns,
+    helpers::{bpf_get_current_pid_tgid, bpf_ktime_get_boot_ns},
     macros::{classifier, map},
     maps::{HashMap, PerCpuArray, RingBuf},
     programs::TcContext,
@@ -366,6 +366,13 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             flow_event.flow_key = normalized_key;
             flow_event.snaplen = ctx.len() as u16;
             flow_event.parsed_offset = parsed_offset as u16;
+
+            // Extract PID associated with the socket/process handling this packet.
+            // bpf_get_current_pid_tgid() returns u64: upper 32 bits = TGID (process ID), lower 32 bits = PID (thread ID).
+            // We use TGID (process ID) which is the upper 32 bits.
+            // If unavailable or for forwarded traffic, this will be 0.
+            let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
+            flow_event.pid = (pid_tgid >> 32) as u32;
 
             // Copy unparsed data (if any) for userspace deep parsing.
             // Load bytes one at a time until we hit the end of the packet or reach 192 bytes.

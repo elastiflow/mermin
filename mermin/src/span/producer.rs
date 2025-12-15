@@ -103,6 +103,7 @@ pub struct FlowSpanProducer {
     hostname_cache: Cache<IpAddr, String>,
     hostname_resolve_timeout: Duration,
     enable_hostname_resolution: bool,
+    process_name_resolver: Arc<crate::process_name::ProcessNameResolver>,
 }
 
 impl FlowSpanProducer {
@@ -116,6 +117,7 @@ impl FlowSpanProducer {
         flow_events_ringbuf: RingBuf<aya::maps::MapData>,
         flow_span_tx: mpsc::Sender<FlowSpan>,
         listening_ports_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, ListeningPortKey, u8>>>,
+        process_name_resolver: Arc<crate::process_name::ProcessNameResolver>,
         conf: &Conf,
     ) -> Result<Self, BootTimeError> {
         let flow_store_capacity = memory::initial_capacity::from_base_capacity(base_capacity);
@@ -187,6 +189,7 @@ impl FlowSpanProducer {
             hostname_cache,
             hostname_resolve_timeout: span_opts.hostname_resolve_timeout,
             enable_hostname_resolution: span_opts.enable_hostname_resolution,
+            process_name_resolver,
         })
     }
 
@@ -874,7 +877,10 @@ impl FlowWorker {
             event.flow_key.protocol,
         );
 
-        self.create_flow_span(&community_id, &event.flow_key, &stats)
+        // Resolve process name from PID
+        let process_name = self.process_name_resolver.resolve(event.pid).await;
+
+        self.create_flow_span(&community_id, &event.flow_key, &stats, process_name)
             .await?;
 
         // Flow successfully created and stored - disable guard cleanup
@@ -959,6 +965,7 @@ impl FlowWorker {
         community_id: &str,
         flow_key: &FlowKey,
         stats: &FlowStats,
+        process_name: Option<String>,
     ) -> Result<(), Error> {
         let is_ip_flow = stats.ether_type == EtherType::Ipv4 || stats.ether_type == EtherType::Ipv6;
         let is_ipv6 = stats.ether_type == EtherType::Ipv6;
@@ -1147,6 +1154,9 @@ impl FlowWorker {
                 flow_reverse_bytes_total: stats.reverse_bytes as i64,
                 flow_reverse_packets_delta: stats.reverse_packets as i64,
                 flow_reverse_packets_total: stats.reverse_packets as i64,
+
+                // Process information
+                process_executable_name: process_name,
 
                 // All other attributes default to None
                 ..Default::default()
