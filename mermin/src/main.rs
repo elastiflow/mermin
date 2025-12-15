@@ -567,6 +567,7 @@ async fn run(cli: Cli) -> Result<()> {
     let (k8s_decorated_flow_span_tx, mut k8s_decorated_flow_span_rx) =
         mpsc::channel(decorated_span_capacity);
     metrics::userspace::set_channel_size(ChannelName::DecoratorOutput, 0);
+    metrics::userspace::set_channel_capacity(ChannelName::DecoratorOutput, decorated_span_capacity);
 
     let listening_port_scanner =
         listening_ports::ListeningPortScanner::new(Arc::clone(&listening_ports_map));
