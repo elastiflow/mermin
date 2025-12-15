@@ -14,12 +14,9 @@ This test environment consists of two main parts:
     * **Grafana:** For visualization.
     * **Grafana Tempo:** For trace storage.
     * **OpenTelemetry Collector:** To receive data from `mermin` and export it to Tempo.
-    * **Prometheus:** For metrics scraping.
+    * **Prometheus:** For metrics.
     * **Traffic Generator:** A simple container that creates network traffic for `mermin` to observe.
 2. **Mermin Deployment (Kubernetes):** A local `kind` cluster is used to deploy the `mermin` agent via its Helm chart.
-3. **Kubernetes Manifests (`k8s/`):** Additional resources for validation:
-    * `traffic-generator.yaml` - Deployments and Service for generating predictable network traffic
-    * `servicemonitor.yaml` - ServiceMonitor/PodMonitor for Prometheus Operator integration
 
 ## Prerequisites
 
@@ -39,12 +36,9 @@ The test is run in two main stages from the root of the repository.
 
 This command starts Grafana, Tempo, and the other backend services in the background.
 
-**Important:** Run this command from the `mermin/tests/e2e/grafana/` directory, or use the full path with correct working directory:
-
 ```bash
-# Run from repository root (requires being in the grafana directory context)
-docker compose -f ./mermin/tests/e2e/grafana/docker-compose.yaml up -d
-```
+docker-compose -f ./mermin/tests/e2e/grafana/docker-compose.yaml up -d
+````
 
 You only need to run this once. The services will continue running until you bring them down.
 
@@ -64,13 +58,11 @@ helm repo add opensearch https://opensearch-project.github.io/helm-charts/
 helm repo update
 helm dependency build charts/mermin
 
-# 4. (optional) If you already have a Helm release, uninstall it first to avoid conflicts
-helm uninstall mermin
 
-# 5. Deploy mermin (choose one of the config options below)
-# Option A: Standard config (tracks all flows)
 make helm-upgrade EXTRA_HELM_ARGS='--set-file config.content=docs/deployment/examples/local/config.hcl'
 
+# 5. (optional) if you already have a Helm release, uninstall it first
+helm uninstall mermin
 ```
 
 This command performs the following steps:
@@ -91,70 +83,13 @@ Once `mermin` is deployed and the `traffic-generator` is running, flow spans sho
 4. Run a query for the `mermin` service, for example: `{resource.service.name="mermin"}`.
 5. **Confirm that `mermin` flow spans are visible in the results.**
 
-### 4. Validate Metrics (Optional)
-
-To validate that mermin metrics are being collected correctly:
-
-#### 4.1 Deploy Traffic Generator in Kubernetes
-
-```bash
-# Deploy client/server workloads for generating traffic
-kubectl apply -f ./mermin/tests/e2e/grafana/k8s/traffic-generator.yaml
-
-# Verify pods are running - Can take up to 2 minutes
-kubectl get pods -n traffic-test
-```
-
-#### 4.2 Expose Mermin Metrics to Prometheus
-
-Since mermin runs in the kind cluster and Prometheus runs in Docker Compose, we need to bridge the networks:
-
-```bash
-# Port-forward mermin metrics to host (run in background or separate terminal)
-kubectl port-forward ds/mermin 10250:10250 &
-```
-
-Prometheus is pre-configured to scrape `host.docker.internal:10250`.
-
-#### 4.3 View Metrics in Grafana
-
-1. Navigate to **`http://localhost:3000`**
-2. Go to **Explore** and select the **Prometheus** data source
-3. Try these queries to verify metrics are working:
-
-```promql
-# Total flow events
-sum(mermin_flow_events_total) by (status)
-
-# Active flows
-mermin_flow_spans_active_total
-
-# Packets processed
-rate(mermin_packets_total[5m])
-```
-
-#### 4.4 Run Sanity Check Queries
-
-See the full metrics validation guide at `docs/deployment/metrics-validation-guide.md` for comprehensive queries that verify metrics invariants.
-
-Key sanity checks:
-- Flow events conservation: all events must be accounted for in status labels
-- Task lifecycle balance: spawned tasks must equal completed + cancelled + panicked + active
-- Export flow conservation: queued spans must eventually be processed
-
-### 5. Cleaning Up
+### 4. Cleaning Up
 
 To tear down the environments, run the following commands:
 
 ```bash
-# Stop port-forward if running
-pkill -f "kubectl port-forward ds/mermin"
-
-# Delete traffic generator
-kubectl delete -f ./mermin/tests/e2e/grafana/k8s/traffic-generator.yaml
-
 # Stop and remove the Grafana stack containers
-docker compose -f ./mermin/tests/e2e/grafana/docker-compose.yaml down
+docker-compose -f ./mermin/tests/e2e/grafana/docker-compose.yaml down
 
 # Delete the kind cluster
 kind delete cluster --name atlantis
