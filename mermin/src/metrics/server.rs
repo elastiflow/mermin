@@ -25,7 +25,8 @@
 //! registry::FLOWS_CREATED.with_label_values(&["eth0"]).inc();
 //! ```
 
-use axum::{Router, http::StatusCode, response::IntoResponse, routing::get};
+use axum::{Router, http::{StatusCode, HeaderMap, HeaderValue}, response::IntoResponse, routing::get};
+use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing::info;
@@ -153,6 +154,166 @@ async fn debug_metrics_handler(debug_enabled: bool) -> impl IntoResponse {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct MetricSummary {
+    name: String,
+    #[serde(rename = "type")]
+    r#type: String,
+    description: String,
+    labels: Vec<String>,
+    category: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct MetricsSummaryResponse {
+    debug_metrics_enabled: bool,
+    total_metrics: usize,
+    standard_metrics: usize,
+    debug_metrics: usize,
+    metrics: Vec<MetricSummary>,
+}
+
+/// Handler for the `/metrics/summary` endpoint.
+///
+/// Returns a JSON summary of all available metrics with their metadata.
+async fn metrics_summary_handler(debug_enabled: bool) -> impl IntoResponse {
+    match tokio::task::spawn_blocking(move || {
+        let mut standard_metrics = Vec::new();
+        let mut debug_metrics = Vec::new();
+
+        // Gather standard metrics
+        let standard_families = registry::STANDARD_REGISTRY.gather();
+        for family in standard_families {
+            let metric_type = match family.get_field_type() {
+                prometheus::proto::MetricType::COUNTER => "counter",
+                prometheus::proto::MetricType::GAUGE => "gauge",
+                prometheus::proto::MetricType::HISTOGRAM => "histogram",
+                prometheus::proto::MetricType::SUMMARY => "summary",
+                prometheus::proto::MetricType::UNTYPED => "untyped",
+            };
+
+            let labels: Vec<String> = family
+                .get_metric()
+                .first()
+                .and_then(|m| {
+                    if m.get_label().is_empty() {
+                        None
+                    } else {
+                        Some(
+                            m.get_label()
+                                .iter()
+                                .map(|l| l.get_name().to_string())
+                                .collect(),
+                        )
+                    }
+                })
+                .unwrap_or_default();
+
+            standard_metrics.push(MetricSummary {
+                name: family.get_name().to_string(),
+                r#type: metric_type.to_string(),
+                description: family.get_help().to_string(),
+                labels,
+                category: "standard".to_string(),
+            });
+        }
+
+        // Gather debug metrics if enabled
+        if debug_enabled {
+            let debug_families = registry::DEBUG_REGISTRY.gather();
+            for family in debug_families {
+                let metric_type = match family.get_field_type() {
+                    prometheus::proto::MetricType::COUNTER => "counter",
+                    prometheus::proto::MetricType::GAUGE => "gauge",
+                    prometheus::proto::MetricType::HISTOGRAM => "histogram",
+                    prometheus::proto::MetricType::SUMMARY => "summary",
+                    prometheus::proto::MetricType::UNTYPED => "untyped",
+                };
+
+                let labels: Vec<String> = family
+                    .get_metric()
+                    .first()
+                    .and_then(|m| {
+                        if m.get_label().is_empty() {
+                            None
+                        } else {
+                            Some(
+                                m.get_label()
+                                    .iter()
+                                    .map(|l| l.get_name().to_string())
+                                    .collect(),
+                            )
+                        }
+                    })
+                    .unwrap_or_default();
+
+                debug_metrics.push(MetricSummary {
+                    name: family.get_name().to_string(),
+                    r#type: metric_type.to_string(),
+                    description: family.get_help().to_string(),
+                    labels,
+                    category: "debug".to_string(),
+                });
+            }
+        }
+
+        let all_metrics: Vec<MetricSummary> = standard_metrics
+            .into_iter()
+            .chain(debug_metrics.into_iter())
+            .collect();
+
+        MetricsSummaryResponse {
+            debug_metrics_enabled: debug_enabled,
+            total_metrics: all_metrics.len(),
+            standard_metrics: all_metrics
+                .iter()
+                .filter(|m| m.category == "standard")
+                .count(),
+            debug_metrics: all_metrics.iter().filter(|m| m.category == "debug").count(),
+            metrics: all_metrics,
+        }
+    })
+    .await
+    {
+        Ok(summary) => {
+            match serde_json::to_string_pretty(&summary) {
+                Ok(json) => {
+                    let mut headers = HeaderMap::new();
+                    headers.insert(
+                        axum::http::header::CONTENT_TYPE,
+                        HeaderValue::from_static("application/json"),
+                    );
+                    (StatusCode::OK, headers, json)
+                }
+                Err(e) => {
+                    tracing::error!(
+                        event.name = "metrics.summary.serialize_failed",
+                        error.message = %e,
+                        "failed to serialize metrics summary"
+                    );
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        HeaderMap::new(),
+                        format!(r#"{{"error": "Failed to serialize metrics summary: {e}"}}"#),
+                    )
+                }
+            }
+        }
+        Err(e) => {
+            tracing::error!(
+                event.name = "metrics.summary.gather_failed",
+                error.message = %e,
+                "metrics summary gathering task panicked"
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                HeaderMap::new(),
+                format!(r#"{{"error": "Failed to gather metrics summary"}}"#),
+            )
+        }
+    }
+}
+
 /// Create the metrics HTTP router.
 fn create_metrics_router(debug_enabled: bool) -> Router {
     Router::new()
@@ -161,6 +322,10 @@ fn create_metrics_router(debug_enabled: bool) -> Router {
         .route(
             "/metrics/debug",
             get(move || debug_metrics_handler(debug_enabled)),
+        )
+        .route(
+            "/metrics/summary",
+            get(move || metrics_summary_handler(debug_enabled)),
         )
         .layer(TraceLayer::new_for_http())
 }
@@ -171,6 +336,7 @@ fn create_metrics_router(debug_enabled: bool) -> Router {
 /// - `<listen_address>:<port>/metrics` - All metrics (standard + debug if enabled)
 /// - `<listen_address>:<port>/metrics/standard` - Standard metrics only (always available)
 /// - `<listen_address>:<port>/metrics/debug` - Debug metrics only (404 if debug not enabled)
+/// - `<listen_address>:<port>/metrics/summary` - JSON summary of all available metrics
 ///
 /// ### Example
 ///
