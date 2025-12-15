@@ -97,6 +97,8 @@ kubectl port-forward daemonset/mermin 10250:10250 -n mermin
 curl http://localhost:10250/metrics
 ```
 
+See [Application Metrics](../observability/app-metrics.md) for complete metrics documentation and Prometheus query examples.
+
 Key metrics to monitor include:
 
 - `mermin_flow_spans_created_total` - Total flow spans created

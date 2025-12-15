@@ -22,11 +22,9 @@ All metrics follow the naming convention: `mermin_<subsystem>_<name>_<unit>` whe
 
 The suffix of a metric name indicates its type:
 
-- `_total`: A counter that only increases
-- `_bytes_total`: A counter for bytes
-- `_seconds`: A histogram for duration measurements in seconds
-- `_ratio`: A gauge representing a ratio (0.0-1.0)
-- (no suffix): A gauge representing the current value
+- `_total`: A [counter](https://prometheus.io/docs/concepts/metric_types/#counter) that only increases
+- `_seconds`: A [histogram](https://prometheus.io/docs/concepts/metric_types/#histogram) for duration measurements in seconds
+- (no suffix): May be a [gauge](https://prometheus.io/docs/concepts/metric_types/#gauge) representing the current value or a [histogram](https://prometheus.io/docs/concepts/metric_types/#histogram)
 
 ### Standard vs Debug Metrics
 

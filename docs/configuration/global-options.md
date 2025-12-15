@@ -369,19 +369,14 @@ Multiplier for decorated span (export) channel capacity. Provides buffering betw
 
 ### Monitoring Performance Configuration
 
-After tuning performance settings, monitor these metrics:
+See [Application Metrics](../observability/app-metrics.md) for complete Prometheus query examples.
 
-```prometheus
-# Backpressure detection
-rate(mermin_flow_events_total{status="dropped_backpressure"}[5m])
-rate(mermin_flow_events_total{status="dropped_error"}[5m])
+After tuning performance settings, monitor these key metrics:
 
-# Channel utilization
-mermin_channel_size / mermin_channel_capacity
-
-# Pipeline latency
-histogram_quantile(0.95, rate(mermin_processing_latency_seconds_bucket[5m]))
-```
+- `mermin_flow_events_total{status="dropped_backpressure"}` - Backpressure events
+- `mermin_flow_events_total{status="dropped_error"}` - Error drops
+- `mermin_channel_size` / `mermin_channel_capacity` - Channel utilization
+- `mermin_processing_latency_seconds` - Pipeline latency histogram
 
 **Healthy indicators:**
 
@@ -489,19 +484,14 @@ Error: pipeline.ring_buffer_capacity must be a positive integer
 
 ## Monitoring Configuration Effectiveness
 
-After changing global options, monitor these metrics:
+See [Application Metrics](../observability/app-metrics.md) for complete Prometheus query examples.
 
-```prometheus
-# Packet processing
-rate(mermin_packets_total[5m])
-rate(mermin_flow_events_total{status="dropped_backpressure"}[5m])
+After changing global options, monitor these key metrics:
 
-# CPU usage
-rate(container_cpu_usage_seconds_total[5m])
-
-# Memory usage
-container_memory_working_set_bytes
-```
+- `mermin_packets_total` - Total packets processed
+- `mermin_flow_events_total{status="dropped_backpressure"}` - Dropped events due to backpressure
+- `container_cpu_usage_seconds_total` - CPU usage (from cAdvisor/kubelet)
+- `container_memory_working_set_bytes` - Memory usage (from cAdvisor/kubelet)
 
 **Healthy indicators:**
 

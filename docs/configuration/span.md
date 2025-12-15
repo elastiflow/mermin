@@ -414,18 +414,13 @@ span {
 
 ## Monitoring Flow Table
 
-Monitor flow table size with metrics:
+See [Application Metrics](../observability/app-metrics.md) for complete Prometheus query examples.
 
-```prometheus
-# Current active flows
-mermin_flow_spans_active_total
+Monitor flow table size with these key metrics:
 
-# Flow creation rate
-rate(mermin_flow_spans_created_total[5m])
-
-# eBPF map utilization
-mermin_ebpf_map_utilization_ratio{map="FLOW_STATS"}
-```
+- `mermin_flow_spans_active_total` - Current active flows
+- `mermin_flow_spans_created_total` - Flow creation rate
+- `mermin_ebpf_map_utilization_ratio{map="FLOW_STATS"}` - eBPF map utilization
 
 **Healthy indicators:**
 

@@ -631,21 +631,15 @@ export "traces" {
 
 ## Monitoring Export Health
 
-### Key Metrics
+See [Application Metrics](../observability/app-metrics.md) for complete Prometheus query examples.
 
-```prometheus
-# Export success rate
-rate(mermin_export_flow_spans_total{status="ok"}[5m])
+### Key Metrics to Monitor
 
-# Export errors
-rate(mermin_export_flow_spans_total{status="error"}[5m])
-
-# Channel utilization
-mermin_channel_size{channel="producer_output"} / mermin_channel_capacity{channel="producer_output"}
-
-# Export latency
-histogram_quantile(0.95, mermin_export_latency_seconds_bucket)
-```
+- `mermin_export_flow_spans_total{status="ok"}` - Export success rate
+- `mermin_export_flow_spans_total{status="error"}` - Export errors
+- `mermin_export_flow_spans_total{status="dropped"}` - Dropped spans
+- `mermin_channel_size{channel="producer_output"}` / `mermin_channel_capacity{channel="producer_output"}` - Channel utilization
+- `mermin_export_latency_seconds` - Export latency histogram
 
 ### Healthy Indicators
 

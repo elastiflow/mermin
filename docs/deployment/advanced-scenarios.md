@@ -458,13 +458,15 @@ podAnnotations:
   prometheus.io/path: "/metrics"
 ```
 
-Key metrics:
+See [Application Metrics](../observability/app-metrics.md) for complete metrics documentation and Prometheus query examples.
 
-* `mermin_flow_spans_created_total`: Total flow spans created
-* `mermin_packets_total`: Total packets processed
-* `mermin_flow_events_total{status="dropped_backpressure"}`: Events dropped due to overload
-* `mermin_export_flow_spans_total{status="error"}`: OTLP export failures
-* `mermin_flow_spans_active_total`: Current number of active flows
+Key metrics to monitor:
+
+* `mermin_flow_spans_created_total` - Total flow spans created
+* `mermin_packets_total` - Total packets processed
+* `mermin_flow_events_total{status="dropped_backpressure"}` - Events dropped due to overload
+* `mermin_export_flow_spans_total{status="error"}` - OTLP export failures
+* `mermin_flow_spans_active_total` - Current number of active flows
 
 ### Tuning Guidelines
 
