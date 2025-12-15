@@ -25,7 +25,12 @@
 //! registry::FLOWS_CREATED.with_label_values(&["eth0"]).inc();
 //! ```
 
-use axum::{Router, http::{StatusCode, HeaderMap, HeaderValue}, response::IntoResponse, routing::get};
+use axum::{
+    Router,
+    http::{HeaderMap, HeaderValue, StatusCode},
+    response::IntoResponse,
+    routing::get,
+};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
@@ -275,30 +280,28 @@ async fn metrics_summary_handler(debug_enabled: bool) -> impl IntoResponse {
     })
     .await
     {
-        Ok(summary) => {
-            match serde_json::to_string_pretty(&summary) {
-                Ok(json) => {
-                    let mut headers = HeaderMap::new();
-                    headers.insert(
-                        axum::http::header::CONTENT_TYPE,
-                        HeaderValue::from_static("application/json"),
-                    );
-                    (StatusCode::OK, headers, json)
-                }
-                Err(e) => {
-                    tracing::error!(
-                        event.name = "metrics.summary.serialize_failed",
-                        error.message = %e,
-                        "failed to serialize metrics summary"
-                    );
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        HeaderMap::new(),
-                        format!(r#"{{"error": "Failed to serialize metrics summary: {e}"}}"#),
-                    )
-                }
+        Ok(summary) => match serde_json::to_string_pretty(&summary) {
+            Ok(json) => {
+                let mut headers = HeaderMap::new();
+                headers.insert(
+                    axum::http::header::CONTENT_TYPE,
+                    HeaderValue::from_static("application/json"),
+                );
+                (StatusCode::OK, headers, json)
             }
-        }
+            Err(e) => {
+                tracing::error!(
+                    event.name = "metrics.summary.serialize_failed",
+                    error.message = %e,
+                    "failed to serialize metrics summary"
+                );
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    HeaderMap::new(),
+                    format!(r#"{{"error": "Failed to serialize metrics summary: {e}"}}"#),
+                )
+            }
+        },
         Err(e) => {
             tracing::error!(
                 event.name = "metrics.summary.gather_failed",
@@ -308,7 +311,7 @@ async fn metrics_summary_handler(debug_enabled: bool) -> impl IntoResponse {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 HeaderMap::new(),
-                format!(r#"{{"error": "Failed to gather metrics summary"}}"#),
+                r#"{"error": "Failed to gather metrics summary"}"#.to_string(),
             )
         }
     }
