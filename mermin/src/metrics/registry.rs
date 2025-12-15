@@ -187,7 +187,7 @@ lazy_static! {
     ).expect("failed to create flow_spans_active_total metric");
 
     pub static ref PRODUCER_FLOW_SPANS_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("producer_flow_spans_total", "Total number of flow spans processed by producer workers (aggregated across interfaces)")
+        Opts::new("producer_flow_spans_total", "Total number of flow spans processed by Flow Producer stage (aggregated across interfaces)")
             .namespace("mermin"),
         &["status"]
     ).expect("failed to create producer_flow_spans_total metric");
