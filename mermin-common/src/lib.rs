@@ -160,7 +160,7 @@ unsafe impl aya::Pod for FlowKey {}
 /// Tracks bidirectional counters, timestamps, and metadata.
 /// Only contains data that eBPF can parse (3-layer: Eth + IP + L4).
 /// Memory layout: 128 bytes actual (121 bytes data + 7 bytes padding for 8-byte alignment)
-/// Breakdown: 48 (u64) + 32 (IP arrays) + 6 (MAC) + 12 (u32) + 6 (u16) + 17 (u8) = 121 bytes unpadded
+/// Breakdown: 102 (u64) + 32 (IP arrays) + 6 (MAC) + 12 (u32) + 6 (u16) + 17 (u8) = 177 bytes unpadded
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct FlowStats {
@@ -177,6 +177,20 @@ pub struct FlowStats {
     pub reverse_packets: u64,
     /// Byte count in reverse direction
     pub reverse_bytes: u64,
+    /// Timestamp when SYN was seen (nanoseconds since boot)
+    pub tcp_syn_ns: u64,
+    /// Timestamp when SYN/ACK was seen (nanoseconds since boot)
+    pub tcp_syn_ack_ns: u64,
+    /// Timestamp when last payload packet was seen in forward direction (nanoseconds since boot)
+    pub tcp_last_payload_fwd_ns: u64,
+    /// Timestamp when last payload packet was seen in reverse direction (nanoseconds since boot)
+    pub tcp_last_payload_rev_ns: u64,
+    /// Running sum of the data transmission durations for latency calculation (nanoseconds)
+    pub tcp_txn_sum_ns: u64,
+    /// Running count of the number of transactions included in tcp_txn_sum_ns
+    pub tcp_txn_count: u64,
+    /// Running average of the average jitter observed between packets (nanoseconds)
+    pub tcp_jitter_avg_ns: u64,
 
     // === 16-byte arrays - 32 bytes ===
     /// Original source IP
@@ -564,6 +578,13 @@ mod tests {
             bytes: 0,
             reverse_packets: 0,
             reverse_bytes: 0,
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
+            tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
             src_ip: [0; 16],
             dst_ip: [0; 16],
             src_mac: [0; 6],

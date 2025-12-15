@@ -15,6 +15,7 @@ use network_types::{
     ip::{IpDscp, IpEcn, IpProto},
     tcp::{TCP_FLAG_FIN, TCP_FLAG_RST},
 };
+use opentelemetry::trace::SpanKind;
 use pnet::datalink::MacAddr;
 use tokio::{
     io::unix::AsyncFd,
@@ -987,6 +988,8 @@ impl FlowWorker {
             } else {
                 (None, None, None, None)
             };
+        let is_server = span_kind == SpanKind::Server;
+        let is_client = span_kind == SpanKind::Client;
 
         let span = FlowSpan {
             trace_id: Some(self.trace_id_cache.get_or_create(community_id)),
@@ -1054,6 +1057,25 @@ impl FlowWorker {
                 flow_reverse_tcp_flags_bits: is_tcp.then_some(stats.reverse_tcp_flags),
                 flow_reverse_tcp_flags_tags: is_tcp
                     .then(|| TcpFlags::flags_from_bits(stats.reverse_tcp_flags)),
+                flow_tcp_handshake_latency: is_tcp.then(|| {
+                    TcpFlags::handshake_latency_from_stats(stats.tcp_syn_ns, stats.tcp_syn_ack_ns)
+                }),
+                flow_tcp_svc_latency: (is_tcp && is_server).then(|| {
+                    TcpFlags::transaction_latency_from_stats(
+                        stats.tcp_txn_sum_ns,
+                        stats.tcp_txn_count,
+                    )
+                }),
+                flow_tcp_svc_jitter: (is_tcp && is_server)
+                    .then_some(stats.tcp_jitter_avg_ns as i64),
+                flow_tcp_rndtrip_latency: (is_tcp && is_client).then(|| {
+                    TcpFlags::transaction_latency_from_stats(
+                        stats.tcp_txn_sum_ns,
+                        stats.tcp_txn_count,
+                    )
+                }),
+                flow_tcp_rndtrip_jitter: (is_tcp && is_client)
+                    .then_some(stats.tcp_jitter_avg_ns as i64),
 
                 // Client/Server attributes (from direction inference)
                 client_address,
@@ -2418,6 +2440,12 @@ mod tests {
             bytes: 100,
             reverse_packets: 0,
             reverse_bytes: 0,
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
+            tcp_txn_count: 0,
             src_mac: [0; 6],
             ifindex: 1,
             ip_flow_label: 0,
@@ -2440,6 +2468,7 @@ mod tests {
             reverse_icmp_code: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 0,
+            tcp_jitter_avg_ns: 0,
         }
     }
 

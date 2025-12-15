@@ -82,6 +82,18 @@ impl TcpFlags {
         Self::active_flags_from_array(&Self::bits_to_array(bits))
     }
 
+    /// Calculate latency between SYN and SYN+ACK packets
+    pub fn handshake_latency_from_stats(syn_ns: u64, syn_ack_ns: u64) -> i64 {
+        (syn_ack_ns - syn_ns) as i64
+    }
+
+    pub fn transaction_latency_from_stats(sum: u64, count: u64) -> i64 {
+        if count == 0 {
+            return 0;
+        }
+        (sum / count) as i64
+    }
+
     /// Convert u8 bit flags to a boolean array
     fn bits_to_array(bits: u8) -> [bool; 8] {
         [
@@ -144,6 +156,12 @@ mod tests {
                 bytes: 0,
                 reverse_packets: 0,
                 reverse_bytes: 0,
+                tcp_syn_ns: 0,
+                tcp_syn_ack_ns: 0,
+                tcp_last_payload_fwd_ns: 0,
+                tcp_last_payload_rev_ns: 0,
+                tcp_txn_sum_ns: 0,
+                tcp_txn_count: 0,
                 src_mac: [0; 6],
                 ifindex: 0,
                 ip_flow_label: 0,
@@ -166,6 +184,7 @@ mod tests {
                 reverse_icmp_code: 0,
                 forward_metadata_seen: 1,
                 reverse_metadata_seen: 0,
+                tcp_jitter_avg_ns: 0,
             }
         }
 
@@ -268,6 +287,13 @@ mod tests {
             bytes: 0,
             reverse_packets: 0,
             reverse_bytes: 0,
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
+            tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
             src_mac: [0; 6],
             ifindex: 0,
             ip_flow_label: 0,

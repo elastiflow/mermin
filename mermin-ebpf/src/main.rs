@@ -395,10 +395,51 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             let new_state = determine_tcp_state(stats.tcp_state, current_flags, direction);
             stats.tcp_state = new_state;
 
+            let data_offset: tcp::OffRes = ctx
+                .load(l4_offset + tcp::TCP_OFF_RES_OFFSET)
+                .map_err(|_| Error::OutOfBounds)?;
+            let tcp_hdr_len = tcp::hdr_len(data_offset);
+            let tcp_payload_offset = l4_offset + tcp_hdr_len;
+            let payload_len = (ctx.len() as usize) - tcp_payload_offset;
+
             if is_forward && stats.forward_tcp_flags == 0 {
                 stats.forward_tcp_flags = current_flags;
             } else if !is_forward && stats.reverse_tcp_flags == 0 {
                 stats.reverse_tcp_flags = current_flags;
+            }
+
+            if stats.syn() && !stats.ack() {
+                stats.tcp_syn_ns = timestamp;
+            }
+
+            if stats.syn() && stats.ack() {
+                stats.tcp_syn_ack_ns = timestamp;
+            }
+
+            if payload_len > 0 {
+                if is_forward {
+                    stats.tcp_last_payload_fwd_ns = timestamp;
+                } else {
+                    stats.tcp_last_payload_rev_ns = timestamp;
+
+                    // If there is a forward timestamp, calculate the delta
+                    if stats.tcp_last_payload_fwd_ns != 0 {
+                        let delta = timestamp.saturating_sub(stats.tcp_last_payload_fwd_ns);
+                        stats.tcp_txn_sum_ns += delta;
+                        stats.tcp_txn_count += 1;
+
+                        stats.tcp_last_payload_fwd_ns = 0;
+
+                        // Calculate the moving average of the jitter following RFC 1889
+                        // J = J + (|D - J| / 16)
+                        let diff = if delta > stats.tcp_jitter_avg_ns {
+                            delta - stats.tcp_jitter_avg_ns
+                        } else {
+                            stats.tcp_jitter_avg_ns - delta
+                        };
+                        stats.tcp_jitter_avg_ns += diff / 16;
+                    }
+                }
             }
         }
     }
@@ -1062,6 +1103,12 @@ mod tests {
             bytes: 0,
             reverse_packets: 0,
             reverse_bytes: 0,
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
+            tcp_txn_count: 0,
             src_mac: [0; 6],
             ip_dscp: 0,
             ip_ecn: 0,
@@ -1081,6 +1128,7 @@ mod tests {
             reverse_icmp_code: 0,
             forward_metadata_seen: 0,
             reverse_metadata_seen: 0,
+            tcp_jitter_avg_ns: 0,
         }
     }
 
