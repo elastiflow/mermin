@@ -122,7 +122,7 @@ Comprehensive documentation is available in the `docs/` directory:
 
 ### Development & Contributing
 
-- [Contributing Guide](docs/contributor-guide/development-workflow.md) - How to contribute to Mermin
+- [Contributing Guide](docs/CONTRIBUTING.md) - How to contribute to Mermin
 - [Development Workflow](docs/contributor-guide/development-workflow.md) - Build, test, and contribute
 - [Debugging eBPF Programs](docs/contributor-guide/debugging-ebpf.md) - eBPF debugging techniques
 - [Debugging Network Traffic](docs/contributor-guide/debugging-network.md) - Wireshark and packet analysis
