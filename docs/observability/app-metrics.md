@@ -78,6 +78,12 @@ These gauges indicate the health of various Mermin components. A value of `1` in
 
 This section focuses on metrics originating from the eBPF layer, which is responsible for capturing low-level packets.
 
+### Attachment Mode
+
+**`mermin_ebpf_method{attachment}`**
+- **Type:** Gauge
+- **Description:** Indicates the active eBPF attachment method. The `attachment` label will be either `tcx` (Kernel >= 6.6) or `tc` (Legacy Netlink). The value is `1` for the active mode.
+
 ### Program Status
 
 **`mermin_ebpf_programs_loaded{program}`**
