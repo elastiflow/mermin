@@ -87,6 +87,7 @@ impl TcpFlags {
         (syn_ack_ns - syn_ns) as i64
     }
 
+    /// Calculate latency from duration sum (ns) and transaction counts
     pub fn transaction_latency_from_stats(sum: u64, count: u64) -> i64 {
         if count == 0 {
             return 0;
@@ -162,6 +163,7 @@ mod tests {
                 tcp_last_payload_rev_ns: 0,
                 tcp_txn_sum_ns: 0,
                 tcp_txn_count: 0,
+                tcp_jitter_avg_ns: 0,
                 src_mac: [0; 6],
                 ifindex: 0,
                 ip_flow_label: 0,
@@ -183,8 +185,7 @@ mod tests {
                 reverse_icmp_type: 0,
                 reverse_icmp_code: 0,
                 forward_metadata_seen: 1,
-                reverse_metadata_seen: 0,
-                tcp_jitter_avg_ns: 0,
+                reverse_metadata_seen: 0
             }
         }
 

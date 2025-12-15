@@ -2446,6 +2446,7 @@ mod tests {
             tcp_last_payload_rev_ns: 0,
             tcp_txn_sum_ns: 0,
             tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
             src_mac: [0; 6],
             ifindex: 1,
             ip_flow_label: 0,
@@ -2468,7 +2469,6 @@ mod tests {
             reverse_icmp_code: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 0,
-            tcp_jitter_avg_ns: 0,
         }
     }
 

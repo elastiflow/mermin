@@ -1109,6 +1109,7 @@ mod tests {
             tcp_last_payload_rev_ns: 0,
             tcp_txn_sum_ns: 0,
             tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
             src_mac: [0; 6],
             ip_dscp: 0,
             ip_ecn: 0,
@@ -1128,7 +1129,6 @@ mod tests {
             reverse_icmp_code: 0,
             forward_metadata_seen: 0,
             reverse_metadata_seen: 0,
-            tcp_jitter_avg_ns: 0,
         }
     }
 

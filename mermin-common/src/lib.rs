@@ -159,8 +159,8 @@ unsafe impl aya::Pod for FlowKey {}
 /// Flow statistics maintained in eBPF maps, aggregated per normalized FlowKey.
 /// Tracks bidirectional counters, timestamps, and metadata.
 /// Only contains data that eBPF can parse (3-layer: Eth + IP + L4).
-/// Memory layout: 128 bytes actual (121 bytes data + 7 bytes padding for 8-byte alignment)
-/// Breakdown: 102 (u64) + 32 (IP arrays) + 6 (MAC) + 12 (u32) + 6 (u16) + 17 (u8) = 177 bytes unpadded
+/// Memory layout: 184 bytes actual (177 bytes data + 7 bytes padding for 8-byte alignment)
+/// Breakdown: 104 (u64) + 32 (IP arrays) + 6 (MAC) + 12 (u32) + 6 (u16) + 17 (u8) = 177 bytes unpadded
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct FlowStats {
