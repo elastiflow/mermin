@@ -8,7 +8,9 @@
 
 ## Overview
 
-This example deploys Mermin and NetObserv Flow (as OTel receiver) with OpenSearch as the data platform. Although local [Kind](https://kind.sigs.k8s.io/) was used for testing, any kubernetes cluster should work if nodes have sufficient resources and don't have any taints that should be tolerated (`tolerations` values may be used) This example is intended only for demonstration, testing, or proof-of-concept use, since OpenSearch is deployed in a single-node mode.
+This example deploys Mermin and NetObserv Flow (as OTel receiver) with OpenSearch as the data platform.
+Although local [Kind](https://kind.sigs.k8s.io/) was used for testing, any kubernetes cluster should work if nodes have sufficient resources and don't have any taints that should be tolerated (`tolerations` values may be used).  
+This example is intended only for demonstration, testing, or proof-of-concept use, since OpenSearch is deployed in a single-node mode.
 
 Notes on the example deployment:
 
@@ -40,6 +42,7 @@ Notes on the example deployment:
       --devel \
       mermin mermin/mermin-netobserv-os-stack
     ```
+    
 * Optionally install `metrics-server` to get metrics if it has not been installed yet
 
     ```sh
