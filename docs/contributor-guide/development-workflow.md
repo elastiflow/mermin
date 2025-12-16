@@ -223,7 +223,7 @@ kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/down
 kubectl -n kube-system patch deployment metrics-server --type='json' -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
 ```
 
-**Optionally install Prometheus/Grafana to get Mermin metrics:**  
+**Optionally install [Prometheus/Grafana](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack) to get Mermin metrics:**  
 Not intended for a production usage, Grafana auth is disabled (insecure).
 
 ```sh
