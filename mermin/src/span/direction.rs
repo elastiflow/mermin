@@ -51,7 +51,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     ip::flow_key_to_ip_addrs,
-    metrics::ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus, inc_map_operation},
+    metrics::ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus, inc_ebpf_map_ops},
 };
 
 // ICMP (IPv4) Type Constants
@@ -165,7 +165,7 @@ impl DirectionInferrer {
         };
         match map.get(&dst_key, 0) {
             Ok(_) => {
-                inc_map_operation(
+                inc_ebpf_map_ops(
                     EbpfMapName::ListeningPorts,
                     EbpfMapOperation::Read,
                     EbpfMapStatus::Ok,
@@ -186,7 +186,7 @@ impl DirectionInferrer {
                 } else {
                     EbpfMapStatus::Error
                 };
-                inc_map_operation(EbpfMapName::ListeningPorts, EbpfMapOperation::Read, status);
+                inc_ebpf_map_ops(EbpfMapName::ListeningPorts, EbpfMapOperation::Read, status);
             }
         }
 
@@ -197,7 +197,7 @@ impl DirectionInferrer {
         };
         match map.get(&src_key, 0) {
             Ok(_) => {
-                inc_map_operation(
+                inc_ebpf_map_ops(
                     EbpfMapName::ListeningPorts,
                     EbpfMapOperation::Read,
                     EbpfMapStatus::Ok,
@@ -218,7 +218,7 @@ impl DirectionInferrer {
                 } else {
                     EbpfMapStatus::Error
                 };
-                inc_map_operation(EbpfMapName::ListeningPorts, EbpfMapOperation::Read, status);
+                inc_ebpf_map_ops(EbpfMapName::ListeningPorts, EbpfMapOperation::Read, status);
             }
         }
 

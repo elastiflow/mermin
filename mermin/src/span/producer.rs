@@ -28,7 +28,6 @@ use crate::{
     metrics::{
         self,
         ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus},
-        export::ExportStatus,
         flow::{FlowEventResult, FlowSpanProducerStatus},
         userspace::{ChannelName, ChannelSendStatus},
     },
@@ -102,8 +101,6 @@ pub struct FlowSpanProducer {
     hostname_cache: Cache<IpAddr, String>,
     hostname_resolve_timeout: Duration,
     enable_hostname_resolution: bool,
-    /// Maximum capacity of the FLOW_STATS eBPF map (for utilization metrics)
-    flow_stats_capacity: u64,
 }
 
 impl FlowSpanProducer {
@@ -189,7 +186,6 @@ impl FlowSpanProducer {
             hostname_cache,
             hostname_resolve_timeout: span_opts.hostname_resolve_timeout,
             enable_hostname_resolution: span_opts.enable_hostname_resolution,
-            flow_stats_capacity: conf.pipeline.ebpf_max_flows as u64,
         })
     }
 
@@ -263,7 +259,6 @@ impl FlowSpanProducer {
             self.boot_time_offset_nanos,
             max_orphan_age,
             community_id_gen,
-            self.flow_stats_capacity,
             orphan_scanner_shutdown_rx,
         ));
         worker_handles.push(orphan_scanner_handle);
@@ -435,7 +430,7 @@ impl FlowSpanProducer {
 
                     while let Some(item) = flow_events.next() {
                         let _timer = metrics::registry::PROCESSING_LATENCY_SECONDS
-                            .with_label_values(&["flow_ingestion"])
+                            .with_label_values(&["flow_producer_input"])
                             .start_timer();
 
                         let flow_event: FlowEvent =
@@ -705,14 +700,14 @@ impl FlowWorker {
         let mut map = self.flow_stats_map.lock().await;
         match map.remove(&event.flow_key) {
             Ok(_) => {
-                metrics::ebpf::inc_map_operation(
+                metrics::ebpf::inc_ebpf_map_ops(
                     EbpfMapName::FlowStats,
                     EbpfMapOperation::Delete,
                     EbpfMapStatus::Ok,
                 );
             }
             Err(e) => {
-                metrics::ebpf::inc_map_operation(
+                metrics::ebpf::inc_ebpf_map_ops(
                     EbpfMapName::FlowStats,
                     EbpfMapOperation::Delete,
                     EbpfMapStatus::Error,
@@ -743,7 +738,7 @@ impl FlowWorker {
             let map = self.flow_stats_map.lock().await;
             match map.get(&event.flow_key, 0) {
                 Ok(s) => {
-                    metrics::ebpf::inc_map_operation(
+                    metrics::ebpf::inc_ebpf_map_ops(
                         EbpfMapName::FlowStats,
                         EbpfMapOperation::Read,
                         EbpfMapStatus::Ok,
@@ -756,13 +751,13 @@ impl FlowWorker {
                     // the entry doesn't exist, we prevent unnecessary cleanup attempt
                     guard.keep();
                     if e.to_string().contains("not found") {
-                        metrics::ebpf::inc_map_operation(
+                        metrics::ebpf::inc_ebpf_map_ops(
                             EbpfMapName::FlowStats,
                             EbpfMapOperation::Read,
                             EbpfMapStatus::NotFound,
                         );
                     } else {
-                        metrics::ebpf::inc_map_operation(
+                        metrics::ebpf::inc_ebpf_map_ops(
                             EbpfMapName::FlowStats,
                             EbpfMapOperation::Read,
                             EbpfMapStatus::Error,
@@ -791,14 +786,14 @@ impl FlowWorker {
                     // Successfully removed from eBPF map - disable guard cleanup to prevent
                     // double-removal attempt when the guard is dropped
                     guard.keep();
-                    metrics::ebpf::inc_map_operation(
+                    metrics::ebpf::inc_ebpf_map_ops(
                         EbpfMapName::FlowStats,
                         EbpfMapOperation::Delete,
                         EbpfMapStatus::Ok,
                     );
                 }
                 Err(e) => {
-                    metrics::ebpf::inc_map_operation(
+                    metrics::ebpf::inc_ebpf_map_ops(
                         EbpfMapName::FlowStats,
                         EbpfMapOperation::Delete,
                         EbpfMapStatus::Error,
@@ -844,7 +839,11 @@ impl FlowWorker {
         // The entry is now managed by flow_store and will be cleaned up by timeout task
         guard.keep();
 
-        metrics::span::inc_flow_spans_processed();
+        // Calculate poller_id for metric tracking (same hash used by pollers)
+        // Note: Poller count is clamped to 32 in FlowSpanProducer, so we use 32 here
+        let num_pollers = 32;
+        let poller_id = hash_string(&community_id) % num_pollers;
+        metrics::span::inc_flow_spans_processed(&poller_id.to_string());
 
         Ok(())
     }
@@ -1555,7 +1554,7 @@ async fn record_flow(
     }
     let stats = match map.get(&flow_key, 0) {
         Ok(s) => {
-            metrics::ebpf::inc_map_operation(
+            metrics::ebpf::inc_ebpf_map_ops(
                 EbpfMapName::FlowStats,
                 EbpfMapOperation::Read,
                 EbpfMapStatus::Ok,
@@ -1564,13 +1563,13 @@ async fn record_flow(
         }
         Err(e) => {
             if e.to_string().contains("not found") {
-                metrics::ebpf::inc_map_operation(
+                metrics::ebpf::inc_ebpf_map_ops(
                     EbpfMapName::FlowStats,
                     EbpfMapOperation::Read,
                     EbpfMapStatus::NotFound,
                 );
             } else {
-                metrics::ebpf::inc_map_operation(
+                metrics::ebpf::inc_ebpf_map_ops(
                     EbpfMapName::FlowStats,
                     EbpfMapOperation::Read,
                     EbpfMapStatus::Error,
@@ -1753,7 +1752,10 @@ async fn record_flow(
             );
         }
         Err(mpsc::error::TrySendError::Full(_)) => {
-            metrics::export::inc_export_flow_spans(ExportStatus::Dropped);
+            metrics::userspace::inc_channel_sends(
+                ChannelName::ProducerOutput,
+                ChannelSendStatus::Backpressure,
+            );
             debug!(
                 event.name = "span.dropped",
                 flow.community_id = %community_id,
@@ -1805,14 +1807,14 @@ async fn record_flow(
 
             match map.insert(ebpf_key, updated_stats, 0) {
                 Ok(_) => {
-                    metrics::ebpf::inc_map_operation(
+                    metrics::ebpf::inc_ebpf_map_ops(
                         EbpfMapName::FlowStats,
                         EbpfMapOperation::Write,
                         EbpfMapStatus::Ok,
                     );
                 }
                 Err(e) => {
-                    metrics::ebpf::inc_map_operation(
+                    metrics::ebpf::inc_ebpf_map_ops(
                         EbpfMapName::FlowStats,
                         EbpfMapOperation::Write,
                         EbpfMapStatus::Error,
@@ -1871,7 +1873,7 @@ pub async fn timeout_and_remove_flow(
 
         match map.get(&key, 0) {
             Ok(stats) => {
-                metrics::ebpf::inc_map_operation(
+                metrics::ebpf::inc_ebpf_map_ops(
                     EbpfMapName::FlowStats,
                     EbpfMapOperation::Read,
                     EbpfMapStatus::Ok,
@@ -1881,13 +1883,13 @@ pub async fn timeout_and_remove_flow(
             }
             Err(e) => {
                 if e.to_string().contains("not found") {
-                    metrics::ebpf::inc_map_operation(
+                    metrics::ebpf::inc_ebpf_map_ops(
                         EbpfMapName::FlowStats,
                         EbpfMapOperation::Read,
                         EbpfMapStatus::NotFound,
                     );
                 } else {
-                    metrics::ebpf::inc_map_operation(
+                    metrics::ebpf::inc_ebpf_map_ops(
                         EbpfMapName::FlowStats,
                         EbpfMapOperation::Read,
                         EbpfMapStatus::Error,
@@ -1922,7 +1924,10 @@ pub async fn timeout_and_remove_flow(
                 );
             }
             Err(mpsc::error::TrySendError::Full(_)) => {
-                metrics::export::inc_export_flow_spans(ExportStatus::Dropped);
+                metrics::userspace::inc_channel_sends(
+                    ChannelName::ProducerOutput,
+                    ChannelSendStatus::Backpressure,
+                );
                 debug!(
                     event.name = "span.dropped",
                     flow.community_id = %community_id,
@@ -1964,14 +1969,14 @@ pub async fn timeout_and_remove_flow(
 
         match map.remove(&key) {
             Ok(_) => {
-                metrics::ebpf::inc_map_operation(
+                metrics::ebpf::inc_ebpf_map_ops(
                     EbpfMapName::FlowStats,
                     EbpfMapOperation::Delete,
                     EbpfMapStatus::Ok,
                 );
             }
             Err(e) => {
-                metrics::ebpf::inc_map_operation(
+                metrics::ebpf::inc_ebpf_map_ops(
                     EbpfMapName::FlowStats,
                     EbpfMapOperation::Delete,
                     EbpfMapStatus::Error,
@@ -2019,14 +2024,12 @@ pub async fn timeout_and_remove_flow(
 /// - `boot_time_offset` - Offset to convert boot time to wall clock time
 /// - `max_age` - Maximum age for entries before they're considered orphans
 /// - `community_id_generator` - For generating community IDs from flow keys
-/// - `flow_stats_capacity` - Maximum capacity of the FLOW_STATS map (for utilization metrics)
 pub async fn orphan_scanner_task(
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     flow_store: FlowStore,
     boot_time_offset: u64,
     max_age: Duration,
     community_id_generator: Arc<CommunityIdGenerator>,
-    flow_stats_capacity: u64,
     mut shutdown_rx: broadcast::Receiver<()>,
 ) {
     let scan_interval = Duration::from_secs(300);
@@ -2054,13 +2057,9 @@ pub async fn orphan_scanner_task(
                     map.keys().filter_map(|k| k.ok()).collect()
                 };
 
-                // Update eBPF map metrics: entries count and utilization ratio
+                // Update eBPF map metrics: entries count
                 let ebpf_map_entries = keys.len() as u64;
                 metrics::ebpf::set_map_entries("FLOW_STATS", ebpf_map_entries);
-                if flow_stats_capacity > 0 {
-                    let utilization = ebpf_map_entries as f64 / flow_stats_capacity as f64;
-                    metrics::ebpf::set_map_utilization("FLOW_STATS", utilization);
-                }
 
                 for key in keys {
                     scanned += 1;

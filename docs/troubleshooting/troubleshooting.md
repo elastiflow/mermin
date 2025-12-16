@@ -103,7 +103,8 @@ Key metrics to monitor include:
 
 - `mermin_flow_spans_created_total` - Total flow spans created
 - `mermin_packets_total` - Total packets processed
-- `mermin_export_flow_spans_total{status="error"}` - Export failures (investigate if increasing)
+- `mermin_export_flow_spans_total{exporter_type="otlp",status="error"}` - OTLP export failures (investigate if increasing)
+- `mermin_export_flow_spans_total{exporter_type="stdout",status="error"}` - Stdout export failures (investigate if increasing)
 
 <!-- TODO(GA Documentation): Iterate on the section -->
 <!-- ## Troubleshooting

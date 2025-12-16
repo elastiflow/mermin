@@ -96,13 +96,13 @@ pub fn dec_flows_active(interface: &str) {
 /// Increment the producer flow spans counter.
 pub fn inc_producer_flow_spans(interface: &str, status: FlowSpanProducerStatus) {
     // Always increment aggregated metric (by status only, no interface label)
-    registry::PRODUCER_FLOW_SPANS_TOTAL
+    registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
         .with_label_values(&[status.as_ref()])
         .inc();
 
     // Conditionally increment debug metric with labels
     if registry::debug_enabled() {
-        registry::PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL
+        registry::FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL
             .with_label_values(&[interface, status.as_ref()])
             .inc();
     }

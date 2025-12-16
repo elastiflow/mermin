@@ -22,7 +22,7 @@ where
         let target = metadata.target();
 
         if target.starts_with("opentelemetry") {
-            inc_export_flow_spans(ExportStatus::Error);
+            inc_export_flow_spans("otlp", ExportStatus::Error);
         }
     }
 }

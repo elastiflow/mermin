@@ -44,7 +44,6 @@ use crate::{
     },
     k8s::{attributor::Attributor, decorator::Decorator},
     metrics::{
-        export::ExportStatus,
         k8s::K8sDecoratorStatus,
         server::start_metrics_server,
         userspace::{ChannelName, ChannelSendStatus},
@@ -283,6 +282,8 @@ async fn run(cli: Cli) -> Result<()> {
         conf.display_conf();
 
         if conf.export.traces.stdout.is_some() || conf.export.traces.otlp.is_some() {
+            let has_stdout = conf.export.traces.stdout.is_some();
+            let has_otlp = conf.export.traces.otlp.is_some();
             let app_tracer_provider = init_provider(
                 conf.export.traces.stdout.clone(),
                 conf.export.traces.otlp.clone(),
@@ -293,7 +294,11 @@ async fn run(cli: Cli) -> Result<()> {
                 task.name = "exporter",
                 "initialized configured trace exporters"
             );
-            Arc::new(TraceExporterAdapter::new(app_tracer_provider))
+            Arc::new(TraceExporterAdapter::new(
+                app_tracer_provider,
+                has_otlp,
+                has_stdout,
+            ))
         } else {
             warn!(
                 event.name = "exporter.misconfigured",
@@ -580,8 +585,6 @@ async fn run(cli: Cli) -> Result<()> {
     // Note: This only reflects the startup state; eBPF kprobes maintain the map
     // in real-time after this, but those changes are not reflected in these metrics.
     metrics::ebpf::set_map_entries("LISTENING_PORTS", scanned_ports as u64);
-    let utilization = scanned_ports as f64 / LISTENING_PORTS_CAPACITY as f64;
-    metrics::ebpf::set_map_utilization("LISTENING_PORTS", utilization);
 
     info!(
         event.name = "listening_ports.scan_complete",
@@ -720,11 +723,9 @@ async fn run(cli: Cli) -> Result<()> {
                             match k8s_decorated_flow_span_tx.send(span).await {
                                 Ok(_) => {
                                     metrics::userspace::inc_channel_sends(ChannelName::DecoratorOutput, ChannelSendStatus::Success);
-                                    metrics::export::inc_export_flow_spans(ExportStatus::Queued);
                                 }
                                 Err(e) => {
                                     metrics::userspace::inc_channel_sends(ChannelName::DecoratorOutput, ChannelSendStatus::Error);
-                                    metrics::export::inc_export_flow_spans(ExportStatus::Dropped);
                                     error!(
                                         event.name = "channel.send_failed",
                                         channel.name = "k8s_decorated_flow_span",
@@ -751,12 +752,10 @@ async fn run(cli: Cli) -> Result<()> {
                         match k8s_decorated_flow_span_tx.send(flow_span).await {
                             Ok(_) => {
                                 metrics::userspace::inc_channel_sends(ChannelName::DecoratorOutput, ChannelSendStatus::Success);
-                                metrics::export::inc_export_flow_spans(ExportStatus::Queued);
                                 metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Undecorated);
                             }
                             Err(e) => {
                                 metrics::userspace::inc_channel_sends(ChannelName::DecoratorOutput, ChannelSendStatus::Error);
-                                metrics::export::inc_export_flow_spans(ExportStatus::Dropped);
                                 metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Dropped);
                                 error!(
                                     event.name = "channel.send_failed",

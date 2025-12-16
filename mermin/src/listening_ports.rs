@@ -16,7 +16,7 @@ use network_types::ip::IpProto;
 use tokio::sync::Mutex;
 use tracing::{debug, trace, warn};
 
-use crate::metrics::ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus, inc_map_operation};
+use crate::metrics::ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus, inc_ebpf_map_ops};
 
 /// TCP connection states from /proc/net/tcp
 /// We only care about TCP_LISTEN (0x0A)
@@ -175,7 +175,7 @@ impl ListeningPortScanner {
             // Insert into eBPF map (duplicates are harmless, just updates value)
             match map.insert(key, 1u8, 0) {
                 Ok(_) => {
-                    inc_map_operation(
+                    inc_ebpf_map_ops(
                         EbpfMapName::ListeningPorts,
                         EbpfMapOperation::Write,
                         EbpfMapStatus::Ok,
@@ -183,7 +183,7 @@ impl ListeningPortScanner {
                     count += 1;
                 }
                 Err(e) => {
-                    inc_map_operation(
+                    inc_ebpf_map_ops(
                         EbpfMapName::ListeningPorts,
                         EbpfMapOperation::Write,
                         EbpfMapStatus::Error,

@@ -8,8 +8,13 @@ use crate::metrics::registry;
 /// Increment the flow spans processed counter.
 ///
 /// Called when FlowWorker successfully creates a flow span from a flow event.
-pub fn inc_flow_spans_processed() {
-    registry::FLOW_SPANS_PROCESSED_TOTAL.inc();
+/// Only updates the metric if debug metrics are enabled (high-cardinality label).
+pub fn inc_flow_spans_processed(poller_id: &str) {
+    if registry::debug_enabled() {
+        registry::FLOW_SPANS_PROCESSED_TOTAL
+            .with_label_values(&[poller_id])
+            .inc();
+    }
 }
 
 /// Set the current size of a flow store for a specific poller.
@@ -31,7 +36,7 @@ pub fn set_flow_store_size(poller_id: &str, size: usize) {
 /// Only updates the metric if debug metrics are enabled (high-cardinality label).
 pub fn set_poller_queue_size(poller_id: &str, size: usize) {
     if registry::debug_enabled() {
-        registry::PRODUCER_QUEUE_SIZE
+        registry::FLOW_PRODUCER_QUEUE_SIZE
             .with_label_values(&[poller_id])
             .set(size as i64);
     }

@@ -121,13 +121,10 @@ This section focuses on metrics originating from the eBPF layer, which is respon
 
 ### TC Program Attachment
 
-**`mermin_ebpf_tc_programs_attached_total`**
+**`mermin_ebpf_tc_programs_total{operation}`**
 - **Type:** Counter
-- **Description:** Total number of TC programs attached across all interfaces.
-
-**`mermin_ebpf_tc_programs_detached_total`**
-- **Type:** Counter
-- **Description:** Total number of TC programs detached across all interfaces.
+- **Labels:** `operation` = "attached" | "detached"
+- **Description:** Total number of TC programs attached or detached across all interfaces.
 
 **`mermin_ebpf_tc_programs_attached_by_interface_total{interface, direction}`** *(debug)*
 - **Type:** Counter
@@ -234,9 +231,12 @@ Metrics for flow span creation, processing, and export.
 
 **`mermin_processing_latency_seconds{stage}`**
 - **Type:** Histogram
-- **Labels:** `stage` = "ringbuf_read" | "flow_worker"
+- **Labels:** `stage` = "flow_producer_input" | "k8s_decoration" | "export"
 - **Buckets:** 10μs to 100ms
 - **Description:** Processing latency by pipeline stage.
+  - `flow_producer_input`: Time spent reading and processing flow events from the eBPF ring buffer
+  - `k8s_decoration`: Time spent enriching flow spans with Kubernetes metadata
+  - `export`: Time spent exporting spans to the OTLP backend
 
 ---
 
@@ -270,20 +270,17 @@ Metrics for flow span creation, processing, and export.
 
 Metrics for the OTLP export stage.
 
-**`mermin_export_flow_spans_total{status}`**
+**`mermin_export_flow_spans_total{exporter_type, status}`**
 - **Type:** Counter
-- **Labels:** `status` = "queued" | "dropped" | "ok" | "error" | "noop"
-- **Description:** Flow spans processed by export stage.
+- **Labels:** 
+  - `exporter_type` = "otlp" | "stdout" | "noop"
+  - `status` = "ok" | "error" | "noop"
+- **Description:** Flow spans exported to external systems. Tracks actual exports to OTLP or stdout exporters, not internal pipeline stages.
 
 **`mermin_export_batch_spans`**
 - **Type:** Histogram
 - **Buckets:** 1 to 1000 spans
 - **Description:** Number of spans per export batch.
-
-**`mermin_export_latency_seconds`**
-- **Type:** Histogram
-- **Buckets:** 1ms to 5s
-- **Description:** Latency of span export operations.
 
 **`mermin_export_timeouts_total`**
 - **Type:** Counter
@@ -400,9 +397,9 @@ mermin_ebpf_map_utilization_ratio{map="FLOW_STATS"}
 # Processing latency p95
 histogram_quantile(0.95, rate(mermin_processing_latency_seconds_bucket[5m]))
 
-# Export success rate
-rate(mermin_export_flow_spans_total{status="ok"}[5m]) /
-rate(mermin_export_flow_spans_total[5m])
+# Export success rate (across all exporter types)
+sum(rate(mermin_export_flow_spans_total{status="ok"}[5m])) /
+sum(rate(mermin_export_flow_spans_total[5m]))
 
 # Flow throughput
 rate(mermin_flow_spans_created_total[5m])

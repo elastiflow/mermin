@@ -76,9 +76,14 @@ pub async fn liveness_handler(State(state): State<HealthState>) -> impl IntoResp
         "liveness check completed"
     );
 
-    let dropped_export_spans = registry::EXPORT_FLOW_SPANS_TOTAL
-        .with_label_values(&[ExportStatus::Dropped.as_ref()])
+    // Sum export errors across all exporter types for health monitoring
+    let export_errors_otlp = registry::EXPORT_FLOW_SPANS_TOTAL
+        .with_label_values(&["otlp", ExportStatus::Error.as_ref()])
         .get();
+    let export_errors_stdout = registry::EXPORT_FLOW_SPANS_TOTAL
+        .with_label_values(&["stdout", ExportStatus::Error.as_ref()])
+        .get();
+    let total_export_errors = export_errors_otlp + export_errors_stdout;
     let pipeline_healthy = ebpf_loaded && ready_to_process;
 
     let body = Json(json!({
@@ -89,7 +94,7 @@ pub async fn liveness_handler(State(state): State<HealthState>) -> impl IntoResp
             "pipeline_healthy": pipeline_healthy
         },
         "metrics": {
-            "dropped_export_spans": dropped_export_spans
+            "export_errors_total": total_export_errors
         }
     }));
 
@@ -103,9 +108,14 @@ pub async fn readiness_handler(State(state): State<HealthState>) -> impl IntoRes
 
     let is_ready = ebpf_loaded && k8s_caches_synced && ready_to_process;
 
-    let dropped_export_spans = registry::EXPORT_FLOW_SPANS_TOTAL
-        .with_label_values(&[ExportStatus::Dropped.as_ref()])
+    // Sum export errors across all exporter types for health monitoring
+    let export_errors_otlp = registry::EXPORT_FLOW_SPANS_TOTAL
+        .with_label_values(&["otlp", ExportStatus::Error.as_ref()])
         .get();
+    let export_errors_stdout = registry::EXPORT_FLOW_SPANS_TOTAL
+        .with_label_values(&["stdout", ExportStatus::Error.as_ref()])
+        .get();
+    let total_export_errors = export_errors_otlp + export_errors_stdout;
     let pipeline_healthy = ebpf_loaded && ready_to_process;
 
     let status_code = if is_ready {
@@ -117,7 +127,7 @@ pub async fn readiness_handler(State(state): State<HealthState>) -> impl IntoRes
             k8s_caches_synced = %k8s_caches_synced,
             ready_to_process = %ready_to_process,
             pipeline_healthy = %pipeline_healthy,
-            dropped_export_spans = %dropped_export_spans,
+            export_errors_total = %total_export_errors,
             "readiness check failed"
         );
         StatusCode::SERVICE_UNAVAILABLE
@@ -132,7 +142,7 @@ pub async fn readiness_handler(State(state): State<HealthState>) -> impl IntoRes
             "pipeline_healthy": pipeline_healthy
         },
         "metrics": {
-            "dropped_export_spans": dropped_export_spans
+            "export_errors_total": total_export_errors
         }
     }));
 

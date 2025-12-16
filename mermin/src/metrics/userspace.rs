@@ -25,6 +25,7 @@ impl AsRef<str> for ChannelName {
 pub enum ChannelSendStatus {
     Success,
     Error,
+    Backpressure,
 }
 
 impl AsRef<str> for ChannelSendStatus {
@@ -32,6 +33,7 @@ impl AsRef<str> for ChannelSendStatus {
         match self {
             ChannelSendStatus::Success => "success",
             ChannelSendStatus::Error => "error",
+            ChannelSendStatus::Backpressure => "backpressure",
         }
     }
 }
@@ -45,7 +47,7 @@ pub fn set_channel_capacity(channel: ChannelName, capacity: usize) {
 
 /// Set the current size of a channel.
 pub fn set_channel_size(channel: ChannelName, size: usize) {
-    registry::CHANNEL_SIZE
+    registry::CHANNEL_ENTRIES
         .with_label_values(&[channel.as_ref()])
         .set(size as i64);
 }

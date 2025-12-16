@@ -465,7 +465,7 @@ Key metrics to monitor:
 * `mermin_flow_spans_created_total` - Total flow spans created
 * `mermin_packets_total` - Total packets processed
 * `mermin_flow_events_total{status="dropped_backpressure"}` - Events dropped due to overload
-* `mermin_export_flow_spans_total{status="error"}` - OTLP export failures
+* `mermin_export_flow_spans_total{exporter_type="otlp",status="error"}` - OTLP export failures
 * `mermin_flow_spans_active_total` - Current number of active flows
 
 ### Tuning Guidelines

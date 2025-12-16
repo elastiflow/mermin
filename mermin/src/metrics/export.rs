@@ -7,8 +7,6 @@ use crate::metrics::registry;
 /// Export status for flow spans.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportStatus {
-    Queued,
-    Dropped,
     Ok,
     Error,
     NoOp,
@@ -17,8 +15,6 @@ pub enum ExportStatus {
 impl AsRef<str> for ExportStatus {
     fn as_ref(&self) -> &str {
         match self {
-            ExportStatus::Queued => "queued",
-            ExportStatus::Dropped => "dropped",
             ExportStatus::Ok => "ok",
             ExportStatus::Error => "error",
             ExportStatus::NoOp => "noop",
@@ -27,20 +23,18 @@ impl AsRef<str> for ExportStatus {
 }
 
 /// Increment the export flow spans counter.
-pub fn inc_export_flow_spans(status: ExportStatus) {
+///
+/// `exporter_type` - The type of exporter: "otlp" or "stdout"
+/// `status` - The export status: "ok", "error", or "noop"
+pub fn inc_export_flow_spans(exporter_type: &str, status: ExportStatus) {
     registry::EXPORT_FLOW_SPANS_TOTAL
-        .with_label_values(&[status.as_ref()])
+        .with_label_values(&[exporter_type, status.as_ref()])
         .inc();
-}
-
-/// Record export operation latency.
-pub fn observe_export_latency(duration: Duration) {
-    registry::EXPORT_LATENCY_SECONDS.observe(duration.as_secs_f64());
 }
 
 /// Record export batch span count.
 pub fn observe_export_batch_spans(count: usize) {
-    registry::EXPORT_BATCH_SPANS.observe(count as f64);
+    registry::EXPORT_BATCH_SIZE.observe(count as f64);
 }
 
 /// Increment the export timeouts counter.

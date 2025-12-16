@@ -57,8 +57,8 @@ impl AsRef<str> for EbpfMapStatus {
 }
 
 /// Increment the eBPF map operations counter.
-pub fn inc_map_operation(map: EbpfMapName, operation: EbpfMapOperation, status: EbpfMapStatus) {
-    registry::EBPF_MAP_OPERATIONS_TOTAL
+pub fn inc_ebpf_map_ops(map: EbpfMapName, operation: EbpfMapOperation, status: EbpfMapStatus) {
+    registry::EBPF_MAP_OPS_TOTAL
         .with_label_values(&[map.as_ref(), operation.as_ref(), status.as_ref()])
         .inc();
 }
@@ -97,24 +97,15 @@ pub fn set_map_capacity(map: &str, capacity: u64) {
         .set(capacity as i64);
 }
 
-/// Set the utilization ratio of an eBPF map.
-///
-/// # Arguments
-/// * `map` - The name of the eBPF map (e.g., "FLOW_STATS", "FLOW_EVENTS", "LISTENING_PORTS")
-/// * `utilization` - The utilization ratio (entries / capacity) as a float between 0.0 and 1.0
-pub fn set_map_utilization(map: &str, utilization: f64) {
-    registry::EBPF_MAP_UTILIZATION
-        .with_label_values(&[map])
-        .set(utilization);
-}
-
 /// Increment the TC program attached counter.
 ///
 /// Always increments the aggregated counter. If debug metrics are enabled,
 /// also increments the per-interface debug counter.
 pub fn inc_tc_programs_attached(interface: &str, direction: &str) {
     // Always increment aggregated metric
-    registry::TC_PROGRAMS_ATTACHED_TOTAL.inc();
+    registry::TC_PROGRAMS_TOTAL
+        .with_label_values(&["attached"])
+        .inc();
 
     // Conditionally increment debug metric with labels
     if registry::debug_enabled() {
@@ -130,7 +121,9 @@ pub fn inc_tc_programs_attached(interface: &str, direction: &str) {
 /// also increments the per-interface debug counter.
 pub fn inc_tc_programs_detached(interface: &str, direction: &str) {
     // Always increment aggregated metric
-    registry::TC_PROGRAMS_DETACHED_TOTAL.inc();
+    registry::TC_PROGRAMS_TOTAL
+        .with_label_values(&["detached"])
+        .inc();
 
     // Conditionally increment debug metric with labels
     if registry::debug_enabled() {
