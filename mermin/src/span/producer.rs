@@ -841,8 +841,8 @@ impl FlowWorker {
 
         // Calculate poller_id for metric tracking (same hash used by pollers)
         // Note: Poller count is clamped to 32 in FlowSpanProducer, so we use 32 here
-        let num_pollers = 32;
-        let poller_id = hash_string(&community_id) % num_pollers;
+        const MAX_POLLERS: usize = 32;
+        let poller_id = hash_string(&community_id) % MAX_POLLERS;
         metrics::span::inc_flow_spans_processed(&poller_id.to_string());
 
         Ok(())
