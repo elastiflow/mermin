@@ -1261,11 +1261,7 @@ impl FlowWorker {
     }
 
     /// Compute TCP performance attributes based on protocol and inferred role.
-    fn tcp_perf_attributes(
-        stats: &FlowStats,
-        is_server: bool,
-        is_client: bool,
-    ) -> TcpTimings {
+    fn tcp_perf_attributes(stats: &FlowStats, is_server: bool, is_client: bool) -> TcpTimings {
         let flow_tcp_handshake_latency = Some(TcpFlags::handshake_latency_from_stats(
             stats.tcp_syn_ns,
             stats.tcp_syn_ack_ns,
