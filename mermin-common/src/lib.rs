@@ -189,7 +189,7 @@ pub struct FlowStats {
     pub tcp_txn_sum_ns: u64,
     /// Running count of the number of transactions included in tcp_txn_sum_ns
     pub tcp_txn_count: u64,
-    /// Running average of the average jitter observed between packets (nanoseconds)
+    /// Running average of the jitter observed between packets (nanoseconds)
     pub tcp_jitter_avg_ns: u64,
 
     // === 16-byte arrays - 32 bytes ===
@@ -303,9 +303,10 @@ impl FlowStats {
     /// #     protocol: IpProto::Tcp, ip_dscp: 0, ip_ecn: 0, ip_ttl: 0,
     /// #     reverse_ip_dscp: 0, reverse_ip_ecn: 0, reverse_ip_ttl: 0,
     /// #     tcp_flags: FlowStats::TCP_FLAG_SYN | FlowStats::TCP_FLAG_ACK,
-    /// #     tcp_state: ConnectionState::Closed,
-    /// #     forward_tcp_flags: 0, reverse_tcp_flags: 0,
-    /// #     icmp_type: 0, icmp_code: 0, reverse_icmp_type: 0, reverse_icmp_code: 0,
+    /// #     tcp_jitter_avg_ns: 0, tcp_last_payload_fwd_ns: 0, tcp_last_payload_rev_ns: 0,
+    /// #     tcp_syn_ns: 0, tcp_syn_ack_ns: 0, tcp_txn_count: 0, tcp_txn_sum_ns: 0,
+    /// #     forward_tcp_flags: 0, reverse_tcp_flags: 0, icmp_type: 0, icmp_code: 0,
+    /// #     reverse_icmp_type: 0, reverse_icmp_code: 0, tcp_state: ConnectionState::Closed,
     /// #     forward_metadata_seen: 0, reverse_metadata_seen: 0,
     /// };
     ///

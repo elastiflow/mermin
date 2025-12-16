@@ -260,31 +260,36 @@ fn update_tcp_timing(stats: &mut FlowStats, is_forward: bool, payload_len: usize
         stats.tcp_syn_ack_ns = timestamp;
     }
 
-    if payload_len > 0 {
-        if is_forward {
-            stats.tcp_last_payload_fwd_ns = timestamp;
-        } else {
-            stats.tcp_last_payload_rev_ns = timestamp;
-
-            // If there is a forward timestamp, calculate the delta
-            if stats.tcp_last_payload_fwd_ns != 0 {
-                let delta = timestamp.saturating_sub(stats.tcp_last_payload_fwd_ns);
-                stats.tcp_txn_sum_ns += delta;
-                stats.tcp_txn_count += 1;
-
-                stats.tcp_last_payload_fwd_ns = 0;
-
-                // Calculate the moving average of the jitter following RFC 1889
-                // J = J + (|D - J| / 16)
-                let diff = if delta > stats.tcp_jitter_avg_ns {
-                    delta - stats.tcp_jitter_avg_ns
-                } else {
-                    stats.tcp_jitter_avg_ns - delta
-                };
-                stats.tcp_jitter_avg_ns += diff / 16;
-            }
-        }
+    if payload_len == 0 {
+        return;
     }
+
+    if is_forward {
+        stats.tcp_last_payload_fwd_ns = timestamp;
+        return;
+    }
+
+    stats.tcp_last_payload_rev_ns = timestamp;
+
+    let fwd_ts = stats.tcp_last_payload_fwd_ns;
+    if fwd_ts == 0 {
+        return;
+    }
+
+    let delta = timestamp.saturating_sub(fwd_ts);
+    stats.tcp_txn_sum_ns += delta;
+    stats.tcp_txn_count += 1;
+
+    stats.tcp_last_payload_fwd_ns = 0;
+
+    // Calculate the moving average of the jitter following RFC 1889
+    // J = J + (|D - J| / 16)
+    let diff = if delta > stats.tcp_jitter_avg_ns {
+        delta - stats.tcp_jitter_avg_ns
+    } else {
+        stats.tcp_jitter_avg_ns - delta
+    };
+    stats.tcp_jitter_avg_ns += diff / 16;
 }
 
 #[cfg(not(feature = "test"))]
@@ -1689,7 +1694,6 @@ mod tests {
         assert_eq!(stats.tcp_jitter_avg_ns, snap_jit);
         assert_eq!(stats.tcp_last_payload_fwd_ns, snap_fwd);
         assert_eq!(stats.tcp_last_payload_rev_ns, snap_rev);
-
     }
 
     #[test]
