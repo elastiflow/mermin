@@ -215,6 +215,32 @@ make helm-upgrade EXTRA_HELM_ARGS='--set-file config.content=local/config.hcl'
 helm upgrade -i mermin charts/mermin --values docs/deployment/examples/local/values.yaml --wait --timeout 10m
 ```
 
+**Optionally install `metrics-server` to get metrics if it has not been installed yet**
+
+```sh
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.8.0/components.yaml
+# Patch to use insecure TLS, commonly needed on dev local clusters
+kubectl -n kube-system patch deployment metrics-server --type='json' -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+```
+
+**Optionally install Prometheus/Grafana to get Mermin metrics:**  
+Not intended for a production usage, Grafana auth is disabled (insecure).
+
+```sh
+helm repo add prometheus https://prometheus-community.github.io/helm-charts
+helm upgrade -i --wait --timeout 15m -n prometheus --create-namespace \
+  -f docs/deployment/examples/local/values_prom_stack.yaml \
+  prometheus prometheus/kube-prometheus-stack
+kubectl -n prometheus patch sts prometheus-grafana \
+  --type="json" -p='[{"op":"replace","path":"/spec/persistentVolumeClaimRetentionPolicy/whenDeleted", "value": "Delete"}]'  
+
+# Port-forward Grafana to open in the browser
+kubectl -n prometheus port-forward svc/prometheus-grafana 3000:3000
+
+# Port-forward Prometheus to open in the browser
+kubectl -n prometheus port-forward svc/prometheus-kube-prometheus-prometheus 9090:9090
+```
+
 ### Iterating on Code Changes
 
 When making changes to the Mermin code, you can quickly rebuild and reload the image into kind without redeploying the entire Helm chart:
