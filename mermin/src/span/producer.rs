@@ -576,6 +576,14 @@ pub struct FlowWorker {
     hostname_resolve_timeout: Duration,
     enable_hostname_resolution: bool,
 }
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TcpTimings {
+    pub flow_tcp_handshake_latency: Option<i64>,
+    pub flow_tcp_svc_latency: Option<i64>,
+    pub flow_tcp_svc_jitter: Option<i64>,
+    pub flow_tcp_rndtrip_latency: Option<i64>,
+    pub flow_tcp_rndtrip_jitter: Option<i64>,
+}
 
 impl FlowWorker {
     #[allow(clippy::too_many_arguments)]
@@ -991,16 +999,10 @@ impl FlowWorker {
         let is_server = span_kind == SpanKind::Server;
         let is_client = span_kind == SpanKind::Client;
 
-        let (
-            flow_tcp_handshake_latency,
-            flow_tcp_svc_latency,
-            flow_tcp_svc_jitter,
-            flow_tcp_rndtrip_latency,
-            flow_tcp_rndtrip_jitter,
-        ) = if is_tcp {
+        let tcp_perf = if is_tcp {
             Self::tcp_perf_attributes(stats, is_server, is_client)
         } else {
-            (None, None, None, None, None)
+            TcpTimings::default()
         };
 
         let span = FlowSpan {
@@ -1069,11 +1071,11 @@ impl FlowWorker {
                 flow_reverse_tcp_flags_bits: is_tcp.then_some(stats.reverse_tcp_flags),
                 flow_reverse_tcp_flags_tags: is_tcp
                     .then(|| TcpFlags::flags_from_bits(stats.reverse_tcp_flags)),
-                flow_tcp_handshake_latency,
-                flow_tcp_svc_latency,
-                flow_tcp_svc_jitter,
-                flow_tcp_rndtrip_latency,
-                flow_tcp_rndtrip_jitter,
+                flow_tcp_handshake_latency: tcp_perf.flow_tcp_handshake_latency,
+                flow_tcp_svc_latency: tcp_perf.flow_tcp_svc_latency,
+                flow_tcp_svc_jitter: tcp_perf.flow_tcp_svc_jitter,
+                flow_tcp_rndtrip_latency: tcp_perf.flow_tcp_rndtrip_latency,
+                flow_tcp_rndtrip_jitter: tcp_perf.flow_tcp_rndtrip_jitter,
 
                 // Client/Server attributes (from direction inference)
                 client_address,
@@ -1263,13 +1265,7 @@ impl FlowWorker {
         stats: &FlowStats,
         is_server: bool,
         is_client: bool,
-    ) -> (
-        Option<i64>,
-        Option<i64>,
-        Option<i64>,
-        Option<i64>,
-        Option<i64>,
-    ) {
+    ) -> TcpTimings {
         let flow_tcp_handshake_latency = Some(TcpFlags::handshake_latency_from_stats(
             stats.tcp_syn_ns,
             stats.tcp_syn_ack_ns,
@@ -1287,13 +1283,13 @@ impl FlowWorker {
 
         let flow_tcp_rndtrip_jitter = is_client.then_some(stats.tcp_jitter_avg_ns as i64);
 
-        (
+        TcpTimings {
             flow_tcp_handshake_latency,
             flow_tcp_svc_latency,
             flow_tcp_svc_jitter,
             flow_tcp_rndtrip_latency,
             flow_tcp_rndtrip_jitter,
-        )
+        }
     }
 
     /// Insert flow into tracking map with initialized timing fields.
@@ -2665,38 +2661,36 @@ mod tests {
     fn test_tcp_perf_attributes_tcp_server_sets_handshake_and_svc_only() {
         let mut stats = create_test_stats(IpProto::Tcp, 0x10);
         stats.tcp_syn_ns = 1;
-        stats.tcp_syn_ack_ns = 3;
+        stats.tcp_syn_ack_ns = 3; // handshake = 2
         stats.tcp_txn_sum_ns = 8;
-        stats.tcp_txn_count = 4;
+        stats.tcp_txn_count = 4; // txn avg = 2
         stats.tcp_jitter_avg_ns = 55;
 
-        let (hs, svc_lat, svc_jit, rt_lat, rt_jit) =
-            FlowWorker::tcp_perf_attributes(&stats, true, false);
+        let tcp = FlowWorker::tcp_perf_attributes(&stats, true, false);
 
-        assert_eq!(hs, Some(2));
-        assert_eq!(svc_lat, Some(2));
-        assert_eq!(svc_jit, Some(55));
-        assert_eq!(rt_lat, None);
-        assert_eq!(rt_jit, None);
+        assert_eq!(tcp.flow_tcp_handshake_latency, Some(2));
+        assert_eq!(tcp.flow_tcp_svc_latency, Some(2));
+        assert_eq!(tcp.flow_tcp_svc_jitter, Some(55));
+        assert_eq!(tcp.flow_tcp_rndtrip_latency, None);
+        assert_eq!(tcp.flow_tcp_rndtrip_jitter, None);
     }
 
     #[test]
     fn test_tcp_perf_attributes_tcp_client_sets_handshake_and_rndtrip_only() {
         let mut stats = create_test_stats(IpProto::Tcp, 0x10);
         stats.tcp_syn_ns = 10;
-        stats.tcp_syn_ack_ns = 15;
+        stats.tcp_syn_ack_ns = 15; // handshake = 5
         stats.tcp_txn_sum_ns = 9;
-        stats.tcp_txn_count = 3;
+        stats.tcp_txn_count = 3; // txn avg = 3
         stats.tcp_jitter_avg_ns = 99;
 
-        let (hs, svc_lat, svc_jit, rt_lat, rt_jit) =
-            FlowWorker::tcp_perf_attributes(&stats, false, true);
+        let tcp = FlowWorker::tcp_perf_attributes(&stats, false, true);
 
-        assert_eq!(hs, Some(5));
-        assert_eq!(svc_lat, None);
-        assert_eq!(svc_jit, None);
-        assert_eq!(rt_lat, Some(3));
-        assert_eq!(rt_jit, Some(99));
+        assert_eq!(tcp.flow_tcp_handshake_latency, Some(5));
+        assert_eq!(tcp.flow_tcp_svc_latency, None);
+        assert_eq!(tcp.flow_tcp_svc_jitter, None);
+        assert_eq!(tcp.flow_tcp_rndtrip_latency, Some(3));
+        assert_eq!(tcp.flow_tcp_rndtrip_jitter, Some(99));
     }
 
     #[test]
@@ -2708,14 +2702,13 @@ mod tests {
         stats.tcp_txn_count = 10;
         stats.tcp_jitter_avg_ns = 500;
 
-        let (hs, svc_lat, svc_jit, rt_lat, rt_jit) =
-            FlowWorker::tcp_perf_attributes(&stats, false, false);
+        let tcp = FlowWorker::tcp_perf_attributes(&stats, false, false);
 
-        assert_eq!(hs, Some(2));
-        assert_eq!(svc_lat, None);
-        assert_eq!(svc_jit, None);
-        assert_eq!(rt_lat, None);
-        assert_eq!(rt_jit, None);
+        assert_eq!(tcp.flow_tcp_handshake_latency, Some(2));
+        assert_eq!(tcp.flow_tcp_svc_latency, None);
+        assert_eq!(tcp.flow_tcp_svc_jitter, None);
+        assert_eq!(tcp.flow_tcp_rndtrip_latency, None);
+        assert_eq!(tcp.flow_tcp_rndtrip_jitter, None);
     }
 
     #[test]
@@ -2724,14 +2717,13 @@ mod tests {
         stats.tcp_syn_ns = 1;
         stats.tcp_syn_ack_ns = 2;
         stats.tcp_txn_sum_ns = 16;
-        stats.tcp_txn_count = 0;
+        stats.tcp_txn_count = 0; // expected avg = 0
         stats.tcp_jitter_avg_ns = 1;
 
-        let (_hs, svc_lat, _svc_jit, rt_lat, _rt_jit) =
-            FlowWorker::tcp_perf_attributes(&stats, true, false);
+        let tcp = FlowWorker::tcp_perf_attributes(&stats, true, false);
 
-        assert_eq!(svc_lat, Some(0));
-        assert_eq!(rt_lat, None);
+        assert_eq!(tcp.flow_tcp_svc_latency, Some(0));
+        assert_eq!(tcp.flow_tcp_rndtrip_latency, None);
     }
 
     #[test]
@@ -2740,14 +2732,13 @@ mod tests {
         stats.tcp_syn_ns = 1;
         stats.tcp_syn_ack_ns = 2;
         stats.tcp_txn_sum_ns = 16;
-        stats.tcp_txn_count = 0;
+        stats.tcp_txn_count = 0; // expected avg = 0
         stats.tcp_jitter_avg_ns = 1;
 
-        let (_hs, svc_lat, _svc_jit, rt_lat, _rt_jit) =
-            FlowWorker::tcp_perf_attributes(&stats, false, true);
+        let tcp = FlowWorker::tcp_perf_attributes(&stats, false, true);
 
-        assert_eq!(svc_lat, None);
-        assert_eq!(rt_lat, Some(0));
+        assert_eq!(tcp.flow_tcp_svc_latency, None);
+        assert_eq!(tcp.flow_tcp_rndtrip_latency, Some(0));
     }
 
     // NOTE: Most integration tests removed - the architecture has changed to an event-driven model
