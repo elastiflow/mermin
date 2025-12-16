@@ -284,11 +284,7 @@ fn update_tcp_timing(stats: &mut FlowStats, is_forward: bool, payload_len: usize
 
     // Calculate the moving average of the jitter following RFC 1889
     // J = J + (|D - J| / 16)
-    let diff = if delta > stats.tcp_jitter_avg_ns {
-        delta - stats.tcp_jitter_avg_ns
-    } else {
-        stats.tcp_jitter_avg_ns - delta
-    };
+    let diff = delta.abs_diff(stats.tcp_jitter_avg_ns);
     stats.tcp_jitter_avg_ns += diff / 16;
 }
 
