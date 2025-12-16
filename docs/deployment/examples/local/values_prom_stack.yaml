@@ -40,16 +40,11 @@ grafana:
   grafana.ini:
     auth.anonymous:
       enabled: true
-      # org_name = Main Org.
       org_role: Admin
 
+  # https://github.com/grafana/helm-charts/issues/3699
   initChownData:
     securityContext:
-      # readOnlyRootFilesystem: false
-      # runAsNonRoot: false
-      # runAsUser: 0
-      # seccompProfile:
-      #   type: RuntimeDefault
       capabilities:
         add:
           - CHOWN
