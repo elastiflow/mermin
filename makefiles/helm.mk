@@ -8,8 +8,6 @@ K8S_ROLLOUT_TIMEOUT=600s
 ##############
 # Helm vars
 ##############
-# TODO(mack#ENG-54|2025-08-06): Use remote Helm registry when it is ready
-# HELM_CHART?="oci://us-docker.pkg.dev/pub-artifacts-j8rjbu/helm-elastiflow/mermin"
 HELM_CHART?="charts/mermin"
 HELM_CHART_VERSION?=
 HELM_OUTPUT_DIR_PREFIX?=helm_rendered
@@ -28,11 +26,6 @@ EXTRA_HELM_ARGS?=
 #######################
 # Deployment targets
 #######################
-# TODO(mack#ENG-54|2025-08-06): Use remote Helm registry when it is ready
-# .PHONY: helm-pull
-# helm-pull:
-# 	helm pull ${HELM_CHART} ${HELMCHART_VERSION_ARG}
-
 .PHONY: helm-template
 helm-template:
 	rm -rf ${HELM_OUTPUT_DIR_PREFIX}

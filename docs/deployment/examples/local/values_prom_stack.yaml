@@ -1,0 +1,92 @@
+defaultRules:
+  create: false
+alertmanager:
+  enabled: false
+
+grafana:
+  enabled: true
+  service:
+    port: 3000
+
+  persistence:
+    enabled: true
+    type: sts
+    storageClassName: "standard"
+
+  sidecar:
+    dashboards:
+      enabled: false
+    datasources:
+      enabled: false
+      alertmanager:
+        enabled: false
+
+  # https://grafana.com/docs/grafana/latest/administration/provisioning/#example-data-source-configuration-file
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      prune: false
+      datasources:
+        - name: "Prometheus"
+          type: prometheus
+          uid: prometheus
+          url: http://prometheus-kube-prometheus-prometheus.prometheus:9090/
+          access: proxy
+          isDefault: true
+          jsonData:
+            httpMethod: POST
+            timeInterval: 30s
+
+  grafana.ini:
+    auth.anonymous:
+      enabled: true
+      org_role: Admin
+
+  # https://github.com/grafana/helm-charts/issues/3699
+  initChownData:
+    securityContext:
+      capabilities:
+        add:
+          - CHOWN
+          - DAC_READ_SEARCH
+        drop:
+          - ALL
+
+prometheus:
+  prometheusSpec:
+    persistentVolumeClaimRetentionPolicy:
+      whenDeleted: Delete
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: standard
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+
+  additionalPodMonitors:
+    - name: "mermin"
+      selector:
+        matchExpressions:
+          - key: "app.kubernetes.io/name"
+            operator: In
+            values: ["mermin"]
+      namespaceSelector:
+        any: true
+      podMetricsEndpoints:
+        - port: metrics
+          path: /metrics
+          interval: 15s
+          enableHttp2: true
+
+# Disable kubernetes component scrapers
+# Following require additional configuration in Kind, so skipping since not essential for the Mermin metrics purpose
+kubeProxy:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
