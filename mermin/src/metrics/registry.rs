@@ -135,6 +135,7 @@ lazy_static! {
         &["poller_id"]  // Track per poller for sharded architecture (max 32 pollers)
     ).expect("failed to create flow_spans_processed_total metric");
 
+    // Debug metrics with high-cardinality labels (only registered if debug_metrics_enabled)
     /// Total number of flow events processed by ring buffer stage.
     /// Labels: status = "received" | "filtered" | "dropped_backpressure" | "dropped_error"
     pub static ref FLOW_EVENTS_TOTAL: IntCounterVec = IntCounterVec::new(
@@ -158,11 +159,11 @@ lazy_static! {
     ).expect("failed to create export_timeouts_total metric");
 
     /// Time spent blocked waiting for export operations to complete.
-    pub static ref EXPORT_BLOCKING_TIME_SECONDS: Histogram = Histogram::with_opts(
-        HistogramOpts::new("export_blocking_time_seconds", "Time spent blocked waiting for export operations")
+    pub static ref EXPORT_LATENCY_SECONDS: Histogram = Histogram::with_opts(
+        HistogramOpts::new("export_latency_seconds", "Time spent waiting for export operations to complete. Export operations are blocking, another export can not happen if previous have not completed.")
             .namespace("mermin")
             .buckets(vec![0.001, 0.01, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0])
-    ).expect("failed to create export_blocking_time_seconds metric");
+    ).expect("failed to create export_latency_seconds metric");
 
     // Standard aggregated metrics (no labels, always enabled)
     pub static ref FLOW_SPANS_CREATED_TOTAL: IntCounter = IntCounter::with_opts(
@@ -213,11 +214,11 @@ lazy_static! {
     // ============================================================================
 
     /// Total number of flow spans exported to external systems.
-    /// Labels: exporter_type = "otlp" | "stdout", status = "ok" | "error" | "noop"
+    /// Labels: exporter = "otlp" | "stdout", status = "ok" | "error" | "noop"
     pub static ref EXPORT_FLOW_SPANS_TOTAL: IntCounterVec = IntCounterVec::new(
         Opts::new("export_flow_spans_total", "Total number of flow spans exported to external systems")
             .namespace("mermin"),
-        &["exporter_type", "status"]
+        &["exporter", "status"]
     ).expect("failed to create export_flow_spans_total metric");
 
 
@@ -283,16 +284,16 @@ lazy_static! {
     /// Task lifecycle events counter.
     /// Labels: status = "spawned" | "completed" | "cancelled" | "panicked"
     /// Note: spawned count should equal sum of completed + cancelled + panicked over time
-    pub static ref TASKMANAGER_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("taskmanager_total", "Total tasks handled by the Mermin TaskManager")
+    pub static ref TASKMANAGER_TASKS_TOTAL: IntCounterVec = IntCounterVec::new(
+        Opts::new("taskmanager_tasks_total", "Total tasks handled by the Mermin TaskManager")
             .namespace("mermin"),
         &["status"]  // spawned, completed, cancelled, panicked
-    ).expect("failed to create taskmanager_total metric");
+    ).expect("failed to create taskmanager_tasks_total metric");
 
-    pub static ref TASKS_ACTIVE_TOTAL: prometheus::IntGauge = prometheus::IntGauge::with_opts(
-        Opts::new("tasks_active_total", "Current number of active tasks across all task types")
+    pub static ref TASKMANAGER_TASKS_ACTIVE_TOTAL: prometheus::IntGauge = prometheus::IntGauge::with_opts(
+        Opts::new("taskmanager_tasks_active_total", "Current number of active tasks across all task types")
             .namespace("mermin")
-    ).expect("failed to create tasks_active_total metric");
+    ).expect("failed to create taskmanager_tasks_active_total metric");
 
     // Debug metrics with high-cardinality labels (only registered if debug_metrics_enabled)
     /// Task lifecycle events counter by task name.
@@ -445,10 +446,9 @@ pub fn init_registry(debug_enabled: bool) -> Result<(), prometheus::Error> {
     // ============================================================================
     // Flow metrics
     // ============================================================================
-    register_standard!(FLOW_EVENTS_TOTAL);
     register_standard!(PROCESSING_LATENCY_SECONDS);
     register_standard!(EXPORT_TIMEOUTS_TOTAL);
-    register_standard!(EXPORT_BLOCKING_TIME_SECONDS);
+    register_standard!(EXPORT_LATENCY_SECONDS);
     register_standard!(EBPF_MAP_OPS_TOTAL);
     register_standard!(FLOW_SPANS_CREATED_TOTAL);
     register_standard!(FLOW_SPANS_ACTIVE_TOTAL);
@@ -458,6 +458,7 @@ pub fn init_registry(debug_enabled: bool) -> Result<(), prometheus::Error> {
     register_debug!(FLOW_SPAN_STORE_SIZE, debug_enabled);
     register_debug!(FLOW_PRODUCER_QUEUE_SIZE, debug_enabled);
     register_debug!(FLOW_SPANS_PROCESSED_TOTAL, debug_enabled);
+    register_debug!(FLOW_EVENTS_TOTAL, debug_enabled);
     register_debug!(FLOWS_CREATED_BY_INTERFACE_TOTAL, debug_enabled);
     register_debug!(FLOWS_ACTIVE_BY_INTERFACE_TOTAL, debug_enabled);
     register_debug!(FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL, debug_enabled);
@@ -489,8 +490,8 @@ pub fn init_registry(debug_enabled: bool) -> Result<(), prometheus::Error> {
     register_standard!(SHUTDOWN_DURATION_SECONDS);
     register_standard!(SHUTDOWN_TIMEOUTS_TOTAL);
     register_standard!(SHUTDOWN_FLOWS_TOTAL);
-    register_standard!(TASKMANAGER_TOTAL);
-    register_standard!(TASKS_ACTIVE_TOTAL);
+    register_standard!(TASKMANAGER_TASKS_TOTAL);
+    register_standard!(TASKMANAGER_TASKS_ACTIVE_TOTAL);
 
     // Debug task metrics
     register_debug!(TASKS_BY_NAME_TOTAL, debug_enabled);

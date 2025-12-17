@@ -45,10 +45,14 @@ impl AsRef<str> for FlowSpanProducerStatus {
 }
 
 /// Increment the flow events counter.
+///
+/// Only increments if debug metrics are enabled.
 pub fn inc_flow_events(event_type: FlowEventResult) {
-    registry::FLOW_EVENTS_TOTAL
-        .with_label_values(&[event_type.as_ref()])
-        .inc();
+    if registry::debug_enabled() {
+        registry::FLOW_EVENTS_TOTAL
+            .with_label_values(&[event_type.as_ref()])
+            .inc();
+    }
 }
 
 /// Increment the flow creation counter.

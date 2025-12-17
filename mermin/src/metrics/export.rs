@@ -24,11 +24,11 @@ impl AsRef<str> for ExportStatus {
 
 /// Increment the export flow spans counter.
 ///
-/// `exporter_type` - The type of exporter: "otlp" or "stdout"
+/// `exporter` - The name of the exporter: "otlp" or "stdout"
 /// `status` - The export status: "ok", "error", or "noop"
-pub fn inc_export_flow_spans(exporter_type: &str, status: ExportStatus) {
+pub fn inc_export_flow_spans(exporter: &str, status: ExportStatus) {
     registry::EXPORT_FLOW_SPANS_TOTAL
-        .with_label_values(&[exporter_type, status.as_ref()])
+        .with_label_values(&[exporter, status.as_ref()])
         .inc();
 }
 
@@ -48,5 +48,5 @@ pub fn inc_export_timeouts() {
 ///
 /// Called to track how long the pipeline is blocked waiting for export to complete.
 pub fn observe_export_blocking_time(duration: Duration) {
-    registry::EXPORT_BLOCKING_TIME_SECONDS.observe(duration.as_secs_f64());
+    registry::EXPORT_LATENCY_SECONDS.observe(duration.as_secs_f64());
 }

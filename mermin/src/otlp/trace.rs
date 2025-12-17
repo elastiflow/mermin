@@ -154,10 +154,10 @@ impl TraceableExporter for TraceExporterAdapter {
         // for each configured exporter type. The actual export happens asynchronously
         // through the SDK's batch processor, so we track the attempt here.
         if self.has_otlp {
-            inc_export_flow_spans("otlp", crate::metrics::export::ExportStatus::Ok);
+            inc_export_flow_spans("otlp", ExportStatus::Ok);
         }
         if self.has_stdout {
-            inc_export_flow_spans("stdout", crate::metrics::export::ExportStatus::Ok);
+            inc_export_flow_spans("stdout", ExportStatus::Ok);
         }
 
         trace!(

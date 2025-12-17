@@ -15,8 +15,8 @@ use tracing::{debug, error, trace, warn};
 use crate::metrics::{
     self,
     registry::{
-        SHUTDOWN_DURATION_SECONDS, SHUTDOWN_TIMEOUTS_TOTAL, TASKMANAGER_TOTAL,
-        TASKS_ACTIVE_BY_NAME_TOTAL, TASKS_ACTIVE_TOTAL, TASKS_BY_NAME_TOTAL,
+        SHUTDOWN_DURATION_SECONDS, SHUTDOWN_TIMEOUTS_TOTAL, TASKMANAGER_TASKS_ACTIVE_TOTAL,
+        TASKMANAGER_TASKS_TOTAL, TASKS_ACTIVE_BY_NAME_TOTAL, TASKS_BY_NAME_TOTAL,
     },
 };
 
@@ -79,8 +79,10 @@ impl TaskManager {
 
         self.tasks.insert(task_id, task_info);
 
-        TASKMANAGER_TOTAL.with_label_values(&["spawned"]).inc();
-        TASKS_ACTIVE_TOTAL.inc();
+        TASKMANAGER_TASKS_TOTAL
+            .with_label_values(&["spawned"])
+            .inc();
+        TASKMANAGER_TASKS_ACTIVE_TOTAL.inc();
         if metrics::registry::debug_enabled() {
             TASKS_BY_NAME_TOTAL
                 .with_label_values(&[name, "spawned"])
@@ -175,8 +177,10 @@ impl TaskManager {
                 task.state = TaskState::Cancelled;
                 task.completion_time = Some(Instant::now());
 
-                TASKMANAGER_TOTAL.with_label_values(&["cancelled"]).inc();
-                TASKS_ACTIVE_TOTAL.dec();
+                TASKMANAGER_TASKS_TOTAL
+                    .with_label_values(&["cancelled"])
+                    .inc();
+                TASKMANAGER_TASKS_ACTIVE_TOTAL.dec();
                 if crate::metrics::registry::debug_enabled() {
                     TASKS_BY_NAME_TOTAL
                         .with_label_values(&[&task_name, "cancelled"])
@@ -276,8 +280,10 @@ impl TaskManager {
                     if let Some(task_info) = self.tasks.get_mut(&task_id) {
                         task_info.state = TaskState::Completed;
                         task_info.completion_time = Some(Instant::now());
-                        TASKMANAGER_TOTAL.with_label_values(&["completed"]).inc();
-                        TASKS_ACTIVE_TOTAL.dec();
+                        TASKMANAGER_TASKS_TOTAL
+                            .with_label_values(&["completed"])
+                            .inc();
+                        TASKMANAGER_TASKS_ACTIVE_TOTAL.dec();
                         if metrics::registry::debug_enabled() {
                             TASKS_BY_NAME_TOTAL
                                 .with_label_values(&[&task_name, "completed"])
@@ -293,8 +299,10 @@ impl TaskManager {
                     if let Some(task_info) = self.tasks.get_mut(&task_id) {
                         task_info.state = TaskState::Cancelled;
                         task_info.completion_time = Some(Instant::now());
-                        TASKMANAGER_TOTAL.with_label_values(&["cancelled"]).inc();
-                        TASKS_ACTIVE_TOTAL.dec();
+                        TASKMANAGER_TASKS_TOTAL
+                            .with_label_values(&["cancelled"])
+                            .inc();
+                        TASKMANAGER_TASKS_ACTIVE_TOTAL.dec();
                         if metrics::registry::debug_enabled() {
                             TASKS_BY_NAME_TOTAL
                                 .with_label_values(&[&task_name, "cancelled"])
@@ -310,8 +318,10 @@ impl TaskManager {
                     if let Some(task_info) = self.tasks.get_mut(&task_id) {
                         task_info.state = TaskState::Panicked;
                         task_info.completion_time = Some(Instant::now());
-                        TASKMANAGER_TOTAL.with_label_values(&["panicked"]).inc();
-                        TASKS_ACTIVE_TOTAL.dec();
+                        TASKMANAGER_TASKS_TOTAL
+                            .with_label_values(&["panicked"])
+                            .inc();
+                        TASKMANAGER_TASKS_ACTIVE_TOTAL.dec();
                         if metrics::registry::debug_enabled() {
                             TASKS_BY_NAME_TOTAL
                                 .with_label_values(&[&task_name, "panicked"])
