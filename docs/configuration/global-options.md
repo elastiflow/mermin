@@ -171,20 +171,24 @@ Mermin provides metrics to monitor shutdown behavior:
 - `flows_preserved_shutdown_total`: Flows successfully exported during shutdown
 - `flows_lost_shutdown_total`: Flows lost due to shutdown timeout
 
-### `ring_buffer_capacity`
+### `base_capacity`
 
 **Type:** Integer
 **Default:** `8192`
 
-Base capacity for the eBPF ring buffer between kernel and userspace. This is the foundation for all pipeline channel sizes.
+Base capacity for **userspace channels** between pipeline stages. This is the foundation for all pipeline channel sizes and flow store capacity.
+
+**Important:** This does NOT control the eBPF `FLOW_EVENTS` ring buffer (hardcoded at 256 KB). Instead, it sizes the userspace processing pipeline.
 
 **Behavior:**
 
-* Acts as a buffer for packets captured by eBPF before userspace processing
-* Used directly for worker channels and as the base for multipliers (`flow_span_channel_multiplier`, `decorated_span_channel_multiplier`)
-* Higher values provide more buffering for burst traffic
+* Sets worker queue capacity: `base_capacity / worker_count`
+* Base for flow span channel: `base_capacity × flow_span_channel_multiplier`
+* Base for decorated span channel: `base_capacity × decorated_span_channel_multiplier`
+* Flow store initial capacity: `base_capacity × 4`
+* Higher values provide more buffering throughout the userspace pipeline
 * Lower values reduce memory usage
-* If channel fills, packets are dropped (visible in metrics)
+* If channels fill, backpressure and sampling occur (visible in metrics)
 
 **Tuning Guidelines:**
 
@@ -220,7 +224,7 @@ Number of parallel worker threads processing packets and generating flow spans. 
 * More workers = more parallelism = higher throughput
 * More workers = more CPU usage
 * Workers share the flow table (synchronized)
-* Worker queue capacity = `ring_buffer_capacity / worker_count`
+* Worker queue capacity = `base_capacity / worker_count`
 
 **Tuning Guidelines:**
 
@@ -346,7 +350,7 @@ These options control the buffer sizes between pipeline stages to optimize for y
 **Type:** Float
 **Default:** `2.0`
 
-Multiplier for flow span channel capacity. Provides buffering between workers and K8s decorator. Channel size = `ring_buffer_capacity * flow_span_channel_multiplier`. With defaults (8192 × 2.0 = 16,384 slots, ~160ms buffer at 100K/s).
+Multiplier for flow span channel capacity. Provides buffering between workers and K8s decorator. Channel size = `base_capacity * flow_span_channel_multiplier`. With defaults (8192 × 2.0 = 16,384 slots, ~160ms buffer at 100K/s).
 
 **Recommendations:**
 
@@ -359,7 +363,7 @@ Multiplier for flow span channel capacity. Provides buffering between workers an
 **Type:** Float
 **Default:** `4.0`
 
-Multiplier for decorated span (export) channel capacity. Provides buffering between K8s decorator and OTLP exporter. This should be the largest buffer since network export is the slowest stage. Channel size = `ring_buffer_capacity * decorated_span_channel_multiplier`. With defaults (8192 × 4.0 = 32,768 slots, ~320ms buffer at 100K/s).
+Multiplier for decorated span (export) channel capacity. Provides buffering between K8s decorator and OTLP exporter. This should be the largest buffer since network export is the slowest stage. Channel size = `base_capacity * decorated_span_channel_multiplier`. With defaults (8192 × 4.0 = 32,768 slots, ~320ms buffer at 100K/s).
 
 **Recommendations:**
 
@@ -401,7 +405,7 @@ For a large cluster with high throughput:
 ```hcl
 pipeline {
   # High-throughput base capacity
-  ring_buffer_capacity = 16384
+  base_capacity = 16384
   worker_count = 8
 
   # Increase decorator parallelism
@@ -436,7 +440,7 @@ shutdown_timeout = "10s"
 
 # Pipeline tuning for flow processing
 pipeline {
-  ring_buffer_capacity = 8192
+  base_capacity = 8192
   worker_count = 4
   k8s_decorator_threads = 4
 }
@@ -483,12 +487,12 @@ Error: invalid log level "invalid", must be one of: trace, debug, info, warn, er
 
 ```hcl
 pipeline {
-  ring_buffer_capacity = -1
+  base_capacity = -1
 }
 ```
 
 ```
-Error: pipeline.ring_buffer_capacity must be a positive integer
+Error: pipeline.base_capacity must be a positive integer
 ```
 
 ## Monitoring Configuration Effectiveness
@@ -529,7 +533,7 @@ container_memory_working_set_bytes
 
 **Solutions:**
 
-1. Increase `pipeline.ring_buffer_capacity`
+1. Increase `pipeline.base_capacity`
 2. Increase `pipeline.worker_count`
 3. Allocate more CPU resources
 4. Reduce monitored interfaces
@@ -551,7 +555,7 @@ container_memory_working_set_bytes
 
 **Solutions:**
 
-1. Decrease `pipeline.ring_buffer_capacity`
+1. Decrease `pipeline.base_capacity`
 2. Decrease flow timeouts (see [Span Options](span-options.md))
 3. Add flow filters to reduce active flows
 4. Allocate more memory resources

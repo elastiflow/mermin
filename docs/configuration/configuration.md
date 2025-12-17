@@ -151,7 +151,7 @@ auto_reload = false
 shutdown_timeout = "5s"
 
 pipeline {
-  ring_buffer_capacity = 8192
+  base_capacity = 8192
   worker_count = 4
 }
 ```

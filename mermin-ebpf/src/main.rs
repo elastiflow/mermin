@@ -134,7 +134,11 @@ const MAX_FLOWS: u32 = 10_000_000; // Upper bound, overridden at runtime
 #[map]
 static mut FLOW_STATS: HashMap<FlowKey, FlowStats> = HashMap::with_max_entries(MAX_FLOWS, 0);
 
-// Size: 256 KB (~10K flow events before overflow)
+// Size: 256 KB (~1,120 FlowEvent entries, each 234 bytes)
+// Provides buffering for new flow bursts while worker channels absorb backpressure.
+// In normal operation, ring buffer stays nearly empty due to event-driven polling.
+// When full, new flow events are dropped (flow still tracked in FLOW_STATS, but userspace
+// won't get initial packet data for deep inspection).
 #[cfg(not(feature = "test"))]
 const RING_BUF_SIZE_BYTES: u32 = 256 * 1024;
 

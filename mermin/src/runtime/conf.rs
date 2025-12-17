@@ -792,7 +792,7 @@ pub mod conf_serde {
 ///
 /// Defaults are tuned for typical enterprise deployments (1K-5K flows/sec):
 /// - `ebpf_max_flows = 100000` (supports ~10K flows/sec with 10x headroom)
-/// - `ring_buffer_capacity = 8192` (good burst buffer for traffic spikes)
+/// - `base_capacity = 8192` (base for sizing all pipeline channels)
 /// - `worker_count = 4` (parallel flow processing across cores)
 /// - `k8s_decorator_threads = 4` (handles typical K8s clusters efficiently)
 /// - `worker_poll_interval = 5s` (responsive timeout checking with low CPU overhead)
@@ -817,13 +817,16 @@ pub struct PipelineOptions {
     ///          → 100K default provides 10x headroom (adequate, consider 200K-500K for 3K+ FPS)
     pub ebpf_max_flows: u32,
 
-    /// eBPF ring buffer capacity (default: 8192)
-    /// This is the base capacity for the ring buffer between eBPF and userspace.
-    /// Also used as the base for flow_span and decorated_span channel multipliers.
-    pub ring_buffer_capacity: usize,
+    /// Base capacity for userspace pipeline channels (default: 8192)
+    /// This is the foundation for sizing all pipeline stages:
+    /// - Worker queues: base_capacity / worker_count
+    /// - Flow span channel: base_capacity × flow_span_channel_multiplier
+    /// - Decorated span channel: base_capacity × decorated_span_channel_multiplier
+    /// - Flow store initial capacity: base_capacity × 4
+    pub base_capacity: usize,
 
     /// Number of flow worker threads for packet processing (default: 4)
-    /// Worker queue capacity derived from: ring_buffer_capacity / worker_count
+    /// Worker queue capacity derived from: base_capacity / worker_count
     /// With defaults: 8192 / 4 = 2048 slots per worker.
     pub worker_count: usize,
 
@@ -841,12 +844,12 @@ pub struct PipelineOptions {
     pub k8s_decorator_threads: usize,
 
     /// Multiplier for flow span channel capacity (default: 2.0)
-    /// Provides buffering between workers and K8s decorator. Channel size = ring_buffer_capacity * multiplier.
+    /// Provides buffering between workers and K8s decorator. Channel size = base_capacity * multiplier.
     /// With defaults: 8192 × 2.0 = 16,384 slots (~1.6s buffer at 10K/s, handles export delays).
     pub flow_span_channel_multiplier: f32,
 
     /// Multiplier for decorated span channel capacity (default: 4.0)
-    /// Provides buffering between K8s decorator and OTLP exporter. Channel size = ring_buffer_capacity * multiplier.
+    /// Provides buffering between K8s decorator and OTLP exporter. Channel size = base_capacity * multiplier.
     /// With defaults: 8192 × 4.0 = 32,768 slots (~3.2s buffer at 10K/s, prevents backpressure).
     pub decorated_span_channel_multiplier: f32,
 
@@ -870,7 +873,7 @@ impl Default for PipelineOptions {
     fn default() -> Self {
         Self {
             ebpf_max_flows: 100_000,
-            ring_buffer_capacity: 8192,
+            base_capacity: 8192,
             worker_count: 4,
             worker_poll_interval: Duration::from_secs(5),
             k8s_decorator_threads: 4,
@@ -937,8 +940,8 @@ mod tests {
             "shutdown_timeout should be 5s"
         );
         assert_eq!(
-            cfg.pipeline.ring_buffer_capacity, 8192,
-            "ring_buffer_capacity should be 8192"
+            cfg.pipeline.base_capacity, 8192,
+            "base_capacity should be 8192"
         );
         assert_eq!(cfg.pipeline.worker_count, 4, "worker_count should be 4");
 
@@ -1075,8 +1078,8 @@ mod tests {
         let deserialized: Conf = serde_yaml::from_str(&serialized).expect("should deserialize");
 
         assert_eq!(
-            cfg.pipeline.ring_buffer_capacity,
-            deserialized.pipeline.ring_buffer_capacity
+            cfg.pipeline.base_capacity,
+            deserialized.pipeline.base_capacity
         );
         assert_eq!(
             cfg.pipeline.worker_count,
@@ -1497,7 +1500,7 @@ log_level: error
 auto_reload: true
 shutdown_timeout: 30s
 pipeline:
-  ring_buffer_capacity: 2048
+  base_capacity: 2048
   worker_count: 8
 discovery:
   instrument:
@@ -1513,7 +1516,7 @@ discovery:
             assert_eq!(cfg.log_level, Level::ERROR);
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
-            assert_eq!(cfg.pipeline.ring_buffer_capacity, 2048);
+            assert_eq!(cfg.pipeline.base_capacity, 2048);
             assert_eq!(cfg.pipeline.worker_count, 8);
             assert_eq!(cfg.discovery.instrument.interfaces, vec!["eth1", "eth2"]);
 
@@ -1532,7 +1535,7 @@ log_level = "error"
 auto_reload = true
 shutdown_timeout = "30s"
 pipeline {
-    ring_buffer_capacity = 2048
+    base_capacity = 2048
     worker_count = 8
 }
 discovery "instrument" {
@@ -1547,7 +1550,7 @@ discovery "instrument" {
             assert_eq!(cfg.log_level, Level::ERROR);
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
-            assert_eq!(cfg.pipeline.ring_buffer_capacity, 2048);
+            assert_eq!(cfg.pipeline.base_capacity, 2048);
             assert_eq!(cfg.pipeline.worker_count, 8);
             assert_eq!(cfg.discovery.instrument.interfaces, vec!["eth1", "eth2"]);
 
@@ -1763,7 +1766,7 @@ discovery:
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.auto_reload, false);
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(5));
-            assert_eq!(cfg.pipeline.ring_buffer_capacity, 8192);
+            assert_eq!(cfg.pipeline.base_capacity, 8192);
             assert_eq!(cfg.pipeline.worker_count, 4);
             assert_eq!(cfg.api.port, 8080);
             assert_eq!(cfg.metrics.port, 10250);
@@ -1970,7 +1973,7 @@ discovery:
 
             // Other defaults should be applied
             assert_eq!(cfg.log_level, Level::INFO);
-            assert_eq!(cfg.pipeline.ring_buffer_capacity, 8192);
+            assert_eq!(cfg.pipeline.base_capacity, 8192);
 
             // Verify all span defaults
             assert_eq!(cfg.span.max_record_interval, Duration::from_secs(60));

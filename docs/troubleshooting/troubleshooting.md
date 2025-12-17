@@ -108,7 +108,7 @@ Key metrics to monitor include:
 
 - **Interface Unavailable**: Mermin logs a warning and continues monitoring other interfaces
 - **eBPF Load Failure**: Agent fails to start; check kernel version and eBPF support
-- **High Packet Loss**: Increase `pipeline.ring_buffer_capacity` or reduce monitored interfaces -->
+- **High Packet Loss**: Increase `pipeline.base_capacity` or reduce monitored interfaces -->
 ### Test eBPF Capabilities
 
 Use the `diagnose bpf` subcommand to validate eBPF support and test attach/detach operations:

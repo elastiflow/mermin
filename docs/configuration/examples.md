@@ -404,7 +404,7 @@ log_level = "warn"  # Reduce logging overhead
 # Maximize capacity and worker parallelism for extreme scale
 pipeline {
   ebpf_max_flows = 1000000
-  ring_buffer_capacity = 16384
+  base_capacity = 16384
   worker_count = 16
   k8s_decorator_threads = 24
 }

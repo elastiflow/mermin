@@ -84,7 +84,7 @@ pub struct FlowSpanComponents {
 
 pub struct FlowSpanProducer {
     span_opts: SpanOptions,
-    ring_buffer_capacity: usize,
+    base_capacity: usize,
     worker_count: usize,
     worker_poll_interval: Duration,
     boot_time_offset_nanos: u64,
@@ -107,7 +107,7 @@ impl FlowSpanProducer {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         span_opts: SpanOptions,
-        ring_buffer_capacity: usize,
+        base_capacity: usize,
         worker_count: usize,
         iface_map: Arc<DashMap<u32, String>>,
         flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
@@ -116,12 +116,11 @@ impl FlowSpanProducer {
         listening_ports_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, ListeningPortKey, u8>>>,
         conf: &Conf,
     ) -> Result<Self, BootTimeError> {
-        let flow_store_capacity =
-            memory::initial_capacity::from_ring_buffer_size(ring_buffer_capacity);
+        let flow_store_capacity = memory::initial_capacity::from_base_capacity(base_capacity);
         info!(
             event.name = "flow_store.initialized",
             capacity = flow_store_capacity,
-            ring_buffer_capacity = ring_buffer_capacity,
+            base_capacity = base_capacity,
             "flow store initialized"
         );
         let flow_store = Arc::new(DashMap::with_capacity_and_hasher(
@@ -169,7 +168,7 @@ impl FlowSpanProducer {
 
         Ok(Self {
             span_opts: span_opts.clone(),
-            ring_buffer_capacity,
+            base_capacity,
             worker_count,
             worker_poll_interval: conf.pipeline.worker_poll_interval,
             boot_time_offset_nanos,
@@ -207,8 +206,7 @@ impl FlowSpanProducer {
 
         let mut worker_handles = Vec::new();
         let mut worker_channels = Vec::new();
-        let worker_capacity =
-            self.ring_buffer_capacity.max(self.worker_count) / self.worker_count.max(1);
+        let worker_capacity = self.base_capacity.max(self.worker_count) / self.worker_count.max(1);
 
         for worker_id in 0..self.worker_count.max(1) {
             let (worker_tx, worker_rx) = mpsc::channel(worker_capacity);

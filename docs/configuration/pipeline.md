@@ -24,17 +24,26 @@ metrics {
 }
 ```
 
-### `ring_buffer_capacity`
+### `base_capacity`
 
 **Type:** Integer **Default:** `8192`
 
-The default capacity of the `FLOW_EVENTS` ring buffer. (Refer to the [architecture](../getting-started/architecture.md#ebpf-programs) documentation for more information.) Increasing this value can help process higher flow rates.
+The base capacity for **userspace channels** between pipeline stages (workers → K8s decorator → exporter). This value is used to calculate:
+
+- **Worker queue capacity**: `base_capacity / worker_count` (default: 8192 / 4 = 2048 per worker)
+- **Flow span channel**: `base_capacity × flow_span_channel_multiplier` (default: 8192 × 2.0 = 16,384)
+- **Decorated span channel**: `base_capacity × decorated_span_channel_multiplier` (default: 8192 × 4.0 = 32,768)
+- **Flow store initial capacity**: `base_capacity × 4` (default: 8192 × 4 = 32,768)
+
+Increasing this value provides larger buffers throughout the pipeline, reducing backpressure during traffic spikes.
+
+**Note:** This does NOT control the eBPF `FLOW_EVENTS` ring buffer size, which is hardcoded at compile time (256 KB, ~1,120 events).
 
 **Example:**
 
 ```hcl
 pipeline {
-  ring_buffer_capacity = 16384  # Increase buffer for high-throughput environments
+  base_capacity = 16384  # Increase userspace buffers for high-throughput environments
 }
 ```
 

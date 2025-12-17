@@ -539,9 +539,9 @@ async fn run(cli: Cli) -> Result<()> {
         "ebpf programs attached and ready to process network traffic"
     );
 
-    let flow_span_capacity = (conf.pipeline.ring_buffer_capacity as f32
-        * conf.pipeline.flow_span_channel_multiplier) as usize;
-    let decorated_span_capacity = (conf.pipeline.ring_buffer_capacity as f32
+    let flow_span_capacity =
+        (conf.pipeline.base_capacity as f32 * conf.pipeline.flow_span_channel_multiplier) as usize;
+    let decorated_span_capacity = (conf.pipeline.base_capacity as f32
         * conf.pipeline.decorated_span_channel_multiplier)
         as usize;
 
@@ -567,7 +567,7 @@ async fn run(cli: Cli) -> Result<()> {
 
     let flow_span_producer = FlowSpanProducer::new(
         conf.clone().span,
-        conf.pipeline.ring_buffer_capacity,
+        conf.pipeline.base_capacity,
         conf.pipeline.worker_count,
         Arc::clone(&iface_map),
         flow_stats_map,
