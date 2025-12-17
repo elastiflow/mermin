@@ -242,6 +242,7 @@ impl FlowSpanProducer {
                 self.hostname_cache.clone(),
                 self.hostname_resolve_timeout,
                 self.enable_hostname_resolution,
+                Arc::clone(&self.process_name_resolver),
             );
 
             let worker_handle = tokio::spawn(async move {
@@ -579,6 +580,7 @@ pub struct FlowWorker {
     hostname_cache: Cache<IpAddr, String>,
     hostname_resolve_timeout: Duration,
     enable_hostname_resolution: bool,
+    process_name_resolver: Arc<crate::process_name::ProcessNameResolver>,
 }
 
 impl FlowWorker {
@@ -601,6 +603,7 @@ impl FlowWorker {
         hostname_cache: Cache<IpAddr, String>,
         hostname_resolve_timeout: Duration,
         enable_hostname_resolution: bool,
+        process_name_resolver: Arc<crate::process_name::ProcessNameResolver>,
     ) -> Self {
         Self {
             worker_id,
@@ -625,6 +628,7 @@ impl FlowWorker {
             hostname_cache,
             hostname_resolve_timeout,
             enable_hostname_resolution,
+            process_name_resolver,
         }
     }
 
@@ -2542,6 +2546,7 @@ mod tests {
         }));
         let direction_inferrer = Arc::new(DirectionInferrer::new(listening_ports_map));
         let hostname_cache = Cache::builder().max_capacity(1000).build();
+        let process_name_resolver = Arc::new(crate::process_name::ProcessNameResolver::new());
 
         FlowWorker {
             worker_id: 0,
@@ -2566,6 +2571,7 @@ mod tests {
             hostname_cache,
             hostname_resolve_timeout: span_opts.hostname_resolve_timeout,
             enable_hostname_resolution: span_opts.enable_hostname_resolution,
+            process_name_resolver,
         }
     }
 

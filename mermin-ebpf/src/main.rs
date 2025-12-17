@@ -369,9 +369,8 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
 
             // Extract PID associated with the socket/process handling this packet.
             // bpf_get_current_pid_tgid() returns u64: upper 32 bits = TGID (process ID), lower 32 bits = PID (thread ID).
-            // We use TGID (process ID) which is the upper 32 bits.
             // If unavailable or for forwarded traffic, this will be 0.
-            let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
+            let pid_tgid = bpf_get_current_pid_tgid();
             flow_event.pid = (pid_tgid >> 32) as u32;
 
             // Copy unparsed data (if any) for userspace deep parsing.

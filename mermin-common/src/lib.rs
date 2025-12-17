@@ -440,10 +440,11 @@ impl core::fmt::Display for ConnectionState {
 /// Key Optimization: eBPF already parsed outer headers into FlowStats, so we only
 /// send the UNPARSED portion to avoid redundant parsing in userspace.
 ///
-/// Memory layout: 238 bytes total (62 bytes saved vs naive approach!)
+/// Memory layout: 240 bytes total (60 bytes saved vs naive approach!)
 /// - FlowKey: 38 bytes (outermost 5-tuple from eBPF)
 /// - snaplen: 2 bytes (total original packet length)
 /// - parsed_offset: 2 bytes (where unparsed data starts in original packet)
+/// - padding: 2 bytes (required for u32 alignment of pid field)
 /// - pid: 4 bytes (process ID associated with socket, 0 if unavailable)
 /// - packet_data: 192 bytes (ONLY unparsed portion, for tunnel inner headers)
 ///
@@ -964,17 +965,18 @@ mod tests {
     /// so any size/alignment mismatch will cause parsing errors in userspace.
     #[test]
     fn test_flow_event_memory_layout() {
-        // Verify FlowEvent size: FlowKey(38) + snaplen(2) + parsed_offset(2) + pid(4) + packet_data(192) = 238
+        // Verify FlowEvent size: FlowKey(38) + snaplen(2) + parsed_offset(2) + padding(2) + pid(4) + packet_data(192) = 240
+        // Note: 2 bytes of padding are required between parsed_offset and pid to ensure u32 alignment
         assert_eq!(
             size_of::<FlowEvent>(),
-            238,
-            "FlowEvent size MUST be 238 bytes for eBPF/userspace compatibility (62 bytes saved vs old design!)"
+            240,
+            "FlowEvent size MUST be 240 bytes for eBPF/userspace compatibility (60 bytes saved vs old design!)"
         );
 
         // Verify alignment (2-byte aligned, inherited from FlowKey)
         assert_eq!(
             align_of::<FlowEvent>(),
-            2,
+            4,
             "FlowEvent alignment MUST be 2 bytes (inherited from FlowKey) for eBPF/userspace compatibility"
         );
     }

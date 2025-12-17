@@ -99,6 +99,7 @@ For developers who want to contribute to Mermin or build it locally:
 Mermin requires:
 
 * **Linux Kernel**: Version 5.14 or newer with eBPF support enabled
+  * **Process Name Enrichment**: The `bpf_get_current_pid_tgid()` helper (available since kernel 4.1) is used to capture process IDs for flow enrichment. Process names are resolved via `/proc/[pid]/comm` in userspace.
 * **Kubernetes**: Version 1.20 or newer (for Kubernetes deployments)
 * **Container Runtime**: Docker, containerd, or CRI-O
 * **Privileges**: Requires privileged mode to load eBPF programs and access network interfaces
