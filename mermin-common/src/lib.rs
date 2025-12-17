@@ -973,11 +973,11 @@ mod tests {
             "FlowEvent size MUST be 240 bytes for eBPF/userspace compatibility (60 bytes saved vs old design!)"
         );
 
-        // Verify alignment (2-byte aligned, inherited from FlowKey)
+        // Verify alignment (4-byte aligned, u32 inherited from FlowKey + u32 padding)
         assert_eq!(
             align_of::<FlowEvent>(),
             4,
-            "FlowEvent alignment MUST be 2 bytes (inherited from FlowKey) for eBPF/userspace compatibility"
+            "FlowEvent alignment MUST be 4 bytes (u32 inherited from FlowKey + u32 padding) for eBPF/userspace compatibility"
         );
     }
 

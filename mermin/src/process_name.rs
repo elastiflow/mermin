@@ -37,8 +37,14 @@ impl ProcessNameResolver {
         // Determine correct /proc path based on deployment mode:
         // - Container with hostPID: true -> use /proc/1/[pid]/comm (host namespace)
         // - Bare metal or hostNetwork: true -> use /proc/[pid]/comm (same namespace)
-        let proc_base = if Path::new("/proc/1/ns/net").exists() {
-            "/proc/1".to_string()
+        let proc_base = if Path::new("/.dockerenv").exists() || Path::new("/proc/1/cgroup").exists()
+        {
+            // In container - check if we can access host /proc via /proc/1
+            if Path::new("/proc/1/comm").exists() && Path::new("/proc/self/ns/pid").exists() {
+                "/proc/1".to_string()
+            } else {
+                "/proc".to_string()
+            }
         } else {
             "/proc".to_string()
         };
@@ -119,7 +125,7 @@ impl ProcessNameResolver {
         match fs::read_to_string(&comm_path) {
             Ok(content) => {
                 // trim newline char
-                let name = content.trim_end().to_string();
+                let name = content.trim().to_string();
                 if name.is_empty() { None } else { Some(name) }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {

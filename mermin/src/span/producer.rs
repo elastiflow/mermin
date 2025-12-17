@@ -884,8 +884,14 @@ impl FlowWorker {
         // Resolve process name from PID
         let process_name = self.process_name_resolver.resolve(event.pid).await;
 
-        self.create_flow_span(&community_id, &event.flow_key, &stats, process_name)
-            .await?;
+        self.create_flow_span(
+            &community_id,
+            &event.flow_key,
+            &stats,
+            process_name,
+            event.pid,
+        )
+        .await?;
 
         // Flow successfully created and stored - disable guard cleanup
         // The entry is now managed by flow_store and will be cleaned up by timeout task
@@ -970,6 +976,7 @@ impl FlowWorker {
         flow_key: &FlowKey,
         stats: &FlowStats,
         process_name: Option<String>,
+        pid: u32,
     ) -> Result<(), Error> {
         let is_ip_flow = stats.ether_type == EtherType::Ipv4 || stats.ether_type == EtherType::Ipv6;
         let is_ipv6 = stats.ether_type == EtherType::Ipv6;
@@ -1161,6 +1168,7 @@ impl FlowWorker {
 
                 // Process information
                 process_executable_name: process_name,
+                process_pid: (pid != 0).then_some(pid.to_string()),
 
                 // All other attributes default to None
                 ..Default::default()
