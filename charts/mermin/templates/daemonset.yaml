@@ -69,7 +69,7 @@ spec:
                 fieldRef:
                   apiVersion: v1
                   fieldPath: metadata.namespace
-            - name: POD_DS
+            - name: POD_DAEMONSET
               value: {{ include "mermin.fullname" . }}
             - name: POD_NODE_NAME
               valueFrom:
