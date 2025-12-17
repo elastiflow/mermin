@@ -213,46 +213,64 @@ pub struct SpanAttributes {
     // Kubernetes & Application Attributes
     pub source_k8s_cluster_name: Option<String>,
     pub source_k8s_cluster_uid: Option<String>,
+    pub source_k8s_node_annotations: Option<String>,
     pub source_k8s_node_name: Option<String>,
     pub source_k8s_node_uid: Option<String>,
     pub source_k8s_namespace_name: Option<String>,
+    pub source_k8s_pod_annotations: Option<String>,
     pub source_k8s_pod_name: Option<String>,
     pub source_k8s_pod_uid: Option<String>,
     pub source_k8s_container_name: Option<String>,
+    pub source_k8s_deployment_annotations: Option<String>,
     pub source_k8s_deployment_name: Option<String>,
     pub source_k8s_deployment_uid: Option<String>,
+    pub source_k8s_replicaset_annotations: Option<String>,
     pub source_k8s_replicaset_name: Option<String>,
     pub source_k8s_replicaset_uid: Option<String>,
+    pub source_k8s_statefulset_annotations: Option<String>,
     pub source_k8s_statefulset_name: Option<String>,
     pub source_k8s_statefulset_uid: Option<String>,
+    pub source_k8s_daemonset_annotations: Option<String>,
     pub source_k8s_daemonset_name: Option<String>,
     pub source_k8s_daemonset_uid: Option<String>,
+    pub source_k8s_job_annotations: Option<String>,
     pub source_k8s_job_name: Option<String>,
     pub source_k8s_job_uid: Option<String>,
+    pub source_k8s_cronjob_annotations: Option<String>,
     pub source_k8s_cronjob_name: Option<String>,
     pub source_k8s_cronjob_uid: Option<String>,
+    pub source_k8s_service_annotations: Option<String>,
     pub source_k8s_service_name: Option<String>,
     pub source_k8s_service_uid: Option<String>,
     pub destination_k8s_cluster_name: Option<String>,
     pub destination_k8s_cluster_uid: Option<String>,
+    pub destination_k8s_node_annotations: Option<String>,
     pub destination_k8s_node_name: Option<String>,
     pub destination_k8s_node_uid: Option<String>,
     pub destination_k8s_namespace_name: Option<String>,
+    pub destination_k8s_pod_annotations: Option<String>,
     pub destination_k8s_pod_name: Option<String>,
     pub destination_k8s_pod_uid: Option<String>,
     pub destination_k8s_container_name: Option<String>,
+    pub destination_k8s_deployment_annotations: Option<String>,
     pub destination_k8s_deployment_name: Option<String>,
     pub destination_k8s_deployment_uid: Option<String>,
+    pub destination_k8s_replicaset_annotations: Option<String>,
     pub destination_k8s_replicaset_name: Option<String>,
     pub destination_k8s_replicaset_uid: Option<String>,
+    pub destination_k8s_statefulset_annotations: Option<String>,
     pub destination_k8s_statefulset_name: Option<String>,
     pub destination_k8s_statefulset_uid: Option<String>,
+    pub destination_k8s_daemonset_annotations: Option<String>,
     pub destination_k8s_daemonset_name: Option<String>,
     pub destination_k8s_daemonset_uid: Option<String>,
+    pub destination_k8s_job_annotations: Option<String>,
     pub destination_k8s_job_name: Option<String>,
     pub destination_k8s_job_uid: Option<String>,
+    pub destination_k8s_cronjob_annotations: Option<String>,
     pub destination_k8s_cronjob_name: Option<String>,
     pub destination_k8s_cronjob_uid: Option<String>,
+    pub destination_k8s_service_annotations: Option<String>,
     pub destination_k8s_service_name: Option<String>,
     pub destination_k8s_service_uid: Option<String>,
     pub network_policies_ingress: Option<Vec<String>>,
@@ -341,46 +359,64 @@ impl Default for SpanAttributes {
             tunnel_ipsec_ah_spi: None,
             source_k8s_cluster_name: None,
             source_k8s_cluster_uid: None,
+            source_k8s_node_annotations: None,
             source_k8s_node_name: None,
             source_k8s_node_uid: None,
             source_k8s_namespace_name: None,
+            source_k8s_pod_annotations: None,
             source_k8s_pod_name: None,
             source_k8s_pod_uid: None,
             source_k8s_container_name: None,
+            source_k8s_deployment_annotations: None,
             source_k8s_deployment_name: None,
             source_k8s_deployment_uid: None,
+            source_k8s_replicaset_annotations: None,
             source_k8s_replicaset_name: None,
             source_k8s_replicaset_uid: None,
+            source_k8s_statefulset_annotations: None,
             source_k8s_statefulset_name: None,
             source_k8s_statefulset_uid: None,
+            source_k8s_daemonset_annotations: None,
             source_k8s_daemonset_name: None,
             source_k8s_daemonset_uid: None,
+            source_k8s_job_annotations: None,
             source_k8s_job_name: None,
             source_k8s_job_uid: None,
+            source_k8s_cronjob_annotations: None,
             source_k8s_cronjob_name: None,
             source_k8s_cronjob_uid: None,
+            source_k8s_service_annotations: None,
             source_k8s_service_name: None,
             source_k8s_service_uid: None,
             destination_k8s_cluster_name: None,
             destination_k8s_cluster_uid: None,
+            destination_k8s_node_annotations: None,
             destination_k8s_node_name: None,
             destination_k8s_node_uid: None,
             destination_k8s_namespace_name: None,
+            destination_k8s_pod_annotations: None,
             destination_k8s_pod_name: None,
             destination_k8s_pod_uid: None,
             destination_k8s_container_name: None,
+            destination_k8s_deployment_annotations: None,
             destination_k8s_deployment_name: None,
             destination_k8s_deployment_uid: None,
+            destination_k8s_replicaset_annotations: None,
             destination_k8s_replicaset_name: None,
             destination_k8s_replicaset_uid: None,
+            destination_k8s_statefulset_annotations: None,
             destination_k8s_statefulset_name: None,
             destination_k8s_statefulset_uid: None,
+            destination_k8s_daemonset_annotations: None,
             destination_k8s_daemonset_name: None,
             destination_k8s_daemonset_uid: None,
+            destination_k8s_job_annotations: None,
             destination_k8s_job_name: None,
             destination_k8s_job_uid: None,
+            destination_k8s_cronjob_annotations: None,
             destination_k8s_cronjob_name: None,
             destination_k8s_cronjob_uid: None,
+            destination_k8s_service_annotations: None,
             destination_k8s_service_name: None,
             destination_k8s_service_uid: None,
             network_policies_ingress: None,
@@ -674,6 +710,9 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.source_k8s_cluster_uid {
             kvs.push(KeyValue::new("source.k8s.cluster.uid", value.to_owned()));
         }
+        if let Some(ref value) = self.attributes.source_k8s_node_annotations {
+            kvs.push(KeyValue::new("source.k8s.node.annotations", value.to_owned()));
+        }
         if let Some(ref value) = self.attributes.source_k8s_node_name {
             kvs.push(KeyValue::new("source.k8s.node.name", value.to_owned()));
         }
@@ -682,6 +721,9 @@ impl Traceable for FlowSpan {
         }
         if let Some(ref value) = self.attributes.source_k8s_namespace_name {
             kvs.push(KeyValue::new("source.k8s.namespace.name", value.to_owned()));
+        }
+        if let Some(ref value) = self.attributes.source_k8s_pod_annotations {
+            kvs.push(KeyValue::new("source.k8s.pod.annotations", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_pod_name {
             kvs.push(KeyValue::new("source.k8s.pod.name", value.to_owned()));
@@ -692,6 +734,12 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.source_k8s_container_name {
             kvs.push(KeyValue::new("source.k8s.container.name", value.to_owned()));
         }
+        if let Some(ref value) = self.attributes.source_k8s_deployment_annotations {
+            kvs.push(KeyValue::new(
+                "source.k8s.deployment.annotations",
+                value.to_owned(),
+            ));
+        }
         if let Some(ref value) = self.attributes.source_k8s_deployment_name {
             kvs.push(KeyValue::new(
                 "source.k8s.deployment.name",
@@ -701,6 +749,12 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.source_k8s_deployment_uid {
             kvs.push(KeyValue::new("source.k8s.deployment.uid", value.to_owned()));
         }
+        if let Some(ref value) = self.attributes.source_k8s_replicaset_annotations {
+            kvs.push(KeyValue::new(
+                "source.k8s.replicaset.annotations",
+                value.to_owned(),
+            ));
+        }
         if let Some(ref value) = self.attributes.source_k8s_replicaset_name {
             kvs.push(KeyValue::new(
                 "source.k8s.replicaset.name",
@@ -709,6 +763,12 @@ impl Traceable for FlowSpan {
         }
         if let Some(ref value) = self.attributes.source_k8s_replicaset_uid {
             kvs.push(KeyValue::new("source.k8s.replicaset.uid", value.to_owned()));
+        }
+        if let Some(ref value) = self.attributes.source_k8s_statefulset_annotations {
+            kvs.push(KeyValue::new(
+                "source.k8s.statefulset.annotations",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.source_k8s_statefulset_name {
             kvs.push(KeyValue::new(
@@ -722,11 +782,17 @@ impl Traceable for FlowSpan {
                 value.to_owned(),
             ));
         }
+        if let Some(ref value) = self.attributes.source_k8s_daemonset_annotations {
+            kvs.push(KeyValue::new("source.k8s.daemonset.annotations", value.to_owned()));
+        }
         if let Some(ref value) = self.attributes.source_k8s_daemonset_name {
             kvs.push(KeyValue::new("source.k8s.daemonset.name", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_daemonset_uid {
             kvs.push(KeyValue::new("source.k8s.daemonset.uid", value.to_owned()));
+        }
+        if let Some(ref value) = self.attributes.source_k8s_job_annotations {
+            kvs.push(KeyValue::new("source.k8s.job.annotations", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_job_name {
             kvs.push(KeyValue::new("source.k8s.job.name", value.to_owned()));
@@ -734,11 +800,17 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.source_k8s_job_uid {
             kvs.push(KeyValue::new("source.k8s.job.uid", value.to_owned()));
         }
+        if let Some(ref value) = self.attributes.source_k8s_cronjob_annotations {
+            kvs.push(KeyValue::new("source.k8s.cronjob.annotations", value.to_owned()));
+        }
         if let Some(ref value) = self.attributes.source_k8s_cronjob_name {
             kvs.push(KeyValue::new("source.k8s.cronjob.name", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_cronjob_uid {
             kvs.push(KeyValue::new("source.k8s.cronjob.uid", value.to_owned()));
+        }
+        if let Some(ref value) = self.attributes.source_k8s_service_annotations {
+            kvs.push(KeyValue::new("source.k8s.service.annotations", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.source_k8s_service_name {
             kvs.push(KeyValue::new("source.k8s.service.name", value.to_owned()));
@@ -758,6 +830,9 @@ impl Traceable for FlowSpan {
                 value.to_owned(),
             ));
         }
+        if let Some(ref value) = self.attributes.destination_k8s_node_annotations {
+            kvs.push(KeyValue::new("destination.k8s.node.annotations", value.to_owned()));
+        }
         if let Some(ref value) = self.attributes.destination_k8s_node_name {
             kvs.push(KeyValue::new("destination.k8s.node.name", value.to_owned()));
         }
@@ -770,6 +845,9 @@ impl Traceable for FlowSpan {
                 value.to_owned(),
             ));
         }
+        if let Some(ref value) = self.attributes.destination_k8s_pod_annotations {
+            kvs.push(KeyValue::new("destination.k8s.pod.annotations", value.to_owned()));
+        }
         if let Some(ref value) = self.attributes.destination_k8s_pod_name {
             kvs.push(KeyValue::new("destination.k8s.pod.name", value.to_owned()));
         }
@@ -779,6 +857,12 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.destination_k8s_container_name {
             kvs.push(KeyValue::new(
                 "destination.k8s.container.name",
+                value.to_owned(),
+            ));
+        }
+        if let Some(ref value) = self.attributes.destination_k8s_deployment_annotations {
+            kvs.push(KeyValue::new(
+                "destination.k8s.deployment.annotations",
                 value.to_owned(),
             ));
         }
@@ -794,6 +878,12 @@ impl Traceable for FlowSpan {
                 value.to_owned(),
             ));
         }
+        if let Some(ref value) = self.attributes.destination_k8s_replicaset_annotations {
+            kvs.push(KeyValue::new(
+                "destination.k8s.replicaset.annotations",
+                value.to_owned(),
+            ));
+        }
         if let Some(ref value) = self.attributes.destination_k8s_replicaset_name {
             kvs.push(KeyValue::new(
                 "destination.k8s.replicaset.name",
@@ -803,6 +893,12 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.destination_k8s_replicaset_uid {
             kvs.push(KeyValue::new(
                 "destination.k8s.replicaset.uid",
+                value.to_owned(),
+            ));
+        }
+        if let Some(ref value) = self.attributes.destination_k8s_statefulset_annotations {
+            kvs.push(KeyValue::new(
+                "destination.k8s.statefulset.annotations",
                 value.to_owned(),
             ));
         }
@@ -818,6 +914,12 @@ impl Traceable for FlowSpan {
                 value.to_owned(),
             ));
         }
+        if let Some(ref value) = self.attributes.destination_k8s_daemonset_annotations {
+            kvs.push(KeyValue::new(
+                "destination.k8s.daemonset.annotations",
+                value.to_owned(),
+            ));
+        }
         if let Some(ref value) = self.attributes.destination_k8s_daemonset_name {
             kvs.push(KeyValue::new(
                 "destination.k8s.daemonset.name",
@@ -830,11 +932,20 @@ impl Traceable for FlowSpan {
                 value.to_owned(),
             ));
         }
+        if let Some(ref value) = self.attributes.destination_k8s_job_annotations {
+            kvs.push(KeyValue::new("destination.k8s.job.annotations", value.to_owned()));
+        }
         if let Some(ref value) = self.attributes.destination_k8s_job_name {
             kvs.push(KeyValue::new("destination.k8s.job.name", value.to_owned()));
         }
         if let Some(ref value) = self.attributes.destination_k8s_job_uid {
             kvs.push(KeyValue::new("destination.k8s.job.uid", value.to_owned()));
+        }
+        if let Some(ref value) = self.attributes.destination_k8s_cronjob_annotations {
+            kvs.push(KeyValue::new(
+                "destination.k8s.cronjob.annotations",
+                value.to_owned(),
+            ));
         }
         if let Some(ref value) = self.attributes.destination_k8s_cronjob_name {
             kvs.push(KeyValue::new(
@@ -845,6 +956,12 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.destination_k8s_cronjob_uid {
             kvs.push(KeyValue::new(
                 "destination.k8s.cronjob.uid",
+                value.to_owned(),
+            ));
+        }
+        if let Some(ref value) = self.attributes.destination_k8s_service_annotations {
+            kvs.push(KeyValue::new(
+                "destination.k8s.service.annotations",
                 value.to_owned(),
             ));
         }

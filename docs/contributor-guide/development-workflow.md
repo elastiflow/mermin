@@ -295,7 +295,7 @@ To remove Mermin from your cluster, uninstall the Helm chart. To tear down the e
 helm uninstall mermin
 
 # Delete the kind cluster
-kind delete cluster atlantis
+kind delete cluster -n atlantis
 ```
 
 ## Cross-Compiling

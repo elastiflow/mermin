@@ -156,6 +156,7 @@ impl<'a> Decorator<'a> {
                 self.set_k8s_attr(flow_span, "pod.name", &pod.name, is_source);
                 self.set_k8s_attr_opt(flow_span, "namespace.name", &pod.namespace, is_source);
                 self.set_k8s_attr_opt(flow_span, "node.name", node_name, is_source);
+                self.set_k8s_json_attr(flow_span, "pod.annotations", &pod.annotations, is_source);
 
                 // Populate workload controller information for all owners in the chain
                 if let Some(workload_owners) = owners {
@@ -173,14 +174,17 @@ impl<'a> Decorator<'a> {
             }
             DecorationInfo::Node { node } => {
                 self.set_k8s_attr(flow_span, "node.name", &node.name, is_source);
+                self.set_k8s_json_attr(flow_span, "node.annotations", &node.annotations, is_source);
             }
             DecorationInfo::Service { service, .. } => {
                 self.set_k8s_attr(flow_span, "service.name", &service.name, is_source);
                 self.set_k8s_attr_opt(flow_span, "namespace.name", &service.namespace, is_source);
+                self.set_k8s_json_attr(flow_span, "service.annotations", &service.annotations, is_source);
             }
             DecorationInfo::EndpointSlice { slice } => {
                 // EndpointSlice provides namespace context for service discovery
                 self.set_k8s_attr_opt(flow_span, "namespace.name", &slice.namespace, is_source);
+                self.set_k8s_json_attr(flow_span, "endpointslice.annotations", &slice.annotations, is_source);
             }
         }
     }
@@ -196,21 +200,27 @@ impl<'a> Decorator<'a> {
         match owner {
             WorkloadOwner::Deployment(meta) => {
                 self.set_k8s_attr(flow_span, "deployment.name", &meta.name, is_source);
+                self.set_k8s_json_attr(flow_span, "deployment.annotations", &meta.annotations, is_source);
             }
             WorkloadOwner::ReplicaSet(meta) => {
                 self.set_k8s_attr(flow_span, "replicaset.name", &meta.name, is_source);
+                self.set_k8s_json_attr(flow_span, "deployment.annotations", &meta.annotations, is_source);
             }
             WorkloadOwner::StatefulSet(meta) => {
                 self.set_k8s_attr(flow_span, "statefulset.name", &meta.name, is_source);
+                self.set_k8s_json_attr(flow_span, "statefulset.annotations", &meta.annotations, is_source);
             }
             WorkloadOwner::DaemonSet(meta) => {
                 self.set_k8s_attr(flow_span, "daemonset.name", &meta.name, is_source);
+                self.set_k8s_json_attr(flow_span, "daemonset.annotations", &meta.annotations, is_source);
             }
             WorkloadOwner::Job(meta) => {
                 self.set_k8s_attr(flow_span, "job.name", &meta.name, is_source);
+                self.set_k8s_json_attr(flow_span, "job.annotations", &meta.annotations, is_source);
             }
             WorkloadOwner::CronJob(meta) => {
                 self.set_k8s_attr(flow_span, "cronjob.name", &meta.name, is_source);
+                self.set_k8s_json_attr(flow_span, "cronjob.annotations", &meta.annotations, is_source);
             }
         }
     }
@@ -306,9 +316,34 @@ impl<'a> Decorator<'a> {
             ("job.name", source_k8s_job_name, destination_k8s_job_name),
             ("cronjob.name", source_k8s_cronjob_name, destination_k8s_cronjob_name),
             ("service.name", source_k8s_service_name, destination_k8s_service_name),
+            ("pod.annotations", source_k8s_pod_annotations, destination_k8s_pod_annotations),
+            ("node.annotations", source_k8s_node_annotations, destination_k8s_node_annotations),
+            ("service.annotations", source_k8s_service_annotations, destination_k8s_service_annotations),
+            ("deployment.annotations", source_k8s_deployment_annotations, destination_k8s_deployment_annotations),
+            ("replicaset.annotations", source_k8s_replicaset_annotations, destination_k8s_replicaset_annotations),
+            ("statefulset.annotations", source_k8s_statefulset_annotations, destination_k8s_statefulset_annotations),
+            ("daemonset.annotations", source_k8s_daemonset_annotations, destination_k8s_daemonset_annotations),
+            ("job.annotations", source_k8s_job_annotations, destination_k8s_job_annotations),
+            ("cronjob.annotations", source_k8s_cronjob_annotations, destination_k8s_cronjob_annotations),
         };
 
         *field = value.clone();
+    }
+
+    /// Serializes a generic value (like HashMap) to JSON string and sets it as an attribute.
+    fn set_k8s_json_attr<T: serde::Serialize>(
+        &self,
+        flow_span: &mut FlowSpan,
+        attr_name: &str,
+        value: &Option<T>,
+        is_source: bool,
+    ) {
+        // Serialize HashMap to String: Some({"k":"v"}) -> Some("{\"k\":\"v\"}")
+        let json_string = value
+            .as_ref()
+            .and_then(|v| serde_json::to_string(v).ok());
+
+        self.set_k8s_attr_opt(flow_span, attr_name, &json_string, is_source);
     }
 
     /// Populates network policy decoration in a FlowSpan.
