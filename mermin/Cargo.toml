@@ -51,12 +51,13 @@ nix = { version = "0.30.1", features = ["sched"] }
 num-iter = "0.1.45"
 num-traits = "0.2.19"
 opentelemetry = { version = "0.31.0" }
-opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic"] }
+opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic", "http-proto", "reqwest-client", "reqwest-rustls"] }
 opentelemetry-stdout = "0.31.0"
 opentelemetry_sdk = { version = "0.31.0", features = ["experimental_async_runtime", "rt-tokio", "experimental_trace_batch_span_processor_with_async_runtime"] }
 pnet = "0.34"
 prometheus = "0.13"
 regex = "1"
+reqwest = {  version = "0.12.26"}
 rtnetlink = "0.18.1"
 rustls = "0.23"
 rustls-native-certs = "0.8"
