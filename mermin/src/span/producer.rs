@@ -2101,14 +2101,34 @@ pub async fn orphan_scanner_task(
 
                     // Orphan detected - remove it
                     let mut map = flow_stats_map.lock().await;
-                    if map.remove(&key).is_ok() {
-                        removed += 1;
-                        crate::metrics::ebpf::inc_orphans_cleaned(1);
-                        warn!(
-                            event.name = "orphan_scanner.entry_removed",
-                            flow.key = ?key,
-                            "removed orphaned eBPF entry (age exceeded threshold and not tracked in userspace)"
-                        );
+                    match map.remove(&key) {
+                        Ok(_) => {
+                            metrics::ebpf::inc_ebpf_map_ops(
+                                EbpfMapName::FlowStats,
+                                EbpfMapOperation::Delete,
+                                EbpfMapStatus::Ok,
+                            );
+                            removed += 1;
+                            metrics::ebpf::inc_orphans_cleaned(1);
+                            warn!(
+                                event.name = "orphan_scanner.entry_removed",
+                                flow.key = ?key,
+                                "removed orphaned eBPF entry (age exceeded threshold and not tracked in userspace)"
+                            );
+                        }
+                        Err(e) => {
+                            metrics::ebpf::inc_ebpf_map_ops(
+                                EbpfMapName::FlowStats,
+                                EbpfMapOperation::Delete,
+                                EbpfMapStatus::Error,
+                            );
+                            debug!(
+                                event.name = "orphan_scanner.entry_removal_failed",
+                                flow.key = ?key,
+                                error.message = %e,
+                                "failed to remove orphaned eBPF entry (may have been evicted already)"
+                            );
+                        }
                     }
                     drop(map);
                 }
