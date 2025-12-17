@@ -802,6 +802,8 @@ rstuvwxyz
 
         let provider = ProviderBuilder::new();
         let result = provider.with_otlp_exporter(options).await;
+
+        // Should succeed without TLS configuration for http:// endpoint
         assert!(result.is_ok());
     }
 
@@ -812,11 +814,17 @@ rstuvwxyz
 
         let provider = ProviderBuilder::new();
         let result = provider.with_otlp_exporter(options).await;
+
+        // Should succeed with automatic TLS for https:// endpoint
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_grpc_insecure_skip_verify_mode_success() {
+        // Note: This test verifies that insecure_skip_verify mode configuration is accepted.
+        // With lazy connection, the channel is created successfully without immediately
+        // connecting to the server. The actual connection attempt happens later when
+        // data is sent through the channel.
         let mut options = default_opts();
         options.endpoint = "https://localhost:4317".to_string();
         options.tls = Some(TlsOptions {
@@ -885,10 +893,18 @@ rstuvwxyz
         let provider = ProviderBuilder::new();
         let result = provider.with_otlp_exporter(options).await;
 
+        // The test certificates may not be valid, so we just verify
+        // that the configuration was processed (either success or TLS error, not file I/O error)
         match result {
-            Ok(_) => {}
+            Ok(_) => {
+                // Success - configuration was accepted
+            }
             Err(e) => {
+                // If it fails, it should be a TLS configuration error (invalid cert format),
+                // not a file I/O error (which would mean the loading logic failed)
                 assert!(matches!(e, OtlpError::TlsConfiguration(_)));
+                // Verify it's a certificate validation error, not a file read error
+                assert!(!e.to_string().contains("failed to open certificate file"));
             }
         }
     }
@@ -913,9 +929,15 @@ rstuvwxyz
         let provider = ProviderBuilder::new();
         let result = provider.with_otlp_exporter(options).await;
 
+        // The test certificates may not be valid PEM format, so we just verify
+        // that the configuration was processed (either success or TLS error, not file I/O error)
         match result {
-            Ok(_) => {}
+            Ok(_) => {
+                // Success - configuration was accepted
+            }
             Err(e) => {
+                // If it fails, it should be a TLS configuration error (invalid cert format),
+                // not a file I/O error (which would mean the loading logic failed)
                 assert!(matches!(e, OtlpError::TlsConfiguration(_)));
             }
         }
@@ -1029,6 +1051,7 @@ rstuvwxyz
         let provider = ProviderBuilder::new();
         let result = provider.with_otlp_exporter(options).await;
 
+        // Should fail when only cert is provided without key
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, OtlpError::TlsConfiguration(_)));
@@ -1052,9 +1075,18 @@ rstuvwxyz
         let provider = ProviderBuilder::new();
         let result = provider.with_otlp_exporter(options).await;
 
+        // http:// endpoint with explicit TLS config should still work
+        // (TLS will be applied even though scheme is http)
+        // The test certificates may not be valid, so we just verify
+        // that the configuration was processed (either success or TLS error, not file I/O error)
         match result {
             Ok(_) => {}
-            Err(e) => assert!(matches!(e, OtlpError::TlsConfiguration(_))),
+            Err(e) => {
+                // If it fails, it should be a TLS configuration error (invalid cert format),
+                // not a file I/O error (which would mean the loading logic failed)
+                assert!(matches!(e, OtlpError::TlsConfiguration(_)));
+                // Verify it's a certificate validation error, not a file read error
+                assert!(!e.to_string().contains("failed to open certificate file")); },
         }
     }
 
@@ -1075,6 +1107,7 @@ rstuvwxyz
         let provider = ProviderBuilder::new();
         let result = provider.with_otlp_exporter(options).await;
 
+        // Should fail with clear error about missing cert file
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, OtlpError::TlsConfiguration(_)));
@@ -1101,6 +1134,7 @@ rstuvwxyz
         let provider = ProviderBuilder::new();
         let result = provider.with_otlp_exporter(options).await;
 
+        // Should fail with clear error about missing key file
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, OtlpError::TlsConfiguration(_)));
