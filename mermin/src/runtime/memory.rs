@@ -137,12 +137,12 @@ pub mod initial_capacity {
     /// - 256 entries covers small-to-medium clusters
     pub const K8S_WATCHER_CACHE: usize = 256;
 
-    /// Calculate flow tracking capacity (FlowStore, TraceIdCache) based on ring buffer size.
+    /// Calculate flow tracking capacity (FlowStore, TraceIdCache) based on pipeline base capacity.
     ///
     /// Uses a 4x multiplier (vs legacy 128x) to balance memory efficiency with performance.
     ///
     /// Calculation rationale:
-    /// - Default ring buffer: 8,192 entries
+    /// - Default base_capacity: 8,192 entries
     /// - 4x multiplier → 32,768 capacity (~13 MB)
     /// - Covers 10K flows/sec without resize
     /// - For extreme traffic (100K flows/sec), will resize to 1M naturally
@@ -153,13 +153,13 @@ pub mod initial_capacity {
     /// ```
     /// use mermin::runtime::memory::initial_capacity;
     ///
-    /// let capacity = initial_capacity::from_ring_buffer_size(8_192);
+    /// let capacity = initial_capacity::from_base_capacity(8_192);
     /// assert_eq!(capacity, 32_768);
     /// ```
-    pub const fn from_ring_buffer_size(ring_buffer_capacity: usize) -> usize {
+    pub const fn from_base_capacity(base_capacity: usize) -> usize {
         // Use 4x multiplier instead of 128x
         // Provides reasonable headroom without massive over-allocation
-        ring_buffer_capacity * 4
+        base_capacity * 4
     }
 }
 

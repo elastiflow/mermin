@@ -270,7 +270,7 @@ For environments with very high network traffic (> 10,000 flows/second), such as
 # Increase internal buffering and parallelism for extreme scale
 pipeline {
   ebpf_max_flows = 500000          # Support up to 50K flows/sec
-  ring_buffer_capacity = 8192
+  base_capacity = 8192
   worker_count = 8
   k8s_decorator_threads = 12
 }
@@ -343,7 +343,7 @@ For nodes with limited memory:
 ```hcl
 # Reduce buffer sizes for low-resource environments
 pipeline {
-  ring_buffer_capacity = 2048
+  base_capacity = 2048
   worker_count = 1
   k8s_decorator_threads = 2
 }
@@ -470,7 +470,7 @@ Key metrics:
 
 **If you see packet drops:**
 
-1. Increase `pipeline.ring_buffer_capacity`
+1. Increase `pipeline.base_capacity`
 2. Increase `pipeline.worker_count`
 3. Add more CPU resources
 4. Reduce monitored interfaces
