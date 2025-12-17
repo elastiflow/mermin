@@ -789,7 +789,9 @@ impl IfaceController {
                                     pin_path = %pin_path,
                                     "tcx link pinned successfully - orphan cleanup enabled"
                                 );
-                                std::mem::forget(pinned_fd_link);
+                                // Drop pinned_fd_link to close the FD, but keep the pin
+                                // The pin keeps the link alive, allowing proper cleanup via unpin()
+                                drop(pinned_fd_link);
                             }
                             Err(e) => {
                                 error!(
@@ -1414,13 +1416,15 @@ impl IfaceController {
         Ok(resolved)
     }
 
-    fn matches_pattern(name: &str, patterns: &[String]) -> bool {
+    /// Check if a name matches any of the given patterns.
+    pub fn matches_pattern(name: &str, patterns: &[String]) -> bool {
         patterns
             .iter()
             .any(|pattern| Self::glob_matches(pattern, name))
     }
 
-    fn glob_matches(pattern: &str, text: &str) -> bool {
+    /// Match a text against a glob pattern.
+    pub fn glob_matches(pattern: &str, text: &str) -> bool {
         const MAX_PATTERN_LEN: usize = 256;
 
         if pattern.len() > MAX_PATTERN_LEN {
@@ -1448,8 +1452,6 @@ impl IfaceController {
     }
 
     /// Check if an error indicates a "not found" condition.
-    ///
-    /// Returns true if the error message contains common "not found" patterns.
     fn is_not_found_error(e: &impl std::fmt::Display) -> bool {
         let error_str = e.to_string();
         error_str.contains("No such file")

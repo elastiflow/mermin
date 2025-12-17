@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use tracing::Level;
 
@@ -27,7 +27,36 @@ pub struct Cli {
     #[arg(short, long, value_name = "LEVEL", env = "MERMIN_LOG_LEVEL")]
     #[serde(with = "level::option", skip_serializing_if = "Option::is_none")]
     pub log_level: Option<Level>,
-    // TODO: metrics port, API port, API TLS
+
+    #[command(subcommand)]
+    pub subcommand: Option<CliSubcommand>,
+}
+
+#[derive(Subcommand, Debug, Clone, Serialize, Deserialize)]
+pub enum CliSubcommand {
+    /// Diagnostic and testing commands
+    Diagnose {
+        #[command(subcommand)]
+        command: DiagnoseCommand,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone, Serialize, Deserialize)]
+pub enum DiagnoseCommand {
+    /// Test BPF filesystem writeability and program attach/detach operations
+    Bpf {
+        /// Test only a specific network interface instead of all interfaces
+        #[arg(short, long, conflicts_with_all = ["pattern", "skip"])]
+        interface: Option<String>,
+        /// Glob patterns to filter which interfaces to test (e.g., 'eth*', 'en*').
+        /// Can be specified multiple times. Only matching interfaces are tested.
+        #[arg(long, action = clap::ArgAction::Append)]
+        pattern: Vec<String>,
+        /// Glob patterns to exclude interfaces from testing (e.g., 'docker*', 'veth*').
+        /// Can be specified multiple times. Matching interfaces are skipped.
+        #[arg(long, action = clap::ArgAction::Append)]
+        skip: Vec<String>,
+    },
 }
 
 fn is_false(v: &bool) -> bool {

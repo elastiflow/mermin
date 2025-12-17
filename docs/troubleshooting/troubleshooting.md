@@ -109,6 +109,27 @@ Key metrics to monitor include:
 - **Interface Unavailable**: Mermin logs a warning and continues monitoring other interfaces
 - **eBPF Load Failure**: Agent fails to start; check kernel version and eBPF support
 - **High Packet Loss**: Increase `pipeline.ring_buffer_capacity` or reduce monitored interfaces -->
+### Test eBPF Capabilities
+
+Use the `diagnose bpf` subcommand to validate eBPF support and test attach/detach operations:
+
+```bash
+# In a deployed cluster
+POD=$(kubectl get pod -n mermin -l app.kubernetes.io/name=mermin -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n mermin $POD -- mermin diagnose bpf
+
+# On bare metal or in a debug pod
+mermin diagnose bpf
+```
+
+This validates:
+
+- Required Linux capabilities
+- eBPF program loading and attach/detach operations
+- BPF filesystem writeability
+- Kernel version compatibility
+
+For detailed usage, interpreting results, and troubleshooting failures, see [Deployment Issues: Test eBPF Attach/Detach Operations](deployment-issues.md#test-ebpf-attachdetach-operations).
 
 ## Getting Help
 

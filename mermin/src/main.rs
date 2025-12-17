@@ -90,7 +90,19 @@ async fn shutdown_exporter_gracefully(
 
 #[tokio::main]
 async fn main() {
-    if let Err(e) = run().await {
+    let cli = Cli::parse();
+
+    if let Some(subcommand) = &cli.subcommand {
+        match runtime::commands::execute(subcommand).await {
+            Ok(()) => std::process::exit(0),
+            Err(e) => {
+                display_error(&e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if let Err(e) = run(cli).await {
         display_error(&e);
         std::process::exit(1);
     }
@@ -112,10 +124,9 @@ async fn main() {
 /// CI check in place: .github/workflows/ci.yml (schema_version_check job)
 const EBPF_MAP_SCHEMA_VERSION: u8 = 1;
 
-async fn run() -> Result<()> {
+async fn run(cli: Cli) -> Result<()> {
     // TODO: listen for SIGUP `kill -HUP $(pidof mermin)` to reload the eBPF program and all configuration
     // TODO: do not reload global configuration found in CLI
-    let cli = Cli::parse();
     let reload_handles = init_bootstrap_logger(&cli);
     let runtime = Context::new(cli)?;
     let Context { conf, .. } = runtime;
