@@ -2228,7 +2228,6 @@ pub async fn orphan_scanner_task(
                     map.keys().filter_map(|k| k.ok()).collect()
                 };
 
-                // Update eBPF map metrics: entries count
                 let ebpf_map_entries = keys.len() as u64;
                 registry::EBPF_MAP_ENTRIES
                     .with_label_values(&[EbpfMapName::FlowStats.as_ref()])
