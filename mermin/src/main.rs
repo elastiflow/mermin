@@ -44,7 +44,9 @@ use crate::{
     },
     k8s::{attributor::Attributor, decorator::Decorator},
     metrics::{
+        ebpf::EbpfMapName,
         k8s::K8sDecoratorStatus,
+        registry,
         server::start_metrics_server,
         userspace::{ChannelName, ChannelSendStatus},
     },
@@ -468,11 +470,17 @@ async fn run(cli: Cli) -> Result<()> {
 
     // Set eBPF map capacity metrics for monitoring utilization
     // FLOW_STATS: configurable via pipeline.ebpf_max_flows (hash map, entry count)
-    metrics::ebpf::set_map_capacity("FLOW_STATS", conf.pipeline.ebpf_max_flows as u64);
+    registry::EBPF_MAP_CAPACITY
+        .with_label_values(&[EbpfMapName::FlowStats.as_ref()])
+        .set(conf.pipeline.ebpf_max_flows as i64);
     // FLOW_EVENTS: 256 KB ring buffer (matches RING_BUF_SIZE_BYTES in mermin-ebpf/src/main.rs)
-    metrics::ebpf::set_map_capacity("FLOW_EVENTS", FLOW_EVENTS_RINGBUF_SIZE_BYTES);
+    registry::EBPF_MAP_CAPACITY
+        .with_label_values(&[EbpfMapName::FlowEvents.as_ref()])
+        .set(FLOW_EVENTS_RINGBUF_SIZE_BYTES as i64);
     // LISTENING_PORTS: 65536 max entries (matches HashMap definition in mermin-ebpf/src/main.rs)
-    metrics::ebpf::set_map_capacity("LISTENING_PORTS", LISTENING_PORTS_CAPACITY);
+    registry::EBPF_MAP_CAPACITY
+        .with_label_values(&[EbpfMapName::ListeningPorts.as_ref()])
+        .set(LISTENING_PORTS_CAPACITY as i64);
 
     info!(
         event.name = "ebpf.maps_ready",
@@ -584,8 +592,10 @@ async fn run(cli: Cli) -> Result<()> {
     // Set LISTENING_PORTS map metrics after initial scan
     // Note: This only reflects the startup state; eBPF kprobes maintain the map
     // in real-time after this, but those changes are not reflected in these metrics.
-    if metrics::registry::debug_enabled() {
-        metrics::ebpf::set_map_entries("LISTENING_PORTS", scanned_ports as u64);
+    if registry::debug_enabled() {
+        registry::EBPF_MAP_ENTRIES
+            .with_label_values(&[EbpfMapName::ListeningPorts.as_ref()])
+            .set(scanned_ports as i64);
     }
 
     info!(
@@ -697,7 +707,7 @@ async fn run(cli: Cli) -> Result<()> {
                             let channel_size = flow_span_rx.len();
                             metrics::userspace::set_channel_size(ChannelName::ProducerOutput, channel_size);
 
-                            let _timer = metrics::registry::PROCESSING_LATENCY_SECONDS
+                            let _timer = registry::PROCESSING_LATENCY_SECONDS
                                 .with_label_values(&["k8s_decoration"])
                                 .start_timer();
                             let (span, err) = decorator.decorate_or_fallback(flow_span).await;

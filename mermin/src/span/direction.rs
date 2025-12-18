@@ -51,7 +51,10 @@ use tokio::sync::Mutex;
 
 use crate::{
     ip::flow_key_to_ip_addrs,
-    metrics::ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus, inc_ebpf_map_ops},
+    metrics::{
+        ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus},
+        registry,
+    },
 };
 
 // ICMP (IPv4) Type Constants
@@ -165,11 +168,13 @@ impl DirectionInferrer {
         };
         match map.get(&dst_key, 0) {
             Ok(_) => {
-                inc_ebpf_map_ops(
-                    EbpfMapName::ListeningPorts,
-                    EbpfMapOperation::Read,
-                    EbpfMapStatus::Ok,
-                );
+                registry::EBPF_MAP_OPS_TOTAL
+                    .with_label_values(&[
+                        EbpfMapName::ListeningPorts.as_ref(),
+                        EbpfMapOperation::Read.as_ref(),
+                        EbpfMapStatus::Ok.as_ref(),
+                    ])
+                    .inc();
                 return Some(ClientServer {
                     client_ip: *src_ip,
                     client_port: flow_key.src_port,
@@ -186,7 +191,13 @@ impl DirectionInferrer {
                 } else {
                     EbpfMapStatus::Error
                 };
-                inc_ebpf_map_ops(EbpfMapName::ListeningPorts, EbpfMapOperation::Read, status);
+                registry::EBPF_MAP_OPS_TOTAL
+                    .with_label_values(&[
+                        EbpfMapName::ListeningPorts.as_ref(),
+                        EbpfMapOperation::Read.as_ref(),
+                        status.as_ref(),
+                    ])
+                    .inc();
             }
         }
 
@@ -197,11 +208,13 @@ impl DirectionInferrer {
         };
         match map.get(&src_key, 0) {
             Ok(_) => {
-                inc_ebpf_map_ops(
-                    EbpfMapName::ListeningPorts,
-                    EbpfMapOperation::Read,
-                    EbpfMapStatus::Ok,
-                );
+                registry::EBPF_MAP_OPS_TOTAL
+                    .with_label_values(&[
+                        EbpfMapName::ListeningPorts.as_ref(),
+                        EbpfMapOperation::Read.as_ref(),
+                        EbpfMapStatus::Ok.as_ref(),
+                    ])
+                    .inc();
                 return Some(ClientServer {
                     client_ip: *dst_ip,
                     client_port: flow_key.dst_port,
@@ -218,7 +231,13 @@ impl DirectionInferrer {
                 } else {
                     EbpfMapStatus::Error
                 };
-                inc_ebpf_map_ops(EbpfMapName::ListeningPorts, EbpfMapOperation::Read, status);
+                registry::EBPF_MAP_OPS_TOTAL
+                    .with_label_values(&[
+                        EbpfMapName::ListeningPorts.as_ref(),
+                        EbpfMapOperation::Read.as_ref(),
+                        status.as_ref(),
+                    ])
+                    .inc();
             }
         }
 

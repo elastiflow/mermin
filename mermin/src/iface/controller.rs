@@ -149,11 +149,7 @@ use tracing::{debug, error, info, trace, warn};
 use crate::{
     error::MerminError,
     iface::types::{ControllerEvent, NetlinkEvent},
-    metrics::{
-        cleanup::MetricCleanupTracker,
-        ebpf::{inc_tc_programs_attached, inc_tc_programs_detached},
-        registry,
-    },
+    metrics::{cleanup::MetricCleanupTracker, ebpf::TcOperation, registry},
     runtime::conf::TcxOrderStrategy,
 };
 
@@ -849,7 +845,15 @@ impl IfaceController {
             self.register_tc_link(iface.to_string(), direction_name, link_id);
         }
 
-        inc_tc_programs_attached(iface, direction_name);
+        registry::TC_PROGRAMS_TOTAL
+            .with_label_values(&[TcOperation::Attached.as_ref()])
+            .inc();
+
+        if registry::debug_enabled() {
+            registry::TC_PROGRAMS_ATTACHED_BY_INTERFACE_TOTAL
+                .with_label_values(&[iface, direction_name])
+                .inc();
+        }
 
         debug!(
             event.name = "interface_controller.program_attached",
@@ -936,7 +940,15 @@ impl IfaceController {
                             pin_path = %pin_path,
                             "unpinned TCX link during detachment"
                         );
-                        inc_tc_programs_detached(iface, direction);
+                        registry::TC_PROGRAMS_TOTAL
+                            .with_label_values(&[TcOperation::Detached.as_ref()])
+                            .inc();
+
+                        if registry::debug_enabled() {
+                            registry::TC_PROGRAMS_DETACHED_BY_INTERFACE_TOTAL
+                                .with_label_values(&[iface, direction])
+                                .inc();
+                        }
                         drop(fd_link);
                         return Ok(());
                     }
@@ -991,7 +1003,15 @@ impl IfaceController {
             ))
         })?;
 
-        inc_tc_programs_detached(iface, direction);
+        registry::TC_PROGRAMS_TOTAL
+            .with_label_values(&[TcOperation::Detached.as_ref()])
+            .inc();
+
+        if registry::debug_enabled() {
+            registry::TC_PROGRAMS_DETACHED_BY_INTERFACE_TOTAL
+                .with_label_values(&[iface, direction])
+                .inc();
+        }
 
         Ok(())
     }
@@ -1022,7 +1042,15 @@ impl IfaceController {
                                 pin_path = %pin_path,
                                 "detached TCX program via pinned link"
                             );
-                            inc_tc_programs_detached(iface, direction);
+                            registry::TC_PROGRAMS_TOTAL
+                                .with_label_values(&[TcOperation::Detached.as_ref()])
+                                .inc();
+
+                            if registry::debug_enabled() {
+                                registry::TC_PROGRAMS_DETACHED_BY_INTERFACE_TOTAL
+                                    .with_label_values(&[iface, direction])
+                                    .inc();
+                            }
                             return Ok(());
                         }
                         Err(e) => {

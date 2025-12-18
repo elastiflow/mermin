@@ -29,6 +29,7 @@ use crate::{
         self,
         ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus},
         flow::{FlowEventResult, FlowSpanProducerStatus},
+        registry,
         userspace::{ChannelName, ChannelSendStatus},
     },
     packet::{
@@ -429,14 +430,16 @@ impl FlowSpanProducer {
                     };
 
                     while let Some(item) = flow_events.next() {
-                        let _timer = metrics::registry::PROCESSING_LATENCY_SECONDS
+                        let _timer = registry::PROCESSING_LATENCY_SECONDS
                             .with_label_values(&["flow_producer_input"])
                             .start_timer();
 
                         let flow_event: FlowEvent =
                             unsafe { std::ptr::read_unaligned(item.as_ptr() as *const FlowEvent) };
 
-                        metrics::ebpf::inc_map_bytes(EbpfMapName::FlowEvents, flow_event.snaplen as u64);
+                        registry::EBPF_MAP_BYTES_TOTAL
+                            .with_label_values(&[EbpfMapName::FlowEvents.as_ref()])
+                            .inc_by(flow_event.snaplen as u64);
                         metrics::flow::inc_flow_events(FlowEventResult::Received);
 
                         let mut sent = false;
@@ -700,18 +703,22 @@ impl FlowWorker {
         let mut map = self.flow_stats_map.lock().await;
         match map.remove(&event.flow_key) {
             Ok(_) => {
-                metrics::ebpf::inc_ebpf_map_ops(
-                    EbpfMapName::FlowStats,
-                    EbpfMapOperation::Delete,
-                    EbpfMapStatus::Ok,
-                );
+                registry::EBPF_MAP_OPS_TOTAL
+                    .with_label_values(&[
+                        EbpfMapName::FlowStats.as_ref(),
+                        EbpfMapOperation::Delete.as_ref(),
+                        EbpfMapStatus::Ok.as_ref(),
+                    ])
+                    .inc();
             }
             Err(e) => {
-                metrics::ebpf::inc_ebpf_map_ops(
-                    EbpfMapName::FlowStats,
-                    EbpfMapOperation::Delete,
-                    EbpfMapStatus::Error,
-                );
+                registry::EBPF_MAP_OPS_TOTAL
+                    .with_label_values(&[
+                        EbpfMapName::FlowStats.as_ref(),
+                        EbpfMapOperation::Delete.as_ref(),
+                        EbpfMapStatus::Error.as_ref(),
+                    ])
+                    .inc();
                 warn!(
                     event.name = "tunneled_flow.cleanup_failed",
                     worker.id = self.worker_id,
@@ -738,11 +745,13 @@ impl FlowWorker {
             let map = self.flow_stats_map.lock().await;
             match map.get(&event.flow_key, 0) {
                 Ok(s) => {
-                    metrics::ebpf::inc_ebpf_map_ops(
-                        EbpfMapName::FlowStats,
-                        EbpfMapOperation::Read,
-                        EbpfMapStatus::Ok,
-                    );
+                    registry::EBPF_MAP_OPS_TOTAL
+                        .with_label_values(&[
+                            EbpfMapName::FlowStats.as_ref(),
+                            EbpfMapOperation::Read.as_ref(),
+                            EbpfMapStatus::Ok.as_ref(),
+                        ])
+                        .inc();
                     s
                 }
                 Err(e) => {
@@ -751,17 +760,21 @@ impl FlowWorker {
                     // the entry doesn't exist, we prevent unnecessary cleanup attempt
                     guard.keep();
                     if e.to_string().contains("not found") {
-                        metrics::ebpf::inc_ebpf_map_ops(
-                            EbpfMapName::FlowStats,
-                            EbpfMapOperation::Read,
-                            EbpfMapStatus::NotFound,
-                        );
+                        registry::EBPF_MAP_OPS_TOTAL
+                            .with_label_values(&[
+                                EbpfMapName::FlowStats.as_ref(),
+                                EbpfMapOperation::Read.as_ref(),
+                                EbpfMapStatus::NotFound.as_ref(),
+                            ])
+                            .inc();
                     } else {
-                        metrics::ebpf::inc_ebpf_map_ops(
-                            EbpfMapName::FlowStats,
-                            EbpfMapOperation::Read,
-                            EbpfMapStatus::Error,
-                        );
+                        registry::EBPF_MAP_OPS_TOTAL
+                            .with_label_values(&[
+                                EbpfMapName::FlowStats.as_ref(),
+                                EbpfMapOperation::Read.as_ref(),
+                                EbpfMapStatus::Error.as_ref(),
+                            ])
+                            .inc();
                     }
                     return Err(Error::FlowNotFound);
                 }
@@ -786,18 +799,22 @@ impl FlowWorker {
                     // Successfully removed from eBPF map - disable guard cleanup to prevent
                     // double-removal attempt when the guard is dropped
                     guard.keep();
-                    metrics::ebpf::inc_ebpf_map_ops(
-                        EbpfMapName::FlowStats,
-                        EbpfMapOperation::Delete,
-                        EbpfMapStatus::Ok,
-                    );
+                    registry::EBPF_MAP_OPS_TOTAL
+                        .with_label_values(&[
+                            EbpfMapName::FlowStats.as_ref(),
+                            EbpfMapOperation::Delete.as_ref(),
+                            EbpfMapStatus::Ok.as_ref(),
+                        ])
+                        .inc();
                 }
                 Err(e) => {
-                    metrics::ebpf::inc_ebpf_map_ops(
-                        EbpfMapName::FlowStats,
-                        EbpfMapOperation::Delete,
-                        EbpfMapStatus::Error,
-                    );
+                    registry::EBPF_MAP_OPS_TOTAL
+                        .with_label_values(&[
+                            EbpfMapName::FlowStats.as_ref(),
+                            EbpfMapOperation::Delete.as_ref(),
+                            EbpfMapStatus::Error.as_ref(),
+                        ])
+                        .inc();
                     warn!(
                         event.name = "flow.cleanup_failed",
                         worker.id = self.worker_id,
@@ -1550,26 +1567,32 @@ async fn record_flow(
     }
     let stats = match map.get(&flow_key, 0) {
         Ok(s) => {
-            metrics::ebpf::inc_ebpf_map_ops(
-                EbpfMapName::FlowStats,
-                EbpfMapOperation::Read,
-                EbpfMapStatus::Ok,
-            );
+            registry::EBPF_MAP_OPS_TOTAL
+                .with_label_values(&[
+                    EbpfMapName::FlowStats.as_ref(),
+                    EbpfMapOperation::Read.as_ref(),
+                    EbpfMapStatus::Ok.as_ref(),
+                ])
+                .inc();
             s
         }
         Err(e) => {
             if e.to_string().contains("not found") {
-                metrics::ebpf::inc_ebpf_map_ops(
-                    EbpfMapName::FlowStats,
-                    EbpfMapOperation::Read,
-                    EbpfMapStatus::NotFound,
-                );
+                registry::EBPF_MAP_OPS_TOTAL
+                    .with_label_values(&[
+                        EbpfMapName::FlowStats.as_ref(),
+                        EbpfMapOperation::Read.as_ref(),
+                        EbpfMapStatus::NotFound.as_ref(),
+                    ])
+                    .inc();
             } else {
-                metrics::ebpf::inc_ebpf_map_ops(
-                    EbpfMapName::FlowStats,
-                    EbpfMapOperation::Read,
-                    EbpfMapStatus::Error,
-                );
+                registry::EBPF_MAP_OPS_TOTAL
+                    .with_label_values(&[
+                        EbpfMapName::FlowStats.as_ref(),
+                        EbpfMapOperation::Read.as_ref(),
+                        EbpfMapStatus::Error.as_ref(),
+                    ])
+                    .inc();
             }
             warn!(
                 event.name = "record.ebpf_read_failed",
@@ -1803,18 +1826,22 @@ async fn record_flow(
 
             match map.insert(ebpf_key, updated_stats, 0) {
                 Ok(_) => {
-                    metrics::ebpf::inc_ebpf_map_ops(
-                        EbpfMapName::FlowStats,
-                        EbpfMapOperation::Write,
-                        EbpfMapStatus::Ok,
-                    );
+                    registry::EBPF_MAP_OPS_TOTAL
+                        .with_label_values(&[
+                            EbpfMapName::FlowStats.as_ref(),
+                            EbpfMapOperation::Write.as_ref(),
+                            EbpfMapStatus::Ok.as_ref(),
+                        ])
+                        .inc();
                 }
                 Err(e) => {
-                    metrics::ebpf::inc_ebpf_map_ops(
-                        EbpfMapName::FlowStats,
-                        EbpfMapOperation::Write,
-                        EbpfMapStatus::Error,
-                    );
+                    registry::EBPF_MAP_OPS_TOTAL
+                        .with_label_values(&[
+                            EbpfMapName::FlowStats.as_ref(),
+                            EbpfMapOperation::Write.as_ref(),
+                            EbpfMapStatus::Error.as_ref(),
+                        ])
+                        .inc();
                     debug!(
                         event.name = "record.metadata_reset_failed",
                         flow.community_id = %community_id,
@@ -1869,27 +1896,33 @@ pub async fn timeout_and_remove_flow(
 
         match map.get(&key, 0) {
             Ok(stats) => {
-                metrics::ebpf::inc_ebpf_map_ops(
-                    EbpfMapName::FlowStats,
-                    EbpfMapOperation::Read,
-                    EbpfMapStatus::Ok,
-                );
+                registry::EBPF_MAP_OPS_TOTAL
+                    .with_label_values(&[
+                        EbpfMapName::FlowStats.as_ref(),
+                        EbpfMapOperation::Read.as_ref(),
+                        EbpfMapStatus::Ok.as_ref(),
+                    ])
+                    .inc();
                 let end_time_nanos = stats.last_seen_ns + boot_time_offset;
                 flow_span.end_time = UNIX_EPOCH + Duration::from_nanos(end_time_nanos);
             }
             Err(e) => {
                 if e.to_string().contains("not found") {
-                    metrics::ebpf::inc_ebpf_map_ops(
-                        EbpfMapName::FlowStats,
-                        EbpfMapOperation::Read,
-                        EbpfMapStatus::NotFound,
-                    );
+                    registry::EBPF_MAP_OPS_TOTAL
+                        .with_label_values(&[
+                            EbpfMapName::FlowStats.as_ref(),
+                            EbpfMapOperation::Read.as_ref(),
+                            EbpfMapStatus::NotFound.as_ref(),
+                        ])
+                        .inc();
                 } else {
-                    metrics::ebpf::inc_ebpf_map_ops(
-                        EbpfMapName::FlowStats,
-                        EbpfMapOperation::Read,
-                        EbpfMapStatus::Error,
-                    );
+                    registry::EBPF_MAP_OPS_TOTAL
+                        .with_label_values(&[
+                            EbpfMapName::FlowStats.as_ref(),
+                            EbpfMapOperation::Read.as_ref(),
+                            EbpfMapStatus::Error.as_ref(),
+                        ])
+                        .inc();
                 }
             }
         }
@@ -1965,18 +1998,22 @@ pub async fn timeout_and_remove_flow(
 
         match map.remove(&key) {
             Ok(_) => {
-                metrics::ebpf::inc_ebpf_map_ops(
-                    EbpfMapName::FlowStats,
-                    EbpfMapOperation::Delete,
-                    EbpfMapStatus::Ok,
-                );
+                registry::EBPF_MAP_OPS_TOTAL
+                    .with_label_values(&[
+                        EbpfMapName::FlowStats.as_ref(),
+                        EbpfMapOperation::Delete.as_ref(),
+                        EbpfMapStatus::Ok.as_ref(),
+                    ])
+                    .inc();
             }
             Err(e) => {
-                metrics::ebpf::inc_ebpf_map_ops(
-                    EbpfMapName::FlowStats,
-                    EbpfMapOperation::Delete,
-                    EbpfMapStatus::Error,
-                );
+                registry::EBPF_MAP_OPS_TOTAL
+                    .with_label_values(&[
+                        EbpfMapName::FlowStats.as_ref(),
+                        EbpfMapOperation::Delete.as_ref(),
+                        EbpfMapStatus::Error.as_ref(),
+                    ])
+                    .inc();
                 debug!(
                     event.name = "ebpf.map_cleanup_failed",
                     flow.community_id = %community_id,
@@ -2055,7 +2092,9 @@ pub async fn orphan_scanner_task(
 
                 // Update eBPF map metrics: entries count
                 let ebpf_map_entries = keys.len() as u64;
-                metrics::ebpf::set_map_entries("FLOW_STATS", ebpf_map_entries);
+                registry::EBPF_MAP_ENTRIES
+                    .with_label_values(&[EbpfMapName::FlowStats.as_ref()])
+                    .set(ebpf_map_entries as i64);
 
                 for key in keys {
                     scanned += 1;
@@ -2099,13 +2138,15 @@ pub async fn orphan_scanner_task(
                     let mut map = flow_stats_map.lock().await;
                     match map.remove(&key) {
                         Ok(_) => {
-                            metrics::ebpf::inc_ebpf_map_ops(
-                                EbpfMapName::FlowStats,
-                                EbpfMapOperation::Delete,
-                                EbpfMapStatus::Ok,
-                            );
+                            registry::EBPF_MAP_OPS_TOTAL
+                                .with_label_values(&[
+                                    EbpfMapName::FlowStats.as_ref(),
+                                    EbpfMapOperation::Delete.as_ref(),
+                                    EbpfMapStatus::Ok.as_ref(),
+                                ])
+                                .inc();
                             removed += 1;
-                            metrics::ebpf::inc_orphans_cleaned(1);
+                            registry::EBPF_ORPHANS_CLEANED_TOTAL.inc_by(1);
                             warn!(
                                 event.name = "orphan_scanner.entry_removed",
                                 flow.key = ?key,
@@ -2113,11 +2154,13 @@ pub async fn orphan_scanner_task(
                             );
                         }
                         Err(e) => {
-                            metrics::ebpf::inc_ebpf_map_ops(
-                                EbpfMapName::FlowStats,
-                                EbpfMapOperation::Delete,
-                                EbpfMapStatus::Error,
-                            );
+                            registry::EBPF_MAP_OPS_TOTAL
+                                .with_label_values(&[
+                                    EbpfMapName::FlowStats.as_ref(),
+                                    EbpfMapOperation::Delete.as_ref(),
+                                    EbpfMapStatus::Error.as_ref(),
+                                ])
+                                .inc();
                             debug!(
                                 event.name = "orphan_scanner.entry_removal_failed",
                                 flow.key = ?key,

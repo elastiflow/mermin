@@ -16,7 +16,10 @@ use network_types::ip::IpProto;
 use tokio::sync::Mutex;
 use tracing::{debug, trace, warn};
 
-use crate::metrics::ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus, inc_ebpf_map_ops};
+use crate::metrics::{
+    ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus},
+    registry,
+};
 
 /// TCP connection states from /proc/net/tcp
 /// We only care about TCP_LISTEN (0x0A)
@@ -175,19 +178,23 @@ impl ListeningPortScanner {
             // Insert into eBPF map (duplicates are harmless, just updates value)
             match map.insert(key, 1u8, 0) {
                 Ok(_) => {
-                    inc_ebpf_map_ops(
-                        EbpfMapName::ListeningPorts,
-                        EbpfMapOperation::Write,
-                        EbpfMapStatus::Ok,
-                    );
+                    registry::EBPF_MAP_OPS_TOTAL
+                        .with_label_values(&[
+                            EbpfMapName::ListeningPorts.as_ref(),
+                            EbpfMapOperation::Write.as_ref(),
+                            EbpfMapStatus::Ok.as_ref(),
+                        ])
+                        .inc();
                     count += 1;
                 }
                 Err(e) => {
-                    inc_ebpf_map_ops(
-                        EbpfMapName::ListeningPorts,
-                        EbpfMapOperation::Write,
-                        EbpfMapStatus::Error,
-                    );
+                    registry::EBPF_MAP_OPS_TOTAL
+                        .with_label_values(&[
+                            EbpfMapName::ListeningPorts.as_ref(),
+                            EbpfMapOperation::Write.as_ref(),
+                            EbpfMapStatus::Error.as_ref(),
+                        ])
+                        .inc();
                     warn!(
                         event.name = "listening_ports.insert_failed",
                         path = path,
