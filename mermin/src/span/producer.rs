@@ -839,11 +839,7 @@ impl FlowWorker {
         // The entry is now managed by flow_store and will be cleaned up by timeout task
         guard.keep();
 
-        // Calculate poller_id for metric tracking (same hash used by pollers)
-        // Note: Poller count is clamped to 32 in FlowSpanProducer, so we use 32 here
-        const MAX_POLLERS: usize = 32;
-        let poller_id = hash_string(&community_id) % MAX_POLLERS;
-        metrics::span::inc_flow_spans_processed(&poller_id.to_string());
+        metrics::span::inc_flow_spans_processed(&self.worker_id.to_string());
 
         Ok(())
     }
