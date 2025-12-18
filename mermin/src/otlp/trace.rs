@@ -156,12 +156,18 @@ impl TraceableExporter for TraceExporterAdapter {
         // will be tracked separately via the tracing layer when export errors occur.
         if self.has_otlp {
             registry::EXPORT_FLOW_SPANS_TOTAL
-                .with_label_values(&[ExporterName::Otlp.as_ref(), ExportStatus::Attempted.as_ref()])
+                .with_label_values(&[
+                    ExporterName::Otlp.as_ref(),
+                    ExportStatus::Attempted.as_ref(),
+                ])
                 .inc();
         }
         if self.has_stdout {
             registry::EXPORT_FLOW_SPANS_TOTAL
-                .with_label_values(&[ExporterName::Stdout.as_ref(), ExportStatus::Attempted.as_ref()])
+                .with_label_values(&[
+                    ExporterName::Stdout.as_ref(),
+                    ExportStatus::Attempted.as_ref(),
+                ])
                 .inc();
         }
 
