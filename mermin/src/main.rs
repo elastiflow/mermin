@@ -584,7 +584,9 @@ async fn run(cli: Cli) -> Result<()> {
     // Set LISTENING_PORTS map metrics after initial scan
     // Note: This only reflects the startup state; eBPF kprobes maintain the map
     // in real-time after this, but those changes are not reflected in these metrics.
-    metrics::ebpf::set_map_entries("LISTENING_PORTS", scanned_ports as u64);
+    if metrics::registry::debug_enabled() {
+        metrics::ebpf::set_map_entries("LISTENING_PORTS", scanned_ports as u64);
+    }
 
     info!(
         event.name = "listening_ports.scan_complete",
