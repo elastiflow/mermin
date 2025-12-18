@@ -777,23 +777,34 @@ impl FlowWorker {
                     // The guard would attempt to remove from the eBPF map on drop, but since
                     // the entry doesn't exist, we prevent unnecessary cleanup attempt
                     guard.keep();
-                    if e.to_string().contains("not found") {
-                        registry::EBPF_MAP_OPS_TOTAL
-                            .with_label_values(&[
-                                EbpfMapName::FlowStats.as_ref(),
-                                EbpfMapOperation::Read.as_ref(),
-                                EbpfMapStatus::NotFound.as_ref(),
-                            ])
-                            .inc();
-                    } else {
-                        registry::EBPF_MAP_OPS_TOTAL
-                            .with_label_values(&[
-                                EbpfMapName::FlowStats.as_ref(),
-                                EbpfMapOperation::Read.as_ref(),
-                                EbpfMapStatus::Error.as_ref(),
-                            ])
-                            .inc();
-                    }
+                    // Traverse the error chain to find an io::Error with NotFound kind
+                    let status = {
+                        let mut current: Option<&dyn std::error::Error> = Some(&e);
+                        let mut found_not_found = false;
+
+                        while let Some(err) = current {
+                            if let Some(io_err) = err.downcast_ref::<std::io::Error>()
+                                && io_err.kind() == std::io::ErrorKind::NotFound
+                            {
+                                found_not_found = true;
+                                break;
+                            }
+                            current = err.source();
+                        }
+
+                        if found_not_found {
+                            EbpfMapStatus::NotFound
+                        } else {
+                            EbpfMapStatus::Error
+                        }
+                    };
+                    registry::EBPF_MAP_OPS_TOTAL
+                        .with_label_values(&[
+                            EbpfMapName::FlowStats.as_ref(),
+                            EbpfMapOperation::Read.as_ref(),
+                            status.as_ref(),
+                        ])
+                        .inc();
                     return Err(Error::FlowNotFound);
                 }
             }
@@ -1677,23 +1688,34 @@ async fn record_flow(
             s
         }
         Err(e) => {
-            if e.to_string().contains("not found") {
-                registry::EBPF_MAP_OPS_TOTAL
-                    .with_label_values(&[
-                        EbpfMapName::FlowStats.as_ref(),
-                        EbpfMapOperation::Read.as_ref(),
-                        EbpfMapStatus::NotFound.as_ref(),
-                    ])
-                    .inc();
-            } else {
-                registry::EBPF_MAP_OPS_TOTAL
-                    .with_label_values(&[
-                        EbpfMapName::FlowStats.as_ref(),
-                        EbpfMapOperation::Read.as_ref(),
-                        EbpfMapStatus::Error.as_ref(),
-                    ])
-                    .inc();
-            }
+            // Traverse the error chain to find an io::Error with NotFound kind
+            let status = {
+                let mut current: Option<&dyn std::error::Error> = Some(&e);
+                let mut found_not_found = false;
+
+                while let Some(err) = current {
+                    if let Some(io_err) = err.downcast_ref::<std::io::Error>()
+                        && io_err.kind() == std::io::ErrorKind::NotFound
+                    {
+                        found_not_found = true;
+                        break;
+                    }
+                    current = err.source();
+                }
+
+                if found_not_found {
+                    EbpfMapStatus::NotFound
+                } else {
+                    EbpfMapStatus::Error
+                }
+            };
+            registry::EBPF_MAP_OPS_TOTAL
+                .with_label_values(&[
+                    EbpfMapName::FlowStats.as_ref(),
+                    EbpfMapOperation::Read.as_ref(),
+                    status.as_ref(),
+                ])
+                .inc();
             warn!(
                 event.name = "record.ebpf_read_failed",
                 flow.community_id = %community_id,
