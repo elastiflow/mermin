@@ -26,7 +26,6 @@ use crate::{
     filter::source::PacketFilter,
     ip::{Error, flow_key_to_ip_addrs},
     metrics::{
-        self,
         ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus},
         flow::{FlowEventResult, FlowSpanProducerStatus},
         registry,
@@ -215,8 +214,12 @@ impl FlowSpanProducer {
             let (worker_tx, worker_rx) = mpsc::channel(worker_capacity);
             worker_channels.push(worker_tx);
 
-            metrics::userspace::set_channel_capacity(ChannelName::PacketWorker, worker_capacity);
-            metrics::userspace::set_channel_size(ChannelName::PacketWorker, 0);
+            registry::CHANNEL_CAPACITY
+                .with_label_values(&[ChannelName::PacketWorker.as_ref()])
+                .set(worker_capacity as i64);
+            registry::CHANNEL_ENTRIES
+                .with_label_values(&[ChannelName::PacketWorker.as_ref()])
+                .set(0);
 
             let flow_worker = FlowWorker::new(
                 worker_id,
@@ -457,7 +460,9 @@ impl FlowSpanProducer {
 
                             match worker_tx.try_send(flow_event) {
                                 Ok(_) => {
-                                    metrics::userspace::inc_channel_sends(ChannelName::PacketWorker, ChannelSendStatus::Success);
+                                    registry::CHANNEL_SENDS_TOTAL
+                                        .with_label_values(&[ChannelName::PacketWorker.as_ref(), ChannelSendStatus::Success.as_ref()])
+                                        .inc();
                                     worker_index = (current_worker + 1) % worker_count;
                                     sent = true;
                                     break;
@@ -468,7 +473,9 @@ impl FlowSpanProducer {
                                 }
                                 Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
                                     // Worker is gone, try next one
-                                    metrics::userspace::inc_channel_sends(ChannelName::PacketWorker, ChannelSendStatus::Error);
+                                    registry::CHANNEL_SENDS_TOTAL
+                                        .with_label_values(&[ChannelName::PacketWorker.as_ref(), ChannelSendStatus::Error.as_ref()])
+                                        .inc();
                                     continue;
                                 }
                             }
@@ -626,10 +633,9 @@ impl FlowWorker {
         );
 
         while let Some(flow_event) = self.flow_event_rx.recv().await {
-            metrics::userspace::set_channel_size(
-                ChannelName::PacketWorker,
-                self.flow_event_rx.len(),
-            );
+            registry::CHANNEL_ENTRIES
+                .with_label_values(&[ChannelName::PacketWorker.as_ref()])
+                .set(self.flow_event_rx.len() as i64);
 
             if let Err(e) = self.process_new_flow(flow_event).await {
                 warn!(
@@ -1886,16 +1892,20 @@ async fn record_flow(
     // Send to exporter
     match flow_span_tx.try_send(recorded_span) {
         Ok(_) => {
-            metrics::userspace::inc_channel_sends(
-                ChannelName::ProducerOutput,
-                ChannelSendStatus::Success,
-            );
+            registry::CHANNEL_SENDS_TOTAL
+                .with_label_values(&[
+                    ChannelName::ProducerOutput.as_ref(),
+                    ChannelSendStatus::Success.as_ref(),
+                ])
+                .inc();
         }
         Err(mpsc::error::TrySendError::Full(_)) => {
-            metrics::userspace::inc_channel_sends(
-                ChannelName::ProducerOutput,
-                ChannelSendStatus::Backpressure,
-            );
+            registry::CHANNEL_SENDS_TOTAL
+                .with_label_values(&[
+                    ChannelName::ProducerOutput.as_ref(),
+                    ChannelSendStatus::Backpressure.as_ref(),
+                ])
+                .inc();
             debug!(
                 event.name = "span.dropped",
                 flow.community_id = %community_id,
@@ -1905,10 +1915,12 @@ async fn record_flow(
             );
         }
         Err(mpsc::error::TrySendError::Closed(_)) => {
-            metrics::userspace::inc_channel_sends(
-                ChannelName::ProducerOutput,
-                ChannelSendStatus::Error,
-            );
+            registry::CHANNEL_SENDS_TOTAL
+                .with_label_values(&[
+                    ChannelName::ProducerOutput.as_ref(),
+                    ChannelSendStatus::Error.as_ref(),
+                ])
+                .inc();
             error!(
                 event.name = "span.export_failed",
                 flow.community_id = %community_id,
@@ -2068,16 +2080,20 @@ pub async fn timeout_and_remove_flow(
 
         match flow_span_tx.try_send(recorded_span) {
             Ok(_) => {
-                metrics::userspace::inc_channel_sends(
-                    ChannelName::ProducerOutput,
-                    ChannelSendStatus::Success,
-                );
+                registry::CHANNEL_SENDS_TOTAL
+                    .with_label_values(&[
+                        ChannelName::ProducerOutput.as_ref(),
+                        ChannelSendStatus::Success.as_ref(),
+                    ])
+                    .inc();
             }
             Err(mpsc::error::TrySendError::Full(_)) => {
-                metrics::userspace::inc_channel_sends(
-                    ChannelName::ProducerOutput,
-                    ChannelSendStatus::Backpressure,
-                );
+                registry::CHANNEL_SENDS_TOTAL
+                    .with_label_values(&[
+                        ChannelName::ProducerOutput.as_ref(),
+                        ChannelSendStatus::Backpressure.as_ref(),
+                    ])
+                    .inc();
                 debug!(
                     event.name = "span.dropped",
                     flow.community_id = %community_id,
@@ -2087,10 +2103,12 @@ pub async fn timeout_and_remove_flow(
                 );
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
-                metrics::userspace::inc_channel_sends(
-                    ChannelName::ProducerOutput,
-                    ChannelSendStatus::Error,
-                );
+                registry::CHANNEL_SENDS_TOTAL
+                    .with_label_values(&[
+                        ChannelName::ProducerOutput.as_ref(),
+                        ChannelSendStatus::Error.as_ref(),
+                    ])
+                    .inc();
                 error!(
                     event.name = "span.export_failed",
                     flow.community_id = %community_id,
