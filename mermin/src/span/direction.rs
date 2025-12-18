@@ -183,26 +183,12 @@ impl DirectionInferrer {
                 });
             }
             Err(e) => {
-                // Traverse the error chain to find an io::Error with NotFound kind
-                let status = {
-                    let mut current: Option<&dyn std::error::Error> = Some(&e);
-                    let mut found_not_found = false;
-
-                    while let Some(err) = current {
-                        if let Some(io_err) = err.downcast_ref::<std::io::Error>()
-                            && io_err.kind() == std::io::ErrorKind::NotFound
-                        {
-                            found_not_found = true;
-                            break;
-                        }
-                        current = err.source();
-                    }
-
-                    if found_not_found {
+                // Match on MapError variants directly for type-safe error handling
+                let status = match &e {
+                    aya::maps::MapError::KeyNotFound | aya::maps::MapError::ElementNotFound => {
                         EbpfMapStatus::NotFound
-                    } else {
-                        EbpfMapStatus::Error
                     }
+                    _ => EbpfMapStatus::Error,
                 };
                 registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[

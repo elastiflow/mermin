@@ -777,26 +777,11 @@ impl FlowWorker {
                     // The guard would attempt to remove from the eBPF map on drop, but since
                     // the entry doesn't exist, we prevent unnecessary cleanup attempt
                     guard.keep();
-                    // Traverse the error chain to find an io::Error with NotFound kind
-                    let status = {
-                        let mut current: Option<&dyn std::error::Error> = Some(&e);
-                        let mut found_not_found = false;
-
-                        while let Some(err) = current {
-                            if let Some(io_err) = err.downcast_ref::<std::io::Error>()
-                                && io_err.kind() == std::io::ErrorKind::NotFound
-                            {
-                                found_not_found = true;
-                                break;
-                            }
-                            current = err.source();
-                        }
-
-                        if found_not_found {
+                    let status = match &e {
+                        aya::maps::MapError::KeyNotFound | aya::maps::MapError::ElementNotFound => {
                             EbpfMapStatus::NotFound
-                        } else {
-                            EbpfMapStatus::Error
                         }
+                        _ => EbpfMapStatus::Error,
                     };
                     registry::EBPF_MAP_OPS_TOTAL
                         .with_label_values(&[
@@ -1688,26 +1673,11 @@ async fn record_flow(
             s
         }
         Err(e) => {
-            // Traverse the error chain to find an io::Error with NotFound kind
-            let status = {
-                let mut current: Option<&dyn std::error::Error> = Some(&e);
-                let mut found_not_found = false;
-
-                while let Some(err) = current {
-                    if let Some(io_err) = err.downcast_ref::<std::io::Error>()
-                        && io_err.kind() == std::io::ErrorKind::NotFound
-                    {
-                        found_not_found = true;
-                        break;
-                    }
-                    current = err.source();
-                }
-
-                if found_not_found {
+            let status = match &e {
+                aya::maps::MapError::KeyNotFound | aya::maps::MapError::ElementNotFound => {
                     EbpfMapStatus::NotFound
-                } else {
-                    EbpfMapStatus::Error
                 }
+                _ => EbpfMapStatus::Error,
             };
             registry::EBPF_MAP_OPS_TOTAL
                 .with_label_values(&[
@@ -1738,8 +1708,7 @@ async fn record_flow(
         .reverse_bytes
         .saturating_sub(last_recorded_reverse_bytes);
 
-    if delta_packets > 0 || delta_reverse_packets > 0 || delta_bytes > 0 || delta_reverse_bytes > 0
-    {
+    if delta_packets > 0 || delta_reverse_packets > 0 {
         let interface_name_for_metrics = flow_store
             .get(community_id)
             .and_then(|entry| {
@@ -2062,23 +2031,19 @@ pub async fn timeout_and_remove_flow(
                 flow_span.end_time = UNIX_EPOCH + Duration::from_nanos(end_time_nanos);
             }
             Err(e) => {
-                if e.to_string().contains("not found") {
-                    registry::EBPF_MAP_OPS_TOTAL
-                        .with_label_values(&[
-                            EbpfMapName::FlowStats.as_ref(),
-                            EbpfMapOperation::Read.as_ref(),
-                            EbpfMapStatus::NotFound.as_ref(),
-                        ])
-                        .inc();
-                } else {
-                    registry::EBPF_MAP_OPS_TOTAL
-                        .with_label_values(&[
-                            EbpfMapName::FlowStats.as_ref(),
-                            EbpfMapOperation::Read.as_ref(),
-                            EbpfMapStatus::Error.as_ref(),
-                        ])
-                        .inc();
-                }
+                let status = match &e {
+                    aya::maps::MapError::KeyNotFound | aya::maps::MapError::ElementNotFound => {
+                        EbpfMapStatus::NotFound
+                    }
+                    _ => EbpfMapStatus::Error,
+                };
+                registry::EBPF_MAP_OPS_TOTAL
+                    .with_label_values(&[
+                        EbpfMapName::FlowStats.as_ref(),
+                        EbpfMapOperation::Read.as_ref(),
+                        status.as_ref(),
+                    ])
+                    .inc();
             }
         }
         drop(map);
