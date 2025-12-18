@@ -186,7 +186,6 @@ async fn metrics_summary_handler(debug_enabled: bool) -> impl IntoResponse {
         let mut standard_metrics = Vec::new();
         let mut debug_metrics = Vec::new();
 
-        // Gather standard metrics
         let standard_families = registry::STANDARD_REGISTRY.gather();
         for family in standard_families {
             let metric_type = match family.get_field_type() {
@@ -202,15 +201,14 @@ async fn metrics_summary_handler(debug_enabled: bool) -> impl IntoResponse {
                 .first()
                 .and_then(|m| {
                     if m.get_label().is_empty() {
-                        None
-                    } else {
-                        Some(
-                            m.get_label()
-                                .iter()
-                                .map(|l| l.get_name().to_string())
-                                .collect(),
-                        )
+                        return None;
                     }
+                    Some(
+                        m.get_label()
+                            .iter()
+                            .map(|l| l.get_name().to_string())
+                            .collect(),
+                    )
                 })
                 .unwrap_or_default();
 
@@ -223,7 +221,6 @@ async fn metrics_summary_handler(debug_enabled: bool) -> impl IntoResponse {
             });
         }
 
-        // Gather debug metrics if enabled
         if debug_enabled {
             let debug_families = registry::DEBUG_REGISTRY.gather();
             for family in debug_families {
