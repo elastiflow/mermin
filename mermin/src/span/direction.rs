@@ -183,13 +183,26 @@ impl DirectionInferrer {
                 });
             }
             Err(e) => {
-                // Track not_found (expected) vs error (unexpected)
-                let status = if e.to_string().contains("not found")
-                    || e.to_string().contains("No such file")
-                {
-                    EbpfMapStatus::NotFound
-                } else {
-                    EbpfMapStatus::Error
+                // Traverse the error chain to find an io::Error with NotFound kind
+                let status = {
+                    let mut current: Option<&dyn std::error::Error> = Some(&e);
+                    let mut found_not_found = false;
+
+                    while let Some(err) = current {
+                        if let Some(io_err) = err.downcast_ref::<std::io::Error>()
+                            && io_err.kind() == std::io::ErrorKind::NotFound
+                        {
+                            found_not_found = true;
+                            break;
+                        }
+                        current = err.source();
+                    }
+
+                    if found_not_found {
+                        EbpfMapStatus::NotFound
+                    } else {
+                        EbpfMapStatus::Error
+                    }
                 };
                 registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
@@ -224,12 +237,26 @@ impl DirectionInferrer {
             }
             Err(e) => {
                 // Track not_found (expected) vs error (unexpected)
-                let status = if e.to_string().contains("not found")
-                    || e.to_string().contains("No such file")
-                {
-                    EbpfMapStatus::NotFound
-                } else {
-                    EbpfMapStatus::Error
+                // Traverse the error chain to find an io::Error with NotFound kind
+                let status = {
+                    let mut current: Option<&dyn std::error::Error> = Some(&e);
+                    let mut found_not_found = false;
+
+                    while let Some(err) = current {
+                        if let Some(io_err) = err.downcast_ref::<std::io::Error>()
+                            && io_err.kind() == std::io::ErrorKind::NotFound
+                        {
+                            found_not_found = true;
+                            break;
+                        }
+                        current = err.source();
+                    }
+
+                    if found_not_found {
+                        EbpfMapStatus::NotFound
+                    } else {
+                        EbpfMapStatus::Error
+                    }
                 };
                 registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
