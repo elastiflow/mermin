@@ -879,7 +879,11 @@ impl FlowWorker {
         // The entry is now managed by flow_store and will be cleaned up by timeout task
         guard.keep();
 
-        metrics::span::inc_flow_spans_processed(&self.worker_id.to_string());
+        if registry::debug_enabled() {
+            registry::FLOW_SPANS_PROCESSED_TOTAL
+                .with_label_values(&[&self.worker_id.to_string()])
+                .inc();
+        }
 
         Ok(())
     }
@@ -1430,9 +1434,17 @@ impl FlowPoller {
 
                 // Update flow store and queue size metrics for this poller
                 let poller_id_str = self.id.to_string();
-                metrics::span::set_flow_store_size(&poller_id_str, flows_checked);
+                if registry::debug_enabled() {
+                    registry::FLOW_SPAN_STORE_SIZE
+                        .with_label_values(&[&poller_id_str])
+                        .set(flows_checked as i64);
+                }
                 let queue_size = flows_to_record.len() + flows_to_remove.len();
-                metrics::span::set_poller_queue_size(&poller_id_str, queue_size);
+                if registry::debug_enabled() {
+                    registry::FLOW_PRODUCER_QUEUE_SIZE
+                        .with_label_values(&[&poller_id_str])
+                        .set(queue_size as i64);
+                }
 
                 // Now process flows WITHOUT holding iterator locks
                 let record_start = std::time::Instant::now();
