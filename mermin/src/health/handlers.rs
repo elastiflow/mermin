@@ -81,7 +81,7 @@ pub async fn liveness_handler(State(state): State<HealthState>) -> impl IntoResp
     let export_errors_stdout = registry::EXPORT_FLOW_SPANS_TOTAL
         .with_label_values(&["stdout", ExportStatus::Error.as_ref()])
         .get();
-    let total_export_errors = export_errors_otlp + export_errors_stdout;
+    let export_errors_total = export_errors_otlp + export_errors_stdout;
     let pipeline_healthy = ebpf_loaded && ready_to_process;
 
     let body = Json(json!({
@@ -92,7 +92,7 @@ pub async fn liveness_handler(State(state): State<HealthState>) -> impl IntoResp
             "pipeline_healthy": pipeline_healthy
         },
         "metrics": {
-            "export_errors_total": total_export_errors
+            "export_errors_total": export_errors_total
         }
     }));
 
@@ -113,7 +113,7 @@ pub async fn readiness_handler(State(state): State<HealthState>) -> impl IntoRes
     let export_errors_stdout = registry::EXPORT_FLOW_SPANS_TOTAL
         .with_label_values(&["stdout", ExportStatus::Error.as_ref()])
         .get();
-    let total_export_errors = export_errors_otlp + export_errors_stdout;
+    let export_errors_total = export_errors_otlp + export_errors_stdout;
     let pipeline_healthy = ebpf_loaded && ready_to_process;
 
     let status_code = if is_ready {
@@ -125,7 +125,7 @@ pub async fn readiness_handler(State(state): State<HealthState>) -> impl IntoRes
             k8s_caches_synced = %k8s_caches_synced,
             ready_to_process = %ready_to_process,
             pipeline_healthy = %pipeline_healthy,
-            export_errors_total = %total_export_errors,
+            export_errors_total = %export_errors_total,
             "readiness check failed"
         );
         StatusCode::SERVICE_UNAVAILABLE
@@ -140,7 +140,7 @@ pub async fn readiness_handler(State(state): State<HealthState>) -> impl IntoRes
             "pipeline_healthy": pipeline_healthy
         },
         "metrics": {
-            "export_errors_total": total_export_errors
+            "export_errors_total": export_errors_total
         }
     }));
 
