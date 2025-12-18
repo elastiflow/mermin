@@ -9,13 +9,13 @@ Mermin exposes Prometheus metrics in the standard Prometheus text format at mult
 - `/metrics` - All metrics (standard + debug if enabled)
 - `/metrics/standard` - Standard metrics only (no high-cardinality labels)
 - `/metrics/debug` - Debug metrics only (returns 404 if disabled)
-- `/metrics/summary` - JSON summary of all available metrics with metadata (name, type, description, labels, category)
+- `/metrics:summary` - JSON summary of all available metrics with metadata (name, type, description, labels, category) (AIP-136 custom method)
 
 **Default URL:** `http://localhost:10250/metrics`
 
 The `/metrics`, `/metrics/standard`, and `/metrics/debug` endpoints return metrics in Prometheus text format, which can be scraped by Prometheus or queried directly using tools like `curl`.
 
-The `/metrics/summary` endpoint returns a JSON response containing metadata about all available metrics, including:
+The `/metrics:summary` endpoint returns a JSON response containing metadata about all available metrics, including:
 - Metric names and types (counter, gauge, histogram)
 - Descriptions
 - Label names
@@ -24,7 +24,7 @@ The `/metrics/summary` endpoint returns a JSON response containing metadata abou
 
 **Example:** If deployed locally, query the summary endpoint exposed on port 10250:
 ```bash
-curl http://localhost:10250/metrics/summary | jq .
+curl http://localhost:10250/metrics:summary | jq .
 ```
 
 ## Metrics Reference

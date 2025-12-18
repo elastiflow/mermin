@@ -82,7 +82,7 @@ metrics {
   # - /metrics          - All metrics (standard + debug if enabled)
   # - /metrics/standard - Standard metrics only (aggregated, no high-cardinality labels)
   # - /metrics/debug    - Debug metrics only (returns 404 if debug not enabled)
-  # - /metrics/summary  - JSON summary of all available metrics with metadata
+  # - /metrics:summary  - JSON summary of all available metrics with metadata
 }
 
 # Parser configuration for eBPF packet parsing

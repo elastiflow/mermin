@@ -178,7 +178,7 @@ struct MetricsSummaryResponse {
     metrics: Vec<MetricSummary>,
 }
 
-/// Handler for the `/metrics/summary` endpoint.
+/// Handler for the `/metrics:summary` endpoint.
 ///
 /// Returns a JSON summary of all available metrics with their metadata.
 async fn metrics_summary_handler(debug_enabled: bool) -> impl IntoResponse {
@@ -327,7 +327,7 @@ fn create_metrics_router(debug_enabled: bool) -> Router {
             get(move || debug_metrics_handler(debug_enabled)),
         )
         .route(
-            "/metrics/summary",
+            "/metrics:summary",
             get(move || metrics_summary_handler(debug_enabled)),
         )
         .layer(TraceLayer::new_for_http())
@@ -339,7 +339,7 @@ fn create_metrics_router(debug_enabled: bool) -> Router {
 /// - `<listen_address>:<port>/metrics` - All metrics (standard + debug if enabled)
 /// - `<listen_address>:<port>/metrics/standard` - Standard metrics only (always available)
 /// - `<listen_address>:<port>/metrics/debug` - Debug metrics only (404 if debug not enabled)
-/// - `<listen_address>:<port>/metrics/summary` - JSON summary of all available metrics
+/// - `<listen_address>:<port>/metrics:summary` - JSON summary of all available metrics
 ///
 /// ### Example
 ///
