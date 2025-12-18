@@ -1,5 +1,3 @@
-mod error;
-
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -13,13 +11,13 @@ use axum::{
     response::{IntoResponse, Json, Response},
     routing::get,
 };
-pub use error::HealthError;
 use serde_json::json;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, warn};
 
 use crate::{
+    health::HealthError,
     metrics::{export::ExportStatus, registry},
     runtime::conf::ApiConf,
 };

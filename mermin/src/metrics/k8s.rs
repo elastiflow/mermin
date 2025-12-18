@@ -22,6 +22,28 @@ impl AsRef<str> for K8sDecoratorStatus {
     }
 }
 
+/// K8s watcher event types for metrics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum K8sWatcherEventType {
+    Apply,
+    Delete,
+    Init,
+    InitDone,
+    Error,
+}
+
+impl AsRef<str> for K8sWatcherEventType {
+    fn as_ref(&self) -> &str {
+        match self {
+            K8sWatcherEventType::Apply => "apply",
+            K8sWatcherEventType::Delete => "delete",
+            K8sWatcherEventType::Init => "init",
+            K8sWatcherEventType::InitDone => "init_done",
+            K8sWatcherEventType::Error => "error",
+        }
+    }
+}
+
 /// Increment the K8s decorator flow spans counter.
 pub fn inc_k8s_decorator_flow_spans(status: K8sDecoratorStatus) {
     registry::K8S_DECORATOR_FLOW_SPANS_TOTAL
