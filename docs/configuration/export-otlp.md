@@ -631,8 +631,6 @@ export "traces" {
 
 ## Monitoring Export Health
 
-See [Application Metrics](../observability/app-metrics.md) for complete Prometheus query examples.
-
 ### Key Metrics to Monitor
 
 - `mermin_export_flow_spans_total{exporter_type="otlp",status="ok"}` - OTLP export success rate
@@ -640,6 +638,8 @@ See [Application Metrics](../observability/app-metrics.md) for complete Promethe
 - `mermin_channel_size{channel="producer_output"}` / `mermin_channel_capacity{channel="producer_output"}` - Channel utilization
 - `mermin_export_latency_seconds` - Export latency histogram
 - `mermin_channel_sends_total{channel="decorator_output",status="error"}` - Channel send failures (indicates dropped spans)
+
+See the [Application Metrics](../observability/app-metrics.md) guide for complete Prometheus query examples.
 
 ### Healthy Indicators
 
