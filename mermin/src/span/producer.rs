@@ -8,7 +8,7 @@ use std::{
 use aya::maps::{HashMap as EbpfHashMap, RingBuf};
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
-use mermin_common::{FlowEvent, FlowKey, FlowStats, ListeningPortKey};
+use mermin_common::{Direction, FlowEvent, FlowKey, FlowStats, ListeningPortKey};
 use moka::future::Cache;
 use network_types::{
     eth::EtherType,
@@ -424,7 +424,11 @@ impl FlowSpanProducer {
                                 error.message = %e,
                                 "error waiting for ring buffer readability"
                             );
-                            metrics::flow::inc_flow_events(FlowEventResult::DroppedError);
+                            if registry::debug_enabled() {
+                                registry::FLOW_EVENTS_TOTAL
+                                    .with_label_values(&[FlowEventResult::DroppedError.as_ref()])
+                                    .inc();
+                            }
                             break;
                         }
                     };
@@ -440,7 +444,11 @@ impl FlowSpanProducer {
                         registry::EBPF_MAP_BYTES_TOTAL
                             .with_label_values(&[EbpfMapName::FlowEvents.as_ref()])
                             .inc_by(flow_event.snaplen as u64);
-                        metrics::flow::inc_flow_events(FlowEventResult::Received);
+                        if registry::debug_enabled() {
+                            registry::FLOW_EVENTS_TOTAL
+                                .with_label_values(&[FlowEventResult::Received.as_ref()])
+                                .inc();
+                        }
 
                         let mut sent = false;
                         for attempt in 0..worker_count {
@@ -470,7 +478,11 @@ impl FlowSpanProducer {
                             // All workers are full - drop event to prevent ring buffer backup
                             // CRITICAL: Blocking here prevents draining ring buffer, causing eBPF to drop MORE events
                             // This is a fail-safe to maintain pipeline throughput under extreme load.
-                            metrics::flow::inc_flow_events(FlowEventResult::DroppedBackpressure);
+                            if registry::debug_enabled() {
+                                registry::FLOW_EVENTS_TOTAL
+                                    .with_label_values(&[FlowEventResult::DroppedBackpressure.as_ref()])
+                                    .inc();
+                            }
 
                             // Log detailed backpressure info every 1000 drops (avoid log spam)
                             static BACKPRESSURE_DROP_COUNT: std::sync::atomic::AtomicU64 =
@@ -784,14 +796,25 @@ impl FlowWorker {
         // Early flow filtering: Check if this flow should be tracked
         // If filtered out, immediately remove from eBPF map to prevent memory leaks
         if !self.should_process_flow(&event.flow_key, &stats) {
-            metrics::flow::inc_flow_events(FlowEventResult::Filtered);
+            if registry::debug_enabled() {
+                registry::FLOW_EVENTS_TOTAL
+                    .with_label_values(&[FlowEventResult::Filtered.as_ref()])
+                    .inc();
+            }
 
             let iface_name = if let Some(entry) = self.iface_map.get(&stats.ifindex) {
                 entry.value().clone()
             } else {
                 "unknown".to_string()
             };
-            metrics::flow::inc_producer_flow_spans(&iface_name, FlowSpanProducerStatus::Dropped);
+            registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
+                .with_label_values(&[FlowSpanProducerStatus::Dropped.as_ref()])
+                .inc();
+            if registry::debug_enabled() {
+                registry::FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL
+                    .with_label_values(&[&iface_name, FlowSpanProducerStatus::Dropped.as_ref()])
+                    .inc();
+            }
 
             let mut map = self.flow_stats_map.lock().await;
             match map.remove(&event.flow_key) {
@@ -1110,32 +1133,71 @@ impl FlowWorker {
         self.insert_flow(community_id.to_string(), span, timeout);
 
         let interface_name = iface_name.as_deref().unwrap_or("unknown");
-        metrics::flow::inc_producer_flow_spans(interface_name, FlowSpanProducerStatus::Created);
+        registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
+            .with_label_values(&[FlowSpanProducerStatus::Created.as_ref()])
+            .inc();
+        if registry::debug_enabled() {
+            registry::FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL
+                .with_label_values(&[interface_name, FlowSpanProducerStatus::Created.as_ref()])
+                .inc();
+        }
 
         // Count initial packets and bytes in metrics
         if stats.packets > 0 {
-            metrics::flow::inc_packets_total(interface_name, stats.direction, stats.packets);
+            registry::PACKETS_TOTAL.inc_by(stats.packets);
+            if registry::debug_enabled() {
+                let direction_str = match stats.direction {
+                    Direction::Ingress => "ingress",
+                    Direction::Egress => "egress",
+                };
+                registry::PACKETS_BY_INTERFACE_TOTAL
+                    .with_label_values(&[interface_name, direction_str])
+                    .inc_by(stats.packets);
+            }
         }
         if stats.bytes > 0 {
-            metrics::flow::inc_bytes_total(interface_name, stats.direction, stats.bytes);
+            registry::BYTES_TOTAL.inc_by(stats.bytes);
+            if registry::debug_enabled() {
+                let direction_str = match stats.direction {
+                    Direction::Ingress => "ingress",
+                    Direction::Egress => "egress",
+                };
+                registry::BYTES_BY_INTERFACE_TOTAL
+                    .with_label_values(&[interface_name, direction_str])
+                    .inc_by(stats.bytes);
+            }
         }
         if stats.reverse_packets > 0 {
             let reverse_direction = match stats.direction {
-                mermin_common::Direction::Ingress => mermin_common::Direction::Egress,
-                mermin_common::Direction::Egress => mermin_common::Direction::Ingress,
+                Direction::Ingress => Direction::Egress,
+                Direction::Egress => Direction::Ingress,
             };
-            metrics::flow::inc_packets_total(
-                interface_name,
-                reverse_direction,
-                stats.reverse_packets,
-            );
+            registry::PACKETS_TOTAL.inc_by(stats.reverse_packets);
+            if registry::debug_enabled() {
+                let direction_str = match reverse_direction {
+                    Direction::Ingress => "ingress",
+                    Direction::Egress => "egress",
+                };
+                registry::PACKETS_BY_INTERFACE_TOTAL
+                    .with_label_values(&[interface_name, direction_str])
+                    .inc_by(stats.reverse_packets);
+            }
         }
         if stats.reverse_bytes > 0 {
             let reverse_direction = match stats.direction {
-                mermin_common::Direction::Ingress => mermin_common::Direction::Egress,
-                mermin_common::Direction::Egress => mermin_common::Direction::Ingress,
+                Direction::Ingress => Direction::Egress,
+                Direction::Egress => Direction::Ingress,
             };
-            metrics::flow::inc_bytes_total(interface_name, reverse_direction, stats.reverse_bytes);
+            registry::BYTES_TOTAL.inc_by(stats.reverse_bytes);
+            if registry::debug_enabled() {
+                let direction_str = match reverse_direction {
+                    Direction::Ingress => "ingress",
+                    Direction::Egress => "egress",
+                };
+                registry::BYTES_BY_INTERFACE_TOTAL
+                    .with_label_values(&[interface_name, direction_str])
+                    .inc_by(stats.reverse_bytes);
+            }
         }
 
         trace!(
@@ -1187,7 +1249,12 @@ impl FlowWorker {
             .as_deref()
             .unwrap_or("unknown")
             .to_string();
-        metrics::flow::inc_flows_created(&iface_name);
+        registry::FLOW_SPANS_CREATED_TOTAL.inc();
+        if registry::debug_enabled() {
+            registry::FLOWS_CREATED_BY_INTERFACE_TOTAL
+                .with_label_values(&[&iface_name])
+                .inc();
+        }
 
         let flow_entry = FlowEntry { flow_span };
 
@@ -1196,7 +1263,12 @@ impl FlowWorker {
         match old_entry {
             None => {
                 // New flow: increment active gauge
-                metrics::flow::inc_flows_active(&iface_name);
+                registry::FLOW_SPANS_ACTIVE_TOTAL.inc();
+                if registry::debug_enabled() {
+                    registry::FLOWS_ACTIVE_BY_INTERFACE_TOTAL
+                        .with_label_values(&[&iface_name])
+                        .inc();
+                }
             }
             Some(old) => {
                 // Replaced existing flow: check if interface changed (handles interface migration edge cases)
@@ -1209,8 +1281,18 @@ impl FlowWorker {
                     .to_string();
 
                 if old_iface != iface_name {
-                    metrics::flow::dec_flows_active(&old_iface);
-                    metrics::flow::inc_flows_active(&iface_name);
+                    registry::FLOW_SPANS_ACTIVE_TOTAL.dec();
+                    if registry::debug_enabled() {
+                        registry::FLOWS_ACTIVE_BY_INTERFACE_TOTAL
+                            .with_label_values(&[&old_iface])
+                            .dec();
+                    }
+                    registry::FLOW_SPANS_ACTIVE_TOTAL.inc();
+                    if registry::debug_enabled() {
+                        registry::FLOWS_ACTIVE_BY_INTERFACE_TOTAL
+                            .with_label_values(&[&iface_name])
+                            .inc();
+                    }
                 }
             }
         }
@@ -1631,40 +1713,60 @@ async fn record_flow(
             .unwrap_or_else(|| "unknown".to_string());
 
         if delta_packets > 0 {
-            metrics::flow::inc_packets_total(
-                &interface_name_for_metrics,
-                stats.direction,
-                delta_packets,
-            );
+            registry::PACKETS_TOTAL.inc_by(delta_packets);
+            if registry::debug_enabled() {
+                let direction_str = match stats.direction {
+                    Direction::Ingress => "ingress",
+                    Direction::Egress => "egress",
+                };
+                registry::PACKETS_BY_INTERFACE_TOTAL
+                    .with_label_values(&[&interface_name_for_metrics, direction_str])
+                    .inc_by(delta_packets);
+            }
         }
         if delta_bytes > 0 {
-            metrics::flow::inc_bytes_total(
-                &interface_name_for_metrics,
-                stats.direction,
-                delta_bytes,
-            );
+            registry::BYTES_TOTAL.inc_by(delta_bytes);
+            if registry::debug_enabled() {
+                let direction_str = match stats.direction {
+                    Direction::Ingress => "ingress",
+                    Direction::Egress => "egress",
+                };
+                registry::BYTES_BY_INTERFACE_TOTAL
+                    .with_label_values(&[&interface_name_for_metrics, direction_str])
+                    .inc_by(delta_bytes);
+            }
         }
         if delta_reverse_packets > 0 {
             let reverse_direction = match stats.direction {
-                mermin_common::Direction::Ingress => mermin_common::Direction::Egress,
-                mermin_common::Direction::Egress => mermin_common::Direction::Ingress,
+                Direction::Ingress => Direction::Egress,
+                Direction::Egress => Direction::Ingress,
             };
-            metrics::flow::inc_packets_total(
-                &interface_name_for_metrics,
-                reverse_direction,
-                delta_reverse_packets,
-            );
+            registry::PACKETS_TOTAL.inc_by(delta_reverse_packets);
+            if registry::debug_enabled() {
+                let direction_str = match reverse_direction {
+                    Direction::Ingress => "ingress",
+                    Direction::Egress => "egress",
+                };
+                registry::PACKETS_BY_INTERFACE_TOTAL
+                    .with_label_values(&[&interface_name_for_metrics, direction_str])
+                    .inc_by(delta_reverse_packets);
+            }
         }
         if delta_reverse_bytes > 0 {
             let reverse_direction = match stats.direction {
-                mermin_common::Direction::Ingress => mermin_common::Direction::Egress,
-                mermin_common::Direction::Egress => mermin_common::Direction::Ingress,
+                Direction::Ingress => Direction::Egress,
+                Direction::Egress => Direction::Ingress,
             };
-            metrics::flow::inc_bytes_total(
-                &interface_name_for_metrics,
-                reverse_direction,
-                delta_reverse_bytes,
-            );
+            registry::BYTES_TOTAL.inc_by(delta_reverse_bytes);
+            if registry::debug_enabled() {
+                let direction_str = match reverse_direction {
+                    Direction::Ingress => "ingress",
+                    Direction::Egress => "egress",
+                };
+                registry::BYTES_BY_INTERFACE_TOTAL
+                    .with_label_values(&[&interface_name_for_metrics, direction_str])
+                    .inc_by(delta_reverse_bytes);
+            }
         }
     }
 
@@ -1702,7 +1804,14 @@ async fn record_flow(
         .network_interface_name
         .as_deref()
         .unwrap_or("unknown");
-    metrics::flow::inc_producer_flow_spans(interface_name, FlowSpanProducerStatus::Recorded);
+    registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
+        .with_label_values(&[FlowSpanProducerStatus::Recorded.as_ref()])
+        .inc();
+    if registry::debug_enabled() {
+        registry::FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL
+            .with_label_values(&[interface_name, FlowSpanProducerStatus::Recorded.as_ref()])
+            .inc();
+    }
 
     // Update IP metadata from eBPF stats
     let is_ip_flow = stats.ether_type == EtherType::Ipv4 || stats.ether_type == EtherType::Ipv6;
@@ -2033,8 +2142,20 @@ pub async fn timeout_and_remove_flow(
         .network_interface_name
         .as_deref()
         .unwrap_or("unknown");
-    metrics::flow::inc_producer_flow_spans(iface_name, FlowSpanProducerStatus::Idled);
-    metrics::flow::dec_flows_active(iface_name);
+    registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
+        .with_label_values(&[FlowSpanProducerStatus::Idled.as_ref()])
+        .inc();
+    if registry::debug_enabled() {
+        registry::FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL
+            .with_label_values(&[iface_name, FlowSpanProducerStatus::Idled.as_ref()])
+            .inc();
+    }
+    registry::FLOW_SPANS_ACTIVE_TOTAL.dec();
+    if registry::debug_enabled() {
+        registry::FLOWS_ACTIVE_BY_INTERFACE_TOTAL
+            .with_label_values(&[iface_name])
+            .dec();
+    }
 }
 
 /// Periodic orphan scanner task - safety net for cleaning up stale eBPF entries.
