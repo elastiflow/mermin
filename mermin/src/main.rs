@@ -824,10 +824,10 @@ async fn run(cli: Cli) -> Result<()> {
             let export_start = std::time::Instant::now();
             let export_result = tokio::time::timeout(Duration::from_secs(EXPORT_TIMEOUT_SECS), exporter.export(traceable)).await;
             let export_duration = export_start.elapsed();
-            metrics::export::observe_export_blocking_time(export_duration);
+            registry::EXPORT_LATENCY_SECONDS.observe(export_duration.as_secs_f64());
 
             if export_result.is_err() {
-                metrics::export::inc_export_timeouts();
+                registry::EXPORT_TIMEOUTS_TOTAL.inc();
                 warn!(event.name = "flow.export_timeout", "export call timed out, span may be lost");
             } else {
                 trace!(event.name = "exporter.export_successful", flow.community_id = %community_id);

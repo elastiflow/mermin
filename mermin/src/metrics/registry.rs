@@ -214,7 +214,7 @@ lazy_static! {
     // ============================================================================
 
     /// Total number of flow spans exported to external systems.
-    /// Labels: exporter = "otlp" | "stdout", status = "ok" | "error" | "noop"
+    /// Labels: exporter = "otlp" | "stdout", status = "ok" | "attempted" | "error" | "noop"
     pub static ref EXPORT_FLOW_SPANS_TOTAL: IntCounterVec = IntCounterVec::new(
         Opts::new("export_flow_spans_total", "Total number of flow spans exported to external systems")
             .namespace("mermin"),

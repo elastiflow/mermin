@@ -12,7 +12,7 @@ use opentelemetry_sdk::{
 use tracing::trace;
 
 use crate::metrics::{
-    export::{ExportStatus, inc_export_flow_spans},
+    export::{ExportStatus, ExporterName},
     registry,
 };
 
@@ -152,12 +152,17 @@ impl TraceableExporter for TraceExporterAdapter {
 
         // Note: OpenTelemetry SDK may export to multiple exporters, so we track metrics
         // for each configured exporter type. The actual export happens asynchronously
-        // through the SDK's batch processor, so we track the attempt here.
+        // through the SDK's batch processor, so we track the attempt here. Success/failure
+        // will be tracked separately via the tracing layer when export errors occur.
         if self.has_otlp {
-            inc_export_flow_spans("otlp", ExportStatus::Ok);
+            registry::EXPORT_FLOW_SPANS_TOTAL
+                .with_label_values(&[ExporterName::Otlp.as_ref(), ExportStatus::Attempted.as_ref()])
+                .inc();
         }
         if self.has_stdout {
-            inc_export_flow_spans("stdout", ExportStatus::Ok);
+            registry::EXPORT_FLOW_SPANS_TOTAL
+                .with_label_values(&[ExporterName::Stdout.as_ref(), ExportStatus::Attempted.as_ref()])
+                .inc();
         }
 
         trace!(
@@ -179,7 +184,9 @@ pub struct NoOpExporterAdapter {}
 impl TraceableExporter for NoOpExporterAdapter {
     async fn export(&self, _traceable: TraceableRecord) {
         // Track as "noop" - span was processed but not exported (no exporter configured)
-        inc_export_flow_spans("noop", ExportStatus::NoOp);
+        registry::EXPORT_FLOW_SPANS_TOTAL
+            .with_label_values(&[ExporterName::Noop.as_ref(), ExportStatus::NoOp.as_ref()])
+            .inc();
         trace!(
             event.name = "span.export_skipped",
             reason = "no_op_exporter_configured",
