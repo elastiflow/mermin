@@ -52,8 +52,8 @@ use tokio::sync::Mutex;
 use crate::{
     ip::flow_key_to_ip_addrs,
     metrics::{
+        self,
         ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus},
-        registry,
     },
 };
 
@@ -168,7 +168,7 @@ impl DirectionInferrer {
         };
         match map.get(&dst_key, 0) {
             Ok(_) => {
-                registry::EBPF_MAP_OPS_TOTAL
+                metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
                         EbpfMapName::ListeningPorts.as_ref(),
                         EbpfMapOperation::Read.as_ref(),
@@ -190,7 +190,7 @@ impl DirectionInferrer {
                     }
                     _ => EbpfMapStatus::Error,
                 };
-                registry::EBPF_MAP_OPS_TOTAL
+                metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
                         EbpfMapName::ListeningPorts.as_ref(),
                         EbpfMapOperation::Read.as_ref(),
@@ -207,7 +207,7 @@ impl DirectionInferrer {
         };
         match map.get(&src_key, 0) {
             Ok(_) => {
-                registry::EBPF_MAP_OPS_TOTAL
+                metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
                         EbpfMapName::ListeningPorts.as_ref(),
                         EbpfMapOperation::Read.as_ref(),
@@ -244,7 +244,7 @@ impl DirectionInferrer {
                         EbpfMapStatus::Error
                     }
                 };
-                registry::EBPF_MAP_OPS_TOTAL
+                metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
                         EbpfMapName::ListeningPorts.as_ref(),
                         EbpfMapOperation::Read.as_ref(),

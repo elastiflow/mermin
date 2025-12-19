@@ -12,8 +12,8 @@ use opentelemetry_sdk::{
 use tracing::trace;
 
 use crate::metrics::{
+    self,
     export::{ExportStatus, ExporterName},
-    registry,
 };
 
 pub struct TraceExporterAdapter {
@@ -107,7 +107,7 @@ pub trait TraceableExporter: Send + Sync {
 #[async_trait]
 impl TraceableExporter for TraceExporterAdapter {
     async fn export(&self, traceable: TraceableRecord) {
-        let _timer = registry::PROCESSING_LATENCY_SECONDS
+        let _timer = metrics::registry::PROCESSING_LATENCY_SECONDS
             .with_label_values(&["export"])
             .start_timer();
 
@@ -155,7 +155,7 @@ impl TraceableExporter for TraceExporterAdapter {
         // through the SDK's batch processor, so we track the attempt here. Success/failure
         // will be tracked separately via the tracing layer when export errors occur.
         if self.has_otlp {
-            registry::EXPORT_FLOW_SPANS_TOTAL
+            metrics::registry::EXPORT_FLOW_SPANS_TOTAL
                 .with_label_values(&[
                     ExporterName::Otlp.as_ref(),
                     ExportStatus::Attempted.as_ref(),
@@ -163,7 +163,7 @@ impl TraceableExporter for TraceExporterAdapter {
                 .inc();
         }
         if self.has_stdout {
-            registry::EXPORT_FLOW_SPANS_TOTAL
+            metrics::registry::EXPORT_FLOW_SPANS_TOTAL
                 .with_label_values(&[
                     ExporterName::Stdout.as_ref(),
                     ExportStatus::Attempted.as_ref(),
@@ -190,7 +190,7 @@ pub struct NoOpExporterAdapter {}
 impl TraceableExporter for NoOpExporterAdapter {
     async fn export(&self, _traceable: TraceableRecord) {
         // Track as "noop" - span was processed but not exported (no exporter configured)
-        registry::EXPORT_FLOW_SPANS_TOTAL
+        metrics::registry::EXPORT_FLOW_SPANS_TOTAL
             .with_label_values(&[ExporterName::Noop.as_ref(), ExportStatus::NoOp.as_ref()])
             .inc();
         trace!(

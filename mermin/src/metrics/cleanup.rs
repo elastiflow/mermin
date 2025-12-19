@@ -27,7 +27,7 @@ use dashmap::DashMap;
 use tokio::time::Instant;
 use tracing::{debug, trace};
 
-use crate::metrics::registry;
+use crate::metrics;
 
 /// Tracks resources and schedules cleanup of their associated metrics after TTL expires.
 ///
@@ -102,7 +102,7 @@ impl MetricCleanupTracker {
         }
 
         if self.ttl.is_zero() {
-            registry::remove_interface_metrics(&iface);
+            metrics::registry::remove_interface_metrics(&iface);
         } else {
             let cleanup_time = Instant::now() + self.ttl;
             self.interface_metrics.insert(iface, cleanup_time);
@@ -124,7 +124,7 @@ impl MetricCleanupTracker {
         }
 
         if self.ttl.is_zero() {
-            registry::remove_k8s_resource_metrics(&resource);
+            metrics::registry::remove_k8s_resource_metrics(&resource);
         } else {
             let cleanup_time = Instant::now() + self.ttl;
             self.k8s_resource_metrics.insert(resource, cleanup_time);
@@ -147,7 +147,7 @@ impl MetricCleanupTracker {
         }
 
         if self.ttl.is_zero() {
-            registry::remove_task_metrics(&task_name);
+            metrics::registry::remove_task_metrics(&task_name);
         } else {
             let cleanup_time = Instant::now() + self.ttl;
             self.task_metrics.insert(task_name, cleanup_time);
@@ -193,7 +193,7 @@ impl MetricCleanupTracker {
 
                     self.interface_metrics.retain(|iface, &mut cleanup_time| {
                         if now >= cleanup_time {
-                            registry::remove_interface_metrics(iface);
+                            metrics::registry::remove_interface_metrics(iface);
                             trace!(
                                 event.name = "metrics.cleanup.interface_expired",
                                 interface = %iface,
@@ -209,7 +209,7 @@ impl MetricCleanupTracker {
                     self.k8s_resource_metrics
                         .retain(|resource, &mut cleanup_time| {
                             if now >= cleanup_time {
-                                registry::remove_k8s_resource_metrics(resource);
+                                metrics::registry::remove_k8s_resource_metrics(resource);
                                 trace!(
                                     event.name = "metrics.cleanup.k8s_resource_expired",
                                     resource = %resource,
@@ -224,7 +224,7 @@ impl MetricCleanupTracker {
 
                     self.task_metrics.retain(|task_name, &mut cleanup_time| {
                         if now >= cleanup_time {
-                            registry::remove_task_metrics(task_name);
+                            metrics::registry::remove_task_metrics(task_name);
                             trace!(
                                 event.name = "metrics.cleanup.task_expired",
                                 task_name = %task_name,
@@ -321,7 +321,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_immediate_cleanup_with_zero_ttl() {
-        let _ = crate::metrics::registry::init_registry(true);
+        let _ = metrics::registry::init_registry(true);
 
         // Create tracker with immediate cleanup (TTL=0)
         let tracker = MetricCleanupTracker::new(Duration::ZERO, true);

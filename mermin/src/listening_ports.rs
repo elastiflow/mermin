@@ -17,8 +17,8 @@ use tokio::sync::Mutex;
 use tracing::{debug, trace, warn};
 
 use crate::metrics::{
+    self,
     ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus},
-    registry,
 };
 
 /// TCP connection states from /proc/net/tcp
@@ -178,7 +178,7 @@ impl ListeningPortScanner {
             // Insert into eBPF map (duplicates are harmless, just updates value)
             match map.insert(key, 1u8, 0) {
                 Ok(_) => {
-                    registry::EBPF_MAP_OPS_TOTAL
+                    metrics::registry::EBPF_MAP_OPS_TOTAL
                         .with_label_values(&[
                             EbpfMapName::ListeningPorts.as_ref(),
                             EbpfMapOperation::Write.as_ref(),
@@ -188,7 +188,7 @@ impl ListeningPortScanner {
                     count += 1;
                 }
                 Err(e) => {
-                    registry::EBPF_MAP_OPS_TOTAL
+                    metrics::registry::EBPF_MAP_OPS_TOTAL
                         .with_label_values(&[
                             EbpfMapName::ListeningPorts.as_ref(),
                             EbpfMapOperation::Write.as_ref(),

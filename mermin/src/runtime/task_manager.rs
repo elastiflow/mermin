@@ -181,7 +181,7 @@ impl TaskManager {
                     .with_label_values(&["cancelled"])
                     .inc();
                 TASKMANAGER_TASKS_ACTIVE_TOTAL.dec();
-                if crate::metrics::registry::debug_enabled() {
+                if metrics::registry::debug_enabled() {
                     TASKS_BY_NAME_TOTAL
                         .with_label_values(&[&task_name, "cancelled"])
                         .inc();

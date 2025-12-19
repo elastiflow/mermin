@@ -7,8 +7,8 @@ use opentelemetry_sdk::{
 };
 
 use crate::metrics::{
+    self,
     export::{ExportStatus, ExporterName},
-    registry,
 };
 
 #[derive(Debug)]
@@ -35,7 +35,7 @@ where
         // Observe batch size before delegating to inner exporter
         let batch_size = batch.len();
         if batch_size > 0 {
-            registry::EXPORT_BATCH_SIZE.observe(batch_size as f64);
+            metrics::registry::EXPORT_BATCH_SIZE.observe(batch_size as f64);
         }
 
         let exporter_name = self.exporter_name;
@@ -59,13 +59,13 @@ where
             match &result {
                 Ok(()) => {
                     // Track successful export - increment by batch size since each span succeeded
-                    registry::EXPORT_FLOW_SPANS_TOTAL
+                    metrics::registry::EXPORT_FLOW_SPANS_TOTAL
                         .with_label_values(&[exporter_name.as_ref(), ExportStatus::Ok.as_ref()])
                         .inc_by(batch_size as u64);
                 }
                 Err(_) => {
                     // Track export error - increment by batch size since each span in the batch failed
-                    registry::EXPORT_FLOW_SPANS_TOTAL
+                    metrics::registry::EXPORT_FLOW_SPANS_TOTAL
                         .with_label_values(&[exporter_name.as_ref(), ExportStatus::Error.as_ref()])
                         .inc_by(batch_size as u64);
                 }

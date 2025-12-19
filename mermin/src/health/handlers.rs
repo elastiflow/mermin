@@ -18,7 +18,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     health::HealthError,
-    metrics::{export::ExportStatus, registry},
+    metrics::{self, export::ExportStatus},
     runtime::conf::ApiConf,
 };
 
@@ -75,10 +75,10 @@ pub async fn liveness_handler(State(state): State<HealthState>) -> impl IntoResp
     );
 
     // Sum export errors across all exporter types for health monitoring
-    let export_errors_otlp = registry::EXPORT_FLOW_SPANS_TOTAL
+    let export_errors_otlp = metrics::registry::EXPORT_FLOW_SPANS_TOTAL
         .with_label_values(&["otlp", ExportStatus::Error.as_ref()])
         .get();
-    let export_errors_stdout = registry::EXPORT_FLOW_SPANS_TOTAL
+    let export_errors_stdout = metrics::registry::EXPORT_FLOW_SPANS_TOTAL
         .with_label_values(&["stdout", ExportStatus::Error.as_ref()])
         .get();
     let export_errors_total = export_errors_otlp + export_errors_stdout;
@@ -107,10 +107,10 @@ pub async fn readiness_handler(State(state): State<HealthState>) -> impl IntoRes
     let is_ready = ebpf_loaded && k8s_caches_synced && ready_to_process;
 
     // Sum export errors across all exporter types for health monitoring
-    let export_errors_otlp = registry::EXPORT_FLOW_SPANS_TOTAL
+    let export_errors_otlp = metrics::registry::EXPORT_FLOW_SPANS_TOTAL
         .with_label_values(&["otlp", ExportStatus::Error.as_ref()])
         .get();
-    let export_errors_stdout = registry::EXPORT_FLOW_SPANS_TOTAL
+    let export_errors_stdout = metrics::registry::EXPORT_FLOW_SPANS_TOTAL
         .with_label_values(&["stdout", ExportStatus::Error.as_ref()])
         .get();
     let export_errors_total = export_errors_otlp + export_errors_stdout;

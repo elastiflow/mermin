@@ -16,13 +16,13 @@
 //! use mermin::metrics::{self, registry};
 //!
 //! // Initialize registry once at startup
-//! registry::init_registry()?;
+//! metrics::registry::init_registry()?;
 //!
 //! // Start metrics HTTP server
 //! let metrics_handle = tokio::spawn(metrics::start_metrics_server(config.metrics));
 //!
 //! // Instrument code
-//! registry::FLOWS_CREATED.with_label_values(&["eth0"]).inc();
+//! metrics::registry::FLOWS_CREATED.with_label_values(&["eth0"]).inc();
 //! ```
 
 use axum::{
@@ -36,7 +36,7 @@ use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
-use crate::metrics::{error::MetricsError, opts::MetricsOptions, registry};
+use crate::metrics::{self, error::MetricsError, opts::MetricsOptions};
 
 /// Handler for the `/metrics` endpoint.
 ///
@@ -44,7 +44,7 @@ use crate::metrics::{error::MetricsError, opts::MetricsOptions, registry};
 async fn metrics_handler() -> impl IntoResponse {
     match tokio::task::spawn_blocking(|| {
         let encoder = prometheus::TextEncoder::new();
-        let metric_families = registry::REGISTRY.gather();
+        let metric_families = metrics::registry::REGISTRY.gather();
         encoder.encode_to_string(&metric_families)
     })
     .await
@@ -82,7 +82,7 @@ async fn metrics_handler() -> impl IntoResponse {
 async fn standard_metrics_handler() -> impl IntoResponse {
     match tokio::task::spawn_blocking(|| {
         let encoder = prometheus::TextEncoder::new();
-        let metric_families = registry::STANDARD_REGISTRY.gather();
+        let metric_families = metrics::registry::STANDARD_REGISTRY.gather();
         encoder.encode_to_string(&metric_families)
     })
     .await
@@ -128,7 +128,7 @@ async fn debug_metrics_handler(debug_enabled: bool) -> impl IntoResponse {
 
     match tokio::task::spawn_blocking(|| {
         let encoder = prometheus::TextEncoder::new();
-        let metric_families = registry::DEBUG_REGISTRY.gather();
+        let metric_families = metrics::registry::DEBUG_REGISTRY.gather();
         encoder.encode_to_string(&metric_families)
     })
     .await
@@ -186,7 +186,7 @@ async fn metrics_summary_handler(debug_enabled: bool) -> impl IntoResponse {
         let mut standard_metrics = Vec::new();
         let mut debug_metrics = Vec::new();
 
-        let standard_families = registry::STANDARD_REGISTRY.gather();
+        let standard_families = metrics::registry::STANDARD_REGISTRY.gather();
         for family in standard_families {
             let metric_type = match family.get_field_type() {
                 prometheus::proto::MetricType::COUNTER => "counter",
@@ -222,7 +222,7 @@ async fn metrics_summary_handler(debug_enabled: bool) -> impl IntoResponse {
         }
 
         if debug_enabled {
-            let debug_families = registry::DEBUG_REGISTRY.gather();
+            let debug_families = metrics::registry::DEBUG_REGISTRY.gather();
             for family in debug_families {
                 let metric_type = match family.get_field_type() {
                     prometheus::proto::MetricType::COUNTER => "counter",

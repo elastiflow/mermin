@@ -26,9 +26,9 @@ use crate::{
     filter::source::PacketFilter,
     ip::{Error, flow_key_to_ip_addrs},
     metrics::{
+        self,
         ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus},
         flow::{FlowEventResult, FlowSpanProducerStatus},
-        registry,
         userspace::{ChannelName, ChannelSendStatus},
     },
     packet::{
@@ -214,10 +214,10 @@ impl FlowSpanProducer {
             let (worker_tx, worker_rx) = mpsc::channel(worker_capacity);
             worker_channels.push(worker_tx);
 
-            registry::CHANNEL_CAPACITY
+            metrics::registry::CHANNEL_CAPACITY
                 .with_label_values(&[ChannelName::PacketWorker.as_ref()])
                 .set(worker_capacity as i64);
-            registry::CHANNEL_ENTRIES
+            metrics::registry::CHANNEL_ENTRIES
                 .with_label_values(&[ChannelName::PacketWorker.as_ref()])
                 .set(0);
 
@@ -427,8 +427,8 @@ impl FlowSpanProducer {
                                 error.message = %e,
                                 "error waiting for ring buffer readability"
                             );
-                            if registry::debug_enabled() {
-                                registry::FLOW_EVENTS_TOTAL
+                            if metrics::registry::debug_enabled() {
+                                metrics::registry::FLOW_EVENTS_TOTAL
                                     .with_label_values(&[FlowEventResult::DroppedError.as_ref()])
                                     .inc();
                             }
@@ -437,18 +437,18 @@ impl FlowSpanProducer {
                     };
 
                     while let Some(item) = flow_events.next() {
-                        let _timer = registry::PROCESSING_LATENCY_SECONDS
+                        let _timer = metrics::registry::PROCESSING_LATENCY_SECONDS
                             .with_label_values(&["flow_producer_input"])
                             .start_timer();
 
                         let flow_event: FlowEvent =
                             unsafe { std::ptr::read_unaligned(item.as_ptr() as *const FlowEvent) };
 
-                        registry::EBPF_MAP_BYTES_TOTAL
+                        metrics::registry::EBPF_MAP_BYTES_TOTAL
                             .with_label_values(&[EbpfMapName::FlowEvents.as_ref()])
                             .inc_by(flow_event.snaplen as u64);
-                        if registry::debug_enabled() {
-                            registry::FLOW_EVENTS_TOTAL
+                        if metrics::registry::debug_enabled() {
+                            metrics::registry::FLOW_EVENTS_TOTAL
                                 .with_label_values(&[FlowEventResult::Received.as_ref()])
                                 .inc();
                         }
@@ -460,7 +460,7 @@ impl FlowSpanProducer {
 
                             match worker_tx.try_send(flow_event) {
                                 Ok(_) => {
-                                    registry::CHANNEL_SENDS_TOTAL
+                                    metrics::registry::CHANNEL_SENDS_TOTAL
                                         .with_label_values(&[ChannelName::PacketWorker.as_ref(), ChannelSendStatus::Success.as_ref()])
                                         .inc();
                                     worker_index = (current_worker + 1) % worker_count;
@@ -473,7 +473,7 @@ impl FlowSpanProducer {
                                 }
                                 Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
                                     // Worker is gone, try next one
-                                    registry::CHANNEL_SENDS_TOTAL
+                                    metrics::registry::CHANNEL_SENDS_TOTAL
                                         .with_label_values(&[ChannelName::PacketWorker.as_ref(), ChannelSendStatus::Error.as_ref()])
                                         .inc();
                                     continue;
@@ -485,8 +485,8 @@ impl FlowSpanProducer {
                             // All workers are full - drop event to prevent ring buffer backup
                             // CRITICAL: Blocking here prevents draining ring buffer, causing eBPF to drop MORE events
                             // This is a fail-safe to maintain pipeline throughput under extreme load.
-                            if registry::debug_enabled() {
-                                registry::FLOW_EVENTS_TOTAL
+                            if metrics::registry::debug_enabled() {
+                                metrics::registry::FLOW_EVENTS_TOTAL
                                     .with_label_values(&[FlowEventResult::DroppedBackpressure.as_ref()])
                                     .inc();
                             }
@@ -633,7 +633,7 @@ impl FlowWorker {
         );
 
         while let Some(flow_event) = self.flow_event_rx.recv().await {
-            registry::CHANNEL_ENTRIES
+            metrics::registry::CHANNEL_ENTRIES
                 .with_label_values(&[ChannelName::PacketWorker.as_ref()])
                 .set(self.flow_event_rx.len() as i64);
 
@@ -721,7 +721,7 @@ impl FlowWorker {
         let mut map = self.flow_stats_map.lock().await;
         match map.remove(&event.flow_key) {
             Ok(_) => {
-                registry::EBPF_MAP_OPS_TOTAL
+                metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
                         EbpfMapName::FlowStats.as_ref(),
                         EbpfMapOperation::Delete.as_ref(),
@@ -730,7 +730,7 @@ impl FlowWorker {
                     .inc();
             }
             Err(e) => {
-                registry::EBPF_MAP_OPS_TOTAL
+                metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
                         EbpfMapName::FlowStats.as_ref(),
                         EbpfMapOperation::Delete.as_ref(),
@@ -763,7 +763,7 @@ impl FlowWorker {
             let map = self.flow_stats_map.lock().await;
             match map.get(&event.flow_key, 0) {
                 Ok(s) => {
-                    registry::EBPF_MAP_OPS_TOTAL
+                    metrics::registry::EBPF_MAP_OPS_TOTAL
                         .with_label_values(&[
                             EbpfMapName::FlowStats.as_ref(),
                             EbpfMapOperation::Read.as_ref(),
@@ -783,7 +783,7 @@ impl FlowWorker {
                         }
                         _ => EbpfMapStatus::Error,
                     };
-                    registry::EBPF_MAP_OPS_TOTAL
+                    metrics::registry::EBPF_MAP_OPS_TOTAL
                         .with_label_values(&[
                             EbpfMapName::FlowStats.as_ref(),
                             EbpfMapOperation::Read.as_ref(),
@@ -798,8 +798,8 @@ impl FlowWorker {
         // Early flow filtering: Check if this flow should be tracked
         // If filtered out, immediately remove from eBPF map to prevent memory leaks
         if !self.should_process_flow(&event.flow_key, &stats) {
-            if registry::debug_enabled() {
-                registry::FLOW_EVENTS_TOTAL
+            if metrics::registry::debug_enabled() {
+                metrics::registry::FLOW_EVENTS_TOTAL
                     .with_label_values(&[FlowEventResult::Filtered.as_ref()])
                     .inc();
             }
@@ -809,11 +809,11 @@ impl FlowWorker {
             } else {
                 "unknown".to_string()
             };
-            registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
+            metrics::registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
                 .with_label_values(&[FlowSpanProducerStatus::Dropped.as_ref()])
                 .inc();
-            if registry::debug_enabled() {
-                registry::FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL
+            if metrics::registry::debug_enabled() {
+                metrics::registry::FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL
                     .with_label_values(&[&iface_name, FlowSpanProducerStatus::Dropped.as_ref()])
                     .inc();
             }
@@ -824,7 +824,7 @@ impl FlowWorker {
                     // Successfully removed from eBPF map - disable guard cleanup to prevent
                     // double-removal attempt when the guard is dropped
                     guard.keep();
-                    registry::EBPF_MAP_OPS_TOTAL
+                    metrics::registry::EBPF_MAP_OPS_TOTAL
                         .with_label_values(&[
                             EbpfMapName::FlowStats.as_ref(),
                             EbpfMapOperation::Delete.as_ref(),
@@ -833,7 +833,7 @@ impl FlowWorker {
                         .inc();
                 }
                 Err(e) => {
-                    registry::EBPF_MAP_OPS_TOTAL
+                    metrics::registry::EBPF_MAP_OPS_TOTAL
                         .with_label_values(&[
                             EbpfMapName::FlowStats.as_ref(),
                             EbpfMapOperation::Delete.as_ref(),
@@ -881,8 +881,8 @@ impl FlowWorker {
         // The entry is now managed by flow_store and will be cleaned up by timeout task
         guard.keep();
 
-        if registry::debug_enabled() {
-            registry::FLOW_SPANS_PROCESSED_TOTAL
+        if metrics::registry::debug_enabled() {
+            metrics::registry::FLOW_SPANS_PROCESSED_TOTAL
                 .with_label_values(&[&self.worker_id.to_string()])
                 .inc();
         }
@@ -1139,36 +1139,36 @@ impl FlowWorker {
         self.insert_flow(community_id.to_string(), span, timeout);
 
         let interface_name = iface_name.as_deref().unwrap_or("unknown");
-        registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
+        metrics::registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
             .with_label_values(&[FlowSpanProducerStatus::Created.as_ref()])
             .inc();
-        if registry::debug_enabled() {
-            registry::FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL
+        if metrics::registry::debug_enabled() {
+            metrics::registry::FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL
                 .with_label_values(&[interface_name, FlowSpanProducerStatus::Created.as_ref()])
                 .inc();
         }
 
         // Count initial packets and bytes in metrics
         if stats.packets > 0 {
-            registry::PACKETS_TOTAL.inc_by(stats.packets);
-            if registry::debug_enabled() {
+            metrics::registry::PACKETS_TOTAL.inc_by(stats.packets);
+            if metrics::registry::debug_enabled() {
                 let direction_str = match stats.direction {
                     Direction::Ingress => "ingress",
                     Direction::Egress => "egress",
                 };
-                registry::PACKETS_BY_INTERFACE_TOTAL
+                metrics::registry::PACKETS_BY_INTERFACE_TOTAL
                     .with_label_values(&[interface_name, direction_str])
                     .inc_by(stats.packets);
             }
         }
         if stats.bytes > 0 {
-            registry::BYTES_TOTAL.inc_by(stats.bytes);
-            if registry::debug_enabled() {
+            metrics::registry::BYTES_TOTAL.inc_by(stats.bytes);
+            if metrics::registry::debug_enabled() {
                 let direction_str = match stats.direction {
                     Direction::Ingress => "ingress",
                     Direction::Egress => "egress",
                 };
-                registry::BYTES_BY_INTERFACE_TOTAL
+                metrics::registry::BYTES_BY_INTERFACE_TOTAL
                     .with_label_values(&[interface_name, direction_str])
                     .inc_by(stats.bytes);
             }
@@ -1178,13 +1178,13 @@ impl FlowWorker {
                 Direction::Ingress => Direction::Egress,
                 Direction::Egress => Direction::Ingress,
             };
-            registry::PACKETS_TOTAL.inc_by(stats.reverse_packets);
-            if registry::debug_enabled() {
+            metrics::registry::PACKETS_TOTAL.inc_by(stats.reverse_packets);
+            if metrics::registry::debug_enabled() {
                 let direction_str = match reverse_direction {
                     Direction::Ingress => "ingress",
                     Direction::Egress => "egress",
                 };
-                registry::PACKETS_BY_INTERFACE_TOTAL
+                metrics::registry::PACKETS_BY_INTERFACE_TOTAL
                     .with_label_values(&[interface_name, direction_str])
                     .inc_by(stats.reverse_packets);
             }
@@ -1194,13 +1194,13 @@ impl FlowWorker {
                 Direction::Ingress => Direction::Egress,
                 Direction::Egress => Direction::Ingress,
             };
-            registry::BYTES_TOTAL.inc_by(stats.reverse_bytes);
-            if registry::debug_enabled() {
+            metrics::registry::BYTES_TOTAL.inc_by(stats.reverse_bytes);
+            if metrics::registry::debug_enabled() {
                 let direction_str = match reverse_direction {
                     Direction::Ingress => "ingress",
                     Direction::Egress => "egress",
                 };
-                registry::BYTES_BY_INTERFACE_TOTAL
+                metrics::registry::BYTES_BY_INTERFACE_TOTAL
                     .with_label_values(&[interface_name, direction_str])
                     .inc_by(stats.reverse_bytes);
             }
@@ -1255,9 +1255,9 @@ impl FlowWorker {
             .as_deref()
             .unwrap_or("unknown")
             .to_string();
-        registry::FLOW_SPANS_CREATED_TOTAL.inc();
-        if registry::debug_enabled() {
-            registry::FLOWS_CREATED_BY_INTERFACE_TOTAL
+        metrics::registry::FLOW_SPANS_CREATED_TOTAL.inc();
+        if metrics::registry::debug_enabled() {
+            metrics::registry::FLOWS_CREATED_BY_INTERFACE_TOTAL
                 .with_label_values(&[&iface_name])
                 .inc();
         }
@@ -1269,9 +1269,9 @@ impl FlowWorker {
         match old_entry {
             None => {
                 // New flow: increment active gauge
-                registry::FLOW_SPANS_ACTIVE_TOTAL.inc();
-                if registry::debug_enabled() {
-                    registry::FLOWS_ACTIVE_BY_INTERFACE_TOTAL
+                metrics::registry::FLOW_SPANS_ACTIVE_TOTAL.inc();
+                if metrics::registry::debug_enabled() {
+                    metrics::registry::FLOWS_ACTIVE_BY_INTERFACE_TOTAL
                         .with_label_values(&[&iface_name])
                         .inc();
                 }
@@ -1287,15 +1287,15 @@ impl FlowWorker {
                     .to_string();
 
                 if old_iface != iface_name {
-                    registry::FLOW_SPANS_ACTIVE_TOTAL.dec();
-                    if registry::debug_enabled() {
-                        registry::FLOWS_ACTIVE_BY_INTERFACE_TOTAL
+                    metrics::registry::FLOW_SPANS_ACTIVE_TOTAL.dec();
+                    if metrics::registry::debug_enabled() {
+                        metrics::registry::FLOWS_ACTIVE_BY_INTERFACE_TOTAL
                             .with_label_values(&[&old_iface])
                             .dec();
                     }
-                    registry::FLOW_SPANS_ACTIVE_TOTAL.inc();
-                    if registry::debug_enabled() {
-                        registry::FLOWS_ACTIVE_BY_INTERFACE_TOTAL
+                    metrics::registry::FLOW_SPANS_ACTIVE_TOTAL.inc();
+                    if metrics::registry::debug_enabled() {
+                        metrics::registry::FLOWS_ACTIVE_BY_INTERFACE_TOTAL
                             .with_label_values(&[&iface_name])
                             .inc();
                     }
@@ -1436,14 +1436,14 @@ impl FlowPoller {
 
                 // Update flow store and queue size metrics for this poller
                 let poller_id_str = self.id.to_string();
-                if registry::debug_enabled() {
-                    registry::FLOW_SPAN_STORE_SIZE
+                if metrics::registry::debug_enabled() {
+                    metrics::registry::FLOW_SPAN_STORE_SIZE
                         .with_label_values(&[&poller_id_str])
                         .set(flows_checked as i64);
                 }
                 let queue_size = flows_to_record.len() + flows_to_remove.len();
-                if registry::debug_enabled() {
-                    registry::FLOW_PRODUCER_QUEUE_SIZE
+                if metrics::registry::debug_enabled() {
+                    metrics::registry::FLOW_PRODUCER_QUEUE_SIZE
                         .with_label_values(&[&poller_id_str])
                         .set(queue_size as i64);
                 }
@@ -1663,7 +1663,7 @@ async fn record_flow(
     }
     let stats = match map.get(&flow_key, 0) {
         Ok(s) => {
-            registry::EBPF_MAP_OPS_TOTAL
+            metrics::registry::EBPF_MAP_OPS_TOTAL
                 .with_label_values(&[
                     EbpfMapName::FlowStats.as_ref(),
                     EbpfMapOperation::Read.as_ref(),
@@ -1679,7 +1679,7 @@ async fn record_flow(
                 }
                 _ => EbpfMapStatus::Error,
             };
-            registry::EBPF_MAP_OPS_TOTAL
+            metrics::registry::EBPF_MAP_OPS_TOTAL
                 .with_label_values(&[
                     EbpfMapName::FlowStats.as_ref(),
                     EbpfMapOperation::Read.as_ref(),
@@ -1722,25 +1722,25 @@ async fn record_flow(
             .unwrap_or_else(|| "unknown".to_string());
 
         if delta_packets > 0 {
-            registry::PACKETS_TOTAL.inc_by(delta_packets);
-            if registry::debug_enabled() {
+            metrics::registry::PACKETS_TOTAL.inc_by(delta_packets);
+            if metrics::registry::debug_enabled() {
                 let direction_str = match stats.direction {
                     Direction::Ingress => "ingress",
                     Direction::Egress => "egress",
                 };
-                registry::PACKETS_BY_INTERFACE_TOTAL
+                metrics::registry::PACKETS_BY_INTERFACE_TOTAL
                     .with_label_values(&[&interface_name_for_metrics, direction_str])
                     .inc_by(delta_packets);
             }
         }
         if delta_bytes > 0 {
-            registry::BYTES_TOTAL.inc_by(delta_bytes);
-            if registry::debug_enabled() {
+            metrics::registry::BYTES_TOTAL.inc_by(delta_bytes);
+            if metrics::registry::debug_enabled() {
                 let direction_str = match stats.direction {
                     Direction::Ingress => "ingress",
                     Direction::Egress => "egress",
                 };
-                registry::BYTES_BY_INTERFACE_TOTAL
+                metrics::registry::BYTES_BY_INTERFACE_TOTAL
                     .with_label_values(&[&interface_name_for_metrics, direction_str])
                     .inc_by(delta_bytes);
             }
@@ -1750,13 +1750,13 @@ async fn record_flow(
                 Direction::Ingress => Direction::Egress,
                 Direction::Egress => Direction::Ingress,
             };
-            registry::PACKETS_TOTAL.inc_by(delta_reverse_packets);
-            if registry::debug_enabled() {
+            metrics::registry::PACKETS_TOTAL.inc_by(delta_reverse_packets);
+            if metrics::registry::debug_enabled() {
                 let direction_str = match reverse_direction {
                     Direction::Ingress => "ingress",
                     Direction::Egress => "egress",
                 };
-                registry::PACKETS_BY_INTERFACE_TOTAL
+                metrics::registry::PACKETS_BY_INTERFACE_TOTAL
                     .with_label_values(&[&interface_name_for_metrics, direction_str])
                     .inc_by(delta_reverse_packets);
             }
@@ -1766,13 +1766,13 @@ async fn record_flow(
                 Direction::Ingress => Direction::Egress,
                 Direction::Egress => Direction::Ingress,
             };
-            registry::BYTES_TOTAL.inc_by(delta_reverse_bytes);
-            if registry::debug_enabled() {
+            metrics::registry::BYTES_TOTAL.inc_by(delta_reverse_bytes);
+            if metrics::registry::debug_enabled() {
                 let direction_str = match reverse_direction {
                     Direction::Ingress => "ingress",
                     Direction::Egress => "egress",
                 };
-                registry::BYTES_BY_INTERFACE_TOTAL
+                metrics::registry::BYTES_BY_INTERFACE_TOTAL
                     .with_label_values(&[&interface_name_for_metrics, direction_str])
                     .inc_by(delta_reverse_bytes);
             }
@@ -1813,11 +1813,11 @@ async fn record_flow(
         .network_interface_name
         .as_deref()
         .unwrap_or("unknown");
-    registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
+    metrics::registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
         .with_label_values(&[FlowSpanProducerStatus::Recorded.as_ref()])
         .inc();
-    if registry::debug_enabled() {
-        registry::FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL
+    if metrics::registry::debug_enabled() {
+        metrics::registry::FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL
             .with_label_values(&[interface_name, FlowSpanProducerStatus::Recorded.as_ref()])
             .inc();
     }
@@ -1883,7 +1883,7 @@ async fn record_flow(
     // Send to exporter
     match flow_span_tx.try_send(recorded_span) {
         Ok(_) => {
-            registry::CHANNEL_SENDS_TOTAL
+            metrics::registry::CHANNEL_SENDS_TOTAL
                 .with_label_values(&[
                     ChannelName::ProducerOutput.as_ref(),
                     ChannelSendStatus::Success.as_ref(),
@@ -1891,7 +1891,7 @@ async fn record_flow(
                 .inc();
         }
         Err(mpsc::error::TrySendError::Full(_)) => {
-            registry::CHANNEL_SENDS_TOTAL
+            metrics::registry::CHANNEL_SENDS_TOTAL
                 .with_label_values(&[
                     ChannelName::ProducerOutput.as_ref(),
                     ChannelSendStatus::Backpressure.as_ref(),
@@ -1906,7 +1906,7 @@ async fn record_flow(
             );
         }
         Err(mpsc::error::TrySendError::Closed(_)) => {
-            registry::CHANNEL_SENDS_TOTAL
+            metrics::registry::CHANNEL_SENDS_TOTAL
                 .with_label_values(&[
                     ChannelName::ProducerOutput.as_ref(),
                     ChannelSendStatus::Error.as_ref(),
@@ -1950,7 +1950,7 @@ async fn record_flow(
 
             match map.insert(ebpf_key, updated_stats, 0) {
                 Ok(_) => {
-                    registry::EBPF_MAP_OPS_TOTAL
+                    metrics::registry::EBPF_MAP_OPS_TOTAL
                         .with_label_values(&[
                             EbpfMapName::FlowStats.as_ref(),
                             EbpfMapOperation::Write.as_ref(),
@@ -1959,7 +1959,7 @@ async fn record_flow(
                         .inc();
                 }
                 Err(e) => {
-                    registry::EBPF_MAP_OPS_TOTAL
+                    metrics::registry::EBPF_MAP_OPS_TOTAL
                         .with_label_values(&[
                             EbpfMapName::FlowStats.as_ref(),
                             EbpfMapOperation::Write.as_ref(),
@@ -2020,7 +2020,7 @@ pub async fn timeout_and_remove_flow(
 
         match map.get(&key, 0) {
             Ok(stats) => {
-                registry::EBPF_MAP_OPS_TOTAL
+                metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
                         EbpfMapName::FlowStats.as_ref(),
                         EbpfMapOperation::Read.as_ref(),
@@ -2037,7 +2037,7 @@ pub async fn timeout_and_remove_flow(
                     }
                     _ => EbpfMapStatus::Error,
                 };
-                registry::EBPF_MAP_OPS_TOTAL
+                metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
                         EbpfMapName::FlowStats.as_ref(),
                         EbpfMapOperation::Read.as_ref(),
@@ -2067,7 +2067,7 @@ pub async fn timeout_and_remove_flow(
 
         match flow_span_tx.try_send(recorded_span) {
             Ok(_) => {
-                registry::CHANNEL_SENDS_TOTAL
+                metrics::registry::CHANNEL_SENDS_TOTAL
                     .with_label_values(&[
                         ChannelName::ProducerOutput.as_ref(),
                         ChannelSendStatus::Success.as_ref(),
@@ -2075,7 +2075,7 @@ pub async fn timeout_and_remove_flow(
                     .inc();
             }
             Err(mpsc::error::TrySendError::Full(_)) => {
-                registry::CHANNEL_SENDS_TOTAL
+                metrics::registry::CHANNEL_SENDS_TOTAL
                     .with_label_values(&[
                         ChannelName::ProducerOutput.as_ref(),
                         ChannelSendStatus::Backpressure.as_ref(),
@@ -2090,7 +2090,7 @@ pub async fn timeout_and_remove_flow(
                 );
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
-                registry::CHANNEL_SENDS_TOTAL
+                metrics::registry::CHANNEL_SENDS_TOTAL
                     .with_label_values(&[
                         ChannelName::ProducerOutput.as_ref(),
                         ChannelSendStatus::Error.as_ref(),
@@ -2124,7 +2124,7 @@ pub async fn timeout_and_remove_flow(
 
         match map.remove(&key) {
             Ok(_) => {
-                registry::EBPF_MAP_OPS_TOTAL
+                metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
                         EbpfMapName::FlowStats.as_ref(),
                         EbpfMapOperation::Delete.as_ref(),
@@ -2133,7 +2133,7 @@ pub async fn timeout_and_remove_flow(
                     .inc();
             }
             Err(e) => {
-                registry::EBPF_MAP_OPS_TOTAL
+                metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
                         EbpfMapName::FlowStats.as_ref(),
                         EbpfMapOperation::Delete.as_ref(),
@@ -2159,17 +2159,17 @@ pub async fn timeout_and_remove_flow(
         .network_interface_name
         .as_deref()
         .unwrap_or("unknown");
-    registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
+    metrics::registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
         .with_label_values(&[FlowSpanProducerStatus::Idled.as_ref()])
         .inc();
-    if registry::debug_enabled() {
-        registry::FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL
+    if metrics::registry::debug_enabled() {
+        metrics::registry::FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL
             .with_label_values(&[iface_name, FlowSpanProducerStatus::Idled.as_ref()])
             .inc();
     }
-    registry::FLOW_SPANS_ACTIVE_TOTAL.dec();
-    if registry::debug_enabled() {
-        registry::FLOWS_ACTIVE_BY_INTERFACE_TOTAL
+    metrics::registry::FLOW_SPANS_ACTIVE_TOTAL.dec();
+    if metrics::registry::debug_enabled() {
+        metrics::registry::FLOWS_ACTIVE_BY_INTERFACE_TOTAL
             .with_label_values(&[iface_name])
             .dec();
     }
@@ -2229,7 +2229,7 @@ pub async fn orphan_scanner_task(
                 };
 
                 let ebpf_map_entries = keys.len() as u64;
-                registry::EBPF_MAP_ENTRIES
+                metrics::registry::EBPF_MAP_ENTRIES
                     .with_label_values(&[EbpfMapName::FlowStats.as_ref()])
                     .set(ebpf_map_entries as i64);
 
@@ -2275,7 +2275,7 @@ pub async fn orphan_scanner_task(
                     let mut map = flow_stats_map.lock().await;
                     match map.remove(&key) {
                         Ok(_) => {
-                            registry::EBPF_MAP_OPS_TOTAL
+                            metrics::registry::EBPF_MAP_OPS_TOTAL
                                 .with_label_values(&[
                                     EbpfMapName::FlowStats.as_ref(),
                                     EbpfMapOperation::Delete.as_ref(),
@@ -2283,7 +2283,7 @@ pub async fn orphan_scanner_task(
                                 ])
                                 .inc();
                             removed += 1;
-                            registry::EBPF_ORPHANS_CLEANED_TOTAL.inc_by(1);
+                            metrics::registry::EBPF_ORPHANS_CLEANED_TOTAL.inc_by(1);
                             warn!(
                                 event.name = "orphan_scanner.entry_removed",
                                 flow.key = ?key,
@@ -2291,7 +2291,7 @@ pub async fn orphan_scanner_task(
                             );
                         }
                         Err(e) => {
-                            registry::EBPF_MAP_OPS_TOTAL
+                            metrics::registry::EBPF_MAP_OPS_TOTAL
                                 .with_label_values(&[
                                     EbpfMapName::FlowStats.as_ref(),
                                     EbpfMapOperation::Delete.as_ref(),

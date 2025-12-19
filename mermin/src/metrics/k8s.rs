@@ -1,6 +1,6 @@
 //! Helper functions for Kubernetes decorator metrics.
 
-use crate::metrics::registry;
+use crate::metrics;
 
 /// K8s decorator flow span status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,7 +46,7 @@ impl AsRef<str> for K8sWatcherEventType {
 
 /// Increment the K8s decorator flow spans counter.
 pub fn inc_k8s_decorator_flow_spans(status: K8sDecoratorStatus) {
-    registry::K8S_DECORATOR_FLOW_SPANS_TOTAL
+    metrics::registry::K8S_DECORATOR_FLOW_SPANS_TOTAL
         .with_label_values(&[status.as_ref()])
         .inc();
 }
