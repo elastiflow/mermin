@@ -28,6 +28,22 @@ impl ProcessNameResolver {
     }
 
     /// Create a new ProcessNameResolver with custom cache capacity and TTL.
+    ///
+    /// Use this when you need to tune cache behavior for specific workloads:
+    /// - Higher capacity for systems with many unique processes
+    /// - Longer TTL for stable process names, shorter for frequently changing names
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use std::time::Duration;
+    /// use mermin::process_name::ProcessNameResolver;
+    ///
+    /// let resolver = ProcessNameResolver::with_capacity_and_ttl(
+    ///     50000,  // Cache up to 50K process names
+    ///     Duration::from_secs(300),  // 5 minute TTL
+    /// );
+    /// ```
     pub fn with_capacity_and_ttl(capacity: u64, ttl: Duration) -> Self {
         let cache = Cache::builder()
             .max_capacity(capacity)
@@ -69,6 +85,21 @@ impl ProcessNameResolver {
     /// - Other I/O errors
     ///
     /// Results are cached to minimize `/proc` file reads.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use mermin::process_name::ProcessNameResolver;
+    ///
+    /// # async fn example() {
+    /// let resolver = ProcessNameResolver::new();
+    /// let process_name = resolver.resolve(1234).await;
+    /// match process_name {
+    ///     Some(name) => println!("Process name: {}", name),
+    ///     None => println!("Process not found or unavailable"),
+    /// }
+    /// # }
+    /// ```
     pub async fn resolve(&self, pid: u32) -> Option<String> {
         // PID 0 is invalid/unavailable (e.g., forwarded traffic, kernel-generated packets)
         // TODO: Add metric for tracking PID 0 rate

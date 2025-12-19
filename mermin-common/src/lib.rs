@@ -444,7 +444,7 @@ impl core::fmt::Display for ConnectionState {
 /// - FlowKey: 38 bytes (outermost 5-tuple from eBPF)
 /// - snaplen: 2 bytes (total original packet length)
 /// - parsed_offset: 2 bytes (where unparsed data starts in original packet)
-/// - padding: 2 bytes (required for u32 alignment of pid field)
+/// - padding: 2 bytes (implicit padding for u32 alignment of pid field)
 /// - pid: 4 bytes (process ID associated with socket, 0 if unavailable)
 /// - packet_data: 192 bytes (ONLY unparsed portion, for tunnel inner headers)
 ///
