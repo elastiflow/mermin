@@ -233,7 +233,6 @@ pub struct K8sObjectMeta {
     pub namespace: Option<String>,
     #[allow(dead_code)]
     pub labels: Option<HashMap<String, String>>,
-    #[allow(dead_code)]
     pub annotations: Option<HashMap<String, String>>,
 }
 
