@@ -87,7 +87,7 @@
 #[cfg(not(feature = "test"))]
 use aya_ebpf::{
     bindings::TC_ACT_UNSPEC,
-    helpers::{bpf_get_current_pid_tgid, bpf_ktime_get_boot_ns},
+    helpers::{bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_ktime_get_boot_ns},
     macros::{classifier, map},
     maps::{HashMap, PerCpuArray, RingBuf},
     programs::TcContext,
@@ -372,6 +372,13 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             // If unavailable, for forwarded traffic, or for kernel-generated packets, this will be 0.
             let pid_tgid = bpf_get_current_pid_tgid();
             flow_event.pid = (pid_tgid >> 32) as u32;
+
+            // Capture process name (comm) synchronously in-kernel.
+            // bpf_get_current_comm() returns the current task's comm field (up to 15 chars + null terminator).
+            // If unavailable or fails, the comm field will remain zero-initialized.
+            if let Ok(comm) = bpf_get_current_comm() {
+                flow_event.comm = comm;
+            }
 
             // Copy unparsed data (if any) for userspace deep parsing.
             // Load bytes one at a time until we hit the end of the packet or reach 192 bytes.

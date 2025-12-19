@@ -76,7 +76,44 @@ impl ProcessNameResolver {
         Self { cache, proc_base }
     }
 
+    /// Convert a comm array (from bpf_get_current_comm) to a String.
+    ///
+    /// The comm array is a null-terminated string of up to 15 characters.
+    /// This function finds the null terminator and converts the bytes before it to a String.
+    /// Returns None if the array is empty (all zeros) or contains invalid UTF-8.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use mermin::process_name::ProcessNameResolver;
+    ///
+    /// let resolver = ProcessNameResolver::new();
+    /// let comm = [b'n', b'g', b'i', b'n', b'x', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    /// assert_eq!(resolver.comm_to_string(comm), Some("nginx".to_string()));
+    ///
+    /// let empty = [0u8; 16];
+    /// assert_eq!(resolver.comm_to_string(empty), None);
+    /// ```
+    fn comm_to_string(&self, comm: [u8; 16]) -> Option<String> {
+        // Find the null terminator
+        let null_pos = comm.iter().position(|&b| b == 0).unwrap_or(16);
+
+        // If all zeros, return None
+        if null_pos == 0 {
+            return None;
+        }
+
+        // Convert to string, handling invalid UTF-8 gracefully
+        String::from_utf8(comm[..null_pos].to_vec())
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+
     /// Resolve a PID to its process executable name.
+    ///
+    /// If `comm` is provided and non-empty, it will be used as the primary source.
+    /// Falls back to `/proc/[pid]/comm` lookup if comm is missing, empty, or generic.
     ///
     /// Returns the process name if found, or `None` if:
     /// - PID is 0 (invalid/unavailable)
@@ -93,14 +130,14 @@ impl ProcessNameResolver {
     ///
     /// # async fn example() {
     /// let resolver = ProcessNameResolver::new();
-    /// let process_name = resolver.resolve(1234).await;
+    /// let process_name = resolver.resolve(1234, None).await;
     /// match process_name {
     ///     Some(name) => println!("Process name: {}", name),
     ///     None => println!("Process not found or unavailable"),
     /// }
     /// # }
     /// ```
-    pub async fn resolve(&self, pid: u32) -> Option<String> {
+    pub async fn resolve(&self, pid: u32, comm: Option<[u8; 16]>) -> Option<String> {
         // PID 0 is invalid/unavailable (e.g., forwarded traffic, kernel-generated packets)
         // TODO: Add metric for tracking PID 0 rate
         if pid == 0 {
@@ -111,6 +148,30 @@ impl ProcessNameResolver {
                 "skipping process name resolution for PID 0"
             );
             return None;
+        }
+
+        // Check comm first if provided (in-kernel capture)
+        if let Some(comm_array) = comm
+            && let Some(comm_name) = self.comm_to_string(comm_array)
+        {
+            // Skip generic kernel thread names that are better resolved via /proc
+            // These are common kernel threads that may have more specific names in /proc
+            let generic_names = ["ksoftirqd", "kworker", "migration", "rcu_"];
+            let is_generic = generic_names
+                .iter()
+                .any(|&prefix| comm_name.starts_with(prefix));
+
+            if !is_generic {
+                trace!(
+                    event.name = "process_name.resolved_from_comm",
+                    pid = pid,
+                    process_name = %comm_name,
+                    "resolved process name from in-kernel comm"
+                );
+                // Cache the result for future lookups
+                self.cache.insert(pid, comm_name.clone()).await;
+                return Some(comm_name);
+            }
         }
 
         if let Some(cached) = self.cache.get(&pid).await {
@@ -212,21 +273,21 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_pid_zero() {
         let resolver = ProcessNameResolver::new();
-        assert_eq!(resolver.resolve(0).await, None);
+        assert_eq!(resolver.resolve(0, None).await, None);
     }
 
     #[tokio::test]
     async fn test_resolve_nonexistent_pid() {
         let resolver = ProcessNameResolver::new();
         // Use a very high PID that's unlikely to exist
-        assert_eq!(resolver.resolve(999999).await, None);
+        assert_eq!(resolver.resolve(999999, None).await, None);
     }
 
     #[tokio::test]
     async fn test_resolve_current_process() {
         let resolver = ProcessNameResolver::new();
         let current_pid = std::process::id();
-        let result = resolver.resolve(current_pid).await;
+        let result = resolver.resolve(current_pid, None).await;
         // Should succeed for current process if /proc is accessible
         // In some test environments (e.g., sandboxed), /proc may not be accessible
         // In that case, the test still validates the resolver doesn't panic
@@ -259,11 +320,11 @@ mod tests {
         };
 
         // First call should read from /proc (temp directory in this case)
-        let result1 = resolver.resolve(12345).await;
+        let result1 = resolver.resolve(12345, None).await;
         assert_eq!(result1, Some("test-process".to_string()));
 
         // Second call should hit cache (same result)
-        let result2 = resolver.resolve(12345).await;
+        let result2 = resolver.resolve(12345, None).await;
         assert_eq!(result1, result2, "cache should return same result");
     }
 

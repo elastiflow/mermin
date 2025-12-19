@@ -881,8 +881,11 @@ impl FlowWorker {
             event.flow_key.protocol,
         );
 
-        // Resolve process name from PID
-        let process_name = self.process_name_resolver.resolve(event.pid).await;
+        // Resolve process name from PID, using in-kernel comm if available
+        let process_name = self
+            .process_name_resolver
+            .resolve(event.pid, Some(event.comm))
+            .await;
 
         self.create_flow_span(
             &community_id,
