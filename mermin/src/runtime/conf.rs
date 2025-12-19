@@ -786,6 +786,30 @@ pub mod conf_serde {
             Ok(ExporterProtocol::from(s))
         }
     }
+
+    /// Serde helpers for ByteSize (e.g., "256KB", "1MiB")
+    pub mod bytesize {
+        use serde::{Deserialize, Deserializer, Serializer};
+
+        pub fn serialize<S>(size: &u32, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let byte_size = ::bytesize::ByteSize::b(*size as u64);
+            serializer.serialize_str(&byte_size.to_string())
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<u32, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let s = String::deserialize(deserializer)?;
+            let byte_size = s
+                .parse::<::bytesize::ByteSize>()
+                .map_err(serde::de::Error::custom)?;
+            Ok(byte_size.as_u64() as u32)
+        }
+    }
 }
 
 /// Pipeline tuning configuration for flow processing optimization
@@ -816,6 +840,32 @@ pub struct PipelineOptions {
     ///          1,000 FPS (low-end public ingress) × 10s = 10,000 concurrent flows
     ///          → 100K default provides 10x headroom (adequate, consider 200K-500K for 3K+ FPS)
     pub ebpf_max_flows: u32,
+
+    /// eBPF ring buffer size in bytes (default: 256 KB)
+    ///
+    /// Controls the size of the FLOW_EVENTS ring buffer used to pass new flow events
+    /// from eBPF to userspace. The ring buffer provides burst tolerance while worker
+    /// channels absorb backpressure.
+    ///
+    /// **Memory**: This buffer size is allocated PER NODE (not per CPU).
+    ///
+    /// **Sizing guide** based on new flows per second (FPS):
+    /// - General/Mixed (50-500 FPS):       256 KB (~1,120 events) - default ✓
+    /// - High Traffic (500-2K FPS):        512 KB (~2,240 events) - 2x buffer
+    /// - Very High Traffic (2K-5K FPS):    1 MB (~4,480 events) - 4x buffer
+    /// - Extreme Traffic (>5K FPS):        2 MB+ (~8,960+ events) - scale as needed
+    ///
+    /// **Formula**: buffer_capacity = (fps × burst_duration_seconds) × event_size
+    /// - Example: 1,000 FPS × 2s burst × 234 bytes = ~468 KB → use 512 KB
+    ///
+    /// **Tuning**: If you see "ring buffer full - dropping flow event" errors,
+    /// increase this value. The aya loader automatically aligns to page size.
+    ///
+    /// **Configuration examples**:
+    /// - "256KB" (default), "512KB", "1MB", "2MiB"
+    /// - Raw bytes also accepted: 262144, 524288, 1048576
+    #[serde(with = "conf_serde::bytesize")]
+    pub ebpf_ring_buffer_size_bytes: u32,
 
     /// Base capacity for userspace pipeline channels (default: 8192)
     /// This is the foundation for sizing all pipeline stages:
@@ -873,6 +923,7 @@ impl Default for PipelineOptions {
     fn default() -> Self {
         Self {
             ebpf_max_flows: 100_000,
+            ebpf_ring_buffer_size_bytes: 256 * 1024,
             base_capacity: 8192,
             worker_count: 4,
             worker_poll_interval: Duration::from_secs(5),
