@@ -1086,7 +1086,8 @@ rstuvwxyz
                 // not a file I/O error (which would mean the loading logic failed)
                 assert!(matches!(e, OtlpError::TlsConfiguration(_)));
                 // Verify it's a certificate validation error, not a file read error
-                assert!(!e.to_string().contains("failed to open certificate file")); },
+                assert!(!e.to_string().contains("failed to open certificate file"));
+            }
         }
     }
 
