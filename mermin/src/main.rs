@@ -467,16 +467,12 @@ async fn run(cli: Cli) -> Result<()> {
         .map_err(|e| MerminError::internal(format!("failed to convert LISTENING_PORTS: {e}")))?,
     ));
 
-    // Set eBPF map capacity metrics for monitoring utilization
-    // FLOW_STATS: configurable via pipeline.ebpf_max_flows (hash map, entry count)
     metrics::registry::EBPF_MAP_CAPACITY
         .with_label_values(&[EbpfMapName::FlowStats.as_ref()])
         .set(conf.pipeline.ebpf_max_flows as i64);
-    // FLOW_EVENTS: 256 KB ring buffer (matches RING_BUF_SIZE_BYTES in mermin-ebpf/src/main.rs)
     metrics::registry::EBPF_MAP_CAPACITY
         .with_label_values(&[EbpfMapName::FlowEvents.as_ref()])
         .set(FLOW_EVENTS_RINGBUF_SIZE_BYTES as i64);
-    // LISTENING_PORTS: 65536 max entries (matches HashMap definition in mermin-ebpf/src/main.rs)
     metrics::registry::EBPF_MAP_CAPACITY
         .with_label_values(&[EbpfMapName::ListeningPorts.as_ref()])
         .set(LISTENING_PORTS_CAPACITY as i64);

@@ -55,7 +55,6 @@ where
         Box::pin(async move {
             let result = inner_export_static.await;
 
-            // Track export result metrics
             match &result {
                 Ok(()) => {
                     // Track successful export - increment by batch size since each span succeeded

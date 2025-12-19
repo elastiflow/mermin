@@ -183,7 +183,6 @@ impl DirectionInferrer {
                 });
             }
             Err(e) => {
-                // Match on MapError variants directly for type-safe error handling
                 let status = match &e {
                     aya::maps::MapError::KeyNotFound | aya::maps::MapError::ElementNotFound => {
                         EbpfMapStatus::NotFound
@@ -222,8 +221,6 @@ impl DirectionInferrer {
                 });
             }
             Err(e) => {
-                // Track not_found (expected) vs error (unexpected)
-                // Traverse the error chain to find an io::Error with NotFound kind
                 let status = {
                     let mut current: Option<&dyn std::error::Error> = Some(&e);
                     let mut found_not_found = false;

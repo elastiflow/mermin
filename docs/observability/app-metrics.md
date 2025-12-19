@@ -9,7 +9,7 @@ Mermin exposes Prometheus metrics in the standard Prometheus text format at mult
 - `/metrics` - All metrics (standard + debug if enabled)
 - `/metrics/standard` - Standard metrics only (no high-cardinality labels)
 - `/metrics/debug` - Debug metrics only (returns 404 if disabled)
-- `/metrics:summary` - JSON summary of all available metrics with metadata (name, type, description, labels, category) (AIP-136 custom method)
+- `/metrics:summary` - JSON summary of all available metrics with metadata (name, type, description, labels, category)
 
 **Default URL:** `http://localhost:10250/metrics`
 

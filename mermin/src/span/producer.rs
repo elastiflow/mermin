@@ -1148,7 +1148,6 @@ impl FlowWorker {
                 .inc();
         }
 
-        // Count initial packets and bytes in metrics
         if stats.packets > 0 {
             metrics::registry::PACKETS_TOTAL.inc_by(stats.packets);
             if metrics::registry::debug_enabled() {
@@ -1434,7 +1433,6 @@ impl FlowPoller {
                     "collection phase completed"
                 );
 
-                // Update flow store and queue size metrics for this poller
                 let poller_id_str = self.id.to_string();
                 if metrics::registry::debug_enabled() {
                     metrics::registry::FLOW_SPAN_STORE_SIZE

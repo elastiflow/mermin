@@ -216,7 +216,6 @@ impl ProviderBuilder {
                     event.name = "exporter.otlp.build_success",
                     "otlp exporter built successfully"
                 );
-                // Wrap exporter to observe batch sizes and track metrics
                 let wrapped_exporter = MetricsSpanExporter::new(exporter, ExporterName::Otlp);
                 let batch_config = BatchConfigBuilder::default()
                     .with_max_export_batch_size(options.max_batch_size)
@@ -255,7 +254,6 @@ impl ProviderBuilder {
         max_export_timeout: std::time::Duration,
     ) -> ProviderBuilder {
         let exporter = opentelemetry_stdout::SpanExporter::default();
-        // Wrap exporter to observe batch sizes and track metrics
         let wrapped_exporter = MetricsSpanExporter::new(exporter, ExporterName::Stdout);
 
         let batch_config = BatchConfigBuilder::default()
