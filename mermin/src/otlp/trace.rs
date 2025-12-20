@@ -157,16 +157,16 @@ impl TraceableExporter for TraceExporterAdapter {
         if self.has_otlp {
             metrics::registry::EXPORT_FLOW_SPANS_TOTAL
                 .with_label_values(&[
-                    ExporterName::Otlp.as_ref(),
-                    ExportStatus::Attempted.as_ref(),
+                    ExporterName::Otlp.as_str(),
+                    ExportStatus::Attempted.as_str(),
                 ])
                 .inc();
         }
         if self.has_stdout {
             metrics::registry::EXPORT_FLOW_SPANS_TOTAL
                 .with_label_values(&[
-                    ExporterName::Stdout.as_ref(),
-                    ExportStatus::Attempted.as_ref(),
+                    ExporterName::Stdout.as_str(),
+                    ExportStatus::Attempted.as_str(),
                 ])
                 .inc();
         }
@@ -191,7 +191,7 @@ impl TraceableExporter for NoOpExporterAdapter {
     async fn export(&self, _traceable: TraceableRecord) {
         // Track as "noop" - span was processed but not exported (no exporter configured)
         metrics::registry::EXPORT_FLOW_SPANS_TOTAL
-            .with_label_values(&[ExporterName::Noop.as_ref(), ExportStatus::NoOp.as_ref()])
+            .with_label_values(&[ExporterName::Noop.as_str(), ExportStatus::NoOp.as_str()])
             .inc();
         trace!(
             event.name = "span.export_skipped",

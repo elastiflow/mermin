@@ -9,8 +9,8 @@ pub enum FlowEventResult {
     DroppedError,
 }
 
-impl AsRef<str> for FlowEventResult {
-    fn as_ref(&self) -> &str {
+impl FlowEventResult {
+    pub const fn as_str(self) -> &'static str {
         match self {
             FlowEventResult::Received => "received",
             FlowEventResult::Filtered => "filtered",
@@ -29,8 +29,8 @@ pub enum FlowSpanProducerStatus {
     Dropped,
 }
 
-impl AsRef<str> for FlowSpanProducerStatus {
-    fn as_ref(&self) -> &str {
+impl FlowSpanProducerStatus {
+    pub const fn as_str(self) -> &'static str {
         match self {
             FlowSpanProducerStatus::Created => "created",
             FlowSpanProducerStatus::Recorded => "recorded",

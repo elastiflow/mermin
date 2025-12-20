@@ -468,13 +468,13 @@ async fn run(cli: Cli) -> Result<()> {
     ));
 
     metrics::registry::EBPF_MAP_CAPACITY
-        .with_label_values(&[EbpfMapName::FlowStats.as_ref()])
+        .with_label_values(&[EbpfMapName::FlowStats.as_str()])
         .set(conf.pipeline.ebpf_max_flows as i64);
     metrics::registry::EBPF_MAP_CAPACITY
-        .with_label_values(&[EbpfMapName::FlowEvents.as_ref()])
+        .with_label_values(&[EbpfMapName::FlowEvents.as_str()])
         .set(FLOW_EVENTS_RINGBUF_SIZE_BYTES as i64);
     metrics::registry::EBPF_MAP_CAPACITY
-        .with_label_values(&[EbpfMapName::ListeningPorts.as_ref()])
+        .with_label_values(&[EbpfMapName::ListeningPorts.as_str()])
         .set(LISTENING_PORTS_CAPACITY as i64);
 
     info!(
@@ -571,18 +571,18 @@ async fn run(cli: Cli) -> Result<()> {
 
     let (flow_span_tx, mut flow_span_rx) = mpsc::channel(flow_span_capacity);
     metrics::registry::CHANNEL_CAPACITY
-        .with_label_values(&[ChannelName::ProducerOutput.as_ref()])
+        .with_label_values(&[ChannelName::ProducerOutput.as_str()])
         .set(flow_span_capacity as i64);
     metrics::registry::CHANNEL_ENTRIES
-        .with_label_values(&[ChannelName::ProducerOutput.as_ref()])
+        .with_label_values(&[ChannelName::ProducerOutput.as_str()])
         .set(0);
     let (k8s_decorated_flow_span_tx, mut k8s_decorated_flow_span_rx) =
         mpsc::channel(decorated_span_capacity);
     metrics::registry::CHANNEL_ENTRIES
-        .with_label_values(&[ChannelName::DecoratorOutput.as_ref()])
+        .with_label_values(&[ChannelName::DecoratorOutput.as_str()])
         .set(0);
     metrics::registry::CHANNEL_CAPACITY
-        .with_label_values(&[ChannelName::DecoratorOutput.as_ref()])
+        .with_label_values(&[ChannelName::DecoratorOutput.as_str()])
         .set(decorated_span_capacity as i64);
 
     let listening_port_scanner =
@@ -597,7 +597,7 @@ async fn run(cli: Cli) -> Result<()> {
     // in real-time after this, but those changes are not reflected in these metrics.
     if metrics::registry::debug_enabled() {
         metrics::registry::EBPF_MAP_ENTRIES
-            .with_label_values(&[EbpfMapName::ListeningPorts.as_ref()])
+            .with_label_values(&[EbpfMapName::ListeningPorts.as_str()])
             .set(scanned_ports as i64);
     }
 
@@ -709,7 +709,7 @@ async fn run(cli: Cli) -> Result<()> {
 
                             let channel_size = flow_span_rx.len();
                             metrics::registry::CHANNEL_ENTRIES
-                                .with_label_values(&[ChannelName::ProducerOutput.as_ref()])
+                                .with_label_values(&[ChannelName::ProducerOutput.as_str()])
                                 .set(channel_size as i64);
 
                             let _timer = metrics::registry::PROCESSING_LATENCY_SECONDS
@@ -740,12 +740,12 @@ async fn run(cli: Cli) -> Result<()> {
                             match k8s_decorated_flow_span_tx.send(span).await {
                                 Ok(_) => {
                                     metrics::registry::CHANNEL_SENDS_TOTAL
-                                        .with_label_values(&[ChannelName::DecoratorOutput.as_ref(), ChannelSendStatus::Success.as_ref()])
+                                        .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Success.as_str()])
                                         .inc();
                                 }
                                 Err(e) => {
                                     metrics::registry::CHANNEL_SENDS_TOTAL
-                                        .with_label_values(&[ChannelName::DecoratorOutput.as_ref(), ChannelSendStatus::Error.as_ref()])
+                                        .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Error.as_str()])
                                         .inc();
                                     error!(
                                         event.name = "channel.send_failed",
@@ -768,20 +768,20 @@ async fn run(cli: Cli) -> Result<()> {
                     while let Some(flow_span) = flow_span_rx.recv().await {
                         let channel_size = flow_span_rx.len();
                         metrics::registry::CHANNEL_ENTRIES
-                            .with_label_values(&[ChannelName::ProducerOutput.as_ref()])
+                            .with_label_values(&[ChannelName::ProducerOutput.as_str()])
                             .set(channel_size as i64);
                         trace!(event.name = "decorator.sending_to_exporter", flow.community_id = %flow_span.attributes.flow_community_id);
 
                         match k8s_decorated_flow_span_tx.send(flow_span).await {
                             Ok(_) => {
                                 metrics::registry::CHANNEL_SENDS_TOTAL
-                                    .with_label_values(&[ChannelName::DecoratorOutput.as_ref(), ChannelSendStatus::Success.as_ref()])
+                                    .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Success.as_str()])
                                     .inc();
                                 metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Undecorated);
                             }
                             Err(e) => {
                                 metrics::registry::CHANNEL_SENDS_TOTAL
-                                    .with_label_values(&[ChannelName::DecoratorOutput.as_ref(), ChannelSendStatus::Error.as_ref()])
+                                    .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Error.as_str()])
                                     .inc();
                                 metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Dropped);
                                 error!(
@@ -827,7 +827,7 @@ async fn run(cli: Cli) -> Result<()> {
             let flow_span_clone = flow_span.clone();
             let queue_size = k8s_decorated_flow_span_rx.len();
             metrics::registry::CHANNEL_ENTRIES
-                .with_label_values(&[ChannelName::DecoratorOutput.as_ref()])
+                .with_label_values(&[ChannelName::DecoratorOutput.as_str()])
                 .set(queue_size as i64);
             // Note: EXPORT_QUEUED is tracked when span is sent from decorator, not when received here
             let traceable: TraceableRecord = Arc::new(flow_span);

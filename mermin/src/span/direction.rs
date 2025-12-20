@@ -170,9 +170,9 @@ impl DirectionInferrer {
             Ok(_) => {
                 metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
-                        EbpfMapName::ListeningPorts.as_ref(),
-                        EbpfMapOperation::Read.as_ref(),
-                        EbpfMapStatus::Ok.as_ref(),
+                        EbpfMapName::ListeningPorts.as_str(),
+                        EbpfMapOperation::Read.as_str(),
+                        EbpfMapStatus::Ok.as_str(),
                     ])
                     .inc();
                 return Some(ClientServer {
@@ -191,9 +191,9 @@ impl DirectionInferrer {
                 };
                 metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
-                        EbpfMapName::ListeningPorts.as_ref(),
-                        EbpfMapOperation::Read.as_ref(),
-                        status.as_ref(),
+                        EbpfMapName::ListeningPorts.as_str(),
+                        EbpfMapOperation::Read.as_str(),
+                        status.as_str(),
                     ])
                     .inc();
             }
@@ -208,9 +208,9 @@ impl DirectionInferrer {
             Ok(_) => {
                 metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
-                        EbpfMapName::ListeningPorts.as_ref(),
-                        EbpfMapOperation::Read.as_ref(),
-                        EbpfMapStatus::Ok.as_ref(),
+                        EbpfMapName::ListeningPorts.as_str(),
+                        EbpfMapOperation::Read.as_str(),
+                        EbpfMapStatus::Ok.as_str(),
                     ])
                     .inc();
                 return Some(ClientServer {
@@ -243,9 +243,9 @@ impl DirectionInferrer {
                 };
                 metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
-                        EbpfMapName::ListeningPorts.as_ref(),
-                        EbpfMapOperation::Read.as_ref(),
-                        status.as_ref(),
+                        EbpfMapName::ListeningPorts.as_str(),
+                        EbpfMapOperation::Read.as_str(),
+                        status.as_str(),
                     ])
                     .inc();
             }

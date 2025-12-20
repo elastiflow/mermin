@@ -8,8 +8,8 @@ pub enum EbpfMapName {
     ListeningPorts,
 }
 
-impl AsRef<str> for EbpfMapName {
-    fn as_ref(&self) -> &str {
+impl EbpfMapName {
+    pub const fn as_str(self) -> &'static str {
         match self {
             EbpfMapName::FlowStats => "FLOW_STATS",
             EbpfMapName::FlowEvents => "FLOW_EVENTS",
@@ -26,8 +26,8 @@ pub enum EbpfMapOperation {
     Delete,
 }
 
-impl AsRef<str> for EbpfMapOperation {
-    fn as_ref(&self) -> &str {
+impl EbpfMapOperation {
+    pub const fn as_str(self) -> &'static str {
         match self {
             EbpfMapOperation::Read => "read",
             EbpfMapOperation::Write => "write",
@@ -44,8 +44,8 @@ pub enum EbpfMapStatus {
     NotFound,
 }
 
-impl AsRef<str> for EbpfMapStatus {
-    fn as_ref(&self) -> &str {
+impl EbpfMapStatus {
+    pub const fn as_str(self) -> &'static str {
         match self {
             EbpfMapStatus::Ok => "ok",
             EbpfMapStatus::Error => "error",
@@ -61,8 +61,8 @@ pub enum TcOperation {
     Detached,
 }
 
-impl AsRef<str> for TcOperation {
-    fn as_ref(&self) -> &str {
+impl TcOperation {
+    pub const fn as_str(self) -> &'static str {
         match self {
             TcOperation::Attached => "attached",
             TcOperation::Detached => "detached",

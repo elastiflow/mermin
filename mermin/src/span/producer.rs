@@ -215,10 +215,10 @@ impl FlowSpanProducer {
             worker_channels.push(worker_tx);
 
             metrics::registry::CHANNEL_CAPACITY
-                .with_label_values(&[ChannelName::PacketWorker.as_ref()])
+                .with_label_values(&[ChannelName::PacketWorker.as_str()])
                 .set(worker_capacity as i64);
             metrics::registry::CHANNEL_ENTRIES
-                .with_label_values(&[ChannelName::PacketWorker.as_ref()])
+                .with_label_values(&[ChannelName::PacketWorker.as_str()])
                 .set(0);
 
             let flow_worker = FlowWorker::new(
@@ -429,7 +429,7 @@ impl FlowSpanProducer {
                             );
                             if metrics::registry::debug_enabled() {
                                 metrics::registry::FLOW_EVENTS_TOTAL
-                                    .with_label_values(&[FlowEventResult::DroppedError.as_ref()])
+                                    .with_label_values(&[FlowEventResult::DroppedError.as_str()])
                                     .inc();
                             }
                             break;
@@ -445,11 +445,11 @@ impl FlowSpanProducer {
                             unsafe { std::ptr::read_unaligned(item.as_ptr() as *const FlowEvent) };
 
                         metrics::registry::EBPF_MAP_BYTES_TOTAL
-                            .with_label_values(&[EbpfMapName::FlowEvents.as_ref()])
+                            .with_label_values(&[EbpfMapName::FlowEvents.as_str()])
                             .inc_by(flow_event.snaplen as u64);
                         if metrics::registry::debug_enabled() {
                             metrics::registry::FLOW_EVENTS_TOTAL
-                                .with_label_values(&[FlowEventResult::Received.as_ref()])
+                                .with_label_values(&[FlowEventResult::Received.as_str()])
                                 .inc();
                         }
 
@@ -461,7 +461,7 @@ impl FlowSpanProducer {
                             match worker_tx.try_send(flow_event) {
                                 Ok(_) => {
                                     metrics::registry::CHANNEL_SENDS_TOTAL
-                                        .with_label_values(&[ChannelName::PacketWorker.as_ref(), ChannelSendStatus::Success.as_ref()])
+                                        .with_label_values(&[ChannelName::PacketWorker.as_str(), ChannelSendStatus::Success.as_str()])
                                         .inc();
                                     worker_index = (current_worker + 1) % worker_count;
                                     sent = true;
@@ -474,7 +474,7 @@ impl FlowSpanProducer {
                                 Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
                                     // Worker is gone, try next one
                                     metrics::registry::CHANNEL_SENDS_TOTAL
-                                        .with_label_values(&[ChannelName::PacketWorker.as_ref(), ChannelSendStatus::Error.as_ref()])
+                                        .with_label_values(&[ChannelName::PacketWorker.as_str(), ChannelSendStatus::Error.as_str()])
                                         .inc();
                                     continue;
                                 }
@@ -487,7 +487,7 @@ impl FlowSpanProducer {
                             // This is a fail-safe to maintain pipeline throughput under extreme load.
                             if metrics::registry::debug_enabled() {
                                 metrics::registry::FLOW_EVENTS_TOTAL
-                                    .with_label_values(&[FlowEventResult::DroppedBackpressure.as_ref()])
+                                    .with_label_values(&[FlowEventResult::DroppedBackpressure.as_str()])
                                     .inc();
                             }
 
@@ -634,7 +634,7 @@ impl FlowWorker {
 
         while let Some(flow_event) = self.flow_event_rx.recv().await {
             metrics::registry::CHANNEL_ENTRIES
-                .with_label_values(&[ChannelName::PacketWorker.as_ref()])
+                .with_label_values(&[ChannelName::PacketWorker.as_str()])
                 .set(self.flow_event_rx.len() as i64);
 
             if let Err(e) = self.process_new_flow(flow_event).await {
@@ -723,18 +723,18 @@ impl FlowWorker {
             Ok(_) => {
                 metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
-                        EbpfMapName::FlowStats.as_ref(),
-                        EbpfMapOperation::Delete.as_ref(),
-                        EbpfMapStatus::Ok.as_ref(),
+                        EbpfMapName::FlowStats.as_str(),
+                        EbpfMapOperation::Delete.as_str(),
+                        EbpfMapStatus::Ok.as_str(),
                     ])
                     .inc();
             }
             Err(e) => {
                 metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
-                        EbpfMapName::FlowStats.as_ref(),
-                        EbpfMapOperation::Delete.as_ref(),
-                        EbpfMapStatus::Error.as_ref(),
+                        EbpfMapName::FlowStats.as_str(),
+                        EbpfMapOperation::Delete.as_str(),
+                        EbpfMapStatus::Error.as_str(),
                     ])
                     .inc();
                 warn!(
@@ -765,9 +765,9 @@ impl FlowWorker {
                 Ok(s) => {
                     metrics::registry::EBPF_MAP_OPS_TOTAL
                         .with_label_values(&[
-                            EbpfMapName::FlowStats.as_ref(),
-                            EbpfMapOperation::Read.as_ref(),
-                            EbpfMapStatus::Ok.as_ref(),
+                            EbpfMapName::FlowStats.as_str(),
+                            EbpfMapOperation::Read.as_str(),
+                            EbpfMapStatus::Ok.as_str(),
                         ])
                         .inc();
                     s
@@ -785,9 +785,9 @@ impl FlowWorker {
                     };
                     metrics::registry::EBPF_MAP_OPS_TOTAL
                         .with_label_values(&[
-                            EbpfMapName::FlowStats.as_ref(),
-                            EbpfMapOperation::Read.as_ref(),
-                            status.as_ref(),
+                            EbpfMapName::FlowStats.as_str(),
+                            EbpfMapOperation::Read.as_str(),
+                            status.as_str(),
                         ])
                         .inc();
                     return Err(Error::FlowNotFound);
@@ -800,7 +800,7 @@ impl FlowWorker {
         if !self.should_process_flow(&event.flow_key, &stats) {
             if metrics::registry::debug_enabled() {
                 metrics::registry::FLOW_EVENTS_TOTAL
-                    .with_label_values(&[FlowEventResult::Filtered.as_ref()])
+                    .with_label_values(&[FlowEventResult::Filtered.as_str()])
                     .inc();
             }
 
@@ -810,11 +810,11 @@ impl FlowWorker {
                 "unknown".to_string()
             };
             metrics::registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
-                .with_label_values(&[FlowSpanProducerStatus::Dropped.as_ref()])
+                .with_label_values(&[FlowSpanProducerStatus::Dropped.as_str()])
                 .inc();
             if metrics::registry::debug_enabled() {
                 metrics::registry::FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL
-                    .with_label_values(&[&iface_name, FlowSpanProducerStatus::Dropped.as_ref()])
+                    .with_label_values(&[&iface_name, FlowSpanProducerStatus::Dropped.as_str()])
                     .inc();
             }
 
@@ -826,18 +826,18 @@ impl FlowWorker {
                     guard.keep();
                     metrics::registry::EBPF_MAP_OPS_TOTAL
                         .with_label_values(&[
-                            EbpfMapName::FlowStats.as_ref(),
-                            EbpfMapOperation::Delete.as_ref(),
-                            EbpfMapStatus::Ok.as_ref(),
+                            EbpfMapName::FlowStats.as_str(),
+                            EbpfMapOperation::Delete.as_str(),
+                            EbpfMapStatus::Ok.as_str(),
                         ])
                         .inc();
                 }
                 Err(e) => {
                     metrics::registry::EBPF_MAP_OPS_TOTAL
                         .with_label_values(&[
-                            EbpfMapName::FlowStats.as_ref(),
-                            EbpfMapOperation::Delete.as_ref(),
-                            EbpfMapStatus::Error.as_ref(),
+                            EbpfMapName::FlowStats.as_str(),
+                            EbpfMapOperation::Delete.as_str(),
+                            EbpfMapStatus::Error.as_str(),
                         ])
                         .inc();
                     warn!(
@@ -1140,11 +1140,11 @@ impl FlowWorker {
 
         let interface_name = iface_name.as_deref().unwrap_or("unknown");
         metrics::registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
-            .with_label_values(&[FlowSpanProducerStatus::Created.as_ref()])
+            .with_label_values(&[FlowSpanProducerStatus::Created.as_str()])
             .inc();
         if metrics::registry::debug_enabled() {
             metrics::registry::FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL
-                .with_label_values(&[interface_name, FlowSpanProducerStatus::Created.as_ref()])
+                .with_label_values(&[interface_name, FlowSpanProducerStatus::Created.as_str()])
                 .inc();
         }
 
@@ -1663,9 +1663,9 @@ async fn record_flow(
         Ok(s) => {
             metrics::registry::EBPF_MAP_OPS_TOTAL
                 .with_label_values(&[
-                    EbpfMapName::FlowStats.as_ref(),
-                    EbpfMapOperation::Read.as_ref(),
-                    EbpfMapStatus::Ok.as_ref(),
+                    EbpfMapName::FlowStats.as_str(),
+                    EbpfMapOperation::Read.as_str(),
+                    EbpfMapStatus::Ok.as_str(),
                 ])
                 .inc();
             s
@@ -1679,9 +1679,9 @@ async fn record_flow(
             };
             metrics::registry::EBPF_MAP_OPS_TOTAL
                 .with_label_values(&[
-                    EbpfMapName::FlowStats.as_ref(),
-                    EbpfMapOperation::Read.as_ref(),
-                    status.as_ref(),
+                    EbpfMapName::FlowStats.as_str(),
+                    EbpfMapOperation::Read.as_str(),
+                    status.as_str(),
                 ])
                 .inc();
             warn!(
@@ -1812,11 +1812,11 @@ async fn record_flow(
         .as_deref()
         .unwrap_or("unknown");
     metrics::registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
-        .with_label_values(&[FlowSpanProducerStatus::Recorded.as_ref()])
+        .with_label_values(&[FlowSpanProducerStatus::Recorded.as_str()])
         .inc();
     if metrics::registry::debug_enabled() {
         metrics::registry::FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL
-            .with_label_values(&[interface_name, FlowSpanProducerStatus::Recorded.as_ref()])
+            .with_label_values(&[interface_name, FlowSpanProducerStatus::Recorded.as_str()])
             .inc();
     }
 
@@ -1883,16 +1883,16 @@ async fn record_flow(
         Ok(_) => {
             metrics::registry::CHANNEL_SENDS_TOTAL
                 .with_label_values(&[
-                    ChannelName::ProducerOutput.as_ref(),
-                    ChannelSendStatus::Success.as_ref(),
+                    ChannelName::ProducerOutput.as_str(),
+                    ChannelSendStatus::Success.as_str(),
                 ])
                 .inc();
         }
         Err(mpsc::error::TrySendError::Full(_)) => {
             metrics::registry::CHANNEL_SENDS_TOTAL
                 .with_label_values(&[
-                    ChannelName::ProducerOutput.as_ref(),
-                    ChannelSendStatus::Backpressure.as_ref(),
+                    ChannelName::ProducerOutput.as_str(),
+                    ChannelSendStatus::Backpressure.as_str(),
                 ])
                 .inc();
             debug!(
@@ -1906,8 +1906,8 @@ async fn record_flow(
         Err(mpsc::error::TrySendError::Closed(_)) => {
             metrics::registry::CHANNEL_SENDS_TOTAL
                 .with_label_values(&[
-                    ChannelName::ProducerOutput.as_ref(),
-                    ChannelSendStatus::Error.as_ref(),
+                    ChannelName::ProducerOutput.as_str(),
+                    ChannelSendStatus::Error.as_str(),
                 ])
                 .inc();
             error!(
@@ -1950,18 +1950,18 @@ async fn record_flow(
                 Ok(_) => {
                     metrics::registry::EBPF_MAP_OPS_TOTAL
                         .with_label_values(&[
-                            EbpfMapName::FlowStats.as_ref(),
-                            EbpfMapOperation::Write.as_ref(),
-                            EbpfMapStatus::Ok.as_ref(),
+                            EbpfMapName::FlowStats.as_str(),
+                            EbpfMapOperation::Write.as_str(),
+                            EbpfMapStatus::Ok.as_str(),
                         ])
                         .inc();
                 }
                 Err(e) => {
                     metrics::registry::EBPF_MAP_OPS_TOTAL
                         .with_label_values(&[
-                            EbpfMapName::FlowStats.as_ref(),
-                            EbpfMapOperation::Write.as_ref(),
-                            EbpfMapStatus::Error.as_ref(),
+                            EbpfMapName::FlowStats.as_str(),
+                            EbpfMapOperation::Write.as_str(),
+                            EbpfMapStatus::Error.as_str(),
                         ])
                         .inc();
                     debug!(
@@ -2020,9 +2020,9 @@ pub async fn timeout_and_remove_flow(
             Ok(stats) => {
                 metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
-                        EbpfMapName::FlowStats.as_ref(),
-                        EbpfMapOperation::Read.as_ref(),
-                        EbpfMapStatus::Ok.as_ref(),
+                        EbpfMapName::FlowStats.as_str(),
+                        EbpfMapOperation::Read.as_str(),
+                        EbpfMapStatus::Ok.as_str(),
                     ])
                     .inc();
                 let end_time_nanos = stats.last_seen_ns + boot_time_offset;
@@ -2037,9 +2037,9 @@ pub async fn timeout_and_remove_flow(
                 };
                 metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
-                        EbpfMapName::FlowStats.as_ref(),
-                        EbpfMapOperation::Read.as_ref(),
-                        status.as_ref(),
+                        EbpfMapName::FlowStats.as_str(),
+                        EbpfMapOperation::Read.as_str(),
+                        status.as_str(),
                     ])
                     .inc();
             }
@@ -2067,16 +2067,16 @@ pub async fn timeout_and_remove_flow(
             Ok(_) => {
                 metrics::registry::CHANNEL_SENDS_TOTAL
                     .with_label_values(&[
-                        ChannelName::ProducerOutput.as_ref(),
-                        ChannelSendStatus::Success.as_ref(),
+                        ChannelName::ProducerOutput.as_str(),
+                        ChannelSendStatus::Success.as_str(),
                     ])
                     .inc();
             }
             Err(mpsc::error::TrySendError::Full(_)) => {
                 metrics::registry::CHANNEL_SENDS_TOTAL
                     .with_label_values(&[
-                        ChannelName::ProducerOutput.as_ref(),
-                        ChannelSendStatus::Backpressure.as_ref(),
+                        ChannelName::ProducerOutput.as_str(),
+                        ChannelSendStatus::Backpressure.as_str(),
                     ])
                     .inc();
                 debug!(
@@ -2090,8 +2090,8 @@ pub async fn timeout_and_remove_flow(
             Err(mpsc::error::TrySendError::Closed(_)) => {
                 metrics::registry::CHANNEL_SENDS_TOTAL
                     .with_label_values(&[
-                        ChannelName::ProducerOutput.as_ref(),
-                        ChannelSendStatus::Error.as_ref(),
+                        ChannelName::ProducerOutput.as_str(),
+                        ChannelSendStatus::Error.as_str(),
                     ])
                     .inc();
                 error!(
@@ -2124,18 +2124,18 @@ pub async fn timeout_and_remove_flow(
             Ok(_) => {
                 metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
-                        EbpfMapName::FlowStats.as_ref(),
-                        EbpfMapOperation::Delete.as_ref(),
-                        EbpfMapStatus::Ok.as_ref(),
+                        EbpfMapName::FlowStats.as_str(),
+                        EbpfMapOperation::Delete.as_str(),
+                        EbpfMapStatus::Ok.as_str(),
                     ])
                     .inc();
             }
             Err(e) => {
                 metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
-                        EbpfMapName::FlowStats.as_ref(),
-                        EbpfMapOperation::Delete.as_ref(),
-                        EbpfMapStatus::Error.as_ref(),
+                        EbpfMapName::FlowStats.as_str(),
+                        EbpfMapOperation::Delete.as_str(),
+                        EbpfMapStatus::Error.as_str(),
                     ])
                     .inc();
                 debug!(
@@ -2158,11 +2158,11 @@ pub async fn timeout_and_remove_flow(
         .as_deref()
         .unwrap_or("unknown");
     metrics::registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
-        .with_label_values(&[FlowSpanProducerStatus::Idled.as_ref()])
+        .with_label_values(&[FlowSpanProducerStatus::Idled.as_str()])
         .inc();
     if metrics::registry::debug_enabled() {
         metrics::registry::FLOW_PRODUCER_FLOW_SPANS_BY_INTERFACE_TOTAL
-            .with_label_values(&[iface_name, FlowSpanProducerStatus::Idled.as_ref()])
+            .with_label_values(&[iface_name, FlowSpanProducerStatus::Idled.as_str()])
             .inc();
     }
     metrics::registry::FLOW_SPANS_ACTIVE_TOTAL.dec();
@@ -2228,7 +2228,7 @@ pub async fn orphan_scanner_task(
 
                 let ebpf_map_entries = keys.len() as u64;
                 metrics::registry::EBPF_MAP_ENTRIES
-                    .with_label_values(&[EbpfMapName::FlowStats.as_ref()])
+                    .with_label_values(&[EbpfMapName::FlowStats.as_str()])
                     .set(ebpf_map_entries as i64);
 
                 for key in keys {
@@ -2275,9 +2275,9 @@ pub async fn orphan_scanner_task(
                         Ok(_) => {
                             metrics::registry::EBPF_MAP_OPS_TOTAL
                                 .with_label_values(&[
-                                    EbpfMapName::FlowStats.as_ref(),
-                                    EbpfMapOperation::Delete.as_ref(),
-                                    EbpfMapStatus::Ok.as_ref(),
+                                    EbpfMapName::FlowStats.as_str(),
+                                    EbpfMapOperation::Delete.as_str(),
+                                    EbpfMapStatus::Ok.as_str(),
                                 ])
                                 .inc();
                             removed += 1;
@@ -2291,9 +2291,9 @@ pub async fn orphan_scanner_task(
                         Err(e) => {
                             metrics::registry::EBPF_MAP_OPS_TOTAL
                                 .with_label_values(&[
-                                    EbpfMapName::FlowStats.as_ref(),
-                                    EbpfMapOperation::Delete.as_ref(),
-                                    EbpfMapStatus::Error.as_ref(),
+                                    EbpfMapName::FlowStats.as_str(),
+                                    EbpfMapOperation::Delete.as_str(),
+                                    EbpfMapStatus::Error.as_str(),
                                 ])
                                 .inc();
                             debug!(

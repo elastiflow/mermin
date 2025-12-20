@@ -846,7 +846,7 @@ impl IfaceController {
         }
 
         metrics::registry::TC_PROGRAMS_TOTAL
-            .with_label_values(&[TcOperation::Attached.as_ref()])
+            .with_label_values(&[TcOperation::Attached.as_str()])
             .inc();
 
         if metrics::registry::debug_enabled() {
@@ -941,7 +941,7 @@ impl IfaceController {
                             "unpinned TCX link during detachment"
                         );
                         metrics::registry::TC_PROGRAMS_TOTAL
-                            .with_label_values(&[TcOperation::Detached.as_ref()])
+                            .with_label_values(&[TcOperation::Detached.as_str()])
                             .inc();
 
                         if metrics::registry::debug_enabled() {
@@ -1004,7 +1004,7 @@ impl IfaceController {
         })?;
 
         metrics::registry::TC_PROGRAMS_TOTAL
-            .with_label_values(&[TcOperation::Detached.as_ref()])
+            .with_label_values(&[TcOperation::Detached.as_str()])
             .inc();
 
         if metrics::registry::debug_enabled() {
@@ -1043,7 +1043,7 @@ impl IfaceController {
                                 "detached TCX program via pinned link"
                             );
                             metrics::registry::TC_PROGRAMS_TOTAL
-                                .with_label_values(&[TcOperation::Detached.as_ref()])
+                                .with_label_values(&[TcOperation::Detached.as_str()])
                                 .inc();
 
                             if metrics::registry::debug_enabled() {

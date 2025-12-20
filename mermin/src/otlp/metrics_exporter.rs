@@ -59,13 +59,13 @@ where
                 Ok(()) => {
                     // Track successful export - increment by batch size since each span succeeded
                     metrics::registry::EXPORT_FLOW_SPANS_TOTAL
-                        .with_label_values(&[exporter_name.as_ref(), ExportStatus::Ok.as_ref()])
+                        .with_label_values(&[exporter_name.as_str(), ExportStatus::Ok.as_str()])
                         .inc_by(batch_size as u64);
                 }
                 Err(_) => {
                     // Track export error - increment by batch size since each span in the batch failed
                     metrics::registry::EXPORT_FLOW_SPANS_TOTAL
-                        .with_label_values(&[exporter_name.as_ref(), ExportStatus::Error.as_ref()])
+                        .with_label_values(&[exporter_name.as_str(), ExportStatus::Error.as_str()])
                         .inc_by(batch_size as u64);
                 }
             }

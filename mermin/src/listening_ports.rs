@@ -180,9 +180,9 @@ impl ListeningPortScanner {
                 Ok(_) => {
                     metrics::registry::EBPF_MAP_OPS_TOTAL
                         .with_label_values(&[
-                            EbpfMapName::ListeningPorts.as_ref(),
-                            EbpfMapOperation::Write.as_ref(),
-                            EbpfMapStatus::Ok.as_ref(),
+                            EbpfMapName::ListeningPorts.as_str(),
+                            EbpfMapOperation::Write.as_str(),
+                            EbpfMapStatus::Ok.as_str(),
                         ])
                         .inc();
                     count += 1;
@@ -190,9 +190,9 @@ impl ListeningPortScanner {
                 Err(e) => {
                     metrics::registry::EBPF_MAP_OPS_TOTAL
                         .with_label_values(&[
-                            EbpfMapName::ListeningPorts.as_ref(),
-                            EbpfMapOperation::Write.as_ref(),
-                            EbpfMapStatus::Error.as_ref(),
+                            EbpfMapName::ListeningPorts.as_str(),
+                            EbpfMapOperation::Write.as_str(),
+                            EbpfMapStatus::Error.as_str(),
                         ])
                         .inc();
                     warn!(

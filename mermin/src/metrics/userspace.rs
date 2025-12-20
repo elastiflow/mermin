@@ -8,8 +8,8 @@ pub enum ChannelName {
     DecoratorOutput,
 }
 
-impl AsRef<str> for ChannelName {
-    fn as_ref(&self) -> &str {
+impl ChannelName {
+    pub const fn as_str(self) -> &'static str {
         match self {
             ChannelName::PacketWorker => "packet_worker",
             ChannelName::ProducerOutput => "producer_output",
@@ -26,8 +26,8 @@ pub enum ChannelSendStatus {
     Backpressure,
 }
 
-impl AsRef<str> for ChannelSendStatus {
-    fn as_ref(&self) -> &str {
+impl ChannelSendStatus {
+    pub const fn as_str(self) -> &'static str {
         match self {
             ChannelSendStatus::Success => "success",
             ChannelSendStatus::Error => "error",

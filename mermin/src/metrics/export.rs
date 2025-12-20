@@ -9,8 +9,8 @@ pub enum ExportStatus {
     NoOp,
 }
 
-impl AsRef<str> for ExportStatus {
-    fn as_ref(&self) -> &str {
+impl ExportStatus {
+    pub const fn as_str(self) -> &'static str {
         match self {
             ExportStatus::Ok => "ok",
             ExportStatus::Attempted => "attempted",
@@ -28,8 +28,8 @@ pub enum ExporterName {
     Noop,
 }
 
-impl AsRef<str> for ExporterName {
-    fn as_ref(&self) -> &str {
+impl ExporterName {
+    pub const fn as_str(self) -> &'static str {
         match self {
             ExporterName::Otlp => "otlp",
             ExporterName::Stdout => "stdout",
