@@ -1,3 +1,15 @@
+## [v0.1.0-beta.42] - 2025-12-22
+
+### Features
+
+- Mermin tcx log (#357)
+- Add mermin subcomands to test ebpf filesystem (#298)
+- Support k8s annotations (#361)
+
+[v0.1.0-beta.41..v0.1.0-beta.42](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.41...v0.1.0-beta.42)
+
+
+
 ## [v0.1.0-beta.41] - 2025-12-12
 
 ### Bug Fixes
