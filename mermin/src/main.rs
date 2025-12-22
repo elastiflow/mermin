@@ -44,7 +44,7 @@ use crate::{
     },
     k8s::{attributor::Attributor, decorator::Decorator},
     metrics::{
-        export::ExportStatus,
+        ebpf::EbpfMapName,
         k8s::K8sDecoratorStatus,
         server::start_metrics_server,
         userspace::{ChannelName, ChannelSendStatus},
@@ -123,6 +123,14 @@ async fn main() {
 ///
 /// CI check in place: .github/workflows/ci.yml (schema_version_check job)
 const EBPF_MAP_SCHEMA_VERSION: u8 = 1;
+
+/// Timeout for individual export operations (in seconds).
+/// If an export takes longer than this, it's considered timed out and the span may be lost.
+const EXPORT_TIMEOUT_SECS: u64 = 10;
+
+// Constants for eBPF map capacities
+const LISTENING_PORTS_CAPACITY: u64 = 65536;
+const FLOW_EVENTS_RINGBUF_SIZE_BYTES: u64 = 256 * 1024;
 
 async fn run(cli: Cli) -> Result<()> {
     // TODO: listen for SIGUP `kill -HUP $(pidof mermin)` to reload the eBPF program and all configuration
@@ -275,6 +283,8 @@ async fn run(cli: Cli) -> Result<()> {
         conf.display_conf();
 
         if conf.export.traces.stdout.is_some() || conf.export.traces.otlp.is_some() {
+            let has_stdout = conf.export.traces.stdout.is_some();
+            let has_otlp = conf.export.traces.otlp.is_some();
             let app_tracer_provider = init_provider(
                 conf.export.traces.stdout.clone(),
                 conf.export.traces.otlp.clone(),
@@ -285,7 +295,11 @@ async fn run(cli: Cli) -> Result<()> {
                 task.name = "exporter",
                 "initialized configured trace exporters"
             );
-            Arc::new(TraceExporterAdapter::new(app_tracer_provider))
+            Arc::new(TraceExporterAdapter::new(
+                app_tracer_provider,
+                has_otlp,
+                has_stdout,
+            ))
         } else {
             warn!(
                 event.name = "exporter.misconfigured",
@@ -453,6 +467,16 @@ async fn run(cli: Cli) -> Result<()> {
         .map_err(|e| MerminError::internal(format!("failed to convert LISTENING_PORTS: {e}")))?,
     ));
 
+    metrics::registry::EBPF_MAP_CAPACITY
+        .with_label_values(&[EbpfMapName::FlowStats.as_str()])
+        .set(conf.pipeline.ebpf_max_flows as i64);
+    metrics::registry::EBPF_MAP_CAPACITY
+        .with_label_values(&[EbpfMapName::FlowEvents.as_str()])
+        .set(FLOW_EVENTS_RINGBUF_SIZE_BYTES as i64);
+    metrics::registry::EBPF_MAP_CAPACITY
+        .with_label_values(&[EbpfMapName::ListeningPorts.as_str()])
+        .set(LISTENING_PORTS_CAPACITY as i64);
+
     info!(
         event.name = "ebpf.maps_ready",
         schema_version = EBPF_MAP_SCHEMA_VERSION,
@@ -546,12 +570,20 @@ async fn run(cli: Cli) -> Result<()> {
         as usize;
 
     let (flow_span_tx, mut flow_span_rx) = mpsc::channel(flow_span_capacity);
-    metrics::userspace::set_channel_capacity(ChannelName::Exporter, flow_span_capacity);
-    metrics::userspace::set_channel_size(ChannelName::Exporter, 0);
+    metrics::registry::CHANNEL_CAPACITY
+        .with_label_values(&[ChannelName::ProducerOutput.as_str()])
+        .set(flow_span_capacity as i64);
+    metrics::registry::CHANNEL_ENTRIES
+        .with_label_values(&[ChannelName::ProducerOutput.as_str()])
+        .set(0);
     let (k8s_decorated_flow_span_tx, mut k8s_decorated_flow_span_rx) =
         mpsc::channel(decorated_span_capacity);
-    metrics::userspace::set_channel_size(ChannelName::ExporterInput, 0);
-    metrics::userspace::set_channel_size(ChannelName::DecoratorInput, 0);
+    metrics::registry::CHANNEL_ENTRIES
+        .with_label_values(&[ChannelName::DecoratorOutput.as_str()])
+        .set(0);
+    metrics::registry::CHANNEL_CAPACITY
+        .with_label_values(&[ChannelName::DecoratorOutput.as_str()])
+        .set(decorated_span_capacity as i64);
 
     let listening_port_scanner =
         listening_ports::ListeningPortScanner::new(Arc::clone(&listening_ports_map));
@@ -559,6 +591,16 @@ async fn run(cli: Cli) -> Result<()> {
         .scan_and_populate()
         .await
         .map_err(|e| MerminError::internal(format!("failed to scan listening ports: {e}")))?;
+
+    // Set LISTENING_PORTS map metrics after initial scan
+    // Note: This only reflects the startup state; eBPF kprobes maintain the map
+    // in real-time after this, but those changes are not reflected in these metrics.
+    if metrics::registry::debug_enabled() {
+        metrics::registry::EBPF_MAP_ENTRIES
+            .with_label_values(&[EbpfMapName::ListeningPorts.as_str()])
+            .set(scanned_ports as i64);
+    }
+
     info!(
         event.name = "listening_ports.scan_complete",
         total_ports = scanned_ports,
@@ -666,8 +708,9 @@ async fn run(cli: Cli) -> Result<()> {
                             let Some(flow_span) = maybe_span else { break };
 
                             let channel_size = flow_span_rx.len();
-                            metrics::userspace::set_channel_size(ChannelName::Exporter, channel_size);
-                            metrics::userspace::set_channel_size(ChannelName::DecoratorInput, channel_size);
+                            metrics::registry::CHANNEL_ENTRIES
+                                .with_label_values(&[ChannelName::ProducerOutput.as_str()])
+                                .set(channel_size as i64);
 
                             let _timer = metrics::registry::PROCESSING_LATENCY_SECONDS
                                 .with_label_values(&["k8s_decoration"])
@@ -696,12 +739,14 @@ async fn run(cli: Cli) -> Result<()> {
 
                             match k8s_decorated_flow_span_tx.send(span).await {
                                 Ok(_) => {
-                                    metrics::userspace::inc_channel_sends(ChannelName::ExporterInput, ChannelSendStatus::Success);
-                                    metrics::export::inc_export_flow_spans(ExportStatus::Queued);
+                                    metrics::registry::CHANNEL_SENDS_TOTAL
+                                        .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Success.as_str()])
+                                        .inc();
                                 }
                                 Err(e) => {
-                                    metrics::userspace::inc_channel_sends(ChannelName::ExporterInput, ChannelSendStatus::Error);
-                                    metrics::export::inc_export_flow_spans(ExportStatus::Dropped);
+                                    metrics::registry::CHANNEL_SENDS_TOTAL
+                                        .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Error.as_str()])
+                                        .inc();
                                     error!(
                                         event.name = "channel.send_failed",
                                         channel.name = "k8s_decorated_flow_span",
@@ -722,19 +767,22 @@ async fn run(cli: Cli) -> Result<()> {
 
                     while let Some(flow_span) = flow_span_rx.recv().await {
                         let channel_size = flow_span_rx.len();
-                        metrics::userspace::set_channel_size(ChannelName::Exporter, channel_size);
-                        metrics::userspace::set_channel_size(ChannelName::DecoratorInput, channel_size);
+                        metrics::registry::CHANNEL_ENTRIES
+                            .with_label_values(&[ChannelName::ProducerOutput.as_str()])
+                            .set(channel_size as i64);
                         trace!(event.name = "decorator.sending_to_exporter", flow.community_id = %flow_span.attributes.flow_community_id);
 
                         match k8s_decorated_flow_span_tx.send(flow_span).await {
                             Ok(_) => {
-                                metrics::userspace::inc_channel_sends(ChannelName::ExporterInput, ChannelSendStatus::Success);
-                                metrics::export::inc_export_flow_spans(ExportStatus::Queued);
+                                metrics::registry::CHANNEL_SENDS_TOTAL
+                                    .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Success.as_str()])
+                                    .inc();
                                 metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Undecorated);
                             }
                             Err(e) => {
-                                metrics::userspace::inc_channel_sends(ChannelName::ExporterInput, ChannelSendStatus::Error);
-                                metrics::export::inc_export_flow_spans(ExportStatus::Dropped);
+                                metrics::registry::CHANNEL_SENDS_TOTAL
+                                    .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Error.as_str()])
+                                    .inc();
                                 metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Dropped);
                                 error!(
                                     event.name = "channel.send_failed",
@@ -778,7 +826,9 @@ async fn run(cli: Cli) -> Result<()> {
         while let Some(flow_span) = k8s_decorated_flow_span_rx.recv().await {
             let flow_span_clone = flow_span.clone();
             let queue_size = k8s_decorated_flow_span_rx.len();
-            metrics::userspace::set_channel_size(ChannelName::ExporterInput, queue_size);
+            metrics::registry::CHANNEL_ENTRIES
+                .with_label_values(&[ChannelName::DecoratorOutput.as_str()])
+                .set(queue_size as i64);
             // Note: EXPORT_QUEUED is tracked when span is sent from decorator, not when received here
             let traceable: TraceableRecord = Arc::new(flow_span);
             trace!(event.name = "flow.exporting", "exporting flow span");
@@ -787,7 +837,14 @@ async fn run(cli: Cli) -> Result<()> {
 
             trace!(event.name = "exporter.received_from_decorator", flow.community_id = %community_id);
 
-            if tokio::time::timeout(Duration::from_secs(10), exporter.export(traceable)).await.is_err() {
+            // Track export blocking time and timeouts
+            let export_start = std::time::Instant::now();
+            let export_result = tokio::time::timeout(Duration::from_secs(EXPORT_TIMEOUT_SECS), exporter.export(traceable)).await;
+            let export_duration = export_start.elapsed();
+            metrics::registry::EXPORT_LATENCY_SECONDS.observe(export_duration.as_secs_f64());
+
+            if export_result.is_err() {
+                metrics::registry::EXPORT_TIMEOUTS_TOTAL.inc();
                 warn!(event.name = "flow.export_timeout", "export call timed out, span may be lost");
             } else {
                 trace!(event.name = "exporter.export_successful", flow.community_id = %community_id);

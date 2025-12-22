@@ -55,7 +55,7 @@ use crate::{
         selector::ResourceFilter,
         selector_relations::{SelectorRelationRule, SelectorRelationsManager},
     },
-    metrics::{self, cleanup::MetricCleanupTracker},
+    metrics::{self, cleanup::MetricCleanupTracker, k8s::K8sWatcherEventType},
     runtime::{self, conf::Conf, memory::ShrinkPolicy},
     span::flow::FlowSpan,
 };
@@ -1459,11 +1459,14 @@ fn spawn_ip_resource_watcher<K, F>(
                 match event {
                     Ok(watcher::Event::Apply(obj)) => {
                         metrics::registry::K8S_WATCHER_EVENTS_TOTAL
-                            .with_label_values(&["apply"])
+                            .with_label_values(&[K8sWatcherEventType::Apply.as_str()])
                             .inc();
                         if metrics::registry::debug_enabled() {
                             metrics::registry::K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL
-                                .with_label_values(&[&resource_name, "apply"])
+                                .with_label_values(&[
+                                    &resource_name,
+                                    K8sWatcherEventType::Apply.as_str(),
+                                ])
                                 .inc();
                         }
 
@@ -1512,11 +1515,14 @@ fn spawn_ip_resource_watcher<K, F>(
                     }
                     Ok(watcher::Event::Delete(obj)) => {
                         metrics::registry::K8S_WATCHER_EVENTS_TOTAL
-                            .with_label_values(&["delete"])
+                            .with_label_values(&[K8sWatcherEventType::Delete.as_str()])
                             .inc();
                         if metrics::registry::debug_enabled() {
                             metrics::registry::K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL
-                                .with_label_values(&[&resource_name, "delete"])
+                                .with_label_values(&[
+                                    &resource_name,
+                                    K8sWatcherEventType::Delete.as_str(),
+                                ])
                                 .inc();
                         }
 
@@ -1557,11 +1563,14 @@ fn spawn_ip_resource_watcher<K, F>(
                     }
                     Ok(watcher::Event::Init) => {
                         metrics::registry::K8S_WATCHER_EVENTS_TOTAL
-                            .with_label_values(&["init"])
+                            .with_label_values(&[K8sWatcherEventType::Init.as_str()])
                             .inc();
                         if metrics::registry::debug_enabled() {
                             metrics::registry::K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL
-                                .with_label_values(&[&resource_name, "init"])
+                                .with_label_values(&[
+                                    &resource_name,
+                                    K8sWatcherEventType::Init.as_str(),
+                                ])
                                 .inc();
                         }
 
@@ -1580,11 +1589,14 @@ fn spawn_ip_resource_watcher<K, F>(
                     }
                     Ok(watcher::Event::InitDone) => {
                         metrics::registry::K8S_WATCHER_EVENTS_TOTAL
-                            .with_label_values(&["init_done"])
+                            .with_label_values(&[K8sWatcherEventType::InitDone.as_str()])
                             .inc();
                         if metrics::registry::debug_enabled() {
                             metrics::registry::K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL
-                                .with_label_values(&[&resource_name, "init_done"])
+                                .with_label_values(&[
+                                    &resource_name,
+                                    K8sWatcherEventType::InitDone.as_str(),
+                                ])
                                 .inc();
                         }
 
@@ -1598,10 +1610,15 @@ fn spawn_ip_resource_watcher<K, F>(
                         );
                     }
                     Err(e) => {
-                        metrics::registry::K8S_WATCHER_ERRORS_TOTAL.inc();
+                        metrics::registry::K8S_WATCHER_EVENTS_TOTAL
+                            .with_label_values(&[K8sWatcherEventType::Error.as_str()])
+                            .inc();
                         if metrics::registry::debug_enabled() {
-                            metrics::registry::K8S_WATCHER_ERRORS_BY_RESOURCE_TOTAL
-                                .with_label_values(&[&resource_name])
+                            metrics::registry::K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL
+                                .with_label_values(&[
+                                    &resource_name,
+                                    K8sWatcherEventType::Error.as_str(),
+                                ])
                                 .inc();
                         }
 

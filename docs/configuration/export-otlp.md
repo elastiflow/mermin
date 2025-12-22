@@ -631,28 +631,22 @@ export "traces" {
 
 ## Monitoring Export Health
 
-### Key Metrics
+### Key Metrics to Monitor
 
-```prometheus
-# Export success rate
-rate(mermin_export_success_total[5m])
+- `mermin_export_flow_spans_total{exporter_type="otlp",status="ok"}` - OTLP export success rate
+- `mermin_export_flow_spans_total{exporter_type="otlp",status="error"}` - OTLP export errors
+- `mermin_channel_size{channel="producer_output"}` / `mermin_channel_capacity{channel="producer_output"}` - Channel utilization
+- `mermin_export_latency_seconds` - Export latency histogram
+- `mermin_channel_sends_total{channel="decorator_output",status="error"}` - Channel send failures (indicates dropped spans)
 
-# Export errors
-rate(mermin_export_errors_total[5m])
-
-# Queue size
-mermin_export_queue_size
-
-# Export latency
-histogram_quantile(0.95, mermin_export_latency_seconds_bucket)
-```
+See the [Application Metrics](../observability/app-metrics.md) guide for complete Prometheus query examples.
 
 ### Healthy Indicators
 
 * Zero or minimal export errors
 * Queue size well below max
 * Export latency < timeout
-* No dropped spans
+* No channel send errors
 
 ## Troubleshooting
 
@@ -691,13 +685,14 @@ histogram_quantile(0.95, mermin_export_latency_seconds_bucket)
 
 ### Queue Full / Dropped Spans
 
-**Symptoms:** `mermin_export_drops_total` increasing
+**Symptoms:** `mermin_channel_sends_total{channel="decorator_output",status="error"}` or `mermin_channel_sends_total{channel="producer_output",status="error"}` increasing
 
 **Solutions:**
 
-1. Increase `max_queue_size`
+1. Increase `max_queue_size` in exporter configuration
 2. Increase collector capacity
 3. Reduce `max_batch_interval` for faster export
+4. Monitor `mermin_channel_entries{channel="decorator_output"}` to see queue depth
 4. Check collector for backpressure
 
 ## Next Steps

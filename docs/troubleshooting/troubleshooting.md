@@ -97,11 +97,14 @@ kubectl port-forward daemonset/mermin 10250:10250 -n mermin
 curl http://localhost:10250/metrics
 ```
 
+See the [Application Metrics](../observability/app-metrics.md) guide for complete metrics documentation and Prometheus query examples.
+
 Key metrics to monitor include:
 
 - `mermin_flow_spans_created_total` - Total flow spans created
-- `mermin_packets_total` - Packets processed by interface and direction
-- `mermin_export_errors_total` - Export failures (investigate if increasing)
+- `mermin_packets_total` - Total packets processed
+- `mermin_export_flow_spans_total{exporter_type="otlp",status="error"}` - OTLP export failures (investigate if increasing)
+- `mermin_export_flow_spans_total{exporter_type="stdout",status="error"}` - Stdout export failures (investigate if increasing)
 
 <!-- TODO(GA Documentation): Iterate on the section -->
 <!-- ## Troubleshooting

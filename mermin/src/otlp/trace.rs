@@ -11,15 +11,24 @@ use opentelemetry_sdk::{
 };
 use tracing::trace;
 
-use crate::metrics::export::{ExportStatus, inc_export_flow_spans, observe_export_latency};
+use crate::metrics::{
+    self,
+    export::{ExportStatus, ExporterName},
+};
 
 pub struct TraceExporterAdapter {
     provider: SdkTracerProvider,
+    has_otlp: bool,
+    has_stdout: bool,
 }
 
 impl TraceExporterAdapter {
-    pub fn new(provider: SdkTracerProvider) -> Self {
-        Self { provider }
+    pub fn new(provider: SdkTracerProvider, has_otlp: bool, has_stdout: bool) -> Self {
+        Self {
+            provider,
+            has_otlp,
+            has_stdout,
+        }
     }
 
     /// Explicitly shutdown the OpenTelemetry provider with a timeout
@@ -98,7 +107,9 @@ pub trait TraceableExporter: Send + Sync {
 #[async_trait]
 impl TraceableExporter for TraceExporterAdapter {
     async fn export(&self, traceable: TraceableRecord) {
-        let start = std::time::Instant::now();
+        let _timer = metrics::registry::PROCESSING_LATENCY_SECONDS
+            .with_label_values(&["export"])
+            .start_timer();
 
         let tracer = self.provider.tracer("mermin");
         let name = if let Some(name) = traceable.name() {
@@ -139,9 +150,26 @@ impl TraceableExporter for TraceExporterAdapter {
         span = traceable.record(span);
         opentelemetry::trace::Span::end_with_timestamp(&mut span, traceable.end_time());
 
-        // Metrics: Span exported successfully
-        observe_export_latency(start.elapsed());
-        inc_export_flow_spans(crate::metrics::export::ExportStatus::Ok);
+        // Note: OpenTelemetry SDK may export to multiple exporters, so we track metrics
+        // for each configured exporter type. The actual export happens asynchronously
+        // through the SDK's batch processor, so we track the attempt here. Success/failure
+        // will be tracked separately via the tracing layer when export errors occur.
+        if self.has_otlp {
+            metrics::registry::EXPORT_FLOW_SPANS_TOTAL
+                .with_label_values(&[
+                    ExporterName::Otlp.as_str(),
+                    ExportStatus::Attempted.as_str(),
+                ])
+                .inc();
+        }
+        if self.has_stdout {
+            metrics::registry::EXPORT_FLOW_SPANS_TOTAL
+                .with_label_values(&[
+                    ExporterName::Stdout.as_str(),
+                    ExportStatus::Attempted.as_str(),
+                ])
+                .inc();
+        }
 
         trace!(
             event.name = "span.exported",
@@ -162,7 +190,9 @@ pub struct NoOpExporterAdapter {}
 impl TraceableExporter for NoOpExporterAdapter {
     async fn export(&self, _traceable: TraceableRecord) {
         // Track as "noop" - span was processed but not exported (no exporter configured)
-        inc_export_flow_spans(ExportStatus::NoOp);
+        metrics::registry::EXPORT_FLOW_SPANS_TOTAL
+            .with_label_values(&[ExporterName::Noop.as_str(), ExportStatus::NoOp.as_str()])
+            .inc();
         trace!(
             event.name = "span.export_skipped",
             reason = "no_op_exporter_configured",

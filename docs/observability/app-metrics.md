@@ -1,60 +1,71 @@
+# Application Metrics
+
 This guide describes the Prometheus metrics endpoint exposed by Mermin and provides a comprehensive breakdown of all available metrics, their types, and descriptions.
 
 ## Metrics Endpoint
 
-Mermin exposes Prometheus metrics in the standard Prometheus text format at the `/metrics` HTTP endpoint. The metrics server is enabled by default and listens on port `10250` (configurable via the `metrics.port` configuration option).
+Mermin exposes Prometheus metrics in the standard Prometheus text format at multiple HTTP endpoints:
 
-**Endpoint URL:** `http://<listen_address>:<port>/metrics`
+- `/metrics` - All metrics (standard + debug if enabled)
+- `/metrics/standard` - Standard metrics only (no high-cardinality labels)
+- `/metrics/debug` - Debug metrics only (returns 404 if disabled)
+- `/metrics:summary` - JSON summary of all available metrics with metadata (name, type, description, labels, category)
 
-By default, this resolves to: `http://localhost:10250/metrics`
+**Default URL:** `http://localhost:10250/metrics`
 
-The endpoint returns all registered metrics in Prometheus text format, which can be scraped by Prometheus or queried directly using tools like `curl` or `wget`.
+The `/metrics`, `/metrics/standard`, and `/metrics/debug` endpoints return metrics in Prometheus text format, which can be scraped by Prometheus or queried directly using tools like `curl`.
+
+The `/metrics:summary` endpoint returns a JSON response containing metadata about all available metrics, including:
+- Metric names and types (counter, gauge, histogram)
+- Descriptions
+- Label names
+- Category (standard or debug)
+- Summary statistics (total metrics, standard metrics count, debug metrics count)
+
+**Example:** If deployed locally, query the summary endpoint exposed on port 10250:
+```bash
+curl http://localhost:10250/metrics:summary | jq .
+```
 
 ## Metrics Reference
 
-All metrics follow the naming convention: `mermin_<subsystem>_<name>_(optional<type>)`
+All metrics follow the naming convention: `mermin_<subsystem>_<name>_<unit>` where applicable.
 
 ### Metric Types
 
 The suffix of a metric name indicates its type:
 
-- `_total`: A counter that only increases
-- `_bytes`: A counter for bytes
-- `_seconds`: A histogram for duration measurements in seconds
-- (no suffix): A gauge representing the current value of a metric
+- `_total`: A [counter](https://prometheus.io/docs/concepts/metric_types/#counter) that only increases
+- `_seconds`: A [histogram](https://prometheus.io/docs/concepts/metric_types/#histogram) for duration measurements in seconds
+- (no suffix): May be a [gauge](https://prometheus.io/docs/concepts/metric_types/#gauge) representing the current value or a [histogram](https://prometheus.io/docs/concepts/metric_types/#histogram)
 
-### Subsystems
+### Standard vs Debug Metrics
 
-Metrics are categorized into logical subsystems that correspond to different components of Mermin:
+- **Standard metrics**: Always enabled, aggregated across resources, safe for production
+- **Debug metrics**: High-cardinality labels (per-interface, per-resource), must be explicitly enabled via `metrics.debug_metrics_enabled = true`
 
-- `(none)`: For application-wide metrics
-- `ebpf`: For eBPF-specific metrics
-- `mermin`: For userspace ring buffer and packet source metrics
-- `span`: For flow span producer metrics
-- `k8s`: For Kubernetes integration metrics
-- `export`: For metrics related to the export subsystem
+---
 
-## Application/System Metrics (`mermin_*`)
+## eBPF Resource Metrics (`mermin_ebpf_*`)
 
-These metrics cover the overall application health, build information, and the state of high-level components.
+Metrics for eBPF programs, maps, and kernel-level packet capture.
 
-### Build and Runtime
+### Map Statistics
 
-**`mermin_build_info{version, git_sha}`**
+**`mermin_ebpf_map_entries{map}`**
 - **Type:** Gauge
-- **Description:** Exposes build information, including the version and Git SHA of the build.
+- **Labels:** `map` = "FLOW_STATS" | "LISTENING_PORTS"
+- **Description:** Current number of entries in eBPF hash maps. Not available for ring buffers.
 
-### Health Status
-
-These gauges indicate the health of various Mermin components. A value of `1` indicates healthy, and `0` indicates unhealthy.
-
-**`mermin_health_ebpf_loaded`**
+**`mermin_ebpf_map_capacity{map}`**
 - **Type:** Gauge
-- **Description:** Indicates if the eBPF programs are successfully loaded.
+- **Labels:** `map` = "FLOW_STATS" | "FLOW_EVENTS" | "LISTENING_PORTS"
+- **Description:** Maximum capacity of eBPF maps. For hash maps this is max entries; for ring buffers (FLOW_EVENTS) this is size in bytes.
 
-**`mermin_health_k8s`**
-- **Type:** Gauge
-- **Description:** Indicates if the Kubernetes caches are synced.
+**`mermin_ebpf_map_utilization_ratio{map}`**
+- **Type:** Gauge (0.0-1.0)
+- **Labels:** `map` = "FLOW_STATS" | "LISTENING_PORTS"
+- **Description:** Utilization ratio (entries/capacity). Available for hash maps only.
 
 **`mermin_health_ready_to_process`**
 - **Type:** Gauge
@@ -104,158 +115,326 @@ This section focuses on metrics originating from the eBPF layer, which is respon
 - **Type:** Gauge
 - **Description:** The stack memory usage in bytes.
 
-**`mermin_ebpf_ringbuf_packets_total{type, interface}`**
+**`mermin_ebpf_map_operations_total{map, operation, status}`**
 - **Type:** Counter
-- **Description:** A counter for packets from the eBPF ring buffer. `type` can be `received` or `malformed`.
+- **Labels:**
+  - `map` = "FLOW_STATS" | "LISTENING_PORTS"
+  - `operation` = "read" | "write" | "delete"
+  - `status` = "ok" | "error" | "not_found"
+- **Description:** Total number of eBPF map operations by type and outcome.
 
-**`mermin_ebpf_ringbuf_bytes`**
+**`mermin_ebpf_map_bytes_total{map}`**
 - **Type:** Counter
-- **Description:** The total bytes received from the eBPF ring buffer.
+- **Labels:** `map` = "FLOW_EVENTS"
+- **Description:** Total bytes read from eBPF ring buffers.
 
-## Userspace Ring Buffer Metrics (`mermin_*`)
-
-These metrics describe the flow of data from the eBPF programs to the userspace application via the ring buffer.
-
-### Packet Processing
-
-**`mermin_ringbuf_packets_total{type}`**
+**`mermin_ebpf_orphans_cleaned_total`**
 - **Type:** Counter
-- **Description:** A counter for packets in the userspace ring buffer. `type` can be `received`, `dropped`, or `filtered`.
+- **Description:** Total number of orphaned eBPF map entries cleaned up during periodic maintenance.
 
-**`mermin_ringbuf_bytes`**
+### TC Program Attachment
+
+**`mermin_ebpf_tc_programs_total{operation}`**
 - **Type:** Counter
-- **Description:** The total bytes received in the userspace ring buffer.
+- **Labels:** `operation` = "attached" | "detached"
+- **Description:** Total number of TC programs attached or detached across all interfaces.
 
-### Channel Metrics
+**`mermin_ebpf_tc_programs_attached_by_interface_total{interface, direction}`** *(debug)*
+- **Type:** Counter
+- **Labels:** `interface`, `direction` = "ingress" | "egress"
+- **Description:** TC programs attached by interface and direction.
 
-These metrics offer insight into the internal channels used for data transmission.
+**`mermin_ebpf_tc_programs_detached_by_interface_total{interface, direction}`** *(debug)*
+- **Type:** Counter
+- **Labels:** `interface`, `direction` = "ingress" | "egress"
+- **Description:** TC programs detached by interface and direction.
+
+**`mermin_ebpf_bpf_fs_writable`**
+- **Type:** Gauge (0 or 1)
+- **Description:** Whether /sys/fs/bpf is writable for TCX link pinning.
+
+---
+
+## Channel Metrics (`mermin_channel_*`)
+
+Metrics for internal async channels between pipeline stages.
 
 **`mermin_channel_capacity{channel}`**
 - **Type:** Gauge
-- **Description:** The capacity of internal channels (`packet_meta`, `exporter`).
+- **Labels:** `channel` = "packet_worker" | "producer_output" | "decorator_output"
+- **Description:** Maximum capacity of internal channels.
 
 **`mermin_channel_size{channel}`**
 - **Type:** Gauge
-- **Description:** The current number of items in the channels.
+- **Labels:** `channel` = "packet_worker" | "producer_output" | "decorator_output"
+- **Description:** Current number of items in channels.
 
-**`mermin_channel_sends_total{status, error_code}`**
+**`mermin_channel_sends_total{channel, status}`**
 - **Type:** Counter
-- **Description:** A counter for send operations on channels. `status` can be `error` or `success`.
+- **Labels:**
+  - `channel` = "packet_worker" | "producer_output" | "decorator_output"
+  - `status` = "success" | "error"
+- **Description:** Total send operations to internal channels by outcome.
 
-## Flow Span Metrics (`mermin_span_*`)
+---
 
-This group of metrics covers the core logic of Mermin, where raw packet data is processed into flow spans.
+## Flow Event Metrics (`mermin_flow_*`)
 
-### Flow Lifecycle
+Metrics for flow events from the eBPF ring buffer stage.
 
-**`mermin_span_active`**
+**`mermin_flow_events_total{status}`**
+- **Type:** Counter
+- **Labels:** `status` = "received" | "filtered" | "dropped_backpressure" | "dropped_error"
+- **Description:** Total flow events processed by the ring buffer stage.
+
+---
+
+## Flow Span Lifecycle Metrics (`mermin_flow_spans_*`)
+
+Metrics for flow span creation, processing, and export.
+
+### Aggregated Metrics (Standard)
+
+**`mermin_flow_spans_created_total`**
+- **Type:** Counter
+- **Description:** Total flow spans created across all interfaces.
+
+**`mermin_flow_spans_active_total`**
 - **Type:** Gauge
-- **Description:** The number of currently active flows.
+- **Description:** Current number of active flow spans across all interfaces.
 
-**`mermin_span_processed_total{reason}`**
+**`mermin_flow_spans_processed_total`**
 - **Type:** Counter
-- **Description:** A counter for flows that have been processed and expired. The `reason` label indicates why the flow expired (e.g., `idle`, `fin`, `rst`, `error`, `sampling`, `full`).
+- **Description:** Total flow spans processed by FlowWorker.
 
-**`mermin_span_sent_total{status, exporter, error_code}`**
+**`mermin_producer_flow_spans_total{status}`**
 - **Type:** Counter
-- **Description:** A counter for spans sent to an exporter. `status` can be `sent` or `failed`.
+- **Labels:** `status` = "created" | "active" | "recorded" | "idled" | "dropped"
+- **Description:** Flow spans processed by producer workers by lifecycle stage.
 
-### Flow Metrics
+### Per-Interface Metrics (Debug)
 
-These metrics provide insights into the nature of the observed flows beyond just the exported span data.
-
-**`mermin_span_packets_processed_total{protocol}`**
+**`mermin_flow_spans_created_by_interface_total{interface}`** *(debug)*
 - **Type:** Counter
-- **Description:** A counter for processed packets by protocol (`tcp`, `udp`, `icmp`).
+- **Description:** Flow spans created by interface.
 
-### Worker Performance
+**`mermin_flow_spans_active_by_interface_total{interface}`** *(debug)*
+- **Type:** Gauge
+- **Description:** Active flow spans by interface.
 
-These metrics are for debugging and performance tuning of the span processing workers.
-
-**`mermin_span_worker_packets_processed_total{worker_id}`**
+**`mermin_producer_flow_spans_by_interface_total{interface, status}`** *(debug)*
 - **Type:** Counter
-- **Description:** A counter for packets processed by each worker.
+- **Description:** Producer flow spans by interface and status.
 
-**`mermin_span_worker_processing_duration_seconds`**
+### Producer Internal Metrics (Debug)
+
+**`mermin_flow_span_store_size{poller_id}`** *(debug)*
+- **Type:** Gauge
+- **Labels:** `poller_id` (0 to 31, up to 32 pollers)
+- **Description:** Current number of flows in flow_store per poller.
+
+**`mermin_producer_queue_size{poller_id}`** *(debug)*
+- **Type:** Gauge
+- **Labels:** `poller_id` (0 to 31, up to 32 pollers)
+- **Description:** Current number of flows queued for processing per poller.
+
+---
+
+## Processing Latency Metrics
+
+**`mermin_processing_latency_seconds{stage}`**
 - **Type:** Histogram
-- **Description:** A histogram of the processing latency for workers.
+- **Labels:** `stage` = "flow_producer_input" | "k8s_decoration" | "export"
+- **Buckets:** 10μs to 100ms
+- **Description:** Processing latency by pipeline stage.
+  - `flow_producer_input`: Time spent reading and processing flow events from the eBPF ring buffer
+  - `k8s_decoration`: Time spent enriching flow spans with Kubernetes metadata
+  - `export`: Time spent exporting spans to the OTLP backend
 
-**`mermin_span_record_tasks_active`**
-- **Type:** Gauge
-- **Description:** The number of active record tasks.
+---
 
-**`mermin_span_timeout_tasks_active`**
-- **Type:** Gauge
-- **Description:** The number of active timeout tasks.
+## Packet/Byte Statistics (`mermin_packets_*`, `mermin_bytes_*`)
 
-## Kubernetes Integration Metrics (`mermin_k8s_*`)
+### Aggregated Metrics (Standard)
 
-These metrics are related to Mermin's interaction with the Kubernetes API for metadata enrichment of flow spans.
-
-### Client & Cache
-
-**`mermin_k8s_client_up`**
-- **Type:** Gauge
-- **Description:** Indicates the status of the connection to the Kubernetes API. An error code label could be added in the future.
-
-**`mermin_k8s_client_api_status{status, error_code}`**
-- **Type:** Gauge
-- **Description:** Indicates if the API is responding.
-
-**`mermin_k8s_informer_last_sync_timestamp_seconds`**
-- **Type:** Gauge
-- **Description:** The timestamp of the last successful sync for an informer.
-
-**`mermin_k8s_informer_sync_duration_seconds`**
-- **Type:** Histogram
-- **Description:** A histogram of the sync duration for informers.
-
-**`mermin_k8s_informer_object_total{kind}`**
-- **Type:** Gauge
-- **Description:** The number of objects in the informer cache by kind (`Pod`, `Service`, `Endpoint`, etc.).
-
-### Decorator Performance
-
-**`mermin_k8s_decorator_spans_processed_total{status, reason}`**
+**`mermin_packets_total`**
 - **Type:** Counter
-- **Description:** A counter for spans processed by the decorator. `status` can be `success` or `fail`. `reason` could be `no_pod_match`, `lookup_error`, `not_found`, etc. This metric merges successful and undecorated spans.
+- **Description:** Total packets processed across all interfaces.
 
-**`mermin_k8s_decorator_lookup_duration_seconds`**
-- **Type:** Histogram
-- **Description:** A histogram of the lookup latency for the decorator.
+**`mermin_bytes_total`**
+- **Type:** Counter
+- **Description:** Total bytes processed across all interfaces.
+
+### Per-Interface Metrics (Debug)
+
+**`mermin_packets_by_interface_total{interface, direction}`** *(debug)*
+- **Type:** Counter
+- **Labels:** `direction` = "ingress" | "egress"
+- **Description:** Packets processed by interface and direction.
+
+**`mermin_bytes_by_interface_total{interface, direction}`** *(debug)*
+- **Type:** Counter
+- **Labels:** `direction` = "ingress" | "egress"
+- **Description:** Bytes processed by interface and direction.
+
+---
 
 ## Export Metrics (`mermin_export_*`)
 
-This section covers the final stage of the Mermin pipeline, where processed spans are exported to an external collector via OTLP.
+Metrics for the OTLP export stage.
 
-### Export Statistics
-
-**`mermin_export_otlp_batches_sent_total{status, error_code}`**
+**`mermin_export_flow_spans_total{exporter_type, status}`**
 - **Type:** Counter
-- **Description:** A counter for OTLP batches sent. `status` can be `success` or `error`. This merges successful and failed batches.
+- **Labels:** 
+  - `exporter_type` = "otlp" | "stdout" | "noop"
+  - `status` = "ok" | "error" | "noop"
+- **Description:** Flow spans exported to external systems. Tracks actual exports to OTLP or stdout exporters, not internal pipeline stages.
 
-**`mermin_export_otlp_spans_sent_total{status, error_code}`**
+**`mermin_export_batch_spans`**
+- **Type:** Histogram
+- **Buckets:** 1 to 1000 spans
+- **Description:** Number of spans per export batch.
+
+**`mermin_export_timeouts_total`**
 - **Type:** Counter
-- **Description:** A counter for OTLP spans sent. `status` can be `success` or `error`. This merges successful and failed spans.
+- **Description:** Total export operations that timed out.
 
-**`mermin_export_otlp_duration_seconds`**
+**`mermin_export_blocking_time_seconds`**
 - **Type:** Histogram
-- **Description:** A histogram of the export latency.
+- **Buckets:** 1ms to 60s
+- **Description:** Time spent blocked waiting for export operations.
 
-**`mermin_export_otlp_batch_size`**
+---
+
+## Kubernetes Decorator Metrics (`mermin_k8s_*`)
+
+Metrics for Kubernetes metadata enrichment.
+
+### Decorator Performance
+
+**`mermin_k8s_decorator_flow_spans_total{status}`**
+- **Type:** Counter
+- **Labels:** `status` = "dropped" | "ok" | "error" | "undecorated"
+- **Description:** Flow spans processed by K8s decorator.
+
+### Watcher Events
+
+**`mermin_k8s_watcher_events_total{event_type}`**
+- **Type:** Counter
+- **Labels:** `event_type` = "apply" | "delete" | "init" | "init_done" | "error"
+- **Description:** K8s resource watcher events (aggregated).
+
+**`mermin_k8s_watcher_events_by_resource_total{resource, event_type}`** *(debug)*
+- **Type:** Counter
+- **Labels:** `resource` = "Pod" | "Service" | "Node" | etc., `event_type` as above
+- **Description:** K8s watcher events by resource type.
+
+### IP Index Performance
+
+**`mermin_k8s_ip_index_updates_total`**
+- **Type:** Counter
+- **Description:** Total K8s IP index updates triggered.
+
+**`mermin_k8s_ip_index_update_duration_seconds`**
 - **Type:** Histogram
-- **Description:** A histogram of batch sizes.
+- **Buckets:** 1ms to 1s
+- **Description:** Duration of K8s IP index updates.
 
-**`mermin_export_otlp_span_size`**
-- **Type:** Histogram
-- **Description:** A histogram of span sizes.
+---
 
-### Queue Metrics
+## Task Lifecycle Metrics (`mermin_tasks_*`)
 
-**`mermin_export_queue_capacity{exporter}`**
+Metrics for async task management.
+
+### Aggregated Metrics (Standard)
+
+**`mermin_tasks_total{status}`**
+- **Type:** Counter
+- **Labels:** `status` = "spawned" | "completed" | "cancelled" | "panicked"
+- **Description:** Task lifecycle events. Note: `spawned` count should equal sum of other statuses over time.
+
+**`mermin_tasks_active_total`**
 - **Type:** Gauge
-- **Description:** The capacity of the export queue.
+- **Description:** Current number of active tasks.
 
-**`mermin_export_queue_size{exporter}`**
+### Per-Task Metrics (Debug)
+
+**`mermin_tasks_by_name_total{task_name, status}`** *(debug)*
+- **Type:** Counter
+- **Description:** Task lifecycle events by task name.
+
+**`mermin_tasks_active_by_name_total{task_name}`** *(debug)*
 - **Type:** Gauge
-- **Description:** The current size of the export queue.
+- **Description:** Active tasks by task name.
+
+---
+
+## Shutdown Metrics (`mermin_shutdown_*`)
+
+Metrics for graceful shutdown behavior.
+
+**`mermin_shutdown_duration_seconds`**
+- **Type:** Histogram
+- **Buckets:** 100ms to 120s
+- **Description:** Duration of shutdown operations.
+
+**`mermin_shutdown_timeouts_total`**
+- **Type:** Counter
+- **Description:** Shutdown operations that exceeded timeout.
+
+**`mermin_shutdown_flows_total{status}`**
+- **Type:** Counter
+- **Labels:** `status` = "preserved" | "lost"
+- **Description:** Flow spans processed during shutdown.
+
+---
+
+## Example Prometheus Queries
+
+### Pipeline Health
+
+```prometheus
+# Backpressure detection
+rate(mermin_flow_events_total{status="dropped_backpressure"}[5m]) > 0
+
+# Channel utilization
+mermin_channel_size / mermin_channel_capacity
+
+# eBPF map utilization
+mermin_ebpf_map_utilization_ratio{map="FLOW_STATS"}
+```
+
+### Performance Monitoring
+
+```prometheus
+# Processing latency p95
+histogram_quantile(0.95, rate(mermin_processing_latency_seconds_bucket[5m]))
+
+# Export success rate (across all exporter types)
+sum(rate(mermin_export_flow_spans_total{status="ok"}[5m])) /
+sum(rate(mermin_export_flow_spans_total[5m]))
+
+# Flow throughput
+rate(mermin_flow_spans_created_total[5m])
+```
+
+### Task Health
+
+```prometheus
+# Active tasks
+mermin_tasks_active_total
+
+# Task failure rate
+rate(mermin_tasks_total{status="panicked"}[5m])
+```
+
+### Kubernetes Integration
+
+```prometheus
+# K8s decoration success rate
+rate(mermin_k8s_decorator_flow_spans_total{status="ok"}[5m]) /
+rate(mermin_k8s_decorator_flow_spans_total[5m])
+
+# Watcher errors
+rate(mermin_k8s_watcher_events_total{event_type="error"}[5m])
+```

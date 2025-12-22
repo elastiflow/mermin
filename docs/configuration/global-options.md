@@ -168,8 +168,8 @@ Mermin provides metrics to monitor shutdown behavior:
 
 - `shutdown_duration_seconds`: Histogram of actual shutdown durations
 - `shutdown_timeouts_total`: Count of shutdowns that exceeded timeout
-- `flows_preserved_shutdown_total`: Flows successfully exported during shutdown
-- `flows_lost_shutdown_total`: Flows lost due to shutdown timeout
+- `shutdown_flows_total{status="preserved"}`: Flows successfully exported during shutdown
+- `shutdown_flows_total{status="lost"}`: Flows lost due to shutdown timeout
 
 ### `base_capacity`
 
@@ -201,7 +201,7 @@ Base capacity for **userspace channels** between pipeline stages. This is the fo
 
 **Signs You Need to Increase:**
 
-* Metrics show packet drops (`mermin_packets_dropped_total`)
+* Metrics show dropped events (`mermin_flow_events_total{status="dropped_backpressure"}`)
 * Gaps in Flow Trace exports
 * Warning logs about channel capacity or backpressure
 
@@ -373,23 +373,14 @@ Multiplier for decorated span (export) channel capacity. Provides buffering betw
 
 ### Monitoring Performance Configuration
 
-After tuning performance settings, monitor these metrics:
+After tuning performance settings, monitor these key metrics:
 
-```prometheus
-# Cache effectiveness
-mermin_k8s_cache_hits_total / (mermin_k8s_cache_hits_total + mermin_k8s_cache_misses_total)
+- `mermin_flow_events_total{status="dropped_backpressure"}` - Backpressure events
+- `mermin_flow_events_total{status="dropped_error"}` - Error drops
+- `mermin_channel_size` / `mermin_channel_capacity` - Channel utilization
+- `mermin_processing_latency_seconds` - Pipeline latency histogram
 
-# Backpressure and sampling
-rate(mermin_flow_events_dropped_backpressure_total[5m])
-rate(mermin_flow_events_sampled_total[5m])
-mermin_flow_events_sampling_rate
-
-# Channel utilization
-mermin_channel_capacity_used_ratio
-
-# Pipeline latency
-histogram_quantile(0.95, rate(mermin_processing_latency_seconds_bucket[5m]))
-```
+See the [Application Metrics](../observability/app-metrics.md) guide for complete Prometheus query examples.
 
 **Healthy indicators:**
 
@@ -497,19 +488,14 @@ Error: pipeline.base_capacity must be a positive integer
 
 ## Monitoring Configuration Effectiveness
 
-After changing global options, monitor these metrics:
+After changing global options, monitor these key metrics:
 
-```prometheus
-# Packet processing
-rate(mermin_packets_total[5m])
-rate(mermin_packets_dropped_total[5m])
+- `mermin_packets_total` - Total packets processed
+- `mermin_flow_events_total{status="dropped_backpressure"}` - Dropped events due to backpressure
+- `container_cpu_usage_seconds_total` - CPU usage (from cAdvisor/kubelet)
+- `container_memory_working_set_bytes` - Memory usage (from cAdvisor/kubelet)
 
-# CPU usage
-rate(container_cpu_usage_seconds_total[5m])
-
-# Memory usage
-container_memory_working_set_bytes
-```
+See the [Application Metrics](../observability/app-metrics.md) guide for complete Prometheus query examples.
 
 **Healthy indicators:**
 
@@ -529,7 +515,7 @@ container_memory_working_set_bytes
 
 ### High Packet Drop Rate
 
-**Symptoms:** `mermin_packets_dropped_total` increasing
+**Symptoms:** `mermin_flow_events_total{status="dropped_backpressure"}` increasing
 
 **Solutions:**
 

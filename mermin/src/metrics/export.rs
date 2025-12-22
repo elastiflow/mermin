@@ -1,44 +1,39 @@
-//! Helper functions for export-related metrics.
-
-use std::time::Duration;
-
-use crate::metrics::registry;
+//! Enums for export-related metrics labels.
 
 /// Export status for flow spans.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportStatus {
-    Queued,
-    Dropped,
     Ok,
+    Attempted,
     Error,
     NoOp,
 }
 
-impl AsRef<str> for ExportStatus {
-    fn as_ref(&self) -> &str {
+impl ExportStatus {
+    pub const fn as_str(self) -> &'static str {
         match self {
-            ExportStatus::Queued => "queued",
-            ExportStatus::Dropped => "dropped",
             ExportStatus::Ok => "ok",
+            ExportStatus::Attempted => "attempted",
             ExportStatus::Error => "error",
             ExportStatus::NoOp => "noop",
         }
     }
 }
 
-/// Increment the export flow spans counter.
-pub fn inc_export_flow_spans(status: ExportStatus) {
-    registry::EXPORT_FLOW_SPANS_TOTAL
-        .with_label_values(&[status.as_ref()])
-        .inc();
+/// Exporter name for metrics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExporterName {
+    Otlp,
+    Stdout,
+    Noop,
 }
 
-/// Record export operation latency.
-pub fn observe_export_latency(duration: Duration) {
-    registry::EXPORT_LATENCY_SECONDS.observe(duration.as_secs_f64());
-}
-
-/// Record export batch size.
-pub fn observe_export_batch_size(size: usize) {
-    registry::EXPORT_BATCH_SIZE.observe(size as f64);
+impl ExporterName {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ExporterName::Otlp => "otlp",
+            ExporterName::Stdout => "stdout",
+            ExporterName::Noop => "noop",
+        }
+    }
 }

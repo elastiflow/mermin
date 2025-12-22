@@ -16,6 +16,11 @@ use network_types::ip::IpProto;
 use tokio::sync::Mutex;
 use tracing::{debug, trace, warn};
 
+use crate::metrics::{
+    self,
+    ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus},
+};
+
 /// TCP connection states from /proc/net/tcp
 /// We only care about TCP_LISTEN (0x0A)
 const TCP_LISTEN: u8 = 0x0A;
@@ -171,16 +176,33 @@ impl ListeningPortScanner {
             let key = ListeningPortKey { port, protocol };
 
             // Insert into eBPF map (duplicates are harmless, just updates value)
-            if let Err(e) = map.insert(key, 1u8, 0) {
-                warn!(
-                    event.name = "listening_ports.insert_failed",
-                    path = path,
-                    port = port,
-                    error = %e,
-                    "failed to insert listening port into eBPF map"
-                );
-            } else {
-                count += 1;
+            match map.insert(key, 1u8, 0) {
+                Ok(_) => {
+                    metrics::registry::EBPF_MAP_OPS_TOTAL
+                        .with_label_values(&[
+                            EbpfMapName::ListeningPorts.as_str(),
+                            EbpfMapOperation::Write.as_str(),
+                            EbpfMapStatus::Ok.as_str(),
+                        ])
+                        .inc();
+                    count += 1;
+                }
+                Err(e) => {
+                    metrics::registry::EBPF_MAP_OPS_TOTAL
+                        .with_label_values(&[
+                            EbpfMapName::ListeningPorts.as_str(),
+                            EbpfMapOperation::Write.as_str(),
+                            EbpfMapStatus::Error.as_str(),
+                        ])
+                        .inc();
+                    warn!(
+                        event.name = "listening_ports.insert_failed",
+                        path = path,
+                        port = port,
+                        error = %e,
+                        "failed to insert listening port into eBPF map"
+                    );
+                }
             }
         }
 

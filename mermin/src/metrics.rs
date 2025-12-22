@@ -7,5 +7,4 @@ pub mod k8s;
 pub mod opts;
 pub mod registry;
 pub mod server;
-pub mod span;
 pub mod userspace;

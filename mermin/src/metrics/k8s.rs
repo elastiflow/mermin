@@ -1,6 +1,6 @@
 //! Helper functions for Kubernetes decorator metrics.
 
-use crate::metrics::registry;
+use crate::metrics;
 
 /// K8s decorator flow span status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,8 +11,8 @@ pub enum K8sDecoratorStatus {
     Undecorated,
 }
 
-impl AsRef<str> for K8sDecoratorStatus {
-    fn as_ref(&self) -> &str {
+impl K8sDecoratorStatus {
+    pub const fn as_str(self) -> &'static str {
         match self {
             K8sDecoratorStatus::Dropped => "dropped",
             K8sDecoratorStatus::Ok => "ok",
@@ -22,9 +22,31 @@ impl AsRef<str> for K8sDecoratorStatus {
     }
 }
 
+/// K8s watcher event types for metrics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum K8sWatcherEventType {
+    Apply,
+    Delete,
+    Init,
+    InitDone,
+    Error,
+}
+
+impl K8sWatcherEventType {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            K8sWatcherEventType::Apply => "apply",
+            K8sWatcherEventType::Delete => "delete",
+            K8sWatcherEventType::Init => "init",
+            K8sWatcherEventType::InitDone => "init_done",
+            K8sWatcherEventType::Error => "error",
+        }
+    }
+}
+
 /// Increment the K8s decorator flow spans counter.
 pub fn inc_k8s_decorator_flow_spans(status: K8sDecoratorStatus) {
-    registry::K8S_DECORATOR_FLOW_SPANS_TOTAL
-        .with_label_values(&[status.as_ref()])
+    metrics::registry::K8S_DECORATOR_FLOW_SPANS_TOTAL
+        .with_label_values(&[status.as_str()])
         .inc();
 }

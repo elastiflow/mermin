@@ -1,49 +1,71 @@
-//! Helper functions for eBPF-related metrics.
+//! Enums for eBPF-related metrics labels.
 
-use crate::metrics::registry;
-
-/// Increment the orphan cleanup counter.
-///
-/// Call this when the orphan scanner successfully removes a stale entry.
-pub fn inc_orphans_cleaned(count: u64) {
-    registry::EBPF_ORPHANS_CLEANED_TOTAL.inc_by(count);
+/// eBPF map names for metrics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EbpfMapName {
+    FlowStats,
+    FlowEvents,
+    ListeningPorts,
 }
 
-/// Set the current number of entries in the eBPF map.
-pub fn set_map_entries(entries: u64) {
-    registry::EBPF_MAP_ENTRIES
-        .with_label_values(&["flow_stats"])
-        .set(entries as i64);
-}
-
-/// Increment the TC program attached counter.
-///
-/// Always increments the aggregated counter. If debug metrics are enabled,
-/// also increments the per-interface debug counter.
-pub fn inc_tc_programs_attached(interface: &str, direction: &str) {
-    // Always increment aggregated metric
-    registry::TC_PROGRAMS_ATTACHED_TOTAL.inc();
-
-    // Conditionally increment debug metric with labels
-    if registry::debug_enabled() {
-        registry::TC_PROGRAMS_ATTACHED_BY_INTERFACE_TOTAL
-            .with_label_values(&[interface, direction])
-            .inc();
+impl EbpfMapName {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            EbpfMapName::FlowStats => "FLOW_STATS",
+            EbpfMapName::FlowEvents => "FLOW_EVENTS",
+            EbpfMapName::ListeningPorts => "LISTENING_PORTS",
+        }
     }
 }
 
-/// Increment the TC program detached counter.
-///
-/// Always increments the aggregated counter. If debug metrics are enabled,
-/// also increments the per-interface debug counter.
-pub fn inc_tc_programs_detached(interface: &str, direction: &str) {
-    // Always increment aggregated metric
-    registry::TC_PROGRAMS_DETACHED_TOTAL.inc();
+/// eBPF map operation types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EbpfMapOperation {
+    Read,
+    Write,
+    Delete,
+}
 
-    // Conditionally increment debug metric with labels
-    if registry::debug_enabled() {
-        registry::TC_PROGRAMS_DETACHED_BY_INTERFACE_TOTAL
-            .with_label_values(&[interface, direction])
-            .inc();
+impl EbpfMapOperation {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            EbpfMapOperation::Read => "read",
+            EbpfMapOperation::Write => "write",
+            EbpfMapOperation::Delete => "delete",
+        }
+    }
+}
+
+/// eBPF map operation status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EbpfMapStatus {
+    Ok,
+    Error,
+    NotFound,
+}
+
+impl EbpfMapStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            EbpfMapStatus::Ok => "ok",
+            EbpfMapStatus::Error => "error",
+            EbpfMapStatus::NotFound => "not_found",
+        }
+    }
+}
+
+/// TC program operation types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TcOperation {
+    Attached,
+    Detached,
+}
+
+impl TcOperation {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            TcOperation::Attached => "attached",
+            TcOperation::Detached => "detached",
+        }
     }
 }

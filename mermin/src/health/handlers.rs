@@ -1,5 +1,3 @@
-mod error;
-
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -13,14 +11,17 @@ use axum::{
     response::{IntoResponse, Json, Response},
     routing::get,
 };
-pub use error::HealthError;
 use serde_json::json;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    metrics::{export::ExportStatus, registry},
+    health::HealthError,
+    metrics::{
+        self,
+        export::{ExportStatus, ExporterName},
+    },
     runtime::conf::ApiConf,
 };
 
@@ -76,9 +77,14 @@ pub async fn liveness_handler(State(state): State<HealthState>) -> impl IntoResp
         "liveness check completed"
     );
 
-    let dropped_export_spans = registry::EXPORT_FLOW_SPANS_TOTAL
-        .with_label_values(&[ExportStatus::Dropped.as_ref()])
+    // Sum export errors across all exporter types for health monitoring
+    let export_errors_otlp = metrics::registry::EXPORT_FLOW_SPANS_TOTAL
+        .with_label_values(&[ExporterName::Otlp.as_str(), ExportStatus::Error.as_str()])
         .get();
+    let export_errors_stdout = metrics::registry::EXPORT_FLOW_SPANS_TOTAL
+        .with_label_values(&[ExporterName::Stdout.as_str(), ExportStatus::Error.as_str()])
+        .get();
+    let export_errors_total = export_errors_otlp + export_errors_stdout;
     let pipeline_healthy = ebpf_loaded && ready_to_process;
 
     let body = Json(json!({
@@ -89,7 +95,7 @@ pub async fn liveness_handler(State(state): State<HealthState>) -> impl IntoResp
             "pipeline_healthy": pipeline_healthy
         },
         "metrics": {
-            "dropped_export_spans": dropped_export_spans
+            "export_errors_total": export_errors_total
         }
     }));
 
@@ -103,9 +109,14 @@ pub async fn readiness_handler(State(state): State<HealthState>) -> impl IntoRes
 
     let is_ready = ebpf_loaded && k8s_caches_synced && ready_to_process;
 
-    let dropped_export_spans = registry::EXPORT_FLOW_SPANS_TOTAL
-        .with_label_values(&[ExportStatus::Dropped.as_ref()])
+    // Sum export errors across all exporter types for health monitoring
+    let export_errors_otlp = metrics::registry::EXPORT_FLOW_SPANS_TOTAL
+        .with_label_values(&[ExporterName::Otlp.as_str(), ExportStatus::Error.as_str()])
         .get();
+    let export_errors_stdout = metrics::registry::EXPORT_FLOW_SPANS_TOTAL
+        .with_label_values(&[ExporterName::Stdout.as_str(), ExportStatus::Error.as_str()])
+        .get();
+    let export_errors_total = export_errors_otlp + export_errors_stdout;
     let pipeline_healthy = ebpf_loaded && ready_to_process;
 
     let status_code = if is_ready {
@@ -117,7 +128,7 @@ pub async fn readiness_handler(State(state): State<HealthState>) -> impl IntoRes
             k8s_caches_synced = %k8s_caches_synced,
             ready_to_process = %ready_to_process,
             pipeline_healthy = %pipeline_healthy,
-            dropped_export_spans = %dropped_export_spans,
+            export_errors_total = %export_errors_total,
             "readiness check failed"
         );
         StatusCode::SERVICE_UNAVAILABLE
@@ -132,7 +143,7 @@ pub async fn readiness_handler(State(state): State<HealthState>) -> impl IntoRes
             "pipeline_healthy": pipeline_healthy
         },
         "metrics": {
-            "dropped_export_spans": dropped_export_spans
+            "export_errors_total": export_errors_total
         }
     }));
 

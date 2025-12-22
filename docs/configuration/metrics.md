@@ -6,6 +6,7 @@ Endpoints available:
 - `/metrics` - All metrics (standard + debug if `metrics.debug_metrics_enabled` is `true`)
 - `/metrics/standard` - Standard metrics only (aggregated, no high-cardinality labels)
 - `/metrics/debug` - Debug metrics only (returns 404 if `metrics.debug_metrics_enabled` is `false`)
+- `/metrics:summary` - JSON summary of all available metrics with metadata (name, type, description, labels, category)
 
 ## Configuration
 
