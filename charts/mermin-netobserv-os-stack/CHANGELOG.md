@@ -1,3 +1,13 @@
+## [mermin-netobserv-os-stack-0.1.0-beta.14] - 2025-12-22
+
+### Features
+
+- Update mermin in the umbrella chart (#356)
+
+[mermin-netobserv-os-stack-0.1.0-beta.13..mermin-netobserv-os-stack-0.1.0-beta.14](https://github.com/elastiflow/mermin/compare/mermin-netobserv-os-stack-0.1.0-beta.13...mermin-netobserv-os-stack-0.1.0-beta.14)
+
+
+
 ## [mermin-netobserv-os-stack-0.1.0-beta.13] - 2025-12-12
 
 ### Features
