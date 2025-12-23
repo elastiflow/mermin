@@ -527,7 +527,7 @@ impl ProviderBuilder {
     ) -> ProviderBuilder {
         let exporter = opentelemetry_stdout::SpanExporter::default();
         // Wrap exporter to observe batch sizes
-        let wrapped_exporter = MetricsSpanExporter::new(exporter);
+        let wrapped_exporter = MetricsSpanExporter::new(exporter, ExporterName::Stdout);
 
         let batch_config = BatchConfigBuilder::default()
             .with_max_export_batch_size(max_batch_size)
