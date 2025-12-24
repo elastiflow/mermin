@@ -9,6 +9,7 @@ mod metrics;
 mod otlp;
 mod packet;
 mod process_name;
+mod process_name_scanner;
 mod runtime;
 mod span;
 
@@ -387,6 +388,44 @@ async fn run(cli: Cli) -> Result<()> {
         "tc programs loaded into kernel"
     );
 
+    // Load and attach tracepoint programs for process name tracking
+    use aya::programs::TracePoint;
+
+    let tracepoint_programs = [
+        ("sched", "sched_process_exec", "sched_process_exec"),
+        ("sched", "sched_process_exit", "sched_process_exit"),
+    ];
+
+    for (category, name, program_name) in &tracepoint_programs {
+        let program: &mut TracePoint = ebpf
+            .program_mut(program_name)
+            .ok_or_else(|| {
+                MerminError::internal(format!(
+                    "tracepoint program '{program_name}' not found in loaded object",
+                ))
+            })?
+            .try_into()
+            .map_err(|e| {
+                MerminError::internal(format!(
+                    "failed to cast tracepoint program '{program_name}': {e}",
+                ))
+            })?;
+
+        program.load()?;
+        program
+            .attach(category, name)
+            .map_err(|e| {
+                MerminError::internal(format!(
+                    "failed to attach tracepoint program '{program_name}' to {category}/{name}: {e}",
+                ))
+            })?;
+    }
+
+    info!(
+        event.name = "ebpf.tracepoints_attached",
+        "process name tracking tracepoints attached"
+    );
+
     let kernel_version = KernelVersion::current().unwrap_or(KernelVersion::new(0, 0, 0));
     let use_tcx = kernel_version >= KernelVersion::new(6, 6, 0);
     let bpf_fs_writable = if !use_tcx {
@@ -464,6 +503,13 @@ async fn run(cli: Cli) -> Result<()> {
                 .ok_or_else(|| MerminError::internal("LISTENING_PORTS not found in eBPF object"))?,
         )
         .map_err(|e| MerminError::internal(format!("failed to convert LISTENING_PORTS: {e}")))?,
+    ));
+    let process_names_map = Arc::new(tokio::sync::Mutex::new(
+        aya::maps::HashMap::try_from(
+            ebpf.take_map("PROCESS_NAMES")
+                .ok_or_else(|| MerminError::internal("PROCESS_NAMES not found in eBPF object"))?,
+        )
+        .map_err(|e| MerminError::internal(format!("failed to convert PROCESS_NAMES: {e}")))?,
     ));
 
     metrics::registry::EBPF_MAP_CAPACITY
@@ -604,6 +650,18 @@ async fn run(cli: Cli) -> Result<()> {
         event.name = "listening_ports.scan_complete",
         total_ports = scanned_ports,
         "populated eBPF map with existing listening ports"
+    );
+
+    let process_name_scanner =
+        process_name_scanner::ProcessNameScanner::new(Arc::clone(&process_names_map));
+    let scanned_processes = process_name_scanner
+        .scan_and_populate()
+        .await
+        .map_err(|e| MerminError::internal(format!("failed to scan process names: {e}")))?;
+    info!(
+        event.name = "process_name.scan_complete",
+        total_processes = scanned_processes,
+        "populated eBPF map with existing process names"
     );
 
     let process_name_resolver = Arc::new(process_name::ProcessNameResolver::new());

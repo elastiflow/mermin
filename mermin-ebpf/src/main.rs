@@ -88,9 +88,9 @@
 use aya_ebpf::{
     bindings::TC_ACT_UNSPEC,
     helpers::{bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_ktime_get_boot_ns},
-    macros::{classifier, map},
+    macros::{classifier, map, tracepoint},
     maps::{HashMap, PerCpuArray, RingBuf},
-    programs::TcContext,
+    programs::{TcContext, TracePointContext},
 };
 #[cfg(not(feature = "test"))]
 use aya_log_ebpf::{error, trace};
@@ -169,6 +169,14 @@ static mut FLOW_KEY_SCRATCH: PerCpuArray<FlowKey> = PerCpuArray::with_max_entrie
 #[cfg(not(feature = "test"))]
 #[map]
 static mut LISTENING_PORTS: HashMap<mermin_common::ListeningPortKey, u8> =
+    HashMap::with_max_entries(65536, 0);
+
+/// Map to track process names (comm) for PID lookups.
+/// Key: PID (u32), Value: comm ([u8; 16])
+/// Max entries: 65536 (sufficient for most systems)
+#[cfg(not(feature = "test"))]
+#[map]
+static mut PROCESS_NAMES: HashMap<u32, [u8; 16]> =
     HashMap::with_max_entries(65536, 0);
 
 /// Error types that can occur during packet parsing.
@@ -373,11 +381,27 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             let pid_tgid = bpf_get_current_pid_tgid();
             flow_event.pid = (pid_tgid >> 32) as u32;
 
-            // Capture process name (comm) synchronously in-kernel.
-            // bpf_get_current_comm() returns the current task's comm field (up to 15 chars + null terminator).
-            // If unavailable or fails, the comm field will remain zero-initialized.
-            if let Ok(comm) = bpf_get_current_comm() {
-                flow_event.comm = comm;
+            // Try to get process name from PROCESS_NAMES map first (most up-to-date)
+            // Fall back to bpf_get_current_comm() if not in map yet (handles race conditions)
+            let pid = flow_event.pid;
+            #[allow(static_mut_refs)]
+            let comm_from_map = unsafe { PROCESS_NAMES.get(&pid) };
+
+            if let Some(comm) = comm_from_map {
+                // Found in map - use it (always up-to-date from exec tracepoint)
+                flow_event.comm = *comm;
+            } else {
+                // Not in map yet - fall back to bpf_get_current_comm()
+                // This handles edge cases:
+                // 1. Process existed before tracepoint attached
+                // 2. Brief race window between process creation and tracepoint execution
+                // 3. Map lookup failure (shouldn't happen, but defensive)
+                if let Ok(comm) = bpf_get_current_comm() {
+                    flow_event.comm = comm;
+                    // Optionally populate map for future lookups (best-effort)
+                    #[allow(static_mut_refs)]
+                    let _ = unsafe { PROCESS_NAMES.insert(&pid, &comm, 0) };
+                }
             }
 
             // Copy unparsed data (if any) for userspace deep parsing.
@@ -473,6 +497,58 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
     }
 
     Ok(TC_ACT_UNSPEC)
+}
+
+#[cfg(not(feature = "test"))]
+#[tracepoint]
+pub fn sched_process_exec(ctx: TracePointContext) -> i32 {
+    // Extract PID (TGID - process ID, not thread ID)
+    let pid_tgid = bpf_get_current_pid_tgid();
+    let pid = (pid_tgid >> 32) as u32;
+
+    // Get current comm (already updated by kernel at exec point)
+    // This is the moment when comm changes, so we capture it synchronously
+    match bpf_get_current_comm() {
+        Ok(comm) => {
+            // Update map atomically - overwrites previous entry if PID reused
+            // This handles both new processes and exec() calls that change comm
+            #[allow(static_mut_refs)]
+            if unsafe { PROCESS_NAMES.insert(&pid, &comm, 0) }.is_err() {
+                // Map full or other error - log at trace level
+                trace!(
+                    &ctx,
+                    "failed to insert process name into map (pid={}, map may be full)",
+                    pid
+                );
+            }
+        }
+        Err(_) => {
+            // bpf_get_current_comm failed - shouldn't happen, but handle gracefully
+            trace!(&ctx, "bpf_get_current_comm failed for pid={}", pid);
+        }
+    }
+
+    0
+}
+
+#[cfg(not(feature = "test"))]
+#[tracepoint]
+pub fn sched_process_exit(_ctx: TracePointContext) -> i32 {
+    // Extract PID from tracepoint context
+    // The tracepoint provides pid_tgid in the context, extract TGID
+    let pid_tgid = bpf_get_current_pid_tgid();
+    let pid = (pid_tgid >> 32) as u32;
+
+    // Remove entry from map (or ignore if not present)
+    // This prevents stale entries and helps with PID reuse
+    #[allow(static_mut_refs)]
+    let _ = unsafe { PROCESS_NAMES.remove(&pid) };
+
+    // Note: remove() returns Result, but we ignore errors since:
+    // - Entry may not exist (process wasn't tracked)
+    // - Map errors are rare and non-critical for cleanup
+
+    0
 }
 
 /// Parse L2 + L3 + L4 headers to extract flow key (Ethernet, IP, Transport/ICMP)
