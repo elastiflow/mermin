@@ -388,7 +388,8 @@ async fn run(cli: Cli) -> Result<()> {
         "tc programs loaded into kernel"
     );
 
-    // Load and attach tracepoint programs for process name tracking
+    // Load and attach tracepoint programs for process lifecycle tracking
+    // Note: We only track PIDs here (cleanup on exit). Comm is populated by userspace scanner.
     use aya::programs::TracePoint;
 
     let tracepoint_programs = [
@@ -423,7 +424,7 @@ async fn run(cli: Cli) -> Result<()> {
 
     info!(
         event.name = "ebpf.tracepoints_attached",
-        "process name tracking tracepoints attached"
+        "process lifecycle tracking tracepoints attached"
     );
 
     let kernel_version = KernelVersion::current().unwrap_or(KernelVersion::new(0, 0, 0));

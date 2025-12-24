@@ -87,7 +87,7 @@
 #[cfg(not(feature = "test"))]
 use aya_ebpf::{
     bindings::TC_ACT_UNSPEC,
-    helpers::{bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_ktime_get_boot_ns},
+    helpers::{bpf_get_current_pid_tgid, bpf_ktime_get_boot_ns},
     macros::{classifier, map, tracepoint},
     maps::{HashMap, PerCpuArray, RingBuf},
     programs::{TcContext, TracePointContext},
@@ -381,28 +381,14 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             let pid_tgid = bpf_get_current_pid_tgid();
             flow_event.pid = (pid_tgid >> 32) as u32;
 
-            // Try to get process name from PROCESS_NAMES map first (most up-to-date)
-            // Fall back to bpf_get_current_comm() if not in map yet (handles race conditions)
+            // Try to get process name from PROCESS_NAMES map
+            // Map is populated by userspace scanner at startup and updated as needed
             let pid = flow_event.pid;
             #[allow(static_mut_refs)]
-            let comm_from_map = unsafe { PROCESS_NAMES.get(&pid) };
-
-            if let Some(comm) = comm_from_map {
-                // Found in map - use it (always up-to-date from exec tracepoint)
+            if let Some(comm) = unsafe { PROCESS_NAMES.get(&pid) } {
                 flow_event.comm = *comm;
-            } else {
-                // Not in map yet - fall back to bpf_get_current_comm()
-                // This handles edge cases:
-                // 1. Process existed before tracepoint attached
-                // 2. Brief race window between process creation and tracepoint execution
-                // 3. Map lookup failure (shouldn't happen, but defensive)
-                if let Ok(comm) = bpf_get_current_comm() {
-                    flow_event.comm = comm;
-                    // Optionally populate map for future lookups (best-effort)
-                    #[allow(static_mut_refs)]
-                    let _ = unsafe { PROCESS_NAMES.insert(&pid, &comm, 0) };
-                }
             }
+            // If not in map, comm remains zero-initialized (userspace will resolve from /proc if needed)
 
             // Copy unparsed data (if any) for userspace deep parsing.
             // Load bytes one at a time until we hit the end of the packet or reach 192 bytes.
@@ -501,46 +487,12 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
 
 #[cfg(not(feature = "test"))]
 #[tracepoint]
-pub fn sched_process_exec(ctx: TracePointContext) -> i32 {
+pub fn sched_process_exit(_ctx: TracePointContext) -> i32 {
     // Extract PID (TGID - process ID, not thread ID)
     let pid_tgid = bpf_get_current_pid_tgid();
     let pid = (pid_tgid >> 32) as u32;
 
-    // Get current comm (already updated by kernel at exec point)
-    // This is the moment when comm changes, so we capture it synchronously
-    match bpf_get_current_comm() {
-        Ok(comm) => {
-            // Update map atomically - overwrites previous entry if PID reused
-            // This handles both new processes and exec() calls that change comm
-            #[allow(static_mut_refs)]
-            if unsafe { PROCESS_NAMES.insert(&pid, &comm, 0) }.is_err() {
-                // Map full or other error - log at trace level
-                trace!(
-                    &ctx,
-                    "failed to insert process name into map (pid={}, map may be full)",
-                    pid
-                );
-            }
-        }
-        Err(_) => {
-            // bpf_get_current_comm failed - shouldn't happen, but handle gracefully
-            trace!(&ctx, "bpf_get_current_comm failed for pid={}", pid);
-        }
-    }
-
-    0
-}
-
-#[cfg(not(feature = "test"))]
-#[tracepoint]
-pub fn sched_process_exit(_ctx: TracePointContext) -> i32 {
-    // Extract PID from tracepoint context
-    // The tracepoint provides pid_tgid in the context, extract TGID
-    let pid_tgid = bpf_get_current_pid_tgid();
-    let pid = (pid_tgid >> 32) as u32;
-
-    // Remove entry from map (or ignore if not present)
-    // This prevents stale entries and helps with PID reuse
+    // Remove entry from map to prevent stale entries and help with PID reuse
     #[allow(static_mut_refs)]
     let _ = unsafe { PROCESS_NAMES.remove(&pid) };
 
