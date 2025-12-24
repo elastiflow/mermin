@@ -188,9 +188,9 @@ pub struct FlowStats {
     /// Running sum of the data transmission durations for latency calculation (nanoseconds)
     pub tcp_txn_sum_ns: u64,
     /// Running count of the number of transactions included in tcp_txn_sum_ns
-    pub tcp_txn_count: u64,
+    pub tcp_txn_count: u32,
     /// Running average of the jitter observed between packets (nanoseconds)
-    pub tcp_jitter_avg_ns: u64,
+    pub tcp_jitter_avg_ns: u32,
 
     // === 16-byte arrays - 32 bytes ===
     /// Original source IP
@@ -934,13 +934,13 @@ mod tests {
     /// 2. Alignment is consistent
     #[test]
     fn test_flow_stats_memory_layout() {
-        // Verify optimized memory layout (184 bytes)
-        // 104 (u64) + 32 (IP arrays) + 6 (MAC) + 2 (padding) + 12 (u32) + 6 (u16) + 14 (u8) = 177 bytes
-        // Compiler adds padding to align to 8 bytes = 128 bytes
+        // Verify optimized memory layout (176 bytes)
+        // 88 (u64) + 32 (IP arrays) + 6 (MAC) + 2 (padding) + 20 (u32) + 6 (u16) + 17 (u8) = 171 bytes
+        // Compiler adds 5 bytes of trailing padding to align to 8-byte boundary = 176 bytes
         assert_eq!(
             size_of::<FlowStats>(),
-            184,
-            "FlowStats size MUST be 184 bytes for eBPF/userspace compatibility"
+            176,
+            "FlowStats size MUST be 176 bytes for eBPF/userspace compatibility"
         );
 
         // Verify alignment (critical for correct memory access in eBPF)

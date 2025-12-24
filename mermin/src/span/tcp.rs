@@ -84,15 +84,19 @@ impl TcpFlags {
 
     /// Calculate latency between SYN and SYN+ACK packets
     pub fn handshake_latency_from_stats(syn_ns: u64, syn_ack_ns: u64) -> i64 {
-        (syn_ack_ns - syn_ns) as i64
+        if syn_ns == 0 || syn_ack_ns == 0 || syn_ack_ns <= syn_ns {
+            return 0;
+        }
+
+        syn_ack_ns.saturating_sub(syn_ns) as i64
     }
 
     /// Calculate latency from duration sum (ns) and transaction counts
-    pub fn transaction_latency_from_stats(sum: u64, count: u64) -> i64 {
+    pub fn transaction_latency_from_stats(sum: u64, count: u32) -> i64 {
         if count == 0 {
             return 0;
         }
-        (sum / count) as i64
+        (sum / count as u64) as i64
     }
 
     /// Convert u8 bit flags to a boolean array
@@ -333,13 +337,7 @@ mod tests {
 
     #[test]
     fn test_transaction_latency_from_stats() {
-        assert_eq!(
-            TcpFlags::transaction_latency_from_stats(8 as u64, 4 as u64),
-            2
-        );
-        assert_eq!(
-            TcpFlags::transaction_latency_from_stats(16 as u64, 0 as u64),
-            0
-        );
+        assert_eq!(TcpFlags::transaction_latency_from_stats(8u64, 4u32), 2);
+        assert_eq!(TcpFlags::transaction_latency_from_stats(16u64, 0u32), 0);
     }
 }
