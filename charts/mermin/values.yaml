@@ -146,7 +146,7 @@ extraVolumes: []
   #   secret:
   #     name: otel-ca-cert
 
-#
+# Additional volume mounts for Pods
 extraVolumeMounts: []
   # Example:
   # - name: otel-ca-cert
