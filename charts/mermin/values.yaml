@@ -140,6 +140,7 @@ config:
   # content: |
   #   log_level = "info"
 
+# Additional volumes for Pods
 extraVolumes: []
   # Example:
   # - name: otel-ca-cert
