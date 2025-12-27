@@ -244,12 +244,12 @@ Metrics for flow span creation, processing, and export.
 
 **`mermin_processing_latency_seconds{stage}`**
 - **Type:** Histogram
-- **Labels:** `stage` = "flow_producer_input" | "k8s_decoration" | "export"
+- **Labels:** `stage` = "ebpf_ringbuf_output" | "producer_output" | "decorator_output"
 - **Buckets:** 10μs to 100ms
 - **Description:** Processing latency by pipeline stage.
-  - `flow_producer_input`: Time spent reading and processing flow events from the eBPF ring buffer
-  - `k8s_decoration`: Time spent enriching flow spans with Kubernetes metadata
-  - `export`: Time spent exporting spans to the OTLP backend
+  - `ebpf_ringbuf_output`: Time spent reading and processing flow events from the eBPF ring buffer
+  - `producer_output`: Time spent enriching flow spans with Kubernetes metadata
+  - `decorator_output`: Time spent exporting spans to the OTLP backend
 
 ---
 

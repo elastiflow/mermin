@@ -4,7 +4,6 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportStatus {
     Ok,
-    Attempted,
     Error,
     NoOp,
 }
@@ -13,7 +12,6 @@ impl ExportStatus {
     pub const fn as_str(self) -> &'static str {
         match self {
             ExportStatus::Ok => "ok",
-            ExportStatus::Attempted => "attempted",
             ExportStatus::Error => "error",
             ExportStatus::NoOp => "noop",
         }

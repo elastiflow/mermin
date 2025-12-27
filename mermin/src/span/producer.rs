@@ -29,6 +29,7 @@ use crate::{
         self,
         ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus},
         flow::{FlowEventResult, FlowSpanProducerStatus},
+        processing::ProcessingStage,
         userspace::{ChannelName, ChannelSendStatus},
     },
     packet::{
@@ -436,7 +437,7 @@ impl FlowSpanProducer {
 
                     while let Some(item) = flow_events.next() {
                         let _timer = metrics::registry::PROCESSING_LATENCY_SECONDS
-                            .with_label_values(&["flow_producer_input"])
+                            .with_label_values(&[ProcessingStage::EbpfRingbufOutput.as_str()])
                             .start_timer();
 
                         let flow_event: FlowEvent =
@@ -807,7 +808,7 @@ impl FlowWorker {
             } else {
                 "unknown".to_string()
             };
-            metrics::registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
+            metrics::registry::PROCESSING_TOTAL
                 .with_label_values(&[FlowSpanProducerStatus::Dropped.as_str()])
                 .inc();
             if metrics::registry::debug_enabled() {
@@ -1137,7 +1138,7 @@ impl FlowWorker {
         self.insert_flow(community_id.to_string(), span, timeout);
 
         let interface_name = iface_name.as_deref().unwrap_or("unknown");
-        metrics::registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
+        metrics::registry::PROCESSING_TOTAL
             .with_label_values(&[FlowSpanProducerStatus::Created.as_str()])
             .inc();
         if metrics::registry::debug_enabled() {
@@ -1809,7 +1810,7 @@ async fn record_flow(
         .network_interface_name
         .as_deref()
         .unwrap_or("unknown");
-    metrics::registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
+    metrics::registry::PROCESSING_TOTAL
         .with_label_values(&[FlowSpanProducerStatus::Recorded.as_str()])
         .inc();
     if metrics::registry::debug_enabled() {
@@ -2155,7 +2156,7 @@ pub async fn timeout_and_remove_flow(
         .network_interface_name
         .as_deref()
         .unwrap_or("unknown");
-    metrics::registry::FLOW_PRODUCER_FLOW_SPANS_TOTAL
+    metrics::registry::PROCESSING_TOTAL
         .with_label_values(&[FlowSpanProducerStatus::Idled.as_str()])
         .inc();
     if metrics::registry::debug_enabled() {
