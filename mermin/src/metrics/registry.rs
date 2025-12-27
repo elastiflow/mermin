@@ -140,11 +140,16 @@ lazy_static! {
 
     // Standard metrics (always registered)
     /// Processing latency by pipeline stage.
+    ///
+    /// Buckets are designed to cover both fast operations (eBPF ring buffer processing,
+    /// typically microseconds to milliseconds) and slow operations (export, which can take
+    /// seconds). The bucket range spans from 10μs to 60s to capture the full latency
+    /// distribution across all pipeline stages.
     pub static ref PROCESSING_LATENCY_SECONDS: HistogramVec = HistogramVec::new(
         HistogramOpts::new("processing_latency_seconds", "Processing latency by pipeline stage")
             .namespace("mermin")
             .subsystem("flow")
-            .buckets(vec![0.001, 0.01, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0]),
+            .buckets(vec![0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0]),
         &["stage"]
     ).expect("failed to create processing_latency_seconds metric");
 
