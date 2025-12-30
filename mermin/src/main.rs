@@ -675,6 +675,18 @@ async fn run(cli: Cli) -> Result<()> {
 
     // K8s decorator runs on dedicated thread pool to prevent K8s API lookups from blocking main runtime
     let decorator_threads = conf.pipeline.k8s_decorator_threads;
+    let get_extract_rules = |direction: &str| -> Vec<String> {
+        conf.attributes
+            .as_ref()
+            .and_then(|directions_map| directions_map.get(direction))
+            .and_then(|providers_map| providers_map.get("k8s"))
+            .map(|options| options.extract.metadata.clone())
+            .unwrap_or_default()
+    };
+
+    let source_extract_rules = get_extract_rules("source");
+    let dest_extract_rules = get_extract_rules("destination");
+
     let mut decorator_shutdown_rx = os_shutdown_tx.subscribe();
     let decorator_handle = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_multi_thread()
@@ -694,70 +706,73 @@ async fn run(cli: Cli) -> Result<()> {
             );
 
             // Matching on the attributor early is a performance optimization to avoid having to check to see if the attributor is None per flow_span_rx receive.
-            match k8s_attributor.as_ref().map(Decorator::new) {
-                Some(decorator) => loop {
-                    tokio::select! {
-                        _ = decorator_shutdown_rx.recv() => {
+            match k8s_attributor.as_ref() {
+                Some(attributor) => {
+                    let decorator = Decorator::new(attributor, source_extract_rules, dest_extract_rules);
+                    loop {
+                        tokio::select! {
+                            _ = decorator_shutdown_rx.recv() => {
                             info!(
                                 event.name = "k8s.decorator.shutdown_signal_received",
                                 "k8s decorator received shutdown signal"
                             );
                             break;
-                        },
-                        maybe_span = flow_span_rx.recv() => {
-                            let Some(flow_span) = maybe_span else { break };
+                            },
+                            maybe_span = flow_span_rx.recv() => {
+                                let Some(flow_span) = maybe_span else { break };
 
-                            let channel_size = flow_span_rx.len();
-                            metrics::registry::CHANNEL_ENTRIES
-                                .with_label_values(&[ChannelName::ProducerOutput.as_str()])
-                                .set(channel_size as i64);
+                                let channel_size = flow_span_rx.len();
+                                metrics::registry::CHANNEL_ENTRIES
+                                    .with_label_values(&[ChannelName::ProducerOutput.as_str()])
+                                    .set(channel_size as i64);
 
-                            let _timer = metrics::registry::PROCESSING_LATENCY_SECONDS
-                                .with_label_values(&["k8s_decoration"])
-                                .start_timer();
-                            let (span, err) = decorator.decorate_or_fallback(flow_span).await;
+                                let _timer = metrics::registry::PROCESSING_LATENCY_SECONDS
+                                    .with_label_values(&["k8s_decoration"])
+                                    .start_timer();
+                                let (span, err) = decorator.decorate_or_fallback(flow_span).await;
 
-                            match err {
-                                Some(e) => {
-                                    metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Error);
-                                    debug!(
-                                        event.name = "k8s.decorator.failed",
-                                        flow.community_id = %span.attributes.flow_community_id,
-                                        error.message = %e,
-                                        "failed to decorate flow attributes with kubernetes metadata, sending undecorated span"
-                                    );
+                                match err {
+                                    Some(e) => {
+                                        metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Error);
+                                        debug!(
+                                            event.name = "k8s.decorator.failed",
+                                            flow.community_id = %span.attributes.flow_community_id,
+                                            error.message = %e,
+                                            "failed to decorate flow attributes with kubernetes metadata, sending undecorated span"
+                                        );
+                                    }
+                                    None => {
+                                        metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Ok);
+                                        trace!(
+                                            event.name = "k8s.decorator.decorated",
+                                            flow.community_id = %span.attributes.flow_community_id,
+                                            "successfully decorated flow attributes with kubernetes metadata"
+                                        );
+                                    }
                                 }
-                                None => {
-                                    metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Ok);
-                                    trace!(
-                                        event.name = "k8s.decorator.decorated",
-                                        flow.community_id = %span.attributes.flow_community_id,
-                                        "successfully decorated flow attributes with kubernetes metadata"
-                                    );
-                                }
-                            }
 
-                            match k8s_decorated_flow_span_tx.send(span).await {
-                                Ok(_) => {
-                                    metrics::registry::CHANNEL_SENDS_TOTAL
-                                        .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Success.as_str()])
-                                        .inc();
-                                }
-                                Err(e) => {
-                                    metrics::registry::CHANNEL_SENDS_TOTAL
-                                        .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Error.as_str()])
-                                        .inc();
-                                    error!(
-                                        event.name = "channel.send_failed",
-                                        channel.name = "k8s_decorated_flow_span",
-                                        error.message = %e,
-                                        "failed to send flow span to export channel"
-                                    );
+                                match k8s_decorated_flow_span_tx.send(span).await {
+                                    Ok(_) => {
+                                        metrics::registry::CHANNEL_SENDS_TOTAL
+                                            .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Success.as_str()])
+                                            .inc();
+                                    }
+                                    Err(e) => {
+                                        metrics::registry::CHANNEL_SENDS_TOTAL
+                                            .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Error.as_str()])
+                                            .inc();
+                                        error!(
+                                            event.name = "channel.send_failed",
+                                            channel.name = "k8s_decorated_flow_span",
+                                            error.message = %e,
+                                            "failed to send flow span to export channel"
+                                        );
+                                    }
                                 }
                             }
                         }
                     }
-                },
+                }
                 None => {
                     warn!(
                         event.name = "k8s.decorator.unavailable",

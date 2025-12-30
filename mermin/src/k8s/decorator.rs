@@ -32,11 +32,21 @@ pub struct NetworkPolicy {
 /// to produce enriched flow attributes containing resource information.
 pub struct Decorator<'a> {
     attributor: &'a Attributor,
+    source_extract_rules: Vec<String>,
+    dest_extract_rules: Vec<String>,
 }
 
 impl<'a> Decorator<'a> {
-    pub fn new(attributor: &'a Attributor) -> Self {
-        Self { attributor }
+    pub fn new(
+        attributor: &'a Attributor,
+        source_extract_rules: Vec<String>,
+        dest_extract_rules: Vec<String>,
+    ) -> Self {
+        Self {
+            attributor,
+            source_extract_rules,
+            dest_extract_rules,
+        }
     }
 
     /// Decorate a flow span with K8s metadata, with automatic fallback to undecorated span on error.
@@ -138,6 +148,59 @@ impl<'a> Decorator<'a> {
         None
     }
 
+    /// Checks if a specific metadata field should be extracted based on config.
+    ///
+    /// generic_kind: "pod", "node", "service", etc.
+    /// field_type: "name", "namespace", "uid", "annotations", "labels"
+    fn should_extract(&self, resource: &str, field: &str, is_source: bool) -> bool {
+        let rules = if is_source {
+            &self.source_extract_rules
+        } else {
+            &self.dest_extract_rules
+        };
+
+        let specific = format!("{resource}.metadata.{field}");
+        if rules.contains(&specific) {
+            return true;
+        }
+
+        let wildcard = format!("[*].metadata.{field}");
+        if rules.contains(&wildcard) {
+            return true;
+        }
+
+        false
+    }
+
+    /// Shared helper to populate standard Kubernetes metadata (Name, UID, Annotations, Namespace).
+    fn populate_common_meta(
+        &self,
+        flow_span: &mut FlowSpan,
+        kind: &str,
+        meta: &K8sObjectMeta,
+        is_source: bool,
+        extract_namespace: bool,
+    ) {
+        if self.should_extract(kind, "name", is_source) {
+            let attr_key = format!("{kind}.name");
+            self.set_k8s_attr(flow_span, &attr_key, &meta.name, is_source);
+        }
+
+        if extract_namespace && self.should_extract(kind, "namespace", is_source) {
+            self.set_k8s_attr_opt(flow_span, "namespace.name", &meta.namespace, is_source);
+        }
+
+        if self.should_extract(kind, "uid", is_source) {
+            let attr_key = format!("{kind}.uid");
+            self.set_k8s_attr_opt(flow_span, &attr_key, &meta.uid, is_source);
+        }
+
+        if self.should_extract(kind, "annotations", is_source) {
+            let attr_key = format!("{kind}.annotations");
+            self.set_k8s_map_attr(flow_span, &attr_key, &meta.annotations, is_source);
+        }
+    }
+
     /// Populates Kubernetes attributes in a FlowSpan based on DecorationInfo.
     /// Maps resource metadata to the appropriate source or destination K8s fields.
     fn populate_k8s_attributes(
@@ -153,10 +216,11 @@ impl<'a> Decorator<'a> {
                 owners,
                 selector_relations,
             } => {
-                self.set_k8s_attr(flow_span, "pod.name", &pod.name, is_source);
-                self.set_k8s_attr_opt(flow_span, "namespace.name", &pod.namespace, is_source);
-                self.set_k8s_attr_opt(flow_span, "node.name", node_name, is_source);
-                self.set_k8s_map_attr(flow_span, "pod.annotations", &pod.annotations, is_source);
+                self.populate_common_meta(flow_span, "pod", pod, is_source, true);
+
+                if self.should_extract("pod", "node_name", is_source) {
+                    self.set_k8s_attr_opt(flow_span, "node.name", node_name, is_source);
+                }
 
                 // Populate workload controller information for all owners in the chain
                 if let Some(workload_owners) = owners {
@@ -173,28 +237,24 @@ impl<'a> Decorator<'a> {
                 }
             }
             DecorationInfo::Node { node } => {
-                self.set_k8s_attr(flow_span, "node.name", &node.name, is_source);
-                self.set_k8s_map_attr(flow_span, "node.annotations", &node.annotations, is_source);
+                self.populate_common_meta(flow_span, "node", node, is_source, false);
             }
             DecorationInfo::Service { service, .. } => {
-                self.set_k8s_attr(flow_span, "service.name", &service.name, is_source);
-                self.set_k8s_attr_opt(flow_span, "namespace.name", &service.namespace, is_source);
-                self.set_k8s_map_attr(
-                    flow_span,
-                    "service.annotations",
-                    &service.annotations,
-                    is_source,
-                );
+                self.populate_common_meta(flow_span, "service", service, is_source, true);
             }
             DecorationInfo::EndpointSlice { slice } => {
-                // EndpointSlice provides namespace context for service discovery
-                self.set_k8s_attr_opt(flow_span, "namespace.name", &slice.namespace, is_source);
-                self.set_k8s_map_attr(
-                    flow_span,
-                    "endpointslice.annotations",
-                    &slice.annotations,
-                    is_source,
-                );
+                if self.should_extract("endpointslice", "namespace", is_source) {
+                    self.set_k8s_attr_opt(flow_span, "namespace.name", &slice.namespace, is_source);
+                }
+
+                if self.should_extract("endpointslice", "annotations", is_source) {
+                    self.set_k8s_map_attr(
+                        flow_span,
+                        "endpointslice.annotations",
+                        &slice.annotations,
+                        is_source,
+                    );
+                }
             }
         }
     }
@@ -207,57 +267,16 @@ impl<'a> Decorator<'a> {
         owner: &WorkloadOwner,
         is_source: bool,
     ) {
-        match owner {
-            WorkloadOwner::Deployment(meta) => {
-                self.set_k8s_attr(flow_span, "deployment.name", &meta.name, is_source);
-                self.set_k8s_map_attr(
-                    flow_span,
-                    "deployment.annotations",
-                    &meta.annotations,
-                    is_source,
-                );
-            }
-            WorkloadOwner::ReplicaSet(meta) => {
-                self.set_k8s_attr(flow_span, "replicaset.name", &meta.name, is_source);
-                self.set_k8s_map_attr(
-                    flow_span,
-                    "deployment.annotations",
-                    &meta.annotations,
-                    is_source,
-                );
-            }
-            WorkloadOwner::StatefulSet(meta) => {
-                self.set_k8s_attr(flow_span, "statefulset.name", &meta.name, is_source);
-                self.set_k8s_map_attr(
-                    flow_span,
-                    "statefulset.annotations",
-                    &meta.annotations,
-                    is_source,
-                );
-            }
-            WorkloadOwner::DaemonSet(meta) => {
-                self.set_k8s_attr(flow_span, "daemonset.name", &meta.name, is_source);
-                self.set_k8s_map_attr(
-                    flow_span,
-                    "daemonset.annotations",
-                    &meta.annotations,
-                    is_source,
-                );
-            }
-            WorkloadOwner::Job(meta) => {
-                self.set_k8s_attr(flow_span, "job.name", &meta.name, is_source);
-                self.set_k8s_map_attr(flow_span, "job.annotations", &meta.annotations, is_source);
-            }
-            WorkloadOwner::CronJob(meta) => {
-                self.set_k8s_attr(flow_span, "cronjob.name", &meta.name, is_source);
-                self.set_k8s_map_attr(
-                    flow_span,
-                    "cronjob.annotations",
-                    &meta.annotations,
-                    is_source,
-                );
-            }
-        }
+        let (kind, meta) = match owner {
+            WorkloadOwner::Deployment(m) => ("deployment", m),
+            WorkloadOwner::ReplicaSet(m) => ("replicaset", m),
+            WorkloadOwner::StatefulSet(m) => ("statefulset", m),
+            WorkloadOwner::DaemonSet(m) => ("daemonset", m),
+            WorkloadOwner::Job(m) => ("job", m),
+            WorkloadOwner::CronJob(m) => ("cronjob", m),
+        };
+
+        self.populate_common_meta(flow_span, kind, meta, is_source, false);
     }
 
     /// Maps selector-based relation metadata to the appropriate K8s attributes.
