@@ -1459,16 +1459,11 @@ fn spawn_ip_resource_watcher<K, F>(
                 match event {
                     Ok(watcher::Event::Apply(obj)) => {
                         metrics::registry::K8S_WATCHER_EVENTS_TOTAL
-                            .with_label_values(&[K8sWatcherEventType::Apply.as_str()])
+                            .with_label_values(&[
+                                &resource_name,
+                                K8sWatcherEventType::Apply.as_str(),
+                            ])
                             .inc();
-                        if metrics::registry::debug_enabled() {
-                            metrics::registry::K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL
-                                .with_label_values(&[
-                                    &resource_name,
-                                    K8sWatcherEventType::Apply.as_str(),
-                                ])
-                                .inc();
-                        }
 
                         // Extract current IPs from this resource
                         let current_ips = extract_ips(&obj);
@@ -1515,16 +1510,11 @@ fn spawn_ip_resource_watcher<K, F>(
                     }
                     Ok(watcher::Event::Delete(obj)) => {
                         metrics::registry::K8S_WATCHER_EVENTS_TOTAL
-                            .with_label_values(&[K8sWatcherEventType::Delete.as_str()])
+                            .with_label_values(&[
+                                &resource_name,
+                                K8sWatcherEventType::Delete.as_str(),
+                            ])
                             .inc();
-                        if metrics::registry::debug_enabled() {
-                            metrics::registry::K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL
-                                .with_label_values(&[
-                                    &resource_name,
-                                    K8sWatcherEventType::Delete.as_str(),
-                                ])
-                                .inc();
-                        }
 
                         // Remove from cache and trigger rebuild since IPs are being removed
                         let uid = obj.meta().uid.clone().unwrap_or_default();
@@ -1563,16 +1553,11 @@ fn spawn_ip_resource_watcher<K, F>(
                     }
                     Ok(watcher::Event::Init) => {
                         metrics::registry::K8S_WATCHER_EVENTS_TOTAL
-                            .with_label_values(&[K8sWatcherEventType::Init.as_str()])
+                            .with_label_values(&[
+                                &resource_name,
+                                K8sWatcherEventType::Init.as_str(),
+                            ])
                             .inc();
-                        if metrics::registry::debug_enabled() {
-                            metrics::registry::K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL
-                                .with_label_values(&[
-                                    &resource_name,
-                                    K8sWatcherEventType::Init.as_str(),
-                                ])
-                                .inc();
-                        }
 
                         debug!(
                             event.name = "k8s.watcher.init",
@@ -1589,16 +1574,11 @@ fn spawn_ip_resource_watcher<K, F>(
                     }
                     Ok(watcher::Event::InitDone) => {
                         metrics::registry::K8S_WATCHER_EVENTS_TOTAL
-                            .with_label_values(&[K8sWatcherEventType::InitDone.as_str()])
+                            .with_label_values(&[
+                                &resource_name,
+                                K8sWatcherEventType::InitDone.as_str(),
+                            ])
                             .inc();
-                        if metrics::registry::debug_enabled() {
-                            metrics::registry::K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL
-                                .with_label_values(&[
-                                    &resource_name,
-                                    K8sWatcherEventType::InitDone.as_str(),
-                                ])
-                                .inc();
-                        }
 
                         if event_tx.send(()).is_err() {
                             return;
@@ -1611,16 +1591,11 @@ fn spawn_ip_resource_watcher<K, F>(
                     }
                     Err(e) => {
                         metrics::registry::K8S_WATCHER_EVENTS_TOTAL
-                            .with_label_values(&[K8sWatcherEventType::Error.as_str()])
+                            .with_label_values(&[
+                                &resource_name,
+                                K8sWatcherEventType::Error.as_str(),
+                            ])
                             .inc();
-                        if metrics::registry::debug_enabled() {
-                            metrics::registry::K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL
-                                .with_label_values(&[
-                                    &resource_name,
-                                    K8sWatcherEventType::Error.as_str(),
-                                ])
-                                .inc();
-                        }
 
                         error!(
                             event.name = "k8s.watcher.error",

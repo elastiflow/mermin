@@ -321,13 +321,10 @@ Metrics for Kubernetes metadata enrichment.
 
 **`mermin_k8s_watcher_events_total{event_type}`**
 - **Type:** Counter
-- **Labels:** `event_type` = "apply" | "delete" | "init" | "init_done" | "error"
+- **Labels:**
+  - `resource` = "Pod" | "Service" | "Node" | etc.,
+  - `event_type` = "apply" | "delete" | "init" | "init_done" | "error"
 - **Description:** K8s resource watcher events (aggregated).
-
-**`mermin_k8s_watcher_events_by_resource_total{resource, event_type}`** *(debug)*
-- **Type:** Counter
-- **Labels:** `resource` = "Pod" | "Service" | "Node" | etc., `event_type` as above
-- **Description:** K8s watcher events by resource type.
 
 ### IP Index Performance
 
@@ -348,24 +345,20 @@ Metrics for async task management.
 
 ### Aggregated Metrics (Standard)
 
-**`mermin_tasks_total{status}`**
-- **Type:** Counter
-- **Labels:** `status` = "spawned" | "completed" | "cancelled" | "panicked"
-- **Description:** Task lifecycle events. Note: `spawned` count should equal sum of other statuses over time.
-
-**`mermin_tasks_active_total`**
+**`mermin_tasks_active{task}`**
 - **Type:** Gauge
+- **Labels:** `task`: The name of the specific task.
 - **Description:** Current number of active tasks.
 
 ### Per-Task Metrics (Debug)
 
-**`mermin_tasks_by_name_total{task_name, status}`** *(debug)*
+**`mermin_tasks_total{status}`**
 - **Type:** Counter
-- **Description:** Task lifecycle events by task name.
+- **Labels:**
+  - `task`: The name of the specific task.
+  - `status` = "spawned" | "completed" | "cancelled" | "panicked"
+- **Description:** Task lifecycle events. Note: `spawned` count should equal sum of other statuses over time.
 
-**`mermin_tasks_active_by_name_total{task_name}`** *(debug)*
-- **Type:** Gauge
-- **Description:** Active tasks by task name.
 
 ---
 

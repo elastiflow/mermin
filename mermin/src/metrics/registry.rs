@@ -277,12 +277,12 @@ lazy_static! {
 
     // Standard metrics (always registered)
     /// K8s watcher events counter.
-    /// Labels: event = "apply" | "delete" | "init" | "init_done" | "error"
+    /// Labels: resource, event = "apply" | "delete" | "init" | "init_done" | "error"
     pub static ref K8S_WATCHER_EVENTS_TOTAL: IntCounterVec = IntCounterVec::new(
         Opts::new("events_total", "Total number of K8s resource watcher events (aggregated across resources)")
             .namespace("mermin")
             .subsystem("k8s_watcher"),
-        &["event"]  // apply, delete, init, init_done, error
+        &["resource", "event"]  // apply, delete, init, init_done, error
     ).expect("failed to create k8s_watcher_events_total metric");
 
     /// Total number of K8s IP index updates triggered.
@@ -300,26 +300,18 @@ lazy_static! {
             .buckets(vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0])
     ).expect("failed to create k8s_ip_index_update_duration metric");
 
-    // Debug metrics (only registered if debug_metrics_enabled)
-    /// K8s watcher events counter by resource type.
-    /// Labels: resource, event = "apply" | "delete" | "init" | "init_done" | "error"
-    pub static ref K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("events_by_resource_total", "Total number of K8s resource watcher events by resource type")
-            .namespace("mermin")
-            .subsystem("k8s_watcher"),
-        &["resource", "event"]  // apply, delete, init, init_done, error
-    ).expect("failed to create k8s_watcher_events_by_resource_total metric");
-
     // ============================================================================
     // Taskmanager Subsystem
     // ============================================================================
 
     // Standard metrics (always registered)
-    pub static ref TASKMANAGER_TASKS_ACTIVE_TOTAL: prometheus::IntGauge = prometheus::IntGauge::with_opts(
-        Opts::new("tasks_active_total", "Current number of active tasks across all task types")
+    /// Labels: task
+    pub static ref TASKMANAGER_TASKS_ACTIVE: IntGaugeVec = IntGaugeVec::new(
+        Opts::new("tasks_active", "Current number of active tasks across all task types")
             .namespace("mermin")
-            .subsystem("taskmanager")
-    ).expect("failed to create taskmanager_tasks_active_total metric");
+            .subsystem("taskmanager"),
+        &["task"]
+    ).expect("failed to create taskmanager_tasks_active metric");
 
     /// Duration of shutdown operations.
     pub static ref SHUTDOWN_DURATION_SECONDS: Histogram = Histogram::with_opts(
@@ -346,31 +338,14 @@ lazy_static! {
     ).expect("failed to create shutdown_flows_total metric");
 
     // Debug metrics (only registered if debug_metrics_enabled)
-    /// Task lifecycle events counter.
-    /// Labels: status = "spawned" | "completed" | "cancelled" | "panicked"
-    /// Note: spawned count should equal sum of completed + cancelled + panicked over time
+    /// Task lifecycle events counter by task.
+    /// Labels: task, status = "spawned" | "completed" | "cancelled" | "panicked"
     pub static ref TASKMANAGER_TASKS_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("tasks_total", "Total tasks handled by the Mermin TaskManager")
+        Opts::new("tasks_total", "Total task lifecycle events by task")
             .namespace("mermin")
             .subsystem("taskmanager"),
-        &["status"]  // spawned, completed, cancelled, panicked
-    ).expect("failed to create taskmanager_tasks_total metric");
-
-    /// Task lifecycle events counter by task name.
-    /// Labels: task_name, status = "spawned" | "completed" | "cancelled" | "panicked"
-    pub static ref TASKS_BY_NAME_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("tasks_by_name_total", "Total task lifecycle events by task name")
-            .namespace("mermin")
-            .subsystem("taskmanager"),
-        &["task_name", "status"]  // spawned, completed, cancelled, panicked
-    ).expect("failed to create tasks_by_name_total metric");
-
-    pub static ref TASKS_ACTIVE_BY_NAME_TOTAL: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("tasks_active_by_name_total", "Current number of active tasks across all task types handled by the Mermin TaskManager")
-            .namespace("mermin")
-            .subsystem("taskmanager"),
-        &["task_name"]
-    ).expect("failed to create tasks_active_by_name_total metric");
+        &["task", "status"]  // spawned, completed, cancelled, panicked
+    ).expect("failed to create tasks_total metric");
 
     // ============================================================================
     // Interface Subsystem
@@ -532,21 +507,16 @@ pub fn init_registry(debug_enabled: bool) -> Result<(), prometheus::Error> {
     register_standard!(K8S_IP_INDEX_UPDATE_DURATION_SECONDS);
     register_standard!(K8S_WATCHER_EVENTS_TOTAL);
 
-    // Debug K8s watcher metrics
-    register_debug!(K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL, debug_enabled);
-
     // ============================================================================
     // Taskmanager metrics
     // ============================================================================
     register_standard!(SHUTDOWN_DURATION_SECONDS);
     register_standard!(SHUTDOWN_TIMEOUTS_TOTAL);
     register_standard!(SHUTDOWN_FLOWS_TOTAL);
-    register_standard!(TASKMANAGER_TASKS_ACTIVE_TOTAL);
+    register_standard!(TASKMANAGER_TASKS_ACTIVE);
 
     // Debug taskmanager metrics
     register_debug!(TASKMANAGER_TASKS_TOTAL, debug_enabled);
-    register_debug!(TASKS_BY_NAME_TOTAL, debug_enabled);
-    register_debug!(TASKS_ACTIVE_BY_NAME_TOTAL, debug_enabled);
 
     // ============================================================================
     // Per-interface statistics
@@ -602,11 +572,11 @@ pub fn remove_interface_metrics(iface: &str) {
 /// Cleans up watcher events metrics for the specified resource.
 pub fn remove_k8s_resource_metrics(resource: &str) {
     // Watcher events (all event types including error)
-    let _ = K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL.remove_label_values(&[resource, "apply"]);
-    let _ = K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL.remove_label_values(&[resource, "init"]);
-    let _ = K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL.remove_label_values(&[resource, "init_done"]);
-    let _ = K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL.remove_label_values(&[resource, "delete"]);
-    let _ = K8S_WATCHER_EVENTS_BY_RESOURCE_TOTAL.remove_label_values(&[resource, "error"]);
+    let _ = K8S_WATCHER_EVENTS_TOTAL.remove_label_values(&[resource, "apply"]);
+    let _ = K8S_WATCHER_EVENTS_TOTAL.remove_label_values(&[resource, "init"]);
+    let _ = K8S_WATCHER_EVENTS_TOTAL.remove_label_values(&[resource, "init_done"]);
+    let _ = K8S_WATCHER_EVENTS_TOTAL.remove_label_values(&[resource, "delete"]);
+    let _ = K8S_WATCHER_EVENTS_TOTAL.remove_label_values(&[resource, "error"]);
 }
 
 /// Remove all metrics for a task (only works if debug metrics are enabled).
@@ -614,11 +584,10 @@ pub fn remove_k8s_resource_metrics(resource: &str) {
 /// Cleans up task lifecycle metrics for the specified task name.
 pub fn remove_task_metrics(task_name: &str) {
     // Remove all status variants for this task
-    let _ = TASKS_BY_NAME_TOTAL.remove_label_values(&[task_name, "spawned"]);
-    let _ = TASKS_BY_NAME_TOTAL.remove_label_values(&[task_name, "completed"]);
-    let _ = TASKS_BY_NAME_TOTAL.remove_label_values(&[task_name, "cancelled"]);
-    let _ = TASKS_BY_NAME_TOTAL.remove_label_values(&[task_name, "panicked"]);
-    let _ = TASKS_ACTIVE_BY_NAME_TOTAL.remove_label_values(&[task_name]);
+    let _ = TASKMANAGER_TASKS_TOTAL.remove_label_values(&[task_name, "spawned"]);
+    let _ = TASKMANAGER_TASKS_TOTAL.remove_label_values(&[task_name, "completed"]);
+    let _ = TASKMANAGER_TASKS_TOTAL.remove_label_values(&[task_name, "cancelled"]);
+    let _ = TASKMANAGER_TASKS_TOTAL.remove_label_values(&[task_name, "panicked"]);
 }
 
 #[cfg(test)]
