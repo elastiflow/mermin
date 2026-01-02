@@ -1,5 +1,31 @@
 # Contributor Guide
 
+- [Contributor Guide](#contributor-guide)
+  - [Prerequisites](#prerequisites)
+  - [Build and Run Locally](#build-and-run-locally)
+    - [1. Build the `mermin` agent](#1-build-the-mermin-agent)
+      - [Pull Pre-built Images](#pull-pre-built-images)
+    - [2. Configuration Files](#2-configuration-files)
+    - [3. Run the agent](#3-run-the-agent)
+    - [4. Generate Traffic](#4-generate-traffic)
+  - [Testing and Linting](#testing-and-linting)
+    - [Run unit tests](#run-unit-tests)
+    - [Format your code](#format-your-code)
+    - [Run Clippy for lints](#run-clippy-for-lints)
+    - ["hack" hints](#hack-hints)
+  - [Using a Dockerized Build Environment](#using-a-dockerized-build-environment)
+    - [1. Build the containerized environment](#1-build-the-containerized-environment)
+    - [2. Run commands inside the container](#2-run-commands-inside-the-container)
+  - [Testing on local Kind K8s cluster](#testing-on-local-kind-k8s-cluster)
+    - [Iterating on Code Changes](#iterating-on-code-changes)
+    - [Verifying the Deployment](#verifying-the-deployment)
+    - [Cleanup](#cleanup)
+  - [Cross-Compiling](#cross-compiling)
+    - [Setting Up rust-analyzer on macOS](#setting-up-rust-analyzer-on-macos)
+      - [Configure VS Code/Cursor settings](#configure-vs-codecursor-settings)
+  - [Next Steps](#next-steps)
+  - [Getting Help](#getting-help)
+
 Welcome to the Mermin contributor guide! This document will help you set up your development environment, build the project, run tests, and contribute effectively to Mermin.
 
 ## Prerequisites
@@ -160,6 +186,15 @@ cargo clippy -p mermin-ebpf -- -D warnings
 # Lint the main application code
 cargo clippy --all-features -- -D warnings
 ```
+
+### "hack" hints
+
+- Generate metrics description for the [app-metrics docs](../observability/app-metrics.md) with `jq`
+  ```bash
+  curl -s ${POD_IP}:10250/metrics:summary | jq --arg metric_prefix ${METRIC_PREFIX} -r -f hack/gen_metrics_doc.jq
+  # Example
+  curl -s localhost:10250/metrics:summary | jq --arg metric_prefix mermin_ebpf -r -f hack/gen_metrics_doc.jq
+  ```
 
 ## Using a Dockerized Build Environment
 

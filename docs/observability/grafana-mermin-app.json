@@ -1348,7 +1348,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 264
+            "y": 372
           },
           "id": 6,
           "options": {
@@ -1484,7 +1484,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 264
+            "y": 372
           },
           "id": 24,
           "interval": "60s",
@@ -1622,7 +1622,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 272
+            "y": 380
           },
           "id": 25,
           "interval": "60s",
@@ -1699,7 +1699,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 272
+            "y": 380
           },
           "id": 23,
           "interval": "60s",
@@ -1841,10 +1841,10 @@
             ]
           },
           "gridPos": {
-            "h": 5,
-            "w": 5,
+            "h": 3,
+            "w": 12,
             "x": 0,
-            "y": 113
+            "y": 36
           },
           "id": 29,
           "options": {
@@ -1935,10 +1935,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 5,
-            "x": 5,
-            "y": 113
+            "h": 3,
+            "w": 12,
+            "x": 12,
+            "y": 36
           },
           "id": 28,
           "options": {
@@ -2075,11 +2075,11 @@
           },
           "gridPos": {
             "h": 5,
-            "w": 14,
-            "x": 10,
-            "y": 113
+            "w": 12,
+            "x": 0,
+            "y": 39
           },
-          "id": 22,
+          "id": 43,
           "options": {
             "legend": {
               "calcs": [
@@ -2111,21 +2111,132 @@
               "legendFormat": "{{ $group_by_pod_label }}",
               "range": true,
               "refId": "A"
+            }
+          ],
+          "title": "Bytes processed",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Total number of packets processed by Mermin",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.8,
+                "drawStyle": "bars",
+                "fillOpacity": 100,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 0,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "showValues": false,
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "normal"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "pps"
             },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Total"
+                },
+                "properties": [
+                  {
+                    "id": "custom.lineWidth",
+                    "value": 0
+                  },
+                  {
+                    "id": "custom.fillOpacity",
+                    "value": 11
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 12,
+            "x": 12,
+            "y": 39
+          },
+          "id": 22,
+          "options": {
+            "legend": {
+              "calcs": [
+                "min",
+                "max",
+                "lastNotNull"
+              ],
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true,
+              "sortBy": "Last *",
+              "sortDesc": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "pluginVersion": "12.3.0",
+          "targets": [
             {
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum(rate(mermin_interface_bytes_total[$__rate_interval]))",
-              "hide": true,
-              "legendFormat": "Total",
+              "expr": "sum(rate(mermin_interface_packets_total[$__rate_interval])) by ($group_by_pod_label)",
+              "legendFormat": "{{ $group_by_pod_label }}",
               "range": true,
-              "refId": "B"
+              "refId": "A"
             }
           ],
-          "title": "Bytes processed",
+          "title": "Packets processed",
           "type": "timeseries"
         },
         {
@@ -2208,7 +2319,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 118
+            "y": 44
           },
           "id": 26,
           "options": {
@@ -2314,7 +2425,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 118
+            "y": 44
           },
           "id": 5,
           "options": {
@@ -2421,7 +2532,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 127
+            "y": 53
           },
           "id": 27,
           "options": {
@@ -2559,7 +2670,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 127
+            "y": 53
           },
           "id": 33,
           "options": {
@@ -2703,7 +2814,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 567
+            "y": 675
           },
           "id": 34,
           "options": {
@@ -2841,7 +2952,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 567
+            "y": 675
           },
           "id": 30,
           "options": {
@@ -2970,7 +3081,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 576
+            "y": 684
           },
           "id": 41,
           "options": {
@@ -3137,6 +3248,6 @@
   "timezone": "browser",
   "title": "Mermin Application",
   "uid": "mermin_app",
-  "version": 20,
+  "version": 22,
   "weekStart": ""
 }
