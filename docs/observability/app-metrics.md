@@ -7,9 +7,6 @@ hidden: true
 - [Mermin Application Metrics](#mermin-application-metrics)
   - [Metrics Endpoint](#metrics-endpoint)
   - [Metrics Reference](#metrics-reference)
-    - [Subsystems](#subsystems)
-    - [Standard vs Debug Metrics](#standard-vs-debug-metrics)
-  - [Metrics](#metrics)
     - [eBPF Metrics (`mermin_ebpf_*`)](#ebpf-metrics-mermin_ebpf_)
     - [Network Interface Metrics (`mermin_interface_*`)](#network-interface-metrics-mermin_interface_)
     - [Flow Metrics (`mermin_flow_*`)](#flow-metrics-mermin_flow_)
@@ -32,30 +29,14 @@ Mermin exposes Prometheus metrics in the standard Prometheus text format at mult
 - `/metrics/debug` - Debug metrics only (returns 404 if disabled)
 - `/metrics:summary` - JSON summary of all available metrics with metadata (name, type, description, labels, category)
 
-**Default URL:** `http://localhost:10250/metrics`
+**Standard vs Debug Metrics:**
 
-The `/metrics`, `/metrics/standard`, and `/metrics/debug` endpoints return metrics in Prometheus text format, which can be scraped by Prometheus or queried directly using tools like `curl`.
-
-The `/metrics:summary` endpoint returns a JSON response containing metadata about all available metrics, including:
-
-- Metric names and types (counter, gauge, histogram)
-- Descriptions
-- Label names
-- Category (standard or debug)
-- Summary statistics (total metrics, standard metrics count, debug metrics count)
-
-**Example:** If deployed locally, query the summary endpoint exposed on port 10250:
-
-```bash
-curl http://localhost:10250/metrics:summary | jq .
-```
+- **Standard metrics**: Always enabled, aggregated across resources, safe for production
+- **Debug metrics**: High-cardinality labels (per-interface, per-resource), must be explicitly enabled via `metrics.debug_metrics_enabled = true`
 
 ## Metrics Reference
 
-All metrics follow the naming convention: `mermin_<subsystem>_<name>_<unit>` where applicable.
-
-### Subsystems
-
+All metrics follow the naming convention: `mermin_<subsystem>_<name>`.  
 Metrics are categorized into logical subsystems that correspond to different components of Mermin:
 
 - `ebpf`: For eBPF-specific metrics
@@ -65,15 +46,6 @@ Metrics are categorized into logical subsystems that correspond to different com
 - `interface`: Network interface related metrics
 - `k8s`: For Kubernetes watcher metrics
 - `taskmanager`: Internal Mermin tasks metrics
-
-### Standard vs Debug Metrics
-
-- **Standard metrics**: Always enabled, aggregated across resources, safe for production
-- **Debug metrics**: High-cardinality labels (per-interface, per-resource), must be explicitly enabled via `metrics.debug_metrics_enabled = true`
-
----
-
-## Metrics
 
 ### eBPF Metrics (`mermin_ebpf_*`)
 
