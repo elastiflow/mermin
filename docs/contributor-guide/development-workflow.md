@@ -210,9 +210,6 @@ make helm-upgrade
 
 # With custom local config
 make helm-upgrade EXTRA_HELM_ARGS='--set-file config.content=local/config.hcl'
-
-# Minimal deployment (uses default config from chart)
-helm upgrade -i mermin charts/mermin --values docs/deployment/examples/local/values.yaml --wait --timeout 10m
 ```
 
 **Optionally install `metrics-server` to get metrics if it has not been installed yet**
@@ -232,7 +229,7 @@ helm upgrade -i --wait --timeout 15m -n prometheus --create-namespace \
   -f docs/deployment/examples/local/values_prom_stack.yaml \
   prometheus prometheus/kube-prometheus-stack
 kubectl -n prometheus patch sts prometheus-grafana \
-  --type="json" -p='[{"op":"replace","path":"/spec/persistentVolumeClaimRetentionPolicy/whenDeleted", "value": "Delete"}]'  
+  --type="json" -p='[{"op":"replace","path":"/spec/persistentVolumeClaimRetentionPolicy/whenDeleted", "value": "Delete"}]'
 
 # Port-forward Grafana to open in the browser
 kubectl -n prometheus port-forward svc/prometheus-grafana 3000:3000
