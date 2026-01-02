@@ -1,5 +1,6 @@
 # This is the helper script to generate part of the metrics Markdown documentation. Usage example:
-# curl ${POD_IP}:10250/metrics:summary | jq --arg metric_prefix mermin_ebpf -r -f hack/gen_metrics_doc.jq
+# curl -s ${POD_IP}:10250/metrics:summary | jq --arg metric_prefix ${metric_prefix} -r -f hack/gen_metrics_doc.jq
+# curl -s localhost:10250/metrics:summary | jq --arg metric_prefix mermin_pipeline -r -f hack/gen_metrics_doc.jq
 
 def labels_formatter(labels):
   if labels | length > 0 then

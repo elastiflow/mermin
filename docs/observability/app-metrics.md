@@ -4,19 +4,6 @@ hidden: true
 
 # Mermin Application Metrics
 
-- [Mermin Application Metrics](#mermin-application-metrics)
-  - [Metrics Endpoint](#metrics-endpoint)
-  - [Metrics Reference](#metrics-reference)
-    - [eBPF Metrics (`mermin_ebpf_*`)](#ebpf-metrics-mermin_ebpf_)
-    - [Network Interface Metrics (`mermin_interface_*`)](#network-interface-metrics-mermin_interface_)
-    - [Flow Metrics (`mermin_flow_*`)](#flow-metrics-mermin_flow_)
-    - [Kubernetes Watcher Metrics (`mermin_k8s_watcher_*`)](#kubernetes-watcher-metrics-mermin_k8s_watcher_)
-    - [Kubernetes Decorator Metrics (`mermin_k8s_decorator_*`)](#kubernetes-decorator-metrics-mermin_k8s_decorator_)
-    - [Flow Span Export Metrics (`mermin_export_*`)](#flow-span-export-metrics-mermin_export_)
-    - [Channel Metrics (`mermin_channel_*`)](#channel-metrics-mermin_channel_)
-    - [Channel Metrics (`mermin_taskmanager_*`)](#channel-metrics-mermin_taskmanager_)
-    - [Task Manager Metrics (`mermin_taskmanager_*`)](#task-manager-metrics-mermin_taskmanager_)
-
 This guide describes the Prometheus metrics endpoint exposed by Mermin and provides a comprehensive breakdown of all available metrics, their types, and descriptions.
 Please find more details on the metrics configuration in the [metrics configuration document](../configuration/metrics.md)
 
@@ -96,16 +83,6 @@ These metrics provide visibility into network traffic processed by Mermin across
 
 ### Flow Metrics (`mermin_flow_*`)
 
-- `mermin_flow_processing_latency_seconds`
-  *Type*: `histogram`
-  *Description*: Processing latency by pipeline stage
-  *Labels*:
-  - `stage`
-- `mermin_flow_processing_total`
-  *Type*: `counter`
-  *Description*: Total number of flow spans processed by Flow Producer stage (aggregated across interfaces)
-  *Labels*:
-  - `status`
 - `mermin_flow_spans_active_total`
   *Type*: `gauge`
   *Description*: Current number of active flow traces across all interfaces
@@ -153,6 +130,16 @@ These metrics track the export of flow spans from Mermin to external systems (su
   - `status`
 
 ### Channel Metrics (`mermin_channel_*`)
+
+These metrics offer insight into the internal pipeline stage duration.
+
+- `mermin_pipeline_duration_seconds`
+  *Type*: `histogram`
+  *Description*: Processing duration by pipeline stage
+  *Labels*:
+  - `stage`
+
+### Channel Metrics (`mermin_pipeline_*`)
 
 These metrics offer insight into the internal channels used for data transmission.
 

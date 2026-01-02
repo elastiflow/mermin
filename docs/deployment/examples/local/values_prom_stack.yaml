@@ -52,6 +52,9 @@ grafana:
         drop:
           - ALL
 
+  plugins:
+    - netsage-sankey-panel
+
 prometheus:
   prometheusSpec:
     persistentVolumeClaimRetentionPolicy:
