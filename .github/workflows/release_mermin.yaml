@@ -118,6 +118,8 @@ jobs:
             Docker images:
             - `ghcr.io/elastiflow/mermin:${{ steps.prepare_release.outputs.new_release_git_tag }}`
             - `ghcr.io/elastiflow/mermin:${{ steps.prepare_release.outputs.new_release_git_tag }}-debug`
+            - `docker.io/elastiflow/mermin:${{ steps.prepare_release.outputs.new_release_git_tag }}`
+            - `docker.io/elastiflow/mermin:${{ steps.prepare_release.outputs.new_release_git_tag }}-debug`
           target_commitish: ${{ github.ref_name }}
           preserve_order: true
           make_latest: true
@@ -161,6 +163,11 @@ jobs:
           registry: us-docker.pkg.dev
           username: oauth2accesstoken
           password: ${{ steps.gcr_auth.outputs.access_token }}
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
       - name: Build docker image
         uses: elastiflow/gha-reusable/actions/docker-build-push@v0
         with:
@@ -174,6 +181,19 @@ jobs:
           cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }},mode=max
           registry_username: ${{ github.actor }}
           registry_password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build docker image for Docker Hub
+        uses: elastiflow/gha-reusable/actions/docker-build-push@v0
+        with:
+          registry: docker.io
+          image: elastiflow/mermin
+          tag: ${{ fromJson(env.TARGET_IMAGE_TAG)[matrix.target] }}
+          platforms: linux/amd64,linux/arm64
+          target: ${{ matrix.target }}
+          push: true
+          cache_from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }}
+          cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }},mode=max
+          registry_username: ${{ secrets.DOCKERHUB_USERNAME }}
+          registry_password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
   release_chart:
     name: Release Chart
