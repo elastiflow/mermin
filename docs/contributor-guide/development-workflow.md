@@ -190,6 +190,7 @@ cargo clippy --all-features -- -D warnings
 ### "hack" hints
 
 - Generate metrics description for the [app-metrics docs](../observability/app-metrics.md) with `jq`
+
   ```bash
   curl -s ${POD_IP}:10250/metrics:summary | jq --arg metric_prefix ${METRIC_PREFIX} -r -f hack/gen_metrics_doc.jq
   # Example
