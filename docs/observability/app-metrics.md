@@ -242,7 +242,7 @@ Metrics for flow span creation, processing, and export.
 
 ## Processing Latency Metrics
 
-**`mermin_processing_latency_seconds{stage}`**
+**`mermin_pipeline_duration_seconds{stage}`**
 - **Type:** Histogram
 - **Labels:** `stage` = "ebpf_ringbuf_output" | "producer_output" | "decorator_output"
 - **Buckets:** 10μs to 60s (covers both fast operations like eBPF ring buffer processing and slow operations like export)
@@ -362,7 +362,7 @@ Metrics for async task management.
 
 ---
 
-## Shutdown Metrics (`mermin_shutdown_*`)
+## Shutdown Metrics (Debug) (`mermin_shutdown_*`)
 
 Metrics for graceful shutdown behavior.
 
@@ -401,7 +401,7 @@ mermin_ebpf_map_utilization_ratio{map="FLOW_STATS"}
 
 ```prometheus
 # Processing latency p95
-histogram_quantile(0.95, rate(mermin_processing_latency_seconds_bucket[5m]))
+histogram_quantile(0.95, rate(mermin_pipeline_duration_seconds[5m]))
 
 # Export success rate (across all exporter types)
 sum(rate(mermin_export_flow_spans_total{status="ok"}[5m])) /

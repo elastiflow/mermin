@@ -468,7 +468,6 @@ impl ResourceStore {
                             let timer = metrics::registry::K8S_IP_INDEX_UPDATE_DURATION_SECONDS.start_timer();
                             update_ip_index(&store_clone, &ip_index_clone, &conf_clone).await;
                             timer.observe_duration();
-                            metrics::registry::K8S_IP_INDEX_UPDATES_TOTAL.inc();
                             pending_update = false;
                             trace!(
                                 event.name = "k8s.ip_index.updated",

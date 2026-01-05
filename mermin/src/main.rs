@@ -707,7 +707,7 @@ async fn run(cli: Cli) -> Result<()> {
                                 .with_label_values(&[ChannelName::ProducerOutput.as_str()])
                                 .set(channel_size as i64);
 
-                            let _timer = metrics::registry::PROCESSING_LATENCY_SECONDS
+                            let _timer = metrics::registry::PROCESSING_DURATION_SECONDS
                                 .with_label_values(&[ProcessingStage::ProducerOutput.as_str()])
                                 .start_timer();
                             let (span, err) = decorator.decorate_or_fallback(flow_span).await;
@@ -836,7 +836,7 @@ async fn run(cli: Cli) -> Result<()> {
             let export_start = std::time::Instant::now();
             let export_result = tokio::time::timeout(Duration::from_secs(EXPORT_TIMEOUT_SECS), exporter.export(traceable)).await;
             let export_duration = export_start.elapsed();
-            metrics::registry::PROCESSING_LATENCY_SECONDS
+            metrics::registry::PROCESSING_DURATION_SECONDS
                 .with_label_values(&[ProcessingStage::DecoratorOutput.as_str()])
                 .observe(export_duration.as_secs_f64());
 

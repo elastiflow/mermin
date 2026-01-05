@@ -102,7 +102,7 @@ pub trait TraceableExporter: Send + Sync {
 #[async_trait]
 impl TraceableExporter for TraceExporterAdapter {
     async fn export(&self, traceable: TraceableRecord) {
-        let _timer = metrics::registry::PROCESSING_LATENCY_SECONDS
+        let _timer = metrics::registry::PROCESSING_DURATION_SECONDS
             .with_label_values(&[ProcessingStage::DecoratorOutput.as_str()])
             .start_timer();
 

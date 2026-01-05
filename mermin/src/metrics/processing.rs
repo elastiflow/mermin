@@ -27,10 +27,10 @@
 ///
 /// ```no_run
 /// use mermin::metrics::processing::ProcessingStage;
-/// use mermin::metrics::registry::PROCESSING_LATENCY_SECONDS;
+/// use mermin::metrics::registry::PROCESSING_DURATION_SECONDS;
 ///
 /// // Start a timer for the eBPF ring buffer output stage
-/// let _timer = PROCESSING_LATENCY_SECONDS
+/// let _timer = PROCESSING_DURATION_SECONDS
 ///     .with_label_values(&[ProcessingStage::EbpfRingbufOutput.as_str()])
 ///     .start_timer();
 ///

@@ -378,7 +378,7 @@ After tuning performance settings, monitor these key metrics:
 - `mermin_flow_events_total{status="dropped_backpressure"}` - Backpressure events
 - `mermin_flow_events_total{status="dropped_error"}` - Error drops
 - `mermin_channel_size` / `mermin_channel_capacity` - Channel utilization
-- `mermin_processing_latency_seconds` - Pipeline latency histogram
+- `mermin_pipeline_duration_seconds` - Pipeline duration histogram
 
 See the [Application Metrics](../observability/app-metrics.md) guide for complete Prometheus query examples.
 
