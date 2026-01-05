@@ -11,7 +11,7 @@ on:
       - beta
     paths:
       - 'charts/mermin-netobserv-os-stack/**/*'
-      - '.github/workflows/release_mermin-netobserv-os-stack.yml'
+      - '.github/workflows/release_mermin-netobserv-os-stack.yaml'
 
 env:
   BRANCH_TAG_PREFIXES: |
@@ -37,7 +37,7 @@ jobs:
 
   release:
     name: Release mermin-netobserv-os-stack
-    uses: ./.github/workflows/reusable_release_chart.yml
+    uses: ./.github/workflows/reusable_release_chart.yaml
     needs: [set_standard_vars]
     permissions:
       contents: write

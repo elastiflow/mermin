@@ -121,7 +121,7 @@ async fn main() {
 /// History:
 /// - v1: Initial schema version (current)
 ///
-/// CI check in place: .github/workflows/ci.yml (schema_version_check job)
+/// CI check in place: .github/workflows/ci.yaml (schema_version_check job)
 const EBPF_MAP_SCHEMA_VERSION: u8 = 1;
 
 /// Timeout for individual export operations (in seconds).
