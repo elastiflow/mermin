@@ -437,7 +437,7 @@ impl FlowSpanProducer {
 
                     while let Some(item) = flow_events.next() {
                         let _timer = metrics::registry::PROCESSING_DURATION_SECONDS
-                            .with_label_values(&[ProcessingStage::EbpfRingbufOutput.as_str()])
+                            .with_label_values(&[ProcessingStage::EbpfRingbufOut.as_str()])
                             .start_timer();
 
                         let flow_event: FlowEvent =

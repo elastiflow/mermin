@@ -103,7 +103,7 @@ pub trait TraceableExporter: Send + Sync {
 impl TraceableExporter for TraceExporterAdapter {
     async fn export(&self, traceable: TraceableRecord) {
         let _timer = metrics::registry::PROCESSING_DURATION_SECONDS
-            .with_label_values(&[ProcessingStage::DecoratorOutput.as_str()])
+            .with_label_values(&[ProcessingStage::K8sDecoratorOut.as_str()])
             .start_timer();
 
         let tracer = self.provider.tracer("mermin");
