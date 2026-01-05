@@ -284,12 +284,12 @@ lazy_static! {
 
     // Standard metrics (always registered)
     /// K8s watcher events counter.
-    /// Labels: resource, event = "apply" | "delete" | "init" | "init_done" | "error"
+    /// Labels: kind, event = "apply" | "delete" | "init" | "init_done" | "error"
     pub static ref K8S_WATCHER_EVENTS_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("events_total", "Total number of K8s resource watcher events (aggregated across resources)")
+        Opts::new("events_total", "Total number of K8s kind watcher events (aggregated across resources)")
             .namespace("mermin")
             .subsystem("k8s_watcher"),
-        &["resource", "event"]  // apply, delete, init, init_done, error
+        &["kind", "event"]  // apply, delete, init, init_done, error
     ).expect("failed to create k8s_watcher_events_total metric");
 
     /// Histogram of K8s IP index update duration.
