@@ -19,6 +19,7 @@ axum = "0.7"
 aya = { workspace = true, features = ["async_tokio"] }
 aya-log = { workspace = true }
 base64 = "0.21"
+bytesize = "1.3"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 clap = { workspace = true, features = ["derive", "env", "help", "suggestions", "usage"] }
 crossbeam = "0.8"
