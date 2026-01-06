@@ -40,7 +40,7 @@ Deploy GreptimeDB to serve as the persistence layer for the collected network te
 Deploy Mermin configured to output directly to the GreptimeDB service using HTTP headers required for signal parsing.
 
 * Create a `config.hcl` file with [contents](config.hcl), or use the one from the repo. Modify as desired, but retain the `otlp_http_headers` and `otlp_protocol` sections.
-  If you would like to run with TLS enabled, remove the `otlp_tls_insecure_skip_verify` section, and modify Mermin's `values.yaml` to include secure TLS configuration (caCert, clientCert, clientKey).
+  If you would like to run with TLS enabled, add TLS configurations (caCert, clientCert, clientKey) to `config.hcl`, and modify Mermin's `values.yaml` to include the certificate.
 
 * Build and load the Mermin image into the cluster:
 
