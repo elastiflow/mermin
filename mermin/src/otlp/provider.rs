@@ -41,7 +41,7 @@ use crate::{
     metrics::export::ExporterName,
     otlp::{
         MetricsSpanExporter, OtlpError,
-        opts::{OtlpExportOptions, StdoutExportOptions, defaults},
+        opts::{ExporterProtocol, OtlpExportOptions, StdoutExportOptions, TlsOptions, defaults},
     },
     runtime::{
         cli::Cli,
@@ -142,13 +142,6 @@ impl ServerCertVerifier for NoCertVerifier {
     }
 }
 
-#[derive(Clone)]
-struct TlsPlan {
-    insecure_skip_verify: bool,
-    // For https or explicit tls config
-    client_config: Option<ClientConfig>,
-}
-
 impl ProviderBuilder {
     pub fn new() -> Self {
         let builder = SdkTracerProvider::builder().with_resource(
@@ -162,335 +155,53 @@ impl ProviderBuilder {
         }
     }
 
-    // Checks for colliding headers names between auth and user headers, and combines them into a single map.
-    fn merge_headers(
-        mut user: HashMap<String, String>,
-        auth: HashMap<String, String>,
-    ) -> Result<HashMap<String, String>, OtlpError> {
-        let mut seen_lower =
-            std::collections::HashSet::<String>::with_capacity(user.len().saturating_mul(2));
-        for k in user.keys() {
-            seen_lower.insert(k.to_ascii_lowercase());
-        }
-        for k in auth.keys() {
-            let lower = k.to_ascii_lowercase();
-            if seen_lower.contains(&lower) {
-                return Err(OtlpError::ExporterConfiguration(format!(
-                    "header name collision between user headers and auth headers on '{k}'. \
-                     Collisions are not allowed (header names are case-insensitive)."
-                )));
-            }
-        }
-
-        user.extend(auth);
-        Ok(user)
+    pub fn build(self) -> SdkTracerProvider {
+        self.sdk_builder.build()
     }
 
-    fn effective_headers(
-        mut options: OtlpExportOptions,
-    ) -> Result<(OtlpExportOptions, Option<HashMap<String, String>>), OtlpError> {
-        let user_headers = options.headers.take().filter(|h| !h.is_empty());
-
-        let auth_headers: Option<HashMap<String, String>> = if let Some(auth_config) = &options.auth
-        {
-            let headers = auth_config.generate_auth_headers().map_err(|e| {
-                OtlpError::ExporterConfiguration(format!(
-                    "failed to generate authentication headers: {e}"
-                ))
-            })?;
-            (!headers.is_empty()).then_some(headers)
-        } else {
-            None
-        };
-
-        let headers = match (user_headers, auth_headers) {
-            (None, None) => None,
-            (Some(user), None) => Some(user),
-            (None, Some(auth)) => Some(auth),
-            (Some(user), Some(auth)) => Some(Self::merge_headers(user, auth)?),
-        };
-
-        Ok((options, headers))
-    }
-
-    fn headers_to_grpc_metadata(
-        headers: &HashMap<String, String>,
-    ) -> Result<MetadataMap, OtlpError> {
-        let mut header_map = HeaderMap::new();
-        for (key, value) in headers {
-            let header_name = HeaderName::from_str(key).map_err(|e| {
-                OtlpError::ExporterConfiguration(format!("Invalid header name '{key}': {e}"))
-            })?;
-            let header_value = HeaderValue::from_str(value).map_err(|e| {
-                OtlpError::ExporterConfiguration(format!(
-                    "Invalid header value for key '{key}': {e}"
-                ))
-            })?;
-            header_map.insert(header_name, header_value);
-        }
-        Ok(MetadataMap::from_headers(header_map))
-    }
-
-    fn plan_tls(
-        is_https: bool,
-        tls_opts: Option<&crate::otlp::opts::TlsOptions>,
-    ) -> Result<TlsPlan, OtlpError> {
-        if let Some(tls_opts) = tls_opts
-            && tls_opts.insecure_skip_verify.unwrap_or_default()
-            && (tls_opts.client_cert.is_some() || tls_opts.client_key.is_some())
-        {
-            return Err(OtlpError::TlsConfiguration(
-                "insecure_skip_verify mode cannot be combined with client certificates - \
-                 please either set insecure_skip_verify to false or remove client certificate configuration."
-                    .to_string(),
-            ));
-        }
-
-        if let Some(tls_opts) = tls_opts
-            && (tls_opts.client_cert.is_some() ^ tls_opts.client_key.is_some())
-        {
-            return Err(OtlpError::TlsConfiguration(
-                "both client_cert and client_key must be provided for mutual TLS".to_string(),
-            ));
-        }
-
-        let insecure_skip_verify = tls_opts
-            .and_then(|t| t.insecure_skip_verify)
-            .unwrap_or(false);
-
-        if !is_https && tls_opts.is_none() {
-            return Ok(TlsPlan {
-                insecure_skip_verify,
-                client_config: None,
-            });
-        }
-
-        let client_config = Self::build_client_config(is_https, insecure_skip_verify, tls_opts)?;
-
-        Ok(TlsPlan {
-            insecure_skip_verify,
-            client_config: Some(client_config),
-        })
-    }
-
-    fn build_client_from_tls_plan(tls_plan: &TlsPlan) -> Result<reqwest::Client, OtlpError> {
-        let Some(ref tls_config) = tls_plan.client_config else {
-            return reqwest::Client::builder().build().map_err(|e| {
-                OtlpError::ExporterConfiguration(format!("failed to build http client: {e}"))
-            });
-        };
-
-        reqwest::Client::builder()
-            .use_preconfigured_tls(tls_config.clone())
-            .build()
-            .map_err(|e| {
-                OtlpError::ExporterConfiguration(format!("failed to build http client: {e}"))
-            })
-    }
-
-    fn build_channel_from_tls_plan(uri: Uri, tls_plan: &TlsPlan) -> Result<Channel, OtlpError> {
-        let Some(ref tls_config) = tls_plan.client_config else {
-            debug!("using plain HTTP connection");
-            return Ok(Channel::builder(uri).connect_lazy());
-        };
-
-        let mut http = HttpConnector::new();
-        http.enforce_http(false);
-
-        let connector = HttpsConnectorBuilder::new()
-            .with_tls_config(tls_config.clone())
-            .https_or_http()
-            .enable_http2()
-            .wrap_connector(http);
-
-        Ok(Channel::builder(uri).connect_with_connector_lazy(connector))
-    }
-
-    fn build_client_config(
-        is_https: bool,
-        is_insecure: bool,
-        tls_opts: Option<&crate::otlp::opts::TlsOptions>,
-    ) -> Result<ClientConfig, OtlpError> {
-        if is_insecure {
-            return Ok(ClientConfig::builder_with_provider(Arc::new(
-                rustls::crypto::aws_lc_rs::default_provider(),
-            ))
-            .with_safe_default_protocol_versions()
-            .map_err(|e| {
-                OtlpError::TlsConfiguration(format!(
-                    "failed to configure TLS protocol versions: {e}"
-                ))
-            })?
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(NoCertVerifier))
-            .with_no_client_auth());
-        }
-
-        let mut root_store = RootCertStore::empty();
-
-        if is_https {
-            debug!("detected https:// endpoint, loading system root certificates");
-            let native_certs = rustls_native_certs::load_native_certs();
-
-            if let Some(err) = native_certs.errors.first() {
-                warn!("some system certificates failed to load: {}", err);
-            }
-
-            for cert in native_certs.certs {
-                root_store.add(cert).map_err(|e| {
-                    OtlpError::TlsConfiguration(format!("failed to add system certificate: {e}"))
-                })?;
-            }
-        }
-
-        if let Some(tls_opts) = tls_opts
-            && let Some(ca_cert_path) = &tls_opts.ca_cert
-        {
-            debug!("loading custom CA certificate from: {}", ca_cert_path);
-            let ca_certs = load_certs_from_pem(ca_cert_path)?;
-
-            if ca_certs.is_empty() {
-                return Err(OtlpError::TlsConfiguration(format!(
-                    "no valid certificates found in CA certificate file '{ca_cert_path}'",
-                )));
-            }
-
-            for cert in ca_certs {
-                root_store.add(cert).map_err(|e| {
-                    OtlpError::TlsConfiguration(format!(
-                        "failed to add CA certificate from '{ca_cert_path}': {e}",
-                    ))
-                })?;
-            }
-        }
-
-        if root_store.is_empty() {
-            return Err(OtlpError::TlsConfiguration(
-                "TLS configuration requires at least one trusted CA certificate. \
-                 Either use an https:// endpoint (for system roots) or provide a ca_cert"
-                    .to_string(),
-            ));
-        }
-
-        let config_builder = ClientConfig::builder_with_provider(Arc::new(
-            rustls::crypto::aws_lc_rs::default_provider(),
-        ))
-        .with_safe_default_protocol_versions()
-        .map_err(|e| {
-            OtlpError::TlsConfiguration(format!("failed to configure TLS protocol versions: {e}"))
-        })?
-        .with_root_certificates(root_store);
-
-        if let Some(tls_opts) = tls_opts
-            && let (Some(client_cert_path), Some(client_key_path)) =
-                (&tls_opts.client_cert, &tls_opts.client_key)
-        {
-            debug!(
-                "loading client certificate for mutual TLS from: {}",
-                client_cert_path
-            );
-
-            let client_certs = load_certs_from_pem(client_cert_path).map_err(|e| {
-                // Wrap the error to distinguish client cert from CA cert errors
-                let error_msg = e.to_string();
-                if error_msg.contains("failed to open certificate file") {
-                    OtlpError::TlsConfiguration(error_msg.replace(
-                        "failed to open certificate file",
-                        "failed to open client certificate file",
-                    ))
-                } else {
-                    e
-                }
-            })?;
-
-            if client_certs.is_empty() {
-                return Err(OtlpError::TlsConfiguration(format!(
-                    "no valid certificates found in client certificate file '{client_cert_path}'",
-                )));
-            }
-
-            let client_key = load_private_key_from_pem(client_key_path)?;
-
-            return config_builder
-                .with_client_auth_cert(client_certs, client_key)
-                .map_err(|e| {
-                    OtlpError::TlsConfiguration(format!(
-                        "failed to configure client certificate: {e}"
-                    ))
-                });
-        }
-
-        Ok(config_builder.with_no_client_auth())
-    }
-
+    /// Build OTLP exporter from options. It will prepare the headers, build the TLS configuration, and build the appropriate exporter based on the protocol.
     pub async fn with_otlp_exporter(self, options: OtlpExportOptions) -> Result<Self, OtlpError> {
         debug!(
             event.name = "exporter.otlp.started",
             "starting otlp exporter"
         );
 
-        let (options, headers) = Self::effective_headers(options)?;
+        // Prepare headers (merge user + auth headers)
+        let (options, headers) = Self::prepare_headers(options)?;
+
+        // Parse endpoint and determine TLS requirements
         let endpoint = options.endpoint.clone();
         let uri: Uri = endpoint.parse().map_err(|e| {
             OtlpError::invalid_endpoint(&endpoint, format!("failed to parse as uri: {e}"))
         })?;
         let is_https = uri.scheme_str() == Some("https");
+        let tls_config = Self::build_tls_config(is_https, options.tls.as_ref())?;
 
-        let tls_plan = Self::plan_tls(is_https, options.tls.as_ref())?;
-
-        if tls_plan.insecure_skip_verify {
+        if options
+            .tls
+            .as_ref()
+            .and_then(|t| t.insecure_skip_verify)
+            .unwrap_or(false)
+        {
             warn!("insecure skip verify mode enabled - not suitable for production");
         }
 
         let exporter = match options.protocol {
-            crate::otlp::opts::ExporterProtocol::Grpc => {
-                let channel = Self::build_channel_from_tls_plan(uri, &tls_plan)?;
-
-                let mut builder = opentelemetry_otlp::SpanExporter::builder()
-                    .with_tonic()
-                    .with_channel(channel)
-                    .with_protocol(Protocol::Grpc);
-
-                if let Some(ref headers) = headers {
-                    let metadata = Self::headers_to_grpc_metadata(headers)?;
-                    builder = builder.with_metadata(metadata);
-                }
-
-                builder.build().map_err(|e| {
-                    OtlpError::ExporterConfiguration(format!(
-                        "failed to build otlp gRPC exporter: {e}"
-                    ))
-                })?
+            ExporterProtocol::Grpc => {
+                Self::build_grpc_exporter(uri, tls_config.as_ref(), headers.as_ref())?
             }
-
-            crate::otlp::opts::ExporterProtocol::HttpBinary => {
-                let http_client = Self::build_client_from_tls_plan(&tls_plan)?;
-
-                let mut builder = opentelemetry_otlp::SpanExporter::builder()
-                    .with_http()
-                    .with_endpoint(endpoint)
-                    .with_protocol(Protocol::HttpBinary)
-                    .with_timeout(options.timeout)
-                    .with_http_client(http_client);
-
-                if let Some(ref headers) = headers {
-                    builder = builder.with_headers(headers.clone());
-                }
-
-                builder.build().map_err(|e| {
-                    OtlpError::ExporterConfiguration(format!(
-                        "failed to build otlp http_binary exporter: {e}"
-                    ))
-                })?
-            }
+            ExporterProtocol::HttpBinary => Self::build_http_exporter(
+                endpoint,
+                tls_config.as_ref(),
+                headers.as_ref(),
+                options.timeout,
+            )?,
         };
 
         debug!(
             event.name = "exporter.otlp.build_success",
             "otlp exporter built successfully"
         );
-
-        let wrapped_exporter = MetricsSpanExporter::new(exporter, ExporterName::Otlp);
 
         let batch_config = BatchConfigBuilder::default()
             .with_max_export_batch_size(options.max_batch_size)
@@ -505,9 +216,10 @@ impl ProviderBuilder {
             max_queue_size = options.max_queue_size,
             max_concurrent_exports = options.max_concurrent_exports,
             max_batch_size = options.max_batch_size,
-            "configuring batch span processor for high throughput"
+            "configured batch span processor for high throughput"
         );
 
+        let wrapped_exporter = MetricsSpanExporter::new(exporter, ExporterName::Otlp);
         let processor = BatchSpanProcessor::builder(wrapped_exporter, runtime::Tokio)
             .with_batch_config(batch_config)
             .build();
@@ -517,6 +229,7 @@ impl ProviderBuilder {
         })
     }
 
+    /// Build stdout exporter from batch configuration. It will wrap the exporter in a metrics exporter and configure the batch processor.
     pub fn with_stdout_exporter(
         self,
         max_batch_size: usize,
@@ -545,8 +258,312 @@ impl ProviderBuilder {
         }
     }
 
-    pub fn build(self) -> SdkTracerProvider {
-        self.sdk_builder.build()
+    // Build TLS configuration from TLS options.
+    fn build_tls_config(
+        is_https: bool,
+        tls_opts: Option<&TlsOptions>,
+    ) -> Result<Option<ClientConfig>, OtlpError> {
+        Self::validate_tls_options(tls_opts)?;
+
+        let is_insecure = tls_opts
+            .and_then(|t| t.insecure_skip_verify)
+            .unwrap_or(false);
+
+        // No TLS needed for plain HTTP without explicit TLS options
+        if !is_https && tls_opts.is_none() {
+            return Ok(None);
+        }
+
+        if is_insecure {
+            let config = ClientConfig::builder_with_provider(Arc::new(
+                rustls::crypto::aws_lc_rs::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()
+            .map_err(|e| {
+                OtlpError::TlsConfiguration(format!(
+                    "failed to configure tls protocol versions: {e}"
+                ))
+            })?
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(NoCertVerifier))
+            .with_no_client_auth();
+            return Ok(Some(config));
+        }
+
+        let root_store = Self::build_root_cert_store(is_https, tls_opts)?;
+
+        let config_builder = ClientConfig::builder_with_provider(Arc::new(
+            rustls::crypto::aws_lc_rs::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .map_err(|e| {
+            OtlpError::TlsConfiguration(format!("failed to configure tls protocol versions: {e}"))
+        })?
+        .with_root_certificates(root_store);
+
+        if let Some(tls_opts) = tls_opts
+            && let (Some(client_cert_path), Some(client_key_path)) =
+                (&tls_opts.client_cert, &tls_opts.client_key)
+        {
+            debug!(
+                "loading client certificate for mutual tls from: {}",
+                client_cert_path
+            );
+
+            let client_certs = load_certs_from_pem(client_cert_path).map_err(|e| {
+                let error_msg = e.to_string();
+                if error_msg.contains("failed to open certificate file") {
+                    OtlpError::TlsConfiguration(
+                        error_msg.replace("certificate file", "client certificate file"),
+                    )
+                } else {
+                    e
+                }
+            })?;
+
+            if client_certs.is_empty() {
+                return Err(OtlpError::TlsConfiguration(format!(
+                    "no valid certificates found in client certificate file '{client_cert_path}'",
+                )));
+            }
+
+            let client_key = load_private_key_from_pem(client_key_path)?;
+
+            let config = config_builder
+                .with_client_auth_cert(client_certs, client_key)
+                .map_err(|e| {
+                    OtlpError::TlsConfiguration(format!(
+                        "failed to configure client certificate: {e}"
+                    ))
+                })?;
+            return Ok(Some(config));
+        }
+
+        Ok(Some(config_builder.with_no_client_auth()))
+    }
+
+    // Build gRPC exporter from URI, TLS configuration, and headers.
+    fn build_grpc_exporter(
+        uri: Uri,
+        tls_config: Option<&ClientConfig>,
+        headers: Option<&HashMap<String, String>>,
+    ) -> Result<opentelemetry_otlp::SpanExporter, OtlpError> {
+        let channel = match tls_config {
+            None => {
+                debug!("using plain http connection");
+                Channel::builder(uri).connect_lazy()
+            }
+            Some(tls_config) => {
+                let mut http = HttpConnector::new();
+                http.enforce_http(false);
+
+                let connector = HttpsConnectorBuilder::new()
+                    .with_tls_config(tls_config.clone())
+                    .https_or_http()
+                    .enable_http2()
+                    .wrap_connector(http);
+
+                Channel::builder(uri).connect_with_connector_lazy(connector)
+            }
+        };
+
+        let mut builder = opentelemetry_otlp::SpanExporter::builder()
+            .with_tonic()
+            .with_channel(channel)
+            .with_protocol(Protocol::Grpc);
+
+        if let Some(headers) = headers {
+            let metadata = Self::headers_to_grpc_metadata(headers)?;
+            builder = builder.with_metadata(metadata);
+        }
+
+        builder.build().map_err(|e| {
+            OtlpError::ExporterConfiguration(format!("failed to build otlp grpc exporter: {e}"))
+        })
+    }
+
+    // Build HTTP exporter from endpoint, TLS configuration, headers, and timeout.
+    fn build_http_exporter(
+        endpoint: String,
+        tls_config: Option<&ClientConfig>,
+        headers: Option<&HashMap<String, String>>,
+        timeout: std::time::Duration,
+    ) -> Result<opentelemetry_otlp::SpanExporter, OtlpError> {
+        let http_client = match tls_config {
+            None => reqwest::Client::builder().build(),
+            Some(tls_config) => reqwest::Client::builder()
+                .use_preconfigured_tls(tls_config.clone())
+                .build(),
+        }
+        .map_err(|e| {
+            OtlpError::ExporterConfiguration(format!("failed to build http client: {e}"))
+        })?;
+
+        let mut builder = opentelemetry_otlp::SpanExporter::builder()
+            .with_http()
+            .with_endpoint(endpoint)
+            .with_protocol(Protocol::HttpBinary)
+            .with_timeout(timeout)
+            .with_http_client(http_client);
+
+        if let Some(headers) = headers {
+            builder = builder.with_headers(headers.clone());
+        }
+
+        builder.build().map_err(|e| {
+            OtlpError::ExporterConfiguration(format!(
+                "failed to build otlp http_binary exporter: {e}"
+            ))
+        })
+    }
+
+    // Build root certificate store from TLS options.
+    fn build_root_cert_store(
+        is_https: bool,
+        tls_opts: Option<&TlsOptions>,
+    ) -> Result<RootCertStore, OtlpError> {
+        let mut root_store = RootCertStore::empty();
+
+        if is_https {
+            debug!("detected https:// endpoint, loading system root certificates");
+            let native_certs = rustls_native_certs::load_native_certs();
+
+            if let Some(err) = native_certs.errors.first() {
+                warn!("some system certificates failed to load: {}", err);
+            }
+
+            for cert in native_certs.certs {
+                root_store.add(cert).map_err(|e| {
+                    OtlpError::TlsConfiguration(format!("failed to add system certificate: {e}"))
+                })?;
+            }
+        }
+
+        if let Some(tls_opts) = tls_opts
+            && let Some(ca_cert_path) = &tls_opts.ca_cert
+        {
+            debug!("loading custom ca certificate from: {}", ca_cert_path);
+            let ca_certs = load_certs_from_pem(ca_cert_path)?;
+
+            if ca_certs.is_empty() {
+                return Err(OtlpError::TlsConfiguration(format!(
+                    "no valid certificates found in ca certificate file '{ca_cert_path}'",
+                )));
+            }
+
+            for cert in ca_certs {
+                root_store.add(cert).map_err(|e| {
+                    OtlpError::TlsConfiguration(format!(
+                        "failed to add ca certificate from '{ca_cert_path}': {e}",
+                    ))
+                })?;
+            }
+        }
+
+        if root_store.is_empty() {
+            return Err(OtlpError::TlsConfiguration(
+                "tls configuration requires at least one trusted ca certificate, \
+                 either use an https:// endpoint (for system roots) or provide a ca_cert"
+                    .to_string(),
+            ));
+        }
+
+        Ok(root_store)
+    }
+
+    // Validate TLS options, returning an error if the options are invalid.
+    fn validate_tls_options(tls_opts: Option<&TlsOptions>) -> Result<(), OtlpError> {
+        let Some(tls_opts) = tls_opts else {
+            return Ok(());
+        };
+
+        if tls_opts.insecure_skip_verify.unwrap_or_default()
+            && (tls_opts.client_cert.is_some() || tls_opts.client_key.is_some())
+        {
+            return Err(OtlpError::TlsConfiguration(
+                "insecure_skip_verify mode cannot be combined with client certificates, \
+                 please either set insecure_skip_verify to false or remove client certificate configuration"
+                    .to_string(),
+            ));
+        }
+
+        if tls_opts.client_cert.is_some() ^ tls_opts.client_key.is_some() {
+            return Err(OtlpError::TlsConfiguration(
+                "both client_cert and client_key must be provided for mutual TLS".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    // Convert headers to gRPC metadata.
+    fn headers_to_grpc_metadata(
+        headers: &HashMap<String, String>,
+    ) -> Result<MetadataMap, OtlpError> {
+        let header_map = headers.iter().try_fold(
+            HeaderMap::new(),
+            |mut map, (key, value)| -> Result<HeaderMap, OtlpError> {
+                let header_name = HeaderName::from_str(key).map_err(|e| {
+                    OtlpError::ExporterConfiguration(format!("invalid header name '{key}': {e}"))
+                })?;
+                let header_value = HeaderValue::from_str(value).map_err(|e| {
+                    OtlpError::ExporterConfiguration(format!(
+                        "invalid header value for key '{key}': {e}"
+                    ))
+                })?;
+                map.insert(header_name, header_value);
+                Ok(map)
+            },
+        )?;
+
+        Ok(MetadataMap::from_headers(header_map))
+    }
+
+    // Prepare headers by merging user and auth headers, returning an error if there is a collision.
+    fn prepare_headers(
+        mut options: OtlpExportOptions,
+    ) -> Result<(OtlpExportOptions, Option<HashMap<String, String>>), OtlpError> {
+        let user_headers = options.headers.take().filter(|h| !h.is_empty());
+        let auth_headers = options
+            .auth
+            .as_ref()
+            .map(|auth_config| {
+                auth_config.generate_auth_headers().map_err(|e| {
+                    OtlpError::ExporterConfiguration(format!(
+                        "failed to generate authentication headers: {e}"
+                    ))
+                })
+            })
+            .transpose()?
+            .filter(|h| !h.is_empty());
+        let headers = match (user_headers, auth_headers) {
+            (Some(user), Some(auth)) => Some(Self::merge_headers(user, auth)?),
+            (user, auth) => user.or(auth),
+        };
+
+        Ok((options, headers))
+    }
+
+    // Merge user and auth headers, returning an error if there is a collision.
+    fn merge_headers(
+        mut user: HashMap<String, String>,
+        auth: HashMap<String, String>,
+    ) -> Result<HashMap<String, String>, OtlpError> {
+        let seen_lower: std::collections::HashSet<_> =
+            user.keys().map(|k| k.to_ascii_lowercase()).collect();
+
+        for k in auth.keys() {
+            let lower = k.to_ascii_lowercase();
+            if seen_lower.contains(&lower) {
+                return Err(OtlpError::ExporterConfiguration(format!(
+                    "header name collision between user headers and auth headers on '{k}', \
+                     collisions are not allowed (header names are case-insensitive)"
+                )));
+            }
+        }
+
+        user.extend(auth);
+        Ok(user)
     }
 }
 
@@ -560,7 +577,7 @@ pub async fn init_provider(
         warn!(
             event.name = "exporter.misconfigured",
             reason = "no_exporters_defined",
-            "no exporters configured; traces will not be exported"
+            "no exporters configured, traces will not be exported"
         );
         return Ok(provider.build());
     }
@@ -753,7 +770,7 @@ mod tests {
     fn default_opts() -> OtlpExportOptions {
         OtlpExportOptions {
             endpoint: "http://localhost:4317".to_string(),
-            protocol: crate::otlp::opts::ExporterProtocol::Grpc,
+            protocol: ExporterProtocol::Grpc,
             timeout: std::time::Duration::from_secs(10),
             max_batch_size: 512,
             max_batch_interval: std::time::Duration::from_secs(5),
@@ -850,7 +867,7 @@ rstuvwxyz
     async fn test_http_binary_endpoint_no_tls() {
         let mut options = default_opts();
         options.endpoint = "http://localhost:4318".to_string();
-        options.protocol = crate::otlp::opts::ExporterProtocol::HttpBinary;
+        options.protocol = ExporterProtocol::HttpBinary;
 
         let provider = ProviderBuilder::new();
         let result = provider.with_otlp_exporter(options).await;
@@ -864,7 +881,7 @@ rstuvwxyz
     async fn test_http_binary_https_auto_tls() {
         let mut options = default_opts();
         options.endpoint = "https://localhost:4318".to_string();
-        options.protocol = crate::otlp::opts::ExporterProtocol::HttpBinary;
+        options.protocol = ExporterProtocol::HttpBinary;
 
         let provider = ProviderBuilder::new();
         let result = provider.with_otlp_exporter(options).await;
@@ -882,7 +899,7 @@ rstuvwxyz
 
         let mut options = default_opts();
         options.endpoint = "https://localhost:4318".to_string();
-        options.protocol = crate::otlp::opts::ExporterProtocol::HttpBinary;
+        options.protocol = ExporterProtocol::HttpBinary;
         options.tls = Some(TlsOptions {
             insecure_skip_verify: Some(false),
             ca_cert: Some(cert_path),
@@ -918,7 +935,7 @@ rstuvwxyz
 
         let mut options = default_opts();
         options.endpoint = "https://localhost:4318".to_string();
-        options.protocol = crate::otlp::opts::ExporterProtocol::HttpBinary;
+        options.protocol = ExporterProtocol::HttpBinary;
         options.tls = Some(TlsOptions {
             insecure_skip_verify: Some(false),
             ca_cert: None,
@@ -947,7 +964,7 @@ rstuvwxyz
     async fn test_http_binary_insecure_skip_verify() {
         let mut options = default_opts();
         options.endpoint = "https://localhost:4318".to_string();
-        options.protocol = crate::otlp::opts::ExporterProtocol::HttpBinary;
+        options.protocol = ExporterProtocol::HttpBinary;
         options.tls = Some(TlsOptions {
             insecure_skip_verify: Some(true),
             ca_cert: None,
@@ -1195,17 +1212,17 @@ rstuvwxyz
     }
 
     #[test]
-    fn test_effective_headers_none_when_no_auth_and_no_user_headers() {
+    fn test_prepare_headers_none_when_no_auth_and_no_user_headers() {
         let opts = default_opts();
 
         let (_opts, headers) =
-            ProviderBuilder::effective_headers(opts).expect("effective_headers should succeed");
+            ProviderBuilder::prepare_headers(opts).expect("prepare_headers should succeed");
 
         assert!(headers.is_none());
     }
 
     #[test]
-    fn test_effective_headers_user_only() {
+    fn test_prepare_headers_user_only() {
         let mut opts = default_opts();
         let mut user = HashMap::new();
         user.insert("x-greptime-db-name".to_string(), "public".to_string());
@@ -1216,7 +1233,7 @@ rstuvwxyz
         opts.headers = Some(user);
 
         let (_opts, headers) =
-            ProviderBuilder::effective_headers(opts).expect("effective_headers should succeed");
+            ProviderBuilder::prepare_headers(opts).expect("prepare_headers should succeed");
 
         let headers = headers.expect("expected Some(headers)");
         assert_eq!(
@@ -1231,7 +1248,7 @@ rstuvwxyz
     }
 
     #[test]
-    fn test_effective_headers_auth_only() {
+    fn test_prepare_headers_auth_only() {
         let mut opts = default_opts();
         opts.auth = Some(AuthOptions {
             basic: None,
@@ -1239,7 +1256,7 @@ rstuvwxyz
         });
 
         let (_opts, headers) =
-            ProviderBuilder::effective_headers(opts).expect("effective_headers should succeed");
+            ProviderBuilder::prepare_headers(opts).expect("prepare_headers should succeed");
 
         let headers = headers.expect("expected Some(headers)");
         assert_eq!(
@@ -1249,7 +1266,7 @@ rstuvwxyz
     }
 
     #[test]
-    fn test_effective_headers_combined_when_both_present() {
+    fn test_prepare_headers_combined_when_both_present() {
         let mut opts = default_opts();
 
         let mut user = HashMap::new();
@@ -1262,7 +1279,7 @@ rstuvwxyz
         });
 
         let (_opts, headers) =
-            ProviderBuilder::effective_headers(opts).expect("effective_headers should succeed");
+            ProviderBuilder::prepare_headers(opts).expect("prepare_headers should succeed");
 
         let headers = headers.expect("expected Some(headers)");
         assert_eq!(
@@ -1276,7 +1293,7 @@ rstuvwxyz
     }
 
     #[test]
-    fn test_effective_headers_auth_only_when_user_headers_is_empty_map() {
+    fn test_prepare_headers_auth_only_when_user_headers_is_empty_map() {
         let mut opts = default_opts();
 
         opts.headers = Some(HashMap::new());
@@ -1286,7 +1303,7 @@ rstuvwxyz
         });
 
         let (_opts, headers) =
-            ProviderBuilder::effective_headers(opts).expect("effective_headers should succeed");
+            ProviderBuilder::prepare_headers(opts).expect("prepare_headers should succeed");
 
         let headers = headers.expect("expected Some(headers)");
         assert_eq!(
@@ -1296,7 +1313,7 @@ rstuvwxyz
     }
 
     #[test]
-    fn test_effective_headers_rejects_authorization_collision_case_insensitive() {
+    fn test_prepare_headers_rejects_authorization_collision_case_insensitive() {
         let mut opts = default_opts();
 
         let mut user = HashMap::new();
@@ -1308,8 +1325,8 @@ rstuvwxyz
             bearer: Some("TOKEN".to_string()),
         });
 
-        let err = ProviderBuilder::effective_headers(opts)
-            .expect_err("expected effective_headers to fail due to collision");
+        let err = ProviderBuilder::prepare_headers(opts)
+            .expect_err("expected prepare_headers to fail due to collision");
 
         let msg = err.to_string().to_ascii_lowercase();
         assert!(msg.contains("collision"), "unexpected error: {msg}");
