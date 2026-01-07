@@ -96,16 +96,13 @@ These metrics track events and performance of the Kubernetes resource watchers u
 
 - `mermin_k8s_watcher_events_total`
   *Type*: `counter`
-  *Description*: Total number of K8s resource watcher events (aggregated across resources)
+  *Description*: Total number of K8s kind watcher events (aggregated across resources)
   *Labels*:
   - `event`
-  - `resource`
+  - `kind`
 - `mermin_k8s_watcher_ip_index_update_duration_seconds`
   *Type*: `histogram`
   *Description*: Duration of K8s IP index updates
-- `mermin_k8s_watcher_ip_index_updates_total`
-  *Type*: `counter`
-  *Description*: Total number of K8s IP index updates
 
 ### Kubernetes Decorator Metrics (`mermin_k8s_decorator_*`)
 
@@ -131,7 +128,28 @@ These metrics track the export of flow spans from Mermin to external systems (su
 
 ### Channel Metrics (`mermin_channel_*`)
 
-These metrics offer insight into the internal pipeline stage duration.
+These metrics offer insight into the internal channels used for data transmission.
+
+- `mermin_channel_capacity`
+  *Type*: `gauge`
+  *Description*: Capacity of internal channels
+  *Labels*:
+  - `channel`
+- `mermin_channel_entries`
+  *Type*: `gauge`
+  *Description*: Current number of items in channels
+  *Labels*:
+  - `channel`
+- `mermin_channel_sends_total`
+  *Type*: `counter`
+  *Description*: Total number of send operations to internal channels
+  *Labels*:
+  - `channel`
+  - `status`
+
+### Pipeline Metrics (`mermin_pipeline_*`)
+
+These metrics offer insight into the internal pipelines used for data mutation (flow generation, decoration).
 
 - `mermin_pipeline_duration_seconds`
   *Type*: `histogram`
@@ -139,54 +157,8 @@ These metrics offer insight into the internal pipeline stage duration.
   *Labels*:
   - `stage`
 
-### Channel Metrics (`mermin_pipeline_*`)
+### TaskManager Metrics (`mermin_taskmanager_*`)
 
-These metrics offer insight into the internal channels used for data transmission.
-
-- `mermin_channel_channel_capacity`
-  *Type*: `gauge`
-  *Description*: Capacity of internal channels
-  *Labels*:
-  - `channel`
-- `mermin_channel_channel_entries`
-  *Type*: `gauge`
-  *Description*: Current number of items in channels
-  *Labels*:
-  - `channel`
-- `mermin_channel_channel_sends_total`
-  *Type*: `counter`
-  *Description*: Total number of send operations to internal channels
-  *Labels*:
-  - `channel`
-  - `status`
-
-### Channel Metrics (`mermin_taskmanager_*`)
-
-- `mermin_channel_channel_capacity`
-  *Type*: `gauge`
-  *Description*: Capacity of internal channels
-  *Labels*:
-  - `channel`
-- `mermin_channel_channel_entries`
-  *Type*: `gauge`
-  *Description*: Current number of items in channels
-  *Labels*:
-  - `channel`
-- `mermin_channel_channel_sends_total`
-  *Type*: `counter`
-  *Description*: Total number of send operations to internal channels
-  *Labels*:
-  - `channel`
-  - `status`
-
-### Task Manager Metrics (`mermin_taskmanager_*`)
-
-- `mermin_taskmanager_shutdown_duration_seconds`
-  *Type*: `histogram`
-  *Description*: Duration of shutdown operations
-- `mermin_taskmanager_shutdown_timeouts_total`
-  *Type*: `counter`
-  *Description*: Total number of shutdown operations that timed out
 - `mermin_taskmanager_tasks_active`
   *Type*: `gauge`
   *Description*: Current number of active tasks across all task types
