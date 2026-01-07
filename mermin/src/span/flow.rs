@@ -178,10 +178,7 @@ pub struct SpanAttributes {
     pub flow_reverse_packets_total: i64,
 
     // Performance Metrics
-    pub flow_tcp_handshake_snd_latency: Option<i64>,
-    pub flow_tcp_handshake_snd_jitter: Option<i64>,
-    pub flow_tcp_handshake_cnd_latency: Option<i64>,
-    pub flow_tcp_handshake_cnd_jitter: Option<i64>,
+    pub flow_tcp_handshake_latency: Option<i64>,
     pub flow_tcp_svc_latency: Option<i64>,
     pub flow_tcp_svc_jitter: Option<i64>,
     pub flow_tcp_rndtrip_latency: Option<i64>,
@@ -336,10 +333,7 @@ impl Default for SpanAttributes {
             flow_reverse_bytes_total: 0,
             flow_reverse_packets_delta: 0,
             flow_reverse_packets_total: 0,
-            flow_tcp_handshake_snd_latency: None,
-            flow_tcp_handshake_snd_jitter: None,
-            flow_tcp_handshake_cnd_latency: None,
-            flow_tcp_handshake_cnd_jitter: None,
+            flow_tcp_handshake_latency: None,
             flow_tcp_svc_latency: None,
             flow_tcp_svc_jitter: None,
             flow_tcp_rndtrip_latency: None,
@@ -642,17 +636,8 @@ impl Traceable for FlowSpan {
         if let Some(value) = self.attributes.flow_ipsec_receiver_index {
             kvs.push(KeyValue::new("flow.ipsec.receiver.index", value as i64));
         }
-        if let Some(value) = self.attributes.flow_tcp_handshake_snd_latency {
-            kvs.push(KeyValue::new("flow.tcp.handshake.snd.latency", value));
-        }
-        if let Some(value) = self.attributes.flow_tcp_handshake_snd_jitter {
-            kvs.push(KeyValue::new("flow.tcp.handshake.snd.jitter", value));
-        }
-        if let Some(value) = self.attributes.flow_tcp_handshake_cnd_latency {
-            kvs.push(KeyValue::new("flow.tcp.handshake.cnd.latency", value));
-        }
-        if let Some(value) = self.attributes.flow_tcp_handshake_cnd_jitter {
-            kvs.push(KeyValue::new("flow.tcp.handshake.cnd.jitter", value));
+        if let Some(value) = self.attributes.flow_tcp_handshake_latency {
+            kvs.push(KeyValue::new("flow.tcp.handshake.latency", value));
         }
         if let Some(value) = self.attributes.flow_tcp_svc_latency {
             kvs.push(KeyValue::new("flow.tcp.svc.latency", value));

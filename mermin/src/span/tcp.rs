@@ -82,6 +82,23 @@ impl TcpFlags {
         Self::active_flags_from_array(&Self::bits_to_array(bits))
     }
 
+    /// Calculate latency between SYN and SYN+ACK packets
+    pub fn handshake_latency_from_stats(syn_ns: u64, syn_ack_ns: u64) -> i64 {
+        if syn_ns == 0 || syn_ack_ns == 0 || syn_ack_ns <= syn_ns {
+            return 0;
+        }
+
+        syn_ack_ns.saturating_sub(syn_ns) as i64
+    }
+
+    /// Calculate latency from duration sum (ns) and transaction counts
+    pub fn transaction_latency_from_stats(sum: u64, count: u32) -> i64 {
+        if count == 0 {
+            return 0;
+        }
+        (sum / count as u64) as i64
+    }
+
     /// Convert u8 bit flags to a boolean array
     fn bits_to_array(bits: u8) -> [bool; 8] {
         [
@@ -144,6 +161,13 @@ mod tests {
                 bytes: 0,
                 reverse_packets: 0,
                 reverse_bytes: 0,
+                tcp_syn_ns: 0,
+                tcp_syn_ack_ns: 0,
+                tcp_last_payload_fwd_ns: 0,
+                tcp_last_payload_rev_ns: 0,
+                tcp_txn_sum_ns: 0,
+                tcp_txn_count: 0,
+                tcp_jitter_avg_ns: 0,
                 src_mac: [0; 6],
                 ifindex: 0,
                 ip_flow_label: 0,
@@ -268,6 +292,13 @@ mod tests {
             bytes: 0,
             reverse_packets: 0,
             reverse_bytes: 0,
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
+            tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
             src_mac: [0; 6],
             ifindex: 0,
             ip_flow_label: 0,
@@ -294,5 +325,19 @@ mod tests {
         let from_packet = TcpFlags::from_stats(&stats).active_flags();
         let from_bits = TcpFlags::flags_from_bits(0x12);
         assert_eq!(from_packet, from_bits);
+    }
+
+    #[test]
+    fn test_handshake_latency_from_stats() {
+        assert_eq!(
+            TcpFlags::handshake_latency_from_stats(1 as u64, 2 as u64),
+            1
+        );
+    }
+
+    #[test]
+    fn test_transaction_latency_from_stats() {
+        assert_eq!(TcpFlags::transaction_latency_from_stats(8u64, 4u32), 2);
+        assert_eq!(TcpFlags::transaction_latency_from_stats(16u64, 0u32), 0);
     }
 }

@@ -159,8 +159,8 @@ unsafe impl aya::Pod for FlowKey {}
 /// Flow statistics maintained in eBPF maps, aggregated per normalized FlowKey.
 /// Tracks bidirectional counters, timestamps, and metadata.
 /// Only contains data that eBPF can parse (3-layer: Eth + IP + L4).
-/// Memory layout: 128 bytes actual (121 bytes data + 7 bytes padding for 8-byte alignment)
-/// Breakdown: 48 (u64) + 32 (IP arrays) + 6 (MAC) + 12 (u32) + 6 (u16) + 17 (u8) = 121 bytes unpadded
+/// Memory layout: 184 bytes actual (177 bytes data + 7 bytes padding for 8-byte alignment)
+/// Breakdown: 104 (u64) + 32 (IP arrays) + 6 (MAC) + 12 (u32) + 6 (u16) + 17 (u8) = 177 bytes unpadded
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct FlowStats {
@@ -177,6 +177,20 @@ pub struct FlowStats {
     pub reverse_packets: u64,
     /// Byte count in reverse direction
     pub reverse_bytes: u64,
+    /// Timestamp when SYN was seen (nanoseconds since boot)
+    pub tcp_syn_ns: u64,
+    /// Timestamp when SYN/ACK was seen (nanoseconds since boot)
+    pub tcp_syn_ack_ns: u64,
+    /// Timestamp when last payload packet was seen in forward direction (nanoseconds since boot)
+    pub tcp_last_payload_fwd_ns: u64,
+    /// Timestamp when last payload packet was seen in reverse direction (nanoseconds since boot)
+    pub tcp_last_payload_rev_ns: u64,
+    /// Running sum of the data transmission durations for latency calculation (nanoseconds)
+    pub tcp_txn_sum_ns: u64,
+    /// Running count of the number of transactions included in tcp_txn_sum_ns
+    pub tcp_txn_count: u32,
+    /// Running average of the jitter observed between packets (nanoseconds)
+    pub tcp_jitter_avg_ns: u32,
 
     // === 16-byte arrays - 32 bytes ===
     /// Original source IP
@@ -289,9 +303,10 @@ impl FlowStats {
     /// #     protocol: IpProto::Tcp, ip_dscp: 0, ip_ecn: 0, ip_ttl: 0,
     /// #     reverse_ip_dscp: 0, reverse_ip_ecn: 0, reverse_ip_ttl: 0,
     /// #     tcp_flags: FlowStats::TCP_FLAG_SYN | FlowStats::TCP_FLAG_ACK,
-    /// #     tcp_state: ConnectionState::Closed,
-    /// #     forward_tcp_flags: 0, reverse_tcp_flags: 0,
-    /// #     icmp_type: 0, icmp_code: 0, reverse_icmp_type: 0, reverse_icmp_code: 0,
+    /// #     tcp_jitter_avg_ns: 0, tcp_last_payload_fwd_ns: 0, tcp_last_payload_rev_ns: 0,
+    /// #     tcp_syn_ns: 0, tcp_syn_ack_ns: 0, tcp_txn_count: 0, tcp_txn_sum_ns: 0,
+    /// #     forward_tcp_flags: 0, reverse_tcp_flags: 0, icmp_type: 0, icmp_code: 0,
+    /// #     reverse_icmp_type: 0, reverse_icmp_code: 0, tcp_state: ConnectionState::Closed,
     /// #     forward_metadata_seen: 0, reverse_metadata_seen: 0,
     /// };
     ///
@@ -564,6 +579,13 @@ mod tests {
             bytes: 0,
             reverse_packets: 0,
             reverse_bytes: 0,
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
+            tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
             src_ip: [0; 16],
             dst_ip: [0; 16],
             src_mac: [0; 6],
@@ -912,13 +934,13 @@ mod tests {
     /// 2. Alignment is consistent
     #[test]
     fn test_flow_stats_memory_layout() {
-        // Verify optimized memory layout (128 bytes)
-        // 48 (u64) + 32 (IP arrays) + 6 (MAC) + 2 (padding) + 12 (u32) + 6 (u16) + 14 (u8) = 120 bytes
-        // Compiler adds padding to align to 8 bytes = 128 bytes
+        // Verify optimized memory layout (176 bytes)
+        // 88 (u64) + 32 (IP arrays) + 6 (MAC) + 2 (padding) + 20 (u32) + 6 (u16) + 17 (u8) = 171 bytes
+        // Compiler adds 5 bytes of trailing padding to align to 8-byte boundary = 176 bytes
         assert_eq!(
             size_of::<FlowStats>(),
-            128,
-            "FlowStats size MUST be 128 bytes for eBPF/userspace compatibility"
+            176,
+            "FlowStats size MUST be 176 bytes for eBPF/userspace compatibility"
         );
 
         // Verify alignment (critical for correct memory access in eBPF)

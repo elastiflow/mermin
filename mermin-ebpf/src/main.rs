@@ -249,6 +249,53 @@ fn run_flow_stats(ctx: &TcContext, direction: Direction) -> i32 {
     }
 }
 
+/// Helper for calculating/applying tcp timing stats
+#[inline(always)]
+fn update_tcp_timing(stats: &mut FlowStats, is_forward: bool, has_payload: bool, timestamp: u64) {
+    if stats.syn() && !stats.ack() {
+        stats.tcp_syn_ns = timestamp;
+    }
+
+    if stats.syn() && stats.ack() {
+        stats.tcp_syn_ack_ns = timestamp;
+    }
+
+    if !has_payload {
+        return;
+    }
+
+    if is_forward {
+        stats.tcp_last_payload_fwd_ns = timestamp;
+        return;
+    }
+
+    stats.tcp_last_payload_rev_ns = timestamp;
+
+    // Only calculate latency if we've seen a corresponding request packet
+    let last_request_ts = stats.tcp_last_payload_fwd_ns;
+    if last_request_ts == 0 {
+        return; // No request seen yet; cannot calculate RTT
+    }
+
+    let delta = timestamp.saturating_sub(last_request_ts);
+    stats.tcp_txn_sum_ns += delta;
+    stats.tcp_txn_count += 1;
+
+    stats.tcp_last_payload_fwd_ns = 0;
+
+    // Calculate the moving average of the jitter following RFC 1889/3550
+    // Formula: J = J + (|D| - J) / 16
+    let current_sample = delta as u32;
+
+    if current_sample > stats.tcp_jitter_avg_ns {
+        let diff = current_sample - stats.tcp_jitter_avg_ns;
+        stats.tcp_jitter_avg_ns += diff / 16;
+    } else {
+        let diff = stats.tcp_jitter_avg_ns - current_sample;
+        stats.tcp_jitter_avg_ns -= diff / 16;
+    }
+}
+
 #[cfg(not(feature = "test"))]
 #[inline(always)]
 fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
@@ -395,11 +442,20 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             let new_state = determine_tcp_state(stats.tcp_state, current_flags, direction);
             stats.tcp_state = new_state;
 
+            let data_offset: tcp::OffRes = ctx
+                .load(l4_offset + tcp::TCP_OFF_RES_OFFSET)
+                .map_err(|_| Error::OutOfBounds)?;
+            let tcp_hdr_len = tcp::hdr_len(data_offset);
+            let tcp_payload_offset = (l4_offset + tcp_hdr_len) as u32;
+
             if is_forward && stats.forward_tcp_flags == 0 {
                 stats.forward_tcp_flags = current_flags;
             } else if !is_forward && stats.reverse_tcp_flags == 0 {
                 stats.reverse_tcp_flags = current_flags;
             }
+
+            let has_payload = ctx.len() > tcp_payload_offset;
+            update_tcp_timing(stats, is_forward, has_payload, timestamp);
         }
     }
 
@@ -1062,6 +1118,13 @@ mod tests {
             bytes: 0,
             reverse_packets: 0,
             reverse_bytes: 0,
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
+            tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
             src_mac: [0; 6],
             ip_dscp: 0,
             ip_ecn: 0,
@@ -1568,6 +1631,73 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), Error::UnsupportedProtocol);
+    }
+
+    #[test]
+    fn test_tcp_timing_logic() {
+        let mut stats = create_test_flow_stats(EtherType::Ipv4, IpProto::Tcp);
+
+        stats.tcp_flags = FlowStats::TCP_FLAG_SYN;
+        update_tcp_timing(&mut stats, true, false, 1_000);
+        assert_eq!(stats.tcp_syn_ns, 1_000);
+        assert_eq!(stats.tcp_syn_ack_ns, 0);
+
+        // Once ACK is also present, SYN timestamp should NOT be overwritten, but SYN/ACK should be set.
+        stats.tcp_flags |= FlowStats::TCP_FLAG_ACK;
+        update_tcp_timing(&mut stats, false, false, 1_200);
+        assert_eq!(stats.tcp_syn_ns, 1_000);
+        assert_eq!(stats.tcp_syn_ack_ns, 1_200);
+
+        // --------------------------------------------------------------------
+        // Payload timing:
+        // - forward payload sets tcp_last_payload_fwd_ns
+        // - reverse payload sets tcp_last_payload_rev_ns
+        // - if there was a forward payload timestamp, reverse computes delta, updates sum/count,
+        //   resets tcp_last_payload_fwd_ns to 0, and updates jitter avg.
+        // --------------------------------------------------------------------
+
+        update_tcp_timing(&mut stats, true, true, 2_000);
+        assert_eq!(stats.tcp_last_payload_fwd_ns, 2_000);
+        assert_eq!(stats.tcp_last_payload_rev_ns, 0);
+        assert_eq!(stats.tcp_txn_sum_ns, 0);
+        assert_eq!(stats.tcp_txn_count, 0);
+        assert_eq!(stats.tcp_jitter_avg_ns, 0);
+
+        // Reverse payload closes the "transaction": delta=100, sum+=100, count+=1, fwd_ts reset to 0.
+        update_tcp_timing(&mut stats, false, true, 2_100);
+        assert_eq!(stats.tcp_last_payload_rev_ns, 2_100);
+        assert_eq!(stats.tcp_txn_sum_ns, 100);
+        assert_eq!(stats.tcp_txn_count, 1);
+        assert_eq!(stats.tcp_last_payload_fwd_ns, 0);
+        assert_eq!(stats.tcp_jitter_avg_ns, 6);
+
+        // Another forward payload starts a new pair.
+        update_tcp_timing(&mut stats, true, true, 3_000);
+        assert_eq!(stats.tcp_last_payload_fwd_ns, 3_000);
+
+        // Reverse payload delta=116 -> sum=216, count=2, jitter: J=6 + |116-6|/16 = 6 + 110/16 = 12
+        update_tcp_timing(&mut stats, false, true, 3_116);
+        assert_eq!(stats.tcp_txn_sum_ns, 216);
+        assert_eq!(stats.tcp_txn_count, 2);
+        assert_eq!(stats.tcp_last_payload_fwd_ns, 0);
+        assert_eq!(stats.tcp_jitter_avg_ns, 12);
+
+        // - payload_len == 0 should not touch payload timestamps / txn counters
+        // - saturating_sub: if reverse timestamp < forward timestamp, delta becomes 0
+        let snap_sum = stats.tcp_txn_sum_ns;
+        let snap_cnt = stats.tcp_txn_count;
+        let snap_jit = stats.tcp_jitter_avg_ns;
+        let snap_fwd = stats.tcp_last_payload_fwd_ns;
+        let snap_rev = stats.tcp_last_payload_rev_ns;
+
+        update_tcp_timing(&mut stats, true, false, 9_999);
+        update_tcp_timing(&mut stats, false, false, 9_999);
+
+        assert_eq!(stats.tcp_txn_sum_ns, snap_sum);
+        assert_eq!(stats.tcp_txn_count, snap_cnt);
+        assert_eq!(stats.tcp_jitter_avg_ns, snap_jit);
+        assert_eq!(stats.tcp_last_payload_fwd_ns, snap_fwd);
+        assert_eq!(stats.tcp_last_payload_rev_ns, snap_rev);
     }
 
     #[test]

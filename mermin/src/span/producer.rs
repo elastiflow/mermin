@@ -15,6 +15,7 @@ use network_types::{
     ip::{IpDscp, IpEcn, IpProto},
     tcp::{TCP_FLAG_FIN, TCP_FLAG_RST},
 };
+use opentelemetry::trace::SpanKind;
 use pnet::datalink::MacAddr;
 use tokio::{
     io::unix::AsyncFd,
@@ -988,6 +989,8 @@ impl FlowWorker {
             } else {
                 (None, None, None, None)
             };
+        let is_server = span_kind == SpanKind::Server;
+        let is_client = span_kind == SpanKind::Client;
 
         let span = FlowSpan {
             trace_id: Some(self.trace_id_cache.get_or_create(community_id)),
@@ -1055,6 +1058,33 @@ impl FlowWorker {
                 flow_reverse_tcp_flags_bits: is_tcp.then_some(stats.reverse_tcp_flags),
                 flow_reverse_tcp_flags_tags: is_tcp
                     .then(|| TcpFlags::flags_from_bits(stats.reverse_tcp_flags)),
+                flow_tcp_handshake_latency: (is_tcp
+                    && stats.tcp_syn_ns != 0
+                    && stats.tcp_syn_ack_ns != 0)
+                    .then(|| {
+                        TcpFlags::handshake_latency_from_stats(
+                            stats.tcp_syn_ns,
+                            stats.tcp_syn_ack_ns,
+                        )
+                    }),
+                flow_tcp_svc_latency: (is_tcp && is_server && stats.tcp_txn_count > 0).then(|| {
+                    TcpFlags::transaction_latency_from_stats(
+                        stats.tcp_txn_sum_ns,
+                        stats.tcp_txn_count,
+                    )
+                }),
+                flow_tcp_svc_jitter: (is_tcp && is_server && stats.tcp_txn_count > 0)
+                    .then_some(stats.tcp_jitter_avg_ns as i64),
+                flow_tcp_rndtrip_latency: (is_tcp && is_client && stats.tcp_txn_count > 0).then(
+                    || {
+                        TcpFlags::transaction_latency_from_stats(
+                            stats.tcp_txn_sum_ns,
+                            stats.tcp_txn_count,
+                        )
+                    },
+                ),
+                flow_tcp_rndtrip_jitter: (is_tcp && is_client && stats.tcp_txn_count > 0)
+                    .then_some(stats.tcp_jitter_avg_ns as i64),
 
                 // Client/Server attributes (from direction inference)
                 client_address,
@@ -1819,6 +1849,37 @@ async fn record_flow(
             .inc();
     }
 
+    let is_tcp = stats.protocol == IpProto::Tcp;
+    let is_server = flow_span.span_kind == SpanKind::Server;
+    let is_client = flow_span.span_kind == SpanKind::Client;
+
+    if is_tcp {
+        if flow_span.attributes.flow_tcp_handshake_latency.is_none()
+            && stats.tcp_syn_ns != 0
+            && stats.tcp_syn_ack_ns != 0
+        {
+            flow_span.attributes.flow_tcp_handshake_latency = Some(
+                TcpFlags::handshake_latency_from_stats(stats.tcp_syn_ns, stats.tcp_syn_ack_ns),
+            );
+        }
+
+        if stats.tcp_txn_count > 0 {
+            let current_latency = Some(TcpFlags::transaction_latency_from_stats(
+                stats.tcp_txn_sum_ns,
+                stats.tcp_txn_count,
+            ));
+            let current_jitter = Some(stats.tcp_jitter_avg_ns as i64);
+
+            if is_server {
+                flow_span.attributes.flow_tcp_svc_latency = current_latency;
+                flow_span.attributes.flow_tcp_svc_jitter = current_jitter;
+            } else if is_client {
+                flow_span.attributes.flow_tcp_rndtrip_latency = current_latency;
+                flow_span.attributes.flow_tcp_rndtrip_jitter = current_jitter;
+            }
+        }
+    }
+
     // Update IP metadata from eBPF stats
     let is_ip_flow = stats.ether_type == EtherType::Ipv4 || stats.ether_type == EtherType::Ipv6;
     let is_ipv6 = stats.ether_type == EtherType::Ipv6;
@@ -2419,6 +2480,13 @@ mod tests {
             bytes: 100,
             reverse_packets: 0,
             reverse_bytes: 0,
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
+            tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
             src_mac: [0; 6],
             ifindex: 1,
             ip_flow_label: 0,
@@ -2595,6 +2663,94 @@ mod tests {
 
         // Prevent drop to avoid IO Safety violation from zeroed eBPF map
         std::mem::forget(worker);
+    }
+
+    #[test]
+    fn test_tcp_perf_logic_client_sets_handshake_and_rndtrip_only() {
+        let mut stats = create_test_stats(IpProto::Tcp, 0x10);
+        stats.tcp_syn_ns = 10;
+        stats.tcp_syn_ack_ns = 15;
+        stats.tcp_txn_sum_ns = 9;
+        stats.tcp_txn_count = 3;
+        stats.tcp_jitter_avg_ns = 99;
+
+        let is_tcp = stats.protocol == IpProto::Tcp;
+        let is_server = false;
+        let is_client = true;
+
+        let flow_tcp_handshake_latency =
+            (is_tcp && stats.tcp_syn_ns != 0 && stats.tcp_syn_ack_ns != 0).then(|| {
+                TcpFlags::handshake_latency_from_stats(stats.tcp_syn_ns, stats.tcp_syn_ack_ns)
+            });
+        let flow_tcp_svc_latency = (is_tcp && is_server && stats.tcp_txn_count > 0).then(|| {
+            TcpFlags::transaction_latency_from_stats(stats.tcp_txn_sum_ns, stats.tcp_txn_count)
+        });
+        let flow_tcp_rndtrip_latency =
+            (is_tcp && is_client && stats.tcp_txn_count > 0).then(|| {
+                TcpFlags::transaction_latency_from_stats(stats.tcp_txn_sum_ns, stats.tcp_txn_count)
+            });
+        let flow_tcp_rndtrip_jitter = (is_tcp && is_client && stats.tcp_txn_count > 0)
+            .then_some(stats.tcp_jitter_avg_ns as i64);
+
+        assert_eq!(flow_tcp_handshake_latency, Some(5));
+        assert_eq!(flow_tcp_svc_latency, None);
+        assert_eq!(flow_tcp_rndtrip_latency, Some(3));
+        assert_eq!(flow_tcp_rndtrip_jitter, Some(99));
+    }
+
+    #[test]
+    fn test_tcp_perf_logic_internal_sets_handshake_only() {
+        let mut stats = create_test_stats(IpProto::Tcp, 0x10);
+        stats.tcp_syn_ns = 7;
+        stats.tcp_syn_ack_ns = 9;
+        stats.tcp_txn_sum_ns = 100;
+        stats.tcp_txn_count = 10;
+        stats.tcp_jitter_avg_ns = 500;
+
+        let is_tcp = stats.protocol == IpProto::Tcp;
+        let is_server = false;
+        let is_client = false;
+
+        let flow_tcp_handshake_latency =
+            (is_tcp && stats.tcp_syn_ns != 0 && stats.tcp_syn_ack_ns != 0).then(|| {
+                TcpFlags::handshake_latency_from_stats(stats.tcp_syn_ns, stats.tcp_syn_ack_ns)
+            });
+        let flow_tcp_svc_latency = (is_tcp && is_server && stats.tcp_txn_count > 0).then(|| {
+            TcpFlags::transaction_latency_from_stats(stats.tcp_txn_sum_ns, stats.tcp_txn_count)
+        });
+        let flow_tcp_rndtrip_latency =
+            (is_tcp && is_client && stats.tcp_txn_count > 0).then(|| {
+                TcpFlags::transaction_latency_from_stats(stats.tcp_txn_sum_ns, stats.tcp_txn_count)
+            });
+
+        assert_eq!(flow_tcp_handshake_latency, Some(2));
+        assert_eq!(flow_tcp_svc_latency, None);
+        assert_eq!(flow_tcp_rndtrip_latency, None);
+    }
+
+    #[test]
+    fn test_tcp_perf_logic_txn_count_zero_returns_none_not_zero() {
+        let mut stats = create_test_stats(IpProto::Tcp, 0x10);
+        stats.tcp_syn_ns = 1;
+        stats.tcp_syn_ack_ns = 2;
+        stats.tcp_txn_sum_ns = 16;
+        stats.tcp_txn_count = 0; // Late start case: no payload transactions captured
+        stats.tcp_jitter_avg_ns = 1;
+
+        let is_tcp = stats.protocol == IpProto::Tcp;
+        let is_server = true;
+        let is_client = true;
+
+        let flow_tcp_svc_latency = (is_tcp && is_server && stats.tcp_txn_count > 0).then(|| {
+            TcpFlags::transaction_latency_from_stats(stats.tcp_txn_sum_ns, stats.tcp_txn_count)
+        });
+        let flow_tcp_rndtrip_latency =
+            (is_tcp && is_client && stats.tcp_txn_count > 0).then(|| {
+                TcpFlags::transaction_latency_from_stats(stats.tcp_txn_sum_ns, stats.tcp_txn_count)
+            });
+
+        assert_eq!(flow_tcp_svc_latency, None);
+        assert_eq!(flow_tcp_rndtrip_latency, None);
     }
 
     // NOTE: Most integration tests removed - the architecture has changed to an event-driven model
