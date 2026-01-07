@@ -156,6 +156,7 @@ impl std::str::FromStr for StdoutFmt {
 /// - `protocol`: The OTLP protocol to use (grpc or http_binary)
 /// - `timeout`: Request timeout duration
 /// - `auth`: Optional authentication configuration (e.g., basic auth)
+/// - `headers`: Optional additional headers to be sent with each request
 /// - `tls`: Optional TLS configuration for secure communication
 /// - `max_batch_size`: Maximum number of spans to batch before export (default: 512)
 /// - `max_batch_interval`: Maximum time to wait before exporting a batch (default: 5s)
@@ -181,6 +182,8 @@ pub struct OtlpExportOptions {
     #[serde(default = "defaults::max_export_timeout", with = "duration")]
     pub max_export_timeout: Duration,
     pub auth: Option<AuthOptions>,
+    #[serde(default)]
+    pub headers: Option<HashMap<String, String>>,
     pub tls: Option<TlsOptions>,
 }
 

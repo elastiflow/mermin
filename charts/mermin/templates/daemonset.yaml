@@ -117,6 +117,9 @@ spec:
               mountPath: /etc/mermin
               readOnly: true
             {{- end }}
+            {{- if .Values.extraVolumeMounts }}
+              {{- toYaml .Values.extraVolumeMounts | nindent 12 }}
+            {{- end }}
       volumes:
         - name: bpf-fs
           hostPath:
@@ -126,4 +129,7 @@ spec:
         - name: mermin-config
           configMap:
             name: {{ include "mermin.fullname" . }}-config
+        {{- end }}
+        {{- if .Values.extraVolumes }}
+          {{- toYaml .Values.extraVolumes | nindent 8 }}
         {{- end }}

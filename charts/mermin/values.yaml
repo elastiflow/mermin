@@ -140,6 +140,20 @@ config:
   # content: |
   #   log_level = "info"
 
+# Additional volumes for Pods
+extraVolumes: []
+  # Example:
+  # - name: otel-ca-cert
+  #   secret:
+  #     name: otel-ca-cert
+
+# Additional volume mounts for Pods
+extraVolumeMounts: []
+  # Example:
+  # - name: otel-ca-cert
+  #   mountPath: /etc/custom-certs
+  #   readOnly: true
+
 # -- Array of extra K8s manifests to deploy (supports templating)
 extraObjects: []
   # As a YAML object
