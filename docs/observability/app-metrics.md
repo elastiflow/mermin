@@ -106,6 +106,8 @@ These metrics track events and performance of the Kubernetes resource watchers u
 
 ### Kubernetes Decorator Metrics (`mermin_k8s_decorator_*`)
 
+These metrics exposes the details to the Kubernetes decorator stage.
+
 - `mermin_k8s_decorator_flow_spans_total`
   *Type*: `counter`
   *Description*: Total number of flow spans processed by the K8s decorator
@@ -158,6 +160,8 @@ These metrics offer insight into the internal pipelines used for data mutation (
   - `stage`
 
 ### TaskManager Metrics (`mermin_taskmanager_*`)
+
+These metrics track the number and type of active background tasks managed by Mermin.
 
 - `mermin_taskmanager_tasks_active`
   *Type*: `gauge`
