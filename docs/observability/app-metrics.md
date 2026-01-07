@@ -242,14 +242,14 @@ Metrics for flow span creation, processing, and export.
 
 ## Processing Latency Metrics
 
-**`mermin_processing_latency_seconds{stage}`**
+**`mermin_pipeline_duration_seconds{stage}`**
 - **Type:** Histogram
-- **Labels:** `stage` = "flow_producer_input" | "k8s_decoration" | "export"
-- **Buckets:** 10μs to 100ms
+- **Labels:** `stage` = "ebpf_ringbuf_output" | "producer_output" | "decorator_output"
+- **Buckets:** 10μs to 60s (covers both fast operations like eBPF ring buffer processing and slow operations like export)
 - **Description:** Processing latency by pipeline stage.
-  - `flow_producer_input`: Time spent reading and processing flow events from the eBPF ring buffer
-  - `k8s_decoration`: Time spent enriching flow spans with Kubernetes metadata
-  - `export`: Time spent exporting spans to the OTLP backend
+  - `ebpf_ringbuf_output`: Time spent reading and processing flow events from the eBPF ring buffer
+  - `producer_output`: Time spent enriching flow spans with Kubernetes metadata
+  - `decorator_output`: Time spent exporting spans to the OTLP backend
 
 ---
 
@@ -321,13 +321,10 @@ Metrics for Kubernetes metadata enrichment.
 
 **`mermin_k8s_watcher_events_total{event_type}`**
 - **Type:** Counter
-- **Labels:** `event_type` = "apply" | "delete" | "init" | "init_done" | "error"
+- **Labels:**
+  - `resource` = "Pod" | "Service" | "Node" | etc.,
+  - `event_type` = "apply" | "delete" | "init" | "init_done" | "error"
 - **Description:** K8s resource watcher events (aggregated).
-
-**`mermin_k8s_watcher_events_by_resource_total{resource, event_type}`** *(debug)*
-- **Type:** Counter
-- **Labels:** `resource` = "Pod" | "Service" | "Node" | etc., `event_type` as above
-- **Description:** K8s watcher events by resource type.
 
 ### IP Index Performance
 
@@ -348,28 +345,24 @@ Metrics for async task management.
 
 ### Aggregated Metrics (Standard)
 
-**`mermin_tasks_total{status}`**
-- **Type:** Counter
-- **Labels:** `status` = "spawned" | "completed" | "cancelled" | "panicked"
-- **Description:** Task lifecycle events. Note: `spawned` count should equal sum of other statuses over time.
-
-**`mermin_tasks_active_total`**
+**`mermin_tasks_active{task}`**
 - **Type:** Gauge
+- **Labels:** `task`: The name of the specific task.
 - **Description:** Current number of active tasks.
 
 ### Per-Task Metrics (Debug)
 
-**`mermin_tasks_by_name_total{task_name, status}`** *(debug)*
+**`mermin_tasks_total{status}`**
 - **Type:** Counter
-- **Description:** Task lifecycle events by task name.
+- **Labels:**
+  - `task`: The name of the specific task.
+  - `status` = "spawned" | "completed" | "cancelled" | "panicked"
+- **Description:** Task lifecycle events. Note: `spawned` count should equal sum of other statuses over time.
 
-**`mermin_tasks_active_by_name_total{task_name}`** *(debug)*
-- **Type:** Gauge
-- **Description:** Active tasks by task name.
 
 ---
 
-## Shutdown Metrics (`mermin_shutdown_*`)
+## Shutdown Metrics (Debug) (`mermin_shutdown_*`)
 
 Metrics for graceful shutdown behavior.
 
@@ -408,7 +401,7 @@ mermin_ebpf_map_utilization_ratio{map="FLOW_STATS"}
 
 ```prometheus
 # Processing latency p95
-histogram_quantile(0.95, rate(mermin_processing_latency_seconds_bucket[5m]))
+histogram_quantile(0.95, rate(mermin_pipeline_duration_seconds[5m]))
 
 # Export success rate (across all exporter types)
 sum(rate(mermin_export_flow_spans_total{status="ok"}[5m])) /

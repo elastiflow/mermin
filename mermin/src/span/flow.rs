@@ -1656,7 +1656,7 @@ mod tests {
         let provider = SdkTracerProvider::builder()
             .with_span_processor(processor)
             .build();
-        let adapter = TraceExporterAdapter::new(provider, false, false);
+        let adapter = TraceExporterAdapter::new(provider);
 
         let flow_span = FlowSpan {
             start_time: std::time::UNIX_EPOCH,
@@ -1725,7 +1725,7 @@ mod tests {
         let provider = SdkTracerProvider::builder()
             .with_span_processor(processor)
             .build();
-        let adapter = TraceExporterAdapter::new(provider, false, false);
+        let adapter = TraceExporterAdapter::new(provider);
 
         let test_trace_id = TraceId::from_bytes([
             0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,

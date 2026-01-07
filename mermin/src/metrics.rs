@@ -5,6 +5,7 @@ pub mod export;
 pub mod flow;
 pub mod k8s;
 pub mod opts;
+pub mod processing;
 pub mod registry;
 pub mod server;
 pub mod userspace;

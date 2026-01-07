@@ -46,6 +46,7 @@ use crate::{
     metrics::{
         ebpf::EbpfMapName,
         k8s::K8sDecoratorStatus,
+        processing::ProcessingStage,
         server::start_metrics_server,
         userspace::{ChannelName, ChannelSendStatus},
     },
@@ -283,8 +284,6 @@ async fn run(cli: Cli) -> Result<()> {
         conf.display_conf();
 
         if conf.export.traces.stdout.is_some() || conf.export.traces.otlp.is_some() {
-            let has_stdout = conf.export.traces.stdout.is_some();
-            let has_otlp = conf.export.traces.otlp.is_some();
             let app_tracer_provider = init_provider(
                 conf.export.traces.stdout.clone(),
                 conf.export.traces.otlp.clone(),
@@ -295,11 +294,7 @@ async fn run(cli: Cli) -> Result<()> {
                 task.name = "exporter",
                 "initialized configured trace exporters"
             );
-            Arc::new(TraceExporterAdapter::new(
-                app_tracer_provider,
-                has_otlp,
-                has_stdout,
-            ))
+            Arc::new(TraceExporterAdapter::new(app_tracer_provider))
         } else {
             warn!(
                 event.name = "exporter.misconfigured",
@@ -727,10 +722,10 @@ async fn run(cli: Cli) -> Result<()> {
                                     .with_label_values(&[ChannelName::ProducerOutput.as_str()])
                                     .set(channel_size as i64);
 
-                                let _timer = metrics::registry::PROCESSING_LATENCY_SECONDS
-                                    .with_label_values(&["k8s_decoration"])
-                                    .start_timer();
-                                let (span, err) = decorator.decorate_or_fallback(flow_span).await;
+                            let _timer = metrics::registry::PROCESSING_DURATION_SECONDS
+                                .with_label_values(&[ProcessingStage::FlowProducerOut.as_str()])
+                                .start_timer();
+                            let (span, err) = decorator.decorate_or_fallback(flow_span).await;
 
                                 match err {
                                     Some(e) => {
@@ -857,7 +852,9 @@ async fn run(cli: Cli) -> Result<()> {
             let export_start = std::time::Instant::now();
             let export_result = tokio::time::timeout(Duration::from_secs(EXPORT_TIMEOUT_SECS), exporter.export(traceable)).await;
             let export_duration = export_start.elapsed();
-            metrics::registry::EXPORT_LATENCY_SECONDS.observe(export_duration.as_secs_f64());
+            metrics::registry::PROCESSING_DURATION_SECONDS
+                .with_label_values(&[ProcessingStage::K8sDecoratorOut.as_str()])
+                .observe(export_duration.as_secs_f64());
 
             if export_result.is_err() {
                 metrics::registry::EXPORT_TIMEOUTS_TOTAL.inc();
