@@ -67,7 +67,7 @@ Data pipeline overview, more details on the pipeline are documented in the [data
           Network Interface
             ↓           ↓
             <kernel space>
-Flow Stats (hashmap)   Flow Events (ring buffer)
+Flow Stats (hashmap)   Flow Events (ring buffer)   Listening Ports (hashmap)
             <user space>
                   ↓
             Flow Producer
@@ -85,6 +85,7 @@ Mermin uses [eBPF](https://ebpf.io/what-is-ebpf/) (extended Berkeley Packet Filt
 - Capture packets at the TC (Traffic Control) layer
 - Aggregate packet data into flow statistics within the `FLOW_STATS` eBPF HashMap
 - Notify userspace of new flows via the `FLOW_EVENTS` ring buffer
+- Track listening ports (servers) in the `LISTENING_PORTS` eBPF HashMap for client/server direction inference
 - For encapsulated or tunneled packets, send inner packet headers to userspace via `FLOW_EVENTS` for decoding
 
 <details>
@@ -122,9 +123,9 @@ A Flow Trace Span includes:
 
 Mermin preserves flow state across pod restarts through eBPF map pinning, ensuring continuous visibility without data loss:
 
-- **Map Pinning**: `FLOW_STATS` and `FLOW_EVENTS` maps are pinned to `/sys/fs/bpf/` when writable (requires `/sys/fs/bpf` mount, refer to the [security-considerations](security-considerations.md#host-mounts-required) document)
+- **Map Pinning**: `FLOW_STATS`, `FLOW_EVENTS`, and `LISTENING_PORTS` maps are pinned to `/sys/fs/bpf/` when writable (requires `/sys/fs/bpf` mount, refer to the [security-considerations](security-considerations.md#host-mounts-required) document)
 - **Schema Versioning**: Maps use versioned paths (e.g., `mermin_flow_stats_map_v1`) to prevent incompatible format reuse across upgrades
-- **State Continuity**: Flow statistics persist across mermin restarts, eliminating visibility gaps during rolling updates
+- **State Continuity**: Flow statistics and listening port data persist across mermin restarts, eliminating visibility gaps during rolling updates
 - **Format Validation**: Pinned maps are reused only if schema version and format match current version
 - **Graceful Degradation**: If pinning fails, mermin continues with unpinned maps (logged as warning)
 - **Upgrade Safety**: When struct layouts change, increment `EBPF_MAP_SCHEMA_VERSION` to create new versioned maps
@@ -133,6 +134,7 @@ This ensures:
 
 - No flow data loss during pod restarts or rolling updates
 - Existing flows continue to accumulate statistics across restarts
+- Listening port information is preserved for accurate direction inference
 - Safe upgrades without corrupt data reuse
 - Easy rollbacks (old map versions remain available)
 
@@ -252,9 +254,12 @@ If the OTLP backend is unavailable:
 - Requires Pixie platform deployment
 - Limited long-term storage (auto-deletes data after hours/days)
 
-**Key Insight:** **Mermin is the only tool that provides flow-level granularity** - each individual network flow becomes a Flow Trace with complete metadata (source/dest pods, services, deployments, labels, packet/byte counts, TCP flags, etc.). Hubble and Pixie provide aggregated network metrics (requests/sec, error rates), which are useful for dashboards but don't give you the raw flow data needed for deep investigation, compliance, or security forensics.
+**Key Insight:** **Mermin is the only tool that provides flow-level granularity** - each individual network flow becomes a Flow Trace with complete metadata (source/dest pods,
+services, deployments, labels, packet/byte counts, TCP flags, etc.). Hubble and Pixie provide aggregated network metrics (requests/sec, error rates), which are useful for dashboards
+but don't give you the raw flow data needed for deep investigation, compliance, or security forensics.
 
-**Trade-off:** Hubble and Pixie offer broader observability features (L7 protocols, application tracing) but with platform coupling and metric aggregation. Mermin prioritizes CNI/backend flexibility and flow-level detail, enabling long-term storage and granular analysis of every network connection.
+**Trade-off:** Hubble and Pixie offer broader observability features (L7 protocols, application tracing) but with platform coupling and metric aggregation. Mermin prioritizes
+CNI/backend flexibility and flow-level detail, enabling long-term storage and granular analysis of every network connection.
 
 ### vs. NetFlow/IPFIX Exporters
 

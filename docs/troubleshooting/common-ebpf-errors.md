@@ -130,6 +130,61 @@ max stack depth exceeded
 
 **What's happening**: The combined stack usage across all your function calls exceeds the kernel's limit (typically 512 bytes). Each function call adds to the stack, and nested calls add up quickly.
 
+## Runtime eBPF Errors
+
+While verifier errors prevent programs from loading, runtime errors occur after your eBPF program is loaded and running. These are less common but important to understand.
+
+### Ring Buffer Full - Dropping Flow Events
+
+The eBPF ring buffer temporarily holds new flow events before userspace processes them. When this buffer fills up, new flow events are dropped to prevent the eBPF program from blocking.
+
+**What you'll see:**
+
+```shell
+ERROR mermin: ebpf - ring buffer full - dropping flow event for new flow
+```
+
+**What's happening**: Your network is creating new flows faster than the ring buffer can drain them. This typically occurs during:
+
+- **Traffic bursts**: Sudden spike in new connections (e.g., load balancer scaling, DDoS)
+- **High connection rate**: Sustained high rate of new flow creation (>1,000 FPS)
+- **Worker backpressure**: Downstream processing can't keep up (check worker channel metrics)
+
+**Important**: Flow tracking continues! The flow is still tracked in the FLOW_STATS map, but userspace won't receive the initial packet data for deep packet inspection on that specific flow.
+
+**How to fix it:**
+
+1. **Increase ring buffer size** in your configuration:
+
+   ```hcl
+   pipeline {
+     ebpf_ring_buffer_size_bytes = "512KB"  # Double the default 256KB
+     # Or use: "1MB", "2MiB" for higher traffic
+   }
+   ```
+
+   **Sizing guide**:
+   - Default 256 KB handles ~1,120 flow events (~500 FPS sustained)
+   - 512 KB for 500-2K FPS
+   - 1 MB for 2K-5K FPS
+   - 2 MB+ for >5K FPS
+
+2. **Scale worker threads** if backpressure is the issue:
+
+   ```hcl
+   pipeline {
+     worker_count = 8  # Default is 4
+   }
+   ```
+
+3. **Monitor metrics** to understand the issue:
+   - `mermin_flow_events_total{result="dropped_backpressure"}` - Worker channel full
+   - `mermin_ringbuf_packets_total{type="received"}` - Ring buffer throughput
+
+**Performance impact**: Ring buffer memory is allocated per-node (not per-CPU), so increasing from 256 KB to 1 MB adds only ~750 KB of memory per node. The performance benefit far outweighs the minimal memory cost.
+
+**When NOT to increase**: If drops are rare (< 1% of flows) during brief bursts, the default size is adequate. The ring buffer is designed to smooth out temporary spikes.
+
 ## Understanding TC Priority and TCX Order
 
 Beyond verifier errors, there's another important aspect of eBPF program loading: execution order. When multiple eBPF programs are attached to the same network interface, the order they run in matters—a lot.
