@@ -708,7 +708,7 @@ async fn run(cli: Cli) -> Result<()> {
                                 .set(channel_size as i64);
 
                             let _timer = metrics::registry::PROCESSING_DURATION_SECONDS
-                                .with_label_values(&[ProcessingStage::ProducerOut.as_str()])
+                                .with_label_values(&[ProcessingStage::FlowProducerOut.as_str()])
                                 .start_timer();
                             let (span, err) = decorator.decorate_or_fallback(flow_span).await;
 

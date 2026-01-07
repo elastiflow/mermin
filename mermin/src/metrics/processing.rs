@@ -63,7 +63,7 @@ pub enum ProcessingStage {
     /// enriches flow spans with pod, service, and namespace information.
     /// This includes the time spent looking up Kubernetes resources and
     /// attaching metadata to spans.
-    ProducerOut,
+    FlowProducerOut,
 
     /// Time spent exporting spans to the OTLP backend.
     ///
@@ -77,7 +77,7 @@ impl ProcessingStage {
     pub const fn as_str(self) -> &'static str {
         match self {
             ProcessingStage::EbpfRingbufOut => "ebpf_ringbuf_out",
-            ProcessingStage::ProducerOut => "producer_out",
+            ProcessingStage::FlowProducerOut => "flow_producer_out",
             ProcessingStage::K8sDecoratorOut => "k8s_decorator_out",
         }
     }
