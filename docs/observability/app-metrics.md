@@ -5,7 +5,7 @@ hidden: true
 # Mermin Application Metrics
 
 This guide describes the Prometheus metrics endpoint exposed by Mermin and provides a comprehensive breakdown of all available metrics, their types, and descriptions.
-Please find more details on the metrics configuration in the [metrics configuration document](../configuration/metrics.md)
+See the [metrics configuration document](../configuration/metrics.md) for more details on metrics configuration.
 
 ## Metrics Endpoint
 
@@ -18,8 +18,8 @@ Mermin exposes Prometheus metrics in the standard Prometheus text format at mult
 
 **Standard vs Debug Metrics:**
 
-- **Standard metrics**: Always enabled, aggregated across resources, safe for production
-- **Debug metrics**: High-cardinality labels (per-interface, per-resource), must be explicitly enabled via `metrics.debug_metrics_enabled = true`
+- **Standard metrics**: Always enabled, aggregated across resources, safe for production.
+- **Debug metrics**: High-cardinality labels (per-interface, per-resource), must be explicitly enabled via `metrics.debug_metrics_enabled = true`.
 
 ## Metrics Reference
 
@@ -28,15 +28,15 @@ Metrics are categorized into logical subsystems that correspond to different com
 
 - `ebpf`: For eBPF-specific metrics
 - `channel`: Internal Mermin channels metrics
-- `export`: Export related metrics
+- `export`: Export-related metrics
 - `flow`: Metrics on the Flow Spans
-- `interface`: Network interface related metrics
+- `interface`: Network interface-related metrics
 - `k8s`: For Kubernetes watcher metrics
 - `taskmanager`: Internal Mermin tasks metrics
 
 ### eBPF Metrics (`mermin_ebpf_*`)
 
-This section focuses on metrics originating from the eBPF layer, which is responsible for capturing low-level packets. These metrics provide visibility into the status of loaded eBPF programs and the usage of eBPF maps.  
+This section describes metrics from the eBPF layer, responsible for capturing low-level packets. These metrics provide visibility into the status of loaded eBPF programs and the usage of eBPF maps.  
 Monitoring these is crucial for ensuring that Mermin's foundational data collection mechanism functions as expected.
 
 - `mermin_ebpf_bpf_fs_writable`
@@ -72,7 +72,7 @@ Monitoring these is crucial for ensuring that Mermin's foundational data collect
 
 ### Network Interface Metrics (`mermin_interface_*`)
 
-These metrics provide visibility into network traffic processed by Mermin across all monitored interfaces, essential for visibility on the overall throughput and packet rates processed by Mermin.
+These metrics provide visibility into network traffic processed by Mermin across all monitored interfaces. They are essential for understanding the overall throughput and packet rates processed by Mermin.
 
 - `mermin_interface_bytes_total`
   *Type*: `counter`
@@ -108,7 +108,7 @@ These metrics track events and performance of the Kubernetes resource watchers u
 
 - `mermin_k8s_decorator_flow_spans_total`
   *Type*: `counter`
-  *Description*: Total number of flow spans processed by K8s decorator
+  *Description*: Total number of flow spans processed by the K8s decorator
   *Labels*:
   - `status`
 
