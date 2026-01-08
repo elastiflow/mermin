@@ -9,7 +9,7 @@
 
 ## Overview
 
-This example deploys Mermin inside a local [Kind](https://kind.sigs.k8s.io/) cluster, utilizing the Flannel CNI. Mermin is configured to write metrics directly to GreptimeDB via HTTP using the OTLP protocol.
+This example deploys Mermin alongside a standalone GreptimeDB instance for persistence. Mermin is configured to write metrics directly to GreptimeDB via HTTP using the OTLP protocol.
 
 Notes on the example deployment:
 
@@ -58,3 +58,39 @@ Deploy Mermin configured to output directly to the GreptimeDB service using HTTP
       --devel \
       mermin charts/mermin
     ```
+
+* Optionally install `metrics-server` to get metrics if it has not been installed yet
+
+    ```sh
+    kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.8.0/components.yaml
+    # Patch to use insecure TLS, commonly needed on dev local clusters
+    kubectl -n kube-system patch deployment metrics-server --type='json' -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+    ```
+
+
+In order to render K8s manifests you may use following commands
+
+* OpenTelemetry Collector
+
+    ```sh
+    rm -rf helm_rendered; helm template \
+      -f values_greptime.yaml \
+      greptimedb greptime/greptimedb \
+      --output-dir helm_rendered
+
+    # Diff with existing K8s resources
+    kubectl diff -R -f helm_rendered/greptimedb/    
+    ```
+* Mermin
+
+    ```sh
+    rm -rf helm_rendered; helm template \
+      --set-file config.content=config.hcl \
+      --devel \
+      mermin mermin/mermin \
+      --output-dir helm_rendered
+
+    # Diff with existing K8s resources
+    kubectl diff -R -f helm_rendered/mermin/    
+    ```
+
