@@ -50,20 +50,12 @@ impl ProcessNameResolver {
             .time_to_live(ttl)
             .build();
 
-        // Determine correct /proc path based on deployment mode:
-        // - Container with hostPID: true -> use /proc/1/[pid]/comm (host namespace)
+        // Determine correct /proc path based on deployment mode.
+        // The determine_proc_base() function handles:
+        // - Container with hostPID: true -> use /proc/[pid]/comm (already in host namespace)
+        // - Container without hostPID -> use /proc/1/[pid]/comm (access host via /proc/1)
         // - Bare metal or hostNetwork: true -> use /proc/[pid]/comm (same namespace)
-        let proc_base = if Path::new("/.dockerenv").exists() || Path::new("/proc/1/cgroup").exists()
-        {
-            // In container - check if we can access host /proc via /proc/1
-            if Path::new("/proc/1/comm").exists() && Path::new("/proc/self/ns/pid").exists() {
-                "/proc/1".to_string()
-            } else {
-                "/proc".to_string()
-            }
-        } else {
-            "/proc".to_string()
-        };
+        let proc_base = Self::determine_proc_base();
 
         debug!(
             event.name = "process_name.resolver.initialized",
@@ -74,6 +66,40 @@ impl ProcessNameResolver {
         );
 
         Self { cache, proc_base }
+    }
+
+    /// Determine the correct /proc base path based on namespace configuration.
+    ///
+    /// Returns:
+    /// - `/proc` if we're already in the host PID namespace (hostPID: true) or on bare metal
+    /// - `/proc/1` if we're in a container but can access host namespace via /proc/1
+    /// - `/proc` as fallback
+    fn determine_proc_base() -> String {
+        // Check if we're in a container
+        let in_container =
+            Path::new("/.dockerenv").exists() || Path::new("/proc/1/cgroup").exists();
+
+        if !in_container {
+            // Not in container, use /proc directly
+            return "/proc".to_string();
+        }
+
+        // In container - check if we're already in the host PID namespace
+        // If /proc/self/ns/pid == /proc/1/ns/pid, we're in host namespace (hostPID: true)
+        let self_pid_ns = fs::read_link("/proc/self/ns/pid").ok();
+        let host_pid_ns = fs::read_link("/proc/1/ns/pid").ok();
+
+        if self_pid_ns == host_pid_ns {
+            // We're already in host PID namespace (hostPID: true)
+            // Use /proc directly, not /proc/1
+            "/proc".to_string()
+        } else if Path::new("/proc/1/comm").exists() && Path::new("/proc/self/ns/pid").exists() {
+            // We're in a container but can access host via /proc/1
+            "/proc/1".to_string()
+        } else {
+            // Fallback to current namespace
+            "/proc".to_string()
+        }
     }
 
     /// Convert a comm array (from bpf_get_current_comm) to a String.
@@ -195,10 +221,26 @@ impl ProcessNameResolver {
                 "resolved process name from /proc"
             );
         } else {
+            // /proc lookup failed, but if we have comm from eBPF, use it as fallback
+            // This handles cases where PID is from different node or process terminated
+            if let Some(comm_array) = comm
+                && let Some(comm_name) = self.comm_to_string(comm_array)
+            {
+                // Even generic names are better than nothing for cross-node/terminated processes
+                trace!(
+                    event.name = "process_name.resolved_from_comm_fallback",
+                    pid = pid,
+                    process_name = %comm_name,
+                    reason = "proc_lookup_failed",
+                    "using in-kernel comm as fallback (proc lookup failed)"
+                );
+                self.cache.insert(pid, comm_name.clone()).await;
+                return Some(comm_name);
+            }
             trace!(
                 event.name = "process_name.resolve_failed",
                 pid = pid,
-                "failed to resolve process name (process may have terminated)"
+                "failed to resolve process name (process may have terminated or be on different node)"
             );
         }
 

@@ -87,7 +87,7 @@
 #[cfg(not(feature = "test"))]
 use aya_ebpf::{
     bindings::TC_ACT_UNSPEC,
-    helpers::{bpf_get_current_pid_tgid, bpf_ktime_get_boot_ns},
+    helpers::{bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_ktime_get_boot_ns},
     macros::{classifier, map, tracepoint},
     maps::{HashMap, PerCpuArray, RingBuf},
     programs::{TcContext, TracePointContext},
@@ -176,8 +176,7 @@ static mut LISTENING_PORTS: HashMap<mermin_common::ListeningPortKey, u8> =
 /// Max entries: 65536 (sufficient for most systems)
 #[cfg(not(feature = "test"))]
 #[map]
-static mut PROCESS_NAMES: HashMap<u32, [u8; 16]> =
-    HashMap::with_max_entries(65536, 0);
+static mut PROCESS_NAMES: HashMap<u32, [u8; 16]> = HashMap::with_max_entries(65536, 0);
 
 /// Error types that can occur during packet parsing.
 ///
@@ -382,7 +381,9 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             flow_event.pid = (pid_tgid >> 32) as u32;
 
             // Try to get process name from PROCESS_NAMES map
-            // Map is populated by userspace scanner at startup and updated as needed
+            // Map is populated by userspace scanner at startup and updated by sched_process_exec tracepoint
+            // Note: bpf_get_current_comm() is NOT available in TC programs (only in tracepoints/kprobes)
+            // So we rely on the PROCESS_NAMES map which is populated by the tracepoint
             let pid = flow_event.pid;
             #[allow(static_mut_refs)]
             if let Some(comm) = unsafe { PROCESS_NAMES.get(&pid) } {
@@ -483,6 +484,37 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
     }
 
     Ok(TC_ACT_UNSPEC)
+}
+
+#[cfg(not(feature = "test"))]
+#[tracepoint]
+pub fn sched_process_exec(_ctx: TracePointContext) -> i32 {
+    // Extract PID (TGID - process ID, not thread ID)
+    let pid_tgid = bpf_get_current_pid_tgid();
+    let pid = (pid_tgid >> 32) as u32;
+
+    // Get process name (comm) - up to 15 characters + null terminator
+    // In aya_ebpf, bpf_get_current_comm() takes no arguments and returns Result<[u8; 16], c_long>
+    let comm = match bpf_get_current_comm() {
+        Ok(comm) => comm,
+        Err(_) => {
+            // If bpf_get_current_comm fails, use zero-initialized comm
+            // Userspace will resolve from /proc/[pid]/comm as fallback
+            [0u8; 16]
+        }
+    };
+
+    // Insert into map (or update if PID was reused)
+    // Duplicates are harmless - they just update the value with the new comm
+    #[allow(static_mut_refs)]
+    let _ = unsafe { PROCESS_NAMES.insert(&pid, &comm, 0) };
+
+    // Note: insert() returns Result, but we ignore errors since:
+    // - Map may be full (unlikely with 65536 entries)
+    // - Map errors are rare and non-critical for tracking
+    // - Userspace scanner will populate on startup anyway
+
+    0
 }
 
 #[cfg(not(feature = "test"))]

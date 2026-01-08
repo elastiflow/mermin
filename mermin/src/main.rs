@@ -390,6 +390,8 @@ async fn run(cli: Cli) -> Result<()> {
 
     // Load and attach tracepoint programs for process lifecycle tracking
     // Note: We only track PIDs here (cleanup on exit). Comm is populated by userspace scanner.
+    // Tracepoints are optional - if tracefs is not available (e.g., in some Docker environments),
+    // we gracefully skip attachment and rely on the userspace scanner for process name tracking.
     use aya::programs::TracePoint;
 
     let tracepoint_programs = [
@@ -397,8 +399,9 @@ async fn run(cli: Cli) -> Result<()> {
         ("sched", "sched_process_exit", "sched_process_exit"),
     ];
 
+    let mut attached_count = 0;
     for (category, name, program_name) in &tracepoint_programs {
-        let program: &mut TracePoint = ebpf
+        let program: &mut TracePoint = match ebpf
             .program_mut(program_name)
             .ok_or_else(|| {
                 MerminError::internal(format!(
@@ -406,26 +409,68 @@ async fn run(cli: Cli) -> Result<()> {
                 ))
             })?
             .try_into()
-            .map_err(|e| {
-                MerminError::internal(format!(
-                    "failed to cast tracepoint program '{program_name}': {e}",
-                ))
-            })?;
+        {
+            Ok(p) => p,
+            Err(e) => {
+                warn!(
+                    event.name = "ebpf.tracepoint.cast_failed",
+                    program.name = program_name,
+                    error = %e,
+                    "failed to cast tracepoint program, skipping"
+                );
+                continue;
+            }
+        };
 
-        program.load()?;
-        program
-            .attach(category, name)
-            .map_err(|e| {
-                MerminError::internal(format!(
-                    "failed to attach tracepoint program '{program_name}' to {category}/{name}: {e}",
-                ))
-            })?;
+        if let Err(e) = program.load() {
+            warn!(
+                event.name = "ebpf.tracepoint.load_failed",
+                program.name = program_name,
+                error = %e,
+                "failed to load tracepoint program, skipping"
+            );
+            continue;
+        }
+
+        match program.attach(category, name) {
+            Ok(_) => {
+                attached_count += 1;
+                debug!(
+                    event.name = "ebpf.tracepoint.attached",
+                    program.name = program_name,
+                    category = category,
+                    name = name,
+                    "tracepoint program attached successfully"
+                );
+            }
+            Err(e) => {
+                // Tracefs may not be available in all environments (e.g., Docker without proper mounts)
+                // This is non-fatal - userspace scanner will still populate the map at startup
+                warn!(
+                    event.name = "ebpf.tracepoint.attach_failed",
+                    program.name = program_name,
+                    category = category,
+                    name = name,
+                    error = %e,
+                    "failed to attach tracepoint program (tracefs may not be available), continuing without real-time process tracking"
+                );
+            }
+        }
     }
 
-    info!(
-        event.name = "ebpf.tracepoints_attached",
-        "process lifecycle tracking tracepoints attached"
-    );
+    if attached_count > 0 {
+        info!(
+            event.name = "ebpf.tracepoints_attached",
+            count = attached_count,
+            total = tracepoint_programs.len(),
+            "process lifecycle tracking tracepoints attached"
+        );
+    } else {
+        warn!(
+            event.name = "ebpf.tracepoints_unavailable",
+            "tracepoint programs could not be attached (tracefs not available), process name tracking will rely on userspace scanner only"
+        );
+    }
 
     let kernel_version = KernelVersion::current().unwrap_or(KernelVersion::new(0, 0, 0));
     let use_tcx = kernel_version >= KernelVersion::new(6, 6, 0);

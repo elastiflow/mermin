@@ -3,11 +3,7 @@
 //! This module scans `/proc/*/comm` at startup to populate the eBPF PROCESS_NAMES
 //! map with existing processes. After startup, eBPF tracepoints maintain the map in real-time.
 
-use std::{
-    fs,
-    path::Path,
-    sync::Arc,
-};
+use std::{fs, path::Path, sync::Arc};
 
 use aya::maps::HashMap as EbpfHashMap;
 use tokio::sync::Mutex;
@@ -24,16 +20,7 @@ impl ProcessNameScanner {
         process_names_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, u32, [u8; 16]>>>,
     ) -> Self {
         // Determine correct /proc path (same logic as ProcessNameResolver)
-        let proc_base = if Path::new("/.dockerenv").exists() || Path::new("/proc/1/cgroup").exists()
-        {
-            if Path::new("/proc/1/comm").exists() && Path::new("/proc/self/ns/pid").exists() {
-                "/proc/1".to_string()
-            } else {
-                "/proc".to_string()
-            }
-        } else {
-            "/proc".to_string()
-        };
+        let proc_base = Self::determine_proc_base();
 
         Self {
             process_names_map,
@@ -41,12 +28,47 @@ impl ProcessNameScanner {
         }
     }
 
+    /// Determine the correct /proc base path based on namespace configuration.
+    ///
+    /// Returns:
+    /// - `/proc` if we're already in the host PID namespace (hostPID: true) or on bare metal
+    /// - `/proc/1` if we're in a container but can access host namespace via /proc/1
+    /// - `/proc` as fallback
+    fn determine_proc_base() -> String {
+        // Check if we're in a container
+        let in_container =
+            Path::new("/.dockerenv").exists() || Path::new("/proc/1/cgroup").exists();
+
+        if !in_container {
+            // Not in container, use /proc directly
+            return "/proc".to_string();
+        }
+
+        // In container - check if we're already in the host PID namespace
+        // If /proc/self/ns/pid == /proc/1/ns/pid, we're in host namespace (hostPID: true)
+        let self_pid_ns = fs::read_link("/proc/self/ns/pid").ok();
+        let host_pid_ns = fs::read_link("/proc/1/ns/pid").ok();
+
+        if self_pid_ns == host_pid_ns {
+            // We're already in host PID namespace (hostPID: true)
+            // Use /proc directly, not /proc/1
+            "/proc".to_string()
+        } else if Path::new("/proc/1/comm").exists() && Path::new("/proc/self/ns/pid").exists() {
+            // We're in a container but can access host via /proc/1
+            "/proc/1".to_string()
+        } else {
+            // Fallback to current namespace
+            "/proc".to_string()
+        }
+    }
+
     /// Scan /proc/*/comm and populate the eBPF map with existing processes.
     ///
     /// This is called once at startup after eBPF programs are attached.
     ///
-    /// When running in a container with `hostPID: true`, uses `/proc/1/*/comm` to see
-    /// the host's processes rather than the container's own namespace.
+    /// When running in a container with `hostPID: true`, uses `/proc/*/comm` directly
+    /// since we're already in the host PID namespace. Without `hostPID: true`, uses
+    /// `/proc/1/*/comm` to access the host's processes.
     ///
     /// # Errors
     ///
@@ -112,4 +134,3 @@ impl ProcessNameScanner {
         Ok(count)
     }
 }
-
