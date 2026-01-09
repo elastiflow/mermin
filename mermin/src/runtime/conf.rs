@@ -870,8 +870,6 @@ pub struct PipelineOptions {
     /// Base capacity for userspace pipeline channels (default: 8192)
     /// This is the foundation for sizing all pipeline stages:
     /// - Worker queues: base_capacity / worker_count
-    /// - Flow span channel: base_capacity × flow_span_channel_multiplier
-    /// - Decorated span channel: base_capacity × decorated_span_channel_multiplier
     /// - Flow store initial capacity: base_capacity × 4
     pub base_capacity: usize,
 
@@ -893,15 +891,15 @@ pub struct PipelineOptions {
     /// Increase for large clusters: 8 threads for 50K flows/sec, 12 threads for 100K flows/sec.
     pub k8s_decorator_threads: usize,
 
-    /// Multiplier for flow span channel capacity (default: 2.0)
-    /// Provides buffering between workers and K8s decorator. Channel size = base_capacity * multiplier.
-    /// With defaults: 8192 × 2.0 = 16,384 slots (~1.6s buffer at 10K/s, handles export delays).
-    pub flow_span_channel_multiplier: f32,
+    /// Explicit capacity for the flow span channel (default: 16384)
+    /// Buffer between workers and K8s decorator.
+    /// /// With defaults: 16,384 slots (~1.6s buffer at 10K/s, handles export delays).
+    pub flow_span_channel_capacity: usize,
 
-    /// Multiplier for decorated span channel capacity (default: 4.0)
-    /// Provides buffering between K8s decorator and OTLP exporter. Channel size = base_capacity * multiplier.
-    /// With defaults: 8192 × 4.0 = 32,768 slots (~3.2s buffer at 10K/s, prevents backpressure).
-    pub decorated_span_channel_multiplier: f32,
+    /// Capacity for the decorated span channel (default: 32768)
+    /// Buffer between K8s decorator and OTLP exporter.
+    /// /// With defaults: 32,768 slots (~3.2s buffer at 10K/s, prevents backpressure).
+    pub decorated_span_channel_capacity: usize,
 
     // TODO: Implement adaptive sampling (ring buffer consumer in mermin-ebpf/src/main.rs)
     /// Enable adaptive sampling under backpressure (default: true)
@@ -928,12 +926,72 @@ impl Default for PipelineOptions {
             worker_count: 4,
             worker_poll_interval: Duration::from_secs(5),
             k8s_decorator_threads: 4,
-            flow_span_channel_multiplier: 2.0,
-            decorated_span_channel_multiplier: 4.0,
+            flow_span_channel_capacity: 16384,
+            decorated_span_channel_capacity: 32768,
             sampling_enabled: true,
             sampling_min_rate: 0.1,
             backpressure_warning_threshold: 0.01,
         }
+    }
+}
+
+impl PipelineOptions {
+    /// Validates channel configurations against cgroup memory limits
+    pub fn validate_memory_usage(&self) {
+        if let Some(limit) = Self::get_cgroup_memory_limit() {
+            self.validate_memory_usage_against_limit(limit);
+        }
+    }
+
+    fn validate_memory_usage_against_limit(&self, limit: u64) -> bool {
+        // Conservative estimates: FlowSpan ~2KB, Decorated ~4KB
+        let estimated_usage = (self.flow_span_channel_capacity * 2048)
+            + (self.decorated_span_channel_capacity * 4096);
+
+        // Warn if estimated channel usage exceeds 40% of container memory
+        let threshold = (limit as f64 * 0.4) as usize;
+
+        if estimated_usage > threshold {
+            warn!(
+                event.name = "config.memory_warning",
+                estimated_usage_bytes = estimated_usage,
+                memory_limit_bytes = limit,
+                flow_span_capacity = self.flow_span_channel_capacity,
+                decorated_span_capacity = self.decorated_span_channel_capacity,
+                "Channel capacities might exceed recommended memory limits (40% of container memory). \
+                     Consider reducing capacities via flow_span_channel_capacity/decorated_span_channel_capacity."
+            );
+            false
+        } else {
+            debug!(
+                event.name = "config.memory_check",
+                estimated_usage_bytes = estimated_usage,
+                memory_limit_bytes = limit,
+                "Channel memory usage is within safe limits"
+            );
+            true
+        }
+    }
+
+    fn get_cgroup_memory_limit() -> Option<u64> {
+        // cgroup v2 check
+        if let Ok(contents) = std::fs::read_to_string("/sys/fs/cgroup/memory.max")
+            && let Ok(val) = contents.trim().parse::<u64>()
+        {
+            return Some(val);
+        }
+
+        // cgroup v1 fallback
+        if let Ok(contents) = std::fs::read_to_string("/sys/fs/cgroup/memory/memory.limit_in_bytes")
+            && let Ok(val) = contents.trim().parse::<u64>()
+        {
+            // cgroup v1 uses PAGE_COUNTER_MAX (maximum possible 64-bit signed integer (2^63 - 1) rounded down to the nearest memory page (usually 4,096 bytes) for unlimited.
+            if val < 9_223_372_036_854_771_712 {
+                return Some(val);
+            }
+        }
+
+        None
     }
 }
 
@@ -965,7 +1023,7 @@ mod tests {
     use figment::Jail;
     use tracing::Level;
 
-    use super::{ApiConf, Conf, InstrumentOptions, MetricsOptions, ParserConf};
+    use super::{ApiConf, Conf, InstrumentOptions, MetricsOptions, ParserConf, PipelineOptions};
     use crate::{
         otlp::opts::{ExportOptions, ExporterProtocol},
         runtime::{cli::Cli, conf::TcxOrderStrategy, opts::InternalOptions},
@@ -995,6 +1053,14 @@ mod tests {
             "base_capacity should be 8192"
         );
         assert_eq!(cfg.pipeline.worker_count, 4, "worker_count should be 4");
+        assert_eq!(
+            cfg.pipeline.flow_span_channel_capacity, 16384,
+            "default flow_span_channel_capacity should be 16384"
+        );
+        assert_eq!(
+            cfg.pipeline.decorated_span_channel_capacity, 32768,
+            "default decorated_span_channel_capacity should be 32768"
+        );
 
         assert_eq!(
             cfg.discovery.instrument.interfaces,
@@ -3077,5 +3143,50 @@ metrics {
 
             Ok(())
         });
+    }
+
+    #[test]
+    fn test_pipeline_capacities_override() {
+        Jail::expect_with(|jail| {
+            let path = "pipeline_cap.yaml";
+            jail.create_file(
+                path,
+                r#"
+    pipeline:
+      flow_span_channel_capacity: 1024
+      decorated_span_channel_capacity: 2048
+                    "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.pipeline.flow_span_channel_capacity, 1024);
+            assert_eq!(cfg.pipeline.decorated_span_channel_capacity, 2048);
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_memory_usage_validation_logic() {
+        // Default config: 16384 * 2048 + 32768 * 4096
+        // = 33,554,432 + 134,217,728 = 167,772,160 bytes (~160 MB)
+        let opts = PipelineOptions::default();
+
+        assert!(
+            opts.validate_memory_usage_against_limit(1_073_741_824),
+            "Should be safe with 1GB memory"
+        );
+
+        assert!(
+            !opts.validate_memory_usage_against_limit(268_435_456),
+            "Should warn with 256MB memory"
+        );
+
+        assert!(
+            opts.validate_memory_usage_against_limit(536_870_912),
+            "Should be safe with 512MB memory"
+        );
     }
 }

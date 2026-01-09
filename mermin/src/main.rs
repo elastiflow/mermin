@@ -559,11 +559,10 @@ async fn run(cli: Cli) -> Result<()> {
         "ebpf programs attached and ready to process network traffic"
     );
 
-    let flow_span_capacity =
-        (conf.pipeline.base_capacity as f32 * conf.pipeline.flow_span_channel_multiplier) as usize;
-    let decorated_span_capacity = (conf.pipeline.base_capacity as f32
-        * conf.pipeline.decorated_span_channel_multiplier)
-        as usize;
+    conf.pipeline.validate_memory_usage();
+
+    let flow_span_capacity = conf.pipeline.flow_span_channel_capacity;
+    let decorated_span_capacity = conf.pipeline.decorated_span_channel_capacity;
 
     let (flow_span_tx, mut flow_span_rx) = mpsc::channel(flow_span_capacity);
     metrics::registry::CHANNEL_CAPACITY
