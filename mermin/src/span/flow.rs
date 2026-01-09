@@ -564,6 +564,18 @@ impl Traceable for FlowSpan {
         if let Some(value) = self.attributes.flow_ip_flow_label {
             kvs.push(KeyValue::new("flow.ip.flow_label", value as i64));
         }
+        if let Some(value) = self.attributes.flow_reverse_ip_ttl {
+            kvs.push(KeyValue::new("flow.reverse.ip.ttl", value as i64));
+        }
+        if let Some(value) = self.attributes.flow_reverse_ip_dscp_id {
+            kvs.push(KeyValue::new("flow.reverse.ip.dscp.id", value as i64));
+        }
+        if let Some(value) = self.attributes.flow_reverse_ip_ecn_id {
+            kvs.push(KeyValue::new("flow.reverse.ip.ecn.id", value as i64));
+        }
+        if let Some(value) = self.attributes.flow_reverse_ip_flow_label {
+            kvs.push(KeyValue::new("flow.reverse.ip.flow_label", value as i64));
+        }
         if let Some(value) = self.attributes.flow_icmp_type_id {
             kvs.push(KeyValue::new("flow.icmp.type.id", value as i64));
         }

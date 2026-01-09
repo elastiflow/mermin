@@ -96,7 +96,9 @@ use aya_ebpf::{
 use aya_log_ebpf::{error, trace};
 #[cfg(not(feature = "test"))]
 use mermin_common::FlowEvent;
-use mermin_common::{ConnectionState, Direction, FlowKey, FlowStats, IpVersion};
+use mermin_common::{
+    ConnectionState, Direction, FlowKey, FlowStats, IcmpStats, IpVersion, TcpStats,
+};
 use network_types::{
     eth,
     eth::EtherType,
@@ -135,6 +137,14 @@ const MAX_FLOWS: u32 = 10_000_000; // Upper bound, overridden at runtime
 #[cfg(not(feature = "test"))]
 #[map]
 static mut FLOW_STATS: HashMap<FlowKey, FlowStats> = HashMap::with_max_entries(MAX_FLOWS, 0);
+
+#[cfg(not(feature = "test"))]
+#[map]
+static mut TCP_STATS: HashMap<FlowKey, TcpStats> = HashMap::with_max_entries(MAX_FLOWS, 0);
+
+#[cfg(not(feature = "test"))]
+#[map]
+static mut ICMP_STATS: HashMap<FlowKey, IcmpStats> = HashMap::with_max_entries(MAX_FLOWS, 0);
 
 // Size: 256 KB (~1,120 FlowEvent entries, each 234 bytes)
 // Provides buffering for new flow bursts while worker channels absorb backpressure.
@@ -253,12 +263,19 @@ fn run_flow_stats(ctx: &TcContext, direction: Direction) -> i32 {
 
 /// Helper for calculating/applying tcp timing stats
 #[inline(always)]
-fn update_tcp_timing(stats: &mut FlowStats, is_forward: bool, has_payload: bool, timestamp: u64) {
-    if stats.syn() && !stats.ack() {
-        stats.tcp_syn_ns = timestamp;
-    }
+fn update_tcp_timing(
+    stats: &mut TcpStats,
+    is_forward: bool,
+    has_payload: bool,
+    current_flags: u8,
+    timestamp: u64,
+) {
+    let is_syn = (current_flags & TcpStats::TCP_FLAG_SYN) != 0;
+    let is_ack = (current_flags & TcpStats::TCP_FLAG_ACK) != 0;
 
-    if stats.syn() && stats.ack() {
+    if is_syn && !is_ack {
+        stats.tcp_syn_ns = timestamp;
+    } else if is_syn && is_ack {
         stats.tcp_syn_ack_ns = timestamp;
     }
 
@@ -266,40 +283,45 @@ fn update_tcp_timing(stats: &mut FlowStats, is_forward: bool, has_payload: bool,
         return;
     }
 
-    if is_forward {
-        stats.tcp_last_payload_fwd_ns = timestamp;
-        return;
-    }
-
-    stats.tcp_last_payload_rev_ns = timestamp;
-
-    // Only calculate latency if we've seen a corresponding request packet
-    let last_request_ts = stats.tcp_last_payload_fwd_ns;
-    if last_request_ts == 0 {
-        return; // No request seen yet; cannot calculate RTT
-    }
-
-    let delta = timestamp.saturating_sub(last_request_ts);
-    stats.tcp_txn_sum_ns += delta;
-    stats.tcp_txn_count += 1;
-
-    stats.tcp_last_payload_fwd_ns = 0;
-
-    // Calculate the moving average of the jitter following RFC 1889/3550
-    // Formula: J = J + (|D| - J) / 16
-    let current_sample = delta as u32;
-
-    if current_sample > stats.tcp_jitter_avg_ns {
-        let diff = current_sample - stats.tcp_jitter_avg_ns;
-        stats.tcp_jitter_avg_ns += diff / 16;
+    let (current_ts, peer_ts) = if is_forward {
+        (
+            &mut stats.tcp_last_payload_fwd_ns,
+            &mut stats.tcp_last_payload_rev_ns,
+        )
     } else {
-        let diff = stats.tcp_jitter_avg_ns - current_sample;
-        stats.tcp_jitter_avg_ns -= diff / 16;
+        (
+            &mut stats.tcp_last_payload_rev_ns,
+            &mut stats.tcp_last_payload_fwd_ns,
+        )
+    };
+
+    if *peer_ts != 0 {
+        let delta = timestamp.saturating_sub(*peer_ts);
+        stats.tcp_txn_sum_ns += delta;
+        stats.tcp_txn_count += 1;
+
+        // Reset the peer timestamp so this "response" doesn't trigger
+        // a delta for the next packet in this same direction.
+        *peer_ts = 0;
+
+        // Calculate the moving average of the jitter following RFC 1889/3550
+        // Formula: J = J + (|D| - J) / 16
+        // Clamp delta to u32::MAX to avoid truncation on high-latency connections
+        let current_sample = delta.min(u32::MAX as u64) as u32;
+        if current_sample > stats.tcp_jitter_avg_ns {
+            stats.tcp_jitter_avg_ns += (current_sample - stats.tcp_jitter_avg_ns) / 16;
+        } else {
+            stats.tcp_jitter_avg_ns -= (stats.tcp_jitter_avg_ns - current_sample) / 16;
+        }
     }
+
+    // Update the timestamp for the current direction to act as a "Request" for the next peer packet
+    *current_ts = timestamp;
 }
 
 #[cfg(not(feature = "test"))]
 #[inline(always)]
+#[allow(static_mut_refs)]
 fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
     // Use per-CPU scratch space for FlowKey parsing (avoids stack overflow)
     #[allow(static_mut_refs)]
@@ -309,15 +331,20 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
 
     // Normalize the flow key for map lookup (bidirectional aggregation)
     let normalized_key = flow_key.normalize();
-    let is_new_flow = unsafe {
-        #[allow(static_mut_refs)]
-        FLOW_STATS.get(&normalized_key).is_none()
-    };
-
     let timestamp = unsafe { bpf_ktime_get_boot_ns() };
 
+    let mut l4_offset = eth::ETH_LEN;
+    if eth_type == EtherType::Ipv4 {
+        let vihl: ipv4::Vihl = ctx.load(l4_offset).map_err(|_| Error::OutOfBounds)?;
+        l4_offset += ipv4::ihl(vihl) as usize;
+    } else if eth_type == EtherType::Ipv6 {
+        l4_offset += ipv6::IPV6_LEN;
+    }
+
     #[allow(static_mut_refs)]
-    let stats_ptr = if is_new_flow {
+    let mut stats_ptr = unsafe { FLOW_STATS.get_ptr_mut(&normalized_key) };
+
+    if stats_ptr.is_none() {
         let ifindex = unsafe { (*ctx.skb.skb).ifindex };
 
         // Use per-CPU scratch space to initialize FlowStats (avoids stack overflow)
@@ -340,10 +367,36 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
         stats.dst_ip = flow_key.dst_ip;
         stats.src_port = flow_key.src_port;
         stats.dst_port = flow_key.dst_port;
-        stats.forward_metadata_seen = 1;
+        // Set metadata flags to 0 initially to allow capture during initial flow creation
+        stats.forward_metadata_seen = 0;
         stats.reverse_metadata_seen = 0;
 
-        let parsed_offset = parse_metadata(ctx, stats)?;
+        let mut icmp_ptr = None;
+        if stats.protocol == IpProto::Tcp {
+            unsafe {
+                TCP_STATS
+                    .insert(&normalized_key, &TcpStats::default(), 0)
+                    .ok();
+            }
+        } else if stats.protocol == IpProto::Icmp || stats.protocol == IpProto::Ipv6Icmp {
+            unsafe {
+                ICMP_STATS
+                    .insert(&normalized_key, &IcmpStats::default(), 0)
+                    .ok();
+            }
+            // Get the pointer so we can save the Type/Code immediately
+            icmp_ptr = unsafe { ICMP_STATS.get_ptr_mut(&normalized_key) };
+        }
+
+        let parsed_offset = parse_metadata(ctx, stats, l4_offset)?;
+
+        // Capture metadata for the initial packet's direction
+        // During initial creation, stats.src_ip/dst_ip match flow_key (since we just set them),
+        // so the packet is in forward direction relative to the normalized key
+        let icmp_ref = icmp_ptr.map(|p| unsafe { &mut *p });
+
+        capture_direction_metadata(ctx, stats, icmp_ref, eth_type, l4_offset, true)?;
+        stats.forward_metadata_seen = 1;
 
         unsafe {
             #[allow(static_mut_refs)]
@@ -391,21 +444,13 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             );
         }
 
-        #[allow(static_mut_refs)]
-        unsafe {
-            FLOW_STATS.get_ptr_mut(&normalized_key)
-        }
-    } else {
-        #[allow(static_mut_refs)]
-        unsafe {
-            FLOW_STATS.get_ptr_mut(&normalized_key)
-        }
-    };
+        stats_ptr = unsafe { FLOW_STATS.get_ptr_mut(&normalized_key) };
+    }
 
     // Update stats for current packet (works for both new and existing flows)
     #[allow(static_mut_refs)]
-    if let Some(stats_ptr) = stats_ptr {
-        let stats = unsafe { &mut *stats_ptr };
+    if let Some(s_ptr) = stats_ptr {
+        let stats = unsafe { &mut *s_ptr };
         stats.last_seen_ns = timestamp;
 
         let is_forward = flow_key.src_ip == stats.src_ip && flow_key.dst_ip == stats.dst_ip;
@@ -417,32 +462,42 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             stats.reverse_bytes = stats.reverse_bytes.saturating_add(ctx.len() as u64);
         }
 
-        let mut l4_offset = eth::ETH_LEN;
-        if eth_type == EtherType::Ipv4 {
-            let vihl: ipv4::Vihl = ctx.load(l4_offset).map_err(|_| Error::OutOfBounds)?;
-            l4_offset += ipv4::ihl(vihl) as usize;
-        } else if eth_type == EtherType::Ipv6 {
-            l4_offset += ipv6::IPV6_LEN;
-        }
-
         // Capture metadata if userspace has reset the flags for re-capture
         // (userspace resets flags after each recording interval to detect changes in DSCP, TTL, etc.)
-        if is_forward && stats.forward_metadata_seen == 0 {
-            capture_direction_metadata(ctx, stats, eth_type, l4_offset, true)?;
-            stats.forward_metadata_seen = 1;
-        } else if !is_forward && stats.reverse_metadata_seen == 0 {
-            capture_direction_metadata(ctx, stats, eth_type, l4_offset, false)?;
-            stats.reverse_metadata_seen = 1;
+        let needs_capture = if is_forward {
+            stats.forward_metadata_seen == 0
+        } else {
+            stats.reverse_metadata_seen == 0
+        };
+
+        if needs_capture {
+            let mut icmp_ref = None;
+            if (stats.protocol == IpProto::Icmp || stats.protocol == IpProto::Ipv6Icmp)
+                && let Some(ptr) = unsafe { ICMP_STATS.get_ptr_mut(&normalized_key) }
+            {
+                icmp_ref = Some(unsafe { &mut *ptr });
+            }
+
+            capture_direction_metadata(ctx, stats, icmp_ref, eth_type, l4_offset, is_forward)?;
+            // Set the appropriate metadata flag to 1 after successful capture
+            // to prevent repeated capture on subsequent packets in the same direction
+            if is_forward {
+                stats.forward_metadata_seen = 1;
+            } else {
+                stats.reverse_metadata_seen = 1;
+            }
         }
 
-        if stats.protocol == IpProto::Tcp {
+        if stats.protocol == IpProto::Tcp
+            && let Some(t_ptr) = unsafe { TCP_STATS.get_ptr_mut(&normalized_key) }
+        {
+            let tcp_stats = unsafe { &mut *t_ptr };
             let current_flags: tcp::Flags = ctx
                 .load(l4_offset + tcp::TCP_FLAGS_OFFSET)
                 .map_err(|_| Error::OutOfBounds)?;
-            stats.tcp_flags |= current_flags;
-
-            let new_state = determine_tcp_state(stats.tcp_state, current_flags, direction);
-            stats.tcp_state = new_state;
+            tcp_stats.tcp_flags |= current_flags;
+            tcp_stats.tcp_state =
+                determine_tcp_state(tcp_stats.tcp_state, current_flags, direction);
 
             let data_offset: tcp::OffRes = ctx
                 .load(l4_offset + tcp::TCP_OFF_RES_OFFSET)
@@ -450,14 +505,14 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             let tcp_hdr_len = tcp::hdr_len(data_offset);
             let tcp_payload_offset = (l4_offset + tcp_hdr_len) as u32;
 
-            if is_forward && stats.forward_tcp_flags == 0 {
-                stats.forward_tcp_flags = current_flags;
-            } else if !is_forward && stats.reverse_tcp_flags == 0 {
-                stats.reverse_tcp_flags = current_flags;
+            if is_forward && tcp_stats.forward_tcp_flags == 0 {
+                tcp_stats.forward_tcp_flags = current_flags;
+            } else if !is_forward && tcp_stats.reverse_tcp_flags == 0 {
+                tcp_stats.reverse_tcp_flags = current_flags;
             }
 
             let has_payload = ctx.len() > tcp_payload_offset;
-            update_tcp_timing(stats, is_forward, has_payload, timestamp);
+            update_tcp_timing(tcp_stats, is_forward, has_payload, current_flags, timestamp);
         }
     }
 
@@ -602,6 +657,7 @@ fn parse_flow_key(ctx: &TcContext, key: &mut FlowKey) -> Result<EtherType, Error
 fn capture_direction_metadata(
     ctx: &TcContext,
     stats: &mut FlowStats,
+    icmp_stats: Option<&mut IcmpStats>,
     eth_type: EtherType,
     l4_offset: usize,
     is_forward: bool,
@@ -646,7 +702,7 @@ fn capture_direction_metadata(
         _ => {}
     }
 
-    if stats.protocol == IpProto::Icmp || stats.protocol == IpProto::Ipv6Icmp {
+    if let Some(icmp) = icmp_stats {
         let icmp_type: u8 = ctx
             .load(l4_offset + icmp::ICMP_TYPE_OFFSET)
             .map_err(|_| Error::OutOfBounds)?;
@@ -655,11 +711,11 @@ fn capture_direction_metadata(
             .map_err(|_| Error::OutOfBounds)?;
 
         if is_forward {
-            stats.icmp_type = icmp_type;
-            stats.icmp_code = icmp_code;
+            icmp.icmp_type = icmp_type;
+            icmp.icmp_code = icmp_code;
         } else {
-            stats.reverse_icmp_type = icmp_type;
-            stats.reverse_icmp_code = icmp_code;
+            icmp.reverse_icmp_type = icmp_type;
+            icmp.reverse_icmp_code = icmp_code;
         }
     }
 
@@ -676,33 +732,17 @@ fn capture_direction_metadata(
 /// Returns [`Error::OutOfBounds`] if packet data cannot be read, or
 /// [`Error::UnsupportedProtocol`] for unsupported L4 protocols.
 #[inline(never)]
-fn parse_metadata(ctx: &TcContext, stats: &mut FlowStats) -> Result<usize, Error> {
-    let mut offset = 0usize;
-
+fn parse_metadata(
+    ctx: &TcContext,
+    stats: &mut FlowStats,
+    l4_offset: usize,
+) -> Result<usize, Error> {
     stats.src_mac = ctx
-        .load::<eth::SrcMacAddr>(offset + eth::ETH_SRC_MAC_ADDR_OFFSET)
+        .load::<eth::SrcMacAddr>(eth::ETH_SRC_MAC_ADDR_OFFSET)
         .map_err(|_| Error::OutOfBounds)?;
-    offset += eth::ETH_LEN;
-
-    // Calculate L4 offset for metadata capture
-    let l4_offset = match stats.ether_type {
-        EtherType::Ipv4 => {
-            let ihl = ipv4::ihl(
-                ctx.load::<ipv4::Vihl>(offset)
-                    .map_err(|_| Error::OutOfBounds)?,
-            ) as usize;
-            offset + ihl
-        }
-        EtherType::Ipv6 => offset + ipv6::IPV6_LEN,
-        _ => return Err(Error::UnsupportedEtherType),
-    };
-
-    // Parse IP and ICMP metadata (DSCP, ECN, TTL, flow label, ICMP type/code)
-    // First packet is always forward direction
-    capture_direction_metadata(ctx, stats, stats.ether_type, l4_offset, true)?;
 
     // Calculate final offset (start of unparsed payload data)
-    let offset = match stats.protocol {
+    let payload_offset = match stats.protocol {
         IpProto::Tcp => {
             // TCP flags are accumulated in try_flow_stats() for all packets
             // No need to capture here - accumulation handles both first and subsequent packets
@@ -717,7 +757,7 @@ fn parse_metadata(ctx: &TcContext, stats: &mut FlowStats) -> Result<usize, Error
         _ => return Err(Error::UnsupportedProtocol),
     };
 
-    Ok(offset)
+    Ok(payload_offset)
 }
 
 /// Determines TCP connection state using hybrid stateless/stateful approach.
@@ -1120,13 +1160,6 @@ mod tests {
             bytes: 0,
             reverse_packets: 0,
             reverse_bytes: 0,
-            tcp_syn_ns: 0,
-            tcp_syn_ack_ns: 0,
-            tcp_last_payload_fwd_ns: 0,
-            tcp_last_payload_rev_ns: 0,
-            tcp_txn_sum_ns: 0,
-            tcp_txn_count: 0,
-            tcp_jitter_avg_ns: 0,
             src_mac: [0; 6],
             ip_dscp: 0,
             ip_ecn: 0,
@@ -1136,16 +1169,33 @@ mod tests {
             reverse_ip_ttl: 0,
             ip_flow_label: 0,
             reverse_ip_flow_label: 0,
+            forward_metadata_seen: 0,
+            reverse_metadata_seen: 0,
+        }
+    }
+
+    fn create_test_tcp_stats() -> TcpStats {
+        TcpStats {
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
+            tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
             tcp_flags: 0,
             tcp_state: ConnectionState::Closed,
             forward_tcp_flags: 0,
             reverse_tcp_flags: 0,
+        }
+    }
+
+    fn create_test_icmp_stats() -> IcmpStats {
+        IcmpStats {
             icmp_type: 0,
             icmp_code: 0,
             reverse_icmp_type: 0,
             reverse_icmp_code: 0,
-            forward_metadata_seen: 0,
-            reverse_metadata_seen: 0,
         }
     }
 
@@ -1412,8 +1462,19 @@ mod tests {
         let mut flow_key = FlowKey::default();
         let ether_type = parse_flow_key(&ctx, &mut flow_key).unwrap();
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
-        let result = parse_metadata(&ctx, &mut stats);
+
+        let mut l4_offset = eth::ETH_LEN;
+        if ether_type == EtherType::Ipv4 {
+            let vihl: ipv4::Vihl = ctx.load(l4_offset).unwrap();
+            l4_offset += ipv4::ihl(vihl) as usize;
+        } else {
+            l4_offset += ipv6::IPV6_LEN;
+        }
+
+        let result = parse_metadata(&ctx, &mut stats, l4_offset);
         let parsed_offset = result.unwrap();
+
+        capture_direction_metadata(&ctx, &mut stats, None, ether_type, l4_offset, true).unwrap();
 
         assert!(result.is_ok());
         assert_eq!(stats.src_mac, [0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
@@ -1421,7 +1482,6 @@ mod tests {
         assert_eq!(stats.ip_ecn, 0);
         assert_eq!(stats.ip_ttl, 64);
         assert_eq!(stats.ip_flow_label, 0);
-        assert_eq!(stats.tcp_flags, 0);
         assert_eq!(parsed_offset, 54);
     }
 
@@ -1432,8 +1492,19 @@ mod tests {
         let mut flow_key = FlowKey::default();
         let ether_type = parse_flow_key(&ctx, &mut flow_key).unwrap();
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
-        let result = parse_metadata(&ctx, &mut stats);
+
+        let mut l4_offset = eth::ETH_LEN;
+        if ether_type == EtherType::Ipv4 {
+            let vihl: ipv4::Vihl = ctx.load(l4_offset).unwrap();
+            l4_offset += ipv4::ihl(vihl) as usize;
+        } else {
+            l4_offset += ipv6::IPV6_LEN;
+        }
+
+        let result = parse_metadata(&ctx, &mut stats, l4_offset);
         let parsed_offset = result.unwrap();
+
+        capture_direction_metadata(&ctx, &mut stats, None, ether_type, l4_offset, true).unwrap();
 
         assert!(result.is_ok());
         assert_eq!(stats.src_mac, [0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
@@ -1451,8 +1522,19 @@ mod tests {
         let mut flow_key = FlowKey::default();
         let ether_type = parse_flow_key(&ctx, &mut flow_key).unwrap();
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
-        let result = parse_metadata(&ctx, &mut stats);
+
+        let mut l4_offset = eth::ETH_LEN;
+        if ether_type == EtherType::Ipv4 {
+            let vihl: ipv4::Vihl = ctx.load(l4_offset).unwrap();
+            l4_offset += ipv4::ihl(vihl) as usize;
+        } else {
+            l4_offset += ipv6::IPV6_LEN;
+        }
+
+        let result = parse_metadata(&ctx, &mut stats, l4_offset);
         let parsed_offset = result.unwrap();
+
+        capture_direction_metadata(&ctx, &mut stats, None, ether_type, l4_offset, true).unwrap();
 
         assert!(result.is_ok());
         assert_eq!(stats.ip_ttl, 128);
@@ -1466,12 +1548,30 @@ mod tests {
         let mut flow_key = FlowKey::default();
         let ether_type = parse_flow_key(&ctx, &mut flow_key).unwrap();
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
-        let result = parse_metadata(&ctx, &mut stats);
+        let mut icmp_stats = create_test_icmp_stats();
+
+        let mut l4_offset = eth::ETH_LEN;
+        if ether_type == EtherType::Ipv4 {
+            let vihl: ipv4::Vihl = ctx.load(l4_offset).map_err(|_| Error::OutOfBounds).unwrap();
+            l4_offset += ipv4::ihl(vihl) as usize;
+        }
+
+        let result = parse_metadata(&ctx, &mut stats, l4_offset);
         let parsed_offset = result.unwrap();
 
+        capture_direction_metadata(
+            &ctx,
+            &mut stats,
+            Some(&mut icmp_stats),
+            ether_type,
+            l4_offset,
+            true,
+        )
+        .unwrap();
+
         assert!(result.is_ok());
-        assert_eq!(stats.icmp_type, 8);
-        assert_eq!(stats.icmp_code, 0);
+        assert_eq!(icmp_stats.icmp_type, 8);
+        assert_eq!(icmp_stats.icmp_code, 0);
         assert_eq!(parsed_offset, 42);
     }
 
@@ -1501,7 +1601,14 @@ mod tests {
         let mut flow_key = FlowKey::default();
         let ether_type = parse_flow_key(&ctx, &mut flow_key).unwrap();
         let mut stats = create_test_flow_stats(ether_type, flow_key.protocol);
-        let result = parse_metadata(&ctx, &mut stats);
+
+        let mut l4_offset = eth::ETH_LEN;
+        if ether_type == EtherType::Ipv4 {
+            let vihl: ipv4::Vihl = ctx.load(l4_offset).map_err(|_| Error::OutOfBounds).unwrap();
+            l4_offset += ipv4::ihl(vihl) as usize;
+        }
+
+        let result = parse_metadata(&ctx, &mut stats, l4_offset);
         let parsed_offset = result.unwrap();
 
         assert!(result.is_ok());
@@ -1513,7 +1620,15 @@ mod tests {
         let pkt = build_ipv4_tcp_packet();
         let ctx = TcContext::new(pkt);
         let mut stats = create_test_flow_stats(EtherType::Ipv4, IpProto::Tcp);
-        let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv4, 34, true);
+        let mut icmp_stats = create_test_icmp_stats();
+        let result = capture_direction_metadata(
+            &ctx,
+            &mut stats,
+            Some(&mut icmp_stats),
+            EtherType::Ipv4,
+            34,
+            true,
+        );
 
         assert!(result.is_ok());
         assert_eq!(stats.ip_dscp, 46);
@@ -1531,7 +1646,7 @@ mod tests {
         let pkt = build_ipv4_tcp_packet();
         let ctx = TcContext::new(pkt);
         let mut stats = create_test_flow_stats(EtherType::Ipv4, IpProto::Tcp);
-        let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv4, 34, false);
+        let result = capture_direction_metadata(&ctx, &mut stats, None, EtherType::Ipv4, 34, false);
 
         assert!(result.is_ok());
         assert_eq!(stats.ip_dscp, 0);
@@ -1547,7 +1662,7 @@ mod tests {
         let pkt = build_ipv6_tcp_packet();
         let ctx = TcContext::new(pkt);
         let mut stats = create_test_flow_stats(EtherType::Ipv6, IpProto::Tcp);
-        let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv6, 54, true);
+        let result = capture_direction_metadata(&ctx, &mut stats, None, EtherType::Ipv6, 54, true);
 
         assert!(result.is_ok());
         assert_eq!(stats.ip_dscp, 3);
@@ -1565,7 +1680,7 @@ mod tests {
         let pkt = build_ipv6_tcp_packet();
         let ctx = TcContext::new(pkt);
         let mut stats = create_test_flow_stats(EtherType::Ipv6, IpProto::Tcp);
-        let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv6, 54, false);
+        let result = capture_direction_metadata(&ctx, &mut stats, None, EtherType::Ipv6, 54, false);
 
         assert!(result.is_ok());
         assert_eq!(stats.ip_dscp, 0);
@@ -1583,13 +1698,21 @@ mod tests {
         let pkt = build_ipv4_icmp_packet();
         let ctx = TcContext::new(pkt);
         let mut stats = create_test_flow_stats(EtherType::Ipv4, IpProto::Icmp);
-        let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv4, 34, true);
+        let mut icmp_stats = create_test_icmp_stats();
+        let result = capture_direction_metadata(
+            &ctx,
+            &mut stats,
+            Some(&mut icmp_stats),
+            EtherType::Ipv4,
+            34,
+            true,
+        );
 
         assert!(result.is_ok());
-        assert_eq!(stats.icmp_type, 8); // Echo Request
-        assert_eq!(stats.icmp_code, 0);
-        assert_eq!(stats.reverse_icmp_type, 0);
-        assert_eq!(stats.reverse_icmp_code, 0);
+        assert_eq!(icmp_stats.icmp_type, 8); // Echo Request
+        assert_eq!(icmp_stats.icmp_code, 0);
+        assert_eq!(icmp_stats.reverse_icmp_type, 0);
+        assert_eq!(icmp_stats.reverse_icmp_code, 0);
     }
 
     #[test]
@@ -1597,13 +1720,21 @@ mod tests {
         let pkt = build_ipv4_icmp_packet();
         let ctx = TcContext::new(pkt);
         let mut stats = create_test_flow_stats(EtherType::Ipv4, IpProto::Icmp);
-        let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv4, 34, false);
+        let mut icmp_stats = create_test_icmp_stats();
+        let result = capture_direction_metadata(
+            &ctx,
+            &mut stats,
+            Some(&mut icmp_stats),
+            EtherType::Ipv4,
+            34,
+            false,
+        );
 
         assert!(result.is_ok());
-        assert_eq!(stats.icmp_type, 0);
-        assert_eq!(stats.icmp_code, 0);
-        assert_eq!(stats.reverse_icmp_type, 8);
-        assert_eq!(stats.reverse_icmp_code, 0);
+        assert_eq!(icmp_stats.icmp_type, 0);
+        assert_eq!(icmp_stats.icmp_code, 0);
+        assert_eq!(icmp_stats.reverse_icmp_type, 8);
+        assert_eq!(icmp_stats.reverse_icmp_code, 0);
     }
 
     #[test]
@@ -1637,16 +1768,17 @@ mod tests {
 
     #[test]
     fn test_tcp_timing_logic() {
-        let mut stats = create_test_flow_stats(EtherType::Ipv4, IpProto::Tcp);
+        let mut stats = create_test_tcp_stats();
 
-        stats.tcp_flags = FlowStats::TCP_FLAG_SYN;
-        update_tcp_timing(&mut stats, true, false, 1_000);
+        stats.tcp_flags = TcpStats::TCP_FLAG_SYN;
+        update_tcp_timing(&mut stats, true, false, TcpStats::TCP_FLAG_SYN, 1_000);
         assert_eq!(stats.tcp_syn_ns, 1_000);
         assert_eq!(stats.tcp_syn_ack_ns, 0);
 
         // Once ACK is also present, SYN timestamp should NOT be overwritten, but SYN/ACK should be set.
-        stats.tcp_flags |= FlowStats::TCP_FLAG_ACK;
-        update_tcp_timing(&mut stats, false, false, 1_200);
+        let syn_ack_flags = TcpStats::TCP_FLAG_SYN | TcpStats::TCP_FLAG_ACK;
+        stats.tcp_flags |= TcpStats::TCP_FLAG_ACK;
+        update_tcp_timing(&mut stats, false, false, syn_ack_flags, 1_200);
         assert_eq!(stats.tcp_syn_ns, 1_000);
         assert_eq!(stats.tcp_syn_ack_ns, 1_200);
 
@@ -1658,7 +1790,7 @@ mod tests {
         //   resets tcp_last_payload_fwd_ns to 0, and updates jitter avg.
         // --------------------------------------------------------------------
 
-        update_tcp_timing(&mut stats, true, true, 2_000);
+        update_tcp_timing(&mut stats, true, true, TcpStats::TCP_FLAG_ACK, 2_000);
         assert_eq!(stats.tcp_last_payload_fwd_ns, 2_000);
         assert_eq!(stats.tcp_last_payload_rev_ns, 0);
         assert_eq!(stats.tcp_txn_sum_ns, 0);
@@ -1666,7 +1798,7 @@ mod tests {
         assert_eq!(stats.tcp_jitter_avg_ns, 0);
 
         // Reverse payload closes the "transaction": delta=100, sum+=100, count+=1, fwd_ts reset to 0.
-        update_tcp_timing(&mut stats, false, true, 2_100);
+        update_tcp_timing(&mut stats, false, true, TcpStats::TCP_FLAG_ACK, 2_100);
         assert_eq!(stats.tcp_last_payload_rev_ns, 2_100);
         assert_eq!(stats.tcp_txn_sum_ns, 100);
         assert_eq!(stats.tcp_txn_count, 1);
@@ -1674,15 +1806,15 @@ mod tests {
         assert_eq!(stats.tcp_jitter_avg_ns, 6);
 
         // Another forward payload starts a new pair.
-        update_tcp_timing(&mut stats, true, true, 3_000);
+        update_tcp_timing(&mut stats, true, true, TcpStats::TCP_FLAG_ACK, 3_000);
         assert_eq!(stats.tcp_last_payload_fwd_ns, 3_000);
 
-        // Reverse payload delta=116 -> sum=216, count=2, jitter: J=6 + |116-6|/16 = 6 + 110/16 = 12
-        update_tcp_timing(&mut stats, false, true, 3_116);
-        assert_eq!(stats.tcp_txn_sum_ns, 216);
-        assert_eq!(stats.tcp_txn_count, 2);
+        // Reverse payload delta=116 -> sum=1116, count=3, jitter: J=61 + |116-61|/16 = 61 + 3 = 64
+        update_tcp_timing(&mut stats, false, true, TcpStats::TCP_FLAG_ACK, 3_116);
+        assert_eq!(stats.tcp_txn_sum_ns, 1116);
+        assert_eq!(stats.tcp_txn_count, 3);
         assert_eq!(stats.tcp_last_payload_fwd_ns, 0);
-        assert_eq!(stats.tcp_jitter_avg_ns, 12);
+        assert_eq!(stats.tcp_jitter_avg_ns, 64);
 
         // - payload_len == 0 should not touch payload timestamps / txn counters
         // - saturating_sub: if reverse timestamp < forward timestamp, delta becomes 0
@@ -1692,8 +1824,8 @@ mod tests {
         let snap_fwd = stats.tcp_last_payload_fwd_ns;
         let snap_rev = stats.tcp_last_payload_rev_ns;
 
-        update_tcp_timing(&mut stats, true, false, 9_999);
-        update_tcp_timing(&mut stats, false, false, 9_999);
+        update_tcp_timing(&mut stats, true, false, TcpStats::TCP_FLAG_ACK, 9_999);
+        update_tcp_timing(&mut stats, false, false, TcpStats::TCP_FLAG_ACK, 9_999);
 
         assert_eq!(stats.tcp_txn_sum_ns, snap_sum);
         assert_eq!(stats.tcp_txn_count, snap_cnt);

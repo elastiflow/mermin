@@ -385,6 +385,8 @@ impl PacketFilter {
         &self,
         flow_key: &mermin_common::FlowKey,
         stats: &mermin_common::FlowStats,
+        tcp_stats: Option<&mermin_common::TcpStats>,
+        icmp_stats: Option<&mermin_common::IcmpStats>,
     ) -> Result<bool, IpError> {
         // Network-level filters
         check_filter!(&self.network.transport, &flow_key.protocol.to_string());
@@ -433,17 +435,21 @@ impl PacketFilter {
             check_filter!(&self.flow.ip_flow_label, &stats.ip_flow_label);
         }
 
-        if matches!(flow_key.protocol, IpProto::Icmp | IpProto::Ipv6Icmp) {
+        if matches!(flow_key.protocol, IpProto::Icmp | IpProto::Ipv6Icmp)
+            && let Some(icmp) = icmp_stats
+        {
             // Use numeric ICMP type/code for filtering since the types don't implement Display
-            let icmp_type_str = stats.icmp_type.to_string();
-            let icmp_code_str = stats.icmp_code.to_string();
+            let icmp_type_str = icmp.icmp_type.to_string();
+            let icmp_code_str = icmp.icmp_code.to_string();
             check_filter!(&self.flow.icmp_type_name, icmp_type_str.as_str());
             check_filter!(&self.flow.icmp_code_name, icmp_code_str.as_str());
         }
 
-        if flow_key.protocol == IpProto::Tcp {
+        if flow_key.protocol == IpProto::Tcp
+            && let Some(tcp) = tcp_stats
+        {
             if let Some(rules) = &self.flow.tcp_flags {
-                let flags_vec = TcpFlags::flags_from_bits(stats.tcp_flags);
+                let flags_vec = TcpFlags::flags_from_bits(tcp.tcp_flags);
                 // Check each flag individually against the patterns
                 // This allows patterns like "syn,ack" to match flows with any of those flags
                 for flag in &flags_vec {
@@ -464,7 +470,7 @@ impl PacketFilter {
                 }
             }
 
-            check_filter!(&self.flow.connection_state, stats.tcp_state.as_str());
+            check_filter!(&self.flow.connection_state, tcp.tcp_state.as_str());
         }
 
         // Source/Destination filters (requires IP parsing)
@@ -503,7 +509,9 @@ mod tests {
         sync::Arc,
     };
 
-    use mermin_common::{ConnectionState, Direction, FlowKey, FlowStats, IpVersion};
+    use mermin_common::{
+        ConnectionState, Direction, FlowKey, FlowStats, IcmpStats, IpVersion, TcpStats,
+    };
     use network_types::{
         eth::EtherType,
         ip::IpProto,
@@ -545,13 +553,6 @@ mod tests {
             bytes: 0,
             reverse_packets: 0,
             reverse_bytes: 0,
-            tcp_syn_ns: 0,
-            tcp_syn_ack_ns: 0,
-            tcp_last_payload_fwd_ns: 0,
-            tcp_last_payload_rev_ns: 0,
-            tcp_txn_sum_ns: 0,
-            tcp_txn_count: 0,
-            tcp_jitter_avg_ns: 0,
             src_ip: [0; 16],
             dst_ip: [0; 16],
             src_mac: [0; 6],
@@ -570,16 +571,35 @@ mod tests {
             reverse_ip_ecn: 0,
             reverse_ip_ttl: 0,
             reverse_ip_flow_label: 0,
+            forward_metadata_seen: 1,
+            reverse_metadata_seen: 0,
+        }
+    }
+
+    /// Helper to create TcpStats for testing
+    fn mock_tcp_stats() -> TcpStats {
+        TcpStats {
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
+            tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
             tcp_flags: 0,
             tcp_state: ConnectionState::Closed,
             forward_tcp_flags: 0,
             reverse_tcp_flags: 0,
+        }
+    }
+
+    /// Helper to create IcmpStats for testing
+    fn mock_icmp_stats() -> IcmpStats {
+        IcmpStats {
             icmp_type: 0,
             icmp_code: 0,
             reverse_icmp_type: 0,
             reverse_icmp_code: 0,
-            forward_metadata_seen: 1,
-            reverse_metadata_seen: 0,
         }
     }
 
@@ -679,7 +699,13 @@ mod tests {
             IpProto::Tcp,
         );
         let flow_stats = mock_flow_stats(1);
-        assert!(filter.should_track_flow(&flow_key, &flow_stats).unwrap());
+        let tcp_stats = mock_tcp_stats();
+        let icmp_stats = mock_icmp_stats();
+        assert!(
+            filter
+                .should_track_flow(&flow_key, &flow_stats, Some(&tcp_stats), Some(&icmp_stats))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -710,11 +736,27 @@ mod tests {
             IpProto::Tcp,
         );
         let flow_stats = mock_flow_stats(1);
+        let tcp_stats = mock_tcp_stats();
+        let icmp_stats = mock_icmp_stats();
 
-        assert!(filter.should_track_flow(&flow_key_ok, &flow_stats).unwrap());
+        assert!(
+            filter
+                .should_track_flow(
+                    &flow_key_ok,
+                    &flow_stats,
+                    Some(&tcp_stats),
+                    Some(&icmp_stats)
+                )
+                .unwrap()
+        );
         assert!(
             !filter
-                .should_track_flow(&flow_key_bad, &flow_stats)
+                .should_track_flow(
+                    &flow_key_bad,
+                    &flow_stats,
+                    Some(&tcp_stats),
+                    Some(&icmp_stats)
+                )
                 .unwrap()
         );
     }
@@ -747,11 +789,27 @@ mod tests {
             IpProto::Udp,
         );
         let flow_stats = mock_flow_stats(1);
+        let tcp_stats = mock_tcp_stats();
+        let icmp_stats = mock_icmp_stats();
 
-        assert!(filter.should_track_flow(&flow_key_ok, &flow_stats).unwrap());
+        assert!(
+            filter
+                .should_track_flow(
+                    &flow_key_ok,
+                    &flow_stats,
+                    Some(&tcp_stats),
+                    Some(&icmp_stats)
+                )
+                .unwrap()
+        );
         assert!(
             !filter
-                .should_track_flow(&flow_key_bad, &flow_stats)
+                .should_track_flow(
+                    &flow_key_bad,
+                    &flow_stats,
+                    Some(&tcp_stats),
+                    Some(&icmp_stats)
+                )
                 .unwrap()
         );
     }
@@ -783,10 +841,27 @@ mod tests {
         let mut flow_stats_bad = mock_flow_stats(1);
         flow_stats_bad.ip_ttl = 128;
 
-        assert!(filter.should_track_flow(&flow_key, &flow_stats_ok).unwrap());
+        let tcp_stats = mock_tcp_stats();
+        let icmp_stats = mock_icmp_stats();
+
+        assert!(
+            filter
+                .should_track_flow(
+                    &flow_key,
+                    &flow_stats_ok,
+                    Some(&tcp_stats),
+                    Some(&icmp_stats)
+                )
+                .unwrap()
+        );
         assert!(
             !filter
-                .should_track_flow(&flow_key, &flow_stats_bad)
+                .should_track_flow(
+                    &flow_key,
+                    &flow_stats_bad,
+                    Some(&tcp_stats),
+                    Some(&icmp_stats)
+                )
                 .unwrap()
         );
     }
@@ -818,10 +893,27 @@ mod tests {
         let mut flow_stats_bad = mock_flow_stats(1);
         flow_stats_bad.ip_dscp = 0; // DF (Default)
 
-        assert!(filter.should_track_flow(&flow_key, &flow_stats_ok).unwrap());
+        let tcp_stats = mock_tcp_stats();
+        let icmp_stats = mock_icmp_stats();
+
+        assert!(
+            filter
+                .should_track_flow(
+                    &flow_key,
+                    &flow_stats_ok,
+                    Some(&tcp_stats),
+                    Some(&icmp_stats)
+                )
+                .unwrap()
+        );
         assert!(
             !filter
-                .should_track_flow(&flow_key, &flow_stats_bad)
+                .should_track_flow(
+                    &flow_key,
+                    &flow_stats_bad,
+                    Some(&tcp_stats),
+                    Some(&icmp_stats)
+                )
                 .unwrap()
         );
     }
@@ -853,10 +945,27 @@ mod tests {
         let mut flow_stats_bad = mock_flow_stats(1);
         flow_stats_bad.src_mac = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
 
-        assert!(filter.should_track_flow(&flow_key, &flow_stats_ok).unwrap());
+        let tcp_stats = mock_tcp_stats();
+        let icmp_stats = mock_icmp_stats();
+
+        assert!(
+            filter
+                .should_track_flow(
+                    &flow_key,
+                    &flow_stats_ok,
+                    Some(&tcp_stats),
+                    Some(&icmp_stats)
+                )
+                .unwrap()
+        );
         assert!(
             !filter
-                .should_track_flow(&flow_key, &flow_stats_bad)
+                .should_track_flow(
+                    &flow_key,
+                    &flow_stats_bad,
+                    Some(&tcp_stats),
+                    Some(&icmp_stats)
+                )
                 .unwrap()
         );
     }
@@ -881,8 +990,15 @@ mod tests {
             0,
             IpProto::Icmp,
         );
-        let mut flow_stats_ok = mock_flow_stats(1);
-        flow_stats_ok.icmp_type = 8; // Echo Request
+        let flow_stats_ok = mock_flow_stats(1);
+        let mut icmp_stats = mock_icmp_stats();
+        icmp_stats.icmp_type = 8; // Echo Request
+
+        assert!(
+            filter
+                .should_track_flow(&flow_key_ok, &flow_stats_ok, None, Some(&icmp_stats))
+                .unwrap()
+        );
 
         let flow_key_bad = mock_flow_key(
             "1.1.1.1".parse().unwrap(),
@@ -891,8 +1007,14 @@ mod tests {
             0,
             IpProto::Icmp,
         );
-        let mut flow_stats_bad = mock_flow_stats(1);
-        flow_stats_bad.icmp_type = 3; // Destination Unreachable
+        let flow_stats_bad = mock_flow_stats(1);
+        icmp_stats.icmp_type = 3; // Destination Unreachable
+
+        assert!(
+            !filter
+                .should_track_flow(&flow_key_bad, &flow_stats_bad, None, Some(&icmp_stats))
+                .unwrap()
+        );
 
         let flow_key_irrelevant = mock_flow_key(
             "1.1.1.1".parse().unwrap(),
@@ -905,17 +1027,12 @@ mod tests {
 
         assert!(
             filter
-                .should_track_flow(&flow_key_ok, &flow_stats_ok)
-                .unwrap()
-        );
-        assert!(
-            !filter
-                .should_track_flow(&flow_key_bad, &flow_stats_bad)
-                .unwrap()
-        );
-        assert!(
-            filter
-                .should_track_flow(&flow_key_irrelevant, &flow_stats_irrelevant)
+                .should_track_flow(
+                    &flow_key_irrelevant,
+                    &flow_stats_irrelevant,
+                    None,
+                    Some(&icmp_stats)
+                )
                 .unwrap()
         );
     }
@@ -941,36 +1058,40 @@ mod tests {
             IpProto::Tcp,
         );
 
-        let mut flow_stats_syn_ack = mock_flow_stats(1);
-        flow_stats_syn_ack.tcp_flags = TCP_FLAG_SYN | TCP_FLAG_ACK;
-
-        let mut flow_stats_ack = mock_flow_stats(1);
-        flow_stats_ack.tcp_flags = TCP_FLAG_ACK;
-
-        let mut flow_stats_rst = mock_flow_stats(1);
-        flow_stats_rst.tcp_flags = TCP_FLAG_RST;
-
-        let mut flow_stats_syn_rst = mock_flow_stats(1);
-        flow_stats_syn_rst.tcp_flags = TCP_FLAG_SYN | TCP_FLAG_RST;
+        let flow_stats_syn_ack = mock_flow_stats(1);
+        let mut tcp_stats = mock_tcp_stats();
+        tcp_stats.tcp_flags = TCP_FLAG_SYN | TCP_FLAG_ACK;
 
         assert!(
             filter
-                .should_track_flow(&flow_key, &flow_stats_syn_ack)
+                .should_track_flow(&flow_key, &flow_stats_syn_ack, Some(&tcp_stats), None)
                 .unwrap()
         ); // Has ACK, no RST
+
+        let flow_stats_ack = mock_flow_stats(1);
+        tcp_stats.tcp_flags = TCP_FLAG_ACK;
+
         assert!(
             filter
-                .should_track_flow(&flow_key, &flow_stats_ack)
+                .should_track_flow(&flow_key, &flow_stats_ack, Some(&tcp_stats), None)
                 .unwrap()
         ); // Has ACK, no RST
+
+        let flow_stats_rst = mock_flow_stats(1);
+        tcp_stats.tcp_flags = TCP_FLAG_RST;
+
         assert!(
             !filter
-                .should_track_flow(&flow_key, &flow_stats_rst)
+                .should_track_flow(&flow_key, &flow_stats_rst, Some(&tcp_stats), None)
                 .unwrap()
         ); // Has RST
+
+        let flow_stats_syn_rst = mock_flow_stats(1);
+        tcp_stats.tcp_flags = TCP_FLAG_SYN | TCP_FLAG_RST;
+
         assert!(
             !filter
-                .should_track_flow(&flow_key, &flow_stats_syn_rst)
+                .should_track_flow(&flow_key, &flow_stats_syn_rst, Some(&tcp_stats), None)
                 .unwrap()
         ); // Has RST
     }
@@ -998,9 +1119,16 @@ mod tests {
             IpProto::Tcp,
         );
         let flow_stats = mock_flow_stats(1);
+        let tcp_stats = mock_tcp_stats();
+        let icmp_stats = mock_icmp_stats();
         assert!(
             filter
-                .should_track_flow(&flow_key_in_range, &flow_stats)
+                .should_track_flow(
+                    &flow_key_in_range,
+                    &flow_stats,
+                    Some(&tcp_stats),
+                    Some(&icmp_stats)
+                )
                 .unwrap()
         );
 
@@ -1014,7 +1142,12 @@ mod tests {
         );
         assert!(
             !filter
-                .should_track_flow(&flow_key_out_range, &flow_stats)
+                .should_track_flow(
+                    &flow_key_out_range,
+                    &flow_stats,
+                    Some(&tcp_stats),
+                    Some(&icmp_stats)
+                )
                 .unwrap()
         );
     }
@@ -1042,7 +1175,18 @@ mod tests {
             IpProto::Tcp,
         );
         let flow_stats = mock_flow_stats(1);
-        assert!(filter.should_track_flow(&flow_key_80, &flow_stats).unwrap());
+        let tcp_stats = mock_tcp_stats();
+        let icmp_stats = mock_icmp_stats();
+        assert!(
+            filter
+                .should_track_flow(
+                    &flow_key_80,
+                    &flow_stats,
+                    Some(&tcp_stats),
+                    Some(&icmp_stats)
+                )
+                .unwrap()
+        );
 
         // Port in invalid range should not match
         let flow_key_8500 = mock_flow_key(
@@ -1054,7 +1198,12 @@ mod tests {
         );
         assert!(
             !filter
-                .should_track_flow(&flow_key_8500, &flow_stats)
+                .should_track_flow(
+                    &flow_key_8500,
+                    &flow_stats,
+                    Some(&tcp_stats),
+                    Some(&icmp_stats)
+                )
                 .unwrap()
         );
     }
@@ -1072,8 +1221,14 @@ mod tests {
             IpProto::Tcp,
         );
         let flow_stats = mock_flow_stats(1);
+        let tcp_stats = mock_tcp_stats();
+        let icmp_stats = mock_icmp_stats();
 
-        assert!(filter.should_track_flow(&flow_key, &flow_stats).unwrap());
+        assert!(
+            filter
+                .should_track_flow(&flow_key, &flow_stats, Some(&tcp_stats), Some(&icmp_stats))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -1099,7 +1254,13 @@ mod tests {
             IpProto::Tcp,
         );
         let flow_stats = mock_flow_stats(1);
-        assert!(filter.should_track_flow(&flow_key, &flow_stats).unwrap());
+        let tcp_stats = mock_tcp_stats();
+        let icmp_stats = mock_icmp_stats();
+        assert!(
+            filter
+                .should_track_flow(&flow_key, &flow_stats, Some(&tcp_stats), Some(&icmp_stats))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -1125,9 +1286,16 @@ mod tests {
             IpProto::Tcp,
         );
         let flow_stats = mock_flow_stats(1);
+        let tcp_stats = mock_tcp_stats();
+        let icmp_stats = mock_icmp_stats();
         assert!(
             filter
-                .should_track_flow(&flow_key_tcp, &flow_stats)
+                .should_track_flow(
+                    &flow_key_tcp,
+                    &flow_stats,
+                    Some(&tcp_stats),
+                    Some(&icmp_stats)
+                )
                 .unwrap()
         );
 
@@ -1140,7 +1308,12 @@ mod tests {
         );
         assert!(
             filter
-                .should_track_flow(&flow_key_udp, &flow_stats)
+                .should_track_flow(
+                    &flow_key_udp,
+                    &flow_stats,
+                    Some(&tcp_stats),
+                    Some(&icmp_stats)
+                )
                 .unwrap()
         );
     }

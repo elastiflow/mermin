@@ -214,7 +214,9 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
         "loading eBPF program"
     );
     let mut ebpf = aya::EbpfLoader::new()
-        .set_max_entries("FLOW_STATS_MAP", 1000) // Small size for testing
+        .set_max_entries("FLOW_STATS_MAP", 1000)
+        .set_max_entries("TCP_STATS", 1000)
+        .set_max_entries("ICMP_STATS", 1000) // Small size for testing
         .load(aya::include_bytes_aligned!(concat!(
             env!("OUT_DIR"),
             "/mermin"
