@@ -17,8 +17,8 @@ pipeline {
   worker_count                      = 4
   worker_poll_interval              = "5s"
   k8s_decorator_threads             = 4
-  flow_span_channel_multiplier      = 2.0
-  decorated_span_channel_multiplier = 4.0
+  flow_span_channel_capacity        = 16384
+  decorated_span_channel_capacity   = 32768
 }
 
 # Internal configuration options

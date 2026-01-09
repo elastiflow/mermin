@@ -178,15 +178,13 @@ Mermin provides metrics to monitor shutdown behavior:
 
 Base capacity for **userspace channels** between pipeline stages. This is the foundation for all pipeline channel sizes and flow store capacity.
 
-**Important:** This does NOT control the eBPF `FLOW_EVENTS` ring buffer (hardcoded at 256 KB). Instead, it sizes the userspace processing pipeline.
+**Important:** This does NOT control the eBPF `FLOW_EVENTS` ring buffer (default 256 KB, configurable via `ebpf_ring_buffer_size_bytes`). Instead, it sizes the userspace processing pipeline.
 
 **Behavior:**
 
 * Sets worker queue capacity: `base_capacity / worker_count`
-* Base for flow span channel: `base_capacity × flow_span_channel_multiplier`
-* Base for decorated span channel: `base_capacity × decorated_span_channel_multiplier`
 * Flow store initial capacity: `base_capacity × 4`
-* Higher values provide more buffering throughout the userspace pipeline
+* Higher values provide more buffering for worker queues
 * Lower values reduce memory usage
 * If channels fill, backpressure and sampling occur (visible in metrics)
 
@@ -345,31 +343,31 @@ Drop rate threshold for logging backpressure warnings. Warnings are logged when 
 
 These options control the buffer sizes between pipeline stages to optimize for your workload.
 
-#### `flow_span_channel_multiplier`
+#### `flow_span_channel_capacity`
 
-**Type:** Float
-**Default:** `2.0`
+**Type:** Integer
+**Default:** `16384`
 
-Multiplier for flow span channel capacity. Provides buffering between workers and K8s decorator. Channel size = `base_capacity * flow_span_channel_multiplier`. With defaults (8192 × 2.0 = 16,384 slots, ~160ms buffer at 100K/s).
-
-**Recommendations:**
-
-* **Steady traffic**: `2.0` (default)
-* **Bursty traffic**: `3.0`-`4.0`
-* **Low latency priority**: `1.5`
-
-#### `decorated_span_channel_multiplier`
-
-**Type:** Float
-**Default:** `4.0`
-
-Multiplier for decorated span (export) channel capacity. Provides buffering between K8s decorator and OTLP exporter. This should be the largest buffer since network export is the slowest stage. Channel size = `base_capacity * decorated_span_channel_multiplier`. With defaults (8192 × 4.0 = 32,768 slots, ~320ms buffer at 100K/s).
+Explicit capacity for the flow span channel. Provides buffering between workers and K8s decorator. With defaults (16,384 slots, ~160ms buffer at 100K/s).
 
 **Recommendations:**
 
-* **Reliable network**: `4.0` (default)
-* **Unreliable network**: `6.0`-`8.0`
-* **Very high throughput**: `8.0`-`12.0`
+* **Steady traffic**: `16384` (default)
+* **Bursty traffic**: `32768`
+* **Low latency priority**: `8192`
+
+#### `decorated_span_channel_capacity`
+
+**Type:** Integer
+**Default:** `32768`
+
+Explicit capacity for the decorated span (export) channel. Provides buffering between K8s decorator and OTLP exporter. This should be the largest buffer since network export is the slowest stage. With defaults (32,768 slots, ~320ms buffer at 100K/s).
+
+**Recommendations:**
+
+* **Reliable network**: `32768` (default)
+* **Unreliable network**: `65536`
+* **Very high throughput**: `131072`
 
 ### Monitoring Performance Configuration
 
@@ -388,175 +386,6 @@ See the [Application Metrics](../observability/app-metrics.md) guide for complet
 * Channel utilization < 80%
 * p95 processing latency < 10ms
 * IP index updates < 100ms
-
-### Pipeline Tuning Example
-
-For a large cluster with high throughput:
-
-```hcl
-pipeline {
-  # High-throughput base capacity
-  base_capacity = 16384
-  worker_count = 8
-
-  # Increase decorator parallelism
-  k8s_decorator_threads = 16
-
-  # Channel multipliers
-  flow_span_channel_multiplier = 3.0
-  decorated_span_channel_multiplier = 8.0
-
-  # Adaptive sampling enabled
-  sampling_enabled = true
-  sampling_min_rate = 0.15
-}
-```
-
-## Complete Example
-
-```hcl
-# Global configuration options
-
-# Required: Path to this config file (set via CLI or ENV)
-# mermin --config=/etc/mermin/config.hcl
-
-# Logging verbosity
-log_level = "info"
-
-# Auto-reload config on file changes
-auto_reload = true
-
-# Graceful shutdown timeout
-shutdown_timeout = "10s"
-
-# Pipeline tuning for flow processing
-pipeline {
-  base_capacity = 8192
-  worker_count = 4
-  k8s_decorator_threads = 4
-}
-
-```
-
-## Precedence Example
-
-When the same option is set in multiple places:
-
-```hcl
-# config.hcl
-log_level = "info"
-```
-
-```bash
-# Environment variable
-export MERMIN_LOG_LEVEL=warn
-
-# CLI flag (highest precedence)
-mermin --log-level=debug --config=config.hcl
-```
-
-**Result:** `log_level` will be `debug` (CLI flag wins).
-
-**Precedence Order (highest to lowest):**
-
-1. Command-line flags
-2. Environment variables
-3. Configuration file
-4. Built-in defaults
-
-## Validation
-
-Invalid values are rejected on startup:
-
-```hcl
-log_level = "invalid"
-```
-
-```
-Error: invalid log level "invalid", must be one of: trace, debug, info, warn, error
-```
-
-```hcl
-pipeline {
-  base_capacity = -1
-}
-```
-
-```
-Error: pipeline.base_capacity must be a positive integer
-```
-
-## Monitoring Configuration Effectiveness
-
-After changing global options, monitor these key metrics:
-
-- `mermin_packets_total` - Total packets processed
-- `mermin_flow_events_total{status="dropped_backpressure"}` - Dropped events due to backpressure
-- `container_cpu_usage_seconds_total` - CPU usage (from cAdvisor/kubelet)
-- `container_memory_working_set_bytes` - Memory usage (from cAdvisor/kubelet)
-
-See the [Application Metrics](../observability/app-metrics.md) guide for complete Prometheus query examples.
-
-**Healthy indicators:**
-
-* Zero or minimal packet drops
-* CPU usage 50-80% of allocated
-* Stable memory usage
-
-## Best Practices
-
-1. **Start conservative**: Use default values initially
-2. **Monitor before tuning**: Collect metrics for at least 24 hours
-3. **Change one at a time**: Isolate the impact of each change
-4. **Document changes**: Note why specific values were chosen
-5. **Test in non-production**: Validate tuning before production rollout
-
-## Troubleshooting
-
-### High Packet Drop Rate
-
-**Symptoms:** `mermin_flow_events_total{status="dropped_backpressure"}` increasing
-
-**Solutions:**
-
-1. Increase `pipeline.base_capacity`
-2. Increase `pipeline.worker_count`
-3. Allocate more CPU resources
-4. Reduce monitored interfaces
-
-### High CPU Usage
-
-**Symptoms:** CPU utilization near limits
-
-**Solutions:**
-
-1. Decrease `pipeline.worker_count`
-2. Increase flow timeouts (see [Span Options](span-options.md))
-3. Add flow filters (see [Filtering](filtering.md))
-4. Allocate more CPU resources
-
-### High Memory Usage
-
-**Symptoms:** Memory usage growing unbounded
-
-**Solutions:**
-
-1. Decrease `pipeline.base_capacity`
-2. Decrease flow timeouts (see [Span Options](span-options.md))
-3. Add flow filters to reduce active flows
-4. Allocate more memory resources
-
-### Configuration Not Reloading
-
-**Symptoms:** Changes to config file not applied
-
-**Solutions:**
-
-1. Verify `auto_reload = true` is set
-2. Check logs for reload errors
-3. Validate configuration syntax
-4. Ensure file permissions allow reading
-5. Some changes require full restart
 
 ## Next Steps
 
