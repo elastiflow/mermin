@@ -1133,7 +1133,7 @@
           "unit": "s"
         }
       },
-      "pluginVersion": "12.3.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
           "datasource": {
@@ -1233,7 +1233,7 @@
           "unit": "spans"
         }
       },
-      "pluginVersion": "12.3.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
           "datasource": {
@@ -1261,6 +1261,712 @@
         "w": 24,
         "x": 0,
         "y": 34
+      },
+      "id": 44,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "fieldMinMax": true,
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "eps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 0,
+            "y": 35
+          },
+          "id": 49,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "vertical",
+            "percentChangeColorMode": "standard",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showPercentChange": false,
+            "textMode": "auto",
+            "wideLayout": true
+          },
+          "pluginVersion": "12.3.1",
+          "targets": [
+            {
+              "editorMode": "code",
+              "exemplar": false,
+              "expr": "min_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"ebpf_ringbuf_out\"}[$__rate_interval])) by (stage)[$__range:])",
+              "instant": false,
+              "legendFormat": "min",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "exemplar": false,
+              "expr": "avg_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"ebpf_ringbuf_out\"}[$__rate_interval])) by (stage)[$__range:])",
+              "hide": false,
+              "instant": false,
+              "legendFormat": "avg",
+              "range": true,
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "exemplar": false,
+              "expr": "max_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"ebpf_ringbuf_out\"}[$__rate_interval])) by (stage)[$__range:])",
+              "hide": false,
+              "instant": false,
+              "legendFormat": "max",
+              "range": true,
+              "refId": "C"
+            }
+          ],
+          "title": "\"ebpf_ringbuf_out\" min, avg, max rate",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 100,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "showValues": false,
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "normal"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "eps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 12,
+            "w": 17,
+            "x": 4,
+            "y": 35
+          },
+          "id": 50,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.3.1",
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "sum(rate(mermin_pipeline_duration_seconds_count[$__rate_interval])) by (stage)",
+              "legendFormat": "Stage: {{ stage }}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Mermin pipeline events rate",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "fieldMinMax": true,
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "eps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 0,
+            "y": 39
+          },
+          "id": 51,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "vertical",
+            "percentChangeColorMode": "standard",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showPercentChange": false,
+            "textMode": "auto",
+            "wideLayout": true
+          },
+          "pluginVersion": "12.3.1",
+          "targets": [
+            {
+              "editorMode": "code",
+              "exemplar": false,
+              "expr": "min_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"flow_producer_out\"}[$__rate_interval])) by (stage)[$__range:])",
+              "instant": false,
+              "legendFormat": "min",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "exemplar": false,
+              "expr": "avg_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"flow_producer_out\"}[$__rate_interval])) by (stage)[$__range:])",
+              "hide": false,
+              "instant": false,
+              "legendFormat": "avg",
+              "range": true,
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "exemplar": false,
+              "expr": "max_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"flow_producer_out\"}[$__rate_interval])) by (stage)[$__range:])",
+              "hide": false,
+              "instant": false,
+              "legendFormat": "max",
+              "range": true,
+              "refId": "C"
+            }
+          ],
+          "title": "\"flow_producer_out\" min, avg, max rate",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "fieldMinMax": true,
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "eps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 0,
+            "y": 43
+          },
+          "id": 52,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "vertical",
+            "percentChangeColorMode": "standard",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showPercentChange": false,
+            "textMode": "auto",
+            "wideLayout": true
+          },
+          "pluginVersion": "12.3.1",
+          "targets": [
+            {
+              "editorMode": "code",
+              "exemplar": false,
+              "expr": "min_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"k8s_decorator_out\"}[$__rate_interval])) by (stage)[$__range:])",
+              "instant": false,
+              "legendFormat": "min",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "exemplar": false,
+              "expr": "avg_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"k8s_decorator_out\"}[$__rate_interval])) by (stage)[$__range:])",
+              "hide": false,
+              "instant": false,
+              "legendFormat": "avg",
+              "range": true,
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "exemplar": false,
+              "expr": "max_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"k8s_decorator_out\"}[$__rate_interval])) by (stage)[$__range:])",
+              "hide": false,
+              "instant": false,
+              "legendFormat": "max",
+              "range": true,
+              "refId": "C"
+            }
+          ],
+          "title": "\"k8s_decorator_out\" min, avg, max rate",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Mermin \"ebpf_ringbuf_out\" pipeline stage duration ",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 0,
+            "y": 47
+          },
+          "id": 46,
+          "interval": "60s",
+          "maxDataPoints": 500,
+          "maxPerRow": 3,
+          "options": {
+            "calculate": false,
+            "calculation": {
+              "xBuckets": {
+                "mode": "size",
+                "value": ""
+              },
+              "yBuckets": {
+                "mode": "size",
+                "value": ""
+              }
+            },
+            "cellGap": 1,
+            "cellValues": {
+              "unit": "updates per sec"
+            },
+            "color": {
+              "exponent": 0.5,
+              "fill": "dark-orange",
+              "mode": "scheme",
+              "reverse": false,
+              "scale": "exponential",
+              "scheme": "RdYlGn",
+              "steps": 16
+            },
+            "exemplars": {
+              "color": "rgba(255,0,255,0.7)"
+            },
+            "filterValues": {
+              "le": 1E-9
+            },
+            "legend": {
+              "show": true
+            },
+            "rowsFrame": {
+              "layout": "auto",
+              "value": "Updates"
+            },
+            "tooltip": {
+              "mode": "single",
+              "showColorScale": true,
+              "yHistogram": true
+            },
+            "yAxis": {
+              "axisPlacement": "left",
+              "reverse": false,
+              "unit": "s"
+            }
+          },
+          "pluginVersion": "12.3.1",
+          "repeatDirection": "h",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(rate(mermin_pipeline_duration_seconds_bucket{stage=\"ebpf_ringbuf_out\"}[$__rate_interval])) by (stage, le)",
+              "format": "heatmap",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "legendFormat": "__auto",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "\"ebpf_ringbuf_out\" duration ",
+          "type": "heatmap"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Mermin \"flow_producer_out\" pipeline stage duration ",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 8,
+            "y": 47
+          },
+          "id": 47,
+          "interval": "60s",
+          "maxDataPoints": 500,
+          "maxPerRow": 3,
+          "options": {
+            "calculate": false,
+            "calculation": {
+              "xBuckets": {
+                "mode": "size",
+                "value": ""
+              },
+              "yBuckets": {
+                "mode": "size",
+                "value": ""
+              }
+            },
+            "cellGap": 1,
+            "cellValues": {
+              "unit": "updates per sec"
+            },
+            "color": {
+              "exponent": 0.5,
+              "fill": "dark-orange",
+              "mode": "scheme",
+              "reverse": false,
+              "scale": "exponential",
+              "scheme": "RdYlGn",
+              "steps": 16
+            },
+            "exemplars": {
+              "color": "rgba(255,0,255,0.7)"
+            },
+            "filterValues": {
+              "le": 1E-9
+            },
+            "legend": {
+              "show": true
+            },
+            "rowsFrame": {
+              "layout": "auto",
+              "value": "Updates"
+            },
+            "tooltip": {
+              "mode": "single",
+              "showColorScale": true,
+              "yHistogram": true
+            },
+            "yAxis": {
+              "axisPlacement": "left",
+              "reverse": false,
+              "unit": "s"
+            }
+          },
+          "pluginVersion": "12.3.1",
+          "repeatDirection": "h",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(rate(mermin_pipeline_duration_seconds_bucket{stage=\"flow_producer_out\"}[$__rate_interval])) by (stage, le)",
+              "format": "heatmap",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "legendFormat": "__auto",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "\"flow_producer_out\" duration ",
+          "type": "heatmap"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Mermin \"k8s_decorator_out\" pipeline stage duration ",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 16,
+            "y": 47
+          },
+          "id": 48,
+          "interval": "60s",
+          "maxDataPoints": 500,
+          "maxPerRow": 3,
+          "options": {
+            "calculate": false,
+            "calculation": {
+              "xBuckets": {
+                "mode": "size",
+                "value": ""
+              },
+              "yBuckets": {
+                "mode": "size",
+                "value": ""
+              }
+            },
+            "cellGap": 1,
+            "cellValues": {
+              "unit": "updates per sec"
+            },
+            "color": {
+              "exponent": 0.5,
+              "fill": "dark-orange",
+              "mode": "scheme",
+              "reverse": false,
+              "scale": "exponential",
+              "scheme": "RdYlGn",
+              "steps": 16
+            },
+            "exemplars": {
+              "color": "rgba(255,0,255,0.7)"
+            },
+            "filterValues": {
+              "le": 1E-9
+            },
+            "legend": {
+              "show": true
+            },
+            "rowsFrame": {
+              "layout": "auto",
+              "value": "Updates"
+            },
+            "tooltip": {
+              "mode": "single",
+              "showColorScale": true,
+              "yHistogram": true
+            },
+            "yAxis": {
+              "axisPlacement": "left",
+              "reverse": false,
+              "unit": "s"
+            }
+          },
+          "pluginVersion": "12.3.1",
+          "repeatDirection": "h",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(rate(mermin_pipeline_duration_seconds_bucket{stage=\"k8s_decorator_out\"}[$__rate_interval])) by (stage, le)",
+              "format": "heatmap",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "legendFormat": "__auto",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "\"k8s_decorator_out\" duration ",
+          "type": "heatmap"
+        }
+      ],
+      "title": "Pipeline",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 35
       },
       "id": 11,
       "panels": [
@@ -1348,7 +2054,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 419
+            "y": 86
           },
           "id": 6,
           "options": {
@@ -1484,7 +2190,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 419
+            "y": 86
           },
           "id": 24,
           "interval": "60s",
@@ -1622,7 +2328,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 427
+            "y": 94
           },
           "id": 25,
           "interval": "60s",
@@ -1699,7 +2405,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 427
+            "y": 94
           },
           "id": 23,
           "interval": "60s",
@@ -1784,7 +2490,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 36
       },
       "id": 13,
       "panels": [
@@ -1844,7 +2550,7 @@
             "h": 3,
             "w": 12,
             "x": 0,
-            "y": 452
+            "y": 763
           },
           "id": 29,
           "options": {
@@ -1938,7 +2644,7 @@
             "h": 3,
             "w": 12,
             "x": 12,
-            "y": 452
+            "y": 763
           },
           "id": 28,
           "options": {
@@ -2077,7 +2783,7 @@
             "h": 5,
             "w": 12,
             "x": 0,
-            "y": 455
+            "y": 766
           },
           "id": 43,
           "options": {
@@ -2200,7 +2906,7 @@
             "h": 5,
             "w": 12,
             "x": 12,
-            "y": 455
+            "y": 766
           },
           "id": 22,
           "options": {
@@ -2319,7 +3025,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 460
+            "y": 771
           },
           "id": 26,
           "options": {
@@ -2425,7 +3131,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 460
+            "y": 771
           },
           "id": 5,
           "options": {
@@ -2532,7 +3238,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 469
+            "y": 780
           },
           "id": 27,
           "options": {
@@ -2670,7 +3376,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 469
+            "y": 780
           },
           "id": 33,
           "options": {
@@ -2742,7 +3448,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 36
+        "y": 37
       },
       "id": 32,
       "panels": [
@@ -2814,7 +3520,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 667
+            "y": 281
           },
           "id": 34,
           "options": {
@@ -2836,7 +3542,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.3.0",
+          "pluginVersion": "12.3.1",
           "targets": [
             {
               "datasource": {
@@ -2952,7 +3658,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 667
+            "y": 281
           },
           "id": 30,
           "options": {
@@ -2972,7 +3678,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.3.0",
+          "pluginVersion": "12.3.1",
           "targets": [
             {
               "datasource": {
@@ -3081,7 +3787,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 676
+            "y": 290
           },
           "id": 41,
           "options": {
@@ -3101,7 +3807,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.3.0",
+          "pluginVersion": "12.3.1",
           "targets": [
             {
               "datasource": {
@@ -3248,6 +3954,6 @@
   "timezone": "browser",
   "title": "Mermin Application",
   "uid": "mermin_app",
-  "version": 3,
+  "version": 21,
   "weekStart": ""
 }
