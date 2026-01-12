@@ -18,8 +18,12 @@ shutdown_timeout = "30s"
 # Defaults are optimized for typical production workloads (1K-5K flows/sec)
 pipeline {
   ebpf_max_flows = 500000        # For high-traffic ingress (>10K flows/sec)
+  worker_queue_capacity = 2048   # Default buffer per worker
+  flow_store_capacity = 32768    # Initial flow store size
   worker_count = 8               # For very busy nodes
   k8s_decorator_threads = 12     # For very large clusters
+  flow_span_channel_capacity = 16384
+  decorated_span_channel_capacity = 32768
 }
 
 # API for health checks (required for liveness/readiness probes)
@@ -404,9 +408,12 @@ log_level = "warn"  # Reduce logging overhead
 # Maximize capacity and worker parallelism for extreme scale
 pipeline {
   ebpf_max_flows = 1000000
-  base_capacity = 16384
+  worker_queue_capacity = 4096
+  flow_store_capacity = 131072
   worker_count = 16
   k8s_decorator_threads = 24
+  flow_span_channel_capacity = 32768
+  decorated_span_channel_capacity = 65536
 }
 
 api {

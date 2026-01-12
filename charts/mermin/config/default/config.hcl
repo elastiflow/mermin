@@ -13,7 +13,8 @@ shutdown_timeout = "5s"
 # Pipeline performance and channel configuration options
 pipeline {
   ebpf_max_flows                    = 100000
-  base_capacity                     = 8192
+  worker_queue_capacity             = 2048
+  flow_store_capacity               = 32768
   worker_count                      = 4
   worker_poll_interval              = "5s"
   k8s_decorator_threads             = 4

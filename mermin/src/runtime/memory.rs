@@ -136,31 +136,6 @@ pub mod initial_capacity {
     /// - Service watcher: ~50-500 services typical
     /// - 256 entries covers small-to-medium clusters
     pub const K8S_WATCHER_CACHE: usize = 256;
-
-    /// Calculate flow tracking capacity (FlowStore, TraceIdCache) based on pipeline base capacity.
-    ///
-    /// Uses a 4x multiplier (vs legacy 128x) to balance memory efficiency with performance.
-    ///
-    /// Calculation rationale:
-    /// - Default base_capacity: 8,192 entries
-    /// - 4x multiplier → 32,768 capacity (~13 MB)
-    /// - Covers 10K flows/sec without resize
-    /// - For extreme traffic (100K flows/sec), will resize to 1M naturally
-    /// - With shrink_to_fit(), memory recovered after traffic drops
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use mermin::runtime::memory::initial_capacity;
-    ///
-    /// let capacity = initial_capacity::from_base_capacity(8_192);
-    /// assert_eq!(capacity, 32_768);
-    /// ```
-    pub const fn from_base_capacity(base_capacity: usize) -> usize {
-        // Use 4x multiplier instead of 128x
-        // Provides reasonable headroom without massive over-allocation
-        base_capacity * 4
-    }
 }
 
 #[cfg(test)]

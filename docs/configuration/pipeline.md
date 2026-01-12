@@ -1,6 +1,6 @@
 # Pipeline Configuration
 
-The `pipeline` block provides advanced configuration for flow processing pipeline optimization, including base channel sizing, worker threading, Kubernetes decoration, backpressure management, and buffer multipliers.
+The `pipeline` block provides advanced configuration for flow processing pipeline optimization, including channel capacity tuning, worker threading, Kubernetes decoration, backpressure management, and buffer multipliers.
 
 The configuration options become useful to take advantage of additional resources allocated for Mermin or to generally optimize the performance for your specific use-case.
 
@@ -43,24 +43,31 @@ pipeline {
 }
 ```
 
-### `base_capacity`
+### `worker_queue_capacity`
 
-**Type:** Integer **Default:** `8192`
+**Type:** Integer **Default:** `2048`
 
-The base capacity for **userspace channels** between pipeline stages. This value is used to calculate:
-
-- **Worker queue capacity**: `base_capacity / worker_count` (default: 8192 / 4 = 2048 per worker)
-- **Flow store initial capacity**: `base_capacity × 4` (default: 8192 × 4 = 32,768)
-
-Increasing this value provides larger buffers for worker processing, reducing backpressure during traffic spikes.
-
-**Note:** This does NOT control the eBPF `FLOW_EVENTS` ring buffer size, which is hardcoded at compile time (256 KB, ~1,120 events).
+Capacity for each worker thread's event queue. Determines how many raw eBPF events can be buffered per worker before drops occur.
 
 **Example:**
 
 ```hcl
 pipeline {
-  base_capacity = 16384  # Increase worker queues
+  worker_queue_capacity = 4096
+}
+```
+
+### `flow_store_capacity`
+
+**Type:** Integer **Default:** `32768`
+
+Initial capacity for the userspace flow tracking map. Should be set large enough to hold active flows to avoid expensive resizing operations.
+
+**Example:**
+
+```hcl
+pipeline {
+  flow_store_capacity = 65536
 }
 ```
 

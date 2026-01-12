@@ -171,43 +171,47 @@ Mermin provides metrics to monitor shutdown behavior:
 - `shutdown_flows_total{status="preserved"}`: Flows successfully exported during shutdown
 - `shutdown_flows_total{status="lost"}`: Flows lost due to shutdown timeout
 
-### `base_capacity`
+### `worker_queue_capacity`
 
 **Type:** Integer
-**Default:** `8192`
+**Default:** `2048`
 
-Base capacity for **userspace channels** between pipeline stages. This is the foundation for all pipeline channel sizes and flow store capacity.
+Capacity for each worker thread's event queue. Determines how many raw eBPF events can be buffered per worker before drops occur.
 
-**Important:** This does NOT control the eBPF `FLOW_EVENTS` ring buffer (default 256 KB, configurable via `ebpf_ring_buffer_size_bytes`). Instead, it sizes the userspace processing pipeline.
-
-**Behavior:**
-
-* Sets worker queue capacity: `base_capacity / worker_count`
-* Flow store initial capacity: `base_capacity × 4`
-* Higher values provide more buffering for worker queues
-* Lower values reduce memory usage
-* If channels fill, backpressure and sampling occur (visible in metrics)
+**Formula:** Total worker buffer memory ≈ `worker_count` × `worker_queue_capacity` × 256 bytes
 
 **Tuning Guidelines:**
 
 | Traffic Volume             | Recommended Value |
 |----------------------------|-------------------|
-| Low (< 10K flows/s)        | 2048-4096         |
-| Medium (10K-50K flows/s)   | 4096-8192         |
-| High (50K-100K flows/s)    | 8192 (default)    |
-| Very High (> 100K flows/s) | 16384+            |
+| Low (< 10K flows/s)        | 1024              |
+| Medium (10K-50K flows/s)   | 2048 (default)    |
+| High (50K-100K flows/s)    | 4096              |
+| Very High (> 100K flows/s) | 8192+             |
 
 **Signs You Need to Increase:**
+* Metrics show `mermin_flow_events_total{status="dropped_backpressure"}` increasing
 
-* Metrics show dropped events (`mermin_flow_events_total{status="dropped_backpressure"}`)
-* Gaps in Flow Trace exports
-* Warning logs about channel capacity or backpressure
+### `flow_store_capacity`
 
-**Signs You Can Decrease:**
+**Type:** Integer
+**Default:** `32768`
 
-* Low CPU usage
-* Minimal traffic volume
-* Memory constraints
+Initial capacity for the userspace flow tracking map (`DashMap`). Should be set large enough to hold active flows to avoid expensive resizing operations.
+
+**Formula:** Active flows ≈ flows_per_sec × avg_flow_lifetime
+
+**Tuning Guidelines:**
+
+| Active Flows               | Recommended Value |
+|----------------------------|-------------------|
+| < 10,000                   | 16384             |
+| 10,000 - 25,000            | 32768 (default)   |
+| 25,000 - 100,000           | 131072            |
+| > 100,000                  | 262144+           |
+
+**Signs You Need to Increase:**
+* High CPU usage during startup or traffic spikes (due to map resizing)
 
 ### `worker_count`
 
@@ -222,7 +226,6 @@ Number of parallel worker threads processing packets and generating flow spans. 
 * More workers = more parallelism = higher throughput
 * More workers = more CPU usage
 * Workers share the flow table (synchronized)
-* Worker queue capacity = `base_capacity / worker_count`
 
 **Tuning Guidelines:**
 

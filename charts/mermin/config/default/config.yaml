@@ -399,7 +399,8 @@ metrics:
   listen_address: 0.0.0.0
   port: 10250
 pipeline:
-  base_capacity: 8192
+  worker_queue_capacity: 2048,
+  flow_store_capacity: 32768,
   worker_count: 4
   worker_poll_interval: 5s
   k8s_decorator_threads: 12
