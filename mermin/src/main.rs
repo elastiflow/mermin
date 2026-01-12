@@ -604,7 +604,8 @@ async fn run(cli: Cli) -> Result<()> {
 
     let flow_span_producer = FlowSpanProducer::new(
         conf.clone().span,
-        conf.pipeline.base_capacity,
+        conf.pipeline.worker_queue_capacity,
+        conf.pipeline.flow_store_capacity,
         conf.pipeline.worker_count,
         Arc::clone(&iface_map),
         flow_stats_map,

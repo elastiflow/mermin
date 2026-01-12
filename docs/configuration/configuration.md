@@ -151,7 +151,7 @@ auto_reload = false
 shutdown_timeout = "5s"
 
 pipeline {
-  base_capacity = 8192
+  worker_queue_capacity = 2048
   worker_count = 4
 }
 ```

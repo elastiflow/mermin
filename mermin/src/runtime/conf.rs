@@ -816,7 +816,8 @@ pub mod conf_serde {
 ///
 /// Defaults are tuned for typical enterprise deployments (1K-5K flows/sec):
 /// - `ebpf_max_flows = 100000` (supports ~10K flows/sec with 10x headroom)
-/// - `base_capacity = 8192` (base for sizing all pipeline channels)
+/// - `worker_queue_capacity = 2048` (buffer per worker)
+/// - `flow_store_capacity = 32768` (initial flow map size)
 /// - `worker_count = 4` (parallel flow processing across cores)
 /// - `k8s_decorator_threads = 4` (handles typical K8s clusters efficiently)
 /// - `worker_poll_interval = 5s` (responsive timeout checking with low CPU overhead)
@@ -867,15 +868,21 @@ pub struct PipelineOptions {
     #[serde(with = "conf_serde::bytesize")]
     pub ebpf_ring_buffer_size_bytes: u32,
 
-    /// Base capacity for userspace pipeline channels (default: 8192)
-    /// This is the foundation for sizing all pipeline stages:
-    /// - Worker queues: base_capacity / worker_count
-    /// - Flow store initial capacity: base_capacity × 4
-    pub base_capacity: usize,
+    /// Capacity for each worker thread's queue (default: 2048)
+    ///
+    /// Determines how many raw eBPF events can be buffered per worker.
+    /// Total worker buffer memory = worker_count * worker_queue_capacity * event_size.
+    pub worker_queue_capacity: usize,
+
+    /// Initial capacity for the flow store (default: 32768)
+    ///
+    /// Determines the initial size of the userspace flow tracking map.
+    /// Should be set large enough to hold active flows to avoid expensive resizing.
+    pub flow_store_capacity: usize,
 
     /// Number of flow worker threads for packet processing (default: 4)
-    /// Worker queue capacity derived from: base_capacity / worker_count
-    /// With defaults: 8192 / 4 = 2048 slots per worker.
+    ///
+    /// Each worker processes events from its own queue with capacity `worker_queue_capacity`.
     pub worker_count: usize,
 
     /// Worker polling interval (default: 5s)
@@ -922,7 +929,8 @@ impl Default for PipelineOptions {
         Self {
             ebpf_max_flows: 100_000,
             ebpf_ring_buffer_size_bytes: 256 * 1024,
-            base_capacity: 8192,
+            worker_queue_capacity: 2048,
+            flow_store_capacity: 32768,
             worker_count: 4,
             worker_poll_interval: Duration::from_secs(5),
             k8s_decorator_threads: 4,
@@ -952,22 +960,36 @@ impl PipelineOptions {
     }
 
     fn validate_memory_usage_against_limit(&self, limit: u64) -> bool {
-        // Conservative estimates: FlowSpan ~2KB, Decorated ~4KB
-        let estimated_usage = (self.flow_span_channel_capacity * 2048)
-            + (self.decorated_span_channel_capacity * 4096);
+        // Conservative estimates:
+        // FlowSpan ~2KB, Decorated ~4KB
+        // FlowEvent ~256 bytes (raw eBPF event)
+        // FlowEntry ~2.5KB (FlowSpan + overhead)
+        const FLOW_SPAN_SIZE: usize = 2048;
+        const DECORATED_SPAN_SIZE: usize = 4096;
+        const FLOW_EVENT_SIZE: usize = 256;
+        const FLOW_ENTRY_SIZE: usize = 2560;
 
-        // Warn if estimated channel usage exceeds 40% of container memory
-        let threshold = (limit as f64 * 0.4) as usize;
+        let channel_usage = (self.flow_span_channel_capacity * FLOW_SPAN_SIZE)
+            + (self.decorated_span_channel_capacity * DECORATED_SPAN_SIZE);
+
+        let worker_usage = self.worker_count * self.worker_queue_capacity * FLOW_EVENT_SIZE;
+
+        let store_usage = self.flow_store_capacity * FLOW_ENTRY_SIZE;
+
+        let estimated_usage = channel_usage + worker_usage + store_usage;
+
+        // Warn if estimated usage exceeds 50% of container memory
+        let threshold = (limit as f64 * 0.5) as usize;
 
         if estimated_usage > threshold {
             warn!(
                 event.name = "config.memory_warning",
                 estimated_usage_bytes = estimated_usage,
                 memory_limit_bytes = limit,
-                flow_span_capacity = self.flow_span_channel_capacity,
-                decorated_span_capacity = self.decorated_span_channel_capacity,
-                "channel capacities might exceed recommended memory limits (40% of container memory); \
-                     consider reducing capacities via flow_span_channel_capacity/decorated_span_channel_capacity"
+                worker_queue_total = self.worker_count * self.worker_queue_capacity,
+                flow_store_capacity = self.flow_store_capacity,
+                "estimated pipeline memory usage might exceed recommended limits (50% of container memory); \
+                 consider reducing channel capacities or flow store size."
             );
             false
         } else {
@@ -1036,10 +1058,13 @@ mod tests {
             "shutdown_timeout should be 5s"
         );
         assert_eq!(
-            cfg.pipeline.base_capacity, 8192,
-            "base_capacity should be 8192"
+            cfg.pipeline.worker_queue_capacity, 2048,
+            "worker_queue_capacity should be 2048"
         );
-        assert_eq!(cfg.pipeline.worker_count, 4, "worker_count should be 4");
+        assert_eq!(
+            cfg.pipeline.flow_store_capacity, 32768,
+            "flow_store_capacity should be 32768"
+        );
         assert_eq!(
             cfg.pipeline.flow_span_channel_capacity, 16384,
             "default flow_span_channel_capacity should be 16384"
@@ -1182,8 +1207,20 @@ mod tests {
         let deserialized: Conf = serde_yaml::from_str(&serialized).expect("should deserialize");
 
         assert_eq!(
-            cfg.pipeline.base_capacity,
-            deserialized.pipeline.base_capacity
+            cfg.pipeline.worker_queue_capacity,
+            deserialized.pipeline.worker_queue_capacity
+        );
+        assert_eq!(
+            cfg.pipeline.flow_store_capacity,
+            deserialized.pipeline.flow_store_capacity
+        );
+        assert_eq!(
+            cfg.pipeline.flow_span_channel_capacity,
+            deserialized.pipeline.flow_span_channel_capacity
+        );
+        assert_eq!(
+            cfg.pipeline.decorated_span_channel_capacity,
+            deserialized.pipeline.decorated_span_channel_capacity
         );
         assert_eq!(
             cfg.pipeline.worker_count,
@@ -1604,7 +1641,8 @@ log_level: error
 auto_reload: true
 shutdown_timeout: 30s
 pipeline:
-  base_capacity: 2048
+  worker_queue_capacity: 512
+  flow_store_capacity: 8192
   worker_count: 8
 discovery:
   instrument:
@@ -1620,7 +1658,10 @@ discovery:
             assert_eq!(cfg.log_level, Level::ERROR);
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
-            assert_eq!(cfg.pipeline.base_capacity, 2048);
+            assert_eq!(cfg.pipeline.worker_queue_capacity, 512);
+            assert_eq!(cfg.pipeline.flow_store_capacity, 8192);
+            assert_eq!(cfg.pipeline.flow_span_channel_capacity, 16384);
+            assert_eq!(cfg.pipeline.decorated_span_channel_capacity, 32768);
             assert_eq!(cfg.pipeline.worker_count, 8);
             assert_eq!(cfg.discovery.instrument.interfaces, vec!["eth1", "eth2"]);
 
@@ -1639,7 +1680,8 @@ log_level = "error"
 auto_reload = true
 shutdown_timeout = "30s"
 pipeline {
-    base_capacity = 2048
+    worker_queue_capacity = 512
+    flow_store_capacity = 8192
     worker_count = 8
 }
 discovery "instrument" {
@@ -1654,7 +1696,10 @@ discovery "instrument" {
             assert_eq!(cfg.log_level, Level::ERROR);
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
-            assert_eq!(cfg.pipeline.base_capacity, 2048);
+            assert_eq!(cfg.pipeline.worker_queue_capacity, 512);
+            assert_eq!(cfg.pipeline.flow_store_capacity, 8192);
+            assert_eq!(cfg.pipeline.flow_span_channel_capacity, 16384);
+            assert_eq!(cfg.pipeline.decorated_span_channel_capacity, 32768);
             assert_eq!(cfg.pipeline.worker_count, 8);
             assert_eq!(cfg.discovery.instrument.interfaces, vec!["eth1", "eth2"]);
 
@@ -1870,7 +1915,10 @@ discovery:
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.auto_reload, false);
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(5));
-            assert_eq!(cfg.pipeline.base_capacity, 8192);
+            assert_eq!(cfg.pipeline.worker_queue_capacity, 2048);
+            assert_eq!(cfg.pipeline.flow_store_capacity, 32768);
+            assert_eq!(cfg.pipeline.flow_span_channel_capacity, 16384);
+            assert_eq!(cfg.pipeline.decorated_span_channel_capacity, 32768);
             assert_eq!(cfg.pipeline.worker_count, 4);
             assert_eq!(cfg.api.port, 8080);
             assert_eq!(cfg.metrics.port, 10250);
@@ -2077,7 +2125,10 @@ discovery:
 
             // Other defaults should be applied
             assert_eq!(cfg.log_level, Level::INFO);
-            assert_eq!(cfg.pipeline.base_capacity, 8192);
+            assert_eq!(cfg.pipeline.worker_queue_capacity, 2048);
+            assert_eq!(cfg.pipeline.flow_store_capacity, 32768);
+            assert_eq!(cfg.pipeline.flow_span_channel_capacity, 16384);
+            assert_eq!(cfg.pipeline.decorated_span_channel_capacity, 32768);
 
             // Verify all span defaults
             assert_eq!(cfg.span.max_record_interval, Duration::from_secs(60));

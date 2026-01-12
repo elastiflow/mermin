@@ -37,7 +37,7 @@ use crate::{
         parser::{is_tunnel, parse_packet_from_offset},
         types::ParsedPacket,
     },
-    runtime::{conf::Conf, memory, memory::ShrinkPolicy},
+    runtime::{conf::Conf, memory::ShrinkPolicy},
     span::{
         community_id::CommunityIdGenerator,
         direction::DirectionInferrer,
@@ -86,7 +86,7 @@ pub struct FlowSpanComponents {
 
 pub struct FlowSpanProducer {
     span_opts: SpanOptions,
-    base_capacity: usize,
+    worker_queue_capacity: usize,
     worker_count: usize,
     worker_poll_interval: Duration,
     boot_time_offset_nanos: u64,
@@ -109,7 +109,8 @@ impl FlowSpanProducer {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         span_opts: SpanOptions,
-        base_capacity: usize,
+        worker_queue_capacity: usize,
+        flow_store_capacity: usize,
         worker_count: usize,
         iface_map: Arc<DashMap<u32, String>>,
         flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
@@ -118,11 +119,9 @@ impl FlowSpanProducer {
         listening_ports_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, ListeningPortKey, u8>>>,
         conf: &Conf,
     ) -> Result<Self, BootTimeError> {
-        let flow_store_capacity = memory::initial_capacity::from_base_capacity(base_capacity);
         info!(
             event.name = "flow_store.initialized",
             capacity = flow_store_capacity,
-            base_capacity = base_capacity,
             "flow store initialized"
         );
         let flow_store = Arc::new(DashMap::with_capacity_and_hasher(
@@ -170,7 +169,7 @@ impl FlowSpanProducer {
 
         Ok(Self {
             span_opts: span_opts.clone(),
-            base_capacity,
+            worker_queue_capacity,
             worker_count,
             worker_poll_interval: conf.pipeline.worker_poll_interval,
             boot_time_offset_nanos,
@@ -208,7 +207,7 @@ impl FlowSpanProducer {
 
         let mut worker_handles = Vec::new();
         let mut worker_channels = Vec::new();
-        let worker_capacity = self.base_capacity.max(self.worker_count) / self.worker_count.max(1);
+        let worker_capacity = self.worker_queue_capacity;
 
         for worker_id in 0..self.worker_count.max(1) {
             let (worker_tx, worker_rx) = mpsc::channel(worker_capacity);
