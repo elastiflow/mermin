@@ -1110,8 +1110,12 @@ rstuvwxyz
 
     #[tokio::test]
     async fn test_missing_client_cert_file() {
-        let key_file = create_test_cert_file(TEST_KEY_PEM);
-        let key_path = key_file.path().to_str().unwrap().to_string();
+        // Keep key_file in scope for the entire test to prevent IO safety violation.
+        // The TLS library may open the file and hold a file descriptor even after
+        // returning an error. If the temp file is dropped while the TLS library
+        // still has it open, we get "IO Safety violation: owned file descriptor already closed".
+        let _key_file = create_test_cert_file(TEST_KEY_PEM);
+        let key_path = _key_file.path().to_str().unwrap().to_string();
 
         let mut options = default_opts();
         options.endpoint = "https://localhost:4317".to_string();
@@ -1137,8 +1141,12 @@ rstuvwxyz
 
     #[tokio::test]
     async fn test_missing_client_key_file() {
-        let cert_file = create_test_cert_file(TEST_CERT_PEM);
-        let cert_path = cert_file.path().to_str().unwrap().to_string();
+        // Keep cert_file in scope for the entire test to prevent IO safety violation.
+        // The TLS library may open the file and hold a file descriptor even after
+        // returning an error. If the temp file is dropped while the TLS library
+        // still has it open, we get "IO Safety violation: owned file descriptor already closed".
+        let _cert_file = create_test_cert_file(TEST_CERT_PEM);
+        let cert_path = _cert_file.path().to_str().unwrap().to_string();
 
         let mut options = default_opts();
         options.endpoint = "https://localhost:4317".to_string();

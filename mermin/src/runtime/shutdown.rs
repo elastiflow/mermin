@@ -444,12 +444,16 @@ mod tests {
         let flow_stats_map = Arc::new(Mutex::new(unsafe {
             std::mem::zeroed::<HashMap<aya::maps::MapData, FlowKey, FlowStats>>()
         }));
+        let socket_pid_map = Arc::new(Mutex::new(unsafe {
+            std::mem::zeroed::<HashMap<aya::maps::MapData, FlowKey, u32>>()
+        }));
         let cache = TraceIdCache::new(Duration::from_secs(3600), 100);
 
         let mock_components = Arc::new(FlowSpanComponents {
             flow_store: Default::default(),
             flow_stats_map, // Safe because it's never dereferenced.
             flow_span_tx,
+            socket_pid_map, // Safe because it's never dereferenced.
         });
 
         let shutdown_manager = ShutdownManager::builder()

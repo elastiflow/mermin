@@ -9,7 +9,6 @@ mod metrics;
 mod otlp;
 mod packet;
 mod process_name;
-mod process_name_scanner;
 mod runtime;
 mod span;
 
@@ -388,16 +387,24 @@ async fn run(cli: Cli) -> Result<()> {
         "tc programs loaded into kernel"
     );
 
-    // Load and attach tracepoint programs for process lifecycle tracking
-    // Note: We only track PIDs here (cleanup on exit). Comm is populated by userspace scanner.
+    // Load and attach tracepoint programs for socket PID tracking
+    // These programs track socket-to-PID mappings using socket lifecycle events.
+    // TCP: Uses inet_sock_set_state tracepoint to capture socket state changes with PID
     // Tracepoints are optional - if tracefs is not available (e.g., in some Docker environments),
-    // we gracefully skip attachment and rely on the userspace scanner for process name tracking.
+    // we gracefully skip attachment and flows will have PID=0.
     use aya::programs::TracePoint;
 
-    let tracepoint_programs = [
-        ("sched", "sched_process_exec", "sched_process_exec"),
-        ("sched", "sched_process_exit", "sched_process_exit"),
-    ];
+    // Pre-flight check: Verify tracefs is accessible before attempting attachment
+    let tracefs_available = std::path::Path::new("/sys/kernel/debug/tracing/events/sock").exists();
+    if !tracefs_available {
+        warn!(
+            event.name = "ebpf.tracefs.unavailable",
+            path = "/sys/kernel/debug/tracing/events/sock",
+            "tracefs not accessible - TCP socket PID tracking will be disabled. Ensure /sys/kernel/debug is mounted as tracefs in the container. See charts/mermin/templates/daemonset.yaml for required volume mount."
+        );
+    }
+
+    let tracepoint_programs = [("sock", "inet_sock_set_state", "socket_pid_tracker_tcp")];
 
     let mut attached_count = 0;
     for (category, name, program_name) in &tracepoint_programs {
@@ -444,16 +451,32 @@ async fn run(cli: Cli) -> Result<()> {
                 );
             }
             Err(e) => {
-                // Tracefs may not be available in all environments (e.g., Docker without proper mounts)
-                // This is non-fatal - userspace scanner will still populate the map at startup
-                warn!(
-                    event.name = "ebpf.tracepoint.attach_failed",
-                    program.name = program_name,
-                    category = category,
-                    name = name,
-                    error = %e,
-                    "failed to attach tracepoint program (tracefs may not be available), continuing without real-time process tracking"
-                );
+                // Tracefs may not be available if /sys/kernel/debug is not mounted
+                // This is non-fatal - TCP flows will have PID=0, but UDP tracking via kprobes will still work
+                let error_msg = format!("{e}");
+                let is_tracefs_error = error_msg.contains("tracefs")
+                    || error_msg.contains("No such file or directory");
+
+                if is_tracefs_error {
+                    warn!(
+                        event.name = "ebpf.tracepoint.attach_failed",
+                        program.name = program_name,
+                        category = category,
+                        name = name,
+                        error = %e,
+                        tracefs_path = "/sys/kernel/debug",
+                        "failed to attach tracepoint program - tracefs not accessible. TCP socket PID tracking will not work. Verify: 1) /sys/kernel/debug is mounted as tracefs on the host node, 2) tracefs volume mount exists in daemonset.yaml, 3) container has CAP_SYS_ADMIN capability. See charts/mermin/templates/daemonset.yaml for required volume mount."
+                    );
+                } else {
+                    warn!(
+                        event.name = "ebpf.tracepoint.attach_failed",
+                        program.name = program_name,
+                        category = category,
+                        name = name,
+                        error = %e,
+                        "failed to attach tracepoint program - TCP socket PID tracking will not work"
+                    );
+                }
             }
         }
     }
@@ -463,7 +486,83 @@ async fn run(cli: Cli) -> Result<()> {
             event.name = "ebpf.tracepoints_attached",
             count = attached_count,
             total = tracepoint_programs.len(),
-            "process lifecycle tracking tracepoints attached"
+            "TCP socket tracking tracepoint attached"
+        );
+    }
+
+    // Load and attach kprobe programs for UDP socket PID tracking
+    // These programs track socket-to-PID mappings using kernel function probes.
+    // UDP: Uses kprobes on udp_sendmsg and udp_recvmsg to capture socket 5-tuple and PID
+    // Kprobes require CAP_SYS_ADMIN or equivalent permissions
+    use aya::programs::KProbe;
+
+    let kprobe_programs = [
+        ("udp_sendmsg", "socket_pid_tracker_udp_send"),
+        ("udp_recvmsg", "socket_pid_tracker_udp_recv"),
+    ];
+
+    let mut kprobe_attached_count = 0;
+    for (function_name, program_name) in &kprobe_programs {
+        let program: &mut KProbe = match ebpf
+            .program_mut(program_name)
+            .ok_or_else(|| {
+                MerminError::internal(format!(
+                    "kprobe program '{program_name}' not found in loaded object",
+                ))
+            })?
+            .try_into()
+        {
+            Ok(p) => p,
+            Err(e) => {
+                warn!(
+                    event.name = "ebpf.kprobe.cast_failed",
+                    program.name = program_name,
+                    error = %e,
+                    "failed to cast kprobe program, skipping"
+                );
+                continue;
+            }
+        };
+
+        if let Err(e) = program.load() {
+            warn!(
+                event.name = "ebpf.kprobe.load_failed",
+                program.name = program_name,
+                error = %e,
+                "failed to load kprobe program, skipping"
+            );
+            continue;
+        }
+
+        match program.attach(function_name, 0) {
+            Ok(_) => {
+                kprobe_attached_count += 1;
+                debug!(
+                    event.name = "ebpf.kprobe.attached",
+                    program.name = program_name,
+                    function = function_name,
+                    "UDP socket tracking kprobe attached successfully"
+                );
+            }
+            Err(e) => {
+                // Kprobes may fail if function doesn't exist or permissions are insufficient
+                warn!(
+                    event.name = "ebpf.kprobe.attach_failed",
+                    program.name = program_name,
+                    function = function_name,
+                    error = %e,
+                    "failed to attach kprobe program (function may not exist or insufficient permissions), UDP flows will have PID=0"
+                );
+            }
+        }
+    }
+
+    if kprobe_attached_count > 0 {
+        info!(
+            event.name = "ebpf.kprobes_attached",
+            count = kprobe_attached_count,
+            total = kprobe_programs.len(),
+            "UDP socket tracking kprobes attached"
         );
     } else {
         warn!(
@@ -550,13 +649,15 @@ async fn run(cli: Cli) -> Result<()> {
         )
         .map_err(|e| MerminError::internal(format!("failed to convert LISTENING_PORTS: {e}")))?,
     ));
-    let process_names_map = Arc::new(tokio::sync::Mutex::new(
+    let socket_pid_map = Arc::new(tokio::sync::Mutex::new(
         aya::maps::HashMap::try_from(
-            ebpf.take_map("PROCESS_NAMES")
-                .ok_or_else(|| MerminError::internal("PROCESS_NAMES not found in eBPF object"))?,
+            ebpf.take_map("SOCKET_PID_MAP")
+                .ok_or_else(|| MerminError::internal("SOCKET_PID_MAP not found in eBPF object"))?,
         )
-        .map_err(|e| MerminError::internal(format!("failed to convert PROCESS_NAMES: {e}")))?,
+        .map_err(|e| MerminError::internal(format!("failed to convert SOCKET_PID_MAP: {e}")))?,
     ));
+    // Note: PROCESS_NAMES map is no longer used - socket PID tracking is handled by
+    // socket_pid_tracker_tcp tracepoint which populates SOCKET_PID_MAP directly
 
     metrics::registry::EBPF_MAP_CAPACITY
         .with_label_values(&[EbpfMapName::FlowStats.as_str()])
@@ -567,6 +668,9 @@ async fn run(cli: Cli) -> Result<()> {
     metrics::registry::EBPF_MAP_CAPACITY
         .with_label_values(&[EbpfMapName::ListeningPorts.as_str()])
         .set(LISTENING_PORTS_CAPACITY as i64);
+    metrics::registry::EBPF_MAP_CAPACITY
+        .with_label_values(&[EbpfMapName::SocketPidMap.as_str()])
+        .set(conf.pipeline.ebpf_max_flows as i64);
 
     info!(
         event.name = "ebpf.maps_ready",
@@ -698,17 +802,8 @@ async fn run(cli: Cli) -> Result<()> {
         "populated eBPF map with existing listening ports"
     );
 
-    let process_name_scanner =
-        process_name_scanner::ProcessNameScanner::new(Arc::clone(&process_names_map));
-    let scanned_processes = process_name_scanner
-        .scan_and_populate()
-        .await
-        .map_err(|e| MerminError::internal(format!("failed to scan process names: {e}")))?;
-    info!(
-        event.name = "process_name.scan_complete",
-        total_processes = scanned_processes,
-        "populated eBPF map with existing process names"
-    );
+    // Note: ProcessNameScanner is no longer used - socket PID tracking is handled by
+    // socket_pid_tracker_tcp tracepoint which tracks sockets in real-time
 
     let process_name_resolver = Arc::new(process_name::ProcessNameResolver::new());
     info!(
@@ -725,6 +820,7 @@ async fn run(cli: Cli) -> Result<()> {
         flow_events_ringbuf,
         flow_span_tx,
         listening_ports_map,
+        socket_pid_map,
         process_name_resolver,
         &conf,
     )?;

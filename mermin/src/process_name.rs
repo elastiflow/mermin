@@ -1,10 +1,10 @@
 //! Process name resolver for correlating PIDs with executable names.
 //!
 //! This module provides process name resolution by reading `/proc/[pid]/comm` and
-//! caching results to minimize I/O overhead. Handles container namespace isolation
-//! by detecting host PID mode and using appropriate `/proc` paths.
+//! caching results to minimize I/O overhead. Requires `hostPID: true` in Kubernetes
+//! deployments to access host process information.
 
-use std::{fs, path::Path, time::Duration};
+use std::{fs, time::Duration};
 
 use moka::future::Cache;
 use tracing::{debug, trace, warn};
@@ -53,8 +53,8 @@ impl ProcessNameResolver {
         // Determine correct /proc path based on deployment mode.
         // The determine_proc_base() function handles:
         // - Container with hostPID: true -> use /proc/[pid]/comm (already in host namespace)
-        // - Container without hostPID -> use /proc/1/[pid]/comm (access host via /proc/1)
-        // - Bare metal or hostNetwork: true -> use /proc/[pid]/comm (same namespace)
+        // - Container without hostPID -> use /proc/[pid]/comm (but host PIDs won't be accessible)
+        // - Bare metal -> use /proc/[pid]/comm (same namespace)
         let proc_base = Self::determine_proc_base();
 
         debug!(
@@ -68,78 +68,27 @@ impl ProcessNameResolver {
         Self { cache, proc_base }
     }
 
-    /// Determine the correct /proc base path based on namespace configuration.
+    /// Determine the correct /proc base path for process information.
     ///
-    /// Returns:
-    /// - `/proc` if we're already in the host PID namespace (hostPID: true) or on bare metal
-    /// - `/proc/1` if we're in a container but can access host namespace via /proc/1
-    /// - `/proc` as fallback
+    /// Returns `/proc` - the standard Linux process filesystem path.
+    ///
+    /// Note: Mermin requires `hostPID: true` in Kubernetes deployments, which means
+    /// the container shares the host PID namespace. In this case, `/proc/[pid]/comm`
+    /// directly accesses host process information. If `hostPID: false`, process name
+    /// resolution will fail (process not found) since eBPF captures host PIDs but the
+    /// container cannot access them from its isolated PID namespace.
+    /// Previously I had logic for moun ting to different /proc paths depending on the environment:
+    /// /proc/1 or /proc/self, but I stripped it to try and simplify.
     fn determine_proc_base() -> String {
-        // Check if we're in a container
-        let in_container =
-            Path::new("/.dockerenv").exists() || Path::new("/proc/1/cgroup").exists();
-
-        if !in_container {
-            // Not in container, use /proc directly
-            return "/proc".to_string();
-        }
-
-        // In container - check if we're already in the host PID namespace
-        // If /proc/self/ns/pid == /proc/1/ns/pid, we're in host namespace (hostPID: true)
-        let self_pid_ns = fs::read_link("/proc/self/ns/pid").ok();
-        let host_pid_ns = fs::read_link("/proc/1/ns/pid").ok();
-
-        if self_pid_ns == host_pid_ns {
-            // We're already in host PID namespace (hostPID: true)
-            // Use /proc directly, not /proc/1
-            "/proc".to_string()
-        } else if Path::new("/proc/1/comm").exists() && Path::new("/proc/self/ns/pid").exists() {
-            // We're in a container but can access host via /proc/1
-            "/proc/1".to_string()
-        } else {
-            // Fallback to current namespace
-            "/proc".to_string()
-        }
-    }
-
-    /// Convert a comm array (from bpf_get_current_comm) to a String.
-    ///
-    /// The comm array is a null-terminated string of up to 15 characters.
-    /// This function finds the null terminator and converts the bytes before it to a String.
-    /// Returns None if the array is empty (all zeros) or contains invalid UTF-8.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use mermin::process_name::ProcessNameResolver;
-    ///
-    /// let resolver = ProcessNameResolver::new();
-    /// let comm = [b'n', b'g', b'i', b'n', b'x', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    /// assert_eq!(resolver.comm_to_string(comm), Some("nginx".to_string()));
-    ///
-    /// let empty = [0u8; 16];
-    /// assert_eq!(resolver.comm_to_string(empty), None);
-    /// ```
-    fn comm_to_string(&self, comm: [u8; 16]) -> Option<String> {
-        // Find the null terminator
-        let null_pos = comm.iter().position(|&b| b == 0).unwrap_or(16);
-
-        // If all zeros, return None
-        if null_pos == 0 {
-            return None;
-        }
-
-        // Convert to string, handling invalid UTF-8 gracefully
-        String::from_utf8(comm[..null_pos].to_vec())
-            .ok()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
+        // hostPID: true is required for Mermin (default in values.yaml)
+        // When hostPID: true, we're in the host PID namespace, so /proc/[pid]/comm
+        // directly accesses host processes. No path manipulation needed.
+        "/proc".to_string()
     }
 
     /// Resolve a PID to its process executable name.
     ///
-    /// If `comm` is provided and non-empty, it will be used as the primary source.
-    /// Falls back to `/proc/[pid]/comm` lookup if comm is missing, empty, or generic.
+    /// Reads `/proc/[pid]/comm` to get the process name.
     ///
     /// Returns the process name if found, or `None` if:
     /// - PID is 0 (invalid/unavailable)
@@ -156,14 +105,14 @@ impl ProcessNameResolver {
     ///
     /// # async fn example() {
     /// let resolver = ProcessNameResolver::new();
-    /// let process_name = resolver.resolve(1234, None).await;
+    /// let process_name = resolver.resolve(1234).await;
     /// match process_name {
     ///     Some(name) => println!("Process name: {}", name),
     ///     None => println!("Process not found or unavailable"),
     /// }
     /// # }
     /// ```
-    pub async fn resolve(&self, pid: u32, comm: Option<[u8; 16]>) -> Option<String> {
+    pub async fn resolve(&self, pid: u32) -> Option<String> {
         // PID 0 is invalid/unavailable (e.g., forwarded traffic, kernel-generated packets)
         // TODO: Add metric for tracking PID 0 rate
         if pid == 0 {
@@ -176,30 +125,7 @@ impl ProcessNameResolver {
             return None;
         }
 
-        // Check comm first if provided (in-kernel capture)
-        if let Some(comm_array) = comm
-            && let Some(comm_name) = self.comm_to_string(comm_array)
-        {
-            // Skip generic kernel thread names that are better resolved via /proc
-            // These are common kernel threads that may have more specific names in /proc
-            let generic_names = ["ksoftirqd", "kworker", "migration", "rcu_"];
-            let is_generic = generic_names
-                .iter()
-                .any(|&prefix| comm_name.starts_with(prefix));
-
-            if !is_generic {
-                trace!(
-                    event.name = "process_name.resolved_from_comm",
-                    pid = pid,
-                    process_name = %comm_name,
-                    "resolved process name from in-kernel comm"
-                );
-                // Cache the result for future lookups
-                self.cache.insert(pid, comm_name.clone()).await;
-                return Some(comm_name);
-            }
-        }
-
+        // Check cache first
         if let Some(cached) = self.cache.get(&pid).await {
             trace!(
                 event.name = "process_name.cache_hit",
@@ -210,6 +136,7 @@ impl ProcessNameResolver {
             return Some(cached);
         }
 
+        // Read from /proc/[pid]/comm
         let process_name = self.read_proc_comm(pid);
 
         if let Some(ref name) = process_name {
@@ -221,26 +148,11 @@ impl ProcessNameResolver {
                 "resolved process name from /proc"
             );
         } else {
-            // /proc lookup failed, but if we have comm from eBPF, use it as fallback
-            // This handles cases where PID is from different node or process terminated
-            if let Some(comm_array) = comm
-                && let Some(comm_name) = self.comm_to_string(comm_array)
-            {
-                // Even generic names are better than nothing for cross-node/terminated processes
-                trace!(
-                    event.name = "process_name.resolved_from_comm_fallback",
-                    pid = pid,
-                    process_name = %comm_name,
-                    reason = "proc_lookup_failed",
-                    "using in-kernel comm as fallback (proc lookup failed)"
-                );
-                self.cache.insert(pid, comm_name.clone()).await;
-                return Some(comm_name);
-            }
-            trace!(
+            debug!(
                 event.name = "process_name.resolve_failed",
                 pid = pid,
-                "failed to resolve process name (process may have terminated or be on different node)"
+                proc_base = %self.proc_base,
+                "failed to resolve process name (process may have terminated or be in different namespace - check process_name.not_found or process_name.permission_denied logs)"
             );
         }
 
@@ -260,15 +172,27 @@ impl ProcessNameResolver {
             Ok(content) => {
                 // trim newline char
                 let name = content.trim().to_string();
-                if name.is_empty() { None } else { Some(name) }
+                if name.is_empty() {
+                    warn!(
+                        event.name = "process_name.empty_comm",
+                        pid = pid,
+                        path = %comm_path,
+                        "process comm file exists but is empty"
+                    );
+                    None
+                } else {
+                    Some(name)
+                }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                // Process terminated
+                // Process terminated or PID doesn't exist in this namespace
                 debug!(
                     event.name = "process_name.not_found",
                     pid = pid,
                     path = %comm_path,
-                    "process not found (likely terminated)"
+                    proc_base = %self.proc_base,
+                    error = %e,
+                    "process not found (process may have terminated, or PID is in different namespace)"
                 );
                 None
             }
@@ -278,6 +202,8 @@ impl ProcessNameResolver {
                     event.name = "process_name.permission_denied",
                     pid = pid,
                     path = %comm_path,
+                    proc_base = %self.proc_base,
+                    error = %e,
                     "permission denied reading process name"
                 );
                 None
@@ -288,7 +214,9 @@ impl ProcessNameResolver {
                     event.name = "process_name.read_error",
                     pid = pid,
                     path = %comm_path,
-                    error.message = %e,
+                    proc_base = %self.proc_base,
+                    error = %e,
+                    error.kind = ?e.kind(),
                     "failed to read process name from /proc"
                 );
                 None
@@ -315,21 +243,21 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_pid_zero() {
         let resolver = ProcessNameResolver::new();
-        assert_eq!(resolver.resolve(0, None).await, None);
+        assert_eq!(resolver.resolve(0).await, None);
     }
 
     #[tokio::test]
     async fn test_resolve_nonexistent_pid() {
         let resolver = ProcessNameResolver::new();
         // Use a very high PID that's unlikely to exist
-        assert_eq!(resolver.resolve(999999, None).await, None);
+        assert_eq!(resolver.resolve(999999).await, None);
     }
 
     #[tokio::test]
     async fn test_resolve_current_process() {
         let resolver = ProcessNameResolver::new();
         let current_pid = std::process::id();
-        let result = resolver.resolve(current_pid, None).await;
+        let result = resolver.resolve(current_pid).await;
         // Should succeed for current process if /proc is accessible
         // In some test environments (e.g., sandboxed), /proc may not be accessible
         // In that case, the test still validates the resolver doesn't panic
@@ -362,11 +290,11 @@ mod tests {
         };
 
         // First call should read from /proc (temp directory in this case)
-        let result1 = resolver.resolve(12345, None).await;
+        let result1 = resolver.resolve(12345).await;
         assert_eq!(result1, Some("test-process".to_string()));
 
         // Second call should hit cache (same result)
-        let result2 = resolver.resolve(12345, None).await;
+        let result2 = resolver.resolve(12345).await;
         assert_eq!(result1, result2, "cache should return same result");
     }
 

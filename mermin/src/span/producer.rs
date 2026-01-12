@@ -82,6 +82,7 @@ pub struct FlowSpanComponents {
     pub flow_store: FlowStore,
     pub flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     pub flow_span_tx: mpsc::Sender<FlowSpan>,
+    pub socket_pid_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, u32>>>,
 }
 
 pub struct FlowSpanProducer {
@@ -117,6 +118,7 @@ impl FlowSpanProducer {
         flow_events_ringbuf: RingBuf<aya::maps::MapData>,
         flow_span_tx: mpsc::Sender<FlowSpan>,
         listening_ports_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, ListeningPortKey, u8>>>,
+        socket_pid_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, u32>>>,
         process_name_resolver: Arc<crate::process_name::ProcessNameResolver>,
         conf: &Conf,
     ) -> Result<Self, BootTimeError> {
@@ -168,6 +170,7 @@ impl FlowSpanProducer {
             flow_store,
             flow_stats_map,
             flow_span_tx,
+            socket_pid_map,
         });
 
         Ok(Self {
@@ -370,6 +373,8 @@ impl FlowSpanProducer {
             let poller_flow_store = Arc::clone(&components.flow_store);
             let poller_stats_map = Arc::clone(&components.flow_stats_map);
             let poller_span_tx = components.flow_span_tx.clone();
+            let poller_socket_pid_map = Arc::clone(&components.socket_pid_map);
+            let poller_process_name_resolver = Arc::clone(&self.process_name_resolver);
             let poller_trace_id_cache = self.trace_id_cache.clone();
             let poller_shutdown_rx = shutdown_rx.resubscribe();
 
@@ -379,9 +384,11 @@ impl FlowSpanProducer {
                 flow_store: poller_flow_store,
                 flow_stats_map: poller_stats_map,
                 flow_span_tx: poller_span_tx,
+                socket_pid_map: poller_socket_pid_map,
+                process_name_resolver: poller_process_name_resolver,
+                trace_id_cache: poller_trace_id_cache,
                 max_record_interval,
                 poll_interval,
-                trace_id_cache: poller_trace_id_cache,
                 shutdown_rx: poller_shutdown_rx,
             };
 
@@ -665,6 +672,22 @@ impl FlowWorker {
         );
     }
 
+    /// Resolve process name from PID.
+    ///
+    /// This helper function centralizes the common pattern of resolving a process name
+    /// from a PID. Callers should handle their own logging based on the result.
+    ///
+    /// # Arguments
+    ///
+    /// * `pid` - The process ID to resolve
+    ///
+    /// # Returns
+    ///
+    /// The resolved process name, or `None` if resolution failed or PID is 0.
+    async fn resolve_process_name(&self, pid: u32) -> Option<String> {
+        self.process_name_resolver.resolve(pid).await
+    }
+
     /// Resolve an IP address to a hostname with caching and timeout.
     ///
     /// Uses an LRU cache to avoid redundant DNS lookups. The cache automatically
@@ -881,11 +904,33 @@ impl FlowWorker {
             event.flow_key.protocol,
         );
 
-        // Resolve process name from PID, using in-kernel comm if available
-        let process_name = self
-            .process_name_resolver
-            .resolve(event.pid, Some(event.comm))
-            .await;
+        // Resolve process name from PID
+        let process_name = self.resolve_process_name(event.pid).await;
+
+        // Debug logging for PID tracking (using debug! so visible at DEBUG log level)
+        if event.pid == 0 {
+            debug!(
+                event.name = "flow.pid_missing",
+                protocol = ?event.flow_key.protocol,
+                src_port = event.flow_key.src_port,
+                dst_port = event.flow_key.dst_port,
+                "flow event has PID=0 (socket not tracked or forwarded traffic - check if tracepoint/kprobe attached)"
+            );
+        } else if process_name.is_none() {
+            debug!(
+                event.name = "flow.process_name_unresolved",
+                pid = event.pid,
+                protocol = ?event.flow_key.protocol,
+                "PID found but process name resolution failed (process may have terminated)"
+            );
+        } else {
+            debug!(
+                event.name = "flow.process_name_resolved",
+                pid = event.pid,
+                process_name = %process_name.as_ref().unwrap(),
+                "successfully resolved process name from PID"
+            );
+        }
 
         self.create_flow_span(
             &community_id,
@@ -1366,6 +1411,8 @@ struct FlowPoller {
     flow_store: FlowStore,
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     flow_span_tx: mpsc::Sender<FlowSpan>,
+    socket_pid_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, u32>>>,
+    process_name_resolver: Arc<crate::process_name::ProcessNameResolver>,
     trace_id_cache: TraceIdCache,
     max_record_interval: Duration,
     poll_interval: Duration,
@@ -1510,7 +1557,14 @@ impl FlowPoller {
                         flow.community_id = %community_id,
                         "calling record_flow"
                     );
-                    if !record_flow(community_id, &self.flow_store, &self.flow_stats_map, &self.flow_span_tx).await {
+                    if !record_flow(
+                        community_id,
+                        &self.flow_store,
+                        &self.flow_stats_map,
+                        &self.flow_span_tx,
+                        &self.socket_pid_map,
+                        &self.process_name_resolver,
+                    ).await {
                         // Export channel closed, stop poller
                         warn!(
                             event.name = "flow_poller.stopped",
@@ -1600,6 +1654,27 @@ impl FlowPoller {
     }
 }
 
+/// Resolve process name from PID.
+///
+/// This helper function centralizes the common pattern of resolving a process name
+/// from a PID. Can be used in both FlowSpanProducer methods and standalone functions.
+/// Callers should handle their own logging based on the result.
+///
+/// # Arguments
+///
+/// * `pid` - The process ID to resolve
+/// * `process_name_resolver` - The resolver to use
+///
+/// # Returns
+///
+/// The resolved process name, or `None` if resolution failed or PID is 0.
+async fn resolve_process_name_standalone(
+    pid: u32,
+    process_name_resolver: &Arc<crate::process_name::ProcessNameResolver>,
+) -> Option<String> {
+    process_name_resolver.resolve(pid).await
+}
+
 /// Errors that can occur during boot time offset calculation
 #[derive(Debug)]
 pub enum BootTimeError {
@@ -1655,6 +1730,8 @@ async fn record_flow(
     flow_store: &FlowStore,
     flow_stats_map: &Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     flow_span_tx: &mpsc::Sender<FlowSpan>,
+    socket_pid_map: &Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, u32>>>,
+    process_name_resolver: &Arc<crate::process_name::ProcessNameResolver>,
 ) -> bool {
     // Extract flow_key and boot_time_offset WITHOUT holding DashMap reference
     let (
@@ -1859,6 +1936,134 @@ async fn record_flow(
     let end_time = UNIX_EPOCH + Duration::from_nanos(end_time_nanos);
     flow_span.end_time = end_time;
     flow_span.last_activity_time = end_time;
+
+    // Check if PID needs to be looked up from SOCKET_PID_MAP
+    // This happens when PID is missing or invalid (0)
+    let pid_is_missing = flow_span.attributes.process_pid.is_none();
+    let pid_is_zero = flow_span
+        .attributes
+        .process_pid
+        .as_ref()
+        .and_then(|p| p.parse::<u32>().ok())
+        == Some(0);
+    let should_lookup_pid_from_map = pid_is_missing || pid_is_zero;
+
+    if should_lookup_pid_from_map {
+        let pid_map = socket_pid_map.lock().await;
+        match pid_map.get(&flow_key, 0) {
+            Ok(0) => {
+                // Track map operation metrics - PID is 0 (entry exists but PID is invalid)
+                metrics::registry::EBPF_MAP_OPS_TOTAL
+                    .with_label_values(&[
+                        EbpfMapName::SocketPidMap.as_str(),
+                        EbpfMapOperation::Read.as_str(),
+                        EbpfMapStatus::NotFound.as_str(),
+                    ])
+                    .inc();
+
+                // PID is 0, skip update
+                trace!(
+                    event.name = "flow.pid_lookup_miss",
+                    flow.community_id = %community_id,
+                    "PID not found in SOCKET_PID_MAP during interval update (PID=0)"
+                );
+            }
+            Err(e) => {
+                // Track map operation metrics - key not found
+                let status = match &e {
+                    aya::maps::MapError::KeyNotFound | aya::maps::MapError::ElementNotFound => {
+                        EbpfMapStatus::NotFound
+                    }
+                    _ => EbpfMapStatus::Error,
+                };
+                metrics::registry::EBPF_MAP_OPS_TOTAL
+                    .with_label_values(&[
+                        EbpfMapName::SocketPidMap.as_str(),
+                        EbpfMapOperation::Read.as_str(),
+                        status.as_str(),
+                    ])
+                    .inc();
+
+                // PID not found, skip update
+                trace!(
+                    event.name = "flow.pid_lookup_miss",
+                    flow.community_id = %community_id,
+                    "PID not found in SOCKET_PID_MAP during interval update"
+                );
+            }
+            Ok(pid) => {
+                // Track successful map operation
+                metrics::registry::EBPF_MAP_OPS_TOTAL
+                    .with_label_values(&[
+                        EbpfMapName::SocketPidMap.as_str(),
+                        EbpfMapOperation::Read.as_str(),
+                        EbpfMapStatus::Ok.as_str(),
+                    ])
+                    .inc();
+
+                drop(pid_map); // Release lock before async call
+                // PID found, resolve process name using helper
+                let process_name =
+                    resolve_process_name_standalone(pid, process_name_resolver).await;
+
+                // Update flow span attributes
+                flow_span.attributes.process_pid = Some(pid.to_string());
+                flow_span.attributes.process_executable_name = process_name.clone();
+
+                // Log lookup success with specific event name for interval updates
+                if let Some(ref name) = process_name {
+                    debug!(
+                        event.name = "flow.pid_lookup_success",
+                        flow.community_id = %community_id,
+                        pid = pid,
+                        process_name = %name,
+                        "PID lookup succeeded during interval update"
+                    );
+                } else {
+                    debug!(
+                        event.name = "flow.pid_lookup_success",
+                        flow.community_id = %community_id,
+                        pid = pid,
+                        "PID lookup succeeded but process name resolution failed"
+                    );
+                }
+            }
+        }
+    }
+
+    // Retry process name resolution if PID exists but process name is missing
+    // This can happen if process name resolution failed during initial flow creation
+    // (e.g., process not yet initialized, container namespace issues, timing)
+    let process_name_is_missing = flow_span.attributes.process_executable_name.is_none();
+    if process_name_is_missing {
+        // Extract PID from existing attributes
+        if let Some(pid_str) = &flow_span.attributes.process_pid
+            && let Ok(pid) = pid_str.parse::<u32>()
+        {
+            // Only retry if PID is valid (non-zero)
+            if pid != 0 {
+                let process_name = process_name_resolver.resolve(pid).await;
+                flow_span.attributes.process_executable_name = process_name.clone();
+
+                if let Some(ref name) = process_name {
+                    debug!(
+                        event.name = "flow.process_name_retry_success",
+                        flow.community_id = %community_id,
+                        pid = pid,
+                        process_name = %name,
+                        "Process name resolution retry succeeded during interval update"
+                    );
+                } else {
+                    trace!(
+                        event.name = "flow.process_name_retry_failed",
+                        flow.community_id = %community_id,
+                        pid = pid,
+                        "Process name resolution retry failed (process may have terminated)"
+                    );
+                }
+            }
+        }
+    }
 
     let interface_name = flow_span
         .attributes

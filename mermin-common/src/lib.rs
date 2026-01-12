@@ -440,13 +440,12 @@ impl core::fmt::Display for ConnectionState {
 /// Key Optimization: eBPF already parsed outer headers into FlowStats, so we only
 /// send the UNPARSED portion to avoid redundant parsing in userspace.
 ///
-/// Memory layout: 256 bytes total
+/// Memory layout: 240 bytes total
 /// - FlowKey: 38 bytes (outermost 5-tuple from eBPF)
 /// - snaplen: 2 bytes (total original packet length)
 /// - parsed_offset: 2 bytes (where unparsed data starts in original packet)
 /// - padding: 2 bytes (implicit padding for u32 alignment of pid field)
 /// - pid: 4 bytes (process ID associated with socket, 0 if unavailable)
-/// - comm: 16 bytes (process name captured in-kernel via bpf_get_current_comm)
 /// - packet_data: 192 bytes (ONLY unparsed portion, for tunnel inner headers)
 ///
 /// Example (Plain TCP/IPv4):
@@ -474,15 +473,10 @@ pub struct FlowEvent {
     pub parsed_offset: u16,
 
     /// Process ID (PID) associated with the network socket.
-    /// Set to 0 if PID is unavailable (e.g., forwarded traffic, kernel-generated packets).
+    /// Set to 0 if PID is unavailable (e.g., forwarded traffic, kernel-generated packets,
+    /// or socket not yet tracked by socket_pid_tracker_tcp tracepoint).
     /// Used in userspace to look up process name via /proc/[pid]/comm.
     pub pid: u32,
-
-    /// Process name (comm) captured synchronously in-kernel using bpf_get_current_comm.
-    /// This is a null-terminated string of up to 15 characters (TASK_COMM_LEN - 1).
-    /// Set to all zeros if unavailable or if bpf_get_current_comm() fails.
-    /// Used as primary source for process name resolution, with /proc/[pid]/comm as fallback.
-    pub comm: [u8; 16],
 
     /// Raw packet bytes starting from parsed_offset (up to 192 bytes).
     /// For plain traffic: Usually empty (all headers already parsed).

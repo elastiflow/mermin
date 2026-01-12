@@ -112,6 +112,9 @@ spec:
               mountPath: /sys/fs/bpf
               readOnly: false
               mountPropagation: HostToContainer
+            - name: tracefs
+              mountPath: /sys/kernel/debug
+              readOnly: true
             {{- if .Values.config.content }}
             - name: mermin-config
               mountPath: /etc/mermin
@@ -125,6 +128,10 @@ spec:
           hostPath:
             path: /sys/fs/bpf
             type: DirectoryOrCreate
+        - name: tracefs
+          hostPath:
+            path: /sys/kernel/debug
+            type: Directory
         {{- if .Values.config.content }}
         - name: mermin-config
           configMap:

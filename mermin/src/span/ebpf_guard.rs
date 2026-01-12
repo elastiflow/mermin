@@ -99,23 +99,36 @@ impl Drop for EbpfFlowGuard {
             let key = self.key;
             let map = Arc::clone(&self.map);
 
-            tokio::spawn(async move {
-                let mut map_guard = map.lock().await;
-                if let Err(e) = map_guard.remove(&key) {
-                    warn!(
-                        event.name = "ebpf_guard.cleanup_failed",
-                        flow.key = ?key,
-                        error.message = %e,
-                        "failed to remove orphaned eBPF entry via guard cleanup"
-                    );
-                } else {
-                    warn!(
-                        event.name = "ebpf_guard.cleanup_success",
-                        flow.key = ?key,
-                        "removed orphaned eBPF entry via guard cleanup (error occurred during flow creation)"
-                    );
-                }
-            });
+            // Try to spawn cleanup task, but handle gracefully if runtime is unavailable
+            // (e.g., during test teardown or when async runtime has shut down)
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let mut map_guard = map.lock().await;
+                    if let Err(e) = map_guard.remove(&key) {
+                        warn!(
+                            event.name = "ebpf_guard.cleanup_failed",
+                            flow.key = ?key,
+                            error.message = %e,
+                            "failed to remove orphaned eBPF entry via guard cleanup"
+                        );
+                    } else {
+                        warn!(
+                            event.name = "ebpf_guard.cleanup_success",
+                            flow.key = ?key,
+                            "removed orphaned eBPF entry via guard cleanup (error occurred during flow creation)"
+                        );
+                    }
+                });
+            } else {
+                // No async runtime available (e.g., during test teardown or shutdown)
+                // Log a warning but don't panic - the entry will be cleaned up by timeout
+                // or on next map operation
+                warn!(
+                    event.name = "ebpf_guard.cleanup_skipped",
+                    flow.key = ?key,
+                    "skipped eBPF entry cleanup - no async runtime available (likely during shutdown)"
+                );
+            }
         }
     }
 }

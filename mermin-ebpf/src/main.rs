@@ -87,11 +87,88 @@
 #[cfg(not(feature = "test"))]
 use aya_ebpf::{
     bindings::TC_ACT_UNSPEC,
-    helpers::{bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_ktime_get_boot_ns},
-    macros::{classifier, map, tracepoint},
+    helpers::{bpf_get_current_pid_tgid, bpf_ktime_get_boot_ns, bpf_probe_read_kernel},
+    macros::{classifier, kprobe, map, tracepoint},
     maps::{HashMap, PerCpuArray, RingBuf},
-    programs::{TcContext, TracePointContext},
+    programs::{ProbeContext, TcContext, TracePointContext},
 };
+
+/// Kernel socket structure definitions
+///
+/// These structs provide type-safe field access to kernel socket structures.
+/// Field offsets are calculated using `core::mem::offset_of!` at compile time,
+/// ensuring type safety and maintainability.
+///
+/// Note: These are minimal definitions containing only the fields we need to access.
+/// The actual kernel structs have many more fields. The field order and padding
+/// are designed to match typical kernel sock_common layouts across common kernel versions.
+#[cfg(not(feature = "test"))]
+mod kernel_structs {
+    /// Socket common structure (sock_common) - shared by all socket types.
+    /// This is embedded at the start of struct sock (offset 0).
+    ///
+    /// Field layout designed to match kernel's sock_common structure:
+    /// - skc_family (u16): Address family (AF_INET=2, AF_INET6=10)
+    /// - skc_state (u8): Socket state
+    /// - skc_reuse (u8): SO_REUSEADDR flag
+    /// - skc_bind_node: Bind hash table node (hlist_node, 8 bytes on 64-bit)
+    /// - skc_portpair: Port pair for hashing (u32)
+    /// - skc_num (__be16): Source port (network byte order)
+    /// - skc_dport (__be16): Destination port (network byte order)
+    /// - skc_flags: Socket flags (u64)
+    /// - skc_inet_saddr: IPv4 source address (u32)
+    /// - skc_rcv_saddr: IPv4 receive address (u32)
+    /// - skc_daddr: IPv4 destination address (u32)
+    /// - skc_v6_rcv_saddr: IPv6 receive address (struct in6_addr = [u32; 4])
+    /// - skc_v6_daddr: IPv6 destination address (struct in6_addr = [u32; 4])
+    ///
+    /// Padding fields (_pad1, _pad2) account for compiler alignment and
+    /// intermediate fields we don't need to access.
+    #[repr(C)]
+    pub struct SockCommon {
+        /// Address family (AF_INET=2, AF_INET6=10)
+        pub skc_family: u16,
+        /// Socket state
+        pub skc_state: u8,
+        /// SO_REUSEADDR flag
+        pub skc_reuse: u8,
+        /// Padding for alignment (actual kernel may have different padding)
+        _pad1: u16,
+        /// Bind hash table node (hlist_node, typically 8 bytes on 64-bit)
+        pub skc_bind_node: [u8; 8],
+        /// Port pair for hashing (u32)
+        pub skc_portpair: u32,
+        /// Source port (__be16, network byte order)
+        pub skc_num: u16,
+        /// Destination port (__be16, network byte order)
+        pub skc_dport: u16,
+        /// Socket flags (u64, 8 bytes)
+        pub skc_flags: u64,
+        /// IPv4 source address (for inet sockets, u32)
+        pub skc_inet_saddr: u32,
+        /// IPv4 receive address (u32)
+        pub skc_rcv_saddr: u32,
+        /// IPv4 destination address (u32)
+        pub skc_daddr: u32,
+        /// Padding before IPv6 fields (actual kernel may have different padding)
+        _pad2: u32,
+        /// IPv6 receive address (struct in6_addr = [u32; 4], 16 bytes)
+        pub skc_v6_rcv_saddr: [u32; 4],
+        /// IPv6 destination address (struct in6_addr = [u32; 4], 16 bytes)
+        pub skc_v6_daddr: [u32; 4],
+    }
+
+    /// Socket structure (struct sock).
+    /// The sock_common is embedded at offset 0, so we can access sock_common
+    /// fields directly from a sock pointer by treating it as a SockCommon pointer.
+    #[allow(dead_code)]
+    #[repr(C)]
+    pub struct Sock {
+        /// sock_common is embedded at the start of struct sock (offset 0)
+        pub __sk_common: SockCommon,
+        // ... many more fields follow, but we don't need them
+    }
+}
 #[cfg(not(feature = "test"))]
 use aya_log_ebpf::{error, trace};
 #[cfg(not(feature = "test"))]
@@ -171,12 +248,12 @@ static mut FLOW_KEY_SCRATCH: PerCpuArray<FlowKey> = PerCpuArray::with_max_entrie
 static mut LISTENING_PORTS: HashMap<mermin_common::ListeningPortKey, u8> =
     HashMap::with_max_entries(65536, 0);
 
-/// Map to track process names (comm) for PID lookups.
-/// Key: PID (u32), Value: comm ([u8; 16])
-/// Max entries: 65536 (sufficient for most systems)
+/// Map to track PID associated with sockets (5-tuple).
+/// Key: FlowKey (normalized 5-tuple), Value: PID (u32)
+/// Max entries: 100,000 (same as FLOW_STATS for reasonable coverage)
 #[cfg(not(feature = "test"))]
 #[map]
-static mut PROCESS_NAMES: HashMap<u32, [u8; 16]> = HashMap::with_max_entries(65536, 0);
+static mut SOCKET_PID_MAP: HashMap<FlowKey, u32> = HashMap::with_max_entries(100_000, 0);
 
 /// Error types that can occur during packet parsing.
 ///
@@ -374,22 +451,13 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             flow_event.snaplen = ctx.len() as u16;
             flow_event.parsed_offset = parsed_offset as u16;
 
-            // Extract PID associated with the socket/process handling this packet.
-            // bpf_get_current_pid_tgid() returns u64: upper 32 bits = TGID (process ID), lower 32 bits = PID (thread ID).
-            // If unavailable, for forwarded traffic, or for kernel-generated packets, this will be 0.
-            let pid_tgid = bpf_get_current_pid_tgid();
-            flow_event.pid = (pid_tgid >> 32) as u32;
+            // Lookup PID from socket tracking map (populated by socket_pid_tracker_tcp tracepoint)
+            // This provides reliable socket-to-PID attribution for TCP connections
+            let pid = unsafe { SOCKET_PID_MAP.get(&normalized_key).copied().unwrap_or(0) };
+            flow_event.pid = pid;
 
-            // Try to get process name from PROCESS_NAMES map
-            // Map is populated by userspace scanner at startup and updated by sched_process_exec tracepoint
-            // Note: bpf_get_current_comm() is NOT available in TC programs (only in tracepoints/kprobes)
-            // So we rely on the PROCESS_NAMES map which is populated by the tracepoint
-            let pid = flow_event.pid;
-            #[allow(static_mut_refs)]
-            if let Some(comm) = unsafe { PROCESS_NAMES.get(&pid) } {
-                flow_event.comm = *comm;
-            }
-            // If not in map, comm remains zero-initialized (userspace will resolve from /proc if needed)
+            // Note: comm field is no longer populated here - it will be removed from FlowEvent struct
+            // Process name resolution happens in userspace via /proc/[pid]/comm
 
             // Copy unparsed data (if any) for userspace deep parsing.
             // Load bytes one at a time until we hit the end of the packet or reach 192 bytes.
@@ -488,51 +556,281 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
 
 #[cfg(not(feature = "test"))]
 #[tracepoint]
-pub fn sched_process_exec(_ctx: TracePointContext) -> i32 {
-    // Extract PID (TGID - process ID, not thread ID)
+pub fn socket_pid_tracker_tcp(ctx: TracePointContext) -> i32 {
+    // Read tracepoint fields using offsets from kernel tracepoint format
+    // Format can be viewed at: /sys/kernel/debug/tracing/events/sock/inet_sock_set_state/format
+    // Typical offsets (may vary by kernel version):
+    //   field:__data_loc unsigned long[] skaddr; offset:8; size:8
+    //   field:short oldstate; offset:16; size:2
+    //   field:short newstate; offset:18; size:2
+    //   field:__be16 sport; offset:20; size:2
+    //   field:__u16 sport; offset:24; size:2
+    //   field:__u16 dport; offset:26; size:2
+    //   field:__u16 family; offset:28; size:2
+    //   field:__u16 protocol; offset:30; size:2
+    //   field:__u8 saddr[4]; offset:32; size:4
+    //   field:__u8 daddr[4]; offset:36; size:4
+    //   field:__u8 saddr_v6[16]; offset:40; size:16
+    //   field:__u8 daddr_v6[16]; offset:56; size:16
+
+    // Read protocol first (offset 30)
+    let protocol: u16 = match unsafe { ctx.read_at(30) } {
+        Ok(p) => p,
+        Err(_) => return 0, // Failed to read protocol
+    };
+    if protocol != IpProto::Tcp as u16 {
+        return 0; // Only track TCP
+    }
+
+    // Read family (offset 28): AF_INET = 2, AF_INET6 = 10
+    let family: u16 = match unsafe { ctx.read_at(28) } {
+        Ok(f) => f,
+        Err(_) => return 0, // Failed to read family
+    };
+    if family != 2 && family != 10 {
+        return 0; // Only track IPv4 and IPv6
+    }
+
+    // Get PID from current process
     let pid_tgid = bpf_get_current_pid_tgid();
     let pid = (pid_tgid >> 32) as u32;
+    if pid == 0 {
+        return 0; // Skip kernel threads
+    }
 
-    // Get process name (comm) - up to 15 characters + null terminator
-    // In aya_ebpf, bpf_get_current_comm() takes no arguments and returns Result<[u8; 16], c_long>
-    let comm = match bpf_get_current_comm() {
-        Ok(comm) => comm,
-        Err(_) => {
-            // If bpf_get_current_comm fails, use zero-initialized comm
-            // Userspace will resolve from /proc/[pid]/comm as fallback
-            [0u8; 16]
-        }
+    // Build FlowKey from socket information
+    let mut flow_key = FlowKey {
+        protocol: IpProto::Tcp,
+        ..Default::default()
     };
 
-    // Insert into map (or update if PID was reused)
-    // Duplicates are harmless - they just update the value with the new comm
-    #[allow(static_mut_refs)]
-    let _ = unsafe { PROCESS_NAMES.insert(&pid, &comm, 0) };
+    if family == 2 {
+        // IPv4
+        flow_key.ip_version = IpVersion::V4;
+        let saddr: [u8; 4] = match unsafe { ctx.read_at(32) } {
+            Ok(addr) => addr,
+            Err(_) => return 0, // Failed to read source address
+        };
+        let daddr: [u8; 4] = match unsafe { ctx.read_at(36) } {
+            Ok(addr) => addr,
+            Err(_) => return 0, // Failed to read destination address
+        };
+        flow_key.src_ip[..4].copy_from_slice(&saddr);
+        flow_key.dst_ip[..4].copy_from_slice(&daddr);
+    } else {
+        // IPv6
+        flow_key.ip_version = IpVersion::V6;
+        let saddr_v6: [u8; 16] = match unsafe { ctx.read_at(40) } {
+            Ok(addr) => addr,
+            Err(_) => return 0, // Failed to read source IPv6 address
+        };
+        let daddr_v6: [u8; 16] = match unsafe { ctx.read_at(56) } {
+            Ok(addr) => addr,
+            Err(_) => return 0, // Failed to read destination IPv6 address
+        };
+        flow_key.src_ip.copy_from_slice(&saddr_v6);
+        flow_key.dst_ip.copy_from_slice(&daddr_v6);
+    }
 
-    // Note: insert() returns Result, but we ignore errors since:
-    // - Map may be full (unlikely with 65536 entries)
-    // - Map errors are rare and non-critical for tracking
-    // - Userspace scanner will populate on startup anyway
+    // Read ports (network byte order, offsets 24 and 26)
+    flow_key.src_port = match unsafe { ctx.read_at(24) } {
+        Ok(port) => port,
+        Err(_) => return 0, // Failed to read source port
+    };
+    flow_key.dst_port = match unsafe { ctx.read_at(26) } {
+        Ok(port) => port,
+        Err(_) => return 0, // Failed to read destination port
+    };
+
+    // Normalize the flow key (src < dst for bidirectional matching)
+    let normalized_key = flow_key.normalize();
+
+    // Store PID in map (or update if socket already exists)
+    #[allow(static_mut_refs)]
+    let _ = unsafe { SOCKET_PID_MAP.insert(&normalized_key, &pid, 0) };
+
+    // Note: We don't clean up on TCP_CLOSE/CLOSED states - let entries expire naturally
+    // or be overwritten when sockets are reused. This simplifies the logic and handles
+    // TIME_WAIT states gracefully.
 
     0
 }
 
-#[cfg(not(feature = "test"))]
-#[tracepoint]
-pub fn sched_process_exit(_ctx: TracePointContext) -> i32 {
-    // Extract PID (TGID - process ID, not thread ID)
+/// Extract FlowKey and PID from a UDP socket and store in SOCKET_PID_MAP.
+/// Uses CO-RE (Compile Once - Run Everywhere) principles by accessing kernel
+/// struct fields through type-safe struct definitions and offset calculations,
+/// allowing BTF to resolve field offsets at load time for portability across
+/// kernel versions.
+///
+/// Returns 0 on success or if socket can't be tracked (e.g., unconnected).
+#[inline(never)]
+fn extract_udp_socket_info(sk_ptr: u64) -> i32 {
+    use core::mem;
+
+    use kernel_structs::SockCommon;
+
+    // Get PID from current process
     let pid_tgid = bpf_get_current_pid_tgid();
     let pid = (pid_tgid >> 32) as u32;
+    if pid == 0 {
+        return 0; // Skip kernel threads
+    }
 
-    // Remove entry from map to prevent stale entries and help with PID reuse
+    // Calculate field offsets using offset_of!
+    // These offsets are calculated at compile time from the SockCommon struct definition,
+    // ensuring type safety and maintainability. The offsets will be correct if our
+    // struct definition matches the kernel's sock_common layout.
+    let skc_family_offset = mem::offset_of!(SockCommon, skc_family);
+    let skc_num_offset = mem::offset_of!(SockCommon, skc_num);
+    let skc_dport_offset = mem::offset_of!(SockCommon, skc_dport);
+    let skc_rcv_saddr_offset = mem::offset_of!(SockCommon, skc_rcv_saddr);
+    let skc_daddr_offset = mem::offset_of!(SockCommon, skc_daddr);
+    let skc_v6_rcv_saddr_offset = mem::offset_of!(SockCommon, skc_v6_rcv_saddr);
+    let skc_v6_daddr_offset = mem::offset_of!(SockCommon, skc_v6_daddr);
+
+    // Read socket family
+    let family_ptr = (sk_ptr as usize + skc_family_offset) as *const u16;
+    let family: u16 = match unsafe { bpf_probe_read_kernel(family_ptr) } {
+        Ok(f) => f,
+        Err(_) => return 0, // Failed to read socket family
+    };
+
+    // Only process IPv4 and IPv6 sockets
+    if family != 2 && family != 10 {
+        // AF_INET = 2, AF_INET6 = 10
+        return 0;
+    }
+
+    // Read source port (skc_num)
+    // Note: skc_num is __be16 in kernel (network byte order)
+    let src_port_ptr = (sk_ptr as usize + skc_num_offset) as *const u16;
+    let src_port: u16 = match unsafe { bpf_probe_read_kernel(src_port_ptr) } {
+        Ok(port) => port,   // Already in network byte order
+        Err(_) => return 0, // Failed to read source port
+    };
+
+    // Read destination port (skc_dport)
+    // Note: skc_dport is __be16 in kernel (network byte order)
+    let dst_port_ptr = (sk_ptr as usize + skc_dport_offset) as *const u16;
+    let dst_port: u16 = match unsafe { bpf_probe_read_kernel(dst_port_ptr) } {
+        Ok(port) => port,   // Already in network byte order
+        Err(_) => return 0, // Failed to read destination port
+    };
+
+    // For UDP, we can only track if destination port is set (connected socket)
+    // If dst_port is 0, we skip this socket as it's unconnected
+    if dst_port == 0 {
+        return 0; // Unconnected socket - can't build complete 5-tuple
+    }
+
+    // Build FlowKey from socket information
+    let mut flow_key = FlowKey {
+        protocol: IpProto::Udp,
+        src_port, // Already in network byte order
+        dst_port, // Already in network byte order
+        ..Default::default()
+    };
+
+    if family == 2 {
+        // IPv4
+        flow_key.ip_version = IpVersion::V4;
+
+        // Read IPv4 source address (skc_rcv_saddr)
+        let src_addr_ptr = (sk_ptr as usize + skc_rcv_saddr_offset) as *const u32;
+        let src_addr: u32 = match unsafe { bpf_probe_read_kernel(src_addr_ptr) } {
+            Ok(addr) => addr,
+            Err(_) => return 0, // Failed to read source address
+        };
+
+        // Read IPv4 destination address (skc_daddr)
+        let dst_addr_ptr = (sk_ptr as usize + skc_daddr_offset) as *const u32;
+        let dst_addr: u32 = match unsafe { bpf_probe_read_kernel(dst_addr_ptr) } {
+            Ok(addr) => addr,
+            Err(_) => return 0, // Failed to read destination address
+        };
+
+        // Convert u32 addresses to bytes (addresses are in network byte order in kernel)
+        flow_key.src_ip[..4].copy_from_slice(&src_addr.to_be_bytes());
+        flow_key.dst_ip[..4].copy_from_slice(&dst_addr.to_be_bytes());
+    } else {
+        // IPv6
+        flow_key.ip_version = IpVersion::V6;
+
+        // Read IPv6 source address (skc_v6_rcv_saddr)
+        let src_v6_ptr = (sk_ptr as usize + skc_v6_rcv_saddr_offset) as *const [u32; 4];
+        let src_v6: [u32; 4] = match unsafe { bpf_probe_read_kernel(src_v6_ptr) } {
+            Ok(addr) => addr,
+            Err(_) => return 0, // Failed to read IPv6 source address
+        };
+
+        // Read IPv6 destination address (skc_v6_daddr)
+        let dst_v6_ptr = (sk_ptr as usize + skc_v6_daddr_offset) as *const [u32; 4];
+        let dst_v6: [u32; 4] = match unsafe { bpf_probe_read_kernel(dst_v6_ptr) } {
+            Ok(addr) => addr,
+            Err(_) => return 0, // Failed to read IPv6 destination address
+        };
+
+        // Copy IPv6 addresses (each u32 is in network byte order)
+        for i in 0..4 {
+            flow_key.src_ip[i * 4..(i + 1) * 4].copy_from_slice(&src_v6[i].to_be_bytes());
+            flow_key.dst_ip[i * 4..(i + 1) * 4].copy_from_slice(&dst_v6[i].to_be_bytes());
+        }
+    }
+
+    // Normalize the flow key (src < dst for bidirectional matching)
+    let normalized_key = flow_key.normalize();
+
+    // Store PID in map (or update if socket already exists)
     #[allow(static_mut_refs)]
-    let _ = unsafe { PROCESS_NAMES.remove(&pid) };
-
-    // Note: remove() returns Result, but we ignore errors since:
-    // - Entry may not exist (process wasn't tracked)
-    // - Map errors are rare and non-critical for cleanup
+    let _ = unsafe { SOCKET_PID_MAP.insert(&normalized_key, &pid, 0) };
 
     0
+}
+
+/// Kprobe handler for udp_sendmsg - tracks outgoing UDP packets
+/// Function signature: int udp_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
+#[cfg(not(feature = "test"))]
+#[kprobe]
+pub fn socket_pid_tracker_udp_send(ctx: ProbeContext) -> i32 {
+    try_socket_pid_tracker_udp_send(ctx).unwrap_or_default()
+}
+
+fn try_socket_pid_tracker_udp_send(ctx: ProbeContext) -> Result<i32, i32> {
+    // Extract socket pointer from first argument
+    let sk_ptr: u64 = match ctx.arg(0) {
+        Some(ptr) => ptr,
+        None => return Err(0),
+    };
+
+    if sk_ptr == 0 {
+        return Err(0); // Invalid socket pointer
+    }
+
+    extract_udp_socket_info(sk_ptr);
+    Ok(0)
+}
+
+/// Kprobe handler for udp_recvmsg - tracks incoming UDP packets
+/// Function signature: int udp_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags, int *addr_len)
+#[cfg(not(feature = "test"))]
+#[kprobe]
+pub fn socket_pid_tracker_udp_recv(ctx: ProbeContext) -> i32 {
+    try_socket_pid_tracker_udp_recv(ctx).unwrap_or_default()
+}
+
+fn try_socket_pid_tracker_udp_recv(ctx: ProbeContext) -> Result<i32, i32> {
+    // Extract socket pointer from first argument
+    let sk_ptr: u64 = match ctx.arg(0) {
+        Some(ptr) => ptr,
+        None => return Err(0),
+    };
+
+    if sk_ptr == 0 {
+        return Err(0); // Invalid socket pointer
+    }
+
+    extract_udp_socket_info(sk_ptr);
+    Ok(0)
 }
 
 /// Parse L2 + L3 + L4 headers to extract flow key (Ethernet, IP, Transport/ICMP)
