@@ -6,7 +6,7 @@ use hcl::{
     eval::{Context, FuncArgs, FuncDef, ParamType},
 };
 use serde::{Deserialize, Serialize};
-use tracing::{Level, debug, warn};
+use tracing::{Level, debug, info, warn};
 
 use crate::{
     filter::opts::FilteringOptions,
@@ -936,10 +936,18 @@ impl Default for PipelineOptions {
 }
 
 impl PipelineOptions {
-    /// Validates channel configurations against cgroup memory limits
     pub fn validate_memory_usage(&self) {
-        if let Some(limit) = Self::get_cgroup_memory_limit() {
+        if let Some(limit) = std::env::var("POD_RESOURCES_LIMITS_MEM")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             self.validate_memory_usage_against_limit(limit);
+        } else {
+            debug!(
+                event.name = "config.memory_check.skipped",
+                reason = "memory_limit_not_found",
+                "could not determine memory limit (POD_RESOURCES_LIMITS_MEM not set), skipping validation"
+            );
         }
     }
 
@@ -958,40 +966,19 @@ impl PipelineOptions {
                 memory_limit_bytes = limit,
                 flow_span_capacity = self.flow_span_channel_capacity,
                 decorated_span_capacity = self.decorated_span_channel_capacity,
-                "Channel capacities might exceed recommended memory limits (40% of container memory). \
-                     Consider reducing capacities via flow_span_channel_capacity/decorated_span_channel_capacity."
+                "channel capacities might exceed recommended memory limits (40% of container memory); \
+                     consider reducing capacities via flow_span_channel_capacity/decorated_span_channel_capacity"
             );
             false
         } else {
-            debug!(
+            info!(
                 event.name = "config.memory_check",
                 estimated_usage_bytes = estimated_usage,
                 memory_limit_bytes = limit,
-                "Channel memory usage is within safe limits"
+                "channel memory usage is within safe limits"
             );
             true
         }
-    }
-
-    fn get_cgroup_memory_limit() -> Option<u64> {
-        // cgroup v2 check
-        if let Ok(contents) = std::fs::read_to_string("/sys/fs/cgroup/memory.max")
-            && let Ok(val) = contents.trim().parse::<u64>()
-        {
-            return Some(val);
-        }
-
-        // cgroup v1 fallback
-        if let Ok(contents) = std::fs::read_to_string("/sys/fs/cgroup/memory/memory.limit_in_bytes")
-            && let Ok(val) = contents.trim().parse::<u64>()
-        {
-            // cgroup v1 uses PAGE_COUNTER_MAX (maximum possible 64-bit signed integer (2^63 - 1) rounded down to the nearest memory page (usually 4,096 bytes) for unlimited.
-            if val < 9_223_372_036_854_771_712 {
-                return Some(val);
-            }
-        }
-
-        None
     }
 }
 
