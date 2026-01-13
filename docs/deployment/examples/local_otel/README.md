@@ -24,21 +24,22 @@ Notes on the example deployment:
     ```sh
     # Deploy OpenTelemetry Collector
     helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
-    helm upgrade -i \
+    helm upgrade -i -n default \
       -f values_otel.yaml \
       otel-collector open-telemetry/opentelemetry-collector
-
     ```
+
 * Create config file for the Mermin with [contents](config.hcl) or use one from the repo
 * Deploy the Mermin chart
 
     ```sh
     helm repo add mermin https://elastiflow.github.io/mermin/
-    helm upgrade -i --wait --timeout 15m \
+    helm upgrade -i --wait --timeout 15m -n default \
       --set-file config.content=config.hcl \
       --devel \
       mermin mermin/mermin
     ```
+
 * Optionally install `metrics-server` to get metrics if it has not been installed yet
 
     ```sh

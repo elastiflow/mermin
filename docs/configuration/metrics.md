@@ -1,6 +1,6 @@
 # Metrics
 
-Mermin provides HTTP endpoints Prometheus metrics. This page documents metrics configuration.
+Mermin provides Prometheus metrics HTTP endpoints (default port `10250`). This page documents metrics configuration.
 Endpoints available:
 
 - `/metrics` - All metrics (standard + debug if `metrics.debug_metrics_enabled` is `true`)
