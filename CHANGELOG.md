@@ -1,3 +1,17 @@
+## [v0.1.0-beta.43] - 2026-01-13
+
+### Features
+
+- Add bytesize dependency and enhance ebpf ring buffer configuration (#365)
+- **config:** Ensure attributes metadata can be set individually (#369)
+- **provider:** Add http support to output (#363)
+- Address metrics improvements (#368)
+- **enrichment:** Tcp time-based metrics (#358)
+
+[v0.1.0-beta.42..v0.1.0-beta.43](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.42...v0.1.0-beta.43)
+
+
+
 er ## [v0.1.0-beta.42] - 2025-12-22
 
 ### Features
