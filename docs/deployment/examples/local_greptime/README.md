@@ -9,7 +9,7 @@
 
 ## Overview
 
-This example deploys Mermin alongside a standalone GreptimeDB instance for persistence. Mermin is configured to write metrics directly to GreptimeDB via HTTP using the OTLP protocol.
+This example deploys Mermin alongside a standalone GreptimeDB instance for persistence. Mermin is configured to write metrics directly to GreptimeDB via HTTP using the OTLP protocol. This deployment has been tested by using [Kind](https://kind.sigs.k8s.io/)
 
 Notes on the example deployment:
 
@@ -31,8 +31,6 @@ Deploy GreptimeDB to serve as the persistence layer for the collected network te
     helm repo add greptime https://greptimeteam.github.io/helm-charts/
     helm repo update
     helm install greptimedb greptime/greptimedb-standalone  \
-      --namespace elastiflow \
-      --create-namespace \
       -f values_greptime.yaml
     ```
 
@@ -47,7 +45,7 @@ Deploy Mermin configured to output directly to the GreptimeDB service using HTTP
 
     ```sh
     helm repo add mermin https://elastiflow.github.io/mermin/
-    helm upgrade -i --wait --timeout 15m -n elastiflow --create-namespace \
+    helm upgrade -i --wait --timeout 15m \
       -f docs/deployment/examples/local/values.yaml \
       --set-file config.content=config.hcl \
       --devel \
