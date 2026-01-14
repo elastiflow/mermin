@@ -123,8 +123,11 @@ startupProbe:
 
 # Priority class name for the pod, empty string means no priority class.
 # Common value is "system-node-critical" to ensure to schedule the Mermin pods on all nodes.
-# See: https://kubernetes.io/docs/tasks/administer-cluster/guaranteed-scheduling-critical-addon-pods/
-# See: https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/
+# You may want to create custom ResourceQuota to allow this priority class if deployed not in the kube-system namespace.
+# Links:
+#   https://kubernetes.io/docs/tasks/administer-cluster/guaranteed-scheduling-critical-addon-pods/
+#   https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/
+#   https://kubernetes.io/docs/concepts/policy/resource-quotas/#quota-scopes
 priorityClassName: ""
 
 tolerations:
