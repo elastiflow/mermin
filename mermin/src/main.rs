@@ -341,7 +341,7 @@ async fn run(cli: Cli) -> Result<()> {
     let mut ebpf = EbpfLoader::new()
         .map_pin_path(&map_pin_path)
         .set_max_entries("FLOW_STATS", conf.pipeline.ebpf_max_flows)
-        .set_max_entries("FLOW_EVENTS", conf.pipeline.ebpf_ring_buffer_size_bytes)
+        .set_max_entries("FLOW_EVENTS", conf.pipeline.ebpf_ring_buffer_size)
         .load(aya::include_bytes_aligned!(concat!(
             env!("OUT_DIR"),
             "/mermin"

@@ -15,6 +15,7 @@ pipeline {
   ebpf_max_flows                    = 100000
   worker_queue_capacity             = 2048
   flow_store_capacity               = 32768
+  ebpf_ring_buffer_size             = "256KB"
   worker_count                      = 4
   worker_poll_interval              = "5s"
   k8s_decorator_threads             = 4
