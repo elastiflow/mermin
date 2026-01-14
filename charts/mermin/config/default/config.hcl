@@ -671,7 +671,6 @@ span {
 }
 
 # OTLP exporter configuration
-# See OBI export concepts: https://opentelemetry.io/docs/zero-code/obi/configure/export-data/
 export "traces" {
   stdout = {
     format = "text_indent" // text, text_indent(*new), json, json_indent
@@ -699,6 +698,12 @@ export "traces" {
       ca_cert              = "/etc/certs/ca.crt"
       client_cert          = "/etc/certs/cert.crt"
       client_key           = "/etc/certs/cert.key"
+    }
+
+    headers = {
+      # Examples
+      # "x-greptime-db-name"       = "public"
+      # "x-greptime-pipeline-name" = "greptime_trace_v1"
     }
   }
 }
