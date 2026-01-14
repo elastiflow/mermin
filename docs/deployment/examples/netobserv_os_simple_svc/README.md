@@ -21,6 +21,7 @@ Notes on the example deployment:
   - OpenSearch Dashboards `1000m`/`768M`
   - NetObserv Flow `1000m`/`6000Mi`
 - You may optionally customize and use `config.hcl` instead of the default config.
+- NetObserv is accessed via K8s Service (ClusterIP) for simplicity.
 
 ## Install
 
