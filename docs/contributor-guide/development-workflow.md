@@ -161,6 +161,22 @@ cargo clippy -p mermin-ebpf -- -D warnings
 cargo clippy --all-features -- -D warnings
 ```
 
+### "hack" hints
+
+- Generate metrics description for the [app-metrics docs](../observability/app-metrics.md) with `jq`
+
+  ```bash
+  curl -s ${POD_IP}:10250/metrics:summary | jq --arg metric_prefix ${METRIC_PREFIX} -r -f hack/gen_metrics_doc.jq
+  # Example
+  curl -s localhost:10250/metrics:summary | jq --arg metric_prefix mermin_ebpf -r -f hack/gen_metrics_doc.jq
+  ```
+
+- Download Grafana dashboard JSON from a local Grafana instance ()
+  
+  ```bash
+  curl -s "localhost:3000/api/dashboards/uid/mermin_app" | jq -r '.dashboard' > docs/observability/grafana-mermin-app.json
+  ```
+
 ## Using a Dockerized Build Environment
 
 To ensure a consistent and reproducible build environment that matches the CI/CD pipeline, you can use Docker. This is
@@ -210,9 +226,6 @@ make helm-upgrade
 
 # With custom local config
 make helm-upgrade EXTRA_HELM_ARGS='--set-file config.content=local/config.hcl'
-
-# Minimal deployment (uses default config from chart)
-helm upgrade -i mermin charts/mermin --values docs/deployment/examples/local/values.yaml --wait --timeout 10m
 ```
 
 **Optionally install `metrics-server` to get metrics if it has not been installed yet**
@@ -232,7 +245,7 @@ helm upgrade -i --wait --timeout 15m -n prometheus --create-namespace \
   -f docs/deployment/examples/local/values_prom_stack.yaml \
   prometheus prometheus/kube-prometheus-stack
 kubectl -n prometheus patch sts prometheus-grafana \
-  --type="json" -p='[{"op":"replace","path":"/spec/persistentVolumeClaimRetentionPolicy/whenDeleted", "value": "Delete"}]'  
+  --type="json" -p='[{"op":"replace","path":"/spec/persistentVolumeClaimRetentionPolicy/whenDeleted", "value": "Delete"}]'
 
 # Port-forward Grafana to open in the browser
 kubectl -n prometheus port-forward svc/prometheus-grafana 3000:3000
