@@ -59,9 +59,9 @@ shutdown_timeout = "10s"
 
 # Pipeline configuration
 pipeline {
-  worker_queue_capacity = 2048
-  flow_store_capacity = 32768
-  flow_span_channel_capacity = 16384
+  ebpf_ringbuf_worker_capacity = 2048
+  flow_producer_store_capacity = 32768
+  flow_producer_channel_capacity = 16384
   worker_count = 4
 }
 

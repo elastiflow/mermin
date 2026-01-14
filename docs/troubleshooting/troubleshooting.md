@@ -112,9 +112,9 @@ Key metrics to monitor include:
 - **Interface Unavailable**: Mermin logs a warning and continues monitoring other interfaces
 - **eBPF Load Failure**: Agent fails to start; check kernel version and eBPF support
 - **High Packet Loss**: 
-  - Worker queue drops: Increase `pipeline.worker_queue_capacity` or `pipeline.worker_count`
-  - Flow span channel drops: Increase `pipeline.flow_span_channel_capacity` or `pipeline.k8s_decorator_threads`
-  - Decorated span channel drops: Increase `pipeline.decorated_span_channel_capacity` or optimize exporter settings
+  - Worker queue drops: Increase `pipeline.ebpf_ringbuf_worker_capacity` or `pipeline.worker_count`
+  - Flow span channel drops: Increase `pipeline.flow_producer_channel_capacity` or `pipeline.k8s_decorator_threads`
+  - Decorated span channel drops: Increase `pipeline.k8s_decorator_channel_capacity` or optimize exporter settings
   - General: Reduce monitored interfaces or check metrics to identify the specific bottleneck -->
 ### Test eBPF Capabilities
 

@@ -171,14 +171,14 @@ Mermin provides metrics to monitor shutdown behavior:
 - `shutdown_flows_total{status="preserved"}`: Flows successfully exported during shutdown
 - `shutdown_flows_total{status="lost"}`: Flows lost due to shutdown timeout
 
-### `worker_queue_capacity`
+### `ebpf_ringbuf_worker_capacity`
 
 **Type:** Integer
 **Default:** `2048`
 
 Capacity for each worker thread's event queue. Determines how many raw eBPF events can be buffered per worker before drops occur.
 
-**Formula:** Total worker buffer memory ≈ `worker_count` × `worker_queue_capacity` × 256 bytes
+**Formula:** Total worker buffer memory ≈ `worker_count` × `ebpf_ringbuf_worker_capacity` × 256 bytes
 
 **Tuning Guidelines:**
 
@@ -192,7 +192,7 @@ Capacity for each worker thread's event queue. Determines how many raw eBPF even
 **Signs You Need to Increase:**
 * Metrics show `mermin_flow_events_total{status="dropped_backpressure"}` increasing
 
-### `flow_store_capacity`
+### `flow_producer_store_capacity`
 
 **Type:** Integer
 **Default:** `32768`
@@ -346,7 +346,7 @@ Drop rate threshold for logging backpressure warnings. Warnings are logged when 
 
 These options control the buffer sizes between pipeline stages to optimize for your workload.
 
-#### `flow_span_channel_capacity`
+#### `flow_producer_channel_capacity`
 
 **Type:** Integer
 **Default:** `16384`
@@ -359,7 +359,7 @@ Explicit capacity for the flow span channel. Provides buffering between workers 
 * **Bursty traffic**: `24576`-`32768`
 * **Low latency priority**: `12288`
 
-#### `decorated_span_channel_capacity`
+#### `k8s_decorator_channel_capacity`
 
 **Type:** Integer
 **Default:** `32768`

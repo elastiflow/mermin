@@ -151,7 +151,7 @@ auto_reload = false
 shutdown_timeout = "5s"
 
 pipeline {
-  worker_queue_capacity = 2048
+  ebpf_ringbuf_worker_capacity = 2048
   worker_count = 4
 }
 ```
