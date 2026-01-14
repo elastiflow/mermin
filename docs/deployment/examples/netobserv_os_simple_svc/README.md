@@ -1,10 +1,10 @@
 # Mermin with NetObserv Flow and OpenSearch
 
-* [Mermin with NetObserv Flow and OpenSearch](./#mermin-with-netobserv-flow-and-opensearch)
-  * [Overview](./#overview)
-  * [Install](./#install)
-  * [Access](./#access)
-  * [Hints](./#hints)
+- [Mermin with NetObserv Flow and OpenSearch](#mermin-with-netobserv-flow-and-opensearch)
+  - [Overview](#overview)
+  - [Install](#install)
+  - [Access](#access)
+  - [Hints](#hints)
 
 ## Overview
 
@@ -14,20 +14,20 @@ This example is intended only for demonstration, testing, or proof-of-concept us
 
 Notes on the example deployment:
 
-* [Location in the repository](https://github.com/elastiflow/mermin/tree/beta/docs/deployment/examples/netobserv_os_simple_svc) - `docs/deployment/examples/netobserv_os_simple_svc`
-* Namespace used in the example: `elastiflow`.
-* Allocatable resources needed (mCPU/MiB):
-  * OpenSearch `2000m`/`4000Mi`
-  * OpenSearch Dashboards `1000m`/`768M`
-  * NetObserv Flow `1000m`/`6000Mi`
-* You may optionally customize and use `config.hcl` instead of the default config.
+- [Location in the repository](https://github.com/elastiflow/mermin/tree/beta/docs/deployment/examples/netobserv_os_simple_svc) - `docs/deployment/examples/netobserv_os_simple_svc`
+- Namespace used in the example: `elastiflow`.
+- Allocatable resources needed (mCPU/MiB):
+  - OpenSearch `2000m`/`4000Mi`
+  - OpenSearch Dashboards `1000m`/`768M`
+  - NetObserv Flow `1000m`/`6000Mi`
+- You may optionally customize and use `config.hcl` instead of the default config.
 
 ## Install
 
-* Create values and a config file for the Mermin Umbrella chart (or use ones from the repo)
-  * Values [contents](values.yaml)
-  * Config [contents](config.hcl)
-* Add Helm charts and Deploy
+- Create values and a config file for the Mermin Umbrella chart (or use ones from the repo)
+  - Values [contents](values.yaml)
+  - Config [contents](config.hcl)
+- Add Helm charts and Deploy
 
     ```sh
     helm repo add mermin https://elastiflow.github.io/mermin/
@@ -43,7 +43,7 @@ Notes on the example deployment:
       mermin mermin/mermin-netobserv-os-stack
     ```
     
-* Optionally install `metrics-server` to get metrics if it has not been installed yet
+- Optionally install `metrics-server` to get metrics if it has not been installed yet
 
     ```sh
     kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.8.0/components.yaml
