@@ -23,7 +23,7 @@ metrics {
   ebpf_max_flows = 5000  # Reduce `FLOW_STATS` capacity
 }
 ```
-### `ebpf_ring_buffer_size`
+### `ebpf_ringbuf_size`
 
 **Type:** String (byte size) **Default:** `"256KB"`
 
@@ -39,11 +39,11 @@ The size of the `FLOW_EVENTS` ring buffer used to pass new flow events from eBPF
 
 ```hcl
 pipeline {
-  ebpf_ring_buffer_size = "1MB"
+  ebpf_ringbuf_size = "1MB"
 }
 ```
 
-### `worker_queue_capacity`
+### `ebpf_ringbuf_worker_capacity`
 
 **Type:** Integer **Default:** `2048`
 
@@ -53,11 +53,11 @@ Capacity for each worker thread's event queue. Determines how many raw eBPF even
 
 ```hcl
 pipeline {
-  worker_queue_capacity = 4096
+  ebpf_ringbuf_worker_capacity = 4096
 }
 ```
 
-### `flow_store_capacity`
+### `flow_producer_store_capacity`
 
 **Type:** Integer **Default:** `32768`
 
@@ -67,7 +67,7 @@ Initial capacity for the userspace flow tracking map. Should be set large enough
 
 ```hcl
 pipeline {
-  flow_store_capacity = 65536
+  flow_producer_store_capacity = 65536
 }
 ```
 
@@ -114,7 +114,7 @@ pipeline {
 }
 ```
 
-### `flow_span_channel_capacity`
+### `flow_producer_channel_capacity`
 
 **Type:** Integer **Default:** `16384`
 
@@ -125,11 +125,11 @@ With default settings, this provides approximately 1.6s of buffer at 10,000 flow
 
 ```hcl
 pipeline {
-  flow_span_channel_capacity = 24576  # Larger buffer for high-latency decoration
+  flow_producer_channel_capacity = 24576  # Larger buffer for high-latency decoration
 }
 ```
 
-### `decorated_span_channel_capacity`
+### `k8s_decorator_channel_capacity`
 
 **Type:** Integer **Default:** `32768`
 
@@ -140,6 +140,6 @@ With default settings, this provides approximately 3.2s of buffer at 10,000 flow
 
 ```hcl
 pipeline {
-  decorated_span_channel_capacity = 65536  # Increase for slow exporters
+  k8s_decorator_channel_capacity = 65536  # Increase for slow exporters
 }
 ```

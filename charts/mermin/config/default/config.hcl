@@ -13,14 +13,14 @@ shutdown_timeout = "5s"
 # Pipeline performance and channel configuration options
 pipeline {
   ebpf_max_flows                    = 100000
-  worker_queue_capacity             = 2048
-  flow_store_capacity               = 32768
-  ebpf_ring_buffer_size             = "256KB"
+  ebpf_ringbuf_worker_capacity      = 2048
+  flow_producer_store_capacity      = 32768
+  ebpf_ringbuf_size             = "256KB"
   worker_count                      = 4
   worker_poll_interval              = "5s"
   k8s_decorator_threads             = 4
-  flow_span_channel_capacity        = 16384
-  decorated_span_channel_capacity   = 32768
+  flow_producer_channel_capacity        = 16384
+  k8s_decorator_channel_capacity   = 32768
 }
 
 # Internal configuration options
