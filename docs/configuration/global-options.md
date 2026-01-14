@@ -184,10 +184,10 @@ Capacity for each worker thread's event queue. Determines how many raw eBPF even
 
 | Traffic Volume             | Recommended Value |
 |----------------------------|-------------------|
-| Low (< 10K flows/s)        | 1024              |
-| Medium (10K-50K flows/s)   | 2048 (default)    |
-| High (50K-100K flows/s)    | 4096              |
-| Very High (> 100K flows/s) | 8192+             |
+| Low (< 10K flows/s)        | 512-1024          |
+| Medium (10K-50K flows/s)   | 1024- 2048        |
+| High (50K-100K flows/s)    | 2048 (default)    |
+| Very High (> 100K flows/s) | 4096+             |
 
 **Signs You Need to Increase:**
 * Metrics show `mermin_flow_events_total{status="dropped_backpressure"}` increasing
@@ -356,8 +356,8 @@ Explicit capacity for the flow span channel. Provides buffering between workers 
 **Recommendations:**
 
 * **Steady traffic**: `16384` (default)
-* **Bursty traffic**: `32768`
-* **Low latency priority**: `8192`
+* **Bursty traffic**: `24576`-`32768`
+* **Low latency priority**: `12288`
 
 #### `decorated_span_channel_capacity`
 
@@ -369,8 +369,8 @@ Explicit capacity for the decorated span (export) channel. Provides buffering be
 **Recommendations:**
 
 * **Reliable network**: `32768` (default)
-* **Unreliable network**: `65536`
-* **Very high throughput**: `131072`
+* **Unreliable network**: `49152`-`65536`
+* **Very high throughput**: `65536`-`98304`
 
 ### Monitoring Performance Configuration
 

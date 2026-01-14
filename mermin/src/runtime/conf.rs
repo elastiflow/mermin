@@ -866,7 +866,7 @@ pub struct PipelineOptions {
     /// - "256KB" (default), "512KB", "1MB", "2MiB"
     /// - Raw bytes also accepted: 262144, 524288, 1048576
     #[serde(with = "conf_serde::bytesize")]
-    pub ebpf_ring_buffer_size_bytes: u32,
+    pub ebpf_ring_buffer_size: u32,
 
     /// Capacity for each worker thread's queue (default: 2048)
     ///
@@ -900,12 +900,12 @@ pub struct PipelineOptions {
 
     /// Explicit capacity for the flow span channel (default: 16384)
     /// Buffer between workers and K8s decorator.
-    /// /// With defaults: 16,384 slots (~1.6s buffer at 10K/s, handles export delays).
+    /// With defaults: 16,384 slots (~1.6s buffer at 10K/s, handles export delays).
     pub flow_span_channel_capacity: usize,
 
     /// Capacity for the decorated span channel (default: 32768)
     /// Buffer between K8s decorator and OTLP exporter.
-    /// /// With defaults: 32,768 slots (~3.2s buffer at 10K/s, prevents backpressure).
+    /// With defaults: 32,768 slots (~3.2s buffer at 10K/s, prevents backpressure).
     pub decorated_span_channel_capacity: usize,
 
     // TODO: Implement adaptive sampling (ring buffer consumer in mermin-ebpf/src/main.rs)
@@ -928,7 +928,7 @@ impl Default for PipelineOptions {
     fn default() -> Self {
         Self {
             ebpf_max_flows: 100_000,
-            ebpf_ring_buffer_size_bytes: 256 * 1024,
+            ebpf_ring_buffer_size: 256 * 1024,
             worker_queue_capacity: 2048,
             flow_store_capacity: 32768,
             worker_count: 4,

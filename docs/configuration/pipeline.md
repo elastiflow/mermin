@@ -23,11 +23,11 @@ metrics {
   ebpf_max_flows = 5000  # Reduce `FLOW_STATS` capacity
 }
 ```
-### `ebpf_ring_buffer_size_bytes`
+### `ebpf_ring_buffer_size`
 
-**Type:** String (byte size) or Integer **Default:** `"256KB"`
+**Type:** String (byte size) **Default:** `"256KB"`
 
-The size of the `FLOW_EVENTS` ring buffer used to pass new flow events from eBPF to userspace. This buffer is allocated **per node** (not per CPU) and provides burst tolerance.
+The size of the `FLOW_EVENTS` ring buffer used to pass new flow events from eBPF to userspace. Keep the buffer high enough to provide flow record burst tolerance.
 
 **Sizing Guide** (based on flows per second):
 - **General/Mixed** (50-500 FPS): `256KB` (~1,120 events)
@@ -39,7 +39,7 @@ The size of the `FLOW_EVENTS` ring buffer used to pass new flow events from eBPF
 
 ```hcl
 pipeline {
-  ebpf_ring_buffer_size_bytes = "1MB"
+  ebpf_ring_buffer_size = "1MB"
 }
 ```
 
@@ -125,7 +125,7 @@ With default settings, this provides approximately 1.6s of buffer at 10,000 flow
 
 ```hcl
 pipeline {
-  flow_span_channel_capacity = 32768  # Larger buffer for high-latency decoration
+  flow_span_channel_capacity = 24576  # Larger buffer for high-latency decoration
 }
 ```
 

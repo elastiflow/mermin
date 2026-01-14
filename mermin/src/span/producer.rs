@@ -207,15 +207,14 @@ impl FlowSpanProducer {
 
         let mut worker_handles = Vec::new();
         let mut worker_channels = Vec::new();
-        let worker_capacity = self.worker_queue_capacity;
 
         for worker_id in 0..self.worker_count.max(1) {
-            let (worker_tx, worker_rx) = mpsc::channel(worker_capacity);
+            let (worker_tx, worker_rx) = mpsc::channel(self.worker_queue_capacity);
             worker_channels.push(worker_tx);
 
             metrics::registry::CHANNEL_CAPACITY
                 .with_label_values(&[ChannelName::PacketWorker.as_str()])
-                .set(worker_capacity as i64);
+                .set(self.worker_queue_capacity as i64);
             metrics::registry::CHANNEL_ENTRIES
                 .with_label_values(&[ChannelName::PacketWorker.as_str()])
                 .set(0);
