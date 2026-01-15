@@ -13,8 +13,8 @@
 
 ## Flow Trace Specification
 
-* [Primer](semconv/primer.md)
-* [Semantic Conventions](semconv/spec.md)
+* [Introductory Primer](spec/introductory-primer.md)
+* [Semantic Conventions](spec/semantic-conventions.md)
 
 ## Deployment
 
