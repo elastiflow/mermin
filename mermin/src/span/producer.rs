@@ -2391,6 +2391,8 @@ pub async fn orphan_scanner_task(
     mut shutdown_rx: broadcast::Receiver<()>,
 ) {
     let scan_interval = Duration::from_secs(300);
+    let mut interval = tokio::time::interval(scan_interval);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     loop {
         tokio::select! {
@@ -2398,7 +2400,7 @@ pub async fn orphan_scanner_task(
                 info!(event.name = "task.shutdown", task.name = "orphan_scanner", "shutdown signal received");
                 break;
             },
-            _ = tokio::time::sleep(scan_interval) => {
+            _ = interval.tick() => {
                 let current_time_ns = std::time::SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
@@ -2419,6 +2421,22 @@ pub async fn orphan_scanner_task(
                 metrics::registry::EBPF_MAP_SIZE
                     .with_label_values(&[EbpfMapName::FlowStats.as_str(), MapUnit::Entries.as_str()])
                     .set(ebpf_map_size as i64);
+
+                let tcp_stats_count = {
+                    let map = tcp_stats_map.lock().await;
+                    map.keys().filter_map(|k| k.ok()).count()
+                };
+                metrics::registry::EBPF_MAP_ENTRIES
+                    .with_label_values(&[EbpfMapName::TcpStats.as_str()])
+                    .set(tcp_stats_count as i64);
+
+                let icmp_stats_count = {
+                    let map = icmp_stats_map.lock().await;
+                    map.keys().filter_map(|k| k.ok()).count()
+                };
+                metrics::registry::EBPF_MAP_ENTRIES
+                    .with_label_values(&[EbpfMapName::IcmpStats.as_str()])
+                    .set(icmp_stats_count as i64);
 
                 for key in keys {
                     scanned += 1;
@@ -2460,20 +2478,20 @@ pub async fn orphan_scanner_task(
 
                     // Orphan detected - remove it
                     macro_rules! remove_orphan_from {
-                        ($map_mutex:expr, $map_enum:expr, $is_primary:expr) => {
+                        ($map_mutex:expr, $map_enum:expr, $is_primary:expr, $key:expr) => {
                             let mut map = $map_mutex.lock().await;
-                            match map.remove(&key) {
+                            match map.remove($key) {
                                 Ok(_) => {
                                     metrics::registry::EBPF_MAP_OPS_TOTAL.with_label_values(&[$map_enum.as_str(), EbpfMapOperation::Delete.as_str(), EbpfMapStatus::Ok.as_str()]).inc();
                                     if $is_primary {
                                         removed += 1;
                                         metrics::registry::EBPF_ORPHANS_CLEANED_TOTAL.inc_by(1);
-                                        warn!(event.name = "orphan_scanner.entry_removed", flow.key = ?key, "removed orphaned eBPF entry (age exceeded threshold and not tracked in userspace)");
+                                        warn!(event.name = "orphan_scanner.entry_removed", flow.key = ?$key, "removed orphaned eBPF entry (age exceeded threshold and not tracked in userspace)");
                                     }
                                 }
                                 Err(e) => {
                                     metrics::registry::EBPF_MAP_OPS_TOTAL.with_label_values(&[$map_enum.as_str(), EbpfMapOperation::Delete.as_str(), EbpfMapStatus::Error.as_str()]).inc();
-                                    debug!(event.name = "orphan_scanner.entry_removal_failed", flow.key = ?key, map = $map_enum.as_str(), error.message = %e, "failed to remove orphaned entry");
+                                    debug!(event.name = "orphan_scanner.entry_removal_failed", flow.key = ?$key, map = $map_enum.as_str(), error.message = %e, "failed to remove orphaned entry");
                                 }
                             }
                             drop(map);
@@ -2481,10 +2499,10 @@ pub async fn orphan_scanner_task(
                     }
 
                     // Remove from FlowStats first (Primary)
-                    remove_orphan_from!(flow_stats_map, EbpfMapName::FlowStats, true);
+                    remove_orphan_from!(flow_stats_map, EbpfMapName::FlowStats, true, &key);
                     // Then remove from protocol maps (Secondary)
-                    remove_orphan_from!(tcp_stats_map, EbpfMapName::TcpStats, false);
-                    remove_orphan_from!(icmp_stats_map, EbpfMapName::IcmpStats, false);
+                    remove_orphan_from!(tcp_stats_map, EbpfMapName::TcpStats, false, &key);
+                    remove_orphan_from!(icmp_stats_map, EbpfMapName::IcmpStats, false, &key);
                 }
 
                 if removed > 0 {
