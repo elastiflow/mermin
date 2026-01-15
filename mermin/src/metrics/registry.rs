@@ -33,12 +33,12 @@ lazy_static! {
     // ============================================================================
 
     // Standard metrics (always registered)
-    pub static ref EBPF_MAP_ENTRIES: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("map_entries", "Current number of entries in eBPF maps. For hash maps (FLOW_STATS, LISTENING_PORTS) this is the entry count. Not available for ring buffers (FLOW_EVENTS).")
+    pub static ref EBPF_MAP_SIZE: IntGaugeVec = IntGaugeVec::new(
+        Opts::new("map_size", "Current number of entries in eBPF maps. For hash maps (FLOW_STATS, LISTENING_PORTS) this is the entry count. Not available for ring buffers (FLOW_EVENTS).")
             .namespace("mermin")
             .subsystem("ebpf"),
-        &["map"]
-    ).expect("failed to create ebpf_map_entries metric");
+        &["map", "unit"]
+    ).expect("failed to create ebpf_map_size metric");
 
     pub static ref EBPF_MAP_CAPACITY: IntGaugeVec = IntGaugeVec::new(
         Opts::new("map_capacity", "Maximum capacity of eBPF maps. For hash maps (FLOW_STATS, LISTENING_PORTS) this is max entries. For ring buffers (FLOW_EVENTS) this is size in bytes.")
@@ -445,7 +445,7 @@ pub fn init_registry(debug_enabled: bool) -> Result<(), prometheus::Error> {
     // ============================================================================
     // eBPF metrics (always registered)
     // ============================================================================
-    register_standard!(EBPF_MAP_ENTRIES);
+    register_standard!(EBPF_MAP_SIZE);
     register_standard!(EBPF_MAP_CAPACITY);
     register_standard!(EBPF_ATTACHMENT_MODE);
     register_standard!(BPF_FS_WRITABLE);

@@ -592,8 +592,8 @@ async fn run(cli: Cli) -> Result<()> {
     // Note: This only reflects the startup state; eBPF kprobes maintain the map
     // in real-time after this, but those changes are not reflected in these metrics.
     if metrics::registry::debug_enabled() {
-        metrics::registry::EBPF_MAP_ENTRIES
-            .with_label_values(&[EbpfMapName::ListeningPorts.as_str()])
+        metrics::registry::EBPF_MAP_SIZE
+            .with_label_values(&[EbpfMapName::ListeningPorts.as_str(), "entries"])
             .set(scanned_ports as i64);
     }
 

@@ -52,11 +52,12 @@ Monitoring these is crucial for ensuring that Mermin's foundational data collect
   *Description*: Maximum capacity of eBPF maps. For hash maps (FLOW_STATS, LISTENING_PORTS) this is max entries. For ring buffers (FLOW_EVENTS) this is size in bytes.
   *Labels*:
   - `map`
-- `mermin_ebpf_map_entries`
+- `mermin_ebpf_map_size`
   *Type*: `gauge`
   *Description*: Current number of entries in eBPF maps. For hash maps (FLOW_STATS, LISTENING_PORTS) this is the entry count. Not available for ring buffers (FLOW_EVENTS).
   *Labels*:
   - `map`
+  - `unit`
 - `mermin_ebpf_map_ops_total`
   *Type*: `counter`
   *Description*: Total number of eBPF map operations
