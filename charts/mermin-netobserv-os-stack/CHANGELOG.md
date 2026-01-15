@@ -1,3 +1,13 @@
+## [mermin-netobserv-os-stack-0.1.0-beta.15] - 2026-01-14
+
+### Features
+
+- Bump dependencies for stack chart (#381)
+
+[mermin-netobserv-os-stack-0.1.0-beta.14..mermin-netobserv-os-stack-0.1.0-beta.15](https://github.com/elastiflow/mermin/compare/mermin-netobserv-os-stack-0.1.0-beta.14...mermin-netobserv-os-stack-0.1.0-beta.15)
+
+
+
 ## [mermin-netobserv-os-stack-0.1.0-beta.14] - 2025-12-22
 
 ### Features
