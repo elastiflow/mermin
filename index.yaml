@@ -138,6 +138,49 @@ entries:
         - name: Chart Source
           url: https://github.com/elastiflow/mermin
     apiVersion: v2
+    appVersion: 0.1.0-beta.16
+    created: "2026-01-15T15:26:41.296571315Z"
+    dependencies:
+    - condition: mermin.enabled
+      name: mermin
+      repository: https://elastiflow.github.io/mermin/
+      version: '>= 0.1.0-beta.44'
+    - condition: netobserv-flow.enabled
+      name: netobserv-flow
+      repository: https://elastiflow.github.io/helm-chart-netobserv/
+      version: '>= 0.7.0'
+    - condition: opensearch.enabled
+      name: opensearch
+      repository: https://opensearch-project.github.io/helm-charts/
+      version: '>= 3.4.0'
+    - condition: opensearch-dashboards.enabled
+      name: opensearch-dashboards
+      repository: https://opensearch-project.github.io/helm-charts/
+      version: '>= 3.4.0'
+    description: A Helm chart for deploying the Mermin eBPF agent
+    digest: 78bcac6f9c5cb187f2a19ee348f6a941118386cb0e14d6473d484d486a571798
+    icon: https://res.cloudinary.com/elastiflow-cloudinary/image/upload/v1746227898/mermin-horizontal_kxhvzo.png
+    keywords:
+    - netflow
+    - network
+    - flow
+    - observability
+    maintainers:
+    - email: engineering@elastiflow.com
+      name: ElastiFlow Engineering Team
+    name: mermin-netobserv-os-stack
+    sources:
+    - https://github.com/elastiflow/mermin
+    type: application
+    urls:
+    - https://github.com/elastiflow/mermin/releases/download/mermin-netobserv-os-stack-0.1.0-beta.16/mermin-netobserv-os-stack-0.1.0-beta.16.tgz
+    version: 0.1.0-beta.16
+  - annotations:
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: Chart Source
+          url: https://github.com/elastiflow/mermin
+    apiVersion: v2
     appVersion: 0.1.0-beta.15
     created: "2026-01-15T12:36:04.219434616Z"
     dependencies:
@@ -304,4 +347,4 @@ entries:
     urls:
     - https://github.com/elastiflow/mermin/releases/download/mermin-netobserv-os-stack-0.1.0-beta.12/mermin-netobserv-os-stack-0.1.0-beta.12.tgz
     version: 0.1.0-beta.12
-generated: "2026-01-15T13:00:05.989347193Z"
+generated: "2026-01-15T15:26:41.296619685Z"
