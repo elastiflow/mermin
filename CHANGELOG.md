@@ -1,3 +1,13 @@
+## [v0.1.0-beta.44] - 2026-01-15
+
+### Features
+
+- Add "priorityClassName" (#383)
+
+[v0.1.0-beta.43..v0.1.0-beta.44](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.43...v0.1.0-beta.44)
+
+
+
 ## [v0.1.0-beta.43] - 2026-01-13
 
 ### Features
