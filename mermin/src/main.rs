@@ -350,7 +350,7 @@ async fn run(cli: Cli) -> Result<()> {
         event.name = "ebpf.loaded",
         map.pin_path = %map_pin_path,
         map.schema_version = EBPF_MAP_SCHEMA_VERSION,
-        "eBPF program loaded, maps will persist with versioned pinning"
+        "ebpf program loaded, maps will persist with versioned pinning"
     );
 
     if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
@@ -358,7 +358,7 @@ async fn run(cli: Cli) -> Result<()> {
         warn!(
             event.name = "ebpf.logger_init_failed",
             error.message = %e,
-            "failed to initialize eBPF logger"
+            "failed to initialize ebpf logger"
         );
     }
 
@@ -423,7 +423,7 @@ async fn run(cli: Cli) -> Result<()> {
             None => {
                 error!(
                     event.name = "ebpf.unexpected_error",
-                    "no ebpf maps found in loaded program, cannot test /sys/fs/bpf writability - this is unexpected and indicates a problem with the eBPF program."
+                    "no ebpf maps found in loaded program, cannot test /sys/fs/bpf writability - this is unexpected and indicates a problem with the ebpf program."
                 );
                 false
             }
@@ -435,7 +435,7 @@ async fn run(cli: Cli) -> Result<()> {
         info!(
             event.name = "ebpf.bpf_fs_check_complete",
             bpf_fs_writable = bpf_fs_writable,
-            "checked /sys/fs/bpf writability for TCX link pinning"
+            "checked /sys/fs/bpf writability for tcx link pinning"
         );
     }
 
@@ -476,7 +476,7 @@ async fn run(cli: Cli) -> Result<()> {
     info!(
         event.name = "ebpf.maps_ready",
         schema_version = EBPF_MAP_SCHEMA_VERSION,
-        "eBPF maps ready for flow producer"
+        "ebpf maps ready for flow producer"
     );
 
     let attach_method = if use_tcx { "TCX" } else { "netlink" };
@@ -486,11 +486,11 @@ async fn run(cli: Cli) -> Result<()> {
         ebpf.attach.priority = conf.discovery.instrument.tc_priority,
         ebpf.attach.tcx_order = %conf.discovery.instrument.tcx_order,
         system.kernel.version = %kernel_version,
-        "determined TC attachment method and priority"
+        "determined tc attachment method and priority"
     );
     info!(
         event.name = "ebpf.ready_for_controller",
-        "eBPF programs ready to move to controller thread"
+        "ebpf programs ready to move to controller thread"
     );
 
     let patterns = if conf.discovery.instrument.interfaces.is_empty() {
@@ -600,7 +600,7 @@ async fn run(cli: Cli) -> Result<()> {
     info!(
         event.name = "listening_ports.scan_complete",
         total_ports = scanned_ports,
-        "populated eBPF map with existing listening ports"
+        "populated ebpf map with existing listening ports"
     );
 
     let flow_span_producer = FlowSpanProducer::new(
@@ -872,7 +872,7 @@ async fn run(cli: Cli) -> Result<()> {
 
         match shutdown_exporter_gracefully(Arc::clone(&exporter), Duration::from_secs(5)).await {
             Ok(()) => {
-                info!(event.name = "exporter.otlp_shutdown_success", "OpenTelemetry provider shut down cleanly");
+                info!(event.name = "exporter.otlp_shutdown_success", "opentelemetry provider shut down cleanly");
             }
             Err(e) => {
                 let event_name = match &e {
@@ -881,7 +881,7 @@ async fn run(cli: Cli) -> Result<()> {
                     MerminError::Internal(msg) if msg.contains("panicked") => "exporter.otlp_shutdown_panic",
                     _ => "exporter.otlp_shutdown_error",
                 };
-                warn!(event.name = event_name, error.message = %e, "OpenTelemetry provider shutdown failed");
+                warn!(event.name = event_name, error.message = %e, "opentelemetry provider shutdown failed");
             }
         }
 

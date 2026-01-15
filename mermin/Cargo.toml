@@ -20,7 +20,6 @@ aya = { workspace = true, features = ["async_tokio"] }
 aya-log = { workspace = true }
 base64 = "0.21"
 bytesize = "1.3"
-chrono = { version = "0.4", default-features = false, features = ["std"] }
 clap = { workspace = true, features = ["derive", "env", "help", "suggestions", "usage"] }
 crossbeam = "0.8"
 dashmap = "6.0"
@@ -57,9 +56,7 @@ opentelemetry-stdout = "0.31.0"
 opentelemetry_sdk = { version = "0.31.0", features = ["experimental_async_runtime", "rt-tokio", "experimental_trace_batch_span_processor_with_async_runtime"] }
 pnet = "0.34"
 prometheus = "0.13"
-regex = "1"
 reqwest = {  version = "0.12.26"}
-rtnetlink = "0.18.1"
 rustls = "0.23"
 rustls-native-certs = "0.8"
 rustls-pemfile = "2.2"
@@ -76,7 +73,6 @@ tokio = { workspace = true, features = [
     "signal",
     "time"
 ] }
-tokio-stream = { version = "0.1", features = ["sync"] }
 tonic = { version = "0.14.2", features = ["transport"] }
 tower-http = { version = "0.5", features = ["trace"] }
 tracing = { version = "0.1.41" }

@@ -79,7 +79,13 @@ impl<'a> Decorator<'a> {
                 k8s.direction = "source",
                 "successfully associated source of flow"
             );
-            self.populate_k8s_attributes(&mut decorated_flow, info, true);
+            self.populate_k8s_attributes(
+                &mut decorated_flow,
+                info,
+                true,
+                ctx.src_pod.as_ref(),
+                flow_span.attributes.source_port,
+            );
         }
 
         let dst_info = self.enrich(ctx.dst_pod.as_ref(), ctx.dst_ip).await;
@@ -90,7 +96,13 @@ impl<'a> Decorator<'a> {
                 k8s.direction = "destination",
                 "successfully associated destination of flow"
             );
-            self.populate_k8s_attributes(&mut decorated_flow, info, false);
+            self.populate_k8s_attributes(
+                &mut decorated_flow,
+                info,
+                false,
+                ctx.dst_pod.as_ref(),
+                flow_span.attributes.destination_port,
+            );
         }
 
         let (ingress_policies, egress_policies) = self.evaluate_flow_policies(&ctx).await?;
@@ -208,18 +220,33 @@ impl<'a> Decorator<'a> {
         flow_span: &mut FlowSpan,
         decoration_info: &DecorationInfo,
         is_source: bool,
+        pod: Option<&Pod>,
+        port: u16,
     ) {
         match decoration_info {
             DecorationInfo::Pod {
-                pod,
+                pod: pod_meta,
                 node_name,
                 owners,
                 selector_relations,
             } => {
-                self.populate_common_meta(flow_span, "pod", pod, is_source, true);
+                self.populate_common_meta(flow_span, "pod", pod_meta, is_source, true);
 
                 if self.should_extract("pod", "node_name", is_source) {
                     self.set_k8s_attr_opt(flow_span, "node.name", node_name, is_source);
+                }
+
+                // Resolve and populate container information
+                if let Some((container_name, container_image)) =
+                    pod.and_then(|p| resolve_pod_container_by_port(p, port))
+                {
+                    self.set_k8s_attr(flow_span, "container.name", &container_name, is_source);
+                    self.set_k8s_attr(
+                        flow_span,
+                        "container.image.name",
+                        &container_image,
+                        is_source,
+                    );
                 }
 
                 // Populate workload controller information for all owners in the chain
@@ -363,6 +390,7 @@ impl<'a> Decorator<'a> {
             ("node.name", source_k8s_node_name, destination_k8s_node_name),
             ("pod.name", source_k8s_pod_name, destination_k8s_pod_name),
             ("container.name", source_k8s_container_name, destination_k8s_container_name),
+            ("container.image.name", source_container_image_name, destination_container_image_name),
             ("deployment.name", source_k8s_deployment_name, destination_k8s_deployment_name),
             ("replicaset.name", source_k8s_replicaset_name, destination_k8s_replicaset_name),
             ("statefulset.name", source_k8s_statefulset_name, destination_k8s_statefulset_name),
@@ -530,5 +558,203 @@ impl<'a> Decorator<'a> {
                 spec: p.spec.clone().unwrap_or_default(),
             })
             .collect())
+    }
+}
+
+/// Resolves container information from a Pod by matching the specified port.
+///
+/// Logic:
+/// - Searches for a container with a matching containerPort
+/// - Returns None if no container matches the port
+/// - Validates that Kubernetes containerPort is in valid range (1-65535)
+/// - Skips containers without images defined
+pub fn resolve_pod_container_by_port(pod: &Pod, port: u16) -> Option<(String, String)> {
+    let spec = pod.spec.as_ref()?;
+
+    // Iterate through all containers in the pod
+    for container in &spec.containers {
+        // Skip containers without ports defined
+        let Some(ports) = container.ports.as_ref() else {
+            continue;
+        };
+
+        // Check if any of the container's ports match the requested port
+        for container_port in ports {
+            // Kubernetes containerPort is i32 but must be in valid port range (1-65535)
+            // Invalid values are rejected by the API server, so we can safely cast
+            let port_num = container_port.container_port;
+            if port_num > 0 && port_num <= 65535 && port_num as u16 == port {
+                // Found a match! Extract container name and image
+                // Clone is necessary since we're borrowing from the Pod and need owned data
+                let name = container.name.clone();
+                let Some(image_name) = container.image.clone() else {
+                    continue; // Skip containers without image
+                };
+
+                return Some((name, image_name));
+            }
+        }
+    }
+
+    // No matching container found
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use k8s_openapi::api::core::v1::{Container, ContainerPort, Pod, PodSpec};
+
+    use super::resolve_pod_container_by_port;
+
+    /// Helper to create a container with optional ports and image
+    fn create_container(name: &str, image: Option<&str>, ports: Option<Vec<i32>>) -> Container {
+        Container {
+            name: name.to_string(),
+            image: image.map(String::from),
+            ports: ports.map(|ps| {
+                ps.into_iter()
+                    .map(|p| ContainerPort {
+                        container_port: p,
+                        ..Default::default()
+                    })
+                    .collect()
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// Helper to create a Pod with specified containers
+    fn create_pod_with_containers(containers: Vec<Container>) -> Pod {
+        Pod {
+            metadata: Default::default(),
+            spec: Some(PodSpec {
+                containers,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_resolve_container_single_container_returns_it() {
+        let pod = create_pod_with_containers(vec![create_container(
+            "nginx",
+            Some("nginx:1.21"),
+            Some(vec![80]),
+        )]);
+
+        let result = resolve_pod_container_by_port(&pod, 80);
+        assert_eq!(
+            result,
+            Some(("nginx".to_string(), "nginx:1.21".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_resolve_container_multi_container_matches_by_port() {
+        let pod = create_pod_with_containers(vec![
+            create_container("sidecar", Some("envoy:v1"), Some(vec![15001])),
+            create_container("app", Some("myapp:v2"), Some(vec![8080])),
+            create_container("metrics", Some("prom-exporter:latest"), Some(vec![9090])),
+        ]);
+
+        // Should match the app container on port 8080
+        let result = resolve_pod_container_by_port(&pod, 8080);
+        assert_eq!(result, Some(("app".to_string(), "myapp:v2".to_string())));
+
+        // Should match the metrics container on port 9090
+        let result = resolve_pod_container_by_port(&pod, 9090);
+        assert_eq!(
+            result,
+            Some(("metrics".to_string(), "prom-exporter:latest".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_resolve_container_no_port_match_returns_none() {
+        let pod = create_pod_with_containers(vec![
+            create_container("first", Some("first:v1"), Some(vec![80])),
+            create_container("second", Some("second:v2"), Some(vec![443])),
+        ]);
+
+        // Port 9999 doesn't match any container, should return None (more accurate)
+        let result = resolve_pod_container_by_port(&pod, 9999);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_resolve_container_with_matching_port() {
+        let pod = create_pod_with_containers(vec![
+            create_container("alpha", Some("alpha:1.0"), Some(vec![80])),
+            create_container("beta", Some("beta:2.0"), Some(vec![443])),
+        ]);
+
+        // Match beta container on port 443
+        let result = resolve_pod_container_by_port(&pod, 443);
+        assert_eq!(result, Some(("beta".to_string(), "beta:2.0".to_string())));
+    }
+
+    #[test]
+    fn test_resolve_container_empty_containers_returns_none() {
+        let pod = create_pod_with_containers(vec![]);
+
+        let result = resolve_pod_container_by_port(&pod, 80);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_resolve_container_no_spec_returns_none() {
+        let pod = Pod {
+            metadata: Default::default(),
+            spec: None,
+            ..Default::default()
+        };
+
+        let result = resolve_pod_container_by_port(&pod, 80);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_resolve_container_no_image_returns_none() {
+        let pod =
+            create_pod_with_containers(vec![create_container("noimage", None, Some(vec![80]))]);
+
+        let result = resolve_pod_container_by_port(&pod, 80);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_resolve_container_skips_containers_without_ports() {
+        let pod = create_pod_with_containers(vec![
+            create_container("no-ports", Some("app:v1"), None),
+            create_container("with-ports", Some("app:v2"), Some(vec![8080])),
+        ]);
+
+        // Looking for port 8080, should find the second container
+        let result = resolve_pod_container_by_port(&pod, 8080);
+        assert_eq!(
+            result,
+            Some(("with-ports".to_string(), "app:v2".to_string()))
+        );
+
+        // Looking for port 9999, no match, returns None (more accurate)
+        let result = resolve_pod_container_by_port(&pod, 9999);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_resolve_container_multiple_ports_on_single_container() {
+        let pod = create_pod_with_containers(vec![create_container(
+            "multi-port",
+            Some("server:v1"),
+            Some(vec![80, 443, 8080]),
+        )]);
+
+        let expected = Some(("multi-port".to_string(), "server:v1".to_string()));
+
+        // Should match on any of the ports
+        assert_eq!(resolve_pod_container_by_port(&pod, 80), expected);
+        assert_eq!(resolve_pod_container_by_port(&pod, 443), expected);
+        assert_eq!(resolve_pod_container_by_port(&pod, 8080), expected);
     }
 }
