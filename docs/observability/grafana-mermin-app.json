@@ -1,4 +1,12 @@
 {
+  "__requires": [
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "11.6.1"
+    }
+  ],
   "annotations": {
     "list": [
       {
@@ -18,37 +26,16 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 1,
+  "id": null,
   "links": [],
   "panels": [
-    {
-      "gridPos": {
-        "h": 2,
-        "w": 24,
-        "x": 0,
-        "y": 0
-      },
-      "id": 10,
-      "options": {
-        "code": {
-          "language": "plaintext",
-          "showLineNumbers": false,
-          "showMiniMap": false
-        },
-        "content": "[Mermin logs](https://grafana.ops.elastiflow.com/explore?schemaVersion=1&panes=%7B%22v8v%22:%7B%22datasource%22:%22P8E80F9AEF21F6940%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22expr%22:%22%7Benv%3D%5C%22stage%5C%22,%20pod%3D~%5C%22mermin.%2B%5C%22%7D%20%7C%20json%20msg%3D%5C%22textPayload%5C%22%20%7C%20line_format%20%5C%22%7B%7B.msg%7D%7D%5C%22%22,%22queryType%22:%22range%22,%22datasource%22:%7B%22type%22:%22loki%22,%22uid%22:%22P8E80F9AEF21F6940%22%7D,%22editorMode%22:%22code%22,%22direction%22:%22backward%22%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D,%22compact%22:false%7D%7D&orgId=1)",
-        "mode": "markdown"
-      },
-      "pluginVersion": "12.3.1",
-      "title": "Drop me",
-      "type": "text"
-    },
     {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 2
+        "y": 0
       },
       "id": 12,
       "panels": [],
@@ -58,7 +45,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${ds_prometheus}"
       },
       "description": "Sum of the flows active and flow rate across all Mermin instances",
       "fieldConfig": {
@@ -98,7 +85,7 @@
         "h": 6,
         "w": 7,
         "x": 0,
-        "y": 3
+        "y": 1
       },
       "id": 37,
       "options": {
@@ -121,7 +108,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "editorMode": "code",
           "exemplar": false,
@@ -135,7 +122,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "editorMode": "code",
           "expr": "sum(rate(mermin_flow_spans_created_total[$__rate_interval]))",
@@ -152,7 +139,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${ds_prometheus}"
       },
       "description": "Average flow span export latency across all Mermin instances",
       "fieldConfig": {
@@ -178,7 +165,7 @@
         "h": 3,
         "w": 3,
         "x": 7,
-        "y": 3
+        "y": 1
       },
       "id": 35,
       "options": {
@@ -216,7 +203,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${ds_prometheus}"
       },
       "description": "Sum of the bytes rate across all Mermin instances",
       "fieldConfig": {
@@ -256,7 +243,7 @@
         "h": 6,
         "w": 2,
         "x": 10,
-        "y": 3
+        "y": 1
       },
       "id": 39,
       "options": {
@@ -293,7 +280,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${ds_prometheus}"
       },
       "description": "Sum of the packets rate across all Mermin instances",
       "fieldConfig": {
@@ -333,7 +320,7 @@
         "h": 6,
         "w": 2,
         "x": 12,
-        "y": 3
+        "y": 1
       },
       "id": 42,
       "options": {
@@ -370,7 +357,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${ds_prometheus}"
       },
       "description": "Average count of spans in each OTLP export batch across all Mermin instances",
       "fieldConfig": {
@@ -396,7 +383,7 @@
         "h": 3,
         "w": 3,
         "x": 7,
-        "y": 6
+        "y": 4
       },
       "id": 36,
       "options": {
@@ -434,7 +421,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${ds_prometheus}"
       },
       "description": "Flow spans currently active in Mermin (total and top $query_top_N by pod)",
       "fieldConfig": {
@@ -514,7 +501,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 9
+        "y": 7
       },
       "id": 8,
       "options": {
@@ -541,18 +528,18 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "editorMode": "code",
-          "expr": "topk($query_top_N, sum(mermin_flow_spans_active_total) by ($group_by_pod_label))",
-          "legendFormat": "{{ $group_by_pod_label }}",
+          "expr": "topk($query_top_N, sum(mermin_flow_spans_active_total) by ($pod_label))",
+          "legendFormat": "{{ $pod_label }}",
           "range": true,
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "editorMode": "code",
           "expr": "sum(mermin_flow_spans_active_total)",
@@ -568,7 +555,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${ds_prometheus}"
       },
       "description": "Flow spans rate per second created (total and top $query_top_N by pod)",
       "fieldConfig": {
@@ -649,7 +636,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 9
+        "y": 7
       },
       "id": 18,
       "options": {
@@ -676,18 +663,18 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "editorMode": "code",
-          "expr": "topk($query_top_N, sum(rate(mermin_flow_spans_created_total[$__rate_interval])) by ($group_by_pod_label))",
-          "legendFormat": "{{ $group_by_pod_label }}",
+          "expr": "topk($query_top_N, sum(rate(mermin_flow_spans_created_total[$__rate_interval])) by ($pod_label))",
+          "legendFormat": "{{ $pod_label }}",
           "range": true,
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "editorMode": "code",
           "expr": "sum(rate(mermin_flow_spans_created_total[$__rate_interval]))",
@@ -703,7 +690,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${ds_prometheus}"
       },
       "description": "Flow span export rate per second (total and top $query_top_N by pod, exporter, status)",
       "fieldConfig": {
@@ -843,7 +830,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 18
+        "y": 16
       },
       "id": 9,
       "options": {
@@ -870,31 +857,31 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "editorMode": "code",
-          "expr": "topk($query_top_N, sum(rate(mermin_export_flow_spans_total{status!=\"error\"}[$__rate_interval])) by ($group_by_pod_label, exporter, status)) > 0",
+          "expr": "topk($query_top_N, sum(rate(mermin_export_flow_spans_total{status!=\"error\"}[$__rate_interval])) by ($pod_label, exporter, status)) > 0",
           "hide": false,
-          "legendFormat": "{{ $group_by_pod_label }}: {{ exporter }}/{{ status }}",
+          "legendFormat": "{{ $pod_label }}: {{ exporter }}/{{ status }}",
           "range": true,
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "editorMode": "code",
-          "expr": "topk($query_top_N, sum(rate(mermin_export_flow_spans_total{status=\"error\"}[$__rate_interval])) by ($group_by_pod_label, exporter, status)) * -1 < 0",
+          "expr": "topk($query_top_N, sum(rate(mermin_export_flow_spans_total{status=\"error\"}[$__rate_interval])) by ($pod_label, exporter, status)) * -1 < 0",
           "hide": false,
-          "legendFormat": "{{ $group_by_pod_label }}: {{ exporter }}/{{ status }}",
+          "legendFormat": "{{ $pod_label }}: {{ exporter }}/{{ status }}",
           "range": true,
           "refId": "B"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "editorMode": "code",
           "expr": "sum(rate(mermin_export_flow_spans_total{status=\"error\"}[$__rate_interval])) by (exporter, status) * -1 < 0",
@@ -906,7 +893,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "editorMode": "code",
           "expr": "sum(rate(mermin_export_flow_spans_total{status!=\"error\"}[$__rate_interval])) by (exporter, status) > 0",
@@ -922,7 +909,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${ds_prometheus}"
       },
       "description": "Packets per second processed by Mermin (total and top $query_top_N by pod)",
       "fieldConfig": {
@@ -1003,7 +990,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 18
+        "y": 16
       },
       "id": 3,
       "options": {
@@ -1030,18 +1017,18 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "editorMode": "code",
-          "expr": "topk($query_top_N, sum(rate(mermin_interface_packets_total[$__rate_interval])) by ($group_by_pod_label))",
-          "legendFormat": "{{ $group_by_pod_label }}",
+          "expr": "topk($query_top_N, sum(rate(mermin_interface_packets_total[$__rate_interval])) by ($pod_label))",
+          "legendFormat": "{{ $pod_label }}",
           "range": true,
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "editorMode": "code",
           "expr": "sum(rate(mermin_interface_packets_total[$__rate_interval]))",
@@ -1057,7 +1044,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${ds_prometheus}"
       },
       "description": "Breakdown of how fast the K8s informer IP index is updated",
       "fieldConfig": {
@@ -1079,7 +1066,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 27
+        "y": 25
       },
       "id": 15,
       "interval": "60s",
@@ -1138,7 +1125,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "editorMode": "code",
           "expr": "sum(rate(mermin_export_latency_seconds_bucket[$__rate_interval])) by (le)",
@@ -1157,7 +1144,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "${ds_prometheus}"
       },
       "description": "Breakdown of how fast the K8s informer IP index is updated",
       "fieldConfig": {
@@ -1179,7 +1166,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 27
+        "y": 25
       },
       "id": 20,
       "interval": "60s",
@@ -1238,7 +1225,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "editorMode": "code",
           "expr": "sum(rate(mermin_export_batch_size_bucket[$__rate_interval])) by (le)",
@@ -1260,14 +1247,14 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 34
+        "y": 32
       },
       "id": 44,
       "panels": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${ds_prometheus}"
           },
           "description": "",
           "fieldConfig": {
@@ -1286,7 +1273,7 @@
                   },
                   {
                     "color": "red",
-                    "value": 80
+                    "value": 10000
                   }
                 ]
               },
@@ -1298,7 +1285,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 35
+            "y": 33
           },
           "id": 49,
           "options": {
@@ -1332,7 +1319,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
               "exemplar": false,
@@ -1346,7 +1333,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
               "exemplar": false,
@@ -1364,7 +1351,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${ds_prometheus}"
           },
           "fieldConfig": {
             "defaults": {
@@ -1427,7 +1414,7 @@
             "h": 12,
             "w": 17,
             "x": 4,
-            "y": 35
+            "y": 33
           },
           "id": 50,
           "options": {
@@ -1459,7 +1446,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${ds_prometheus}"
           },
           "description": "",
           "fieldConfig": {
@@ -1478,7 +1465,7 @@
                   },
                   {
                     "color": "red",
-                    "value": 80
+                    "value": 10000
                   }
                 ]
               },
@@ -1490,7 +1477,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 39
+            "y": 37
           },
           "id": 51,
           "options": {
@@ -1524,7 +1511,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
               "exemplar": false,
@@ -1538,7 +1525,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
               "exemplar": false,
@@ -1556,7 +1543,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${ds_prometheus}"
           },
           "description": "",
           "fieldConfig": {
@@ -1575,7 +1562,7 @@
                   },
                   {
                     "color": "red",
-                    "value": 80
+                    "value": 10000
                   }
                 ]
               },
@@ -1587,7 +1574,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 43
+            "y": 41
           },
           "id": 52,
           "options": {
@@ -1621,7 +1608,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
               "exemplar": false,
@@ -1635,7 +1622,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
               "exemplar": false,
@@ -1653,7 +1640,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "description": "Mermin \"ebpf_ringbuf_out\" pipeline stage duration ",
           "fieldConfig": {
@@ -1675,7 +1662,7 @@
             "h": 7,
             "w": 8,
             "x": 0,
-            "y": 47
+            "y": 45
           },
           "id": 46,
           "interval": "60s",
@@ -1731,12 +1718,11 @@
             }
           },
           "pluginVersion": "12.3.1",
-          "repeatDirection": "h",
           "targets": [
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
               "expr": "sum(rate(mermin_pipeline_duration_seconds_bucket{stage=\"ebpf_ringbuf_out\"}[$__rate_interval])) by (stage, le)",
@@ -1755,7 +1741,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "description": "Mermin \"flow_producer_out\" pipeline stage duration ",
           "fieldConfig": {
@@ -1777,7 +1763,7 @@
             "h": 7,
             "w": 8,
             "x": 8,
-            "y": 47
+            "y": 45
           },
           "id": 47,
           "interval": "60s",
@@ -1833,12 +1819,11 @@
             }
           },
           "pluginVersion": "12.3.1",
-          "repeatDirection": "h",
           "targets": [
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
               "expr": "sum(rate(mermin_pipeline_duration_seconds_bucket{stage=\"flow_producer_out\"}[$__rate_interval])) by (stage, le)",
@@ -1857,7 +1842,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "description": "Mermin \"k8s_decorator_out\" pipeline stage duration ",
           "fieldConfig": {
@@ -1879,7 +1864,7 @@
             "h": 7,
             "w": 8,
             "x": 16,
-            "y": 47
+            "y": 45
           },
           "id": 48,
           "interval": "60s",
@@ -1935,12 +1920,11 @@
             }
           },
           "pluginVersion": "12.3.1",
-          "repeatDirection": "h",
           "targets": [
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
               "expr": "sum(rate(mermin_pipeline_duration_seconds_bucket{stage=\"k8s_decorator_out\"}[$__rate_interval])) by (stage, le)",
@@ -1966,14 +1950,14 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 33
       },
       "id": 11,
       "panels": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "description": "Flow spans per second decorated by the K8s decorator (total and top $query_top_N by pod)",
           "fieldConfig": {
@@ -2054,7 +2038,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 86
+            "y": 53
           },
           "id": 6,
           "options": {
@@ -2081,18 +2065,18 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "topk($query_top_N, sum(rate(mermin_k8s_decorator_flow_spans_total[$__rate_interval])) by ($group_by_pod_label, status))",
-              "legendFormat": "{{ $group_by_pod_label }}: {{ status }}",
+              "expr": "topk($query_top_N, sum(rate(mermin_k8s_decorator_flow_spans_total[$__rate_interval])) by ($pod_label, status))",
+              "legendFormat": "{{ $pod_label }}: {{ status }}",
               "range": true,
               "refId": "A"
             },
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
               "expr": "sum(rate(mermin_k8s_decorator_flow_spans_total[$__rate_interval])) by (status)",
@@ -2108,7 +2092,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "description": "K8s informer index upate rate (total and top $query_top_N by pod)",
           "fieldConfig": {
@@ -2190,7 +2174,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 86
+            "y": 53
           },
           "id": 24,
           "interval": "60s",
@@ -2218,19 +2202,19 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "topk($query_top_N, sum(rate(mermin_k8s_watcher_ip_index_update_duration_seconds_count[$__rate_interval])) by ($group_by_pod_label))",
+              "expr": "topk($query_top_N, sum(rate(mermin_k8s_watcher_ip_index_update_duration_seconds_count[$__rate_interval])) by ($pod_label))",
               "hide": false,
-              "legendFormat": "{{ $group_by_pod_label }}",
+              "legendFormat": "{{ $pod_label }}",
               "range": true,
               "refId": "A"
             },
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
               "expr": "sum(rate(mermin_k8s_watcher_ip_index_update_duration_seconds_count[$__rate_interval]))",
@@ -2246,7 +2230,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "description": "K8s watcher events rate by event type (total and top $query_top_N by pod, event_type)",
           "fieldConfig": {
@@ -2328,7 +2312,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 94
+            "y": 61
           },
           "id": 25,
           "interval": "60s",
@@ -2356,23 +2340,23 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "topk($query_top_N, sum(rate(mermin_k8s_watcher_events_total[$__rate_interval])) by ($group_by_pod_label, event, resource)) > 0",
-              "legendFormat": "{{ $group_by_pod_label }}: {{ event }}/{{ resource }}",
+              "expr": "topk($query_top_N, sum(rate(mermin_k8s_watcher_events_total[$__rate_interval])) by ($pod_label, event, kind)) > 0",
+              "legendFormat": "{{ $pod_label }}: {{ event }}/{{ kind }}",
               "range": true,
               "refId": "A"
             },
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "sum(rate(mermin_k8s_watcher_events_total[$__rate_interval])) by (event, resource) > 0",
+              "expr": "sum(rate(mermin_k8s_watcher_events_total[$__rate_interval])) by (event, kind) > 0",
               "hide": false,
-              "legendFormat": "Total: {{ event }}/{{ resource }}",
+              "legendFormat": "Total: {{ event }}/{{ kind }}",
               "range": true,
               "refId": "B"
             }
@@ -2383,7 +2367,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "description": "Breakdown of how fast the K8s informer IP index is updated",
           "fieldConfig": {
@@ -2405,7 +2389,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 94
+            "y": 61
           },
           "id": 23,
           "interval": "60s",
@@ -2464,7 +2448,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
               "expr": "sum(rate(mermin_k8s_watcher_ip_index_update_duration_seconds_bucket[$__rate_interval])) by (le)",
@@ -2490,14 +2474,14 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 36
+        "y": 34
       },
       "id": 13,
       "panels": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "description": "Shows pods only when `/sys/fs/bpf` is not writable (top $query_top_N false)",
           "fieldConfig": {
@@ -2550,7 +2534,7 @@
             "h": 3,
             "w": 12,
             "x": 0,
-            "y": 763
+            "y": 855
           },
           "id": 29,
           "options": {
@@ -2575,14 +2559,14 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
               "exemplar": false,
-              "expr": "bottomk($query_top_N, sum(mermin_ebpf_bpf_fs_writable) by ($group_by_pod_label))",
+              "expr": "bottomk($query_top_N, sum(mermin_ebpf_bpf_fs_writable) by ($pod_label))",
               "format": "table",
               "instant": true,
-              "legendFormat": "{{ $group_by_pod_label }} /sys/fs/bpf writable",
+              "legendFormat": "{{ $pod_label }} /sys/fs/bpf writable",
               "range": false,
               "refId": "A"
             }
@@ -2615,7 +2599,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "description": "eBPF attachment method (TC or TCX)",
           "fieldConfig": {
@@ -2644,7 +2628,7 @@
             "h": 3,
             "w": 12,
             "x": 12,
-            "y": 763
+            "y": 855
           },
           "id": 28,
           "options": {
@@ -2670,14 +2654,14 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
               "exemplar": false,
-              "expr": "sum(mermin_ebpf_method) by ($group_by_pod_label, attachment) > 0",
+              "expr": "sum(mermin_ebpf_method) by ($pod_label, attachment) > 0",
               "format": "table",
               "instant": true,
-              "legendFormat": "{{ $group_by_pod_label }}",
+              "legendFormat": "{{ $pod_label }}",
               "range": false,
               "refId": "A"
             }
@@ -2702,7 +2686,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "description": "Total number of bytes processed by Mermin (top $query_top_N by pod)",
           "fieldConfig": {
@@ -2783,7 +2767,7 @@
             "h": 5,
             "w": 12,
             "x": 0,
-            "y": 766
+            "y": 858
           },
           "id": 43,
           "options": {
@@ -2810,11 +2794,11 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "topk($query_top_N, sum(rate(mermin_interface_bytes_total[$__rate_interval])) by ($group_by_pod_label))",
-              "legendFormat": "{{ $group_by_pod_label }}",
+              "expr": "topk($query_top_N, sum(rate(mermin_interface_bytes_total[$__rate_interval])) by ($pod_label))",
+              "legendFormat": "{{ $pod_label }}",
               "range": true,
               "refId": "A"
             }
@@ -2825,7 +2809,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "description": "Total number of packets processed by Mermin (top $query_top_N)",
           "fieldConfig": {
@@ -2906,7 +2890,7 @@
             "h": 5,
             "w": 12,
             "x": 12,
-            "y": 766
+            "y": 858
           },
           "id": 22,
           "options": {
@@ -2933,11 +2917,11 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "topk($query_top_N, sum(rate(mermin_interface_packets_total[$__rate_interval])) by ($group_by_pod_label))",
-              "legendFormat": "{{ $group_by_pod_label }}",
+              "expr": "topk($query_top_N, sum(rate(mermin_interface_packets_total[$__rate_interval])) by ($pod_label))",
+              "legendFormat": "{{ $pod_label }}",
               "range": true,
               "refId": "A"
             }
@@ -2948,7 +2932,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "description": "Current active Mermin TaskManager tasks (top $query_top_N by pod)",
           "fieldConfig": {
@@ -3025,7 +3009,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 771
+            "y": 863
           },
           "id": 26,
           "options": {
@@ -3050,12 +3034,12 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "topk($query_top_N ,sum(mermin_taskmanager_tasks_active) by ($group_by_pod_label, task))",
+              "expr": "topk($query_top_N ,sum(mermin_taskmanager_tasks_active) by ($pod_label, task))",
               "hide": false,
-              "legendFormat": "Active: {{ $group_by_pod_label }}/{{ task }}",
+              "legendFormat": "Active: {{ $pod_label }}/{{ task }}",
               "range": true,
               "refId": "A"
             }
@@ -3066,7 +3050,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "description": "Ratio of used channel capacity (top $query_top_N by pod, channel)",
           "fieldConfig": {
@@ -3131,7 +3115,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 771
+            "y": 863
           },
           "id": 5,
           "options": {
@@ -3158,11 +3142,11 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "topk($query_top_N, sum(mermin_channel_entries / mermin_channel_capacity) by ($group_by_pod_label, channel))",
-              "legendFormat": "{{ $group_by_pod_label }}: {{ channel }}",
+              "expr": "topk($query_top_N, sum(mermin_channel_entries / mermin_channel_capacity) by ($pod_label, channel))",
+              "legendFormat": "{{ $pod_label }}: {{ channel }}",
               "range": true,
               "refId": "A"
             }
@@ -3173,7 +3157,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "description": "Ratio of used eBPF map capacity (max)",
           "fieldConfig": {
@@ -3238,7 +3222,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 780
+            "y": 872
           },
           "id": 27,
           "options": {
@@ -3265,7 +3249,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
               "expr": "max(mermin_ebpf_map_entries / mermin_ebpf_map_capacity) by (map)",
@@ -3280,7 +3264,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "description": "Total rate of the eBPF map operations (by map, operation, status)",
           "fieldConfig": {
@@ -3376,7 +3360,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 780
+            "y": 872
           },
           "id": 33,
           "options": {
@@ -3401,7 +3385,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
               "expr": "sum(rate(mermin_ebpf_map_ops_total{status=\"ok\"}[$__rate_interval])) by (map, operation, status)",
@@ -3413,7 +3397,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
               "expr": "sum(rate(mermin_ebpf_map_ops_total{status=\"not_found\"}[$__rate_interval])) by (map, operation, status)",
@@ -3425,7 +3409,7 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
               "expr": "sum(rate(mermin_ebpf_map_ops_total{status=\"error\"}[$__rate_interval])) by (map, operation, status) * -1",
@@ -3448,14 +3432,14 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 37
+        "y": 35
       },
       "id": 32,
       "panels": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "description": "Ratio of used eBPF map capacity (top $query_top_N by pod, map)",
           "fieldConfig": {
@@ -3520,7 +3504,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 281
+            "y": 373
           },
           "id": 34,
           "options": {
@@ -3547,11 +3531,11 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "topk($query_top_N, sum(mermin_ebpf_map_entries{map=~\"$ebpf_map\"} / mermin_ebpf_map_capacity{map=~\"$ebpf_map\"}) by ($group_by_pod_label, map))",
-              "legendFormat": "{{ $group_by_pod_label }}: {{ map }}",
+              "expr": "topk($query_top_N, sum(mermin_ebpf_map_entries{map=~\"$ebpf_map\"} / mermin_ebpf_map_capacity{map=~\"$ebpf_map\"}) by ($pod_label, map))",
+              "legendFormat": "{{ $pod_label }}: {{ map }}",
               "range": true,
               "refId": "A"
             }
@@ -3562,7 +3546,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "description": "Rate of the eBPF map operations (top $query_top_N by pod, map, operation, status)",
           "fieldConfig": {
@@ -3658,7 +3642,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 281
+            "y": 373
           },
           "id": 30,
           "options": {
@@ -3683,36 +3667,36 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "topk($query_top_N ,sum(rate(mermin_ebpf_map_ops_total{map=\"$ebpf_map\", status=\"ok\"}[$__rate_interval])) by ($group_by_pod_label, map, operation, status))",
+              "expr": "topk($query_top_N ,sum(rate(mermin_ebpf_map_ops_total{map=\"$ebpf_map\", status=\"ok\"}[$__rate_interval])) by ($pod_label, map, operation, status))",
               "hide": false,
-              "legendFormat": "{{ $group_by_pod_label }}: {{ map }}/{{ operation }}/{{ status }}",
+              "legendFormat": "{{ $pod_label }}: {{ map }}/{{ operation }}/{{ status }}",
               "range": true,
               "refId": "A"
             },
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "topk($query_top_N ,sum(rate(mermin_ebpf_map_ops_total{map=\"$ebpf_map\", status=\"not_found\"}[$__rate_interval])) by ($group_by_pod_label, map, operation, status))",
+              "expr": "topk($query_top_N ,sum(rate(mermin_ebpf_map_ops_total{map=\"$ebpf_map\", status=\"not_found\"}[$__rate_interval])) by ($pod_label, map, operation, status))",
               "hide": false,
-              "legendFormat": "{{ $group_by_pod_label }}: {{ map }}/{{ operation }}/{{ status }}",
+              "legendFormat": "{{ $pod_label }}: {{ map }}/{{ operation }}/{{ status }}",
               "range": true,
               "refId": "B"
             },
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "topk($query_top_N ,sum(rate(mermin_ebpf_map_ops_total{map=\"$ebpf_map\", status=\"error\"}[$__rate_interval])) by ($group_by_pod_label, map, operation, status)) * -1",
+              "expr": "topk($query_top_N ,sum(rate(mermin_ebpf_map_ops_total{map=\"$ebpf_map\", status=\"error\"}[$__rate_interval])) by ($pod_label, map, operation, status)) * -1",
               "hide": false,
-              "legendFormat": "{{ $group_by_pod_label }}: {{ operation }}/{{ status }}",
+              "legendFormat": "{{ $pod_label }}: {{ operation }}/{{ status }}",
               "range": true,
               "refId": "C"
             }
@@ -3723,7 +3707,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${ds_prometheus}"
           },
           "description": "Rate of the eBPF map bytes processed (top $query_top_N by pod)",
           "fieldConfig": {
@@ -3787,7 +3771,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 290
+            "y": 382
           },
           "id": 41,
           "options": {
@@ -3812,12 +3796,12 @@
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "${datasource}"
+                "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "topk($query_top_N ,sum(rate(mermin_ebpf_map_bytes_total{map=\"$ebpf_map\"}[$__rate_interval])) by ($group_by_pod_label, map))",
+              "expr": "topk($query_top_N ,sum(rate(mermin_ebpf_map_bytes_total{map=\"$ebpf_map\"}[$__rate_interval])) by ($pod_label, map))",
               "hide": false,
-              "legendFormat": "{{ $group_by_pod_label }}: {{ map }}",
+              "legendFormat": "{{ $pod_label }}: {{ map }}",
               "range": true,
               "refId": "A"
             }
@@ -3838,13 +3822,13 @@
   "templating": {
     "list": [
       {
-        "allowCustomValue": false,
         "current": {
           "text": "Prometheus",
-          "value": "prometheus"
+          "value": "PBFA97CFB590B2093"
         },
-        "label": "datasource",
-        "name": "datasource",
+        "includeAll": false,
+        "label": "Datasource",
+        "name": "ds_prometheus",
         "options": [],
         "query": "prometheus",
         "refresh": 1,
@@ -3858,7 +3842,7 @@
         },
         "description": "Metrtics label that contain pod name, used for grouping",
         "label": "Pod label",
-        "name": "group_by_pod_label",
+        "name": "pod_label",
         "options": [
           {
             "selected": true,
@@ -3916,7 +3900,7 @@
         "baseFilters": [],
         "datasource": {
           "type": "prometheus",
-          "uid": "${datasource}"
+          "uid": "${ds_prometheus}"
         },
         "description": "",
         "filters": [],
@@ -3954,6 +3938,5 @@
   "timezone": "browser",
   "title": "Mermin Application",
   "uid": "mermin_app",
-  "version": 21,
-  "weekStart": ""
+  "version": 1
 }

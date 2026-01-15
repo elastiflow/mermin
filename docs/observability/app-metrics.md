@@ -4,6 +4,20 @@ hidden: true
 
 # Mermin Application Metrics
 
+- [Mermin Application Metrics](#mermin-application-metrics)
+  - [Metrics Endpoint](#metrics-endpoint)
+  - [Metrics Reference](#metrics-reference)
+    - [eBPF Metrics (`mermin_ebpf_*`)](#ebpf-metrics-mermin_ebpf_)
+    - [Network Interface Metrics (`mermin_interface_*`)](#network-interface-metrics-mermin_interface_)
+    - [Flow Metrics (`mermin_flow_*`)](#flow-metrics-mermin_flow_)
+    - [Kubernetes Watcher Metrics (`mermin_k8s_watcher_*`)](#kubernetes-watcher-metrics-mermin_k8s_watcher_)
+    - [Kubernetes Decorator Metrics (`mermin_k8s_decorator_*`)](#kubernetes-decorator-metrics-mermin_k8s_decorator_)
+    - [Flow Span Export Metrics (`mermin_export_*`)](#flow-span-export-metrics-mermin_export_)
+    - [Channel Metrics (`mermin_channel_*`)](#channel-metrics-mermin_channel_)
+    - [Pipeline Metrics (`mermin_pipeline_*`)](#pipeline-metrics-mermin_pipeline_)
+    - [TaskManager Metrics (`mermin_taskmanager_*`)](#taskmanager-metrics-mermin_taskmanager_)
+
+
 This guide describes the Prometheus metrics endpoint exposed by Mermin and provides a comprehensive breakdown of all available metrics, their types, and descriptions.
 See the [metrics configuration document](../configuration/metrics.md) for more details on metrics configuration.
 
