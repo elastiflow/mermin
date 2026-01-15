@@ -11,6 +11,11 @@
 * [Architecture](getting-started/architecture.md)
 * [Security Considerations](getting-started/security-considerations.md)
 
+## Flow Trace Specification
+
+* [Primer](semconv/primer.md)
+* [Semantic Conventions](semconv/spec.md)
+
 ## Deployment
 
 * [Deployment Overview](deployment/deployment.md)
