@@ -188,7 +188,7 @@ jobs:
           cache_from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }}
           cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }},mode=max
           registry_username: ${{ secrets.DOCKERHUB_USERNAME }}
-          registry_password: ${{ secrets.DOCKERHUB_PASSWORD }}
+          registry_password: ${{ secrets.DOCKERHUB_API_TOKEN }}
 
   release_chart:
     name: Release Chart
