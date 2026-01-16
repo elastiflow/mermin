@@ -275,6 +275,8 @@ pub enum DecorationInfo {
         /// Resources that have selectors matching this pod's labels
         /// (e.g., NetworkPolicies, Services that select this pod)
         selector_relations: Option<Vec<K8sObjectMeta>>,
+        /// Container information resolved via port matching
+        container_info: Option<crate::k8s::container_resolver::ContainerInfo>,
     },
     Node {
         node: K8sObjectMeta,

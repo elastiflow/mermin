@@ -274,8 +274,10 @@ pub struct SpanAttributes {
     pub network_policies_ingress: Option<Vec<String>>,
     pub network_policies_egress: Option<Vec<String>>,
     pub process_executable_name: Option<String>,
-    pub container_image_name: Option<String>,
-    pub container_name: Option<String>,
+    pub source_container_name: Option<String>,
+    pub source_container_image_name: Option<String>,
+    pub destination_container_name: Option<String>,
+    pub destination_container_image_name: Option<String>,
 }
 
 impl Default for SpanAttributes {
@@ -417,8 +419,10 @@ impl Default for SpanAttributes {
             network_policies_ingress: None,
             network_policies_egress: None,
             process_executable_name: None,
-            container_image_name: None,
-            container_name: None,
+            source_container_name: None,
+            source_container_image_name: None,
+            destination_container_name: None,
+            destination_container_image_name: None,
         }
     }
 }
@@ -975,11 +979,26 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.process_executable_name {
             kvs.push(KeyValue::new("process.executable.name", value.to_owned()));
         }
-        if let Some(ref value) = self.attributes.container_image_name {
-            kvs.push(KeyValue::new("container.image.name", value.to_string()));
+        if let Some(ref value) = self.attributes.source_container_name {
+            kvs.push(KeyValue::new("source.k8s.container.name", value.to_owned()));
         }
-        if let Some(ref value) = self.attributes.container_name {
-            kvs.push(KeyValue::new("container.name", value.to_owned()));
+        if let Some(ref value) = self.attributes.source_container_image_name {
+            kvs.push(KeyValue::new(
+                "source.k8s.container.image.name",
+                value.to_owned(),
+            ));
+        }
+        if let Some(ref value) = self.attributes.destination_container_name {
+            kvs.push(KeyValue::new(
+                "destination.k8s.container.name",
+                value.to_owned(),
+            ));
+        }
+        if let Some(ref value) = self.attributes.destination_container_image_name {
+            kvs.push(KeyValue::new(
+                "destination.k8s.container.image.name",
+                value.to_owned(),
+            ));
         }
         span.set_attributes(kvs);
         span

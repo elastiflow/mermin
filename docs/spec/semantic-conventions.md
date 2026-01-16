@@ -301,12 +301,18 @@ Time-based metrics calculated for the flow, stored in nanoseconds (`ns`).
 
 ### Process & Container Attributes
 
-| Proposed Field Name       | Data Type | Description                                                         | Notes / Decisions                          | Std OTel | Required |
-| ------------------------- | --------- | ------------------------------------------------------------------- | ------------------------------------------ | -------- | -------- |
-| `process.executable.name` | `string`  | The name of the binary associated with the socket for this flow.    | Provides application-level identification. | ✓        | \~       |
-| `process.pid`             | `long`    | The PID of the process associated with the socket for this flow.    | Provides application-level identification. | ✓        | \~       |
-| `container.image.name`    | `string`  | The name of the container image (e.g., `nginx:1.21`, `app:v1.0.0`). | Provides application-level identification. | ✓        | \~       |
-| `container.name`          | `string`  | The name of the container instance.                                 | Provides application-level identification. | ✓        | \~       |
+| Proposed Field Name                       | Data Type | Description                                                                                                                                        | Notes / Decisions                          | Std OTel  | Required |
+| ----------------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | --------- | -------- |
+| `process.executable.name`                 | `string`  | The name of the binary associated with the socket for this flow.                                                                                   | Provides application-level identification. | ✓         | \~       |
+| `process.pid`                             | `long`    | The PID of the process associated with the socket for this flow.                                                                                   | Provides application-level identification. | ✓         | \~       |
+| `source.k8s.container.name`               | `string`  | The name of the container from the Pod spec (source).                                                                                              | Resolved via port matching in K8s.         | partially | \~       |
+| `source.k8s.container.image.name`         | `string`  | The container image name from Pod spec (source).                                                                                                   | e.g., `nginx:1.21`, `app:v1.0.0`.          | partially | \~       |
+| `destination.k8s.container.name`          | `string`  | The name of the container from the Pod spec (destination).                                                                                         | Resolved via port matching in K8s.         | partially | \~       |
+| `destination.k8s.container.image.name`    | `string`  | The container image name from Pod spec (destination).                                                                                              | e.g., `nginx:1.21`, `app:v1.0.0`.          | partially | \~       |
+| `container.name`                          | `string`  | The container runtime's globally unique name (e.g., Docker container ID).                                                                          | Different from K8s spec name above.        | ✓         | \~       |
+| `container.image.name`                    | `string`  | The container image name from runtime.                                                                                                             | May differ from K8s spec if using digests. | ✓         | \~       |
+
+**Note:** The `*.k8s.container.*` attributes represent the container name and image as defined in the **Pod specification** (extracted via port-based matching), while `container.name` and `container.image.name` represent the **container runtime's** identifiers. These are semantically different concepts as per [OpenTelemetry K8s conventions](https://opentelemetry.io/docs/specs/semconv/system/k8s-metrics/).
 
 ***
 

@@ -1,4 +1,5 @@
 pub mod attributor;
+pub mod container_resolver;
 pub mod decorator;
 pub mod error;
 pub mod opts;

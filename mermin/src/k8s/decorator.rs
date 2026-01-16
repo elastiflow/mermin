@@ -71,7 +71,13 @@ impl<'a> Decorator<'a> {
         let ctx = FlowContext::from_flow_span(flow_span, self.attributor).await;
         let mut decorated_flow = flow_span.clone();
 
-        let src_info = self.enrich(ctx.src_pod.as_ref(), ctx.src_ip).await;
+        let src_info = self
+            .enrich(
+                ctx.src_pod.as_ref(),
+                ctx.src_ip,
+                flow_span.attributes.source_port,
+            )
+            .await;
         if let Some(info) = &src_info {
             trace!(
                 event.name = "k8s.decorator.associated",
@@ -82,7 +88,13 @@ impl<'a> Decorator<'a> {
             self.populate_k8s_attributes(&mut decorated_flow, info, true);
         }
 
-        let dst_info = self.enrich(ctx.dst_pod.as_ref(), ctx.dst_ip).await;
+        let dst_info = self
+            .enrich(
+                ctx.dst_pod.as_ref(),
+                ctx.dst_ip,
+                flow_span.attributes.destination_port,
+            )
+            .await;
         if let Some(info) = &dst_info {
             trace!(
                 event.name = "k8s.decorator.associated",
@@ -101,17 +113,19 @@ impl<'a> Decorator<'a> {
 
     /// Resolves a pod and IP address to Kubernetes resource decoration information.
     /// Returns Pod decoration if available, otherwise attempts IP-based fallback resolution.
-    async fn enrich(&self, pod: Option<&Pod>, ip: IpAddr) -> Option<DecorationInfo> {
+    async fn enrich(&self, pod: Option<&Pod>, ip: IpAddr, port: u16) -> Option<DecorationInfo> {
         if let Some(pod) = pod {
             let pod_meta = K8sObjectMeta::from(pod);
             let node_name = pod.spec.as_ref()?.node_name.clone();
             let owners = self.attributor.get_owners(pod);
             let selector_relations = self.attributor.get_selector_based_metadata(pod);
+            let container_info = crate::k8s::container_resolver::resolve_container_by_port(pod, port);
             return Some(DecorationInfo::Pod {
                 pod: pod_meta,
                 node_name,
                 owners,
                 selector_relations,
+                container_info,
             });
         }
 
@@ -215,12 +229,16 @@ impl<'a> Decorator<'a> {
                 node_name,
                 owners,
                 selector_relations,
+                container_info,
             } => {
                 self.populate_common_meta(flow_span, "pod", pod, is_source, true);
 
                 if self.should_extract("pod", "node_name", is_source) {
                     self.set_k8s_attr_opt(flow_span, "node.name", node_name, is_source);
                 }
+
+                // Populate container information
+                self.populate_container_attributes(flow_span, container_info, is_source);
 
                 // Populate workload controller information for all owners in the chain
                 if let Some(workload_owners) = owners {
@@ -321,6 +339,25 @@ impl<'a> Decorator<'a> {
                     k8s.resource.name = %relation.name,
                     "selector relation for unsupported resource kind"
                 );
+            }
+        }
+    }
+
+    /// Populates container attributes in a FlowSpan based on ContainerInfo.
+    fn populate_container_attributes(
+        &self,
+        flow_span: &mut FlowSpan,
+        container_info: &Option<crate::k8s::container_resolver::ContainerInfo>,
+        is_source: bool,
+    ) {
+        if let Some(info) = container_info {
+            if is_source {
+                flow_span.attributes.source_container_name = Some(info.name.clone());
+                flow_span.attributes.source_container_image_name = Some(info.image_name.clone());
+            } else {
+                flow_span.attributes.destination_container_name = Some(info.name.clone());
+                flow_span.attributes.destination_container_image_name =
+                    Some(info.image_name.clone());
             }
         }
     }
