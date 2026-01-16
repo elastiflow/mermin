@@ -3268,7 +3268,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "max(mermin_ebpf_map_size / mermin_ebpf_map_capacity) by (map)",
+              "expr": "max(mermin_ebpf_map_size{unit=\"entries\"} / mermin_ebpf_map_capacity{unit=\"entries\"}) by (map)",
               "legendFormat": "{{ map }}",
               "range": true,
               "refId": "A"
@@ -3550,7 +3550,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "topk($query_top_N, sum(mermin_ebpf_map_size{map=~\"$ebpf_map\"} / mermin_ebpf_map_capacity{map=~\"$ebpf_map\"}) by ($group_by_pod_label, map))",
+              "expr": "topk($query_top_N, sum(mermin_ebpf_map_size{map=~\"$ebpf_map\",unit=\"entries\"} / mermin_ebpf_map_capacity{map=~\"$ebpf_map\",unit=\"entries\"}) by ($group_by_pod_label, map))",
               "legendFormat": "{{ $group_by_pod_label }}: {{ map }}",
               "range": true,
               "refId": "A"

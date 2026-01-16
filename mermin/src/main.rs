@@ -464,13 +464,13 @@ async fn run(cli: Cli) -> Result<()> {
     ));
 
     metrics::registry::EBPF_MAP_CAPACITY
-        .with_label_values(&[EbpfMapName::FlowStats.as_str()])
+        .with_label_values(&[EbpfMapName::FlowStats.as_str(), "entries"])
         .set(conf.pipeline.ebpf_max_flows as i64);
     metrics::registry::EBPF_MAP_CAPACITY
-        .with_label_values(&[EbpfMapName::FlowEvents.as_str()])
+        .with_label_values(&[EbpfMapName::FlowEvents.as_str(), "bytes"])
         .set(FLOW_EVENTS_RINGBUF_SIZE_BYTES as i64);
     metrics::registry::EBPF_MAP_CAPACITY
-        .with_label_values(&[EbpfMapName::ListeningPorts.as_str()])
+        .with_label_values(&[EbpfMapName::ListeningPorts.as_str(), "entries"])
         .set(LISTENING_PORTS_CAPACITY as i64);
 
     info!(

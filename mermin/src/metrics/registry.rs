@@ -44,7 +44,7 @@ lazy_static! {
         Opts::new("map_capacity", "Maximum capacity of eBPF maps. For hash maps (FLOW_STATS, LISTENING_PORTS) this is max entries. For ring buffers (FLOW_EVENTS) this is size in bytes.")
             .namespace("mermin")
             .subsystem("ebpf"),
-        &["map"]
+        &["map", "unit"]
     ).expect("failed to create ebpf_map_capacity metric");
 
     pub static ref EBPF_ATTACHMENT_MODE: IntGaugeVec = IntGaugeVec::new(
