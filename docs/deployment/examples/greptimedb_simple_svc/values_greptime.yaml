@@ -1,0 +1,3 @@
+configToml: |
+  mode = 'standalone'
+  enable_otlp = true
