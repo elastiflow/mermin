@@ -275,7 +275,7 @@ pipeline {
   }
   flow_producer {
     workers = 8                          # High parallelism
-    worker_queue_capacity = 4096cargo clippy --all-features -- -D warnings         # Larger per-worker buffer
+    worker_queue_capacity = 4096         # Larger per-worker buffer
     flow_span_queue_capacity = 32768     # Larger buffer to K8s decorator
   }
   k8s_decorator {
