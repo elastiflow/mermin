@@ -118,6 +118,8 @@ jobs:
             Docker images:
             - `ghcr.io/elastiflow/mermin:${{ steps.prepare_release.outputs.new_release_git_tag }}`
             - `ghcr.io/elastiflow/mermin:${{ steps.prepare_release.outputs.new_release_git_tag }}-debug`
+            - `docker.io/elastiflow/mermin:${{ steps.prepare_release.outputs.new_release_git_tag }}`
+            - `docker.io/elastiflow/mermin:${{ steps.prepare_release.outputs.new_release_git_tag }}-debug`
           target_commitish: ${{ github.ref_name }}
           preserve_order: true
           make_latest: true
@@ -174,6 +176,19 @@ jobs:
           cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }},mode=max
           registry_username: ${{ github.actor }}
           registry_password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build docker image for Docker Hub
+        uses: elastiflow/gha-reusable/actions/docker-build-push@v0
+        with:
+          registry: docker.io
+          image: elastiflow/mermin
+          tag: ${{ fromJson(env.TARGET_IMAGE_TAG)[matrix.target] }}
+          platforms: linux/amd64,linux/arm64
+          target: ${{ matrix.target }}
+          push: true
+          cache_from: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }}
+          cache_to: type=registry,ref=us-docker.pkg.dev/pub-artifacts-j8rjbu/docker-cache/mermin-${{ matrix.target }},mode=max
+          registry_username: ${{ secrets.DOCKERHUB_USERNAME }}
+          registry_password: ${{ secrets.DOCKERHUB_API_TOKEN }}
 
   release_chart:
     name: Release Chart
