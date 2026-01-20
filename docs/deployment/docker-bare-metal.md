@@ -59,10 +59,11 @@ shutdown_timeout = "10s"
 
 # Pipeline configuration
 pipeline {
-  ebpf_ringbuf_worker_capacity = 2048
-  flow_producer_store_capacity = 32768
-  flow_producer_channel_capacity = 16384
-  worker_count = 4
+  flow_producer {
+    workers = 4
+    worker_queue_capacity = 2048
+    flow_span_queue_capacity = 16384
+  }
 }
 
 # Network interfaces to monitor

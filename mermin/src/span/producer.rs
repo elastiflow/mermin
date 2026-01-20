@@ -86,9 +86,9 @@ pub struct FlowSpanComponents {
 
 pub struct FlowSpanProducer {
     span_opts: SpanOptions,
-    ebpf_ringbuf_worker_capacity: usize,
-    worker_count: usize,
-    worker_poll_interval: Duration,
+    worker_queue_capacity: usize,
+    workers: usize,
+    flow_store_poll_interval: Duration,
     boot_time_offset_nanos: u64,
     iface_map: Arc<DashMap<u32, String>>,
     community_id_generator: CommunityIdGenerator,
@@ -109,9 +109,8 @@ impl FlowSpanProducer {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         span_opts: SpanOptions,
-        ebpf_ringbuf_worker_capacity: usize,
-        flow_producer_store_capacity: usize,
-        worker_count: usize,
+        worker_queue_capacity: usize,
+        workers: usize,
         iface_map: Arc<DashMap<u32, String>>,
         flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
         flow_events_ringbuf: RingBuf<aya::maps::MapData>,
@@ -119,20 +118,25 @@ impl FlowSpanProducer {
         listening_ports_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, ListeningPortKey, u8>>>,
         conf: &Conf,
     ) -> Result<Self, BootTimeError> {
+        // Derive producer_store_capacity from flow_capture.flow_stats_capacity
+        //
+        // The userspace flow store (DashMap) tracks the same flows as FLOW_STATS (eBPF).
+        // We derive the initial capacity as flow_stats_capacity / 3 to balance memory usage and performance.
+        let producer_store_capacity = (conf.pipeline.flow_capture.flow_stats_capacity / 3) as usize;
+
         info!(
             event.name = "flow_store.initialized",
-            capacity = flow_producer_store_capacity,
+            capacity = producer_store_capacity,
             "flow store initialized"
         );
         let flow_store = Arc::new(DashMap::with_capacity_and_hasher(
-            flow_producer_store_capacity,
+            producer_store_capacity,
             FxBuildHasher::default(),
         ));
         let community_id_generator = CommunityIdGenerator::new(span_opts.community_id_seed);
 
         // Initialize trace ID cache with configured timeout
-        let trace_id_cache =
-            TraceIdCache::new(span_opts.trace_id_timeout, flow_producer_store_capacity);
+        let trace_id_cache = TraceIdCache::new(span_opts.trace_id_timeout, producer_store_capacity);
 
         // Calculate boot time offset to convert kernel boot-relative timestamps to wall clock
         // This is critical - if we can't determine boot time, timestamps will be wrong
@@ -155,9 +159,9 @@ impl FlowSpanProducer {
         let direction_inferrer = Arc::new(DirectionInferrer::new(listening_ports_map));
 
         // Initialize hostname resolution cache
-        // Cache capacity = ebpf_max_flows / 2 (each flow has 2 IPs, typical cardinality is ~10-30%)
+        // Cache capacity = flow_stats_capacity / 2 (each flow has 2 IPs, typical cardinality is ~10-30%)
         // Example: 100K flows → 50K cache entries → ~5MB memory
-        let hostname_cache_capacity = (conf.pipeline.ebpf_max_flows / 2) as u64;
+        let hostname_cache_capacity = (conf.pipeline.flow_capture.flow_stats_capacity / 2) as u64;
         let hostname_cache = Cache::builder()
             .max_capacity(hostname_cache_capacity)
             .build();
@@ -170,9 +174,9 @@ impl FlowSpanProducer {
 
         Ok(Self {
             span_opts: span_opts.clone(),
-            ebpf_ringbuf_worker_capacity,
-            worker_count,
-            worker_poll_interval: conf.pipeline.worker_poll_interval,
+            worker_queue_capacity,
+            workers,
+            flow_store_poll_interval: conf.pipeline.flow_producer.flow_store_poll_interval,
             boot_time_offset_nanos,
             community_id_generator,
             trace_id_cache,
@@ -209,13 +213,13 @@ impl FlowSpanProducer {
         let mut worker_handles = Vec::new();
         let mut worker_channels = Vec::new();
 
-        for worker_id in 0..self.worker_count.max(1) {
-            let (worker_tx, worker_rx) = mpsc::channel(self.ebpf_ringbuf_worker_capacity);
+        for worker_id in 0..self.workers.max(1) {
+            let (worker_tx, worker_rx) = mpsc::channel(self.worker_queue_capacity);
             worker_channels.push(worker_tx);
 
             metrics::registry::CHANNEL_CAPACITY
                 .with_label_values(&[ChannelName::PacketWorker.as_str()])
-                .set(self.ebpf_ringbuf_worker_capacity as i64);
+                .set(self.worker_queue_capacity as i64);
             metrics::registry::CHANNEL_ENTRIES
                 .with_label_values(&[ChannelName::PacketWorker.as_str()])
                 .set(0);
@@ -247,7 +251,7 @@ impl FlowSpanProducer {
         }
         info!(
             event.name = "workers.started",
-            worker.count = self.worker_count.max(1),
+            worker.count = self.workers.max(1),
             "flow workers spawned, starting event loop"
         );
 
@@ -358,9 +362,9 @@ impl FlowSpanProducer {
         // Spawn flow pollers (sharded by community_id hash) to replace per-flow tasks
         // Scale with worker count but cap at 32 for scalability
         // Each poller can handle ~100K active flows efficiently (typical: 3-10K per poller)
-        let num_pollers = self.worker_count.clamp(1, 32);
+        let num_pollers = self.workers.clamp(1, 32);
         let max_record_interval = self.span_opts.max_record_interval;
-        let poll_interval = self.worker_poll_interval;
+        let poll_interval = self.flow_store_poll_interval;
         for poller_id in 0..num_pollers {
             let poller_flow_store = Arc::clone(&components.flow_store);
             let poller_stats_map = Arc::clone(&components.flow_stats_map);
@@ -405,7 +409,7 @@ impl FlowSpanProducer {
         };
 
         let mut worker_index = 0;
-        let worker_count = self.worker_count.max(1);
+        let worker_count = self.workers.max(1);
 
         loop {
             tokio::select! {
