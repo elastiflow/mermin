@@ -903,7 +903,7 @@
           "refId": "D"
         }
       ],
-      "title": "Export flows export rate (top $query_top_N)",
+      "title": "Export flows rate (top $query_top_N)",
       "type": "timeseries"
     },
     {

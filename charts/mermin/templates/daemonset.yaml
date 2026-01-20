@@ -23,7 +23,7 @@ spec:
         {{- end }}
       {{- end }}
       labels:
-        {{- include "mermin.selectorLabels" . | nindent 8 }}
+        {{- include "mermin.labels" . | nindent 8 }}
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
