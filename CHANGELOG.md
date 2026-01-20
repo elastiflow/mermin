@@ -1,3 +1,16 @@
+## [v0.1.0-beta.45] - 2026-01-20
+
+### Bug Fixes
+
+- Add missing "commonLabels" (#393)
+### Features
+
+- Add docker hub as an upload target for mermin docker images (#371)
+
+[v0.1.0-beta.44..v0.1.0-beta.45](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.44...v0.1.0-beta.45)
+
+
+
 ## [v0.1.0-beta.44] - 2026-01-15
 
 ### Features
