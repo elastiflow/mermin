@@ -23,7 +23,7 @@ spec:
         {{- end }}
       {{- end }}
       labels:
-        {{- include "mermin.selectorLabels" . | nindent 8 }}
+        {{- include "mermin.labels" . | nindent 8 }}
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -89,6 +89,16 @@ spec:
                 fieldRef:
                   apiVersion: v1
                   fieldPath: status.podIP
+            - name: POD_RESOURCES_REQUESTS_MEM
+              valueFrom:
+                resourceFieldRef:
+                  containerName: {{ .Chart.Name }}
+                  resource: requests.memory
+            - name: POD_RESOURCES_LIMITS_MEM
+              valueFrom:
+                resourceFieldRef:
+                  containerName: {{ .Chart.Name }}
+                  resource: limits.memory
             - name: MERMIN_PLATFORM
               value: "kubernetes"
           {{- with .Values.env }}

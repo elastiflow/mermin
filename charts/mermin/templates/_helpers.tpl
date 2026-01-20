@@ -40,7 +40,10 @@ helm.sh/chart: {{ include "mermin.chart" . }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
-{{- end -}}
+{{- range $k, $v := .Values.commonLabels }}
+{{ $k }}: {{ $v | quote }}
+{{- end }}
+{{- end }}
 
 {{/*
 Selector labels

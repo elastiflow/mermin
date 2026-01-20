@@ -1,6 +1,6 @@
 # Pipeline Configuration
 
-The `pipeline` block provides advanced configuration for flow processing pipeline optimization, including base channel sizing, worker threading, Kubernetes decoration, backpressure management, and buffer multipliers.
+The `pipeline` block provides advanced configuration for flow processing pipeline optimization, including channel capacity tuning, worker threading, Kubernetes decoration, backpressure management, and buffer multipliers.
 
 The configuration options become useful to take advantage of additional resources allocated for Mermin or to generally optimize the performance for your specific use-case.
 
@@ -23,27 +23,51 @@ metrics {
   ebpf_max_flows = 5000  # Reduce `FLOW_STATS` capacity
 }
 ```
+### `ebpf_ringbuf_size`
 
-### `base_capacity`
+**Type:** String (byte size) **Default:** `"256KB"`
 
-**Type:** Integer **Default:** `8192`
+The size of the `FLOW_EVENTS` ring buffer used to pass new flow events from eBPF to userspace. Keep the buffer high enough to provide flow record burst tolerance.
 
-The base capacity for **userspace channels** between pipeline stages (workers → K8s decorator → exporter). This value is used to calculate:
-
-- **Worker queue capacity**: `base_capacity / worker_count` (default: 8192 / 4 = 2048 per worker)
-- **Flow span channel**: `base_capacity × flow_span_channel_multiplier` (default: 8192 × 2.0 = 16,384)
-- **Decorated span channel**: `base_capacity × decorated_span_channel_multiplier` (default: 8192 × 4.0 = 32,768)
-- **Flow store initial capacity**: `base_capacity × 4` (default: 8192 × 4 = 32,768)
-
-Increasing this value provides larger buffers throughout the pipeline, reducing backpressure during traffic spikes.
-
-**Note:** This does NOT control the eBPF `FLOW_EVENTS` ring buffer size, which is hardcoded at compile time (256 KB, ~1,120 events).
+**Sizing Guide** (based on flows per second):
+- **General/Mixed** (50-500 FPS): `256KB` (~1,120 events)
+- **High Traffic** (500-2K FPS): `512KB` (~2,240 events)
+- **Very High Traffic** (2K-5K FPS): `1MB` (~4,480 events)
+- **Extreme Traffic** (>5K FPS): `2MB`+
 
 **Example:**
 
 ```hcl
 pipeline {
-  base_capacity = 16384  # Increase userspace buffers for high-throughput environments
+  ebpf_ringbuf_size = "1MB"
+}
+```
+
+### `ebpf_ringbuf_worker_capacity`
+
+**Type:** Integer **Default:** `2048`
+
+Capacity for each worker thread's event queue. Determines how many raw eBPF events can be buffered per worker before drops occur.
+
+**Example:**
+
+```hcl
+pipeline {
+  ebpf_ringbuf_worker_capacity = 4096
+}
+```
+
+### `flow_producer_store_capacity`
+
+**Type:** Integer **Default:** `32768`
+
+Initial capacity for the userspace flow tracking map. Should be set large enough to hold active flows to avoid expensive resizing operations.
+
+**Example:**
+
+```hcl
+pipeline {
+  flow_producer_store_capacity = 65536
 }
 ```
 
@@ -90,32 +114,32 @@ pipeline {
 }
 ```
 
-### `flow_span_channel_multiplier`
+### `flow_producer_channel_capacity`
 
-**Type:** Float **Default:** `2.0`
+**Type:** Integer **Default:** `16384`
 
-The multiplier for the flow span channel size, relative to the ring buffer capacity.
-The channel is used in the "Flow Producer" stage, please refer to the [architecture](../getting-started/architecture.md#components) documentation for more information.
+Explicit capacity for the flow span channel, acting as a buffer between workers and the K8s decorator.
+With default settings, this provides approximately 1.6s of buffer at 10,000 flows/sec.
 
 **Example:**
 
 ```hcl
 pipeline {
-  flow_span_channel_multiplier = 3.0  # Larger channel for bursty flows
+  flow_producer_channel_capacity = 24576  # Larger buffer for high-latency decoration
 }
 ```
 
-### `decorated_span_channel_multiplier`
+### `k8s_decorator_channel_capacity`
 
-**Type:** Float **Default:** `4.0`
+**Type:** Integer **Default:** `32768`
 
-The multiplier for the decorated span channel size, relative to the ring buffer capacity.
-The channel is used in the "K8s Decorator" stage, please refer to the [architecture](../getting-started/architecture.md#components) documentation for more information.
+Explicit capacity for the decorated span channel, acting as a buffer between the K8s decorator and the exporter.
+With default settings, this provides approximately 3.2s of buffer at 10,000 flows/sec.
 
 **Example:**
 
 ```hcl
 pipeline {
-  decorated_span_channel_multiplier = 6.0  # Increase for heavy decoration workloads
+  k8s_decorator_channel_capacity = 65536  # Increase for slow exporters
 }
 ```

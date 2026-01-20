@@ -171,10 +171,14 @@ cargo clippy --all-features -- -D warnings
   curl -s localhost:10250/metrics:summary | jq --arg metric_prefix mermin_ebpf -r -f hack/gen_metrics_doc.jq
   ```
 
-- Download Grafana dashboard JSON from a local Grafana instance ()
+- Download Grafana dashboard JSON from a local Grafana instance
   
   ```bash
-  curl -s "localhost:3000/api/dashboards/uid/mermin_app" | jq -r '.dashboard' > docs/observability/grafana-mermin-app.json
+  # From a local Grafana
+  curl -s "localhost:3000/api/dashboards/uid/mermin_app" | jq '.dashboard' | jq -f hack/sanitize_grafana_dashboard.jq > docs/observability/grafana-mermin-app.json
+  # Or from a copy/pasted file
+  jq -f hack/sanitize_grafana_dashboard.jq docs/observability/grafana-mermin-app.json > docs/observability/grafana-mermin-app.json.tmp \
+    && mv docs/observability/grafana-mermin-app.json.tmp docs/observability/grafana-mermin-app.json
   ```
 
 ## Using a Dockerized Build Environment

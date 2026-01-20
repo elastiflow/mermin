@@ -158,7 +158,7 @@ ERROR mermin: ebpf - ring buffer full - dropping flow event for new flow
 
    ```hcl
    pipeline {
-     ebpf_ring_buffer_size_bytes = "512KB"  # Double the default 256KB
+     ebpf_ringbuf_size = "512KB"  # Double the default 256KB
      # Or use: "1MB", "2MiB" for higher traffic
    }
    ```

@@ -270,9 +270,12 @@ For environments with very high network traffic (> 10,000 flows/second), such as
 # Increase internal buffering and parallelism for extreme scale
 pipeline {
   ebpf_max_flows = 500000          # Support up to 50K flows/sec
-  base_capacity = 8192
+  ebpf_ringbuf_worker_capacity = 4096     # Larger per-worker buffer
+  flow_producer_store_capacity = 131072     # ~100K active flows
   worker_count = 8
   k8s_decorator_threads = 12
+  flow_producer_channel_capacity = 32768      # Larger buffer for high-latency decoration
+  k8s_decorator_channel_capacity = 65536  # Larger buffer for slow exporters
 }
 
 # Aggressive flow expiration to limit memory
@@ -343,9 +346,13 @@ For nodes with limited memory:
 ```hcl
 # Reduce buffer sizes for low-resource environments
 pipeline {
-  base_capacity = 2048
+  ebpf_ringbuf_worker_capacity = 1024
+  flow_producer_store_capacity = 4096
   worker_count = 1
   k8s_decorator_threads = 2
+  
+  flow_producer_channel_capacity = 2048
+  k8s_decorator_channel_capacity = 4096
 }
 
 # Aggressive flow expiration
@@ -472,10 +479,24 @@ Key metrics to monitor:
 
 **If you see packet drops:**
 
-1. Increase `pipeline.base_capacity`
-2. Increase `pipeline.worker_count`
-3. Add more CPU resources
-4. Reduce monitored interfaces
+The appropriate fix depends on where drops occur in the pipeline:
+
+1. **Worker queue drops** (eBPF events dropped before reaching workers):
+   - Increase `pipeline.ebpf_ringbuf_worker_capacity` (per-worker buffer)
+   - Increase `pipeline.worker_count` (more parallel processing)
+   - Add more CPU resources
+
+2. **Flow span channel drops** (drops between workers and K8s decorator):
+   - Increase `pipeline.flow_producer_channel_capacity`
+   - Increase `pipeline.k8s_decorator_threads` (faster decoration)
+
+3. **Decorated span channel drops** (drops between decorator and exporter):
+   - Increase `pipeline.k8s_decorator_channel_capacity`
+   - Optimize exporter configuration (larger batches, more concurrent exports)
+
+4. **General recommendations:**
+   - Reduce monitored interfaces if drops persist
+   - Check metrics to identify the specific bottleneck stage
 
 **If you see high memory usage:**
 

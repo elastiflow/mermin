@@ -5,10 +5,13 @@ auto_reload = false
 # Pipeline configuration (using defaults optimized for typical enterprise)
 pipeline {
   ebpf_max_flows        = 100000
-  base_capacity          = 8192
+  ebpf_ringbuf_worker_capacity = 2048
+  flow_producer_store_capacity = 32768
   worker_count          = 4
   worker_poll_interval  = "5s"
   k8s_decorator_threads = 4
+  flow_producer_channel_capacity = 16384
+  k8s_decorator_channel_capacity = 32768
 }
 shutdown_timeout        = "5s"
 
