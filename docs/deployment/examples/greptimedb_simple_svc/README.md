@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Mermin with GreptimeDB
 
 - [Mermin with GreptimeDB](#mermin-with-greptimedb)
