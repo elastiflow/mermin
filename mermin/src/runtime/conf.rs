@@ -842,6 +842,27 @@ pub struct PipelineOptions {
     ///          → 100K default provides 10x headroom (adequate, consider 200K-500K for 3K+ FPS)
     pub ebpf_max_flows: u32,
 
+    /// Maximum socket identities in SK_STORAGE map (default: 100,000)
+    ///
+    /// Controls memory usage of the eBPF SOCKET_IDENTITY map for process attribution.
+    /// Each socket tracked requires 32 bytes of kernel memory.
+    ///
+    /// **Memory sizing**:
+    /// - 50,000 sockets:    ~1.6 MB
+    /// - 100,000 sockets:   ~3.2 MB (default ✓)
+    /// - 500,000 sockets:   ~16 MB
+    /// - 1,000,000 sockets: ~32 MB
+    ///
+    /// **Tuning guide**:
+    /// This should match or exceed your peak concurrent socket count on the node.
+    /// In most scenarios, socket count correlates with concurrent connections (ebpf_max_flows).
+    /// However, long-lived idle connections (e.g., database pools, websockets) may result
+    /// in more sockets than active flows.
+    ///
+    /// **Lifecycle**: Socket storage is automatically freed when the kernel destroys the socket.
+    /// **Fallback**: If storage is full, new sockets won't be attributed (PID=0 in spans).
+    pub ebpf_max_socket_identities: u32,
+
     /// eBPF ring buffer size in bytes (default: 256 KB)
     ///
     /// Controls the size of the FLOW_EVENTS ring buffer used to pass new flow events
@@ -928,9 +949,15 @@ impl Default for PipelineOptions {
     fn default() -> Self {
         Self {
             ebpf_max_flows: 100_000,
+<<<<<<< Updated upstream
             ebpf_ringbuf_size: 256 * 1024,
             ebpf_ringbuf_worker_capacity: 2048,
             flow_producer_store_capacity: 32768,
+=======
+            ebpf_max_socket_identities: 100_000,
+            ebpf_ring_buffer_size_bytes: 256 * 1024,
+            base_capacity: 8192,
+>>>>>>> Stashed changes
             worker_count: 4,
             worker_poll_interval: Duration::from_secs(5),
             k8s_decorator_threads: 4,

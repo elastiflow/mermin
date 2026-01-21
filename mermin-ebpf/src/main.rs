@@ -87,16 +87,19 @@
 #[cfg(not(feature = "test"))]
 use aya_ebpf::{
     bindings::TC_ACT_UNSPEC,
-    helpers::bpf_ktime_get_boot_ns,
-    macros::{classifier, map},
-    maps::{HashMap, PerCpuArray, RingBuf},
-    programs::TcContext,
+    helpers::{
+        bpf_get_current_cgroup_id, bpf_get_current_comm, bpf_get_current_pid_tgid,
+        bpf_get_current_uid_gid, bpf_ktime_get_boot_ns,
+    },
+    macros::{classifier, lsm, map},
+    maps::{HashMap, PerCpuArray, RingBuf, SkStorage},
+    programs::{LsmContext, TcContext},
 };
 #[cfg(not(feature = "test"))]
 use aya_log_ebpf::{error, trace};
 #[cfg(not(feature = "test"))]
 use mermin_common::FlowEvent;
-use mermin_common::{ConnectionState, Direction, FlowKey, FlowStats, IpVersion};
+use mermin_common::{ConnectionState, Direction, FlowKey, FlowStats, IpVersion, SocketIdentity};
 use network_types::{
     eth,
     eth::EtherType,
@@ -171,6 +174,27 @@ static mut FLOW_KEY_SCRATCH: PerCpuArray<FlowKey> = PerCpuArray::with_max_entrie
 static mut LISTENING_PORTS: HashMap<mermin_common::ListeningPortKey, u8> =
     HashMap::with_max_entries(65536, 0);
 
+/// Maximum number of socket identities to track in the SK_STORAGE map.
+///
+/// This is an upper bound that can be overridden at runtime by the userspace
+/// loader using aya's `set_max_entries()` API. The actual size is configured
+/// via the `pipeline.ebpf_max_socket_identities` config field.
+///
+/// Default at runtime: 100,000 sockets (~3.2 MB with 32-byte SocketIdentity)
+///
+/// Memory calculation: sockets × 32 bytes
+#[cfg(not(feature = "test"))]
+const MAX_SOCKET_IDENTITIES: u32 = 10_000_000; // Upper bound, overridden at runtime
+
+/// Socket-local storage map for process attribution.
+/// Maps socket pointer -> SocketIdentity (PID, executable name, cgroup ID, UID).
+/// Populated by LSM hooks at socket creation time, queried by TC programs for flow attribution.
+/// Storage is automatically freed when socket is destroyed by the kernel.
+#[cfg(not(feature = "test"))]
+#[map]
+static mut SOCKET_IDENTITY: SkStorage<SocketIdentity> =
+    SkStorage::with_max_entries(MAX_SOCKET_IDENTITIES, 0);
+
 /// Error types that can occur during packet parsing.
 ///
 /// Error logs are emitted with human-readable descriptions including the specific header type
@@ -234,6 +258,66 @@ pub fn mermin_flow_ingress(ctx: TcContext) -> i32 {
 #[classifier]
 pub fn mermin_flow_egress(ctx: TcContext) -> i32 {
     run_flow_stats(&ctx, Direction::Egress)
+}
+
+/// LSM hook: socket_post_create
+///
+/// Stamps process identity metadata onto newly created sockets using SK_STORAGE.
+/// This metadata is later retrieved by TC programs for flow attribution.
+///
+/// Captures:
+/// - Process ID (PID) and Thread Group ID (TGID)
+/// - Executable name (comm) from task_struct
+/// - Cgroup ID for container correlation
+/// - User ID (UID) for user attribution
+///
+/// Returns 0 to allow socket creation (LSM hooks must return 0 on success).
+#[cfg(not(feature = "test"))]
+#[lsm(hook = "socket_post_create")]
+pub fn socket_post_create(ctx: LsmContext) -> i32 {
+    match try_socket_post_create(ctx) {
+        Ok(_) => 0,
+        Err(_) => 0, // Always allow socket creation, even if we fail to store metadata
+    }
+}
+
+/// Try to stamp socket identity metadata into SK_STORAGE.
+/// Errors are non-fatal - socket creation proceeds even if stamping fails.
+#[cfg(not(feature = "test"))]
+#[inline(always)]
+fn try_socket_post_create(ctx: LsmContext) -> Result<(), ()> {
+    // Validate this approach
+    let sock = unsafe { ctx.arg::<*mut core::ffi::c_void>(0) };
+    if sock.is_null() {
+        return Err(());
+    }
+    // End of validation
+
+    // Capture process context
+    let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
+    let mut comm = [0u8; 16];
+    unsafe {
+        bpf_get_current_comm(&mut comm as *mut _ as *mut u8, 16);
+    }
+    let cgroup_id = unsafe { bpf_get_current_cgroup_id() };
+    let uid_gid = unsafe { bpf_get_current_uid_gid() };
+
+    // Build SocketIdentity
+    let identity = SocketIdentity {
+        pid: (pid_tgid >> 32) as u32,
+        tgid: pid_tgid as u32,
+        comm,
+        cgroup_id,
+        uid: uid_gid as u32,
+    };
+
+    // Store in SK_STORAGE (tied to socket lifetime)
+    unsafe {
+        #[allow(static_mut_refs)]
+        let _ = SOCKET_IDENTITY.set(sock as *const _, &identity);
+    }
+
+    Ok(())
 }
 
 /// Helper to handle flow stats with error logging
@@ -342,6 +426,34 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
         stats.reverse_metadata_seen = 0;
 
         let parsed_offset = parse_metadata(ctx, stats)?;
+
+        // Lookup socket identity from SK_STORAGE for process attribution
+        let sk = unsafe { (*ctx.skb.skb).sk };
+        if !sk.is_null() {
+            #[allow(static_mut_refs)]
+            if let Some(identity) = unsafe { SOCKET_IDENTITY.get(sk as *const _) } {
+                stats.process_pid = identity.pid;
+                stats.process_tgid = identity.tgid;
+                stats.process_comm = identity.comm;
+                stats.process_cgroup_id = identity.cgroup_id;
+                stats.process_uid = identity.uid;
+            } else {
+                // Socket storage not found (e.g., pre-existing connection)
+                // PID of 0 indicates attribution unavailable
+                stats.process_pid = 0;
+                stats.process_tgid = 0;
+                stats.process_comm = [0; 16];
+                stats.process_cgroup_id = 0;
+                stats.process_uid = 0;
+            }
+        } else {
+            // No socket associated with skb
+            stats.process_pid = 0;
+            stats.process_tgid = 0;
+            stats.process_comm = [0; 16];
+            stats.process_cgroup_id = 0;
+            stats.process_uid = 0;
+        }
 
         unsafe {
             #[allow(static_mut_refs)]
@@ -1144,6 +1256,11 @@ mod tests {
             reverse_icmp_code: 0,
             forward_metadata_seen: 0,
             reverse_metadata_seen: 0,
+            process_pid: 0,
+            process_tgid: 0,
+            process_comm: [0; 16],
+            process_cgroup_id: 0,
+            process_uid: 0,
         }
     }
 

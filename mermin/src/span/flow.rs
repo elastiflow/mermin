@@ -273,7 +273,14 @@ pub struct SpanAttributes {
     pub destination_k8s_service_uid: Option<String>,
     pub network_policies_ingress: Option<Vec<String>>,
     pub network_policies_egress: Option<Vec<String>>,
+
+    // Process Attribution (from LSM socket storage)
+    pub process_pid: Option<u32>,
+    pub process_tgid: Option<u32>,
     pub process_executable_name: Option<String>,
+    pub process_cgroup_id: Option<u64>,
+    pub process_uid: Option<u32>,
+
     pub container_image_name: Option<String>,
     pub container_name: Option<String>,
 }
@@ -416,7 +423,11 @@ impl Default for SpanAttributes {
             destination_k8s_service_uid: None,
             network_policies_ingress: None,
             network_policies_egress: None,
+            process_pid: None,
+            process_tgid: None,
             process_executable_name: None,
+            process_cgroup_id: None,
+            process_uid: None,
             container_image_name: None,
             container_name: None,
         }
@@ -972,9 +983,24 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.network_policies_egress {
             kvs.push(KeyValue::new("network.policies.egress", value.join(",")));
         }
+
+        // Process attribution (from LSM socket storage)
+        if let Some(value) = self.attributes.process_pid {
+            kvs.push(KeyValue::new("process.pid", value as i64));
+        }
+        if let Some(value) = self.attributes.process_tgid {
+            kvs.push(KeyValue::new("process.tgid", value as i64));
+        }
         if let Some(ref value) = self.attributes.process_executable_name {
             kvs.push(KeyValue::new("process.executable.name", value.to_owned()));
         }
+        if let Some(value) = self.attributes.process_cgroup_id {
+            kvs.push(KeyValue::new("process.cgroup.id", value as i64));
+        }
+        if let Some(value) = self.attributes.process_uid {
+            kvs.push(KeyValue::new("process.uid", value as i64));
+        }
+
         if let Some(ref value) = self.attributes.container_image_name {
             kvs.push(KeyValue::new("container.image.name", value.to_string()));
         }

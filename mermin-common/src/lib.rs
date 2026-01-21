@@ -156,11 +156,36 @@ impl core::hash::Hash for FlowKey {
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for FlowKey {}
 
+/// Socket identity metadata captured by LSM hooks and stored in SK_STORAGE map.
+/// This data is stamped onto sockets at creation time and retrieved by TC programs
+/// for process attribution on network flows.
+///
+/// Memory layout: 32 bytes (with automatic alignment from #[repr(C)])
+/// Breakdown: u32 + u32 + [u8;16] + u64 + u32 = 32 bytes aligned
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct SocketIdentity {
+    /// Process ID (PID)
+    pub pid: u32,
+    /// Thread Group ID (TGID) - main process ID
+    pub tgid: u32,
+    /// Executable name from task_struct (comm field, max 16 bytes)
+    pub comm: [u8; 16],
+    /// Cgroup ID for container/namespace correlation
+    pub cgroup_id: u64,
+    /// User ID (UID) of the process owning the socket
+    pub uid: u32,
+}
+
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for SocketIdentity {}
+
 /// Flow statistics maintained in eBPF maps, aggregated per normalized FlowKey.
 /// Tracks bidirectional counters, timestamps, and metadata.
 /// Only contains data that eBPF can parse (3-layer: Eth + IP + L4).
-/// Memory layout: 184 bytes actual (177 bytes data + 7 bytes padding for 8-byte alignment)
-/// Breakdown: 104 (u64) + 32 (IP arrays) + 6 (MAC) + 12 (u32) + 6 (u16) + 17 (u8) = 177 bytes unpadded
+/// Includes process attribution from LSM socket storage.
+/// Memory layout: 208 bytes (was 176 bytes, added 32 bytes for process attribution)
+/// Breakdown: 104 (u64) + 32 (IP arrays) + 6 (MAC) + 12 (u32) + 6 (u16) + 17 (u8) + 36 (process attrs) = 213 bytes unpadded, aligned to 208
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct FlowStats {
@@ -257,6 +282,18 @@ pub struct FlowStats {
     pub forward_metadata_seen: u8,
     /// Flag indicating reverse direction metadata has been captured for current interval (1=captured, 0=not yet)
     pub reverse_metadata_seen: u8,
+
+    // === Process attribution (from LSM socket storage) - 36 bytes ===
+    /// Process ID (0 if attribution unavailable)
+    pub process_pid: u32,
+    /// Thread Group ID - main process ID (0 if attribution unavailable)
+    pub process_tgid: u32,
+    /// Process executable name from task_struct (empty if attribution unavailable)
+    pub process_comm: [u8; 16],
+    /// Cgroup ID for container correlation (0 if attribution unavailable)
+    pub process_cgroup_id: u64,
+    /// User ID of process owning socket (0 if attribution unavailable)
+    pub process_uid: u32,
 }
 
 impl FlowStats {
@@ -614,6 +651,11 @@ mod tests {
             reverse_icmp_code: 0,
             forward_metadata_seen: 0,
             reverse_metadata_seen: 0,
+            process_pid: 0,
+            process_tgid: 0,
+            process_comm: [0; 16],
+            process_cgroup_id: 0,
+            process_uid: 0,
         }
     }
     #[test]
@@ -933,14 +975,30 @@ mod tests {
     /// 1. Size remains constant (including any padding)
     /// 2. Alignment is consistent
     #[test]
+    fn test_socket_identity_memory_layout() {
+        // SocketIdentity: u32 + u32 + [u8;16] + u64 + u32 = 32 bytes (with alignment)
+        assert_eq!(
+            size_of::<SocketIdentity>(),
+            32,
+            "SocketIdentity size MUST be 32 bytes for eBPF/userspace compatibility"
+        );
+
+        // Verify alignment (critical for correct memory access in eBPF)
+        assert_eq!(
+            align_of::<SocketIdentity>(),
+            8,
+            "SocketIdentity alignment MUST be 8 bytes (u64 field) for eBPF/userspace compatibility"
+        );
+    }
+
+    #[test]
     fn test_flow_stats_memory_layout() {
-        // Verify optimized memory layout (176 bytes)
-        // 88 (u64) + 32 (IP arrays) + 6 (MAC) + 2 (padding) + 20 (u32) + 6 (u16) + 17 (u8) = 171 bytes
-        // Compiler adds 5 bytes of trailing padding to align to 8-byte boundary = 176 bytes
+        // Updated size with process attribution fields (5 fields = 32 bytes added)
+        // FlowStats was 176 bytes, now 176 + 32 = 208 bytes
         assert_eq!(
             size_of::<FlowStats>(),
-            176,
-            "FlowStats size MUST be 176 bytes for eBPF/userspace compatibility"
+            208,
+            "FlowStats size MUST be 208 bytes for eBPF/userspace compatibility (added process attribution)"
         );
 
         // Verify alignment (critical for correct memory access in eBPF)

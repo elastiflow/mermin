@@ -1147,6 +1147,18 @@ impl FlowWorker {
                 flow_reverse_packets_delta: stats.reverse_packets as i64,
                 flow_reverse_packets_total: stats.reverse_packets as i64,
 
+                // Process attribution - only set if PID is non-zero (attribution available)
+                process_pid: (stats.process_pid != 0).then_some(stats.process_pid),
+                process_tgid: (stats.process_tgid != 0).then_some(stats.process_tgid),
+                process_executable_name: (stats.process_pid != 0).then_some(
+                    String::from_utf8_lossy(&stats.process_comm)
+                        .trim_end_matches('\0')
+                        .to_string(),
+                ),
+                process_cgroup_id: (stats.process_cgroup_id != 0)
+                    .then_some(stats.process_cgroup_id),
+                process_uid: (stats.process_pid != 0).then_some(stats.process_uid),
+
                 // All other attributes default to None
                 ..Default::default()
             },
