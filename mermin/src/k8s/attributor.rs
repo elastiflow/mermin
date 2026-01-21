@@ -791,8 +791,9 @@ impl Attributor {
         manager.get_related_resources(pod_labels, &pod_namespace, &self.resource_store)
     }
 
-    /// A generic helper to find the first object of a specific kind for a given IP.
-    /// This is the new internal engine that uses the IP index.
+    /// A generic helper to find objects of a specific kind for a given IP with intelligent conflict resolution.
+    /// This method handles IP conflicts that can occur in Cilium environments where multiple resources
+    /// may share the same IP address (e.g., host network pods and nodes).
     async fn get_objects_by_ip<K>(&self, ip: IpAddr) -> Vec<Arc<K>>
     where
         K: Resource<DynamicType = ()> + Clone + 'static,
@@ -805,13 +806,24 @@ impl Attributor {
             let candidates = entry.value();
             let store = self.resource_store.store();
 
+            // Group candidates by resource type for conflict resolution
+            let mut pods = Vec::new();
+            let mut nodes = Vec::new();
+            let mut services = Vec::new();
+            let mut other_resources = Vec::new();
+
             for meta in candidates {
                 if meta.kind == K::kind(&()) {
                     let key = ObjectRef::new(&meta.name)
                         .within(meta.namespace.as_deref().unwrap_or_default());
                     if let Some(obj) = store.get(&key) {
                         if self.filter.is_allowed(obj.as_ref()) {
-                            results.push(obj);
+                            match meta.kind.as_str() {
+                                "Pod" => pods.push(obj),
+                                "Node" => nodes.push(obj),
+                                "Service" => services.push(obj),
+                                _ => other_resources.push(obj),
+                            }
                         } else {
                             trace!(
                                 event.name = "k8s.attributor.filtered",
@@ -823,6 +835,15 @@ impl Attributor {
                     }
                 }
             }
+
+            // Apply conflict resolution logic
+            results.extend(self.resolve_ip_conflicts(
+                ip,
+                &pods,
+                &nodes,
+                &services,
+                &other_resources,
+            ));
         }
         results
     }
@@ -879,6 +900,105 @@ impl Attributor {
     /// Looks up an EndpointSlice directly by one of its endpoint IP addresses.
     pub async fn get_endpointslice_by_ip(&self, ip: IpAddr) -> Option<Arc<EndpointSlice>> {
         self.get_objects_by_ip(ip).await.into_iter().next()
+    }
+
+    /// Resolves IP conflicts when multiple Kubernetes resources share the same IP address.
+    /// This is particularly important in Cilium environments where host network pods
+    /// and nodes can have overlapping IP addresses.
+    ///
+    /// # Arguments
+    /// * `ip` - The IP address being resolved
+    /// * `pods` - Pod resources found for this IP
+    /// * `nodes` - Node resources found for this IP  
+    /// * `services` - Service resources found for this IP
+    /// * `other_resources` - Other resource types found for this IP
+    ///
+    /// # Returns
+    /// A Vec of resources prioritized according to conflict resolution rules
+    fn resolve_ip_conflicts<K>(
+        &self,
+        ip: IpAddr,
+        pods: &[Arc<K>],
+        nodes: &[Arc<K>],
+        services: &[Arc<K>],
+        other_resources: &[Arc<K>],
+    ) -> Vec<Arc<K>>
+    where
+        K: Resource<DynamicType = ()> + Clone + 'static,
+    {
+        // 1. Logic for Pods (Highest priority usually, unless HostNetwork conflict)
+        if !pods.is_empty() {
+            // Check if K is actually a Pod type at runtime
+            let is_pod_type = std::any::TypeId::of::<K>() == std::any::TypeId::of::<Pod>();
+
+            if is_pod_type {
+                // Check if any pods are host-networked
+                let has_host_network_pod = pods
+                    .iter()
+                    .any(|p| self.is_host_network_pod_generic(p.as_ref()));
+
+                // Conflict Resolution: If we have a HostNetwork pod AND a Node match on the same IP
+                if has_host_network_pod && !nodes.is_empty() && self.is_likely_node_ip(ip) {
+                    trace!(
+                        event.name = "k8s.attributor.conflict_resolved",
+                        net.ip.address = %ip,
+                        resolution = "node_over_host_network_pod",
+                        "resolved ip conflict: preferring node over host network pod"
+                    );
+                    return nodes.to_vec();
+                }
+            }
+            return pods.to_vec();
+        }
+
+        // 2. Fallback hierarchy: Services > Nodes > Others
+        if !services.is_empty() {
+            return services.to_vec();
+        }
+        if !nodes.is_empty() {
+            return nodes.to_vec();
+        }
+
+        other_resources.to_vec()
+    }
+
+    /// Checks if a Kubernetes resource (when cast to Pod) is running in host network mode.
+    /// This method uses type downcasting to safely check Pod-specific properties.
+    fn is_host_network_pod_generic<K>(&self, resource: &K) -> bool
+    where
+        K: Resource<DynamicType = ()> + 'static,
+    {
+        use std::any::Any;
+
+        // Use Any to downcast K to Pod
+        if let Some(pod) = (resource as &dyn Any).downcast_ref::<Pod>() {
+            return pod
+                .spec
+                .as_ref()
+                .and_then(|spec| spec.host_network)
+                .unwrap_or(false);
+        }
+
+        false
+    }
+
+    /// Determines if an IP address is likely a node IP by checking against known node IPs.
+    /// This provides more accurate conflict resolution than generic heuristics.
+    fn is_likely_node_ip(&self, ip: IpAddr) -> bool {
+        let ip_str = ip.to_string();
+
+        self.resource_store.nodes.state().iter().any(|node| {
+            node.status
+                .as_ref()
+                .and_then(|status| status.addresses.as_ref())
+                .map(|addresses| {
+                    addresses.iter().any(|addr| {
+                        (addr.type_ == "InternalIP" || addr.type_ == "ExternalIP")
+                            && addr.address == ip_str // Compare strings to avoid re-parsing IP every time
+                    })
+                })
+                .unwrap_or(false)
+        })
     }
 
     /// Finds all EndpointSlices associated with a given Service.
@@ -1313,12 +1433,27 @@ async fn index_resource_by_ip<K>(
 fn extract_pod_ips(pod: &Pod) -> HashSet<String> {
     let mut ips = HashSet::new();
     if let Some(status) = &pod.status {
+        let mut has_pod_ips = false;
+
         if let Some(pod_ip) = &status.pod_ip {
             ips.insert(pod_ip.clone());
+            has_pod_ips = true;
         }
         if let Some(pod_ips) = &status.pod_ips {
             for pod_ip_info in pod_ips {
                 ips.insert(pod_ip_info.ip.clone());
+                has_pod_ips = true;
+            }
+        }
+
+        if !has_pod_ips {
+            if let Some(host_ip) = &status.host_ip {
+                ips.insert(host_ip.clone());
+            }
+            if let Some(host_ips) = &status.host_ips {
+                for host_ip_info in host_ips {
+                    ips.insert(host_ip_info.ip.clone());
+                }
             }
         }
     }
@@ -1481,6 +1616,15 @@ fn spawn_ip_resource_watcher<K, F>(
                             // Update cache with new IPs
                             ip_cache.insert(uid.clone(), current_ips.clone());
 
+                            trace!(
+                                event.name = "k8s.watcher.add_uid",
+                                k8s.resource.kind = %resource_name,
+                                k8s.resource.object = ?obj.meta().name,
+                                k8s.resource.uid = %uid,
+                                k8s.resource.ips = %current_ips.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(","),
+                                "adding uid to ip cache"
+                            );
+
                             // Trigger IP index rebuild
                             if event_tx.send(()).is_err() {
                                 warn!(
@@ -1624,6 +1768,11 @@ async fn update_ip_index(
     index: &Arc<DashMap<String, Vec<K8sObjectMeta>>>,
     conf: &Conf,
 ) {
+    trace!(
+        event.name = "k8s.ip_index.update_start",
+        "starting ip index update"
+    );
+
     let mut new_index = HashMap::new();
 
     if let Some(k8s_conf) = conf
@@ -2021,6 +2170,73 @@ mod tests {
                 .iter()
                 .map(|m| format!("{}/{}", m.kind, m.name))
                 .collect::<Vec<_>>()
+        );
+    }
+
+    /// Test IP conflict resolution logic for Cilium environments
+    #[test]
+    fn test_ip_conflict_resolution() {
+        use std::collections::BTreeMap;
+
+        use k8s_openapi::api::core::v1::PodSpec;
+
+        // Create a test pod with host network enabled
+        let mut host_network_pod = create_test_pod(
+            "host-network-pod",
+            "default",
+            BTreeMap::from([("app".to_string(), "test".to_string())]),
+            None,
+        );
+
+        // Set host network to true
+        host_network_pod.spec = Some(PodSpec {
+            host_network: Some(true),
+            ..Default::default()
+        });
+
+        // Create a regular pod
+        let regular_pod = create_test_pod(
+            "regular-pod",
+            "default",
+            BTreeMap::from([("app".to_string(), "test".to_string())]),
+            None,
+        );
+
+        // Create a test node
+        let test_node = Node {
+            metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+                name: Some("test-node".to_string()),
+                ..Default::default()
+            },
+            status: Some(k8s_openapi::api::core::v1::NodeStatus {
+                addresses: Some(vec![k8s_openapi::api::core::v1::NodeAddress {
+                    type_: "InternalIP".to_string(),
+                    address: "10.104.7.192".to_string(),
+                }]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        // Test host network detection
+        let is_host_network = host_network_pod
+            .spec
+            .as_ref()
+            .and_then(|spec| spec.host_network)
+            .unwrap_or(false);
+        assert!(
+            is_host_network,
+            "Host network pod should be detected as host network"
+        );
+
+        let is_regular_network = regular_pod
+            .spec
+            .as_ref()
+            .and_then(|spec| spec.host_network)
+            .unwrap_or(false);
+        assert!(
+            !is_regular_network,
+            "Regular pod should not be detected as host network"
         );
     }
 
