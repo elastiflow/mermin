@@ -1432,6 +1432,8 @@ async fn index_resource_by_ip<K>(
 /// Extracts IP addresses from a Pod resource
 fn extract_pod_ips(pod: &Pod) -> HashSet<String> {
     let mut ips = HashSet::new();
+    let is_host_network = pod.spec.as_ref().and_then(|s| s.host_network).unwrap_or(false);
+
     if let Some(status) = &pod.status {
         let mut has_pod_ips = false;
 
@@ -1446,7 +1448,7 @@ fn extract_pod_ips(pod: &Pod) -> HashSet<String> {
             }
         }
 
-        if !has_pod_ips {
+        if is_host_network && !has_pod_ips {
             if let Some(host_ip) = &status.host_ip {
                 ips.insert(host_ip.clone());
             }
@@ -1616,13 +1618,22 @@ fn spawn_ip_resource_watcher<K, F>(
                             // Update cache with new IPs
                             ip_cache.insert(uid.clone(), current_ips.clone());
 
-                            trace!(
+                            debug!(
                                 event.name = "k8s.watcher.add_uid",
                                 k8s.resource.kind = %resource_name,
                                 k8s.resource.object = ?obj.meta().name,
                                 k8s.resource.uid = %uid,
                                 k8s.resource.ips = %current_ips.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(","),
                                 "adding uid to ip cache"
+                            );
+
+                            debug!(
+                                event.name = "k8s.watcher.ip_changed",
+                                k8s.resource.kind = %resource_name,
+                                k8s.resource.name = %obj.name_any(),
+                                k8s.resource.namespace = %obj.namespace().unwrap_or_default(),
+                                k8s.resource.ips = ?current_ips,
+                                "resource ips changed, triggering ip index update"
                             );
 
                             // Trigger IP index rebuild
@@ -1768,7 +1779,7 @@ async fn update_ip_index(
     index: &Arc<DashMap<String, Vec<K8sObjectMeta>>>,
     conf: &Conf,
 ) {
-    trace!(
+    debug!(
         event.name = "k8s.ip_index.update_start",
         "starting ip index update"
     );
