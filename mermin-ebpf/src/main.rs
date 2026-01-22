@@ -131,20 +131,25 @@ const FLOW_EVENT_PACKET_DATA_SIZE: usize = 192;
 /// Memory calculation: flows × 232 bytes
 #[cfg(not(feature = "test"))]
 const MAX_FLOWS: u32 = 10_000_000; // Upper bound, overridden at runtime
+#[cfg(not(feature = "test"))]
+const BPF_F_NO_PREALLOC: u32 = 1;
 
 // New eBPF map aggregation architecture
 // Flow statistics map: normalized FlowKey -> FlowStats
 #[cfg(not(feature = "test"))]
 #[map]
-static mut FLOW_STATS: HashMap<FlowKey, FlowStats> = HashMap::with_max_entries(MAX_FLOWS, 0);
+static mut FLOW_STATS: HashMap<FlowKey, FlowStats> =
+    HashMap::with_max_entries(MAX_FLOWS, BPF_F_NO_PREALLOC);
 
 #[cfg(not(feature = "test"))]
 #[map]
-static mut TCP_STATS: HashMap<FlowKey, TcpStats> = HashMap::with_max_entries(MAX_FLOWS, 0);
+static mut TCP_STATS: HashMap<FlowKey, TcpStats> =
+    HashMap::with_max_entries(MAX_FLOWS, BPF_F_NO_PREALLOC);
 
 #[cfg(not(feature = "test"))]
 #[map]
-static mut ICMP_STATS: HashMap<FlowKey, IcmpStats> = HashMap::with_max_entries(MAX_FLOWS, 0);
+static mut ICMP_STATS: HashMap<FlowKey, IcmpStats> =
+    HashMap::with_max_entries(MAX_FLOWS, BPF_F_NO_PREALLOC);
 
 // Size: 256 KB (~1,120 FlowEvent entries, each 234 bytes)
 // Provides buffering for new flow bursts while worker channels absorb backpressure.
