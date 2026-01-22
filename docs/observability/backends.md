@@ -22,7 +22,7 @@ The OpenTelemetry Collector is the most flexible option:
 * Exports to multiple backends simultaneously
 * Provides buffering and retry logic
 
-**Example Configuration:** See [`docs/deployment/examples/local_otel/`](../../docs/deployment/examples/local_otel/) for a complete setup with OpenTelemetry Collector, including Mermin configuration and collector pipeline.
+**Example Configuration:** See [Mermin with OpenTelemetry Collector](../deployment/examples/local_otel/README.md) for a complete setup with OpenTelemetry Collector, including Mermin configuration and collector pipeline.
 
 ### Basic Mermin Configuration
 
