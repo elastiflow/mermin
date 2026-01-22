@@ -818,6 +818,29 @@ impl Attributor {
                         .within(meta.namespace.as_deref().unwrap_or_default());
                     if let Some(obj) = store.get(&key) {
                         if self.filter.is_allowed(obj.as_ref()) {
+                            let host_network = {
+                                use std::any::Any;
+                                if let Some(pod) = (obj.as_ref() as &dyn Any).downcast_ref::<Pod>() {
+                                    pod.spec
+                                        .as_ref()
+                                        .and_then(|spec| spec.host_network)
+                                        .unwrap_or(false)
+                                } else {
+                                    false // Not a Pod, so hostNetwork doesn't apply
+                                }
+                            };
+                            
+                            debug!(
+                                event.name = "k8s.attributor.found",
+                                k8s.resource.kind = %meta.kind,
+                                k8s.resource.name = %obj.name_any(),
+                                k8s.resource.object = ?obj.meta().name,
+                                k8s.resource.namespace = %obj.namespace().unwrap_or_default(),
+                                k8s.resource.uid = %obj.meta().uid.as_deref().unwrap_or_default(),
+                                k8s.resource.ip = &ip_str,
+                                k8s.resource.host_network = %host_network,
+                                "resource attributed to ip address"
+                            );
                             match meta.kind.as_str() {
                                 "Pod" => pods.push(obj),
                                 "Node" => nodes.push(obj),
