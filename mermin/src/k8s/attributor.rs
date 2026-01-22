@@ -939,7 +939,7 @@ impl Attributor {
 
                 // Conflict Resolution: If we have a HostNetwork pod AND a Node match on the same IP
                 if has_host_network_pod && !nodes.is_empty() && self.is_likely_node_ip(ip) {
-                    trace!(
+                    debug!(
                         event.name = "k8s.attributor.conflict_resolved",
                         net.ip.address = %ip,
                         resolution = "node_over_host_network_pod",
@@ -1432,7 +1432,11 @@ async fn index_resource_by_ip<K>(
 /// Extracts IP addresses from a Pod resource
 fn extract_pod_ips(pod: &Pod) -> HashSet<String> {
     let mut ips = HashSet::new();
-    let is_host_network = pod.spec.as_ref().and_then(|s| s.host_network).unwrap_or(false);
+    let is_host_network = pod
+        .spec
+        .as_ref()
+        .and_then(|s| s.host_network)
+        .unwrap_or(false);
 
     if let Some(status) = &pod.status {
         let mut has_pod_ips = false;
@@ -1601,6 +1605,12 @@ fn spawn_ip_resource_watcher<K, F>(
                             ])
                             .inc();
 
+                        let host_network = (&obj as &dyn std::any::Any)
+                            .downcast_ref::<Pod>()
+                            .and_then(|p| p.spec.as_ref())
+                            .and_then(|s| s.host_network)
+                            .unwrap_or_default();
+
                         // Extract current IPs from this resource
                         let current_ips = extract_ips(&obj);
                         let uid = obj.meta().uid.clone().unwrap_or_default();
@@ -1622,18 +1632,12 @@ fn spawn_ip_resource_watcher<K, F>(
                                 event.name = "k8s.watcher.add_uid",
                                 k8s.resource.kind = %resource_name,
                                 k8s.resource.object = ?obj.meta().name,
-                                k8s.resource.uid = %uid,
-                                k8s.resource.ips = %current_ips.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(","),
-                                "adding uid to ip cache"
-                            );
-
-                            debug!(
-                                event.name = "k8s.watcher.ip_changed",
-                                k8s.resource.kind = %resource_name,
                                 k8s.resource.name = %obj.name_any(),
                                 k8s.resource.namespace = %obj.namespace().unwrap_or_default(),
-                                k8s.resource.ips = ?current_ips,
-                                "resource ips changed, triggering ip index update"
+                                k8s.resource.uid = %uid,
+                                k8s.resource.ips = %current_ips.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(","),
+                                k8s.resource.host_network = %host_network,
+                                "resource ips changed, adding uid to ip cache"
                             );
 
                             // Trigger IP index rebuild
