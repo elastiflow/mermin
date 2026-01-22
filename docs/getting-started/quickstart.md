@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Quick Start
 
 This guide will help you deploy Mermin on a local Kubernetes cluster using `kind` (Kubernetes in Docker) in just a few minutes. By the end, you'll have Mermin capturing network flows and displaying them in your terminal.
