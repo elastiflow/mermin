@@ -636,5 +636,5 @@ discovery "instrument" {
 
 * [**Parser Configuration**](parser.md): Configure tunnel protocol detection
 * [**Flow Filtering**](filtering.md): Filter flows by interface name
-* [**Troubleshooting No Flows**](../troubleshooting/no-flows.md): Diagnose interface issues
+* [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose interface issues
 * [**Advanced Scenarios**](../deployment/advanced-scenarios.md): CNI-specific configurations

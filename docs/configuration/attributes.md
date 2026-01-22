@@ -294,6 +294,6 @@ To verify the default attributes are working:
 
 ## Next Steps
 
-* [**Kubernetes Informers**](kubernetes-informers.md): Configure resource watching
+* [**Kubernetes Informers**](discovery-kubernetes-informer.md): Configure resource watching
 * [**Owner Relations**](owner-relations.md): Add owner metadata
 * [**Configuration Examples**](examples.md): See complete configurations

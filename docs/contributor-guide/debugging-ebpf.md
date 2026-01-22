@@ -358,6 +358,6 @@ This approach gives you both quick diagnostics and deep analysis capabilities fo
 
 ## Next Steps
 
-- [Contributor Guide](contributor-guide.md) - Return to the main contributor guide
+- [Contributor Guide](development-workflow.md) - Return to the main contributor guide
 - [Debugging Network Traffic](debugging-network.md) - Learn about Wireshark packet capture
 - [Troubleshooting Guide](../troubleshooting/troubleshooting.md) - Common issues and solutions

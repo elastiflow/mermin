@@ -699,5 +699,5 @@ See the [Application Metrics](../observability/app-metrics.md) guide for complet
 
 * [**Stdout Exporter**](export-stdout.md): Configure console output for debugging
 * [**Integration Guides**](../observability/backends.md): Connect to specific backends
-* [**Troubleshooting Export Issues**](../troubleshooting/export-issues.md): Diagnose problems
-* [**OpenTelemetry Collector**](../integrations/opentelemetry-collector.md): Set up collector
+* [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose problems
+* [**Observability Backends**](../observability/backends.md): Set up collector and backends

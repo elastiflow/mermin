@@ -364,4 +364,4 @@ discovery "informer" "k8s" {
 * [**Owner Relations**](owner-relations.md): Configure owner reference walking
 * [**Selector Relations**](selector-relations.md): Configure selector-based matching
 * [**Flow Attributes**](attributes.md): Configure metadata extraction
-* [**Troubleshooting Metadata**](../troubleshooting/kubernetes-metadata.md): Debug missing metadata
+* [**Troubleshooting**](../troubleshooting/troubleshooting.md): Debug missing metadata

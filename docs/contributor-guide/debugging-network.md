@@ -125,4 +125,4 @@ Ensure Wireshark is installed and available in your PATH. On macOS, you may need
 ## Next Steps
 
 - [Debugging eBPF Programs](debugging-ebpf.md) - Learn how to inspect eBPF programs with bpftool
-- [Contributor Guide](contributor-guide.md) - Return to the main contributor guide
+- [Contributor Guide](development-workflow.md) - Return to the main contributor guide

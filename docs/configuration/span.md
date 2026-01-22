@@ -525,4 +525,4 @@ span {
 * [**Flow Filtering**](filtering.md): Filter flows before export
 * [**OTLP Exporter**](export-otlp.md): Configure export batching and intervals
 * [**Global Options**](global-options.md): Tune packet processing workers
-* [**Troubleshooting Performance**](../troubleshooting/performance.md): Optimize for your environment
+* [**Troubleshooting**](../troubleshooting/troubleshooting.md): Optimize for your environment

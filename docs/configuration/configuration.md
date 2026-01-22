@@ -183,10 +183,10 @@ metrics {
 ```
 
 {% hint style="warning" %}
-**Debug Metrics Warning**: Setting `debug_metrics_enabled = true` enables high-cardinality metrics with per-resource labels. This can cause significant memory growth in production. Only enable for debugging. See [Debug Metrics Configuration](metrics-debug.md) for details.
+**Debug Metrics Warning**: Setting `debug_metrics_enabled = true` enables high-cardinality metrics with per-resource labels. This can cause significant memory growth in production. Only enable for debugging. See [Metrics Configuration](metrics.md) for details.
 {% endhint %}
 
-See [API and Metrics](api-metrics.md) and [Debug Metrics](metrics-debug.md) for details.
+See [API](api.md) and [Metrics](metrics.md) for details.
 
 ### Parser Configuration
 
@@ -222,7 +222,7 @@ discovery "informer" "k8s" {
 }
 ```
 
-See [Network Interface Discovery](discovery-interfaces.md) and [Kubernetes Informers](kubernetes-informers.md).
+See [Network Interface Discovery](discovery-instrument.md) and [Kubernetes Informers](discovery-kubernetes-informer.md).
 
 ### Kubernetes Relations
 
@@ -307,7 +307,7 @@ span {
 }
 ```
 
-See [Flow Span Options](span-options.md) for details.
+See [Flow Span Options](span.md) for details.
 
 ### Export Configuration
 
@@ -395,15 +395,15 @@ Detailed documentation for each configuration section:
 | Section                                         | Description                          |
 | ----------------------------------------------- | ------------------------------------ |
 | [Global Options](global-options.md)             | Top-level settings and CLI flags     |
-| [API and Metrics](api-metrics.md)               | Health checks and Prometheus metrics |
+| [API](api.md) and [Metrics](metrics.md)         | Health checks and Prometheus metrics |
 | [Parser](parser.md)                             | eBPF packet parsing options          |
-| [Network Interfaces](discovery-interfaces.md)   | Interface discovery patterns         |
-| [Kubernetes Informers](kubernetes-informers.md) | K8s resource watching                |
+| [Network Interfaces](discovery-instrument.md)   | Interface discovery patterns         |
+| [Kubernetes Informers](discovery-kubernetes-informer.md) | K8s resource watching                |
 | [Owner Relations](owner-relations.md)           | Owner reference walking              |
 | [Selector Relations](selector-relations.md)     | Label selector matching              |
 | [Flow Attributes](attributes.md)                | Metadata extraction and association  |
 | [Filtering](filtering.md)                       | Flow filtering rules                 |
-| [Span Options](span-options.md)                 | Flow generation and timeouts         |
+| [Span Options](span.md)                 | Flow generation and timeouts         |
 | [OTLP Exporter](export-otlp.md)                 | OpenTelemetry Protocol export        |
 | [Stdout Exporter](export-stdout.md)             | Console output for debugging         |
 | [Internal Tracing](internal-tracing.md)         | Mermin self-monitoring               |
@@ -421,6 +421,6 @@ Detailed documentation for each configuration section:
 ## Next Steps
 
 * [**Global Options**](global-options.md): Configure top-level settings
-* [**Network Interface Discovery**](discovery-interfaces.md): Choose which interfaces to monitor
+* [**Network Interface Discovery**](discovery-instrument.md): Choose which interfaces to monitor
 * [**OTLP Exporter**](export-otlp.md): Configure flow export to your backend
 * [**Configuration Examples**](examples.md): See complete working configurations

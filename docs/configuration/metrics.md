@@ -132,4 +132,4 @@ For production environments:
 
 ## Next Steps
 
-- [**Mermin Application Metrics**](docs/observability/app-metrics.md): Mermin metrics documentation
+- [**Mermin Application Metrics**](../observability/app-metrics.md): Mermin metrics documentation
