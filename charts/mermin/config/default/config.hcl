@@ -26,9 +26,6 @@ pipeline {
     threads                      = 4
     decorated_span_queue_capacity = 32768
   }
-  sampling_enabled              = true
-  sampling_min_rate             = 0.1
-  backpressure_warning_threshold = 0.01
 }
 
 # Internal configuration options

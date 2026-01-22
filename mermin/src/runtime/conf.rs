@@ -1,10 +1,14 @@
-use std::{collections::HashMap, error::Error, fmt, net::Ipv4Addr, path::Path, time::Duration};
+use std::{
+    collections::HashMap, error::Error, fmt, mem::size_of, net::Ipv4Addr, path::Path,
+    time::Duration,
+};
 
 use figment::providers::Format;
 use hcl::{
     Value,
     eval::{Context, FuncArgs, FuncDef, ParamType},
 };
+use mermin_common::{FlowEvent, FlowStats};
 use serde::{Deserialize, Serialize};
 use tracing::{Level, debug, info, warn};
 
@@ -20,7 +24,7 @@ use crate::{
         conf::conf_serde::{duration, level},
         opts::InternalOptions,
     },
-    span::opts::SpanOptions,
+    span::{flow::FlowSpan, opts::SpanOptions},
 };
 
 /// TCX ordering strategy for kernel >= 6.6
@@ -845,7 +849,6 @@ impl Default for FlowCapture {
 impl FlowCapture {
     /// Convert flow_events_capacity (entries) to bytes for eBPF ring buffer initialization
     pub fn flow_events_capacity_bytes(&self) -> u32 {
-        use mermin_common::FlowEvent;
         self.flow_events_capacity * size_of::<FlowEvent>() as u32
     }
 }
@@ -922,7 +925,7 @@ impl Default for K8sDecorator {
 /// - `flow_producer.workers = 4` (parallel flow processing across cores)
 /// - `k8s_decorator.threads = 4` (handles typical K8s clusters efficiently)
 /// - `flow_producer.flow_store_poll_interval = 5s` (responsive timeout checking with low CPU overhead)
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct PipelineOptions {
     /// Flow capture configuration for eBPF-level flow tracking
@@ -933,34 +936,20 @@ pub struct PipelineOptions {
 
     /// Kubernetes decorator configuration
     pub k8s_decorator: K8sDecorator,
-
     // TODO: Implement adaptive sampling (ring buffer consumer in mermin-ebpf/src/main.rs)
-    /// Enable adaptive sampling under backpressure (default: true)
-    /// **NOT IMPLEMENTED:** Should drop low-priority flows when worker channels are full.
-    pub sampling_enabled: bool,
+    // Enable adaptive sampling under backpressure (default: true)
+    // **NOT IMPLEMENTED:** Should drop low-priority flows when worker channels are full.
+    // pub sampling_enabled: bool,
 
     // TODO: Implement minimum sampling rate enforcement
-    /// Minimum sampling rate to maintain (default: 0.1 = 10%)
-    /// **NOT IMPLEMENTED:** Ensure at least 10% of flows pass through even under extreme load.
-    pub sampling_min_rate: f32,
+    // Minimum sampling rate to maintain (default: 0.1 = 10%)
+    // **NOT IMPLEMENTED:** Ensure at least 10% of flows pass through even under extreme load.
+    // pub sampling_min_rate: f32,
 
     // TODO: Implement backpressure threshold warnings
-    /// Drop rate threshold for backpressure warnings (default: 0.01 = 1%)
-    /// **NOT IMPLEMENTED:** Should emit warnings when drop rate exceeds this threshold.
-    pub backpressure_warning_threshold: f32,
-}
-
-impl Default for PipelineOptions {
-    fn default() -> Self {
-        Self {
-            flow_capture: FlowCapture::default(),
-            flow_producer: FlowProducer::default(),
-            k8s_decorator: K8sDecorator::default(),
-            sampling_enabled: true,
-            sampling_min_rate: 0.1,
-            backpressure_warning_threshold: 0.01,
-        }
-    }
+    // Drop rate threshold for backpressure warnings (default: 0.01 = 1%)
+    // **NOT IMPLEMENTED:** Should emit warnings when drop rate exceeds this threshold.
+    // pub backpressure_warning_threshold: f32,
 }
 
 impl PipelineOptions {
@@ -979,48 +968,88 @@ impl PipelineOptions {
         }
     }
 
-    fn validate_memory_usage_against_limit(&self, limit: u64) -> bool {
-        // Conservative estimates:
-        // FlowSpan ~2KB, Decorated ~4KB
-        // FlowEvent ~256 bytes (raw eBPF event)
-        // FlowEntry ~2.5KB (FlowSpan + overhead)
-        const FLOW_SPAN_SIZE: usize = 2048;
-        const DECORATED_SPAN_SIZE: usize = 4096;
-        const FLOW_EVENT_SIZE: usize = 256;
-        const FLOW_ENTRY_SIZE: usize = 2560;
+    fn validate_memory_usage_against_limit(&self, limit_bytes: u64) -> bool {
+        if limit_bytes == 0 {
+            info!(
+                event.name = "config.memory_check",
+                "Memory configuration check skipped: POD_RESOURCES_LIMITS_MEM is 0."
+            );
+            return true;
+        }
 
-        let channel_usage = (self.flow_producer.flow_span_queue_capacity * FLOW_SPAN_SIZE)
-            + (self.k8s_decorator.decorated_span_queue_capacity * DECORATED_SPAN_SIZE);
+        const MB: u64 = 1024 * 1024;
 
-        let worker_usage =
-            self.flow_producer.workers * self.flow_producer.worker_queue_capacity * FLOW_EVENT_SIZE;
+        let flow_event_size = size_of::<FlowEvent>() as u64;
+        let flow_stats_size = size_of::<FlowStats>() as u64;
 
-        let producer_capacity = self.flow_capture.flow_stats_capacity as usize / 3;
-        let store_usage = producer_capacity * FLOW_ENTRY_SIZE;
+        // FlowSpan with baseline info
+        let span_undecorated_size = size_of::<FlowSpan>() as u64 + 256;
 
-        let estimated_usage = channel_usage + worker_usage + store_usage;
+        // Flow span with k8s metadata
+        let span_decorated_size = size_of::<FlowSpan>() as u64 + 2048;
 
-        // Warn if estimated usage exceeds 50% of container memory
-        let threshold = (limit as f64 * 0.5) as usize;
+        let capture_bytes = {
+            // FlowStats map (value + key + overhead)
+            let map_entry_overhead = 300;
+            let stats_map = self.flow_capture.flow_stats_capacity as u64 * map_entry_overhead;
+            let ring_buf = self.flow_capture.flow_events_capacity as u64 * flow_event_size;
+            stats_map + ring_buf
+        };
 
-        if estimated_usage > threshold {
+        let producer_bytes = {
+            let worker_buffers = (self.flow_producer.workers
+                * self.flow_producer.worker_queue_capacity) as u64
+                * flow_event_size;
+            // Hash map overhead estimate (1.5x)
+            let flow_store = (self.flow_capture.flow_stats_capacity as u64 * flow_stats_size * 3) / 2;
+
+            let output_queue =
+                self.flow_producer.flow_span_queue_capacity as u64 * span_undecorated_size;
+
+            worker_buffers + flow_store + output_queue
+        };
+
+        let decorator_bytes = {
+            // Informer cache size estimate:
+            //
+            // Apply a factor estimate of 512 bytes per flow-slot.
+            // - 100k flows -> Est. 50 MB Cache (Matches a ~5,000-pod cluster)
+            // - 10k flows -> Est. 5 MB Cache (Matches a ~500-pod cluster)
+            let informer_cache_baseline = self.flow_capture.flow_stats_capacity as u64 * 512;
+
+            let output_queue =
+                self.k8s_decorator.decorated_span_queue_capacity as u64 * span_decorated_size;
+
+            informer_cache_baseline + output_queue
+        };
+
+        let estimated_usage = capture_bytes + producer_bytes + decorator_bytes;
+
+        // 80% threshold
+        let threshold_bytes = (limit_bytes as f64 * 0.80) as u64;
+
+        if estimated_usage > threshold_bytes {
             warn!(
                 event.name = "config.memory_warning",
-                estimated_usage_bytes = estimated_usage,
-                memory_limit_bytes = limit,
-                worker_queue_total =
-                    self.flow_producer.workers * self.flow_producer.worker_queue_capacity,
-                producer_capacity = producer_capacity,
-                "estimated pipeline memory usage might exceed recommended limits (50% of container memory); \
-                 consider reducing channel capacities or flow store size."
+                estimated_usage_mb = estimated_usage / MB,
+                limit_mb = limit_bytes / MB,
+                ebpf_mb = capture_bytes / MB,
+                producer_mb = producer_bytes / MB,
+                decorator_mb = decorator_bytes / MB,
+                "Pipeline memory projection ({:.1} MB) exceeds safe threshold of container limit ({:.1} MB). \
+                 Mermin is at risk of OOM Kill during traffic bursts. \
+                 Action: Increase memory limit or tune config.",
+                estimated_usage as f64 / MB as f64,
+                limit_bytes as f64 / MB as f64,
             );
             false
         } else {
             info!(
                 event.name = "config.memory_check",
-                estimated_usage_bytes = estimated_usage,
-                memory_limit_bytes = limit,
-                "channel memory usage is within safe limits"
+                estimated_usage_mb = estimated_usage / MB,
+                limit_mb = limit_bytes / MB,
+                utilization_pct = (estimated_usage as f64 / limit_bytes as f64) * 100.0,
+                "Memory configuration is valid."
             );
             true
         }
@@ -3240,8 +3269,7 @@ metrics {
 
     #[test]
     fn test_memory_usage_validation_logic() {
-        // Default config: 16384 * 2048 + 32768 * 4096
-        // = 33,554,432 + 134,217,728 = 167,772,160 bytes (~160 MB)
+        //  Estimated memory usage: 312.6 MB with defaults
         let opts = PipelineOptions::default();
 
         assert!(
@@ -3251,7 +3279,7 @@ metrics {
 
         assert!(
             !opts.validate_memory_usage_against_limit(268_435_456),
-            "Should warn with 256MB memory"
+            "Should warn with 256MB memory (estimated usage exceeds 80% threshold)"
         );
 
         assert!(

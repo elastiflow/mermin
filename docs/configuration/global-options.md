@@ -306,33 +306,6 @@ Number of dedicated threads for Kubernetes metadata decoration. Running decorati
 | High-Traffic Ingress       | 5K-25K      | 8-12                |
 | Extreme Scale (Edge/CDN)   | >25K        | 12-24               |
 
-### `sampling_enabled`
-
-**Type:** Boolean
-**Default:** `true`
-
-Enable adaptive sampling when worker channels are full. When enabled, Mermin intelligently drops events to prevent complete pipeline stalls while preserving critical flow information (TCP FIN/RST, new flows).
-
-**Behavior:**
-
-* Sampling activates only under backpressure
-* Preserves flow control packets (FIN, RST)
-* Maintains minimum sampling rate (see `sampling_min_rate`)
-
-### `sampling_min_rate`
-
-**Type:** Float (0.0-1.0)
-**Default:** `0.1` (10%)
-
-Minimum fraction of events to keep during maximum backpressure. A value of `0.1` ensures at least 10% of events are processed even under extreme load.
-
-### `backpressure_warning_threshold`
-
-**Type:** Float (0.0-1.0)
-**Default:** `0.01` (1%)
-
-Drop rate threshold for logging backpressure warnings. Warnings are logged when the fraction of dropped events exceeds this value.
-
 ### Channel Capacity Tuning
 
 These options control the buffer sizes between pipeline stages to optimize for your workload.

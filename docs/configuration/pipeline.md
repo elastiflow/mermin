@@ -23,10 +23,6 @@ pipeline {
   k8s_decorator {
     # Kubernetes metadata decoration configuration
   }
-  # Top-level backpressure and sampling settings
-  sampling_enabled = true
-  sampling_min_rate = 0.1
-  backpressure_warning_threshold = 0.01
 }
 ```
 
