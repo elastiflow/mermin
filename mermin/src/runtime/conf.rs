@@ -982,9 +982,8 @@ impl PipelineOptions {
         let span_decorated_size = size_of::<FlowSpan>() as u64 + 2048;
 
         let capture_bytes = {
-            // FlowStats map (value + key + overhead)
-            let map_entry_overhead = 300;
-            let stats_map = self.flow_capture.flow_stats_capacity as u64 * map_entry_overhead;
+            // FlowStats map (value + key + overhead ~ 300)
+            let stats_map = self.flow_capture.flow_stats_capacity as u64 * 300;
             let ring_buf = self.flow_capture.flow_events_capacity as u64 * flow_event_size;
             stats_map + ring_buf
         };
