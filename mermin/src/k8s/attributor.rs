@@ -829,7 +829,7 @@ impl Attributor {
                                     false // Not a Pod, so hostNetwork doesn't apply
                                 }
                             };
-                            
+
                             debug!(
                                 event.name = "k8s.attributor.found",
                                 k8s.resource.kind = %meta.kind,
@@ -839,7 +839,7 @@ impl Attributor {
                                 k8s.resource.uid = %obj.meta().uid.as_deref().unwrap_or_default(),
                                 k8s.resource.ip = &ip_str,
                                 k8s.resource.host_network = %host_network,
-                                "resource attributed to ip address"
+                                "resource attributed to ip address before conflict resolution"
                             );
                             match meta.kind.as_str() {
                                 "Pod" => pods.push(obj),
@@ -860,13 +860,42 @@ impl Attributor {
             }
 
             // Apply conflict resolution logic
-            results.extend(self.resolve_ip_conflicts(
+            let resolved_resources = self.resolve_ip_conflicts(
                 ip,
                 &pods,
                 &nodes,
                 &services,
                 &other_resources,
-            ));
+            );
+
+            // Log the final resolved resources after conflict resolution
+            for resource in &resolved_resources {
+                let host_network = {
+                    use std::any::Any;
+                    if let Some(pod) = (resource.as_ref() as &dyn Any).downcast_ref::<Pod>() {
+                        pod.spec
+                            .as_ref()
+                            .and_then(|spec| spec.host_network)
+                            .unwrap_or(false)
+                    } else {
+                        false // Not a Pod, so hostNetwork doesn't apply
+                    }
+                };
+
+                debug!(
+                    event.name = "k8s.attributor.resolved",
+                    k8s.resource.kind = %K::kind(&()),
+                    k8s.resource.name = %resource.name_any(),
+                    k8s.resource.object = ?resource.meta().name,
+                    k8s.resource.namespace = %resource.namespace().unwrap_or_default(),
+                    k8s.resource.uid = %resource.meta().uid.as_deref().unwrap_or_default(),
+                    k8s.resource.ip = &ip_str,
+                    k8s.resource.host_network = %host_network,
+                    "resource attributed to ip address after conflict resolution"
+                );
+            }
+
+            results.extend(resolved_resources);
         }
         results
     }
