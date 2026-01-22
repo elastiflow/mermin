@@ -6,7 +6,6 @@
 use std::sync::OnceLock;
 
 use lazy_static::lazy_static;
-use mermin_common::MapUnit;
 use prometheus::{
     Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGaugeVec, Opts, Registry,
 };

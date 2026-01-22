@@ -24,6 +24,7 @@ use aya::{
 use clap::Parser;
 use dashmap::DashMap;
 use error::{MerminError, Result};
+use mermin_common::MapUnit;
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal as unix_signal};
 use tokio::{
@@ -31,7 +32,6 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 use tracing::{debug, error, info, trace, warn};
-use mermin_common::MapUnit;
 
 use crate::{
     health::{HealthState, start_api_server},
