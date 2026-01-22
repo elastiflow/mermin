@@ -1,3 +1,7 @@
+---
+hidden: true
+---
+
 # Quick Start
 
 This guide will help you deploy Mermin on a local Kubernetes cluster using `kind` (Kubernetes in Docker) in just a few minutes. By the end, you'll have Mermin capturing network flows and displaying them in your terminal.
@@ -161,7 +165,7 @@ kubectl delete service nginx --ignore-not-found
 helm uninstall mermin
 
 # Delete the kind cluster
-kind delete cluster --name mermin-demo
+kind delete cluster --name atlantis
 ```
 
 ## Next Steps
