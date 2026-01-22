@@ -655,7 +655,7 @@ span {
 #
 #   Mermin → OTel Collector → Multiple Backends
 #
-# See integrations/opentelemetry-collector.md for collector configuration.
+# See observability/backends.md for collector configuration.
 
 export "traces" {
   otlp = {
@@ -806,6 +806,6 @@ export "traces" {
 ## Next Steps
 
 * [**Global Options**](global-options.md): Reference for all global configuration fields
-* [**Discovery Configuration**](discovery-interfaces.md): Interface selection details
+* [**Discovery Configuration**](discovery-instrument.md): Interface selection details
 * [**Export Configuration**](export-otlp.md): OTLP export options
 * [**Deployment Guide**](../deployment/deployment.md): Deploy with your chosen configuration

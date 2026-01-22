@@ -10,11 +10,12 @@
 * [Quick Start](getting-started/quickstart.md)
 * [Architecture](getting-started/architecture.md)
 * [Security Considerations](getting-started/security-considerations.md)
+* [Field Reference](reference/field-reference.md)
 
-## Flow Trace Specification
+## Observability
 
-* [Introductory Primer](spec/introductory-primer.md)
-* [Semantic Conventions](spec/semantic-conventions.md)
+* [Backends](observability/backends.md)
+* [Mermin Application Metrics](observability/app-metrics.md)
 
 ## Deployment
 
@@ -23,19 +24,17 @@
 * [Cloud Platforms](deployment/cloud-platforms.md)
 * [Advanced Scenarios](deployment/advanced-scenarios.md)
 * [Docker on Bare Metal](deployment/docker-bare-metal.md)
-* [Helm Examples](deployment/helm-examples/README.md)
+* Helm Examples
   * [Mermin with OpenTelemetry Collector](deployment/examples/local_otel/README.md)
   * [Mermin with NetObserv Flow and OpenSearch](deployment/examples/netobserv_os_simple_svc/README.md)
   * [Mermin with NetObserv Flow and OpenSearch in GKE with Gateway](deployment/examples/netobserv_os_simple_gke_gw/README.md)
-
-## Observability
-
-* [Backends](observability/backends.md)
-* [Mermin Application Metrics](observability/app-metrics.md)
+  * [Mermin with GreptimeDB](deployment/examples/greptimedb_simple_svc/README.md)
 
 ## Configuration
 
 * [Configuration Overview](configuration/configuration.md)
+* [Configuration Examples](configuration/examples.md)
+* [OTLP Exporter](configuration/export-otlp.md)
 * [Global Options](configuration/global-options.md)
 * [API](configuration/api.md)
 * [Metrics](configuration/metrics.md)
@@ -48,10 +47,8 @@
 * [Flow Attributes](configuration/attributes.md)
 * [Flow Filtering](configuration/filtering.md)
 * [Flow Span Producer](configuration/span.md)
-* [OTLP Exporter](configuration/export-otlp.md)
 * [Stdout Exporter](configuration/export-stdout.md)
 * [Internal Tracing](configuration/internal-tracing.md)
-* [Configuration Examples](configuration/examples.md)
 
 ## Troubleshooting
 
@@ -59,6 +56,15 @@
 * [Deployment Issues](troubleshooting/deployment-issues.md)
 * [Interface Visibility and Traffic Decapsulation](troubleshooting/interface-visibility-and-traffic-decapsulation.md)
 * [Common eBPF Errors](troubleshooting/common-ebpf-errors.md)
+
+## Flow Trace Specification
+
+* [Introductory Primer](spec/introductory-primer.md)
+* [Semantic Conventions](spec/semantic-conventions.md)
+
+## Security
+
+* [Security Policy](SECURITY.md)
 
 ## Contributor Guide
 

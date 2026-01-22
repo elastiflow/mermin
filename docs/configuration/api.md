@@ -283,6 +283,6 @@ internal "metrics" {
 ## Next Steps
 
 * [**Global Options**](global-options.md): Configure logging and performance
-* [**Flow Span Options**](span-options.md): Tune flow generation
+* [**Flow Span Options**](span.md): Tune flow generation
 * [**OTLP Exporter**](export-otlp.md): Configure flow export
-* [**Troubleshooting Performance**](../troubleshooting/performance.md): Diagnose issues
+* [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose issues

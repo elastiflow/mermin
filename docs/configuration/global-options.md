@@ -356,7 +356,7 @@ See the [Application Metrics](../observability/app-metrics.md) guide for complet
 
 ## Next Steps
 
-* [**API and Metrics**](api-metrics.md): Configure health checks and monitoring
-* [**Network Interface Discovery**](discovery-interfaces.md): Select which interfaces to monitor
-* [**Flow Span Options**](span-options.md): Configure flow generation and timeouts
+* [**API**](api.md) and [**Metrics**](metrics.md): Configure health checks and monitoring
+* [**Network Interface Discovery**](discovery-instrument.md): Select which interfaces to monitor
+* [**Flow Span Options**](span.md): Configure flow generation and timeouts
 * [**Configuration Examples**](examples.md): See complete configurations

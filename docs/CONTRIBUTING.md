@@ -16,10 +16,10 @@ Thank you for your interest in contributing to Mermin! This guide will help you 
 
 Before you start contributing:
 
-1. **Read the [Development Workflow](development-workflow.md)** guide to set up your environment
+1. **Read the [Development Workflow](contributor-guide/development-workflow.md)** guide to set up your environment
 2. **Browse existing issues** on [GitHub Issues](https://github.com/elastiflow/mermin/issues) to find something to work on
 3. **Join the discussion** on [GitHub Discussions](https://github.com/elastiflow/mermin/discussions)
-4. **Review our [Code of Conduct](code-of-conduct.md)** to understand our community standards
+4. **Review our [Code of Conduct](CODE-OF-CONDUCT.md)** to understand our community standards
 
 ### Finding Something to Work On
 
@@ -93,7 +93,7 @@ cd network-types/tests
 make test-ci
 ```
 
-See the [Development Workflow](development-workflow.md) guide for more testing details.
+See the [Development Workflow](contributor-guide/development-workflow.md) guide for more testing details.
 
 ### 5. Push and Create Pull Request
 
@@ -301,7 +301,7 @@ docker run --rm -i hadolint/hadolint < Dockerfile
 
 ## Code of Conduct
 
-All contributors must adhere to our [Code of Conduct](code-of-conduct.md). We are committed to providing a welcoming and inclusive environment for everyone.
+All contributors must adhere to our [Code of Conduct](CODE-OF-CONDUCT.md). We are committed to providing a welcoming and inclusive environment for everyone.
 
 ## License
 

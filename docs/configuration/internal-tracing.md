@@ -386,6 +386,6 @@ Filter internal traces:
 ## Next Steps
 
 * [**Global Options**](global-options.md): Configure logging levels
-* [**API and Metrics**](api-metrics.md): Monitor Mermin with Prometheus
+* [**API**](api.md) and [**Metrics**](metrics.md): Monitor Mermin with Prometheus
 * [**Troubleshooting**](../troubleshooting/troubleshooting.md): Debug common issues
 * [**OTLP Exporter**](export-otlp.md): Configure trace export
