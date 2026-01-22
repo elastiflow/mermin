@@ -191,4 +191,4 @@ Key observations:
 
 ## Learn More
 
-For the complete specification including all attributes, requirement levels, and detailed semantics, see the [Flow Trace Specification](spec.md).
+For the complete specification including all attributes, requirement levels, and detailed semantics, see the [Semantic Conventions](semantic-conventions.md).

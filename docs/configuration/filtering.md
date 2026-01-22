@@ -260,5 +260,5 @@ filter "flow" {
 ## Next Steps
 
 * [**Configuration Examples**](examples.md): See complete filter configurations
-* [**Flow Span Options**](span-options.md): Configure flow generation
+* [**Flow Span Options**](span.md): Configure flow generation
 * [**OTLP Export**](export-otlp.md): Configure export options

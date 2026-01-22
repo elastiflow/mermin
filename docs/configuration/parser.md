@@ -428,8 +428,8 @@ If your environment uses multiple ports for the same tunnel protocol (e.g., mult
 
 ## Next Steps
 
-- [**Network Interface Discovery**](discovery-interfaces.md): Configure which interfaces to monitor
+- [**Network Interface Discovery**](discovery-instrument.md): Configure which interfaces to monitor
 - [**Flow Filtering**](filtering.md): Filter flows based on protocols and ports
 - [**Deployment Issues**](../troubleshooting/deployment-issues.md): Troubleshoot eBPF verifier failures
-- [**Troubleshooting No Flow Data**](../troubleshooting/no-flows.md): Diagnose flow capture issues
+- [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose flow capture issues
 - [**Advanced Scenarios**](../deployment/advanced-scenarios.md): CNI-specific deployment guides
