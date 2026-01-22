@@ -957,26 +957,19 @@ impl PipelineOptions {
         if let Some(limit) = std::env::var("POD_RESOURCES_LIMITS_MEM")
             .ok()
             .and_then(|s| s.parse().ok())
+            .filter(|&v| v > 0)
         {
             self.validate_memory_usage_against_limit(limit);
         } else {
             debug!(
                 event.name = "config.memory_check.skipped",
                 reason = "memory_limit_not_found",
-                "could not determine memory limit (POD_RESOURCES_LIMITS_MEM not set), skipping validation"
+                "could not determine memory limit (POD_RESOURCES_LIMITS_MEM not set or set to 0), skipping validation"
             );
         }
     }
 
     fn validate_memory_usage_against_limit(&self, limit_bytes: u64) -> bool {
-        if limit_bytes == 0 {
-            info!(
-                event.name = "config.memory_check",
-                "Memory configuration check skipped: POD_RESOURCES_LIMITS_MEM is 0."
-            );
-            return true;
-        }
-
         const MB: u64 = 1024 * 1024;
 
         let flow_event_size = size_of::<FlowEvent>() as u64;
