@@ -1001,7 +1001,8 @@ impl PipelineOptions {
                 * self.flow_producer.worker_queue_capacity) as u64
                 * flow_event_size;
             // Hash map overhead estimate (1.5x)
-            let flow_store = (self.flow_capture.flow_stats_capacity as u64 * flow_stats_size * 3) / 2;
+            let flow_store =
+                (self.flow_capture.flow_stats_capacity as u64 * flow_stats_size * 3) / 2;
 
             let output_queue =
                 self.flow_producer.flow_span_queue_capacity as u64 * span_undecorated_size;
