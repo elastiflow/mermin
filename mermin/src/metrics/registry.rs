@@ -6,6 +6,7 @@
 use std::sync::OnceLock;
 
 use lazy_static::lazy_static;
+use mermin_common::MapUnit;
 use prometheus::{
     Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGaugeVec, Opts, Registry,
 };
@@ -119,7 +120,7 @@ lazy_static! {
     ).expect("failed to create capacity metric");
 
     pub static ref CHANNEL_ENTRIES: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("entries", "Current number of items in channels")
+        Opts::new(MapUnit::Entries.as_str(), "Current number of items in channels")
             .namespace("mermin")
             .subsystem("channel"),
         &["channel"]  // packet_worker, exporter

@@ -8,7 +8,7 @@ use std::{
 use aya::maps::{HashMap as EbpfHashMap, RingBuf};
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
-use mermin_common::{Direction, FlowEvent, FlowKey, FlowStats, ListeningPortKey};
+use mermin_common::{Direction, FlowEvent, FlowKey, FlowStats, ListeningPortKey, MapUnit};
 use moka::future::Cache;
 use network_types::{
     eth::EtherType,
@@ -2288,7 +2288,7 @@ pub async fn orphan_scanner_task(
 
                 let ebpf_map_size = keys.len() as u64;
                 metrics::registry::EBPF_MAP_SIZE
-                    .with_label_values(&[EbpfMapName::FlowStats.as_str(), "entries"])
+                    .with_label_values(&[EbpfMapName::FlowStats.as_str(), MapUnit::Entries.as_str()])
                     .set(ebpf_map_size as i64);
 
                 for key in keys {
