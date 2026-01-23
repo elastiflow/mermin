@@ -107,7 +107,7 @@ The following tables detail the proposed attributes for the flow span.
 The following symbols are used in the "Required" column to indicate [OpenTelemetry attribute requirement levels](https://opentelemetry.io/docs/specs/semconv/general/attribute-requirement-level/):
 
 | Symbol | Requirement Level      | Description                                                      |
-| ------ | ---------------------- | ---------------------------------------------------------------- |
+|--------|------------------------|------------------------------------------------------------------|
 | ✓      | Required               | All instrumentations MUST populate the attribute                 |
 | ?      | Conditionally Required | MUST populate when the specified condition is satisfied          |
 | \~     | Recommended            | SHOULD add by default if readily available and efficient         |
@@ -118,7 +118,7 @@ The following symbols are used in the "Required" column to indicate [OpenTelemet
 > Note on Timestamps: The span's standard `start_time_unix_nano` and `end_time_unix_nano` fields are used to mark the beginning and end of the flow span's observation window. These are analogous to the `flowStart*` and `flowEnd*` fields in IPFIX records and are not duplicated as attributes.
 
 | Proposed Field Name     | Data Type | Description                                                                               | Notes / Decisions                                                                                                                                        | Std OTel | Required   |
-| ----------------------- | --------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------- |
+|-------------------------|-----------|-------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|----------|------------|
 | `flow.community_id`     | `string`  | The Community ID hash of the flow's five-tuple.                                           | A common way to identify a network flow across different monitoring points.                                                                              |          | ✓          |
 | `flow.direction`        | `string`  | The inferred direction of the flow from the observer's perspective.                       | One of: `forward`, `reverse`, or `unknown`. Mirrors IPFIX biflow concepts. See [Flow Direction](semantic-conventions.md#flow-direction) for details.     |          | ✓          |
 | `flow.connection.state` | `string`  | The state of the connection (e.g., TCP state) at the time the flow was generated.         | For TCP, this would be one of the standard states like `established`, `time_wait`, etc. Similar to network.connection.state but from a flow perspective. |          | ? TCP only |
@@ -127,7 +127,7 @@ The following symbols are used in the "Required" column to indicate [OpenTelemet
 ### L2-L4 Attributes
 
 | Proposed Field Name           | Data Type  | Description                                                                             | Notes / Decisions                                                      | Std OTel | Required          |
-| ----------------------------- | ---------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | -------- | ----------------- |
+|-------------------------------|------------|-----------------------------------------------------------------------------------------|------------------------------------------------------------------------|----------|-------------------|
 | `source.address`              | `string`   | Source IP address.                                                                      |                                                                        | ✓        | ✓                 |
 | `source.port`                 | `long`     | Source port number.                                                                     |                                                                        | ✓        | ✓                 |
 | `destination.address`         | `string`   | Destination IP address.                                                                 |                                                                        | ✓        | ✓                 |
@@ -169,7 +169,7 @@ The following symbols are used in the "Required" column to indicate [OpenTelemet
 ### Flow Metrics
 
 | Proposed Field Name          | Data Type | Description                                                               | Notes / Decisions                                        | Std OTel | Required |
-| ---------------------------- | --------- | ------------------------------------------------------------------------- | -------------------------------------------------------- | -------- | -------- |
+|------------------------------|-----------|---------------------------------------------------------------------------|----------------------------------------------------------|----------|----------|
 | `flow.bytes.delta`           | `long`    | Number of bytes observed in the last measurement interval for the flow.   |                                                          |          | ✓        |
 | `flow.bytes.total`           | `long`    | Total number of bytes observed for this flow since its start.             | The term `bytes` is preferred over `octets` for clarity. |          | \~       |
 | `flow.packets.delta`         | `long`    | Number of packets observed in the last measurement interval for the flow. |                                                          |          | ✓        |
@@ -184,7 +184,7 @@ The following symbols are used in the "Required" column to indicate [OpenTelemet
 Time-based metrics calculated for the flow, stored in nanoseconds (`ns`).
 
 | Proposed Field Name          | Data Type | Description                                                                                                                    | Notes / Decisions | Std OTel | Required |
-| ---------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------- | -------- | -------- |
+|------------------------------|-----------|--------------------------------------------------------------------------------------------------------------------------------|-------------------|----------|----------|
 | `flow.tcp.handshake.latency` | `long`    | The latency of the first part of the TCP handshake (SYN to SYN/ACK), from the **client's perspective**. (Server network delay) | Unit: `ns`.       |          | \~       |
 | `flow.tcp.svc.latency`       | `long`    | The application/service processing time, as measured on the **server side**.                                                   | Unit: `ns`.       |          | \~       |
 | `flow.tcp.svc.jitter`        | `long`    | The jitter of the application/service processing time, as measured on the **server side**.                                     | Unit: `ns`.       |          | \~       |
@@ -194,7 +194,7 @@ Time-based metrics calculated for the flow, stored in nanoseconds (`ns`).
 ### Tunnel & Ip-in-Ip & IPSec Attributes
 
 | Proposed Field Name            | Data Type | Description                                                                 | Notes / Decisions                                        | Std OTel | Required           |
-| ------------------------------ | --------- | --------------------------------------------------------------------------- | -------------------------------------------------------- | -------- | ------------------ |
+|--------------------------------|-----------|-----------------------------------------------------------------------------|----------------------------------------------------------|----------|--------------------|
 | `flow.ipsec.ah.spi`            | `long`    | Security Parameters Index for AH headers.                                   | SPI from the outermost header (after a tunnel)           |          | ○                  |
 | `flow.ipsec.esp.spi`           | `long`    | Security Parameters Index for ESP headers.                                  | SPI from the outermost header (after a tunnel)           |          | ○                  |
 | `flow.ipsec.sender_index`      | `long`    | The sender index from a WireGuard header.                                   |                                                          |          | ○                  |
@@ -228,7 +228,7 @@ Time-based metrics calculated for the flow, stored in nanoseconds (`ns`).
 > **Note:** These attributes use `source.k8s.*` / `destination.k8s.*` prefixes rather than standard OTel `k8s.*` attributes. See [Why `source.k8s.*` Instead of `k8s.source.*`?](semantic-conventions.md#why-sourcek8s-instead-of-k8ssource) for the rationale.
 
 | Proposed Field Name                             | Data Type | Description                                                 | Notes / Decisions | Std OTel  | Required |
-| ----------------------------------------------- | --------- | ----------------------------------------------------------- | ----------------- | --------- | -------- |
+|-------------------------------------------------|-----------|-------------------------------------------------------------|-------------------|-----------|----------|
 | `source.k8s.cluster.name`                       | `string`  | The name of the Kubernetes cluster for the source.          |                   | partially | \~       |
 | `source.k8s.cluster.uid`                        | `string`  | The UID of the Kubernetes cluster for the source.           |                   | partially | ○        |
 | `source.k8s.node.name`                          | `string`  | The name of the Kubernetes Node for the source.             |                   | partially | \~       |
@@ -238,7 +238,7 @@ Time-based metrics calculated for the flow, stored in nanoseconds (`ns`).
 | `source.k8s.pod.name`                           | `string`  | The name of the Kubernetes Pod for the source.              |                   | partially | \~       |
 | `source.k8s.pod.uid`                            | `string`  | The UID of the Kubernetes Pod for the source.               |                   | partially | ○        |
 | `source.k8s.pod.annotations.<key>`              | `string`  | Dynamic annotations from the source Pod.                    | Flattened map.    | partially | ○        |
-| `source.k8s.container.name`                     | `string`  | The name of the Kubernetes Container for the source.        |                   | partially | \~       |
+| `source.k8s.container.name`                     | `string`  | The name of the Container from Pod specification.           |                   | partially | \~       |
 | `source.k8s.deployment.name`                    | `string`  | The name of the Kubernetes Deployment for the source.       |                   | partially | \~       |
 | `source.k8s.deployment.uid`                     | `string`  | The UID of the Kubernetes Deployment for the source.        |                   | partially | ○        |
 | `source.k8s.deployment.annotations.<key>`       | `string`  | Dynamic annotations from the source Deployment.             | Flattened map.    | partially | ○        |
@@ -269,7 +269,7 @@ Time-based metrics calculated for the flow, stored in nanoseconds (`ns`).
 | `destination.k8s.pod.name`                      | `string`  | The name of the Kubernetes Pod for the destination.         |                   | partially | \~       |
 | `destination.k8s.pod.uid`                       | `string`  | The UID of the Kubernetes Pod for the destination.          |                   | partially | ○        |
 | `destination.k8s.pod.annotations.<key>`         | `string`  | Dynamic annotations from the destination Pod.               | Flattened map.    | partially | ○        |
-| `destination.k8s.container.name`                | `string`  | The name of the Kubernetes Container for the destination.   |                   | partially | \~       |
+| `destination.k8s.container.name`                | `string`  | The name of the Container from Pod specification.           |                   | partially | \~       |
 | `destination.k8s.deployment.name`               | `string`  | The name of the Kubernetes Deployment for the destination.  |                   | partially | \~       |
 | `destination.k8s.deployment.uid`                | `string`  | The UID of the Kubernetes Deployment for the destination.   |                   | partially | ○        |
 | `destination.k8s.deployment.annotations.<key>`  | `string`  | Dynamic annotations from the destination Deployment.        | Flattened map.    | partially | ○        |
@@ -295,18 +295,20 @@ Time-based metrics calculated for the flow, stored in nanoseconds (`ns`).
 ### Network Policy Attributes
 
 | Proposed Field Name      | Data Type  | Description                                               | Notes / Decisions                | Std OTel | Required |
-| ------------------------ | ---------- | --------------------------------------------------------- | -------------------------------- | -------- | -------- |
+|--------------------------|------------|-----------------------------------------------------------|----------------------------------|----------|----------|
 | `network.policy.ingress` | `string[]` | A list of network policy names affecting ingress traffic. | This could be multiple policies. |          | ○        |
 | `network.policy.egress`  | `string[]` | A list of network policy names affecting egress traffic.  | This could be multiple policies. |          | ○        |
 
 ### Process & Container Attributes
 
-| Proposed Field Name       | Data Type | Description                                                         | Notes / Decisions                          | Std OTel | Required |
-| ------------------------- | --------- | ------------------------------------------------------------------- | ------------------------------------------ | -------- | -------- |
-| `process.executable.name` | `string`  | The name of the binary associated with the socket for this flow.    | Provides application-level identification. | ✓        | \~       |
-| `process.pid`             | `long`    | The PID of the process associated with the socket for this flow.    | Provides application-level identification. | ✓        | \~       |
-| `container.image.name`    | `string`  | The name of the container image (e.g., `nginx:1.21`, `app:v1.0.0`). | Provides application-level identification. | ✓        | \~       |
-| `container.name`          | `string`  | The name of the container instance.                                 | Provides application-level identification. | ✓        | \~       |
+| Proposed Field Name                | Data Type | Description                                                               | Notes / Decisions                               | Std OTel | Required |
+|------------------------------------|-----------|---------------------------------------------------------------------------|-------------------------------------------------|----------|----------|
+| `process.executable.name`          | `string`  | The name of the binary associated with the socket for this flow.          | Provides application-level identification.      | ✓        | \~       |
+| `process.pid`                      | `long`    | The PID of the process associated with the socket for this flow.          | Provides application-level identification.      | ✓        | \~       |
+| `source.container.name`            | `string`  | The container runtime name for the source (e.g., from Docker/containerd). | Distinct from `source.k8s.container.name`.      | ✓        | \~       |
+| `source.container.image.name`      | `string`  | The image name of the source container (e.g., `nginx:1.21`).              | From K8s Pod spec container image.              |          | \~       |
+| `destination.container.name`       | `string`  | The container runtime name for the destination.                           | Distinct from `destination.k8s.container.name`. | ✓        | \~       |
+| `destination.container.image.name` | `string`  | The image name of the destination container (e.g., `app:v1.0.0`).         | From K8s Pod spec container image.              |          | \~       |
 
 ***
 
