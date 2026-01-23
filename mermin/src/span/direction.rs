@@ -575,6 +575,11 @@ mod tests {
             reverse_icmp_code: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 0,
+            process_pid: 0,
+            process_tgid: 0,
+            process_comm: [0; 16],
+            process_cgroup_id: 0,
+            process_uid: 0,
         }
     }
 

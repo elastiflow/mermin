@@ -331,6 +331,11 @@ mod event_driven_tests {
             reverse_icmp_code: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 0,
+            process_pid: 0,
+            process_tgid: 0,
+            process_comm: [0; 16],
+            process_cgroup_id: 0,
+            process_uid: 0,
         };
 
         handler.handle_flow_event(flow_key, stats).await;
@@ -395,6 +400,11 @@ mod event_driven_tests {
             reverse_icmp_code: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 0,
+            process_pid: 0,
+            process_tgid: 0,
+            process_comm: [0; 16],
+            process_cgroup_id: 0,
+            process_uid: 0,
         };
 
         handler
@@ -455,6 +465,11 @@ mod event_driven_tests {
             reverse_icmp_code: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 1,
+            process_pid: 0,
+            process_tgid: 0,
+            process_comm: [0; 16],
+            process_cgroup_id: 0,
+            process_uid: 0,
         };
 
         // Update stats (simulating eBPF map update)
@@ -524,6 +539,11 @@ mod event_driven_tests {
             reverse_icmp_code: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 1,
+            process_pid: 0,
+            process_tgid: 0,
+            process_comm: [0; 16],
+            process_cgroup_id: 0,
+            process_uid: 0,
         };
 
         handler.handle_flow_event(flow_key, stats_t1).await;
@@ -574,6 +594,11 @@ mod event_driven_tests {
             reverse_icmp_code: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 1,
+            process_pid: 0,
+            process_tgid: 0,
+            process_comm: [0; 16],
+            process_cgroup_id: 0,
+            process_uid: 0,
         };
 
         handler.handle_flow_event(flow_key, stats_t2).await;
@@ -660,6 +685,11 @@ mod event_driven_tests {
                     reverse_icmp_code: 0,
                     forward_metadata_seen: 1,
                     reverse_metadata_seen: 0,
+                    process_pid: 0,
+                    process_tgid: 0,
+                    process_comm: [0; 16],
+                    process_cgroup_id: 0,
+                    process_uid: 0,
                 };
 
                 handler_clone.handle_flow_event(key, stats).await;
