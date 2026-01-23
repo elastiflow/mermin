@@ -86,13 +86,15 @@
 
 #[cfg(not(feature = "test"))]
 use aya_ebpf::{
-    bindings::TC_ACT_UNSPEC,
+    bindings::{BPF_SK_STORAGE_GET_F_CREATE, TC_ACT_UNSPEC},
+    btf_maps::SkStorage,
+    helpers::generated::bpf_sk_storage_get,
     helpers::{
         bpf_get_current_cgroup_id, bpf_get_current_comm, bpf_get_current_pid_tgid,
         bpf_get_current_uid_gid, bpf_ktime_get_boot_ns,
     },
-    macros::{classifier, lsm, map},
-    maps::{HashMap, PerCpuArray, RingBuf, SkStorage},
+    macros::{btf_map, classifier, lsm, map},
+    maps::{HashMap, PerCpuArray, RingBuf},
     programs::{LsmContext, TcContext},
 };
 #[cfg(not(feature = "test"))]
@@ -174,26 +176,13 @@ static mut FLOW_KEY_SCRATCH: PerCpuArray<FlowKey> = PerCpuArray::with_max_entrie
 static mut LISTENING_PORTS: HashMap<mermin_common::ListeningPortKey, u8> =
     HashMap::with_max_entries(65536, 0);
 
-/// Maximum number of socket identities to track in the SK_STORAGE map.
-///
-/// This is an upper bound that can be overridden at runtime by the userspace
-/// loader using aya's `set_max_entries()` API. The actual size is configured
-/// via the `pipeline.ebpf_max_socket_identities` config field.
-///
-/// Default at runtime: 100,000 sockets (~3.2 MB with 32-byte SocketIdentity)
-///
-/// Memory calculation: sockets × 32 bytes
-#[cfg(not(feature = "test"))]
-const MAX_SOCKET_IDENTITIES: u32 = 10_000_000; // Upper bound, overridden at runtime
-
 /// Socket-local storage map for process attribution.
 /// Maps socket pointer -> SocketIdentity (PID, executable name, cgroup ID, UID).
 /// Populated by LSM hooks at socket creation time, queried by TC programs for flow attribution.
 /// Storage is automatically freed when socket is destroyed by the kernel.
 #[cfg(not(feature = "test"))]
-#[map]
-static mut SOCKET_IDENTITY: SkStorage<SocketIdentity> =
-    SkStorage::with_max_entries(MAX_SOCKET_IDENTITIES, 0);
+#[btf_map]
+static mut SOCKET_IDENTITY: SkStorage<SocketIdentity> = SkStorage::new();
 
 /// Error types that can occur during packet parsing.
 ///
@@ -286,21 +275,19 @@ pub fn socket_post_create(ctx: LsmContext) -> i32 {
 #[cfg(not(feature = "test"))]
 #[inline(always)]
 fn try_socket_post_create(ctx: LsmContext) -> Result<(), ()> {
-    // Validate this approach
-    let sock = unsafe { ctx.arg::<*mut core::ffi::c_void>(0) };
+    // Get the socket pointer from LSM context (first argument)
+    //Validate this
+    let sock = unsafe { ctx.arg::<*const core::ffi::c_void>(0) };
     if sock.is_null() {
         return Err(());
     }
     // End of validation
 
     // Capture process context
-    let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
-    let mut comm = [0u8; 16];
-    unsafe {
-        bpf_get_current_comm(&mut comm as *mut _ as *mut u8, 16);
-    }
+    let pid_tgid = bpf_get_current_pid_tgid();
+    let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
     let cgroup_id = unsafe { bpf_get_current_cgroup_id() };
-    let uid_gid = unsafe { bpf_get_current_uid_gid() };
+    let uid_gid = bpf_get_current_uid_gid();
 
     // Build SocketIdentity
     let identity = SocketIdentity {
@@ -312,9 +299,18 @@ fn try_socket_post_create(ctx: LsmContext) -> Result<(), ()> {
     };
 
     // Store in SK_STORAGE (tied to socket lifetime)
+    // Use raw bpf_sk_storage_get helper since SkStorage type-safe API
+    // is only available for SockAddrContext, not LsmContext
     unsafe {
         #[allow(static_mut_refs)]
-        let _ = SOCKET_IDENTITY.set(sock as *const _, &identity);
+        let map_ptr = &SOCKET_IDENTITY as *const _ as *mut core::ffi::c_void;
+        let value_ptr = &identity as *const _ as *mut core::ffi::c_void;
+        let _ = bpf_sk_storage_get(
+            map_ptr,
+            sock as *mut core::ffi::c_void,
+            value_ptr,
+            BPF_SK_STORAGE_GET_F_CREATE.into(),
+        );
     }
 
     Ok(())
@@ -428,23 +424,35 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
         let parsed_offset = parse_metadata(ctx, stats)?;
 
         // Lookup socket identity from SK_STORAGE for process attribution
-        let sk = unsafe { (*ctx.skb.skb).sk };
+        // Use raw bpf_sk_storage_get helper since SkStorage type-safe API
+        // is only available for SockAddrContext, not TcContext
+        let sk = unsafe { (*ctx.skb.skb).__bindgen_anon_2.sk };
         if !sk.is_null() {
-            #[allow(static_mut_refs)]
-            if let Some(identity) = unsafe { SOCKET_IDENTITY.get(sk as *const _) } {
-                stats.process_pid = identity.pid;
-                stats.process_tgid = identity.tgid;
-                stats.process_comm = identity.comm;
-                stats.process_cgroup_id = identity.cgroup_id;
-                stats.process_uid = identity.uid;
-            } else {
-                // Socket storage not found (e.g., pre-existing connection)
-                // PID of 0 indicates attribution unavailable
-                stats.process_pid = 0;
-                stats.process_tgid = 0;
-                stats.process_comm = [0; 16];
-                stats.process_cgroup_id = 0;
-                stats.process_uid = 0;
+            unsafe {
+                #[allow(static_mut_refs)]
+                let map_ptr = &SOCKET_IDENTITY as *const _ as *mut core::ffi::c_void;
+                let identity_ptr = bpf_sk_storage_get(
+                    map_ptr,
+                    sk as *mut core::ffi::c_void,
+                    core::ptr::null_mut(), // NULL = retrieve only, don't create
+                    0u64,                  // No flags for retrieval
+                );
+                if !identity_ptr.is_null() {
+                    let identity = &*(identity_ptr as *const SocketIdentity);
+                    stats.process_pid = identity.pid;
+                    stats.process_tgid = identity.tgid;
+                    stats.process_comm = identity.comm;
+                    stats.process_cgroup_id = identity.cgroup_id;
+                    stats.process_uid = identity.uid;
+                } else {
+                    // Socket storage not found (e.g., pre-existing connection)
+                    // PID of 0 indicates attribution unavailable
+                    stats.process_pid = 0;
+                    stats.process_tgid = 0;
+                    stats.process_comm = [0; 16];
+                    stats.process_cgroup_id = 0;
+                    stats.process_uid = 0;
+                }
             }
         } else {
             // No socket associated with skb

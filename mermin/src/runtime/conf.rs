@@ -949,15 +949,10 @@ impl Default for PipelineOptions {
     fn default() -> Self {
         Self {
             ebpf_max_flows: 100_000,
-<<<<<<< Updated upstream
+            ebpf_max_socket_identities: 100_000,
             ebpf_ringbuf_size: 256 * 1024,
             ebpf_ringbuf_worker_capacity: 2048,
             flow_producer_store_capacity: 32768,
-=======
-            ebpf_max_socket_identities: 100_000,
-            ebpf_ring_buffer_size_bytes: 256 * 1024,
-            base_capacity: 8192,
->>>>>>> Stashed changes
             worker_count: 4,
             worker_poll_interval: Duration::from_secs(5),
             k8s_decorator_threads: 4,

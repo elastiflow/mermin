@@ -17,8 +17,8 @@ use std::{
 };
 
 use aya::{
-    EbpfLoader,
-    programs::{Lsm, SchedClassifier, TcAttachType},
+    Btf, EbpfLoader,
+    programs::{SchedClassifier, TcAttachType},
     util::KernelVersion,
 };
 use clap::Parser;
@@ -341,12 +341,7 @@ async fn run(cli: Cli) -> Result<()> {
     let mut ebpf = EbpfLoader::new()
         .map_pin_path(&map_pin_path)
         .set_max_entries("FLOW_STATS", conf.pipeline.ebpf_max_flows)
-<<<<<<< Updated upstream
         .set_max_entries("FLOW_EVENTS", conf.pipeline.ebpf_ringbuf_size)
-=======
-        .set_max_entries("FLOW_EVENTS", conf.pipeline.ebpf_ring_buffer_size_bytes)
-        .set_max_entries("SOCKET_IDENTITY", conf.pipeline.ebpf_max_socket_identities)
->>>>>>> Stashed changes
         .load(aya::include_bytes_aligned!(concat!(
             env!("OUT_DIR"),
             "/mermin"
@@ -393,46 +388,56 @@ async fn run(cli: Cli) -> Result<()> {
     // Requires kernel 5.7+ for LSM BPF support and SK_STORAGE
     let kernel_version = KernelVersion::current().unwrap_or(KernelVersion::new(0, 0, 0));
     if kernel_version >= KernelVersion::new(5, 7, 0) {
-        match ebpf.program_mut("socket_post_create") {
-            Some(program) => {
-                let program: &mut aya::programs::Lsm = match program.try_into() {
-                    Ok(p) => p,
-                    Err(e) => {
+        // Load kernel BTF for LSM program
+        let btf = match Btf::from_sys_fs() {
+            Ok(btf) => Some(btf),
+            Err(e) => {
+                warn!(
+                    event.name = "ebpf.btf_load_failed",
+                    error.message = %e,
+                    "failed to load kernel BTF - process attribution will be unavailable"
+                );
+                None
+            }
+        };
+
+        if let Some(ref btf) = btf {
+            match ebpf.program_mut("socket_post_create") {
+                Some(program) => {
+                    // Try to convert and load LSM program - failures are non-fatal
+                    if let Ok(program) = TryInto::<&mut aya::programs::Lsm>::try_into(program) {
+                        if let Err(e) = program.load("socket_post_create", btf) {
+                            warn!(
+                                event.name = "ebpf.lsm_load_failed",
+                                error.message = %e,
+                                "failed to load LSM program - process attribution will be unavailable"
+                            );
+                        } else if let Err(e) = program.attach() {
+                            warn!(
+                                event.name = "ebpf.lsm_attach_failed",
+                                error.message = %e,
+                                "failed to attach LSM program - process attribution will be unavailable"
+                            );
+                        } else {
+                            info!(
+                                event.name = "ebpf.lsm_attached",
+                                lsm.hook = "socket_post_create",
+                                "LSM eBPF program attached for process attribution"
+                            );
+                        }
+                    } else {
                         warn!(
-                            event.name = "ebpf.lsm_load_failed",
-                            error.message = %e,
-                            "failed to convert LSM program"
+                            event.name = "ebpf.lsm_convert_failed",
+                            "failed to convert program to LSM type - process attribution disabled"
                         );
-                        return Err(MerminError::internal(format!(
-                            "failed to convert LSM program: {e}"
-                        )));
                     }
-                };
-                if let Err(e) = program.load() {
-                    warn!(
-                        event.name = "ebpf.lsm_load_failed",
-                        error.message = %e,
-                        "failed to load LSM program - process attribution will be unavailable"
-                    );
-                } else if let Err(e) = program.attach() {
-                    warn!(
-                        event.name = "ebpf.lsm_attach_failed",
-                        error.message = %e,
-                        "failed to attach LSM program - process attribution will be unavailable"
-                    );
-                } else {
-                    info!(
-                        event.name = "ebpf.lsm_attached",
-                        lsm.hook = "socket_post_create",
-                        "LSM eBPF program attached for process attribution"
+                }
+                None => {
+                    debug!(
+                        event.name = "ebpf.lsm_not_found",
+                        "LSM program socket_post_create not found in eBPF object - process attribution disabled"
                     );
                 }
-            }
-            None => {
-                debug!(
-                    event.name = "ebpf.lsm_not_found",
-                    "LSM program socket_post_create not found in eBPF object - process attribution disabled"
-                );
             }
         }
     } else {
