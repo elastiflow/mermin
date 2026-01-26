@@ -72,19 +72,47 @@ The BTF (BPF Type Format) encoding for Rust enums (`Result`, `Option`) is genera
 - **Action**: Changed to `#[inline(always)]`
 - **Result**: Error shifted from `Result` type to `Option` type - did not fix root cause
 
+### Attempt 4: Isolate SkStorage as Root Cause
+- **Hypothesis**: SkStorage BTF map might be causing or contributing to the BTF type_id error
+- **Action**: Commented out all SkStorage-related code:
+  - `SOCKET_IDENTITY` map definition (commented out `#[btf_map]` declaration)
+  - `socket_post_create()` LSM hook and `try_socket_post_create()` helper function
+  - SkStorage retrieval code in `try_flow_stats()` TC program
+  - Userspace LSM program loading code in `mermin/src/main.rs`
+- **Result**: BTF error **persisted** - still showing `Invalid type_id=0` for `Result_3C_network_types_3A__3A_eth_3A__3A_EtherType_2C__20_mermin_3A__3A_Error_3E_`. This confirms the issue is **NOT SkStorage-specific** but rather a general problem with `Result`/`Option` enum types in non-inlined functions. Additionally, a new error appeared: `fd 21 is not pointing to valid bpf_map` during program attachment, suggesting the BTF error prevents proper program verification. **Unable to produce a successful build** - the BTF error blocks program attachment even with SkStorage completely disabled.
+
+### Attempt 5: Update to Latest Aya Main Branch
+- **Hypothesis**: Newer aya revisions might have fixes for BTF enum encoding issues
+- **Action**: Updated `Cargo.toml` to use latest aya main branch (removed revision pins for `aya-build`, `aya-ebpf`, `aya-log-ebpf`)
+- **Result**: Build failed with compilation error - `cargo_metadata` is no longer re-exported from `aya-build` in newer versions. Attempted to fix by adding `cargo_metadata = "0.18"` as direct dependency and updating imports in `build.rs` files, but user reverted all changes and restored original pinned revision `de42b80c74883f512542875e7cfa96b8634a8991` due to build complexity and API incompatibilities. **No successful build achieved with latest aya version** - could not verify if newer versions contain BTF fixes.
+
+### Attempt 6: C-Compatible #[repr(C)] Result Structs
+- **Hypothesis**: Replacing `Result<T, E>` with C-compatible `#[repr(C)]` structs would provide fixed memory layouts that BTF can encode without the enum discriminant issues
+- **Action**: 
+  1. Added `#[repr(C)]` and `Default` derive to the `Error` enum
+  2. Created three C-compatible result structs:
+     - `ParseFlowKeyResult { ether_type: EtherType, error: Error, is_ok: bool }`
+     - `ParseMetadataResult { offset: usize, error: Error, is_ok: bool }`
+     - `ParseResult { error: Error, is_ok: bool }` (for `Result<(), Error>`)
+  3. Refactored `parse_flow_key`, `parse_metadata`, and `capture_direction_metadata` to return these structs
+  4. Updated all call sites to check `is_ok` field instead of using `?` operator
+  5. Updated all tests to use struct field access instead of `Result` methods
+- **Result**: Error persisted, now showing `Option<()>` (`Option_3C__28__29__3E_`) with `type_id=0` - the BTF issue was not caused by the function return types themselves but by some other enum type being encoded in the BTF metadata
+- **Key Insight**: The BTF invalid type_id error is not specific to function return types. Even after eliminating all `Result` return types from BTF-visible functions, some other Rust enum (`Option<()>`) was still being encoded with invalid BTF. The issue appears to be systemic with how Rust enums are encoded in BTF, not limited to specific code patterns.
+
 ## Remaining Tasks
 
 ### Investigation Needed
 - [ ] Investigate if this is a known aya/bpf-linker bug with Rust enum BTF encoding
-- [ ] Check if newer aya revisions fix this BTF issue
-- [ ] Explore alternative: avoid `Option`/`Result` in eBPF code paths that get BTF-encoded
+- [X] Check if newer aya revisions fix this BTF issue
+- [X] Explore alternative: avoid `Option`/`Result` in eBPF code paths that get BTF-encoded
 - [ ] Check if removing SkStorage map eliminates BTF errors (to isolate cause)
 - [ ] Investigate bpf-linker version and potential fixes
 
 ### Potential Solutions to Try
 - [ ] Try a newer aya revision (check aya-rs/aya main branch for BTF fixes)
-- [ ] Refactor code to avoid Rust enums in non-inlined functions
-- [ ] Check if `#[repr(C)]` on Error/custom types helps
+- [X] Refactor code to avoid Rust enums in non-inlined functions
+- [X] Check if `#[repr(C)]` on Error/custom types helps
 - [ ] Try removing SkStorage temporarily to see if error persists (isolate cause)
 
 ## Important Context
@@ -123,6 +151,8 @@ cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config 
 3. Inlining functions shifts which enum type fails, but doesn't fix the issue
 4. The SkStorage map definition itself references types that may be triggering the issue
 5. This may be a bpf-linker or LLVM BTF generation bug
+6. Replacing `Result<T, E>` with C-repr structs does NOT fix the issue - some other Rust enum (`Option<()>`) still gets encoded with invalid BTF
+7. The problematic enum types may be generated internally by the compiler/linker, not just from explicit return types
 
 ## Hypotheses for Next Chat
 
