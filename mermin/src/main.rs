@@ -142,7 +142,10 @@ async fn run(cli: Cli) -> Result<()> {
 
     // Initialize Prometheus metrics registry early, before any subsystems that might record metrics
     // This also initializes the global debug_enabled flag
-    if let Err(e) = metrics::registry::init_registry(conf.internal.metrics.debug_metrics_enabled) {
+    let bucket_config = metrics::registry::HistogramBucketConfig::from(&conf.internal.metrics);
+    if let Err(e) =
+        metrics::registry::init_registry(conf.internal.metrics.debug_metrics_enabled, bucket_config)
+    {
         error!(
             event.name = "metrics.registry_init_failed",
             error.message = %e,
@@ -753,7 +756,7 @@ async fn run(cli: Cli) -> Result<()> {
                                     .with_label_values(&[ChannelName::ProducerOutput.as_str()])
                                     .set(channel_size as i64);
 
-                            let _timer = metrics::registry::PROCESSING_DURATION_SECONDS
+                            let _timer = metrics::registry::processing_duration_seconds()
                                 .with_label_values(&[ProcessingStage::FlowProducerOut.as_str()])
                                 .start_timer();
                             let (span, err) = decorator.decorate_or_fallback(flow_span).await;
@@ -883,7 +886,7 @@ async fn run(cli: Cli) -> Result<()> {
             let export_start = std::time::Instant::now();
             let export_result = tokio::time::timeout(Duration::from_secs(EXPORT_TIMEOUT_SECS), exporter.export(traceable)).await;
             let export_duration = export_start.elapsed();
-            metrics::registry::PROCESSING_DURATION_SECONDS
+            metrics::registry::processing_duration_seconds()
                 .with_label_values(&[ProcessingStage::K8sDecoratorOut.as_str()])
                 .observe(export_duration.as_secs_f64());
 

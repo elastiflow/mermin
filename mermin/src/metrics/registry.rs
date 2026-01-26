@@ -10,11 +10,84 @@ use prometheus::{
     Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGaugeVec, Opts, Registry,
 };
 
+use crate::metrics::opts::MetricsOptions;
+
 /// Global flag indicating whether debug metrics with high-cardinality labels are enabled.
 ///
 /// This is initialized once at application startup via `init_registry()` and provides
 /// thread-safe access without needing to pass the flag through every function call.
 static DEBUG_METRICS_ENABLED: OnceLock<bool> = OnceLock::new();
+
+/// Configuration for histogram bucket sizes
+#[derive(Clone, Debug)]
+pub struct HistogramBucketConfig {
+    pub pipeline_duration: Vec<f64>,
+    pub export_batch_size: Vec<f64>,
+    pub export_duration: Vec<f64>,
+    pub k8s_ip_index_update_duration: Vec<f64>,
+    pub shutdown_duration: Vec<f64>,
+}
+
+impl HistogramBucketConfig {
+    /// Create bucket configuration from MetricsOptions
+    pub fn from(opts: &MetricsOptions) -> Self {
+        Self {
+            pipeline_duration: opts
+                .pipeline_duration_buckets
+                .clone()
+                .unwrap_or_else(default_pipeline_duration_buckets),
+            export_batch_size: opts
+                .export_batch_size_buckets
+                .clone()
+                .unwrap_or_else(default_export_batch_size_buckets),
+            export_duration: opts
+                .export_duration_buckets
+                .clone()
+                .unwrap_or_else(default_export_duration_buckets),
+            k8s_ip_index_update_duration: opts
+                .k8s_ip_index_update_duration_buckets
+                .clone()
+                .unwrap_or_else(default_k8s_ip_index_update_duration_buckets),
+            shutdown_duration: opts
+                .shutdown_duration_buckets
+                .clone()
+                .unwrap_or_else(default_shutdown_duration_buckets),
+        }
+    }
+}
+
+/// Default buckets for pipeline_duration_seconds histogram
+/// Covers: 10μs to 60s
+fn default_pipeline_duration_buckets() -> Vec<f64> {
+    vec![
+        0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0,
+        60.0,
+    ]
+}
+
+/// Default buckets for export_batch_size histogram
+/// Covers: 1 to 1000 spans
+fn default_export_batch_size_buckets() -> Vec<f64> {
+    vec![1.0, 10.0, 50.0, 100.0, 250.0, 500.0, 1000.0]
+}
+
+/// Default buckets for export_duration_seconds histogram
+/// Covers: 1ms to 5s
+fn default_export_duration_buckets() -> Vec<f64> {
+    vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0]
+}
+
+/// Default buckets for k8s_ip_index_update_duration_seconds histogram
+/// Covers: 1ms to 1s
+fn default_k8s_ip_index_update_duration_buckets() -> Vec<f64> {
+    vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0]
+}
+
+/// Default buckets for shutdown_duration_seconds histogram
+/// Covers: 100ms to 120s
+fn default_shutdown_duration_buckets() -> Vec<f64> {
+    vec![0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0]
+}
 
 lazy_static! {
     /// Global Prometheus registry for all Mermin metrics (standard + debug).
@@ -139,19 +212,7 @@ lazy_static! {
     // ============================================================================
 
     // Standard metrics (always registered)
-    /// Processing duration by pipeline stage.
-    ///
-    /// Buckets are designed to cover both fast operations (eBPF ring buffer processing,
-    /// typically microseconds to milliseconds) and slow operations (export, which can take
-    /// seconds). The bucket range spans from 10μs to 60s to capture the full latency
-    /// distribution across all pipeline stages.
-    pub static ref PROCESSING_DURATION_SECONDS: HistogramVec = HistogramVec::new(
-        HistogramOpts::new("duration_seconds", "Processing duration by pipeline stage")
-            .namespace("mermin")
-            .subsystem("pipeline")
-            .buckets(vec![0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0]),
-        &["stage"]
-    ).expect("failed to create duration_seconds metric");
+    // Note: PROCESSING_DURATION_SECONDS is now created dynamically in init_registry()
 
     pub static ref FLOW_SPANS_CREATED_TOTAL: IntCounter = IntCounter::with_opts(
         Opts::new("spans_created_total", "Total number of flow spans created across all interfaces")
@@ -243,12 +304,7 @@ lazy_static! {
         &["exporter", "status"]
     ).expect("failed to create export_flow_spans_total metric");
 
-    pub static ref EXPORT_BATCH_SIZE: Histogram = Histogram::with_opts(
-        HistogramOpts::new("batch_size", "Number of spans per export batch")
-            .namespace("mermin")
-            .subsystem("export")
-            .buckets(vec![1.0, 10.0, 50.0, 100.0, 250.0, 500.0, 1000.0])
-    ).expect("failed to create export_batch_size metric");
+    // Note: EXPORT_BATCH_SIZE is now created dynamically in init_registry()
 
     // Debug metrics (only registered if debug_metrics_enabled)
     pub static ref EXPORT_TIMEOUTS_TOTAL: IntCounter = IntCounter::with_opts(
@@ -257,12 +313,7 @@ lazy_static! {
             .subsystem("export")
     ).expect("failed to create export_timeouts_total metric");
 
-    pub static ref EXPORT_DURATION_SECONDS: Histogram = Histogram::with_opts(
-        HistogramOpts::new("duration_seconds", "Duration of span export operations")
-            .namespace("mermin")
-            .subsystem("export")
-            .buckets(vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0])
-    ).expect("failed to create duration_seconds metric");
+    // Note: EXPORT_DURATION_SECONDS is now created dynamically in init_registry()
 
     // ============================================================================
     // Kubernetes Decorator Subsystem
@@ -292,13 +343,7 @@ lazy_static! {
         &["kind", "event"]  // apply, delete, init, init_done, error
     ).expect("failed to create k8s_watcher_events_total metric");
 
-    /// Histogram of K8s IP index update duration.
-    pub static ref K8S_IP_INDEX_UPDATE_DURATION_SECONDS: Histogram = Histogram::with_opts(
-        HistogramOpts::new("ip_index_update_duration_seconds", "Duration of K8s IP index updates")
-            .namespace("mermin")
-            .subsystem("k8s_watcher")
-            .buckets(vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0])
-    ).expect("failed to create k8s_ip_index_update_duration metric");
+    // Note: K8S_IP_INDEX_UPDATE_DURATION_SECONDS is now created dynamically in init_registry()
 
     // ============================================================================
     // Taskmanager Subsystem
@@ -315,13 +360,7 @@ lazy_static! {
 
     // Debug metrics (only registered if debug_metrics_enabled)
 
-    /// Duration of shutdown operations.
-    pub static ref SHUTDOWN_DURATION_SECONDS: Histogram = Histogram::with_opts(
-        HistogramOpts::new("shutdown_duration_seconds", "Duration of shutdown operations")
-            .namespace("mermin")
-            .subsystem("taskmanager")
-            .buckets(vec![0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0])
-    ).expect("failed to create shutdown_duration metric");
+    // Note: SHUTDOWN_DURATION_SECONDS is now created dynamically in init_registry()
 
     /// Total number of shutdown operations that timed out.
     pub static ref SHUTDOWN_TIMEOUTS_TOTAL: IntCounter = IntCounter::with_opts(
@@ -381,6 +420,27 @@ lazy_static! {
     ).expect("failed to create bytes_by_interface_total metric");
 }
 
+// Histogram metrics with configurable buckets (initialized dynamically)
+/// Processing duration by pipeline stage.
+///
+/// Buckets are designed to cover both fast operations (eBPF ring buffer processing,
+/// typically microseconds to milliseconds) and slow operations (export, which can take
+/// seconds). The bucket range spans from 10μs to 60s to capture the full latency
+/// distribution across all pipeline stages.
+pub static PROCESSING_DURATION_SECONDS: OnceLock<HistogramVec> = OnceLock::new();
+
+/// Number of spans per export batch
+pub static EXPORT_BATCH_SIZE: OnceLock<Histogram> = OnceLock::new();
+
+/// Duration of span export operations (debug metric)
+pub static EXPORT_DURATION_SECONDS: OnceLock<Histogram> = OnceLock::new();
+
+/// Duration of K8s IP index updates
+pub static K8S_IP_INDEX_UPDATE_DURATION_SECONDS: OnceLock<Histogram> = OnceLock::new();
+
+/// Duration of shutdown operations (debug metric)
+pub static SHUTDOWN_DURATION_SECONDS: OnceLock<Histogram> = OnceLock::new();
+
 // Helper macro to register a metric to both combined and standard registries
 macro_rules! register_standard {
     ($metric:expr) => {{
@@ -421,12 +481,17 @@ macro_rules! register_debug {
 /// ```
 /// use mermin::metrics::registry;
 ///
-/// registry::init_registry(false)?;
+/// let bucket_config = HistogramBucketConfig::from(&metrics_opts);
+/// registry::init_registry(false, bucket_config)?;
 ///
-/// registry::init_registry(false)?;
+/// let bucket_config = HistogramBucketConfig::from(&metrics_opts);
+/// registry::init_registry(false, bucket_config)?;
 /// # Ok::<(), prometheus::Error>(())
 /// ```
-pub fn init_registry(debug_enabled: bool) -> Result<(), prometheus::Error> {
+pub fn init_registry(
+    debug_enabled: bool,
+    bucket_config: HistogramBucketConfig,
+) -> Result<(), prometheus::Error> {
     // Check if already initialized with different value
     if let Some(&existing) = DEBUG_METRICS_ENABLED.get() {
         if existing != debug_enabled {
@@ -441,6 +506,85 @@ pub fn init_registry(debug_enabled: bool) -> Result<(), prometheus::Error> {
     DEBUG_METRICS_ENABLED
         .set(debug_enabled)
         .expect("DEBUG_METRICS_ENABLED should not be set yet");
+
+    // Initialize histogram metrics with configurable buckets
+    let processing_duration = HistogramVec::new(
+        HistogramOpts::new("duration_seconds", "Processing duration by pipeline stage")
+            .namespace("mermin")
+            .subsystem("pipeline")
+            .buckets(bucket_config.pipeline_duration),
+        &["stage"],
+    )
+    .map_err(|e| {
+        prometheus::Error::Msg(format!("failed to create duration_seconds metric: {e}"))
+    })?;
+
+    let export_batch_size = Histogram::with_opts(
+        HistogramOpts::new("batch_size", "Number of spans per export batch")
+            .namespace("mermin")
+            .subsystem("export")
+            .buckets(bucket_config.export_batch_size),
+    )
+    .map_err(|e| {
+        prometheus::Error::Msg(format!("failed to create export_batch_size metric: {e}"))
+    })?;
+
+    let export_duration = Histogram::with_opts(
+        HistogramOpts::new("duration_seconds", "Duration of span export operations")
+            .namespace("mermin")
+            .subsystem("export")
+            .buckets(bucket_config.export_duration),
+    )
+    .map_err(|e| {
+        prometheus::Error::Msg(format!(
+            "failed to create export_duration_seconds metric: {e}"
+        ))
+    })?;
+
+    let k8s_ip_index_update_duration = Histogram::with_opts(
+        HistogramOpts::new(
+            "ip_index_update_duration_seconds",
+            "Duration of K8s IP index updates",
+        )
+        .namespace("mermin")
+        .subsystem("k8s_watcher")
+        .buckets(bucket_config.k8s_ip_index_update_duration),
+    )
+    .map_err(|e| {
+        prometheus::Error::Msg(format!(
+            "failed to create k8s_ip_index_update_duration metric: {e}"
+        ))
+    })?;
+
+    let shutdown_duration = Histogram::with_opts(
+        HistogramOpts::new(
+            "shutdown_duration_seconds",
+            "Duration of shutdown operations",
+        )
+        .namespace("mermin")
+        .subsystem("taskmanager")
+        .buckets(bucket_config.shutdown_duration),
+    )
+    .map_err(|e| {
+        prometheus::Error::Msg(format!("failed to create shutdown_duration metric: {e}"))
+    })?;
+
+    // Store histogram metrics in OnceLock
+    PROCESSING_DURATION_SECONDS
+        .set(processing_duration.clone())
+        .expect("PROCESSING_DURATION_SECONDS should not be set yet");
+    EXPORT_BATCH_SIZE
+        .set(export_batch_size.clone())
+        .expect("EXPORT_BATCH_SIZE should not be set yet");
+    EXPORT_DURATION_SECONDS
+        .set(export_duration.clone())
+        .expect("EXPORT_DURATION_SECONDS should not be set yet");
+    K8S_IP_INDEX_UPDATE_DURATION_SECONDS
+        .set(k8s_ip_index_update_duration.clone())
+        .expect("K8S_IP_INDEX_UPDATE_DURATION_SECONDS should not be set yet");
+    SHUTDOWN_DURATION_SECONDS
+        .set(shutdown_duration.clone())
+        .expect("SHUTDOWN_DURATION_SECONDS should not be set yet");
 
     // ============================================================================
     // eBPF metrics (always registered)
@@ -468,7 +612,7 @@ pub fn init_registry(debug_enabled: bool) -> Result<(), prometheus::Error> {
     // ============================================================================
     // Flow metrics
     // ============================================================================
-    register_standard!(PROCESSING_DURATION_SECONDS);
+    register_standard!(PROCESSING_DURATION_SECONDS.get().unwrap());
     register_standard!(FLOW_SPANS_CREATED_TOTAL);
     register_standard!(FLOW_SPANS_ACTIVE_TOTAL);
 
@@ -491,11 +635,11 @@ pub fn init_registry(debug_enabled: bool) -> Result<(), prometheus::Error> {
     // Export metrics (always registered)
     // ============================================================================
     register_standard!(EXPORT_FLOW_SPANS_TOTAL);
-    register_standard!(EXPORT_BATCH_SIZE);
+    register_standard!(EXPORT_BATCH_SIZE.get().unwrap());
 
     // Debug export metrics (conditional)
     register_debug!(EXPORT_TIMEOUTS_TOTAL, debug_enabled);
-    register_debug!(EXPORT_DURATION_SECONDS, debug_enabled);
+    register_debug!(EXPORT_DURATION_SECONDS.get().unwrap(), debug_enabled);
 
     // ============================================================================
     // K8s decorator metrics (always registered)
@@ -505,7 +649,7 @@ pub fn init_registry(debug_enabled: bool) -> Result<(), prometheus::Error> {
     // ============================================================================
     // K8s watcher metrics
     // ============================================================================
-    register_standard!(K8S_IP_INDEX_UPDATE_DURATION_SECONDS);
+    register_standard!(K8S_IP_INDEX_UPDATE_DURATION_SECONDS.get().unwrap());
     register_standard!(K8S_WATCHER_EVENTS_TOTAL);
 
     // ============================================================================
@@ -514,7 +658,7 @@ pub fn init_registry(debug_enabled: bool) -> Result<(), prometheus::Error> {
     register_standard!(TASKMANAGER_TASKS_ACTIVE);
 
     // Debug taskmanager metrics
-    register_debug!(SHUTDOWN_DURATION_SECONDS, debug_enabled);
+    register_debug!(SHUTDOWN_DURATION_SECONDS.get().unwrap(), debug_enabled);
     register_debug!(SHUTDOWN_TIMEOUTS_TOTAL, debug_enabled);
     register_debug!(SHUTDOWN_FLOWS_TOTAL, debug_enabled);
     register_debug!(TASKMANAGER_TASKS_TOTAL, debug_enabled);
@@ -538,6 +682,54 @@ pub fn init_registry(debug_enabled: bool) -> Result<(), prometheus::Error> {
 #[inline]
 pub fn debug_enabled() -> bool {
     DEBUG_METRICS_ENABLED.get().copied().unwrap_or(false)
+}
+
+/// Get the PROCESSING_DURATION_SECONDS histogram metric.
+///
+/// # Panics
+///
+/// Panics if the registry has not been initialized.
+#[inline]
+pub fn processing_duration_seconds() -> &'static HistogramVec {
+    PROCESSING_DURATION_SECONDS
+        .get()
+        .expect("metrics registry not initialized")
+}
+
+/// Get the EXPORT_BATCH_SIZE histogram metric.
+///
+/// # Panics
+///
+/// Panics if the registry has not been initialized.
+#[inline]
+pub fn export_batch_size() -> &'static Histogram {
+    EXPORT_BATCH_SIZE
+        .get()
+        .expect("metrics registry not initialized")
+}
+
+/// Get the K8S_IP_INDEX_UPDATE_DURATION_SECONDS histogram metric.
+///
+/// # Panics
+///
+/// Panics if the registry has not been initialized.
+#[inline]
+pub fn k8s_ip_index_update_duration_seconds() -> &'static Histogram {
+    K8S_IP_INDEX_UPDATE_DURATION_SECONDS
+        .get()
+        .expect("metrics registry not initialized")
+}
+
+/// Get the SHUTDOWN_DURATION_SECONDS histogram metric.
+///
+/// # Panics
+///
+/// Panics if the registry has not been initialized.
+#[inline]
+pub fn shutdown_duration_seconds() -> &'static Histogram {
+    SHUTDOWN_DURATION_SECONDS
+        .get()
+        .expect("metrics registry not initialized")
 }
 
 /// Remove all metrics for an interface (only works if debug metrics are enabled).
@@ -617,7 +809,14 @@ mod tests {
     fn test_metrics_system_initialization() {
         // Initialize registry without debug metrics
         // Note: May already be initialized by another test, which is fine
-        let _ = init_registry(false);
+        let bucket_config = HistogramBucketConfig {
+            pipeline_duration: default_pipeline_duration_buckets(),
+            export_batch_size: default_export_batch_size_buckets(),
+            export_duration: default_export_duration_buckets(),
+            k8s_ip_index_update_duration: default_k8s_ip_index_update_duration_buckets(),
+            shutdown_duration: default_shutdown_duration_buckets(),
+        };
+        let _ = init_registry(false, bucket_config);
 
         // The important thing is that debug can be queried
         // (It might be enabled from a different test, but that's OK for this basic test)
@@ -626,7 +825,15 @@ mod tests {
 
     #[test]
     fn test_standard_registry_always_has_metrics() {
-        let _ = init_registry(false);
+        // Initialize with debug disabled
+        let bucket_config = HistogramBucketConfig {
+            pipeline_duration: default_pipeline_duration_buckets(),
+            export_batch_size: default_export_batch_size_buckets(),
+            export_duration: default_export_duration_buckets(),
+            k8s_ip_index_update_duration: default_k8s_ip_index_update_duration_buckets(),
+            shutdown_duration: default_shutdown_duration_buckets(),
+        };
+        let _ = init_registry(false, bucket_config);
 
         // Standard registry should have metrics
         let families = STANDARD_REGISTRY.gather();

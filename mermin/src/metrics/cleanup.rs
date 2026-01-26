@@ -321,7 +321,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_immediate_cleanup_with_zero_ttl() {
-        let _ = metrics::registry::init_registry(true);
+        use crate::metrics::opts::MetricsOptions;
+        let metrics_opts = MetricsOptions::default();
+        let bucket_config = metrics::registry::HistogramBucketConfig::from(&metrics_opts);
+        let _ = metrics::registry::init_registry(true, bucket_config);
 
         // Create tracker with immediate cleanup (TTL=0)
         let tracker = MetricCleanupTracker::new(Duration::ZERO, true);

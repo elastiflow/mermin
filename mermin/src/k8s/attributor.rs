@@ -465,7 +465,7 @@ impl ResourceStore {
                     }
                     _ = debounce_timer.tick() => {
                         if pending_update {
-                            let timer = metrics::registry::K8S_IP_INDEX_UPDATE_DURATION_SECONDS.start_timer();
+                            let timer = metrics::registry::k8s_ip_index_update_duration_seconds().start_timer();
                             update_ip_index(&store_clone, &ip_index_clone, &conf_clone).await;
                             timer.observe_duration();
                             pending_update = false;

@@ -14,10 +14,7 @@ use tracing::{debug, error, trace, warn};
 
 use crate::metrics::{
     self,
-    registry::{
-        SHUTDOWN_DURATION_SECONDS, SHUTDOWN_TIMEOUTS_TOTAL, TASKMANAGER_TASKS_ACTIVE,
-        TASKMANAGER_TASKS_TOTAL,
-    },
+    registry::{SHUTDOWN_TIMEOUTS_TOTAL, TASKMANAGER_TASKS_ACTIVE, TASKMANAGER_TASKS_TOTAL},
 };
 
 /// Task state for tracking lifecycle
@@ -210,7 +207,8 @@ impl TaskManager {
         match graceful_result {
             Ok(()) => {
                 let shutdown_duration = shutdown_start.elapsed();
-                SHUTDOWN_DURATION_SECONDS.observe(shutdown_duration.as_secs_f64());
+                metrics::registry::shutdown_duration_seconds()
+                    .observe(shutdown_duration.as_secs_f64());
 
                 trace!(
                     event.name = "task_manager.shutdown_completed",
@@ -236,7 +234,8 @@ impl TaskManager {
                 let _ = timeout(Duration::from_secs(5), self.wait_for_running_tasks()).await;
 
                 let shutdown_duration = shutdown_start.elapsed();
-                SHUTDOWN_DURATION_SECONDS.observe(shutdown_duration.as_secs_f64());
+                metrics::registry::shutdown_duration_seconds()
+                    .observe(shutdown_duration.as_secs_f64());
 
                 ShutdownResult::ForcedCancellation {
                     duration: shutdown_duration,
