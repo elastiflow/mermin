@@ -956,6 +956,12 @@ impl Attributor {
                 .collect();
 
             if !host_nw_pods.is_empty() {
+                debug!(
+                    event.name = "k8s.attributor.conflict_resolved",
+                    net.ip.address = %ip,
+                    resolution = "host_network_pod_on_node_ip",
+                    "resolved ip conflict: allowing host network pod on node ip"
+                );
                 return if is_k_pod { self.downcast_arc_vec(&host_nw_pods) } else { Vec::new() };
             }
             if !nodes.is_empty() {
@@ -963,13 +969,21 @@ impl Attributor {
                     debug!(
                     event.name = "k8s.attributor.conflict_resolved",
                     net.ip.address = %ip,
-                    resolution = "node_over_regular_pod",
-                    "resolved ip conflict: preferring node over non-host-network pod on node ip"
+                    resolution = "node_over_regular_pod_on_node_ip",
+                    "resolved ip conflict: preferring node over regular pod on node ip"
                 );
                 }
                 return if is_k_node { self.downcast_arc_vec(nodes) } else { Vec::new() };
             }
 
+            if !pods.is_empty() {
+                debug!(
+                    event.name = "k8s.attributor.conflict_resolved",
+                    net.ip.address = %ip,
+                    resolution = "reject_regular_pod_on_node_ip",
+                    "resolved ip conflict: rejecting regular pod claiming node ip"
+                );
+            }
             return Vec::new();
         }
 
@@ -1467,9 +1481,24 @@ async fn index_resource_by_ip<K>(
 
     if let Some(source) = ip_source {
         for resource in store.store().state() {
+            let is_pod = std::any::TypeId::of::<K>() == std::any::TypeId::of::<Pod>();
+            let is_host_network = if is_pod {
+                (resource.as_ref() as &dyn std::any::Any)
+                    .downcast_ref::<Pod>()
+                    .and_then(|p| p.spec.as_ref())
+                    .and_then(|s| s.host_network)
+                    .unwrap_or_default()
+            } else {
+                false
+            };
             let meta = K8sObjectMeta::from(resource.as_ref());
 
             for path in &source.to {
+                // Skip hostIP/hostIPs paths if it's a regular pod
+                if is_pod && !is_host_network && (path.contains("hostIP") || path.contains("hostIPs")) {
+                    continue;
+                }
+                
                 match extract_values_from_resource(resource.as_ref(), path) {
                     Ok(values) => {
                         for value in values {
