@@ -1285,7 +1285,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 33
+            "y": 208
           },
           "id": 49,
           "options": {
@@ -1367,7 +1367,7 @@
                 "barAlignment": 0,
                 "barWidthFactor": 0.6,
                 "drawStyle": "line",
-                "fillOpacity": 100,
+                "fillOpacity": 10,
                 "gradientMode": "none",
                 "hideFrom": {
                   "legend": false,
@@ -1386,7 +1386,7 @@
                 "spanNulls": false,
                 "stacking": {
                   "group": "A",
-                  "mode": "normal"
+                  "mode": "none"
                 },
                 "thresholdsStyle": {
                   "mode": "off"
@@ -1414,7 +1414,7 @@
             "h": 12,
             "w": 17,
             "x": 4,
-            "y": 33
+            "y": 208
           },
           "id": 50,
           "options": {
@@ -1426,7 +1426,7 @@
             },
             "tooltip": {
               "hideZeros": false,
-              "mode": "single",
+              "mode": "multi",
               "sort": "none"
             }
           },
@@ -1477,7 +1477,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 37
+            "y": 212
           },
           "id": 51,
           "options": {
@@ -1574,7 +1574,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 41
+            "y": 216
           },
           "id": 52,
           "options": {
@@ -1662,7 +1662,7 @@
             "h": 7,
             "w": 8,
             "x": 0,
-            "y": 45
+            "y": 220
           },
           "id": 46,
           "interval": "60s",
@@ -1763,7 +1763,7 @@
             "h": 7,
             "w": 8,
             "x": 8,
-            "y": 45
+            "y": 220
           },
           "id": 47,
           "interval": "60s",
@@ -1864,7 +1864,7 @@
             "h": 7,
             "w": 8,
             "x": 16,
-            "y": 45
+            "y": 220
           },
           "id": 48,
           "interval": "60s",
@@ -2038,7 +2038,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 53
+            "y": 247
           },
           "id": 6,
           "options": {
@@ -2174,7 +2174,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 53
+            "y": 247
           },
           "id": 24,
           "interval": "60s",
@@ -2312,7 +2312,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 61
+            "y": 255
           },
           "id": 25,
           "interval": "60s",
@@ -2389,7 +2389,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 61
+            "y": 255
           },
           "id": 23,
           "interval": "60s",
@@ -2534,7 +2534,7 @@
             "h": 3,
             "w": 12,
             "x": 0,
-            "y": 855
+            "y": 1133
           },
           "id": 29,
           "options": {
@@ -2628,7 +2628,7 @@
             "h": 3,
             "w": 12,
             "x": 12,
-            "y": 855
+            "y": 1133
           },
           "id": 28,
           "options": {
@@ -2767,7 +2767,7 @@
             "h": 5,
             "w": 12,
             "x": 0,
-            "y": 858
+            "y": 1136
           },
           "id": 43,
           "options": {
@@ -2890,7 +2890,7 @@
             "h": 5,
             "w": 12,
             "x": 12,
-            "y": 858
+            "y": 1136
           },
           "id": 22,
           "options": {
@@ -3009,7 +3009,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 863
+            "y": 1141
           },
           "id": 26,
           "options": {
@@ -3115,7 +3115,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 863
+            "y": 1141
           },
           "id": 5,
           "options": {
@@ -3222,7 +3222,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 872
+            "y": 1150
           },
           "id": 27,
           "options": {
@@ -3252,7 +3252,7 @@
                 "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "max(mermin_ebpf_map_entries / mermin_ebpf_map_capacity) by (map)",
+              "expr": "max(mermin_ebpf_map_size / mermin_ebpf_map_capacity) by (map)",
               "legendFormat": "{{ map }}",
               "range": true,
               "refId": "A"
@@ -3360,7 +3360,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 872
+            "y": 1150
           },
           "id": 33,
           "options": {
@@ -3504,7 +3504,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 373
+            "y": 36
           },
           "id": 34,
           "options": {
@@ -3534,7 +3534,7 @@
                 "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "topk($query_top_N, sum(mermin_ebpf_map_entries{map=~\"$ebpf_map\"} / mermin_ebpf_map_capacity{map=~\"$ebpf_map\"}) by ($pod_label, map))",
+              "expr": "topk($query_top_N, sum(mermin_ebpf_map_size{map=~\"$ebpf_map\"} / mermin_ebpf_map_capacity{map=~\"$ebpf_map\"}) by ($pod_label, map))",
               "legendFormat": "{{ $pod_label }}: {{ map }}",
               "range": true,
               "refId": "A"
@@ -3642,7 +3642,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 373
+            "y": 36
           },
           "id": 30,
           "options": {
@@ -3771,7 +3771,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 382
+            "y": 45
           },
           "id": 41,
           "options": {
@@ -3824,7 +3824,7 @@
       {
         "current": {
           "text": "Prometheus",
-          "value": "PBFA97CFB590B2093"
+          "value": "prometheus"
         },
         "includeAll": false,
         "label": "Datasource",
@@ -3938,5 +3938,6 @@
   "timezone": "browser",
   "title": "Mermin Application",
   "uid": "mermin_app",
-  "version": 1
+  "version": 1,
+  "weekStart": ""
 }
