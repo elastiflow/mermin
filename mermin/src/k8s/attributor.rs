@@ -870,7 +870,7 @@ impl Attributor {
 
         // Log the final resolved resources after conflict resolution
         for res in &resolved_resources {
-            let is_host_nw = self.is_host_network_pod_generic(res.as_ref());
+            let is_host_nw = is_host_network_resource(res.as_ref());
             let kind = K::kind(&());
 
             trace!(
@@ -974,7 +974,7 @@ impl Attributor {
         if is_node_ip {
             let host_nw_pods: Vec<_> = pods
                 .iter()
-                .filter(|p| self.is_host_network_pod_generic(p.as_ref()))
+                .filter(|p| is_host_network_resource(p.as_ref()))
                 .cloned()
                 .collect();
 
@@ -1044,15 +1044,6 @@ impl Attributor {
                 any_item.downcast::<K>().ok()
             })
             .collect()
-    }
-
-    /// Checks if a Kubernetes resource (when cast to Pod) is running in host network mode.
-    /// This method uses the single standalone function to eliminate code duplication.
-    fn is_host_network_pod_generic<K>(&self, resource: &K) -> bool
-    where
-        K: Resource<DynamicType = ()> + 'static,
-    {
-        is_host_network_resource(resource)
     }
 
     /// Determines if an IP address is likely a node IP by checking against known node IPs.
@@ -1532,11 +1523,7 @@ async fn index_resource_by_ip<K>(
 /// Extracts IP addresses from a Pod resource
 fn extract_pod_ips(pod: &Pod) -> HashSet<String> {
     let mut ips = HashSet::new();
-    let is_host_network = pod
-        .spec
-        .as_ref()
-        .and_then(|s| s.host_network)
-        .unwrap_or(false);
+    let is_host_network = is_host_network_resource(&pod);
 
     if let Some(status) = &pod.status {
         let mut has_pod_ips = false;
