@@ -479,6 +479,28 @@ pub struct FlowEvent {
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for FlowEvent {}
 
+/// Unit types for eBPF map metrics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapUnit {
+    Entries,
+    Bytes,
+}
+
+impl MapUnit {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MapUnit::Entries => "entries",
+            MapUnit::Bytes => "bytes",
+        }
+    }
+}
+
+impl core::fmt::Display for MapUnit {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// Tunnel encapsulation type detected in network traffic.
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]

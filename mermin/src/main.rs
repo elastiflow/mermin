@@ -24,6 +24,7 @@ use aya::{
 use clap::Parser;
 use dashmap::DashMap;
 use error::{MerminError, Result};
+use mermin_common::MapUnit;
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal as unix_signal};
 use tokio::{
@@ -464,13 +465,16 @@ async fn run(cli: Cli) -> Result<()> {
     ));
 
     metrics::registry::EBPF_MAP_CAPACITY
-        .with_label_values(&[EbpfMapName::FlowStats.as_str()])
+        .with_label_values(&[EbpfMapName::FlowStats.as_str(), MapUnit::Entries.as_str()])
         .set(conf.pipeline.ebpf_max_flows as i64);
     metrics::registry::EBPF_MAP_CAPACITY
-        .with_label_values(&[EbpfMapName::FlowEvents.as_str()])
+        .with_label_values(&[EbpfMapName::FlowEvents.as_str(), MapUnit::Bytes.as_str()])
         .set(FLOW_EVENTS_RINGBUF_SIZE_BYTES as i64);
     metrics::registry::EBPF_MAP_CAPACITY
-        .with_label_values(&[EbpfMapName::ListeningPorts.as_str()])
+        .with_label_values(&[
+            EbpfMapName::ListeningPorts.as_str(),
+            MapUnit::Entries.as_str(),
+        ])
         .set(LISTENING_PORTS_CAPACITY as i64);
 
     info!(
@@ -591,8 +595,11 @@ async fn run(cli: Cli) -> Result<()> {
     // Note: This only reflects the startup state; eBPF kprobes maintain the map
     // in real-time after this, but those changes are not reflected in these metrics.
     if metrics::registry::debug_enabled() {
-        metrics::registry::EBPF_MAP_ENTRIES
-            .with_label_values(&[EbpfMapName::ListeningPorts.as_str()])
+        metrics::registry::EBPF_MAP_SIZE
+            .with_label_values(&[
+                EbpfMapName::ListeningPorts.as_str(),
+                MapUnit::Entries.as_str(),
+            ])
             .set(scanned_ports as i64);
     }
 
