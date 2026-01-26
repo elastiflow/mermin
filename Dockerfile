@@ -99,13 +99,8 @@ RUN find . -type d | while read -r i; do mkdir -p "$i/src"; echo 'fn main() {}' 
   && find . -type d -name 'src' -not -path './target/*' -prune -exec rm -rf {} \; \
   && find . -mindepth 1 -maxdepth 1 -type d | while read -r i; do find ./target/ -type d -name "${i#./}-*" -prune -exec rm -rf {} \;; done
 
-# Copy source code
-COPY ./common-build ./common-build
-COPY ./mermin ./mermin
-COPY ./mermin-common ./mermin-common
-COPY ./mermin-ebpf ./mermin-ebpf
-COPY ./network-types ./network-types
-
+# Copy source code (heavily relies on .dockerignore)
+COPY . .
 # Build the final application, leveraging the cached dependencies
 RUN cargo build --release
 
