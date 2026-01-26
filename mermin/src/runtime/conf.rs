@@ -1863,6 +1863,32 @@ internal {
     }
 
     #[test]
+    fn override_metrics_settings_via_hcl_labeled_block() {
+        Jail::expect_with(|jail| {
+            let path = "override_metrics_labeled.hcl";
+            jail.create_file(
+                path,
+                r#"
+internal "metrics" {
+    enabled = false
+    listen_address = "192.168.1.1"
+    port = 9999
+}
+                "#,
+            )?;
+
+            let cli = Cli::parse_from(["mermin", "--config", path.into()]);
+            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+
+            assert_eq!(cfg.internal.metrics.enabled, false);
+            assert_eq!(cfg.internal.metrics.listen_address, "192.168.1.1");
+            assert_eq!(cfg.internal.metrics.port, 9999);
+
+            Ok(())
+        });
+    }
+
+    #[test]
     fn override_parser_settings_via_yaml() {
         Jail::expect_with(|jail| {
             let path = "override_parser.yaml";
