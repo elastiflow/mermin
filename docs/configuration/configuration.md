@@ -171,7 +171,7 @@ api {
   port = 8080
 }
 
-metrics {
+internal "metrics" {
   enabled = true
   listen_address = "0.0.0.0"
   port = 10250
@@ -183,7 +183,7 @@ metrics {
 ```
 
 {% hint style="warning" %}
-**Debug Metrics Warning**: Setting `debug_metrics_enabled = true` enables high-cardinality metrics with per-resource labels. This can cause significant memory growth in production. Only enable for debugging. See [Debug Metrics Configuration](metrics-debug.md) for details.
+**Debug Metrics Warning**: Setting `internal.metrics.debug_metrics_enabled = true` enables high-cardinality metrics with per-resource labels. This can cause significant memory growth in production. Only enable for debugging. See [Debug Metrics Configuration](metrics-debug.md) for details.
 {% endhint %}
 
 See [API and Metrics](api-metrics.md) and [Debug Metrics](metrics-debug.md) for details.

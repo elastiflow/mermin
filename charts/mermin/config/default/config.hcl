@@ -70,7 +70,7 @@ api {
 }
 
 # Metrics server configuration (for Prometheus scraping)
-metrics {
+internal "metrics" {
   enabled        = true
   listen_address = "0.0.0.0"
   port           = 10250

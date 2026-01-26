@@ -41,7 +41,7 @@ api {
 }
 
 # Metrics for Prometheus scraping
-metrics {
+internal "metrics" {
   enabled = true
   listen_address = "0.0.0.0"
   port = 10250
@@ -196,7 +196,7 @@ api {
   port = 8080
 }
 
-metrics {
+internal "metrics" {
   enabled = true
   port = 10250
 }
@@ -269,7 +269,7 @@ api {
   port = 8080
 }
 
-metrics {
+internal "metrics" {
   enabled = true
   port = 10250
 }
@@ -343,7 +343,7 @@ api {
   port = 8080
 }
 
-metrics {
+internal "metrics" {
   enabled = true
   port = 10250
 }
@@ -434,7 +434,7 @@ api {
   port = 8080
 }
 
-metrics {
+internal "metrics" {
   enabled = true
   port = 10250
 }
@@ -518,7 +518,7 @@ api {
   port = 8080
 }
 
-metrics {
+internal "metrics" {
   enabled = true
   listen_address = "127.0.0.1"  # Localhost only
   port = 10250
@@ -606,7 +606,7 @@ api {
   port = 8080
 }
 
-metrics {
+internal "metrics" {
   enabled = true
   port = 10250
 }

@@ -1,11 +1,15 @@
 use serde::{Deserialize, Serialize};
 
-use crate::otlp::opts::{OtlpExportOptions, StdoutExportOptions};
+use crate::{
+    metrics::opts::MetricsOptions,
+    otlp::opts::{OtlpExportOptions, StdoutExportOptions},
+};
 
-/// Represents the entire top-level `traces` block for internal monitoring.
+/// Represents the entire top-level `internal` block for internal monitoring.
 #[derive(Default, Debug, Deserialize, Serialize, Clone)]
 pub struct InternalOptions {
     pub traces: InternalTraceOptions,
+    pub metrics: MetricsOptions,
 }
 
 #[derive(Default, Debug, Deserialize, Serialize, Clone)]

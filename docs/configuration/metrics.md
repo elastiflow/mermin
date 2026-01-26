@@ -3,9 +3,9 @@
 Mermin provides Prometheus metrics HTTP endpoints (default port `10250`). This page documents metrics configuration.
 Endpoints available:
 
-- `/metrics` - All metrics (standard + debug if `metrics.debug_metrics_enabled` is `true`)
+- `/metrics` - All metrics (standard + debug if `internal.metrics.debug_metrics_enabled` is `true`)
 - `/metrics/standard` - Standard metrics only (aggregated, no high-cardinality labels)
-- `/metrics/debug` - Debug metrics only (returns 404 if `metrics.debug_metrics_enabled` is `false`)
+- `/metrics/debug` - Debug metrics only (returns 404 if `internal.metrics.debug_metrics_enabled` is `false`)
 - `/metrics:summary` - JSON summary of all available metrics with metadata (name, type, description, labels, category)
 
 ## Configuration
@@ -23,7 +23,7 @@ Enable or disable the metrics server.
 **Example:**
 
 ```hcl
-metrics {
+internal "metrics" {
   enabled = false  # Disable metrics
 }
 ```
@@ -37,7 +37,7 @@ IP address the metrics server binds to.
 **Example:**
 
 ```hcl
-metrics {
+internal "metrics" {
   listen_address = "127.0.0.1"  # Localhost only
 }
 ```
@@ -51,7 +51,7 @@ TCP port the metrics server listens on.
 **Example:**
 
 ```hcl
-metrics {
+internal "metrics" {
   port = 9090  # Custom port
 }
 ```
@@ -73,7 +73,7 @@ Enabling debug metrics can cause significant memory growth in production
 **Example:**
 
 ```hcl
-metrics {
+internal "metrics" {
   debug_metrics_enabled = true  # Enable debug metrics
 }
 ```
@@ -91,7 +91,7 @@ Only applies when debug_metrics_enabled
 **Example:**
 
 ```hcl
-metrics {
+internal "metrics" {
   stale_metric_ttl = "1m" # Cleanup after 1 minute
 }
 ```
@@ -114,7 +114,7 @@ For production environments:
 
 **Solutions:**
 
-1. Verify `metrics.enabled = true`
+1. Verify `internal.metrics.enabled = true`
 2. Check Prometheus configuration
 3. Verify pod annotations or `ServiceMonitor` (or another K8s CRD responsible for scraping configuration)
 4. Test manual scrape: `curl http://pod-ip:10250/metrics`

@@ -142,7 +142,7 @@ async fn run(cli: Cli) -> Result<()> {
 
     // Initialize Prometheus metrics registry early, before any subsystems that might record metrics
     // This also initializes the global debug_enabled flag
-    if let Err(e) = metrics::registry::init_registry(conf.metrics.debug_metrics_enabled) {
+    if let Err(e) = metrics::registry::init_registry(conf.internal.metrics.debug_metrics_enabled) {
         error!(
             event.name = "metrics.registry_init_failed",
             error.message = %e,
@@ -151,26 +151,26 @@ async fn run(cli: Cli) -> Result<()> {
     } else {
         info!(
             event.name = "metrics.registry_initialized",
-            debug_metrics_enabled = conf.metrics.debug_metrics_enabled,
+            debug_metrics_enabled = conf.internal.metrics.debug_metrics_enabled,
             "prometheus metrics registry initialized"
         );
     }
 
     // Warn if debug metrics are enabled - they cause significant memory growth
-    if conf.metrics.debug_metrics_enabled {
+    if conf.internal.metrics.debug_metrics_enabled {
         warn!(
             event.name = "metrics.debug_metrics_enabled",
-            stale_metric_ttl = ?conf.metrics.stale_metric_ttl,
+            stale_metric_ttl = ?conf.internal.metrics.stale_metric_ttl,
             "DEBUG METRICS ENABLED: High-cardinality metrics with per-resource labels are active. \
              Memory usage will increase significantly. DO NOT USE IN PRODUCTION unless necessary for debugging."
         );
     }
 
     // Create metric cleanup tracker if debug metrics are enabled
-    let cleanup_tracker = if conf.metrics.debug_metrics_enabled {
+    let cleanup_tracker = if conf.internal.metrics.debug_metrics_enabled {
         Some(metrics::cleanup::MetricCleanupTracker::new(
-            conf.metrics.stale_metric_ttl,
-            conf.metrics.debug_metrics_enabled,
+            conf.internal.metrics.stale_metric_ttl,
+            conf.internal.metrics.debug_metrics_enabled,
         ))
     } else {
         None
@@ -188,8 +188,8 @@ async fn run(cli: Cli) -> Result<()> {
         });
     }
 
-    if conf.metrics.enabled {
-        let metrics_conf = conf.metrics.clone();
+    if conf.internal.metrics.enabled {
+        let metrics_conf = conf.internal.metrics.clone();
         let mut shutdown_rx = os_shutdown_tx.subscribe();
 
         // Start metrics server on a dedicated runtime thread to prevent starvation
