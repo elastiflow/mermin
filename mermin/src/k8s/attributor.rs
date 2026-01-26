@@ -818,52 +818,74 @@ impl Attributor {
             match meta.kind.as_str() {
                 "Pod" => {
                     let key: ObjectRef<Pod> = ObjectRef::new(name).within(ns);
-                    if let Some(p) = self.resource_store.pods.get(&key) {
-                        if self.filter.is_allowed(p.as_ref()) { pods.push(p); }
+                    if let Some(p) = self
+                        .resource_store
+                        .pods
+                        .get(&key)
+                        .filter(|p| self.filter.is_allowed(p.as_ref()))
+                    {
+                        pods.push(p);
                     }
                 }
                 "Node" => {
                     let key: ObjectRef<Node> = ObjectRef::new(name);
-                    if let Some(n) = self.resource_store.nodes.get(&key) {
-                        if self.filter.is_allowed(n.as_ref()) { nodes.push(n); }
+                    if let Some(n) = self
+                        .resource_store
+                        .nodes
+                        .get(&key)
+                        .filter(|n| self.filter.is_allowed(n.as_ref()))
+                    {
+                        nodes.push(n);
                     }
                 }
                 "Service" => {
                     let key: ObjectRef<Service> = ObjectRef::new(name).within(ns);
-                    if let Some(s) = self.resource_store.services.get(&key) {
-                        if self.filter.is_allowed(s.as_ref()) { services.push(s); }
+                    if let Some(s) = self
+                        .resource_store
+                        .services
+                        .get(&key)
+                        .filter(|s| self.filter.is_allowed(s.as_ref()))
+                    {
+                        services.push(s);
                     }
                 }
                 kind if kind == K::kind(&()) => {
                     let key: ObjectRef<K> = ObjectRef::new(name).within(ns);
-                    if let Some(o) = self.resource_store.store().get(&key) {
-                        if self.filter.is_allowed(o.as_ref()) { other_resources.push(o); }
+                    if let Some(o) = self
+                        .resource_store
+                        .store()
+                        .get(&key)
+                        .filter(|o| self.filter.is_allowed(o.as_ref()))
+                    {
+                        other_resources.push(o);
                     }
                 }
                 _ => {}
             }
         }
 
-        for pod in &pods { self.log_discovery("found", ip, pod.as_ref()); }
-        for node in &nodes { self.log_discovery("found", ip, node.as_ref()); }
-        for svc in &services { self.log_discovery("found", ip, svc.as_ref()); }
-
         // Apply conflict resolution logic
-        let resolved_resources = self.resolve_ip_conflicts(
-            ip,
-            &pods,
-            &nodes,
-            &services,
-            &other_resources,
-        );
+        let resolved_resources =
+            self.resolve_ip_conflicts(ip, &pods, &nodes, &services, &other_resources);
 
         // Log the final resolved resources after conflict resolution
         for res in &resolved_resources {
-            self.log_discovery("resolved", ip, res.as_ref());
+            let is_host_nw = self.is_host_network_pod_generic(res.as_ref());
+            let kind = K::kind(&());
+
+            trace!(
+                event.name = "k8s.attributor.resolved",
+                k8s.resource.kind = %kind,
+                k8s.resource.name = %res.name_any(),
+                k8s.resource.namespace = %res.namespace().unwrap_or_default(),
+                k8s.resource.uid = %res.meta().uid.as_deref().unwrap_or_default(),
+                k8s.resource.ip = %ip,
+                k8s.resource.host_network = %is_host_nw,
+                "resource attributed to ip address"
+            );
         }
 
         resolved_resources
-
     }
 
     /// Looks up a Pod by its IP address.
@@ -950,34 +972,43 @@ impl Attributor {
         let is_node_ip = self.is_likely_node_ip(ip);
 
         if is_node_ip {
-            let host_nw_pods: Vec<_> = pods.iter()
+            let host_nw_pods: Vec<_> = pods
+                .iter()
                 .filter(|p| self.is_host_network_pod_generic(p.as_ref()))
                 .cloned()
                 .collect();
 
             if !host_nw_pods.is_empty() {
-                debug!(
+                trace!(
                     event.name = "k8s.attributor.conflict_resolved",
                     net.ip.address = %ip,
                     resolution = "host_network_pod_on_node_ip",
                     "resolved ip conflict: allowing host network pod on node ip"
                 );
-                return if is_k_pod { self.downcast_arc_vec(&host_nw_pods) } else { Vec::new() };
+                return if is_k_pod {
+                    self.downcast_arc_vec(&host_nw_pods)
+                } else {
+                    Vec::new()
+                };
             }
             if !nodes.is_empty() {
                 if !pods.is_empty() {
-                    debug!(
-                    event.name = "k8s.attributor.conflict_resolved",
-                    net.ip.address = %ip,
-                    resolution = "node_over_regular_pod_on_node_ip",
-                    "resolved ip conflict: preferring node over regular pod on node ip"
-                );
+                    trace!(
+                        event.name = "k8s.attributor.conflict_resolved",
+                        net.ip.address = %ip,
+                        resolution = "node_over_regular_pod_on_node_ip",
+                        "resolved ip conflict: preferring node over regular pod on node ip"
+                    );
                 }
-                return if is_k_node { self.downcast_arc_vec(nodes) } else { Vec::new() };
+                return if is_k_node {
+                    self.downcast_arc_vec(nodes)
+                } else {
+                    Vec::new()
+                };
             }
 
             if !pods.is_empty() {
-                debug!(
+                trace!(
                     event.name = "k8s.attributor.conflict_resolved",
                     net.ip.address = %ip,
                     resolution = "reject_regular_pod_on_node_ip",
@@ -1015,50 +1046,13 @@ impl Attributor {
             .collect()
     }
 
-    /// Centralized logging for discovery events
-    fn log_discovery<T>(&self, stage: &str, ip: IpAddr, resource: &T)
-    where
-        T: Resource<DynamicType = ()> + Send + Sync + 'static,
-    {
-        let is_host_nw = (resource as &dyn std::any::Any)
-            .downcast_ref::<Pod>()
-            .and_then(|p| p.spec.as_ref())
-            .and_then(|s| s.host_network)
-            .unwrap_or_default();
-
-        debug!(
-            event.name = match stage {
-                "found" => "k8s.attributor.found",
-                _ => "k8s.attributor.resolved",
-            },
-            k8s.resource.kind = %T::kind(&()),
-            k8s.resource.name = %resource.name_any(),
-            k8s.resource.namespace = %resource.namespace().unwrap_or_default(),
-            k8s.resource.uid = %resource.meta().uid.as_deref().unwrap_or_default(),
-            k8s.resource.ip = %ip,
-            k8s.resource.host_network = %is_host_nw,
-            "resource attributed to ip address"
-        );
-    }
-
     /// Checks if a Kubernetes resource (when cast to Pod) is running in host network mode.
-    /// This method uses type downcasting to safely check Pod-specific properties.
+    /// This method uses the single standalone function to eliminate code duplication.
     fn is_host_network_pod_generic<K>(&self, resource: &K) -> bool
     where
         K: Resource<DynamicType = ()> + 'static,
     {
-        use std::any::Any;
-
-        // Use Any to downcast K to Pod
-        if let Some(pod) = (resource as &dyn Any).downcast_ref::<Pod>() {
-            return pod
-                .spec
-                .as_ref()
-                .and_then(|spec| spec.host_network)
-                .unwrap_or(false);
-        }
-
-        false
+        is_host_network_resource(resource)
     }
 
     /// Determines if an IP address is likely a node IP by checking against known node IPs.
@@ -1466,6 +1460,19 @@ fn add_to_index(index: &mut HashMap<String, Vec<K8sObjectMeta>>, ip: &str, meta:
     index.entry(ip.to_string()).or_default().push(meta.clone());
 }
 
+/// Checks if any resource is a Pod with host networking enabled.
+/// This single function eliminates all code duplication for host network detection.
+fn is_host_network_resource<T>(resource: &T) -> bool
+where
+    T: std::any::Any,
+{
+    (resource as &dyn std::any::Any)
+        .downcast_ref::<Pod>()
+        .and_then(|p| p.spec.as_ref())
+        .and_then(|s| s.host_network)
+        .unwrap_or(false)
+}
+
 async fn index_resource_by_ip<K>(
     store: &ResourceStore,
     new_index: &mut HashMap<String, Vec<K8sObjectMeta>>,
@@ -1483,11 +1490,7 @@ async fn index_resource_by_ip<K>(
         for resource in store.store().state() {
             let is_pod = std::any::TypeId::of::<K>() == std::any::TypeId::of::<Pod>();
             let is_host_network = if is_pod {
-                (resource.as_ref() as &dyn std::any::Any)
-                    .downcast_ref::<Pod>()
-                    .and_then(|p| p.spec.as_ref())
-                    .and_then(|s| s.host_network)
-                    .unwrap_or_default()
+                is_host_network_resource(resource.as_ref())
             } else {
                 false
             };
@@ -1495,10 +1498,13 @@ async fn index_resource_by_ip<K>(
 
             for path in &source.to {
                 // Skip hostIP/hostIPs paths if it's a regular pod
-                if is_pod && !is_host_network && (path.contains("hostIP") || path.contains("hostIPs")) {
+                if is_pod
+                    && !is_host_network
+                    && (path.contains("hostIP") || path.contains("hostIPs"))
+                {
                     continue;
                 }
-                
+
                 match extract_values_from_resource(resource.as_ref(), path) {
                     Ok(values) => {
                         for value in values {
@@ -1699,11 +1705,7 @@ fn spawn_ip_resource_watcher<K, F>(
                             ])
                             .inc();
 
-                        let host_network = (&obj as &dyn std::any::Any)
-                            .downcast_ref::<Pod>()
-                            .and_then(|p| p.spec.as_ref())
-                            .and_then(|s| s.host_network)
-                            .unwrap_or_default();
+                        let host_network = is_host_network_resource(&obj);
 
                         // Extract current IPs from this resource
                         let current_ips = extract_ips(&obj);
@@ -2346,6 +2348,39 @@ mod tests {
         assert!(
             !is_regular_network,
             "Regular pod should not be detected as host network"
+        );
+
+        // Test node properties
+        assert!(
+            test_node.metadata.name.is_some(),
+            "Test node should have a name"
+        );
+        assert_eq!(
+            test_node.metadata.name.as_ref().unwrap(),
+            "test-node",
+            "Test node should have the correct name"
+        );
+
+        // Test node IP address
+        let node_addresses = test_node
+            .status
+            .as_ref()
+            .and_then(|status| status.addresses.as_ref())
+            .expect("Test node should have addresses");
+
+        assert!(
+            !node_addresses.is_empty(),
+            "Test node should have at least one address"
+        );
+
+        let internal_ip = node_addresses
+            .iter()
+            .find(|addr| addr.type_ == "InternalIP")
+            .expect("Test node should have an InternalIP address");
+
+        assert_eq!(
+            internal_ip.address, "10.104.7.192",
+            "Test node should have the correct IP address"
         );
     }
 
