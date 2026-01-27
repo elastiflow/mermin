@@ -9,6 +9,7 @@ use lazy_static::lazy_static;
 use prometheus::{
     Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGaugeVec, Opts, Registry,
 };
+use tracing::warn;
 
 use crate::metrics::opts::MetricsOptions;
 
@@ -18,75 +19,97 @@ use crate::metrics::opts::MetricsOptions;
 /// thread-safe access without needing to pass the flag through every function call.
 static DEBUG_METRICS_ENABLED: OnceLock<bool> = OnceLock::new();
 
+/// Default buckets for pipeline_duration_seconds histogram
+/// Covers: 10μs to 60s
+const DEFAULT_PIPELINE_DURATION_BUCKETS: &[f64] = &[
+    0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0,
+    60.0,
+];
+
+/// Default buckets for export_batch_size histogram
+/// Covers: 1 to 1000 spans
+const DEFAULT_EXPORT_BATCH_SIZE_BUCKETS: &[f64] = &[1.0, 10.0, 50.0, 100.0, 250.0, 500.0, 1000.0];
+
+/// Default buckets for k8s_ip_index_update_duration_seconds histogram
+/// Covers: 1ms to 1s
+const DEFAULT_K8S_IP_INDEX_UPDATE_DURATION_BUCKETS: &[f64] =
+    &[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0];
+
+/// Default buckets for shutdown_duration_seconds histogram
+/// Covers: 100ms to 120s
+const DEFAULT_SHUTDOWN_DURATION_BUCKETS: &[f64] = &[0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0];
+
 /// Configuration for histogram bucket sizes
 #[derive(Clone, Debug)]
 pub struct HistogramBucketConfig {
     pub pipeline_duration: Vec<f64>,
     pub export_batch_size: Vec<f64>,
-    pub export_duration: Vec<f64>,
     pub k8s_ip_index_update_duration: Vec<f64>,
     pub shutdown_duration: Vec<f64>,
 }
 
 impl HistogramBucketConfig {
     /// Create bucket configuration from MetricsOptions
+    ///
+    /// Validates custom bucket configurations. If validation fails, falls back to default buckets
+    /// and logs a warning. INVALID configurations include:
+    /// - Empty buckets
+    /// - Non-positive values
+    /// - Unsorted or duplicate values
     pub fn from(opts: &MetricsOptions) -> Self {
         Self {
-            pipeline_duration: opts
-                .pipeline_duration_buckets
-                .clone()
-                .unwrap_or_else(default_pipeline_duration_buckets),
-            export_batch_size: opts
-                .export_batch_size_buckets
-                .clone()
-                .unwrap_or_else(default_export_batch_size_buckets),
-            export_duration: opts
-                .export_duration_buckets
-                .clone()
-                .unwrap_or_else(default_export_duration_buckets),
-            k8s_ip_index_update_duration: opts
-                .k8s_ip_index_update_duration_buckets
-                .clone()
-                .unwrap_or_else(default_k8s_ip_index_update_duration_buckets),
-            shutdown_duration: opts
-                .shutdown_duration_buckets
-                .clone()
-                .unwrap_or_else(default_shutdown_duration_buckets),
+            pipeline_duration: Self::validate_buckets(
+                opts.pipeline_duration_buckets.clone(),
+                DEFAULT_PIPELINE_DURATION_BUCKETS,
+                "pipeline_duration_buckets",
+            ),
+            export_batch_size: Self::validate_buckets(
+                opts.export_batch_size_buckets.clone(),
+                DEFAULT_EXPORT_BATCH_SIZE_BUCKETS,
+                "export_batch_size_buckets",
+            ),
+            k8s_ip_index_update_duration: Self::validate_buckets(
+                opts.k8s_ip_index_update_duration_buckets.clone(),
+                DEFAULT_K8S_IP_INDEX_UPDATE_DURATION_BUCKETS,
+                "k8s_ip_index_update_duration_buckets",
+            ),
+            shutdown_duration: Self::validate_buckets(
+                opts.shutdown_duration_buckets.clone(),
+                DEFAULT_SHUTDOWN_DURATION_BUCKETS,
+                "shutdown_duration_buckets",
+            ),
         }
     }
-}
 
-/// Default buckets for pipeline_duration_seconds histogram
-/// Covers: 10μs to 60s
-fn default_pipeline_duration_buckets() -> Vec<f64> {
-    vec![
-        0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0,
-        60.0,
-    ]
-}
+    /// Validate bucket configuration and fall back to defaults if invalid
+    fn validate_buckets(buckets: Option<Vec<f64>>, default: &[f64], name: &str) -> Vec<f64> {
+        let Some(buckets) = buckets else {
+            return default.to_vec();
+        };
 
-/// Default buckets for export_batch_size histogram
-/// Covers: 1 to 1000 spans
-fn default_export_batch_size_buckets() -> Vec<f64> {
-    vec![1.0, 10.0, 50.0, 100.0, 250.0, 500.0, 1000.0]
-}
+        if buckets.is_empty() {
+            warn!("{} is empty, falling back to default buckets", name);
+            return default.to_vec();
+        }
 
-/// Default buckets for export_duration_seconds histogram
-/// Covers: 1ms to 5s
-fn default_export_duration_buckets() -> Vec<f64> {
-    vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0]
-}
+        if !buckets.iter().any(|&b| b > 0.0) {
+            warn!(
+                "{} contains non-positive values, falling back to default buckets",
+                name
+            );
+            return default.to_vec();
+        }
 
-/// Default buckets for k8s_ip_index_update_duration_seconds histogram
-/// Covers: 1ms to 1s
-fn default_k8s_ip_index_update_duration_buckets() -> Vec<f64> {
-    vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0]
-}
+        if !buckets.is_sorted_by(|a, b| a < b) {
+            warn!(
+                "{} is not sorted in ascending order or contains duplicates, falling back to default buckets",
+                name
+            );
+            return default.to_vec();
+        }
 
-/// Default buckets for shutdown_duration_seconds histogram
-/// Covers: 100ms to 120s
-fn default_shutdown_duration_buckets() -> Vec<f64> {
-    vec![0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0]
+        buckets
+    }
 }
 
 lazy_static! {
@@ -313,7 +336,6 @@ lazy_static! {
             .subsystem("export")
     ).expect("failed to create export_timeouts_total metric");
 
-    // Note: EXPORT_DURATION_SECONDS is now created dynamically in init_registry()
 
     // ============================================================================
     // Kubernetes Decorator Subsystem
@@ -432,9 +454,6 @@ pub static PROCESSING_DURATION_SECONDS: OnceLock<HistogramVec> = OnceLock::new()
 /// Number of spans per export batch
 pub static EXPORT_BATCH_SIZE: OnceLock<Histogram> = OnceLock::new();
 
-/// Duration of span export operations (debug metric)
-pub static EXPORT_DURATION_SECONDS: OnceLock<Histogram> = OnceLock::new();
-
 /// Duration of K8s IP index updates
 pub static K8S_IP_INDEX_UPDATE_DURATION_SECONDS: OnceLock<Histogram> = OnceLock::new();
 
@@ -503,8 +522,6 @@ pub fn init_registry(
         .set(debug_enabled)
         .expect("DEBUG_METRICS_ENABLED should not be set yet");
 
-    // TODO: Functionize here
-
     // Initialize histogram metrics with configurable buckets
     let processing_duration = HistogramVec::new(
         HistogramOpts::new("duration_seconds", "Processing duration by pipeline stage")
@@ -525,18 +542,6 @@ pub fn init_registry(
     )
     .map_err(|e| {
         prometheus::Error::Msg(format!("failed to create export_batch_size metric: {e}"))
-    })?;
-
-    let export_duration = Histogram::with_opts(
-        HistogramOpts::new("duration_seconds", "Duration of span export operations")
-            .namespace("mermin")
-            .subsystem("export")
-            .buckets(bucket_config.export_duration),
-    )
-    .map_err(|e| {
-        prometheus::Error::Msg(format!(
-            "failed to create export_duration_seconds metric: {e}"
-        ))
     })?;
 
     let k8s_ip_index_update_duration = Histogram::with_opts(
@@ -574,9 +579,6 @@ pub fn init_registry(
     EXPORT_BATCH_SIZE
         .set(export_batch_size.clone())
         .expect("EXPORT_BATCH_SIZE should not be set yet");
-    EXPORT_DURATION_SECONDS
-        .set(export_duration.clone())
-        .expect("EXPORT_DURATION_SECONDS should not be set yet");
     K8S_IP_INDEX_UPDATE_DURATION_SECONDS
         .set(k8s_ip_index_update_duration.clone())
         .expect("K8S_IP_INDEX_UPDATE_DURATION_SECONDS should not be set yet");
@@ -637,7 +639,6 @@ pub fn init_registry(
 
     // Debug export metrics (conditional)
     register_debug!(EXPORT_TIMEOUTS_TOTAL, debug_enabled);
-    register_debug!(EXPORT_DURATION_SECONDS.get().unwrap(), debug_enabled);
 
     // ============================================================================
     // K8s decorator metrics (always registered)
@@ -690,18 +691,6 @@ pub fn debug_enabled() -> bool {
 #[inline]
 pub fn processing_duration_seconds() -> &'static HistogramVec {
     PROCESSING_DURATION_SECONDS
-        .get()
-        .expect("metrics registry not initialized")
-}
-
-/// Get the EXPORT_BATCH_SIZE histogram metric.
-///
-/// # Panics
-///
-/// Panics if the registry has not been initialized.
-#[inline]
-pub fn export_batch_size() -> &'static Histogram {
-    EXPORT_BATCH_SIZE
         .get()
         .expect("metrics registry not initialized")
 }
@@ -808,11 +797,10 @@ mod tests {
         // Initialize registry without debug metrics
         // Note: May already be initialized by another test, which is fine
         let bucket_config = HistogramBucketConfig {
-            pipeline_duration: default_pipeline_duration_buckets(),
-            export_batch_size: default_export_batch_size_buckets(),
-            export_duration: default_export_duration_buckets(),
-            k8s_ip_index_update_duration: default_k8s_ip_index_update_duration_buckets(),
-            shutdown_duration: default_shutdown_duration_buckets(),
+            pipeline_duration: DEFAULT_PIPELINE_DURATION_BUCKETS.to_vec(),
+            export_batch_size: DEFAULT_EXPORT_BATCH_SIZE_BUCKETS.to_vec(),
+            k8s_ip_index_update_duration: DEFAULT_K8S_IP_INDEX_UPDATE_DURATION_BUCKETS.to_vec(),
+            shutdown_duration: DEFAULT_SHUTDOWN_DURATION_BUCKETS.to_vec(),
         };
         let _ = init_registry(false, bucket_config);
 
@@ -825,11 +813,10 @@ mod tests {
     fn test_standard_registry_always_has_metrics() {
         // Initialize with debug disabled
         let bucket_config = HistogramBucketConfig {
-            pipeline_duration: default_pipeline_duration_buckets(),
-            export_batch_size: default_export_batch_size_buckets(),
-            export_duration: default_export_duration_buckets(),
-            k8s_ip_index_update_duration: default_k8s_ip_index_update_duration_buckets(),
-            shutdown_duration: default_shutdown_duration_buckets(),
+            pipeline_duration: DEFAULT_PIPELINE_DURATION_BUCKETS.to_vec(),
+            export_batch_size: DEFAULT_EXPORT_BATCH_SIZE_BUCKETS.to_vec(),
+            k8s_ip_index_update_duration: DEFAULT_K8S_IP_INDEX_UPDATE_DURATION_BUCKETS.to_vec(),
+            shutdown_duration: DEFAULT_SHUTDOWN_DURATION_BUCKETS.to_vec(),
         };
         let _ = init_registry(false, bucket_config);
 

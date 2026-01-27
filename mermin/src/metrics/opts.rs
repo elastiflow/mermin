@@ -30,10 +30,6 @@ pub struct MetricsOptions {
     /// If not specified, uses default buckets: [1, 10, 50, 100, 250, 500, 1000]
     pub export_batch_size_buckets: Option<Vec<f64>>,
 
-    /// Custom buckets for export_duration_seconds histogram
-    /// If not specified, uses default buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0]
-    pub export_duration_buckets: Option<Vec<f64>>,
-
     /// Custom buckets for k8s_ip_index_update_duration_seconds histogram
     /// If not specified, uses default buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0]
     pub k8s_ip_index_update_duration_buckets: Option<Vec<f64>>,
@@ -53,7 +49,6 @@ impl Default for MetricsOptions {
             stale_metric_ttl: Duration::from_secs(300),
             pipeline_duration_buckets: None,
             export_batch_size_buckets: None,
-            export_duration_buckets: None,
             k8s_ip_index_update_duration_buckets: None,
             shutdown_duration_buckets: None,
         }
