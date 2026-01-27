@@ -116,12 +116,14 @@ const FLOW_EVENT_PACKET_DATA_SIZE: usize = 192;
 ///
 /// This is an upper bound that can be overridden at runtime by the userspace
 /// loader using aya's `set_max_entries()` API. The actual size is configured
-/// via the `pipeline.ebpf_max_flows` config field (see runtime/conf.rs).
+/// via the `pipeline.flow_capture.flow_stats_capacity` config field (see runtime/conf.rs).
 ///
 /// Default at runtime: 100,000 flows (~23 MB)
 /// Configurable in config.hcl:
 ///   pipeline {
-///     ebpf_max_flows = 500000  # For high-traffic (500K flows, ~116 MB)
+///     flow_capture {
+///       flow_stats_capacity = 500000  # For high-traffic (500K flows, ~116 MB)
+///     }
 ///   }
 ///
 /// Memory calculation: flows × 232 bytes

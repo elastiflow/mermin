@@ -132,7 +132,6 @@ const EXPORT_TIMEOUT_SECS: u64 = 10;
 
 // Constants for eBPF map capacities
 const LISTENING_PORTS_CAPACITY: u64 = 65536;
-const FLOW_EVENTS_RINGBUF_SIZE_BYTES: u64 = 256 * 1024;
 
 async fn run(cli: Cli) -> Result<()> {
     // TODO: listen for SIGUP `kill -HUP $(pidof mermin)` to reload the eBPF program and all configuration
@@ -341,8 +340,11 @@ async fn run(cli: Cli) -> Result<()> {
     }
     let mut ebpf = EbpfLoader::new()
         .map_pin_path(&map_pin_path)
-        .set_max_entries("FLOW_STATS", conf.pipeline.ebpf_max_flows)
-        .set_max_entries("FLOW_EVENTS", conf.pipeline.ebpf_ringbuf_size)
+        .set_max_entries("FLOW_STATS", conf.pipeline.flow_capture.flow_stats_capacity)
+        .set_max_entries(
+            "FLOW_EVENTS",
+            conf.pipeline.flow_capture.flow_events_capacity_bytes(),
+        )
         .load(aya::include_bytes_aligned!(concat!(
             env!("OUT_DIR"),
             "/mermin"
@@ -466,10 +468,10 @@ async fn run(cli: Cli) -> Result<()> {
 
     metrics::registry::EBPF_MAP_CAPACITY
         .with_label_values(&[EbpfMapName::FlowStats.as_str(), MapUnit::Entries.as_str()])
-        .set(conf.pipeline.ebpf_max_flows as i64);
+        .set(conf.pipeline.flow_capture.flow_stats_capacity as i64);
     metrics::registry::EBPF_MAP_CAPACITY
         .with_label_values(&[EbpfMapName::FlowEvents.as_str(), MapUnit::Bytes.as_str()])
-        .set(FLOW_EVENTS_RINGBUF_SIZE_BYTES as i64);
+        .set(conf.pipeline.flow_capture.flow_events_capacity_bytes() as i64);
     metrics::registry::EBPF_MAP_CAPACITY
         .with_label_values(&[
             EbpfMapName::ListeningPorts.as_str(),
@@ -565,8 +567,8 @@ async fn run(cli: Cli) -> Result<()> {
 
     conf.pipeline.validate_memory_usage();
 
-    let flow_span_capacity = conf.pipeline.flow_producer_channel_capacity;
-    let decorated_span_capacity = conf.pipeline.k8s_decorator_channel_capacity;
+    let flow_span_capacity = conf.pipeline.flow_producer.flow_span_queue_capacity;
+    let decorated_span_capacity = conf.pipeline.k8s_decorator.decorated_span_queue_capacity;
 
     let (flow_span_tx, mut flow_span_rx) = mpsc::channel(flow_span_capacity);
     metrics::registry::CHANNEL_CAPACITY
@@ -611,9 +613,8 @@ async fn run(cli: Cli) -> Result<()> {
 
     let flow_span_producer = FlowSpanProducer::new(
         conf.clone().span,
-        conf.pipeline.ebpf_ringbuf_worker_capacity,
-        conf.pipeline.flow_producer_store_capacity,
-        conf.pipeline.worker_count,
+        conf.pipeline.flow_producer.worker_queue_capacity,
+        conf.pipeline.flow_producer.workers,
         Arc::clone(&iface_map),
         flow_stats_map,
         flow_events_ringbuf,
@@ -677,7 +678,7 @@ async fn run(cli: Cli) -> Result<()> {
     };
 
     // K8s decorator runs on dedicated thread pool to prevent K8s API lookups from blocking main runtime
-    let decorator_threads = conf.pipeline.k8s_decorator_threads;
+    let decorator_threads = conf.pipeline.k8s_decorator.threads;
     let get_extract_rules = |direction: &str| -> Vec<String> {
         conf.attributes
             .as_ref()

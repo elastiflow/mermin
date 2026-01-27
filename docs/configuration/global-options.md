@@ -171,14 +171,14 @@ Mermin provides metrics to monitor shutdown behavior:
 - `shutdown_flows_total{status="preserved"}`: Flows successfully exported during shutdown
 - `shutdown_flows_total{status="lost"}`: Flows lost due to shutdown timeout
 
-### `ebpf_ringbuf_worker_capacity`
+### `flow_producer.worker_queue_capacity`
 
 **Type:** Integer
 **Default:** `2048`
 
 Capacity for each worker thread's event queue. Determines how many raw eBPF events can be buffered per worker before drops occur.
 
-**Formula:** Total worker buffer memory ≈ `worker_count` × `ebpf_ringbuf_worker_capacity` × 256 bytes
+**Formula:** Total worker buffer memory ≈ `flow_producer.workers` × `flow_producer.worker_queue_capacity` × 256 bytes
 
 **Tuning Guidelines:**
 
@@ -191,15 +191,6 @@ Capacity for each worker thread's event queue. Determines how many raw eBPF even
 
 **Signs You Need to Increase:**
 * Metrics show `mermin_flow_events_total{status="dropped_backpressure"}` increasing
-
-### `flow_producer_store_capacity`
-
-**Type:** Integer
-**Default:** `32768`
-
-Initial capacity for the userspace flow tracking map (`DashMap`). Should be set large enough to hold active flows to avoid expensive resizing operations.
-
-**Formula:** Active flows ≈ flows_per_sec × avg_flow_lifetime
 
 **Tuning Guidelines:**
 
@@ -249,12 +240,12 @@ Number of parallel worker threads processing packets and generating flow spans. 
 # Kubernetes resources should match worker count
 resources:
   requests:
-    cpu: 2     # For worker_count = 4
+    cpu: 2     # For flow_producer.workers = 4
   limits:
-    cpu: 4     # For worker_count = 4
+    cpu: 4     # For flow_producer.workers = 4
 ```
 
-### `worker_poll_interval`
+### `flow_producer.flow_store_poll_interval`
 
 **Type:** Duration
 **Default:** `5s`
@@ -298,7 +289,7 @@ Interval at which flow pollers check for flow records and timeouts. Pollers iter
 * Primarily long-lived TCP flows
 * Flow timeout accuracy not critical
 
-### `k8s_decorator_threads`
+### `k8s_decorator.threads`
 
 **Type:** Integer
 **Default:** `4`
@@ -315,38 +306,11 @@ Number of dedicated threads for Kubernetes metadata decoration. Running decorati
 | High-Traffic Ingress       | 5K-25K      | 8-12                |
 | Extreme Scale (Edge/CDN)   | >25K        | 12-24               |
 
-### `sampling_enabled`
-
-**Type:** Boolean
-**Default:** `true`
-
-Enable adaptive sampling when worker channels are full. When enabled, Mermin intelligently drops events to prevent complete pipeline stalls while preserving critical flow information (TCP FIN/RST, new flows).
-
-**Behavior:**
-
-* Sampling activates only under backpressure
-* Preserves flow control packets (FIN, RST)
-* Maintains minimum sampling rate (see `sampling_min_rate`)
-
-### `sampling_min_rate`
-
-**Type:** Float (0.0-1.0)
-**Default:** `0.1` (10%)
-
-Minimum fraction of events to keep during maximum backpressure. A value of `0.1` ensures at least 10% of events are processed even under extreme load.
-
-### `backpressure_warning_threshold`
-
-**Type:** Float (0.0-1.0)
-**Default:** `0.01` (1%)
-
-Drop rate threshold for logging backpressure warnings. Warnings are logged when the fraction of dropped events exceeds this value.
-
 ### Channel Capacity Tuning
 
 These options control the buffer sizes between pipeline stages to optimize for your workload.
 
-#### `flow_producer_channel_capacity`
+#### `flow_producer.flow_span_queue_capacity`
 
 **Type:** Integer
 **Default:** `16384`
@@ -359,7 +323,7 @@ Explicit capacity for the flow span channel. Provides buffering between workers 
 * **Bursty traffic**: `24576`-`32768`
 * **Low latency priority**: `12288`
 
-#### `k8s_decorator_channel_capacity`
+#### `k8s_decorator.decorated_span_queue_capacity`
 
 **Type:** Integer
 **Default:** `32768`
