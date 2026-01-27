@@ -751,13 +751,13 @@ async fn run(cli: Cli) -> Result<()> {
                             maybe_span = flow_span_rx.recv() => {
                                 let Some(flow_span) = maybe_span else { break };
 
-                                let channel_size = flow_span_rx.len();
-                                metrics::registry::CHANNEL_ENTRIES
-                                    .with_label_values(&[ChannelName::ProducerOutput.as_str()])
-                                    .set(channel_size as i64);
+                            let channel_size = flow_span_rx.len();
+                            metrics::registry::CHANNEL_ENTRIES
+                                .with_label_values(&[ChannelName::ProducerOutput.as_str()])
+                                .set(channel_size as i64);
 
                             let _timer = metrics::registry::processing_duration_seconds()
-                                .with_label_values(&[ProcessingStage::FlowProducerOut.as_str()])
+                                .with_label_values(&[ProcessingStage::K8sDecoratorOut.as_str()])
                                 .start_timer();
                             let (span, err) = decorator.decorate_or_fallback(flow_span).await;
 
@@ -887,7 +887,7 @@ async fn run(cli: Cli) -> Result<()> {
             let export_result = tokio::time::timeout(Duration::from_secs(EXPORT_TIMEOUT_SECS), exporter.export(traceable)).await;
             let export_duration = export_start.elapsed();
             metrics::registry::processing_duration_seconds()
-                .with_label_values(&[ProcessingStage::K8sDecoratorOut.as_str()])
+                .with_label_values(&[ProcessingStage::K8sExportOut.as_str()])
                 .observe(export_duration.as_secs_f64());
 
             if export_result.is_err() {
