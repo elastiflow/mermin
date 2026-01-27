@@ -1,3 +1,17 @@
+## [v0.1.0-beta.46] - 2026-01-27
+
+### Bug Fixes
+
+- Simplify copying sources for docker build (#397)
+- Mermin wrongfully detects pod ip (#399)
+### Features
+
+- Add direction-aware container attributes with port-based resolution (#392)
+
+[v0.1.0-beta.45..v0.1.0-beta.46](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.45...v0.1.0-beta.46)
+
+
+
 ## [v0.1.0-beta.45] - 2026-01-20
 
 ### Bug Fixes
