@@ -2426,7 +2426,7 @@ pub async fn orphan_scanner_task(
                     let map = tcp_stats_map.lock().await;
                     map.keys().filter_map(|k| k.ok()).count()
                 };
-                metrics::registry::EBPF_MAP_ENTRIES
+                metrics::registry::EBPF_MAP_SIZE
                     .with_label_values(&[EbpfMapName::TcpStats.as_str()])
                     .set(tcp_stats_count as i64);
 
@@ -2434,7 +2434,7 @@ pub async fn orphan_scanner_task(
                     let map = icmp_stats_map.lock().await;
                     map.keys().filter_map(|k| k.ok()).count()
                 };
-                metrics::registry::EBPF_MAP_ENTRIES
+                metrics::registry::EBPF_MAP_SIZE
                     .with_label_values(&[EbpfMapName::IcmpStats.as_str()])
                     .set(icmp_stats_count as i64);
 
