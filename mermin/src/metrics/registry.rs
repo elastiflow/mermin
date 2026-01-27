@@ -82,7 +82,11 @@ impl HistogramBucketConfig {
     }
 
     /// Validate bucket configuration and fall back to defaults if invalid
-    fn validate_buckets(buckets: Option<Vec<f64>>, default: &[f64], name: &str) -> Vec<f64> {
+    pub(crate) fn validate_buckets(
+        buckets: Option<Vec<f64>>,
+        default: &[f64],
+        name: &str,
+    ) -> Vec<f64> {
         let Some(buckets) = buckets else {
             return default.to_vec();
         };
@@ -92,9 +96,9 @@ impl HistogramBucketConfig {
             return default.to_vec();
         }
 
-        if !buckets.iter().any(|&b| b > 0.0) {
+        if buckets.iter().any(|&b| !b.is_finite() || b <= 0.0) {
             warn!(
-                "{} contains non-positive values, falling back to default buckets",
+                "{} contains invalid values, falling back to default buckets",
                 name
             );
             return default.to_vec();
@@ -839,5 +843,137 @@ mod tests {
         let _ = &DEBUG_REGISTRY;
 
         assert!(true, "All registries are accessible");
+    }
+
+    // ============================================================================
+    // Bucket Validation Tests
+    // ============================================================================
+
+    #[test]
+    fn test_validate_buckets_none() {
+        let result = HistogramBucketConfig::validate_buckets(
+            None,
+            DEFAULT_PIPELINE_DURATION_BUCKETS,
+            "test_none",
+        );
+        assert_eq!(result, DEFAULT_PIPELINE_DURATION_BUCKETS.to_vec());
+    }
+
+    #[test]
+    fn test_validate_buckets_empty() {
+        let result = HistogramBucketConfig::validate_buckets(
+            Some(vec![]),
+            DEFAULT_PIPELINE_DURATION_BUCKETS,
+            "test_empty",
+        );
+        assert_eq!(result, DEFAULT_PIPELINE_DURATION_BUCKETS.to_vec());
+    }
+
+    #[test]
+    fn test_validate_buckets_non_positive_negative() {
+        let result = HistogramBucketConfig::validate_buckets(
+            Some(vec![-1.0, 0.0, 1.0]),
+            DEFAULT_PIPELINE_DURATION_BUCKETS,
+            "test_negative",
+        );
+        assert_eq!(result, DEFAULT_PIPELINE_DURATION_BUCKETS.to_vec());
+    }
+
+    #[test]
+    fn test_validate_buckets_non_positive_zero() {
+        let result = HistogramBucketConfig::validate_buckets(
+            Some(vec![0.0, 1.0, 2.0]),
+            DEFAULT_PIPELINE_DURATION_BUCKETS,
+            "test_zero",
+        );
+        assert_eq!(result, DEFAULT_PIPELINE_DURATION_BUCKETS.to_vec());
+    }
+
+    #[test]
+    fn test_validate_buckets_nan() {
+        let result = HistogramBucketConfig::validate_buckets(
+            Some(vec![1.0, f64::NAN, 2.0]),
+            DEFAULT_PIPELINE_DURATION_BUCKETS,
+            "test_nan",
+        );
+        assert_eq!(result, DEFAULT_PIPELINE_DURATION_BUCKETS.to_vec());
+    }
+
+    #[test]
+    fn test_validate_buckets_infinity() {
+        let result = HistogramBucketConfig::validate_buckets(
+            Some(vec![1.0, f64::INFINITY, 2.0]),
+            DEFAULT_PIPELINE_DURATION_BUCKETS,
+            "test_infinity",
+        );
+        assert_eq!(result, DEFAULT_PIPELINE_DURATION_BUCKETS.to_vec());
+    }
+
+    #[test]
+    fn test_validate_buckets_unsorted() {
+        let result = HistogramBucketConfig::validate_buckets(
+            Some(vec![1.0, 3.0, 2.0]),
+            DEFAULT_PIPELINE_DURATION_BUCKETS,
+            "test_unsorted",
+        );
+        assert_eq!(result, DEFAULT_PIPELINE_DURATION_BUCKETS.to_vec());
+    }
+
+    #[test]
+    fn test_validate_buckets_duplicates() {
+        let result = HistogramBucketConfig::validate_buckets(
+            Some(vec![1.0, 2.0, 2.0, 3.0]),
+            DEFAULT_PIPELINE_DURATION_BUCKETS,
+            "test_duplicates",
+        );
+        assert_eq!(result, DEFAULT_PIPELINE_DURATION_BUCKETS.to_vec());
+    }
+
+    #[test]
+    fn test_validate_buckets_valid() {
+        let custom_buckets = vec![0.001, 0.01, 0.1, 1.0, 22.0];
+        let result = HistogramBucketConfig::validate_buckets(
+            Some(custom_buckets.clone()),
+            DEFAULT_PIPELINE_DURATION_BUCKETS,
+            "test_valid",
+        );
+        assert_eq!(result, custom_buckets);
+    }
+
+    #[test]
+    fn test_validate_buckets_single_value() {
+        let custom_buckets = vec![1.0];
+        let result = HistogramBucketConfig::validate_buckets(
+            Some(custom_buckets.clone()),
+            DEFAULT_PIPELINE_DURATION_BUCKETS,
+            "test_single",
+        );
+        assert_eq!(result, custom_buckets);
+    }
+
+    #[test]
+    fn test_histogram_bucket_config_from_with_valid_buckets() {
+        use crate::metrics::opts::MetricsOptions;
+
+        let custom_pipeline = vec![0.001, 0.01, 0.1, 1.0];
+        let custom_export = vec![10.0, 50.0, 100.0];
+        let custom_k8s = vec![0.01, 0.1, 1.0];
+        let custom_shutdown = vec![1.0, 5.0, 10.0];
+
+        let opts = MetricsOptions {
+            pipeline_duration_buckets: Some(custom_pipeline.clone()),
+            export_batch_size_buckets: Some(custom_export.clone()),
+            k8s_ip_index_update_duration_buckets: Some(custom_k8s.clone()),
+            shutdown_duration_buckets: Some(custom_shutdown.clone()),
+            ..Default::default()
+        };
+
+        let config = HistogramBucketConfig::from(&opts);
+
+        // All should use custom buckets
+        assert_eq!(config.pipeline_duration, custom_pipeline);
+        assert_eq!(config.export_batch_size, custom_export);
+        assert_eq!(config.k8s_ip_index_update_duration, custom_k8s);
+        assert_eq!(config.shutdown_duration, custom_shutdown);
     }
 }
