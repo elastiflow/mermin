@@ -91,7 +91,6 @@ internal "metrics" {
   #
   # pipeline_duration_buckets = [0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0]
   # export_batch_size_buckets = [1.0, 10.0, 50.0, 100.0, 250.0, 500.0, 1000.0]
-  # export_duration_buckets = [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0]  # Only when debug_metrics_enabled = true
   # k8s_ip_index_update_duration_buckets = [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0]
   # shutdown_duration_buckets = [0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0]  # Only when debug_metrics_enabled = true
 

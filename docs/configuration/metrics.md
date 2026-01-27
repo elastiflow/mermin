@@ -134,28 +134,6 @@ internal "metrics" {
 }
 ```
 
-### `export_duration_buckets`
-
-**Type:** Array of numbers **Default:** `[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0]`
-
-Custom buckets for the `mermin_export_duration_seconds` histogram metric (debug metric). This metric tracks the duration of span export operations.
-
-The default buckets cover durations from 1ms to 5s, which is appropriate for most export operations.
-
-{% hint style="info" %}
-This metric is only available when `debug_metrics_enabled = true`
-{% endhint %}
-
-**Example:**
-
-```hcl
-internal "metrics" {
-  debug_metrics_enabled = true
-  # Customize buckets for faster export operations
-  export_duration_buckets = [0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5]
-}
-```
-
 ### `k8s_ip_index_update_duration_buckets`
 
 **Type:** Array of numbers **Default:** `[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0]`
