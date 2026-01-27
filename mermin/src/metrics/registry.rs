@@ -459,7 +459,7 @@ macro_rules! register_debug {
     }};
 }
 
-/// Initialize the metrics registry by registering all collectors.
+/// Initialize histogram metrics with configurable buckets.
 ///
 /// Registers metrics to three registries:
 /// - REGISTRY: All metrics (standard + debug if enabled)
@@ -483,10 +483,6 @@ macro_rules! register_debug {
 ///
 /// let bucket_config = HistogramBucketConfig::from(&metrics_opts);
 /// registry::init_registry(false, bucket_config)?;
-///
-/// let bucket_config = HistogramBucketConfig::from(&metrics_opts);
-/// registry::init_registry(false, bucket_config)?;
-/// # Ok::<(), prometheus::Error>(())
 /// ```
 pub fn init_registry(
     debug_enabled: bool,
@@ -506,6 +502,8 @@ pub fn init_registry(
     DEBUG_METRICS_ENABLED
         .set(debug_enabled)
         .expect("DEBUG_METRICS_ENABLED should not be set yet");
+
+    // TODO: Functionize here
 
     // Initialize histogram metrics with configurable buckets
     let processing_duration = HistogramVec::new(
@@ -569,7 +567,7 @@ pub fn init_registry(
         prometheus::Error::Msg(format!("failed to create shutdown_duration metric: {e}"))
     })?;
 
-    // Store histogram metrics in OnceLock
+    // Store histogram metrics
     PROCESSING_DURATION_SECONDS
         .set(processing_duration.clone())
         .expect("PROCESSING_DURATION_SECONDS should not be set yet");
