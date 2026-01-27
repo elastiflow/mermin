@@ -106,16 +106,16 @@ Key metrics to monitor include:
 - `mermin_export_flow_spans_total{exporter_type="otlp",status="error"}` - OTLP export failures (investigate if increasing)
 - `mermin_export_flow_spans_total{exporter_type="stdout",status="error"}` - Stdout export failures (investigate if increasing)
 
-<!-- TODO(GA Documentation): Iterate on the section -->
-<!-- ## Troubleshooting
+## Troubleshooting
 
-- **Interface Unavailable**: Mermin logs a warning and continues monitoring other interfaces
-- **eBPF Load Failure**: Agent fails to start; check kernel version and eBPF support
-- **High Packet Loss**: 
-  - Worker queue drops: Increase `pipeline.flow_producer.worker_queue_capacity` or `pipeline.flow_producer.workers`
-  - Flow span channel drops: Increase `pipeline.flow_producer.flow_span_queue_capacity` or `pipeline.k8s_decorator.threads`
-  - Decorated span channel drops: Increase `pipeline.k8s_decorator.decorated_span_queue_capacity` or optimize exporter settings
-  - General: Reduce monitored interfaces or check metrics to identify the specific bottleneck -->
+- **Interface Unavailable**: If a configured network interface is missing, Mermin handles this gracefully. It will log a warning to indicate the specific missing interface but will continue to startup and monitor all other valid interfaces.
+- **eBPF Load Failure**: This is a critical error that prevents the agent from starting. Verify that your host Linux kernel meets the minimum version requirements and that the necessary eBPF capabilities are enabled.
+- **High Packet Loss**: If you observe packet loss, inspect the internal metrics to identify the specific bottleneck stage:
+  - Worker queue drops: The kernel is producing events faster than userspace can consume them. Increase `pipeline.ebpf_ringbuf_worker_capacity` or `pipeline.worker_count`.
+  - Flow span channel drops: The enrichment stage is lagging. Increase `pipeline.flow_producer_channel_capacity` or add concurrency via `pipeline.k8s_decorator_threads`.
+  - Decorated span channel drops: There is backpressure from the export stage. Increase `pipeline.k8s_decorator_channel_capacity` or optimize your OTLP exporter settings.
+  - General: If tuning does not resolve the issue, consider reducing the number of monitored interfaces or increasing the CPU limits allocated to the agent.
+
 ### Test eBPF Capabilities
 
 Use the `diagnose bpf` subcommand to validate eBPF support and test attach/detach operations:

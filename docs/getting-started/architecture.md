@@ -4,7 +4,7 @@ This page explains how Mermin works, its architecture, and the flow of data from
 
 ## What are Flow Traces?
 
-**Flow Traces** are OpenTelemetry traces, which are combined from multiple Flow Trace Spans and represent a long lived connection.
+**Flow Traces** are OpenTelemetry traces, which are combined from multiple Flow Trace Spans and represent a long-lived connection.
 **Flow Trace Spans** are OpenTelemetry trace spans that represent network flows with NetFlow-like semantics. Unlike traditional NetFlow or IPFIX:
 
 - **OpenTelemetry Native**: Flow Traces are OTLP trace spans, not proprietary flow protocols
@@ -105,13 +105,11 @@ The userspace Mermin agent receives packets from eBPF and aggregates them into n
 
 - **Bidirectional Flow Spans**: Groups packets by 5-tuple (source IP/port, dest IP/port, protocol)
 - **State Tracking**: Maintains connection state for TCP (SYN, FIN, RST flags)
-<!-- TODO(GA Documentation):  Add link to the `docs/configuration/span.md` configuration -->
-- **Timeout Management**: Expires inactive flows based on configurable timeouts
+- **Timeout Management**: Expires inactive flows based on [configurable timeouts](../configuration/span.md)
 - **Protocol Parsing**: Deep packet inspection for tunneling protocols (VXLAN, Geneve, WireGuard)
 - **Community ID**: Generates standard Community ID hashes for flow correlation
 
-A Flow Trace Span includes:
-<!-- TODO(GA Documentation): Add a link to flow trace spec -->
+A [Flow Trace Span](../spec/semantic-conventions.md) includes:
 - Source and destination IP addresses and ports
 - Network protocol (TCP, UDP, ICMP, etc.)
 - Packet and byte counters (bidirectional)
@@ -155,20 +153,20 @@ This cache is continuously updated as resources change, ensuring metadata is alw
 #### Flow Attribution
 
 For each network flow, Mermin:
-<!-- TODO(GA Documentation): Add link to the docs/configuration/discovery-kubernetes-informer.md -->
 
 1. **Identifies Pods**: Matches source/destination IPs to pod IPs
 2. **Extracts Metadata**: Retrieves pod name, namespace, labels, annotations
 3. **Walks Owner References**: Follows ownerReferences from Pod, for example `Pod → ReplicaSet → Deployment`
-4. **Selector Matching**: Finds Services and NetworkPolicies that select the pod via it's selectors.
+4. **Selector Matching**: Finds Services and NetworkPolicies that select the pod via its selectors.
 5. **Decorates Traces**: Attaches all relevant metadata to the Flow Trace Span
 
 This provides full context for each network flow, enabling powerful filtering and analysis.
 
+To learn more about attribution configuration options, see the [Kubernetes informer](../configuration/discovery-kubernetes-informer.md) documentation.
+
 ### OTLP Exporter
 
 Mermin exports flows as **Flow Traces** using the OpenTelemetry Protocol (OTLP):
-<!-- TODO(GA Documentation): Add link to the docs/configuration/export-otlp.md -->
 
 - **Flow Traces as Spans**: Each network flow becomes an OpenTelemetry trace span
 - **Standard Protocol**: OTLP is an industry-standard telemetry protocol (OTel [docs](https://opentelemetry.io/docs/), [vendors](https://opentelemetry.io/ecosystem/vendors/))
@@ -179,6 +177,8 @@ Mermin exports flows as **Flow Traces** using the OpenTelemetry Protocol (OTLP):
 - **Secure Transport**: TLS encryption with custom CA certificate support
 
 Flow Traces are exported as OTLP trace spans, allowing them to be processed by any OTLP-compatible backend without requiring NetFlow collectors.
+
+To learn more about the exporter configuration options, see the [OTLP exporter](../configuration/export-otlp.md) documentation.
 
 ## Performance Characteristics
 
@@ -324,11 +324,11 @@ CNI/backend flexibility and flow-level detail, enabling long-term storage and gr
 
 **Key Insight:** You can run Mermin alongside a service mesh. Mermin observes network flows (L3/L4) across all workloads, while the service mesh manages application traffic (L7) for enrolled services. Many organizations use both together.
 
-<!-- TODO(GA Documentation): Cleanup the next steps -->
-<!-- ## Next Steps
+## Next Steps
 
-Now that you understand how Mermin generates Flow Traces:
-1. [**Deploy to Production**](../deployment/deployment.md): Choose your deployment model
-2. [**Configure Mermin**](../configuration/configuration.md): Customize for your environment
-3. [**Choose Your Backend**](../observability/backends.md): Send Flow Traces to your observability platform
-4. [**Troubleshoot Issues**](../troubleshooting/troubleshooting.md): Diagnose and resolve problems -->
+Now that you understand how Mermin generates Flow Traces, review the following guides to learn more and get started:
+
+1. [**Deploy to Production**](../deployment/deployment.md): Select the deployment model that best suits your needs with detailed guidance covering Kubernetes, cloud platforms, and bare metal Docker environments. Includes in-depth recommendations for resource allocation, network architecture, and security best practices.
+2. [**Configure Mermin**](../configuration/configuration.md): Customize Mermin for your environment by configuring network interface discovery, Kubernetes metadata enrichment, flow filtering, OTLP export, and other settings. Features support for auto-reload and flexible configuration precedence.
+3. [**Choose Your Backend**](../observability/backends.md): Send Flow Traces via OTLP to any compatible observability platform, including OpenTelemetry Collector, Elastic Stack, OpenSearch, Grafana Tempo, and Jaeger, or commercial platforms like Grafana Cloud and Datadog.
+4. [**Troubleshoot Issues**](../troubleshooting/troubleshooting.md): Diagnose deployment failures, eBPF errors, and traffic visibility issues using pod logs, health checks, metrics monitoring, and the `diagnose bpf` command, with organized guides for common problem categories.
