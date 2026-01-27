@@ -1057,8 +1057,8 @@ impl Attributor {
                 .and_then(|status| status.addresses.as_ref())
                 .map(|addresses| {
                     addresses.iter().any(|addr| {
-                        (addr.type_ == "InternalIP" || addr.type_ == "ExternalIP")
-                            && addr.address == ip_str // Compare strings to avoid re-parsing IP every time
+                        addr.address == ip_str
+                            && matches!(addr.type_.as_str(), "InternalIP" | "ExternalIP")
                     })
                 })
                 .unwrap_or(false)
@@ -1523,7 +1523,7 @@ async fn index_resource_by_ip<K>(
 /// Extracts IP addresses from a Pod resource
 fn extract_pod_ips(pod: &Pod) -> HashSet<String> {
     let mut ips = HashSet::new();
-    let is_host_network = is_host_network_resource(&pod);
+    let is_host_network = is_host_network_resource(pod);
 
     if let Some(status) = &pod.status {
         let mut has_pod_ips = false;
