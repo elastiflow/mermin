@@ -341,6 +341,8 @@ async fn run(cli: Cli) -> Result<()> {
     let mut ebpf = EbpfLoader::new()
         .map_pin_path(&map_pin_path)
         .set_max_entries("FLOW_STATS", conf.pipeline.flow_capture.flow_stats_capacity)
+        .set_max_entries("TCP_STATS", conf.pipeline.flow_capture.flow_stats_capacity)
+        .set_max_entries("ICMP_STATS", conf.pipeline.flow_capture.flow_stats_capacity)
         .set_max_entries(
             "FLOW_EVENTS",
             conf.pipeline.flow_capture.flow_events_capacity_bytes(),
@@ -450,6 +452,20 @@ async fn run(cli: Cli) -> Result<()> {
                 .ok_or_else(|| MerminError::internal("FLOW_STATS not found in eBPF object"))?,
         )
         .map_err(|e| MerminError::internal(format!("failed to convert FLOW_STATS: {e}")))?,
+    ));
+    let tcp_stats_map = Arc::new(tokio::sync::Mutex::new(
+        aya::maps::HashMap::try_from(
+            ebpf.take_map("TCP_STATS")
+                .ok_or_else(|| MerminError::internal("TCP_STATS not found in eBPF object"))?,
+        )
+        .map_err(|e| MerminError::internal(format!("failed to convert TCP_STATS: {e}")))?,
+    ));
+    let icmp_stats_map = Arc::new(tokio::sync::Mutex::new(
+        aya::maps::HashMap::try_from(
+            ebpf.take_map("ICMP_STATS")
+                .ok_or_else(|| MerminError::internal("ICMP_STATS not found in eBPF object"))?,
+        )
+        .map_err(|e| MerminError::internal(format!("failed to convert ICMP_STATS: {e}")))?,
     ));
     let flow_events_ringbuf = aya::maps::RingBuf::try_from(
         ebpf.take_map("FLOW_EVENTS")
@@ -617,6 +633,8 @@ async fn run(cli: Cli) -> Result<()> {
         conf.pipeline.flow_producer.workers,
         Arc::clone(&iface_map),
         flow_stats_map,
+        tcp_stats_map,
+        icmp_stats_map,
         flow_events_ringbuf,
         flow_span_tx,
         listening_ports_map,

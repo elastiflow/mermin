@@ -56,7 +56,9 @@ use tracing::warn;
 /// This prevents orphaned entries when errors occur during flow creation.
 pub struct EbpfFlowGuard {
     key: FlowKey,
-    map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, mermin_common::FlowStats>>>,
+    stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, mermin_common::FlowStats>>>,
+    tcp_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, mermin_common::TcpStats>>>,
+    icmp_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, mermin_common::IcmpStats>>>,
     should_keep: Arc<AtomicBool>,
 }
 
@@ -72,11 +74,15 @@ impl EbpfFlowGuard {
     /// - `map` - Shared reference to the eBPF `FLOW_STATS`
     pub fn new(
         key: FlowKey,
-        map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, mermin_common::FlowStats>>>,
+        stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, mermin_common::FlowStats>>>,
+        tcp_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, mermin_common::TcpStats>>>,
+        icmp_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, mermin_common::IcmpStats>>>,
     ) -> Self {
         Self {
             key,
-            map,
+            stats_map,
+            tcp_map,
+            icmp_map,
             should_keep: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -97,24 +103,40 @@ impl Drop for EbpfFlowGuard {
             // Entry was not marked as "kept", so clean it up
             // Spawn a background task to avoid blocking the drop (async not allowed in Drop)
             let key = self.key;
-            let map = Arc::clone(&self.map);
+            let stats_map = Arc::clone(&self.stats_map);
+            let tcp_map = Arc::clone(&self.tcp_map);
+            let icmp_map = Arc::clone(&self.icmp_map);
 
             tokio::spawn(async move {
-                let mut map_guard = map.lock().await;
-                if let Err(e) = map_guard.remove(&key) {
-                    warn!(
-                        event.name = "ebpf_guard.cleanup_failed",
-                        flow.key = ?key,
-                        error.message = %e,
-                        "failed to remove orphaned eBPF entry via guard cleanup"
-                    );
-                } else {
-                    warn!(
-                        event.name = "ebpf_guard.cleanup_success",
-                        flow.key = ?key,
-                        "removed orphaned eBPF entry via guard cleanup (error occurred during flow creation)"
-                    );
+                macro_rules! cleanup_map {
+                    ($map_mutex:expr) => {
+                        let mut map = $map_mutex.lock().await;
+                        match map.remove(&key) {
+                            Ok(_) => {
+                                warn!(
+                                    event.name = "ebpf_guard.cleanup_success",
+                                    flow.key = ?key,
+                                    "removed orphaned eBPF entry via guard cleanup (error occurred during flow creation)"
+                                );
+                            }
+                            Err(e) => {
+                                if !matches!(e, aya::maps::MapError::KeyNotFound | aya::maps::MapError::ElementNotFound) {
+                                    warn!(
+                                        event.name = "ebpf_guard.cleanup_failed",
+                                        flow.key = ?key,
+                                        error.message = %e,
+                                        "failed to remove orphaned eBPF entry via guard cleanup"
+                                    );
+                                }
+                            }
+                        }
+                        drop(map);
+                    };
                 }
+
+                cleanup_map!(stats_map);
+                cleanup_map!(tcp_map);
+                cleanup_map!(icmp_map);
             });
         }
     }

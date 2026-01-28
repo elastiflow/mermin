@@ -1,4 +1,3 @@
-use mermin_common::FlowStats;
 use network_types::tcp::{
     TCP_FLAG_ACK, TCP_FLAG_CWR, TCP_FLAG_ECE, TCP_FLAG_FIN, TCP_FLAG_PSH, TCP_FLAG_RST,
     TCP_FLAG_SYN, TCP_FLAG_URG,
@@ -56,27 +55,6 @@ pub struct TcpFlags {
 }
 
 impl TcpFlags {
-    /// Create TcpFlags from a packet
-    pub fn from_stats(stats: &FlowStats) -> Self {
-        Self {
-            flags: [
-                stats.fin(),
-                stats.syn(),
-                stats.rst(),
-                stats.psh(),
-                stats.ack(),
-                stats.urg(),
-                stats.ece(),
-                stats.cwr(),
-            ],
-        }
-    }
-
-    /// Get only the flags that are set
-    pub fn active_flags(&self) -> Vec<TcpFlag> {
-        Self::active_flags_from_array(&self.flags)
-    }
-
     /// Convert bit flags (u8) to a vector of active TcpFlag enum variants
     pub fn flags_from_bits(bits: u8) -> Vec<TcpFlag> {
         Self::active_flags_from_array(&Self::bits_to_array(bits))
@@ -136,99 +114,20 @@ impl TcpFlags {
 
 #[cfg(test)]
 mod tests {
-    use mermin_common::ConnectionState;
-    use network_types::ip::IpProto;
+    use mermin_common::{ConnectionState, TcpStats};
 
     use super::*;
 
     #[test]
-    fn test_tcp_flags_from_packet() {
-        // Helper to create FlowStats with specific TCP flags
-        fn create_stats_with_flags(tcp_flags: u8) -> FlowStats {
-            use mermin_common::IpVersion;
-            use network_types::{eth::EtherType, ip::IpProto};
+    fn test_tcp_flags_from_struct() {
+        let stats = TcpStats {
+            tcp_flags: TCP_FLAG_SYN | TCP_FLAG_ACK,
+            tcp_state: ConnectionState::Established,
+            ..Default::default()
+        };
 
-            FlowStats {
-                direction: mermin_common::Direction::Egress,
-                ether_type: EtherType::Ipv4,
-                ip_version: IpVersion::V4,
-                protocol: IpProto::Tcp,
-                src_ip: [0; 16],
-                dst_ip: [0; 16],
-                src_port: 0,
-                dst_port: 0,
-                packets: 0,
-                bytes: 0,
-                reverse_packets: 0,
-                reverse_bytes: 0,
-                tcp_syn_ns: 0,
-                tcp_syn_ack_ns: 0,
-                tcp_last_payload_fwd_ns: 0,
-                tcp_last_payload_rev_ns: 0,
-                tcp_txn_sum_ns: 0,
-                tcp_txn_count: 0,
-                tcp_jitter_avg_ns: 0,
-                src_mac: [0; 6],
-                ifindex: 0,
-                ip_flow_label: 0,
-                first_seen_ns: 0,
-                last_seen_ns: 0,
-                ip_dscp: 0,
-                ip_ecn: 0,
-                ip_ttl: 0,
-                reverse_ip_dscp: 0,
-                reverse_ip_ecn: 0,
-                reverse_ip_ttl: 0,
-                reverse_ip_flow_label: 0,
-                tcp_flags,
-                tcp_state: ConnectionState::Closed,
-                forward_tcp_flags: tcp_flags,
-                reverse_tcp_flags: 0,
-                icmp_type: 0,
-                icmp_code: 0,
-                reverse_icmp_type: 0,
-                reverse_icmp_code: 0,
-                forward_metadata_seen: 1,
-                reverse_metadata_seen: 0,
-            }
-        }
-
-        // Test no flags
-        let stats = create_stats_with_flags(0);
-        let flags = TcpFlags::from_stats(&stats);
-        assert_eq!(flags.active_flags(), Vec::<TcpFlag>::new());
-
-        // Test SYN flag only
-        let stats = create_stats_with_flags(TCP_FLAG_SYN);
-        let flags = TcpFlags::from_stats(&stats);
-        assert_eq!(flags.active_flags(), vec![TcpFlag::Syn]);
-
-        // Test SYN+ACK
-        let stats = create_stats_with_flags(TCP_FLAG_SYN | TCP_FLAG_ACK);
-        let flags = TcpFlags::from_stats(&stats);
-        assert_eq!(flags.active_flags(), vec![TcpFlag::Syn, TcpFlag::Ack]);
-
-        // Test FIN+ACK
-        let stats = create_stats_with_flags(TCP_FLAG_FIN | TCP_FLAG_ACK);
-        let flags = TcpFlags::from_stats(&stats);
-        assert_eq!(flags.active_flags(), vec![TcpFlag::Fin, TcpFlag::Ack]);
-
-        // Test all flags
-        let stats = create_stats_with_flags(0xFF);
-        let flags = TcpFlags::from_stats(&stats);
-        assert_eq!(
-            flags.active_flags(),
-            vec![
-                TcpFlag::Fin,
-                TcpFlag::Syn,
-                TcpFlag::Rst,
-                TcpFlag::Psh,
-                TcpFlag::Ack,
-                TcpFlag::Urg,
-                TcpFlag::Ece,
-                TcpFlag::Cwr
-            ]
-        );
+        let flags = TcpFlags::flags_from_bits(stats.tcp_flags);
+        assert_eq!(flags, vec![TcpFlag::Syn, TcpFlag::Ack]);
     }
 
     #[test]
@@ -237,26 +136,26 @@ mod tests {
         assert_eq!(TcpFlags::flags_from_bits(0x00), Vec::<TcpFlag>::new());
 
         // Test individual flags
-        assert_eq!(TcpFlags::flags_from_bits(0x01), vec![TcpFlag::Fin]);
-        assert_eq!(TcpFlags::flags_from_bits(0x02), vec![TcpFlag::Syn]);
-        assert_eq!(TcpFlags::flags_from_bits(0x04), vec![TcpFlag::Rst]);
-        assert_eq!(TcpFlags::flags_from_bits(0x08), vec![TcpFlag::Psh]);
-        assert_eq!(TcpFlags::flags_from_bits(0x10), vec![TcpFlag::Ack]);
-        assert_eq!(TcpFlags::flags_from_bits(0x20), vec![TcpFlag::Urg]);
-        assert_eq!(TcpFlags::flags_from_bits(0x40), vec![TcpFlag::Ece]);
-        assert_eq!(TcpFlags::flags_from_bits(0x80), vec![TcpFlag::Cwr]);
+        assert_eq!(TcpFlags::flags_from_bits(TCP_FLAG_FIN), vec![TcpFlag::Fin]);
+        assert_eq!(TcpFlags::flags_from_bits(TCP_FLAG_SYN), vec![TcpFlag::Syn]);
+        assert_eq!(TcpFlags::flags_from_bits(TCP_FLAG_RST), vec![TcpFlag::Rst]);
+        assert_eq!(TcpFlags::flags_from_bits(TCP_FLAG_PSH), vec![TcpFlag::Psh]);
+        assert_eq!(TcpFlags::flags_from_bits(TCP_FLAG_ACK), vec![TcpFlag::Ack]);
+        assert_eq!(TcpFlags::flags_from_bits(TCP_FLAG_URG), vec![TcpFlag::Urg]);
+        assert_eq!(TcpFlags::flags_from_bits(TCP_FLAG_ECE), vec![TcpFlag::Ece]);
+        assert_eq!(TcpFlags::flags_from_bits(TCP_FLAG_CWR), vec![TcpFlag::Cwr]);
 
         // Test common flag combinations
         assert_eq!(
-            TcpFlags::flags_from_bits(0x02 | 0x10), // SYN+ACK
+            TcpFlags::flags_from_bits(TCP_FLAG_SYN | TCP_FLAG_ACK), // SYN+ACK
             vec![TcpFlag::Syn, TcpFlag::Ack]
         );
         assert_eq!(
-            TcpFlags::flags_from_bits(0x01 | 0x10), // FIN+ACK
+            TcpFlags::flags_from_bits(TCP_FLAG_FIN | TCP_FLAG_ACK), // FIN+ACK
             vec![TcpFlag::Fin, TcpFlag::Ack]
         );
         assert_eq!(
-            TcpFlags::flags_from_bits(0x08 | 0x10), // PSH+ACK
+            TcpFlags::flags_from_bits(TCP_FLAG_PSH | TCP_FLAG_ACK), // PSH+ACK
             vec![TcpFlag::Psh, TcpFlag::Ack]
         );
 
@@ -274,64 +173,13 @@ mod tests {
                 TcpFlag::Cwr
             ]
         );
-
-        // Test that flags_from_bits and from_packet produce the same results
-        use mermin_common::IpVersion;
-        use network_types::eth::EtherType;
-
-        let stats = FlowStats {
-            direction: mermin_common::Direction::Egress,
-            ether_type: EtherType::Ipv4,
-            ip_version: IpVersion::V4,
-            protocol: IpProto::Tcp,
-            src_ip: [0; 16],
-            dst_ip: [0; 16],
-            src_port: 0,
-            dst_port: 0,
-            packets: 0,
-            bytes: 0,
-            reverse_packets: 0,
-            reverse_bytes: 0,
-            tcp_syn_ns: 0,
-            tcp_syn_ack_ns: 0,
-            tcp_last_payload_fwd_ns: 0,
-            tcp_last_payload_rev_ns: 0,
-            tcp_txn_sum_ns: 0,
-            tcp_txn_count: 0,
-            tcp_jitter_avg_ns: 0,
-            src_mac: [0; 6],
-            ifindex: 0,
-            ip_flow_label: 0,
-            first_seen_ns: 0,
-            last_seen_ns: 0,
-            ip_dscp: 0,
-            ip_ecn: 0,
-            ip_ttl: 0,
-            reverse_ip_dscp: 0,
-            reverse_ip_ecn: 0,
-            reverse_ip_ttl: 0,
-            reverse_ip_flow_label: 0,
-            tcp_flags: 0x12, // SYN+ACK
-            tcp_state: ConnectionState::Closed,
-            forward_tcp_flags: 0x12,
-            reverse_tcp_flags: 0x00,
-            icmp_type: 0,
-            icmp_code: 0,
-            reverse_icmp_type: 0,
-            reverse_icmp_code: 0,
-            forward_metadata_seen: 1,
-            reverse_metadata_seen: 0,
-        };
-        let from_packet = TcpFlags::from_stats(&stats).active_flags();
-        let from_bits = TcpFlags::flags_from_bits(0x12);
-        assert_eq!(from_packet, from_bits);
     }
 
     #[test]
     fn test_handshake_latency_from_stats() {
         assert_eq!(
-            TcpFlags::handshake_latency_from_stats(1 as u64, 2 as u64),
-            1
+            TcpFlags::handshake_latency_from_stats(1000u64, 1500u64),
+            500
         );
     }
 

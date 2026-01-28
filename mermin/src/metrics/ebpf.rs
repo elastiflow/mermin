@@ -5,7 +5,9 @@
 pub enum EbpfMapName {
     FlowStats,
     FlowEvents,
+    IcmpStats,
     ListeningPorts,
+    TcpStats,
 }
 
 impl EbpfMapName {
@@ -13,7 +15,9 @@ impl EbpfMapName {
         match self {
             EbpfMapName::FlowStats => "FLOW_STATS",
             EbpfMapName::FlowEvents => "FLOW_EVENTS",
+            EbpfMapName::IcmpStats => "ICMP_STATS",
             EbpfMapName::ListeningPorts => "LISTENING_PORTS",
+            EbpfMapName::TcpStats => "TCP_STATS",
         }
     }
 }
