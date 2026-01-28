@@ -10,7 +10,6 @@
 * [Quick Start](getting-started/quickstart.md)
 * [Architecture](getting-started/architecture.md)
 * [Security Considerations](getting-started/security-considerations.md)
-* [Semantic Conventions](spec/semantic-conventions.md)
 
 ## Observability
 
