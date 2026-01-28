@@ -10,7 +10,7 @@
 * [Quick Start](getting-started/quickstart.md)
 * [Architecture](getting-started/architecture.md)
 * [Security Considerations](getting-started/security-considerations.md)
-* [Field Reference](reference/field-reference.md)
+* [Semantic Conventions](spec/semantic-conventions.md)
 
 ## Observability
 
