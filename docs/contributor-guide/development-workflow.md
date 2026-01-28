@@ -202,6 +202,106 @@ docker run -it --privileged -v `pwd`:/app mermin-builder:latest /bin/bash
 
 Inside the container's shell, you can now run any of the `cargo` build or test commands mentioned above.
 
+> **Note**: Docker Desktop for Mac does not support BPF LSM (Linux Security Modules). If you need to develop or test
+> LSM-based features (like process tracking via `lsm` hooks), use [Colima with QEMU](#using-colima-for-lsm-development) instead.
+
+## Using Colima for LSM Development
+
+[Colima](https://colima.run/) provides a Docker-compatible runtime on macOS with better kernel support than Docker Desktop.
+This is **required** for developing BPF LSM features (e.g., `socket_post_create`, `tcp_v4_connect` hooks for process tracking).
+
+### Why Colima with QEMU?
+
+Docker Desktop for Mac uses a LinuxKit VM that lacks `CONFIG_SECURITY=y` and `CONFIG_BPF_LSM=y`. Colima with an Ubuntu
+VM has these compiled in, but **BPF LSM must be enabled via kernel boot parameters**.
+
+**Critical**: You must use `--vm-type=qemu`, not VZ. The VZ framework (Virtualization.Framework) loads the kernel directly
+via the hypervisor and **bypasses GRUB entirely**, making kernel boot parameter changes impossible. QEMU boots through
+GRUB, allowing BPF LSM to be enabled persistently.
+
+### 1. Install Colima
+
+```shell
+brew install colima docker
+```
+
+### 2. Start Colima with QEMU
+
+```shell
+# Stop Docker Desktop if running (they conflict)
+# Delete any existing Colima instance to start fresh
+colima stop 2>/dev/null || true
+colima delete 2>/dev/null || true
+
+# Start with QEMU (required for kernel parameter changes via GRUB)
+colima start --vm-type=qemu --cpu 4 --memory 8 --disk 60
+```
+
+### 3. Enable BPF LSM in the Kernel
+
+The Ubuntu cloud image used by Colima has GRUB configuration files in `/etc/default/grub.d/` that override
+`/etc/default/grub`. To ensure your LSM settings persist, create a new file with a higher number (99) that
+gets sourced last:
+
+```shell
+# Run this single command to enable BPF LSM (creates a grub.d override file)
+colima ssh -- bash -c 'echo "GRUB_CMDLINE_LINUX_DEFAULT=\"console=tty1 console=ttyAMA0 lsm=lockdown,capability,landlock,yama,apparmor,bpf\"" | sudo tee /etc/default/grub.d/99-bpf-lsm.cfg && sudo update-grub'
+```
+
+### 4. Restart Colima
+
+```shell
+colima stop
+colima start
+```
+
+### 5. Verify BPF LSM is Enabled
+
+```shell
+colima ssh -- cat /sys/kernel/security/lsm
+# Should now show: lockdown,capability,landlock,yama,apparmor,bpf
+```
+
+### 6. Build and Run Mermin
+
+```shell
+# Build Mermin using the Docker container
+docker build -t mermin-builder:latest --target builder .
+docker run --rm --privileged --mount type=bind,source=$(pwd),target=/app mermin-builder:latest \
+  /bin/bash -c "cargo build --release"
+
+# SSH into Colima and run Mermin
+colima ssh
+cd /Users/$(whoami)/Documents/Code/mermin  # Adjust path as needed
+sudo ./target/release/mermin --config local/config.hcl
+```
+
+### Troubleshooting Colima
+
+**BPF LSM still not enabled after restart:**
+
+This usually means you're using VZ instead of QEMU. Check with:
+```shell
+colima list
+# Look for "VMTYPE" column - should show "qemu", not "vz"
+```
+
+If it shows "vz", delete and recreate with QEMU:
+```shell
+colima delete
+colima start --vm-type=qemu --cpu 4 --memory 8 --disk 60
+```
+
+**Docker commands not working:**
+
+```shell
+# Ensure Colima is running
+colima status
+
+# If Docker context isn't set
+docker context use colima
+```
+
 ## Testing on local Kind K8s cluster
 
 You can create a local cluster, build the Mermin image, and deploy it with a single command sequence:

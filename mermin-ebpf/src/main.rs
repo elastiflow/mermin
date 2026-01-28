@@ -292,47 +292,47 @@ const SOCK_STREAM: i32 = 2; // TCP (stream socket)
 /// Minimal LSM hook for socket creation - validates LSM infrastructure works.
 /// This hook fires when any socket is created. We use it primarily for logging/validation.
 /// Process tracking for TCP is done via tcp_v4_connect (outbound) and socket_accept (inbound).
-// #[cfg(not(feature = "test"))]
-// #[lsm(hook = "socket_post_create")]
-// pub fn socket_post_create(ctx: LsmContext) -> i32 {
-//     // SAFETY: try_socket_post_create only accesses arguments via the provided context
-//     // and reads kernel memory through BTF-validated offsets
-//     // match { try_socket_post_create(&ctx) } {
-//     //     Ok(ret) => ret,
-//     //     Err(_) => 0, // Return 0 to allow the operation (LSM hooks must not block normal operation)
-//     // }
-//     0
-// }
+#[cfg(not(feature = "test"))]
+#[lsm(hook = "socket_post_create")]
+pub fn socket_post_create(ctx: LsmContext) -> i32 {
+    // // SAFETY: try_socket_post_create only accesses arguments via the provided context
+    // // and reads kernel memory through BTF-validated offsets
+    // match { try_socket_post_create(&ctx) } {
+    //     Ok(ret) => ret,
+    //     Err(_) => 0, // Return 0 to allow the operation (LSM hooks must not block normal operation)
+    // }
+    0
+}
 
-// #[cfg(not(feature = "test"))]
-// #[inline(always)]
-// fn try_socket_post_create(ctx: &LsmContext) -> Result<i32, i64> {
-//     // Args: struct socket *sock, int family, int type, int protocol, int kern
-//     // We only care about tracking AF_INET/AF_INET6 TCP sockets
-//     // Access arguments through ctx pointer - arguments are laid out sequentially
-//     let args_ptr = ctx.as_ptr() as *const usize;
-//     let family: i32 = unsafe { *(args_ptr.add(1) as *const i32) };
-//     let sock_type: i32 = unsafe { *(args_ptr.add(2) as *const i32) };
+#[cfg(not(feature = "test"))]
+#[inline(always)]
+fn try_socket_post_create(ctx: &LsmContext) -> Result<i32, i64> {
+    // Args: struct socket *sock, int family, int type, int protocol, int kern
+    // We only care about tracking AF_INET/AF_INET6 TCP sockets
+    // Access arguments through ctx pointer - arguments are laid out sequentially
+    let args_ptr = ctx.as_ptr() as *const usize;
+    let family: i32 = unsafe { *(args_ptr.add(1) as *const i32) };
+    let sock_type: i32 = unsafe { *(args_ptr.add(2) as *const i32) };
 
-//     // Only track IPv4/IPv6 TCP sockets
-//     if (family != AF_INET && family != AF_INET6) || sock_type != SOCK_STREAM {
-//         return Ok(0);
-//     }
+    // Only track IPv4/IPv6 TCP sockets
+    if (family != AF_INET && family != AF_INET6) || sock_type != SOCK_STREAM {
+        return Ok(0);
+    }
 
-//     // Get process info for logging
-//     let pid_tgid = bpf_get_current_pid_tgid();
-//     let pid = (pid_tgid >> 32) as u32;
+    // Get process info for logging
+    let pid_tgid = bpf_get_current_pid_tgid();
+    let pid = (pid_tgid >> 32) as u32;
 
-//     // Log TCP socket creation for validation
-//     let ip_version = if family == AF_INET { 4 } else { 6 };
-//     trace!(ctx, "lsm/socket_post_create: tcp socket created, pid={}, ipv={}", pid, ip_version);
+    // Log TCP socket creation for validation
+    let ip_version = if family == AF_INET { 4 } else { 6 };
+    trace!(ctx, "lsm/socket_post_create: tcp socket created, pid={}, ipv={}", pid, ip_version);
 
-//     // Socket post-create doesn't have full connection info yet.
-//     // We'll track the process info when the connection is established
-//     // via tcp_v4_connect (outbound) or socket_accept (inbound).
+    // Socket post-create doesn't have full connection info yet.
+    // We'll track the process info when the connection is established
+    // via tcp_v4_connect (outbound) or socket_accept (inbound).
 
-//     Ok(0)
-// }
+    Ok(0)
+}
 
 // /// fexit hook for tcp_v4_connect - captures process info for outbound TCP connections.
 // /// This fires AFTER tcp_v4_connect() completes, when the source port is assigned.
@@ -347,66 +347,66 @@ const SOCK_STREAM: i32 = 2; // TCP (stream socket)
 //     }
 // }
 
-#[cfg(not(feature = "test"))]
-#[inline(always)]
-#[allow(static_mut_refs)]
-fn try_tcp_v4_connect_exit(ctx: &FExitContext) -> Result<i32, i64> {
-    // tcp_v4_connect signature: int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
-    // On fexit, we can access the return value and the original arguments
-    // Access arguments through ctx pointer - for fexit, return value is after all args
+// #[cfg(not(feature = "test"))]
+// #[inline(always)]
+// #[allow(static_mut_refs)]
+// fn try_tcp_v4_connect_exit(ctx: &FExitContext) -> Result<i32, i64> {
+//     // tcp_v4_connect signature: int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
+//     // On fexit, we can access the return value and the original arguments
+//     // Access arguments through ctx pointer - for fexit, return value is after all args
 
-    let args_ptr = ctx.as_ptr() as *const usize;
-    let ret: i32 = unsafe { *(args_ptr.add(3) as *const i32) }; // Return value is arg 3 in fexit
+//     let args_ptr = ctx.as_ptr() as *const usize;
+//     let ret: i32 = unsafe { *(args_ptr.add(3) as *const i32) }; // Return value is arg 3 in fexit
 
-    if ret != 0 {
-        // Connection failed, don't track
-        return Ok(0);
-    }
+//     if ret != 0 {
+//         // Connection failed, don't track
+//         return Ok(0);
+//     }
 
-    // Get process info
-    let pid_tgid = bpf_get_current_pid_tgid();
-    let pid = (pid_tgid >> 32) as u32;
-    let tgid = pid_tgid as u32;
+//     // Get process info
+//     let pid_tgid = bpf_get_current_pid_tgid();
+//     let pid = (pid_tgid >> 32) as u32;
+//     let tgid = pid_tgid as u32;
 
-    let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
+//     let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
 
-    // Extract the socket to build a FlowKey
-    // arg(0) is struct sock *sk
-    // TODO: Consider trying aya package approach:
-    // use aya_ebpf_bindings::bindings::{sock, socket};
-    //
-    // let sk: *const sock = unsafe { *(args_ptr as *const *const sock) };  // Instead of *const c_void
-    let sk: *const core::ffi::c_void = unsafe { *(args_ptr as *const *const core::ffi::c_void) };
-    if sk.is_null() {
-        return Ok(0);
-    }
+//     // Extract the socket to build a FlowKey
+//     // arg(0) is struct sock *sk
+//     // TODO: Consider trying aya package approach:
+//     // use aya_ebpf_bindings::bindings::{sock, socket};
+//     //
+//     // let sk: *const sock = unsafe { *(args_ptr as *const *const sock) };  // Instead of *const c_void
+//     let sk: *const core::ffi::c_void = unsafe { *(args_ptr as *const *const core::ffi::c_void) };
+//     if sk.is_null() {
+//         return Ok(0);
+//     }
 
-    // Build FlowKey from sock structure
-    let flow_key = match extract_flow_key_from_sock_v4(sk) {
-        Ok(key) => key,
-        Err(_) => return Ok(0),
-    };
+//     // Build FlowKey from sock structure
+//     let flow_key = match extract_flow_key_from_sock_v4(sk) {
+//         Ok(key) => key,
+//         Err(_) => return Ok(0),
+//     };
 
-    // Normalize the key for lookup
-    let normalized_key = flow_key.normalize();
+//     // Normalize the key for lookup
+//     let normalized_key = flow_key.normalize();
 
-    // Look up and update FLOW_STATS with process info
-    #[allow(static_mut_refs)]
-    if let Some(stats_ptr) = unsafe { FLOW_STATS.get_ptr_mut(&normalized_key) } {
-        let stats = unsafe { &mut *stats_ptr };
-        // Only update if pid is not already set (first come, first served)
-        if stats.pid == 0 {
-            stats.pid = pid;
-            stats.tgid = tgid; // TODO: remove TGID here and form flow stats struct
-            stats.comm = comm;
-        }
-    }
-    // Note: If FLOW_STATS entry doesn't exist yet, the TC hook will create it
-    // and this process info will be lost. This is the expected "timing edge case"
-    // mentioned in the plan - pid=0 indicates unknown process.
+//     // Look up and update FLOW_STATS with process info
+//     #[allow(static_mut_refs)]
+//     if let Some(stats_ptr) = unsafe { FLOW_STATS.get_ptr_mut(&normalized_key) } {
+//         let stats = unsafe { &mut *stats_ptr };
+//         // Only update if pid is not already set (first come, first served)
+//         if stats.pid == 0 {
+//             stats.pid = pid;
+//             stats.tgid = tgid; // TODO: remove TGID here and form flow stats struct
+//             stats.comm = comm;
+//         }
+//     }
+//     // Note: If FLOW_STATS entry doesn't exist yet, the TC hook will create it
+//     // and this process info will be lost. This is the expected "timing edge case"
+//     // mentioned in the plan - pid=0 indicates unknown process.
 
-    Ok(0)
-}
+//     Ok(0)
+// }
 
 // /// LSM hook for socket_accept - captures process info for inbound TCP connections.
 // /// This fires when a server accepts an incoming connection.
