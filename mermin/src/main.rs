@@ -383,6 +383,87 @@ async fn run(cli: Cli) -> Result<()> {
         "tc programs loaded into kernel"
     );
 
+    // let btf = Btf::from_sys_fs().map_err(|e| {
+    //     MerminError::internal(format!(
+    //         "failed to load btf from /sys/kernel/btf/vmlinux: {e} - lsm/fentry programs require btf support"
+    //     ))
+    // })?;
+
+    // if let Some(prog) = ebpf.program_mut("socket_post_create") {
+    //     let lsm_prog: &mut Lsm = prog.try_into().map_err(|e| {
+    //         MerminError::internal(format!("failed to convert socket_post_create to lsm: {e}"))
+    //     })?;
+    //     lsm_prog.load("socket_post_create", &btf).map_err(|e| {
+    //         MerminError::internal(format!("failed to load socket_post_create lsm program: {e}"))
+    //     })?;
+    //     lsm_prog.attach().map_err(|e| {
+    //         MerminError::internal(format!(
+    //             "failed to attach socket_post_create lsm program: {e}"
+    //         ))
+    //     })?;
+    //     info!(
+    //         event.name = "ebpf.lsm_attached",
+    //         program.name = "socket_post_create",
+    //         "lsm program attached for socket creation tracking"
+    //     );
+    // } else {
+    //     error!(
+    //         event.name = "ebpf.lsm_not_found",
+    //         program.name = "socket_post_create",
+    //         "socket_post_create lsm program not found, skipping"
+    //     );
+    // }
+
+    // if let Some(prog) = ebpf.program_mut("tcp_v4_connect_exit") {
+    //     let fexit_prog: &mut FExit = prog.try_into().map_err(|e| {
+    //         MerminError::internal(format!("failed to convert tcp_v4_connect_exit to fexit: {e}"))
+    //     })?;
+    //     fexit_prog.load("tcp_v4_connect", &btf).map_err(|e| {
+    //         MerminError::internal(format!(
+    //             "failed to load tcp_v4_connect_exit fexit program: {e}"
+    //         ))
+    //     })?;
+    //     fexit_prog.attach().map_err(|e| {
+    //         MerminError::internal(format!(
+    //             "failed to attach tcp_v4_connect_exit fexit program: {e}"
+    //         ))
+    //     })?;
+    //     info!(
+    //         event.name = "ebpf.fexit_attached",
+    //         program.name = "tcp_v4_connect_exit",
+    //         "fexit program attached for outbound tcp process tracking"
+    //     );
+    // } else {
+    //     error!(
+    //         event.name = "ebpf.fexit_not_found",
+    //         program.name = "tcp_v4_connect_exit",
+    //         "tcp_v4_connect_exit fexit program not found, skipping"
+    //     );
+    // }
+
+    // if let Some(prog) = ebpf.program_mut("socket_accept") {
+    //     let lsm_prog: &mut Lsm = prog.try_into().map_err(|e| {
+    //         MerminError::internal(format!("failed to convert socket_accept to Lsm: {e}"))
+    //     })?;
+    //     lsm_prog.load("socket_accept", &btf).map_err(|e| {
+    //         MerminError::internal(format!("failed to load socket_accept lsm program: {e}"))
+    //     })?;
+    //     lsm_prog.attach().map_err(|e| {
+    //         MerminError::internal(format!("failed to attach socket_accept lsm program: {e}"))
+    //     })?;
+    //     info!(
+    //         event.name = "ebpf.lsm_attached",
+    //         program.name = "socket_accept",
+    //         "lsm program attached for inbound tcp process tracking"
+    //     );
+    // } else {
+    //     error!(
+    //         event.name = "ebpf.lsm_not_found",
+    //         program.name = "socket_accept",
+    //         "socket_accept lsm program not found, skipping"
+    //     );
+    // }
+
     let kernel_version = KernelVersion::current().unwrap_or(KernelVersion::new(0, 0, 0));
     let use_tcx = kernel_version >= KernelVersion::new(6, 6, 0);
     let bpf_fs_writable = if !use_tcx {
