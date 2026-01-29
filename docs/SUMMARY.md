@@ -10,7 +10,7 @@
 * [Quick Start](getting-started/quickstart.md)
 * [Architecture](getting-started/architecture.md)
 * [Security Considerations](getting-started/security-considerations.md)
-* [Atribute Reference](spec/attribute-reference.md)
+* [Attribute Reference](spec/attribute-reference.md)
 
 ## Observability
 
