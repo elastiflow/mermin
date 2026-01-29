@@ -22,21 +22,10 @@ pub struct MetricsOptions {
     #[serde(with = "duration")]
     pub stale_metric_ttl: Duration,
 
-    /// Custom buckets for pipeline_duration_seconds histogram
-    /// If not specified, uses default buckets optimized for pipeline stages (10μs to 60s)
-    pub pipeline_duration_buckets: Option<Vec<f64>>,
-
-    /// Custom buckets for export_batch_size histogram
-    /// If not specified, uses default buckets: [1, 10, 50, 100, 250, 500, 1000]
-    pub export_batch_size_buckets: Option<Vec<f64>>,
-
-    /// Custom buckets for k8s_ip_index_update_duration_seconds histogram
-    /// If not specified, uses default buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0]
-    pub k8s_ip_index_update_duration_buckets: Option<Vec<f64>>,
-
-    /// Custom buckets for shutdown_duration_seconds histogram
-    /// If not specified, uses default buckets: [0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0]
-    pub shutdown_duration_buckets: Option<Vec<f64>>,
+    /// Optional histogram bucket overrides, keyed by metric name.
+    /// Omit the block to use default buckets for all histograms.
+    #[serde(default)]
+    pub histogram_buckets: Option<HistogramBuckets>,
 }
 
 impl Default for MetricsOptions {
@@ -47,10 +36,30 @@ impl Default for MetricsOptions {
             port: 10250,
             debug_metrics_enabled: false,
             stale_metric_ttl: Duration::from_secs(300),
-            pipeline_duration_buckets: None,
-            export_batch_size_buckets: None,
-            k8s_ip_index_update_duration_buckets: None,
-            shutdown_duration_buckets: None,
+            histogram_buckets: None,
         }
     }
+}
+
+/// Optional histogram bucket overrides keyed by metric name.
+///
+/// All fields are optional; omit the block or individual keys to use default buckets.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct HistogramBuckets {
+    /// Custom buckets for `mermin_pipeline_duration_seconds` histogram.
+    /// If not specified, uses default buckets optimized for pipeline stages (10μs to 60s).
+    pub mermin_pipeline_duration_seconds: Option<Vec<f64>>,
+
+    /// Custom buckets for `mermin_export_batch_size` histogram.
+    /// If not specified, uses default buckets: [1, 10, 50, 100, 250, 500, 1000].
+    pub mermin_export_batch_size: Option<Vec<f64>>,
+
+    /// Custom buckets for `mermin_k8s_watcher_ip_index_update_duration_seconds` histogram.
+    /// If not specified, uses default buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0].
+    pub mermin_k8s_watcher_ip_index_update_duration_seconds: Option<Vec<f64>>,
+
+    /// Custom buckets for `mermin_taskmanager_shutdown_duration_seconds` histogram.
+    /// If not specified, uses default buckets: [0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0].
+    pub mermin_taskmanager_shutdown_duration_seconds: Option<Vec<f64>>,
 }

@@ -57,26 +57,30 @@ impl HistogramBucketConfig {
     /// - Non-positive values
     /// - Unsorted or duplicate values
     pub fn from(opts: &MetricsOptions) -> Self {
+        let buckets = opts.histogram_buckets.as_ref();
         Self {
             pipeline_duration: Self::validate_buckets(
-                opts.pipeline_duration_buckets.clone(),
+                buckets.and_then(|b| b.mermin_pipeline_duration_seconds.clone()),
                 DEFAULT_PIPELINE_DURATION_BUCKETS,
-                "pipeline_duration_buckets",
+                "mermin_pipeline_duration_seconds",
             ),
             export_batch_size: Self::validate_buckets(
-                opts.export_batch_size_buckets.clone(),
+                buckets.and_then(|b| b.mermin_export_batch_size.clone()),
                 DEFAULT_EXPORT_BATCH_SIZE_BUCKETS,
-                "export_batch_size_buckets",
+                "mermin_export_batch_size",
             ),
             k8s_ip_index_update_duration: Self::validate_buckets(
-                opts.k8s_ip_index_update_duration_buckets.clone(),
+                buckets.and_then(|b| {
+                    b.mermin_k8s_watcher_ip_index_update_duration_seconds
+                        .clone()
+                }),
                 DEFAULT_K8S_IP_INDEX_UPDATE_DURATION_BUCKETS,
-                "k8s_ip_index_update_duration_buckets",
+                "mermin_k8s_watcher_ip_index_update_duration_seconds",
             ),
             shutdown_duration: Self::validate_buckets(
-                opts.shutdown_duration_buckets.clone(),
+                buckets.and_then(|b| b.mermin_taskmanager_shutdown_duration_seconds.clone()),
                 DEFAULT_SHUTDOWN_DURATION_BUCKETS,
-                "shutdown_duration_buckets",
+                "mermin_taskmanager_shutdown_duration_seconds",
             ),
         }
     }
@@ -960,11 +964,16 @@ mod tests {
         let custom_k8s = vec![0.01, 0.1, 1.0];
         let custom_shutdown = vec![1.0, 5.0, 10.0];
 
+        use crate::metrics::opts::HistogramBuckets;
+
         let opts = MetricsOptions {
-            pipeline_duration_buckets: Some(custom_pipeline.clone()),
-            export_batch_size_buckets: Some(custom_export.clone()),
-            k8s_ip_index_update_duration_buckets: Some(custom_k8s.clone()),
-            shutdown_duration_buckets: Some(custom_shutdown.clone()),
+            histogram_buckets: Some(HistogramBuckets {
+                mermin_pipeline_duration_seconds: Some(custom_pipeline.clone()),
+                mermin_export_batch_size: Some(custom_export.clone()),
+                mermin_k8s_watcher_ip_index_update_duration_seconds: Some(custom_k8s.clone()),
+                mermin_taskmanager_shutdown_duration_seconds: Some(custom_shutdown.clone()),
+                ..Default::default()
+            }),
             ..Default::default()
         };
 

@@ -98,9 +98,13 @@ internal "metrics" {
 
 ## Histogram Bucket Configuration
 
-Mermin provides several histogram metrics that track distributions of values (durations, batch sizes, etc.). By default, these metrics use pre-configured bucket sizes optimized for typical workloads. You can customize these bucket sizes to better match your specific use case.
+Mermin provides several histogram metrics that track distributions of values (durations, batch sizes, etc.). By default, these metrics use pre-configured bucket sizes optimized for typical workloads. You can customize these bucket sizes inside a `histogram_buckets` block, with options named after the metric they configure.
 
-### `pipeline_duration_buckets`
+### `histogram_buckets` block
+
+Optional subsection for histogram bucket overrides. Omit the block to use default buckets for all histograms. Each key is the full metric name.
+
+#### `mermin_pipeline_duration_seconds`
 
 **Type:** Array of numbers **Default:** `[0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0]`
 
@@ -108,16 +112,7 @@ Custom buckets for the `mermin_pipeline_duration_seconds` histogram metric. This
 
 The default buckets cover a range from 10μs to 60s to capture both fast operations (eBPF ring buffer processing, typically microseconds to milliseconds) and slow operations (export, which can take seconds).
 
-**Example:**
-
-```hcl
-internal "metrics" {
-  # Customize buckets for pipeline duration to focus on sub-second operations
-  pipeline_duration_buckets = [0.0001, 0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0]
-}
-```
-
-### `export_batch_size_buckets`
+#### `mermin_export_batch_size`
 
 **Type:** Array of numbers **Default:** `[1, 10, 50, 100, 250, 500, 1000]`
 
@@ -125,16 +120,7 @@ Custom buckets for the `mermin_export_batch_size` histogram metric. This metric 
 
 The default buckets cover batch sizes from 1 to 1000 spans, which is suitable for most deployments.
 
-**Example:**
-
-```hcl
-internal "metrics" {
-  # Customize buckets for larger batch sizes
-  export_batch_size_buckets = [10, 50, 100, 500, 1000, 2000, 5000]
-}
-```
-
-### `k8s_ip_index_update_duration_buckets`
+#### `mermin_k8s_watcher_ip_index_update_duration_seconds`
 
 **Type:** Array of numbers **Default:** `[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0]`
 
@@ -142,16 +128,7 @@ Custom buckets for the `mermin_k8s_watcher_ip_index_update_duration_seconds` his
 
 The default buckets cover durations from 1ms to 1s, which is typical for IP index updates.
 
-**Example:**
-
-```hcl
-internal "metrics" {
-  # Customize buckets for faster IP index updates
-  k8s_ip_index_update_duration_buckets = [0.0005, 0.001, 0.005, 0.01, 0.05, 0.1]
-}
-```
-
-### `shutdown_duration_buckets`
+#### `mermin_taskmanager_shutdown_duration_seconds`
 
 **Type:** Array of numbers **Default:** `[0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0]`
 
@@ -167,9 +144,24 @@ This metric is only available when `debug_metrics_enabled = true`
 
 ```hcl
 internal "metrics" {
+  # Customize buckets for pipeline duration to focus on sub-second operations
+  histogram_buckets {
+    mermin_pipeline_duration_seconds = [0.0001, 0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0]
+  }
+}
+```
+
+**Example with multiple buckets:**
+
+```hcl
+internal "metrics" {
   debug_metrics_enabled = true
-  # Customize buckets for faster shutdowns
-  shutdown_duration_buckets = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
+  histogram_buckets {
+    mermin_pipeline_duration_seconds                        = [0.0001, 0.001, 0.01, 0.1, 1.0, 5.0, 10.0]
+    mermin_export_batch_size                                = [10, 50, 100, 500, 1000]
+    mermin_k8s_watcher_ip_index_update_duration_seconds     = [0.001, 0.01, 0.1, 0.5, 1.0]
+    mermin_taskmanager_shutdown_duration_seconds            = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
+  }
 }
 ```
 
@@ -182,23 +174,6 @@ internal "metrics" {
 3. **Balance granularity and cardinality**: More buckets provide finer granularity but increase metric cardinality. Typically, 5-15 buckets is sufficient.
 
 4. **Consider your SLOs**: Align bucket boundaries with your service level objectives (SLOs) to make it easier to calculate percentiles and set alerts.
-
-**Example with all bucket configurations:**
-
-```hcl
-internal "metrics" {
-  enabled = true
-  listen_address = "0.0.0.0"
-  port = 10250
-  debug_metrics_enabled = false
-  stale_metric_ttl = "5m"
-
-  # Customize histogram buckets
-  pipeline_duration_buckets = [0.0001, 0.001, 0.01, 0.1, 1.0, 5.0, 10.0]
-  export_batch_size_buckets = [10, 50, 100, 500, 1000]
-  k8s_ip_index_update_duration_buckets = [0.001, 0.01, 0.1, 0.5, 1.0]
-}
-```
 
 ## Authentication and Security
 
