@@ -1,10 +1,14 @@
-use std::{collections::HashMap, error::Error, fmt, net::Ipv4Addr, path::Path, time::Duration};
+use std::{
+    collections::HashMap, error::Error, fmt, mem::size_of, net::Ipv4Addr, path::Path,
+    time::Duration,
+};
 
 use figment::providers::Format;
 use hcl::{
     Value,
     eval::{Context, FuncArgs, FuncDef, ParamType},
 };
+use mermin_common::{FlowEvent, FlowStats};
 use serde::{Deserialize, Serialize};
 use tracing::{Level, debug, info, warn};
 
@@ -20,7 +24,7 @@ use crate::{
         conf::conf_serde::{duration, level},
         opts::InternalOptions,
     },
-    span::opts::SpanOptions,
+    span::{flow::FlowSpan, opts::SpanOptions},
 };
 
 /// TCX ordering strategy for kernel >= 6.6
@@ -786,44 +790,12 @@ pub mod conf_serde {
             Ok(ExporterProtocol::from(s))
         }
     }
-
-    /// Serde helpers for ByteSize (e.g., "256KB", "1MiB")
-    pub mod bytesize {
-        use serde::{Deserialize, Deserializer, Serializer};
-
-        pub fn serialize<S>(size: &u32, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            let byte_size = ::bytesize::ByteSize::b(*size as u64);
-            serializer.serialize_str(&byte_size.to_string())
-        }
-
-        pub fn deserialize<'de, D>(deserializer: D) -> Result<u32, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            let s = String::deserialize(deserializer)?;
-            let byte_size = s
-                .parse::<::bytesize::ByteSize>()
-                .map_err(serde::de::Error::custom)?;
-            Ok(byte_size.as_u64() as u32)
-        }
-    }
 }
 
-/// Pipeline tuning configuration for flow processing optimization
-///
-/// Defaults are tuned for typical enterprise deployments (1K-5K flows/sec):
-/// - `ebpf_max_flows = 100000` (supports ~10K flows/sec with 10x headroom)
-/// - `ebpf_ringbuf_worker_capacity = 2048` (buffer per worker)
-/// - `flow_producer_store_capacity = 32768` (initial flow map size)
-/// - `worker_count = 4` (parallel flow processing across cores)
-/// - `k8s_decorator_threads = 4` (handles typical K8s clusters efficiently)
-/// - `worker_poll_interval = 5s` (responsive timeout checking with low CPU overhead)
+/// Flow capture configuration for eBPF-level flow tracking
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
-pub struct PipelineOptions {
+pub struct FlowCapture {
     /// Maximum concurrent flows in eBPF map (default: 100,000)
     ///
     /// Controls memory usage of the eBPF FLOW_STATS.
@@ -840,107 +812,144 @@ pub struct PipelineOptions {
     ///          → 100K default provides 50x headroom for bursts
     ///          1,000 FPS (low-end public ingress) × 10s = 10,000 concurrent flows
     ///          → 100K default provides 10x headroom (adequate, consider 200K-500K for 3K+ FPS)
-    pub ebpf_max_flows: u32,
+    pub flow_stats_capacity: u32,
 
-    /// eBPF ring buffer size in bytes (default: 256 KB)
+    /// FLOW_EVENTS ring buffer capacity as entries (default: 1024)
     ///
-    /// Controls the size of the FLOW_EVENTS ring buffer used to pass new flow events
+    /// Controls the capacity of the FLOW_EVENTS ring buffer used to pass new flow events
     /// from eBPF to userspace. The ring buffer provides burst tolerance while worker
     /// channels absorb backpressure.
     ///
     /// **Memory**: This buffer size is allocated PER NODE (not per CPU).
+    /// Each entry is 234 bytes (FlowEvent size), so default 1024 entries = ~240 KB.
     ///
     /// **Sizing guide** based on new flows per second (FPS):
-    /// - General/Mixed (50-500 FPS):       256 KB (~1,120 events) - default ✓
-    /// - High Traffic (500-2K FPS):        512 KB (~2,240 events) - 2x buffer
-    /// - Very High Traffic (2K-5K FPS):    1 MB (~4,480 events) - 4x buffer
-    /// - Extreme Traffic (>5K FPS):        2 MB+ (~8,960+ events) - scale as needed
+    /// - General/Mixed (50-500 FPS):       1024 entries (~240 KB) - default ✓
+    /// - High Traffic (500-2K FPS):        2048 entries (~480 KB) - 2x buffer
+    /// - Very High Traffic (2K-5K FPS):    4096 entries (~960 KB) - 4x buffer
+    /// - Extreme Traffic (>5K FPS):        8192+ entries (~1.9 MB+) - scale as needed
     ///
-    /// **Formula**: buffer_capacity = (fps × burst_duration_seconds) × event_size
-    /// - Example: 1,000 FPS × 2s burst × 234 bytes = ~468 KB → use 512 KB
+    /// **Formula**: buffer_capacity_entries = (fps × burst_duration_seconds)
+    /// - Example: 1,000 FPS × 2s burst = 2,000 entries → use 2048
     ///
     /// **Tuning**: If you see "ring buffer full - dropping flow event" errors,
     /// increase this value. The aya loader automatically aligns to page size.
+    pub flow_events_capacity: u32,
+}
+
+impl Default for FlowCapture {
+    fn default() -> Self {
+        Self {
+            flow_stats_capacity: 100_000,
+            flow_events_capacity: 1024,
+        }
+    }
+}
+
+impl FlowCapture {
+    /// Convert flow_events_capacity (entries) to bytes for eBPF ring buffer initialization
+    pub fn flow_events_capacity_bytes(&self) -> u32 {
+        self.flow_events_capacity * size_of::<FlowEvent>() as u32
+    }
+}
+
+/// Flow producer configuration for userspace flow processing
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub struct FlowProducer {
+    /// Number of flow worker threads for packet processing (default: 4)
     ///
-    /// **Configuration examples**:
-    /// - "256KB" (default), "512KB", "1MB", "2MiB"
-    /// - Raw bytes also accepted: 262144, 524288, 1048576
-    #[serde(with = "conf_serde::bytesize")]
-    pub ebpf_ringbuf_size: u32,
+    /// Each worker processes events from its own queue with capacity `worker_queue_capacity`.
+    pub workers: usize,
 
     /// Capacity for each worker thread's queue (default: 2048)
     ///
     /// Determines how many raw eBPF events can be buffered per worker.
-    /// Total worker buffer memory = worker_count * ebpf_ringbuf_worker_capacity * event_size.
-    pub ebpf_ringbuf_worker_capacity: usize,
-
-    /// Initial capacity for the flow store (default: 32768)
-    ///
-    /// Determines the initial size of the userspace flow tracking map.
-    /// Should be set large enough to hold active flows to avoid expensive resizing.
-    pub flow_producer_store_capacity: usize,
-
-    /// Number of flow worker threads for packet processing (default: 4)
-    ///
-    /// Each worker processes events from its own queue with capacity `ebpf_ringbuf_worker_capacity`.
-    pub worker_count: usize,
+    /// Total worker buffer memory = workers * worker_queue_capacity * event_size.
+    pub worker_queue_capacity: usize,
 
     /// Worker polling interval (default: 5s)
     /// Pollers check for record intervals and timeouts at this frequency.
     /// Lower values = more responsive but higher CPU. Higher values = less overhead.
     /// At 10K flows/sec with 100K active flows and 32 pollers: ~600 checks/sec per poller.
     #[serde(with = "duration")]
-    pub worker_poll_interval: Duration,
-
-    /// Number of dedicated threads for K8s decorator (default: 4)
-    /// Creates a dedicated multi-threaded Tokio runtime for Kubernetes metadata decoration.
-    /// Each thread handles ~8K flows/sec, so 4 threads = 32K flows/sec capacity (3x headroom for 10K target).
-    /// Increase for large clusters: 8 threads for 50K flows/sec, 12 threads for 100K flows/sec.
-    pub k8s_decorator_threads: usize,
+    pub flow_store_poll_interval: Duration,
 
     /// Explicit capacity for the flow span channel (default: 16384)
     /// Buffer between workers and K8s decorator.
     /// With defaults: 16,384 slots (~1.6s buffer at 10K/s, handles export delays).
-    pub flow_producer_channel_capacity: usize,
+    pub flow_span_queue_capacity: usize,
+}
+
+impl Default for FlowProducer {
+    fn default() -> Self {
+        Self {
+            workers: 4,
+            worker_queue_capacity: 2048,
+            flow_store_poll_interval: Duration::from_secs(5),
+            flow_span_queue_capacity: 16384,
+        }
+    }
+}
+
+/// Kubernetes decorator configuration
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub struct K8sDecorator {
+    /// Number of dedicated threads for K8s decorator (default: 4)
+    /// Creates a dedicated multi-threaded Tokio runtime for Kubernetes metadata decoration.
+    /// Each thread handles ~8K flows/sec, so 4 threads = 32K flows/sec capacity (3x headroom for 10K target).
+    /// Increase for large clusters: 8 threads for 50K flows/sec, 12 threads for 100K flows/sec.
+    pub threads: usize,
 
     /// Capacity for the decorated span channel (default: 32768)
     /// Buffer between K8s decorator and OTLP exporter.
     /// With defaults: 32,768 slots (~3.2s buffer at 10K/s, prevents backpressure).
-    pub k8s_decorator_channel_capacity: usize,
-
-    // TODO: Implement adaptive sampling (ring buffer consumer in mermin-ebpf/src/main.rs)
-    /// Enable adaptive sampling under backpressure (default: true)
-    /// **NOT IMPLEMENTED:** Should drop low-priority flows when worker channels are full.
-    pub sampling_enabled: bool,
-
-    // TODO: Implement minimum sampling rate enforcement
-    /// Minimum sampling rate to maintain (default: 0.1 = 10%)
-    /// **NOT IMPLEMENTED:** Ensure at least 10% of flows pass through even under extreme load.
-    pub sampling_min_rate: f32,
-
-    // TODO: Implement backpressure threshold warnings
-    /// Drop rate threshold for backpressure warnings (default: 0.01 = 1%)
-    /// **NOT IMPLEMENTED:** Should emit warnings when drop rate exceeds this threshold.
-    pub backpressure_warning_threshold: f32,
+    pub decorated_span_queue_capacity: usize,
 }
 
-impl Default for PipelineOptions {
+impl Default for K8sDecorator {
     fn default() -> Self {
         Self {
-            ebpf_max_flows: 100_000,
-            ebpf_ringbuf_size: 256 * 1024,
-            ebpf_ringbuf_worker_capacity: 2048,
-            flow_producer_store_capacity: 32768,
-            worker_count: 4,
-            worker_poll_interval: Duration::from_secs(5),
-            k8s_decorator_threads: 4,
-            flow_producer_channel_capacity: 16384,
-            k8s_decorator_channel_capacity: 32768,
-            sampling_enabled: true,
-            sampling_min_rate: 0.1,
-            backpressure_warning_threshold: 0.01,
+            threads: 4,
+            decorated_span_queue_capacity: 32768,
         }
     }
+}
+
+/// Pipeline tuning configuration for flow processing optimization
+///
+/// Defaults are tuned for typical enterprise deployments (1K-5K flows/sec):
+/// - `flow_capture.flow_stats_capacity = 100000` (supports ~10K flows/sec with 10x headroom)
+/// - `flow_producer.worker_queue_capacity = 2048` (buffer per worker)
+/// - `flow_producer.workers = 4` (parallel flow processing across cores)
+/// - `k8s_decorator.threads = 4` (handles typical K8s clusters efficiently)
+/// - `flow_producer.flow_store_poll_interval = 5s` (responsive timeout checking with low CPU overhead)
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+#[serde(default)]
+pub struct PipelineOptions {
+    /// Flow capture configuration for eBPF-level flow tracking
+    pub flow_capture: FlowCapture,
+
+    /// Flow producer configuration for userspace flow processing
+    pub flow_producer: FlowProducer,
+
+    /// Kubernetes decorator configuration
+    pub k8s_decorator: K8sDecorator,
+    // TODO: Implement adaptive sampling (ring buffer consumer in mermin-ebpf/src/main.rs)
+    // Enable adaptive sampling under backpressure (default: true)
+    // **NOT IMPLEMENTED:** Should drop low-priority flows when worker channels are full.
+    // pub sampling_enabled: bool,
+
+    // TODO: Implement minimum sampling rate enforcement
+    // Minimum sampling rate to maintain (default: 0.1 = 10%)
+    // **NOT IMPLEMENTED:** Ensure at least 10% of flows pass through even under extreme load.
+    // pub sampling_min_rate: f32,
+
+    // TODO: Implement backpressure threshold warnings
+    // Drop rate threshold for backpressure warnings (default: 0.01 = 1%)
+    // **NOT IMPLEMENTED:** Should emit warnings when drop rate exceeds this threshold.
+    // pub backpressure_warning_threshold: f32,
 }
 
 impl PipelineOptions {
@@ -948,56 +957,92 @@ impl PipelineOptions {
         if let Some(limit) = std::env::var("POD_RESOURCES_LIMITS_MEM")
             .ok()
             .and_then(|s| s.parse().ok())
+            .filter(|&v| v > 0)
         {
             self.validate_memory_usage_against_limit(limit);
         } else {
             debug!(
                 event.name = "config.memory_check.skipped",
                 reason = "memory_limit_not_found",
-                "could not determine memory limit (POD_RESOURCES_LIMITS_MEM not set), skipping validation"
+                "could not determine memory limit (POD_RESOURCES_LIMITS_MEM not set or set to 0), skipping validation"
             );
         }
     }
 
-    fn validate_memory_usage_against_limit(&self, limit: u64) -> bool {
-        // Conservative estimates:
-        // FlowSpan ~2KB, Decorated ~4KB
-        // FlowEvent ~256 bytes (raw eBPF event)
-        // FlowEntry ~2.5KB (FlowSpan + overhead)
-        const FLOW_SPAN_SIZE: usize = 2048;
-        const DECORATED_SPAN_SIZE: usize = 4096;
-        const FLOW_EVENT_SIZE: usize = 256;
-        const FLOW_ENTRY_SIZE: usize = 2560;
+    fn validate_memory_usage_against_limit(&self, limit_bytes: u64) -> bool {
+        const MB: u64 = 1024 * 1024;
 
-        let channel_usage = (self.flow_producer_channel_capacity * FLOW_SPAN_SIZE)
-            + (self.k8s_decorator_channel_capacity * DECORATED_SPAN_SIZE);
+        let flow_event_size = size_of::<FlowEvent>() as u64;
+        let flow_stats_size = size_of::<FlowStats>() as u64;
 
-        let worker_usage = self.worker_count * self.ebpf_ringbuf_worker_capacity * FLOW_EVENT_SIZE;
+        // FlowSpan with baseline info
+        let span_undecorated_size = size_of::<FlowSpan>() as u64 + 256;
 
-        let store_usage = self.flow_producer_store_capacity * FLOW_ENTRY_SIZE;
+        // Flow span with k8s metadata
+        let span_decorated_size = size_of::<FlowSpan>() as u64 + 2048;
 
-        let estimated_usage = channel_usage + worker_usage + store_usage;
+        let capture_bytes = {
+            // FlowStats map (value + key + overhead ~ 300)
+            let stats_map = self.flow_capture.flow_stats_capacity as u64 * 300;
+            let ring_buf = self.flow_capture.flow_events_capacity as u64 * flow_event_size;
+            stats_map + ring_buf
+        };
 
-        // Warn if estimated usage exceeds 50% of container memory
-        let threshold = (limit as f64 * 0.5) as usize;
+        let producer_bytes = {
+            let worker_buffers = (self.flow_producer.workers
+                * self.flow_producer.worker_queue_capacity) as u64
+                * flow_event_size;
+            // Hash map overhead estimate (1.5x)
+            let flow_store =
+                (self.flow_capture.flow_stats_capacity as u64 * flow_stats_size * 3) / 2;
 
-        if estimated_usage > threshold {
+            let output_queue =
+                self.flow_producer.flow_span_queue_capacity as u64 * span_undecorated_size;
+
+            worker_buffers + flow_store + output_queue
+        };
+
+        let decorator_bytes = {
+            // Informer cache size estimate:
+            //
+            // Apply a factor estimate of 512 bytes per flow-slot.
+            // - 100k flows -> Est. 50 MB Cache (Matches a ~5,000-pod cluster)
+            // - 10k flows -> Est. 5 MB Cache (Matches a ~500-pod cluster)
+            let informer_cache_baseline = self.flow_capture.flow_stats_capacity as u64 * 512;
+
+            let output_queue =
+                self.k8s_decorator.decorated_span_queue_capacity as u64 * span_decorated_size;
+
+            informer_cache_baseline + output_queue
+        };
+
+        let estimated_usage = capture_bytes + producer_bytes + decorator_bytes;
+
+        // 80% threshold
+        let threshold_bytes = (limit_bytes as f64 * 0.80) as u64;
+
+        if estimated_usage > threshold_bytes {
             warn!(
                 event.name = "config.memory_warning",
-                estimated_usage_bytes = estimated_usage,
-                memory_limit_bytes = limit,
-                worker_queue_total = self.worker_count * self.ebpf_ringbuf_worker_capacity,
-                flow_producer_store_capacity = self.flow_producer_store_capacity,
-                "estimated pipeline memory usage might exceed recommended limits (50% of container memory); \
-                 consider reducing channel capacities or flow store size."
+                estimated_usage_mb = estimated_usage / MB,
+                limit_mb = limit_bytes / MB,
+                ebpf_mb = capture_bytes / MB,
+                producer_mb = producer_bytes / MB,
+                decorator_mb = decorator_bytes / MB,
+                "Pipeline memory projection ({:.1} MB) exceeds safe threshold of container limit ({:.1} MB). \
+                 Mermin is at risk of OOM Kill during traffic bursts. \
+                 Action: Increase memory limit or tune config.",
+                estimated_usage as f64 / MB as f64,
+                limit_bytes as f64 / MB as f64,
             );
             false
         } else {
             info!(
                 event.name = "config.memory_check",
-                estimated_usage_bytes = estimated_usage,
-                memory_limit_bytes = limit,
-                "channel memory usage is within safe limits"
+                estimated_usage_mb = estimated_usage / MB,
+                limit_mb = limit_bytes / MB,
+                utilization_pct = (estimated_usage as f64 / limit_bytes as f64) * 100.0,
+                "Memory configuration is valid."
             );
             true
         }
@@ -1058,20 +1103,16 @@ mod tests {
             "shutdown_timeout should be 5s"
         );
         assert_eq!(
-            cfg.pipeline.ebpf_ringbuf_worker_capacity, 2048,
-            "ebpf_ringbuf_worker_capacity should be 2048"
+            cfg.pipeline.flow_producer.worker_queue_capacity, 2048,
+            "worker_queue_capacity should be 2048"
         );
         assert_eq!(
-            cfg.pipeline.flow_producer_store_capacity, 32768,
-            "flow_producer_store_capacity should be 32768"
+            cfg.pipeline.flow_producer.flow_span_queue_capacity, 16384,
+            "default flow_span_queue_capacity should be 16384"
         );
         assert_eq!(
-            cfg.pipeline.flow_producer_channel_capacity, 16384,
-            "default flow_producer_channel_capacity should be 16384"
-        );
-        assert_eq!(
-            cfg.pipeline.k8s_decorator_channel_capacity, 32768,
-            "default k8s_decorator_channel_capacity should be 32768"
+            cfg.pipeline.k8s_decorator.decorated_span_queue_capacity, 32768,
+            "default decorated_span_queue_capacity should be 32768"
         );
 
         assert_eq!(
@@ -1207,24 +1248,23 @@ mod tests {
         let deserialized: Conf = serde_yaml::from_str(&serialized).expect("should deserialize");
 
         assert_eq!(
-            cfg.pipeline.ebpf_ringbuf_worker_capacity,
-            deserialized.pipeline.ebpf_ringbuf_worker_capacity
+            cfg.pipeline.flow_producer.worker_queue_capacity,
+            deserialized.pipeline.flow_producer.worker_queue_capacity
         );
         assert_eq!(
-            cfg.pipeline.flow_producer_store_capacity,
-            deserialized.pipeline.flow_producer_store_capacity
+            cfg.pipeline.flow_producer.flow_span_queue_capacity,
+            deserialized.pipeline.flow_producer.flow_span_queue_capacity
         );
         assert_eq!(
-            cfg.pipeline.flow_producer_channel_capacity,
-            deserialized.pipeline.flow_producer_channel_capacity
+            cfg.pipeline.k8s_decorator.decorated_span_queue_capacity,
+            deserialized
+                .pipeline
+                .k8s_decorator
+                .decorated_span_queue_capacity
         );
         assert_eq!(
-            cfg.pipeline.k8s_decorator_channel_capacity,
-            deserialized.pipeline.k8s_decorator_channel_capacity
-        );
-        assert_eq!(
-            cfg.pipeline.worker_count,
-            deserialized.pipeline.worker_count
+            cfg.pipeline.flow_producer.workers,
+            deserialized.pipeline.flow_producer.workers
         );
     }
 
@@ -1641,9 +1681,9 @@ log_level: error
 auto_reload: true
 shutdown_timeout: 30s
 pipeline:
-  ebpf_ringbuf_worker_capacity: 512
-  flow_producer_store_capacity: 8192
-  worker_count: 8
+  flow_producer:
+    worker_queue_capacity: 512
+    workers: 8
 discovery:
   instrument:
     interfaces:
@@ -1658,11 +1698,13 @@ discovery:
             assert_eq!(cfg.log_level, Level::ERROR);
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
-            assert_eq!(cfg.pipeline.ebpf_ringbuf_worker_capacity, 512);
-            assert_eq!(cfg.pipeline.flow_producer_store_capacity, 8192);
-            assert_eq!(cfg.pipeline.flow_producer_channel_capacity, 16384);
-            assert_eq!(cfg.pipeline.k8s_decorator_channel_capacity, 32768);
-            assert_eq!(cfg.pipeline.worker_count, 8);
+            assert_eq!(cfg.pipeline.flow_producer.worker_queue_capacity, 512);
+            assert_eq!(cfg.pipeline.flow_producer.flow_span_queue_capacity, 16384);
+            assert_eq!(
+                cfg.pipeline.k8s_decorator.decorated_span_queue_capacity,
+                32768
+            );
+            assert_eq!(cfg.pipeline.flow_producer.workers, 8);
             assert_eq!(cfg.discovery.instrument.interfaces, vec!["eth1", "eth2"]);
 
             Ok(())
@@ -1680,9 +1722,10 @@ log_level = "error"
 auto_reload = true
 shutdown_timeout = "30s"
 pipeline {
-    ebpf_ringbuf_worker_capacity = 512
-    flow_producer_store_capacity = 8192
-    worker_count = 8
+  flow_producer {
+    workers = 8
+    worker_queue_capacity = 512
+  }
 }
 discovery "instrument" {
     interfaces = ["eth1", "eth2"]
@@ -1696,11 +1739,13 @@ discovery "instrument" {
             assert_eq!(cfg.log_level, Level::ERROR);
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
-            assert_eq!(cfg.pipeline.ebpf_ringbuf_worker_capacity, 512);
-            assert_eq!(cfg.pipeline.flow_producer_store_capacity, 8192);
-            assert_eq!(cfg.pipeline.flow_producer_channel_capacity, 16384);
-            assert_eq!(cfg.pipeline.k8s_decorator_channel_capacity, 32768);
-            assert_eq!(cfg.pipeline.worker_count, 8);
+            assert_eq!(cfg.pipeline.flow_producer.worker_queue_capacity, 512);
+            assert_eq!(cfg.pipeline.flow_producer.flow_span_queue_capacity, 16384);
+            assert_eq!(
+                cfg.pipeline.k8s_decorator.decorated_span_queue_capacity,
+                32768
+            );
+            assert_eq!(cfg.pipeline.flow_producer.workers, 8);
             assert_eq!(cfg.discovery.instrument.interfaces, vec!["eth1", "eth2"]);
 
             Ok(())
@@ -1915,11 +1960,13 @@ discovery:
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.auto_reload, false);
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(5));
-            assert_eq!(cfg.pipeline.ebpf_ringbuf_worker_capacity, 2048);
-            assert_eq!(cfg.pipeline.flow_producer_store_capacity, 32768);
-            assert_eq!(cfg.pipeline.flow_producer_channel_capacity, 16384);
-            assert_eq!(cfg.pipeline.k8s_decorator_channel_capacity, 32768);
-            assert_eq!(cfg.pipeline.worker_count, 4);
+            assert_eq!(cfg.pipeline.flow_producer.worker_queue_capacity, 2048);
+            assert_eq!(cfg.pipeline.flow_producer.flow_span_queue_capacity, 16384);
+            assert_eq!(
+                cfg.pipeline.k8s_decorator.decorated_span_queue_capacity,
+                32768
+            );
+            assert_eq!(cfg.pipeline.flow_producer.workers, 4);
             assert_eq!(cfg.api.port, 8080);
             assert_eq!(cfg.metrics.port, 10250);
             assert!(matches!(
@@ -2125,10 +2172,12 @@ discovery:
 
             // Other defaults should be applied
             assert_eq!(cfg.log_level, Level::INFO);
-            assert_eq!(cfg.pipeline.ebpf_ringbuf_worker_capacity, 2048);
-            assert_eq!(cfg.pipeline.flow_producer_store_capacity, 32768);
-            assert_eq!(cfg.pipeline.flow_producer_channel_capacity, 16384);
-            assert_eq!(cfg.pipeline.k8s_decorator_channel_capacity, 32768);
+            assert_eq!(cfg.pipeline.flow_producer.worker_queue_capacity, 2048);
+            assert_eq!(cfg.pipeline.flow_producer.flow_span_queue_capacity, 16384);
+            assert_eq!(
+                cfg.pipeline.k8s_decorator.decorated_span_queue_capacity,
+                32768
+            );
 
             // Verify all span defaults
             assert_eq!(cfg.span.max_record_interval, Duration::from_secs(60));
@@ -3191,16 +3240,21 @@ metrics {
                 path,
                 r#"
     pipeline:
-      flow_producer_channel_capacity: 1024
-      k8s_decorator_channel_capacity: 2048
+      flow_producer:
+        flow_span_queue_capacity: 1024
+      k8s_decorator:
+        decorated_span_queue_capacity: 2048
                     "#,
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config should load");
 
-            assert_eq!(cfg.pipeline.flow_producer_channel_capacity, 1024);
-            assert_eq!(cfg.pipeline.k8s_decorator_channel_capacity, 2048);
+            assert_eq!(cfg.pipeline.flow_producer.flow_span_queue_capacity, 1024);
+            assert_eq!(
+                cfg.pipeline.k8s_decorator.decorated_span_queue_capacity,
+                2048
+            );
 
             Ok(())
         });
@@ -3208,8 +3262,7 @@ metrics {
 
     #[test]
     fn test_memory_usage_validation_logic() {
-        // Default config: 16384 * 2048 + 32768 * 4096
-        // = 33,554,432 + 134,217,728 = 167,772,160 bytes (~160 MB)
+        //  Estimated memory usage: 312.6 MB with defaults
         let opts = PipelineOptions::default();
 
         assert!(
@@ -3219,7 +3272,7 @@ metrics {
 
         assert!(
             !opts.validate_memory_usage_against_limit(268_435_456),
-            "Should warn with 256MB memory"
+            "Should warn with 256MB memory (estimated usage exceeds 80% threshold)"
         );
 
         assert!(

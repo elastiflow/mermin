@@ -17,13 +17,20 @@ shutdown_timeout = "30s"
 
 # Defaults are optimized for typical production workloads (1K-5K flows/sec)
 pipeline {
-  ebpf_max_flows = 500000        # For high-traffic ingress (>10K flows/sec)
-  ebpf_ringbuf_worker_capacity = 2048   # Default buffer per worker
-  flow_producer_store_capacity = 32768    # Initial flow store size
-  worker_count = 8               # For very busy nodes
-  k8s_decorator_threads = 12     # For very large clusters
-  flow_producer_channel_capacity = 16384
-  k8s_decorator_channel_capacity = 32768
+  flow_capture {
+    flow_stats_capacity = 500000        # For high-traffic ingress (>10K flows/sec)
+    flow_events_capacity = 1024         # Ring buffer capacity (entries)
+  }
+  flow_producer {
+    workers = 8                          # For very busy nodes
+    worker_queue_capacity = 2048         # Default buffer per worker
+    flow_store_poll_interval = "5s"      # Polling interval
+    flow_span_queue_capacity = 16384     # Buffer to K8s decorator
+  }
+  k8s_decorator {
+    threads = 12                         # For very large clusters
+    decorated_span_queue_capacity = 32768  # Buffer to exporter
+  }
 }
 
 # API for health checks (required for liveness/readiness probes)
@@ -407,13 +414,19 @@ log_level = "warn"  # Reduce logging overhead
 
 # Maximize capacity and worker parallelism for extreme scale
 pipeline {
-  ebpf_max_flows = 1000000
-  ebpf_ringbuf_worker_capacity = 4096
-  flow_producer_store_capacity = 131072
-  worker_count = 16
-  k8s_decorator_threads = 24
-  flow_producer_channel_capacity = 32768
-  k8s_decorator_channel_capacity = 65536
+  flow_capture {
+    flow_stats_capacity = 1000000        # Extreme scale
+    flow_events_capacity = 2048          # Large ring buffer
+  }
+  flow_producer {
+    workers = 16                         # High parallelism
+    worker_queue_capacity = 4096         # Large per-worker buffer
+    flow_span_queue_capacity = 32768     # Large buffer to K8s decorator
+  }
+  k8s_decorator {
+    threads = 24                         # Very large clusters
+    decorated_span_queue_capacity = 65536  # Large buffer to exporter
+  }
 }
 
 api {

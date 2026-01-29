@@ -16,6 +16,7 @@ hidden: true
     - [Channel Metrics (`mermin_channel_*`)](#channel-metrics-mermin_channel_)
     - [Pipeline Metrics (`mermin_pipeline_*`)](#pipeline-metrics-mermin_pipeline_)
     - [TaskManager Metrics (`mermin_taskmanager_*`)](#taskmanager-metrics-mermin_taskmanager_)
+  - [Grafana Dashboard](#grafana-dashboard)
 
 
 This guide describes the Prometheus metrics endpoint exposed by Mermin and provides a comprehensive breakdown of all available metrics, their types, and descriptions.
@@ -66,11 +67,7 @@ Monitoring these is crucial for ensuring that Mermin's foundational data collect
   *Description*: Maximum capacity of eBPF maps. For hash maps (FLOW_STATS, LISTENING_PORTS) this is max entries. For ring buffers (FLOW_EVENTS) this is size in bytes.
   *Labels*:
   - `map`
-- `mermin_ebpf_map_entries`
-  *Type*: `gauge`
-  *Description*: Current number of entries in eBPF maps. For hash maps (FLOW_STATS, LISTENING_PORTS) this is the entry count. Not available for ring buffers (FLOW_EVENTS).
-  *Labels*:
-  - `map`
+  - `unit`
 - `mermin_ebpf_map_ops_total`
   *Type*: `counter`
   *Description*: Total number of eBPF map operations
@@ -78,6 +75,12 @@ Monitoring these is crucial for ensuring that Mermin's foundational data collect
   - `map`
   - `operation`
   - `status`
+- `mermin_ebpf_map_size`
+  *Type*: `gauge`
+  *Description*: Current number of entries in eBPF maps. For hash maps (FLOW_STATS, LISTENING_PORTS) this is the entry count. Not available for ring buffers (FLOW_EVENTS).
+  *Labels*:
+  - `map`
+  - `unit`
 - `mermin_ebpf_method`
   *Type*: `gauge`
   *Description*: Current eBPF attachment method used (tc or tcx)
@@ -182,3 +185,7 @@ These metrics track the number and type of active background tasks managed by Me
   *Description*: Current number of active tasks across all task types
   *Labels*:
   - `task`
+
+## Grafana Dashboard
+
+Grafana dashboard can be imported from the [Dashboard JSON](./grafana-mermin-app.json)

@@ -1,2 +1,18 @@
+*
+
+# misc
+!Cargo.lock
+!Cargo.toml
+!rust-toolchain.toml
+!rustfmt.toml
+
+# src
+!/common-build/
+!/mermin/
+!/mermin-common/
+!/mermin-ebpf/
+!/network-types/
+
+# re-ignore
+mermin/tests/
 **/target/
-mermin/tests/e2e

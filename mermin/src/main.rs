@@ -24,6 +24,7 @@ use aya::{
 use clap::Parser;
 use dashmap::DashMap;
 use error::{MerminError, Result};
+use mermin_common::MapUnit;
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal as unix_signal};
 use tokio::{
@@ -131,7 +132,6 @@ const EXPORT_TIMEOUT_SECS: u64 = 10;
 
 // Constants for eBPF map capacities
 const LISTENING_PORTS_CAPACITY: u64 = 65536;
-const FLOW_EVENTS_RINGBUF_SIZE_BYTES: u64 = 256 * 1024;
 
 async fn run(cli: Cli) -> Result<()> {
     // TODO: listen for SIGUP `kill -HUP $(pidof mermin)` to reload the eBPF program and all configuration
@@ -340,8 +340,13 @@ async fn run(cli: Cli) -> Result<()> {
     }
     let mut ebpf = EbpfLoader::new()
         .map_pin_path(&map_pin_path)
-        .set_max_entries("FLOW_STATS", conf.pipeline.ebpf_max_flows)
-        .set_max_entries("FLOW_EVENTS", conf.pipeline.ebpf_ringbuf_size)
+        .set_max_entries("FLOW_STATS", conf.pipeline.flow_capture.flow_stats_capacity)
+        .set_max_entries("TCP_STATS", conf.pipeline.flow_capture.flow_stats_capacity)
+        .set_max_entries("ICMP_STATS", conf.pipeline.flow_capture.flow_stats_capacity)
+        .set_max_entries(
+            "FLOW_EVENTS",
+            conf.pipeline.flow_capture.flow_events_capacity_bytes(),
+        )
         .load(aya::include_bytes_aligned!(concat!(
             env!("OUT_DIR"),
             "/mermin"
@@ -350,7 +355,7 @@ async fn run(cli: Cli) -> Result<()> {
         event.name = "ebpf.loaded",
         map.pin_path = %map_pin_path,
         map.schema_version = EBPF_MAP_SCHEMA_VERSION,
-        "eBPF program loaded, maps will persist with versioned pinning"
+        "ebpf program loaded, maps will persist with versioned pinning"
     );
 
     if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
@@ -358,7 +363,7 @@ async fn run(cli: Cli) -> Result<()> {
         warn!(
             event.name = "ebpf.logger_init_failed",
             error.message = %e,
-            "failed to initialize eBPF logger"
+            "failed to initialize ebpf logger"
         );
     }
 
@@ -423,7 +428,7 @@ async fn run(cli: Cli) -> Result<()> {
             None => {
                 error!(
                     event.name = "ebpf.unexpected_error",
-                    "no ebpf maps found in loaded program, cannot test /sys/fs/bpf writability - this is unexpected and indicates a problem with the eBPF program."
+                    "no ebpf maps found in loaded program, cannot test /sys/fs/bpf writability - this is unexpected and indicates a problem with the ebpf program."
                 );
                 false
             }
@@ -435,7 +440,7 @@ async fn run(cli: Cli) -> Result<()> {
         info!(
             event.name = "ebpf.bpf_fs_check_complete",
             bpf_fs_writable = bpf_fs_writable,
-            "checked /sys/fs/bpf writability for TCX link pinning"
+            "checked /sys/fs/bpf writability for tcx link pinning"
         );
     }
 
@@ -447,6 +452,20 @@ async fn run(cli: Cli) -> Result<()> {
                 .ok_or_else(|| MerminError::internal("FLOW_STATS not found in eBPF object"))?,
         )
         .map_err(|e| MerminError::internal(format!("failed to convert FLOW_STATS: {e}")))?,
+    ));
+    let tcp_stats_map = Arc::new(tokio::sync::Mutex::new(
+        aya::maps::HashMap::try_from(
+            ebpf.take_map("TCP_STATS")
+                .ok_or_else(|| MerminError::internal("TCP_STATS not found in eBPF object"))?,
+        )
+        .map_err(|e| MerminError::internal(format!("failed to convert TCP_STATS: {e}")))?,
+    ));
+    let icmp_stats_map = Arc::new(tokio::sync::Mutex::new(
+        aya::maps::HashMap::try_from(
+            ebpf.take_map("ICMP_STATS")
+                .ok_or_else(|| MerminError::internal("ICMP_STATS not found in eBPF object"))?,
+        )
+        .map_err(|e| MerminError::internal(format!("failed to convert ICMP_STATS: {e}")))?,
     ));
     let flow_events_ringbuf = aya::maps::RingBuf::try_from(
         ebpf.take_map("FLOW_EVENTS")
@@ -464,19 +483,22 @@ async fn run(cli: Cli) -> Result<()> {
     ));
 
     metrics::registry::EBPF_MAP_CAPACITY
-        .with_label_values(&[EbpfMapName::FlowStats.as_str()])
-        .set(conf.pipeline.ebpf_max_flows as i64);
+        .with_label_values(&[EbpfMapName::FlowStats.as_str(), MapUnit::Entries.as_str()])
+        .set(conf.pipeline.flow_capture.flow_stats_capacity as i64);
     metrics::registry::EBPF_MAP_CAPACITY
-        .with_label_values(&[EbpfMapName::FlowEvents.as_str()])
-        .set(FLOW_EVENTS_RINGBUF_SIZE_BYTES as i64);
+        .with_label_values(&[EbpfMapName::FlowEvents.as_str(), MapUnit::Bytes.as_str()])
+        .set(conf.pipeline.flow_capture.flow_events_capacity_bytes() as i64);
     metrics::registry::EBPF_MAP_CAPACITY
-        .with_label_values(&[EbpfMapName::ListeningPorts.as_str()])
+        .with_label_values(&[
+            EbpfMapName::ListeningPorts.as_str(),
+            MapUnit::Entries.as_str(),
+        ])
         .set(LISTENING_PORTS_CAPACITY as i64);
 
     info!(
         event.name = "ebpf.maps_ready",
         schema_version = EBPF_MAP_SCHEMA_VERSION,
-        "eBPF maps ready for flow producer"
+        "ebpf maps ready for flow producer"
     );
 
     let attach_method = if use_tcx { "TCX" } else { "netlink" };
@@ -486,11 +508,11 @@ async fn run(cli: Cli) -> Result<()> {
         ebpf.attach.priority = conf.discovery.instrument.tc_priority,
         ebpf.attach.tcx_order = %conf.discovery.instrument.tcx_order,
         system.kernel.version = %kernel_version,
-        "determined TC attachment method and priority"
+        "determined tc attachment method and priority"
     );
     info!(
         event.name = "ebpf.ready_for_controller",
-        "eBPF programs ready to move to controller thread"
+        "ebpf programs ready to move to controller thread"
     );
 
     let patterns = if conf.discovery.instrument.interfaces.is_empty() {
@@ -561,8 +583,8 @@ async fn run(cli: Cli) -> Result<()> {
 
     conf.pipeline.validate_memory_usage();
 
-    let flow_span_capacity = conf.pipeline.flow_producer_channel_capacity;
-    let decorated_span_capacity = conf.pipeline.k8s_decorator_channel_capacity;
+    let flow_span_capacity = conf.pipeline.flow_producer.flow_span_queue_capacity;
+    let decorated_span_capacity = conf.pipeline.k8s_decorator.decorated_span_queue_capacity;
 
     let (flow_span_tx, mut flow_span_rx) = mpsc::channel(flow_span_capacity);
     metrics::registry::CHANNEL_CAPACITY
@@ -591,24 +613,28 @@ async fn run(cli: Cli) -> Result<()> {
     // Note: This only reflects the startup state; eBPF kprobes maintain the map
     // in real-time after this, but those changes are not reflected in these metrics.
     if metrics::registry::debug_enabled() {
-        metrics::registry::EBPF_MAP_ENTRIES
-            .with_label_values(&[EbpfMapName::ListeningPorts.as_str()])
+        metrics::registry::EBPF_MAP_SIZE
+            .with_label_values(&[
+                EbpfMapName::ListeningPorts.as_str(),
+                MapUnit::Entries.as_str(),
+            ])
             .set(scanned_ports as i64);
     }
 
     info!(
         event.name = "listening_ports.scan_complete",
         total_ports = scanned_ports,
-        "populated eBPF map with existing listening ports"
+        "populated ebpf map with existing listening ports"
     );
 
     let flow_span_producer = FlowSpanProducer::new(
         conf.clone().span,
-        conf.pipeline.ebpf_ringbuf_worker_capacity,
-        conf.pipeline.flow_producer_store_capacity,
-        conf.pipeline.worker_count,
+        conf.pipeline.flow_producer.worker_queue_capacity,
+        conf.pipeline.flow_producer.workers,
         Arc::clone(&iface_map),
         flow_stats_map,
+        tcp_stats_map,
+        icmp_stats_map,
         flow_events_ringbuf,
         flow_span_tx,
         listening_ports_map,
@@ -670,7 +696,7 @@ async fn run(cli: Cli) -> Result<()> {
     };
 
     // K8s decorator runs on dedicated thread pool to prevent K8s API lookups from blocking main runtime
-    let decorator_threads = conf.pipeline.k8s_decorator_threads;
+    let decorator_threads = conf.pipeline.k8s_decorator.threads;
     let get_extract_rules = |direction: &str| -> Vec<String> {
         conf.attributes
             .as_ref()
@@ -872,7 +898,7 @@ async fn run(cli: Cli) -> Result<()> {
 
         match shutdown_exporter_gracefully(Arc::clone(&exporter), Duration::from_secs(5)).await {
             Ok(()) => {
-                info!(event.name = "exporter.otlp_shutdown_success", "OpenTelemetry provider shut down cleanly");
+                info!(event.name = "exporter.otlp_shutdown_success", "opentelemetry provider shut down cleanly");
             }
             Err(e) => {
                 let event_name = match &e {
@@ -881,7 +907,7 @@ async fn run(cli: Cli) -> Result<()> {
                     MerminError::Internal(msg) if msg.contains("panicked") => "exporter.otlp_shutdown_panic",
                     _ => "exporter.otlp_shutdown_error",
                 };
-                warn!(event.name = event_name, error.message = %e, "OpenTelemetry provider shutdown failed");
+                warn!(event.name = event_name, error.message = %e, "opentelemetry provider shutdown failed");
             }
         }
 

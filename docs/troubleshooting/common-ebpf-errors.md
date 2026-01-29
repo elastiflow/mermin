@@ -158,22 +158,26 @@ ERROR mermin: ebpf - ring buffer full - dropping flow event for new flow
 
    ```hcl
    pipeline {
-     ebpf_ringbuf_size = "512KB"  # Double the default 256KB
-     # Or use: "1MB", "2MiB" for higher traffic
+     flow_capture {
+       flow_events_capacity = 2048  # Double the default 1024 entries
+       # Or use: 4096, 8192 for higher traffic
+     }
    }
    ```
 
-   **Sizing guide**:
-   - Default 256 KB handles ~1,120 flow events (~500 FPS sustained)
-   - 512 KB for 500-2K FPS
-   - 1 MB for 2K-5K FPS
-   - 2 MB+ for >5K FPS
+   **Sizing guide** (based on flows per second):
+   - Default 1024 entries (~240 KB) handles 50-500 FPS
+   - 2048 entries (~480 KB) for 500-2K FPS
+   - 4096 entries (~960 KB) for 2K-5K FPS
+   - 8192+ entries (~1.9 MB+) for >5K FPS
 
 2. **Scale worker threads** if backpressure is the issue:
 
    ```hcl
    pipeline {
-     worker_count = 8  # Default is 4
+     flow_producer {
+       workers = 8  # Default is 4
+     }
    }
    ```
 

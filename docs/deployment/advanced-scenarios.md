@@ -264,18 +264,24 @@ readinessProbe:
 
 ### High-Traffic Configuration
 
-For environments with very high network traffic (> 10,000 flows/second), such as public ingress nodes or edge deployments:
+For environments with extreme network traffic (> 10,000 flows/second), such as public ingress nodes or edge deployments:
 
 ```hcl
 # Increase internal buffering and parallelism for extreme scale
 pipeline {
-  ebpf_max_flows = 500000          # Support up to 50K flows/sec
-  ebpf_ringbuf_worker_capacity = 4096     # Larger per-worker buffer
-  flow_producer_store_capacity = 131072     # ~100K active flows
-  worker_count = 8
-  k8s_decorator_threads = 12
-  flow_producer_channel_capacity = 32768      # Larger buffer for high-latency decoration
-  k8s_decorator_channel_capacity = 65536  # Larger buffer for slow exporters
+  flow_capture {
+    flow_stats_capacity = 500000        # Support up to 50K flows/sec
+    flow_events_capacity = 8192         # Larger ring buffer
+  }
+  flow_producer {
+    workers = 8                          # High parallelism
+    worker_queue_capacity = 4096         # Larger per-worker buffer
+    flow_span_queue_capacity = 32768     # Larger buffer to K8s decorator
+  }
+  k8s_decorator {
+    threads = 12                         # For very large clusters
+    decorated_span_queue_capacity = 65536  # Larger buffer to exporter
+  }
 }
 
 # Aggressive flow expiration to limit memory
@@ -346,13 +352,18 @@ For nodes with limited memory:
 ```hcl
 # Reduce buffer sizes for low-resource environments
 pipeline {
-  ebpf_ringbuf_worker_capacity = 1024
-  flow_producer_store_capacity = 4096
-  worker_count = 1
-  k8s_decorator_threads = 2
-  
-  flow_producer_channel_capacity = 2048
-  k8s_decorator_channel_capacity = 4096
+  flow_capture {
+    flow_events_capacity = 512
+  }
+  flow_producer {
+    workers = 1
+    worker_queue_capacity = 1024
+    flow_span_queue_capacity = 2048
+  }
+  k8s_decorator {
+    threads = 2
+    decorated_span_queue_capacity = 4096
+  }
 }
 
 # Aggressive flow expiration
@@ -482,16 +493,16 @@ Key metrics to monitor:
 The appropriate fix depends on where drops occur in the pipeline:
 
 1. **Worker queue drops** (eBPF events dropped before reaching workers):
-   - Increase `pipeline.ebpf_ringbuf_worker_capacity` (per-worker buffer)
-   - Increase `pipeline.worker_count` (more parallel processing)
+   - Increase `pipeline.flow_producer.worker_queue_capacity` (per-worker buffer)
+   - Increase `pipeline.flow_producer.workers` (more parallel processing)
    - Add more CPU resources
 
 2. **Flow span channel drops** (drops between workers and K8s decorator):
-   - Increase `pipeline.flow_producer_channel_capacity`
-   - Increase `pipeline.k8s_decorator_threads` (faster decoration)
+   - Increase `pipeline.flow_producer.flow_span_queue_capacity`
+   - Increase `pipeline.k8s_decorator.threads` (faster decoration)
 
 3. **Decorated span channel drops** (drops between decorator and exporter):
-   - Increase `pipeline.k8s_decorator_channel_capacity`
+   - Increase `pipeline.k8s_decorator.decorated_span_queue_capacity`
    - Optimize exporter configuration (larger batches, more concurrent exports)
 
 4. **General recommendations:**
