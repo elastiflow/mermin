@@ -93,9 +93,9 @@ use aya_ebpf::{
     programs::TcContext,
 };
 #[cfg(not(feature = "test"))]
-use aya_log_ebpf::{error, trace};
-#[cfg(not(feature = "test"))]
 use mermin_common::FlowEvent;
+#[cfg(not(feature = "test"))]
+use mermin_common::LogEntry;
 use mermin_common::{
     ConnectionState, Direction, FlowKey, FlowStats, IcmpStats, IpVersion, TcpStats,
 };
@@ -164,6 +164,17 @@ const RING_BUF_SIZE_BYTES: u32 = 256 * 1024;
 #[map]
 static mut FLOW_EVENTS: RingBuf = RingBuf::with_byte_size(RING_BUF_SIZE_BYTES, 0);
 
+// Size: 4 KB (~256 LogEntry entries, each 16 bytes)
+// Small buffer for eBPF logging - replaces aya_log to avoid BTF issues.
+// Logs are low-volume (errors only), so a small buffer is sufficient.
+#[cfg(not(feature = "test"))]
+const LOG_BUF_SIZE_BYTES: u32 = 4 * 1024;
+
+// Log events ring buffer: sends log entries to userspace
+#[cfg(not(feature = "test"))]
+#[map]
+static mut LOG_EVENTS: RingBuf = RingBuf::with_byte_size(LOG_BUF_SIZE_BYTES, 0);
+
 // Per-CPU scratch space for FlowStats initialization
 // Used to avoid stack overflow (FlowStats is 232 bytes, eBPF stack limit is 512 bytes)
 #[cfg(not(feature = "test"))]
@@ -199,46 +210,55 @@ static mut LISTENING_PORTS: HashMap<mermin_common::ListeningPortKey, u8> =
 /// - **MalformedHeader** - Header structure is invalid or corrupted
 /// - **Unsupported** - Protocol/header type not currently supported
 /// - **InternalError** - Map access failure or internal state error
+///
+/// Discriminant values match `LogErrorCode` in mermin-common for userspace decoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum Error {
-    OutOfBounds,
-    MalformedHeader,
-    UnsupportedEtherType,
-    UnsupportedProtocol,
-    InternalError,
+    OutOfBounds = 0,
+    MalformedHeader = 1,
+    InternalError = 2,
+    UnsupportedEtherType = 3,
+    UnsupportedProtocol = 4,
+    FlowEventDropped = 5,
 }
 
-/// Log errors at appropriate severity levels.
+/// Log level constants matching LogLevel enum in mermin-common.
 ///
-/// Uses `error!` for critical errors (OutOfBounds, MalformedHeader, InternalError)
-/// and `trace!` for expected non-critical errors (unsupported protocols/ethertypes).
-/// This prevents log spam from legitimate non-IP traffic (ARP, LLDP, etc.).
+/// Only levels actually used in `log_error()` are defined here.
+/// Full set: Trace=0, Debug=1, Info=2, Warn=3, Error=4
+#[cfg(not(feature = "test"))]
+const LOG_LEVEL_TRACE: u8 = 0;
+#[cfg(not(feature = "test"))]
+const LOG_LEVEL_WARN: u8 = 3;
+#[cfg(not(feature = "test"))]
+const LOG_LEVEL_ERROR: u8 = 4;
+
+/// Log errors at appropriate severity levels via ring buffer.
 #[cfg(not(feature = "test"))]
 #[inline(always)]
 fn log_error(ctx: &TcContext, err: Error, direction: Direction) {
-    match err {
-        Error::OutOfBounds => {
-            error!(ctx, "out of bounds error in direction={}", direction as u8);
-        }
-        Error::MalformedHeader => {
-            error!(
-                ctx,
-                "malformed header error in direction={}", direction as u8
-            );
-        }
-        Error::InternalError => {
-            error!(ctx, "internal error in direction={}", direction as u8);
-        }
-        Error::UnsupportedEtherType => {
-            trace!(
-                ctx,
-                "unsupported ether type in direction={}", direction as u8
-            );
-        }
-        Error::UnsupportedProtocol => {
-            trace!(ctx, "unsupported protocol in direction={}", direction as u8);
-        }
+    let level = match err {
+        Error::OutOfBounds | Error::MalformedHeader | Error::InternalError => LOG_LEVEL_ERROR,
+        Error::FlowEventDropped => LOG_LEVEL_WARN,
+        Error::UnsupportedEtherType | Error::UnsupportedProtocol => LOG_LEVEL_TRACE,
+    };
+
+    // Try to reserve space in the log ring buffer
+    #[allow(static_mut_refs)]
+    if let Some(mut entry) = unsafe { LOG_EVENTS.reserve::<LogEntry>(0) } {
+        let log_entry = LogEntry {
+            timestamp_ns: unsafe { bpf_ktime_get_boot_ns() },
+            ifindex: unsafe { (*ctx.skb.skb).ifindex },
+            level,
+            error_code: err as u8,
+            direction: direction as u8,
+            _pad: 0,
+        };
+        entry.write(log_entry);
+        entry.submit(0);
     }
+    // If ring buffer is full, silently drop the log (non-critical)
 }
 
 #[cfg(not(feature = "test"))]
@@ -442,11 +462,9 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             event.write(*flow_event);
             event.submit(0);
         } else {
-            error!(
-                ctx,
-                "ebpf - ring buffer full - dropping flow event for new flow (protocol={})",
-                flow_key.protocol as u8
-            );
+            // The flow is still tracked in FLOW_STATS, but userspace won't get
+            // initial packet data for deep inspection.
+            log_error(ctx, Error::FlowEventDropped, direction);
         }
 
         stats_ptr = unsafe { FLOW_STATS.get_ptr_mut(&normalized_key) };
@@ -532,7 +550,7 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
 /// - Layer 4: TCP/UDP ports or ICMP type/code
 ///
 /// This function uses bounded loops to satisfy old kernel verifiers (5.14+).
-#[inline(never)]
+#[inline(always)]
 fn parse_flow_key(ctx: &TcContext, key: &mut FlowKey) -> Result<EtherType, Error> {
     if eth::ETH_LEN > ctx.len() as usize {
         return Err(Error::MalformedHeader);
@@ -736,7 +754,7 @@ fn capture_direction_metadata(
 ///
 /// Returns [`Error::OutOfBounds`] if packet data cannot be read, or
 /// [`Error::UnsupportedProtocol`] for unsupported L4 protocols.
-#[inline(never)]
+#[inline(always)]
 fn parse_metadata(
     ctx: &TcContext,
     stats: &mut FlowStats,

@@ -6,7 +6,6 @@ use aya::{
     programs::{SchedClassifier, TcAttachType},
     util::online_cpus,
 };
-use aya_log::EbpfLogger;
 use bytes::BytesMut;
 use integration_common::ParsedHeader;
 use log::{LevelFilter, debug, info, warn};
@@ -225,9 +224,6 @@ pub async fn setup_test_with_config(config: TestConfig) -> Result<TestHarness> {
 
     // Load the eBPF program
     let mut ebpf = Ebpf::load(config.ebpf_program_path)?;
-    if let Err(e) = EbpfLogger::init(&mut ebpf) {
-        warn!("Failed to initialize eBPF logger: {}", e);
-    }
 
     // Get the program by name and convert it to the expected type
     let program: &mut SchedClassifier = ebpf

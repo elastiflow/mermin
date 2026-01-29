@@ -218,23 +218,23 @@ docker build -t mermin-builder:latest --target builder .
 
 #### 2. Stack Analysis Scripts
 
-The project includes three analysis scripts in the `scripts/` directory:
+The project includes three analysis scripts in the `hack/` directory:
 
-**`scripts/check_stack_usage.sh`** - Quick health check (30 seconds)
+**`hack/check_stack_usage.sh`** - Quick health check (30 seconds)
 
 - **Purpose**: Fast individual function stack analysis for daily development and CI/CD
 - **Thresholds**: Critical >320 bytes, Warning >192 bytes (64-byte aligned)
 - **Output**: Simple pass/fail with color-coded status
 - **Features**: Forces fresh builds, detects build failures, prevents stale results
 
-**`scripts/analyze_call_chain.sh`** - Call chain overview (45 seconds)
+**`hack/analyze_call_chain.sh`** - Call chain overview (45 seconds)
 
 - **Purpose**: Shows function calls and stack usage levels for initial investigation
 - **Output**: Function call instructions and sorted stack usage levels
 - **Use When**: Investigating verifier failures or understanding call patterns
 - **Features**: Forces fresh builds, shows binary timestamps, handles no-call scenarios
 
-**`scripts/cumulative_stack_calculator.sh`** - Educational deep dive (2 minutes)
+**`hack/cumulative_stack_calculator.sh`** - Educational deep dive (2 minutes)
 
 - **Purpose**: Step-by-step educational breakdown of cumulative stack calculation
 - **Output**: Detailed hex-to-decimal conversions, scenarios, and insights
@@ -245,18 +245,18 @@ The project includes three analysis scripts in the `scripts/` directory:
 
 ```shell
 # Quick health check (30 seconds)
-./mermin/tests/e2e/common/check_stack_usage.sh
+./hack/check_stack_usage.sh
 
 # Call chain overview (45 seconds)
-./scripts/analyze_call_chain.sh
+./hack/analyze_call_chain.sh
 
 # Detailed educational analysis (2 minutes)
-./scripts/cumulative_stack_calculator.sh
+./hack/cumulative_stack_calculator.sh
 ```
 
 ### Interpreting Results
 
-#### Understanding `check_stack_usage.sh` Output
+#### Understanding `hack/check_stack_usage.sh` Output
 
 ```bash
 📊 Individual function max stack: 136 bytes (0x88)
@@ -267,7 +267,7 @@ The project includes three analysis scripts in the `scripts/` directory:
 - **192-320 bytes**: Monitor call depth - might exceed 512 in deep chains
 - **Above 320 bytes**: High risk - will likely cause verifier failures
 
-#### Understanding `analyze_call_chain.sh` Output
+#### Understanding `hack/analyze_call_chain.sh` Output
 
 ```bash
 📞 Function Calls Found:
@@ -338,9 +338,9 @@ docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:la
 - name: Check eBPF Stack Usage
   run: |
     docker build -t mermin-builder:latest --target builder .
-    ./mermin/tests/e2e/common/check_stack_usage.sh
+    ./hack/check_stack_usage.sh
     # Exit with error if stack usage is too high
-    MAX_STACK=$(./mermin/tests/e2e/common/check_stack_usage.sh | grep -oE '[0-9]+ bytes' | grep -oE '[0-9]+' | head -1)
+    MAX_STACK=$(./hack/check_stack_usage.sh | grep -oE '[0-9]+ bytes' | grep -oE '[0-9]+' | head -1)
     if [ "$MAX_STACK" -gt 320 ]; then exit 1; fi
 ```
 
@@ -348,8 +348,8 @@ docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:la
 
 ```bash
 # Get detailed analysis when CI fails
-./scripts/analyze_call_chain.sh
-./scripts/cumulative_stack_calculator.sh
+./hack/analyze_call_chain.sh
+./hack/cumulative_stack_calculator.sh
 ```
 
 This approach gives you both quick diagnostics and deep analysis capabilities for eBPF stack issues.

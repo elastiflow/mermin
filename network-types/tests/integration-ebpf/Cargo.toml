@@ -11,11 +11,9 @@ test = false
 
 [dependencies]
 aya-ebpf = { workspace = true }
-aya-log-ebpf = { workspace = true }
 integration-common = { path = "../integration-common", default-features = false }
 network-types = { path = "../.." }
 
 [build-dependencies]
 aya-build = { workspace = true }
 which = { workspace = true }
-

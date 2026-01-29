@@ -221,13 +221,6 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
             env!("OUT_DIR"),
             "/mermin"
         )))?;
-    if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
-        warn!(
-            event.name = "diagnose.bpf.logger_init_failed",
-            error.message = %e,
-            "failed to initialize eBPF logger"
-        );
-    }
 
     let kernel_version = KernelVersion::current().unwrap_or(KernelVersion::new(0, 0, 0));
     let use_tcx = kernel_version >= KernelVersion::new(6, 6, 0);

@@ -7,7 +7,6 @@ use aya_ebpf::{
     maps::{PerCpuArray, PerfEventArray},
     programs::TcContext,
 };
-use aya_log_ebpf::{Level, log};
 use integration_common::{
     AhTestData, DestOptsTestData, EspTestData, EthernetTestData, FragmentTestData,
     GenericRouteTestData, GeneveTestData, GreTestData, HeaderUnion, HipTestData, HopOptTestData,
@@ -87,7 +86,7 @@ fn u8_to_packet_type(val: u8) -> Option<PacketType> {
 
 /// Store test data in PerCpuArray and verify it can be retrieved
 fn store_and_verify_test_data(
-    ctx: &TcContext,
+    _ctx: &TcContext,
     packet_type: PacketType,
     first_header_byte: u8,
 ) -> Result<(), i32> {
@@ -101,7 +100,6 @@ fn store_and_verify_test_data(
             (*ptr).parsed_successfully = 1;
             (*ptr).reserved = [0; 2];
         } else {
-            log!(ctx, Level::Error, "Failed to get PerCpuArray pointer");
             return Err(TC_ACT_SHOT);
         }
     }
@@ -111,32 +109,19 @@ fn store_and_verify_test_data(
         #[allow(static_mut_refs)]
         if let Some(stored_data) = TEST_DATA_STORAGE.get(0) {
             if stored_data.packet_type != packet_type {
-                log!(ctx, Level::Error, "Packet type verification failed");
                 return Err(TC_ACT_SHOT);
             }
             if stored_data.first_header_byte != first_header_byte {
-                log!(ctx, Level::Error, "First header byte verification failed");
                 return Err(TC_ACT_SHOT);
             }
             if stored_data.parsed_successfully != 1 {
-                log!(ctx, Level::Error, "Parse success flag verification failed");
                 return Err(TC_ACT_SHOT);
             }
         } else {
-            log!(
-                ctx,
-                Level::Error,
-                "Failed to retrieve data from PerCpuArray"
-            );
             return Err(TC_ACT_SHOT);
         }
     }
 
-    log!(
-        ctx,
-        Level::Info,
-        "PerCpuArray storage and verification successful"
-    );
     Ok(())
 }
 
@@ -149,19 +134,12 @@ pub fn integration_test(ctx: TcContext) -> i32 {
 }
 
 fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
-    log!(&ctx, Level::Info, "TC program triggered");
-
     // In our specific test case (UDP packet on loopback), we can assume a fixed header size.
     // Ethernet Header (14 bytes) + IPv4 Header (20 bytes) + UDP Header (8 bytes) = 42 bytes.
     const PAYLOAD_OFFSET: usize = ETH_LEN + IPV4_LEN + UDP_LEN;
 
     // Bounds check for packet type byte
     if PAYLOAD_OFFSET + 1 > ctx.len() as usize {
-        log!(
-            &ctx,
-            Level::Error,
-            "Packet too short to contain type discriminator"
-        );
         return Err(TC_ACT_SHOT);
     }
 
@@ -171,12 +149,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
     let packet_type = match u8_to_packet_type(packet_type_byte) {
         Some(pt) => pt,
         None => {
-            log!(
-                &ctx,
-                Level::Warn,
-                "Unknown packet type in payload: {}",
-                packet_type_byte
-            );
             return Ok(TC_ACT_OK);
         }
     };
@@ -184,7 +156,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
     let response = match packet_type {
         PacketType::Eth => {
             if data_offset + ETH_LEN > ctx.len() as usize {
-                log!(&ctx, Level::Error, "Ethernet header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
@@ -208,7 +179,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::Ipv4 => {
             if data_offset + IPV4_LEN > ctx.len() as usize {
-                log!(&ctx, Level::Error, "IPv4 header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
@@ -236,7 +206,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::Ipv6 => {
             if data_offset + IPV6_LEN > ctx.len() as usize {
-                log!(&ctx, Level::Error, "IPv6 header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
@@ -265,7 +234,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::Tcp => {
             if data_offset + TCP_LEN > ctx.len() as usize {
-                log!(&ctx, Level::Error, "TCP header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
@@ -290,7 +258,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::Udp => {
             if data_offset + UDP_LEN > ctx.len() as usize {
-                log!(&ctx, Level::Error, "UDP header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
@@ -310,7 +277,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::Ah => {
             if data_offset + AH_LEN > ctx.len() as usize {
-                log!(&ctx, Level::Error, "AH header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
@@ -330,7 +296,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::Esp => {
             if data_offset + ESP_LEN > ctx.len() as usize {
-                log!(&ctx, Level::Error, "ESP header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
@@ -349,11 +314,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::Hop => {
             if data_offset + HOP_OPT_LEN > ctx.len() as usize {
-                log!(
-                    &ctx,
-                    Level::Error,
-                    "Hop-by-Hop Options header out of bounds"
-                );
                 return Err(TC_ACT_SHOT);
             }
 
@@ -376,7 +336,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::Fragment => {
             if data_offset + FRAGMENT_LEN > ctx.len() as usize {
-                log!(&ctx, Level::Error, "Fragment header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
@@ -395,11 +354,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::DestOpts => {
             if data_offset + DEST_OPTS_LEN > ctx.len() as usize {
-                log!(
-                    &ctx,
-                    Level::Error,
-                    "Destination Options header out of bounds"
-                );
                 return Err(TC_ACT_SHOT);
             }
 
@@ -422,7 +376,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::Mobility => {
             if data_offset + MOBILITY_LEN > ctx.len() as usize {
-                log!(&ctx, Level::Error, "Mobility header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
@@ -445,7 +398,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::Shim6 => {
             if data_offset + SHIM6_LEN > ctx.len() as usize {
-                log!(&ctx, Level::Error, "Shim6 header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
@@ -468,7 +420,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::Geneve => {
             if data_offset + GENEVE_LEN > ctx.len() as usize {
-                log!(&ctx, Level::Error, "Geneve header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
@@ -494,7 +445,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         PacketType::GenericRoute => {
             const GENERIC_ROUTE_LEN: usize = 4;
             if data_offset + GENERIC_ROUTE_LEN > ctx.len() as usize {
-                log!(&ctx, Level::Error, "Generic Route header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
@@ -517,7 +467,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::Vxlan => {
             if data_offset + VXLAN_LEN > ctx.len() as usize {
-                log!(&ctx, Level::Error, "VXLAN header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
@@ -537,7 +486,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::Hip => {
             if data_offset + HIP_LEN > ctx.len() as usize {
-                log!(&ctx, Level::Error, "HIP header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
@@ -560,7 +508,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::Gre => {
             if data_offset + GRE_LEN > ctx.len() as usize {
-                log!(&ctx, Level::Error, "GRE header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
@@ -583,7 +530,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::WireGuardInit => {
             if data_offset + WireGuardInitTestData::LEN > ctx.len() as usize {
-                log!(&ctx, Level::Error, "WireGuard Init header out of bounds");
                 return Err(TC_ACT_SHOT);
             }
 
@@ -603,11 +549,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::WireGuardResponse => {
             if data_offset + WireGuardResponseTestData::LEN > ctx.len() as usize {
-                log!(
-                    &ctx,
-                    Level::Error,
-                    "WireGuard Response header out of bounds"
-                );
                 return Err(TC_ACT_SHOT);
             }
 
@@ -632,11 +573,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::WireGuardCookieReply => {
             if data_offset + WireGuardCookieReplyTestData::LEN > ctx.len() as usize {
-                log!(
-                    &ctx,
-                    Level::Error,
-                    "WireGuard Cookie Reply header out of bounds"
-                );
                 return Err(TC_ACT_SHOT);
             }
 
@@ -659,11 +595,6 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
         }
         PacketType::WireGuardTransportData => {
             if data_offset + WireGuardTransportDataTestData::LEN > ctx.len() as usize {
-                log!(
-                    &ctx,
-                    Level::Error,
-                    "WireGuard Transport Data header out of bounds"
-                );
                 return Err(TC_ACT_SHOT);
             }
 
@@ -687,17 +618,10 @@ fn try_integration_test(ctx: TcContext) -> Result<i32, i32> {
     };
 
     // Output the parsed header to the PerfEventArray
-    log!(&ctx, Level::Info, "About to output to PerfEventArray");
     #[allow(static_mut_refs)]
     unsafe {
         OUT_DATA.output(&ctx, &response, 0)
     };
-
-    log!(
-        &ctx,
-        Level::Info,
-        "Successfully processed packet payload with PerCpuArray verification"
-    );
 
     Ok(TC_ACT_OK)
 }

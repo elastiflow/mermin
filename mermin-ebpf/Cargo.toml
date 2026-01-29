@@ -13,7 +13,6 @@ test = []
 [dependencies]
 
 aya-ebpf = { workspace = true }
-aya-log-ebpf = { workspace = true }
 mermin-common = { path = "../mermin-common" }
 network-types = { path = "../network-types" }
 
