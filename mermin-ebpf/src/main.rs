@@ -227,8 +227,11 @@ pub enum Error {
 ///
 /// Only levels actually used in `log_error()` are defined here.
 /// Full set: Trace=0, Debug=1, Info=2, Warn=3, Error=4
+#[cfg(not(feature = "test"))]
 const LOG_LEVEL_TRACE: u8 = 0;
+#[cfg(not(feature = "test"))]
 const LOG_LEVEL_WARN: u8 = 3;
+#[cfg(not(feature = "test"))]
 const LOG_LEVEL_ERROR: u8 = 4;
 
 /// Log errors at appropriate severity levels via ring buffer.

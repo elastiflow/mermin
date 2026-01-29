@@ -9,7 +9,7 @@ name = "integration"
 path = "src/main.rs"
 
 [dependencies]
-aya = { workspace = true }
+aya = { workspace = true, features = ["async_tokio"] }
 bytes = "1"
 env_logger = { workspace = true }
 integration-common = { path = "../integration-common", features = ["user"] }
