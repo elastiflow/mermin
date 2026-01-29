@@ -35,7 +35,7 @@ resources:
     memory: 512Mi
 ```
 
-**Note**: The Helm chart sets the default limits to prevent the Mermin pods from disrupting existing workloads, please see the [default values](https://github.com/elastiflow/mermin/blob/beta/charts/mermin/values.yaml) for details.
+**Note**: The Helm chart sets the default limits to prevent the Mermin pods from disrupting existing workloads, please see the [default values](https://github.com/elastiflow/mermin/blob/main/charts/mermin/values.yaml) for details.
 
 #### 2. Pod Security Policy Restrictions
 
@@ -338,7 +338,7 @@ kubectl get clusterrole mermin -o yaml
 kubectl get clusterrolebinding mermin
 ```
 
-Make sure your ClusterRole has the required permissions, which can be found in the [Helm Chart template](https://github.com/elastiflow/mermin/blob/beta/charts/mermin/templates/clusterrole.yaml):
+Make sure your ClusterRole has the required permissions, which can be found in the [Helm Chart template](https://github.com/elastiflow/mermin/blob/main/charts/mermin/templates/clusterrole.yaml):
 
 ## CNI and Interface Configuration
 
