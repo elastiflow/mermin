@@ -19,23 +19,19 @@ use crate::metrics::opts::MetricsOptions;
 /// thread-safe access without needing to pass the flag through every function call.
 static DEBUG_METRICS_ENABLED: OnceLock<bool> = OnceLock::new();
 
-/// Default buckets for pipeline_duration_seconds histogram
 /// Covers: 10μs to 60s
 const DEFAULT_PIPELINE_DURATION_BUCKETS: &[f64] = &[
     0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0,
     60.0,
 ];
 
-/// Default buckets for export_batch_size histogram
 /// Covers: 1 to 1000 spans
 const DEFAULT_EXPORT_BATCH_SIZE_BUCKETS: &[f64] = &[1.0, 10.0, 50.0, 100.0, 250.0, 500.0, 1000.0];
 
-/// Default buckets for k8s_ip_index_update_duration_seconds histogram
 /// Covers: 1ms to 1s
 const DEFAULT_K8S_IP_INDEX_UPDATE_DURATION_BUCKETS: &[f64] =
     &[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0];
 
-/// Default buckets for shutdown_duration_seconds histogram
 /// Covers: 100ms to 120s
 const DEFAULT_SHUTDOWN_DURATION_BUCKETS: &[f64] = &[0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0];
 
@@ -85,7 +81,6 @@ impl HistogramBucketConfig {
         }
     }
 
-    /// Validate bucket configuration and fall back to defaults if invalid
     pub(crate) fn validate_buckets(
         buckets: Option<Vec<f64>>,
         default: &[f64],
@@ -243,7 +238,6 @@ lazy_static! {
     // ============================================================================
 
     // Standard metrics (always registered)
-    // Note: PROCESSING_DURATION_SECONDS is now created dynamically in init_registry()
 
     pub static ref FLOW_SPANS_CREATED_TOTAL: IntCounter = IntCounter::with_opts(
         Opts::new("spans_created_total", "Total number of flow spans created across all interfaces")
@@ -335,8 +329,6 @@ lazy_static! {
         &["exporter", "status"]
     ).expect("failed to create export_flow_spans_total metric");
 
-    // Note: EXPORT_BATCH_SIZE is now created dynamically in init_registry()
-
     // Debug metrics (only registered if debug_metrics_enabled)
     pub static ref EXPORT_TIMEOUTS_TOTAL: IntCounter = IntCounter::with_opts(
         Opts::new("timeouts_total", "Total number of export operations that timed out")
@@ -373,7 +365,6 @@ lazy_static! {
         &["kind", "event"]  // apply, delete, init, init_done, error
     ).expect("failed to create k8s_watcher_events_total metric");
 
-    // Note: K8S_IP_INDEX_UPDATE_DURATION_SECONDS is now created dynamically in init_registry()
 
     // ============================================================================
     // Taskmanager Subsystem
@@ -389,8 +380,6 @@ lazy_static! {
     ).expect("failed to create taskmanager_tasks_active metric");
 
     // Debug metrics (only registered if debug_metrics_enabled)
-
-    // Note: SHUTDOWN_DURATION_SECONDS is now created dynamically in init_registry()
 
     /// Total number of shutdown operations that timed out.
     pub static ref SHUTDOWN_TIMEOUTS_TOTAL: IntCounter = IntCounter::with_opts(
@@ -691,11 +680,6 @@ pub fn debug_enabled() -> bool {
     DEBUG_METRICS_ENABLED.get().copied().unwrap_or(false)
 }
 
-/// Get the PROCESSING_DURATION_SECONDS histogram metric.
-///
-/// # Panics
-///
-/// Panics if the registry has not been initialized.
 #[inline]
 pub fn processing_duration_seconds() -> &'static HistogramVec {
     PROCESSING_DURATION_SECONDS
@@ -703,11 +687,6 @@ pub fn processing_duration_seconds() -> &'static HistogramVec {
         .expect("metrics registry not initialized")
 }
 
-/// Get the K8S_IP_INDEX_UPDATE_DURATION_SECONDS histogram metric.
-///
-/// # Panics
-///
-/// Panics if the registry has not been initialized.
 #[inline]
 pub fn k8s_ip_index_update_duration_seconds() -> &'static Histogram {
     K8S_IP_INDEX_UPDATE_DURATION_SECONDS
@@ -715,11 +694,6 @@ pub fn k8s_ip_index_update_duration_seconds() -> &'static Histogram {
         .expect("metrics registry not initialized")
 }
 
-/// Get the SHUTDOWN_DURATION_SECONDS histogram metric.
-///
-/// # Panics
-///
-/// Panics if the registry has not been initialized.
 #[inline]
 pub fn shutdown_duration_seconds() -> &'static Histogram {
     SHUTDOWN_DURATION_SECONDS
@@ -803,7 +777,6 @@ mod tests {
     #[test]
     fn test_metrics_system_initialization() {
         // Initialize registry without debug metrics
-        // Note: May already be initialized by another test, which is fine
         let bucket_config = HistogramBucketConfig {
             pipeline_duration: DEFAULT_PIPELINE_DURATION_BUCKETS.to_vec(),
             export_batch_size: DEFAULT_EXPORT_BATCH_SIZE_BUCKETS.to_vec(),
