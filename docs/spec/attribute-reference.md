@@ -9,7 +9,7 @@ This document is a reference for all of the available attributes in mermin. It d
   * [Attribute Namespaces](#attribute-namespaces)
   * [Why `source.k8s.*` Instead of `k8s.source.*`?](#why-sourcek8s-instead-of-k8ssource)
   * [Example Span (OTLP JSON)](#example-span-otlp-json)
-* [Attribute Tables](#attribute-tables)
+* [Attributes](#attributes)
   * [Requirement Level Legend](#requirement-level-legend)
   * [General Flow Attributes](#general-flow-attributes)
   * [L2-L4 Attributes](#l2-l4-attributes)
@@ -140,7 +140,7 @@ A simple litmus test can help:
 
 This separation prevents ambiguity. For instance, an attribute like network.byte\_count could be misinterpreted as the total bytes for an entire network interface, whereas flow.bytes.total clearly refers to the byte count for a specific five-tuple flow. This makes the resulting telemetry data more accurate and easier to query.
 
-## Attribute Tables
+## Attributes
 
 ### Requirement Level Legend
 

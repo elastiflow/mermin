@@ -1,7 +1,5 @@
 # Semantic Conventions
 
-> **Quick Reference**: For a concise table of commonly used fields, see the [Field Reference](../reference/field-reference.md).
-
 This document proposes semantic conventions for representing network flow data as traces. The existing network conventions are primarily designed for unidirectional, client/server interactions within an instrumented application. This proposal addresses the need to represent a network flow as a complete, bidirectional conversation, typically observed by a third party (like a network device or eBPF agent).
 
 The core concept of this proposal is to represent each network flow record as a single **Span**. This model elevates traces from purely application-level signals to comprehensive flow spans that capture detailed data about network traffic, creating a new standard for network observability within the OpenTelemetry ecosystem.
