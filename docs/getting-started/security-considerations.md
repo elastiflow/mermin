@@ -66,4 +66,4 @@ Mermin needs Kubernetes RBAC permissions to:
 * List and watch resources across all namespaces
 * Access the Kubernetes API server
 
-See the Helm chart's [ClusterRole](https://github.com/elastiflow/mermin/blob/main/charts/mermin/templates/clusterrole.yaml) for the minimal required permissions.
+See the Helm chart's [ClusterRole](https://github.com/elastiflow/mermin/blob/beta/charts/mermin/templates/clusterrole.yaml) for the minimal required permissions.
