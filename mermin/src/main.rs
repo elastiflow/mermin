@@ -358,15 +358,6 @@ async fn run(cli: Cli) -> Result<()> {
         "ebpf program loaded, maps will persist with versioned pinning"
     );
 
-    if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
-        // This can happen if you remove all log statements from your eBPF program.
-        warn!(
-            event.name = "ebpf.logger_init_failed",
-            error.message = %e,
-            "failed to initialize ebpf logger"
-        );
-    }
-
     let programs = [TcAttachType::Ingress, TcAttachType::Egress];
     programs.iter().try_for_each(|attach_type| -> Result<()> {
         let program: &mut SchedClassifier = ebpf
@@ -446,6 +437,11 @@ async fn run(cli: Cli) -> Result<()> {
 
     // Extract eBPF maps - they're already pinned/reused automatically by EbpfLoader
     // Maps are pinned to /sys/fs/bpf/mermin_v{version}/<map_name> and reused across restarts
+    let log_events_ringbuf = aya::maps::RingBuf::try_from(
+        ebpf.take_map("LOG_EVENTS")
+            .ok_or_else(|| MerminError::internal("LOG_EVENTS not found in eBPF object"))?,
+    )
+    .map_err(|e| MerminError::internal(format!("failed to convert LOG_EVENTS ring buffer: {e}")))?;
     let flow_stats_map = Arc::new(tokio::sync::Mutex::new(
         aya::maps::HashMap::try_from(
             ebpf.take_map("FLOW_STATS")
@@ -499,6 +495,15 @@ async fn run(cli: Cli) -> Result<()> {
         event.name = "ebpf.maps_ready",
         schema_version = EBPF_MAP_SCHEMA_VERSION,
         "ebpf maps ready for flow producer"
+    );
+
+    let log_shutdown_rx = os_shutdown_tx.subscribe();
+    task_manager.spawn("ebpf-log-consumer", async move {
+        runtime::ebpf_log::run_log_consumer(log_events_ringbuf, log_shutdown_rx).await;
+    });
+    debug!(
+        event.name = "ebpf.log_consumer_started",
+        "ebpf log consumer started"
     );
 
     let attach_method = if use_tcx { "TCX" } else { "netlink" };

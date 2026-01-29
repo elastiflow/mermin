@@ -18,6 +18,123 @@
 
 use network_types::{eth::EtherType, ip::IpProto};
 
+/// Log level for eBPF log entries.
+/// Uses primitive u8 values to avoid BTF issues with complex enum types.
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum LogLevel {
+    /// Trace level - detailed debugging information
+    #[default]
+    Trace = 0,
+    /// Debug level - debugging information
+    Debug = 1,
+    /// Info level - general information
+    Info = 2,
+    /// Warn level - warning conditions
+    Warn = 3,
+    /// Error level - error conditions
+    Error = 4,
+}
+
+impl TryFrom<u8> for LogLevel {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, ()> {
+        match value {
+            0 => Ok(Self::Trace),
+            1 => Ok(Self::Debug),
+            2 => Ok(Self::Info),
+            3 => Ok(Self::Warn),
+            4 => Ok(Self::Error),
+            _ => Err(()),
+        }
+    }
+}
+
+/// Error codes for eBPF log entries.
+///
+/// # Synchronization Requirement
+///
+/// These discriminants **MUST** match the `Error` enum in `mermin-ebpf/src/main.rs`.
+/// If you add, remove, or reorder variants here, update the eBPF `Error` enum accordingly.
+/// The `test_log_error_code_discriminants` test verifies the discriminant values.
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum LogErrorCode {
+    /// Out of bounds memory access
+    #[default]
+    OutOfBounds = 0,
+    /// Malformed packet header
+    MalformedHeader = 1,
+    /// Internal error
+    InternalError = 2,
+    /// Unsupported EtherType
+    UnsupportedEtherType = 3,
+    /// Unsupported protocol
+    UnsupportedProtocol = 4,
+    /// Flow event dropped (ring buffer full)
+    FlowEventDropped = 5,
+}
+
+impl LogErrorCode {
+    /// Convert the error code to a string representation
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::OutOfBounds => "out of bounds",
+            Self::MalformedHeader => "malformed header",
+            Self::InternalError => "internal error",
+            Self::UnsupportedEtherType => "unsupported ether type",
+            Self::UnsupportedProtocol => "unsupported protocol",
+            Self::FlowEventDropped => "flow event dropped (ring buffer full)",
+        }
+    }
+}
+
+impl TryFrom<u8> for LogErrorCode {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, ()> {
+        match value {
+            0 => Ok(Self::OutOfBounds),
+            1 => Ok(Self::MalformedHeader),
+            2 => Ok(Self::InternalError),
+            3 => Ok(Self::UnsupportedEtherType),
+            4 => Ok(Self::UnsupportedProtocol),
+            5 => Ok(Self::FlowEventDropped),
+            _ => Err(()),
+        }
+    }
+}
+
+/// Log entry sent from eBPF to userspace via ring buffer.
+/// Uses only primitive types to avoid BTF issues with generics.
+///
+/// Memory layout: 16 bytes (8 + 4 + 1 + 1 + 1 + 1), 8-byte aligned
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LogEntry {
+    /// Timestamp (nanoseconds since boot)
+    pub timestamp_ns: u64,
+    /// Network interface index
+    pub ifindex: u32,
+    /// Log level (see LogLevel enum)
+    pub level: u8,
+    /// Error code (see LogErrorCode enum)
+    pub error_code: u8,
+    /// Direction: 0=egress, 1=ingress
+    pub direction: u8,
+    /// Padding for alignment
+    pub _pad: u8,
+}
+
+#[cfg(feature = "user")]
+// SAFETY: LogEntry is repr(C) with only POD fields:
+// - All fields are primitive types with valid bit patterns
+// - 8-byte alignment from u64 field
+// - No padding issues due to careful field ordering
+unsafe impl aya::Pod for LogEntry {}
+
 /// Flow key for bidirectional flow aggregation, compatible with Community ID hashing.
 /// This key is normalized during flow creation to ensure both directions of a flow
 /// (A→B and B→A) map to the same key.
@@ -1316,5 +1433,103 @@ mod tests {
         assert_eq!(ConnectionState::Closing as u8, 8);
         assert_eq!(ConnectionState::LastAck as u8, 9);
         assert_eq!(ConnectionState::TimeWait as u8, 10);
+    }
+
+    #[test]
+    fn test_log_entry_memory_layout() {
+        // Verify LogEntry size: 8 (u64) + 4 (u32) + 1 + 1 + 1 + 1 = 16 bytes
+        assert_eq!(
+            size_of::<LogEntry>(),
+            16,
+            "LogEntry size MUST be 16 bytes for eBPF/userspace compatibility"
+        );
+
+        // Verify alignment (8-byte aligned due to u64 field)
+        assert_eq!(
+            align_of::<LogEntry>(),
+            8,
+            "LogEntry alignment MUST be 8 bytes for eBPF/userspace compatibility"
+        );
+    }
+
+    #[test]
+    fn test_log_level_discriminants() {
+        assert_eq!(LogLevel::Trace as u8, 0);
+        assert_eq!(LogLevel::Debug as u8, 1);
+        assert_eq!(LogLevel::Info as u8, 2);
+        assert_eq!(LogLevel::Warn as u8, 3);
+        assert_eq!(LogLevel::Error as u8, 4);
+    }
+
+    #[test]
+    fn test_log_error_code_discriminants() {
+        // These discriminants MUST match the Error enum in mermin-ebpf/src/main.rs
+        assert_eq!(LogErrorCode::OutOfBounds as u8, 0);
+        assert_eq!(LogErrorCode::MalformedHeader as u8, 1);
+        assert_eq!(LogErrorCode::InternalError as u8, 2);
+        assert_eq!(LogErrorCode::UnsupportedEtherType as u8, 3);
+        assert_eq!(LogErrorCode::UnsupportedProtocol as u8, 4);
+        assert_eq!(LogErrorCode::FlowEventDropped as u8, 5);
+    }
+
+    #[test]
+    fn test_log_error_code_as_str() {
+        assert_eq!(LogErrorCode::OutOfBounds.as_str(), "out of bounds");
+        assert_eq!(LogErrorCode::MalformedHeader.as_str(), "malformed header");
+        assert_eq!(LogErrorCode::InternalError.as_str(), "internal error");
+        assert_eq!(
+            LogErrorCode::UnsupportedEtherType.as_str(),
+            "unsupported ether type"
+        );
+        assert_eq!(
+            LogErrorCode::UnsupportedProtocol.as_str(),
+            "unsupported protocol"
+        );
+        assert_eq!(
+            LogErrorCode::FlowEventDropped.as_str(),
+            "flow event dropped (ring buffer full)"
+        );
+    }
+
+    #[test]
+    fn test_log_error_code_try_from() {
+        assert_eq!(LogErrorCode::try_from(0), Ok(LogErrorCode::OutOfBounds));
+        assert_eq!(LogErrorCode::try_from(1), Ok(LogErrorCode::MalformedHeader));
+        assert_eq!(LogErrorCode::try_from(2), Ok(LogErrorCode::InternalError));
+        assert_eq!(
+            LogErrorCode::try_from(3),
+            Ok(LogErrorCode::UnsupportedEtherType)
+        );
+        assert_eq!(
+            LogErrorCode::try_from(4),
+            Ok(LogErrorCode::UnsupportedProtocol)
+        );
+        assert_eq!(
+            LogErrorCode::try_from(5),
+            Ok(LogErrorCode::FlowEventDropped)
+        );
+        // Unknown error codes should return Err
+        assert_eq!(LogErrorCode::try_from(6), Err(()));
+        assert_eq!(LogErrorCode::try_from(255), Err(()));
+    }
+
+    #[test]
+    fn test_log_level_try_from() {
+        assert_eq!(LogLevel::try_from(0), Ok(LogLevel::Trace));
+        assert_eq!(LogLevel::try_from(1), Ok(LogLevel::Debug));
+        assert_eq!(LogLevel::try_from(2), Ok(LogLevel::Info));
+        assert_eq!(LogLevel::try_from(3), Ok(LogLevel::Warn));
+        assert_eq!(LogLevel::try_from(4), Ok(LogLevel::Error));
+        // Unknown log levels should return Err
+        assert_eq!(LogLevel::try_from(5), Err(()));
+        assert_eq!(LogLevel::try_from(255), Err(()));
+    }
+
+    #[test]
+    fn test_direction_discriminants() {
+        // Verify Direction enum discriminants for eBPF/userspace compatibility.
+        // LogEntry.direction uses: 0=Egress, 1=Ingress
+        assert_eq!(Direction::Egress as u8, 0);
+        assert_eq!(Direction::Ingress as u8, 1);
     }
 }

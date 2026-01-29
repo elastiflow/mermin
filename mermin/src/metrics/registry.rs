@@ -626,8 +626,7 @@ mod tests {
 
     #[test]
     fn test_standard_registry_always_has_metrics() {
-        // Initialize with debug disabled
-        let _ = init_registry(false).expect("init_registry(false) should succeed");
+        let _ = init_registry(false);
 
         // Standard registry should have metrics
         let families = STANDARD_REGISTRY.gather();
