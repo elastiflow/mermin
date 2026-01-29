@@ -132,13 +132,9 @@ The default buckets cover durations from 1ms to 1s, which is typical for IP inde
 
 **Type:** Array of numbers **Default:** `[0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0]`
 
-Custom buckets for the `mermin_taskmanager_shutdown_duration_seconds` histogram metric (debug metric). This metric tracks the duration of shutdown operations.
+**Only present when debug metrics are enabled** (`internal.metrics.debug_metrics_enabled = true`). Custom buckets for the `mermin_taskmanager_shutdown_duration_seconds` histogram metric. This metric tracks the duration of shutdown operations.
 
 The default buckets cover durations from 100ms to 120s, which accommodates both quick shutdowns and longer graceful shutdowns.
-
-{% hint style="info" %}
-This metric is only available when `debug_metrics_enabled = true`
-{% endhint %}
 
 **Example:**
 
