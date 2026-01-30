@@ -2,6 +2,8 @@
 title: Flow Trace Attributes
 ---
 
+# Flow Trace Attributes
+
 ## Attributes
 
 ### Requirement Level Legend

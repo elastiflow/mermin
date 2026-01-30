@@ -122,12 +122,12 @@ service = {
 
 In addition to **pod**, **service**, and **node**, you can configure:
 
-| Association      | Resource        | Use case |
-|------------------|-----------------|----------|
-| **endpointslice** | EndpointSlice   | Direct matching of EndpointSlice backend IPs (e.g. `endpoints[*].addresses[*]`). |
-| **networkpolicy** | NetworkPolicy   | Match flows to NetworkPolicy resources by IP. |
-| **ingress**       | Ingress         | Match flows to Ingress VIPs and backend IPs. |
-| **gateway**       | Gateway (Gateway API) | Match flows to Gateway resources. |
+| Association       | Resource              | Use case                                                                         |
+|-------------------|-----------------------|----------------------------------------------------------------------------------|
+| **endpointslice** | EndpointSlice         | Direct matching of EndpointSlice backend IPs (e.g. `endpoints[*].addresses[*]`). |
+| **networkpolicy** | NetworkPolicy         | Match flows to NetworkPolicy resources by IP.                                    |
+| **ingress**       | Ingress               | Match flows to Ingress VIPs and backend IPs.                                     |
+| **gateway**       | Gateway (Gateway API) | Match flows to Gateway resources.                                                |
 
 Example for direct EndpointSlice IP matching:
 
@@ -167,14 +167,15 @@ attributes "destination" "k8s" {
 
 Summary of default associations (source and destination each get the same structure, with `source.ip`/`source.port` or `destination.ip`/`destination.port`):
 
-| Association | Flow fields used | Kubernetes paths (summary) |
-|-------------|------------------|-----------------------------|
-| **pod**     | ip, port, network.transport | status.podIP, status.podIPs[*], status.hostIP, status.hostIPs[*], spec.containers[*].ports[*].containerPort, hostPort, protocol |
-| **service** | ip, port, network.transport | spec.clusterIP, spec.clusterIPs[*], spec.externalIPs[*], spec.loadBalancerIP, spec.ports[*].port, spec.ports[*].protocol |
-| **node**    | ip | status.addresses[*].address |
-| **endpoint** | ip | endpoints[*].addresses[*] (legacy; for direct EndpointSlice IP matching use **endpointslice**) |
+| Association  | Flow fields used            | Kubernetes paths (summary)                                                                                                      |
+|--------------|-----------------------------|---------------------------------------------------------------------------------------------------------------------------------|
+| **pod**      | ip, port, network.transport | status.podIP, status.podIPs[*], status.hostIP, status.hostIPs[*], spec.containers[*].ports[*].containerPort, hostPort, protocol |
+| **service**  | ip, port, network.transport | spec.clusterIP, spec.clusterIPs[*], spec.externalIPs[*], spec.loadBalancerIP, spec.ports[*].port, spec.ports[*].protocol        |
+| **node**     | ip                          | status.addresses[*].address                                                                                                     |
+| **endpoint** | ip                          | endpoints[*].addresses[*] (legacy; for direct EndpointSlice IP matching use **endpointslice**)                                  |
 
-**Note:** The default **endpoint** block uses path `endpoints[*].addresses[*]`. The IP index is built from **pod**, **service**, **node**, and **endpointslice** when present. For direct matching of EndpointSlice backend IPs, add an **endpointslice** association (see [Other association types](#other-association-types)).
+**Note:** The default **endpoint** block uses path `endpoints[*].addresses[*]`. The IP index is built from **pod**, **service**, **node**, and **endpointslice** when present.
+For direct matching of EndpointSlice backend IPs, add an **endpointslice** association (see [Other association types](#other-association-types)).
 
 ```hcl
 # Automatically configured - no manual setup required
@@ -315,7 +316,8 @@ attributes "source" "k8s" {
 }
 ```
 
-Any explicit `attributes` configuration completely replaces the defaults for that direction and provider. If you only configure one direction (e.g. only `attributes "source" "k8s"`), the other direction gets no attribution unless you add it explicitly.
+Any explicit `attributes` configuration completely replaces the defaults for that direction and provider.
+If you only configure one direction (e.g. only `attributes "source" "k8s"`), the other direction gets no attribution unless you add it explicitly.
 
 ### Verification
 
