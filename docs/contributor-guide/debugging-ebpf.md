@@ -183,10 +183,18 @@ cat /proc/sys/kernel/bpf_jit_harden
 
 You can integrate bpftool analysis into your development process:
 
-<!-- TODO(GA Documentation): Following commands needs to be fixed, not working currently-->
 ```shell
-# Quick instruction count check during development
-docker run -it --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "bpftool prog list | grep mermin && echo 'Instruction counts:' && for id in \$(bpftool prog list | grep mermin | awk '{print \$1}' | tr -d ':'); do echo -n \"Program \$id: \"; bpftool prog dump xlated id \$id | grep -E '^[0-9]+:' | wc -l; done"
+docker run -it --privileged --pid=host --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "
+ids=\$(bpftool prog list | grep mermin | awk '{print \$1}' | tr -d ':');
+if [ -z \"\$ids\" ]; then
+    echo 'No mermin programs found.';
+else
+    echo 'Instruction counts:';
+    for id in \$ids; do
+        echo -n \"Program \$id: \";
+        bpftool prog dump xlated id \$id | grep -E '^\s*[0-9]+:' | wc -l;
+    done;
+fi"
 ```
 
 This command provides a comprehensive overview of all mermin programs and their instruction counts in a single execution.
@@ -316,10 +324,12 @@ When you see high stack usage:
 
 ### Advanced Analysis Commands
 
-<!-- TODO(GA Documentation): Following commands needs to be fixed, not working currently-->
 For deeper investigation:
 
 ```shell
+# Find the binary path, or skip and specify it manually
+export EBPF_BINARY=$(find target -type f -path "*bpfel-unknown-none*" -name "mermin" -not -name "*.d" | head -n 1)
+
 # Find specific stack offset (e.g., 328 bytes = 0x148)
 docker run --privileged --mount type=bind,source=.,target=/app mermin-builder:latest /bin/bash -c "llvm-objdump-20 -d --section=classifier ${EBPF_BINARY} | grep 'r10.*-.*0x148'"
 
