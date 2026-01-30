@@ -11,6 +11,11 @@ Mermin supports filtering flows by:
 - TCP flags, ICMP types
 - Connection states
 
+{% hint style="info" %}
+Filter option names are derived directly from FlowSpan attribute names defined in the semantic conventions and can be referenced easily in the [attributes reference](../spec/attribute-reference.md).
+The attribute's dot notation is converted to underscores (e.g., `flow.tcp.flags.tags` becomes `tcp_flags_tags`). This 1:1 mapping ensures consistency and makes it easy to identify which attribute each filter targets.
+{% endhint %}
+
 A full configuration example can be found in the [Default Configuration](./default/config.hcl).
 
 ## Configuration
@@ -25,13 +30,13 @@ Mermin uses simple match patterns:
 - **`match`**: Include flows matching the pattern, list of strings, (empty list = include all).
 - **`not_match`**: Exclude flows matching the pattern, list of strings, (empty list = exclude none, takes precedence).
 
-The patterns support multiple forms
+The patterns support multiple forms:
 
 - **IP addresses and CIDRs**, used in the `address` arguments, for example:
   - `10.0.0.0/8`: CIDR notation, matches the subnet
-  - `10.0.0.1`: IP address, equals to the `10.0.0.1/32`
+  - `10.0.0.1`: IP address, equals the `10.0.0.1/32` subnet
 
-- **Ranges**, used in the `port`, `interface_index`, `ip_ttl`, `ipv6_flow_label`, `icmp_code` arguments, supports ranges, for example:
+- **Ranges**, used in the `port`, `interface_index`, `ip_ttl`, `ip_flow_label`, `icmp_code_name` arguments, support ranges. For example:
   - `80`: Single port
   - `8000-8999`: Port range
   - `0`: Single interface index
@@ -44,7 +49,7 @@ The patterns support multiple forms
   - `0-8`: ICMP code range
 
 - **Arbitrary strings**, used in more generic arguments like transport names, interface names, and others.
-  Support [globs](https://docs.rs/globset/latest/globset/#syntax), for example:
+  Supports [globs](https://docs.rs/globset/latest/globset/#syntax). For example:
   - `tcp`: Protocol names
   - `close_wait`: Connection states
   - `eth*`: Interface names
@@ -103,7 +108,7 @@ Filter by port.
 
 #### Notes
 
-Result of the `filter.source`/`filter.destination` inclusion/exclusion is combined with an "AND" condition, meaning it is very easy to accidentally exclude flows you want to observe. For example:
+The result of the `filter.source`/`filter.destination` inclusion/exclusion is combined with an "AND" condition, meaning it is very easy to accidentally exclude flows you want to observe. For example:
 
 - Matching only private subnets will filter out any flow originating from public subnets.
   The configuration:
@@ -128,7 +133,7 @@ Result of the `filter.source`/`filter.destination` inclusion/exclusion is combin
   ]
   ```
 
-- Matching same port in the `source` and `destination` filters will filter out almost all flows
+- Matching the same port in the `source` and `destination` filters will filter out almost all flows.
   Although, theoretically, source and destination ports can be the same (e.g., old DNS servers), it is relatively uncommon to see the same source and destination port.
     The configuration:
 
@@ -222,7 +227,7 @@ Filter by network interface name.
   ```hcl
   filter "network" {
     interface_name = {
-      match = ["eth*", `enp*`]
+      match = ["eth*", "enp*"]
     }
   }
   ```
@@ -306,7 +311,7 @@ Filter by TCP connection state.
   }
   ```
 
-#### `tcp_flags`
+#### `tcp_flags_tags`
 
 Filter by TCP flags.
 
@@ -318,7 +323,7 @@ Filter by TCP flags.
 
   ```hcl
   filter "flow" {
-    tcp_flags = {
+    tcp_flags_tags = {
       match = ["SYN"]
     }
   }
@@ -326,9 +331,9 @@ Filter by TCP flags.
 
 #### `ip_dscp_name`
 
-Filter flows based on the DSCP ([Differentiated Services Code Point](https://en.wikipedia.org/wiki/Differentiated_services#Configuration_guidelines)) names
+Filter flows based on the DSCP ([Differentiated Services Code Point](https://en.wikipedia.org/wiki/Differentiated_services#Configuration_guidelines)) names.
 
-**Supported values in [patterns](#matchnot_match-patterns):** Any valid interface name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+**Supported values in [patterns](#matchnot_match-patterns):** Any valid DSCP name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
 **Examples:**
 
@@ -340,7 +345,7 @@ Filter flows based on the DSCP ([Differentiated Services Code Point](https://en.
   }
   ```
 
-- Exclude multimedia conferencing (`AF41`, `AF42` `AF43`)
+- Exclude multimedia conferencing (`AF41`, `AF42`, `AF43`)
 
   ```hcl
   filter "flow" {
@@ -350,7 +355,7 @@ Filter flows based on the DSCP ([Differentiated Services Code Point](https://en.
 
 #### `ip_ecn_name`
 
-Filter flows based on ECN ([Explicit Congestion Notification](https://en.wikipedia.org/wiki/Explicit_congestion_notification)) values
+Filter flows based on ECN ([Explicit Congestion Notification](https://en.wikipedia.org/wiki/Explicit_congestion_notification)) values.
 
 **Supported values in [patterns](#matchnot_match-patterns):** Any valid ECN value (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
@@ -374,7 +379,7 @@ Filter flows based on ECN ([Explicit Congestion Notification](https://en.wikiped
 
 #### `ip_ttl`
 
-Filter flows based on the IP TTL ([Time To Live](https://en.wikipedia.org/wiki/Time_to_live)) values
+Filter flows based on the IP TTL ([Time To Live](https://en.wikipedia.org/wiki/Time_to_live)) values.
 
 **Supported values in [patterns](#matchnot_match-patterns):** Any valid TTL or TTL range as a string (`1`, `64-184`)
 
@@ -396,9 +401,9 @@ Filter flows based on the IP TTL ([Time To Live](https://en.wikipedia.org/wiki/T
   }
   ```
 
-#### `ipv6_flow_label`
+#### `ip_flow_label`
 
-Filter flows based on IPv6 [flow labels](https://www.rfc-editor.org/rfc/rfc6437.html)
+Filter flows based on IPv6 [flow labels](https://www.rfc-editor.org/rfc/rfc6437.html).
 
 **Supported values in [patterns](#matchnot_match-patterns):** Any valid flow label or label range (`2145`, `12345-12545`)
 
@@ -408,7 +413,7 @@ Filter flows based on IPv6 [flow labels](https://www.rfc-editor.org/rfc/rfc6437.
 
   ```hcl
   filter "flow" {
-    ipv6_flow_label = { match = ["12345"] }
+    ip_flow_label = { match = ["12345"] }
   }
   ```
 
@@ -416,7 +421,7 @@ Filter flows based on IPv6 [flow labels](https://www.rfc-editor.org/rfc/rfc6437.
 
   ```hcl
   filter "flow" {
-    ipv6_flow_label = { not_match = ["12345-12545"] }
+    ip_flow_label = { not_match = ["12345-12545"] }
   }
   ```
 
@@ -444,7 +449,7 @@ Filter flows based on [ICMP type](https://www.iana.org/assignments/icmp-paramete
   }
   ```
 
-#### `icmp_code`
+#### `icmp_code_name`
 
 Filter flows based on [ICMP codes](https://www.iana.org/assignments/icmp-parameters/icmp-parameters.xhtml)
 
@@ -456,7 +461,7 @@ Filter flows based on [ICMP codes](https://www.iana.org/assignments/icmp-paramet
 
   ```hcl
   filter "flow" {
-    icmp_code = { match = ["0-8", "13"] }
+    icmp_code_name = { match = ["0-8", "13"] }
   }
   ```
 
@@ -464,7 +469,7 @@ Filter flows based on [ICMP codes](https://www.iana.org/assignments/icmp-paramet
 
   ```hcl
   filter "flow" {
-    icmp_code = { not_match = ["3"] }
+    icmp_code_name = { not_match = ["3"] }
   }
   ```
 
@@ -472,7 +477,7 @@ Filter flows based on [ICMP codes](https://www.iana.org/assignments/icmp-paramet
 
 ### HTTP/HTTPS Only
 
-Following configuration captures flows with HTTP/HTTPS destination.
+The following configuration captures flows with HTTP/HTTPS destination.
 
 ```hcl
 filter "destination" {
@@ -498,7 +503,7 @@ Example flows:
 
 ### Exclude Internal Traffic
 
-Following configuration captures flows originated from non-local
+The following configuration captures flows originating from non-local addresses:
 
 ```hcl
 filter "source" {
@@ -521,18 +526,18 @@ filter "source" {
 
 ### TCP Only, Established Connections
 
-Following configuration captures flows for established TCP connections
+The following configuration captures flows for established TCP connections.
 
 ```hcl
 filter "network" {
   transport = {
-    match = "tcp"
+    match = ["tcp"]
   }
 }
 
 filter "flow" {
   connection_state = {
-    match = "established"
+    match = ["established"]
   }
 }
 ```

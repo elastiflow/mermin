@@ -17,13 +17,13 @@ pub struct FilteringOptions {
     pub ip_flow_label: Option<FilteringPair>,
     pub icmp_type_name: Option<FilteringPair>,
     pub icmp_code_name: Option<FilteringPair>,
-    pub tcp_flags: Option<FilteringPair>,
+    pub tcp_flags_tags: Option<FilteringPair>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct FilteringPair {
     #[serde(default, rename = "match")]
-    pub match_glob: String,
+    pub match_list: Vec<String>,
     #[serde(default, rename = "not_match")]
-    pub not_match_glob: String,
+    pub not_match_list: Vec<String>,
 }

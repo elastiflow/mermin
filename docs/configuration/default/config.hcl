@@ -560,13 +560,13 @@ filter "network" {
 
 filter "flow" {
   connection_state = { match = [], not_match = [] } # States to  (e.g., ["established", "close_wait"])
-  tcp_flags        = { match = [], not_match = [] } # TCP flags (e.g., ["SYN", "ACK"])
+  tcp_flags_tags   = { match = [], not_match = [] } # TCP flags (e.g., ["SYN", "ACK"])
   ip_dscp_name     = { match = [], not_match = [] } # DSCP values (e.g., ["CS0", "AF21"])
   ip_ecn_name      = { match = [], not_match = [] } # ECN values (e.g., ["ECT0"])
   ip_ttl           = { match = [], not_match = [] } # TTL values (e.g., ["1"])
-  ipv6_flow_label  = { match = [], not_match = [] } # IPv6 flow labels (e.g., ["12345"])
+  ip_flow_label    = { match = [], not_match = [] } # IPv6 flow labels (e.g., ["12345"])
   icmp_type_name   = { match = [], not_match = [] } # ICMP types (e.g., ["echo_request"])
-  icmp_code        = { match = [], not_match = [] } # ICMP codes (e.g., ["0"])
+  icmp_code_name   = { match = [], not_match = [] } # ICMP codes (e.g., ["0"])
 }
 
 span {
