@@ -21,6 +21,8 @@ We've organized troubleshooting guides into three main categories based on the t
 
 If Mermin won't start or keeps crashing, this guide covers pod startup failures, permission errors, CNI conflicts, and TC/TCX priority configuration.
 
+> **Note:** eBPF load failures are critical errors that prevent startup — verify your kernel version and eBPF capabilities are enabled.
+
 **You'll want this guide if you're seeing:**
 
 - Pods stuck in `Pending`, `CrashLoopBackOff`, or `Error` states
@@ -43,6 +45,8 @@ This guide helps you diagnose verifier failures, program loading errors, and ker
 ### [Interface Visibility and Traffic Decapsulation](interface-visibility-and-traffic-decapsulation.md)
 
 Not seeing the traffic you expect? This guide explains traffic visibility at different network layers and how to configure interface monitoring correctly.
+
+> **Note:** If a configured interface is missing, Mermin logs a warning but continues monitoring other valid interfaces.
 
 **This guide helps with:**
 
@@ -106,16 +110,16 @@ Key metrics to monitor include:
 - `mermin_export_flow_spans_total{exporter_type="otlp",status="error"}` - OTLP export failures (investigate if increasing)
 - `mermin_export_flow_spans_total{exporter_type="stdout",status="error"}` - Stdout export failures (investigate if increasing)
 
-<!-- TODO(GA Documentation): Iterate on the section -->
-<!-- ## Troubleshooting
+#### Diagnosing Flow Span Drops
 
-- **Interface Unavailable**: Mermin logs a warning and continues monitoring other interfaces
-- **eBPF Load Failure**: Agent fails to start; check kernel version and eBPF support
-- **High Packet Loss**: 
-  - Worker queue drops: Increase `pipeline.flow_producer.worker_queue_capacity` or `pipeline.flow_producer.workers`
-  - Flow span channel drops: Increase `pipeline.flow_producer.flow_span_queue_capacity` or `pipeline.k8s_decorator.threads`
-  - Decorated span channel drops: Increase `pipeline.k8s_decorator.decorated_span_queue_capacity` or optimize exporter settings
-  - General: Reduce monitored interfaces or check metrics to identify the specific bottleneck -->
+If flow spans are being dropped, inspect the internal metrics to identify the specific bottleneck stage:
+
+- **Worker queue drops**: The kernel is producing events faster than userspace can consume them. Increase `pipeline.ebpf_ringbuf_worker_capacity` or `pipeline.worker_count`.
+- **Flow span channel drops**: The enrichment stage is lagging. Increase `pipeline.flow_producer_channel_capacity` or add concurrency via `pipeline.k8s_decorator_threads`.
+- **Decorated span channel drops**: There is backpressure from the export stage. Increase `pipeline.k8s_decorator_channel_capacity` or optimize your OTLP exporter settings.
+
+If tuning does not resolve the issue, consider reducing the number of monitored interfaces or increasing the CPU limits allocated to the agent.
+
 ### Test eBPF Capabilities
 
 Use the `diagnose bpf` subcommand to validate eBPF support and test attach/detach operations:

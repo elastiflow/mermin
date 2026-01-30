@@ -90,7 +90,7 @@ discovery "instrument" {
 
 Captures only inter-node traffic. Misses same-node pod-to-pod communication but monitors fewer interfaces.
 
-See [Network Interface Discovery](../configuration/discovery-interfaces.md) for detailed strategies and CNI-specific patterns.
+See [Network Interface Discovery](../configuration/discovery-instrument.md) for detailed strategies and CNI-specific patterns.
 
 ### Network Namespace Switching
 
@@ -266,13 +266,13 @@ Before deploying Mermin to production:
 * [ ] Review [Architecture](../getting-started/architecture.md) to understand how Mermin works
 * [ ] Choose appropriate [deployment method](deployment.md#deployment-options)
 * [ ] Plan [resource allocation](deployment.md#resource-requirements)
-* [ ] Configure [network interfaces](../configuration/discovery-interfaces.md)
-* [ ] Set up [OTLP collector](../integrations/opentelemetry-collector.md) endpoint
+* [ ] Configure [network interfaces](../configuration/discovery-instrument.md)
+* [ ] Set up [OTLP collector](../observability/backends.md) endpoint
 * [ ] Configure [authentication and TLS](../configuration/export-otlp.md) for OTLP
 * [ ] Define [flow filters](../configuration/filtering.md) if needed
 * [ ] Set appropriate [resource limits](kubernetes-helm.md)
 * [ ] Test in non-production environment first
-* [ ] Monitor [metrics](../configuration/api-metrics.md) after deployment
+* [ ] Monitor [metrics](../configuration/metrics.md) after deployment
 * [ ] Review [troubleshooting guide](../troubleshooting/troubleshooting.md)
 
 ## Upgrade Strategy

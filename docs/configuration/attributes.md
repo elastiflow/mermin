@@ -1,7 +1,3 @@
----
-hidden: true
----
-
 # Flow Attributes
 
 Flow attributes define which Kubernetes metadata to extract and how to associate it with network flows.
@@ -14,6 +10,8 @@ The `attributes` configuration has two main components:
 2. **Association**: How to map flow attributes (IPs, ports) to Kubernetes object fields
 
 ## Configuration
+
+Mermin accepts HCL or YAML for the config file. The examples below use HCL; the same structure can be expressed in YAML (see [Configuration Overview](configuration.md#file-format)).
 
 ```hcl
 attributes "source" "k8s" {
@@ -58,7 +56,7 @@ attributes "source" "k8s" {
 
 ### `metadata`
 
-Array of JSON paths to extract from Kubernetes resources.
+Array of JSONPath-style paths to extract from Kubernetes resources. Paths are evaluated against the resource object (Pod, Service, Node, etc.).
 
 **Common extractions:**
 
@@ -80,7 +78,7 @@ extract {
 
 ## Association Configuration
 
-Associations map flow fields to Kubernetes object fields for matching.
+Associations map flow fields (e.g. `source.ip`, `source.port`) to Kubernetes object fields for matching. The `to` paths are JSONPath-style paths over the resource (Pod, Service, Node, etc.).
 
 ### Pod Association
 
@@ -120,6 +118,33 @@ service = {
 }
 ```
 
+### Other Association Types
+
+In addition to **pod**, **service**, and **node**, you can configure:
+
+| Association       | Resource              | Use case                                                                         |
+|-------------------|-----------------------|----------------------------------------------------------------------------------|
+| **endpointslice** | EndpointSlice         | Direct matching of EndpointSlice backend IPs (e.g. `endpoints[*].addresses[*]`). |
+| **networkpolicy** | NetworkPolicy         | Match flows to NetworkPolicy resources by IP.                                    |
+| **ingress**       | Ingress               | Match flows to Ingress VIPs and backend IPs.                                     |
+| **gateway**       | Gateway (Gateway API) | Match flows to Gateway resources.                                                |
+
+Example for direct EndpointSlice IP matching:
+
+```hcl
+association {
+  endpointslice = {
+    sources = [
+      {
+        from = "flow"
+        name = "source.ip"
+        to = ["endpoints[*].addresses[*]"]
+      }
+    ]
+  }
+}
+```
+
 ## Source vs Destination
 
 Configure attributes for both flow directions:
@@ -139,6 +164,18 @@ attributes "destination" "k8s" {
 ```
 
 ### Default Configuration
+
+Summary of default associations (source and destination each get the same structure, with `source.ip`/`source.port` or `destination.ip`/`destination.port`):
+
+| Association  | Flow fields used            | Kubernetes paths (summary)                                                                                                      |
+|--------------|-----------------------------|---------------------------------------------------------------------------------------------------------------------------------|
+| **pod**      | ip, port, network.transport | status.podIP, status.podIPs[*], status.hostIP, status.hostIPs[*], spec.containers[*].ports[*].containerPort, hostPort, protocol |
+| **service**  | ip, port, network.transport | spec.clusterIP, spec.clusterIPs[*], spec.externalIPs[*], spec.loadBalancerIP, spec.ports[*].port, spec.ports[*].protocol        |
+| **node**     | ip                          | status.addresses[*].address                                                                                                     |
+| **endpoint** | ip                          | endpoints[*].addresses[*] (legacy; for direct EndpointSlice IP matching use **endpointslice**)                                  |
+
+**Note:** The default **endpoint** block uses path `endpoints[*].addresses[*]`. The IP index is built from **pod**, **service**, **node**, and **endpointslice** when present.
+For direct matching of EndpointSlice backend IPs, add an **endpointslice** association (see [Other association types](#other-association-types)).
 
 ```hcl
 # Automatically configured - no manual setup required
@@ -238,7 +275,7 @@ attributes "destination" "k8s" {
 * **Pod associations** capture container networking (IPs, ports, protocols) including both pod and host networking
 * **Service associations** cover all service types (ClusterIP, LoadBalancer, ExternalIP) with port and protocol matching
 * **Node associations** match node IP addresses for host networking scenarios
-* **Endpoint associations** capture endpoint slice IP addresses for service discovery
+* The default **endpoint** association is provided for compatibility; for direct EndpointSlice IP matching, use **endpointslice** (see [Other association types](#other-association-types))
 
 This covers the most common Kubernetes networking patterns and provides immediate network observability upon deployment.
 
@@ -280,6 +317,7 @@ attributes "source" "k8s" {
 ```
 
 Any explicit `attributes` configuration completely replaces the defaults for that direction and provider.
+If you only configure one direction (e.g. only `attributes "source" "k8s"`), the other direction gets no attribution unless you add it explicitly.
 
 ### Verification
 
@@ -288,12 +326,11 @@ To verify the default attributes are working:
 1. Deploy Mermin without any `attributes` configuration
 2. Generate network traffic in your cluster
 3. Check that flow spans include Kubernetes metadata like:
-    - `k8s.pod.name`
-    - `k8s.service.name`
-    - `k8s.namespace.name`
+    - `source.k8s.pod.name`, `source.k8s.service.name`, `source.k8s.namespace.name`
+    - `destination.k8s.pod.name`, `destination.k8s.service.name`, `destination.k8s.namespace.name` (and other `destination.*` equivalents)
 
 ## Next Steps
 
-* [**Kubernetes Informers**](kubernetes-informers.md): Configure resource watching
+* [**Kubernetes Informers**](discovery-kubernetes-informer.md): Configure resource watching
 * [**Owner Relations**](owner-relations.md): Add owner metadata
 * [**Configuration Examples**](examples.md): See complete configurations

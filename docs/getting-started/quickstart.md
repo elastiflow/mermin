@@ -165,7 +165,7 @@ kubectl delete service nginx --ignore-not-found
 helm uninstall mermin
 
 # Delete the kind cluster
-kind delete cluster --name mermin-demo
+kind delete cluster --name atlantis
 ```
 
 ## Next Steps

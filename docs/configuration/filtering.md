@@ -1,7 +1,3 @@
----
-hidden: true
----
-
 # Flow Filtering
 
 Flow filtering allows you to include or exclude network flows based on various criteria before they are exported, reducing data volume and focusing on relevant traffic.
@@ -143,7 +139,7 @@ Filter by IP version.
 
 ### `interface_name`
 
-Filter by network interface.
+Filter by network interface name (glob patterns, e.g. `eth*`, `veth*`).
 
 **Example:**
 
@@ -156,13 +152,15 @@ filter "network" {
 }
 ```
 
+**Also supported under `filter "network"`:** `interface_index` (numeric, e.g. `2,3,5-10`) and `interface_mac` (MAC glob, e.g. `aa:bb:cc:*:ee:ff`) with the same `match` / `not_match` structure.
+
 ## Flow Filters
 
 ### `connection_state`
 
 Filter by TCP connection state.
 
-**Values:** `established`, `syn_sent`, `syn_received`, `fin_wait`, `close_wait`, `closing`, `last_ack`, `time_wait`, `closed`
+**Values:** `established`, `syn_sent`, `syn_received`, `fin_wait_1`, `fin_wait_2`, `close_wait`, `closing`, `last_ack`, `time_wait`, `closed`, `listen`
 
 ### `tcp_flags`
 
@@ -172,9 +170,12 @@ Filter by TCP flags.
 
 ### Other Flow Attributes
 
+These options use the same `match` / `not_match` structure under `filter "flow"`:
+
 * `ip_dscp_name`: DSCP value
 * `ip_ecn_name`: ECN value
 * `ip_ttl`: TTL value
+* `ip_flow_label`: IPv6 flow label
 * `icmp_type_name`: ICMP type
 * `icmp_code_name`: ICMP code
 
@@ -260,5 +261,5 @@ filter "flow" {
 ## Next Steps
 
 * [**Configuration Examples**](examples.md): See complete filter configurations
-* [**Flow Span Options**](span-options.md): Configure flow generation
+* [**Flow Span Options**](span.md): Configure flow generation
 * [**OTLP Export**](export-otlp.md): Configure export options

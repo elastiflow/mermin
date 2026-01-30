@@ -1,7 +1,3 @@
----
-hidden: true
----
-
 # OTLP Exporter
 
 This page documents the OpenTelemetry Protocol (OTLP) exporter configuration, which controls how Mermin exports flow
@@ -21,10 +17,10 @@ export "traces" {
     endpoint               = "http://otel-collector:4317"
     protocol               = "grpc"
     timeout                = "10s"
-    max_batch_size         = 512
-    max_batch_interval     = "5s"
+    max_batch_size         = 1024
+    max_batch_interval     = "2s"
     max_queue_size         = 32768
-    max_concurrent_exports = 1
+    max_concurrent_exports = 4
     max_export_timeout     = "10s"
 
     auth = {
@@ -172,10 +168,10 @@ Maximum number of spans (flow records) per batch.
 ```hcl
 export "traces" {
   otlp = {
-    max_batch_size = 512  # Default
+    max_batch_size = 1024  # Default
 
     # For high-volume environments
-    # max_batch_size = 1024
+    # max_batch_size = 2048
 
     # For low-latency requirements
     # max_batch_size = 128
@@ -199,7 +195,7 @@ Maximum time to wait before exporting a partial batch.
 ```hcl
 export "traces" {
   otlp = {
-    max_batch_interval = "5s"  # Default
+    max_batch_interval = "2s"  # Default
 
     # For real-time monitoring
     # max_batch_interval = "1s"
@@ -251,9 +247,9 @@ export "traces" {
 **Queue Behavior:**
 
 * Acts as buffer during temporary collector unavailability or slow exports
-* When full, `export()` calls block until space is available (with 60s timeout protection)
-* Default sized to buffer ~30 minutes at typical enterprise workloads (1K-5K flows/sec)
-* Monitor `mermin_export_timeouts_total` and `mermin_export_blocking_time_seconds` metrics
+* When the queue is full, new spans are **dropped** (OpenTelemetry uses non-blocking send); export workers send batches and may block on the network call up to the configured timeout
+* Default (32768) buffers on the order of seconds at high throughput (e.g. ~6s at 5K flows/sec); increase for burst tolerance
+* Monitor `mermin_export_flow_spans_total{exporter="otlp",status="error"}` and `mermin_export_timeouts_total` for export health
 
 ### `max_concurrent_exports`
 
@@ -280,10 +276,13 @@ This setting is **critical** for high-throughput scenarios. With the defaults:
 ```hcl
 export "traces" {
   otlp = {
-    max_concurrent_exports = 1  # Default
+    max_concurrent_exports = 4  # Default
+
+    # For low-latency backends
+    # max_concurrent_exports = 1
 
     # For high-throughput (experimental)
-    # max_concurrent_exports = 4
+    # max_concurrent_exports = 8
   }
 }
 ```
@@ -512,7 +511,7 @@ export "traces" {
     max_batch_interval = "2s"
 
     # Large queue for burst handling
-    max_queue_size = 8192
+    max_queue_size = 65536
 
     # Aggressive timeouts
     timeout = "5s"
@@ -633,10 +632,10 @@ export "traces" {
 
 ### Key Metrics to Monitor
 
-- `mermin_export_flow_spans_total{exporter_type="otlp",status="ok"}` - OTLP export success rate
-- `mermin_export_flow_spans_total{exporter_type="otlp",status="error"}` - OTLP export errors
-- `mermin_channel_size{channel="producer_output"}` / `mermin_channel_capacity{channel="producer_output"}` - Channel utilization
-- `mermin_export_latency_seconds` - Export latency histogram
+- `mermin_export_flow_spans_total{exporter="otlp",status="ok"}` - OTLP export success rate
+- `mermin_export_flow_spans_total{exporter="otlp",status="error"}` - OTLP export errors
+- `mermin_channel_entries{channel="producer_output"}` / `mermin_channel_capacity{channel="producer_output"}` - Channel utilization
+- `mermin_pipeline_duration_seconds{stage="k8s_export_out"}` - Export-stage latency
 - `mermin_channel_sends_total{channel="decorator_output",status="error"}` - Channel send failures (indicates dropped spans)
 
 See the [Application Metrics](../observability/app-metrics.md) guide for complete Prometheus query examples.
@@ -693,11 +692,10 @@ See the [Application Metrics](../observability/app-metrics.md) guide for complet
 2. Increase collector capacity
 3. Reduce `max_batch_interval` for faster export
 4. Monitor `mermin_channel_entries{channel="decorator_output"}` to see queue depth
-4. Check collector for backpressure
+5. Check collector for backpressure
 
 ## Next Steps
 
 * [**Stdout Exporter**](export-stdout.md): Configure console output for debugging
-* [**Integration Guides**](../observability/backends.md): Connect to specific backends
-* [**Troubleshooting Export Issues**](../troubleshooting/export-issues.md): Diagnose problems
-* [**OpenTelemetry Collector**](../integrations/opentelemetry-collector.md): Set up collector
+* [**Observability Backends**](../observability/backends.md): Set up collector and connect to backends
+* [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose problems

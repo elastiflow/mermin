@@ -1,528 +1,88 @@
----
-hidden: true
----
-
 # Flow Span Options
 
-This page documents the `span` configuration block, which controls how Mermin generates flow records (spans) from captured network packets.
+Mermin groups captured packets into bidirectional flows and exports each flow as an OpenTelemetry span. The `span` block controls when flows are closed and when they emit records, plus Community ID hashing, trace ID correlation, and hostname resolution. Add a top-level `span { }` block in your [configuration file](configuration.md); there are no CLI or environment overrides for span options.
 
-## Overview
-
-Mermin aggregates network packets into bidirectional Flows Trace Spans. The span configuration determines:
-
-* How long flows remain active before being exported
-* When inactive flows are considered complete
-* Protocol-specific timeout behavior
-* Community ID generation for a Flow Trace correlation
+Flow semantics (how flows become OpenTelemetry spans and what attributes they carry) are in [Semantic Conventions](../spec/semantic-conventions.md) and [Attribute Reference](../spec/attribute-reference.md).
 
 ## Configuration
 
-```hcl
-span {
-  max_record_interval = "60s"
-  generic_timeout = "30s"
-  icmp_timeout = "10s"
-  tcp_timeout = "20s"
-  tcp_fin_timeout = "5s"
-  tcp_rst_timeout = "5s"
-  udp_timeout = "60s"
-  community_id_seed = 0
-}
-```
-
-## Configuration Options
-
-### `max_record_interval`
-
-**Type:** Duration **Default:** `60s`
-
-Maximum interval between flow records for an active flow.
-
-**Description:**
-
-* Limits how long an active flow continues without exporting a record
-* Applies to all flows regardless of protocol
-* Even if packets continue flowing, a record is exported at this interval
-* Prevents indefinitely long flows that never close
-
-**Example:**
+Place a `span { }` block alongside `pipeline`, `export`, and other blocks. Omit the block to use built-in defaults for all options. Durations use HCL duration strings (e.g. `"30s"`, `"5m"`, `"24h"`).
 
 ```hcl
 span {
-  max_record_interval = "60s"  # Export at least every 60 seconds
+  max_record_interval   = "60s"
+  generic_timeout       = "30s"
+  icmp_timeout          = "10s"
+  tcp_timeout           = "20s"
+  tcp_fin_timeout       = "5s"
+  tcp_rst_timeout       = "5s"
+  udp_timeout           = "60s"
+  community_id_seed     = 0
+  trace_id_timeout      = "24h"
+  enable_hostname_resolution = true
+  hostname_resolve_timeout   = "100ms"
 }
 ```
 
-**Use Cases:**
+## Option Reference
 
-* **Short intervals (10s-30s)**: Real-time monitoring, quick detection
-* **Medium intervals (60s-120s)**: Standard observability (default)
-* **Long intervals (300s+)**: Reduced data volume, long-running connections
+### Timeouts and intervals
 
-**Trade-offs:**
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `max_record_interval` | duration | `60s` | Maximum time an active flow can run without exporting a record. When this interval is reached, a record is emitted and the flow continues. Long-lived flows are therefore split into multiple spans. |
+| `generic_timeout` | duration | `30s` | Inactivity timeout for protocols that have no dedicated timeout: GRE, ESP, AH, and other IP protocols. After this period with no packets, the flow is closed. Flows with at least one packet are exported; flows with zero packets are dropped. |
+| `icmp_timeout` | duration | `10s` | Inactivity timeout for ICMP (e.g. ping, traceroute). |
+| `tcp_timeout` | duration | `20s` | Inactivity timeout for TCP when no FIN or RST has been seen (connection still open). |
+| `tcp_fin_timeout` | duration | `5s` | After a FIN is seen (graceful close), the flow is exported after this period so final ACKs can be included. |
+| `tcp_rst_timeout` | duration | `5s` | After an RST is seen (abrupt close), the flow is exported after this period. |
+| `udp_timeout` | duration | `60s` | Inactivity timeout for UDP. UDP is connectionless; a longer value suits sporadic traffic. |
 
-* **Shorter**: More granular data, higher export rate, more storage
-* **Longer**: Less data volume, longer detection time, lower costs
+For TCP, the effective timeout is chosen per flow: `tcp_timeout` for established connections with no FIN/RST, `tcp_fin_timeout` once a FIN is seen, and `tcp_rst_timeout` once an RST is seen.
 
-### `generic_timeout`
+### Community ID and trace correlation
 
-**Type:** Duration **Default:** `30s`
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `community_id_seed` | integer (uint16) | `0` | Seed for [Community ID](https://github.com/corelight/community-id-spec) hashing of the flow five-tuple. Use the same seed everywhere for correlation across agents and tools. The result is exported as `flow.community_id` ([Attribute Reference](../spec/attribute-reference.md)). |
+| `trace_id_timeout` | duration | `24h` | How long the same Community ID keeps the same trace ID. After this duration without activity, a new trace ID is used. Bounds memory while still allowing correlation across multiple flow records for the same logical flow. |
 
-General timeout for flows without specific protocol timeouts.
+### Hostname resolution
 
-**Description:**
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enable_hostname_resolution` | bool | `true` | When true, `client.address` and `server.address` may be reverse-DNS hostnames instead of IPs ([Attribute Reference](../spec/attribute-reference.md)). |
+| `hostname_resolve_timeout` | duration | `100ms` | Timeout for each reverse-DNS lookup. Results are cached. |
 
-* Used for protocols without specific timeout configuration
-* Applied after no activity for the specified duration
-* Flows with packet count > 0 are exported on timeout
-* Flows with packet count = 0 are silently dropped
+## When a flow span is exported
 
-**Example:**
+A flow span is exported when any of these is true:
+
+1. **Max interval**: The flow has been active for `max_record_interval` without emitting a record. A record is emitted and the flow continues (may emit again at the next interval).
+2. **Protocol timeout**: No packets for the protocol-specific timeout (generic, ICMP, TCP, or UDP). The flow is closed and removed from the flow table.
+3. **TCP close**: A FIN or RST was seen and the corresponding `tcp_fin_timeout` or `tcp_rst_timeout` has elapsed. The flow is closed and exported.
+
+Exported spans are sent to the targets configured in your export block ([OTLP export](export-otlp.md), [stdout export](export-stdout.md), etc.). Workers poll flow state on an interval defined in [pipeline](pipeline.md) (`flow_producer.flow_store_poll_interval`). The flow table is backed by the eBPF `FLOW_STATS` map and in-memory state; its capacity is set in [pipeline](pipeline.md) (`flow_capture.flow_stats_capacity`).
+
+## Tuning
+
+Shorter intervals and timeouts mean more exports and higher storage and [OTLP export](export-otlp.md) load; longer values reduce volume and improve aggregation at the cost of slower visibility.
+
+Example for low-latency monitoring (only overrides shown; the rest use defaults):
 
 ```hcl
 span {
-  generic_timeout = "30s"  # 30 second inactivity timeout
+  max_record_interval = "10s"
+  generic_timeout     = "10s"
+  tcp_timeout         = "10s"
+  tcp_fin_timeout     = "2s"
+  tcp_rst_timeout     = "2s"
+  udp_timeout         = "20s"
 }
 ```
 
-**Applies to:**
+For high-throughput or memory-constrained nodes, use longer or shorter timeouts accordingly. To reduce the number of flows tracked, use [flow filters](filtering.md). [Troubleshooting](../troubleshooting/troubleshooting.md) and [Pipeline](pipeline.md) cover backpressure, export tuning, and pipeline sizing.
 
-* GRE, ESP, AH, and other IP protocols
-* Unknown or unclassified traffic
-* Protocols without dedicated timeout options
+## Monitoring
 
-### `icmp_timeout`
-
-**Type:** Duration **Default:** `10s`
-
-Timeout for ICMP flows (ping, traceroute, etc.).
-
-**Description:**
-
-* ICMP is typically request-response
-* Short timeout appropriate for transient ICMP traffic
-* Exports flow after 10 seconds of inactivity
-
-**Example:**
-
-```hcl
-span {
-  icmp_timeout = "10s"  # ICMP timeout
-}
-```
-
-**Common ICMP Types:**
-
-* Echo Request/Reply (ping)
-* Destination Unreachable
-* Time Exceeded (traceroute)
-* Redirect
-
-**Tuning:**
-
-* **Shorter (5s)**: For networks with rapid ICMP bursts
-* **Longer (20s)**: For environments with slow ICMP responses
-
-### `tcp_timeout`
-
-**Type:** Duration **Default:** `20s`
-
-Timeout for general TCP flows without specific termination signals.
-
-**Description:**
-
-* Applied to established TCP connections
-* Used when connection doesn't have FIN or RST flags
-* Shorter than UDP due to TCP's connection-oriented nature
-
-**Example:**
-
-```hcl
-span {
-  tcp_timeout = "20s"  # TCP inactivity timeout
-}
-```
-
-**When Applied:**
-
-* Established TCP connections
-* No FIN or RST flags observed
-* No packets for specified duration
-
-**Relationship to TCP States:**
-
-* **ESTABLISHED**: Uses `tcp_timeout`
-* **FIN\_WAIT**: Uses `tcp_fin_timeout`
-* **CLOSE\_WAIT**: Uses `tcp_fin_timeout`
-* **RESET**: Uses `tcp_rst_timeout`
-
-### `tcp_fin_timeout`
-
-**Type:** Duration **Default:** `5s`
-
-Timeout for TCP flows after FIN flag is observed.
-
-**Description:**
-
-* FIN flag indicates graceful connection close
-* Short timeout to quickly export closing connections
-* Allows time for final ACKs to be captured
-
-**Example:**
-
-```hcl
-span {
-  tcp_fin_timeout = "5s"  # Quick close after FIN
-}
-```
-
-**TCP Close Sequence:**
-
-1. Client sends FIN
-2. Server sends ACK
-3. Server sends FIN
-4. Client sends ACK
-5. **Mermin waits `tcp_fin_timeout` then exports flow**
-
-**Tuning:**
-
-* **Shorter (2s)**: Faster export, may miss final packets
-* **Longer (10s)**: More complete flows, slower export
-
-### `tcp_rst_timeout`
-
-**Type:** Duration **Default:** `5s`
-
-Timeout for TCP flows after RST flag is observed.
-
-**Description:**
-
-* RST flag indicates abrupt connection termination
-* Short timeout for quick export of failed connections
-* Useful for detecting connection failures
-
-**Example:**
-
-```hcl
-span {
-  tcp_rst_timeout = "5s"  # Quick export after RST
-}
-```
-
-**RST Scenarios:**
-
-* Connection refused (port not listening)
-* Connection aborted by application
-* Firewall dropping connection
-* TCP errors or violations
-
-**Use Cases:**
-
-* Security monitoring (port scans)
-* Application debugging (connection failures)
-* Network troubleshooting
-
-### `udp_timeout`
-
-**Type:** Duration **Default:** `60s`
-
-Timeout for UDP flows.
-
-**Description:**
-
-* UDP is connectionless, no explicit close
-* Longer timeout accommodates sporadic UDP traffic
-* Balances between timely export and flow completeness
-
-**Example:**
-
-```hcl
-span {
-  udp_timeout = "60s"  # UDP inactivity timeout
-}
-```
-
-**Common UDP Protocols:**
-
-* DNS (port 53)
-* DHCP (ports 67, 68)
-* SNMP (port 161)
-* Syslog (port 514)
-* Streaming media
-* Gaming protocols
-
-**Tuning:**
-
-* **Shorter (30s)**: For bursty UDP traffic (DNS, DHCP)
-* **Longer (120s+)**: For streaming or persistent UDP (VoIP, gaming)
-
-### `community_id_seed`
-
-**Type:** Integer (uint16) **Default:** `0`
-
-Seed value for Community ID hash generation.
-
-**Description:**
-
-* [Community ID](https://github.com/corelight/community-id-spec) is a standard flow fingerprinting method
-* Generates deterministic hash from flow 5-tuple
-* Allows correlation across different monitoring systems
-* Seed value should be consistent across your infrastructure
-
-**Example:**
-
-```hcl
-span {
-  community_id_seed = 0  # Standard seed
-}
-```
-
-**Community ID Format:**
-
-```
-1:hash_value
-```
-
-Example: `1:LQU9qZlK+B5F3KDmev6m5PMibrg=`
-
-**Use Cases:**
-
-* Correlating flows across multiple Mermin agents
-* Deduplicating flows from multiple capture points
-* Matching flows with other systems using Community ID
-
-**Seed Selection:**
-
-* **0 (default)**: Standard, interoperable with other tools
-* **Custom**: Use if you need different hashing for security/privacy
-
-## Flow Generation Logic
-
-### Flow Record Generation
-
-Mermin creates a flow record when:
-
-1. **Max Interval Reached**: Active flow hits `max_record_interval`
-2. **Timeout Expired**: No activity for protocol-specific timeout
-3. **Connection Close**: TCP FIN or RST observed (after respective timeout)
-
-### Flow State Machine
-
-```
-Packet Received
-    ↓
-Flow Exists? ──No──→ Create New Flow
-    ↓ Yes
-Update Flow State
-    ↓
-Check Conditions:
-    - Max interval reached?
-    - Timeout expired?
-    - TCP FIN/RST seen + timeout?
-    ↓
-Export Flow Record
-    ↓
-Remove from Flow Table
-```
-
-## Tuning Guidelines
-
-### Low-Latency Configuration
-
-For real-time monitoring with low latency:
-
-```hcl
-span {
-  max_record_interval = "10s"  # Frequent exports
-  generic_timeout = "10s"
-  icmp_timeout = "5s"
-  tcp_timeout = "10s"
-  tcp_fin_timeout = "2s"
-  tcp_rst_timeout = "2s"
-  udp_timeout = "20s"
-}
-```
-
-**Benefits:**
-
-* Rapid flow detection
-* Real-time visibility
-* Quick anomaly detection
-
-**Trade-offs:**
-
-* Higher export rate
-* More OTLP traffic
-* More storage required
-* Higher CPU usage
-
-### High-Throughput Configuration
-
-For environments with very high traffic volume:
-
-```hcl
-span {
-  max_record_interval = "120s"  # Longer intervals
-  generic_timeout = "60s"
-  icmp_timeout = "20s"
-  tcp_timeout = "40s"
-  tcp_fin_timeout = "10s"
-  tcp_rst_timeout = "10s"
-  udp_timeout = "120s"
-}
-```
-
-**Benefits:**
-
-* Reduced export rate
-* Lower storage requirements
-* Less OTLP bandwidth
-* Lower CPU usage
-
-**Trade-offs:**
-
-* Slower detection
-* Less granular data
-* Longer memory retention
-
-### Memory-Constrained Configuration
-
-For nodes with limited memory:
-
-```hcl
-span {
-  max_record_interval = "30s"   # Quick exports
-  generic_timeout = "15s"        # Aggressive timeouts
-  icmp_timeout = "5s"
-  tcp_timeout = "15s"
-  tcp_fin_timeout = "5s"
-  tcp_rst_timeout = "5s"
-  udp_timeout = "30s"
-}
-```
-
-**Benefits:**
-
-* Smaller flow table
-* Lower memory usage
-* Faster flow turnover
-
-**Trade-offs:**
-
-* May fragment long flows
-* Slightly higher export rate
-
-## Monitoring Flow Table
-
-
-Monitor flow table size with these key metrics:
-
-- `mermin_flow_spans_active_total` - Current active flows
-- `mermin_flow_spans_created_total` - Flow creation rate
-- `mermin_ebpf_map_utilization_ratio{map="FLOW_STATS"}` - eBPF map utilization
-
-See the [Application Metrics](../observability/app-metrics.md) guide for complete Prometheus query examples.
-
-**Healthy indicators:**
-
-* Flow table size stable
-* Flow duration aligns with timeouts
-* No unbounded growth
-
-**Warning signs:**
-
-* Flow table continuously growing
-* Very long average flow durations
-* Memory usage increasing
-
-**Solutions:**
-
-* Decrease timeout values
-* Decrease `max_record_interval`
-* Add flow filters to reduce tracked flows
-
-## Protocol-Specific Examples
-
-### DNS (UDP)
-
-DNS is typically request-response with short duration:
-
-```hcl
-span {
-  udp_timeout = "10s"  # Short timeout for DNS
-}
-```
-
-### HTTP/HTTPS (TCP)
-
-Web traffic with varying connection durations:
-
-```hcl
-span {
-  max_record_interval = "60s"  # Export long connections periodically
-  tcp_timeout = "20s"           # Reasonable inactivity timeout
-  tcp_fin_timeout = "5s"        # Quick close detection
-}
-```
-
-### Streaming (UDP)
-
-Long-lived streaming connections:
-
-```hcl
-span {
-  max_record_interval = "300s"  # Allow long streams
-  udp_timeout = "120s"          # Long inactivity allowance
-}
-```
-
-### SSH (TCP)
-
-Interactive sessions with sporadic activity:
-
-```hcl
-span {
-  max_record_interval = "600s"  # Very long sessions
-  tcp_timeout = "300s"          # Long idle time
-}
-```
-
-## Complete Configuration Example
-
-```hcl
-# Flow span generation configuration
-span {
-  # Maximum time between records for active flows
-  max_record_interval = "60s"
-
-  # Default timeout for unspecified protocols
-  generic_timeout = "30s"
-
-  # Protocol-specific timeouts
-  icmp_timeout = "10s"       # ICMP (ping, etc.)
-  tcp_timeout = "20s"        # TCP established connections
-  tcp_fin_timeout = "5s"     # TCP graceful close
-  tcp_rst_timeout = "5s"     # TCP abrupt close
-  udp_timeout = "60s"        # UDP flows
-
-  # Community ID for flow correlation
-  community_id_seed = 0
-}
-```
-
-## Best Practices
-
-1. **Start with defaults**: Default values suit most environments
-2. **Monitor metrics**: Observe flow behavior before tuning
-3. **Adjust incrementally**: Change one timeout at a time
-4. **Document rationale**: Note why specific values were chosen
-5. **Consider protocol mix**: Tune based on predominant protocols
-6. **Balance objectives**: Trade off latency, accuracy, and resources
-7. **Test changes**: Validate in non-production first
-
-## Next Steps
-
-* [**Flow Filtering**](filtering.md): Filter flows before export
-* [**OTLP Exporter**](export-otlp.md): Configure export batching and intervals
-* [**Global Options**](global-options.md): Tune packet processing workers
-* [**Troubleshooting Performance**](../troubleshooting/performance.md): Optimize for your environment
+Flow and eBPF map metrics are in [Application Metrics](../observability/app-metrics.md): `mermin_flow_spans_active_total`, `mermin_flow_spans_created_total`, and `mermin_ebpf_map_size` / `mermin_ebpf_map_capacity` with `map="FLOW_STATS"`. If the flow table or memory grows without bound, lower timeouts or `max_record_interval`, or reduce tracked flows with [flow filters](filtering.md). If you need more headroom for legitimate load, increase `flow_capture.flow_stats_capacity` in [pipeline](pipeline.md).

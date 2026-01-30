@@ -2,6 +2,8 @@
 
 Welcome to the Mermin documentation! Mermin is a powerful, Kubernetes-native network observability tool that uses eBPF to efficiently capture network traffic and export it as **Flow Traces** via the OpenTelemetry Protocol (OTLP). It provides deep visibility into your cluster's network communications with zero application changes required.
 
+![Mermin Overview](images/mermin-overview.png)
+
 ***
 
 ## Why Mermin?
@@ -84,15 +86,15 @@ This documentation is designed to help you successfully deploy, configure, and o
 * [**Configuration Reference**](configuration/configuration.md): Comprehensive documentation of all configuration options.
 * [**Observability Backends**](observability/backends.md): Understand how to send Flow Traces to Elastic, Grafana Tempo, Jaeger, and other OTLP-compatible platforms.
 * [**Troubleshooting**](troubleshooting/troubleshooting.md): Solutions to common issues and diagnostic approaches
-* [**Development Guides**](development/contributor-guide.md): Build, test, and contribute to Mermin
+* [**Development Guides**](contributor-guide/development-workflow.md): Build, test, and contribute to Mermin
 
 ## Development & Contributing
 
 For developers who want to contribute to Mermin or build it locally:
 
-* [**Contributor Guide**](development/contributor-guide.md): Complete guide for setting up your development environment
-* [**Debugging eBPF Programs**](development/debugging-ebpf.md): Advanced eBPF program inspection and optimization techniques
-* [**Debugging Network Traffic**](development/debugging-network.md): Live packet capture with Wireshark
+* [**Contributor Guide**](contributor-guide/development-workflow.md): Complete guide for setting up your development environment
+* [**Debugging eBPF Programs**](contributor-guide/debugging-ebpf.md): Advanced eBPF program inspection and optimization techniques
+* [**Debugging Network Traffic**](contributor-guide/debugging-network.md): Live packet capture with Wireshark
 
 ## System Requirements
 

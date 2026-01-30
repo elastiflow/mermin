@@ -2,30 +2,20 @@
 
 Thank you for your interest in contributing to Mermin! This guide will help you understand our contribution process and how to get your changes successfully merged.
 
-## Table of Contents
-
-- [Getting Started](#getting-started)
-- [Contribution Workflow](#contribution-workflow)
-- [Commit Message Guidelines](#commit-message-guidelines)
-- [Pull Request Process](#pull-request-process)
-- [CI Checks](#ci-checks)
-- [Community and Communication](#community-and-communication)
-- [Code of Conduct](#code-of-conduct)
-
 ## Getting Started
 
 Before you start contributing:
 
-1. **Read the [Development Workflow](development-workflow.md)** guide to set up your environment
-2. **Browse existing issues** on [GitHub Issues](https://github.com/elastiflow/mermin/issues) to find something to work on
-3. **Join the discussion** on [GitHub Discussions](https://github.com/elastiflow/mermin/discussions)
-4. **Review our [Code of Conduct](code-of-conduct.md)** to understand our community standards
+1. **Read the [Development Workflow](contributor-guide/development-workflow.md)** guide to set up your environment.
+2. **Browse existing issues** on [GitHub Issues](https://github.com/elastiflow/mermin/issues) to find something to work on.
+3. **Join the discussion** on [GitHub Discussions](https://github.com/elastiflow/mermin/discussions).
+4. **Review our [Code of Conduct](CODE-OF-CONDUCT.md)** to understand our community standards.
 
 ### Finding Something to Work On
 
-- **Good First Issues**: Look for issues labeled `good first issue` for beginner-friendly tasks
-- **Help Wanted**: Issues labeled `help wanted` are actively seeking contributors
-- **Feature Requests**: Check the discussions board for feature ideas
+- **Good First Issues**: Look for issues labeled `good first issue` for beginner-friendly tasks.
+- **Help Wanted**: Issues labeled `help wanted` are actively seeking contributors.
+- **Feature Requests**: Check the discussions board for feature ideas.
 - **Bug Reports**: Any unassigned bug is fair game!
 
 If you want to work on something not yet tracked, please **open an issue first** to discuss your idea with the maintainers.
@@ -66,11 +56,11 @@ git checkout -b fix/issue-123 upstream/beta
 
 ### 3. Make Your Changes
 
-- Follow the existing code style and conventions
-- Add tests for new functionality
-- Update documentation as needed
-- Keep commits focused and atomic
-- Write clear commit messages (see [Commit Guidelines](#commit-message-guidelines))
+- Follow the existing code style and conventions.
+- Add tests for new functionality.
+- Update documentation as needed.
+- Keep commits focused and atomic.
+- Write clear commit messages (see [Commit Guidelines](#commit-message-guidelines)).
 
 ### 4. Test Your Changes
 
@@ -93,7 +83,7 @@ cd network-types/tests
 make test-ci
 ```
 
-See the [Development Workflow](development-workflow.md) guide for more testing details.
+See the [Development Workflow](contributor-guide/development-workflow.md) guide for more testing details.
 
 ### 5. Push and Create Pull Request
 
@@ -168,47 +158,47 @@ set log_level = "info" in their configuration.
 
 ### Important Notes
 
-- Use the **imperative, present tense**: "add" not "added" or "adds"
-- **Description must be lowercase**: Don't capitalize the first letter of the description
-- No period (.) at the end of the description
-- Reference issues and pull requests in the footer
-- **PR titles must also follow this format**: Your PR title must be a valid conventional commit (lowercase description)
+- Use the **imperative, present tense**: "add" not "added" or "adds".
+- **Description must be lowercase**: Don't capitalize the first letter of the description.
+- No period (.) at the end of the description.
+- Reference issues and pull requests in the footer.
+- **PR titles must also follow this format**: Your PR title must be a valid conventional commit (lowercase description).
 
 ## Pull Request Process
 
 ### Before Submitting
 
-- [ ] Ensure your branch is up to date with `upstream/beta`
-- [ ] All tests pass locally
-- [ ] Code is formatted with `cargo fmt`
-- [ ] No clippy warnings
-- [ ] Documentation is updated
-- [ ] Commit messages follow conventional commits
-- [ ] You've tested your changes end-to-end if possible
+- [ ] Ensure your branch is up to date with `upstream/beta`.
+- [ ] All tests pass locally.
+- [ ] Code is formatted with `cargo fmt`.
+- [ ] No clippy warnings.
+- [ ] Documentation is updated.
+- [ ] Commit messages follow conventional commits.
+- [ ] You've tested your changes end-to-end if possible.
 
 ### PR Description Template
 
 When creating a PR, provide:
 
-1. **What**: A clear description of what you changed
-2. **Why**: The motivation for the change
-3. **How**: Technical details of the implementation
-4. **Testing**: How you tested the changes
-5. **Screenshots**: If UI/output changes, include before/after
-6. **Related Issues**: Link to any related issues
+1. **What**: A clear description of what you changed.
+2. **Why**: The motivation for the change.
+3. **How**: Technical details of the implementation.
+4. **Testing**: How you tested the changes.
+5. **Screenshots**: If UI/output changes, include before/after.
+6. **Related Issues**: Link to any related issues.
 
 ### Review Process
 
-1. **Automated checks** will run (see [CI Checks](#ci-checks))
-2. **Maintainer review**: A maintainer will review your code
-3. **Feedback**: Address any requested changes
-4. **Approval**: Once approved, a maintainer will merge your PR
+1. **Automated checks** will run (see [CI Checks](#ci-checks)).
+2. **Maintainer review**: A maintainer will review your code.
+3. **Feedback**: Address any requested changes.
+4. **Approval**: Once approved, a maintainer will merge your PR.
 
 **Response time:** We aim to provide initial feedback within 3-5 business days.
 
 ### After Your PR is Merged
 
-- Delete your feature branch
+- Delete your feature branch.
 - Update your local repository:
 
   ```shell
@@ -286,22 +276,22 @@ docker run --rm -i hadolint/hadolint < Dockerfile
 
 ### Where to Get Help
 
-- **Questions**: Use [GitHub Discussions](https://github.com/elastiflow/mermin/discussions) for general questions
-- **Bugs**: Report bugs via [GitHub Issues](https://github.com/elastiflow/mermin/issues)
-- **Feature Requests**: Discuss features in [GitHub Discussions](https://github.com/elastiflow/mermin/discussions)
-- **Security Issues**: See our security policy for reporting vulnerabilities
+- **Questions**: Use [GitHub Discussions](https://github.com/elastiflow/mermin/discussions) for general questions.
+- **Bugs**: Report bugs via [GitHub Issues](https://github.com/elastiflow/mermin/issues).
+- **Feature Requests**: Discuss features in [GitHub Discussions](https://github.com/elastiflow/mermin/discussions).
+- **Security Issues**: See our security policy for reporting vulnerabilities.
 
 ### Communication Guidelines
 
-- Be respectful and inclusive
-- Search existing issues/discussions before creating new ones
-- Provide clear, detailed information when reporting bugs
-- Include steps to reproduce for bug reports
-- Be patient - maintainers are often volunteers
+- Be respectful and inclusive.
+- Search existing issues/discussions before creating new ones.
+- Provide clear, detailed information when reporting bugs.
+- Include steps to reproduce for bug reports.
+- Be patient - maintainers are often volunteers.
 
 ## Code of Conduct
 
-All contributors must adhere to our [Code of Conduct](code-of-conduct.md). We are committed to providing a welcoming and inclusive environment for everyone.
+All contributors must adhere to our [Code of Conduct](CODE-OF-CONDUCT.md). We are committed to providing a welcoming and inclusive environment for everyone.
 
 ## License
 
@@ -316,8 +306,8 @@ See [LICENSE-GPL2](../../LICENSE-GPL2) and [LICENSE-APACHE](../../LICENSE-APACHE
 
 If you have questions about contributing, feel free to:
 
-- Open a discussion on [GitHub Discussions](https://github.com/elastiflow/mermin/discussions)
-- Comment on the issue you're interested in working on
-- Reach out to the maintainers
+- Open a discussion on [GitHub Discussions](https://github.com/elastiflow/mermin/discussions).
+- Comment on the issue you're interested in working on.
+- Reach out to the maintainers.
 
 Thank you for contributing to Mermin! 🎉
