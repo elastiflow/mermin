@@ -2,36 +2,34 @@
 title: Flow Trace Attributes
 ---
 
-# Flow Trace Attributes
+# Attributes
 
-## Attributes
-
-### Requirement Level Legend
+## Requirement Level Legend
 
 The following symbols are used in the "Required" column to indicate [OpenTelemetry attribute requirement levels](https://opentelemetry.io/docs/specs/semconv/general/attribute-requirement-level/):
 
 | Symbol | Requirement Level      | Description                                                      |
-|--------|------------------------|------------------------------------------------------------------|
+| ------ | ---------------------- | ---------------------------------------------------------------- |
 | ✓      | Required               | All instrumentations MUST populate the attribute                 |
 | ?      | Conditionally Required | MUST populate when the specified condition is satisfied          |
 | \~     | Recommended            | SHOULD add by default if readily available and efficient         |
 | ○      | Opt-In                 | SHOULD populate only if user configures instrumentation to do so |
 
-### General Flow Attributes
+## General Flow Attributes
 
 > Note on Timestamps: The span's standard `start_time_unix_nano` and `end_time_unix_nano` fields are used to mark the beginning and end of the flow span's observation window. These are analogous to the `flowStart*` and `flowEnd*` fields in IPFIX records and are not duplicated as attributes.
 
 | Proposed Field Name     | Data Type | Description                                                                               | Notes / Decisions                                                                                                                                        | Std OTel | Required   |
-|-------------------------|-----------|-------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|----------|------------|
+| ----------------------- | --------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------- |
 | `flow.community_id`     | `string`  | The Community ID hash of the flow's five-tuple.                                           | A common way to identify a network flow across different monitoring points.                                                                              |          | ✓          |
 | `flow.direction`        | `string`  | The inferred direction of the flow from the observer's perspective.                       | One of: `forward`, `reverse`, or `unknown`. Mirrors IPFIX biflow concepts. See [Flow Direction](semantic-conventions.md#flow-direction) for details.     |          | ✓          |
 | `flow.connection.state` | `string`  | The state of the connection (e.g., TCP state) at the time the flow was generated.         | For TCP, this would be one of the standard states like `established`, `time_wait`, etc. Similar to network.connection.state but from a flow perspective. |          | ? TCP only |
 | `flow.end_reason`       | `string`  | The reason the flow record was exported (e.g., `active_timeout`, `end_of_flow_detected`). | Stored as a human-readable text enum based on [ipfix end reason](https://www.iana.org/assignments/ipfix/ipfix.xhtml#ipfix-flow-end-reason).              |          | ✓          |
 
-### L2-L4 Attributes
+## L2-L4 Attributes
 
 | Proposed Field Name           | Data Type  | Description                                                                             | Notes / Decisions                                                      | Std OTel | Required          |
-|-------------------------------|------------|-----------------------------------------------------------------------------------------|------------------------------------------------------------------------|----------|-------------------|
+| ----------------------------- | ---------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | -------- | ----------------- |
 | `source.address`              | `string`   | Source IP address.                                                                      |                                                                        | ✓        | ✓                 |
 | `source.port`                 | `long`     | Source port number.                                                                     |                                                                        | ✓        | ✓                 |
 | `destination.address`         | `string`   | Destination IP address.                                                                 |                                                                        | ✓        | ✓                 |
@@ -70,10 +68,10 @@ The following symbols are used in the "Required" column to indicate [OpenTelemet
 | `flow.reverse.tcp.flags.bits` | `long`     | The integer representation of all TCP flags seen in reverse direction.                  | Accumulated across entire flow lifetime (never reset).                 |          | \~                |
 | `flow.reverse.tcp.flags.tags` | `string[]` | An array of TCP flag names for reverse direction (e.g., `["SYN", "ACK"]`).              | Accumulated across entire flow lifetime (never reset).                 |          | \~                |
 
-### Flow Metrics
+## Flow Metrics
 
 | Proposed Field Name          | Data Type | Description                                                               | Notes / Decisions                                        | Std OTel | Required |
-|------------------------------|-----------|---------------------------------------------------------------------------|----------------------------------------------------------|----------|----------|
+| ---------------------------- | --------- | ------------------------------------------------------------------------- | -------------------------------------------------------- | -------- | -------- |
 | `flow.bytes.delta`           | `long`    | Number of bytes observed in the last measurement interval for the flow.   |                                                          |          | ✓        |
 | `flow.bytes.total`           | `long`    | Total number of bytes observed for this flow since its start.             | The term `bytes` is preferred over `octets` for clarity. |          | \~       |
 | `flow.packets.delta`         | `long`    | Number of packets observed in the last measurement interval for the flow. |                                                          |          | ✓        |
@@ -83,22 +81,22 @@ The following symbols are used in the "Required" column to indicate [OpenTelemet
 | `flow.reverse.packets.delta` | `long`    | Delta packets in the reverse direction of the flow.                       |                                                          |          | ✓        |
 | `flow.reverse.packets.total` | `long`    | Total packets in the reverse direction of the flow since its start.       |                                                          |          | \~       |
 
-### Performance Metrics
+## Performance Metrics
 
 Time-based metrics calculated for the flow, stored in nanoseconds (`ns`).
 
 | Proposed Field Name          | Data Type | Description                                                                                                                    | Notes / Decisions | Std OTel | Required |
-|------------------------------|-----------|--------------------------------------------------------------------------------------------------------------------------------|-------------------|----------|----------|
+| ---------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------- | -------- | -------- |
 | `flow.tcp.handshake.latency` | `long`    | The latency of the first part of the TCP handshake (SYN to SYN/ACK), from the **client's perspective**. (Server network delay) | Unit: `ns`.       |          | \~       |
 | `flow.tcp.svc.latency`       | `long`    | The application/service processing time, as measured on the **server side**.                                                   | Unit: `ns`.       |          | \~       |
 | `flow.tcp.svc.jitter`        | `long`    | The jitter of the application/service processing time, as measured on the **server side**.                                     | Unit: `ns`.       |          | \~       |
 | `flow.tcp.rndtrip.latency`   | `long`    | The full round-trip time (client to server + app to client), from the **client's perspective**.                                | Unit: `ns`.       |          | \~       |
 | `flow.tcp.rndtrip.jitter`    | `long`    | The jitter of the full round-trip time, from the **client's perspective**.                                                     | Unit: `ns`.       |          | \~       |
 
-### Tunnel & Ip-in-Ip & IPSec Attributes
+## Tunnel & Ip-in-Ip & IPSec Attributes
 
 | Proposed Field Name            | Data Type | Description                                                                 | Notes / Decisions                                        | Std OTel | Required           |
-|--------------------------------|-----------|-----------------------------------------------------------------------------|----------------------------------------------------------|----------|--------------------|
+| ------------------------------ | --------- | --------------------------------------------------------------------------- | -------------------------------------------------------- | -------- | ------------------ |
 | `flow.ipsec.ah.spi`            | `long`    | Security Parameters Index for AH headers.                                   | SPI from the outermost header (after a tunnel)           |          | ○                  |
 | `flow.ipsec.esp.spi`           | `long`    | Security Parameters Index for ESP headers.                                  | SPI from the outermost header (after a tunnel)           |          | ○                  |
 | `flow.ipsec.sender_index`      | `long`    | The sender index from a WireGuard header.                                   |                                                          |          | ○                  |
@@ -127,12 +125,12 @@ Time-based metrics calculated for the flow, stored in nanoseconds (`ns`).
 | `tunnel.reverse.bytes.delta`   | `long`    | Delta tunnel overhead bytes in the reverse direction.                       |                                                          |          | ? tunnel present   |
 | `tunnel.reverse.bytes.total`   | `long`    | Total tunnel overhead bytes in the reverse direction since flow start.      |                                                          |          | \~                 |
 
-### Kubernetes Attributes
+## Kubernetes Attributes
 
 > **Note:** These attributes use `source.k8s.*` / `destination.k8s.*` prefixes rather than standard OTel `k8s.*` attributes. See [Why `source.k8s.*` Instead of `k8s.source.*`?](semantic-conventions.md#why-sourcek8s-instead-of-k8ssource) for the rationale.
 
 | Proposed Field Name                             | Data Type | Description                                                 | Notes / Decisions | Std OTel  | Required |
-|-------------------------------------------------|-----------|-------------------------------------------------------------|-------------------|-----------|----------|
+| ----------------------------------------------- | --------- | ----------------------------------------------------------- | ----------------- | --------- | -------- |
 | `source.k8s.cluster.name`                       | `string`  | The name of the Kubernetes cluster for the source.          |                   | partially | \~       |
 | `source.k8s.cluster.uid`                        | `string`  | The UID of the Kubernetes cluster for the source.           |                   | partially | ○        |
 | `source.k8s.node.name`                          | `string`  | The name of the Kubernetes Node for the source.             |                   | partially | \~       |
@@ -196,17 +194,17 @@ Time-based metrics calculated for the flow, stored in nanoseconds (`ns`).
 | `destination.k8s.service.uid`                   | `string`  | The UID of the Kubernetes Service for the destination.      |                   | partially | ○        |
 | `destination.k8s.service.annotations.<key>`     | `string`  | Dynamic annotations from the destination Service.           | Flattened map.    | partially | ○        |
 
-### Network Policy Attributes
+## Network Policy Attributes
 
 | Proposed Field Name      | Data Type  | Description                                               | Notes / Decisions                | Std OTel | Required |
-|--------------------------|------------|-----------------------------------------------------------|----------------------------------|----------|----------|
+| ------------------------ | ---------- | --------------------------------------------------------- | -------------------------------- | -------- | -------- |
 | `network.policy.ingress` | `string[]` | A list of network policy names affecting ingress traffic. | This could be multiple policies. |          | ○        |
 | `network.policy.egress`  | `string[]` | A list of network policy names affecting egress traffic.  | This could be multiple policies. |          | ○        |
 
-### Process & Container Attributes
+## Process & Container Attributes
 
 | Proposed Field Name                | Data Type | Description                                                               | Notes / Decisions                               | Std OTel | Required |
-|------------------------------------|-----------|---------------------------------------------------------------------------|-------------------------------------------------|----------|----------|
+| ---------------------------------- | --------- | ------------------------------------------------------------------------- | ----------------------------------------------- | -------- | -------- |
 | `process.executable.name`          | `string`  | The name of the binary associated with the socket for this flow.          | Provides application-level identification.      | ✓        | \~       |
 | `process.pid`                      | `long`    | The PID of the process associated with the socket for this flow.          | Provides application-level identification.      | ✓        | \~       |
 | `source.container.name`            | `string`  | The container runtime name for the source (e.g., from Docker/containerd). | Distinct from `source.k8s.container.name`.      | ✓        | \~       |

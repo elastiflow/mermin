@@ -24,7 +24,7 @@
 * [Cloud Platforms](deployment/cloud-platforms.md)
 * [Advanced Scenarios](deployment/advanced-scenarios.md)
 * [Docker on Bare Metal](deployment/docker-bare-metal.md)
-* Helm Examples
+* [Helm Examples](deployment/helm-examples/README.md)
   * [Mermin with OpenTelemetry Collector](deployment/examples/local_otel/README.md)
   * [Mermin with NetObserv Flow and OpenSearch](deployment/examples/netobserv_os_simple_svc/README.md)
   * [Mermin with NetObserv Flow and OpenSearch in GKE with Gateway](deployment/examples/netobserv_os_simple_gke_gw/README.md)
