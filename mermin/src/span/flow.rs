@@ -167,6 +167,12 @@ pub struct SpanAttributes {
     pub server_address: Option<String>,
     pub server_port: Option<u16>,
 
+    // Process Attributes (from eBPF LSM hooks)
+    /// PID of the process that created/owns this flow (None if unknown)
+    pub process_pid: Option<u32>,
+    /// Command name of the process (TASK_COMM_LEN, None if unknown)
+    pub process_command: Option<String>,
+
     // Flow Metrics
     pub flow_bytes_delta: i64,
     pub flow_bytes_total: i64,
@@ -331,6 +337,8 @@ impl Default for SpanAttributes {
             client_port: None,
             server_address: None,
             server_port: None,
+            process_pid: None,
+            process_command: None,
             flow_bytes_delta: 0,
             flow_bytes_total: 0,
             flow_packets_delta: 0,
@@ -643,6 +651,12 @@ impl Traceable for FlowSpan {
         }
         if let Some(value) = self.attributes.server_port {
             kvs.push(KeyValue::new("server.port", value as i64));
+        }
+        if let Some(value) = self.attributes.process_pid {
+            kvs.push(KeyValue::new("process.pid", value as i64));
+        }
+        if let Some(ref value) = self.attributes.process_command {
+            kvs.push(KeyValue::new("process.command", value.to_owned()));
         }
         if let Some(value) = self.attributes.flow_ipsec_ah_spi {
             kvs.push(KeyValue::new("flow.ipsec.ah.spi", value as i64));

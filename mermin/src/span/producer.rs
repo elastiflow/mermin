@@ -1174,6 +1174,15 @@ impl FlowWorker {
                 server_address,
                 server_port,
 
+                // Process metadata from eBPF LSM hooks
+                process_pid: (stats.pid != 0).then_some(stats.pid),
+                process_command: (stats.pid != 0).then(|| {
+                    // comm is null-terminated, convert to String
+                    String::from_utf8_lossy(&stats.comm)
+                        .trim_end_matches('\0')
+                        .to_string()
+                }),
+
                 // ICMP metadata
                 flow_icmp_type_id: icmp_stats.map(|is| is.icmp_type),
                 flow_icmp_type_name: icmp_stats.and_then(|is| {
