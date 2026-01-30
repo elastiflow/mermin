@@ -1,7 +1,3 @@
----
-hidden: true
----
-
 # Configuration Examples
 
 This page provides complete, real-world configuration examples for common Mermin deployment scenarios.
@@ -83,23 +79,26 @@ discovery "informer" "k8s" {
     { kind = "NetworkPolicy" },
     { kind = "Ingress" }
   ]
-}
 
-# Walk owner references for workload attribution
-discovery "owners" {
-  max_depth = 10
-  include_kinds = [
-    "Deployment",
-    "StatefulSet",
-    "DaemonSet",
-    "ReplicaSet",
-    "Job",
-    "CronJob"
+  # Walk owner references for workload attribution
+  owner_relations = {
+    max_depth = 10
+    include_kinds = [
+      "Deployment",
+      "StatefulSet",
+      "DaemonSet",
+      "ReplicaSet",
+      "Job",
+      "CronJob"
+    ]
+  }
+
+  # Enable selector-based relations (NetworkPolicy, Service)
+  selector_relations = [
+    { kind = "NetworkPolicy", to = "Pod", selector_match_labels_field = "spec.podSelector.matchLabels", selector_match_expressions_field = "spec.podSelector.matchExpressions" },
+    { kind = "Service", to = "Pod", selector_match_labels_field = "spec.selector" }
   ]
 }
-
-# Enable selector-based relations (NetworkPolicy, Service)
-discovery "selector_relations" {}
 
 # Extract comprehensive source metadata
 attributes {
@@ -168,15 +167,15 @@ export "traces" {
 
     # TLS with CA verification
     tls = {
-      insecure = false
-      ca_file = "/etc/mermin/certs/ca.crt"
+      insecure_skip_verify = false
+      ca_cert = "/etc/mermin/certs/ca.crt"
     }
 
     # Basic authentication
     auth = {
       basic = {
-        username = "${OTLP_USERNAME}"
-        password = "${OTLP_PASSWORD}"
+        user = "${OTLP_USERNAME}"
+        pass = "${OTLP_PASSWORD}"
       }
     }
   }
@@ -213,11 +212,7 @@ discovery "informer" "k8s" {
     { kind = "Service" },
     { kind = "Node" }
   ]
-}
-
-# Simple owner tracking
-discovery "owners" {
-  max_depth = 5
+  owner_relations = { max_depth = 5 }
 }
 
 # Minimal metadata extraction
@@ -251,7 +246,7 @@ export "traces" {
     endpoint = "localhost:4317"
     protocol = "grpc"
     tls = {
-      insecure = true
+      insecure_skip_verify = true  # Development only
     }
   }
 }
@@ -291,13 +286,12 @@ discovery "informer" "k8s" {
     { kind = "Deployment" },
     { kind = "NetworkPolicy" }  # Cilium NetworkPolicies
   ]
+  owner_relations = { max_depth = 10 }
+  selector_relations = [
+    { kind = "NetworkPolicy", to = "Pod", selector_match_labels_field = "spec.podSelector.matchLabels", selector_match_expressions_field = "spec.podSelector.matchExpressions" },
+    { kind = "Service", to = "Pod", selector_match_labels_field = "spec.selector" }
+  ]
 }
-
-discovery "owners" {
-  max_depth = 10
-}
-
-discovery "selector_relations" {}
 
 attributes {
   source {
@@ -365,13 +359,12 @@ discovery "informer" "k8s" {
     { kind = "Deployment" },
     { kind = "NetworkPolicy" }
   ]
+  owner_relations = { max_depth = 10 }
+  selector_relations = [
+    { kind = "NetworkPolicy", to = "Pod", selector_match_labels_field = "spec.podSelector.matchLabels", selector_match_expressions_field = "spec.podSelector.matchExpressions" },
+    { kind = "Service", to = "Pod", selector_match_labels_field = "spec.selector" }
+  ]
 }
-
-discovery "owners" {
-  max_depth = 10
-}
-
-discovery "selector_relations" {}
 
 attributes {
   source {
@@ -451,10 +444,7 @@ discovery "informer" "k8s" {
     { kind = "Service" },
     { kind = "Node" }
   ]
-}
-
-discovery "owners" {
-  max_depth = 5  # Limit depth to reduce processing
+  owner_relations = { max_depth = 5 }  # Limit depth to reduce processing
 }
 
 # Minimal metadata extraction
@@ -536,10 +526,7 @@ discovery "informer" "k8s" {
     { kind = "Node" },  # Nodes are cluster-scoped, no namespace filter
     { kind = "Deployment", namespaces = ["production", "staging"] }
   ]
-}
-
-discovery "owners" {
-  max_depth = 10
+  owner_relations = { max_depth = 10 }
 }
 
 attributes {
@@ -577,17 +564,17 @@ export "traces" {
 
     # Mutual TLS
     tls = {
-      insecure = false
-      ca_file = "/etc/mermin/certs/ca.crt"
-      cert_file = "/etc/mermin/certs/client.crt"
-      key_file = "/etc/mermin/certs/client.key"
+      insecure_skip_verify = false
+      ca_cert = "/etc/mermin/certs/ca.crt"
+      client_cert = "/etc/mermin/certs/client.crt"
+      client_key = "/etc/mermin/certs/client.key"
     }
 
     # Authentication
     auth = {
       basic = {
-        username = "${OTLP_USERNAME}"
-        password = "${OTLP_PASSWORD}"
+        user = "${OTLP_USERNAME}"
+        pass = "${OTLP_PASSWORD}"
       }
     }
   }
@@ -622,10 +609,7 @@ discovery "informer" "k8s" {
     { kind = "Node" },
     { kind = "Deployment" }
   ]
-}
-
-discovery "owners" {
-  max_depth = 10
+  owner_relations = { max_depth = 10 }
 }
 
 attributes {
@@ -655,7 +639,7 @@ span {
 #
 #   Mermin → OTel Collector → Multiple Backends
 #
-# See observability/backends.md for collector configuration.
+# See [Observability Backends](../observability/backends.md) for collector configuration.
 
 export "traces" {
   otlp = {
@@ -714,10 +698,7 @@ discovery "informer" "k8s" {
     { kind = "Node" },
     { kind = "Deployment" }
   ]
-}
-
-discovery "owners" {
-  max_depth = 10
+  owner_relations = { max_depth = 10 }
 }
 
 span {
@@ -749,10 +730,7 @@ discovery "informer" "k8s" {
     { kind = "Node" },
     { kind = "Deployment" }
   ]
-}
-
-discovery "owners" {
-  max_depth = 10
+  owner_relations = { max_depth = 10 }
 }
 
 span {
@@ -784,10 +762,7 @@ discovery "informer" "k8s" {
     { kind = "Node" },
     { kind = "Deployment" }
   ]
-}
-
-discovery "owners" {
-  max_depth = 10
+  owner_relations = { max_depth = 10 }
 }
 
 span {

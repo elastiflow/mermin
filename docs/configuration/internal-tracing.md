@@ -1,10 +1,6 @@
----
-hidden: true
----
-
 # Internal Tracing
 
-This page documents the `internal.traces` configuration, which controls how Mermin exports its own telemetry data for self-monitoring and debugging.
+This page documents the `internal "traces"` configuration (config path: `internal.traces`), which controls how Mermin exports its own telemetry data for self-monitoring and debugging. Mermin accepts HCL or YAML; the examples below use HCL (see [Configuration Overview](configuration.md#file-format) for format details).
 
 ## Overview
 
@@ -44,7 +40,7 @@ Span event format for internal traces.
 
 **Valid Values:**
 
-* `"full"`: Record all span events (enter, exit, close)
+* `"full"`: Record all span events (enter, exit, close). The value `"plain"` is accepted and treated as `"full"`.
 
 **Example:**
 
@@ -299,9 +295,9 @@ This is the default and recommended for most deployments.
 
 **Solutions:**
 
-1. Send internal traces to different endpoint
-2. Use different collector instances
-3. Filter by service name in backend
+1. Send internal traces to a different endpoint than flow traces (e.g. separate OTLP collectors)
+2. Use different collector instances for internal vs flow export
+3. Filter by span name or attributes in your backend: both internal and flow traces use `service.name="mermin"`, so distinguish them by span name (e.g. internal spans like `load_ebpf_program`, `process_packet`, `sync_k8s_informers` vs flow span names from your flow data)
 
 ## Best Practices
 
@@ -364,24 +360,26 @@ internal "traces" {
 
 ## Integration with Observability Stack
 
+Internal and flow traces both use `service.name="mermin"`. To find internal traces in your backend, filter by span name or other attributes (e.g. internal span names like `load_ebpf_program`, `process_packet`, `sync_k8s_informers`).
+
 ### Grafana Tempo
 
-Query internal traces in Tempo:
+Query internal traces in Tempo using TraceQL (Tempo's trace query language, not PromQL):
 
-```promql
-# Find slow operations
-{service.name="mermin-internal"} | duration > 1s
+```traceql
+# Find internal spans for Mermin (filter by span name)
+{ resource.service.name="mermin" && name=~"load_ebpf_program|process_packet|sync_k8s_informers" }
 
-# Find eBPF loading spans
-{service.name="mermin-internal", span.name="load_ebpf_program"}
+# Find slow internal operations (duration filter)
+{ resource.service.name="mermin" && name=~"load_ebpf_program|process_packet|sync_k8s_informers" } | duration > 1s
 ```
 
 ### Jaeger
 
 Filter internal traces:
 
-* Service: `mermin-internal`
-* Operation: `process_packet`, `sync_k8s_informers`, etc.
+* **Service:** `mermin` (same as flow traces; use operation/span name to narrow)
+* **Operation (span name):** `load_ebpf_program`, `process_packet`, `sync_k8s_informers`, etc.
 
 ## Next Steps
 

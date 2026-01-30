@@ -1,14 +1,10 @@
----
-hidden: true
----
-
 # Owner Relations
 
-Owner relations control how Mermin walks Kubernetes owner references to enrich flows with workload controller metadata (Deployment, StatefulSet, etc.).
+Owner relations control how Mermin walks Kubernetes owner references to enrich flows with workload controller metadata (Deployment, StatefulSet, etc.). Mermin accepts HCL or YAML for the config file; the examples below use HCL (see [Configuration Overview](configuration.md#file-format) for format details).
 
 ## Overview
 
-Kubernetes resources have owner references forming a chain: Pod → ReplicaSet → Deployment → ... Mermin can walk this chain and attach metadata from owners to network flows.
+Kubernetes resources have owner references forming a chain: Pod → ReplicaSet → Deployment → ... Mermin can walk this chain and attach metadata from owners to network flows. Owner relations apply when Kubernetes discovery is enabled (`discovery "informer" "k8s"`).
 
 ## Configuration
 
@@ -42,7 +38,7 @@ owner_relations = {
 
 **Type:** Array of strings **Default:** `[]` (include all)
 
-Only include these owner kinds in flow metadata. Empty array means include all.
+Only include these owner kinds in flow metadata. Empty array means include all. Kind names are case-insensitive (e.g. `Deployment` and `deployment` are equivalent).
 
 **Valid kinds:** Deployment, ReplicaSet, StatefulSet, DaemonSet, Job, CronJob
 
@@ -58,7 +54,7 @@ owner_relations = {
 
 **Type:** Array of strings **Default:** `[]` (exclude none)
 
-Exclude these owner kinds from flow metadata. Takes precedence over `include_kinds`.
+Exclude these owner kinds from flow metadata. Takes precedence over `include_kinds`. Kind names are case-insensitive.
 
 **Example:**
 
@@ -68,17 +64,31 @@ owner_relations = {
 }
 ```
 
+### Default behavior
+
+If you omit the `owner_relations` block, Mermin uses default settings: `max_depth = 5`, `include_kinds = []` (include all kinds), `exclude_kinds = []`. Owner walking is enabled and all supported owner kinds are included in flow metadata.
+
+To disable owner walking (no owner metadata on flows), set `max_depth = 0`:
+
+```hcl
+discovery "informer" "k8s" {
+  owner_relations = {
+    max_depth = 0
+  }
+}
+```
+
 ## How It Works
 
 **Example chain:** Pod `nginx-abc123` → ReplicaSet `nginx-xyz` → Deployment `nginx`
 
-**Without owner relations:**
+**Without owner relations (or max_depth = 0):**
 
 * Flow shows only: Pod name, namespace, labels
 
-**With owner relations:**
+**With owner relations (default or custom):**
 
-* Flow shows: Pod + ReplicaSet + Deployment metadata
+* Flow shows: Pod + ReplicaSet + Deployment metadata (up to `max_depth` levels, filtered by include/exclude)
 
 ## Complete Example
 

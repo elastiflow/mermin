@@ -1,20 +1,15 @@
----
-hidden: true
----
-
 # Parser Configuration
 
-The parser configuration controls how Mermin's eBPF programs parse network packets, including tunnel detection, protocol parsing depth, and IPv6 extension header handling.
+The parser configuration controls how Mermin's eBPF programs detect and parse tunneled traffic by specifying UDP ports for VXLAN, Geneve, and WireGuard.
 
 ## Overview
 
 Mermin's parser configuration allows you to:
 
-- Specify ports for tunnel protocol detection (VXLAN, Geneve, WireGuard)
-- Control the maximum depth of nested protocol headers to parse
-- Enable/disable parsing of advanced IPv6 extension headers
+- Specify UDP ports for tunnel protocol detection (VXLAN, Geneve, WireGuard)
+- Match your CNI or overlay network's tunnel port settings so inner (pod) traffic is visible
 
-These settings directly affect eBPF verifier complexity and can be tuned to balance visibility needs against deployment constraints.
+Correct port configuration ensures flows show inner source/destination (e.g., pod IPs) instead of only tunnel endpoints (node IPs). These settings do not add configurable parsing depth or IPv6 extension options; only tunnel ports are configurable.
 
 ## Configuration
 
@@ -31,7 +26,7 @@ parser {
 
 ### Tunnel Port Detection
 
-### `geneve_port`
+#### `geneve_port`
 
 **Type:** Integer (port number) **Default:** `6081`
 
@@ -65,7 +60,7 @@ parser {
 }
 ```
 
-### `vxlan_port`
+#### `vxlan_port`
 
 **Type:** Integer (port number) **Default:** `4789`
 
@@ -99,7 +94,7 @@ parser {
 }
 ```
 
-### `wireguard_port`
+#### `wireguard_port`
 
 **Type:** Integer (port number) **Default:** `51820`
 
@@ -428,8 +423,9 @@ If your environment uses multiple ports for the same tunnel protocol (e.g., mult
 
 ## Next Steps
 
-- [**Network Interface Discovery**](discovery-instrument.md): Configure which interfaces to monitor
-- [**Flow Filtering**](filtering.md): Filter flows based on protocols and ports
-- [**Deployment Issues**](../troubleshooting/deployment-issues.md): Troubleshoot eBPF verifier failures
-- [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose flow capture issues
-- [**Advanced Scenarios**](../deployment/advanced-scenarios.md): CNI-specific deployment guides
+* [**Configuration Overview**](configuration.md): Config file format and structure
+* [**Network Interface Discovery**](discovery-instrument.md): Configure which interfaces to monitor
+* [**Flow Filtering**](filtering.md): Filter flows based on protocols and ports
+* [**Deployment Issues**](../troubleshooting/deployment-issues.md): Troubleshoot eBPF verifier failures
+* [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose flow capture issues
+* [**Advanced Scenarios**](../deployment/advanced-scenarios.md): CNI-specific deployment guides

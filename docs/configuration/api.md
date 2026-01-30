@@ -1,10 +1,6 @@
----
-hidden: true
----
-
 # API and Metrics
 
-Mermin provides HTTP endpoints for health checks and Prometheus metrics. This page documents how to configure these services.
+Mermin provides HTTP endpoints for health checks and Prometheus metrics. This page documents how to configure the API server and health probes; for the Prometheus metrics server (port, endpoints, debug metrics), see [Metrics](metrics.md).
 
 ## API Server Configuration
 
@@ -74,7 +70,13 @@ api {
 }
 ```
 
+## Metrics Server
+
+The metrics server (Prometheus scrape endpoint) is configured via the `internal "metrics"` block. Options include `enabled`, `listen_address`, `port` (default `10250`), and `debug_metrics_enabled`. See [Metrics](metrics.md) for full configuration and available endpoints.
+
 ## Health Check Endpoints
+
+Health endpoints return JSON (`Content-Type: application/json`) with a `status` field (`"ok"` or `"unavailable"`) and a `checks` object with detailed state.
 
 ### `/livez` - Liveness Probe
 
@@ -91,7 +93,7 @@ curl http://localhost:8080/livez
 * **200 OK**: Mermin is alive
 * **503 Service Unavailable**: Mermin is not responsive
 
-**Returns:** Plain text `ok` or error message
+**Response body (JSON):** `status` (`"ok"` or `"unavailable"`), `checks` (e.g. `ebpf_loaded`, `startup_complete`, `pipeline_healthy`), and `metrics.export_errors_total`.
 
 **Use Case:**
 
@@ -111,6 +113,10 @@ livenessProbe:
   failureThreshold: 3
 ```
 
+{% hint style="info" %}
+The examples use `port: api`, a named container port. Ensure your pod spec defines a port named `api`, or use the numeric port (e.g. `8080`) instead.
+{% endhint %}
+
 ### `/readyz` - Readiness Probe
 
 Indicates whether Mermin is ready to accept traffic.
@@ -123,10 +129,10 @@ curl http://localhost:8080/readyz
 
 **Response:**
 
-* **200 OK**: Mermin is ready (eBPF programs loaded, informers synced)
+* **200 OK**: Mermin is ready (eBPF programs loaded, Kubernetes informers synced, pipeline ready to process)
 * **503 Service Unavailable**: Mermin is not ready
 
-**Returns:** Plain text `ok` or error message
+**Response body (JSON):** `status`, `checks` (e.g. `ebpf_loaded`, `k8s_caches_synced`, `ready_to_process`, `pipeline_healthy`), and `metrics.export_errors_total`.
 
 **Use Case:**
 
@@ -162,7 +168,7 @@ curl http://localhost:8080/startup
 * **200 OK**: Startup complete
 * **503 Service Unavailable**: Still starting up
 
-**Returns:** Plain text `ok` or error message
+**Response body (JSON):** `status` and `checks` (e.g. `startup_complete`).
 
 **Use Case:**
 
@@ -217,6 +223,8 @@ spec:
           port: 10250
 ```
 
+Adjust the `matchLabels` (e.g. `name: monitoring`) to match the namespace where your Prometheus runs.
+
 ### Authentication
 
 Currently, the API and metrics endpoints do not support authentication. Use network policies or service mesh policies to restrict access.
@@ -264,7 +272,7 @@ internal "metrics" {
 
 **Solutions:**
 
-1. Verify `metrics.enabled = true`
+1. Verify the metrics server is enabled: `internal "metrics" { enabled = true }` in HCL (see [Metrics](metrics.md))
 2. Check Prometheus configuration
 3. Verify pod annotations or ServiceMonitor
 4. Test manual scrape: `curl http://pod-ip:10250/metrics`
@@ -276,12 +284,13 @@ internal "metrics" {
 
 **Solutions:**
 
-1. Limit labels in metrics
+1. Ensure debug metrics are disabled if not needed (see [Metrics](metrics.md)); limit labels where configurable
 2. Use aggregation in queries
 3. Adjust Prometheus retention
 
 ## Next Steps
 
+* [**Metrics**](metrics.md): Configure Prometheus metrics server and endpoints
 * [**Global Options**](global-options.md): Configure logging and performance
 * [**Flow Span Options**](span.md): Tune flow generation
 * [**OTLP Exporter**](export-otlp.md): Configure flow export

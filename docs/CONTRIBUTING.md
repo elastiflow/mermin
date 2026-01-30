@@ -2,16 +2,6 @@
 
 Thank you for your interest in contributing to Mermin! This guide will help you understand our contribution process and how to get your changes successfully merged.
 
-## Table of Contents
-
-- [Getting Started](#getting-started)
-- [Contribution Workflow](#contribution-workflow)
-- [Commit Message Guidelines](#commit-message-guidelines)
-- [Pull Request Process](#pull-request-process)
-- [CI Checks](#ci-checks)
-- [Community and Communication](#community-and-communication)
-- [Code of Conduct](#code-of-conduct)
-
 ## Getting Started
 
 Before you start contributing:

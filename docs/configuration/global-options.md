@@ -1,7 +1,3 @@
----
-hidden: true
----
-
 # Global Options
 
 Global options are top-level configuration settings that control Mermin's overall behavior. These are the only options that can be configured via CLI flags or environment variables in addition to the configuration file.
@@ -39,9 +35,9 @@ mermin
 
 ### `config` / `MERMIN_CONFIG_PATH`
 
-**Type:** String (file path) **Default:** None (required) **CLI Flag:** `--config` **Environment:** `MERMIN_CONFIG_PATH`
+**Type:** String (file path) **Default:** None (optional) **CLI Flag:** `--config` **Environment:** `MERMIN_CONFIG_PATH`
 
-Path to the HCL or YAML configuration file.
+Path to the HCL or YAML configuration file. Omit to use built-in defaults.
 
 **Example:**
 

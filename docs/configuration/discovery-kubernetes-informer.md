@@ -1,7 +1,3 @@
----
-hidden: true
----
-
 # Discovery: Kubernetes Informer
 
 This page documents how to configure Mermin's Kubernetes informers, which watch and cache Kubernetes resources for flow
@@ -95,7 +91,7 @@ discovery "informer" "k8s" {
 
 ## Resource Selectors
 
-The `selectors` array determines which Kubernetes resources to watch.
+The `selectors` array determines which Kubernetes resources to watch. If `selectors` is omitted or empty, Mermin uses a default set of kinds (Service, EndpointSlice, Pod, workload controllers, NetworkPolicy, Ingress, Gateway). When you provide selectors, your entries are merged with these defaults: for each kind you list, your selector replaces the default for that kind.
 
 ### Selector Structure
 
@@ -193,21 +189,23 @@ discovery "informer" "k8s" {
 * `Exists`: Label key exists
 * `DoesNotExist`: Label key doesn't exist
 
-### Exclusion
+### Excluding resources
 
-Exclude specific resources:
+* **Exclude a kind entirely:** If you omit `selectors` or leave it empty, all default kinds are watched. When you provide `selectors`, they are merged with defaults: for each kind you specify, your selector is used; for kinds you do not specify, the default for that kind is still used. So you cannot remove a single kind from the default set—unspecified kinds remain. To limit scope, use **namespace filtering** or **label selectors** (inclusion) so that only the resources you need are watched.
+* **Namespace filter is inclusion-only:** `namespaces = ["a", "b"]` means "watch this kind only in namespaces `a` and `b`." There is no way to "exclude namespace X" for a kind; use inclusion (list the namespaces you want) instead.
+
+**Example:** Watch only pods in specific namespaces (inclusion) to reduce load:
 
 ```hcl
 discovery "informer" "k8s" {
   selectors = [
-    # Include all pods
-    { kind = "Pod" },
-
-    # Exclude gateways in "loggers" namespace
     {
-      kind = "Gateway"
-      namespaces = ["loggers"]
+      kind = "Pod"
+      namespaces = ["default", "production"]
     },
+    # Other kinds use defaults (no namespace filter = all namespaces)
+    { kind = "Service" },
+    { kind = "EndpointSlice" },
   ]
 }
 ```
@@ -232,7 +230,9 @@ Mermin supports watching these Kubernetes resources:
 | `Ingress`       | Ingress controller flows            |
 | `Gateway`       | Gateway API flows                   |
 
-**Case insensitive**: `"Pod"`, `"pod"`, and `"POD"` are equivalent.
+**Case insensitive:** `"Pod"`, `"pod"`, and `"POD"` are equivalent.
+
+**Endpoint:** Prefer `EndpointSlice` for service endpoints; `Endpoint` (core v1) is deprecated.
 
 ## Complete Configuration Example
 
@@ -282,7 +282,9 @@ discovery "informer" "k8s" {
 
 Memory usage scales with number of watched resources:
 
-**Estimate:** \~1 KB per resource **10,000 pods:** \~10 MB **100,000 pods:** \~100 MB
+* **Estimate:** ~1 KB per resource
+* **10,000 pods:** ~10 MB
+* **100,000 pods:** ~100 MB
 
 ### API Server Load
 
@@ -320,7 +322,7 @@ discovery "informer" "k8s" {
 
 ### Informer Sync Timeout
 
-**Symptoms:** `informer sync timeout exceeded`
+**Symptoms:** e.g. `kubernetes cache sync timed out after 30s - increase informers_sync_timeout if needed`
 
 **Solutions:**
 

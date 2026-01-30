@@ -1,7 +1,3 @@
----
-hidden: true
----
-
 # Discovery: Network Interfaces Instrumentation
 
 This page explains how Mermin discovers and monitors network interfaces on the host. Interface selection is critical for determining what network traffic Mermin captures.
@@ -11,6 +7,8 @@ This page explains how Mermin discovers and monitors network interfaces on the h
 Mermin attaches eBPF programs to network interfaces to capture packets. The `discovery.instrument.interfaces` configuration specifies which interfaces to monitor using patterns that are resolved against available host interfaces.
 
 ## Configuration
+
+You specify which interfaces to monitor with the `interfaces` option. Example (physical interfaces only; the [default](#default-configuration) uses veth and tunnel patterns):
 
 ```hcl
 discovery "instrument" {
@@ -131,11 +129,11 @@ discovery "instrument" {
 eth0, eth1, ens32, ens33, cni0, cni123abc
 ```
 
-**Not included:** `lo` (loopback), `docker0` (not matched)
+**Not included:** `lo` (loopback), `docker0` (not matched). Loopback is typically excluded because it carries only localhost traffic and is rarely needed for flow observability.
 
 ## Default Configuration
 
-If `interfaces` is empty or not specified, Mermin uses these defaults:
+If `interfaces` is empty or not specified, Mermin uses these defaults. Both an empty list (`interfaces = []`) and omitting the option yield the same default set.
 
 ```hcl
 discovery "instrument" {
@@ -220,8 +218,8 @@ discovery "instrument" {
 **Trade-offs:**
 
 * ✅ Low overhead (few interfaces)
-* ❌ Incomplete visibility
-* ⚠️ May cause duplication with veth monitoring
+* ✅ No flow duplication (only physical interfaces monitored)
+* ❌ Incomplete visibility (misses same-node pod traffic)
 
 **Use cases:**
 
@@ -229,7 +227,7 @@ discovery "instrument" {
 * Cost-sensitive deployments
 * External traffic focus
 
-### Intra-Node Traffic Only
+### Physical + CNI (Full Visibility with Duplication Risk)
 
 Monitor both physical and CNI interfaces:
 
@@ -348,6 +346,23 @@ This disables the controller's synchronization and watches only interfaces prese
 When `auto_discover_interfaces` is disabled, the Interface Controller does not run. Mermin only attaches to interfaces present at startup. New interfaces created after startup will not be monitored until Mermin is restarted.
 {% endhint %}
 
+### TC Attachment Order
+
+When attaching eBPF programs to interfaces, Mermin supports two options that affect where its programs run in the TC chain relative to other programs (e.g., CNI or Cilium):
+
+* **`tc_priority`** (netlink only, kernel &lt; 6.6): TC priority for program attachment. Higher values = lower priority = runs later. Default: `1`. Range: 1–32767. Values below 30 may run before some CNI programs.
+* **`tcx_order`** (TCX only, kernel ≥ 6.6): Order in the TCX program chain. Options: `"last"` (default; runs after other programs, recommended for observability) or `"first"` (runs before).
+
+Most deployments can leave these at their defaults. Tune them only if you need Mermin to see traffic before or after specific CNI or security programs.
+
+```hcl
+discovery "instrument" {
+  interfaces = ["veth*", "tunl*"]
+  tc_priority = 1      # optional; default 1
+  tcx_order  = "last"  # optional; default "last"
+}
+```
+
 ## CNI-Specific Patterns
 
 Different Container Network Interfaces create different interface patterns:
@@ -450,15 +465,15 @@ While Mermin doesn't support exclusion patterns directly, use specific patterns 
 
 ```hcl
 discovery "instrument" {
-  # Use regex to exclude
+  # Use regex to limit to specific interface names
   interfaces = [
-    "/^eth[0-9]+$/",     # Only eth0-eth9 (not eth10+)
+    "/^eth[0-9]$/",      # Only eth0-eth9 (single digit)
     "/^ens3[0-9]$/"      # Only ens30-ens39
   ]
 }
 ```
 
-### Dynamic Interface Discovery
+### Broad Patterns for Varying Hosts
 
 Use broad patterns that adapt to host configuration:
 
@@ -478,7 +493,7 @@ discovery "instrument" {
 
 ### No Interfaces Matched
 
-**Symptom:** Log message "no interfaces matched configured patterns"
+**Symptom:** Log message "no interfaces matched the configured patterns"
 
 **Solutions:**
 
@@ -505,7 +520,7 @@ discovery "instrument" {
 
 ### Interface Not Found
 
-**Symptom:** Warning log "configured interface was not found on the host"
+**Symptom:** Warning log that an interface was not found (e.g. "interface '…' not found in datalink::interfaces()")
 
 **Causes:**
 
@@ -583,7 +598,7 @@ INFO eBPF programs attached interfaces=["eth0","eth1","ens32"]
 1. **Start with defaults**: Use default patterns for initial deployment
 2. **Monitor metrics**: Watch packet/flow counts per interface
 3. **Test patterns**: Validate interface resolution in non-production first
-4. **Avoid wildcards for production**: Use specific patterns when possible
+4. **Use the narrowest patterns that meet your needs**: Prefer specific patterns when limiting scope (e.g., a single physical interface)
 5. **Document choices**: Comment why specific interfaces are monitored
 6. **Review periodically**: Interface naming may change with OS upgrades
 
@@ -597,10 +612,12 @@ discovery "instrument" {
 }
 ```
 
-### Standard (Default)
+### Physical Interfaces Only (Alternative)
 
 ```hcl
 discovery "instrument" {
+  # Not the default: use when you want inter-node/external traffic only.
+  # The actual default is the complete-visibility set (veth*, tunl*, etc.) above.
   interfaces = ["eth*", "ens*", "en*"]
 }
 ```
@@ -625,7 +642,7 @@ discovery "instrument" {
 ```hcl
 discovery "instrument" {
   interfaces = [
-    "/^eth[0-9]+$/",         # eth0-eth9...
+    "/^eth[0-9]+$/",         # eth0, eth1, eth10, ... (one or more digits)
     "/^ens[0-9]{1,3}$/",     # ens0-ens999
     "/^(cni|cali|cilium).*/", # Any CNI interface
   ]

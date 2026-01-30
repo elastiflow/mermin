@@ -6,11 +6,11 @@ The configuration options become useful to take advantage of additional resource
 
 ## Configuration
 
-Full configuration example may be found in the [Default Config](https://github.com/elastiflow/mermin/tree/beta/charts/mermin/config/default/config.hcl).
+A full pipeline example is in the [default config](../../charts/mermin/config/default/config.hcl) in the repository.
 
 ## Configuration Structure
 
-The pipeline configuration is organized into nested blocks for which reflect the architecture:
+The pipeline configuration is organized into nested blocks that reflect the architecture:
 
 ```hcl
 pipeline {
@@ -34,7 +34,7 @@ pipeline {
 
 **Type:** Integer **Default:** `100000`
 
-The capacity of the `FLOW_STATS` eBPF map. (Refer to the [architecture](../getting-started/architecture.md#ebpf-programs) documentation for more information.)
+The capacity of the `FLOW_STATS` eBPF map. See [eBPF Programs](../getting-started/architecture.md#ebpf-programs) in the architecture documentation for more information.
 
 **Example:**
 ```hcl
@@ -102,8 +102,7 @@ pipeline {
 
 **Type:** String (duration) **Default:** `"5s"`
 
-The polling interval for flow workers. This controls how frequently workers poll the flow data from the `FLOW_STATS` map. (Refer to the [architecture](../getting-started/architecture.md#ebpf-programs) documentation for more information.)
-Reducing the interval may increase the CPU usage.
+The polling interval for flow workers. This controls how frequently workers poll the flow data from the `FLOW_STATS` map. See [eBPF Programs](../getting-started/architecture.md#ebpf-programs) in the architecture documentation for more information. Reducing the interval may increase CPU usage.
 
 **Example:**
 ```hcl
@@ -118,8 +117,7 @@ pipeline {
 
 **Type:** Integer **Default:** `16384`
 
-Explicit capacity for the flow span channel, acting as a buffer between workers and the K8s decorator.
-With default settings, this provides approximately 1.6s of buffer at 10,000 flows/sec.
+Explicit capacity for the flow span channel, acting as a buffer between workers and the K8s decorator. With default settings, this provides approximately 1.6s of buffer at 10,000 flows/sec.
 
 **Example:**
 ```hcl
@@ -151,8 +149,7 @@ pipeline {
 
 **Type:** Integer **Default:** `32768`
 
-Explicit capacity for the decorated span channel, acting as a buffer between the K8s decorator and the exporter.
-With default settings, this provides approximately 3.2s of buffer at 10,000 flows/sec.
+Explicit capacity for the decorated span channel, acting as a buffer between the K8s decorator and the exporter. With default settings, this provides approximately 3.2s of buffer at 10,000 flows/sec.
 
 **Example:**
 ```hcl
@@ -162,3 +159,11 @@ pipeline {
   }
 }
 ```
+
+## Next Steps
+
+* [**Configuration Overview**](configuration.md): Config file format and structure
+* [**Architecture**](../getting-started/architecture.md): Data flow and eBPF programs
+* [**Span Options**](span.md): Flow timeouts and span generation
+* [**OTLP Exporter**](export-otlp.md): Export tuning and backpressure
+* [**Configuration Examples**](examples.md): Full pipeline examples (production, high-throughput)

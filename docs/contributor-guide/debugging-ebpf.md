@@ -2,13 +2,6 @@
 
 This guide covers how to inspect, debug, and optimize eBPF programs in Mermin. It includes tools and techniques for understanding program behavior, performance characteristics, and troubleshooting issues.
 
-## Table of Contents
-
-- [Debugging eBPF Programs with bpftool](#debugging-ebpf-programs-with-bpftool)
-- [Measuring eBPF Stack Usage](#measuring-ebpf-stack-usage)
-
----
-
 ## Debugging eBPF Programs with bpftool
 
 This section covers how to use `bpftool` to inspect and debug your eBPF programs running in the cluster. This is essential for understanding program behavior, performance characteristics, and troubleshooting issues.

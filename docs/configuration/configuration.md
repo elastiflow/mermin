@@ -1,33 +1,48 @@
----
-hidden: true
----
-
 # Configuration Overview
 
-Mermin uses HCL (HashiCorp Configuration Language) as its primary configuration format, providing a human-readable and flexible way to configure all aspects of the observability agent.
+Mermin is configured with HCL (HashiCorp Configuration Language) or YAML. This page describes the config file format, precedence, and structure. Section-specific options are documented in the linked pages.
 
-## Configuration File Format
+## File Format
 
-Mermin supports two configuration formats:
+Mermin accepts HCL (recommended) or YAML. Supported file extensions: `.hcl`, `.yaml`, `.yml`. Use an `.hcl` file for clear syntax and good error messages. To use YAML, convert from HCL with the [fmtconvert](https://github.com/genelet/determined/tree/main/cmd/fmtconvert) tool (`go install github.com/genelet/determined/cmd/fmtconvert@latest`) and pass the result to `--config`:
 
-### HCL (Recommended)
+```bash
+fmtconvert -from hcl -to yaml config.hcl > config.yaml
+mermin --config config.yaml
+```
 
-HCL is the recommended format, offering:
+## Precedence
 
-* Clear, readable syntax
-* Built-in support for expressions and functions
-* Native block and attribute structure
-* Better error messages
+Configuration is merged in this order (later overrides earlier):
 
-**Example HCL configuration:**
+1. Built-in defaults  
+2. Config file (path from `--config` or `MERMIN_CONFIG_PATH`)  
+3. Environment variables (global options only)  
+4. Command-line flags (global options only)
+
+Only these global options can be set via environment variables or CLI: config path (`MERMIN_CONFIG_PATH`, `--config`), `log_level` (`MERMIN_LOG_LEVEL`, `--log-level`), and `auto_reload` (`MERMIN_CONFIG_AUTO_RELOAD`, `--auto-reload`). Options like `shutdown_timeout` and everything under `pipeline`, `api`, `export`, etc. are config-file only.
+
+Example: with `log_level = "info"` in the file, `export MERMIN_LOG_LEVEL=debug` or `mermin --log-level=debug --config=config.hcl` yields `log_level` = `debug`.
+
+## Config File Location
+
+A config file is optional. Omit `--config` and `MERMIN_CONFIG_PATH` to use built-in defaults. To use a file:
+
+- **CLI:** `mermin --config /path/to/config.hcl`  
+- **Env:** `MERMIN_CONFIG_PATH=/path/to/config.hcl`  
+- **Kubernetes:** Create a ConfigMap from the file, mount it in the pod, and pass the path to `mermin --config`.
+
+The file must exist and have a supported extension. Subcommands (e.g. `mermin diagnose bpf`) do not load the main config. Use `mermin --help` or `mermin diagnose --help` for usage.
+
+## Auto-Reload
+
+When `auto_reload = true` (or `--auto-reload` / `MERMIN_CONFIG_AUTO_RELOAD=true`), Mermin watches the config file and reloads on change without restart. Flow capture may pause briefly during reload. Some changes (e.g. interface selection or RBAC) still require a full restart.
+
+## Minimal configuration
+
+Without a config file, Mermin uses built-in defaults and does not configure an exporter, so flow data is not sent anywhere. To send flow traces to an OTLP endpoint with everything else at defaults, use a config file that only sets export:
 
 ```hcl
-log_level = "info"
-
-discovery "instrument" {
-  interfaces = ["eth*", "ens*"]
-}
-
 export "traces" {
   otlp = {
     endpoint = "http://otel-collector:4317"
@@ -36,391 +51,263 @@ export "traces" {
 }
 ```
 
-### YAML (Supported)
-
-YAML is also supported through conversion. To use YAML:
-
-```bash
-# Convert HCL to YAML using fmtconvert
-fmtconvert -from hcl -to yaml config.hcl > config.yaml
-```
-
-However, HCL is recommended for direct use with Mermin.
-
-## Configuration Precedence
-
-Mermin loads configuration in the following order (later sources override earlier):
-
-1. **Built-in Defaults**: Sensible defaults for all options
-2. **Configuration File**: HCL or YAML file specified via `--config`
-3. **Environment Variables**: Only for global options (see below)
-4. **Command-Line Arguments**: Only for global options (see below)
-
-{% hint style="info" %}
-Only global options can be set via environment variables and CLI flags. All other configuration must be in the configuration file.
-{% endhint %}
-
-### Example Precedence
-
-```hcl
-# config.hcl (base configuration)
-log_level = "info"
-```
-
-```bash
-# Override via environment variable
-export MERMIN_LOG_LEVEL=debug
-
-# Or override via CLI flag
-mermin --log-level=debug --config=config.hcl
-```
-
-Result: `log_level` will be `debug`.
-
-## Configuration File Location
-
-Specify the configuration file using:
-
-### Command-Line Flag
-
-```bash
-mermin --config /path/to/config.hcl
-```
-
-### Environment Variable
-
-```bash
-export MERMIN_CONFIG_PATH=/path/to/config.hcl
-mermin
-```
-
-### Kubernetes ConfigMap
-
-```bash
-kubectl create configmap mermin-config --from-file=config.hcl
-```
-
-Then mount in pod and reference:
-
-```yaml
-volumeMounts:
-  - name: config
-    mountPath: /etc/mermin
-
-command: ["mermin", "--config", "/etc/mermin/config.hcl"]
-```
-
-## Auto-Reload Feature
-
-Mermin can automatically reload configuration when the file changes:
-
-```hcl
-auto_reload = true
-```
-
-Or via environment/CLI:
-
-```bash
-mermin --auto-reload --config=config.hcl
-# or
-export MERMIN_CONFIG_AUTO_RELOAD=true
-```
-
-When enabled:
-
-* Mermin watches the config file for changes
-* Automatically reloads and applies new configuration
-* No restart required
-* Minimal disruption (brief pause in flow capture during reload)
-
-{% hint style="warning" %}
-Some changes may require a restart even with auto-reload enabled, such as interface selection changes or RBAC permission changes.
-{% endhint %}
+Omit other blocks (discovery, pipeline, api, etc.) to use built-in defaults. Run with `mermin --config config.hcl`. For more complete examples, see [Configuration Examples](examples.md).
 
 ## Configuration Structure
 
-Mermin configuration is organized into logical sections:
+### Global options
 
-### Global Options
-
-Top-level settings that affect overall behavior:
+Top-level settings. See [Global Options](global-options.md).
 
 ```hcl
-log_level = "info"
-auto_reload = false
+log_level       = "info"
+log_color       = false
+auto_reload     = false
 shutdown_timeout = "5s"
 
 pipeline {
+  flow_capture {
+    flow_stats_capacity   = 100000
+    flow_events_capacity  = 1024
+  }
   flow_producer {
-    worker_queue_capacity = 2048
-    workers: 4
+    workers                   = 4
+    worker_queue_capacity      = 2048
+    flow_store_poll_interval   = "5s"
+    flow_span_queue_capacity  = 16384
+  }
+  k8s_decorator {
+    threads                        = 4
+    decorated_span_queue_capacity  = 32768
   }
 }
 ```
 
-See [Global Options](global-options.md) for details.
+### API and metrics
 
-### API and Metrics
-
-Health check and metrics endpoints:
+Health API and internal Prometheus metrics. See [API](api.md) and [Metrics](metrics.md).
 
 ```hcl
 api {
-  enabled = true
-  listen_address = "0.0.0.0"
-  port = 8080
+  enabled         = true
+  listen_address  = "0.0.0.0"
+  port            = 8080
 }
 
 internal "metrics" {
-  enabled = true
-  listen_address = "0.0.0.0"
-  port = 10250
-
-  # Debug metrics (optional) - see warning below
+  enabled               = true
+  listen_address        = "0.0.0.0"
+  port                  = 10250
   debug_metrics_enabled = false
-  stale_metric_ttl = "5m"
+  stale_metric_ttl      = "5m"
+  # histogram_buckets { ... }  # optional overrides
 }
 ```
 
-{% hint style="warning" %}
-**Debug Metrics Warning**: Setting `internal.metrics.debug_metrics_enabled = true` enables high-cardinality metrics with per-resource labels. This can cause significant memory growth in production. Only enable for debugging. See [Metrics Configuration](metrics.md) for details.
-{% endhint %}
+Setting `internal.metrics.debug_metrics_enabled = true` enables high-cardinality metrics and can increase memory use; enable only for debugging.
 
-See [API](api.md) and [Metrics](metrics.md) for details.
+### Parser
 
-### Parser Configuration
-
-eBPF packet parsing options:
+eBPF packet parsing. See [Parser](parser.md).
 
 ```hcl
 parser {
-  geneve_port = 6081
-  vxlan_port = 4789
+  geneve_port   = 6081
+  vxlan_port    = 4789
   wireguard_port = 51820
 }
 ```
 
-See [Parser Configuration](parser.md) for details.
-
 ### Discovery
 
-Network interface and Kubernetes resource discovery:
+Interfaces and Kubernetes discovery. See [Network Interface Discovery](discovery-instrument.md) and [Kubernetes Informers](discovery-kubernetes-informer.md). If you omit `interfaces`, built-in defaults target CNI interfaces (e.g. `veth*`, `tunl*`, `vxlan*`, `cali*`, `cilium_*`). The example below overrides with physical interfaces:
 
 ```hcl
 discovery "instrument" {
-  interfaces = ["eth*", "ens*"]
+  interfaces                = ["eth*", "ens*"]  # override; defaults are CNI-oriented
+  auto_discover_interfaces  = true
+  tc_priority               = 1
+  tcx_order                 = "first"  # or "last"
 }
 
 discovery "informer" "k8s" {
-  # K8s API connection configuration
+  kubeconfig_path       = ""
   informers_sync_timeout = "30s"
-
-  selectors = [
-    { kind = "Pod" },
-    { kind = "Service" }
-  ]
+  selectors              = [{ kind = "Pod" }, { kind = "Service" }]
+  # owner_relations { ... }
+  # selector_relations = [ ... ]
 }
 ```
 
-See [Network Interface Discovery](discovery-instrument.md) and [Kubernetes Informers](discovery-kubernetes-informer.md).
+### Kubernetes relations
 
-### Kubernetes Relations
+Owner and selector relations for flow enrichment. See [Owner Relations](owner-relations.md) and [Selector Relations](selector-relations.md).
 
-Configure how flows are enriched with Kubernetes metadata:
+### Flow attributes
 
-```hcl
-discovery "informer" "k8s" {
-  owner_relations = {
-    max_depth = 5
-    include_kinds = []
-    exclude_kinds = []
-  }
-
-  selector_relations = [
-    {
-      kind = "Service"
-      to = "Pod"
-      selector_match_labels_field = "spec.selector"
-    }
-  ]
-}
-```
-
-See [Owner Relations](owner-relations.md) and [Selector Relations](selector-relations.md).
-
-### Flow Attributes
-
-Define which Kubernetes metadata to extract and associate with flows:
-
-```hcl
-attributes "source" "k8s" {
-  extract {
-    metadata = [
-      "[*].metadata.name",
-      "[*].metadata.namespace"
-    ]
-  }
-
-  association {
-    pod = {
-      sources = [
-        { from = "flow", name = "source.ip", to = ["status.podIP"] }
-      ]
-    }
-  }
-}
-```
-
-See [Flow Attributes](attributes.md) for details.
+Which Kubernetes metadata to extract and how to associate it with flows. See [Flow Attributes](attributes.md). If you omit the `attributes` block, default Kubernetes attribution is applied. An empty `attributes {}` block disables attribution.
 
 ### Filtering
 
-Filter flows before export:
+Filter flows by address, port, transport, type, interface, and other dimensions. See [Flow Filtering](filtering.md). Each filter block has a label (e.g. `"source"`); inside it you can set `match` and `not_match` for:
+
+- `address`, `port`, `transport`, `type`  
+- `interface_name`, `interface_index`, `interface_mac`  
+- `connection_state`  
+- `ip_dscp_name`, `ip_ecn_name`, `ip_ttl`, `ip_flow_label`  
+- `icmp_type_name`, `icmp_code_name`  
+- `tcp_flags`
+
+Example:
 
 ```hcl
 filter "source" {
-  address = { match = "10.0.0.0/8", not_match = "" }
-  port = { match = "80,443", not_match = "" }
-}
-
-filter "network" {
+  address   = { match = "10.0.0.0/8", not_match = "" }
+  port      = { match = "80,443", not_match = "" }
   transport = { match = "tcp", not_match = "" }
 }
 ```
 
-See [Flow Filtering](filtering.md) for details.
+### Span options
 
-### Span Options
-
-Configure flow span generation and timeouts:
+Flow span generation, timeouts, Community ID, trace correlation, and hostname resolution. See [Flow Span Options](span.md). All options are config-file only.
 
 ```hcl
 span {
-  max_record_interval = "60s"
-  generic_timeout = "30s"
-  icmp_timeout = "10s"
-  tcp_timeout = "20s"
-  tcp_fin_timeout = "5s"
-  tcp_rst_timeout = "5s"
-  udp_timeout = "60s"
-  community_id_seed = 0
+  max_record_interval        = "60s"
+  generic_timeout            = "30s"
+  icmp_timeout               = "10s"
+  tcp_timeout                = "20s"
+  tcp_fin_timeout            = "5s"
+  tcp_rst_timeout            = "5s"
+  udp_timeout                = "60s"
+  community_id_seed          = 0
+  trace_id_timeout           = "24h"
+  enable_hostname_resolution  = true
+  hostname_resolve_timeout   = "100ms"
 }
 ```
 
-See [Flow Span Options](span.md) for details.
+### Export
 
-### Export Configuration
-
-Configure OTLP and stdout exporters:
+Trace export to OTLP and/or stdout. See [OTLP Exporter](export-otlp.md) and [Stdout Exporter](export-stdout.md).
 
 ```hcl
 export "traces" {
   stdout = "text_indent"
 
   otlp = {
-    endpoint = "http://otel-collector:4317"
-    protocol = "grpc"
-    timeout = "10s"
-    max_batch_size = 512
-    max_batch_interval = "5s"
-
+    endpoint              = "http://otel-collector:4317"
+    protocol              = "grpc"
+    timeout               = "10s"
+    max_batch_size        = 512
+    max_batch_interval    = "5s"
+    max_queue_size        = 2048
+    max_concurrent_exports = 1
+    max_export_timeout    = "30s"
+    headers               = { "x-custom" = "value" }
     auth = {
-      basic = {
-        user = "username"
-        pass = "password"
-      }
+      basic = { user = "username", pass = "password" }
     }
-
     tls = {
       insecure_skip_verify = false
-      ca_cert = "/etc/certs/ca.crt"
+      ca_cert              = "/etc/certs/ca.crt"
+      client_cert          = "/etc/certs/client.crt"
+      client_key           = "/etc/certs/client.key"
     }
   }
 }
 ```
 
-See [OTLP Exporter](export-otlp.md) and [Stdout Exporter](export-stdout.md).
+### Internal tracing
 
-### Internal Tracing
-
-Configure Mermin's own telemetry:
+Mermin’s own telemetry. See [Internal Tracing](internal-tracing.md).
 
 ```hcl
 internal "traces" {
   span_fmt = "full"
-
-  stdout = {
-    format = "text_indent"
-  }
-
-  otlp = {
-    endpoint = "http://otel-collector:4317"
-    protocol = "grpc"
-  }
+  stdout   = { format = "text_indent" }
+  otlp     = { endpoint = "http://otel-collector:4317", protocol = "grpc" }
 }
 ```
 
-See [Internal Tracing](internal-tracing.md) for details.
-
 ## Validation
 
-Mermin validates configuration on startup and reports errors:
+Configuration is validated on startup. Invalid config (e.g. unknown field, invalid value, missing file, or unsupported extension) causes Mermin to exit with a non-zero exit code and print the error to stderr. Fix the file and restart (or rely on auto-reload after fixing). When running in Kubernetes, Mermin may log a memory warning if estimated pipeline usage exceeds 80% of the container limit; see [Pipeline](pipeline.md) and [Troubleshooting](../troubleshooting/troubleshooting.md).
 
-```bash
-mermin --config=config.hcl
-# Error: invalid configuration: unknown field "invalid_field" at line 10
+## HCL functions
+
+HCL config files (not YAML) can call the `env` function to read environment variables. Useful for secrets or environment-specific values without hardcoding. The function is evaluated when the config is loaded and again on reload.
+
+- `env("VAR_NAME")`  
+  Returns the value of the environment variable, or an empty string if unset. Mermin logs a warning when the variable is not set.
+
+- `env("VAR_NAME", "default")`  
+  Returns the variable value if set, otherwise the second argument. Mermin logs a warning when the variable is not set and the default is used.
+
+You can use `env` anywhere a string is accepted (e.g. `log_level`, `api.listen_address`, `export "traces" { otlp = { endpoint = ... } }`, `auth.basic.pass`). You can use it in lists (e.g. `discovery "instrument" { interfaces = [env("IFACE")] }`) and in string interpolation (e.g. `"prefix-${env("VAR")}-suffix"`). Examples that match the behavior tested in the codebase:
+
+```hcl
+# Top-level with default
+log_level = env("MERMIN_LOG_LEVEL", "info")
+
+# OTLP endpoint and auth (strings)
+export "traces" {
+  otlp = {
+    endpoint = env("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+    auth = {
+      basic = {
+        user = "mermin"
+        pass = env("OTLP_PASSWORD")
+      }
+    }
+  }
+}
+
+# API listen address with interpolation
+api {
+  listen_address = "prefix-${env("API_HOST")}-suffix"
+  port = 8080
+}
 ```
 
-To test configuration without running:
+YAML configs do not support `env`; use HCL if you need it, or inject values before conversion.
 
-```bash
-# Validate only (upcoming feature)
-mermin --config=config.hcl --validate
-```
+## Examples and reference
 
-## Configuration Examples
+- [Configuration Examples](examples.md): full example configs (production, development, CNI, high-throughput, security).  
+- Section reference:
 
-See [Configuration Examples](examples.md) for complete, real-world configurations:
+| Section | Description |
+|---------|-------------|
+| [Global Options](global-options.md) | Top-level and CLI/env |
+| [API](api.md), [Metrics](metrics.md) | Health and Prometheus |
+| [Parser](parser.md) | eBPF parsing |
+| [Network Interfaces](discovery-instrument.md) | Interface discovery |
+| [Kubernetes Informers](discovery-kubernetes-informer.md) | K8s informers |
+| [Owner Relations](owner-relations.md) | Owner reference walking |
+| [Selector Relations](selector-relations.md) | Label selector matching |
+| [Flow Attributes](attributes.md) | Metadata extraction and association |
+| [Filtering](filtering.md) | Flow filters |
+| [Span Options](span.md) | Flow generation and timeouts |
+| [OTLP Exporter](export-otlp.md) | OTLP export |
+| [Stdout Exporter](export-stdout.md) | Stdout export |
+| [Internal Tracing](internal-tracing.md) | Self-telemetry |
+| [Pipeline](pipeline.md) | Flow capture and producer tuning |
 
-* Production-ready configuration
-* Development/testing configuration
-* CNI-specific configurations
-* High-throughput configuration
-* Security-hardened configuration
+## Best practices
 
-## Configuration Reference
+1. Start minimal; add options as needed.  
+2. Comment non-obvious choices.  
+3. Keep config in version control.  
+4. Test changes outside production.  
+5. Use metrics to confirm behavior.  
+6. Prefer auto-reload for iterative tuning.  
+7. Keep secrets in env vars or Kubernetes secrets, not in the config file.
 
-Detailed documentation for each configuration section:
+## Next steps
 
-| Section                                         | Description                          |
-| ----------------------------------------------- | ------------------------------------ |
-| [Global Options](global-options.md)             | Top-level settings and CLI flags     |
-| [API](api.md) and [Metrics](metrics.md)         | Health checks and Prometheus metrics |
-| [Parser](parser.md)                             | eBPF packet parsing options          |
-| [Network Interfaces](discovery-instrument.md)   | Interface discovery patterns         |
-| [Kubernetes Informers](discovery-kubernetes-informer.md) | K8s resource watching                |
-| [Owner Relations](owner-relations.md)           | Owner reference walking              |
-| [Selector Relations](selector-relations.md)     | Label selector matching              |
-| [Flow Attributes](attributes.md)                | Metadata extraction and association  |
-| [Filtering](filtering.md)                       | Flow filtering rules                 |
-| [Span Options](span.md)                 | Flow generation and timeouts         |
-| [OTLP Exporter](export-otlp.md)                 | OpenTelemetry Protocol export        |
-| [Stdout Exporter](export-stdout.md)             | Console output for debugging         |
-| [Internal Tracing](internal-tracing.md)         | Mermin self-monitoring               |
-
-## Best Practices
-
-1. **Start with minimal configuration**: Add complexity as needed
-2. **Use comments**: Document why specific settings are chosen
-3. **Version control**: Track configuration changes in Git
-4. **Test in non-production**: Validate changes before production deployment
-5. **Monitor metrics**: Ensure configuration performs as expected
-6. **Use auto-reload**: For easier configuration iteration
-7. **Keep secrets separate**: Use environment variables or Kubernetes secrets for sensitive data
-
-## Next Steps
-
-* [**Global Options**](global-options.md): Configure top-level settings
-* [**Network Interface Discovery**](discovery-instrument.md): Choose which interfaces to monitor
-* [**OTLP Exporter**](export-otlp.md): Configure flow export to your backend
-* [**Configuration Examples**](examples.md): See complete working configurations
+- [Global Options](global-options.md): top-level and CLI  
+- [Network Interface Discovery](discovery-instrument.md): which interfaces to monitor  
+- [OTLP Exporter](export-otlp.md): send flows to your backend  
+- [Configuration Examples](examples.md): full sample configs  

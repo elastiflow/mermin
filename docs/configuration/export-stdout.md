@@ -1,7 +1,3 @@
----
-hidden: true
----
-
 # Stdout Exporter
 
 The stdout exporter outputs flow records directly to the console (standard output), making it ideal for development, debugging, and initial testing of Mermin.
@@ -18,13 +14,23 @@ export "traces" {
 }
 ```
 
+Alternatively, use the object form (required in YAML):
+
+```hcl
+export "traces" {
+  stdout = {
+    format = "text_indent"
+  }
+}
+```
+
 ## Configuration Option
 
 ### `stdout`
 
-**Type:** String (enum) or null **Default:** `null` (disabled)
+**Type:** String (enum), object with `format` key, or null **Default:** `null` (disabled)
 
-Output format for stdout exporter.
+Output format for stdout exporter. In HCL you can use the shorthand `stdout = "text_indent"` or the object form `stdout = { format = "text_indent" }`. In YAML use the object form with a `format` key.
 
 **Valid Values:**
 
@@ -220,8 +226,8 @@ kubectl logs -f <pod-name> -c mermin
 # Last N lines
 kubectl logs --tail=50 <pod-name>
 
-# Filter for specific source IP
-kubectl logs <pod-name> | grep "Source IP: 10.244.1.5"
+# Filter for specific source IP (matches "IP: ..." under Source in output)
+kubectl logs <pod-name> | grep "IP: 10.244.1.5"
 ```
 
 ### Docker (Bare Metal)
@@ -262,13 +268,13 @@ Filter flows by criteria:
 
 ```bash
 # Flows from specific IP
-kubectl logs <pod> | grep "Source IP: 10.244.1.5"
+kubectl logs <pod> | grep "IP: 10.244.1.5"
 
 # TCP flows only
 kubectl logs <pod> | grep "Protocol: TCP"
 
-# Flows to specific port
-kubectl logs <pod> | grep "Destination Port: 443"
+# Flows to specific port (matches "Port: ..." under Destination in output)
+kubectl logs <pod> | grep "Port: 443"
 
 # Flows involving specific pod
 kubectl logs <pod> | grep "nginx-deployment"
@@ -289,7 +295,9 @@ kubectl logs <pod> | jq 'select(.source.port == 443)'
 
 Stdout output can generate significant log volume:
 
-**Typical flow rate:** 1,000 flows/second **Text indent size:** \~500 bytes per flow **Log rate:** \~500 KB/second = \~1.8 GB/hour
+* **Typical flow rate:** 1,000 flows/second
+* **Text indent size:** ~500 bytes per flow
+* **Log rate:** ~500 KB/second = ~1.8 GB/hour
 
 **Recommendations:**
 
@@ -338,7 +346,7 @@ Configure log rotation to prevent disk filling:
 
 **Solutions:**
 
-1. Verify `stdout = "text_indent"` is set
+1. Verify stdout is set (e.g. `stdout = "text_indent"` or `stdout = { format = "text_indent" }`)
 2. Check log level includes info: `log_level = "info"`
 3. Verify flows are being captured: check metrics
 4. Confirm log output destination
@@ -428,7 +436,8 @@ export "traces" {
 
 ## Next Steps
 
+* [**Configuration Overview**](configuration.md): Config file format and structure
 * [**OTLP Exporter**](export-otlp.md): Configure production export
 * [**Flow Filtering**](filtering.md): Reduce log volume
 * [**Internal Tracing**](internal-tracing.md): Monitor Mermin itself
-* [**Integration Guides**](../observability/backends.md): Set up observability backends
+* [**Observability Backends**](../observability/backends.md): Set up observability backends
