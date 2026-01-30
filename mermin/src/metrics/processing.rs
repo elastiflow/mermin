@@ -17,9 +17,9 @@
 ///
 /// The stages follow the data flow through the system:
 ///
-/// 1. **EbpfRingbufOut**: eBPF ring buffer → userspace (fast, typically microseconds)
-/// 2. **ProducerOut**: Kubernetes decoration and enrichment (medium, typically milliseconds)
-/// 3. **DecoratorOut**: Export to OTLP/stdout (slow, can be seconds)
+/// 1. **FlowProducerOut**: Flow producer processing from ringbuffer (fast, typically microseconds to milliseconds)
+/// 2. **K8sDecoratorOut**: Kubernetes decoration and enrichment (medium, typically milliseconds)
+/// 3. **K8sExportOut**: Export to OTLP/stdout (slow, can be seconds)
 ///
 /// # Examples
 ///
@@ -27,14 +27,14 @@
 ///
 /// ```no_run
 /// use mermin::metrics::processing::ProcessingStage;
-/// use mermin::metrics::registry::PROCESSING_DURATION_SECONDS;
+/// use mermin::metrics::registry;
 ///
-/// // Start a timer for the eBPF ring buffer output stage
-/// let _timer = PROCESSING_DURATION_SECONDS
-///     .with_label_values(&[ProcessingStage::EbpfRingbufOut.as_str()])
+/// // Start a timer for the flow producer output stage
+/// let _timer = registry::processing_duration_seconds()
+///     .with_label_values(&[ProcessingStage::FlowProducerOut.as_str()])
 ///     .start_timer();
 ///
-/// // ... perform eBPF ring buffer processing ...
+/// // ... perform flow producer processing ...
 ///
 /// // Timer automatically records the duration when dropped
 /// ```
@@ -44,18 +44,19 @@
 /// ```
 /// use mermin::metrics::processing::ProcessingStage;
 ///
-/// let stage = ProcessingStage::ProducerOut;
-/// let label = stage.as_str(); // "producer_out"
-/// assert_eq!(label, "producer_out");
+/// let stage = ProcessingStage::FlowProducerOut;
+/// let label = stage.as_str(); // "flow_producer_out"
+/// assert_eq!(label, "flow_producer_out");
 /// ```
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcessingStage {
-    /// Time spent reading and processing flow events from the eBPF ring buffer.
+    /// Time spent by the flow producer reading and processing flow events from the ringbuffer.
     ///
-    /// This stage measures the latency from when data is available in the eBPF
-    /// ring buffer until it's been read and parsed into flow events in userspace.
-    EbpfRingbufOut,
+    /// This stage measures the latency of the flow producer processing flow events
+    /// from the eBPF ring buffer. This includes reading, parsing, and initial
+    /// processing of flow events in userspace.
+    FlowProducerOut,
 
     /// Time spent enriching flow spans with Kubernetes metadata.
     ///
@@ -63,22 +64,22 @@ pub enum ProcessingStage {
     /// enriches flow spans with pod, service, and namespace information.
     /// This includes the time spent looking up Kubernetes resources and
     /// attaching metadata to spans.
-    FlowProducerOut,
+    K8sDecoratorOut,
 
-    /// Time spent exporting spans to the OTLP backend.
+    /// Time spent exporting spans to configured exporters (OTLP or stdout).
     ///
     /// This stage measures the latency of exporting completed flow spans
     /// to configured exporters (OTLP or stdout). This includes serialization,
     /// network I/O (for OTLP), and any batching operations.
-    K8sDecoratorOut,
+    K8sExportOut,
 }
 
 impl ProcessingStage {
     pub const fn as_str(self) -> &'static str {
         match self {
-            ProcessingStage::EbpfRingbufOut => "ebpf_ringbuf_out",
             ProcessingStage::FlowProducerOut => "flow_producer_out",
             ProcessingStage::K8sDecoratorOut => "k8s_decorator_out",
+            ProcessingStage::K8sExportOut => "k8s_export_out",
         }
     }
 }

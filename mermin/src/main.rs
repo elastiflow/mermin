@@ -142,7 +142,10 @@ async fn run(cli: Cli) -> Result<()> {
 
     // Initialize Prometheus metrics registry early, before any subsystems that might record metrics
     // This also initializes the global debug_enabled flag
-    if let Err(e) = metrics::registry::init_registry(conf.metrics.debug_metrics_enabled) {
+    let bucket_config = metrics::registry::HistogramBucketConfig::from(&conf.internal.metrics);
+    if let Err(e) =
+        metrics::registry::init_registry(conf.internal.metrics.debug_metrics_enabled, bucket_config)
+    {
         error!(
             event.name = "metrics.registry_init_failed",
             error.message = %e,
@@ -151,26 +154,26 @@ async fn run(cli: Cli) -> Result<()> {
     } else {
         info!(
             event.name = "metrics.registry_initialized",
-            debug_metrics_enabled = conf.metrics.debug_metrics_enabled,
+            debug_metrics_enabled = conf.internal.metrics.debug_metrics_enabled,
             "prometheus metrics registry initialized"
         );
     }
 
     // Warn if debug metrics are enabled - they cause significant memory growth
-    if conf.metrics.debug_metrics_enabled {
+    if conf.internal.metrics.debug_metrics_enabled {
         warn!(
             event.name = "metrics.debug_metrics_enabled",
-            stale_metric_ttl = ?conf.metrics.stale_metric_ttl,
+            stale_metric_ttl = ?conf.internal.metrics.stale_metric_ttl,
             "DEBUG METRICS ENABLED: High-cardinality metrics with per-resource labels are active. \
              Memory usage will increase significantly. DO NOT USE IN PRODUCTION unless necessary for debugging."
         );
     }
 
     // Create metric cleanup tracker if debug metrics are enabled
-    let cleanup_tracker = if conf.metrics.debug_metrics_enabled {
+    let cleanup_tracker = if conf.internal.metrics.debug_metrics_enabled {
         Some(metrics::cleanup::MetricCleanupTracker::new(
-            conf.metrics.stale_metric_ttl,
-            conf.metrics.debug_metrics_enabled,
+            conf.internal.metrics.stale_metric_ttl,
+            conf.internal.metrics.debug_metrics_enabled,
         ))
     } else {
         None
@@ -188,8 +191,8 @@ async fn run(cli: Cli) -> Result<()> {
         });
     }
 
-    if conf.metrics.enabled {
-        let metrics_conf = conf.metrics.clone();
+    if conf.internal.metrics.enabled {
+        let metrics_conf = conf.internal.metrics.clone();
         let mut shutdown_rx = os_shutdown_tx.subscribe();
 
         // Start metrics server on a dedicated runtime thread to prevent starvation
@@ -748,13 +751,13 @@ async fn run(cli: Cli) -> Result<()> {
                             maybe_span = flow_span_rx.recv() => {
                                 let Some(flow_span) = maybe_span else { break };
 
-                                let channel_size = flow_span_rx.len();
-                                metrics::registry::CHANNEL_ENTRIES
-                                    .with_label_values(&[ChannelName::ProducerOutput.as_str()])
-                                    .set(channel_size as i64);
+                            let channel_size = flow_span_rx.len();
+                            metrics::registry::CHANNEL_ENTRIES
+                                .with_label_values(&[ChannelName::ProducerOutput.as_str()])
+                                .set(channel_size as i64);
 
-                            let _timer = metrics::registry::PROCESSING_DURATION_SECONDS
-                                .with_label_values(&[ProcessingStage::FlowProducerOut.as_str()])
+                            let _timer = metrics::registry::processing_duration_seconds()
+                                .with_label_values(&[ProcessingStage::K8sDecoratorOut.as_str()])
                                 .start_timer();
                             let (span, err) = decorator.decorate_or_fallback(flow_span).await;
 
@@ -883,8 +886,8 @@ async fn run(cli: Cli) -> Result<()> {
             let export_start = std::time::Instant::now();
             let export_result = tokio::time::timeout(Duration::from_secs(EXPORT_TIMEOUT_SECS), exporter.export(traceable)).await;
             let export_duration = export_start.elapsed();
-            metrics::registry::PROCESSING_DURATION_SECONDS
-                .with_label_values(&[ProcessingStage::K8sDecoratorOut.as_str()])
+            metrics::registry::processing_duration_seconds()
+                .with_label_values(&[ProcessingStage::K8sExportOut.as_str()])
                 .observe(export_duration.as_secs_f64());
 
             if export_result.is_err() {

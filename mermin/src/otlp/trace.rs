@@ -14,7 +14,6 @@ use tracing::trace;
 use crate::metrics::{
     self,
     export::{ExportStatus, ExporterName},
-    processing::ProcessingStage,
 };
 
 pub struct TraceExporterAdapter {
@@ -102,10 +101,6 @@ pub trait TraceableExporter: Send + Sync {
 #[async_trait]
 impl TraceableExporter for TraceExporterAdapter {
     async fn export(&self, traceable: TraceableRecord) {
-        let _timer = metrics::registry::PROCESSING_DURATION_SECONDS
-            .with_label_values(&[ProcessingStage::K8sDecoratorOut.as_str()])
-            .start_timer();
-
         let tracer = self.provider.tracer("mermin");
         let name = if let Some(name) = traceable.name() {
             name

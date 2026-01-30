@@ -415,10 +415,21 @@ mod tests {
     };
 
     use super::*;
-    use crate::{iface, runtime::task_manager::TaskManager};
+    use crate::{
+        iface,
+        metrics::{opts::MetricsOptions, registry::HistogramBucketConfig},
+        runtime::task_manager::TaskManager,
+    };
+
+    fn init_test_metrics() {
+        let metrics_opts = MetricsOptions::default();
+        let bucket_config = HistogramBucketConfig::from(&metrics_opts);
+        let _ = crate::metrics::registry::init_registry(false, bucket_config);
+    }
 
     #[tokio::test]
     async fn test_full_shutdown_sequence_with_active_tasks() {
+        init_test_metrics();
         let (flow_span_tx, mut flow_span_rx) = mpsc::channel::<crate::span::flow::FlowSpan>(1);
         let (cmd_tx, cmd_rx) = channel::unbounded();
         let netlink_fd = Arc::new(iface::threads::ShutdownEventFd::new().unwrap());

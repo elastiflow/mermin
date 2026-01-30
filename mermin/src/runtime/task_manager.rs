@@ -14,10 +14,7 @@ use tracing::{debug, error, trace, warn};
 
 use crate::metrics::{
     self,
-    registry::{
-        SHUTDOWN_DURATION_SECONDS, SHUTDOWN_TIMEOUTS_TOTAL, TASKMANAGER_TASKS_ACTIVE,
-        TASKMANAGER_TASKS_TOTAL,
-    },
+    registry::{SHUTDOWN_TIMEOUTS_TOTAL, TASKMANAGER_TASKS_ACTIVE, TASKMANAGER_TASKS_TOTAL},
 };
 
 /// Task state for tracking lifecycle
@@ -210,7 +207,8 @@ impl TaskManager {
         match graceful_result {
             Ok(()) => {
                 let shutdown_duration = shutdown_start.elapsed();
-                SHUTDOWN_DURATION_SECONDS.observe(shutdown_duration.as_secs_f64());
+                metrics::registry::shutdown_duration_seconds()
+                    .observe(shutdown_duration.as_secs_f64());
 
                 trace!(
                     event.name = "task_manager.shutdown_completed",
@@ -236,7 +234,8 @@ impl TaskManager {
                 let _ = timeout(Duration::from_secs(5), self.wait_for_running_tasks()).await;
 
                 let shutdown_duration = shutdown_start.elapsed();
-                SHUTDOWN_DURATION_SECONDS.observe(shutdown_duration.as_secs_f64());
+                metrics::registry::shutdown_duration_seconds()
+                    .observe(shutdown_duration.as_secs_f64());
 
                 ShutdownResult::ForcedCancellation {
                     duration: shutdown_duration,
@@ -356,9 +355,17 @@ mod tests {
     use tokio::time::{Duration, sleep};
 
     use super::*;
+    use crate::metrics::{opts::MetricsOptions, registry::HistogramBucketConfig};
+
+    fn init_test_metrics() {
+        let metrics_opts = MetricsOptions::default();
+        let bucket_config = HistogramBucketConfig::from(&metrics_opts);
+        let _ = crate::metrics::registry::init_registry(false, bucket_config);
+    }
 
     #[tokio::test]
     async fn test_task_spawning_and_tracking() {
+        init_test_metrics();
         let (mut task_manager, _shutdown_rx) = TaskManager::new();
 
         let task_id = task_manager.spawn("test-task", async {
@@ -375,6 +382,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_graceful_shutdown() {
+        init_test_metrics();
         let (mut task_manager, _shutdown_rx) = TaskManager::new();
 
         // Spawn a task that responds to shutdown signals
@@ -413,6 +421,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_forced_cancellation() {
+        init_test_metrics();
         let (mut task_manager, _shutdown_rx) = TaskManager::new();
 
         // Spawn a task that ignores shutdown signals
@@ -437,6 +446,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_tasks_shutdown() {
+        init_test_metrics();
         let (mut task_manager, _shutdown_rx) = TaskManager::new();
 
         let completed_count = Arc::new(AtomicUsize::new(0));
@@ -475,6 +485,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mixed_shutdown_scenarios() {
+        init_test_metrics();
         let (mut task_manager, _shutdown_rx) = TaskManager::new();
 
         let graceful_completed = Arc::new(AtomicUsize::new(0));

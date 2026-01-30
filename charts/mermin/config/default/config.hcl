@@ -70,7 +70,7 @@ api {
 }
 
 # Metrics server configuration (for Prometheus scraping)
-metrics {
+internal "metrics" {
   enabled        = true
   listen_address = "0.0.0.0"
   port           = 10250
@@ -84,6 +84,17 @@ metrics {
   # Examples: "5m", "300s", "1h", "0s" for immediate cleanup
   # Recommended: "5m" handles pod restarts while preventing unbounded growth
   stale_metric_ttl = "5m"
+
+  # Histogram bucket configuration (optional)
+  # Customize bucket sizes for histogram metrics to better match your workload
+  # If not specified, default buckets optimized for typical workloads are used
+  #
+  # histogram_buckets {
+  #   mermin_pipeline_duration_seconds                        = [0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0]
+  #   mermin_export_batch_size                                = [1.0, 10.0, 50.0, 100.0, 250.0, 500.0, 1000.0]
+  #   mermin_k8s_watcher_ip_index_update_duration_seconds     = [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0]
+  #   mermin_taskmanager_shutdown_duration_seconds            = [0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0]  # Only when debug_metrics_enabled = true
+  # }
 
   # Endpoints available:
   # - /metrics          - All metrics (standard + debug if enabled)

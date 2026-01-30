@@ -35,7 +35,10 @@ where
         // Observe batch size before delegating to inner exporter
         let batch_size = batch.len();
         if batch_size > 0 {
-            metrics::registry::EXPORT_BATCH_SIZE.observe(batch_size as f64);
+            metrics::registry::EXPORT_BATCH_SIZE
+                .get()
+                .unwrap()
+                .observe(batch_size as f64);
         }
 
         let exporter_name = self.exporter_name;
