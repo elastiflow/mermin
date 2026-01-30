@@ -74,6 +74,8 @@ pub enum LogErrorCode {
     UnsupportedProtocol = 4,
     /// Flow event dropped (ring buffer full)
     FlowEventDropped = 5,
+    /// LSM: TCP socket created (trace event from socket_post_create)
+    TcpSocketCreated = 6,
 }
 
 impl LogErrorCode {
@@ -87,6 +89,7 @@ impl LogErrorCode {
             Self::UnsupportedEtherType => "unsupported ether type",
             Self::UnsupportedProtocol => "unsupported protocol",
             Self::FlowEventDropped => "flow event dropped (ring buffer full)",
+            Self::TcpSocketCreated => "tcp socket created (lsm/socket_post_create)",
         }
     }
 }
@@ -102,6 +105,7 @@ impl TryFrom<u8> for LogErrorCode {
             3 => Ok(Self::UnsupportedEtherType),
             4 => Ok(Self::UnsupportedProtocol),
             5 => Ok(Self::FlowEventDropped),
+            6 => Ok(Self::TcpSocketCreated),
             _ => Err(()),
         }
     }
@@ -1479,6 +1483,7 @@ mod tests {
         assert_eq!(LogErrorCode::UnsupportedEtherType as u8, 3);
         assert_eq!(LogErrorCode::UnsupportedProtocol as u8, 4);
         assert_eq!(LogErrorCode::FlowEventDropped as u8, 5);
+        assert_eq!(LogErrorCode::TcpSocketCreated as u8, 6);
     }
 
     #[test]
@@ -1497,6 +1502,10 @@ mod tests {
         assert_eq!(
             LogErrorCode::FlowEventDropped.as_str(),
             "flow event dropped (ring buffer full)"
+        );
+        assert_eq!(
+            LogErrorCode::TcpSocketCreated.as_str(),
+            "tcp socket created (lsm/socket_post_create)"
         );
     }
 
@@ -1517,8 +1526,12 @@ mod tests {
             LogErrorCode::try_from(5),
             Ok(LogErrorCode::FlowEventDropped)
         );
+        assert_eq!(
+            LogErrorCode::try_from(6),
+            Ok(LogErrorCode::TcpSocketCreated)
+        );
         // Unknown error codes should return Err
-        assert_eq!(LogErrorCode::try_from(6), Err(()));
+        assert_eq!(LogErrorCode::try_from(7), Err(()));
         assert_eq!(LogErrorCode::try_from(255), Err(()));
     }
 

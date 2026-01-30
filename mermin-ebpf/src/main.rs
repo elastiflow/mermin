@@ -225,6 +225,7 @@ pub enum Error {
     UnsupportedEtherType = 3,
     UnsupportedProtocol = 4,
     FlowEventDropped = 5,
+    TcpSocketCreated = 6,
 }
 
 /// Log level constants matching LogLevel enum in mermin-common.
@@ -245,7 +246,9 @@ fn log_error(ctx: &TcContext, err: Error, direction: Direction) {
     let level = match err {
         Error::OutOfBounds | Error::MalformedHeader | Error::InternalError => LOG_LEVEL_ERROR,
         Error::FlowEventDropped => LOG_LEVEL_WARN,
-        Error::UnsupportedEtherType | Error::UnsupportedProtocol => LOG_LEVEL_TRACE,
+        Error::UnsupportedEtherType | Error::UnsupportedProtocol | Error::TcpSocketCreated => {
+            LOG_LEVEL_TRACE
+        }
     };
 
     // Try to reserve space in the log ring buffer
@@ -295,13 +298,9 @@ const SOCK_STREAM: i32 = 2; // TCP (stream socket)
 #[cfg(not(feature = "test"))]
 #[lsm(hook = "socket_post_create")]
 pub fn socket_post_create(ctx: LsmContext) -> i32 {
-    // // SAFETY: try_socket_post_create only accesses arguments via the provided context
-    // // and reads kernel memory through BTF-validated offsets
-    // match { try_socket_post_create(&ctx) } {
-    //     Ok(ret) => ret,
-    //     Err(_) => 0, // Return 0 to allow the operation (LSM hooks must not block normal operation)
-    // }
-    0
+    // SAFETY: try_socket_post_create only accesses arguments via the provided context
+    // and reads kernel memory through BTF-validated offsets
+    try_socket_post_create(&ctx).unwrap_or_default() // 0 allows the operation (LSM must not block)
 }
 
 #[cfg(not(feature = "test"))]
@@ -319,13 +318,20 @@ fn try_socket_post_create(ctx: &LsmContext) -> Result<i32, i64> {
         return Ok(0);
     }
 
-    // Get process info for logging
-    let pid_tgid = bpf_get_current_pid_tgid();
-    let pid = (pid_tgid >> 32) as u32;
-
-    // Log TCP socket creation for validation
-    let ip_version = if family == AF_INET { 4 } else { 6 };
-    trace!(ctx, "lsm/socket_post_create: tcp socket created, pid={}, ipv={}", pid, ip_version);
+    // Log TCP socket creation via LOG_EVENTS (LSM has no ifindex; use 0)
+    #[allow(static_mut_refs)]
+    if let Some(mut entry) = unsafe { LOG_EVENTS.reserve::<LogEntry>(0) } {
+        let log_entry = LogEntry {
+            timestamp_ns: unsafe { bpf_ktime_get_boot_ns() },
+            ifindex: 0,
+            level: LOG_LEVEL_TRACE,
+            error_code: Error::TcpSocketCreated as u8,
+            direction: 0,
+            _pad: 0,
+        };
+        entry.write(log_entry);
+        entry.submit(0);
+    }
 
     // Socket post-create doesn't have full connection info yet.
     // We'll track the process info when the connection is established
@@ -334,178 +340,172 @@ fn try_socket_post_create(ctx: &LsmContext) -> Result<i32, i64> {
     Ok(0)
 }
 
-// /// fexit hook for tcp_v4_connect - captures process info for outbound TCP connections.
-// /// This fires AFTER tcp_v4_connect() completes, when the source port is assigned.
-// #[cfg(not(feature = "test"))]
-// #[fexit(function = "tcp_v4_connect")]
-// pub fn tcp_v4_connect_exit(ctx: FExitContext) -> i32 {
-//     // SAFETY: try_tcp_v4_connect_exit only accesses arguments via the provided context
-//     // and reads kernel sock structure through BTF-validated offsets
-//     match { try_tcp_v4_connect_exit(&ctx) } {
-//         Ok(ret) => ret,
-//         Err(_) => 0,
-//     }
-// }
+/// fexit hook for tcp_v4_connect - captures process info for outbound TCP connections.
+/// This fires AFTER tcp_v4_connect() completes, when the source port is assigned.
+#[cfg(not(feature = "test"))]
+#[fexit(function = "tcp_v4_connect")]
+pub fn tcp_v4_connect_exit(ctx: FExitContext) -> i32 {
+    // SAFETY: try_tcp_v4_connect_exit only accesses arguments via the provided context
+    // and reads kernel sock structure through BTF-validated offsets
+    try_tcp_v4_connect_exit(&ctx).unwrap_or_default()
+}
 
-// #[cfg(not(feature = "test"))]
-// #[inline(always)]
-// #[allow(static_mut_refs)]
-// fn try_tcp_v4_connect_exit(ctx: &FExitContext) -> Result<i32, i64> {
-//     // tcp_v4_connect signature: int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
-//     // On fexit, we can access the return value and the original arguments
-//     // Access arguments through ctx pointer - for fexit, return value is after all args
+#[cfg(not(feature = "test"))]
+#[inline(always)]
+#[allow(static_mut_refs)]
+fn try_tcp_v4_connect_exit(ctx: &FExitContext) -> Result<i32, i64> {
+    // tcp_v4_connect signature: int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
+    // On fexit, we can access the return value and the original arguments
+    // Access arguments through ctx pointer - for fexit, return value is after all args
 
-//     let args_ptr = ctx.as_ptr() as *const usize;
-//     let ret: i32 = unsafe { *(args_ptr.add(3) as *const i32) }; // Return value is arg 3 in fexit
+    let args_ptr = ctx.as_ptr() as *const usize;
+    let ret: i32 = unsafe { *(args_ptr.add(3) as *const i32) }; // Return value is arg 3 in fexit
 
-//     if ret != 0 {
-//         // Connection failed, don't track
-//         return Ok(0);
-//     }
+    if ret != 0 {
+        // Connection failed, don't track
+        return Ok(0);
+    }
 
-//     // Get process info
-//     let pid_tgid = bpf_get_current_pid_tgid();
-//     let pid = (pid_tgid >> 32) as u32;
-//     let tgid = pid_tgid as u32;
+    // Get process info
+    let pid_tgid = bpf_get_current_pid_tgid();
+    let pid = (pid_tgid >> 32) as u32;
+    let tgid = pid_tgid as u32;
 
-//     let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
+    let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
 
-//     // Extract the socket to build a FlowKey
-//     // arg(0) is struct sock *sk
-//     // TODO: Consider trying aya package approach:
-//     // use aya_ebpf_bindings::bindings::{sock, socket};
-//     //
-//     // let sk: *const sock = unsafe { *(args_ptr as *const *const sock) };  // Instead of *const c_void
-//     let sk: *const core::ffi::c_void = unsafe { *(args_ptr as *const *const core::ffi::c_void) };
-//     if sk.is_null() {
-//         return Ok(0);
-//     }
+    // Extract the socket to build a FlowKey
+    // arg(0) is struct sock *sk
+    // TODO: Consider trying aya package approach:
+    // use aya_ebpf_bindings::bindings::{sock, socket};
+    //
+    // let sk: *const sock = unsafe { *(args_ptr as *const *const sock) };  // Instead of *const c_void
+    let sk: *const core::ffi::c_void = unsafe { *(args_ptr as *const *const core::ffi::c_void) };
+    if sk.is_null() {
+        return Ok(0);
+    }
 
-//     // Build FlowKey from sock structure
-//     let flow_key = match extract_flow_key_from_sock_v4(sk) {
-//         Ok(key) => key,
-//         Err(_) => return Ok(0),
-//     };
+    // Build FlowKey from sock structure
+    let flow_key = match extract_flow_key_from_sock_v4(sk) {
+        Ok(key) => key,
+        Err(_) => return Ok(0),
+    };
 
-//     // Normalize the key for lookup
-//     let normalized_key = flow_key.normalize();
+    // Normalize the key for lookup
+    let normalized_key = flow_key.normalize();
 
-//     // Look up and update FLOW_STATS with process info
-//     #[allow(static_mut_refs)]
-//     if let Some(stats_ptr) = unsafe { FLOW_STATS.get_ptr_mut(&normalized_key) } {
-//         let stats = unsafe { &mut *stats_ptr };
-//         // Only update if pid is not already set (first come, first served)
-//         if stats.pid == 0 {
-//             stats.pid = pid;
-//             stats.tgid = tgid; // TODO: remove TGID here and form flow stats struct
-//             stats.comm = comm;
-//         }
-//     }
-//     // Note: If FLOW_STATS entry doesn't exist yet, the TC hook will create it
-//     // and this process info will be lost. This is the expected "timing edge case"
-//     // mentioned in the plan - pid=0 indicates unknown process.
+    // Look up and update FLOW_STATS with process info
+    #[allow(static_mut_refs)]
+    if let Some(stats_ptr) = unsafe { FLOW_STATS.get_ptr_mut(&normalized_key) } {
+        let stats = unsafe { &mut *stats_ptr };
+        // Only update if pid is not already set (first come, first served)
+        if stats.pid == 0 {
+            stats.pid = pid;
+            stats.tgid = tgid; // TODO: remove TGID here and form flow stats struct
+            stats.comm = comm;
+        }
+    }
+    // Note: If FLOW_STATS entry doesn't exist yet, the TC hook will create it
+    // and this process info will be lost. This is the expected "timing edge case"
+    // mentioned in the plan - pid=0 indicates unknown process.
 
-//     Ok(0)
-// }
+    Ok(0)
+}
 
-// /// LSM hook for socket_accept - captures process info for inbound TCP connections.
-// /// This fires when a server accepts an incoming connection.
-// #[cfg(not(feature = "test"))]
-// #[lsm(hook = "socket_accept")]
-// pub fn socket_accept(ctx: LsmContext) -> i32 {
-//     // SAFETY: try_socket_accept only accesses arguments via the provided context
-//     // and reads kernel socket/sock structures through BTF-validated offsets
-//     match try_socket_accept(&ctx) {
-//         Ok(ret) => ret,
-//         Err(_) => 0, // Return 0 to allow the operation
-//     }
-// }
+/// LSM hook for socket_accept - captures process info for inbound TCP connections.
+/// This fires when a server accepts an incoming connection.
+#[cfg(not(feature = "test"))]
+#[lsm(hook = "socket_accept")]
+pub fn socket_accept(ctx: LsmContext) -> i32 {
+    // SAFETY: try_socket_accept only accesses arguments via the provided context
+    // and reads kernel socket/sock structures through BTF-validated offsets
+    try_socket_accept(&ctx).unwrap_or_default() // 0 allows the operation
+}
 
-// #[cfg(not(feature = "test"))]
-// #[inline(always)]
-// #[allow(static_mut_refs)]
-// fn try_socket_accept(ctx: &LsmContext) -> Result<i32, i64> {
-//     // socket_accept signature: int socket_accept(struct socket *sock, struct socket *newsock)
-//     // sock is the listening socket, newsock is the newly accepted connection
+#[cfg(not(feature = "test"))]
+#[inline(always)]
+#[allow(static_mut_refs)]
+fn try_socket_accept(ctx: &LsmContext) -> Result<i32, i64> {
+    // socket_accept signature: int socket_accept(struct socket *sock, struct socket *newsock)
+    // sock is the listening socket, newsock is the newly accepted connection
 
-//     // Get process info
-//     let pid_tgid = bpf_get_current_pid_tgid();
-//     let pid = (pid_tgid >> 32) as u32;
-//     let tgid = pid_tgid as u32;
+    // Get process info
+    let pid_tgid = bpf_get_current_pid_tgid();
+    let pid = (pid_tgid >> 32) as u32;
+    let tgid = pid_tgid as u32;
 
-//     let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
+    let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
 
-//     // Access arguments through ctx pointer
-//     let args_ptr = ctx.as_ptr() as *const usize;
-//     // Get the new socket (arg 1) - struct socket *newsock
-//     let newsock: *const core::ffi::c_void =
-//         unsafe { *(args_ptr.add(1) as *const *const core::ffi::c_void) };
-//     if newsock.is_null() {
-//         return Ok(0);
-//     }
+    // Access arguments through ctx pointer
+    let args_ptr = ctx.as_ptr() as *const usize;
+    // Get the new socket (arg 1) - struct socket *newsock
+    let newsock: *const core::ffi::c_void =
+        unsafe { *(args_ptr.add(1) as *const *const core::ffi::c_void) };
+    if newsock.is_null() {
+        return Ok(0);
+    }
 
-//     // Get sk from socket struct: struct socket { ...; struct sock *sk; ... }
-//     // Offset of sk in struct socket varies by kernel version, typically at offset 24-32
-//     // We use bpf_probe_read_kernel to safely read from kernel memory
-//     // TODO: try using aya_ebpf_bindings::bindings::socket
-//     let sk: *const core::ffi::c_void = match read_socket_sk(newsock) {
-//         Ok(sk) => sk,
-//         Err(_) => return Ok(0),
-//     };
-//     if sk.is_null() {
-//         return Ok(0);
-//     }
+    // Get sk from socket struct: struct socket { ...; struct sock *sk; ... }
+    // Offset of sk in struct socket varies by kernel version, typically at offset 24-32
+    // We use bpf_probe_read_kernel to safely read from kernel memory
+    // TODO: try using aya_ebpf_bindings::bindings::socket
+    let sk: *const core::ffi::c_void = match read_socket_sk(newsock) {
+        Ok(sk) => sk,
+        Err(_) => return Ok(0),
+    };
+    if sk.is_null() {
+        return Ok(0);
+    }
 
-//     // Check if this is a TCP socket (AF_INET or AF_INET6)
-//     // Read skc_family from __sk_common (offset 16 from start of sock)
-//     let family: u16 = match read_sock_family(sk) {
-//         Ok(f) => f,
-//         Err(_) => return Ok(0),
-//     };
-//     if family != AF_INET as u16 && family != AF_INET6 as u16 {
-//         return Ok(0);
-//     }
+    // Check if this is a TCP socket (AF_INET or AF_INET6)
+    // Read skc_family from __sk_common (offset 16 from start of sock)
+    let family: u16 = match read_sock_family(sk) {
+        Ok(f) => f,
+        Err(_) => return Ok(0),
+    };
+    if family != AF_INET as u16 && family != AF_INET6 as u16 {
+        return Ok(0);
+    }
 
-//     // Build FlowKey from sock structure
-//     let flow_key = if family == AF_INET as u16 {
-//         match extract_flow_key_from_sock_v4(sk) {
-//             Ok(key) => key,
-//             Err(_) => return Ok(0),
-//         }
-//     } else {
-//         match extract_flow_key_from_sock_v6(sk) {
-//             Ok(key) => key,
-//             Err(_) => return Ok(0),
-//         }
-//     };
+    // Build FlowKey from sock structure
+    let flow_key = if family == AF_INET as u16 {
+        match extract_flow_key_from_sock_v4(sk) {
+            Ok(key) => key,
+            Err(_) => return Ok(0),
+        }
+    } else {
+        match extract_flow_key_from_sock_v6(sk) {
+            Ok(key) => key,
+            Err(_) => return Ok(0),
+        }
+    };
 
-//     // Normalize the key for lookup
-//     let normalized_key = flow_key.normalize();
+    // Normalize the key for lookup
+    let normalized_key = flow_key.normalize();
 
-//     // Look up and update FLOW_STATS with process info
-//     #[allow(static_mut_refs)]
-//     if let Some(stats_ptr) = unsafe { FLOW_STATS.get_ptr_mut(&normalized_key) } {
-//         let stats = unsafe { &mut *stats_ptr };
-//         // Only update if pid is not already set
-//         if stats.pid == 0 {
-//             stats.pid = pid;
-//             stats.tgid = tgid;
-//             stats.comm = comm;
-//         }
-//     }
+    // Look up and update FLOW_STATS with process info
+    #[allow(static_mut_refs)]
+    if let Some(stats_ptr) = unsafe { FLOW_STATS.get_ptr_mut(&normalized_key) } {
+        let stats = unsafe { &mut *stats_ptr };
+        // Only update if pid is not already set
+        if stats.pid == 0 {
+            stats.pid = pid;
+            stats.tgid = tgid;
+            stats.comm = comm;
+        }
+    }
 
-//     Ok(0)
-// }
+    Ok(0)
+}
 
-// // ============================================================================
-// // Kernel struct offsets for sock structure access
-// // These are typically stable across kernel versions but may need adjustment
-// // for specific kernel builds. Using BTF would be more robust.
-// // ============================================================================
+// ============================================================================
+// Kernel struct offsets for sock structure access
+// These are typically stable across kernel versions but may need adjustment
+// for specific kernel builds. Using BTF would be more robust.
+// ============================================================================
 
-// /// Offset of sk field in struct socket (typically 24-32 depending on kernel)
-// #[cfg(not(feature = "test"))]
-// const SOCKET_SK_OFFSET: usize = 32;
+/// Offset of sk field in struct socket (typically 24-32 depending on kernel)
+#[cfg(not(feature = "test"))]
+const SOCKET_SK_OFFSET: usize = 32;
 
 /// Offsets within struct sock's __sk_common union (struct sock_common)
 /// These are relative to the start of struct sock
@@ -524,22 +524,23 @@ const SK_COMMON_SKC_V6_DADDR_OFFSET: usize = 40; // skc_v6_daddr (IPv6 remote ad
 #[cfg(not(feature = "test"))]
 const SK_COMMON_SKC_V6_RCV_SADDR_OFFSET: usize = 56; // skc_v6_rcv_saddr (IPv6 local addr)
 
-// /// Read the sk field from struct socket
-// /// TODO: try using aya_ebpf_bindings::bindings::socket
-// #[cfg(not(feature = "test"))]
-// #[inline(always)]
-// fn read_socket_sk(socket: *const core::ffi::c_void) -> Result<*const core::ffi::c_void, i64> {
-//     let sk_ptr = unsafe { (socket as *const u8).add(SOCKET_SK_OFFSET) as *const *const core::ffi::c_void };
-//     unsafe { bpf_probe_read_kernel(sk_ptr).map_err(|_| -1i64) }
-// }
+/// Read the sk field from struct socket
+/// TODO: try using aya_ebpf_bindings::bindings::socket
+#[cfg(not(feature = "test"))]
+#[inline(always)]
+fn read_socket_sk(socket: *const core::ffi::c_void) -> Result<*const core::ffi::c_void, i64> {
+    let sk_ptr =
+        unsafe { (socket as *const u8).add(SOCKET_SK_OFFSET) as *const *const core::ffi::c_void };
+    unsafe { bpf_probe_read_kernel(sk_ptr).map_err(|_| -1i64) }
+}
 
-// /// Read the skc_family field from struct sock
-// #[cfg(not(feature = "test"))]
-// #[inline(always)]
-// fn read_sock_family(sk: *const core::ffi::c_void) -> Result<u16, i64> {
-//     let family_ptr = unsafe { (sk as *const u8).add(SK_COMMON_SKC_FAMILY_OFFSET) as *const u16 };
-//     unsafe { bpf_probe_read_kernel(family_ptr).map_err(|_| -1i64) }
-// }
+/// Read the skc_family field from struct sock
+#[cfg(not(feature = "test"))]
+#[inline(always)]
+fn read_sock_family(sk: *const core::ffi::c_void) -> Result<u16, i64> {
+    let family_ptr = unsafe { (sk as *const u8).add(SK_COMMON_SKC_FAMILY_OFFSET) as *const u16 };
+    unsafe { bpf_probe_read_kernel(family_ptr).map_err(|_| -1i64) }
+}
 
 /// Extract FlowKey from struct sock for IPv4 connections.
 /// Reads connection 4-tuple from kernel sock structure using bpf_probe_read_kernel.
@@ -591,50 +592,52 @@ fn extract_flow_key_from_sock_v4(sk: *const core::ffi::c_void) -> Result<FlowKey
     Ok(key)
 }
 
-// /// Extract FlowKey from struct sock for IPv6 connections.
-// /// Reads connection 4-tuple from kernel sock structure using bpf_probe_read_kernel.
-// #[cfg(not(feature = "test"))]
-// #[inline(always)]
-// fn extract_flow_key_from_sock_v6(
-//     sk: *const core::ffi::c_void,
-// ) -> Result<FlowKey, i64> {
-//     if sk.is_null() {
-//         return Err(-1);
-//     }
+/// Extract FlowKey from struct sock for IPv6 connections.
+/// Reads connection 4-tuple from kernel sock structure using bpf_probe_read_kernel.
+#[cfg(not(feature = "test"))]
+#[inline(always)]
+fn extract_flow_key_from_sock_v6(sk: *const core::ffi::c_void) -> Result<FlowKey, i64> {
+    if sk.is_null() {
+        return Err(-1);
+    }
 
-//     let sk_bytes = sk as *const u8;
+    let sk_bytes = sk as *const u8;
 
-//     // Read ports
-//     let src_port: u16 = unsafe { bpf_probe_read_kernel(
-//         sk_bytes.add(SK_COMMON_SKC_NUM_OFFSET) as *const u16
-//     ).map_err(|_| -1i64)? };
+    // Read ports
+    let src_port: u16 = unsafe {
+        bpf_probe_read_kernel(sk_bytes.add(SK_COMMON_SKC_NUM_OFFSET) as *const u16)
+            .map_err(|_| -1i64)?
+    };
 
-//     let dst_port_be: u16 = unsafe { bpf_probe_read_kernel(
-//         sk_bytes.add(SK_COMMON_SKC_DPORT_OFFSET) as *const u16
-//     ).map_err(|_| -1i64)? };
-//     let dst_port = u16::from_be(dst_port_be);
+    let dst_port_be: u16 = unsafe {
+        bpf_probe_read_kernel(sk_bytes.add(SK_COMMON_SKC_DPORT_OFFSET) as *const u16)
+            .map_err(|_| -1i64)?
+    };
+    let dst_port = u16::from_be(dst_port_be);
 
-//     // Read IPv6 addresses
-//     let src_addr: [u8; 16] = unsafe { bpf_probe_read_kernel(
-//         sk_bytes.add(SK_COMMON_SKC_V6_RCV_SADDR_OFFSET) as *const [u8; 16]
-//     ).map_err(|_| -1i64)? };
+    // Read IPv6 addresses
+    let src_addr: [u8; 16] = unsafe {
+        bpf_probe_read_kernel(sk_bytes.add(SK_COMMON_SKC_V6_RCV_SADDR_OFFSET) as *const [u8; 16])
+            .map_err(|_| -1i64)?
+    };
 
-//     let dst_addr: [u8; 16] = unsafe { bpf_probe_read_kernel(
-//         sk_bytes.add(SK_COMMON_SKC_V6_DADDR_OFFSET) as *const [u8; 16]
-//     ).map_err(|_| -1i64)? };
+    let dst_addr: [u8; 16] = unsafe {
+        bpf_probe_read_kernel(sk_bytes.add(SK_COMMON_SKC_V6_DADDR_OFFSET) as *const [u8; 16])
+            .map_err(|_| -1i64)?
+    };
 
-//     // Build FlowKey
-//     let key = FlowKey {
-//         src_ip: src_addr,
-//         dst_ip: dst_addr,
-//         src_port,
-//         dst_port,
-//         ip_version: IpVersion::V6,
-//         protocol: network_types::ip::IpProto::Tcp,
-//     };
+    // Build FlowKey
+    let key = FlowKey {
+        src_ip: src_addr,
+        dst_ip: dst_addr,
+        src_port,
+        dst_port,
+        ip_version: IpVersion::V6,
+        protocol: network_types::ip::IpProto::Tcp,
+    };
 
-//     Ok(key)
-// }
+    Ok(key)
+}
 
 /// Helper to handle flow stats with error logging
 #[cfg(not(feature = "test"))]
