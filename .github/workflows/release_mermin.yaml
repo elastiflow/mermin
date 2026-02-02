@@ -230,6 +230,7 @@ jobs:
           name: mermin-${{ needs.release.outputs.new_release_version }}
           tag_name: mermin-${{ needs.release.outputs.new_release_version }}
           body: |
+            Helm chart for Mermin ${{ needs.release.outputs.new_release_version }}
             ${{ needs.release.outputs.new_release_notes }}
           target_commitish: ${{ github.ref_name }}
           preserve_order: true
