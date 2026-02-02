@@ -103,7 +103,7 @@ Filter by port.
 
 ### Notes
 
-Result of the `filter.source`/`filter.destination` inclusion/exclusion is "ANDed", meaning it is very easy to accidentally exclude flows you want to observe. For example:
+Result of the `filter.source`/`filter.destination` inclusion/exclusion is combined with an "AND" condition, meaning it is very easy to accidentally exclude flows you want to observe. For example:
 
 - Matching only private subnets will filter out any flow originating from public subnets.
   The configuration:
