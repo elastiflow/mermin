@@ -314,12 +314,10 @@ fn try_tcp_v4_connect_exit(ctx: &FExitContext) -> Result<i32, i64> {
         return Ok(0);
     }
 
-    // Get process info
     let pid_tgid = bpf_get_current_pid_tgid();
     let pid = (pid_tgid >> 32) as u32;
     let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
 
-    // Extract the socket to build a FlowKey
     // arg(0) is struct sock *sk
     // TODO(CAN-136): Use aya_ebpf_bindings::bindings::{sock, socket} for type-safe access
     let sk: *const core::ffi::c_void = unsafe { *(args_ptr as *const *const core::ffi::c_void) };
@@ -327,20 +325,16 @@ fn try_tcp_v4_connect_exit(ctx: &FExitContext) -> Result<i32, i64> {
         return Ok(0);
     }
 
-    // Build FlowKey from sock structure
     let flow_key = match extract_flow_key_from_sock_v4(sk) {
         Ok(key) => key,
         Err(_) => return Ok(0),
     };
 
-    // Normalize the key for lookup
     let normalized_key = flow_key.normalize();
 
-    // Look up and update FLOW_STATS with process info
     #[allow(static_mut_refs)]
     if let Some(stats_ptr) = unsafe { FLOW_STATS.get_ptr_mut(&normalized_key) } {
         let stats = unsafe { &mut *stats_ptr };
-        // Only update if pid is not already set (first come, first served)
         if stats.pid == 0 {
             stats.pid = pid;
             stats.comm = comm;
@@ -371,12 +365,10 @@ fn try_socket_accept(ctx: &LsmContext) -> Result<i32, i64> {
     // socket_accept signature: int socket_accept(struct socket *sock, struct socket *newsock)
     // sock is the listening socket, newsock is the newly accepted connection
 
-    // Get process info
     let pid_tgid = bpf_get_current_pid_tgid();
     let pid = (pid_tgid >> 32) as u32;
     let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
 
-    // Access arguments through ctx pointer
     let args_ptr = ctx.as_ptr() as *const usize;
     // Get the new socket (arg 1) - struct socket *newsock
     let newsock: *const core::ffi::c_void =
@@ -407,7 +399,6 @@ fn try_socket_accept(ctx: &LsmContext) -> Result<i32, i64> {
         return Ok(0);
     }
 
-    // Build FlowKey from sock structure
     let flow_key = if family == AF_INET as u16 {
         match extract_flow_key_from_sock_v4(sk) {
             Ok(key) => key,
@@ -420,10 +411,8 @@ fn try_socket_accept(ctx: &LsmContext) -> Result<i32, i64> {
         }
     };
 
-    // Normalize the key for lookup
     let normalized_key = flow_key.normalize();
 
-    // Look up and update FLOW_STATS with process info
     #[allow(static_mut_refs)]
     if let Some(stats_ptr) = unsafe { FLOW_STATS.get_ptr_mut(&normalized_key) } {
         let stats = unsafe { &mut *stats_ptr };
@@ -464,7 +453,6 @@ const SK_COMMON_SKC_V6_DADDR_OFFSET: usize = 40; // skc_v6_daddr (IPv6 remote ad
 #[cfg(not(feature = "test"))]
 const SK_COMMON_SKC_V6_RCV_SADDR_OFFSET: usize = 56; // skc_v6_rcv_saddr (IPv6 local addr)
 
-/// Read the sk field from struct socket
 /// TODO(CAN-136): Use aya_ebpf_bindings::bindings::socket for type-safe access, the goal is to replace the above hardcoded offsets
 #[cfg(not(feature = "test"))]
 #[inline(always)]
@@ -474,7 +462,6 @@ fn read_socket_sk(socket: *const core::ffi::c_void) -> Result<*const core::ffi::
     unsafe { bpf_probe_read_kernel(sk_ptr).map_err(|_| -1i64) }
 }
 
-/// Read the skc_family field from struct sock
 #[cfg(not(feature = "test"))]
 #[inline(always)]
 fn read_sock_family(sk: *const core::ffi::c_void) -> Result<u16, i64> {
@@ -482,8 +469,6 @@ fn read_sock_family(sk: *const core::ffi::c_void) -> Result<u16, i64> {
     unsafe { bpf_probe_read_kernel(family_ptr).map_err(|_| -1i64) }
 }
 
-/// Extract FlowKey from struct sock for IPv4 connections.
-/// Reads connection 4-tuple from kernel sock structure using bpf_probe_read_kernel.
 #[cfg(not(feature = "test"))]
 #[inline(always)]
 fn extract_flow_key_from_sock_v4(sk: *const core::ffi::c_void) -> Result<FlowKey, i64> {
@@ -493,7 +478,6 @@ fn extract_flow_key_from_sock_v4(sk: *const core::ffi::c_void) -> Result<FlowKey
 
     let sk_bytes = sk as *const u8;
 
-    // Read addresses and ports from sock_common
     let src_addr: u32 = unsafe {
         bpf_probe_read_kernel(sk_bytes.add(SK_COMMON_SKC_RCV_SADDR_OFFSET) as *const u32)
             .map_err(|_| -1i64)?
@@ -515,7 +499,6 @@ fn extract_flow_key_from_sock_v4(sk: *const core::ffi::c_void) -> Result<FlowKey
     };
     let dst_port = u16::from_be(dst_port_be);
 
-    // Build FlowKey
     let mut key = FlowKey {
         src_ip: [0u8; 16],
         dst_ip: [0u8; 16],
@@ -525,7 +508,6 @@ fn extract_flow_key_from_sock_v4(sk: *const core::ffi::c_void) -> Result<FlowKey
         protocol: network_types::ip::IpProto::Tcp,
     };
 
-    // Copy IPv4 addresses to first 4 bytes (network byte order)
     key.src_ip[0..4].copy_from_slice(&src_addr.to_ne_bytes());
     key.dst_ip[0..4].copy_from_slice(&dst_addr.to_ne_bytes());
 
@@ -543,7 +525,6 @@ fn extract_flow_key_from_sock_v6(sk: *const core::ffi::c_void) -> Result<FlowKey
 
     let sk_bytes = sk as *const u8;
 
-    // Read ports
     let src_port: u16 = unsafe {
         bpf_probe_read_kernel(sk_bytes.add(SK_COMMON_SKC_NUM_OFFSET) as *const u16)
             .map_err(|_| -1i64)?
@@ -555,7 +536,6 @@ fn extract_flow_key_from_sock_v6(sk: *const core::ffi::c_void) -> Result<FlowKey
     };
     let dst_port = u16::from_be(dst_port_be);
 
-    // Read IPv6 addresses
     let src_addr: [u8; 16] = unsafe {
         bpf_probe_read_kernel(sk_bytes.add(SK_COMMON_SKC_V6_RCV_SADDR_OFFSET) as *const [u8; 16])
             .map_err(|_| -1i64)?
@@ -566,7 +546,6 @@ fn extract_flow_key_from_sock_v6(sk: *const core::ffi::c_void) -> Result<FlowKey
             .map_err(|_| -1i64)?
     };
 
-    // Build FlowKey
     let key = FlowKey {
         src_ip: src_addr,
         dst_ip: dst_addr,
