@@ -38,7 +38,7 @@ Mermin exposes Prometheus metrics in the standard Prometheus text format at mult
 
 ## Metrics Reference
 
-All metrics follow the naming convention: `mermin_<subsystem>_<name>`.  
+All metrics follow the naming convention: `mermin_<subsystem>_<name>`.
 Metrics are categorized into logical subsystems that correspond to different components of Mermin:
 
 - `ebpf`: For eBPF-specific metrics
@@ -51,7 +51,7 @@ Metrics are categorized into logical subsystems that correspond to different com
 
 ### eBPF Metrics (`mermin_ebpf_*`)
 
-This section describes metrics from the eBPF layer, responsible for capturing low-level packets. These metrics provide visibility into the status of loaded eBPF programs and the usage of eBPF maps.  
+This section describes metrics from the eBPF layer, responsible for capturing low-level packets. These metrics provide visibility into the status of loaded eBPF programs and the usage of eBPF maps.
 Monitoring these is crucial for ensuring that Mermin's foundational data collection mechanism functions as expected.
 
 - `mermin_ebpf_bpf_fs_writable`
@@ -64,7 +64,7 @@ Monitoring these is crucial for ensuring that Mermin's foundational data collect
   - `map`
 - `mermin_ebpf_map_capacity`
   *Type*: `gauge`
-  *Description*: Maximum capacity of eBPF maps. For hash maps (FLOW_STATS, LISTENING_PORTS) this is max entries. For ring buffers (FLOW_EVENTS) this is size in bytes.
+  *Description*: Maximum capacity of eBPF maps. For hash maps (FLOW_STATS, TCP_STATS, ICMP_STATS, LISTENING_PORTS) this is max entries. For ring buffers (FLOW_EVENTS) this is size in bytes.
   *Labels*:
   - `map`
   - `unit`
@@ -77,7 +77,7 @@ Monitoring these is crucial for ensuring that Mermin's foundational data collect
   - `status`
 - `mermin_ebpf_map_size`
   *Type*: `gauge`
-  *Description*: Current number of entries in eBPF maps. For hash maps (FLOW_STATS, LISTENING_PORTS) this is the entry count. Not available for ring buffers (FLOW_EVENTS).
+  *Description*: Current size of eBPF maps. For hash maps (FLOW_STATS, TCP_STATS, ICMP_STATS, LISTENING_PORTS) this is the entry count. For ring buffers (FLOW_EVENTS) this is pending bytes (producer_pos - consumer_pos).
   *Labels*:
   - `map`
   - `unit`

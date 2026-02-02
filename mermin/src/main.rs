@@ -45,7 +45,7 @@ use crate::{
     },
     k8s::{attributor::Attributor, decorator::Decorator},
     metrics::{
-        ebpf::EbpfMapName,
+        ebpf::{EbpfMapName, init_ringbuf_metrics},
         k8s::K8sDecoratorStatus,
         processing::ProcessingStage,
         server::start_metrics_server,
@@ -473,6 +473,20 @@ async fn run(cli: Cli) -> Result<()> {
     .map_err(|e| {
         MerminError::internal(format!("failed to convert FLOW_EVENTS ring buffer: {e}"))
     })?;
+
+    // Initialize ring buffer metrics before producer takes ownership (need fd access for mmap)
+    if init_ringbuf_metrics(&flow_events_ringbuf) {
+        debug!(
+            event.name = "ringbuf_metrics.initialized",
+            "ring buffer metrics initialized for FLOW_EVENTS"
+        );
+    } else {
+        warn!(
+            event.name = "ringbuf_metrics.init_failed",
+            "failed to initialize ring buffer metrics - FLOW_EVENTS size will not be reported"
+        );
+    }
+
     let listening_ports_map = Arc::new(tokio::sync::Mutex::new(
         aya::maps::HashMap::try_from(
             ebpf.take_map("LISTENING_PORTS")
@@ -483,6 +497,12 @@ async fn run(cli: Cli) -> Result<()> {
 
     metrics::registry::EBPF_MAP_CAPACITY
         .with_label_values(&[EbpfMapName::FlowStats.as_str(), MapUnit::Entries.as_str()])
+        .set(conf.pipeline.flow_capture.flow_stats_capacity as i64);
+    metrics::registry::EBPF_MAP_CAPACITY
+        .with_label_values(&[EbpfMapName::TcpStats.as_str(), MapUnit::Entries.as_str()])
+        .set(conf.pipeline.flow_capture.flow_stats_capacity as i64);
+    metrics::registry::EBPF_MAP_CAPACITY
+        .with_label_values(&[EbpfMapName::IcmpStats.as_str(), MapUnit::Entries.as_str()])
         .set(conf.pipeline.flow_capture.flow_stats_capacity as i64);
     metrics::registry::EBPF_MAP_CAPACITY
         .with_label_values(&[EbpfMapName::FlowEvents.as_str(), MapUnit::Bytes.as_str()])

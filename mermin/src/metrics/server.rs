@@ -36,13 +36,17 @@ use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
-use crate::metrics::{self, error::MetricsError, opts::MetricsOptions};
+use crate::metrics::{
+    self, ebpf::update_ringbuf_size_metric, error::MetricsError, opts::MetricsOptions,
+};
 
 /// Handler for the `/metrics` endpoint.
 ///
 /// Returns Prometheus text format metrics for all registered collectors.
 async fn metrics_handler() -> impl IntoResponse {
     match tokio::task::spawn_blocking(|| {
+        update_ringbuf_size_metric();
+
         let encoder = prometheus::TextEncoder::new();
         let metric_families = metrics::registry::REGISTRY.gather();
         encoder.encode_to_string(&metric_families)
@@ -81,6 +85,8 @@ async fn metrics_handler() -> impl IntoResponse {
 /// Always returns 200 OK because standard metrics are always enabled.
 async fn standard_metrics_handler() -> impl IntoResponse {
     match tokio::task::spawn_blocking(|| {
+        update_ringbuf_size_metric();
+
         let encoder = prometheus::TextEncoder::new();
         let metric_families = metrics::registry::STANDARD_REGISTRY.gather();
         encoder.encode_to_string(&metric_families)
