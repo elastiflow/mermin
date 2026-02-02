@@ -1,8 +1,8 @@
 # Flow Filtering
 
-Flow filtering allows you to include or exclude network flows based on various criteria. This reduces data volume and focuses on relevant traffic.
+**Block:** `filter.source`/`filter.destination`/`filter.network`/`filter.flow`
 
-## Overview
+Flow filtering allows you to include or exclude network flows based on various criteria. This reduces data volume and focuses on relevant traffic.
 
 Mermin supports filtering flows by:
 
@@ -11,11 +11,16 @@ Mermin supports filtering flows by:
 - TCP flags, ICMP types
 - Connection states
 
-A full configuration example can be found in the [Default Config](https://github.com/elastiflow/mermin/tree/beta/charts/mermin/config/default/config.hcl).
+A full configuration example can be found in the [Default Configuration](./default/config.hcl).
 
-### Match Patterns
+# Configuration
 
-Mermin uses simple `match`/`not_match` patterns:
+## `match`/`not_match` patterns
+
+**Type:** List of strings  
+**Default:** `[]`
+
+Mermin uses simple match patterns:
 
 - **`match`**: Include flows matching the pattern, list of strings, (empty list = include all).
 - **`not_match`**: Exclude flows matching the pattern, list of strings, (empty list = exclude none, takes precedence).
@@ -44,18 +49,16 @@ The patterns support multiple forms
   - `close_wait`: Connection states
   - `eth*`: Interface names
 
-## Configuration
-
-### `filter.source` and `filter.destination` filters
+## `filter.source` and `filter.destination` filters
 
 The filters apply to the `source`/`destination` combination of the `address` and `port` in the flow span.
 Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/architecture.md#components)), which can help reduce resource usage in subsequent stages.
 
-#### `address`
+### `address`
 
 Filter by IP address.
 
-**Supported values:** IP or CIDR notation (`10.0.0.0/8`, `10.0.0.1`)
+**Supported values in [patterns](#matchnot_match-patterns):** IP or CIDR notation (`10.0.0.0/8`, `10.0.0.1`)
 
 **Examples:**
 
@@ -70,11 +73,11 @@ Filter by IP address.
   }
   ```
 
-#### `port`
+### `port`
 
 Filter by port.
 
-**Supported values:** Port or port range as a string (`443`, `8000-9000`)
+**Supported values in [patterns](#matchnot_match-patterns):** Port or port range as a string (`443`, `8000-9000`)
 
 **Examples:**
 
@@ -98,7 +101,7 @@ Filter by port.
   }
   ```
 
-#### Notes
+### Notes
 
 Result of the `filter.source`/`filter.destination` inclusion/exclusion is "ANDed", meaning it is very easy to accidentally exclude flows you want to observe. For example:
 
@@ -155,16 +158,16 @@ Result of the `filter.source`/`filter.destination` inclusion/exclusion is "ANDed
   ]
   ```
 
-### `filter.network` filter
+## `filter.network` filter
 
 The filter applies to various network attributes in the flow span, such as transport protocol, interface, and others.
 Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/architecture.md#components)), which can help reduce resource usage in subsequent stages.
 
-#### `transport`
+### `transport`
 
 Filter by transport protocol.
 
-**Supported values:** `tcp`, `udp`, `icmp`, `icmpv6` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+**Supported values in [patterns](#matchnot_match-patterns):** `tcp`, `udp`, `icmp`, `icmpv6` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
 **Examples:**
 
@@ -188,11 +191,11 @@ Filter by transport protocol.
   }
   ```
 
-#### `type`
+### `type`
 
 Filter by IP version.
 
-**Supported values:** `ipv4`, `ipv6` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+**Supported values in [patterns](#matchnot_match-patterns):** `ipv4`, `ipv6` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
 **Examples:**
 
@@ -206,11 +209,11 @@ Filter by IP version.
   }
   ```
 
-#### `interface_name`
+### `interface_name`
 
 Filter by network interface name.
 
-**Supported values:** Any valid interface name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+**Supported values in [patterns](#matchnot_match-patterns):** Any valid interface name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
 **Examples:**
 
@@ -234,11 +237,11 @@ Filter by network interface name.
   }
   ```
 
-#### `interface_index`
+### `interface_index`
 
 Filter by network interface index.
 
-**Supported values:** Any valid interface index or interface index range as a string (`0`, `1-27`)
+**Supported values in [patterns](#matchnot_match-patterns):** Any valid interface index or interface index range as a string (`0`, `1-27`)
 
 **Examples:**
 
@@ -262,11 +265,11 @@ Filter by network interface index.
   }
   ```
 
-#### `interface_mac`
+### `interface_mac`
 
 Filter by network interface MAC address.
 
-**Supported values:** Any valid MAC address (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+**Supported values in [patterns](#matchnot_match-patterns):** Any valid MAC address (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
 **Examples:**
 
@@ -280,16 +283,16 @@ Filter by network interface MAC address.
   }
   ```
 
-### `filter.flow` filters
+## `filter.flow` filters
 
 The filter applies to various flow attributes in the flow span, such as connection state, TCP flags and others.
 Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/architecture.md#components)), which can help reduce resource usage in subsequent stages.
 
-#### `connection_state`
+### `connection_state`
 
 Filter by TCP connection state.
 
-**Supported values:** `established`, `syn_sent`, `syn_received`, `fin_wait`, `close_wait`, `closing`, `last_ack`, `time_wait`, `closed` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+**Supported values in [patterns](#matchnot_match-patterns):** `established`, `syn_sent`, `syn_received`, `fin_wait`, `close_wait`, `closing`, `last_ack`, `time_wait`, `closed` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
 **Examples:**
 
@@ -303,11 +306,11 @@ Filter by TCP connection state.
   }
   ```
 
-#### `tcp_flags`
+### `tcp_flags`
 
 Filter by TCP flags.
 
-**Supported values:** `SYN`, `ACK`, `FIN`, `RST`, `PSH`, `URG` (supports [globs](https://docs.rs/globset/latest/globset/#syntax)), _case insensitive_.
+**Supported values in [patterns](#matchnot_match-patterns):** `SYN`, `ACK`, `FIN`, `RST`, `PSH`, `URG` (supports [globs](https://docs.rs/globset/latest/globset/#syntax)), _case insensitive_.
 
 **Examples:**
 
@@ -321,11 +324,11 @@ Filter by TCP flags.
   }
   ```
 
-#### `ip_dscp_name`
+### `ip_dscp_name`
 
 Filter flows based on the DSCP ([Differentiated Services Code Point](https://en.wikipedia.org/wiki/Differentiated_services#Configuration_guidelines)) names
 
-**Supported values:** Any valid interface name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+**Supported values in [patterns](#matchnot_match-patterns):** Any valid interface name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
 **Examples:**
 
@@ -345,11 +348,11 @@ Filter flows based on the DSCP ([Differentiated Services Code Point](https://en.
   }
   ```
 
-#### `ip_ecn_name`
+### `ip_ecn_name`
 
 Filter flows based on ECN ([Explicit Congestion Notification](https://en.wikipedia.org/wiki/Explicit_congestion_notification)) values
 
-**Supported values:** Any valid ECN value (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+**Supported values in [patterns](#matchnot_match-patterns):** Any valid ECN value (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
 **Examples:**
 
@@ -369,11 +372,11 @@ Filter flows based on ECN ([Explicit Congestion Notification](https://en.wikiped
   }
   ```
 
-#### `ip_ttl`
+### `ip_ttl`
 
 Filter flows based on the IP TTL ([Time To Live](https://en.wikipedia.org/wiki/Time_to_live)) values
 
-**Supported values:** Any valid TTL or TTL range as a string (`1`, `64-184`)
+**Supported values in [patterns](#matchnot_match-patterns):** Any valid TTL or TTL range as a string (`1`, `64-184`)
 
 **Examples:**
 
@@ -393,11 +396,11 @@ Filter flows based on the IP TTL ([Time To Live](https://en.wikipedia.org/wiki/T
   }
   ```
 
-#### `ipv6_flow_label`
+### `ipv6_flow_label`
 
 Filter flows based on IPv6 [flow labels](https://www.rfc-editor.org/rfc/rfc6437.html)
 
-**Supported values:** Any valid flow label or label range (`2145`, `12345-12545`)
+**Supported values in [patterns](#matchnot_match-patterns):** Any valid flow label or label range (`2145`, `12345-12545`)
 
 **Examples:**
 
@@ -417,11 +420,11 @@ Filter flows based on IPv6 [flow labels](https://www.rfc-editor.org/rfc/rfc6437.
   }
   ```
 
-#### `icmp_type_name`
+### `icmp_type_name`
 
 Filter flows based on [ICMP type](https://www.iana.org/assignments/icmp-parameters/icmp-parameters.xhtml) names (converted to a [snake case](https://en.wikipedia.org/wiki/Snake_case))
 
-**Supported values:** Any valid ICMP type name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+**Supported values in [patterns](#matchnot_match-patterns):** Any valid ICMP type name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
 **Examples:**
 
@@ -441,11 +444,11 @@ Filter flows based on [ICMP type](https://www.iana.org/assignments/icmp-paramete
   }
   ```
 
-#### `icmp_code`
+### `icmp_code`
 
 Filter flows based on [ICMP codes](https://www.iana.org/assignments/icmp-parameters/icmp-parameters.xhtml)
 
-**Supported values:** Any valid ICMP code or code range as a string (`13`, `0-8`)
+**Supported values in [patterns](#matchnot_match-patterns):** Any valid ICMP code or code range as a string (`13`, `0-8`)
 
 **Examples:**
 
@@ -465,9 +468,9 @@ Filter flows based on [ICMP codes](https://www.iana.org/assignments/icmp-paramet
   }
   ```
 
-## Common Filtering Scenarios
+# Common Filtering Scenarios
 
-### HTTP/HTTPS Only
+## HTTP/HTTPS Only
 
 Following configuration captures flows with HTTP/HTTPS destination.
 
@@ -493,7 +496,7 @@ Example flows:
 ]
 ```
 
-### Exclude Internal Traffic
+## Exclude Internal Traffic
 
 Following configuration captures flows originated from non-local 
 
@@ -516,7 +519,7 @@ filter "source" {
 ]
 ```
 
-### TCP Only, Established Connections
+## TCP Only, Established Connections
 
 Following configuration captures flows for established TCP connections
 
@@ -534,7 +537,7 @@ filter "flow" {
 }
 ```
 
-## Best Practices
+# Best Practices
 
 1. **Start permissive**: Begin with no filters, add as needed
 2. **Monitor impact**: Check flow reduction with metrics
@@ -542,7 +545,7 @@ filter "flow" {
 4. **Document rationale**: Comment why filters are applied
 5. **Use `match`/`not_match` carefully**: Match patterns can hide important traffic
 
-## Next Steps
+# Next Steps
 
 - [**Configuration Examples**](examples.md): See complete filter configurations
 - [**Flow Span Options**](span.md): Configure flow generation
