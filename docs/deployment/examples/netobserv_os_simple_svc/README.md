@@ -36,14 +36,13 @@ Notes on the example deployment:
     helm repo add opensearch https://opensearch-project.github.io/helm-charts/
     helm repo update
     # Deploy
-    kubectl create namespace elastiflow
-    helm upgrade -i --wait --timeout 15m -n elastiflow \
+    helm upgrade -i --wait --timeout 15m -n elastiflow --create-namespace \
       -f values.yaml \
       --set-file mermin.config.content=config.hcl \
       --devel \
       mermin mermin/mermin-netobserv-os-stack
     ```
-    
+
 - Optionally install `metrics-server` to get metrics if it has not been installed yet
 
     ```sh

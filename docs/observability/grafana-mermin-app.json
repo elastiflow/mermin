@@ -1128,7 +1128,7 @@
             "uid": "${ds_prometheus}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(mermin_pipeline_duration_seconds_bucket{stage=\"k8s_export_out\"}[$__rate_interval])) by (le)",
+          "expr": "sum(rate(mermin_pipeline_duration_seconds_bucket{stage=\"export_out\"}[$__rate_interval])) by (le)",
           "format": "heatmap",
           "hide": false,
           "instant": false,
@@ -1285,7 +1285,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 64
+            "y": 33
           },
           "id": 49,
           "options": {
@@ -1414,12 +1414,16 @@
             "h": 12,
             "w": 17,
             "x": 4,
-            "y": 64
+            "y": 33
           },
           "id": 50,
           "options": {
             "legend": {
-              "calcs": [],
+              "calcs": [
+                "min",
+                "max",
+                "lastNotNull"
+              ],
               "displayMode": "table",
               "placement": "right",
               "showLegend": true
@@ -1427,7 +1431,7 @@
             "tooltip": {
               "hideZeros": false,
               "mode": "multi",
-              "sort": "none"
+              "sort": "desc"
             }
           },
           "pluginVersion": "12.3.1",
@@ -1477,7 +1481,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 68
+            "y": 37
           },
           "id": 51,
           "options": {
@@ -1574,7 +1578,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 72
+            "y": 41
           },
           "id": 52,
           "options": {
@@ -1599,7 +1603,7 @@
             {
               "editorMode": "code",
               "exemplar": false,
-              "expr": "min_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"k8s_export_out\"}[$__rate_interval])) by (stage)[$__range:])",
+              "expr": "min_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"export_out\"}[$__rate_interval])) by (stage)[$__range:])",
               "instant": false,
               "legendFormat": "min",
               "range": true,
@@ -1612,7 +1616,7 @@
               },
               "editorMode": "code",
               "exemplar": false,
-              "expr": "avg_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"k8s_export_out\"}[$__rate_interval])) by (stage)[$__range:])",
+              "expr": "avg_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"export_out\"}[$__rate_interval])) by (stage)[$__range:])",
               "hide": false,
               "instant": false,
               "legendFormat": "avg",
@@ -1626,7 +1630,7 @@
               },
               "editorMode": "code",
               "exemplar": false,
-              "expr": "max_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"k8s_export_out\"}[$__rate_interval])) by (stage)[$__range:])",
+              "expr": "max_over_time(sum(rate(mermin_pipeline_duration_seconds_count{stage=\"export_out\"}[$__rate_interval])) by (stage)[$__range:])",
               "hide": false,
               "instant": false,
               "legendFormat": "max",
@@ -1634,7 +1638,7 @@
               "refId": "C"
             }
           ],
-          "title": "\"k8s_export_out\" min, avg, max rate",
+          "title": "\"export_out\" min, avg, max rate",
           "type": "stat"
         },
         {
@@ -1662,7 +1666,7 @@
             "h": 7,
             "w": 8,
             "x": 0,
-            "y": 76
+            "y": 45
           },
           "id": 46,
           "interval": "60s",
@@ -1763,7 +1767,7 @@
             "h": 7,
             "w": 8,
             "x": 8,
-            "y": 76
+            "y": 45
           },
           "id": 47,
           "interval": "60s",
@@ -1844,7 +1848,7 @@
             "type": "prometheus",
             "uid": "${ds_prometheus}"
           },
-          "description": "Mermin \"k8s_export_out\" pipeline stage duration ",
+          "description": "Mermin \"export_out\" pipeline stage duration ",
           "fieldConfig": {
             "defaults": {
               "custom": {
@@ -1864,7 +1868,7 @@
             "h": 7,
             "w": 8,
             "x": 16,
-            "y": 76
+            "y": 45
           },
           "id": 48,
           "interval": "60s",
@@ -1927,7 +1931,7 @@
                 "uid": "${ds_prometheus}"
               },
               "editorMode": "code",
-              "expr": "sum(rate(mermin_pipeline_duration_seconds_bucket{stage=\"k8s_export_out\"}[$__rate_interval])) by (stage, le)",
+              "expr": "sum(rate(mermin_pipeline_duration_seconds_bucket{stage=\"export_out\"}[$__rate_interval])) by (stage, le)",
               "format": "heatmap",
               "hide": false,
               "instant": false,
@@ -1937,7 +1941,7 @@
               "refId": "A"
             }
           ],
-          "title": "\"k8s_export_out\" duration ",
+          "title": "\"export_out\" duration ",
           "type": "heatmap"
         }
       ],
@@ -2038,7 +2042,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 297
+            "y": 347
           },
           "id": 6,
           "options": {
@@ -2174,7 +2178,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 297
+            "y": 347
           },
           "id": 24,
           "interval": "60s",
@@ -2312,7 +2316,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 305
+            "y": 355
           },
           "id": 25,
           "interval": "60s",
@@ -2389,7 +2393,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 305
+            "y": 355
           },
           "id": 23,
           "interval": "60s",
@@ -2534,7 +2538,7 @@
             "h": 3,
             "w": 12,
             "x": 0,
-            "y": 1183
+            "y": 1233
           },
           "id": 29,
           "options": {
@@ -2628,7 +2632,7 @@
             "h": 3,
             "w": 12,
             "x": 12,
-            "y": 1183
+            "y": 1233
           },
           "id": 28,
           "options": {
@@ -2767,7 +2771,7 @@
             "h": 5,
             "w": 12,
             "x": 0,
-            "y": 1186
+            "y": 1236
           },
           "id": 43,
           "options": {
@@ -2890,7 +2894,7 @@
             "h": 5,
             "w": 12,
             "x": 12,
-            "y": 1186
+            "y": 1236
           },
           "id": 22,
           "options": {
@@ -3009,7 +3013,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 1191
+            "y": 1241
           },
           "id": 26,
           "options": {
@@ -3115,7 +3119,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 1191
+            "y": 1241
           },
           "id": 5,
           "options": {
@@ -3222,7 +3226,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 1200
+            "y": 1250
           },
           "id": 27,
           "options": {
@@ -3360,7 +3364,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 1200
+            "y": 1250
           },
           "id": 33,
           "options": {
@@ -3504,7 +3508,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 86
+            "y": 136
           },
           "id": 34,
           "options": {
@@ -3642,7 +3646,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 86
+            "y": 136
           },
           "id": 30,
           "options": {
@@ -3771,7 +3775,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 95
+            "y": 145
           },
           "id": 41,
           "options": {
@@ -3914,14 +3918,14 @@
           "text": "All",
           "value": "$__all"
         },
-        "definition": "label_values(mermin_ebpf_map_capacity,map)",
+        "definition": "label_values(mermin_ebpf_map_capacity{map!=\"LISTENING_PORTS\"},map)",
         "hide": 2,
         "includeAll": true,
         "name": "ebpf_map",
         "options": [],
         "query": {
           "qryType": 1,
-          "query": "label_values(mermin_ebpf_map_capacity,map)",
+          "query": "label_values(mermin_ebpf_map_capacity{map!=\"LISTENING_PORTS\"},map)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
