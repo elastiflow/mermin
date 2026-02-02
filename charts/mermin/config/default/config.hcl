@@ -13,17 +13,17 @@ shutdown_timeout = "5s"
 # Pipeline performance and channel configuration options
 pipeline {
   flow_capture {
-    flow_stats_capacity   = 100000
-    flow_events_capacity  = 1024
+    flow_stats_capacity  = 100000
+    flow_events_capacity = 1024
   }
   flow_producer {
-    workers                    = 4
-    worker_queue_capacity      = 2048
-    flow_store_poll_interval   = "5s"
-    flow_span_queue_capacity   = 16384
+    workers                  = 4
+    worker_queue_capacity    = 2048
+    flow_store_poll_interval = "5s"
+    flow_span_queue_capacity = 16384
   }
   k8s_decorator {
-    threads                      = 4
+    threads                       = 4
     decorated_span_queue_capacity = 32768
   }
 }
@@ -78,7 +78,7 @@ internal "metrics" {
   # Enable debug metrics
   # WARNING: Enabling debug metrics can cause significant memory growth in production
   # Only enable for debugging purposes in development/staging environments
-  debug_metrics_enabled = false  # Set to true for per-resource metrics (interface, task, K8s resource labels)
+  debug_metrics_enabled = false # Set to true for per-resource metrics (interface, task, K8s resource labels)
 
   # Time-to-live for stale metrics after resource deletion (only applies when debug_metrics_enabled = true)
   # Examples: "5m", "300s", "1h", "0s" for immediate cleanup
@@ -472,7 +472,6 @@ attributes "source" "k8s" {
     }
   }
 }
-
 /*
   Maps flow data (destination IPs, ports) to Kubernetes resources:
 */
@@ -620,58 +619,52 @@ attributes "destination" "k8s" {
   }
 }
 
-# Use the syntax and rules of OBI: https://opentelemetry.io/docs/zero-code/obi/configure/filter-metrics-traces/
-# For globs we can use https://docs.rs/globset/latest/globset/#syntax to match the functionality of OBI.
-# OBI-aligned filter configuration with glob pattern strings
+/*
+  Flow filtering configuration
+  Define which flows will be captured and processed based on various criteria.
+  Empty match/not_match means no filtering on that attribute:
+    * match = [] - include all
+    * not_match = [] - exclude none
+*/
 filter "source" {
   address = {
-    match     = "" # CIDR/IP glob to include (e.g., "10.0.0.0/8", "192.168.1.*")
-    not_match = "" # CIDR/IP glob to exclude
+    match     = [] # CIDR/IP to include (e.g., ["10.0.0.0/16", "91.1.1.1"])
+    not_match = [] # CIDR/IP to exclude (e.g., ["192.168.0.0/16", "92.1.1.1"])
   }
   port = {
-    match     = "" # Port range/glob to include (e.g., "80", "443", "8000-8999")
-    not_match = "" # Port range/glob to exclude
+    match     = [] # Ports, port ranges to include (e.g., ["80", "443", "8000-9000"])
+    not_match = [] # Ports, port ranges to exclude (e.g., ["22", "3306-3307"])
   }
 }
 
 filter "destination" {
   address = {
-    match     = "" # CIDR/IP glob to include
-    not_match = "" # CIDR/IP glob to exclude
+    match     = [] # CIDR/IP to include (e.g., ["10.0.0.0/16", "91.1.1.1"])
+    not_match = [] # CIDR/IP to exclude (e.g., ["192.168.0.0/16", "92.1.1.1"])
   }
   port = {
-    match     = "" # Port range/glob to include
-    not_match = "" # Port range/glob to exclude
+    match     = [] # Ports, port ranges to include (e.g., ["80", "443", "8000-9000"])
+    not_match = [] # Ports, port ranges to exclude (e.g., ["22", "3306-3307"])
   }
 }
 
 filter "network" {
-  transport = {
-    match     = "" # e.g., "tcp", "udp"
-    not_match = "" # e.g., "icmp"
-  }
-  type = {
-    match     = "" # e.g., "ipv4", "ipv6"
-    not_match = ""
-  }
-  interface_name  = { match = "", not_match = "" }
-  interface_index = { match = "", not_match = "" }
-  interface_mac   = { match = "", not_match = "" }
+  transport       = { match = [], not_match = [] } # Protocols (e.g., ["tcp", "udp", "icmp", "icmpv6"])
+  type            = { match = [], not_match = [] } # IP versions (e.g., ["ipv4", "ipv6"])
+  interface_name  = { match = [], not_match = [] } # Interface names (e.g., ["eth*"])
+  interface_index = { match = [], not_match = [] } # Interface indices (e.g., ["2"])
+  interface_mac   = { match = [], not_match = [] } # MAC addresses (e.g., ["00:11:22:33:44:55"])
 }
 
 filter "flow" {
-  connection_state = {
-    match     = "" # e.g., "established", "close_wait", "syn_sent"
-    not_match = ""
-  }
-  end_reason     = { match = "", not_match = "" }
-  ip_dscp_name   = { match = "", not_match = "" }
-  ip_ecn_name    = { match = "", not_match = "" }
-  ip_ttl         = { match = "", not_match = "" }
-  ip_flow_label  = { match = "", not_match = "" }
-  icmp_type_name = { match = "", not_match = "" }
-  icmp_code_name = { match = "", not_match = "" }
-  tcp_flags      = { match = "", not_match = "" }
+  connection_state = { match = [], not_match = [] } # States to  (e.g., ["established", "close_wait"])
+  tcp_flags        = { match = [], not_match = [] } # TCP flags (e.g., ["SYN", "ACK"])
+  ip_dscp_name     = { match = [], not_match = [] } # DSCP values (e.g., ["CS0", "AF21"])
+  ip_ecn_name      = { match = [], not_match = [] } # ECN values (e.g., ["ECT0"])
+  ip_ttl           = { match = [], not_match = [] } # TTL values (e.g., ["1"])
+  ipv6_flow_label    = { match = [], not_match = [] } # IPv6 flow labels (e.g., ["12345"])
+  icmp_type_name   = { match = [], not_match = [] } # ICMP types (e.g., ["echo_request"])
+  icmp_code   = { match = [], not_match = [] } # ICMP codes (e.g., ["0"])
 }
 
 span {
