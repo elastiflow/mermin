@@ -225,7 +225,6 @@ pub enum Error {
     UnsupportedEtherType = 3,
     UnsupportedProtocol = 4,
     FlowEventDropped = 5,
-    TcpSocketCreated = 6,
 }
 
 /// Log level constants matching LogLevel enum in mermin-common.
@@ -246,9 +245,7 @@ fn log_error(ctx: &TcContext, err: Error, direction: Direction) {
     let level = match err {
         Error::OutOfBounds | Error::MalformedHeader | Error::InternalError => LOG_LEVEL_ERROR,
         Error::FlowEventDropped => LOG_LEVEL_WARN,
-        Error::UnsupportedEtherType | Error::UnsupportedProtocol | Error::TcpSocketCreated => {
-            LOG_LEVEL_TRACE
-        }
+        Error::UnsupportedEtherType | Error::UnsupportedProtocol => LOG_LEVEL_TRACE,
     };
 
     // Try to reserve space in the log ring buffer
@@ -287,58 +284,6 @@ pub fn mermin_flow_egress(ctx: TcContext) -> i32 {
 /// Address family constants
 const AF_INET: i32 = 2;
 const AF_INET6: i32 = 10;
-
-/// Socket type constants (from include/linux/net.h)
-const SOCK_STREAM: i32 = 2; // TCP (stream socket)
-//TODO: Potnetially cut these two functions?
-
-/// Minimal LSM hook for socket creation - validates LSM infrastructure works.
-/// This hook fires when any socket is created. We use it primarily for logging/validation.
-/// Process tracking for TCP is done via tcp_v4_connect (outbound) and socket_accept (inbound).
-#[cfg(not(feature = "test"))]
-#[lsm(hook = "socket_post_create")]
-pub fn socket_post_create(ctx: LsmContext) -> i32 {
-    // SAFETY: try_socket_post_create only accesses arguments via the provided context
-    // and reads kernel memory through BTF-validated offsets
-    try_socket_post_create(&ctx).unwrap_or_default() // 0 allows the operation (LSM must not block)
-}
-
-#[cfg(not(feature = "test"))]
-#[inline(always)]
-fn try_socket_post_create(ctx: &LsmContext) -> Result<i32, i64> {
-    // Args: struct socket *sock, int family, int type, int protocol, int kern
-    // We only care about tracking AF_INET/AF_INET6 TCP sockets
-    // Access arguments through ctx pointer - arguments are laid out sequentially
-    let args_ptr = ctx.as_ptr() as *const usize;
-    let family: i32 = unsafe { *(args_ptr.add(1) as *const i32) };
-    let sock_type: i32 = unsafe { *(args_ptr.add(2) as *const i32) };
-
-    // Only track IPv4/IPv6 TCP sockets
-    if (family != AF_INET && family != AF_INET6) || sock_type != SOCK_STREAM {
-        return Ok(0);
-    }
-
-    // Log TCP socket creation via LOG_EVENTS (LSM has no ifindex; use 0)
-    #[allow(static_mut_refs)]
-    if let Some(mut entry) = unsafe { LOG_EVENTS.reserve::<LogEntry>(0) } {
-        let log_entry = LogEntry {
-            timestamp_ns: unsafe { bpf_ktime_get_boot_ns() },
-            ifindex: 0,
-            level: LOG_LEVEL_TRACE,
-            error_code: Error::TcpSocketCreated as u8,
-            direction: 0,
-            _pad: 0,
-        };
-        entry.write(log_entry);
-        entry.submit(0);
-    }
-
-    // Socket post-create doesn't have full connection info yet.
-    // We'll track the process info when the connection is established
-    // via tcp_v4_connect (outbound) or socket_accept (inbound).
-
-    Ok(0)
-}
 
 /// fexit hook for tcp_v4_connect - captures process info for outbound TCP connections.
 /// This fires AFTER tcp_v4_connect() completes, when the source port is assigned.

@@ -389,33 +389,6 @@ async fn run(cli: Cli) -> Result<()> {
         ))
     })?;
 
-    if let Some(prog) = ebpf.program_mut("socket_post_create") {
-        let lsm_prog: &mut Lsm = prog.try_into().map_err(|e| {
-            MerminError::internal(format!("failed to convert socket_post_create to lsm: {e}"))
-        })?;
-        lsm_prog.load("socket_post_create", &btf).map_err(|e| {
-            MerminError::internal(format!(
-                "failed to load socket_post_create lsm program: {e}"
-            ))
-        })?;
-        lsm_prog.attach().map_err(|e| {
-            MerminError::internal(format!(
-                "failed to attach socket_post_create lsm program: {e}"
-            ))
-        })?;
-        info!(
-            event.name = "ebpf.lsm_attached",
-            program.name = "socket_post_create",
-            "lsm program attached for socket creation tracking"
-        );
-    } else {
-        error!(
-            event.name = "ebpf.lsm_not_found",
-            program.name = "socket_post_create",
-            "socket_post_create lsm program not found, skipping"
-        );
-    }
-
     if let Some(prog) = ebpf.program_mut("tcp_v4_connect_exit") {
         let fexit_prog: &mut FExit = prog.try_into().map_err(|e| {
             MerminError::internal(format!(
