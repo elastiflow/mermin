@@ -170,8 +170,8 @@ pub struct SpanAttributes {
     // Process Attributes (from eBPF LSM hooks)
     /// PID of the process that created/owns this flow (None if unknown)
     pub process_pid: Option<u32>,
-    /// Command name of the process (TASK_COMM_LEN, None if unknown)
-    pub process_command: Option<String>,
+    /// Executable name of the process (TASK_COMM_LEN, None if unknown)
+    pub process_executable_name: Option<String>,
 
     // Flow Metrics
     pub flow_bytes_delta: i64,
@@ -279,7 +279,6 @@ pub struct SpanAttributes {
     pub destination_k8s_service_uid: Option<String>,
     pub network_policies_ingress: Option<Vec<String>>,
     pub network_policies_egress: Option<Vec<String>>,
-    pub process_executable_name: Option<String>,
     /// Container runtime name for source (e.g., from Docker/containerd).
     /// Distinct from source_k8s_container_name which comes from Pod spec.
     pub source_container_name: Option<String>,
@@ -338,7 +337,7 @@ impl Default for SpanAttributes {
             server_address: None,
             server_port: None,
             process_pid: None,
-            process_command: None,
+            process_executable_name: None,
             flow_bytes_delta: 0,
             flow_bytes_total: 0,
             flow_packets_delta: 0,
@@ -430,7 +429,6 @@ impl Default for SpanAttributes {
             destination_k8s_service_uid: None,
             network_policies_ingress: None,
             network_policies_egress: None,
-            process_executable_name: None,
             source_container_name: None,
             source_container_image_name: None,
             destination_container_name: None,
@@ -654,9 +652,6 @@ impl Traceable for FlowSpan {
         }
         if let Some(value) = self.attributes.process_pid {
             kvs.push(KeyValue::new("process.pid", value as i64));
-        }
-        if let Some(ref value) = self.attributes.process_command {
-            kvs.push(KeyValue::new("process.command", value.to_owned()));
         }
         if let Some(value) = self.attributes.flow_ipsec_ah_spi {
             kvs.push(KeyValue::new("flow.ipsec.ah.spi", value as i64));

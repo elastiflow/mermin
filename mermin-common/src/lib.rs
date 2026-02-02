@@ -280,8 +280,8 @@ unsafe impl aya::Pod for FlowKey {}
 /// Flow statistics maintained in eBPF maps, aggregated per normalized FlowKey.
 /// Tracks bidirectional counters, timestamps, metadata, and process information.
 /// Only contains data that eBPF can parse (3-layer: Eth + IP + L4).
-/// Memory layout: 144 bytes (includes process metadata: pid, tgid, comm)
-/// Breakdown: 48 (u64) + 32 (IP arrays) + 6 (MAC) + 20 (u32 including pid/tgid) + 6 (u16) + 28 (u8 including comm[16]) + padding
+/// Memory layout: 144 bytes (includes process metadata: pid, comm)
+/// Breakdown: 48 (u64) + 32 (IP arrays) + 6 (MAC) + 12 (u32) + 6 (u16) + 11 (u8) + 4 (pid) + 16 (comm) + 9 (padding)
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct FlowStats {
@@ -349,11 +349,9 @@ pub struct FlowStats {
     /// Flag indicating reverse direction metadata has been captured for current interval (1=captured, 0=not yet)
     pub reverse_metadata_seen: u8,
 
-    // === Process metadata - 24 bytes ===
+    // === Process metadata - 20 bytes ===
     /// Process ID that created/connected this flow (0 if unknown)
     pub pid: u32,
-    /// Thread Group ID (usually same as PID for main thread)
-    pub tgid: u32,
     /// Process command name (TASK_COMM_LEN = 16 bytes)
     pub comm: [u8; 16],
 }
@@ -1047,7 +1045,7 @@ mod tests {
     fn test_flow_stats_memory_layout() {
         // Verify optimized memory layout (144 bytes)
         // Previous: 120 bytes
-        // Added: 4 (pid) + 4 (tgid) + 16 (comm) = 24 bytes
+        // Added: 4 (pid) + 16 (comm) = 20 bytes + padding
         // Total: 144 bytes (aligned to 8-byte boundary)
         assert_eq!(
             size_of::<FlowStats>(),

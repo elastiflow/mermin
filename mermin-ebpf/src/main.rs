@@ -369,8 +369,6 @@ fn try_tcp_v4_connect_exit(ctx: &FExitContext) -> Result<i32, i64> {
     // Get process info
     let pid_tgid = bpf_get_current_pid_tgid();
     let pid = (pid_tgid >> 32) as u32;
-    let tgid = pid_tgid as u32;
-
     let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
 
     // Extract the socket to build a FlowKey
@@ -400,7 +398,6 @@ fn try_tcp_v4_connect_exit(ctx: &FExitContext) -> Result<i32, i64> {
         // Only update if pid is not already set (first come, first served)
         if stats.pid == 0 {
             stats.pid = pid;
-            stats.tgid = tgid; // TODO: remove TGID here and form flow stats struct
             stats.comm = comm;
         }
     }
@@ -431,8 +428,6 @@ fn try_socket_accept(ctx: &LsmContext) -> Result<i32, i64> {
     // Get process info
     let pid_tgid = bpf_get_current_pid_tgid();
     let pid = (pid_tgid >> 32) as u32;
-    let tgid = pid_tgid as u32;
-
     let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
 
     // Access arguments through ctx pointer
@@ -489,7 +484,6 @@ fn try_socket_accept(ctx: &LsmContext) -> Result<i32, i64> {
         // Only update if pid is not already set
         if stats.pid == 0 {
             stats.pid = pid;
-            stats.tgid = tgid;
             stats.comm = comm;
         }
     }
@@ -1561,7 +1555,6 @@ mod tests {
             forward_metadata_seen: 0,
             reverse_metadata_seen: 0,
             pid: 0,
-            tgid: 0,
             comm: [0; 16],
         }
     }

@@ -1176,7 +1176,7 @@ impl FlowWorker {
 
                 // Process metadata from eBPF LSM hooks
                 process_pid: (stats.pid != 0).then_some(stats.pid),
-                process_command: (stats.pid != 0).then(|| {
+                process_executable_name: (stats.pid != 0).then(|| {
                     // comm is null-terminated, convert to String
                     String::from_utf8_lossy(&stats.comm)
                         .trim_end_matches('\0')
@@ -2642,7 +2642,6 @@ mod tests {
             forward_metadata_seen: 1,
             reverse_metadata_seen: 0,
             pid: 0,
-            tgid: 0,
             comm: [0u8; 16],
         }
     }

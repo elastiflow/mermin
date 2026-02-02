@@ -567,7 +567,6 @@ mod tests {
             forward_metadata_seen: 1,
             reverse_metadata_seen: 0,
             pid: 0,
-            tgid: 0,
             comm: [0u8; 16],
         }
     }
