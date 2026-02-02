@@ -321,7 +321,7 @@ pub struct FlowStats {
     /// Original destination port
     pub dst_port: u16,
 
-    // === 1-byte aligned (u8) - 17 bytes ===
+    // === 1-byte aligned (u8) - 11 bytes ===
     /// Direction: 0=egress, 1=ingress (TC hook attachment point)
     pub direction: Direction,
     /// IP version

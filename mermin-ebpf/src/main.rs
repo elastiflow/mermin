@@ -280,6 +280,9 @@ pub fn mermin_flow_egress(ctx: TcContext) -> i32 {
 // ============================================================================
 // LSM and fentry/fexit hooks for process tracking
 // ============================================================================
+//
+// TODO(CAN-134): Add tcp_v6_connect_exit fexit hook for IPv6 outbound connection tracking
+// TODO(CAN-135): Add UDP process tracking (e.g., udp_sendmsg hooks)
 
 /// Address family constants
 const AF_INET: i32 = 2;
@@ -318,10 +321,7 @@ fn try_tcp_v4_connect_exit(ctx: &FExitContext) -> Result<i32, i64> {
 
     // Extract the socket to build a FlowKey
     // arg(0) is struct sock *sk
-    // TODO: Consider trying aya package approach:
-    // use aya_ebpf_bindings::bindings::{sock, socket};
-    //
-    // let sk: *const sock = unsafe { *(args_ptr as *const *const sock) };  // Instead of *const c_void
+    // TODO(CAN-136): Use aya_ebpf_bindings::bindings::{sock, socket} for type-safe access
     let sk: *const core::ffi::c_void = unsafe { *(args_ptr as *const *const core::ffi::c_void) };
     if sk.is_null() {
         return Ok(0);
@@ -349,6 +349,7 @@ fn try_tcp_v4_connect_exit(ctx: &FExitContext) -> Result<i32, i64> {
     // Note: If FLOW_STATS entry doesn't exist yet, the TC hook will create it
     // and this process info will be lost. This is the expected "timing edge case"
     // mentioned in the plan - pid=0 indicates unknown process.
+    // TODO(CAN-137): Investigate approaches to reduce pid=0 rate (e.g., separate map, fentry)
 
     Ok(0)
 }
@@ -387,7 +388,7 @@ fn try_socket_accept(ctx: &LsmContext) -> Result<i32, i64> {
     // Get sk from socket struct: struct socket { ...; struct sock *sk; ... }
     // Offset of sk in struct socket varies by kernel version, typically at offset 24-32
     // We use bpf_probe_read_kernel to safely read from kernel memory
-    // TODO: try using aya_ebpf_bindings::bindings::socket
+    // TODO(CAN-136): Use aya_ebpf_bindings::bindings::socket for type-safe access
     let sk: *const core::ffi::c_void = match read_socket_sk(newsock) {
         Ok(sk) => sk,
         Err(_) => return Ok(0),
@@ -464,7 +465,7 @@ const SK_COMMON_SKC_V6_DADDR_OFFSET: usize = 40; // skc_v6_daddr (IPv6 remote ad
 const SK_COMMON_SKC_V6_RCV_SADDR_OFFSET: usize = 56; // skc_v6_rcv_saddr (IPv6 local addr)
 
 /// Read the sk field from struct socket
-/// TODO: try using aya_ebpf_bindings::bindings::socket
+/// TODO(CAN-136): Use aya_ebpf_bindings::bindings::socket for type-safe access, the goal is to replace the above hardcoded offsets
 #[cfg(not(feature = "test"))]
 #[inline(always)]
 fn read_socket_sk(socket: *const core::ffi::c_void) -> Result<*const core::ffi::c_void, i64> {

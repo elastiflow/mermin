@@ -650,9 +650,6 @@ impl Traceable for FlowSpan {
         if let Some(value) = self.attributes.server_port {
             kvs.push(KeyValue::new("server.port", value as i64));
         }
-        if let Some(value) = self.attributes.process_pid {
-            kvs.push(KeyValue::new("process.pid", value as i64));
-        }
         if let Some(value) = self.attributes.flow_ipsec_ah_spi {
             kvs.push(KeyValue::new("flow.ipsec.ah.spi", value as i64));
         }
@@ -1000,6 +997,10 @@ impl Traceable for FlowSpan {
         }
         if let Some(ref value) = self.attributes.network_policies_egress {
             kvs.push(KeyValue::new("network.policies.egress", value.join(",")));
+        }
+        // Process attributes (from eBPF LSM hooks)
+        if let Some(value) = self.attributes.process_pid {
+            kvs.push(KeyValue::new("process.pid", value as i64));
         }
         if let Some(ref value) = self.attributes.process_executable_name {
             kvs.push(KeyValue::new("process.executable.name", value.to_owned()));
