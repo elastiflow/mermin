@@ -673,7 +673,7 @@ pub enum Direction {
 
 /// Key for tracking listening ports in eBPF map.
 /// Used to identify which ports have local processes listening (for client/server inference).
-/// Memory layout: 3 bytes (2 for port + 1 for protocol)
+/// Memory layout: 4 bytes (2 for port + 1 for protocol + 1 padding for alignment)
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ListeningPortKey {
@@ -1531,5 +1531,22 @@ mod tests {
         // LogEntry.direction uses: 0=Egress, 1=Ingress
         assert_eq!(Direction::Egress as u8, 0);
         assert_eq!(Direction::Ingress as u8, 1);
+    }
+
+    #[test]
+    fn test_listening_port_key_size() {
+        // ListeningPortKey is #[repr(C)] with u16 + u8, padded to 4 bytes.
+        // This test ensures the size doesn't change unexpectedly, which would
+        // affect LISTENING_PORTS_ENTRY_SIZE in metrics/ebpf.rs.
+        assert_eq!(
+            size_of::<ListeningPortKey>(),
+            4,
+            "ListeningPortKey size changed - verify LISTENING_PORTS_ENTRY_SIZE is still correct"
+        );
+        assert_eq!(
+            align_of::<ListeningPortKey>(),
+            2,
+            "ListeningPortKey alignment changed"
+        );
     }
 }
