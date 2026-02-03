@@ -907,7 +907,7 @@ async fn run(cli: Cli) -> Result<()> {
             let export_result = tokio::time::timeout(Duration::from_secs(EXPORT_TIMEOUT_SECS), exporter.export(traceable)).await;
             let export_duration = export_start.elapsed();
             metrics::registry::processing_duration_seconds()
-                .with_label_values(&[ProcessingStage::K8sExportOut.as_str()])
+                .with_label_values(&[ProcessingStage::ExportOut.as_str()])
                 .observe(export_duration.as_secs_f64());
 
             if export_result.is_err() {
