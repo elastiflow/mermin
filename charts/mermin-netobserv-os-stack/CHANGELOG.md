@@ -1,3 +1,13 @@
+## [mermin-netobserv-os-stack-0.1.0-beta.17] - 2026-02-03
+
+### Features
+
+- Bump Mermin in umbrella charts () (#421)
+
+[mermin-netobserv-os-stack-0.1.0-beta.16..mermin-netobserv-os-stack-0.1.0-beta.17](https://github.com/elastiflow/mermin/compare/mermin-netobserv-os-stack-0.1.0-beta.16...mermin-netobserv-os-stack-0.1.0-beta.17)
+
+
+
 ## [mermin-netobserv-os-stack-0.1.0-beta.16] - 2026-01-15
 
 ### Features
