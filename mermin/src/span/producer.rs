@@ -466,6 +466,13 @@ impl FlowSpanProducer {
                         metrics::registry::EBPF_MAP_BYTES_TOTAL
                             .with_label_values(&[EbpfMapName::FlowEvents.as_str()])
                             .inc_by(flow_event.snaplen as u64);
+                        metrics::registry::EBPF_MAP_OPS_TOTAL
+                            .with_label_values(&[
+                                EbpfMapName::FlowEvents.as_str(),
+                                EbpfMapOperation::Read.as_str(),
+                                EbpfMapStatus::Ok.as_str(),
+                            ])
+                            .inc();
                         if metrics::registry::debug_enabled() {
                             metrics::registry::FLOW_EVENTS_TOTAL
                                 .with_label_values(&[FlowEventResult::Received.as_str()])
