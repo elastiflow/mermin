@@ -16,14 +16,7 @@ use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, warn};
 
-use crate::{
-    health::HealthError,
-    metrics::{
-        self,
-        export::{ExportStatus, ExporterName},
-    },
-    runtime::conf::ApiConf,
-};
+use crate::{health::HealthError, runtime::conf::ApiConf};
 
 #[derive(Clone)]
 pub struct HealthState {
@@ -49,7 +42,6 @@ pub async fn liveness_handler(State(state): State<HealthState>) -> impl IntoResp
 
     let ebpf_loaded = state.ebpf_loaded.load(Ordering::Relaxed);
     let startup_complete = state.startup_complete.load(Ordering::Relaxed);
-    let ready_to_process = state.ready_to_process.load(Ordering::Relaxed);
 
     // Liveness is OK if eBPF is loaded OR if we haven't completed startup yet
     // This prevents killing the pod during initialization
@@ -77,26 +69,12 @@ pub async fn liveness_handler(State(state): State<HealthState>) -> impl IntoResp
         "liveness check completed"
     );
 
-    // Sum export errors across all exporter types for health monitoring
-    let export_errors_otlp = metrics::registry::EXPORT_FLOW_SPANS_TOTAL
-        .with_label_values(&[ExporterName::Otlp.as_str(), ExportStatus::Error.as_str()])
-        .get();
-    let export_errors_stdout = metrics::registry::EXPORT_FLOW_SPANS_TOTAL
-        .with_label_values(&[ExporterName::Stdout.as_str(), ExportStatus::Error.as_str()])
-        .get();
-    let export_errors_total = export_errors_otlp + export_errors_stdout;
-    let pipeline_healthy = ebpf_loaded && ready_to_process;
-
     let body = Json(json!({
         "status": if is_alive { "ok" } else { "unavailable" },
         "checks": {
             "ebpf_loaded": ebpf_loaded,
             "startup_complete": startup_complete,
-            "pipeline_healthy": pipeline_healthy
         },
-        "metrics": {
-            "export_errors_total": export_errors_total
-        }
     }));
 
     (status_code, body)
@@ -109,16 +87,6 @@ pub async fn readiness_handler(State(state): State<HealthState>) -> impl IntoRes
 
     let is_ready = ebpf_loaded && k8s_caches_synced && ready_to_process;
 
-    // Sum export errors across all exporter types for health monitoring
-    let export_errors_otlp = metrics::registry::EXPORT_FLOW_SPANS_TOTAL
-        .with_label_values(&[ExporterName::Otlp.as_str(), ExportStatus::Error.as_str()])
-        .get();
-    let export_errors_stdout = metrics::registry::EXPORT_FLOW_SPANS_TOTAL
-        .with_label_values(&[ExporterName::Stdout.as_str(), ExportStatus::Error.as_str()])
-        .get();
-    let export_errors_total = export_errors_otlp + export_errors_stdout;
-    let pipeline_healthy = ebpf_loaded && ready_to_process;
-
     let status_code = if is_ready {
         StatusCode::OK
     } else {
@@ -127,8 +95,6 @@ pub async fn readiness_handler(State(state): State<HealthState>) -> impl IntoRes
             ebpf_loaded = %ebpf_loaded,
             k8s_caches_synced = %k8s_caches_synced,
             ready_to_process = %ready_to_process,
-            pipeline_healthy = %pipeline_healthy,
-            export_errors_total = %export_errors_total,
             "readiness check failed"
         );
         StatusCode::SERVICE_UNAVAILABLE
@@ -140,11 +106,7 @@ pub async fn readiness_handler(State(state): State<HealthState>) -> impl IntoRes
             "ebpf_loaded": ebpf_loaded,
             "k8s_caches_synced": k8s_caches_synced,
             "ready_to_process": ready_to_process,
-            "pipeline_healthy": pipeline_healthy
         },
-        "metrics": {
-            "export_errors_total": export_errors_total
-        }
     }));
 
     (status_code, body)
