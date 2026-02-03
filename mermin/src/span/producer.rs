@@ -748,14 +748,18 @@ impl FlowWorker {
             EbpfMapName::FlowStats,
         )
         .await;
-        self.remove_ebpf_map_entry(&self.tcp_stats_map, &event.flow_key, EbpfMapName::TcpStats)
+        if event.flow_key.protocol == IpProto::Tcp {
+            self.remove_ebpf_map_entry(&self.tcp_stats_map, &event.flow_key, EbpfMapName::TcpStats)
+                .await;
+        }
+        if matches!(event.flow_key.protocol, IpProto::Icmp | IpProto::Ipv6Icmp) {
+            self.remove_ebpf_map_entry(
+                &self.icmp_stats_map,
+                &event.flow_key,
+                EbpfMapName::IcmpStats,
+            )
             .await;
-        self.remove_ebpf_map_entry(
-            &self.icmp_stats_map,
-            &event.flow_key,
-            EbpfMapName::IcmpStats,
-        )
-        .await;
+        }
 
         Ok(())
     }
@@ -778,19 +782,38 @@ impl FlowWorker {
                     .inc();
             }
             Err(e) => {
+                let is_not_found = matches!(
+                    e,
+                    aya::maps::MapError::KeyNotFound | aya::maps::MapError::ElementNotFound
+                );
+                let status = if is_not_found {
+                    EbpfMapStatus::NotFound
+                } else {
+                    EbpfMapStatus::Error
+                };
+
                 metrics::registry::EBPF_MAP_OPS_TOTAL
                     .with_label_values(&[
                         map_name.as_str(),
                         EbpfMapOperation::Delete.as_str(),
-                        EbpfMapStatus::Error.as_str(),
+                        status.as_str(),
                     ])
                     .inc();
-                trace!(
-                    event.name = "ebpf.map_removal_failed",
-                    map = map_name.as_str(),
-                    error.message = %e,
-                    "failed to remove entry from eBPF map (may have been evicted)"
-                );
+                if is_not_found {
+                    trace!(
+                        event.name = "ebpf.map_removal_failed",
+                        map = map_name.as_str(),
+                        error.message = %e,
+                        "eBPF entry already gone (evicted or protocol mismatch)"
+                    );
+                } else {
+                    trace!(
+                        event.name = "ebpf.map_removal_failed",
+                        map = map_name.as_str(),
+                        error.message = %e,
+                        "failed to remove entry from eBPF map"
+                    );
+                }
             }
         }
     }
@@ -2308,19 +2331,39 @@ pub async fn timeout_and_remove_flow(
                         ]).inc();
                     }
                     Err(e) => {
+                        let is_not_found = matches!(
+                            e,
+                            aya::maps::MapError::KeyNotFound | aya::maps::MapError::ElementNotFound
+                        );
+
+                        let status = if is_not_found {
+                            EbpfMapStatus::NotFound
+                        } else {
+                            EbpfMapStatus::Error
+                        };
                         metrics::registry::EBPF_MAP_OPS_TOTAL.with_label_values(&[
                             $map_enum.as_str(),
                             EbpfMapOperation::Delete.as_str(),
-                            EbpfMapStatus::Error.as_str(),
+                            status.as_str(),
                         ]).inc();
 
-                        debug!(
-                            event.name = "ebpf.map_cleanup_failed",
-                            flow.community_id = %community_id,
-                            map = $map_enum.as_str(),
-                            error.message = %e,
-                            "failed to remove eBPF map entry (may have been evicted or protocol mismatch)"
-                        );
+                        if !is_not_found {
+                            debug!(
+                                event.name = "ebpf.map_cleanup_failed",
+                                flow.community_id = %community_id,
+                                map = $map_enum.as_str(),
+                                error.message = %e,
+                                "failed to remove eBPF map entry due to kernel error"
+                            );
+                        } else {
+                            debug!(
+                                event.name = "ebpf.map_entry_absent",
+                                flow.community_id = %community_id,
+                                map = $map_enum.as_str(),
+                                error.message = %e,
+                                "map entry already removed or evicted"
+                            );
+                        }
                     }
                 }
                 drop(map); // Release lock immediately
@@ -2329,8 +2372,12 @@ pub async fn timeout_and_remove_flow(
 
         // Execute cleanup for all three maps
         cleanup_ebpf_map!(flow_stats_map, EbpfMapName::FlowStats);
-        cleanup_ebpf_map!(tcp_stats_map, EbpfMapName::TcpStats);
-        cleanup_ebpf_map!(icmp_stats_map, EbpfMapName::IcmpStats);
+        if key.protocol == IpProto::Tcp {
+            cleanup_ebpf_map!(tcp_stats_map, EbpfMapName::TcpStats);
+        }
+        if matches!(key.protocol, IpProto::Icmp | IpProto::Ipv6Icmp) {
+            cleanup_ebpf_map!(icmp_stats_map, EbpfMapName::IcmpStats);
+        }
     }
 
     trace_id_cache.remove(&community_id);
