@@ -112,10 +112,8 @@ pub struct ObjectAssociationRule {
 #[serde(default)]
 /// Defines a single association rule mapping a flow attribute to Kubernetes object fields.
 pub struct AssociationSource {
-    /// The origin of the attribute (e.g., "flow").
-    pub from: String,
     /// The specific attribute name (e.g., "source.ip").
-    pub name: String,
+    pub from: String,
     /// A list of Kubernetes object fields to match against.
     pub to: Vec<String>,
 }
@@ -155,8 +153,7 @@ fn create_k8s_attributes_mapping(direction: &str) -> AttributesOptions {
             pod: Some(ObjectAssociationRule {
                 sources: vec![
                     AssociationSource {
-                        from: "flow".to_string(),
-                        name: ip_attr_name.clone(),
+                        from: ip_attr_name.clone(),
                         to: vec![
                             "status.podIP".to_string(),
                             "status.podIPs[*]".to_string(),
@@ -165,16 +162,14 @@ fn create_k8s_attributes_mapping(direction: &str) -> AttributesOptions {
                         ],
                     },
                     AssociationSource {
-                        from: "flow".to_string(),
-                        name: port_attr_name.clone(),
+                        from: port_attr_name.clone(),
                         to: vec![
                             "spec.containers[*].ports[*].containerPort".to_string(),
                             "spec.containers[*].ports[*].hostPort".to_string(),
                         ],
                     },
                     AssociationSource {
-                        from: "flow".to_string(),
-                        name: "network.transport".to_string(),
+                        from: "network.transport".to_string(),
                         to: vec!["spec.containers[*].ports[*].protocol".to_string()],
                     },
                 ],
@@ -182,8 +177,7 @@ fn create_k8s_attributes_mapping(direction: &str) -> AttributesOptions {
             service: Some(ObjectAssociationRule {
                 sources: vec![
                     AssociationSource {
-                        from: "flow".to_string(),
-                        name: ip_attr_name.clone(),
+                        from: ip_attr_name.clone(),
                         to: vec![
                             "spec.clusterIP".to_string(),
                             "spec.clusterIPs[*]".to_string(),
@@ -192,28 +186,24 @@ fn create_k8s_attributes_mapping(direction: &str) -> AttributesOptions {
                         ],
                     },
                     AssociationSource {
-                        from: "flow".to_string(),
-                        name: port_attr_name.clone(),
+                        from: port_attr_name.clone(),
                         to: vec!["spec.ports[*].port".to_string()],
                     },
                     AssociationSource {
-                        from: "flow".to_string(),
-                        name: "network.transport".to_string(),
+                        from: "network.transport".to_string(),
                         to: vec!["spec.ports[*].protocol".to_string()],
                     },
                 ],
             }),
             node: Some(ObjectAssociationRule {
                 sources: vec![AssociationSource {
-                    from: "flow".to_string(),
-                    name: ip_attr_name.clone(),
+                    from: ip_attr_name.clone(),
                     to: vec!["status.addresses[*].address".to_string()],
                 }],
             }),
             endpoint: Some(ObjectAssociationRule {
                 sources: vec![AssociationSource {
-                    from: "flow".to_string(),
-                    name: ip_attr_name,
+                    from: ip_attr_name,
                     to: vec!["endpoints[*].addresses[*]".to_string()],
                 }],
             }),
@@ -1448,7 +1438,11 @@ async fn index_hostname(
 
 /// (private helper) Adds an IP address and metadata to the index.
 fn add_to_index(index: &mut HashMap<String, Vec<K8sObjectMeta>>, ip: &str, meta: &K8sObjectMeta) {
-    index.entry(ip.to_string()).or_default().push(meta.clone());
+    let entries = index.entry(ip.to_string()).or_default();
+    // Only add if this specific resource (by UID) is not already indexed for this IP
+    if !entries.iter().any(|existing| existing.uid == meta.uid) {
+        entries.push(meta.clone());
+    }
 }
 
 /// Checks if any resource is a Pod with host networking enabled.
@@ -1472,12 +1466,12 @@ async fn index_resource_by_ip<K>(
     K: Resource<DynamicType = ()> + Clone + serde::Serialize + 'static,
     ResourceStore: HasStore<K>,
 {
-    let ip_source = association_rule
+    let ip_sources = association_rule
         .sources
         .iter()
-        .find(|s| s.from == "flow" && (s.name == "source.ip" || s.name == "destination.ip"));
+        .filter(|s| s.from == "source.ip" || s.from == "destination.ip");
 
-    if let Some(source) = ip_source {
+    for source in ip_sources {
         for resource in store.store().state() {
             let is_pod = std::any::TypeId::of::<K>() == std::any::TypeId::of::<Pod>();
             let is_host_network = if is_pod {
@@ -1873,27 +1867,28 @@ async fn update_ip_index(
 
     let mut new_index = HashMap::new();
 
-    if let Some(k8s_conf) = conf
-        .attributes
-        .as_ref()
-        .and_then(|attributes_map| attributes_map.values().find_map(|p| p.get("k8s")))
-    {
-        let assoc = &k8s_conf.association;
+    if let Some(attributes_map) = &conf.attributes {
+        for direction_map in attributes_map.values() {
+            // Iterate through every provider (k8s, etc.)
+            if let Some(k8s_conf) = direction_map.get("k8s") {
+                let assoc = &k8s_conf.association;
 
-        if let Some(rule) = &assoc.pod {
-            index_resource_by_ip::<Pod>(store, &mut new_index, rule).await;
-        }
-        if let Some(rule) = &assoc.node {
-            index_resource_by_ip::<Node>(store, &mut new_index, rule).await;
-        }
-        if let Some(rule) = &assoc.service {
-            index_resource_by_ip::<Service>(store, &mut new_index, rule).await;
-        }
-        if let Some(rule) = &assoc.ingress {
-            index_resource_by_ip::<Ingress>(store, &mut new_index, rule).await;
-        }
-        if let Some(rule) = &assoc.endpointslice {
-            index_resource_by_ip::<EndpointSlice>(store, &mut new_index, rule).await;
+                if let Some(rule) = &assoc.pod {
+                    index_resource_by_ip::<Pod>(store, &mut new_index, rule).await;
+                }
+                if let Some(rule) = &assoc.node {
+                    index_resource_by_ip::<Node>(store, &mut new_index, rule).await;
+                }
+                if let Some(rule) = &assoc.service {
+                    index_resource_by_ip::<Service>(store, &mut new_index, rule).await;
+                }
+                if let Some(rule) = &assoc.ingress {
+                    index_resource_by_ip::<Ingress>(store, &mut new_index, rule).await;
+                }
+                if let Some(rule) = &assoc.endpointslice {
+                    index_resource_by_ip::<EndpointSlice>(store, &mut new_index, rule).await;
+                }
+            }
         }
     }
 
@@ -1925,7 +1920,10 @@ pub enum FlowDirection {
 mod tests {
     use std::collections::BTreeMap;
 
-    use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
+    use k8s_openapi::{
+        api::core::v1::PodStatus,
+        apimachinery::pkg::apis::meta::v1::{ObjectMeta, OwnerReference},
+    };
 
     use super::*;
     use crate::k8s::{
@@ -2456,5 +2454,98 @@ mod tests {
         );
 
         println!("✓ Generic field path extraction works with custom paths for CRD-like resources");
+    }
+
+    #[cfg(test)]
+    fn mock_empty_store() -> ResourceStore {
+        use kube::runtime::reflector;
+
+        // Helper to create just the reader (Store) part
+        let (pods, _) = reflector::store();
+        let (nodes, _) = reflector::store();
+        let (namespaces, _) = reflector::store();
+        let (deployments, _) = reflector::store();
+        let (replica_sets, _) = reflector::store();
+        let (stateful_sets, _) = reflector::store();
+        let (daemon_sets, _) = reflector::store();
+        let (jobs, _) = reflector::store();
+        let (cron_jobs, _) = reflector::store();
+        let (services, _) = reflector::store();
+        let (ingresses, _) = reflector::store();
+        let (endpoint_slices, _) = reflector::store();
+        let (network_policies, _) = reflector::store();
+
+        ResourceStore {
+            pods,
+            nodes,
+            namespaces,
+            deployments,
+            replica_sets,
+            stateful_sets,
+            daemon_sets,
+            jobs,
+            cron_jobs,
+            services,
+            ingresses,
+            endpoint_slices,
+            network_policies,
+        }
+    }
+
+    #[test]
+    fn test_custom_association_logic() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        rt.block_on(async {
+            let mut conf = Conf::default();
+            let mut hcl_config = HashMap::new();
+            let mut k8s_inner = HashMap::new();
+            k8s_inner.insert(
+                "k8s".to_string(),
+                AttributesOptions {
+                    association: AssociationBlock {
+                        pod: Some(ObjectAssociationRule {
+                            sources: vec![AssociationSource {
+                                from: "source.ip".to_string(),
+                                to: vec!["status.podIP".to_string()],
+                            }],
+                        }),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            );
+            hcl_config.insert("source".to_string(), k8s_inner);
+            conf.attributes = Some(hcl_config);
+
+            let pod = Pod {
+                metadata: ObjectMeta {
+                    name: Some("test-pod".into()),
+                    ..Default::default()
+                },
+                status: Some(PodStatus {
+                    pod_ip: Some("10.0.0.5".into()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+
+            let (pod_store, mut writer) = reflector::store();
+            writer.apply_watcher_event(&watcher::Event::Apply(pod));
+            let store = ResourceStore {
+                pods: pod_store,
+                ..mock_empty_store()
+            };
+
+            let ip_index = Arc::new(DashMap::new());
+            update_ip_index(&store, &ip_index, &conf).await;
+
+            assert!(
+                ip_index.contains_key("10.0.0.5"),
+                "IP index should contain the pod IP"
+            );
+            let meta = &ip_index.get("10.0.0.5").unwrap()[0];
+            assert_eq!(meta.name, "test-pod");
+        });
     }
 }

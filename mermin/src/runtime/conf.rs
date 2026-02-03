@@ -230,7 +230,14 @@ impl Conf {
         conf.attributes = match conf.attributes {
             None => Some(default_attributes()),
             Some(map) if map.is_empty() => None,
-            Some(map) => Some(map),
+            Some(mut user_map) => {
+                let defaults = default_attributes();
+
+                for (direction, default_inner_map) in defaults {
+                    user_map.entry(direction).or_insert(default_inner_map);
+                }
+                Some(user_map)
+            }
         };
         conf.config_path = config_path_to_store;
 
