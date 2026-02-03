@@ -239,6 +239,7 @@ impl<'a> Decorator<'a> {
                 // Resolve and populate container information
                 if let Some((container_name, container_image)) =
                     pod.and_then(|p| resolve_pod_container_by_port(p, port))
+                    && self.should_extract("container", "name", is_source)
                 {
                     self.set_k8s_attr(flow_span, "container.name", &container_name, is_source);
                     self.set_k8s_attr(
