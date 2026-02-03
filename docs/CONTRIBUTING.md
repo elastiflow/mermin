@@ -109,16 +109,18 @@ Mermin uses **Conventional Commits** for all commit messages. This enables autom
 
 ### Types
 
-- **feat**: A new feature
-- **fix**: A bug fix
-- **docs**: Documentation changes only
-- **style**: Code style changes (formatting, missing semicolons, etc.)
-- **refactor**: Code changes that neither fix a bug nor add a feature
-- **perf**: Performance improvements
-- **test**: Adding or updating tests
-- **build**: Changes to build system or dependencies
-- **ci**: Changes to CI configuration files and scripts
-- **chore**: Other changes that don't modify src or test files
+- **feat**: A new feature, will trigger a minor semver bump
+- **fix**: A bug fix, will trigger a patch semver bump
+- **feat!**: A new breaking feature, will trigger a major semver bump
+- **fix!**: A breaking bug fix, will trigger a major semver bump
+- **docs**: Documentation changes only, will not trigger a release neither get to the changelog
+- **style**: Code style changes (formatting, missing semicolons, etc.). Will not trigger a release neither get to the changelog
+- **refactor**: Code changes that neither fix a bug nor add a feature, will not trigger a release neither get to the changelog
+- **perf**: Performance improvements, will not trigger a release neither get to the changelog
+- **test**: Adding or updating tests, will not trigger a release neither get to the changelog
+- **build**: Changes to build system or dependencies, will not trigger a release neither get to the changelog
+- **ci**: Changes to CI configuration files and scripts, will not trigger a release neither get to the changelog
+- **chore**: Other changes that don't modify src or test files, will not trigger a release neither get to the changelog
 
 ### Examples
 
