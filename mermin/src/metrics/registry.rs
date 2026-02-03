@@ -169,7 +169,7 @@ lazy_static! {
     ).expect("failed to create ebpf_map_bytes_total metric");
 
     /// Total number of eBPF map operations.
-    /// Labels: map = "FLOW_STATS" | "LISTENING_PORTS", operation = "read" | "write" | "delete", status = "ok" | "error" | "not_found"
+    /// Labels: map = "FLOW_STATS" | "FLOW_EVENTS" | "LISTENING_PORTS", operation = "read" | "write" | "delete", status = "ok" | "error" | "not_found"
     pub static ref EBPF_MAP_OPS_TOTAL: IntCounterVec = IntCounterVec::new(
         Opts::new("map_ops_total", "Total number of eBPF map operations")
             .namespace("mermin")
