@@ -635,7 +635,7 @@ export "traces" {
 - `mermin_export_flow_spans_total{exporter="otlp",status="ok"}` - OTLP export success rate
 - `mermin_export_flow_spans_total{exporter="otlp",status="error"}` - OTLP export errors
 - `mermin_channel_entries{channel="producer_output"}` / `mermin_channel_capacity{channel="producer_output"}` - Channel utilization
-- `mermin_pipeline_duration_seconds{stage="k8s_export_out"}` - Export-stage latency
+- `mermin_pipeline_duration_seconds{stage="export_out"}` - Export-stage latency
 - `mermin_channel_sends_total{channel="decorator_output",status="error"}` - Channel send failures (indicates dropped spans)
 
 See the [Application Metrics](../observability/app-metrics.md) guide for complete Prometheus query examples.

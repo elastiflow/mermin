@@ -19,7 +19,7 @@
 ///
 /// 1. **FlowProducerOut**: Flow producer processing from ringbuffer (fast, typically microseconds to milliseconds)
 /// 2. **K8sDecoratorOut**: Kubernetes decoration and enrichment (medium, typically milliseconds)
-/// 3. **K8sExportOut**: Export to OTLP/stdout (slow, can be seconds)
+/// 3. **ExportOut**: Export to OTLP/stdout (slow, can be seconds)
 ///
 /// # Examples
 ///
@@ -71,7 +71,7 @@ pub enum ProcessingStage {
     /// This stage measures the latency of exporting completed flow spans
     /// to configured exporters (OTLP or stdout). This includes serialization,
     /// network I/O (for OTLP), and any batching operations.
-    K8sExportOut,
+    ExportOut,
 }
 
 impl ProcessingStage {
@@ -79,7 +79,7 @@ impl ProcessingStage {
         match self {
             ProcessingStage::FlowProducerOut => "flow_producer_out",
             ProcessingStage::K8sDecoratorOut => "k8s_decorator_out",
-            ProcessingStage::K8sExportOut => "k8s_export_out",
+            ProcessingStage::ExportOut => "export_out",
         }
     }
 }
