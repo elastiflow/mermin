@@ -1,3 +1,13 @@
+## [v0.1.0-beta.48] - 2026-02-03
+
+### Bug Fixes
+
+- **health:** Remove unused metrics and streamline health checks (#417)
+
+[v0.1.0-beta.47..v0.1.0-beta.48](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.47...v0.1.0-beta.48)
+
+
+
 ## [v0.1.0-beta.47] - 2026-02-03
 
 ### Features
