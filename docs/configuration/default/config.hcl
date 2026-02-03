@@ -13,94 +13,19 @@ shutdown_timeout = "5s"
 # Pipeline performance and channel configuration options
 pipeline {
   flow_capture {
-    flow_stats_capacity   = 100000
-    flow_events_capacity  = 1024
+    flow_stats_capacity  = 100000
+    flow_events_capacity = 1024
   }
   flow_producer {
-    workers                    = 4
-    worker_queue_capacity      = 2048
-    flow_store_poll_interval   = "5s"
-    flow_span_queue_capacity   = 16384
+    workers                  = 4
+    worker_queue_capacity    = 2048
+    flow_store_poll_interval = "5s"
+    flow_span_queue_capacity = 16384
   }
   k8s_decorator {
-    threads                      = 4
+    threads                       = 4
     decorated_span_queue_capacity = 32768
   }
-}
-
-# Internal configuration options
-internal "traces" {
-  span_format = "full"
-
-  # stdout = {
-  #   format = "text_indent" // text_indent
-  # }
-
-  otlp = {
-    endpoint               = "http://otelcol:4317"
-    protocol               = "grpc"
-    timeout                = "10s"
-    max_batch_size         = 512
-    max_batch_interval     = "5s"
-    max_queue_size         = 2048
-    max_concurrent_exports = 1
-    max_export_timeout     = "30s"
-
-    auth = {
-      basic = {
-        user = "USERNAME"
-        pass = "PASSWORD"
-      }
-    }
-
-    tls = {
-      insecure_skip_verify = false
-      ca_cert              = "/etc/certs/ca.crt"
-      client_cert          = "/etc/certs/cert.crt"
-      client_key           = "/etc/certs/cert.key"
-    }
-  }
-}
-
-# API server configuration (health endpoints)
-api {
-  enabled        = true
-  listen_address = "0.0.0.0"
-  port           = 8080
-}
-
-# Metrics server configuration (for Prometheus scraping)
-internal "metrics" {
-  enabled        = true
-  listen_address = "0.0.0.0"
-  port           = 10250
-
-  # Enable debug metrics
-  # WARNING: Enabling debug metrics can cause significant memory growth in production
-  # Only enable for debugging purposes in development/staging environments
-  debug_metrics_enabled = false  # Set to true for per-resource metrics (interface, task, K8s resource labels)
-
-  # Time-to-live for stale metrics after resource deletion (only applies when debug_metrics_enabled = true)
-  # Examples: "5m", "300s", "1h", "0s" for immediate cleanup
-  # Recommended: "5m" handles pod restarts while preventing unbounded growth
-  stale_metric_ttl = "5m"
-
-  # Histogram bucket configuration (optional)
-  # Customize bucket sizes for histogram metrics to better match your workload
-  # If not specified, default buckets optimized for typical workloads are used
-  #
-  # histogram_buckets {
-  #   mermin_pipeline_duration_seconds                        = [0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0]
-  #   mermin_export_batch_size                                = [1.0, 10.0, 50.0, 100.0, 250.0, 500.0, 1000.0]
-  #   mermin_k8s_watcher_ip_index_update_duration_seconds     = [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0]
-  #   mermin_taskmanager_shutdown_duration_seconds            = [0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0]  # Only when debug_metrics_enabled = true
-  # }
-
-  # Endpoints available:
-  # - /metrics          - All metrics (standard + debug if enabled)
-  # - /metrics/standard - Standard metrics only (aggregated, no high-cardinality labels)
-  # - /metrics/debug    - Debug metrics only (returns 404 if debug not enabled)
-  # - /metrics:summary  - JSON summary of all available metrics with metadata
 }
 
 # Parser configuration for eBPF packet parsing
@@ -331,29 +256,32 @@ attributes "source" "k8s" {
   */
   extract {
     metadata = [
-      "[*].metadata.name",      # All kinds, metadata.name
       "[*].metadata.namespace", # All kinds, metadata.namespace
+      "[*].metadata.name",      # All kinds, metadata.name
       "[*].metadata.uid",       # All kinds, metadata.uid (if present)
     ]
 
     /*
-      Otel label extract example, full doc: https://grafana.com/docs/agent/latest/flow/reference/components/otelcol.processor.k8sattributes/#extract-label-block
-      None by default, example:
+      Extract K8s label to Otel attribute extract example:
     */
     # label {
-    #   from      = "service" # case insensitive
-    #   key_regex = "kubernetes.io/(.*)"
-    #   tag_name  = "$1"
+    #   from            = "service" # case insensitive
+    #   key_regex       = "kubernetes.io/(.*)"
+    #   value_regex     = "(.*)"
+    #   attribute       = "$1"
+    #   attribute_value = "$1"
     # }
 
+
     /*
-      Otel annotation extract example, full doc: https://grafana.com/docs/agent/latest/flow/reference/components/otelcol.processor.k8sattributes/#annotation-block
-      None by default, example:
+      Extract K8s annotation to Otel attribute extract example:
     */
     # annotation {
-    #   from      = "pod" # case insensitive
-    #   key_regex = "kubernetes.io/(.*)"
-    #   tag_name  = "$1"
+    #   from            = "pod" # case insensitive
+    #   key_regex       = "kubernetes.io/(.*)"
+    #   value_regex     = "(.*)"
+    #   attribute       = "$1"
+    #   attribute_value = "$1"
     # }
   }
 
@@ -366,15 +294,9 @@ attributes "source" "k8s" {
     */
     pod = {
       sources = [
-        {
-          from = "flow", name = "source.ip",
-          to   = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"]
-        },
-        {
-          from = "flow", name = "source.port",
-          to   = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"]
-        },
-        { from = "flow", name = "network.transport", to = ["spec.containers[*].ports[*].protocol"] },
+        { from = "source.ip", to = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"] },
+        { from = "source.port", to = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"] },
+        { from = "network.transport", to = ["spec.containers[*].ports[*].protocol"] },
       ]
     }
     /*
@@ -383,7 +305,7 @@ attributes "source" "k8s" {
     */
     node = {
       sources = [
-        { from = "flow", name = "source.ip", to = ["status.addresses[*].address"] },
+        { from = "source.ip", to = ["status.addresses[*].address"] },
       ]
     }
     /*
@@ -393,13 +315,12 @@ attributes "source" "k8s" {
     service = {
       sources = [
         {
-          from = "flow", name = "source.ip", to = [
-            "spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"
-          ]
+          from = "source.ip",
+          to   = ["spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"]
         },
-        { from = "flow", name = "source.port", to = ["spec.ports[*].port"] },
-        { from = "flow", name = "network.transport", to = ["spec.ports[*].protocol"] },
-        { from = "flow", name = "network.type", to = ["spec.ipFamilies[*]"] },
+        { from = "source.port", to = ["spec.ports[*].port"] },
+        { from = "network.transport", to = ["spec.ports[*].protocol"] },
+        { from = "network.type", to = ["spec.ipFamilies[*]"] },
       ]
     }
     /*
@@ -407,9 +328,9 @@ attributes "source" "k8s" {
     */
     endpoint = {
       sources = [
-        { from = "flow", name = "source.ip", to = ["subsets[*].addresses[*].ip"] },
-        { from = "flow", name = "source.port", to = ["subsets[*].ports[*].port"] },
-        { from = "flow", name = "network.transport", to = ["subsets[*].ports[*].protocol"] },
+        { from = "source.ip", to = ["subsets[*].addresses[*].ip"] },
+        { from = "source.port", to = ["subsets[*].ports[*].port"] },
+        { from = "network.transport", to = ["subsets[*].ports[*].protocol"] },
       ]
     }
     /*
@@ -417,10 +338,10 @@ attributes "source" "k8s" {
     */
     endpointslice = {
       sources = [
-        { from = "flow", name = "source.ip", to = ["endpoints[*].addresses[*]"] },
-        { from = "flow", name = "source.port", to = ["ports[*].port"] },
-        { from = "flow", name = "network.transport", to = ["ports[*].protocol"] },
-        { from = "flow", name = "network.type", to = ["addressType"] },
+        { from = "source.ip", to = ["endpoints[*].addresses[*]"] },
+        { from = "source.port", to = ["ports[*].port"] },
+        { from = "network.transport", to = ["ports[*].protocol"] },
+        { from = "network.type", to = ["addressType"] },
       ]
     }
     /*
@@ -430,11 +351,11 @@ attributes "source" "k8s" {
     ingress = {
       sources = [
         {
-          from = "flow", name = "source.ip",
+          from = "source.ip",
           to   = ["status.loadBalancer.ingress[*].ip", "status.loadBalancer.ingress[*].hostname"]
         },
         {
-          from = "flow", name = "source.port",
+          from = "source.port",
           to   = ["spec.defaultBackend.service.port", "spec.rules[*].http.paths[*].backend.service.port.number"]
         }
       ]
@@ -446,8 +367,8 @@ attributes "source" "k8s" {
     */
     gateway = {
       sources = [
-        { from = "flow", name = "source.ip", to = ["spec.addresses[*].value", "status.addresses[*].value"] },
-        { from = "flow", name = "source.port", to = ["spec.listeners[*].port"] },
+        { from = "source.ip", to = ["spec.addresses[*].value", "status.addresses[*].value"] },
+        { from = "source.port", to = ["spec.listeners[*].port"] },
       ]
     }
     /*
@@ -460,19 +381,18 @@ attributes "source" "k8s" {
     networkpolicy = {
       sources = [
         {
-          from = "flow", name = "source.ip",
+          from = "source.ip",
           to   = ["spec.ingress[*].from[*].ipBlock.cidr", "spec.egress[*].to[*].ipBlock.cidr"]
         },
-        { from = "flow", name = "source.port", to = ["spec.ingress[*].ports[*].port", "spec.egress[*].ports[*].port"] },
+        { from = "source.port", to = ["spec.ingress[*].ports[*].port", "spec.egress[*].ports[*].port"] },
         {
-          from = "flow", name = "network.transport",
+          from = "network.transport",
           to   = ["spec.ingress[*].ports[*].protocol", "spec.egress[*].ports[*].protocol"]
         },
       ]
     }
   }
 }
-
 /*
   Maps flow data (destination IPs, ports) to Kubernetes resources:
 */
@@ -511,15 +431,9 @@ attributes "destination" "k8s" {
     */
     pod = {
       sources = [
-        {
-          from = "flow", name = "destination.ip",
-          to   = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"]
-        },
-        {
-          from = "flow", name = "destination.port",
-          to   = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"]
-        },
-        { from = "flow", name = "network.transport", to = ["spec.containers[*].ports[*].protocol"] },
+        { from = "destination.ip", to = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"] },
+        { from = "destination.port", to = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"] },
+        { from = "network.transport", to = ["spec.containers[*].ports[*].protocol"] },
       ]
     }
     /*
@@ -528,7 +442,7 @@ attributes "destination" "k8s" {
     */
     node = {
       sources = [
-        { from = "flow", name = "destination.ip", to = ["status.addresses[*].address"] },
+        { from = "destination.ip", to = ["status.addresses[*].address"] },
       ]
     }
     /*
@@ -538,13 +452,12 @@ attributes "destination" "k8s" {
     service = {
       sources = [
         {
-          from = "flow", name = "destination.ip", to = [
-            "spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"
-          ]
+          from = "destination.ip",
+          to   = ["spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"]
         },
-        { from = "flow", name = "destination.port", to = ["spec.ports[*].port"] },
-        { from = "flow", name = "network.transport", to = ["spec.ports[*].protocol"] },
-        { from = "flow", name = "network.type", to = ["spec.ipFamilies[*]"] },
+        { from = "destination.port", to = ["spec.ports[*].port"] },
+        { from = "network.transport", to = ["spec.ports[*].protocol"] },
+        { from = "network.type", to = ["spec.ipFamilies[*]"] },
       ]
     }
     /*
@@ -552,9 +465,9 @@ attributes "destination" "k8s" {
     */
     endpoint = {
       sources = [
-        { from = "flow", name = "destination.ip", to = ["subsets[*].addresses[*].ip"] },
-        { from = "flow", name = "destination.port", to = ["subsets[*].ports[*].port"] },
-        { from = "flow", name = "network.transport", to = ["subsets[*].ports[*].protocol"] },
+        { from = "destination.ip", to = ["subsets[*].addresses[*].ip"] },
+        { from = "destination.port", to = ["subsets[*].ports[*].port"] },
+        { from = "network.transport", to = ["subsets[*].ports[*].protocol"] },
       ]
     }
     /*
@@ -562,9 +475,9 @@ attributes "destination" "k8s" {
     */
     endpointslice = {
       sources = [
-        { from = "flow", name = "destination.ip", to = ["endpoints[*].addresses[*]"] },
-        { from = "flow", name = "destination.port", to = ["ports[*].port"] },
-        { from = "flow", name = "network.transport", to = ["ports[*].protocol"] },
+        { from = "destination.ip", to = ["endpoints[*].addresses[*]"] },
+        { from = "destination.port", to = ["ports[*].port"] },
+        { from = "network.transport", to = ["ports[*].protocol"] },
       ]
     }
     /*
@@ -573,12 +486,9 @@ attributes "destination" "k8s" {
     */
     ingress = {
       sources = [
+        { from = "destination.ip", to = ["status.loadBalancer.ingress[*].ip", "status.loadBalancer.ingress[*].hostname"] },
         {
-          from = "flow", name = "destination.ip",
-          to   = ["status.loadBalancer.ingress[*].ip", "status.loadBalancer.ingress[*].hostname"]
-        },
-        {
-          from = "flow", name = "destination.port",
+          from = "destination.port",
           to   = ["spec.defaultBackend.service.port", "spec.rules[*].http.paths[*].backend.service.port.number"]
         }
       ]
@@ -590,8 +500,8 @@ attributes "destination" "k8s" {
     */
     gateway = {
       sources = [
-        { from = "flow", name = "destination.ip", to = ["spec.addresses[*].value", "status.addresses[*].value"] },
-        { from = "flow", name = "destination.port", to = ["spec.listeners[*].port"] },
+        { from = "destination.ip", to = ["spec.addresses[*].value", "status.addresses[*].value"] },
+        { from = "destination.port", to = ["spec.listeners[*].port"] },
       ]
     }
     /*
@@ -603,75 +513,60 @@ attributes "destination" "k8s" {
     */
     networkpolicy = {
       sources = [
-        {
-          from = "flow", name = "destination.ip",
-          to   = ["spec.ingress[*].from[*].ipBlock.cidr", "spec.egress[*].to[*].ipBlock.cidr"]
-        },
-        {
-          from = "flow", name = "destination.port",
-          to   = ["spec.ingress[*].ports[*].port", "spec.egress[*].ports[*].port"]
-        },
-        {
-          from = "flow", name = "network.transport",
-          to   = ["spec.ingress[*].ports[*].protocol", "spec.egress[*].ports[*].protocol"]
-        },
+        { from = "destination.ip", to = ["spec.ingress[*].from[*].ipBlock.cidr", "spec.egress[*].to[*].ipBlock.cidr"] },
+        { from = "destination.port", to = ["spec.ingress[*].ports[*].port", "spec.egress[*].ports[*].port"] },
+        { from = "network.transport", to = ["spec.ingress[*].ports[*].protocol", "spec.egress[*].ports[*].protocol"] },
       ]
     }
   }
 }
 
-# Use the syntax and rules of OBI: https://opentelemetry.io/docs/zero-code/obi/configure/filter-metrics-traces/
-# For globs we can use https://docs.rs/globset/latest/globset/#syntax to match the functionality of OBI.
-# OBI-aligned filter configuration with glob pattern strings
+/*
+  Flow filtering configuration
+  Define which flows will be captured and processed based on various criteria.
+  Empty match/not_match means no filtering on that attribute:
+    * match = [] - include all
+    * not_match = [] - exclude none
+*/
 filter "source" {
   address = {
-    match     = "" # CIDR/IP glob to include (e.g., "10.0.0.0/8", "192.168.1.*")
-    not_match = "" # CIDR/IP glob to exclude
+    match     = [] # CIDR/IP to include (e.g., ["10.0.0.0/16", "91.1.1.1"])
+    not_match = [] # CIDR/IP to exclude (e.g., ["192.168.0.0/16", "92.1.1.1"])
   }
   port = {
-    match     = "" # Port range/glob to include (e.g., "80", "443", "8000-8999")
-    not_match = "" # Port range/glob to exclude
+    match     = [] # Ports, port ranges to include (e.g., ["80", "443", "8000-9000"])
+    not_match = [] # Ports, port ranges to exclude (e.g., ["22", "3306-3307"])
   }
 }
 
 filter "destination" {
   address = {
-    match     = "" # CIDR/IP glob to include
-    not_match = "" # CIDR/IP glob to exclude
+    match     = [] # CIDR/IP to include (e.g., ["10.0.0.0/16", "91.1.1.1"])
+    not_match = [] # CIDR/IP to exclude (e.g., ["192.168.0.0/16", "92.1.1.1"])
   }
   port = {
-    match     = "" # Port range/glob to include
-    not_match = "" # Port range/glob to exclude
+    match     = [] # Ports, port ranges to include (e.g., ["80", "443", "8000-9000"])
+    not_match = [] # Ports, port ranges to exclude (e.g., ["22", "3306-3307"])
   }
 }
 
 filter "network" {
-  transport = {
-    match     = "" # e.g., "tcp", "udp"
-    not_match = "" # e.g., "icmp"
-  }
-  type = {
-    match     = "" # e.g., "ipv4", "ipv6"
-    not_match = ""
-  }
-  interface_name  = { match = "", not_match = "" }
-  interface_index = { match = "", not_match = "" }
-  interface_mac   = { match = "", not_match = "" }
+  transport       = { match = [], not_match = [] } # Protocols (e.g., ["tcp", "udp", "icmp", "icmpv6"])
+  type            = { match = [], not_match = [] } # IP versions (e.g., ["ipv4", "ipv6"])
+  interface_name  = { match = [], not_match = [] } # Interface names (e.g., ["eth*"])
+  interface_index = { match = [], not_match = [] } # Interface indices (e.g., ["2"])
+  interface_mac   = { match = [], not_match = [] } # MAC addresses (e.g., ["00:11:22:33:44:55"])
 }
 
 filter "flow" {
-  connection_state = {
-    match     = "" # e.g., "established", "close_wait", "syn_sent"
-    not_match = ""
-  }
-  end_reason     = { match = "", not_match = "" }
-  ip_dscp_name   = { match = "", not_match = "" }
-  ip_ecn_name    = { match = "", not_match = "" }
-  ip_ttl         = { match = "", not_match = "" }
-  ip_flow_label  = { match = "", not_match = "" }
-  icmp_type_name = { match = "", not_match = "" }
-  icmp_code_name = { match = "", not_match = "" }
-  tcp_flags      = { match = "", not_match = "" }
+  connection_state = { match = [], not_match = [] } # States to  (e.g., ["established", "close_wait"])
+  tcp_flags        = { match = [], not_match = [] } # TCP flags (e.g., ["SYN", "ACK"])
+  ip_dscp_name     = { match = [], not_match = [] } # DSCP values (e.g., ["CS0", "AF21"])
+  ip_ecn_name      = { match = [], not_match = [] } # ECN values (e.g., ["ECT0"])
+  ip_ttl           = { match = [], not_match = [] } # TTL values (e.g., ["1"])
+  ipv6_flow_label  = { match = [], not_match = [] } # IPv6 flow labels (e.g., ["12345"])
+  icmp_type_name   = { match = [], not_match = [] } # ICMP types (e.g., ["echo_request"])
+  icmp_code        = { match = [], not_match = [] } # ICMP codes (e.g., ["0"])
 }
 
 span {
@@ -724,4 +619,79 @@ export "traces" {
       # "x-greptime-pipeline-name" = "greptime_trace_v1"
     }
   }
+}
+
+# Internal configuration options
+internal "traces" {
+  span_format = "full"
+
+  # stdout = {
+  #   format = "text_indent" // text_indent
+  # }
+
+  otlp = {
+    endpoint               = "http://otelcol:4317"
+    protocol               = "grpc"
+    timeout                = "10s"
+    max_batch_size         = 512
+    max_batch_interval     = "5s"
+    max_queue_size         = 2048
+    max_concurrent_exports = 1
+    max_export_timeout     = "30s"
+
+    auth = {
+      basic = {
+        user = "USERNAME"
+        pass = "PASSWORD"
+      }
+    }
+
+    tls = {
+      insecure_skip_verify = false
+      ca_cert              = "/etc/certs/ca.crt"
+      client_cert          = "/etc/certs/cert.crt"
+      client_key           = "/etc/certs/cert.key"
+    }
+  }
+}
+
+# Metrics server configuration (for Prometheus scraping)
+internal "metrics" {
+  enabled        = true
+  listen_address = "0.0.0.0"
+  port           = 10250
+
+  # Enable debug metrics
+  # WARNING: Enabling debug metrics can cause significant memory growth in production
+  # Only enable for debugging purposes in development/staging environments
+  debug_metrics_enabled = false # Set to true for per-resource metrics (interface, task, K8s resource labels)
+
+  # Time-to-live for stale metrics after resource deletion (only applies when debug_metrics_enabled = true)
+  # Examples: "5m", "300s", "1h", "0s" for immediate cleanup
+  # Recommended: "5m" handles pod restarts while preventing unbounded growth
+  stale_metric_ttl = "5m"
+
+  # Histogram bucket configuration (optional)
+  # Customize bucket sizes for histogram metrics to better match your workload
+  # If not specified, default buckets optimized for typical workloads are used
+  #
+  # histogram_buckets {
+  #   mermin_pipeline_duration_seconds                        = [0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0]
+  #   mermin_export_batch_size                                = [1.0, 10.0, 50.0, 100.0, 250.0, 500.0, 1000.0]
+  #   mermin_k8s_watcher_ip_index_update_duration_seconds     = [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0]
+  #   mermin_taskmanager_shutdown_duration_seconds            = [0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0]  # Only when debug_metrics_enabled = true
+  # }
+
+  # Endpoints available:
+  # - /metrics          - All metrics (standard + debug if enabled)
+  # - /metrics/standard - Standard metrics only (aggregated, no high-cardinality labels)
+  # - /metrics/debug    - Debug metrics only (returns 404 if debug not enabled)
+  # - /metrics:summary  - JSON summary of all available metrics with metadata
+}
+
+# API server configuration (health endpoints)
+api {
+  enabled        = true
+  listen_address = "0.0.0.0"
+  port           = 8080
 }
