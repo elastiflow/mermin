@@ -83,6 +83,7 @@
 
 #![cfg_attr(not(test), no_main)]
 #![cfg_attr(not(test), no_std)]
+#[cfg(not(feature = "test"))]
 use aya_ebpf::{
     EbpfContext,
     helpers::{bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_probe_read_kernel},
@@ -285,7 +286,9 @@ pub fn mermin_flow_egress(ctx: TcContext) -> i32 {
 // TODO(CAN-135): Add UDP process tracking (e.g., udp_sendmsg hooks)
 
 /// Address family constants
+#[cfg(not(feature = "test"))]
 const AF_INET: i32 = 2;
+#[cfg(not(feature = "test"))]
 const AF_INET6: i32 = 10;
 
 /// fexit hook for tcp_v4_connect - captures process info for outbound TCP connections.
