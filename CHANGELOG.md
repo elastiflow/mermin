@@ -1,3 +1,16 @@
+## [v0.1.0-beta.47] - 2026-02-03
+
+### Features
+
+- **pipeline:** Restructure pipeline configuration (#395)
+- Flowstats protocol-specific maps (#375)
+- **metrics:** Housekeeping items (#401)
+- Add ring buffer size metrics via mmap producer/consumer positions (#416)
+
+[v0.1.0-beta.46..v0.1.0-beta.47](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.46...v0.1.0-beta.47)
+
+
+
 re## [v0.1.0-beta.46] - 2026-01-27
 
 ### Bug Fixes
