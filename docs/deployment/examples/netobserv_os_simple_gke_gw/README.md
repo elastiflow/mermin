@@ -46,8 +46,7 @@ This installation assumes that no additional DNS controllers are running in the 
       helm repo add opensearch https://opensearch-project.github.io/helm-charts/
       helm repo update
       # Deploy
-      kubectl create namespace elastiflow
-      helm upgrade -i --wait --timeout 15m -n elastiflow \
+      helm upgrade -i --wait --timeout 15m -n elastiflow --create-namespace \
         -f values.yaml \
         --set-file mermin.config.content=config.hcl \
         --devel \
