@@ -157,6 +157,10 @@ pub fn update_ringbuf_size_metric() {
     }
 }
 
+/// Size of a LISTENING_PORTS entry (ListeningPortKey + u8 value).
+/// Used for bytes_total metric tracking on read operations.
+pub const LISTENING_PORTS_ENTRY_SIZE: u64 = 4;
+
 /// eBPF map names for metrics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EbpfMapName {

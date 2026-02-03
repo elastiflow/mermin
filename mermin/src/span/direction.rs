@@ -54,7 +54,7 @@ use crate::{
     ip::flow_key_to_ip_addrs,
     metrics::{
         self,
-        ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus},
+        ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus, LISTENING_PORTS_ENTRY_SIZE},
     },
 };
 

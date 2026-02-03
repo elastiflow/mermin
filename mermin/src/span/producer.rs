@@ -975,6 +975,9 @@ impl FlowWorker {
                         EbpfMapStatus::Ok.as_str(),
                     ])
                     .inc();
+                metrics::registry::EBPF_MAP_BYTES_TOTAL
+                    .with_label_values(&[map_name.as_str()])
+                    .inc_by(std::mem::size_of::<V>() as u64);
                 Ok(v)
             }
             Err(e) => {
