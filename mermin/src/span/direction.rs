@@ -48,6 +48,7 @@ use network_types::{
 };
 use opentelemetry::trace::SpanKind;
 use tokio::sync::Mutex;
+use tracing::trace;
 
 use crate::{
     ip::flow_key_to_ip_addrs,
@@ -165,94 +166,72 @@ impl DirectionInferrer {
     ) -> Option<ClientServer> {
         let map = self.listening_ports_map.lock().await;
 
-        // Check if destination port is listening (most common case: request packets)
-        let dst_key = ListeningPortKey {
-            port: flow_key.dst_port,
-            protocol: stats.protocol,
-        };
-        match map.get(&dst_key, 0) {
-            Ok(_) => {
-                metrics::registry::EBPF_MAP_OPS_TOTAL
-                    .with_label_values(&[
-                        EbpfMapName::ListeningPorts.as_str(),
-                        EbpfMapOperation::Read.as_str(),
-                        EbpfMapStatus::Ok.as_str(),
-                    ])
-                    .inc();
-                return Some(ClientServer {
-                    client_ip: *src_ip,
-                    client_port: flow_key.src_port,
-                    server_ip: *dst_ip,
-                    server_port: flow_key.dst_port,
-                });
-            }
-            Err(e) => {
-                let status = match &e {
-                    aya::maps::MapError::KeyNotFound | aya::maps::MapError::ElementNotFound => {
-                        EbpfMapStatus::NotFound
-                    }
-                    _ => EbpfMapStatus::Error,
-                };
-                metrics::registry::EBPF_MAP_OPS_TOTAL
-                    .with_label_values(&[
-                        EbpfMapName::ListeningPorts.as_str(),
-                        EbpfMapOperation::Read.as_str(),
-                        status.as_str(),
-                    ])
-                    .inc();
-            }
-        }
+        let lookup_port = |port: u16| -> bool {
+            let key = ListeningPortKey {
+                port,
+                protocol: stats.protocol,
+            };
 
-        // Check if source port is listening (response packets or server-to-server)
-        let src_key = ListeningPortKey {
-            port: flow_key.src_port,
-            protocol: stats.protocol,
-        };
-        match map.get(&src_key, 0) {
-            Ok(_) => {
-                metrics::registry::EBPF_MAP_OPS_TOTAL
-                    .with_label_values(&[
-                        EbpfMapName::ListeningPorts.as_str(),
-                        EbpfMapOperation::Read.as_str(),
-                        EbpfMapStatus::Ok.as_str(),
-                    ])
-                    .inc();
-                return Some(ClientServer {
-                    client_ip: *dst_ip,
-                    client_port: flow_key.dst_port,
-                    server_ip: *src_ip,
-                    server_port: flow_key.src_port,
-                });
-            }
-            Err(e) => {
-                let status = {
-                    let mut current: Option<&dyn std::error::Error> = Some(&e);
-                    let mut found_not_found = false;
+            match map.get(&key, 0) {
+                Ok(_) => {
+                    metrics::registry::EBPF_MAP_OPS_TOTAL
+                        .with_label_values(&[
+                            EbpfMapName::ListeningPorts.as_str(),
+                            EbpfMapOperation::Read.as_str(),
+                            EbpfMapStatus::Ok.as_str(),
+                        ])
+                        .inc();
+                    true
+                }
+                Err(e) => {
+                    let is_not_found = matches!(
+                        e,
+                        aya::maps::MapError::KeyNotFound | aya::maps::MapError::ElementNotFound
+                    );
 
-                    while let Some(err) = current {
-                        if let Some(io_err) = err.downcast_ref::<std::io::Error>()
-                            && io_err.kind() == std::io::ErrorKind::NotFound
-                        {
-                            found_not_found = true;
-                            break;
-                        }
-                        current = err.source();
-                    }
-
-                    if found_not_found {
+                    let status = if is_not_found {
                         EbpfMapStatus::NotFound
                     } else {
                         EbpfMapStatus::Error
+                    };
+
+                    metrics::registry::EBPF_MAP_OPS_TOTAL
+                        .with_label_values(&[
+                            EbpfMapName::ListeningPorts.as_str(),
+                            EbpfMapOperation::Read.as_str(),
+                            status.as_str(),
+                        ])
+                        .inc();
+
+                    if !is_not_found {
+                        trace!(
+                            event.name = "ebpf.map_read_failed",
+                            map = EbpfMapName::ListeningPorts.as_str(),
+                            error.message = %e,
+                            "failed to read listening ports map"
+                        );
                     }
-                };
-                metrics::registry::EBPF_MAP_OPS_TOTAL
-                    .with_label_values(&[
-                        EbpfMapName::ListeningPorts.as_str(),
-                        EbpfMapOperation::Read.as_str(),
-                        status.as_str(),
-                    ])
-                    .inc();
+                    false
+                }
             }
+        };
+
+        if lookup_port(flow_key.dst_port) {
+            return Some(ClientServer {
+                client_ip: *src_ip,
+                client_port: flow_key.src_port,
+                server_ip: *dst_ip,
+                server_port: flow_key.dst_port,
+            });
+        }
+
+        if lookup_port(flow_key.src_port) {
+            return Some(ClientServer {
+                client_ip: *dst_ip,
+                client_port: flow_key.dst_port,
+                server_ip: *src_ip,
+                server_port: flow_key.src_port,
+            });
         }
 
         None
