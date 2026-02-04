@@ -15,4 +15,4 @@ layout:
     visible: true
 ---
 
-# Helm Examples
+# Examples

@@ -526,7 +526,7 @@ sudo systemctl start mermin
 
 * [**Configuration Reference**](../configuration/configuration.md): Optimize for bare metal
 * [**OTLP Export**](../configuration/export-otlp.md): Configure secure export
-* [**Observability Backends**](../observability/backends.md): Send data to observability backends
+* [**Observability Backends**](../observability/backend-integrations.md): Send data to observability backends
 * [**Troubleshooting**](../troubleshooting/troubleshooting.md): Solve common issues
 
 For Kubernetes deployments with full metadata enrichment, see [**Kubernetes with Helm**](kubernetes-helm.md).

@@ -89,6 +89,6 @@ For high-throughput or memory-constrained nodes, use longer or shorter timeouts 
 
 ## Monitoring
 
-Flow and eBPF map metrics are in [Internal Metrics](../observability/app-metrics.md): `mermin_flow_spans_active_total`, `mermin_flow_spans_created_total`, and `mermin_ebpf_map_size` / `mermin_ebpf_map_capacity` with `map="FLOW_STATS"`.
+Flow and eBPF map metrics are in [Internal Metrics](../internal-monitoring/app-metrics.md): `mermin_flow_spans_active_total`, `mermin_flow_spans_created_total`, and `mermin_ebpf_map_size` / `mermin_ebpf_map_capacity` with `map="FLOW_STATS"`.
 If the flow table or memory grows without bound, lower timeouts or `max_record_interval`, or reduce tracked flows with [flow filters](filtering.md). If you need more headroom for legitimate load,
 increase `flow_capture.flow_stats_capacity` in [pipeline](pipeline.md).

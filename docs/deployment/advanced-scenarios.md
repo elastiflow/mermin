@@ -476,7 +476,7 @@ podAnnotations:
   prometheus.io/path: "/metrics"
 ```
 
-See [Internal Metrics](../observability/app-metrics.md) for complete metrics documentation and Prometheus query examples.
+See [Internal Metrics](../internal-monitoring/app-metrics.md) for complete metrics documentation and Prometheus query examples.
 
 Key metrics to monitor:
 
@@ -637,5 +637,5 @@ export "traces" {
 
 - [**Configuration Reference**](../configuration/configuration.md): Deep dive into all configuration options
 - [**Filtering**](../configuration/filtering.md): Configure flow filters for security and performance
-- [**Observability Backends**](../observability/backends.md): Send Flow Traces to your observability backend
+- [**Observability Backends**](../observability/backend-integrations.md): Send Flow Traces to your observability backend
 - [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose and resolve performance issues

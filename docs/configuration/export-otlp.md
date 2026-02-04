@@ -638,7 +638,7 @@ export "traces" {
 - `mermin_pipeline_duration_seconds{stage="export_out"}` - Export-stage latency
 - `mermin_channel_sends_total{channel="decorator_output",status="error"}` - Channel send failures (indicates dropped spans)
 
-See the [Internal Metrics](../observability/app-metrics.md) guide for complete Prometheus query examples.
+See the [Internal Metrics](../internal-monitoring/app-metrics.md) guide for complete Prometheus query examples.
 
 ### Healthy Indicators
 
@@ -697,5 +697,5 @@ See the [Internal Metrics](../observability/app-metrics.md) guide for complete P
 ## Next Steps
 
 - [**Stdout Exporter**](export-stdout.md): Configure console output for debugging
-- [**Observability Backends**](../observability/backends.md): Set up collector and connect to backends
+- [**Observability Backends**](../observability/backend-integrations.md): Set up collector and connect to backends
 - [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose problems

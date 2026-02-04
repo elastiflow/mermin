@@ -2,7 +2,7 @@
 hidden: true
 ---
 
-# Deployment Overview
+# Overview
 
 This section provides comprehensive guidance for deploying Mermin in various environments, from local development to production Kubernetes clusters.
 
@@ -264,10 +264,10 @@ spec:
 Before deploying Mermin to production:
 
 * [ ] Review [Architecture](../getting-started/architecture.md) to understand how Mermin works
-* [ ] Choose appropriate [deployment method](deployment.md#deployment-options)
-* [ ] Plan [resource allocation](deployment.md#resource-requirements)
+* [ ] Choose appropriate [deployment method](#deployment-options)
+* [ ] Plan [resource allocation](#resource-requirements)
 * [ ] Configure [network interfaces](../configuration/discovery-instrument.md)
-* [ ] Set up [OTLP collector](../observability/backends.md) endpoint
+* [ ] Set up [OTLP collector](../observability/backend-integrations.md) endpoint
 * [ ] Configure [authentication and TLS](../configuration/export-otlp.md) for OTLP
 * [ ] Define [flow filters](../configuration/filtering.md) if needed
 * [ ] Set appropriate [resource limits](kubernetes-helm.md)
@@ -308,4 +308,4 @@ After deploying, configure Mermin for your environment:
 
 * [Configuration Overview](../configuration/configuration.md)
 * [OTLP Export Configuration](../configuration/export-otlp.md)
-* [Observability Backends](../observability/backends.md)
+* [Observability Backends](../observability/backend-integrations.md)

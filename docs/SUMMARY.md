@@ -7,24 +7,23 @@
 
 ## Getting Started
 
-* [Quick Start](getting-started/quickstart.md)
-* [Architecture](getting-started/architecture.md)
+* [Quickstart Guide](getting-started/quickstart-guide.md)
+* [Agent Architecture](getting-started/agent-architecture.md)
 * [Security Considerations](getting-started/security-considerations.md)
-* [Attribute Reference](spec/attribute-reference.md)
+* [Attribute Reference](getting-started/attribute-reference.md)
 
 ## Observability
 
-* [Backend Integration](observability/backends.md)
-* [Internal Metrics](observability/app-metrics.md)
+* [Backend Integrations](observability/backend-integrations.md)
 
 ## Deployment
 
-* [Overview](deployment/deployment.md)
+* [Overview](deployment/overview.md)
 * [Kubernetes with Helm](deployment/kubernetes-helm.md)
 * [Cloud Platforms](deployment/cloud-platforms.md)
 * [Advanced Scenarios](deployment/advanced-scenarios.md)
 * [Docker on Bare Metal](deployment/docker-bare-metal.md)
-* [Integration Guides](deployment/helm-examples/README.md)
+* [Examples](deployment/examples/README.md)
   * [Mermin with OpenTelemetry Collector](deployment/examples/local_otel/README.md)
   * [Mermin with NetObserv Flow and OpenSearch](deployment/examples/netobserv_os_simple_svc/README.md)
   * [Mermin with NetObserv Flow and OpenSearch in GKE with Gateway](deployment/examples/netobserv_os_simple_gke_gw/README.md)
@@ -50,6 +49,10 @@
   * [Internal API](configuration/api.md)
   * [Internal Prometheus Metrics](configuration/metrics.md)
   * [Internal Tracing](configuration/internal-tracing.md)
+
+## Internal Monitoring
+
+* [Metrics](internal-monitoring/app-metrics.md)
 
 ## Troubleshooting
 

@@ -550,5 +550,5 @@ See [Troubleshooting Guide](../troubleshooting/troubleshooting.md) for more solu
 
 * [**Configure OTLP Export**](../configuration/export-otlp.md): Set up authentication and TLS
 * [**Customize Filters**](../configuration/filtering.md): Filter flows before export
-* [**Observability Backends**](../observability/backends.md): Send Flow Traces to your backend
+* [**Observability Backends**](../observability/backend-integrations.md): Send Flow Traces to your backend
 * [**Monitor Mermin**](../configuration/metrics.md): Set up Prometheus scraping

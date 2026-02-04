@@ -61,7 +61,7 @@ In order to render K8s manifests you may use following commands
       --output-dir helm_rendered
 
     # Diff with existing K8s resources
-    kubectl diff -R -f helm_rendered/mermin/    
+    kubectl diff -R -f helm_rendered/mermin/
     ```
 
 - Mermin
@@ -74,5 +74,5 @@ In order to render K8s manifests you may use following commands
       --output-dir helm_rendered
 
     # Diff with existing K8s resources
-    kubectl diff -R -f helm_rendered/mermin/    
+    kubectl diff -R -f helm_rendered/mermin/
     ```
