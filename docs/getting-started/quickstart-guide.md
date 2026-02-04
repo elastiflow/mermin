@@ -1,7 +1,3 @@
----
-hidden: true
----
-
 # Quickstart Guide
 
 This guide will help you deploy Mermin on a local Kubernetes cluster using `kind` (Kubernetes in Docker) in just a few minutes. By the end, you'll have Mermin capturing network flows and displaying them in your terminal.
@@ -14,10 +10,6 @@ Before starting, ensure you have the following tools installed:
 * [**kind**](https://kind.sigs.k8s.io/docs/user/quick-start/#installation): Kubernetes in Docker
 * [**kubectl**](https://kubernetes.io/docs/tasks/tools/): Kubernetes command-line tool
 * [**Helm**](https://helm.sh/docs/intro/install/): Kubernetes package manager (version 3.x)
-* **Make**:
-  * On Mac systems `make` is available via "Xcode Command Line Tools" - `xcode-select --install`
-  * On Ubuntu/Debian run `sudo apt-get update && sudo apt-get install --no-install-recommends make`
-  * On RedHat-based systems run `sudo yum install make`
 
 {% hint style="info" %}
 This quick start is designed for local testing and development. For production deployments, see the [Deployment Guide](../deployment/overview.md).
@@ -98,7 +90,7 @@ You should see flow records in a human-readable format. Let's generate some traf
 
 ```bash
 # In a new terminal, create a test pod
-kubectl run --rm -it --image=busybox test-pod -- bash
+kubectl run --rm -it --image=alpine/curl test-pod -- sh
 
 # Inside the test pod, generate traffic
 ping -c 10 8.8.8.8
@@ -116,17 +108,64 @@ Switch back to the logs terminal, and you'll see network flow records for the tr
 Example flow record (stdout format):
 
 ```text
-Flow Record:
-  Timestamp: 2025-10-27T10:30:45Z
-  Source: 10.244.1.5:45678 (test-pod)
-  Destination: 8.8.8.8:0
-  Protocol: ICMP
-  Packets: 10 sent, 10 received
-  Bytes: 840 sent, 840 received
-  Namespace: default
+Span #1
+        Instrumentation Scope
+                Name         : "mermin"
+
+        Name         : flow_ipv4_icmp
+        TraceId      : 25532f1af4ef46087ab38fd181e8c409
+        SpanId       : 0e610e187627dfac
+        TraceFlags   : TraceFlags(1)
+        ParentSpanId : f5bc1abf5a703419
+        Kind         : Server
+        Start time   : 2026-02-04 18:57:36.295385
+        End time     : 2026-02-04 18:57:38.297897
+        Status       : Unset
+        Attributes:
+                 ->  flow.community_id: String(Owned("1:a962MiVftHsve9ogcQKeY0/p9bc="))
+                 ->  network.type: String(Static("ipv4"))
+                 ->  network.transport: String(Static("icmp"))
+                 ->  source.address: String(Owned("8.8.8.8"))
+                 ->  source.port: I64(0)
+                 ->  destination.address: String(Owned("10.244.2.4"))
+                 ->  destination.port: I64(0)
+                 ->  flow.bytes.delta: I64(98)
+                 ->  flow.bytes.total: I64(98)
+                 ->  flow.packets.delta: I64(1)
+                 ->  flow.packets.total: I64(1)
+                 ->  flow.reverse.bytes.delta: I64(0)
+                 ->  flow.reverse.bytes.total: I64(0)
+                 ->  flow.reverse.packets.delta: I64(0)
+                 ->  flow.reverse.packets.total: I64(0)
+                 ->  flow.end_reason: String(Static("idle timeout"))
+                 ->  network.interface.index: I64(14)
+                 ->  network.interface.name: String(Owned("veth8ef8af66"))
+                 ->  network.interface.mac: String(Owned("1a:b2:da:f1:5d:d3"))
+                 ->  flow.ip.dscp.id: I64(0)
+                 ->  flow.ip.dscp.name: String(Owned("df"))
+                 ->  flow.ip.ecn.id: I64(0)
+                 ->  flow.ip.ecn.name: String(Owned("non-ect"))
+                 ->  flow.ip.ttl: I64(62)
+                 ->  flow.reverse.ip.ttl: I64(0)
+                 ->  flow.reverse.ip.dscp.id: I64(0)
+                 ->  flow.reverse.ip.ecn.id: I64(0)
+                 ->  flow.icmp.type.id: I64(0)
+                 ->  flow.icmp.type.name: String(Owned("echo_reply"))
+                 ->  flow.icmp.code.id: I64(0)
+                 ->  flow.icmp.code.name: String(Owned(""))
+                 ->  flow.reverse.icmp.type.id: I64(0)
+                 ->  flow.reverse.icmp.type.name: String(Owned("echo_reply"))
+                 ->  flow.reverse.icmp.code.id: I64(0)
+                 ->  flow.reverse.icmp.code.name: String(Owned(""))
+                 ->  client.address: String(Owned("10.244.2.4"))
+                 ->  client.port: I64(0)
+                 ->  server.address: String(Owned("dns.google"))
+                 ->  server.port: I64(0)
+                 ->  destination.k8s.namespace.name: String(Owned("default"))
+                 ->  destination.k8s.pod.name: String(Owned("test-pod"))
 ```
 
-## Step 6: Explore Mermin Features (Optional)
+## Step 5: Explore Mermin Features (Optional)
 
 ### Check Metrics
 
