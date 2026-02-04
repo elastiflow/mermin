@@ -2,7 +2,7 @@
 
 ## Welcome
 
-* [Introduction](README.md)
+* [Mermin Documentation](README.md "Introduction")
 * [Beta Program](welcome/beta-program.md)
 
 ## Getting Started
