@@ -2,7 +2,7 @@
 hidden: true
 ---
 
-# Backends
+# Observability Backend Integration
 
 Mermin exports Flow Traces via the **OpenTelemetry Protocol (OTLP)**, which means it works with any OTLP-enabled observability backend or collector.
 
@@ -17,10 +17,10 @@ To receive Flow Traces from Mermin, you need one of:
 
 The OpenTelemetry Collector is the most flexible option:
 
-* Receives OTLP from Mermin via gRPC or HTTP
-* Processes, batches, and transforms telemetry data
-* Exports to multiple backends simultaneously
-* Provides buffering and retry logic
+- Receives OTLP from Mermin via gRPC or HTTP
+- Processes, batches, and transforms telemetry data
+- Exports to multiple backends simultaneously
+- Provides buffering and retry logic
 
 **Example Configuration:** See [Mermin with OpenTelemetry Collector](../deployment/examples/local_otel/README.md) for a complete setup with OpenTelemetry Collector, including Mermin configuration and collector pipeline.
 
@@ -47,8 +47,8 @@ Elasticsearch with APM Server or OpenTelemetry Collector can ingest OTLP traces.
 
 **How to Connect:**
 
-* Point Mermin → OpenTelemetry Collector → Elasticsearch exporter
-* Or point Mermin → Elastic APM Server (OTLP endpoint)
+- Point Mermin → OpenTelemetry Collector → Elasticsearch exporter
+- Or point Mermin → Elastic APM Server (OTLP endpoint)
 
 **Example:** See [`docs/deployment/examples/netobserv_os_simple_svc/`](../../docs/deployment/examples/netobserv_os_simple_svc/) for OpenSearch (Elastic-compatible) deployment
 
@@ -60,8 +60,8 @@ Open-source alternative to Elasticsearch with native OTLP support via OpenTeleme
 
 **Examples:**
 
-* [`docs/deployment/examples/netobserv_os_simple_svc/`](../../docs/deployment/examples/netobserv_os_simple_svc/) - Basic OpenSearch setup
-* [`docs/deployment/examples/netobserv_os_simple_gke_gw/`](../../docs/deployment/examples/netobserv_os_simple_gke_gw/) - GKE deployment with Gateway API
+- [`docs/deployment/examples/netobserv_os_simple_svc/`](../../docs/deployment/examples/netobserv_os_simple_svc/) - Basic OpenSearch setup
+- [`docs/deployment/examples/netobserv_os_simple_gke_gw/`](../../docs/deployment/examples/netobserv_os_simple_gke_gw/) - GKE deployment with Gateway API
 
 ### Grafana Tempo
 
@@ -101,7 +101,7 @@ export "traces" {
 
 **Example:** Coming soon
 
-### Grafana Cloud, Datadog, New Relic, Honeycomb, etc.
+### Grafana Cloud, Datadog, New Relic, Honeycomb, etc
 
 Most commercial observability platforms now support OTLP ingestion.
 
@@ -131,17 +131,17 @@ Each Flow Trace is an OpenTelemetry span containing:
 
 **Span Attributes:**
 
-* Network 5-tuple: source/dest IPs, ports, protocol
-* Bidirectional counters: bytes sent/received, packets sent/received
-* TCP state: flags (SYN, FIN, RST), connection state
-* Kubernetes metadata: pod, service, deployment, namespace, labels
-* Community ID for flow correlation
+- Network 5-tuple: source/dest IPs, ports, protocol
+- Bidirectional counters: bytes sent/received, packets sent/received
+- TCP state: flags (SYN, FIN, RST), connection state
+- Kubernetes metadata: pod, service, deployment, namespace, labels
+- Community ID for flow correlation
 
 **Resource Attributes:**
 
-* Kubernetes cluster name
-* Node name
-* Mermin version
+- Kubernetes cluster name
+- Node name
+- Mermin version
 
 This standardized format allows querying Flow Traces using native backend query languages (TraceQL, KQL, Lucene, etc.).
 

@@ -25,9 +25,9 @@ You'll see output similar to this:
 
 | NAME         | READY | STATUS  | RESTARTS | AGE | IP          | NODE               | NOMINATED NODE | READINESS GATES |
 |--------------|-------|---------|----------|-----|-------------|--------------------|----------------|-----------------|
-| mermin-vrxd2 | 1/1   | Running | 0        | 42s | 10.244.0.11 | kind-control-plane | <none>         | <none>          |
-| mermin-8k9x7 | 1/1   | Running | 0        | 42s | 10.244.3.21 | kind-worker        | <none>         | <none>          |
-| mermin-pdsn7 | 1/1   | Running | 0        | 42s | 10.244.1.7  | kind-worker2       | <none>         | <none>          |
+| mermin-vrxd2 | 1/1   | Running | 0        | 42s | 10.244.0.11 | kind-control-plane | \<none\>       | \<none\>        |
+| mermin-8k9x7 | 1/1   | Running | 0        | 42s | 10.244.3.21 | kind-worker        | \<none\>       | \<none\>        |
+| mermin-pdsn7 | 1/1   | Running | 0        | 42s | 10.244.1.7  | kind-worker2       | \<none\>       | \<none\>        |
 
 For this example, we will capture traffic from mermin-vrxd2.
 

@@ -11,11 +11,11 @@ This section provides comprehensive guidance for deploying Mermin in various env
 Mermin supports multiple deployment scenarios:
 
 | Deployment Type                                  | Use Case                  | Complexity | Production Ready |
-| ------------------------------------------------ | ------------------------- | ---------- | ---------------- |
+|--------------------------------------------------|---------------------------|------------|------------------|
 | [**Kubernetes with Helm**](kubernetes-helm.md)   | Standard K8s clusters     | Low        | ✅ Yes            |
 | [**Cloud Platforms**](cloud-platforms.md)        | GKE, EKS, AKS             | Low        | ✅ Yes            |
 | [**Advanced Scenarios**](advanced-scenarios.md)  | Custom CNI, multi-cluster | Medium     | ✅ Yes            |
-| [**Docker on Bare Metal**](docker-bare-metal.md) | Non-K8s Linux hosts       | Medium     | ⚠️ Limited       |
+| [**Docker on Bare Metal**](docker-bare-metal.md) | Non-K8s Linux hosts       | Medium     | ⚠️ Limited        |
 
 ## Architecture Considerations
 

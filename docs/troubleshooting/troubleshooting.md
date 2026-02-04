@@ -1,4 +1,4 @@
-# Troubleshooting
+# Troubleshooting Guide for Common Issues
 
 This guide will help you diagnose and resolve common issues when deploying and operating Mermin.
 
@@ -101,7 +101,7 @@ kubectl port-forward daemonset/mermin 10250:10250 -n mermin
 curl http://localhost:10250/metrics
 ```
 
-See the [Application Metrics](../observability/app-metrics.md) guide for complete metrics documentation and Prometheus query examples.
+See the [Internal Metrics](../observability/app-metrics.md) guide for complete metrics documentation and Prometheus query examples.
 
 Key metrics to monitor include:
 

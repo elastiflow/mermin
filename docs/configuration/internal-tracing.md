@@ -1,6 +1,7 @@
-# Internal Tracing
+# Configure the Internal Tracing Exporter
 
-This page documents the `internal "traces"` configuration (config path: `internal.traces`), which controls how Mermin exports its own telemetry data for self-monitoring and debugging. Mermin accepts HCL or YAML; the examples below use HCL (see [Configuration Overview](configuration.md#file-format) for format details).
+This page documents the `internal "traces"` configuration (config path: `internal.traces`), which controls how Mermin exports its own telemetry data for self-monitoring and debugging.
+Mermin accepts HCL or YAML; the examples below use HCL (see [Configuration Overview](configuration.md#file-format) for format details).
 
 ## Overview
 
@@ -164,7 +165,7 @@ internal "traces" {
 
 ### eBPF Program Loading
 
-```
+```text
 Span: load_ebpf_program
   Start: 2025-10-27T15:30:00.000Z
   Duration: 250ms
@@ -179,7 +180,7 @@ Span: load_ebpf_program
 
 ### Flow Processing
 
-```
+```text
 Span: process_packet
   Start: 2025-10-27T15:30:01.234Z
   Duration: 0.5ms
@@ -195,7 +196,7 @@ Span: process_packet
 
 ### Kubernetes Informer Sync
 
-```
+```text
 Span: sync_k8s_informers
   Start: 2025-10-27T15:30:05.000Z
   Duration: 2.5s
@@ -297,7 +298,8 @@ This is the default and recommended for most deployments.
 
 1. Send internal traces to a different endpoint than flow traces (e.g. separate OTLP collectors)
 2. Use different collector instances for internal vs flow export
-3. Filter by span name or attributes in your backend: both internal and flow traces use `service.name="mermin"`, so distinguish them by span name (e.g. internal spans like `load_ebpf_program`, `process_packet`, `sync_k8s_informers` vs flow span names from your flow data)
+3. Filter by span name or attributes in your backend: both internal and flow traces use `service.name="mermin"`,
+   so distinguish them by span name (e.g. internal spans like `load_ebpf_program`, `process_packet`, `sync_k8s_informers` vs flow span names from your flow data)
 
 ## Best Practices
 

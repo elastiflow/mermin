@@ -1,6 +1,5 @@
-# Mermin Application Metrics
+# Mermin Internal Metrics
 
-- [Mermin Application Metrics](#mermin-application-metrics)
 - [Metrics Endpoint](#metrics-endpoint)
 - [Metrics Reference](#metrics-reference)
   - [eBPF Metrics (`mermin_ebpf_*`)](#ebpf-metrics-mermin_ebpf_)
@@ -14,11 +13,10 @@
   - [TaskManager Metrics (`mermin_taskmanager_*`)](#taskmanager-metrics-mermin_taskmanager_)
 - [Grafana Dashboard](#grafana-dashboard)
 
-
 This guide describes the Prometheus metrics endpoint exposed by Mermin and provides a comprehensive breakdown of all available metrics, their types, and descriptions.
 See the [metrics configuration document](../configuration/metrics.md) for more details on metrics configuration.
 
-# Metrics Endpoint
+## Metrics Endpoint
 
 Mermin exposes Prometheus metrics in the standard Prometheus text format at multiple HTTP endpoints:
 
@@ -32,7 +30,7 @@ Mermin exposes Prometheus metrics in the standard Prometheus text format at mult
 - **Standard metrics**: Always enabled, aggregated across resources, safe for production.
 - **Debug metrics**: High-cardinality labels (per-interface, per-resource), must be explicitly enabled via `metrics.debug_metrics_enabled = true`.
 
-# Metrics Reference
+## Metrics Reference
 
 All metrics follow the naming convention: `mermin_<subsystem>_<name>`.
 Metrics are categorized into logical subsystems that correspond to different components of Mermin:
@@ -45,7 +43,7 @@ Metrics are categorized into logical subsystems that correspond to different com
 - `k8s`: For Kubernetes watcher metrics
 - `taskmanager`: Internal Mermin tasks metrics
 
-## eBPF Metrics (`mermin_ebpf_*`)
+### eBPF Metrics (`mermin_ebpf_*`)
 
 This section describes metrics from the eBPF layer, responsible for capturing low-level packets. These metrics provide visibility into the status of loaded eBPF programs and the usage of eBPF maps.
 Monitoring these is crucial for ensuring that Mermin's foundational data collection mechanism functions as expected.
@@ -83,7 +81,7 @@ Monitoring these is crucial for ensuring that Mermin's foundational data collect
   *Labels*:
   - `attachment`
 
-## Network Interface Metrics (`mermin_interface_*`)
+### Network Interface Metrics (`mermin_interface_*`)
 
 These metrics provide visibility into network traffic processed by Mermin across all monitored interfaces. They are essential for understanding the overall throughput and packet rates processed by Mermin.
 
@@ -94,7 +92,7 @@ These metrics provide visibility into network traffic processed by Mermin across
   *Type*: `counter`
   *Description*: Total number of packets processed across all interfaces
 
-## Flow Metrics (`mermin_flow_*`)
+### Flow Metrics (`mermin_flow_*`)
 
 - `mermin_flow_spans_active_total`
   *Type*: `gauge`
@@ -103,7 +101,7 @@ These metrics provide visibility into network traffic processed by Mermin across
   *Type*: `counter`
   *Description*: Total number of flow spans created across all interfaces
 
-## Kubernetes Watcher Metrics (`mermin_k8s_watcher_*`)
+### Kubernetes Watcher Metrics (`mermin_k8s_watcher_*`)
 
 These metrics track events and performance of the Kubernetes resource watchers used by Mermin for metadata enrichment and resource monitoring.
 
@@ -117,7 +115,7 @@ These metrics track events and performance of the Kubernetes resource watchers u
   *Type*: `histogram`
   *Description*: Duration of K8s IP index updates
 
-## Kubernetes Decorator Metrics (`mermin_k8s_decorator_*`)
+### Kubernetes Decorator Metrics (`mermin_k8s_decorator_*`)
 
 These metrics exposes the details to the Kubernetes decorator stage.
 
@@ -127,7 +125,7 @@ These metrics exposes the details to the Kubernetes decorator stage.
   *Labels*:
   - `status`
 
-## Flow Span Export Metrics (`mermin_export_*`)
+### Flow Span Export Metrics (`mermin_export_*`)
 
 These metrics track the export of flow spans from Mermin to external systems (such as OTLP collectors), providing insight into export performance and reliability.
 
@@ -141,7 +139,7 @@ These metrics track the export of flow spans from Mermin to external systems (su
   - `exporter`
   - `status`
 
-## Channel Metrics (`mermin_channel_*`)
+### Channel Metrics (`mermin_channel_*`)
 
 These metrics offer insight into the internal channels used for data transmission.
 
@@ -162,7 +160,7 @@ These metrics offer insight into the internal channels used for data transmissio
   - `channel`
   - `status`
 
-## Pipeline Metrics (`mermin_pipeline_*`)
+### Pipeline Metrics (`mermin_pipeline_*`)
 
 These metrics offer insight into the internal pipelines used for data mutation (flow generation, decoration).
 
@@ -172,7 +170,7 @@ These metrics offer insight into the internal pipelines used for data mutation (
   *Labels*:
   - `stage`
 
-## TaskManager Metrics (`mermin_taskmanager_*`)
+### TaskManager Metrics (`mermin_taskmanager_*`)
 
 These metrics track the number and type of active background tasks managed by Mermin.
 
@@ -182,6 +180,6 @@ These metrics track the number and type of active background tasks managed by Me
   *Labels*:
   - `task`
 
-# Grafana Dashboard
+## Grafana Dashboard
 
 Grafana dashboard can be imported from the [Dashboard JSON](./grafana-mermin-app.json)

@@ -1,4 +1,4 @@
-# Flow Filtering
+# Configure Agent Pipeline Filters
 
 **Block:** `filter.source`/`filter.destination`/`filter.network`/`filter.flow`
 
@@ -13,11 +13,11 @@ Mermin supports filtering flows by:
 
 A full configuration example can be found in the [Default Configuration](./default/config.hcl).
 
-# Configuration
+## Configuration
 
-## `match`/`not_match` patterns
+### `match`/`not_match` patterns
 
-**Type:** List of strings  
+**Type:** List of strings
 **Default:** `[]`
 
 Mermin uses simple match patterns:
@@ -49,12 +49,12 @@ The patterns support multiple forms
   - `close_wait`: Connection states
   - `eth*`: Interface names
 
-## `filter.source` and `filter.destination` filters
+### `filter.source` and `filter.destination` filters
 
 The filters apply to the `source`/`destination` combination of the `address` and `port` in the flow span.
 Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/architecture.md#components)), which can help reduce resource usage in subsequent stages.
 
-### `address`
+#### `address`
 
 Filter by IP address.
 
@@ -73,7 +73,7 @@ Filter by IP address.
   }
   ```
 
-### `port`
+#### `port`
 
 Filter by port.
 
@@ -101,7 +101,7 @@ Filter by port.
   }
   ```
 
-### Notes
+#### Notes
 
 Result of the `filter.source`/`filter.destination` inclusion/exclusion is combined with an "AND" condition, meaning it is very easy to accidentally exclude flows you want to observe. For example:
 
@@ -158,12 +158,12 @@ Result of the `filter.source`/`filter.destination` inclusion/exclusion is combin
   ]
   ```
 
-## `filter.network` filter
+### `filter.network` filter
 
 The filter applies to various network attributes in the flow span, such as transport protocol, interface, and others.
 Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/architecture.md#components)), which can help reduce resource usage in subsequent stages.
 
-### `transport`
+#### `transport`
 
 Filter by transport protocol.
 
@@ -191,7 +191,7 @@ Filter by transport protocol.
   }
   ```
 
-### `type`
+#### `type`
 
 Filter by IP version.
 
@@ -209,7 +209,7 @@ Filter by IP version.
   }
   ```
 
-### `interface_name`
+#### `interface_name`
 
 Filter by network interface name.
 
@@ -237,7 +237,7 @@ Filter by network interface name.
   }
   ```
 
-### `interface_index`
+#### `interface_index`
 
 Filter by network interface index.
 
@@ -265,7 +265,7 @@ Filter by network interface index.
   }
   ```
 
-### `interface_mac`
+#### `interface_mac`
 
 Filter by network interface MAC address.
 
@@ -283,12 +283,12 @@ Filter by network interface MAC address.
   }
   ```
 
-## `filter.flow` filters
+### `filter.flow` filters
 
 The filter applies to various flow attributes in the flow span, such as connection state, TCP flags and others.
 Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/architecture.md#components)), which can help reduce resource usage in subsequent stages.
 
-### `connection_state`
+#### `connection_state`
 
 Filter by TCP connection state.
 
@@ -306,7 +306,7 @@ Filter by TCP connection state.
   }
   ```
 
-### `tcp_flags`
+#### `tcp_flags`
 
 Filter by TCP flags.
 
@@ -324,7 +324,7 @@ Filter by TCP flags.
   }
   ```
 
-### `ip_dscp_name`
+#### `ip_dscp_name`
 
 Filter flows based on the DSCP ([Differentiated Services Code Point](https://en.wikipedia.org/wiki/Differentiated_services#Configuration_guidelines)) names
 
@@ -333,7 +333,7 @@ Filter flows based on the DSCP ([Differentiated Services Code Point](https://en.
 **Examples:**
 
 - Include only low-latency data (`AF21`)
-  
+
   ```hcl
   filter "flow" {
     ip_dscp_name = { match = ["AF21"] }
@@ -341,14 +341,14 @@ Filter flows based on the DSCP ([Differentiated Services Code Point](https://en.
   ```
 
 - Exclude multimedia conferencing (`AF41`, `AF42` `AF43`)
-  
+
   ```hcl
   filter "flow" {
     ip_dscp_name = { match = ["AF4{1,2,3}"] }
   }
   ```
 
-### `ip_ecn_name`
+#### `ip_ecn_name`
 
 Filter flows based on ECN ([Explicit Congestion Notification](https://en.wikipedia.org/wiki/Explicit_congestion_notification)) values
 
@@ -357,7 +357,7 @@ Filter flows based on ECN ([Explicit Congestion Notification](https://en.wikiped
 **Examples:**
 
 - Include only ECN-capable transport (`ECT0`, `ECT1`)
-  
+
   ```hcl
   filter "flow" {
     ip_ecn_name = { match = ["ECT?"] }
@@ -365,14 +365,14 @@ Filter flows based on ECN ([Explicit Congestion Notification](https://en.wikiped
   ```
 
 - Exclude congestion encountered (`CE`)
-  
+
   ```hcl
   filter "flow" {
     ip_ecn_name = { not_match = ["CE"] }
   }
   ```
 
-### `ip_ttl`
+#### `ip_ttl`
 
 Filter flows based on the IP TTL ([Time To Live](https://en.wikipedia.org/wiki/Time_to_live)) values
 
@@ -381,7 +381,7 @@ Filter flows based on the IP TTL ([Time To Live](https://en.wikipedia.org/wiki/T
 **Examples:**
 
 - Include only packets with the TTL `1` and `64` to `128`
-  
+
   ```hcl
   filter "flow" {
     ip_ttl = { match = ["1", "64-184"] }
@@ -389,14 +389,14 @@ Filter flows based on the IP TTL ([Time To Live](https://en.wikipedia.org/wiki/T
   ```
 
 - Exclude packets with the TTL `64`
-  
+
   ```hcl
   filter "flow" {
     ip_ttl = { not_match = ["64"] }
   }
   ```
 
-### `ipv6_flow_label`
+#### `ipv6_flow_label`
 
 Filter flows based on IPv6 [flow labels](https://www.rfc-editor.org/rfc/rfc6437.html)
 
@@ -405,7 +405,7 @@ Filter flows based on IPv6 [flow labels](https://www.rfc-editor.org/rfc/rfc6437.
 **Examples:**
 
 - Include only flows with label 12345
-  
+
   ```hcl
   filter "flow" {
     ipv6_flow_label = { match = ["12345"] }
@@ -413,14 +413,14 @@ Filter flows based on IPv6 [flow labels](https://www.rfc-editor.org/rfc/rfc6437.
   ```
 
 - Exclude flows with labels in a range
-  
+
   ```hcl
   filter "flow" {
     ipv6_flow_label = { not_match = ["12345-12545"] }
   }
   ```
 
-### `icmp_type_name`
+#### `icmp_type_name`
 
 Filter flows based on [ICMP type](https://www.iana.org/assignments/icmp-parameters/icmp-parameters.xhtml) names (converted to a [snake case](https://en.wikipedia.org/wiki/Snake_case))
 
@@ -429,7 +429,7 @@ Filter flows based on [ICMP type](https://www.iana.org/assignments/icmp-paramete
 **Examples:**
 
 - Include only echo requests
-  
+
   ```hcl
   filter "flow" {
     icmp_type_name = { match = ["echo_request"] }
@@ -437,14 +437,14 @@ Filter flows based on [ICMP type](https://www.iana.org/assignments/icmp-paramete
   ```
 
 - Exclude destination unreachable
-  
+
   ```hcl
   filter "flow" {
     icmp_type_name = { not_match = ["destination_unreachable"] }
   }
   ```
 
-### `icmp_code`
+#### `icmp_code`
 
 Filter flows based on [ICMP codes](https://www.iana.org/assignments/icmp-parameters/icmp-parameters.xhtml)
 
@@ -453,7 +453,7 @@ Filter flows based on [ICMP codes](https://www.iana.org/assignments/icmp-paramet
 **Examples:**
 
 - Include codes from `0` to `8` and `13`
-  
+
   ```hcl
   filter "flow" {
     icmp_code = { match = ["0-8", "13"] }
@@ -461,16 +461,16 @@ Filter flows based on [ICMP codes](https://www.iana.org/assignments/icmp-paramet
   ```
 
 - Exclude code `3`
-  
+
   ```hcl
   filter "flow" {
     icmp_code = { not_match = ["3"] }
   }
   ```
 
-# Common Filtering Scenarios
+## Common Filtering Scenarios
 
-## HTTP/HTTPS Only
+### HTTP/HTTPS Only
 
 Following configuration captures flows with HTTP/HTTPS destination.
 
@@ -496,9 +496,9 @@ Example flows:
 ]
 ```
 
-## Exclude Internal Traffic
+### Exclude Internal Traffic
 
-Following configuration captures flows originated from non-local 
+Following configuration captures flows originated from non-local
 
 ```hcl
 filter "source" {
@@ -519,7 +519,7 @@ filter "source" {
 ]
 ```
 
-## TCP Only, Established Connections
+### TCP Only, Established Connections
 
 Following configuration captures flows for established TCP connections
 
@@ -537,7 +537,7 @@ filter "flow" {
 }
 ```
 
-# Best Practices
+## Best Practices
 
 1. **Start permissive**: Begin with no filters, add as needed
 2. **Monitor impact**: Check flow reduction with metrics
@@ -545,7 +545,7 @@ filter "flow" {
 4. **Document rationale**: Comment why filters are applied
 5. **Use `match`/`not_match` carefully**: Match patterns can hide important traffic
 
-# Next Steps
+## Next Steps
 
 - [**Configuration Examples**](examples.md): See complete filter configurations
 - [**Flow Span Options**](span.md): Configure flow generation

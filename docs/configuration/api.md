@@ -1,4 +1,4 @@
-# API and Metrics
+# Configure the Internal API
 
 Mermin provides HTTP endpoints for health checks and Prometheus metrics. This page documents how to configure the API server and health probes; for the Prometheus metrics server (port, endpoints, debug metrics), see [Metrics](metrics.md).
 
@@ -72,7 +72,8 @@ api {
 
 ## Metrics Server
 
-The metrics server (Prometheus scrape endpoint) is configured via the `internal "metrics"` block. Options include `enabled`, `listen_address`, `port` (default `10250`), and `debug_metrics_enabled`. See [Metrics](metrics.md) for full configuration and available endpoints.
+The metrics server (Prometheus scrape endpoint) is configured via the `internal "metrics"` block. Options include `enabled`, `listen_address`, `port` (default `10250`), and `debug_metrics_enabled`.
+See [Metrics](metrics.md) for full configuration and available endpoints.
 
 ## Health Check Endpoints
 

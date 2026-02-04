@@ -1,4 +1,4 @@
-# Discovery: Kubernetes Informer
+# Configure Kubernetes Informer Discovery
 
 This page documents how to configure Mermin's Kubernetes informers, which watch and cache Kubernetes resources for flow
 metadata enrichment.
@@ -59,9 +59,9 @@ discovery "informer" "k8s" {
 
 **When to set:**
 
-* Testing locally outside cluster
-* Using specific service account
-* Multi-cluster scenarios
+- Testing locally outside cluster
+- Using specific service account
+- Multi-cluster scenarios
 
 ### `informers_sync_timeout`
 
@@ -71,9 +71,9 @@ Timeout for initial informer synchronization.
 
 **Description:**
 
-* Maximum time to wait for informers to complete initial sync
-* Mermin won't be ready until sync completes
-* Large clusters may need longer timeout
+- Maximum time to wait for informers to complete initial sync
+- Mermin won't be ready until sync completes
+- Large clusters may need longer timeout
 
 **Examples:**
 
@@ -91,7 +91,8 @@ discovery "informer" "k8s" {
 
 ## Resource Selectors
 
-The `selectors` array determines which Kubernetes resources to watch. If `selectors` is omitted or empty, Mermin uses a default set of kinds (Service, EndpointSlice, Pod, workload controllers, NetworkPolicy, Ingress, Gateway). When you provide selectors, your entries are merged with these defaults: for each kind you list, your selector replaces the default for that kind.
+The `selectors` array determines which Kubernetes resources to watch. If `selectors` is omitted or empty, Mermin uses a default set of kinds (Service, EndpointSlice, Pod, workload controllers, NetworkPolicy, Ingress, Gateway).
+When you provide selectors, your entries are merged with these defaults: for each kind you list, your selector replaces the default for that kind.
 
 ### Selector Structure
 
@@ -184,15 +185,17 @@ discovery "informer" "k8s" {
 
 **Operators:**
 
-* `In`: Label value in list
-* `NotIn`: Label value not in list
-* `Exists`: Label key exists
-* `DoesNotExist`: Label key doesn't exist
+- `In`: Label value in list
+- `NotIn`: Label value not in list
+- `Exists`: Label key exists
+- `DoesNotExist`: Label key doesn't exist
 
 ### Excluding resources
 
-* **Exclude a kind entirely:** If you omit `selectors` or leave it empty, all default kinds are watched. When you provide `selectors`, they are merged with defaults: for each kind you specify, your selector is used; for kinds you do not specify, the default for that kind is still used. So you cannot remove a single kind from the default set—unspecified kinds remain. To limit scope, use **namespace filtering** or **label selectors** (inclusion) so that only the resources you need are watched.
-* **Namespace filter is inclusion-only:** `namespaces = ["a", "b"]` means "watch this kind only in namespaces `a` and `b`." There is no way to "exclude namespace X" for a kind; use inclusion (list the namespaces you want) instead.
+- **Exclude a kind entirely:** If you omit `selectors` or leave it empty, all default kinds are watched.
+  When you provide `selectors`, they are merged with defaults: for each kind you specify, your selector is used; for kinds you do not specify, the default for that kind is still used.
+  So you cannot remove a single kind from the default set—unspecified kinds remain. To limit scope, use **namespace filtering** or **label selectors** (inclusion) so that only the resources you need are watched.
+- **Namespace filter is inclusion-only:** `namespaces = ["a", "b"]` means "watch this kind only in namespaces `a` and `b`." There is no way to "exclude namespace X" for a kind; use inclusion (list the namespaces you want) instead.
 
 **Example:** Watch only pods in specific namespaces (inclusion) to reduce load:
 
@@ -282,30 +285,30 @@ discovery "informer" "k8s" {
 
 Memory usage scales with number of watched resources:
 
-* **Estimate:** ~1 KB per resource
-* **10,000 pods:** ~10 MB
-* **100,000 pods:** ~100 MB
+- **Estimate:** ~1 KB per resource
+- **10,000 pods:** ~10 MB
+- **100,000 pods:** ~100 MB
 
 ### API Server Load
 
 Informers use Kubernetes watch API:
 
-* Initial LIST operation per resource type
-* WATCH for ongoing updates
+- Initial LIST operation per resource type
+- WATCH for ongoing updates
 
 **Reduce load:**
 
-* Use namespace filtering
-* Use label selectors
+- Use namespace filtering
+- Use label selectors
 
 ### Sync Time
 
 Initial sync time depends on:
 
-* Cluster size
-* Number of resource types
-* API server performance
-* Network latency
+- Cluster size
+- Number of resource types
+- API server performance
+- Network latency
 
 **Large cluster tuning:**
 
@@ -363,7 +366,7 @@ discovery "informer" "k8s" {
 
 ## Next Steps
 
-* [**Owner Relations**](owner-relations.md): Configure owner reference walking
-* [**Selector Relations**](selector-relations.md): Configure selector-based matching
-* [**Flow Attributes**](attributes.md): Configure metadata extraction
-* [**Troubleshooting**](../troubleshooting/troubleshooting.md): Debug missing metadata
+- [**Owner Relations**](owner-relations.md): Configure owner reference walking
+- [**Selector Relations**](selector-relations.md): Configure selector-based matching
+- [**Flow Attributes**](attributes.md): Configure metadata extraction
+- [**Troubleshooting**](../troubleshooting/troubleshooting.md): Debug missing metadata

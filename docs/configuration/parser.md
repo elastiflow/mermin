@@ -1,4 +1,4 @@
-# Parser Configuration
+# Configure the Network Packet Parser
 
 The parser configuration controls how Mermin's eBPF programs detect and parse tunneled traffic by specifying UDP ports for VXLAN, Geneve, and WireGuard.
 
@@ -423,9 +423,9 @@ If your environment uses multiple ports for the same tunnel protocol (e.g., mult
 
 ## Next Steps
 
-* [**Configuration Overview**](configuration.md): Config file format and structure
-* [**Network Interface Discovery**](discovery-instrument.md): Configure which interfaces to monitor
-* [**Flow Filtering**](filtering.md): Filter flows based on protocols and ports
-* [**Deployment Issues**](../troubleshooting/deployment-issues.md): Troubleshoot eBPF verifier failures
-* [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose flow capture issues
-* [**Advanced Scenarios**](../deployment/advanced-scenarios.md): CNI-specific deployment guides
+- [**Configuration Overview**](configuration.md): Config file format and structure
+- [**Network Interface Discovery**](discovery-instrument.md): Configure which interfaces to monitor
+- [**Flow Filtering**](filtering.md): Filter flows based on protocols and ports
+- [**Deployment Issues**](../troubleshooting/deployment-issues.md): Troubleshoot eBPF verifier failures
+- [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose flow capture issues
+- [**Advanced Scenarios**](../deployment/advanced-scenarios.md): CNI-specific deployment guides
