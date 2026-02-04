@@ -1536,12 +1536,11 @@ mod tests {
     #[test]
     fn test_listening_port_key_size() {
         // ListeningPortKey is #[repr(C)] with u16 + u8, padded to 4 bytes.
-        // This test ensures the size doesn't change unexpectedly, which would
-        // affect LISTENING_PORTS_ENTRY_SIZE in metrics/ebpf.rs.
+        // This test ensures the size doesn't change unexpectedly.
         assert_eq!(
             size_of::<ListeningPortKey>(),
             4,
-            "ListeningPortKey size changed - verify LISTENING_PORTS_ENTRY_SIZE is still correct"
+            "ListeningPortKey size changed"
         );
         assert_eq!(
             align_of::<ListeningPortKey>(),

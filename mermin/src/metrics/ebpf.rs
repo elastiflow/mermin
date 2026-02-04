@@ -157,11 +157,6 @@ pub fn update_ringbuf_size_metric() {
     }
 }
 
-/// Size of a LISTENING_PORTS entry in bytes (key + value).
-/// Used for bytes_total metric tracking on read operations.
-pub const LISTENING_PORTS_ENTRY_SIZE: u64 =
-    (std::mem::size_of::<mermin_common::ListeningPortKey>() + std::mem::size_of::<u8>()) as u64;
-
 /// eBPF map names for metrics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EbpfMapName {
