@@ -1,10 +1,44 @@
-# Configure Global Agent Options
+---
+layout:
+  width: default
+  title:
+    visible: true
+  description:
+    visible: true
+  tableOfContents:
+    visible: true
+  outline:
+    visible: true
+  pagination:
+    visible: true
+  metadata:
+    visible: true
+---
+
+<!-- markdownlint-disable MD025 -->
+# Configuration Reference
+
+This section provides detailed reference documentation for all Mermin configuration options, from network interface discovery to export settings.
+
+## How Configuration Works
+
+Mermin uses a layered configuration approach:
+
+1. **Configuration File (HCL/YAML)**: The primary method for detailed configuration.
+2. **Environment Variables**: Override global options at runtime.
+3. **Command-Line Flags**: Override global options at runtime.
+
+Global options (documented below) are the only settings configurable via all three methods. All other configuration blocks require a configuration file.
+
+---
+
+## Configure Global Agent Options
 
 Global options are top-level configuration settings that control Mermin's overall behavior. These are the only options that can be configured via CLI flags or environment variables in addition to the configuration file.
 
-## Configuration Methods
+### Configuration Methods
 
-### Configuration File (HCL)
+#### Configuration File (HCL)
 
 ```hcl
 # config.hcl
@@ -13,7 +47,7 @@ auto_reload = true
 shutdown_timeout = "10s"
 ```
 
-### Command-Line Flags
+#### Command-Line Flags
 
 ```bash
 mermin \
@@ -22,7 +56,7 @@ mermin \
   --auto-reload
 ```
 
-### Environment Variables
+#### Environment Variables
 
 ```bash
 export MERMIN_CONFIG_PATH=/etc/mermin/config.hcl
@@ -31,9 +65,9 @@ export MERMIN_CONFIG_AUTO_RELOAD=true
 mermin
 ```
 
-## Configuration Options
+### Configuration Options
 
-### `config` / `MERMIN_CONFIG_PATH`
+#### `config` / `MERMIN_CONFIG_PATH`
 
 **Type:** String (file path) **Default:** None (optional) **CLI Flag:** `--config` **Environment:** `MERMIN_CONFIG_PATH`
 
@@ -47,7 +81,11 @@ mermin --config=/etc/mermin/config.hcl
 export MERMIN_CONFIG_PATH=/etc/mermin/config.hcl
 ```
 
-### `auto_reload` / `MERMIN_CONFIG_AUTO_RELOAD`
+#### `auto_reload` / `MERMIN_CONFIG_AUTO_RELOAD`
+
+{% hint style="warning" %}
+Currently, this features is not supported yet.
+{% endhint %}
 
 **Type:** Boolean **Default:** `false` **CLI Flag:** `--auto-reload` **Environment:** `MERMIN_CONFIG_AUTO_RELOAD`
 
@@ -89,7 +127,7 @@ export MERMIN_CONFIG_AUTO_RELOAD=true
 Some configuration changes may require a full restart, such as changing monitored network interfaces or modifying RBAC permissions.
 {% endhint %}
 
-### `log_level` / `MERMIN_LOG_LEVEL`
+#### `log_level` / `MERMIN_LOG_LEVEL`
 
 **Type:** String (enum) **Default:** `info` **CLI Flag:** `--log-level` **Environment:** `MERMIN_LOG_LEVEL`
 
@@ -127,7 +165,7 @@ export MERMIN_LOG_LEVEL=warn
 - **Debugging:** `debug` for detailed troubleshooting
 - **Development:** `trace` for comprehensive visibility
 
-### `shutdown_timeout`
+#### `shutdown_timeout`
 
 **Type:** Duration **Default:** `5s` **CLI Flag:** Not available **Environment:** Not available
 
@@ -156,18 +194,18 @@ shutdown_timeout = "10s"
 
 - `export.otlp.max_export_timeout`: Should be less than `shutdown_timeout`
 
-## Monitoring Shutdown Behavior
+### Monitoring Shutdown Behavior
 
 Mermin provides metrics to monitor shutdown behavior:
 
-### Shutdown Metrics
+#### Shutdown Metrics
 
 - `shutdown_duration_seconds`: Histogram of actual shutdown durations
 - `shutdown_timeouts_total`: Count of shutdowns that exceeded timeout
 - `shutdown_flows_total{status="preserved"}`: Flows successfully exported during shutdown
 - `shutdown_flows_total{status="lost"}`: Flows lost due to shutdown timeout
 
-### `flow_producer.worker_queue_capacity`
+#### `flow_producer.worker_queue_capacity`
 
 **Type:** Integer
 **Default:** `2048`
@@ -202,7 +240,7 @@ Capacity for each worker thread's event queue. Determines how many raw eBPF even
 
 - High CPU usage during startup or traffic spikes (due to map resizing)
 
-### `worker_count`
+#### `worker_count`
 
 **Type:** Integer
 **Default:** `4`
@@ -243,7 +281,7 @@ resources:
     cpu: 4     # For flow_producer.workers = 4
 ```
 
-### `flow_producer.flow_store_poll_interval`
+#### `flow_producer.flow_store_poll_interval`
 
 **Type:** Duration
 **Default:** `5s`
@@ -287,7 +325,7 @@ Interval at which flow pollers check for flow records and timeouts. Pollers iter
 - Primarily long-lived TCP flows
 - Flow timeout accuracy not critical
 
-### `k8s_decorator.threads`
+#### `k8s_decorator.threads`
 
 **Type:** Integer
 **Default:** `4`
@@ -305,11 +343,11 @@ so 4 threads provide 32K flows/sec capacity.
 | High-Traffic Ingress       | 5K-25K      | 8-12                |
 | Extreme Scale (Edge/CDN)   | >25K        | 12-24               |
 
-### Channel Capacity Tuning
+#### Channel Capacity Tuning
 
 These options control the buffer sizes between pipeline stages to optimize for your workload.
 
-#### `flow_producer.flow_span_queue_capacity`
+##### `flow_producer.flow_span_queue_capacity`
 
 **Type:** Integer
 **Default:** `16384`
@@ -322,7 +360,7 @@ Explicit capacity for the flow span channel. Provides buffering between workers 
 - **Bursty traffic**: `24576`-`32768`
 - **Low latency priority**: `12288`
 
-#### `k8s_decorator.decorated_span_queue_capacity`
+##### `k8s_decorator.decorated_span_queue_capacity`
 
 **Type:** Integer
 **Default:** `32768`
@@ -336,7 +374,7 @@ With defaults (32,768 slots, ~320ms buffer at 100K/s).
 - **Unreliable network**: `49152`-`65536`
 - **Very high throughput**: `65536`-`98304`
 
-### Monitoring Performance Configuration
+#### Monitoring Performance Configuration
 
 After tuning performance settings, monitor these key metrics:
 
@@ -345,7 +383,7 @@ After tuning performance settings, monitor these key metrics:
 - `mermin_channel_size` / `mermin_channel_capacity` - Channel utilization
 - `mermin_pipeline_duration_seconds` - Pipeline duration histogram
 
-See the [Internal Metrics](../internal-monitoring/internal-metrics.md) guide for complete Prometheus query examples.
+See the [Internal Metrics](../../internal-monitoring/internal-metrics.md) guide for complete Prometheus query examples.
 
 **Healthy indicators:**
 
@@ -354,9 +392,9 @@ See the [Internal Metrics](../internal-monitoring/internal-metrics.md) guide for
 - p95 processing latency < 10ms
 - IP index updates < 100ms
 
-## Next Steps
+### Next Steps
 
-- [**API**](api.md) and [**Metrics**](metrics.md): Configure health checks and monitoring
-- [**Network Interface Discovery**](references/network-interface-discovery.md): Select which interfaces to monitor
-- [**Flow Span Options**](span.md): Configure flow generation and timeouts
-- [**Configuration Examples**](examples.md): See complete configurations
+- [**API**](../api.md) and [**Metrics**](../metrics.md): Configure health checks and monitoring
+- [**Network Interface Discovery**](network-interface-discovery.md): Select which interfaces to monitor
+- [**Flow Span Options**](../span.md): Configure flow generation and timeouts
+- [**Configuration Examples**](../examples.md): See complete configurations

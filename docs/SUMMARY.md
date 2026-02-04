@@ -8,17 +8,12 @@
 ## Getting Started
 
 * [Quickstart Guide](getting-started/quickstart-guide.md)
-* [Agent Architecture](getting-started/agent-architecture.md)
-* [Security Considerations](getting-started/security-considerations.md)
+* [Integrate into Observability Backends](observability/backend-integrations.md "Backend Integrations")
 * [Attribute Reference](getting-started/attribute-reference.md)
-
-## Observability
-
-* [Backend Integrations](observability/backend-integrations.md)
 
 ## Deployment
 
-* [Overview](deployment/overview.md)
+* [Deployment Overview](deployment/overview.md "Overview")
 * [Kubernetes with Helm](deployment/kubernetes-helm.md)
 * [Cloud Platforms](deployment/cloud-platforms.md)
 * [Advanced Scenarios](deployment/advanced-scenarios.md)
@@ -33,42 +28,39 @@
 
 * [Configuration Overview](configuration/overview.md "Overview")
 * [Configuration Examples](configuration/examples.md "Examples")
-* [Configure Global Agent Options](configuration/global-options.md "Global Options")
-* [Configuration References](configuration/references/README.md "Configuration References")
-  * [Configure Network Interface Discovery](configuration/references/network-interface-discovery.md "Network Interface Discovery")
-  * [Configure the Network Packet Parser](configuration/references/network-packet-parser.md "Network Packet Parser")
-  * [Flow Span Producer](configuration/span.md)
-  * [OTLP Exporter](configuration/export-otlp.md)
-  * [Stdout Exporter](configuration/export-stdout.md)
-  * [Flow Span Kubernetes Attribution](configuration/attributes.md)
-  * [Kubernetes Owner Relations](configuration/owner-relations.md)
-  * [Kubernetes Informer Discovery](configuration/discovery-kubernetes-informer.md)
-  * [Kubernetes Selector Relations](configuration/selector-relations.md)
-  * [Agent Pipeline](configuration/pipeline.md)
-  * [Agent Pipeline Filters](configuration/filtering.md)
-  * [Internal API](configuration/api.md)
-  * [Internal Prometheus Metrics](configuration/metrics.md)
-  * [Internal Tracing](configuration/internal-tracing.md)
+* [Configuration Reference](configuration/reference/README.md "Configuration Reference")
+  * [Configure Discovery of Network Interfaces](configuration/reference/network-interface-discovery.md "Network Interface Discovery")
+  * [Configure Parsing of Network Packets](configuration/reference/network-packet-parser.md "Network Packet Parser")
+  * [Configure Producing of Flow Spans](configuration/span.md "Flow Span Producer")
+  * [Configure Filtering of Flow Spans](configuration/filtering.md "Flow Span Filters")
+  * [Configure OpenTelemetry OTLP Exporter](configuration/export-otlp.md "OpenTelemetry OTLP Exporter")
+  * [Configure OpenTelemetry Console Exporter](configuration/export-stdout.md "OpenTelemetry Console Exporter")
+  * [Configure Kubernetes Attribution of Flow Spans](configuration/attributes.md "Flow Span Kubernetes Attribution")
+  * [Configure Discovery of Kubernetes Informer](configuration/discovery-kubernetes-informer.md "Kubernetes Informer Discovery")
+  * [Configure Owner Relations of Kubernetes Resources](configuration/owner-relations.md "Kubernetes Owner Relations")
+  * [Configure Selector Relations of Kubernetes Resources](configuration/selector-relations.md "Kubernetes Selector Relations")
+  * [Configure Flow Processing Pipeline](configuration/pipeline.md "Flow Processing Pipeline")
+  * [Configure Internal Server](configuration/api.md "Internal Server")
+  * [Configure Internal Prometheus Metrics Server](configuration/metrics.md "Internal Prometheus Metrics")
+  * [Configure Internal Tracing Exporter](configuration/internal-tracing.md "Internal Tracing")
 
 ## Internal Monitoring
 
-* [Metrics](internal-monitoring/internal-metrics.md "Metrics")
+* [Internal Metrics](internal-monitoring/internal-metrics.md "Metrics")
+
+## Concepts
+
+* [Introduction to Flow Traces](spec/introductory-primer.md)
+* [Flow Trace Semantic Conventions](spec/semantic-conventions.md "Semantic Conventions")
+* [Mermin Agent Architecture](getting-started/agent-architecture.md "Agent Architecture")
+* [eBPF Security Considerations](getting-started/security-considerations.md)
 
 ## Troubleshooting
 
-* [Overview](troubleshooting/troubleshooting.md)
+* [Troubleshooting Overview](troubleshooting/troubleshooting.md "Overview")
 * [Deployment Issues](troubleshooting/deployment-issues.md)
 * [Interface Visibility and Traffic Decapsulation](troubleshooting/interface-visibility-and-traffic-decapsulation.md)
 * [Common eBPF Errors](troubleshooting/common-ebpf-errors.md)
-
-## Flow Trace Specification
-
-* [Introduction to Flow Traces](spec/introductory-primer.md)
-* [Semantic Conventions](spec/semantic-conventions.md)
-
-## Security
-
-* [Security Policy](SECURITY.md)
 
 ## Contributor Guide
 
@@ -77,3 +69,4 @@
 * [Debugging eBPF](contributor-guide/debugging-ebpf.md)
 * [Debugging Network](contributor-guide/debugging-network.md)
 * [Code of Conduct](CODE-OF-CONDUCT.md)
+* [Security Policy](SECURITY.md)

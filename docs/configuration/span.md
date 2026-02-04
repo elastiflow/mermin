@@ -1,4 +1,4 @@
-# Configure the Flow Span Producer
+# Configure Producing of Flow Spans
 
 Mermin groups captured packets into bidirectional flows and exports each flow as an OpenTelemetry span. The `span` block controls when flows are closed and when they emit records,
 plus Community ID hashing, trace ID correlation, and hostname resolution. Add a top-level `span { }` block in your [configuration file](overview.md); there are no CLI or environment overrides for span options.

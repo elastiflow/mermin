@@ -1,4 +1,4 @@
-# Configure the Internal Tracing Exporter
+# Configure Internal Tracing Exporter
 
 This page documents the `internal "traces"` configuration (config path: `internal.traces`), which controls how Mermin exports its own telemetry data for self-monitoring and debugging.
 Mermin accepts HCL or YAML; the examples below use HCL (see [Configuration Overview](overview.md#file-format) for format details).
@@ -385,7 +385,7 @@ Filter internal traces:
 
 ## Next Steps
 
-* [**Global Options**](global-options.md): Configure logging levels
+* [**Global Options**](reference/README.md#configure-global-agent-options): Configure logging levels
 * [**API**](api.md) and [**Metrics**](metrics.md): Monitor Mermin with Prometheus
 * [**Troubleshooting**](../troubleshooting/troubleshooting.md): Debug common issues
 * [**OTLP Exporter**](export-otlp.md): Configure trace export

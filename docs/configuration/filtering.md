@@ -1,4 +1,4 @@
-# Configure Agent Pipeline Filters
+# Configure Filtering of Flow Spans
 
 **Block:** `filter.source`/`filter.destination`/`filter.network`/`filter.flow`
 

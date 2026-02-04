@@ -1,4 +1,4 @@
-# Configure the OTLP Exporter
+# Configure OpenTelemetry OTLP Exporter
 
 This page documents the OpenTelemetry Protocol (OTLP) exporter configuration, which controls how Mermin exports flow
 records to your observability backend.
