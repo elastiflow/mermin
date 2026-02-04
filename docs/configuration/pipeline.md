@@ -173,7 +173,7 @@ pipeline {
 
 ## Next Steps
 
-- [**Configuration Overview**](configuration.md): Config file format and structure
+- [**Configuration Overview**](overview.md): Config file format and structure
 - [**Architecture**](../getting-started/agent-architecture.md): Data flow and eBPF programs
 - [**Span Options**](span.md): Flow timeouts and span generation
 - [**OTLP Exporter**](export-otlp.md): Export tuning and backpressure

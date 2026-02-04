@@ -1,7 +1,7 @@
 # Configure the Flow Span Producer
 
 Mermin groups captured packets into bidirectional flows and exports each flow as an OpenTelemetry span. The `span` block controls when flows are closed and when they emit records,
-plus Community ID hashing, trace ID correlation, and hostname resolution. Add a top-level `span { }` block in your [configuration file](configuration.md); there are no CLI or environment overrides for span options.
+plus Community ID hashing, trace ID correlation, and hostname resolution. Add a top-level `span { }` block in your [configuration file](overview.md); there are no CLI or environment overrides for span options.
 
 Flow semantics (how flows become OpenTelemetry spans and what attributes they carry) are in [Semantic Conventions](../spec/semantic-conventions.md) and [Attribute Reference](../getting-started/attribute-reference.md).
 
@@ -89,6 +89,6 @@ For high-throughput or memory-constrained nodes, use longer or shorter timeouts 
 
 ## Monitoring
 
-Flow and eBPF map metrics are in [Internal Metrics](../internal-monitoring/app-metrics.md): `mermin_flow_spans_active_total`, `mermin_flow_spans_created_total`, and `mermin_ebpf_map_size` / `mermin_ebpf_map_capacity` with `map="FLOW_STATS"`.
+Flow and eBPF map metrics are in [Internal Metrics](../internal-monitoring/internal-metrics.md): `mermin_flow_spans_active_total`, `mermin_flow_spans_created_total`, and `mermin_ebpf_map_size` / `mermin_ebpf_map_capacity` with `map="FLOW_STATS"`.
 If the flow table or memory grows without bound, lower timeouts or `max_record_interval`, or reduce tracked flows with [flow filters](filtering.md). If you need more headroom for legitimate load,
 increase `flow_capture.flow_stats_capacity` in [pipeline](pipeline.md).

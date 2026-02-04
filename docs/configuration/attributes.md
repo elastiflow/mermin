@@ -11,7 +11,7 @@ The `attributes` configuration has two main components:
 
 ## Configuration
 
-Mermin accepts HCL or YAML for the config file. The examples below use HCL; the same structure can be expressed in YAML (see [Configuration Overview](configuration.md#file-format)).
+Mermin accepts HCL or YAML for the config file. The examples below use HCL; the same structure can be expressed in YAML (see [Configuration Overview](overview.md#file-format)).
 
 ```hcl
 attributes "source" "k8s" {

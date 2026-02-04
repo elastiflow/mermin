@@ -306,6 +306,6 @@ Choose your deployment path:
 
 After deploying, configure Mermin for your environment:
 
-* [Configuration Overview](../configuration/configuration.md)
+* [Configuration Overview](../configuration/overview.md)
 * [OTLP Export Configuration](../configuration/export-otlp.md)
 * [Observability Backends](../observability/backend-integrations.md)

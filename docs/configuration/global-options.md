@@ -345,7 +345,7 @@ After tuning performance settings, monitor these key metrics:
 - `mermin_channel_size` / `mermin_channel_capacity` - Channel utilization
 - `mermin_pipeline_duration_seconds` - Pipeline duration histogram
 
-See the [Internal Metrics](../internal-monitoring/app-metrics.md) guide for complete Prometheus query examples.
+See the [Internal Metrics](../internal-monitoring/internal-metrics.md) guide for complete Prometheus query examples.
 
 **Healthy indicators:**
 

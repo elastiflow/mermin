@@ -1,4 +1,4 @@
-# Mermin Internal Metrics
+# Internal Metrics
 
 - [Metrics Endpoint](#metrics-endpoint)
 - [Metrics Reference](#metrics-reference)

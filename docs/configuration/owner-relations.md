@@ -1,7 +1,7 @@
 # Configure Kubernetes Owner Relations
 
 Owner relations control how Mermin walks Kubernetes owner references to enrich flows with workload controller metadata (Deployment, StatefulSet, etc.).
-Mermin accepts HCL or YAML for the config file; the examples below use HCL (see [Configuration Overview](configuration.md#file-format) for format details).
+Mermin accepts HCL or YAML for the config file; the examples below use HCL (see [Configuration Overview](overview.md#file-format) for format details).
 
 ## Overview
 

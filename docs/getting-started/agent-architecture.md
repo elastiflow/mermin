@@ -331,7 +331,7 @@ Now that you understand how Mermin generates Flow Traces, review the following g
 
 1. [**Deploy to Production**](../deployment/overview.md): Select the deployment model that best suits your needs with detailed guidance covering Kubernetes, cloud platforms, and bare metal Docker environments.
    Includes in-depth recommendations for resource allocation, network architecture, and security best practices.
-2. [**Configure Mermin**](../configuration/configuration.md): Customize Mermin for your environment by configuring network interface discovery, Kubernetes metadata enrichment, flow filtering, OTLP export, and other settings.
+2. [**Configure Mermin**](../configuration/overview.md): Customize Mermin for your environment by configuring network interface discovery, Kubernetes metadata enrichment, flow filtering, OTLP export, and other settings.
    Features support for auto-reload and flexible configuration precedence.
 3. [**Choose Your Backend**](../observability/backend-integrations.md): Send Flow Traces via OTLP to any compatible observability platform, including OpenTelemetry Collector, Elastic Stack, OpenSearch, Grafana Tempo, and Jaeger.
 4. [**Troubleshoot Issues**](../troubleshooting/troubleshooting.md): Diagnose deployment failures, eBPF errors, and traffic visibility issues using pod logs, health checks, metrics monitoring, and the `diagnose bpf` command.
