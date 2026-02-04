@@ -31,11 +31,11 @@
 
 ## Configuration
 
-* [Overview](configuration/overview.md "Configuration Overview")
-* [Examples](configuration/examples.md)
-* [Global Agent Options](configuration/global-options.md)
+* [Configuration Overview](configuration/overview.md "Overview")
+* [Configuration Examples](configuration/examples.md "Examples")
+* [Configure Global Agent Options](configuration/global-options.md "Global Options")
 * [Configuration References](configuration/configuration-references/README.md)
-  * [Network Interface Discovery](configuration/discovery-instrument.md)
+  * [Network Interface Discoveryd](configuration/discovery-instrument.md)
   * [Network Packet Parser](configuration/parser.md)
   * [Flow Span Producer](configuration/span.md)
   * [OTLP Exporter](configuration/export-otlp.md)
