@@ -75,12 +75,11 @@ Distributed tracing backend with native OTLP support and TraceQL query language.
 export "traces" {
   otlp = {
     endpoint = "http://tempo:4317"
-    protocol = "grpc"
   }
 }
 ```
 
-**Example:** Coming soon
+**Example:** Coming soon...
 
 ### Jaeger
 
@@ -94,7 +93,6 @@ Distributed tracing platform with native OTLP receiver.
 export "traces" {
   otlp = {
     endpoint = "http://jaeger-collector:4317"
-    protocol = "grpc"
   }
 }
 ```
@@ -103,7 +101,7 @@ export "traces" {
 
 ### Greptime Ingestion
 
-Greptime is a database supporting high-cardinality time series data that supports OTLP ingestion.
+Greptime is a database designed for high-cardinality time series data that supports OTLP ingestion.
 
 ```hcl
 export "traces" {
