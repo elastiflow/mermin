@@ -3,10 +3,10 @@
 ## Welcome
 
 * [Mermin Documentation](README.md "Introduction")
-* [Beta Program](welcome/beta-program.md)
 
 ## Getting Started
 
+* [Beta Program](welcome/beta-program.md)
 * [Quickstart Guide](getting-started/quickstart-guide.md)
 * [Integrate into Observability Backends](observability/backend-integrations.md "Backend Integrations")
 * [Attribute Reference](getting-started/attribute-reference.md)
