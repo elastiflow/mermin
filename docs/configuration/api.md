@@ -292,7 +292,8 @@ internal "metrics" {
 ## Next Steps
 
 * [**Metrics**](metrics.md): Configure Prometheus metrics server and endpoints
-* [**Global Options**](reference/README.md#configure-global-agent-options): Configure logging and performance
+* [**Global Options**](reference/README.md#configure-global-agent-options): Configure logging and shutdown behavior
+* [**Pipeline**](pipeline.md): Configure performance tuning and threading
 * [**Flow Span Options**](span.md): Tune flow generation
 * [**OTLP Exporter**](export-otlp.md): Configure flow export
 * [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose issues
