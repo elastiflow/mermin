@@ -102,7 +102,6 @@ impl DirectionInferrer {
         }
     }
 
-    /// Returns a clone of the listening ports map reference.
     pub fn listening_ports_map(
         &self,
     ) -> Arc<Mutex<EbpfHashMap<aya::maps::MapData, ListeningPortKey, u8>>> {
