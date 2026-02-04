@@ -658,7 +658,7 @@ discovery "instrument" {
 
 ## Next Steps
 
-* [**Parser Configuration**](configuration-references/network-packet-parser.md): Configure tunnel protocol detection
+* [**Parser Configuration**](references/network-packet-parser.md): Configure tunnel protocol detection
 * [**Flow Filtering**](filtering.md): Filter flows by interface name
 * [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose interface issues
 * [**Advanced Scenarios**](../deployment/advanced-scenarios.md): CNI-specific configurations
