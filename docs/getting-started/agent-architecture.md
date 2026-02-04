@@ -58,7 +58,7 @@ Mermin is deployed as a DaemonSet in Kubernetes, with one agent instance running
 
 ## Components
 
-Data pipeline overview, more details on the pipeline are documented in the [data-flow block](architecture.md#data-flow)
+Data pipeline overview, more details on the pipeline are documented in the [data-flow block](agent-architecture.md#data-flow)
 
 ```text
             <kernel space>

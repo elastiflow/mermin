@@ -38,7 +38,7 @@ Unlike traditional NetFlow or IPFIX, Flow Traces leverage the OpenTelemetry stan
 
 The fastest way to get started with Mermin is to deploy it to a local Kubernetes cluster using our quickstart guide:
 
-[**📚 Follow the Complete Quickstart Guide**](getting-started/quickstart.md)
+[**📚 Follow the Complete Quickstart Guide**](getting-started/quickstart-guide.md)
 
 Or deploy directly with Helm:
 
@@ -84,8 +84,8 @@ Once deployed, Mermin runs as a DaemonSet with one pod per node, automatically c
 
 This documentation is designed to help you successfully deploy, configure, and operate Mermin in your environment. You'll find:
 
-- [**Quick Start Guide**](getting-started/quickstart.md): Get Mermin running in minutes on a local Kubernetes cluster.
-- [**Architecture Overview**](getting-started/architecture.md): Understand how Mermin works and its data flow.
+- [**Quick Start Guide**](getting-started/quickstart-guide.md): Get Mermin running in minutes on a local Kubernetes cluster.
+- [**Architecture Overview**](getting-started/agent-architecture.md): Understand how Mermin works and its data flow.
 - [**Deployment Guides**](deployment/overview.md): Detailed instructions for various deployment scenarios (Kubernetes, cloud platforms, bare metal).
 - [**Configuration Reference**](configuration/configuration.md): Comprehensive documentation of all configuration options.
 - [**Observability Backends**](observability/backend-integrations.md): Understand how to send Flow Traces to Elastic, Grafana Tempo, Jaeger, and other OTLP-compatible platforms.
@@ -130,6 +130,6 @@ If you encounter issues or have questions:
 
 ## Next Steps
 
-Ready to get started? Follow our [**Quick Start Guide**](getting-started/quickstart.md) to deploy Mermin on a local Kubernetes cluster in minutes.
+Ready to get started? Follow our [**Quick Start Guide**](getting-started/quickstart-guide.md) to deploy Mermin on a local Kubernetes cluster in minutes.
 
 For production deployments, review the [**Deployment Overview**](deployment/overview.md) to understand your deployment options and best practices.

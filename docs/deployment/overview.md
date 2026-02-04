@@ -263,7 +263,7 @@ spec:
 
 Before deploying Mermin to production:
 
-* [ ] Review [Architecture](../getting-started/architecture.md) to understand how Mermin works
+* [ ] Review [Architecture](../getting-started/agent-architecture.md) to understand how Mermin works
 * [ ] Choose appropriate [deployment method](#deployment-options)
 * [ ] Plan [resource allocation](#resource-requirements)
 * [ ] Configure [network interfaces](../configuration/discovery-instrument.md)
