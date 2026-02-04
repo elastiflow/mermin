@@ -1,9 +1,4 @@
 MD013:
   line_length: 240
-MD025: false
 MD033:
-  allowed_elements: [
-    "b",
-    "summary",
-    "details",
-  ]
+  allowed_elements: ["b", "summary", "details"]

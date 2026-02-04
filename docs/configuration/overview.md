@@ -160,15 +160,15 @@ Filter flows by address, port, transport, type, interface, and other dimensions.
 - `connection_state`
 - `ip_dscp_name`, `ip_ecn_name`, `ip_ttl`, `ip_flow_label`
 - `icmp_type_name`, `icmp_code_name`
-- `tcp_flags`
+- `tcp_flags_tags`
 
 Example:
 
 ```hcl
 filter "source" {
-  address   = { match = "10.0.0.0/8", not_match = "" }
-  port      = { match = "80,443", not_match = "" }
-  transport = { match = "tcp", not_match = "" }
+  address   = { match = ["10.0.0.0/8"] }
+  port      = { match = ["80", "443"] }
+  transport = { match = ["tcp"] }
 }
 ```
 

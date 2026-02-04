@@ -340,62 +340,62 @@ impl Conf {
                 );
 
                 if let Some(ref address) = filter_opts.address
-                    && (!address.match_glob.is_empty() || !address.not_match_glob.is_empty())
+                    && (!address.match_list.is_empty() || !address.not_match_list.is_empty())
                 {
                     debug!(
                         event.name = "config.filter.address",
                         filter.name = %filter_name,
-                        match = %address.match_glob,
-                        not_match = %address.not_match_glob,
+                        match = ?address.match_list,
+                        not_match = ?address.not_match_list,
                         "address filter configuration"
                     );
                 }
 
                 if let Some(ref port) = filter_opts.port
-                    && (!port.match_glob.is_empty() || !port.not_match_glob.is_empty())
+                    && (!port.match_list.is_empty() || !port.not_match_list.is_empty())
                 {
                     debug!(
                         event.name = "config.filter.port",
                         filter.name = %filter_name,
-                        match = %port.match_glob,
-                        not_match = %port.not_match_glob,
+                        match = ?port.match_list,
+                        not_match = ?port.not_match_list,
                         "port filter configuration"
                     );
                 }
 
                 if let Some(ref transport) = filter_opts.transport
-                    && (!transport.match_glob.is_empty() || !transport.not_match_glob.is_empty())
+                    && (!transport.match_list.is_empty() || !transport.not_match_list.is_empty())
                 {
                     debug!(
                         event.name = "config.filter.transport",
                         filter.name = %filter_name,
-                        match = %transport.match_glob,
-                        not_match = %transport.not_match_glob,
+                        match = ?transport.match_list,
+                        not_match = ?transport.not_match_list,
                         "transport filter configuration"
                     );
                 }
 
                 if let Some(ref type_) = filter_opts.type_
-                    && (!type_.match_glob.is_empty() || !type_.not_match_glob.is_empty())
+                    && (!type_.match_list.is_empty() || !type_.not_match_list.is_empty())
                 {
                     debug!(
                         event.name = "config.filter.type",
                         filter.name = %filter_name,
-                        match = %type_.match_glob,
-                        not_match = %type_.not_match_glob,
+                        match = ?type_.match_list,
+                        not_match = ?type_.not_match_list,
                         "type filter configuration"
                     );
                 }
 
                 if let Some(ref interface_name) = filter_opts.interface_name
-                    && (!interface_name.match_glob.is_empty()
-                        || !interface_name.not_match_glob.is_empty())
+                    && (!interface_name.match_list.is_empty()
+                        || !interface_name.not_match_list.is_empty())
                 {
                     debug!(
                         event.name = "config.filter.interface_name",
                         filter.name = %filter_name,
-                        match = %interface_name.match_glob,
-                        not_match = %interface_name.not_match_glob,
+                        match = ?interface_name.match_list,
+                        not_match = ?interface_name.not_match_list,
                         "interface_name filter configuration"
                     );
                 }

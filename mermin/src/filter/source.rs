@@ -53,7 +53,7 @@ struct CompiledRules {
     ip_flow_label: Option<CompiledRuleSet<HashSet<u32>>>,
     icmp_type_name: Option<CompiledRuleSet<GlobSet>>,
     icmp_code_name: Option<CompiledRuleSet<GlobSet>>,
-    tcp_flags: Option<CompiledRuleSet<GlobSet>>,
+    tcp_flags_tags: Option<CompiledRuleSet<GlobSet>>,
 }
 
 /// A generic, pre-compiled set of rules for any filterable type.
@@ -70,16 +70,11 @@ impl CompiledRules {
         };
 
         let build_glob_set = |pair: &FilteringPair| -> CompiledRuleSet<GlobSet> {
-            let build = |s: &str| -> GlobSet {
-                if s.is_empty() {
-                    // Empty builder can never fail
-                    return GlobSetBuilder::new()
-                        .build()
-                        .expect("empty globset build should never fail");
-                }
+            let build = |list: &[String]| -> GlobSet {
                 let mut builder = GlobSetBuilder::new();
-                for part in s.split(',') {
-                    match Glob::new(part.trim()) {
+                for part in list {
+                    let normalized_part = part.trim().to_lowercase();
+                    match Glob::new(&normalized_part) {
                         Ok(glob) => {
                             builder.add(glob);
                         }
@@ -106,8 +101,8 @@ impl CompiledRules {
             };
 
             CompiledRuleSet {
-                match_rules: build(&pair.match_glob),
-                not_match_rules: build(&pair.not_match_glob),
+                match_rules: build(&pair.match_list),
+                not_match_rules: build(&pair.not_match_list),
             }
         };
 
@@ -117,15 +112,15 @@ impl CompiledRules {
             <T as FromStr>::Err: std::fmt::Debug,
         {
             CompiledRuleSet {
-                match_rules: build_numeric_set::<T>(&pair.match_glob),
-                not_match_rules: build_numeric_set::<T>(&pair.not_match_glob),
+                match_rules: build_numeric_set::<T>(&pair.match_list),
+                not_match_rules: build_numeric_set::<T>(&pair.not_match_list),
             }
         }
 
         Self {
             address: opts.address.as_ref().map(|pair| CompiledRuleSet {
-                match_rules: build_ip_network_table(&pair.match_glob),
-                not_match_rules: build_ip_network_table(&pair.not_match_glob),
+                match_rules: build_ip_network_table(&pair.match_list),
+                not_match_rules: build_ip_network_table(&pair.not_match_list),
             }),
             port: opts.port.as_ref().map(build_numeric_pair::<u16>),
             transport: opts.transport.as_ref().map(build_glob_set),
@@ -140,31 +135,26 @@ impl CompiledRules {
             ip_flow_label: opts.ip_flow_label.as_ref().map(build_numeric_pair::<u32>),
             icmp_type_name: opts.icmp_type_name.as_ref().map(build_glob_set),
             icmp_code_name: opts.icmp_code_name.as_ref().map(build_glob_set),
-            tcp_flags: opts.tcp_flags.as_ref().map(build_glob_set),
+            tcp_flags_tags: opts.tcp_flags_tags.as_ref().map(build_glob_set),
         }
     }
 }
 
-/// Parses a comma-separated string of CIDRs, IPs, OR Wildcards into an IpNetworkTable.
+/// Parses a comma-separated string of CIDRs or IPs into an IpNetworkTable.
 /// Supports:
 /// - CIDR: "192.168.1.0/24"
 /// - IP: "192.168.1.1" (implies /32)
-/// - Wildcard: "192.168.1.*" (implies /24), "10.*" (implies /8)
-fn build_ip_network_table(s: &str) -> IpNetworkTable<()> {
+fn build_ip_network_table(list: &[String]) -> IpNetworkTable<()> {
     let mut table = IpNetworkTable::new();
-    if s.is_empty() {
-        return table;
-    }
-    for part in s.split(',') {
-        let part = part.trim();
-        if part.is_empty() {
+    for item in list {
+        let item = item.trim();
+        if item.is_empty() {
             continue;
         }
-        let network = part
+        let network = item
             .parse::<IpNetwork>()
             .ok()
-            .or_else(|| part.parse::<IpAddr>().ok().map(IpNetwork::from))
-            .or_else(|| parse_ipv4_wildcard(part));
+            .or_else(|| item.parse::<IpAddr>().ok().map(IpNetwork::from));
 
         match network {
             Some(net) => {
@@ -173,8 +163,8 @@ fn build_ip_network_table(s: &str) -> IpNetworkTable<()> {
             None => {
                 warn!(
                     event_name = "filter.cidr_parse_failed",
-                    input = %part,
-                    "invalid cidr, ip, or wildcard pattern in filter config, skipping."
+                    input = %item,
+                    "invalid cidr or ip pattern in filter config, skipping."
                 );
             }
         }
@@ -182,57 +172,22 @@ fn build_ip_network_table(s: &str) -> IpNetworkTable<()> {
     table
 }
 
-/// Helper to convert "192.168.*" -> "192.168.0.0/16"
-fn parse_ipv4_wildcard(s: &str) -> Option<IpNetwork> {
-    if !s.contains('*') || s.contains(':') {
-        return None;
-    }
-
-    let parts: Vec<&str> = s.split('.').collect();
-    if parts.len() != 4 {
-        return None;
-    }
-
-    let mut octets = [0u8; 4];
-    let mut prefix_len = 0;
-    let mut wildcard_seen = false;
-
-    for (i, part) in parts.iter().enumerate() {
-        if *part == "*" {
-            wildcard_seen = true;
-        } else if wildcard_seen {
-            return None;
-        } else {
-            let octet = part.parse::<u8>().ok()?;
-            octets[i] = octet;
-            prefix_len += 8;
-        }
-    }
-
-    let ip = IpAddr::from(octets);
-    IpNetwork::new(ip, prefix_len).ok()
-}
-
-/// Parses a comma-separated string of numbers and ranges into a HashSet.
-/// e.g., "80, 443, 8000-8002" -> {80, 443, 8000, 8001, 8002}
-fn build_numeric_set<T>(s: &str) -> HashSet<T>
+/// Parses a comma-separated string of numbers into a HashSet.
+/// e.g., "80, 443, 8000" -> {80, 443, 8000}
+fn build_numeric_set<T>(list: &[String]) -> HashSet<T>
 where
     T: PrimInt + FromStr + std::hash::Hash + Eq,
     <T as FromStr>::Err: std::fmt::Debug,
 {
     let mut set = HashSet::new();
-    if s.is_empty() {
-        return set;
-    }
-
-    for part in s.split(',') {
-        let part = part.trim();
-        if let Some((start_str, end_str)) = part.split_once('-') {
+    for item in list {
+        let item = item.trim();
+        if let Some((start_str, end_str)) = item.split_once('-') {
             if let (Ok(start), Ok(end)) = (start_str.parse::<T>(), end_str.parse::<T>()) {
                 if start > end {
                     warn!(
                         event_name = "filter.range_invalid",
-                        range = %part,
+                        range = %item,
                         "invalid numeric range (start > end) in filter config, skipping."
                     );
                     continue;
@@ -243,17 +198,17 @@ where
             } else {
                 warn!(
                     event_name = "filter.range_parse_failed",
-                    range = %part,
+                    range = %item,
                     "invalid numeric range in filter config, skipping."
                 );
             }
-        } else if let Ok(val) = part.parse::<T>() {
+        } else if let Ok(val) = item.parse::<T>() {
             set.insert(val);
         } else {
             warn!(
                 event_name = "filter.value_parse_failed",
-                value = %part,
-                "invalid numeric value in filter config, skipping."
+                value = %item,
+                "invalid numeric value in filter config (wildcards not supported), skipping."
             );
         }
     }
@@ -448,7 +403,7 @@ impl PacketFilter {
         if flow_key.protocol == IpProto::Tcp
             && let Some(tcp) = tcp_stats
         {
-            if let Some(rules) = &self.flow.tcp_flags {
+            if let Some(rules) = &self.flow.tcp_flags_tags {
                 let flags_vec = TcpFlags::flags_from_bits(tcp.tcp_flags);
                 // Check each flag individually against the patterns
                 // This allows patterns like "syn,ack" to match flows with any of those flags
@@ -616,7 +571,11 @@ mod tests {
 
     #[test]
     fn test_parse_ports() {
-        let hash_set = build_numeric_set::<u16>("80, 443, 8000-8002");
+        let hash_set = build_numeric_set::<u16>(&[
+            "80".to_string(),
+            "443".to_string(),
+            "8000-8002".to_string(),
+        ]);
         assert!(hash_set.contains(&80));
         assert!(hash_set.contains(&443));
         assert!(hash_set.contains(&8000));
@@ -628,7 +587,7 @@ mod tests {
 
     #[test]
     fn test_parse_cidrs_and_ips() {
-        let table = build_ip_network_table("192.168.1.0/24, 10.0.0.1");
+        let table = build_ip_network_table(&["192.168.1.0/24".to_string(), "10.0.0.1".to_string()]);
         assert!(
             table
                 .longest_match("192.168.1.50".parse::<IpAddr>().unwrap())
@@ -643,35 +602,6 @@ mod tests {
             table
                 .longest_match("10.0.0.2".parse::<IpAddr>().unwrap())
                 .is_none()
-        );
-    }
-
-    #[test]
-    fn test_parse_wildcards() {
-        // "192.168.1.*" -> 192.168.1.0/24
-        // "10.*.*.*"       -> 10.0.0.0/8
-        // "172.16.0.1" -> 172.16.0.1/32
-        let table = build_ip_network_table("192.168.1.*, 10.*.*.*, 172.16.0.1");
-
-        assert!(
-            table
-                .longest_match("192.168.1.55".parse::<IpAddr>().unwrap())
-                .is_some()
-        );
-        assert!(
-            table
-                .longest_match("192.168.2.55".parse::<IpAddr>().unwrap())
-                .is_none()
-        );
-        assert!(
-            table
-                .longest_match("10.1.2.3".parse::<IpAddr>().unwrap())
-                .is_some()
-        );
-        assert!(
-            table
-                .longest_match("172.16.0.1".parse::<IpAddr>().unwrap())
-                .is_some()
         );
     }
 
@@ -714,7 +644,7 @@ mod tests {
             "destination".to_string(),
             FilteringOptions {
                 port: Some(FilteringPair {
-                    match_glob: "80,443".to_string(),
+                    match_list: vec!["80".to_string(), "443".to_string()],
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -767,7 +697,7 @@ mod tests {
             "source".to_string(),
             FilteringOptions {
                 address: Some(FilteringPair {
-                    not_match_glob: "10.0.0.0/8".to_string(),
+                    not_match_list: vec!["10.0.0.0/8".to_string()],
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -820,7 +750,7 @@ mod tests {
             "flow".to_string(),
             FilteringOptions {
                 ip_ttl: Some(FilteringPair {
-                    match_glob: "64".to_string(),
+                    match_list: vec!["64".to_string()],
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -872,7 +802,7 @@ mod tests {
             "flow".to_string(),
             FilteringOptions {
                 ip_dscp_name: Some(FilteringPair {
-                    match_glob: "46".to_string(), // EF (Expedited Forwarding)
+                    match_list: vec!["46".to_string()], // EF (Expedited Forwarding)
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -924,7 +854,7 @@ mod tests {
             "network".to_string(),
             FilteringOptions {
                 interface_mac: Some(FilteringPair {
-                    match_glob: "aa:bb:cc:*:ee:ff".to_string(),
+                    match_list: vec!["aa:bb:cc:*:ee:ff".to_string()],
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -976,7 +906,7 @@ mod tests {
             "flow".to_string(),
             FilteringOptions {
                 icmp_type_name: Some(FilteringPair {
-                    match_glob: "8".to_string(), // Echo Request
+                    match_list: vec!["8".to_string()], // Echo Request
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -1038,13 +968,13 @@ mod tests {
     }
 
     #[test]
-    fn test_filter_tcp_flags() {
+    fn test_filter_tcp_flags_tags() {
         let filter = build_filter(HashMap::from([(
             "flow".to_string(),
             FilteringOptions {
-                tcp_flags: Some(FilteringPair {
-                    match_glob: "syn,ack".to_string(),
-                    not_match_glob: "rst".to_string(),
+                tcp_flags_tags: Some(FilteringPair {
+                    match_list: vec!["syn".to_string(), "ack".to_string()],
+                    not_match_list: vec!["rst".to_string()],
                 }),
                 ..Default::default()
             },
@@ -1099,111 +1029,45 @@ mod tests {
     #[test]
     fn test_invalid_cidr_handling() {
         // Test that invalid CIDRs are gracefully skipped with warnings
+        // Wildcards like "10.*" are no longer supported for IPs and should be ignored
         let filter = build_filter(HashMap::from([(
             "source".to_string(),
             FilteringOptions {
                 address: Some(FilteringPair {
-                    match_glob: "192.168.1.0/24, invalid-cidr, 10.0.0.0/8".to_string(),
+                    match_list: vec!["192.168.1.0/24".to_string(), "10.*".to_string()],
                     ..Default::default()
                 }),
                 ..Default::default()
             },
         )]));
 
-        // Valid CIDR should still work
-        let flow_key_in_range = mock_flow_key(
+        let flow_stats = mock_flow_stats(1);
+
+        // Valid CIDR still matches
+        let flow_key_ok = mock_flow_key(
             "192.168.1.50".parse().unwrap(),
-            1234,
+            1,
             "8.8.8.8".parse().unwrap(),
-            53,
+            2,
             IpProto::Tcp,
         );
-        let flow_stats = mock_flow_stats(1);
-        let tcp_stats = mock_tcp_stats();
-        let icmp_stats = mock_icmp_stats();
         assert!(
             filter
-                .should_track_flow(
-                    &flow_key_in_range,
-                    &flow_stats,
-                    Some(&tcp_stats),
-                    Some(&icmp_stats)
-                )
+                .should_track_flow(&flow_key_ok, &flow_stats, None, None)
                 .unwrap()
         );
 
-        // invalid CIDR shouldn't cause panic or stop processing
-        let flow_key_out_range = mock_flow_key(
-            "172.16.0.1".parse().unwrap(),
-            1234,
+        // Wildcard "10.*" failed to parse, so this IP (which would have matched a wildcard) now fails
+        let flow_key_was_wildcard = mock_flow_key(
+            "10.1.1.1".parse().unwrap(),
+            1,
             "8.8.8.8".parse().unwrap(),
-            53,
+            2,
             IpProto::Tcp,
         );
         assert!(
             !filter
-                .should_track_flow(
-                    &flow_key_out_range,
-                    &flow_stats,
-                    Some(&tcp_stats),
-                    Some(&icmp_stats)
-                )
-                .unwrap()
-        );
-    }
-
-    #[test]
-    fn test_invalid_port_range_handling() {
-        // Test that invalid port ranges (start > end) are gracefully skipped
-        let filter = build_filter(HashMap::from([(
-            "destination".to_string(),
-            FilteringOptions {
-                port: Some(FilteringPair {
-                    match_glob: "80, 9000-8000, 443".to_string(), // invalid range
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        )]));
-
-        // Valid ports should still work
-        let flow_key_80 = mock_flow_key(
-            "10.1.1.1".parse().unwrap(),
-            1234,
-            "10.2.2.2".parse().unwrap(),
-            80,
-            IpProto::Tcp,
-        );
-        let flow_stats = mock_flow_stats(1);
-        let tcp_stats = mock_tcp_stats();
-        let icmp_stats = mock_icmp_stats();
-        assert!(
-            filter
-                .should_track_flow(
-                    &flow_key_80,
-                    &flow_stats,
-                    Some(&tcp_stats),
-                    Some(&icmp_stats)
-                )
-                .unwrap()
-        );
-
-        // Port in invalid range should not match
-        let flow_key_8500 = mock_flow_key(
-            "10.1.1.1".parse().unwrap(),
-            1234,
-            "10.2.2.2".parse().unwrap(),
-            8500,
-            IpProto::Tcp,
-        );
-        assert!(
-            !filter
-                .should_track_flow(
-                    &flow_key_8500,
-                    &flow_stats,
-                    Some(&tcp_stats),
-                    Some(&icmp_stats)
-                )
+                .should_track_flow(&flow_key_was_wildcard, &flow_stats, None, None)
                 .unwrap()
         );
     }
@@ -1238,7 +1102,12 @@ mod tests {
             "destination".to_string(),
             FilteringOptions {
                 port: Some(FilteringPair {
-                    match_glob: "80, abc, 443, xyz-999".to_string(),
+                    match_list: vec![
+                        "80".to_string(),
+                        "abc".to_string(),
+                        "443".to_string(),
+                        "xyz-999".to_string(),
+                    ],
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -1270,7 +1139,11 @@ mod tests {
             "network".to_string(),
             FilteringOptions {
                 transport: Some(FilteringPair {
-                    match_glob: "tcp, [invalid-glob, udp".to_string(),
+                    match_list: vec![
+                        "tcp".to_string(),
+                        "[invalid-glob".to_string(),
+                        "udp".to_string(),
+                    ],
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -1315,6 +1188,103 @@ mod tests {
                     Some(&icmp_stats)
                 )
                 .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_advanced_glob_matching() {
+        let filter = build_filter(HashMap::from([(
+            "network".to_string(),
+            FilteringOptions {
+                transport: Some(FilteringPair {
+                    match_list: vec!["t[bc]p".to_string()], // Matches 'tcp' or 'tbp'
+                    ..Default::default()
+                }),
+                interface_name: Some(FilteringPair {
+                    match_list: vec!["eth[0-9]".to_string(), "lo".to_string()],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )]));
+
+        let tcp_stats = mock_tcp_stats();
+        let icmp_stats = mock_icmp_stats();
+
+        let flow_tcp = mock_flow_key(
+            "10.1.1.1".parse().unwrap(),
+            1234,
+            "10.2.2.2".parse().unwrap(),
+            80,
+            IpProto::Tcp,
+        );
+        let stats_eth0 = mock_flow_stats(1);
+
+        assert!(
+            filter
+                .should_track_flow(&flow_tcp, &stats_eth0, Some(&tcp_stats), Some(&icmp_stats))
+                .unwrap(),
+            "t[bc]p should match 'tcp'"
+        );
+
+        assert!(
+            filter
+                .should_track_flow(&flow_tcp, &stats_eth0, Some(&tcp_stats), Some(&icmp_stats))
+                .unwrap(),
+            "eth0 should match eth[0-9]"
+        );
+
+        let stats_lo = mock_flow_stats(2);
+        assert!(
+            filter
+                .should_track_flow(&flow_tcp, &stats_lo, Some(&tcp_stats), Some(&icmp_stats))
+                .unwrap(),
+            "Multiple list items should act like brace expansion"
+        );
+
+        let flow_udp = mock_flow_key(
+            "10.1.1.1".parse().unwrap(),
+            1234,
+            "10.2.2.2".parse().unwrap(),
+            80,
+            IpProto::Udp,
+        );
+        assert!(
+            !filter
+                .should_track_flow(&flow_udp, &stats_eth0, Some(&tcp_stats), Some(&icmp_stats))
+                .unwrap(),
+            "udp should NOT match t[bc]p"
+        );
+    }
+
+    #[test]
+    fn test_glob_case_insensitivity() {
+        let filter = build_filter(HashMap::from([(
+            "network".to_string(),
+            FilteringOptions {
+                transport: Some(FilteringPair {
+                    match_list: vec!["TCP".to_string()], // Uppercase in config
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )]));
+
+        let flow_key = mock_flow_key(
+            "1.1.1.1".parse().unwrap(),
+            1,
+            "2.2.2.2".parse().unwrap(),
+            2,
+            IpProto::Tcp,
+        );
+        let stats = mock_flow_stats(1);
+        let tcp_stats = mock_tcp_stats();
+
+        assert!(
+            filter
+                .should_track_flow(&flow_key, &stats, Some(&tcp_stats), None)
+                .unwrap(),
+            "Filters should be case-insensitive (config TCP matches flow tcp)"
         );
     }
 }
