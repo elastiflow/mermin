@@ -1,7 +1,10 @@
 # Configure Internal Prometheus Metrics Server
 
+**Block:** `internal.metrics`
+
 Mermin provides Prometheus metrics HTTP endpoints (default port `10250`). This page documents metrics configuration.
-Endpoints available:
+
+**Endpoints available:**
 
 - `/metrics` - All metrics (standard + debug if `internal.metrics.debug_metrics_enabled` is `true`)
 - `/metrics/standard` - Standard metrics only (aggregated, no high-cardinality labels)
@@ -10,159 +13,211 @@ Endpoints available:
 
 ## Configuration
 
-Full configuration example may be found in the [Default Config](https://github.com/elastiflow/mermin/tree/beta/charts/mermin/config/default/config.hcl)
+A full configuration example may be found in the [Default Configuration](./default/config.hcl).
 
-## Configuration Options
+### `internal.metrics` block
 
-### `enabled`
+- `enabled` attribute
 
-**Type:** Boolean **Default:** `true`
+  Enable or disable the metrics server.
 
-Enable or disable the metrics server.
+  **Type:** Boolean
 
-**Example:**
+  **Default:** `true`
 
-```hcl
-internal "metrics" {
-  enabled = false  # Disable metrics
-}
-```
+  **Example:** Disable metrics
 
-### `listen_address`
+  ```hcl
+  internal "metrics" {
+    enabled = false
+  }
+  ```
 
-**Type:** String (IP address) **Default:** `"0.0.0.0"`
+- `listen_address` attribute
 
-IP address the metrics server binds to.
+  IP address the metrics server binds to.
 
-**Example:**
+  **Type:** String (IP address)
 
-```hcl
-internal "metrics" {
-  listen_address = "127.0.0.1"  # Localhost only
-}
-```
+  **Default:** `"0.0.0.0"`
 
-### `port`
+  **Example:** Listen on localhost only
 
-**Type:** Integer **Default:** `10250`
+  ```hcl
+  internal "metrics" {
+    listen_address = "127.0.0.1"
+  }
+  ```
 
-TCP port the metrics server listens on.
+- `port` attribute
 
-**Example:**
+  TCP port the metrics server listens on.
 
-```hcl
-internal "metrics" {
-  port = 9090  # Custom port
-}
-```
+  **Type:** Integer
 
-{% hint style="info" %}
-Port 10250 is chosen to align with kubelet metrics port, making it familiar to Kubernetes administrators.
-{% endhint %}
+  **Default:** `10250`
 
-### `debug_metrics_enabled`
+  {% hint style="info" %}
+  Port 10250 is chosen to align with kubelet metrics port, making it familiar to Kubernetes administrators.
+  {% endhint %}
 
-**Type:** Boolean **Default:** `false`
+  **Example:** Custom port
 
-Enable debug metrics
+  ```hcl
+  internal "metrics" {
+    port = 9090
+  }
+  ```
 
-{% hint style="warning" %}
-Enabling debug metrics can cause significant memory growth in production
-{% endhint %}
+- `debug_metrics_enabled` attribute
 
-**Example:**
+  Enable debug metrics.
 
-```hcl
-internal "metrics" {
-  debug_metrics_enabled = true  # Enable debug metrics
-}
-```
+  **Type:** Boolean
 
-### `stale_metric_ttl`
+  **Default:** `false`
 
-**Type:** String (duration) **Default:** `5m`
+  {% hint style="warning" %}
+  Enabling debug metrics can cause significant memory growth in production.
+  {% endhint %}
 
-Time-to-live for stale metrics after resource deletion. `0s` applies immediate cleanup
+  **Example:** Enable debug metrics
 
-{% hint style="info" %}
-Only applies when debug_metrics_enabled
-{% endhint %}
+  ```hcl
+  internal "metrics" {
+    debug_metrics_enabled = true
+  }
+  ```
 
-**Example:**
+- `stale_metric_ttl` attribute
 
-```hcl
-internal "metrics" {
-  stale_metric_ttl = "1m" # Cleanup after 1 minute
-}
-```
+  Time-to-live for stale metrics after resource deletion. `0s` applies immediate cleanup.
 
-## Histogram Bucket Configuration
+  **Type:** String (duration)
 
-Mermin provides several histogram metrics that track distributions of values (durations, batch sizes, etc.). By default, these metrics use pre-configured bucket sizes optimized for typical workloads.
-You can customize these bucket sizes inside a `histogram_buckets` block, with options named after the metric they configure.
+  **Default:** `"5m"`
+
+  {% hint style="info" %}
+  Only applies when `debug_metrics_enabled` is `true`.
+  {% endhint %}
+
+  **Example:** Cleanup after 1 minute
+
+  ```hcl
+  internal "metrics" {
+    stale_metric_ttl = "1m"
+  }
+  ```
 
 ### `histogram_buckets` block
 
 Optional subsection for histogram bucket overrides. Omit the block to use default buckets for all histograms. Each key is the full metric name.
 
-#### `mermin_pipeline_duration_seconds`
+Mermin provides several histogram metrics that track distributions of values (durations, batch sizes, etc.). By default, these metrics use pre-configured bucket sizes optimized for typical workloads.
+You can customize these bucket sizes inside a `histogram_buckets` block.
 
-**Type:** Array of numbers **Default:** `[0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0]`
+- `mermin_pipeline_duration_seconds` attribute
 
-Custom buckets for the `mermin_pipeline_duration_seconds` histogram metric. This metric tracks processing duration by pipeline stage (eBPF ring buffer processing, Kubernetes decoration, export operations).
+  Custom buckets for the `mermin_pipeline_duration_seconds` histogram metric. This metric tracks processing duration by pipeline stage (eBPF ring buffer processing, Kubernetes decoration, export operations).
 
-The default buckets cover a range from 10μs to 60s to capture both fast operations (eBPF ring buffer processing, typically microseconds to milliseconds) and slow operations (export, which can take seconds).
+  **Type:** Array of numbers
 
-#### `mermin_export_batch_size`
+  **Default:** `[0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0]`
 
-**Type:** Array of numbers **Default:** `[1, 10, 50, 100, 250, 500, 1000]`
+  The default buckets cover a range from 10μs to 60s to capture both fast operations (eBPF ring buffer processing, typically microseconds to milliseconds) and slow operations (export, which can take seconds).
 
-Custom buckets for the `mermin_export_batch_size` histogram metric. This metric tracks the number of spans per export batch.
+  **Example:** Focus on sub-second operations
 
-The default buckets cover batch sizes from 1 to 1000 spans, which is suitable for most deployments.
-
-#### `mermin_k8s_watcher_ip_index_update_duration_seconds`
-
-**Type:** Array of numbers **Default:** `[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0]`
-
-Custom buckets for the `mermin_k8s_watcher_ip_index_update_duration_seconds` histogram metric. This metric tracks the duration of Kubernetes IP index updates.
-
-The default buckets cover durations from 1ms to 1s, which is typical for IP index updates.
-
-#### `mermin_taskmanager_shutdown_duration_seconds`
-
-**Type:** Array of numbers **Default:** `[0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0]`
-
-**Only present when debug metrics are enabled** (`internal.metrics.debug_metrics_enabled = true`). Custom buckets for the `mermin_taskmanager_shutdown_duration_seconds` histogram metric. This metric tracks the duration of shutdown operations.
-
-The default buckets cover durations from 100ms to 120s, which accommodates both quick shutdowns and longer graceful shutdowns.
-
-**Example:**
-
-```hcl
-internal "metrics" {
-  # Customize buckets for pipeline duration to focus on sub-second operations
-  histogram_buckets {
-    mermin_pipeline_duration_seconds = [0.0001, 0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0]
+  ```hcl
+  internal "metrics" {
+    histogram_buckets {
+      mermin_pipeline_duration_seconds = [0.0001, 0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0]
+    }
   }
-}
-```
+  ```
 
-**Example with multiple buckets:**
+- `mermin_export_batch_size` attribute
 
-```hcl
-internal "metrics" {
-  debug_metrics_enabled = true
-  histogram_buckets {
-    mermin_pipeline_duration_seconds                        = [0.0001, 0.001, 0.01, 0.1, 1.0, 5.0, 10.0]
-    mermin_export_batch_size                                = [10, 50, 100, 500, 1000]
-    mermin_k8s_watcher_ip_index_update_duration_seconds     = [0.001, 0.01, 0.1, 0.5, 1.0]
-    mermin_taskmanager_shutdown_duration_seconds            = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
+  Custom buckets for the `mermin_export_batch_size` histogram metric. This metric tracks the number of spans per export batch.
+
+  **Type:** Array of numbers
+
+  **Default:** `[1, 10, 50, 100, 250, 500, 1000]`
+
+  The default buckets cover batch sizes from 1 to 1000 spans, which is suitable for most deployments.
+
+  **Example:** Custom batch size buckets
+
+  ```hcl
+  internal "metrics" {
+    histogram_buckets {
+      mermin_export_batch_size = [10, 50, 100, 500, 1000]
+    }
   }
-}
-```
+  ```
 
-### Bucket Configuration Best Practices
+- `mermin_k8s_watcher_ip_index_update_duration_seconds` attribute
+
+  Custom buckets for the `mermin_k8s_watcher_ip_index_update_duration_seconds` histogram metric. This metric tracks the duration of Kubernetes IP index updates.
+
+  **Type:** Array of numbers
+
+  **Default:** `[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0]`
+
+  The default buckets cover durations from 1ms to 1s, which is typical for IP index updates.
+
+  **Example:** Custom IP index update duration buckets
+
+  ```hcl
+  internal "metrics" {
+    histogram_buckets {
+      mermin_k8s_watcher_ip_index_update_duration_seconds = [0.001, 0.01, 0.1, 0.5, 1.0]
+    }
+  }
+  ```
+
+- `mermin_taskmanager_shutdown_duration_seconds` attribute
+
+  Custom buckets for the `mermin_taskmanager_shutdown_duration_seconds` histogram metric. This metric tracks the duration of shutdown operations.
+
+  **Type:** Array of numbers
+
+  **Default:** `[0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0]`
+
+  {% hint style="info" %}
+  Only present when debug metrics are enabled (`internal.metrics.debug_metrics_enabled = true`).
+  {% endhint %}
+
+  The default buckets cover durations from 100ms to 120s, which accommodates both quick shutdowns and longer graceful shutdowns.
+
+  **Examples:**
+
+  - Custom shutdown duration buckets
+
+    ```hcl
+    internal "metrics" {
+      debug_metrics_enabled = true
+      histogram_buckets {
+        mermin_taskmanager_shutdown_duration_seconds = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
+      }
+    }
+    ```
+
+  - Multiple bucket configurations
+
+    ```hcl
+    internal "metrics" {
+      debug_metrics_enabled = true
+      histogram_buckets {
+        mermin_pipeline_duration_seconds                        = [0.0001, 0.001, 0.01, 0.1, 1.0, 5.0, 10.0]
+        mermin_export_batch_size                                = [10, 50, 100, 500, 1000]
+        mermin_k8s_watcher_ip_index_update_duration_seconds     = [0.001, 0.01, 0.1, 0.5, 1.0]
+        mermin_taskmanager_shutdown_duration_seconds            = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
+      }
+    }
+    ```
+
+#### Bucket Configuration Best Practices
 
 1. **Bucket boundaries should be sorted**: Buckets must be provided in ascending order. Prometheus will reject invalid configurations.
 
@@ -196,7 +251,7 @@ For production environments:
 4. Test manual scrape: `curl http://pod-ip:10250/metrics`
 5. Check network policies
 
-#### High Metrics Cardinality
+### High Metrics Cardinality
 
 **Symptoms:** Too many unique metric series
 
