@@ -183,7 +183,7 @@ kubectl logs -f -l app.kubernetes.io/name=mermin
 ## Next Steps
 
 1. **Choose your backend** from the options above
-2. **Review example configurations** in [`deployment/examples/`](../deployment/examples/)
-3. **Configure OTLP export** in your Mermin deployment - see [OTLP Exporter Configuration](../configuration/export-otlp.md)
-4. **Set up authentication and TLS** for production - see [OTLP Exporter Configuration](../configuration/export-otlp.md)
+2. **Review example configurations** in [`deployment/examples`](../deployment/examples/README.md)
+3. **Configure OTLP export** in your Mermin deployment – see [OTLP Exporter Configuration](../configuration/export-otlp.md)
+4. **Set up authentication and TLS** for production – see [OTLP Exporter Configuration](../configuration/export-otlp.md)
 5. **Create dashboards** to visualize Flow Traces in your chosen platform
