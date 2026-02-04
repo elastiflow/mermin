@@ -463,9 +463,6 @@ impl FlowSpanProducer {
                         let flow_event: FlowEvent =
                             unsafe { std::ptr::read_unaligned(item.as_ptr() as *const FlowEvent) };
 
-                        metrics::registry::EBPF_MAP_BYTES_TOTAL
-                            .with_label_values(&[EbpfMapName::FlowEvents.as_str()])
-                            .inc_by(flow_event.snaplen as u64);
                         metrics::registry::EBPF_MAP_OPS_TOTAL
                             .with_label_values(&[
                                 EbpfMapName::FlowEvents.as_str(),
@@ -975,9 +972,6 @@ impl FlowWorker {
                         EbpfMapStatus::Ok.as_str(),
                     ])
                     .inc();
-                metrics::registry::EBPF_MAP_BYTES_TOTAL
-                    .with_label_values(&[map_name.as_str()])
-                    .inc_by((std::mem::size_of::<FlowKey>() + std::mem::size_of::<V>()) as u64);
                 Ok(v)
             }
             Err(e) => {
@@ -1832,9 +1826,6 @@ async fn record_flow(
                     EbpfMapStatus::Ok.as_str(),
                 ])
                 .inc();
-            metrics::registry::EBPF_MAP_BYTES_TOTAL
-                .with_label_values(&[EbpfMapName::FlowStats.as_str()])
-                .inc_by((std::mem::size_of::<FlowKey>() + std::mem::size_of::<FlowStats>()) as u64);
             s
         }
         Err(e) => {
@@ -1874,9 +1865,6 @@ async fn record_flow(
                     EbpfMapStatus::Ok.as_str(),
                 ])
                 .inc();
-            metrics::registry::EBPF_MAP_BYTES_TOTAL
-                .with_label_values(&[EbpfMapName::TcpStats.as_str()])
-                .inc_by((std::mem::size_of::<FlowKey>() + std::mem::size_of::<TcpStats>()) as u64);
             tcp_stats = Some(ts);
         }
     }
@@ -1892,9 +1880,6 @@ async fn record_flow(
                     EbpfMapStatus::Ok.as_str(),
                 ])
                 .inc();
-            metrics::registry::EBPF_MAP_BYTES_TOTAL
-                .with_label_values(&[EbpfMapName::IcmpStats.as_str()])
-                .inc_by((std::mem::size_of::<FlowKey>() + std::mem::size_of::<IcmpStats>()) as u64);
             icmp_stats = Some(is);
         }
     }
@@ -2176,9 +2161,6 @@ async fn record_flow(
                     EbpfMapStatus::Ok.as_str(),
                 ])
                 .inc();
-            metrics::registry::EBPF_MAP_BYTES_TOTAL
-                .with_label_values(&[EbpfMapName::FlowStats.as_str()])
-                .inc_by((std::mem::size_of::<FlowKey>() + std::mem::size_of::<FlowStats>()) as u64);
 
             let mut updated_stats = stats;
             updated_stats.forward_metadata_seen = 0;
@@ -2272,9 +2254,6 @@ pub async fn timeout_and_remove_flow(
                     EbpfMapStatus::Ok.as_str(),
                 ])
                 .inc();
-            metrics::registry::EBPF_MAP_BYTES_TOTAL
-                .with_label_values(&[EbpfMapName::FlowStats.as_str()])
-                .inc_by((std::mem::size_of::<FlowKey>() + std::mem::size_of::<FlowStats>()) as u64);
             let end_time_nanos = stats.last_seen_ns + boot_time_offset;
             flow_span.end_time = UNIX_EPOCH + Duration::from_nanos(end_time_nanos);
         }
@@ -2533,13 +2512,6 @@ pub async fn orphan_scanner_task(
                                         EbpfMapStatus::Ok.as_str(),
                                     ])
                                     .inc();
-                                metrics::registry::EBPF_MAP_BYTES_TOTAL
-                                    .with_label_values(&[EbpfMapName::FlowStats.as_str()])
-                                    .inc_by(
-                                        (std::mem::size_of::<FlowKey>()
-                                            + std::mem::size_of::<FlowStats>())
-                                            as u64,
-                                    );
                                 let age_ns = current_boot_time_ns.saturating_sub(stats.last_seen_ns);
                                 age_ns > max_age_ns
                             }

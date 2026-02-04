@@ -181,12 +181,6 @@ impl DirectionInferrer {
                             EbpfMapStatus::Ok.as_str(),
                         ])
                         .inc();
-                    metrics::registry::EBPF_MAP_BYTES_TOTAL
-                        .with_label_values(&[EbpfMapName::ListeningPorts.as_str()])
-                        .inc_by(
-                            (std::mem::size_of::<ListeningPortKey>() + std::mem::size_of::<u8>())
-                                as u64,
-                        );
                     true
                 }
                 Err(e) => {
