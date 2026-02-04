@@ -463,9 +463,6 @@ impl FlowSpanProducer {
                         let flow_event: FlowEvent =
                             unsafe { std::ptr::read_unaligned(item.as_ptr() as *const FlowEvent) };
 
-                        metrics::registry::EBPF_MAP_BYTES_TOTAL
-                            .with_label_values(&[EbpfMapName::FlowEvents.as_str()])
-                            .inc_by(flow_event.snaplen as u64);
                         metrics::registry::EBPF_MAP_OPS_TOTAL
                             .with_label_values(&[
                                 EbpfMapName::FlowEvents.as_str(),
@@ -2157,6 +2154,14 @@ async fn record_flow(
     if let Some(ebpf_key) = ebpf_key {
         let mut map = flow_stats_map.lock().await;
         if let Ok(stats) = map.get(&ebpf_key, 0) {
+            metrics::registry::EBPF_MAP_OPS_TOTAL
+                .with_label_values(&[
+                    EbpfMapName::FlowStats.as_str(),
+                    EbpfMapOperation::Read.as_str(),
+                    EbpfMapStatus::Ok.as_str(),
+                ])
+                .inc();
+
             let mut updated_stats = stats;
             updated_stats.forward_metadata_seen = 0;
             updated_stats.reverse_metadata_seen = 0;
@@ -2500,6 +2505,13 @@ pub async fn orphan_scanner_task(
                         let map = flow_stats_map.lock().await;
                         match map.get(&key, 0) {
                             Ok(stats) => {
+                                metrics::registry::EBPF_MAP_OPS_TOTAL
+                                    .with_label_values(&[
+                                        EbpfMapName::FlowStats.as_str(),
+                                        EbpfMapOperation::Read.as_str(),
+                                        EbpfMapStatus::Ok.as_str(),
+                                    ])
+                                    .inc();
                                 let age_ns = current_boot_time_ns.saturating_sub(stats.last_seen_ns);
                                 age_ns > max_age_ns
                             }

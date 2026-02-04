@@ -51,11 +51,6 @@ Monitoring these is crucial for ensuring that Mermin's foundational data collect
 - `mermin_ebpf_bpf_fs_writable`
   *Type*: `gauge`
   *Description*: Whether /sys/fs/bpf is writable for TCX link pinning (1 = writable, 0 = not writable)
-- `mermin_ebpf_map_bytes_total`
-  *Type*: `counter`
-  *Description*: Total bytes processed through eBPF maps and ring buffers
-  *Labels*:
-  - `map`
 - `mermin_ebpf_map_capacity`
   *Type*: `gauge`
   *Description*: Maximum capacity of eBPF maps. For hash maps (FLOW_STATS, TCP_STATS, ICMP_STATS, LISTENING_PORTS) this is max entries. For ring buffers (FLOW_EVENTS) this is size in bytes.

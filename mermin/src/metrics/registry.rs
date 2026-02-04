@@ -159,15 +159,6 @@ lazy_static! {
             .subsystem("ebpf")
     ).expect("failed to create ebpf_bpf_fs_writable metric");
 
-    /// Total bytes processed through eBPF maps/ring buffers.
-    /// Labels: map = "FLOW_EVENTS" (ring buffer bytes read by userspace)
-    pub static ref EBPF_MAP_BYTES_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("map_bytes_total", "Total bytes processed through eBPF maps and ring buffers")
-            .namespace("mermin")
-            .subsystem("ebpf"),
-        &["map"]
-    ).expect("failed to create ebpf_map_bytes_total metric");
-
     /// Total number of eBPF map operations.
     /// Labels: map = "FLOW_STATS" | "FLOW_EVENTS" | "LISTENING_PORTS", operation = "read" | "write" | "delete", status = "ok" | "error" | "not_found"
     pub static ref EBPF_MAP_OPS_TOTAL: IntCounterVec = IntCounterVec::new(
@@ -590,7 +581,6 @@ pub fn init_registry(
     register_standard!(EBPF_MAP_CAPACITY);
     register_standard!(EBPF_ATTACHMENT_MODE);
     register_standard!(BPF_FS_WRITABLE);
-    register_standard!(EBPF_MAP_BYTES_TOTAL);
     register_standard!(EBPF_MAP_OPS_TOTAL);
 
     // Debug eBPF metrics (conditional)
