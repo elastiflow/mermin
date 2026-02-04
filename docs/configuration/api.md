@@ -1,4 +1,4 @@
-# Configure the Internal API
+# Configure Internal Server
 
 Mermin provides HTTP endpoints for health checks and Prometheus metrics. This page documents how to configure the API server and health probes; for the Prometheus metrics server (port, endpoints, debug metrics), see [Metrics](metrics.md).
 
@@ -292,7 +292,7 @@ internal "metrics" {
 ## Next Steps
 
 * [**Metrics**](metrics.md): Configure Prometheus metrics server and endpoints
-* [**Global Options**](global-options.md): Configure logging and performance
+* [**Global Options**](reference/README.md#configure-global-agent-options): Configure logging and performance
 * [**Flow Span Options**](span.md): Tune flow generation
 * [**OTLP Exporter**](export-otlp.md): Configure flow export
 * [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose issues

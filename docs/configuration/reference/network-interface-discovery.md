@@ -1,4 +1,4 @@
-# Configure Network Interface Discovery
+# Configure Discovery of Network Interfaces
 
 This page explains how Mermin discovers and monitors network interfaces on the host. Interface selection is critical for determining what network traffic Mermin captures.
 
@@ -658,7 +658,7 @@ discovery "instrument" {
 
 ## Next Steps
 
-* [**Parser Configuration**](references/network-packet-parser.md): Configure tunnel protocol detection
+* [**Parser Configuration**](reference/network-packet-parser.md): Configure tunnel protocol detection
 * [**Flow Filtering**](filtering.md): Filter flows by interface name
 * [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose interface issues
 * [**Advanced Scenarios**](../deployment/advanced-scenarios.md): CNI-specific configurations

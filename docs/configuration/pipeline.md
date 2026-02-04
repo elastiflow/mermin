@@ -1,4 +1,4 @@
-# Configure the Agent's Flow Processing Pipeline
+# Agent Processing Pipeline
 
 The `pipeline` block provides advanced configuration for flow processing pipeline optimization, including channel capacity tuning, worker threading, Kubernetes decoration, backpressure management, and buffer multipliers.
 

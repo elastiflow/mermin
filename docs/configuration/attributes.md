@@ -1,4 +1,4 @@
-# Configure Flow Span Attribution
+# Configure Kubernetes Attribution of Flow Spans
 
 Flow attributes define which Kubernetes metadata to extract and how to associate it with network flows.
 

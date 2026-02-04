@@ -1,4 +1,4 @@
-# Troubleshooting Guide for Common Issues
+# Troubleshooting Overview
 
 This guide will help you diagnose and resolve common issues when deploying and operating Mermin.
 

@@ -86,7 +86,7 @@ discovery "instrument" {
 **Trade-offs**: Lower overhead (fewer interfaces), incomplete visibility, may cause flow duplication if combined with veth monitoring\
 **Use cases**: Infrastructure-focused monitoring, cost-sensitive deployments, clusters with minimal same-node communication
 
-> **For more information, please reference**: [Network Interface Discovery](../configuration/references/network-interface-discovery.md)
+> **For more information, please reference**: [Network Interface Discovery](../configuration/reference/network-interface-discovery.md)
 
 </details>
 

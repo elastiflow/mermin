@@ -780,7 +780,7 @@ export "traces" {
 
 ## Next Steps
 
-* [**Global Options**](global-options.md): Reference for all global configuration fields
-* [**Discovery Configuration**](references/network-interface-discovery.md): Interface selection details
+* [**Global Options**](reference/README.md#configure-global-agent-options): Reference for all global configuration fields
+* [**Discovery Configuration**](reference/network-interface-discovery.md): Interface selection details
 * [**Export Configuration**](export-otlp.md): OTLP export options
 * [**Deployment Guide**](../deployment/overview.md): Deploy with your chosen configuration

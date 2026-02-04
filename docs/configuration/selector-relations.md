@@ -1,4 +1,4 @@
-# Configure Kubernetes Selector Relations
+# Configure Selector Relations of Kubernetes Resources
 
 Selector relations enable matching Kubernetes resources based on label selectors, such as NetworkPolicy → Pod or Service → Pod associations.
 
