@@ -357,6 +357,6 @@ See the [Internal Metrics](../internal-monitoring/internal-metrics.md) guide for
 ## Next Steps
 
 - [**API**](api.md) and [**Metrics**](metrics.md): Configure health checks and monitoring
-- [**Network Interface Discovery**](discovery-instrument.md): Select which interfaces to monitor
+- [**Network Interface Discovery**](configuration-references/network-interface-discovery.md): Select which interfaces to monitor
 - [**Flow Span Options**](span.md): Configure flow generation and timeouts
 - [**Configuration Examples**](examples.md): See complete configurations
