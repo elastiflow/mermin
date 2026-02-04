@@ -111,7 +111,7 @@ Setting `internal.metrics.debug_metrics_enabled = true` enables high-cardinality
 
 ### Parser
 
-eBPF packet parsing. See [Network Packet Parser](configuration-references/network-packet-parser.md).
+eBPF packet parsing. See [Network Packet Parser](references/network-packet-parser.md).
 
 ```hcl
 parser {
@@ -123,7 +123,7 @@ parser {
 
 ### Discovery
 
-Interfaces and Kubernetes discovery. See [Network Interface Discovery](configuration-references/network-interface-discovery.md) and [Kubernetes Informers](discovery-kubernetes-informer.md).
+Interfaces and Kubernetes discovery. See [Network Interface Discovery](references/network-interface-discovery.md) and [Kubernetes Informers](discovery-kubernetes-informer.md).
 If you omit `interfaces`, built-in defaults target CNI interfaces (e.g. `veth*`, `tunl*`, `vxlan*`, `cali*`, `cilium_*`). The example below overrides with physical interfaces:
 
 ```hcl
@@ -284,22 +284,22 @@ YAML configs do not support `env`; use HCL if you need it, or inject values befo
 - [Configuration Examples](examples.md): full example configs (production, development, CNI, high-throughput, security).
 - Section reference:
 
-| Section                                                                       | Description                         |
-|-------------------------------------------------------------------------------|-------------------------------------|
-| [Global Options](global-options.md)                                           | Top-level and CLI/env               |
-| [API](api.md), [Metrics](metrics.md)                                          | Health and Prometheus               |
-| [Parser](configuration-references/network-packet-parser.md)                   | eBPF parsing                        |
-| [Network Interfaces](configuration-references/network-interface-discovery.md) | Interface discovery                 |
-| [Kubernetes Informers](discovery-kubernetes-informer.md)                      | K8s informers                       |
-| [Owner Relations](owner-relations.md)                                         | Owner reference walking             |
-| [Selector Relations](selector-relations.md)                                   | Label selector matching             |
-| [Flow Attributes](attributes.md)                                              | Metadata extraction and association |
-| [Filtering](filtering.md)                                                     | Flow filters                        |
-| [Span Options](span.md)                                                       | Flow generation and timeouts        |
-| [OTLP Exporter](export-otlp.md)                                               | OTLP export                         |
-| [Stdout Exporter](export-stdout.md)                                           | Stdout export                       |
-| [Internal Tracing](internal-tracing.md)                                       | Self-telemetry                      |
-| [Pipeline](pipeline.md)                                                       | Flow capture and producer tuning    |
+| Section                                                         | Description                         |
+|-----------------------------------------------------------------|-------------------------------------|
+| [Global Options](global-options.md)                             | Top-level and CLI/env               |
+| [API](api.md), [Metrics](metrics.md)                            | Health and Prometheus               |
+| [Parser](references/network-packet-parser.md)                   | eBPF parsing                        |
+| [Network Interfaces](references/network-interface-discovery.md) | Interface discovery                 |
+| [Kubernetes Informers](discovery-kubernetes-informer.md)        | K8s informers                       |
+| [Owner Relations](owner-relations.md)                           | Owner reference walking             |
+| [Selector Relations](selector-relations.md)                     | Label selector matching             |
+| [Flow Attributes](attributes.md)                                | Metadata extraction and association |
+| [Filtering](filtering.md)                                       | Flow filters                        |
+| [Span Options](span.md)                                         | Flow generation and timeouts        |
+| [OTLP Exporter](export-otlp.md)                                 | OTLP export                         |
+| [Stdout Exporter](export-stdout.md)                             | Stdout export                       |
+| [Internal Tracing](internal-tracing.md)                         | Self-telemetry                      |
+| [Pipeline](pipeline.md)                                         | Flow capture and producer tuning    |
 
 ## Best practices
 
@@ -314,6 +314,6 @@ YAML configs do not support `env`; use HCL if you need it, or inject values befo
 ## Next steps
 
 - [Global Options](global-options.md): top-level and CLI
-- [Network Interface Discovery](configuration-references/network-interface-discovery.md): which interfaces to monitor
+- [Network Interface Discovery](references/network-interface-discovery.md): which interfaces to monitor
 - [OTLP Exporter](export-otlp.md): send flows to your backend
 - [Configuration Examples](examples.md): full sample configs

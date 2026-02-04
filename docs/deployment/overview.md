@@ -90,7 +90,7 @@ discovery "instrument" {
 
 Captures only inter-node traffic. Misses same-node pod-to-pod communication but monitors fewer interfaces.
 
-See [Network Interface Discovery](../configuration/configuration-references/network-interface-discovery.md) for detailed strategies and CNI-specific patterns.
+See [Network Interface Discovery](../configuration/references/network-interface-discovery.md) for detailed strategies and CNI-specific patterns.
 
 ### Network Namespace Switching
 
@@ -266,7 +266,7 @@ Before deploying Mermin to production:
 * [ ] Review [Architecture](../getting-started/agent-architecture.md) to understand how Mermin works
 * [ ] Choose appropriate [deployment method](#deployment-options)
 * [ ] Plan [resource allocation](#resource-requirements)
-* [ ] Configure [network interfaces](../configuration/configuration-references/network-interface-discovery.md)
+* [ ] Configure [network interfaces](../configuration/references/network-interface-discovery.md)
 * [ ] Set up [OTLP collector](../observability/backend-integrations.md) endpoint
 * [ ] Configure [authentication and TLS](../configuration/export-otlp.md) for OTLP
 * [ ] Define [flow filters](../configuration/filtering.md) if needed
