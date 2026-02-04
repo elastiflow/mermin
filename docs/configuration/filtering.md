@@ -160,17 +160,15 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
   Filter by IP version.
   Supported values in patterns: `ipv4`, `ipv6` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
-  **Examples:**
+  **Example:** Include only IPv4 traffic:
 
-  - Include only IPv4 traffic:
-
-    ```hcl
-    filter "network" {
-      type = {
-        match = ["ipv4"]
-      }
+  ```hcl
+  filter "network" {
+    type = {
+      match = ["ipv4"]
     }
-    ```
+  }
+  ```
 
 - `interface_name` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.
 
@@ -189,15 +187,15 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
     }
     ```
 
-- Exclude interfaces matching `docker*` (`docker0`, `docker1`, `docker-wec2323`):
+  - Exclude interfaces matching `docker*` (`docker0`, `docker1`, `docker-wec2323`):
 
-  ```hcl
-  filter "network" {
-    interface_name = {
-      not_match = ["docker*"]
+    ```hcl
+    filter "network" {
+      interface_name = {
+        not_match = ["docker*"]
+      }
     }
-  }
-  ```
+    ```
 
 - `interface_index` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.
 
@@ -231,9 +229,7 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
   Filter by network interface MAC address.
   Supported values in patterns: Any valid MAC address (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
-  **Examples:**
-
-  - Exclude a specific MAC address:
+  **Example:** Exclude a specific MAC address:
 
     ```hcl
     filter "network" {
@@ -250,30 +246,25 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
 
 - `connection_state` - [pattern matcher object](#pattern-matcher-object), default `{}`.
 
-
   Filter by TCP connection state.
   Supported values in patterns: `established`, `syn_sent`, `syn_received`, `fin_wait`, `close_wait`, `closing`, `last_ack`, `time_wait`, `closed` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
-**Examples:**
+  **Example:** Include only established connections:
 
-- Include only established connections:
-
-  ```hcl
-  filter "flow" {
-    connection_state = {
-      match = ["established"]
+    ```hcl
+    filter "flow" {
+      connection_state = {
+        match = ["established"]
+      }
     }
-  }
-  ```
+    ```
 
 - `tcp_flags_tags` - [pattern matcher object](#pattern-matcher-object), default `{}`.
 
   Filter by TCP flags.
   Supported values in patterns: `SYN`, `ACK`, `FIN`, `RST`, `PSH`, `URG` (supports [globs](https://docs.rs/globset/latest/globset/#syntax)), _case insensitive_.
 
-  **Examples:**
-
-  - Include only flows with SYN flag:
+  **Example:** Include only flows with SYN flag:
 
     ```hcl
     filter "flow" {

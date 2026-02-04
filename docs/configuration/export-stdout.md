@@ -1,5 +1,7 @@
 # Configure OpenTelemetry Console Exporter
 
+**Block:** `export.traces.stdout`
+
 The stdout exporter outputs flow records directly to the console (standard output), making it ideal for development, debugging, and initial testing of Mermin.
 
 ## Overview
@@ -24,36 +26,38 @@ export "traces" {
 }
 ```
 
-## Configuration Option
+### `export.traces.stdout` block
 
-### `stdout`
+- `stdout` attribute
 
-**Type:** String (enum), object with `format` key, or null **Default:** `null` (disabled)
+  Output format for stdout exporter. In HCL you can use the shorthand `stdout = "text_indent"` or the object form `stdout = { format = "text_indent" }`. In YAML use the object form with a `format` key.
 
-Output format for stdout exporter. In HCL you can use the shorthand `stdout = "text_indent"` or the object form `stdout = { format = "text_indent" }`. In YAML use the object form with a `format` key.
+  **Type:** String (enum), object with `format` key, or null
 
-**Valid Values:**
+  **Default:** `null` (disabled)
 
-* `"text_indent"`: Human-readable, indented text format (recommended)
-* `null`: Disable stdout export
+  **Valid Values:**
 
-**Examples:**
+  - `"text_indent"`: Human-readable, indented text format (recommended)
+  - `null`: Disable stdout export
 
-Enable stdout exporter:
+  **Examples:**
 
-```hcl
-export "traces" {
-  stdout = "text_indent"
-}
-```
+  - Enable stdout exporter
 
-Disable stdout exporter:
+    ```hcl
+    export "traces" {
+      stdout = "text_indent"
+    }
+    ```
 
-```hcl
-export "traces" {
-  # stdout export disabled
-}
-```
+  - Disable stdout exporter
+
+    ```hcl
+    export "traces" {
+      # stdout export disabled
+    }
+    ```
 
 ## Output Format
 
@@ -121,10 +125,10 @@ export "traces" {
 
 **Benefits:**
 
-* No external dependencies
-* Immediate feedback
-* Easy debugging
-* Simple setup
+- No external dependencies
+- Immediate feedback
+- Easy debugging
+- Simple setup
 
 ### Debugging Flow Issues
 
@@ -202,141 +206,10 @@ export "traces" {
 
 **When to use both:**
 
-* Debugging export issues
-* Comparing local vs. exported data
-* Validating flow enrichment
-* Troubleshooting transformations
-
-## Viewing Stdout Output
-
-### Kubernetes
-
-View logs from Mermin pods:
-
-```bash
-# Single pod
-kubectl logs -f <pod-name>
-
-# All Mermin pods
-kubectl logs -f -l app.kubernetes.io/name=mermin
-
-# Specific container (if multi-container pod)
-kubectl logs -f <pod-name> -c mermin
-
-# Last N lines
-kubectl logs --tail=50 <pod-name>
-
-# Filter for specific source IP (matches "IP: ..." under Source in output)
-kubectl logs <pod-name> | grep "IP: 10.244.1.5"
-```
-
-### Docker (Bare Metal)
-
-View logs from Docker container:
-
-```bash
-# Follow logs
-docker logs -f mermin
-
-# Last N lines
-docker logs --tail=100 mermin
-
-# Since timestamp
-docker logs --since=10m mermin
-```
-
-### Systemd
-
-View logs from systemd service:
-
-```bash
-# Follow logs
-journalctl -u mermin -f
-
-# Last N lines
-journalctl -u mermin -n 100
-
-# Since timestamp
-journalctl -u mermin --since "10 minutes ago"
-```
-
-## Filtering Stdout Output
-
-### Using grep
-
-Filter flows by criteria:
-
-```bash
-# Flows from specific IP
-kubectl logs <pod> | grep "IP: 10.244.1.5"
-
-# TCP flows only
-kubectl logs <pod> | grep "Protocol: TCP"
-
-# Flows to specific port (matches "Port: ..." under Destination in output)
-kubectl logs <pod> | grep "Port: 443"
-
-# Flows involving specific pod
-kubectl logs <pod> | grep "nginx-deployment"
-```
-
-### Using jq (if JSON format available)
-
-While Mermin currently supports text\_indent format, future JSON support would enable:
-
-```bash
-# Example for future JSON support
-kubectl logs <pod> | jq 'select(.source.port == 443)'
-```
-
-## Performance Considerations
-
-### Log Volume
-
-Stdout output can generate significant log volume:
-
-* **Typical flow rate:** 1,000 flows/second
-* **Text indent size:** ~500 bytes per flow
-* **Log rate:** ~500 KB/second = ~1.8 GB/hour
-
-**Recommendations:**
-
-* Use stdout only for development/debugging
-* Disable for production environments
-* Configure log rotation if enabled long-term
-
-### CPU Impact
-
-Formatting flow records for stdout has minimal CPU overhead:
-
-* Text formatting: < 1% CPU
-* Logging I/O: < 2% CPU
-
-Enable stdout without significant performance impact for debugging.
-
-### Log Rotation
-
-Configure log rotation to prevent disk filling:
-
-**Docker:**
-
-```json
-{
-  "log-driver": "json-file",
-  "log-opts": {
-    "max-size": "100m",
-    "max-file": "5"
-  }
-}
-```
-
-**Kubernetes:**
-
-```yaml
-# Relies on node-level log rotation
-# Typically handled by kubelet
-# Check: /var/log/pods/
-```
+- Debugging export issues
+- Comparing local vs. exported data
+- Validating flow enrichment
+- Troubleshooting transformations
 
 ## Troubleshooting
 
@@ -377,9 +250,7 @@ Configure log rotation to prevent disk filling:
 1. **Disable in production**: Use OTLP for production environments
 2. **Enable temporarily**: Turn on only when needed for debugging
 3. **Use with filters**: Combine with flow filters to reduce volume
-4. **Monitor disk space**: Ensure adequate disk for logs
-5. **Automate cleanup**: Configure log rotation
-6. **Document usage**: Note when/why stdout is enabled
+4. **Document usage**: Note when/why stdout is enabled
 
 ## Configuration Examples
 
@@ -408,36 +279,10 @@ export "traces" {
 }
 ```
 
-### Production (Stdout Disabled)
-
-```hcl
-# Production configuration
-export "traces" {
-  # stdout disabled
-
-  otlp = {
-    endpoint = "https://collector.example.com:4317"
-    protocol = "grpc"
-  }
-}
-```
-
-## Comparison with OTLP
-
-| Feature              | Stdout         | OTLP                 |
-| -------------------- | -------------- | -------------------- |
-| **Setup Complexity** | None           | Requires collector   |
-| **Storage**          | Logs/ephemeral | Persistent backend   |
-| **Query Capability** | grep only      | Full query language  |
-| **Production Ready** | No             | Yes                  |
-| **Resource Usage**   | Low            | Moderate             |
-| **Scalability**      | Poor           | Excellent            |
-| **Visualization**    | None           | Dashboards available |
-
 ## Next Steps
 
-* [**Configuration Overview**](overview.md): Config file format and structure
-* [**OTLP Exporter**](export-otlp.md): Configure production export
-* [**Flow Filtering**](filtering.md): Reduce log volume
-* [**Internal Tracing**](internal-tracing.md): Monitor Mermin itself
-* [**Observability Backends**](../observability/backend-integrations.md): Set up observability backends
+- [**Configuration Overview**](overview.md): Config file format and structure
+- [**OTLP Exporter**](export-otlp.md): Configure production export
+- [**Flow Filtering**](filtering.md): Reduce log volume
+- [**Internal Tracing**](internal-tracing.md): Monitor Mermin itself
+- [**Observability Backends**](../observability/backend-integrations.md): Set up observability backends
