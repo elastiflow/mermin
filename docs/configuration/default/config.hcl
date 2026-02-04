@@ -128,8 +128,7 @@ discovery "informer" "k8s" {
   */
   selectors = [
     { kind = "Service" }, { kind = "Endpoint" }, { kind = "EndpointSlice" }, { kind = "Gateway" }, { kind = "Ingress" },
-    { kind = "Pod" }, { kind = "ReplicaSet" }, { kind = "Deployment" }, { kind = "Daemonset" },
-    { kind = "StatefulSet" },
+    { kind = "Pod" }, { kind = "ReplicaSet" }, { kind = "Deployment" }, { kind = "Daemonset" }, { kind = "StatefulSet" },
     { kind = "Job" }, { kind = "CronJob" }, { kind = "NetworkPolicy" },
 
     /*

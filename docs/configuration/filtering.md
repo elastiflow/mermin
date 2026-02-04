@@ -39,7 +39,7 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
   }
   ```
 
-- `port` attribute - [Pattern matcher object](#pattern-matcher-object), default `{}`.  
+- `port` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.  
   Filter by port. Supported values in patterns: Port or port range as a string (`443`, `8000-9000`)
 
   **Examples:**
@@ -126,7 +126,7 @@ The result of the `filter.source`/`filter.destination` inclusion/exclusion is co
 The filter applies to various network attributes in the flow span, such as transport protocol, interface, and others.
 Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/agent-architecture.md#components)), which can help reduce resource usage in subsequent stages.
 
-- `transport` attribute - [Pattern matcher object](#pattern-matcher-object), default `{}`.  
+- `transport` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.  
   Filter by transport protocol.  
   Supported values in patterns: `tcp`, `udp`, `icmp`, `icmpv6` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
@@ -152,7 +152,7 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
     }
     ```
 
-- `type` attribute - [Pattern matcher object](#pattern-matcher-object), default `{}`.  
+- `type` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.  
   Filter by IP version.  
   Supported values in patterns: `ipv4`, `ipv6` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
@@ -168,7 +168,7 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
     }
     ```
 
-- `interface_name` attribute - [Pattern matcher object](#pattern-matcher-object), default `{}`.  
+- `interface_name` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.  
   Filter by network interface name.  
   Supported values in patterns: Any valid interface name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
