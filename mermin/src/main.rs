@@ -638,7 +638,6 @@ async fn run(cli: Cli) -> Result<()> {
         .map_err(|e| MerminError::internal(format!("failed to scan listening ports: {e}")))?;
 
     // Set LISTENING_PORTS map metrics after initial scan.
-    // The orphan scanner task will update this metric periodically.
     metrics::registry::EBPF_MAP_SIZE
         .with_label_values(&[
             EbpfMapName::ListeningPorts.as_str(),
