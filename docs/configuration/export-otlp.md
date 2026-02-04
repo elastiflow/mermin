@@ -1,5 +1,7 @@
 # Configure OpenTelemetry OTLP Exporter
 
+**Block:** `export.traces.otlp`
+
 This page documents the OpenTelemetry Protocol (OTLP) exporter configuration, which controls how Mermin exports flow
 records to your observability backend.
 
@@ -10,6 +12,8 @@ enabling integration with any OTLP-compatible backend including OpenTelemetry Co
 more.
 
 ## Configuration
+
+A full configuration example:
 
 ```hcl
 export "traces" {
@@ -40,459 +44,511 @@ export "traces" {
 }
 ```
 
-## Basic Configuration Options
+### `export.traces.otlp` block
 
-### `endpoint`
+- `endpoint` attribute
 
-**Type:** String (URL) **Default:** `"http://localhost:4317"`
+  OTLP collector endpoint URL.
 
-OTLP collector endpoint URL.
+  **Type:** String (URL)
 
-**Format:**
+  **Default:** `"http://localhost:4317"`
 
-- `http://hostname:port` for unencrypted gRPC
-- `https://hostname:port` for TLS-encrypted gRPC
-- Port 4317 is standard for gRPC
-- Port 4318 is standard for HTTP
+  **Format:**
 
-**Examples:**
+  - `http://hostname:port` for unencrypted gRPC
+  - `https://hostname:port` for TLS-encrypted gRPC
+  - Port 4317 is standard for gRPC
+  - Port 4318 is standard for HTTP
 
-```hcl
-export "traces" {
-  otlp = {
-    # Local collector
-    endpoint = "http://otel-collector:4317"
+  **Examples:**
 
-    # Remote collector with TLS
-    # endpoint = "https://collector.example.com:4317"
+  - Local collector
 
-    # HTTP protocol
-    # endpoint = "http://collector.example.com:4318"
+    ```hcl
+    export "traces" {
+      otlp = {
+        endpoint = "http://otel-collector:4317"
+      }
+    }
+    ```
+
+  - Remote collector with TLS
+
+    ```hcl
+    export "traces" {
+      otlp = {
+        endpoint = "https://collector.example.com:4317"
+      }
+    }
+    ```
+
+  - Kubernetes service in different namespace
+
+    ```hcl
+    export "traces" {
+      otlp = {
+        endpoint = "http://otel-collector.observability:4317"
+      }
+    }
+    ```
+
+- `protocol` attribute
+
+  OTLP transport protocol.
+
+  **Type:** String (enum)
+
+  **Default:** `"grpc"`
+
+  **Valid Values:**
+
+  - `"grpc"`: gRPC protocol (recommended, default)
+  - `"http_binary"`: HTTP with binary protobuf payload
+
+  **Protocol Comparison:**
+
+  | Feature               | gRPC   | HTTP     |
+  |-----------------------|--------|----------|
+  | **Performance**       | Higher | Moderate |
+  | **Streaming**         | Yes    | No       |
+  | **Firewall Friendly** | Less   | More     |
+  | **Standard Port**     | 4317   | 4318     |
+  | **HTTP/2 Required**   | Yes    | No       |
+
+  **Example:** Use HTTP protocol
+
+  ```hcl
+  export "traces" {
+    otlp = {
+      protocol = "http_binary"
+      endpoint = "http://collector:4318"
+    }
   }
-}
-```
+  ```
 
-**Kubernetes Service Discovery:**
+- `timeout` attribute
 
-```hcl
-export "traces" {
-  otlp = {
-    # Service in same namespace
-    endpoint = "http://otel-collector:4317"
+  Timeout for individual OTLP export requests.
 
-    # Service in different namespace
-    # endpoint = "http://otel-collector.observability:4317"
+  **Type:** Duration
 
-    # Headless service
-    # endpoint = "http://otel-collector-0.otel-collector.observability:4317"
+  **Default:** `"10s"`
+
+  **Tuning:**
+
+  - **Fast networks**: 5s-10s
+  - **WAN/Internet**: 15s-30s
+  - **High latency**: 30s-60s
+
+  **Example:** Slow network timeout
+
+  ```hcl
+  export "traces" {
+    otlp = {
+      timeout = "30s"
+    }
   }
-}
-```
+  ```
 
-### `protocol`
+#### Batching Configuration
 
-**Type:** String (enum) **Default:** `"grpc"`
+Mermin uses batching for efficient exports of flow spans. The processor queues spans asynchronously and exports them in batches, providing natural backpressure when the queue fills up.
 
-OTLP transport protocol.
+- `max_batch_size` attribute
 
-**Valid Values:**
+  Maximum number of spans (flow records) per batch.
 
-- `"grpc"`: gRPC protocol (recommended, default)
-- `"http_binary"`: HTTP with binary protobuf payload
+  **Type:** Integer
 
-**Examples:**
+  **Default:** `1024`
 
-```hcl
-export "traces" {
-  otlp = {
-    protocol = "grpc"  # Default, recommended
+  **Trade-offs:**
 
-    # For HTTP protocol
-    # protocol = "http_binary"
-    # endpoint = "http://collector:4318"
+  - **Larger batches**: Better efficiency, higher latency
+  - **Smaller batches**: Lower latency, more requests
+
+  **Examples:**
+
+  - High-volume environment
+
+    ```hcl
+    export "traces" {
+      otlp = {
+        max_batch_size = 2048
+      }
+    }
+    ```
+
+  - Low-latency requirements
+
+    ```hcl
+    export "traces" {
+      otlp = {
+        max_batch_size = 128
+      }
+    }
+    ```
+
+- `max_batch_interval` attribute
+
+  Maximum time to wait before exporting a partial batch.
+
+  **Type:** Duration
+
+  **Default:** `"2s"`
+
+  **Behavior:**
+
+  - Batch is exported when it reaches `max_batch_size` OR `max_batch_interval` (whichever comes first)
+  - Prevents indefinite waiting for partial batches
+
+  **Examples:**
+
+  - Real-time monitoring
+
+    ```hcl
+    export "traces" {
+      otlp = {
+        max_batch_interval = "1s"
+      }
+    }
+    ```
+
+  - Reduced export frequency
+
+    ```hcl
+    export "traces" {
+      otlp = {
+        max_batch_interval = "10s"
+      }
+    }
+    ```
+
+- `max_queue_size` attribute
+
+  Maximum number of spans queued in the batch processor before they are exported.
+
+  **Type:** Integer
+
+  **Default:** `32768`
+
+  **Critical for High Throughput:**
+
+  This is the internal queue capacity of the batch processor. When this queue fills up:
+
+  - New spans are **dropped silently** (OpenTelemetry will log a warning)
+  - The queue uses `try_send` which is **non-blocking**, so your pipeline won't deadlock
+  - This provides natural backpressure during export slowdowns
+
+  **Queue Behavior:**
+
+  - Acts as buffer during temporary collector unavailability or slow exports
+  - When the queue is full, new spans are **dropped** (OpenTelemetry uses non-blocking send); export workers send batches and may block on the network call up to the configured timeout
+  - Default (32768) buffers on the order of seconds at high throughput (e.g. ~6s at 5K flows/sec); increase for burst tolerance
+  - Monitor `mermin_export_flow_spans_total{exporter="otlp",status="error"}` and `mermin_export_timeouts_total` for export health
+
+  **Examples:**
+
+  - Very high throughput (>10K flows/sec)
+
+    ```hcl
+    export "traces" {
+      otlp = {
+        max_queue_size = 65536
+      }
+    }
+    ```
+
+  - Memory-constrained environment
+
+    ```hcl
+    export "traces" {
+      otlp = {
+        max_queue_size = 2048
+      }
+    }
+    ```
+
+- `max_concurrent_exports` attribute
+
+  Maximum number of concurrent export requests to the backend.
+
+  **Type:** Integer
+
+  **Default:** `4`
+
+  **Tuning for Throughput:**
+
+  This setting is **critical** for high-throughput scenarios. With the defaults:
+
+  - `1024 spans/batch × 100 batches/sec/worker = 102,400 flows/sec capacity`
+  - Each worker needs ~40ms per export (including network + backend processing)
+  - If exports take longer, increase this value
+
+  **Recommendations:**
+
+  - **2-4:** Good for most scenarios (default is 4)
+  - **6-8:** High backend latency (>50ms per export)
+  - **1:** Low-latency, high-performance backends only
+
+  **Example:** High-throughput
+
+  ```hcl
+  export "traces" {
+    otlp = {
+      max_concurrent_exports = 8
+    }
   }
-}
-```
+  ```
 
-**Protocol Comparison:**
+- `max_export_timeout` attribute
 
-| Feature               | gRPC   | HTTP     |
-|-----------------------|--------|----------|
-| **Performance**       | Higher | Moderate |
-| **Streaming**         | Yes    | No       |
-| **Firewall Friendly** | Less   | More     |
-| **Standard Port**     | 4317   | 4318     |
-| **HTTP/2 Required**   | Yes    | No       |
+  Maximum time for export operation including retries.
 
-### `timeout`
+  **Type:** Duration
 
-**Type:** Duration **Default:** `"10s"`
+  **Default:** `"10s"`
 
-Timeout for individual OTLP export requests.
+  **Example:** High-latency networks or slow backends
 
-**Examples:**
-
-```hcl
-export "traces" {
-  otlp = {
-    timeout = "10s"  # Default
-
-    # For slow networks
-    # timeout = "30s"
-
-    # For fast local networks
-    # timeout = "5s"
+  ```hcl
+  export "traces" {
+    otlp = {
+      max_export_timeout = "30s"
+    }
   }
-}
-```
+  ```
 
-**Tuning:**
+### `export.traces.otlp.auth` block
 
-- **Fast networks**: 5s-10s
-- **WAN/Internet**: 15s-30s
-- **High latency**: 30s-60s
+Configure authentication for the OTLP endpoint. Supports HTTP Basic authentication or Bearer token authentication.
 
-## Batching Configuration
+- `basic` block
 
-Mermin uses OpenTelemetry's `BatchSpanProcessor` for efficient batching and export of flow spans. The processor queues
-spans asynchronously and exports them in batches, providing natural backpressure when the queue fills up.
+  Configure HTTP Basic authentication for the OTLP endpoint.
 
-### `max_batch_size`
+  - `user` attribute
 
-**Type:** Integer **Default:** `1024`
+    Username for basic authentication.
 
-Maximum number of spans (flow records) per batch.
+    **Type:** String
 
-**Examples:**
+    **Default:** None (required if basic auth is used)
 
-```hcl
-export "traces" {
-  otlp = {
-    max_batch_size = 1024  # Default
+  - `pass` attribute
 
-    # For high-volume environments
-    # max_batch_size = 2048
+    Password for basic authentication. Supports environment variable interpolation via `env(VAR_NAME)`.
 
-    # For low-latency requirements
-    # max_batch_size = 128
-  }
-}
-```
+    **Type:** String
 
-**Trade-offs:**
+    **Default:** None (required if basic auth is used)
 
-- **Larger batches**: Better efficiency, higher latency
-- **Smaller batches**: Lower latency, more requests
+  **Examples:**
 
-### `max_batch_interval`
+  - Basic authentication
 
-**Type:** Duration **Default:** `"2s"`
+    ```hcl
+    export "traces" {
+      otlp = {
+        endpoint = "https://collector.example.com:4317"
 
-Maximum time to wait before exporting a partial batch.
+        auth = {
+          basic = {
+            user = "mermin"
+            pass = "secret_password"
+          }
+        }
+      }
+    }
+    ```
 
-**Examples:**
+  - Using environment variables
 
-```hcl
-export "traces" {
-  otlp = {
-    max_batch_interval = "2s"  # Default
+    ```bash
+    # Set environment variable
+    export OTLP_PASSWORD="secret_password"
+    ```
 
-    # For real-time monitoring
-    # max_batch_interval = "1s"
+    ```hcl
+    export "traces" {
+      otlp = {
+        auth = {
+          basic = {
+            user = "mermin"
+            pass = "env(OTLP_PASSWORD)"
+          }
+        }
+      }
+    }
+    ```
 
-    # For reduced export frequency
-    # max_batch_interval = "10s"
-  }
-}
-```
+  - Using Kubernetes Secrets
 
-**Behavior:**
+    ```bash
+    # Create secret
+    kubectl create secret generic mermin-otlp-auth \
+      --from-literal=username=mermin \
+      --from-literal=password=secret_password
+    ```
 
-- Batch is exported when it reaches `max_batch_size` OR `max_batch_interval` (whichever comes first)
-- Prevents indefinite waiting for partial batches
+    ```yaml
+    # Mount in pod
+    env:
+      - name: OTLP_USER
+        valueFrom:
+          secretKeyRef:
+            name: mermin-otlp-auth
+            key: username
+      - name: OTLP_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: mermin-otlp-auth
+            key: password
+    ```
 
-### `max_queue_size`
+- `bearer` attribute
 
-**Type:** Integer **Default:** `32768`
+  Bearer token for authentication. Use instead of basic authentication when the backend expects a bearer token.
 
-Maximum number of spans queued in the `BatchSpanProcessor` before they are exported.
+  **Type:** String
 
-**Critical for High Throughput:**
+  **Default:** None (optional)
 
-This is the internal queue capacity of OpenTelemetry's `BatchSpanProcessor`. When this queue fills up:
+  **Example:** Bearer authentication
 
-- New spans are **dropped silently** (OpenTelemetry will log a warning)
-- The queue uses `try_send` which is **non-blocking**, so your pipeline won't deadlock
-- This provides natural backpressure during export slowdowns
+  ```hcl
+  export "traces" {
+    otlp = {
+      endpoint = "https://collector.example.com:4317"
 
-**Examples:**
-
-```hcl
-export "traces" {
-  otlp = {
-    max_queue_size = 32768  # Default (sized for typical enterprise workloads)
-
-    # For very high throughput (>10K flows/sec) or higher burst tolerance
-    # max_queue_size = 65536
-
-    # For lower traffic environments
-    # max_queue_size = 8192
-
-    # For memory-constrained environments
-    # max_queue_size = 2048
-  }
-}
-```
-
-**Queue Behavior:**
-
-- Acts as buffer during temporary collector unavailability or slow exports
-- When the queue is full, new spans are **dropped** (OpenTelemetry uses non-blocking send); export workers send batches and may block on the network call up to the configured timeout
-- Default (32768) buffers on the order of seconds at high throughput (e.g. ~6s at 5K flows/sec); increase for burst tolerance
-- Monitor `mermin_export_flow_spans_total{exporter="otlp",status="error"}` and `mermin_export_timeouts_total` for export health
-
-### `max_concurrent_exports`
-
-**Type:** Integer **Default:** `4`
-
-Maximum number of concurrent export requests to the backend.
-
-**Tuning for Throughput:**
-
-This setting is **critical** for high-throughput scenarios. With the defaults:
-
-- `1024 spans/batch × 100 batches/sec/worker = 102,400 flows/sec capacity`
-- Each worker needs ~40ms per export (including network + backend processing)
-- If exports take longer, increase this value
-
-**Recommendations:**
-
-- **2-4:** Good for most scenarios (default is 4)
-- **6-8:** High backend latency (>50ms per export)
-- **1:** Low-latency, high-performance backends only
-
-**Examples:**
-
-```hcl
-export "traces" {
-  otlp = {
-    max_concurrent_exports = 4  # Default
-
-    # For low-latency backends
-    # max_concurrent_exports = 1
-
-    # For high-throughput (experimental)
-    # max_concurrent_exports = 8
-  }
-}
-```
-
-{% hint style="warning" %}
-Values > 1 are experimental. Use with caution and monitor for ordering issues.
-{% endhint %}
-
-### `max_export_timeout`
-
-**Type:** Duration **Default:** `"10s"`
-
-Maximum time for export operation including retries.
-
-**Examples:**
-
-```hcl
-export "traces" {
-  otlp = {
-    max_export_timeout = "10s"  # Default
-
-    # For high-latency networks or slow backends
-    # max_export_timeout = "30s"
-
-    # For low-latency local deployments
-    # max_export_timeout = "5s"
-  }
-}
-```
-
-## Authentication Configuration
-
-### Basic Authentication
-
-```hcl
-export "traces" {
-  otlp = {
-    endpoint = "https://collector.example.com:4317"
-
-    auth = {
-      basic = {
-        user = "mermin"
-        pass = "secret_password"
+      auth = {
+        bearer = "secret_password"
       }
     }
   }
-}
-```
+  ```
 
-**Using Environment Variables:**
+### `export.traces.otlp.tls` block
 
-```bash
-# Set environment variable
-export OTLP_PASSWORD="secret_password"
-```
+TLS is automatically enabled for `https://` endpoints. Use the `tls` block to configure custom certificates or disable verification.
 
-```hcl
-export "traces" {
-  otlp = {
-    auth = {
-      basic = {
-        user = "mermin"
-        pass = "env(OTLP_PASSWORD)"  # Load from environment
+- `insecure_skip_verify` attribute
+
+  Skip TLS certificate verification.
+
+  **Type:** Boolean
+
+  **Default:** `false`
+
+  {% hint style="danger" %}
+  **Never use `insecure_skip_verify = true` in production!** This disables all certificate verification and makes connections vulnerable to man-in-the-middle attacks.
+  {% endhint %}
+
+  **Example:** Insecure mode (development only)
+
+  ```hcl
+  export "traces" {
+    otlp = {
+      endpoint = "https://collector.example.com:4317"
+
+      tls = {
+        insecure_skip_verify = true
       }
     }
   }
-}
-```
+  ```
 
-**Using Kubernetes Secrets:**
+- `ca_cert` attribute
 
-```bash
-# Create secret
-kubectl create secret generic mermin-otlp-auth \
-  --from-literal=username=mermin \
-  --from-literal=password=secret_password
-```
+  Path to custom CA certificate file for verifying the server's certificate.
 
-```yaml
-# Mount in pod
-env:
-  - name: OTLP_USER
-    valueFrom:
-      secretKeyRef:
-        name: mermin-otlp-auth
-        key: username
-  - name: OTLP_PASSWORD
-    valueFrom:
-      secretKeyRef:
-        name: mermin-otlp-auth
-        key: password
-```
+  **Type:** String (file path)
 
-### Bearer Authentication
+  **Default:** None (uses system CA certificates)
 
-```hcl
-export "traces" {
-  otlp = {
-    endpoint = "https://collector.example.com:4317"
+  **Examples:**
 
-    auth = {
-      bearer = "secret_password"
+  - Custom CA certificate
+
+    ```hcl
+    export "traces" {
+      otlp = {
+        endpoint = "https://collector.example.com:4317"
+
+        tls = {
+          insecure_skip_verify = false
+          ca_cert              = "/etc/mermin/certs/ca.crt"
+        }
+      }
     }
-  }
-}
-```
+    ```
 
-## TLS Configuration
+  - Mounting CA certificate in Kubernetes
 
-### TLS with System CA Certificates
+    ```yaml
+    volumes:
+      - name: ca-cert
+        configMap:
+          name: collector-ca-cert
+          items:
+            - key: ca.crt
+              path: ca.crt
 
-For standard TLS using system root certificates:
+    volumeMounts:
+      - name: ca-cert
+        mountPath: /etc/mermin/certs
+        readOnly: true
+    ```
 
-```hcl
-export "traces" {
-  otlp = {
-    endpoint = "https://collector.example.com:4317"
-    protocol = "grpc"
+- `client_cert` attribute
 
-    # TLS is automatically enabled for https:// endpoints
-    # No tls block needed for standard certificates
-  }
-}
-```
+  Path to client certificate file for mutual TLS (mTLS) authentication.
 
-### TLS with Custom CA Certificate
+  **Type:** String (file path)
 
-For self-signed certificates or custom CAs:
+  **Default:** None (optional)
 
-```hcl
-export "traces" {
-  otlp = {
-    endpoint = "https://collector.example.com:4317"
+- `client_key` attribute
 
-    tls = {
-      insecure_skip_verify = false
-      ca_cert              = "/etc/mermin/certs/ca.crt"
+  Path to client private key file for mutual TLS (mTLS) authentication.
+
+  **Type:** String (file path)
+
+  **Default:** None (optional)
+
+  **Examples:**
+
+  - Mutual TLS (mTLS)
+
+    ```hcl
+    export "traces" {
+      otlp = {
+        endpoint = "https://collector.example.com:4317"
+
+        tls = {
+          insecure_skip_verify = false
+          ca_cert              = "/etc/mermin/certs/ca.crt"
+          client_cert          = "/etc/mermin/certs/client.crt"
+          client_key           = "/etc/mermin/certs/client.key"
+        }
+      }
     }
-  }
-}
-```
+    ```
 
-**Mounting CA certificate in Kubernetes:**
+  - Mounting client certificates in Kubernetes
 
-```yaml
-volumes:
-  - name: ca-cert
-    configMap:
-      name: collector-ca-cert
-      items:
-        - key: ca.crt
-          path: ca.crt
+    ```yaml
+    volumes:
+      - name: client-certs
+        secret:
+          secretName: mermin-client-certs
 
-volumeMounts:
-  - name: ca-cert
-    mountPath: /etc/mermin/certs
-    readOnly: true
-```
-
-### Mutual TLS (mTLS)
-
-For client certificate authentication:
-
-```hcl
-export "traces" {
-  otlp = {
-    endpoint = "https://collector.example.com:4317"
-
-    tls = {
-      insecure_skip_verify = false
-      ca_cert              = "/etc/mermin/certs/ca.crt"
-      client_cert          = "/etc/mermin/certs/client.crt"
-      client_key           = "/etc/mermin/certs/client.key"
-    }
-  }
-}
-```
-
-**Mounting client certificates in Kubernetes:**
-
-```yaml
-volumes:
-  - name: client-certs
-    secret:
-      secretName: mermin-client-certs
-
-volumeMounts:
-  - name: client-certs
-    mountPath: /etc/mermin/certs
-    readOnly: true
-```
-
-### Insecure Mode (Development Only)
-
-{% hint style="danger" %}
-**Never use in production!** This disables all certificate verification and makes connections vulnerable to
-man-in-the-middle attacks.
-{% endhint %}
-
-```hcl
-export "traces" {
-  otlp = {
-    endpoint = "https://collector.example.com:4317"
-
-    tls = {
-      insecure_skip_verify = true  # DEVELOPMENT ONLY
-    }
-  }
-}
-```
+    volumeMounts:
+      - name: client-certs
+        mountPath: /etc/mermin/certs
+        readOnly: true
+    ```
 
 ## Performance Tuning
 
@@ -517,7 +573,7 @@ export "traces" {
     timeout = "5s"
     max_export_timeout = "20s"
 
-    # Multiple concurrent exports (experimental)
+    # Multiple concurrent exports
     max_concurrent_exports = 4
   }
 }
