@@ -29,8 +29,8 @@ pipeline {
   }
 }
 
-# API for health checks (required for liveness/readiness probes)
-api {
+# HTTP server for health checks (required for liveness/readiness probes)
+internal "server" {
   enabled = true
   listen_address = "0.0.0.0"
   port = 8080
@@ -190,7 +190,7 @@ Simplified configuration for local development and testing with stdout export.
 # Development configuration
 log_level = "debug"  # Verbose logging for troubleshooting
 
-api {
+internal "server" {
   enabled = true
   port = 8080
 }
@@ -259,7 +259,7 @@ Optimized for Kubernetes clusters using Cilium CNI.
 ```hcl
 log_level = "info"
 
-api {
+internal "server" {
   enabled = true
   port = 8080
 }
@@ -332,7 +332,7 @@ Optimized for Kubernetes clusters using Calico CNI.
 ```hcl
 log_level = "info"
 
-api {
+internal "server" {
   enabled = true
   port = 8080
 }
@@ -422,7 +422,7 @@ pipeline {
   }
 }
 
-api {
+internal "server" {
   enabled = true
   port = 8080
 }
@@ -502,7 +502,7 @@ Focused on secure export and minimal attack surface.
 ```hcl
 log_level = "info"
 
-api {
+internal "server" {
   enabled = true
   listen_address = "127.0.0.1"  # Localhost only
   port = 8080
@@ -588,7 +588,7 @@ Export to multiple observability backends simultaneously.
 ```hcl
 log_level = "info"
 
-api {
+internal "server" {
   enabled = true
   port = 8080
 }

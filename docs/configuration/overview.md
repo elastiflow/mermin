@@ -86,12 +86,12 @@ pipeline {
 }
 ```
 
-### API and metrics
+### HTTP server and metrics
 
-Health API and internal Prometheus metrics. See [API](api.md) and [Metrics](metrics.md).
+Health HTTP server and internal Prometheus metrics. See Internal [Server](reference/internal-server.md) and [Metrics](metrics.md).
 
 ```hcl
-api {
+internal "server" {
   enabled         = true
   listen_address  = "0.0.0.0"
   port            = 8080
@@ -270,9 +270,9 @@ export "traces" {
   }
 }
 
-# API listen address with interpolation
-api {
-  listen_address = "prefix-${env("API_HOST")}-suffix"
+# HTTP server listen address with interpolation
+internal "server" {
+  listen_address = "prefix-${env("SERVER_HOST")}-suffix"
   port = 8080
 }
 ```
@@ -287,7 +287,8 @@ YAML configs do not support `env`; use HCL if you need it, or inject values befo
 | Section                                                                 | Description                                          |
 |-------------------------------------------------------------------------|------------------------------------------------------|
 | [Global Options](reference/README.md#configure-global-agent-options)    | Configure Global Agent Options                       |
-| [Internal Server](api.md), [Internal Prometheus Metrics](metrics.md)    | Configure Internal Server and Prometheus Metrics     |
+| [Internal Server](reference/internal-server.md)                                   | Configure Internal Server                            |
+| [Internal Prometheus Metrics](metrics.md)                               | Configure Internal Prometheus Metrics                |
 | [Network Packet Parser](reference/network-packet-parser.md)             | Configure Parsing of Network Packets                 |
 | [Network Interface Discovery](reference/network-interface-discovery.md) | Configure Discovery of Network Interfaces            |
 | [Kubernetes Informer Discovery](discovery-kubernetes-informer.md)       | Configure Discovery of Kubernetes Informer           |

@@ -21,8 +21,8 @@ pipeline {
 }
 shutdown_timeout        = "5s"
 
-# API server configuration (health endpoints)
-api {
+# HTTP server configuration (health endpoints)
+internal "server" {
   enabled        = true
   listen_address = "0.0.0.0"
   port           = 8080

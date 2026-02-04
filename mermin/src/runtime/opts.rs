@@ -1,3 +1,5 @@
+use std::net::Ipv4Addr;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -10,6 +12,28 @@ use crate::{
 pub struct InternalOptions {
     pub traces: InternalTraceOptions,
     pub metrics: MetricsOptions,
+    pub server: ServerConf,
+}
+
+/// Configuration for the internal HTTP server (health endpoints).
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ServerConf {
+    /// Enable the HTTP server.
+    pub enabled: bool,
+    /// The network address the HTTP server will listen on.
+    pub listen_address: String,
+    /// The port the HTTP server will listen on.
+    pub port: u16,
+}
+
+impl Default for ServerConf {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
+            port: 8080,
+        }
+    }
 }
 
 #[derive(Default, Debug, Deserialize, Serialize, Clone)]

@@ -228,9 +228,9 @@ async fn run(cli: Cli) -> Result<()> {
 
     let health_state = HealthState::default();
 
-    if conf.api.enabled {
+    if conf.internal.server.enabled {
         let health_state_clone = health_state.clone();
-        let api_conf = conf.api.clone();
+        let server_conf = conf.internal.server.clone();
         let mut shutdown_rx = os_shutdown_tx.subscribe();
 
         // Start API server on a dedicated runtime thread to prevent starvation
@@ -244,7 +244,7 @@ async fn run(cli: Cli) -> Result<()> {
 
             rt.block_on(async move {
                 tokio::select! {
-                    result = start_api_server(health_state_clone, &api_conf) => {
+                    result = start_api_server(health_state_clone, &server_conf) => {
                         if let Err(e) = result {
                             error!(
                                 event.name = "api.internal_error",
@@ -1075,91 +1075,91 @@ fn display_error(error: &MerminError) {
 
     match error {
         MerminError::Context(ctx_err) => {
-            eprintln!("❌ Configuration Error");
+            eprintln!("Configuration Error");
             eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
             eprintln!("{ctx_err}\n");
 
             let err_msg = ctx_err.to_string();
             if err_msg.contains("no config file provided") {
-                eprintln!("💡 Solution:");
+                eprintln!("Solution:");
                 eprintln!("   1. Create the config file at the specified path, or");
                 eprintln!("   2. Run without --config flag to use defaults, or");
                 eprintln!("   3. Unset MERMIN_CONFIG_PATH environment variable\n");
-                eprintln!("📖 Example configs:");
+                eprintln!("Example configs:");
                 eprintln!("   - charts/mermin/config/examples/");
             } else if err_msg.contains("invalid file extension") {
-                eprintln!("💡 Solution:");
+                eprintln!("Solution:");
                 eprintln!("   Use a config file with .hcl extension");
             } else if err_msg.contains("is not a valid file") {
-                eprintln!("💡 Solution:");
+                eprintln!("Solution:");
                 eprintln!("   Provide a file path, not a directory");
             } else if err_msg.contains("configuration error") {
-                eprintln!("💡 Tip:");
+                eprintln!("Tip:");
                 eprintln!("   Check your config file syntax and values");
             }
         }
 
         MerminError::EbpfLoad(e) => {
-            eprintln!("❌ eBPF Loading Error");
+            eprintln!("eBPF Loading Error");
             eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
             eprintln!("Failed to load eBPF program: {e}\n");
-            eprintln!("💡 Common causes:");
+            eprintln!("Common causes:");
             eprintln!("   - Insufficient privileges (needs root/CAP_BPF)");
             eprintln!("   - Kernel doesn't support eBPF");
-            eprintln!("   - Incompatible kernel version");
-            eprintln!("\n💡 Solution:");
+            eprintln!("   - Incompatible kernel version\n");
+            eprintln!("Solution:");
             eprintln!("   Run with elevated privileges: sudo mermin");
             eprintln!("   Or in Docker with --privileged flag");
         }
 
         MerminError::EbpfProgram(e) => {
-            eprintln!("❌ eBPF Program Error");
+            eprintln!("eBPF Program Error");
             eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
             eprintln!("{e}\n");
-            eprintln!("💡 Common causes:");
+            eprintln!("Common causes:");
             eprintln!("   - Interface doesn't exist");
             eprintln!("   - Interface is down");
-            eprintln!("   - Insufficient privileges");
-            eprintln!("\n💡 Solution:");
+            eprintln!("   - Insufficient privileges\n");
+            eprintln!("Solution:");
             eprintln!("   - Check interface names: ip link show");
             eprintln!("   - Verify interfaces in config match host interfaces");
             eprintln!("   - Run with elevated privileges");
         }
 
         MerminError::Otlp(e) => {
-            eprintln!("❌ OpenTelemetry Error");
+            eprintln!("OpenTelemetry Error");
             eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
             eprintln!("{e}\n");
-            eprintln!("💡 Common causes:");
+            eprintln!("Common causes:");
             eprintln!("   - OTLP endpoint is unreachable");
             eprintln!("   - Invalid endpoint configuration");
-            eprintln!("   - Network connectivity issues");
-            eprintln!("\n💡 Solution:");
+            eprintln!("   - Network connectivity issues\n");
+            eprintln!("Solution:");
             eprintln!("   - Verify export.traces.otlp.endpoint in config");
             eprintln!("   - Check if the OTLP collector is running");
             eprintln!("   - Use export.traces.stdout for local debugging");
         }
 
         MerminError::Health(e) => {
-            eprintln!("❌ Health/API Server Error");
+            eprintln!("Health/HTTP Server Error");
             eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
             eprintln!("{e}\n");
-            eprintln!("💡 Common causes:");
+            eprintln!("Common causes:");
             eprintln!("   - Port already in use");
-            eprintln!("   - Invalid listen address");
-            eprintln!("\n💡 Solution:");
-            eprintln!("   - Check api.port and metrics.port in config");
-            eprintln!("   - Set api.enabled=false to disable API server");
+            eprintln!("   - Invalid listen address\n");
+            eprintln!("Solution:");
+            eprintln!("   - Check internal.server.port and internal.metrics.port in config");
+            eprintln!("   - Set internal.server.enabled=false to disable HTTP server");
         }
 
         MerminError::Signal(e) => {
-            eprintln!("❌ Signal Handling Error");
+            eprintln!("Signal Handling Error");
             eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
             eprintln!("{e}\n");
         }
 
         _ => {
-            eprintln!("❌ Error");
+            eprintln!("Error");
             eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
             eprintln!("{error}\n");
         }
