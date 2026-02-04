@@ -16,58 +16,20 @@ Filter option names are derived directly from FlowSpan attribute names defined i
 The attribute's dot notation is converted to underscores (e.g., `flow.tcp.flags.tags` becomes `tcp_flags_tags`). This 1:1 mapping ensures consistency and makes it easy to identify which attribute each filter targets.
 {% endhint %}
 
-A full configuration example can be found in the [Default Configuration](./default/config.hcl).
-
 ## Configuration
 
-### `match`/`not_match` patterns
+A full configuration example can be found in the [Default Configuration](./default/config.hcl).
 
-**Type:** List of strings
-**Default:** `[]`
-
-Mermin uses simple match patterns:
-
-- **`match`**: Include flows matching the pattern, list of strings, (empty list = include all).
-- **`not_match`**: Exclude flows matching the pattern, list of strings, (empty list = exclude none, takes precedence).
-
-The patterns support multiple forms:
-
-- **IP addresses and CIDRs**, used in the `address` arguments, for example:
-  - `10.0.0.0/8`: CIDR notation, matches the subnet
-  - `10.0.0.1`: IP address, equals the `10.0.0.1/32` subnet
-
-- **Ranges**, used in the `port`, `interface_index`, `ip_ttl`, `ip_flow_label`, `icmp_code_name` arguments, support ranges. For example:
-  - `80`: Single port
-  - `8000-8999`: Port range
-  - `0`: Single interface index
-  - `0-22`: Interface index range
-  - `64`: Single TTL
-  - `64-128`: TTL range
-  - `12345`: Single Flow Label
-  - `12345-12445`: Flow Label range
-  - `0`: Single ICMP code
-  - `0-8`: ICMP code range
-
-- **Arbitrary strings**, used in more generic arguments like transport names, interface names, and others.
-  Supports [globs](https://docs.rs/globset/latest/globset/#syntax). For example:
-  - `tcp`: Protocol names
-  - `close_wait`: Connection states
-  - `eth*`: Interface names
-
-### `filter.source` and `filter.destination` filters
+### `filter.source` and `filter.destination` filters block
 
 The filters apply to the `source`/`destination` combination of the `address` and `port` in the flow span.
 Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/agent-architecture.md#components)), which can help reduce resource usage in subsequent stages.
 
-#### `address`
+- `address` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.  
 
-Filter by IP address.
+  Filter by IP address. Supported values in patterns: IP or CIDR notation (`10.0.0.0/8`, `10.0.0.1`)
 
-**Supported values in [patterns](#matchnot_match-patterns):** IP or CIDR notation (`10.0.0.0/8`, `10.0.0.1`)
-
-**Examples:**
-
-- Include only [RFC1918](https://datatracker.ietf.org/doc/html/rfc1918), but exclude `10.0.0.0/24`, and `10.0.2.1`
+  **Example:** Include only [RFC1918](https://datatracker.ietf.org/doc/html/rfc1918), but exclude `10.0.0.0/24`, and `10.0.2.1`
 
   ```hcl
   filter "source" {
@@ -78,33 +40,31 @@ Filter by IP address.
   }
   ```
 
-#### `port`
+- `port` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.  
 
-Filter by port.
+  Filter by port. Supported values in patterns: Port or port range as a string (`443`, `8000-9000`)
 
-**Supported values in [patterns](#matchnot_match-patterns):** Port or port range as a string (`443`, `8000-9000`)
+  **Examples:**
 
-**Examples:**
+  - Include flows with only `443` (HTTPS) destination port
 
-- Include flows with only `443` (HTTPS) destination port
-
-  ```hcl
-  filter "destination" {
-    port = {
-      match = ["443"]
+    ```hcl
+    filter "destination" {
+      port = {
+        match = ["443"]
+      }
     }
-  }
-  ```
+    ```
 
-- Include flows with only [Linux ephemeral](https://www.kernel.org/doc/html/latest//networking/ip-sysctl.html#ip-variables) source ports
+  - Include flows with only [Linux ephemeral](https://www.kernel.org/doc/html/latest//networking/ip-sysctl.html#ip-variables) source ports
 
-  ```hcl
-  filter "source" {
-    port = {
-      match = ["32000-60999"]
+    ```hcl
+    filter "source" {
+      port = {
+        match = ["32000-60999"]
+      }
     }
-  }
-  ```
+    ```
 
 #### Notes
 
@@ -163,74 +123,71 @@ The result of the `filter.source`/`filter.destination` inclusion/exclusion is co
   ]
   ```
 
-### `filter.network` filter
+### `filter.network` filter block
 
 The filter applies to various network attributes in the flow span, such as transport protocol, interface, and others.
 Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/agent-architecture.md#components)), which can help reduce resource usage in subsequent stages.
 
-#### `transport`
+- `transport` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.  
 
-Filter by transport protocol.
+  Filter by transport protocol.  
+  Supported values in patterns: `tcp`, `udp`, `icmp`, `icmpv6` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
-**Supported values in [patterns](#matchnot_match-patterns):** `tcp`, `udp`, `icmp`, `icmpv6` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+  **Examples:**
 
-**Examples:**
+  - Include only TCP and UDP traffic:
 
-- Include only TCP and UDP traffic:
-
-  ```hcl
-  filter "network" {
-    transport = {
-      match = ["tcp", "udp"]
+    ```hcl
+    filter "network" {
+      transport = {
+        match = ["tcp", "udp"]
+      }
     }
-  }
-  ```
+    ```
 
-- Exclude ICMP:
+  - Exclude ICMP:
 
-  ```hcl
-  filter "network" {
-    transport = {
-      not_match = ["icmp"]
+    ```hcl
+    filter "network" {
+      transport = {
+        not_match = ["icmp"]
+      }
     }
-  }
-  ```
+    ```
 
-#### `type`
+- `type` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.  
 
-Filter by IP version.
+  Filter by IP version.  
+  Supported values in patterns: `ipv4`, `ipv6` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
-**Supported values in [patterns](#matchnot_match-patterns):** `ipv4`, `ipv6` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+  **Examples:**
 
-**Examples:**
+  - Include only IPv4 traffic:
 
-- Include only IPv4 traffic:
-
-  ```hcl
-  filter "network" {
-    type = {
-      match = ["ipv4"]
+    ```hcl
+    filter "network" {
+      type = {
+        match = ["ipv4"]
+      }
     }
-  }
-  ```
+    ```
 
-#### `interface_name`
+- `interface_name` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.  
 
-Filter by network interface name.
+  Filter by network interface name.  
+  Supported values in patterns: Any valid interface name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
-**Supported values in [patterns](#matchnot_match-patterns):** Any valid interface name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+  **Examples:**
 
-**Examples:**
+  - Include only interfaces matching `eth*` or `enp*` (`eth0`, `eth1`, `enp0s3`, `enp8s0f0`):
 
-- Include only interfaces matching `eth*` or `enp*` (`eth0`, `eth1`, `enp0s3`, `enp8s0f0`):
-
-  ```hcl
-  filter "network" {
-    interface_name = {
-      match = ["eth*", "enp*"]
+    ```hcl
+    filter "network" {
+      interface_name = {
+        match = ["eth*", "enp*"]
+      }
     }
-  }
-  ```
+    ```
 
 - Exclude interfaces matching `docker*` (`docker0`, `docker1`, `docker-wec2323`):
 
@@ -242,62 +199,60 @@ Filter by network interface name.
   }
   ```
 
-#### `interface_index`
+- `interface_index` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.  
 
-Filter by network interface index.
+  Filter by network interface index.  
+  Supported values in patterns: Any valid interface index or interface index range as a string (`0`, `1-27`)
 
-**Supported values in [patterns](#matchnot_match-patterns):** Any valid interface index or interface index range as a string (`0`, `1-27`)
+  **Examples:**
 
-**Examples:**
+  - Exclude only interface index 2:
 
-- Exclude only interface index 2:
-
-  ```hcl
-  filter "network" {
-    interface_index = {
-      not_match = ["2"]
+    ```hcl
+    filter "network" {
+      interface_index = {
+        not_match = ["2"]
+      }
     }
-  }
-  ```
+    ```
 
-- Include only interfaces `1` to `27` and `30`:
+  - Include only interfaces `1` to `27` and `30`:
 
-  ```hcl
-  filter "network" {
-    interface_index = {
-      match = ["1-27", "30"]
+    ```hcl
+    filter "network" {
+      interface_index = {
+        match = ["1-27", "30"]
+      }
     }
-  }
-  ```
+    ```
 
-#### `interface_mac`
+- `interface_mac` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.  
 
-Filter by network interface MAC address.
+  Filter by network interface MAC address.  
+  Supported values in patterns: Any valid MAC address (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
-**Supported values in [patterns](#matchnot_match-patterns):** Any valid MAC address (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+  **Examples:**
 
-**Examples:**
+  - Exclude a specific MAC address:
 
-- Exclude a specific MAC address:
-
-  ```hcl
-  filter "network" {
-    interface_mac = {
-      not_match = ["00:11:22:33:44:55"]
+    ```hcl
+    filter "network" {
+      interface_mac = {
+        not_match = ["00:11:22:33:44:55"]
+      }
     }
-  }
-  ```
+    ```
 
-### `filter.flow` filters
+### `filter.flow` filter block
 
 The filter applies to various flow attributes in the flow span, such as connection state, TCP flags and others.
 Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/agent-architecture.md#components)), which can help reduce resource usage in subsequent stages.
 
-#### `connection_state`
+- `connection_state` - [pattern matcher object](#pattern-matcher-object), default `{}`.  
 
-Filter by TCP connection state.
 
-**Supported values in [patterns](#matchnot_match-patterns):** `established`, `syn_sent`, `syn_received`, `fin_wait`, `close_wait`, `closing`, `last_ack`, `time_wait`, `closed` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+  Filter by TCP connection state.  
+  Supported values in patterns: `established`, `syn_sent`, `syn_received`, `fin_wait`, `close_wait`, `closing`, `last_ack`, `time_wait`, `closed` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
 **Examples:**
 
@@ -311,167 +266,197 @@ Filter by TCP connection state.
   }
   ```
 
-#### `tcp_flags_tags`
+- `tcp_flags_tags` - [pattern matcher object](#pattern-matcher-object), default `{}`.  
 
-Filter by TCP flags.
+  Filter by TCP flags.  
+  Supported values in patterns: `SYN`, `ACK`, `FIN`, `RST`, `PSH`, `URG` (supports [globs](https://docs.rs/globset/latest/globset/#syntax)), _case insensitive_.
 
-**Supported values in [patterns](#matchnot_match-patterns):** `SYN`, `ACK`, `FIN`, `RST`, `PSH`, `URG` (supports [globs](https://docs.rs/globset/latest/globset/#syntax)), _case insensitive_.
+  **Examples:**
 
-**Examples:**
+  - Include only flows with SYN flag:
 
-- Include only flows with SYN flag:
-
-  ```hcl
-  filter "flow" {
-    tcp_flags_tags = {
-      match = ["SYN"]
+    ```hcl
+    filter "flow" {
+      tcp_flags_tags = {
+        match = ["SYN"]
+      }
     }
-  }
-  ```
+    ```
 
-#### `ip_dscp_name`
+- `ip_dscp_name` - [pattern matcher object](#pattern-matcher-object), default `{}`.  
 
-Filter flows based on the DSCP ([Differentiated Services Code Point](https://en.wikipedia.org/wiki/Differentiated_services#Configuration_guidelines)) names.
+  Filter flows based on the DSCP ([Differentiated Services Code Point](https://en.wikipedia.org/wiki/Differentiated_services#Configuration_guidelines)) names.  
+  Supported values in patterns: Any valid DSCP name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
-**Supported values in [patterns](#matchnot_match-patterns):** Any valid DSCP name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+  **Examples:**
 
-**Examples:**
+  - Include only low-latency data (`AF21`)
 
-- Include only low-latency data (`AF21`)
+    ```hcl
+    filter "flow" {
+      ip_dscp_name = { match = ["AF21"] }
+    }
+    ```
 
-  ```hcl
-  filter "flow" {
-    ip_dscp_name = { match = ["AF21"] }
-  }
-  ```
+  - Exclude multimedia conferencing (`AF41`, `AF42`, `AF43`)
 
-- Exclude multimedia conferencing (`AF41`, `AF42`, `AF43`)
+    ```hcl
+    filter "flow" {
+      ip_dscp_name = { match = ["AF4{1,2,3}"] }
+    }
+    ```
 
-  ```hcl
-  filter "flow" {
-    ip_dscp_name = { match = ["AF4{1,2,3}"] }
-  }
-  ```
+- `ip_ecn_name` - [pattern matcher object](#pattern-matcher-object), default `{}`.  
 
-#### `ip_ecn_name`
+  Filter flows based on ECN ([Explicit Congestion Notification](https://en.wikipedia.org/wiki/Explicit_congestion_notification)) values.  
+  Supported values in patterns: Any valid ECN value (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
-Filter flows based on ECN ([Explicit Congestion Notification](https://en.wikipedia.org/wiki/Explicit_congestion_notification)) values.
+  **Examples:**
 
-**Supported values in [patterns](#matchnot_match-patterns):** Any valid ECN value (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+  - Include only ECN-capable transport (`ECT0`, `ECT1`)
 
-**Examples:**
+    ```hcl
+    filter "flow" {
+      ip_ecn_name = { match = ["ECT?"] }
+    }
+    ```
 
-- Include only ECN-capable transport (`ECT0`, `ECT1`)
+  - Exclude congestion encountered (`CE`)
 
-  ```hcl
-  filter "flow" {
-    ip_ecn_name = { match = ["ECT?"] }
-  }
-  ```
+    ```hcl
+    filter "flow" {
+      ip_ecn_name = { not_match = ["CE"] }
+    }
+    ```
 
-- Exclude congestion encountered (`CE`)
+- `ip_ttl` - [pattern matcher object](#pattern-matcher-object), default `{}`.  
 
-  ```hcl
-  filter "flow" {
-    ip_ecn_name = { not_match = ["CE"] }
-  }
-  ```
+  Filter flows based on the IP TTL ([Time To Live](https://en.wikipedia.org/wiki/Time_to_live)) values.  
+  Supported values in patterns: Any valid TTL or TTL range as a string (`1`, `64-184`)
 
-#### `ip_ttl`
+  **Examples:**
 
-Filter flows based on the IP TTL ([Time To Live](https://en.wikipedia.org/wiki/Time_to_live)) values.
+  - Include only packets with the TTL `1` and `64` to `128`
 
-**Supported values in [patterns](#matchnot_match-patterns):** Any valid TTL or TTL range as a string (`1`, `64-184`)
+    ```hcl
+    filter "flow" {
+      ip_ttl = { match = ["1", "64-184"] }
+    }
+    ```
 
-**Examples:**
+  - Exclude packets with the TTL `64`
 
-- Include only packets with the TTL `1` and `64` to `128`
+    ```hcl
+    filter "flow" {
+      ip_ttl = { not_match = ["64"] }
+    }
+    ```
 
-  ```hcl
-  filter "flow" {
-    ip_ttl = { match = ["1", "64-184"] }
-  }
-  ```
+- `ip_flow_label` - [pattern matcher object](#pattern-matcher-object), default `{}`.  
 
-- Exclude packets with the TTL `64`
+  Filter flows based on IPv6 [flow labels](https://www.rfc-editor.org/rfc/rfc6437.html).  
+  Supported values in patterns: Any valid flow label or label range (`2145`, `12345-12545`)
 
-  ```hcl
-  filter "flow" {
-    ip_ttl = { not_match = ["64"] }
-  }
-  ```
+  **Examples:**
 
-#### `ip_flow_label`
+  - Include only flows with label 12345
 
-Filter flows based on IPv6 [flow labels](https://www.rfc-editor.org/rfc/rfc6437.html).
+    ```hcl
+    filter "flow" {
+      ip_flow_label = { match = ["12345"] }
+    }
+    ```
 
-**Supported values in [patterns](#matchnot_match-patterns):** Any valid flow label or label range (`2145`, `12345-12545`)
+  - Exclude flows with labels in a range
 
-**Examples:**
+    ```hcl
+    filter "flow" {
+      ip_flow_label = { not_match = ["12345-12545"] }
+    }
+    ```
 
-- Include only flows with label 12345
+- `icmp_type_name` - [pattern matcher object](#pattern-matcher-object), default `{}`.  
 
-  ```hcl
-  filter "flow" {
-    ip_flow_label = { match = ["12345"] }
-  }
-  ```
+  Filter flows based on [ICMP type](https://www.iana.org/assignments/icmp-parameters/icmp-parameters.xhtml) names (converted to a [snake case](https://en.wikipedia.org/wiki/Snake_case)).  
+  Supported values in patterns: Any valid ICMP type name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
-- Exclude flows with labels in a range
+  **Examples:**
 
-  ```hcl
-  filter "flow" {
-    ip_flow_label = { not_match = ["12345-12545"] }
-  }
-  ```
+  - Include only echo requests
 
-#### `icmp_type_name`
+    ```hcl
+    filter "flow" {
+      icmp_type_name = { match = ["echo_request"] }
+    }
+    ```
 
-Filter flows based on [ICMP type](https://www.iana.org/assignments/icmp-parameters/icmp-parameters.xhtml) names (converted to a [snake case](https://en.wikipedia.org/wiki/Snake_case))
+  - Exclude destination unreachable
 
-**Supported values in [patterns](#matchnot_match-patterns):** Any valid ICMP type name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+    ```hcl
+    filter "flow" {
+      icmp_type_name = { not_match = ["destination_unreachable"] }
+    }
+    ```
 
-**Examples:**
+- `icmp_code_name` - [pattern matcher object](#pattern-matcher-object), default `{}`.  
 
-- Include only echo requests
+  Filter flows based on [ICMP codes](https://www.iana.org/assignments/icmp-parameters/icmp-parameters.xhtml).  
+  Supported values in patterns: Any valid ICMP code or code range as a string (`13`, `0-8`)
 
-  ```hcl
-  filter "flow" {
-    icmp_type_name = { match = ["echo_request"] }
-  }
-  ```
+  **Examples:**
 
-- Exclude destination unreachable
+  - Include codes from `0` to `8` and `13`
 
-  ```hcl
-  filter "flow" {
-    icmp_type_name = { not_match = ["destination_unreachable"] }
-  }
-  ```
+    ```hcl
+    filter "flow" {
+      icmp_code_name = { match = ["0-8", "13"] }
+    }
+    ```
 
-#### `icmp_code_name`
+  - Exclude code `3`
 
-Filter flows based on [ICMP codes](https://www.iana.org/assignments/icmp-parameters/icmp-parameters.xhtml)
+    ```hcl
+    filter "flow" {
+      icmp_code_name = { not_match = ["3"] }
+    }
+    ```
 
-**Supported values in [patterns](#matchnot_match-patterns):** Any valid ICMP code or code range as a string (`13`, `0-8`)
+## Object types
 
-**Examples:**
+### Pattern matcher object
 
-- Include codes from `0` to `8` and `13`
+- `match` attribute - list of strings, default `[]` (empty list, include all).  
 
-  ```hcl
-  filter "flow" {
-    icmp_code_name = { match = ["0-8", "13"] }
-  }
-  ```
+  Include flows matching the pattern
+- `not_match` attribute - list of strings, default `[]` (empty list, exclude none).  
 
-- Exclude code `3`
+  Exclude flows matching the pattern
 
-  ```hcl
-  filter "flow" {
-    icmp_code_name = { not_match = ["3"] }
-  }
-  ```
+#### Matcher value types
+
+Although matcher patterns are strings only, there are multiple types that are supported:
+
+- **IP addresses and CIDRs**, used in the `address` arguments, for example:
+  - `10.0.0.0/8`: CIDR notation, matches the subnet
+  - `10.0.0.1`: IP address, equals the `10.0.0.1/32` subnet
+
+- **Ranges**, used in the `port`, `interface_index`, `ip_ttl`, `ip_flow_label`, `icmp_code_name` arguments, support ranges. For example:
+  - `80`: Single port
+  - `8000-8999`: Port range
+  - `0`: Single interface index
+  - `0-22`: Interface index range
+  - `64`: Single TTL
+  - `64-128`: TTL range
+  - `12345`: Single Flow Label
+  - `12345-12445`: Flow Label range
+  - `0`: Single ICMP code
+  - `0-8`: ICMP code range
+
+- **Arbitrary strings**, used in more generic arguments like transport names, interface names, and others.
+  Supports [globs](https://docs.rs/globset/latest/globset/#syntax). For example:
+  - `tcp`: Protocol names
+  - `close_wait`: Connection states
+  - `eth*`: Interface names
 
 ## Common Filtering Scenarios
 

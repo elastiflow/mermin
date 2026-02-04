@@ -1,149 +1,19 @@
 # Configure Kubernetes Attribution of Flow Spans
 
+**Block:** `attributes.source.k8s`/`attributes.destination.k8s`
+
 Flow attributes define which Kubernetes metadata to extract and how to associate it with network flows.
 
-## Overview
+The feature allows:
 
-The `attributes` configuration has two main components:
+- **Pod associations** capture container networking (IPs, ports, protocols) including both pod and host networking
+- **Service associations** cover all service types (ClusterIP, LoadBalancer, ExternalIP) with port and protocol matching
+- **Node associations** match node IP addresses for host networking scenarios
+
+The configuration has two main components:
 
 1. **Extract**: Which metadata fields to extract from Kubernetes resources
 2. **Association**: How to map flow attributes (IPs, ports) to Kubernetes object fields
-
-## Configuration
-
-Mermin accepts HCL or YAML for the config file. The examples below use HCL; the same structure can be expressed in YAML (see [Configuration Overview](overview.md#file-format)).
-
-```hcl
-attributes "source" "k8s" {
-  extract {
-    metadata = [
-      "[*].metadata.name",
-      "[*].metadata.namespace",
-      "[*].metadata.uid",
-    ]
-  }
-
-  association {
-    pod = {
-      sources = [
-        {
-          from = "flow"
-          name = "source.ip"
-          to = ["status.podIP", "status.podIPs[*]"]
-        }
-      ]
-    }
-
-    service = {
-      sources = [
-        {
-          from = "flow"
-          name = "source.ip"
-          to = ["spec.clusterIP", "spec.clusterIPs[*]"]
-        },
-        {
-          from = "flow"
-          name = "source.port"
-          to = ["spec.ports[*].port"]
-        }
-      ]
-    }
-  }
-}
-```
-
-## Extract Configuration
-
-### `metadata`
-
-Array of JSONPath-style paths to extract from Kubernetes resources. Paths are evaluated against the resource object (Pod, Service, Node, etc.).
-
-**Common extractions:**
-
-```hcl
-extract {
-  metadata = [
-    "[*].metadata.name", # Resource name
-    "[*].metadata.namespace", # Namespace
-    "[*].metadata.uid", # Unique ID
-  ]
-}
-```
-
-**Syntax:**
-
-- `[*]`: Applies to all resource kinds
-- `pod.metadata.name`: Specific to pods
-- `[*].metadata.labels`: Extract labels
-
-## Association Configuration
-
-Associations map flow fields (e.g. `source.ip`, `source.port`) to Kubernetes object fields for matching. The `to` paths are JSONPath-style paths over the resource (Pod, Service, Node, etc.).
-
-### Pod Association
-
-```hcl
-pod = {
-  sources = [
-    {
-      from = "flow"
-      name = "source.ip"
-      to = ["status.podIP", "status.podIPs[*]", "status.hostIP"]
-    }
-  ]
-}
-```
-
-### Service Association
-
-```hcl
-service = {
-  sources = [
-    {
-      from = "flow"
-      name = "source.ip"
-      to = ["spec.clusterIP", "spec.clusterIPs[*]"]
-    },
-    {
-      from = "flow"
-      name = "source.port"
-      to = ["spec.ports[*].port"]
-    },
-    {
-      from = "flow"
-      name = "network.transport"
-      to = ["spec.ports[*].protocol"]
-    }
-  ]
-}
-```
-
-### Other Association Types
-
-In addition to **pod**, **service**, and **node**, you can configure:
-
-| Association       | Resource              | Use case                                                                         |
-|-------------------|-----------------------|----------------------------------------------------------------------------------|
-| **endpointslice** | EndpointSlice         | Direct matching of EndpointSlice backend IPs (e.g. `endpoints[*].addresses[*]`). |
-| **networkpolicy** | NetworkPolicy         | Match flows to NetworkPolicy resources by IP.                                    |
-| **ingress**       | Ingress               | Match flows to Ingress VIPs and backend IPs.                                     |
-| **gateway**       | Gateway (Gateway API) | Match flows to Gateway resources.                                                |
-
-Example for direct EndpointSlice IP matching:
-
-```hcl
-association {
-  endpointslice = {
-    sources = [
-      {
-        from = "flow"
-        name = "source.ip"
-        to = ["endpoints[*].addresses[*]"]
-      }
-    ]
-  }
-}
-```
 
 ## Source vs Destination
 
@@ -163,165 +33,158 @@ attributes "destination" "k8s" {
 }
 ```
 
-### Default Configuration
+## Configuration
 
-Summary of default associations (source and destination each get the same structure, with `source.ip`/`source.port` or `destination.ip`/`destination.port`):
+A full configuration example can be found in the [Default Configuration](./default/config.hcl).
 
-| Association  | Flow fields used            | Kubernetes paths (summary)                                                                                                      |
-|--------------|-----------------------------|---------------------------------------------------------------------------------------------------------------------------------|
-| **pod**      | ip, port, network.transport | status.podIP, status.podIPs[*], status.hostIP, status.hostIPs[*], spec.containers[*].ports[*].containerPort, hostPort, protocol |
-| **service**  | ip, port, network.transport | spec.clusterIP, spec.clusterIPs[*], spec.externalIPs[*], spec.loadBalancerIP, spec.ports[*].port, spec.ports[*].protocol        |
-| **node**     | ip                          | status.addresses[*].address                                                                                                     |
-| **endpoint** | ip                          | endpoints[*].addresses[*] (legacy; for direct EndpointSlice IP matching use **endpointslice**)                                  |
+### `extract` block
 
-**Note:** The default **endpoint** block uses path `endpoints[*].addresses[*]`. The IP index is built from **pod**, **service**, **node**, and **endpointslice** when present.
-For direct matching of EndpointSlice backend IPs, add an **endpointslice** association (see [Other association types](#other-association-types)).
+Defines which metadata to extract from the Kubernetes resources.
 
-```hcl
-# Automatically configured - no manual setup required
-attributes "source" "k8s" {
+- `metadata` attribute - list of strings, default `["[*].metadata.namespace", "[*].metadata.name", "[*].metadata.uid"]`.  
+
+  List of JSONPath-style paths to extract from Kubernetes resources. Paths are evaluated against the resource object (Pod, Service, Node, etc.).
+
+  **Example:** Extract all resource names but namespace only for the Pods
+
+  ```hcl
   extract {
     metadata = [
-      "[*].metadata.name", # Resource name
-      "[*].metadata.namespace", # Namespace
-      "[*].metadata.uid", # Unique identifier
+      "[*].metadata.name",
+      "pod.metadata.namespace",
     ]
   }
+  ```
 
+- `label` block - [metadata extraction object](#metadata-extraction-object), `{}` (no labels are extracted by default).  
+
+  The label block configures how to extract Kubernetes labels to Otel attributes, can be defined multiple times to extract multiple labels.
+  _Not implemented_
+
+  **Example:** Extract all Service labels with `kubernetes.io/` prefix to Otel attribute named after label suffix without any value modifications
+
+  ```hcl
+  label {
+    from            = "service"
+    key_regex       = "kubernetes.io/(.*)"
+    value_regex     = "(.*)"
+    attribute       = "$1"
+    attribute_value = "$1"
+  }
+  ```
+
+- `annotation` block - [metadata extraction object](#metadata-extraction-object), `{}` (no annotations are extracted by default).  
+
+  The label block configures how to extract Kubernetes annotations to Otel attributes, can be defined multiple times to extract multiple labels.
+  _Not implemented_
+
+  **Example:** Extract all Pod annotations with `kubernetes.io/` prefix to Otel attribute named after annotation suffix without any value modifications
+
+  ```hcl
+  annotation {
+    from            = "pod"
+    key_regex       = "kubernetes.io/(.*)"
+    value_regex     = "(.*)"
+    attribute       = "$1"
+    attribute_value = "$1"
+  }
+  ```
+
+### `association` block
+
+Defines how to associate flow fields (e.g. `source.ip`, `source.port`) to Kubernetes object fields for matching. The `to` paths are JSONPath-style paths over the resource (Pod, Service, Node, etc.).
+
+Each key in the map identifies the Kubernetes kind (`pod`, `service`, `node`, etc.)
+
+**Example:** Simplify flow `source.ip` matching to the pod
+
+```hcl
+attributes "source" "k8s" {
   association {
     pod = {
       sources = [
         {
-          from = "flow"
-          name = "source.ip"
-          to = [
-            "status.podIP",
-            "status.podIPs[*]",
-            "status.hostIP",
-            "status.hostIPs[*]"
-          ]
-        },
-        {
-          from = "flow"
-          name = "source.port"
-          to = [
-            "spec.containers[*].ports[*].containerPort",
-            "spec.containers[*].ports[*].hostPort"
-          ]
-        },
-        {
-          from = "flow"
-          name = "network.transport"
-          to = ["spec.containers[*].ports[*].protocol"]
-        }
-      ]
-    }
-
-    service = {
-      sources = [
-        {
-          from = "flow"
-          name = "source.ip"
-          to = [
-            "spec.clusterIP",
-            "spec.clusterIPs[*]",
-            "spec.externalIPs[*]",
-            "spec.loadBalancerIP"
-          ]
-        },
-        {
-          from = "flow"
-          name = "source.port"
-          to = ["spec.ports[*].port"]
-        },
-        {
-          from = "flow"
-          name = "network.transport"
-          to = ["spec.ports[*].protocol"]
-        }
-      ]
-    }
-
-    node = {
-      sources = [
-        {
-          from = "flow"
-          name = "source.ip"
-          to = ["status.addresses[*].address"]
-        }
-      ]
-    }
-
-    endpoint = {
-      sources = [
-        {
-          from = "flow"
-          name = "source.ip"
-          to = ["endpoints[*].addresses[*]"]
+          from = "source.ip"
+          to = ["status.podIP"]
         }
       ]
     }
   }
 }
-
-# Same configuration automatically applied for destination
-attributes "destination" "k8s" {
-  # ... identical structure with destination.ip and destination.port
-}
 ```
 
-**Strategy**: Comprehensive Kubernetes metadata enrichment without manual configuration
+- `sources` attribute - list of [association objects](#association-object), please see the [default configuration](./default/config.hcl) for the default for each Kubernetes kind.  
 
-- **Pod associations** capture container networking (IPs, ports, protocols) including both pod and host networking
-- **Service associations** cover all service types (ClusterIP, LoadBalancer, ExternalIP) with port and protocol matching
-- **Node associations** match node IP addresses for host networking scenarios
-- The default **endpoint** association is provided for compatibility; for direct EndpointSlice IP matching, use **endpointslice** (see [Other association types](#other-association-types))
+  **Example:** Map `source.ip` from the flow record to the Pod IP
 
-This covers the most common Kubernetes networking patterns and provides immediate network observability upon deployment.
+  ```hcl
+  pod = {
+    sources = [
+      {
+        from = "source.ip"
+        to   = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"]
+      }
+    ]
+  }
+  ```
 
-### How to Disable Default Attributes
+### Disable Default Attributes
 
 If you need to disable the automatic attributes configuration, override it with an empty configuration:
 
 ```hcl
-# Disables all default and custom attribution rules.
-attributes {}
+attributes "source" "k8s" {}
+attributes "destination" "k8s" {}
 ```
 
-### How to Customize Default Attributes
+## Object types
 
-You can provide your own `attributes` configuration to override the defaults:
+### Metadata extraction object
 
-```hcl
-# Custom source attributes (replaces defaults)
-attributes "source" "k8s" {
-  extract {
-    metadata = [
-      "[*].metadata.name",
-      "[*].metadata.labels", # Add custom fields
-    ]
-  }
+Defines how to extract Kubernetes labels to Otel attributes
 
-  association {
-    pod = {
-      sources = [
-        {
-          from = "flow"
-          name = "source.ip"
-          to = ["status.podIP"]  # Simplified matching
-        }
-      ]
-    }
-  }
-}
-```
+- `from` attribute - string, default `""`.  
+
+  Kubernetes kind to extract labels from
+
+- `key_regex` attribute - string, default `""`.  
+
+  [Rust regular expressions](https://docs.rs/regex/latest/regex/) to match label keys against. Regex capture groups are available.
+
+- `value_regex` attribute - string, default `""`.  
+
+  [Rust regular expressions](https://docs.rs/regex/latest/regex/) to match label values against. Regex capture groups are available.
+
+- `attribute` attribute - string, default `""`.  
+
+  Otel attribute to which the resulting value is written in a replace action. Regex capture groups are available.
+
+- `attribute_value` attribute - string, default `""`.  
+
+  Otel attribute value to set. Regex capture groups are available.
+
+### Association object
+
+Defines how to associate flow fields (e.g. `source.ip`, `source.port`) to Kubernetes object fields for matching. The `to` paths are JSONPath-style paths over the resource (Pod, Service, Node, etc.).
+
+- `from` attribute - string.  
+
+  Flow field (attribute) name to use for the mapping
+
+- `to` attribute - list of strings.  
+
+  JSONPath-style paths over the resource to match with `from` value
+
+## Troubleshooting
+
+### Kubernetes Metadata is not properly mapped
+
+**Symptoms:** You don't see Kubernetes resources attributes mapped to the flow spans.
 
 Any explicit `attributes` configuration completely replaces the defaults for that direction and provider.
 If you only configure one direction (e.g. only `attributes "source" "k8s"`), the other direction gets no attribution unless you add it explicitly.
 
-### Verification
-
-To verify the default attributes are working:
+**Solutions:**
 
 1. Deploy Mermin without any `attributes` configuration
 2. Generate network traffic in your cluster
