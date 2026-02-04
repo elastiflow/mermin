@@ -208,4 +208,4 @@ For production environments:
 
 ## Next Steps
 
-- [**Mermin Internal Metrics**](../internal-monitoring/app-metrics.md): Mermin metrics documentation
+- [**Mermin Internal Metrics**](../internal-monitoring/internal-metrics.md): Mermin metrics documentation

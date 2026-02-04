@@ -423,7 +423,7 @@ If your environment uses multiple ports for the same tunnel protocol (e.g., mult
 
 ## Next Steps
 
-- [**Configuration Overview**](configuration.md): Config file format and structure
+- [**Configuration Overview**](overview.md): Config file format and structure
 - [**Network Interface Discovery**](discovery-instrument.md): Configure which interfaces to monitor
 - [**Flow Filtering**](filtering.md): Filter flows based on protocols and ports
 - [**Deployment Issues**](../troubleshooting/deployment-issues.md): Troubleshoot eBPF verifier failures

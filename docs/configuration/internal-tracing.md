@@ -1,7 +1,7 @@
 # Configure the Internal Tracing Exporter
 
 This page documents the `internal "traces"` configuration (config path: `internal.traces`), which controls how Mermin exports its own telemetry data for self-monitoring and debugging.
-Mermin accepts HCL or YAML; the examples below use HCL (see [Configuration Overview](configuration.md#file-format) for format details).
+Mermin accepts HCL or YAML; the examples below use HCL (see [Configuration Overview](overview.md#file-format) for format details).
 
 ## Overview
 

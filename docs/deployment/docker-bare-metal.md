@@ -524,7 +524,7 @@ sudo systemctl start mermin
 
 ## Next Steps
 
-* [**Configuration Reference**](../configuration/configuration.md): Optimize for bare metal
+* [**Configuration Reference**](../configuration/overview.md): Optimize for bare metal
 * [**OTLP Export**](../configuration/export-otlp.md): Configure secure export
 * [**Observability Backends**](../observability/backend-integrations.md): Send data to observability backends
 * [**Troubleshooting**](../troubleshooting/troubleshooting.md): Solve common issues

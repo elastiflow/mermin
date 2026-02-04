@@ -31,7 +31,7 @@
 
 ## Configuration
 
-* [Overview](configuration/configuration.md)
+* [Overview](configuration/overview.md "Configuration Overview")
 * [Examples](configuration/examples.md)
 * [Global Agent Options](configuration/global-options.md)
 * [Configuration References](configuration/configuration-references/README.md)
@@ -52,7 +52,7 @@
 
 ## Internal Monitoring
 
-* [Metrics](internal-monitoring/app-metrics.md)
+* [Metrics](internal-monitoring/internal-metrics.md "Metrics")
 
 ## Troubleshooting
 

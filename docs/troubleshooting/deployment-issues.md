@@ -501,4 +501,4 @@ Want to dive deeper? These guides provide additional context:
 
 - [**Common eBPF Errors**](common-ebpf-errors.md) - Detailed eBPF verifier error diagnosis and solutions
 - [**Interface Visibility**](interface-visibility-and-traffic-decapsulation.md) - Understanding network traffic visibility at different layers
-- [**Configuration Reference**](../configuration/configuration.md) - Complete configuration options
+- [**Configuration Reference**](../configuration/overview.md) - Complete configuration options

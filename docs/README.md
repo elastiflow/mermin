@@ -87,7 +87,7 @@ This documentation is designed to help you successfully deploy, configure, and o
 - [**Quick Start Guide**](getting-started/quickstart-guide.md): Get Mermin running in minutes on a local Kubernetes cluster.
 - [**Architecture Overview**](getting-started/agent-architecture.md): Understand how Mermin works and its data flow.
 - [**Deployment Guides**](deployment/overview.md): Detailed instructions for various deployment scenarios (Kubernetes, cloud platforms, bare metal).
-- [**Configuration Reference**](configuration/configuration.md): Comprehensive documentation of all configuration options.
+- [**Configuration Reference**](configuration/overview.md): Comprehensive documentation of all configuration options.
 - [**Observability Backends**](observability/backend-integrations.md): Understand how to send Flow Traces to Elastic, Grafana Tempo, Jaeger, and other OTLP-compatible platforms.
 - [**Troubleshooting**](troubleshooting/troubleshooting.md): Solutions to common issues and diagnostic approaches
 - [**Development Guides**](contributor-guide/development-workflow.md): Build, test, and contribute to Mermin

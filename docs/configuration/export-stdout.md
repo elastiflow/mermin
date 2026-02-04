@@ -436,7 +436,7 @@ export "traces" {
 
 ## Next Steps
 
-* [**Configuration Overview**](configuration.md): Config file format and structure
+* [**Configuration Overview**](overview.md): Config file format and structure
 * [**OTLP Exporter**](export-otlp.md): Configure production export
 * [**Flow Filtering**](filtering.md): Reduce log volume
 * [**Internal Tracing**](internal-tracing.md): Monitor Mermin itself
