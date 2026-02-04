@@ -34,7 +34,7 @@ pipeline {
 
 **Type:** Integer **Default:** `100000`
 
-The capacity of the `FLOW_STATS` eBPF map. See [eBPF Programs](../getting-started/architecture.md#ebpf-programs) in the architecture documentation for more information.
+The capacity of the `FLOW_STATS` eBPF map. See [eBPF Programs](../getting-started/agent-architecture.md#ebpf-programs) in the architecture documentation for more information.
 
 **Example:**
 
@@ -108,7 +108,7 @@ pipeline {
 
 **Type:** String (duration) **Default:** `"5s"`
 
-The polling interval for flow workers. This controls how frequently workers poll the flow data from the `FLOW_STATS` map.See [eBPF Programs](../getting-started/architecture.md#ebpf-programs) in the architecture documentation for more information.
+The polling interval for flow workers. This controls how frequently workers poll the flow data from the `FLOW_STATS` map.See [eBPF Programs](../getting-started/agent-architecture.md#ebpf-programs) in the architecture documentation for more information.
 Reducing the interval may increase CPU usage.
 
 **Example:**
@@ -174,7 +174,7 @@ pipeline {
 ## Next Steps
 
 - [**Configuration Overview**](configuration.md): Config file format and structure
-- [**Architecture**](../getting-started/architecture.md): Data flow and eBPF programs
+- [**Architecture**](../getting-started/agent-architecture.md): Data flow and eBPF programs
 - [**Span Options**](span.md): Flow timeouts and span generation
 - [**OTLP Exporter**](export-otlp.md): Export tuning and backpressure
 - [**Configuration Examples**](examples.md): Full pipeline examples (production, high-throughput)

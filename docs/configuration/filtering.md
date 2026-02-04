@@ -52,7 +52,7 @@ The patterns support multiple forms
 ### `filter.source` and `filter.destination` filters
 
 The filters apply to the `source`/`destination` combination of the `address` and `port` in the flow span.
-Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/architecture.md#components)), which can help reduce resource usage in subsequent stages.
+Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/agent-architecture.md#components)), which can help reduce resource usage in subsequent stages.
 
 #### `address`
 
@@ -161,7 +161,7 @@ Result of the `filter.source`/`filter.destination` inclusion/exclusion is combin
 ### `filter.network` filter
 
 The filter applies to various network attributes in the flow span, such as transport protocol, interface, and others.
-Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/architecture.md#components)), which can help reduce resource usage in subsequent stages.
+Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/agent-architecture.md#components)), which can help reduce resource usage in subsequent stages.
 
 #### `transport`
 
@@ -286,7 +286,7 @@ Filter by network interface MAC address.
 ### `filter.flow` filters
 
 The filter applies to various flow attributes in the flow span, such as connection state, TCP flags and others.
-Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/architecture.md#components)), which can help reduce resource usage in subsequent stages.
+Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/agent-architecture.md#components)), which can help reduce resource usage in subsequent stages.
 
 #### `connection_state`
 

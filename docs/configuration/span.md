@@ -3,7 +3,7 @@
 Mermin groups captured packets into bidirectional flows and exports each flow as an OpenTelemetry span. The `span` block controls when flows are closed and when they emit records,
 plus Community ID hashing, trace ID correlation, and hostname resolution. Add a top-level `span { }` block in your [configuration file](configuration.md); there are no CLI or environment overrides for span options.
 
-Flow semantics (how flows become OpenTelemetry spans and what attributes they carry) are in [Semantic Conventions](../spec/semantic-conventions.md) and [Attribute Reference](../spec/attribute-reference.md).
+Flow semantics (how flows become OpenTelemetry spans and what attributes they carry) are in [Semantic Conventions](../spec/semantic-conventions.md) and [Attribute Reference](../getting-started/attribute-reference.md).
 
 ## Configuration
 
@@ -45,14 +45,14 @@ For TCP, the effective timeout is chosen per flow: `tcp_timeout` for established
 
 | Option              | Type             | Default | Description                                                                                                                                                                                                                                                                          |
 |---------------------|------------------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `community_id_seed` | integer (uint16) | `0`     | Seed for [Community ID](https://github.com/corelight/community-id-spec) hashing of the flow five-tuple. Use the same seed everywhere for correlation across agents and tools. The result is exported as `flow.community_id` ([Attribute Reference](../spec/attribute-reference.md)). |
+| `community_id_seed` | integer (uint16) | `0`     | Seed for [Community ID](https://github.com/corelight/community-id-spec) hashing of the flow five-tuple. Use the same seed everywhere for correlation across agents and tools. The result is exported as `flow.community_id` ([Attribute Reference](../getting-started/attribute-reference.md)). |
 | `trace_id_timeout`  | duration         | `24h`   | How long the same Community ID keeps the same trace ID. Bounds memory while still allowing correlation across flow records for the same logical flow.                                                                                                                                |
 
 ### Hostname resolution
 
 | Option                       | Type     | Default | Description                                                                                                                                           |
 |------------------------------|----------|---------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `enable_hostname_resolution` | bool     | `true`  | When true, `client.address` and `server.address` may be reverse-DNS hostnames instead of IPs ([Attribute Reference](../spec/attribute-reference.md)). |
+| `enable_hostname_resolution` | bool     | `true`  | When true, `client.address` and `server.address` may be reverse-DNS hostnames instead of IPs ([Attribute Reference](../getting-started/attribute-reference.md)). |
 | `hostname_resolve_timeout`   | duration | `100ms` | Timeout for each reverse-DNS lookup. Results are cached.                                                                                              |
 
 ## When a flow span is exported

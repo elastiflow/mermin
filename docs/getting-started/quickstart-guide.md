@@ -174,7 +174,7 @@ Congratulations! You've successfully deployed Mermin and captured network flows.
 
 To use Mermin in production:
 
-1. [**Review the Architecture**](architecture.md) to understand how Mermin works
+1. [**Review the Architecture**](agent-architecture.md) to understand how Mermin works
 2. [**Explore Deployment Options**](../deployment/overview.md) for production-ready configurations
 3. [**Configure OTLP Export**](../configuration/export-otlp.md) to send flows to your observability backend
 4. [**Set Up Integrations**](../observability/backend-integrations.md) with Grafana, Elastic, or other platforms
