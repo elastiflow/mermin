@@ -79,7 +79,7 @@ kubectl get pods -l app.kubernetes.io/name=mermin
 
 You should see one Mermin pod per worker node, all in the `Running` state:
 
-```
+```text
 NAME           READY   STATUS    RESTARTS   AGE
 mermin-abc123  1/1     Running   0          2m
 mermin-def456  1/1     Running   0          2m
@@ -115,7 +115,7 @@ Switch back to the logs terminal, and you'll see network flow records for the tr
 
 Example flow record (stdout format):
 
-```
+```text
 Flow Record:
   Timestamp: 2025-10-27T10:30:45Z
   Source: 10.244.1.5:45678 (test-pod)

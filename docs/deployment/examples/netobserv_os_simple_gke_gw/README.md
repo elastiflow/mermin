@@ -8,7 +8,8 @@
 
 ## Overview
 
-This example deploys Mermin and NetObserv Flow (as OTel receiver) with OpenSearch as the data platform in a GCP GKE cluster. This example is intended only for demonstration, testing, or proof-of-concept use, since OpenSearch is deployed in a single-node mode.
+This example deploys Mermin and NetObserv Flow (as OTel receiver) with OpenSearch as the data platform in a GCP GKE cluster. This example is intended only for demonstration, testing, or proof-of-concept use,
+since OpenSearch is deployed in a single-node mode.
 
 Notes on the example deployment:
 
@@ -32,7 +33,8 @@ The installation process consists of two phases:
 1. Install NetObserv with OpenSearch.
 2. Install Mermin.
 
-This installation assumes that no additional DNS controllers are running in the cluster. Therefore, it is not possible to know the IP address of the NetObserv gRPC load balancer without extra GCP actions before the NetObserv chart (dependency) is ready.
+This installation assumes that no additional DNS controllers are running in the cluster.
+Therefore, it is not possible to know the IP address of the NetObserv gRPC load balancer without extra GCP actions before the NetObserv chart (dependency) is ready.
 
 - Phase 1
   - Create values and a config files for the Mermin Umbrella chart (or use ones from the repo)
@@ -52,12 +54,14 @@ This installation assumes that no additional DNS controllers are running in the 
         --devel \
         mermin mermin/mermin-netobserv-os-stack
       ```
+
 - Phase 2:
   - Get the NetObserv Gateway (Load Balancer) IP
 
       ```sh
       kubectl get gtw netobserv-flow -o=jsonpath='{.status.addresses[0].value}'
       ```
+
   - Modify `export.traces.otlp.endpoint` in the `config.hcl` to the value from the previous step and redeploy the chart
 
       ```sh

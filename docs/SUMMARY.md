@@ -2,7 +2,7 @@
 
 ## Welcome
 
-* [Overview](README.md)
+* [Introduction](README.md)
 * [Beta Program](welcome/beta-program.md)
 
 ## Getting Started
@@ -14,17 +14,17 @@
 
 ## Observability
 
-* [Backends](observability/backends.md)
-* [Mermin Application Metrics](observability/app-metrics.md)
+* [Backend Integration](observability/backends.md)
+* [Internal Metrics](observability/app-metrics.md)
 
 ## Deployment
 
-* [Deployment Overview](deployment/deployment.md)
+* [Overview](deployment/deployment.md)
 * [Kubernetes with Helm](deployment/kubernetes-helm.md)
 * [Cloud Platforms](deployment/cloud-platforms.md)
 * [Advanced Scenarios](deployment/advanced-scenarios.md)
 * [Docker on Bare Metal](deployment/docker-bare-metal.md)
-* [Helm Examples](deployment/helm-examples/README.md)
+* [Integration Guides](deployment/helm-examples/README.md)
   * [Mermin with OpenTelemetry Collector](deployment/examples/local_otel/README.md)
   * [Mermin with NetObserv Flow and OpenSearch](deployment/examples/netobserv_os_simple_svc/README.md)
   * [Mermin with NetObserv Flow and OpenSearch in GKE with Gateway](deployment/examples/netobserv_os_simple_gke_gw/README.md)
@@ -32,23 +32,24 @@
 
 ## Configuration
 
-* [Configuration Overview](configuration/configuration.md)
-* [Configuration Examples](configuration/examples.md)
-* [OTLP Exporter](configuration/export-otlp.md)
-* [Global Options](configuration/global-options.md)
-* [API](configuration/api.md)
-* [Metrics](configuration/metrics.md)
-* [Parser Configuration](configuration/parser.md)
-* [Pipeline Configuration](configuration/pipeline.md)
-* [Network Interface Discovery](configuration/discovery-instrument.md)
-* [Kubernetes Informers](configuration/discovery-kubernetes-informer.md)
-* [Owner Relations](configuration/owner-relations.md)
-* [Selector Relations](configuration/selector-relations.md)
-* [Flow Attributes](configuration/attributes.md)
-* [Flow Filtering](configuration/filtering.md)
-* [Flow Span Producer](configuration/span.md)
-* [Stdout Exporter](configuration/export-stdout.md)
-* [Internal Tracing](configuration/internal-tracing.md)
+* [Overview](configuration/configuration.md)
+* [Examples](configuration/examples.md)
+* [Global Agent Options](configuration/global-options.md)
+* Configuration References
+  * [Network Interface Discovery](configuration/discovery-instrument.md)
+  * [Network Packet Parser](configuration/parser.md)
+  * [Flow Span Producer](configuration/span.md)
+  * [OTLP Exporter](configuration/export-otlp.md)
+  * [Stdout Exporter](configuration/export-stdout.md)
+  * [Flow Span Kubernetes Attribution](configuration/attributes.md)
+  * [Kubernetes Owner Relations](configuration/owner-relations.md)
+  * [Kubernetes Informer Discovery](configuration/discovery-kubernetes-informer.md)
+  * [Kubernetes Selector Relations](configuration/selector-relations.md)
+  * [Agent Pipeline](configuration/pipeline.md)
+  * [Agent Pipeline Filters](configuration/filtering.md)
+  * [Internal API](configuration/api.md)
+  * [Internal Prometheus Metrics](configuration/metrics.md)
+  * [Internal Tracing](configuration/internal-tracing.md)
 
 ## Troubleshooting
 
@@ -59,7 +60,7 @@
 
 ## Flow Trace Specification
 
-* [Introductory Primer](spec/introductory-primer.md)
+* [Introduction to Flow Traces](spec/introductory-primer.md)
 * [Semantic Conventions](spec/semantic-conventions.md)
 
 ## Security

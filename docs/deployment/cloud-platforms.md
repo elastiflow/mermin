@@ -8,7 +8,7 @@ This guide provides specific instructions for deploying Mermin on major cloud Ku
 
 ## Google Kubernetes Engine (GKE)
 
-### Prerequisites
+### GKE Prerequisites
 
 - `gcloud` CLI installed and configured
 - GKE cluster created (Standard or Autopilot)
@@ -191,7 +191,7 @@ Only adjust if you experience specific integration issues with Cilium or other T
 
 ## Amazon Elastic Kubernetes Service (EKS)
 
-### Prerequisites
+### EKS Prerequisites
 
 - `aws` CLI installed and configured
 - `eksctl` installed (optional but recommended)
@@ -274,7 +274,7 @@ eksctl create iamserviceaccount \
 
 ## Azure Kubernetes Service (AKS)
 
-### Prerequisites
+### AKS Prerequisites
 
 - `az` CLI installed and configured
 - AKS cluster created
@@ -475,19 +475,19 @@ az role assignment create \
 
 ## Performance and Cost Optimization
 
-### GKE
+### GKE Cost Optimization
 
 - Use **Preemptible/Spot nodes** for non-critical Mermin pods (with PodDisruptionBudget)
 - Use **node autoscaling** to match traffic patterns
 - Consider **regional clusters** for high availability
 
-### EKS
+### EKS Cost Optimization
 
 - Use **Spot instances** for cost savings (with PodDisruptionBudget)
 - Use **Cluster Autoscaler** or **Karpenter** for dynamic scaling
 - Enable **Container Insights** for monitoring
 
-### AKS
+### AKS Cost Optimization
 
 - Use **Spot node pools** for cost savings
 - Use **Cluster Autoscaler** for dynamic scaling

@@ -1,8 +1,9 @@
-# Flow Trace Primer
+# Introduction to Flow Traces
 
 ## Introduction
 
-This document is a non-normative, user-friendly introduction to the Flow Trace semantic convention. It is intended for those who want to understand the core concepts and motivation behind representing network flow data within OpenTelemetry without reading the full specification.
+This document is a non-normative, user-friendly introduction to the Flow Trace semantic convention.
+It is intended for those who want to understand the core concepts and motivation behind representing network flow data within OpenTelemetry without reading the full specification.
 
 ---
 
@@ -10,11 +11,13 @@ This document is a non-normative, user-friendly introduction to the Flow Trace s
 
 A **Flow Trace** is an OpenTelemetry trace that represents a network connection. It is composed of one or more **Flow Trace Spans**, where each span captures a measurement interval of the network conversation.
 
-Unlike traditional OpenTelemetry traces that focus on application-level requests (HTTP calls, database queries, etc.), a Flow Trace captures the network conversation itself—the bidirectional exchange of packets between two endpoints as observed by an independent monitoring point like an eBPF agent.
+Unlike traditional OpenTelemetry traces that focus on application-level requests (HTTP calls, database queries, etc.),
+a Flow Trace captures the network conversation itself—the bidirectional exchange of packets between two endpoints as observed by an independent monitoring point like an eBPF agent.
 
 ### Flow Trace vs. Flow Trace Span
 
-- **Flow Trace Span**: A single OpenTelemetry span representing one flow record—a snapshot of the network conversation during a specific observation window. When a flow is active, the agent exports periodic spans (e.g., every 60 seconds) with delta metrics for that interval.
+- **Flow Trace Span**: A single OpenTelemetry span representing one flow record—a snapshot of the network conversation during a specific observation window.
+When a flow is active, the agent exports periodic spans (e.g., every 60 seconds) with delta metrics for that interval.
 
 - **Flow Trace**: The complete collection of related Flow Trace Spans that together represent the full lifecycle of a network connection—from the first packet to the last.
 
@@ -26,7 +29,8 @@ Think of it like a long-running database connection: individual spans might repr
 
 ### The Observability Gap
 
-The modern observability stack—Metrics, Events, Logs, and Traces (MELT)—excels at application-level visibility. APM traces show you request latency, error rates, and service dependencies. Network monitoring gives you bandwidth utilization and interface statistics.
+The modern observability stack—Metrics, Events, Logs, and Traces (MELT)—excels at application-level visibility. APM traces show you request latency, error rates, and service dependencies.'
+Network monitoring gives you bandwidth utilization and interface statistics.
 
 But there's a gap between these two worlds:
 
@@ -182,6 +186,7 @@ Here is what a simple Flow Trace Span might look like in OTLP JSON format. It re
 ```
 
 Key observations:
+
 - The span represents a 60-second observation window (start to end time).
 - Bidirectional metrics show this is primarily a download: 1KB sent, 32KB received.
 - Kubernetes metadata identifies the pods by name, not just IP address.

@@ -1,10 +1,12 @@
-# Interface Visibility and Traffic Decapsulation
+# Troubleshoot Interface Visibility and Traffic Decapsulation
 
-Not seeing the traffic you expect from Mermin? The issue is often related to *which* network interfaces you're monitoring. Different interface types show you completely different views of the same traffic, and understanding these differences is crucial for getting Mermin configured correctly.
+Not seeing the traffic you expect from Mermin? The issue is often related to *which* network interfaces you're monitoring. Different interface types show you completely different views of the same traffic,
+and understanding these differences is crucial for getting Mermin configured correctly.
 
 ## The Big Picture: What Am I Actually Seeing?
 
-Here's the key insight that explains everything: the Linux kernel automatically encapsulates and decapsulates network traffic as it moves between physical interfaces and pod namespaces. This means the same packet looks completely different depending on where you observe it.
+Here's the key insight that explains everything: the Linux kernel automatically encapsulates and decapsulates network traffic as it moves between physical interfaces and pod namespaces.
+This means the same packet looks completely different depending on where you observe it.
 
 Think of it like watching a package move through the postal system:
 
@@ -406,6 +408,7 @@ The Linux kernel does all the heavy lifting - decapsulation, decryption, and rou
 - Node routing information
 - Node IPs
 
-For most Kubernetes observability use cases, this is exactly what you want: insight into actual workload communication without getting lost in infrastructure tunneling complexity. Your applications don't know about VXLAN or WireGuard, and for monitoring application behavior, you usually don't need to either.
+For most Kubernetes observability use cases, this is exactly what you want: insight into actual workload communication without getting lost in infrastructure tunneling complexity.
+Your applications don't know about VXLAN or WireGuard, and for monitoring application behavior, you usually don't need to either.
 
 **When you do need infrastructure visibility** (troubleshooting CNI issues, debugging tunnel problems, capacity planning), add tunnel interfaces to your configuration to see both layers.

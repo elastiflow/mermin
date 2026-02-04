@@ -1,12 +1,14 @@
-# Common eBPF Errors
+# Troubleshoot Common eBPF Errors
 
-eBPF programs must pass the kernel's verifier before they can run. The verifier is like a strict security guard—it checks that your program is safe, won't crash the kernel, and will eventually terminate. Understanding verifier errors can be tricky, especially since verifier behavior changes significantly between kernel versions.
+eBPF programs must pass the kernel's verifier before they can run. The verifier is like a strict security guard—it checks that your program is safe, won't crash the kernel, and will eventually terminate.
+Understanding verifier errors can be tricky, especially since verifier behavior changes significantly between kernel versions.
 
 ## What You Need to Know About the Verifier
 
 **Good news**: Verifier errors are rare, especially on modern kernels. Most Mermin deployments work out of the box without any issues.
 
-**When problems do occur**, they're typically on older kernel versions (< 5.16) that can't perform the sophisticated complexity analysis that newer kernels can. Older kernels are more conservative and may reject programs that newer kernels accept without issue.
+**When problems do occur**, they're typically on older kernel versions (< 5.16) that can't perform the sophisticated complexity analysis that newer kernels can.
+Older kernels are more conservative and may reject programs that newer kernels accept without issue.
 
 The eBPF verifier has evolved considerably over time. A program that loads perfectly on a newer kernel might fail on an older one:
 
@@ -113,7 +115,8 @@ back-edge from insn X to Y
 infinite loop detected at insn X
 ```
 
-**What's happening**: The verifier found a loop without a provable upper bound. In eBPF, every loop must have a maximum number of iterations that the verifier can determine at verification time. If the verifier can't prove your loop will eventually exit, it rejects the program.
+**What's happening**: The verifier found a loop without a provable upper bound. In eBPF, every loop must have a maximum number of iterations that the verifier can determine at verification time.
+If the verifier can't prove your loop will eventually exit, it rejects the program.
 
 This is a fundamental eBPF safety requirement—infinite loops could freeze the kernel.
 

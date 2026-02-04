@@ -1,10 +1,11 @@
-# Selector Relations
+# Configure Kubernetes Selector Relations
 
 Selector relations enable matching Kubernetes resources based on label selectors, such as NetworkPolicy → Pod or Service → Pod associations.
 
 ## Overview
 
-Many Kubernetes resources use selectors to target other resources. Mermin can extract these selectors and find matching resources to enrich flow metadata. The resulting relations are used for flow and span enrichment; enable the corresponding associations in [Flow Attributes](attributes.md) (e.g. `networkpolicy`, `service`) to see this metadata on flows.
+Many Kubernetes resources use selectors to target other resources. Mermin can extract these selectors and find matching resources to enrich flow metadata.
+The resulting relations are used for flow and span enrichment; enable the corresponding associations in [Flow Attributes](attributes.md) (e.g. `networkpolicy`, `service`) to see this metadata on flows.
 
 ## Configuration
 
@@ -144,5 +145,5 @@ discovery "informer" "k8s" {
 
 ## Next Steps
 
-* [**Flow Attributes**](attributes.md): Configure metadata extraction and enable associations (e.g. `networkpolicy`, `service`) so selector-based metadata appears on flows
-* [**Owner Relations**](owner-relations.md): Configure owner reference walking
+- [**Flow Attributes**](attributes.md): Configure metadata extraction and enable associations (e.g. `networkpolicy`, `service`) so selector-based metadata appears on flows
+- [**Owner Relations**](owner-relations.md): Configure owner reference walking

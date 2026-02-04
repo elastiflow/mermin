@@ -1,4 +1,4 @@
-# Global Options
+# Configure Global Agent Options
 
 Global options are top-level configuration settings that control Mermin's overall behavior. These are the only options that can be configured via CLI flags or environment variables in addition to the configuration file.
 
@@ -73,17 +73,17 @@ export MERMIN_CONFIG_AUTO_RELOAD=true
 
 **Behavior:**
 
-* File is monitored for changes using filesystem watches
-* Configuration is reloaded atomically
-* Brief pause in flow capture during reload (\~100ms)
-* Invalid configuration prevents reload (old config remains active)
-* Logs indicate successful/failed reload attempts
+- File is monitored for changes using filesystem watches
+- Configuration is reloaded atomically
+- Brief pause in flow capture during reload (\~100ms)
+- Invalid configuration prevents reload (old config remains active)
+- Logs indicate successful/failed reload attempts
 
 **Use Cases:**
 
-* Development and testing: Iterate quickly without restarts
-* Production: Update configuration without downtime
-* Debugging: Temporarily change log levels or filters
+- Development and testing: Iterate quickly without restarts
+- Production: Update configuration without downtime
+- Debugging: Temporarily change log levels or filters
 
 {% hint style="warning" %}
 Some configuration changes may require a full restart, such as changing monitored network interfaces or modifying RBAC permissions.
@@ -97,11 +97,11 @@ Sets the logging verbosity level.
 
 **Valid Values:**
 
-* `trace`: Most verbose, includes all debug information
-* `debug`: Detailed debugging information
-* `info`: General informational messages (default)
-* `warn`: Warning messages only
-* `error`: Error messages only
+- `trace`: Most verbose, includes all debug information
+- `debug`: Detailed debugging information
+- `info`: General informational messages (default)
+- `warn`: Warning messages only
+- `error`: Error messages only
 
 **HCL:**
 
@@ -123,9 +123,9 @@ export MERMIN_LOG_LEVEL=warn
 
 **Recommendations:**
 
-* **Production:** `info` or `warn` to reduce log volume
-* **Debugging:** `debug` for detailed troubleshooting
-* **Development:** `trace` for comprehensive visibility
+- **Production:** `info` or `warn` to reduce log volume
+- **Debugging:** `debug` for detailed troubleshooting
+- **Development:** `trace` for comprehensive visibility
 
 ### `shutdown_timeout`
 
@@ -148,13 +148,13 @@ shutdown_timeout = "10s"
 
 **Recommendations:**
 
-* **Production:** `10s` to ensure flows are exported
-* **Development:** `5s` (default) is usually sufficient
-* **High-throughput:** Increase to `30s` or more
+- **Production:** `10s` to ensure flows are exported
+- **Development:** `5s` (default) is usually sufficient
+- **High-throughput:** Increase to `30s` or more
 
 **Related Settings:**
 
-* `export.otlp.max_export_timeout`: Should be less than `shutdown_timeout`
+- `export.otlp.max_export_timeout`: Should be less than `shutdown_timeout`
 
 ## Monitoring Shutdown Behavior
 
@@ -186,7 +186,8 @@ Capacity for each worker thread's event queue. Determines how many raw eBPF even
 | Very High (> 100K flows/s) | 4096+             |
 
 **Signs You Need to Increase:**
-* Metrics show `mermin_flow_events_total{status="dropped_backpressure"}` increasing
+
+- Metrics show `mermin_flow_events_total{status="dropped_backpressure"}` increasing
 
 **Tuning Guidelines:**
 
@@ -198,7 +199,8 @@ Capacity for each worker thread's event queue. Determines how many raw eBPF even
 | > 100,000                  | 262144+           |
 
 **Signs You Need to Increase:**
-* High CPU usage during startup or traffic spikes (due to map resizing)
+
+- High CPU usage during startup or traffic spikes (due to map resizing)
 
 ### `worker_count`
 
@@ -209,10 +211,10 @@ Number of parallel worker threads processing packets and generating flow spans. 
 
 **Behavior:**
 
-* Each worker processes packets independently
-* More workers = more parallelism = higher throughput
-* More workers = more CPU usage
-* Workers share the flow table (synchronized)
+- Each worker processes packets independently
+- More workers = more parallelism = higher throughput
+- More workers = more CPU usage
+- Workers share the flow table (synchronized)
 
 **Tuning Guidelines:**
 
@@ -225,10 +227,10 @@ Number of parallel worker threads processing packets and generating flow spans. 
 
 **Optimal Worker Count:**
 
-* Start with CPU count / 2
-* Monitor CPU usage with metrics
-* Increase if CPU is underutilized and packet drops occur
-* Decrease if CPU is overutilized
+- Start with CPU count / 2
+- Monitor CPU usage with metrics
+- Increase if CPU is underutilized and packet drops occur
+- Decrease if CPU is overutilized
 
 **Relationship with CPU Resources:**
 
@@ -248,49 +250,50 @@ resources:
 
 Interval at which flow pollers check for flow records and timeouts. Pollers iterate through active flows to:
 
-* Generate periodic flow records (based on `max_record_interval` in `span` config)
-* Detect and remove idle flows (based on protocol-specific timeouts in `span` config)
+- Generate periodic flow records (based on `max_record_interval` in `span` config)
+- Detect and remove idle flows (based on protocol-specific timeouts in `span` config)
 
 **Behavior:**
 
-* Lower values = more responsive timeout detection and flow recording
-* Higher values = less CPU overhead
-* At typical enterprise scale (10K flows/sec with 100K active flows and 32 pollers): ~600 flow checks/sec per poller
-* Modern CPUs handle flow checking very efficiently (microseconds per check)
+- Lower values = more responsive timeout detection and flow recording
+- Higher values = less CPU overhead
+- At typical enterprise scale (10K flows/sec with 100K active flows and 32 pollers): ~600 flow checks/sec per poller
+- Modern CPUs handle flow checking very efficiently (microseconds per check)
 
 **Tuning Guidelines:**
 
-| Traffic Pattern | Recommended Interval | Rationale |
-|-----------------|---------------------|-----------|
-| Short-lived flows (ICMP) | 3-5s | Fast timeout detection |
-| Mixed traffic | 5s (default) | Balance responsiveness and overhead |
-| Long-lived flows (TCP) | 10s | Lower overhead, slower timeouts |
-| Memory constrained | 3-5s | More frequent cleanup |
+| Traffic Pattern          | Recommended Interval | Rationale                           |
+|--------------------------|----------------------|-------------------------------------|
+| Short-lived flows (ICMP) | 3-5s                 | Fast timeout detection              |
+| Mixed traffic            | 5s (default)         | Balance responsiveness and overhead |
+| Long-lived flows (TCP)   | 10s                  | Lower overhead, slower timeouts     |
+| Memory constrained       | 3-5s                 | More frequent cleanup               |
 
 **Trade-offs:**
 
-* **3s interval**: Most responsive, slightly higher CPU (~10K checks/sec per poller)
-* **5s interval** (default): Best balance for most workloads
-* **10s interval**: Lowest CPU, flows may linger longer before timeout
+- **3s interval**: Most responsive, slightly higher CPU (~10K checks/sec per poller)
+- **5s interval** (default): Best balance for most workloads
+- **10s interval**: Lowest CPU, flows may linger longer before timeout
 
 **Signs You Should Decrease:**
 
-* Flows lingering past their intended timeout
-* Memory usage growing steadily
-* Short-lived flow protocols (ICMP with 10s timeout)
+- Flows lingering past their intended timeout
+- Memory usage growing steadily
+- Short-lived flow protocols (ICMP with 10s timeout)
 
 **Signs You Can Increase:**
 
-* CPU constrained
-* Primarily long-lived TCP flows
-* Flow timeout accuracy not critical
+- CPU constrained
+- Primarily long-lived TCP flows
+- Flow timeout accuracy not critical
 
 ### `k8s_decorator.threads`
 
 **Type:** Integer
 **Default:** `4`
 
-Number of dedicated threads for Kubernetes metadata decoration. Running decoration on separate threads prevents K8s API lookups from blocking flow processing. Each thread handles ~8K flows/sec (~100-150μs per flow), so 4 threads provide 32K flows/sec capacity.
+Number of dedicated threads for Kubernetes metadata decoration. Running decoration on separate threads prevents K8s API lookups from blocking flow processing. Each thread handles ~8K flows/sec (~100-150μs per flow),
+so 4 threads provide 32K flows/sec capacity.
 
 **Recommendations based on typical FPS (flows per second):**
 
@@ -315,22 +318,23 @@ Explicit capacity for the flow span channel. Provides buffering between workers 
 
 **Recommendations:**
 
-* **Steady traffic**: `16384` (default)
-* **Bursty traffic**: `24576`-`32768`
-* **Low latency priority**: `12288`
+- **Steady traffic**: `16384` (default)
+- **Bursty traffic**: `24576`-`32768`
+- **Low latency priority**: `12288`
 
 #### `k8s_decorator.decorated_span_queue_capacity`
 
 **Type:** Integer
 **Default:** `32768`
 
-Explicit capacity for the decorated span (export) channel. Provides buffering between K8s decorator and OTLP exporter. This should be the largest buffer since network export is the slowest stage. With defaults (32,768 slots, ~320ms buffer at 100K/s).
+Explicit capacity for the decorated span (export) channel. Provides buffering between K8s decorator and OTLP exporter. This should be the largest buffer since network export is the slowest stage.
+With defaults (32,768 slots, ~320ms buffer at 100K/s).
 
 **Recommendations:**
 
-* **Reliable network**: `32768` (default)
-* **Unreliable network**: `49152`-`65536`
-* **Very high throughput**: `65536`-`98304`
+- **Reliable network**: `32768` (default)
+- **Unreliable network**: `49152`-`65536`
+- **Very high throughput**: `65536`-`98304`
 
 ### Monitoring Performance Configuration
 
@@ -341,18 +345,18 @@ After tuning performance settings, monitor these key metrics:
 - `mermin_channel_size` / `mermin_channel_capacity` - Channel utilization
 - `mermin_pipeline_duration_seconds` - Pipeline duration histogram
 
-See the [Application Metrics](../observability/app-metrics.md) guide for complete Prometheus query examples.
+See the [Internal Metrics](../observability/app-metrics.md) guide for complete Prometheus query examples.
 
 **Healthy indicators:**
 
-* Sampling rate = 0 (no backpressure)
-* Channel utilization < 80%
-* p95 processing latency < 10ms
-* IP index updates < 100ms
+- Sampling rate = 0 (no backpressure)
+- Channel utilization < 80%
+- p95 processing latency < 10ms
+- IP index updates < 100ms
 
 ## Next Steps
 
-* [**API**](api.md) and [**Metrics**](metrics.md): Configure health checks and monitoring
-* [**Network Interface Discovery**](discovery-instrument.md): Select which interfaces to monitor
-* [**Flow Span Options**](span.md): Configure flow generation and timeouts
-* [**Configuration Examples**](examples.md): See complete configurations
+- [**API**](api.md) and [**Metrics**](metrics.md): Configure health checks and monitoring
+- [**Network Interface Discovery**](discovery-instrument.md): Select which interfaces to monitor
+- [**Flow Span Options**](span.md): Configure flow generation and timeouts
+- [**Configuration Examples**](examples.md): See complete configurations

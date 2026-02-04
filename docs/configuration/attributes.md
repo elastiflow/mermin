@@ -1,4 +1,4 @@
-# Flow Attributes
+# Configure Flow Span Attribution
 
 Flow attributes define which Kubernetes metadata to extract and how to associate it with network flows.
 
@@ -72,9 +72,9 @@ extract {
 
 **Syntax:**
 
-* `[*]`: Applies to all resource kinds
-* `pod.metadata.name`: Specific to pods
-* `[*].metadata.labels`: Extract labels
+- `[*]`: Applies to all resource kinds
+- `pod.metadata.name`: Specific to pods
+- `[*].metadata.labels`: Extract labels
 
 ## Association Configuration
 
@@ -272,10 +272,10 @@ attributes "destination" "k8s" {
 
 **Strategy**: Comprehensive Kubernetes metadata enrichment without manual configuration
 
-* **Pod associations** capture container networking (IPs, ports, protocols) including both pod and host networking
-* **Service associations** cover all service types (ClusterIP, LoadBalancer, ExternalIP) with port and protocol matching
-* **Node associations** match node IP addresses for host networking scenarios
-* The default **endpoint** association is provided for compatibility; for direct EndpointSlice IP matching, use **endpointslice** (see [Other association types](#other-association-types))
+- **Pod associations** capture container networking (IPs, ports, protocols) including both pod and host networking
+- **Service associations** cover all service types (ClusterIP, LoadBalancer, ExternalIP) with port and protocol matching
+- **Node associations** match node IP addresses for host networking scenarios
+- The default **endpoint** association is provided for compatibility; for direct EndpointSlice IP matching, use **endpointslice** (see [Other association types](#other-association-types))
 
 This covers the most common Kubernetes networking patterns and provides immediate network observability upon deployment.
 
@@ -331,6 +331,6 @@ To verify the default attributes are working:
 
 ## Next Steps
 
-* [**Kubernetes Informers**](discovery-kubernetes-informer.md): Configure resource watching
-* [**Owner Relations**](owner-relations.md): Add owner metadata
-* [**Configuration Examples**](examples.md): See complete configurations
+- [**Kubernetes Informers**](discovery-kubernetes-informer.md): Configure resource watching
+- [**Owner Relations**](owner-relations.md): Add owner metadata
+- [**Configuration Examples**](examples.md): See complete configurations

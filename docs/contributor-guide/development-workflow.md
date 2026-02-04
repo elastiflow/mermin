@@ -30,11 +30,11 @@ Mermin supports multiple local development workflows depending on your needs:
 
 **Choosing your workflow:**
 
-1. **Bare Metal (Native)**: Requires Linux, but provides instant feedback. Run `cargo build` and execute the binary directly with `sudo`. Ideal for iterating on eBPF programs, packet parsing, and core flow logic. Cannot test Kubernetes metadata enrichment without a cluster.
-
+1. **Bare Metal (Native)**: Requires Linux, but provides instant feedback. Run `cargo build` and execute the binary directly with `sudo`. Ideal for iterating on eBPF programs, packet parsing, and core flow logic.
+   Cannot test Kubernetes metadata enrichment without a cluster.
 2. **Dockerized Build**: Use a Docker container for building to match the CI/CD environment. Useful on macOS or when you need a consistent, reproducible build environment. Slightly slower than native builds but works anywhere Docker runs.
-
-3. **Kubernetes (kind)**: Full integration testing environment. Deploy to a local Kubernetes cluster for testing Kubernetes metadata enrichment, Helm chart configurations, and complete deployment scenarios. Highest setup complexity and slowest iteration cycle, but essential for validating end-to-end functionality.
+3. **Kubernetes (kind)**: Full integration testing environment. Deploy to a local Kubernetes cluster for testing Kubernetes metadata enrichment, Helm chart configurations, and complete deployment scenarios.
+   Highest setup complexity and slowest iteration cycle, but essential for validating end-to-end functionality.
 
 ### 1. Build the `mermin` agent
 
@@ -99,7 +99,8 @@ fmtconvert -from hcl -to yaml charts/mermin/config/examples/config.hcl > local/c
 
 Running the eBPF agent requires elevated privileges. Use the `--config` flag to specify your configuration file.
 
-> **Note**: You can run without a configuration file, but the default settings disable stdout and OTLP exporting, so you won't see any flow trace output. For local development, it's recommended to use atleast a configuration file with stdout exporting enabled (see the minimal config example above).
+> **Note**: You can run without a configuration file, but the default settings disable stdout and OTLP exporting, so you won't see any flow trace output.
+> For local development, it's recommended to use at least a configuration file with stdout exporting enabled (see the minimal config example above).
 
 **Using HCL:**
 
@@ -172,7 +173,7 @@ cargo clippy --all-features -- -D warnings
   ```
 
 - Download Grafana dashboard JSON from a local Grafana instance
-  
+
   ```bash
   # From a local Grafana
   curl -s "localhost:3000/api/dashboards/uid/mermin_app" | jq '.dashboard' | jq -f hack/sanitize_grafana_dashboard.jq > docs/observability/grafana-mermin-app.json
@@ -240,7 +241,7 @@ kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/down
 kubectl -n kube-system patch deployment metrics-server --type='json' -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
 ```
 
-**Optionally install [Prometheus/Grafana](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack) to get Mermin metrics:**  
+**Optionally install [Prometheus/Grafana](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack) to get Mermin metrics:**
 Not intended for a production usage, Grafana auth is disabled (insecure).
 
 ```sh

@@ -1,4 +1,4 @@
-# OTLP Exporter
+# Configure the OTLP Exporter
 
 This page documents the OpenTelemetry Protocol (OTLP) exporter configuration, which controls how Mermin exports flow
 records to your observability backend.
@@ -50,10 +50,10 @@ OTLP collector endpoint URL.
 
 **Format:**
 
-* `http://hostname:port` for unencrypted gRPC
-* `https://hostname:port` for TLS-encrypted gRPC
-* Port 4317 is standard for gRPC
-* Port 4318 is standard for HTTP
+- `http://hostname:port` for unencrypted gRPC
+- `https://hostname:port` for TLS-encrypted gRPC
+- Port 4317 is standard for gRPC
+- Port 4318 is standard for HTTP
 
 **Examples:**
 
@@ -97,8 +97,8 @@ OTLP transport protocol.
 
 **Valid Values:**
 
-* `"grpc"`: gRPC protocol (recommended, default)
-* `"http_binary"`: HTTP with binary protobuf payload
+- `"grpc"`: gRPC protocol (recommended, default)
+- `"http_binary"`: HTTP with binary protobuf payload
 
 **Examples:**
 
@@ -148,9 +148,9 @@ export "traces" {
 
 **Tuning:**
 
-* **Fast networks**: 5s-10s
-* **WAN/Internet**: 15s-30s
-* **High latency**: 30s-60s
+- **Fast networks**: 5s-10s
+- **WAN/Internet**: 15s-30s
+- **High latency**: 30s-60s
 
 ## Batching Configuration
 
@@ -181,8 +181,8 @@ export "traces" {
 
 **Trade-offs:**
 
-* **Larger batches**: Better efficiency, higher latency
-* **Smaller batches**: Lower latency, more requests
+- **Larger batches**: Better efficiency, higher latency
+- **Smaller batches**: Lower latency, more requests
 
 ### `max_batch_interval`
 
@@ -208,8 +208,8 @@ export "traces" {
 
 **Behavior:**
 
-* Batch is exported when it reaches `max_batch_size` OR `max_batch_interval` (whichever comes first)
-* Prevents indefinite waiting for partial batches
+- Batch is exported when it reaches `max_batch_size` OR `max_batch_interval` (whichever comes first)
+- Prevents indefinite waiting for partial batches
 
 ### `max_queue_size`
 
@@ -246,10 +246,10 @@ export "traces" {
 
 **Queue Behavior:**
 
-* Acts as buffer during temporary collector unavailability or slow exports
-* When the queue is full, new spans are **dropped** (OpenTelemetry uses non-blocking send); export workers send batches and may block on the network call up to the configured timeout
-* Default (32768) buffers on the order of seconds at high throughput (e.g. ~6s at 5K flows/sec); increase for burst tolerance
-* Monitor `mermin_export_flow_spans_total{exporter="otlp",status="error"}` and `mermin_export_timeouts_total` for export health
+- Acts as buffer during temporary collector unavailability or slow exports
+- When the queue is full, new spans are **dropped** (OpenTelemetry uses non-blocking send); export workers send batches and may block on the network call up to the configured timeout
+- Default (32768) buffers on the order of seconds at high throughput (e.g. ~6s at 5K flows/sec); increase for burst tolerance
+- Monitor `mermin_export_flow_spans_total{exporter="otlp",status="error"}` and `mermin_export_timeouts_total` for export health
 
 ### `max_concurrent_exports`
 
@@ -638,14 +638,14 @@ export "traces" {
 - `mermin_pipeline_duration_seconds{stage="export_out"}` - Export-stage latency
 - `mermin_channel_sends_total{channel="decorator_output",status="error"}` - Channel send failures (indicates dropped spans)
 
-See the [Application Metrics](../observability/app-metrics.md) guide for complete Prometheus query examples.
+See the [Internal Metrics](../observability/app-metrics.md) guide for complete Prometheus query examples.
 
 ### Healthy Indicators
 
-* Zero or minimal export errors
-* Queue size well below max
-* Export latency < timeout
-* No channel send errors
+- Zero or minimal export errors
+- Queue size well below max
+- Export latency < timeout
+- No channel send errors
 
 ## Troubleshooting
 
@@ -696,6 +696,6 @@ See the [Application Metrics](../observability/app-metrics.md) guide for complet
 
 ## Next Steps
 
-* [**Stdout Exporter**](export-stdout.md): Configure console output for debugging
-* [**Observability Backends**](../observability/backends.md): Set up collector and connect to backends
-* [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose problems
+- [**Stdout Exporter**](export-stdout.md): Configure console output for debugging
+- [**Observability Backends**](../observability/backends.md): Set up collector and connect to backends
+- [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose problems

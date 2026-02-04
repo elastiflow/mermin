@@ -1,4 +1,4 @@
-# Stdout Exporter
+# Configure the Stdout Exporter
 
 The stdout exporter outputs flow records directly to the console (standard output), making it ideal for development, debugging, and initial testing of Mermin.
 
@@ -61,7 +61,7 @@ export "traces" {
 
 The `text_indent` format provides structured, readable output:
 
-```
+```text
 Flow Record:
   Timestamp: 2025-10-27T15:30:45.123Z
   Duration: 15.234s

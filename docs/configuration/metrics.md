@@ -1,4 +1,4 @@
-# Metrics
+# Configure the Internal Prometheus Metrics
 
 Mermin provides Prometheus metrics HTTP endpoints (default port `10250`). This page documents metrics configuration.
 Endpoints available:
@@ -98,7 +98,8 @@ internal "metrics" {
 
 ## Histogram Bucket Configuration
 
-Mermin provides several histogram metrics that track distributions of values (durations, batch sizes, etc.). By default, these metrics use pre-configured bucket sizes optimized for typical workloads. You can customize these bucket sizes inside a `histogram_buckets` block, with options named after the metric they configure.
+Mermin provides several histogram metrics that track distributions of values (durations, batch sizes, etc.). By default, these metrics use pre-configured bucket sizes optimized for typical workloads.
+You can customize these bucket sizes inside a `histogram_buckets` block, with options named after the metric they configure.
 
 ### `histogram_buckets` block
 
@@ -181,9 +182,9 @@ For production environments:
 2. Do not expose metrics endpoints externally
 3. Use port-forwarding for manual access: `kubectl port-forward pod/mermin-xxx 10250:10250`
 
-# Troubleshooting
+## Troubleshooting
 
-## Metrics Not Scraped by Prometheus
+### Metrics Not Scraped by Prometheus
 
 **Symptoms:** No Mermin metrics in Prometheus
 
@@ -195,7 +196,7 @@ For production environments:
 4. Test manual scrape: `curl http://pod-ip:10250/metrics`
 5. Check network policies
 
-### High Metrics Cardinality
+#### High Metrics Cardinality
 
 **Symptoms:** Too many unique metric series
 
@@ -207,4 +208,4 @@ For production environments:
 
 ## Next Steps
 
-- [**Mermin Application Metrics**](../observability/app-metrics.md): Mermin metrics documentation
+- [**Mermin Internal Metrics**](../observability/app-metrics.md): Mermin metrics documentation

@@ -1,4 +1,4 @@
-# Deployment Issues
+# Troubleshoot Deployment Issues
 
 This guide will help you diagnose and resolve pod startup failures, eBPF loading errors, permission issues, and network interface configuration problems.
 
@@ -200,7 +200,7 @@ securityContext:
   privileged: true    # Grants all required capabilities
 ```
 
-**If you can't use privileged mode** (due to security policies), you can grant specific capabilities instead: (Refer to the [security considerations](../getting-started/security-considerations.md#privileges-required) documentation for more information.)
+**If you can't use privileged mode** (due to security policies), you can grant specific capabilities instead. Refer to the [security considerations](../getting-started/security-considerations.md#privileges-required) documentation for more information.
 
 ```yaml
 # In charts/mermin/values.yaml (capability-based approach)
@@ -334,7 +334,7 @@ This means the service account doesn't have the necessary permissions.
 
 ```bash
 kubectl get sa -n ${MERMIN_NAMESPACE}
-kubectl get clusterrole mermin -o yaml 
+kubectl get clusterrole mermin -o yaml
 kubectl get clusterrolebinding mermin
 ```
 
@@ -362,7 +362,8 @@ Different interface types show different traffic - veth interfaces capture pod-t
 
 ## Understanding TC Priority
 
-TC (Traffic Control) priority determines the order in which eBPF programs execute in the networking stack. On older kernels (< 6.6), this is managed through netlink-based TC with numeric priorities. On newer kernels (>= 6.6), TCX mode uses explicit ordering.
+TC (Traffic Control) priority determines the order in which eBPF programs execute in the networking stack. On older kernels (< 6.6), this is managed through netlink-based TC with numeric priorities.
+On newer kernels (>= 6.6), TCX mode uses explicit ordering.
 
 ### Check What Priority Mermin is Using
 
@@ -404,7 +405,8 @@ Since Mermin uses `TC_ACT_UNSPEC` (pass-through), it observes packets without mo
 2. **Alternative**: Move Mermin to a higher priority if you prefer CNI to run first (loses unfiltered view)
 
 {% hint style="warning" %}
-**Test any priority changes thoroughly!** Adjusting either Mermin's or your CNI's priority can affect network behavior differently depending on your CNI plugin. Validate in a non-production environment that flows are captured correctly and network connectivity works as expected.
+**Test any priority changes thoroughly!** Adjusting either Mermin's or your CNI's priority can affect network behavior differently depending on your CNI plugin.
+Validate in a non-production environment that flows are captured correctly and network connectivity works as expected.
 {% endhint %}
 
 **Why priority 1 matters for Mermin**:
@@ -450,7 +452,8 @@ discovery "instrument" {
 ```
 
 {% hint style="warning" %}
-**Important**: Changing from the default priority/order settings can cause issues with some CNI plugins, including missing flows or network connectivity problems. Test thoroughly in a non-production environment first and verify that flows are being captured correctly for your specific CNI.
+**Important**: Changing from the default priority/order settings can cause issues with some CNI plugins, including missing flows or network connectivity problems.
+Test thoroughly in a non-production environment first and verify that flows are being captured correctly for your specific CNI.
 {% endhint %}
 
 Not sure which kernel you're running?
