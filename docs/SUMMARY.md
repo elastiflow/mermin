@@ -40,7 +40,7 @@
   * [Configure Owner Relations of Kubernetes Resources](configuration/owner-relations.md "Kubernetes Owner Relations")
   * [Configure Selector Relations of Kubernetes Resources](configuration/selector-relations.md "Kubernetes Selector Relations")
   * [Configure Flow Processing Pipeline](configuration/pipeline.md "Flow Processing Pipeline")
-  * [Configure Internal Server](configuration/api.md "Internal Server")
+  * [Configure Internal Server](configuration/reference/internal-server.md "Internal Server")
   * [Configure Internal Prometheus Metrics Server](configuration/metrics.md "Internal Prometheus Metrics")
   * [Configure Internal Tracing Exporter](configuration/internal-tracing.md "Internal Tracing")
 

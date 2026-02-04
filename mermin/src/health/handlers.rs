@@ -16,7 +16,7 @@ use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, warn};
 
-use crate::{health::HealthError, runtime::conf::ApiConf};
+use crate::{health::HealthError, runtime::opts::ServerConf};
 
 #[derive(Clone)]
 pub struct HealthState {
@@ -176,7 +176,7 @@ pub fn create_health_router(state: HealthState) -> Router {
         .with_state(state)
 }
 
-pub async fn start_api_server(state: HealthState, config: &ApiConf) -> Result<(), HealthError> {
+pub async fn start_api_server(state: HealthState, config: &ServerConf) -> Result<(), HealthError> {
     let app = create_health_router(state);
 
     let bind_address = format!("{}:{}", config.listen_address, config.port);

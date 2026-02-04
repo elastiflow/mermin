@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap, error::Error, fmt, mem::size_of, net::Ipv4Addr, path::Path,
-    time::Duration,
-};
+use std::{collections::HashMap, error::Error, fmt, mem::size_of, path::Path, time::Duration};
 
 use figment::providers::Format;
 use hcl::{
@@ -131,10 +128,8 @@ pub struct Conf {
     pub auto_reload: bool,
     #[serde(with = "duration")]
     pub shutdown_timeout: Duration,
-    /// Contains the configuration for internal exporters (traces, metrics)
+    /// Contains the configuration for internal exporters (traces, metrics, server)
     pub internal: InternalOptions,
-    /// API configuration for the API server
-    pub api: ApiConf,
     /// Pipeline tuning configuration
     pub pipeline: PipelineOptions,
     /// Parser configuration for eBPF packet parsing
@@ -170,7 +165,6 @@ impl Default for Conf {
             auto_reload: false,
             shutdown_timeout: defaults::shutdown_timeout(),
             internal: InternalOptions::default(),
-            api: ApiConf::default(),
             parser: ParserConf::default(),
             span: SpanOptions::default(),
             discovery: DiscoveryConf::default(),
@@ -1052,26 +1046,6 @@ impl PipelineOptions {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct ApiConf {
-    /// Enable the API server.
-    pub enabled: bool,
-    /// The network address the API server will listen on.
-    pub listen_address: String,
-    /// The port the API server will listen on.
-    pub port: u16,
-}
-
-impl Default for ApiConf {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            listen_address: Ipv4Addr::UNSPECIFIED.to_string(),
-            port: 8080,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -1080,11 +1054,15 @@ mod tests {
     use figment::Jail;
     use tracing::Level;
 
-    use super::{ApiConf, Conf, InstrumentOptions, ParserConf, PipelineOptions};
+    use super::{Conf, InstrumentOptions, ParserConf, PipelineOptions};
     use crate::{
         metrics::opts::MetricsOptions,
         otlp::opts::{ExportOptions, ExporterProtocol},
-        runtime::{cli::Cli, conf::TcxOrderStrategy, opts::InternalOptions},
+        runtime::{
+            cli::Cli,
+            conf::TcxOrderStrategy,
+            opts::{InternalOptions, ServerConf},
+        },
         span::opts::SpanOptions,
     };
 
@@ -1138,12 +1116,15 @@ mod tests {
             "default interfaces should be common physical interface patterns"
         );
 
-        assert_eq!(cfg.api.enabled, true, "API should be enabled by default");
         assert_eq!(
-            cfg.api.listen_address, "0.0.0.0",
-            "API should listen on all interfaces by default"
+            cfg.internal.server.enabled, true,
+            "server should be enabled by default"
         );
-        assert_eq!(cfg.api.port, 8080, "API port should be 8080");
+        assert_eq!(
+            cfg.internal.server.listen_address, "0.0.0.0",
+            "server should listen on all interfaces by default"
+        );
+        assert_eq!(cfg.internal.server.port, 8080, "server port should be 8080");
 
         assert_eq!(
             cfg.internal.metrics.enabled, true,
@@ -1462,7 +1443,7 @@ discovery:
     }
 
     #[test]
-    fn loads_api_and_metrics_config_from_yaml_file() {
+    fn loads_server_and_metrics_config_from_yaml_file() {
         Jail::expect_with(|jail| {
             let path = "mermin_custom_api.yaml";
 
@@ -1475,11 +1456,10 @@ discovery:
     interfaces:
       - eth1
 
-api:
-  listen_address: "127.0.0.1"
-  port: 8081
-
 internal:
+  server:
+    listen_address: "127.0.0.1"
+    port: 8081
   metrics:
     listen_address: "0.0.0.0"
     port: 9090
@@ -1495,8 +1475,8 @@ internal:
                 cfg.discovery.instrument.interfaces,
                 Vec::from(["eth1".to_string()])
             );
-            assert_eq!(cfg.api.listen_address, "127.0.0.1");
-            assert_eq!(cfg.api.port, 8081);
+            assert_eq!(cfg.internal.server.listen_address, "127.0.0.1");
+            assert_eq!(cfg.internal.server.port, 8081);
             assert_eq!(cfg.internal.metrics.listen_address, "0.0.0.0");
             assert_eq!(cfg.internal.metrics.port, 9090);
 
@@ -1518,12 +1498,11 @@ discovery "instrument" {
 log_level = "info"
 auto_reload = true
 
-api {
-    enabled = true
-    port = 9090
-}
-
 internal {
+    server {
+        enabled = true
+        port = 9090
+    }
     metrics {
         enabled = true
         port = 10250
@@ -1538,7 +1517,7 @@ internal {
             assert_eq!(cfg.discovery.instrument.interfaces, vec!["eth0"]);
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.auto_reload, true);
-            assert_eq!(cfg.api.port, 9090);
+            assert_eq!(cfg.internal.server.port, 9090);
             assert_eq!(cfg.internal.metrics.port, 10250);
 
             Ok(())
@@ -1639,9 +1618,9 @@ log_level =
     }
 
     #[test]
-    fn loads_api_and_metrics_config_from_hcl_file() {
+    fn loads_server_and_metrics_config_from_hcl_file() {
         Jail::expect_with(|jail| {
-            let path = "mermin_custom_api.hcl";
+            let path = "mermin_custom_server.hcl";
 
             jail.create_file(
                 path,
@@ -1651,12 +1630,11 @@ discovery "instrument" {
     interfaces = ["eth1"]
 }
 
-api {
-    listen_address = "127.0.0.1"
-    port = 8081
-}
-
 internal {
+    server {
+        listen_address = "127.0.0.1"
+        port = 8081
+    }
     metrics {
         listen_address = "0.0.0.0"
         port = 9090
@@ -1673,8 +1651,8 @@ internal {
                 cfg.discovery.instrument.interfaces,
                 Vec::from(["eth1".to_string()])
             );
-            assert_eq!(cfg.api.listen_address, "127.0.0.1");
-            assert_eq!(cfg.api.port, 8081);
+            assert_eq!(cfg.internal.server.listen_address, "127.0.0.1");
+            assert_eq!(cfg.internal.server.port, 8081);
             assert_eq!(cfg.internal.metrics.listen_address, "0.0.0.0");
             assert_eq!(cfg.internal.metrics.port, 9090);
 
@@ -1765,38 +1743,39 @@ discovery "instrument" {
     }
 
     #[test]
-    fn override_api_settings_via_yaml() {
+    fn override_server_settings_via_yaml() {
         Jail::expect_with(|jail| {
-            let path = "override_api.yaml";
+            let path = "override_server.yaml";
             jail.create_file(
                 path,
                 r#"
-api:
-  enabled: false
-  listen_address: "127.0.0.1"
-  port: 9000
+internal:
+  server:
+    enabled: false
+    listen_address: "127.0.0.1"
+    port: 9000
                 "#,
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config should load");
 
-            assert_eq!(cfg.api.enabled, false);
-            assert_eq!(cfg.api.listen_address, "127.0.0.1");
-            assert_eq!(cfg.api.port, 9000);
+            assert_eq!(cfg.internal.server.enabled, false);
+            assert_eq!(cfg.internal.server.listen_address, "127.0.0.1");
+            assert_eq!(cfg.internal.server.port, 9000);
 
             Ok(())
         });
     }
 
     #[test]
-    fn override_api_settings_via_hcl() {
+    fn override_server_settings_via_hcl() {
         Jail::expect_with(|jail| {
-            let path = "override_api.hcl";
+            let path = "override_server.hcl";
             jail.create_file(
                 path,
                 r#"
-api {
+internal "server" {
     enabled = false
     listen_address = "127.0.0.1"
     port = 9000
@@ -1807,9 +1786,9 @@ api {
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let (cfg, _cli) = Conf::new(cli).expect("config should load");
 
-            assert_eq!(cfg.api.enabled, false);
-            assert_eq!(cfg.api.listen_address, "127.0.0.1");
-            assert_eq!(cfg.api.port, 9000);
+            assert_eq!(cfg.internal.server.enabled, false);
+            assert_eq!(cfg.internal.server.listen_address, "127.0.0.1");
+            assert_eq!(cfg.internal.server.port, 9000);
 
             Ok(())
         });
@@ -2008,7 +1987,7 @@ discovery:
                 32768
             );
             assert_eq!(cfg.pipeline.flow_producer.workers, 4);
-            assert_eq!(cfg.api.port, 8080);
+            assert_eq!(cfg.internal.server.port, 8080);
             assert_eq!(cfg.internal.metrics.port, 10250);
             assert!(matches!(
                 cfg.internal.traces.span_fmt,
@@ -2092,15 +2071,15 @@ shutdown_timeout: 2min
     }
 
     #[test]
-    fn default_api_conf_has_expected_values() {
-        let api = ApiConf::default();
+    fn default_server_conf_has_expected_values() {
+        let server = ServerConf::default();
 
-        assert_eq!(api.enabled, true, "API should be enabled by default");
+        assert_eq!(server.enabled, true, "server should be enabled by default");
         assert_eq!(
-            api.listen_address, "0.0.0.0",
-            "API should listen on all interfaces"
+            server.listen_address, "0.0.0.0",
+            "server should listen on all interfaces"
         );
-        assert_eq!(api.port, 8080, "API default port should be 8080");
+        assert_eq!(server.port, 8080, "server default port should be 8080");
     }
 
     #[test]
@@ -3243,13 +3222,12 @@ log_level = env("MISSING_VAR", "info")
 auto_reload = env("MISSING_BOOL_VAR") == ""
 
 # Test interpolation syntax
-api {
-    listen_address = "prefix-${env("ANOTHER_TEST_VAR")}-suffix"
-    port = 8080
-}
-
-# Test env with existing variable and default (should use env value)
 internal {
+    server {
+        listen_address = "prefix-${env("ANOTHER_TEST_VAR")}-suffix"
+        port = 8080
+    }
+    # Test env with existing variable and default (should use env value)
     metrics {
         listen_address = env("ANOTHER_TEST_VAR", "fallback")
         port = 9090
@@ -3265,7 +3243,10 @@ internal {
             assert_eq!(cfg.discovery.instrument.interfaces, vec!["test_value"]);
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.auto_reload, true);
-            assert_eq!(cfg.api.listen_address, "prefix-another_value-suffix");
+            assert_eq!(
+                cfg.internal.server.listen_address,
+                "prefix-another_value-suffix"
+            );
             assert_eq!(cfg.internal.metrics.listen_address, "another_value");
 
             std::env::remove_var("TEST_ENV_VAR");

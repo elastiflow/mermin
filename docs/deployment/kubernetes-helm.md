@@ -158,8 +158,8 @@ export "traces" {
   }
 }
 
-# API server configuration (health checks)
-api {
+# HTTP server configuration (health checks)
+internal "server" {
   enabled = true
   listen_address = "0.0.0.0"
   port = 8080
