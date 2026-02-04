@@ -6,6 +6,14 @@ image:
 # Valid values are "daemonset", "deployment", and "statefulset".
 mode: "deployment"
 
+resources:
+  limits:
+    cpu: 250m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
 config:
   exporters:
     nop: {}

@@ -30,7 +30,7 @@ The OpenTelemetry Collector is the most flexible option:
 export "traces" {
   otlp = {
     endpoint = "http://otel-collector:4317"  # Collector's OTLP gRPC endpoint
-    protocol = "grpc"
+    protocol = "grpc" # Optional; Mermin defaults to "grpc".
   }
 }
 ```
@@ -50,7 +50,7 @@ Elasticsearch with APM Server or OpenTelemetry Collector can ingest OTLP traces.
 - Point Mermin → OpenTelemetry Collector → Elasticsearch exporter
 - Or point Mermin → Elastic APM Server (OTLP endpoint)
 
-**Example:** See [`docs/deployment/examples/netobserv_os_simple_svc/`](../deployment/examples/netobserv_os_simple_svc/) for OpenSearch (Elastic-compatible) deployment
+**Example:** See [`docs/deployment/examples/netobserv_os_simple_svc/`](../deployment/examples/netobserv_os_simple_svc/README.md) for OpenSearch (Elastic-compatible) deployment
 
 ### OpenSearch
 
@@ -60,8 +60,8 @@ Open-source alternative to Elasticsearch with native OTLP support via OpenTeleme
 
 **Examples:**
 
-- [`docs/deployment/examples/netobserv_os_simple_svc/`](../deployment/examples/netobserv_os_simple_svc/) - Basic OpenSearch setup
-- [`docs/deployment/examples/netobserv_os_simple_gke_gw/`](../deployment/examples/netobserv_os_simple_gke_gw/) - GKE deployment with Gateway API
+- [`docs/deployment/examples/netobserv_os_simple_svc/`](../deployment/examples/netobserv_os_simple_svc/README.md) - Basic OpenSearch setup
+- [`docs/deployment/examples/netobserv_os_simple_gke_gw/`](../deployment/examples/netobserv_os_simple_gke_gw/README.md) - GKE deployment with Gateway API
 
 ### Grafana Tempo
 
@@ -99,7 +99,27 @@ export "traces" {
 }
 ```
 
-**Example:** Coming soon
+**Example:** Coming soon...
+
+### Greptime Ingestion
+
+Greptime is a database supporting high-cardinality time series data that supports OTLP ingestion.
+
+```hcl
+export "traces" {
+  otlp = {
+    endpoint = "http://greptime-standalone-instance:4000/v1/otlp/v1/traces"
+    protocol = "http_binary"
+
+    headers = {
+      "x-greptime-db-name"       = "public"
+      "x-greptime-pipeline-name" = "greptime_trace_v1"
+    }
+  }
+}
+```
+
+**Example:** [`docs/deployment/examples/greptime_simple_svc`](../deployment/examples/greptimedb_simple_svc/README.md)
 
 ### Grafana Cloud, Datadog, New Relic, Honeycomb, etc
 
@@ -115,7 +135,6 @@ Most commercial observability platforms now support OTLP ingestion.
 export "traces" {
   otlp = {
     endpoint = "https://otlp.provider.com:4317"
-    protocol = "grpc"
     headers = {
       "authorization" = "Bearer ${API_TOKEN}"
     }
@@ -123,7 +142,7 @@ export "traces" {
 }
 ```
 
-**Examples:** Coming soon
+**Examples:** Coming soon...
 
 ## Flow Trace Data Model
 
@@ -151,7 +170,9 @@ For local development and testing, you can output Flow Traces to stdout instead 
 
 ```hcl
 export "traces" {
-  stdout = "text_indent"  # Human-readable format
+  stdout = {
+    format = "text_indent"  # Human-readable format
+  }
 }
 ```
 
@@ -164,7 +185,7 @@ kubectl logs -f -l app.kubernetes.io/name=mermin
 ## Next Steps
 
 1. **Choose your backend** from the options above
-2. **Review example configurations** in [`examples/`](../deployment/examples/)
+2. **Review example configurations** in [`deployment/examples/`](../deployment/examples/)
 3. **Configure OTLP export** in your Mermin deployment - see [OTLP Exporter Configuration](../configuration/export-otlp.md)
 4. **Set up authentication and TLS** for production - see [OTLP Exporter Configuration](../configuration/export-otlp.md)
 5. **Create dashboards** to visualize Flow Traces in your chosen platform
