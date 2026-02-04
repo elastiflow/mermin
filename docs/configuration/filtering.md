@@ -12,7 +12,7 @@ Mermin supports filtering flows by:
 - Connection states
 
 {% hint style="info" %}
-Filter option names are derived directly from FlowSpan attribute names defined in the semantic conventions and can be referenced easily in the [attributes reference](../spec/attribute-reference.md).
+Filter option names are derived directly from FlowSpan attribute names defined in the semantic conventions and can be referenced easily in the [attributes reference](../getting-started/attribute-reference.md).
 The attribute's dot notation is converted to underscores (e.g., `flow.tcp.flags.tags` becomes `tcp_flags_tags`). This 1:1 mapping ensures consistency and makes it easy to identify which attribute each filter targets.
 {% endhint %}
 
@@ -421,9 +421,9 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
     }
     ```
 
-## Object types
+## Object Types
 
-### Pattern matcher object
+### Pattern Matcher Object
 
 - `match` attribute - list of strings, default `[]` (empty list, include all).
 

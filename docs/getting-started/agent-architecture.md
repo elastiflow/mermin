@@ -163,7 +163,7 @@ For each network flow, Mermin:
 
 This provides full context for each network flow, enabling powerful filtering and analysis.
 
-To learn more about attribution configuration options, see the [Kubernetes informer](../configuration/discovery-kubernetes-informer.md) documentation.
+To learn more about attribution configuration options, see the [Kubernetes informer](../configuration/reference/kubernetes-informer-discovery.md) documentation.
 
 ### OTLP Exporter
 
