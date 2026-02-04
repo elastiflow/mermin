@@ -2,7 +2,7 @@
 
 ## Welcome
 
-* [Introduction](README.md)
+* [Mermin Documentation](README.md)
 * [Beta Program](welcome/beta-program.md)
 
 ## Getting Started
@@ -35,7 +35,7 @@
 * [Overview](configuration/configuration.md)
 * [Examples](configuration/examples.md)
 * [Global Agent Options](configuration/global-options.md)
-* Configuration References
+* [Configuration References](configuration/configuration-references/README.md)
   * [Network Interface Discovery](configuration/discovery-instrument.md)
   * [Network Packet Parser](configuration/parser.md)
   * [Flow Span Producer](configuration/span.md)
