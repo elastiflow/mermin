@@ -190,7 +190,7 @@
         {
           "editorMode": "code",
           "exemplar": false,
-          "expr": "avg(rate(mermin_export_latency_seconds_sum[$__rate_interval]) / rate(mermin_export_latency_seconds_count[$__rate_interval]))",
+          "expr": "avg(rate(mermin_pipeline_duration_seconds_sum{stage=\"export_out\"}[$__rate_interval]) / rate(mermin_pipeline_duration_seconds_count{stage=\"export_out\"}[$__rate_interval]))",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -2042,7 +2042,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 347
+            "y": 416
           },
           "id": 6,
           "options": {
@@ -2178,7 +2178,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 347
+            "y": 416
           },
           "id": 24,
           "interval": "60s",
@@ -2316,7 +2316,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 355
+            "y": 424
           },
           "id": 25,
           "interval": "60s",
@@ -2393,7 +2393,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 355
+            "y": 424
           },
           "id": 23,
           "interval": "60s",
@@ -2538,7 +2538,7 @@
             "h": 3,
             "w": 12,
             "x": 0,
-            "y": 1233
+            "y": 1302
           },
           "id": 29,
           "options": {
@@ -2632,7 +2632,7 @@
             "h": 3,
             "w": 12,
             "x": 12,
-            "y": 1233
+            "y": 1302
           },
           "id": 28,
           "options": {
@@ -2771,7 +2771,7 @@
             "h": 5,
             "w": 12,
             "x": 0,
-            "y": 1236
+            "y": 1305
           },
           "id": 43,
           "options": {
@@ -2894,7 +2894,7 @@
             "h": 5,
             "w": 12,
             "x": 12,
-            "y": 1236
+            "y": 1305
           },
           "id": 22,
           "options": {
@@ -3013,7 +3013,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 1241
+            "y": 1310
           },
           "id": 26,
           "options": {
@@ -3119,7 +3119,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 1241
+            "y": 1310
           },
           "id": 5,
           "options": {
@@ -3226,7 +3226,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 1250
+            "y": 1319
           },
           "id": 27,
           "options": {
@@ -3364,7 +3364,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 1250
+            "y": 1319
           },
           "id": 33,
           "options": {
@@ -3508,7 +3508,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 136
+            "y": 205
           },
           "id": 34,
           "options": {
@@ -3646,7 +3646,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 136
+            "y": 205
           },
           "id": 30,
           "options": {
@@ -3775,7 +3775,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 145
+            "y": 214
           },
           "id": 41,
           "options": {
