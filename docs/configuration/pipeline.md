@@ -6,7 +6,7 @@ The configuration options become useful to take advantage of additional resource
 
 ## Configuration
 
-A full pipeline example is in the [default config](../../charts/mermin/config/default/config.hcl) in the repository.
+A full pipeline example is in the [default config](./default/config.hcl) in the repository.
 
 ## Configuration Structure
 

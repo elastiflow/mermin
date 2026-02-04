@@ -560,7 +560,7 @@ discovery "instrument" {
    }
    ```
 
-3. **Add flow filters** (see [Filtering](filtering.md))
+3. **Add flow filters** (see [Filtering](../filtering.md))
 
 ### Flow Duplication
 
@@ -658,7 +658,7 @@ discovery "instrument" {
 
 ## Next Steps
 
-* [**Parser Configuration**](reference/network-packet-parser.md): Configure tunnel protocol detection
-* [**Flow Filtering**](filtering.md): Filter flows by interface name
-* [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose interface issues
-* [**Advanced Scenarios**](../deployment/advanced-scenarios.md): CNI-specific configurations
+* [**Parser Configuration**](network-packet-parser.md): Configure tunnel protocol detection
+* [**Flow Filtering**](../filtering.md): Filter flows by interface name
+* [**Troubleshooting**](../../troubleshooting/troubleshooting.md): Diagnose interface issues
+* [**Advanced Scenarios**](../../deployment/advanced-scenarios.md): CNI-specific configurations

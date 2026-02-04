@@ -123,7 +123,7 @@ parser {
 
 ### Discovery
 
-Interfaces and Kubernetes discovery. See [Network Interface Discovery](reference/network-interface-discovery.md) and [Kubernetes Informers](discovery-kubernetes-informer.md).
+Interfaces and Kubernetes discovery. See [Network Interface Discovery](reference/network-interface-discovery.md) and [Kubernetes Informers](reference/kubernetes-informer-discovery.md).
 If you omit `interfaces`, built-in defaults target CNI interfaces (e.g. `veth*`, `tunl*`, `vxlan*`, `cali*`, `cilium_*`). The example below overrides with physical interfaces:
 
 ```hcl
@@ -284,23 +284,23 @@ YAML configs do not support `env`; use HCL if you need it, or inject values befo
 - [Configuration Examples](examples.md): full example configs (production, development, CNI, high-throughput, security).
 - Section reference:
 
-| Section                                                                 | Description                                          |
-|-------------------------------------------------------------------------|------------------------------------------------------|
-| [Global Options](reference/README.md#configure-global-agent-options)    | Configure Global Agent Options                       |
-| [Internal Server](reference/internal-server.md)                                   | Configure Internal Server                            |
-| [Internal Prometheus Metrics](metrics.md)                               | Configure Internal Prometheus Metrics                |
-| [Network Packet Parser](reference/network-packet-parser.md)             | Configure Parsing of Network Packets                 |
-| [Network Interface Discovery](reference/network-interface-discovery.md) | Configure Discovery of Network Interfaces            |
-| [Kubernetes Informer Discovery](discovery-kubernetes-informer.md)       | Configure Discovery of Kubernetes Informer           |
-| [Kubernetes Owner Relations](owner-relations.md)                        | Configure Owner Relations of Kubernetes Resources    |
-| [Kubernetes Selector Relations](selector-relations.md)                  | Configure Selector Relations of Kubernetes Resources |
-| [Flow Span Kubernetes Attribution](attributes.md)                       | Configure Kubernetes Attribution of Flow Spans       |
-| [Flow Span Filters](filtering.md)                                       | Configure Filtering of Flow Spans                    |
-| [Flow Span Producer](span.md)                                           | Configure Producing of Flow Spans                    |
-| [OpenTelemetry OTLP Exporter](export-otlp.md)                           | Configure OpenTelemetry OTLP Exporter                |
-| [OpenTelemetry Console Exporter](export-stdout.md)                      | Configure OpenTelemetry Console Exporter             |
-| [Internal Tracing](internal-tracing.md)                                 | Configure Internal Tracing Exporter                  |
-| [Flow Processing Pipeline](pipeline.md)                                 | Configure Flow Processing Pipeline                   |
+| Section                                                                     | Description                                          |
+|-----------------------------------------------------------------------------|------------------------------------------------------|
+| [Global Options](reference/README.md#configure-global-agent-options)        | Configure Global Agent Options                       |
+| [Internal Server](reference/internal-server.md)                             | Configure Internal Server                            |
+| [Internal Prometheus Metrics](metrics.md)                                   | Configure Internal Prometheus Metrics                |
+| [Network Packet Parser](reference/network-packet-parser.md)                 | Configure Parsing of Network Packets                 |
+| [Network Interface Discovery](reference/network-interface-discovery.md)     | Configure Discovery of Network Interfaces            |
+| [Kubernetes Informer Discovery](reference/kubernetes-informer-discovery.md) | Configure Discovery of Kubernetes Informer           |
+| [Kubernetes Owner Relations](owner-relations.md)                            | Configure Owner Relations of Kubernetes Resources    |
+| [Kubernetes Selector Relations](selector-relations.md)                      | Configure Selector Relations of Kubernetes Resources |
+| [Flow Span Kubernetes Attribution](attributes.md)                           | Configure Kubernetes Attribution of Flow Spans       |
+| [Flow Span Filters](filtering.md)                                           | Configure Filtering of Flow Spans                    |
+| [Flow Span Producer](span.md)                                               | Configure Producing of Flow Spans                    |
+| [OpenTelemetry OTLP Exporter](export-otlp.md)                               | Configure OpenTelemetry OTLP Exporter                |
+| [OpenTelemetry Console Exporter](export-stdout.md)                          | Configure OpenTelemetry Console Exporter             |
+| [Internal Tracing](internal-tracing.md)                                     | Configure Internal Tracing Exporter                  |
+| [Flow Processing Pipeline](pipeline.md)                                     | Configure Flow Processing Pipeline                   |
 
 ## Best practices
 

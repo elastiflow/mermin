@@ -41,7 +41,7 @@ A full configuration example can be found in the [Default Configuration](./defau
 
 Defines which metadata to extract from the Kubernetes resources.
 
-- `metadata` attribute - list of strings, default `["[*].metadata.namespace", "[*].metadata.name", "[*].metadata.uid"]`.  
+- `metadata` attribute - list of strings, default `["[*].metadata.namespace", "[*].metadata.name", "[*].metadata.uid"]`.
 
   List of JSONPath-style paths to extract from Kubernetes resources. Paths are evaluated against the resource object (Pod, Service, Node, etc.).
 
@@ -56,7 +56,7 @@ Defines which metadata to extract from the Kubernetes resources.
   }
   ```
 
-- `label` block - [metadata extraction object](#metadata-extraction-object), `{}` (no labels are extracted by default).  
+- `label` block - [metadata extraction object](#metadata-extraction-object), `{}` (no labels are extracted by default).
 
   The label block configures how to extract Kubernetes labels to Otel attributes, can be defined multiple times to extract multiple labels.
   _Not implemented_
@@ -73,7 +73,7 @@ Defines which metadata to extract from the Kubernetes resources.
   }
   ```
 
-- `annotation` block - [metadata extraction object](#metadata-extraction-object), `{}` (no annotations are extracted by default).  
+- `annotation` block - [metadata extraction object](#metadata-extraction-object), `{}` (no annotations are extracted by default).
 
   The label block configures how to extract Kubernetes annotations to Otel attributes, can be defined multiple times to extract multiple labels.
   _Not implemented_
@@ -113,7 +113,7 @@ attributes "source" "k8s" {
 }
 ```
 
-- `sources` attribute - list of [association objects](#association-object), please see the [default configuration](./default/config.hcl) for the default for each Kubernetes kind.  
+- `sources` attribute - list of [association objects](#association-object), please see the [default configuration](./default/config.hcl) for the default for each Kubernetes kind.
 
   **Example:** Map `source.ip` from the flow record to the Pod IP
 
@@ -137,47 +137,47 @@ attributes "source" "k8s" {}
 attributes "destination" "k8s" {}
 ```
 
-## Object types
+## Object Type
 
-### Metadata extraction object
+### Metadata Extraction Object
 
 Defines how to extract Kubernetes labels to Otel attributes
 
-- `from` attribute - string, default `""`.  
+- `from` attribute - string, default `""`.
 
   Kubernetes kind to extract labels from
 
-- `key_regex` attribute - string, default `""`.  
+- `key_regex` attribute - string, default `""`.
 
   [Rust regular expressions](https://docs.rs/regex/latest/regex/) to match label keys against. Regex capture groups are available.
 
-- `value_regex` attribute - string, default `""`.  
+- `value_regex` attribute - string, default `""`.
 
   [Rust regular expressions](https://docs.rs/regex/latest/regex/) to match label values against. Regex capture groups are available.
 
-- `attribute` attribute - string, default `""`.  
+- `attribute` attribute - string, default `""`.
 
   Otel attribute to which the resulting value is written in a replace action. Regex capture groups are available.
 
-- `attribute_value` attribute - string, default `""`.  
+- `attribute_value` attribute - string, default `""`.
 
   Otel attribute value to set. Regex capture groups are available.
 
-### Association object
+### Association Object
 
 Defines how to associate flow fields (e.g. `source.ip`, `source.port`) to Kubernetes object fields for matching. The `to` paths are JSONPath-style paths over the resource (Pod, Service, Node, etc.).
 
-- `from` attribute - string.  
+- `from` attribute - string.
 
   Flow field (attribute) name to use for the mapping
 
-- `to` attribute - list of strings.  
+- `to` attribute - list of strings.
 
   JSONPath-style paths over the resource to match with `from` value
 
 ## Troubleshooting
 
-### Kubernetes Metadata is not properly mapped
+### Kubernetes Metadata Is Not Properly Mapped
 
 **Symptoms:** You don't see Kubernetes resources attributes mapped to the flow spans.
 
@@ -194,6 +194,6 @@ If you only configure one direction (e.g. only `attributes "source" "k8s"`), the
 
 ## Next Steps
 
-- [**Kubernetes Informers**](discovery-kubernetes-informer.md): Configure resource watching
+- [**Kubernetes Informers**](reference/kubernetes-informer-discovery.md): Configure resource watching
 - [**Owner Relations**](owner-relations.md): Add owner metadata
 - [**Configuration Examples**](examples.md): See complete configurations

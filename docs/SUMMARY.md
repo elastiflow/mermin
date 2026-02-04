@@ -36,7 +36,7 @@
   * [Configure OpenTelemetry OTLP Exporter](configuration/export-otlp.md "OpenTelemetry OTLP Exporter")
   * [Configure OpenTelemetry Console Exporter](configuration/export-stdout.md "OpenTelemetry Console Exporter")
   * [Configure Kubernetes Attribution of Flow Spans](configuration/attributes.md "Flow Span Kubernetes Attribution")
-  * [Configure Discovery of Kubernetes Informer](configuration/discovery-kubernetes-informer.md "Kubernetes Informer Discovery")
+  * [Configure Discovery of Kubernetes Informer](configuration/reference/kubernetes-informer-discovery.md "Kubernetes Informer Discovery")
   * [Configure Owner Relations of Kubernetes Resources](configuration/owner-relations.md "Kubernetes Owner Relations")
   * [Configure Selector Relations of Kubernetes Resources](configuration/selector-relations.md "Kubernetes Selector Relations")
   * [Configure Flow Processing Pipeline](configuration/pipeline.md "Flow Processing Pipeline")

@@ -50,7 +50,7 @@ Elasticsearch with APM Server or OpenTelemetry Collector can ingest OTLP traces.
 - Point Mermin → OpenTelemetry Collector → Elasticsearch exporter
 - Or point Mermin → Elastic APM Server (OTLP endpoint)
 
-**Example:** See [`docs/deployment/examples/netobserv_os_simple_svc/`](../../docs/deployment/examples/netobserv_os_simple_svc/) for OpenSearch (Elastic-compatible) deployment
+**Example:** See [`docs/deployment/examples/netobserv_os_simple_svc/`](../deployment/examples/netobserv_os_simple_svc/) for OpenSearch (Elastic-compatible) deployment
 
 ### OpenSearch
 
@@ -60,8 +60,8 @@ Open-source alternative to Elasticsearch with native OTLP support via OpenTeleme
 
 **Examples:**
 
-- [`docs/deployment/examples/netobserv_os_simple_svc/`](../../docs/deployment/examples/netobserv_os_simple_svc/) - Basic OpenSearch setup
-- [`docs/deployment/examples/netobserv_os_simple_gke_gw/`](../../docs/deployment/examples/netobserv_os_simple_gke_gw/) - GKE deployment with Gateway API
+- [`docs/deployment/examples/netobserv_os_simple_svc/`](../deployment/examples/netobserv_os_simple_svc/) - Basic OpenSearch setup
+- [`docs/deployment/examples/netobserv_os_simple_gke_gw/`](../deployment/examples/netobserv_os_simple_gke_gw/) - GKE deployment with Gateway API
 
 ### Grafana Tempo
 
@@ -164,7 +164,7 @@ kubectl logs -f -l app.kubernetes.io/name=mermin
 ## Next Steps
 
 1. **Choose your backend** from the options above
-2. **Review example configurations** in [`examples/`](../../examples/)
+2. **Review example configurations** in [`examples/`](../deployment/examples/)
 3. **Configure OTLP export** in your Mermin deployment - see [OTLP Exporter Configuration](../configuration/export-otlp.md)
 4. **Set up authentication and TLS** for production - see [OTLP Exporter Configuration](../configuration/export-otlp.md)
 5. **Create dashboards** to visualize Flow Traces in your chosen platform
