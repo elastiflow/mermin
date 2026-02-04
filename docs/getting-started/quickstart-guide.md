@@ -2,7 +2,7 @@
 hidden: true
 ---
 
-# Quick Start
+# Quickstart Guide
 
 This guide will help you deploy Mermin on a local Kubernetes cluster using `kind` (Kubernetes in Docker) in just a few minutes. By the end, you'll have Mermin capturing network flows and displaying them in your terminal.
 
@@ -20,7 +20,7 @@ Before starting, ensure you have the following tools installed:
   * On RedHat-based systems run `sudo yum install make`
 
 {% hint style="info" %}
-This quick start is designed for local testing and development. For production deployments, see the [Deployment Guide](../deployment/deployment.md).
+This quick start is designed for local testing and development. For production deployments, see the [Deployment Guide](../deployment/overview.md).
 {% endhint %}
 
 ## Step 1: Create a kind Cluster
@@ -175,9 +175,9 @@ Congratulations! You've successfully deployed Mermin and captured network flows.
 To use Mermin in production:
 
 1. [**Review the Architecture**](architecture.md) to understand how Mermin works
-2. [**Explore Deployment Options**](../deployment/deployment.md) for production-ready configurations
+2. [**Explore Deployment Options**](../deployment/overview.md) for production-ready configurations
 3. [**Configure OTLP Export**](../configuration/export-otlp.md) to send flows to your observability backend
-4. [**Set Up Integrations**](../observability/backends.md) with Grafana, Elastic, or other platforms
+4. [**Set Up Integrations**](../observability/backend-integrations.md) with Grafana, Elastic, or other platforms
 5. [**Customize Configuration**](../configuration/configuration.md) to match your environment and requirements
 
 ## Troubleshooting

@@ -577,5 +577,5 @@ Ensure managed identity has necessary permissions and AAD Pod Identity is config
 
 - [**Advanced Scenarios**](advanced-scenarios.md): Custom CNI, multi-cluster deployments
 - [**Configuration Reference**](../configuration/configuration.md): Fine-tune Mermin for your environment
-- [**Observability Backends**](../observability/backends.md): Send Flow Traces to cloud-native observability platforms
+- [**Observability Backends**](../observability/backend-integrations.md): Send Flow Traces to cloud-native observability platforms
 - [**Troubleshooting**](../troubleshooting/troubleshooting.md): Solve cloud-specific issues

@@ -86,9 +86,9 @@ This documentation is designed to help you successfully deploy, configure, and o
 
 - [**Quick Start Guide**](getting-started/quickstart.md): Get Mermin running in minutes on a local Kubernetes cluster.
 - [**Architecture Overview**](getting-started/architecture.md): Understand how Mermin works and its data flow.
-- [**Deployment Guides**](deployment/deployment.md): Detailed instructions for various deployment scenarios (Kubernetes, cloud platforms, bare metal).
+- [**Deployment Guides**](deployment/overview.md): Detailed instructions for various deployment scenarios (Kubernetes, cloud platforms, bare metal).
 - [**Configuration Reference**](configuration/configuration.md): Comprehensive documentation of all configuration options.
-- [**Observability Backends**](observability/backends.md): Understand how to send Flow Traces to Elastic, Grafana Tempo, Jaeger, and other OTLP-compatible platforms.
+- [**Observability Backends**](observability/backend-integrations.md): Understand how to send Flow Traces to Elastic, Grafana Tempo, Jaeger, and other OTLP-compatible platforms.
 - [**Troubleshooting**](troubleshooting/troubleshooting.md): Solutions to common issues and diagnostic approaches
 - [**Development Guides**](contributor-guide/development-workflow.md): Build, test, and contribute to Mermin
 
@@ -132,4 +132,4 @@ If you encounter issues or have questions:
 
 Ready to get started? Follow our [**Quick Start Guide**](getting-started/quickstart.md) to deploy Mermin on a local Kubernetes cluster in minutes.
 
-For production deployments, review the [**Deployment Overview**](deployment/deployment.md) to understand your deployment options and best practices.
+For production deployments, review the [**Deployment Overview**](deployment/overview.md) to understand your deployment options and best practices.

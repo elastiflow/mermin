@@ -2,7 +2,7 @@
 hidden: true
 ---
 
-# Observability Backend Integration
+# Backend Integrations
 
 Mermin exports Flow Traces via the **OpenTelemetry Protocol (OTLP)**, which means it works with any OTLP-enabled observability backend or collector.
 

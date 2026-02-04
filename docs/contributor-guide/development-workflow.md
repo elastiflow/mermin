@@ -164,7 +164,7 @@ cargo clippy --all-features -- -D warnings
 
 ### "hack" hints
 
-- Generate metrics description for the [app-metrics docs](../observability/app-metrics.md) with `jq`
+- Generate metrics description for the [app-metrics docs](../internal-monitoring/app-metrics.md) with `jq`
 
   ```bash
   curl -s ${POD_IP}:10250/metrics:summary | jq --arg metric_prefix ${METRIC_PREFIX} -r -f hack/gen_metrics_doc.jq
@@ -375,7 +375,7 @@ Once you have your development environment set up, you may want to explore:
 
 - [Debugging Network Traffic](debugging-network.md) - Learn how to use Wireshark for live packet capture
 - [Debugging eBPF Programs](debugging-ebpf.md) - Deep dive into eBPF program inspection and optimization
-- [Deployment Documentation](../deployment/deployment.md) - Understand production deployment scenarios
+- [Deployment Documentation](../deployment/overview.md) - Understand production deployment scenarios
 
 ## Getting Help
 

@@ -440,4 +440,4 @@ export "traces" {
 * [**OTLP Exporter**](export-otlp.md): Configure production export
 * [**Flow Filtering**](filtering.md): Reduce log volume
 * [**Internal Tracing**](internal-tracing.md): Monitor Mermin itself
-* [**Observability Backends**](../observability/backends.md): Set up observability backends
+* [**Observability Backends**](../observability/backend-integrations.md): Set up observability backends
