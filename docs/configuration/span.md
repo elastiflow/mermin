@@ -17,30 +17,6 @@ Flow semantics (how flows become OpenTelemetry spans and what attributes they ca
 
 A full configuration example can be found in the [Default Configuration](./default/config.hcl).
 
-## Object Types
-
-### `span` block
-
-Place a `span { }` block alongside `pipeline`, `export`, and other blocks. Omit the block to use built-in defaults for all options. Durations use HCL duration strings (e.g. `"30s"`, `"5m"`, `"24h"`).
-
-```hcl
-span {
-  max_record_interval   = "60s"
-  generic_timeout       = "30s"
-  icmp_timeout          = "10s"
-  tcp_timeout           = "20s"
-  tcp_fin_timeout       = "5s"
-  tcp_rst_timeout       = "5s"
-  udp_timeout           = "60s"
-  community_id_seed     = 0
-  trace_id_timeout      = "24h"
-  enable_hostname_resolution = true
-  hostname_resolve_timeout   = "100ms"
-}
-```
-
-#### Timeouts and Intervals
-
 - `max_record_interval` attribute
 
   Maximum time an active flow can run without exporting a record. When this interval is reached, a record is emitted and the flow continues. Long-lived flows are therefore split into multiple spans.
@@ -91,7 +67,7 @@ span {
 
 - `tcp_timeout` attribute
 
-  Inactivity timeout for TCP when no FIN or RST has been seen (connection still open).
+  Inactivity timeout for TCP flows that remain open (no FIN or RST observed). When this timeout elapses without traffic, the flow is considered inactive and will be closed. For each TCP flow, `tcp_timeout` applies as long as no FIN or RST has been seen.
 
   **Type:** Duration
 
@@ -107,7 +83,7 @@ span {
 
 - `tcp_fin_timeout` attribute
 
-  After a FIN is seen (graceful close), the flow is exported after this period so final ACKs can be included.
+  After a FIN (graceful close) is observed on a TCP flow, the exporter waits for this timeout before exporting the flow. This allows late-arriving final ACKs to be captured. For each TCP flow, once a FIN is seen, `tcp_fin_timeout` determines when the flow is closed and exported.
 
   **Type:** Duration
 
@@ -123,7 +99,7 @@ span {
 
 - `tcp_rst_timeout` attribute
 
-  After an RST is seen (abrupt close), the flow is exported after this period.
+  When a TCP RST (reset) is observed—indicating an abrupt connection termination—the flow waits for the specified `tcp_rst_timeout` before being exported. This timeout is evaluated for each flow individually after an RST is detected, ensuring even abruptly closed connections are accounted for with a brief post-RST delay before export.
 
   **Type:** Duration
 
@@ -152,10 +128,6 @@ span {
     udp_timeout = "30s"
   }
   ```
-
-For TCP, the effective timeout is chosen per flow: `tcp_timeout` for established connections with no FIN/RST, `tcp_fin_timeout` once a FIN is seen, and `tcp_rst_timeout` once an RST is seen.
-
-#### Community ID and Trace Correlation
 
 - `community_id_seed` attribute
 
@@ -188,8 +160,6 @@ For TCP, the effective timeout is chosen per flow: `tcp_timeout` for established
     trace_id_timeout = "1h"
   }
   ```
-
-#### Hostname Resolution
 
 - `enable_hostname_resolution` attribute
 
