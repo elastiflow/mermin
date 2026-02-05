@@ -81,10 +81,10 @@ securityContext:
 resources:
   limits:
     cpu: 200m
-    memory: 220Mi
+    memory: 512Mi
   requests:
     cpu: 200m
-    memory: 220Mi
+    memory: 512Mi
 
 ports:
   - name: api
