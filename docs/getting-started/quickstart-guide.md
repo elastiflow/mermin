@@ -191,6 +191,109 @@ kubectl run curl-test --image=curlimages/curl -it --rm -- curl http://nginx
 
 The flow logs will now include metadata about the nginx deployment, service, and pods.
 
+### Explore Essential Configuration Options
+
+To view flows with Kubernetes metadata enrichment, Mermin requires four core configuration blocks: Network Interface Discovery, Kubernetes Informer, Flow-to-Kubernetes Attribute Mapping & Export.
+
+A minimal example configuration is available here: [Example Configuration](../deployment/examples/local/config.example.hcl), for a more comprehensive example, please see the [Default Config](https://github.com/elastiflow/mermin/tree/beta/charts/mermin/config/default/config.hcl)
+
+<details>
+
+<summary>Network Interface Discovery</summary>
+
+**CNI-Specific Patterns:**
+
+```hcl
+discovery "instrument" {
+  # Kind / kindnet
+  # interfaces = ["veth*"]
+
+  # Flannel
+  # interfaces = ["veth*", "flannel*", "vxlan*"]
+
+  # Calico
+  # interfaces = ["veth*", "cali*", "tunl*", "ip6tnl*"]
+
+  # Cilium
+  # interfaces = ["veth*", "cilium_*", "lxc*"]
+
+  # GKE
+  # interfaces = ["veth*", "gke*"]
+
+  # AWS VPC CNI
+  # interfaces = ["veth*", "eni*"]
+}
+```
+
+Default:
+
+```text
+"veth*", "tunl*", "ip6tnl*", "vxlan*", "flannel*", "cali*", "cilium_*", "lxc", "gke*", "eni*", "ovn-k8s*"
+```
+
+**What you'll see**: All pod-to-pod traffic (inter-node and intra-node)\
+**What you'll miss**: Traffic on other CNI-specific interfaces not listed\
+**Use cases**: Fine-tuning for specific CNI setups, reducing monitored interface count
+
+{% hint style="info" %}
+Mermin's goal is to show you pod-to-pod traffic which is exposed by Virtual Ethernet Devices, which match patterns like `"veth*", "gke*", "cali*"`. Currently, bridge interfaces like `"tun*"` or `flannel*` are ignored,
+because Mermin does not support parsing tunneled/encapsulated traffic. This feature will come very soon.
+{% endhint %}
+
+**Physical Interfaces Only:**
+
+{% hint style="warning" %}
+Most of the traffic on the physical interfaces will be ignored, because Mermin currently lacks support for tunneled/encapsulated traffic.
+{% endhint %}
+
+Monitor only physical network interfaces for inter-node traffic:
+
+```hcl
+discovery "instrument" {
+  interfaces = ["eth*", "ens*", "en*"]
+}
+```
+
+**What you'll see**: Inter-node pod traffic, node-to-node traffic, external connections\
+**What you'll miss**: Same-node pod-to-pod communication (never hits physical interfaces)
+
+**Trade-offs**: Lower overhead (fewer interfaces), incomplete visibility, may cause flow duplication if combined with veth monitoring\
+**Use cases**: Infrastructure-focused monitoring, cost-sensitive deployments, clusters with minimal same-node communication
+
+> **For more information, please reference**: [Network Interface Discovery](../configuration/discovery-interfaces.md)
+
+</details>
+
+<details>
+
+<summary>Kubernetes Informer</summary>
+
+Configures which Kubernetes resources Mermin watches to enrich network flows with metadata. This enables Mermin to associate IP addresses and ports with pod names, services, deployments, and other Kubernetes contexts.
+
+**For more information, please reference:** [Owner Relations](../configuration/owner-relations.md) **&** [Selector Relations](../configuration/selector-relations.md)
+
+</details>
+
+<details>
+
+<summary>Flow-to-Kubernetes Attribute Mapping</summary>
+
+Configures how Mermin matches network flow data (source/destination IPs and ports) to Kubernetes resources. This mapping defines which Kubernetes object fields to extract and how to associate them with captured flows.
+
+> **For more information, please reference:** [Flow Attributes](../configuration/attributes.md)
+
+</details>
+
+<details>
+
+<summary>Exporter</summary>
+
+Configures how Mermin exports network flow data. Flows can be sent to an OTLP receiver (OpenTelemetry Protocol) for storage and analysis, or output to stdout for debugging.
+
+> **For more information, please reference:** [OTLP Exporter](../configuration/export-otlp.md)
+
+</details>
+
 ## Cleanup
 
 When you're done experimenting, clean up the resources:
