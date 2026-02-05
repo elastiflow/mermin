@@ -131,23 +131,6 @@ owner_relations = {
 
 - Flow shows: Pod + ReplicaSet + Deployment metadata (up to `max_depth` levels, filtered by include/exclude)
 
-## Complete Example
-
-```hcl
-discovery "informer" "k8s" {
-  owner_relations = {
-    # Walk up to 5 levels
-    max_depth = 5
-
-    # Include all owner types (default)
-    include_kinds = []
-
-    # Optionally exclude specific types
-    exclude_kinds = []
-  }
-}
-```
-
 ## Next Steps
 
 - [**Selector Relations**](selector-relations.md): Configure selector-based matching
