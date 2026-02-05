@@ -1,26 +1,94 @@
 # Configure Discovery of Network Interfaces
 
-This page explains how Mermin discovers and monitors network interfaces on the host. Interface selection is critical for determining what network traffic Mermin captures.
+**Block:** `discovery.instrument`
 
-## Overview
-
-Mermin attaches eBPF programs to network interfaces to capture packets. The `discovery.instrument.interfaces` configuration specifies which interfaces to monitor using patterns that are resolved against available host interfaces.
+Mermin attaches eBPF programs to network interfaces to capture packets as they traverse the network stack. Interface selection is critical because different interfaces see different traffic—choosing the right interfaces ensures you capture pod-to-pod, inter-node, and external traffic without gaps or duplication. You specify interfaces using flexible patterns (literals, globs, or regex) that are resolved against available host interfaces at startup and during runtime.
 
 ## Configuration
 
-You specify which interfaces to monitor with the `interfaces` option. Example (physical interfaces only; the [default](#default-configuration) uses veth and tunnel patterns):
+A full configuration example can be found in the [Default Configuration](../default/config.hcl).
 
-```hcl
-discovery "instrument" {
-  interfaces = ["eth*", "ens*", "en*"]
-}
-```
+### `discovery.instrument` block
+
+- `interfaces` attribute
+
+  List of interface name patterns to monitor for network traffic capture. Patterns can be literals, globs, or regex expressions. Mermin attaches eBPF programs to all interfaces matching these patterns.
+
+  **Type:** List of Strings
+
+  **Default:** `["veth*", "tunl*", "ip6tnl*", "vxlan*", "flannel*", "cali*", "cilium_*", "lxc*", "gke*", "eni*", "azure*", "ovn-k8s*"]`
+
+  **Example:** Monitor only physical interfaces
+
+  ```hcl
+  discovery "instrument" {
+    interfaces = ["eth*", "ens*", "en*"]
+  }
+  ```
+
+- `auto_discover_interfaces` attribute
+
+  Enable the Interface Controller for automatic network interface discovery and management. When enabled, Mermin continuously watches for interface changes via netlink events and automatically attaches/detaches eBPF programs as interfaces are created or destroyed. This is particularly useful for ephemeral interfaces like veth pairs.
+
+  **Type:** Boolean
+
+  **Default:** `true`
+
+  **Example:** Disable automatic discovery for static interface monitoring
+
+  ```hcl
+  discovery "instrument" {
+    interfaces = ["tunl*", "flannel*"]
+    auto_discover_interfaces = false
+  }
+  ```
+
+- `tc_priority` attribute
+
+  TC priority for eBPF program attachment (netlink only, kernel < 6.6). Controls where Mermin's programs run in the TC chain relative to other programs. Higher values = lower priority = runs later in the chain. Values below 30 may run before some CNI programs.
+
+  **Type:** Integer
+
+  **Default:** `1`
+
+  **Valid Values:** 1–32767
+
+  **Example:** Run Mermin after other TC programs
+
+  ```hcl
+  discovery "instrument" {
+    interfaces = ["veth*", "tunl*"]
+    tc_priority = 100
+  }
+  ```
+
+- `tcx_order` attribute
+
+  Order in the TCX program chain (TCX only, kernel ≥ 6.6). Controls whether Mermin's eBPF programs run before or after other programs in the chain. Using `"last"` (default) is recommended for observability to see traffic after CNI and security programs have processed it.
+
+  **Type:** String
+
+  **Default:** `"last"`
+
+  **Valid Values:**
+
+  - `"last"`: Runs after other programs (recommended for observability)
+  - `"first"`: Runs before other programs
+
+  **Example:** Run Mermin before other TCX programs
+
+  ```hcl
+  discovery "instrument" {
+    interfaces = ["veth*", "tunl*"]
+    tcx_order = "first"
+  }
+  ```
 
 ## Interface Patterns
 
 Mermin supports three pattern types for interface matching:
 
-### 1. Literal Names
+### Literal Names
 
 Exact interface name matching:
 
@@ -34,7 +102,7 @@ discovery "instrument" {
 * No wildcards or patterns
 * Most explicit, least flexible
 
-### 2. Glob Patterns
+### Glob Patterns
 
 Shell-style wildcard matching:
 
@@ -65,7 +133,7 @@ discovery "instrument" {
 }
 ```
 
-### 3. Regex Patterns
+### Regex Patterns
 
 Full regular expression matching (enclosed in `/`):
 
