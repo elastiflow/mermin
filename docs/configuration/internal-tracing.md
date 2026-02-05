@@ -15,6 +15,30 @@ Mermin can export traces about its own operation for self-monitoring and debuggi
 
 A full configuration example may be found in the [Default Configuration](./default/config.hcl).
 
+### Configuration Structure
+
+The internal traces configuration is organized as follows:
+
+```hcl
+internal "traces" {
+  # Span format
+  span_fmt = "full"
+
+  # Optional: stdout exporter
+  stdout = {
+    format = "text_indent"
+  }
+
+  # Optional: OTLP exporter
+  otlp = {
+    endpoint = "http://otel-collector:4317"
+    protocol = "grpc"
+  }
+}
+```
+
+## Configuration Options
+
 ### `internal.traces` block
 
 - `span_fmt` attribute
@@ -187,7 +211,6 @@ internal "traces" {
 - Separate production Flow Traces from debug data
 - Different retention policies
 - Isolate development traffic
-
 
 Safe to enable in production for troubleshooting.
 
