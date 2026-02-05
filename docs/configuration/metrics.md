@@ -261,7 +261,6 @@ For production environments:
 2. Use aggregation in queries
 3. Adjust Prometheus retention
 
-
 ## Next Steps
 
 - [**Mermin Internal Metrics**](../internal-monitoring/internal-metrics.md): Mermin metrics documentation
