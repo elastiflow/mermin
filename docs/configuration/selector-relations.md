@@ -181,37 +181,6 @@ CronJob’s selector lives on the job template.
 }
 ```
 
-## Complete Example
-
-```hcl
-discovery "informer" "k8s" {
-  selector_relations = [
-    # NetworkPolicy → Pod
-    {
-      kind = "NetworkPolicy"
-      to = "Pod"
-      selector_match_labels_field      = "spec.podSelector.matchLabels"
-      selector_match_expressions_field = "spec.podSelector.matchExpressions"
-    },
-
-    # Service → Pod
-    {
-      kind = "Service"
-      to = "Pod"
-      selector_match_labels_field = "spec.selector"
-    },
-
-    # Workload controller (Deployment); ReplicaSet, StatefulSet, DaemonSet, Job use spec.selector; CronJob uses spec.jobTemplate.spec.selector
-    {
-      kind = "Deployment"
-      to   = "Pod"
-      selector_match_labels_field      = "spec.selector.matchLabels"
-      selector_match_expressions_field = "spec.selector.matchExpressions"
-    },
-  ]
-}
-```
-
 ## Next Steps
 
 - [**Flow Attributes**](attributes.md): Enable associations (e.g. `networkpolicy`, `service`) so selector-based metadata appears on flows
