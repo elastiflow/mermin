@@ -77,14 +77,14 @@ securityContext:
   runAsUser: 0
   runAsGroup: 0
 
-# TODO(mack#ENG-123|2025-09-29): Set default resources relative to the flows per second
-resources:
-  limits:
-    cpu: 200m
-    memory: 512Mi
-  requests:
-    cpu: 200m
-    memory: 512Mi
+resources: {}
+  # We usually recommend not to specify default resources and to leave this as a conscious choice for the user.
+  # limits:
+  #   cpu: 200m
+  #   memory: 220Mi
+  # requests:
+  #   cpu: 200m
+  #   memory: 220Mi
 
 ports:
   - name: api

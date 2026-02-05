@@ -89,16 +89,20 @@ spec:
                 fieldRef:
                   apiVersion: v1
                   fieldPath: status.podIP
+            {{- if (.Values.resources | dig "requests" "memory" false) }}
             - name: POD_RESOURCES_REQUESTS_MEM
               valueFrom:
                 resourceFieldRef:
                   containerName: {{ .Chart.Name }}
                   resource: requests.memory
+            {{- end }}
+            {{- if (.Values.resources | dig "requests" "memory" false) }}
             - name: POD_RESOURCES_LIMITS_MEM
               valueFrom:
                 resourceFieldRef:
                   containerName: {{ .Chart.Name }}
                   resource: limits.memory
+            {{- end }}
             - name: MERMIN_PLATFORM
               value: "kubernetes"
           {{- with .Values.env }}
@@ -106,8 +110,10 @@ spec:
           {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- with .Values.resources }}
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- with .Values.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}
