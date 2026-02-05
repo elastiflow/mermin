@@ -191,23 +191,7 @@ kubectl run curl-test --image=curlimages/curl -it --rm -- curl http://nginx
 
 The flow logs will now include metadata about the nginx deployment, service, and pods.
 
-## Cleanup
-
-When you're done experimenting, clean up the resources:
-
-```bash
-# Remove the test deployment and service (if created)
-kubectl delete deployment nginx --ignore-not-found
-kubectl delete service nginx --ignore-not-found
-
-# Uninstall Mermin
-helm uninstall mermin
-
-# Delete the kind cluster
-kind delete cluster --name atlantis
-```
-
-## Configuration Essentials
+### Explore Essential Configuration Options
 
 To view flows with Kubernetes metadata enrichment, Mermin requires four core configuration blocks: Network Interface Discovery, Kubernetes Informer, Flow-to-Kubernetes Attribute Mapping & Export.
 
@@ -217,7 +201,7 @@ A minimal example configuration is available here: [Example Configuration](../de
 
 <summary>Network Interface Discovery</summary>
 
-**CNI-Specific Patterns**
+**CNI-Specific Patterns:**
 
 ```hcl
 discovery "instrument" {
@@ -243,7 +227,7 @@ discovery "instrument" {
 
 Default:
 
-```
+```text
 "veth*", "tunl*", "ip6tnl*", "vxlan*", "flannel*", "cali*", "cilium_*", "lxc", "gke*", "eni*", "ovn-k8s*"
 ```
 
@@ -252,10 +236,11 @@ Default:
 **Use cases**: Fine-tuning for specific CNI setups, reducing monitored interface count
 
 {% hint style="info" %}
-Mermin's goal is to show you pod-to-pod traffic which is exposed by Virtual Ethernet Devices, which match patterns like `"veth*", "gke*", "cali*"`. Currently, bridge interfaces like `"tun*"` or `flannel*` are ignored, because Mermin does not support parsing tunneled/encapsulated traffic. This feature will come very soon.
+Mermin's goal is to show you pod-to-pod traffic which is exposed by Virtual Ethernet Devices, which match patterns like `"veth*", "gke*", "cali*"`. Currently, bridge interfaces like `"tun*"` or `flannel*` are ignored,
+because Mermin does not support parsing tunneled/encapsulated traffic. This feature will come very soon.
 {% endhint %}
 
-**Physical Interfaces Only**
+**Physical Interfaces Only:**
 
 {% hint style="warning" %}
 Most of the traffic on the physical interfaces will be ignored, because Mermin currently lacks support for tunneled/encapsulated traffic.
@@ -308,6 +293,22 @@ Configures how Mermin exports network flow data. Flows can be sent to an OTLP re
 > **For more information, please reference:** [OTLP Exporter](../configuration/export-otlp.md)
 
 </details>
+
+## Cleanup
+
+When you're done experimenting, clean up the resources:
+
+```bash
+# Remove the test deployment and service (if created)
+kubectl delete deployment nginx --ignore-not-found
+kubectl delete service nginx --ignore-not-found
+
+# Uninstall Mermin
+helm uninstall mermin
+
+# Delete the kind cluster
+kind delete cluster --name atlantis
+```
 
 ## Next Steps
 
