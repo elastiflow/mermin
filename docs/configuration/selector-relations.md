@@ -124,9 +124,7 @@ Each element in `selector_relations` is an object with these attributes:
   }
   ```
 
-### Object Relations
-
-#### Common Configurations
+## Common Configurations
 
 ### NetworkPolicy → Pod
 
