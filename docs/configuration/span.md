@@ -2,7 +2,8 @@
 
 **Block:** `span`
 
-Mermin groups captured packets into bidirectional flows and exports each flow as an OpenTelemetry span. The `span` block controls when flows are closed and when they emit records, plus Community ID hashing, trace ID correlation, and hostname resolution. Add a top-level `span { }` block in your [configuration file](overview.md); there are no CLI or environment overrides for span options.
+Mermin groups captured packets into bidirectional flows and exports each flow as an OpenTelemetry span. The `span` block controls when flows are closed and when they emit records,
+plus Community ID hashing, trace ID correlation, and hostname resolution. Add a top-level `span { }` block in your [configuration file](overview.md); there are no CLI or environment overrides for span options.
 
 The span block lets you configure:
 
@@ -36,14 +37,16 @@ span {
 }
 ```
 
-### Timeouts and intervals
+#### Timeouts and Intervals
 
 - `max_record_interval` attribute
 
   Maximum time an active flow can run without exporting a record. When this interval is reached, a record is emitted and the flow continues. Long-lived flows are therefore split into multiple spans.
 
-  **Type:** Duration  
-  **Default:** `60s`  
+  **Type:** Duration
+
+  **Default:** `60s`
+
   **Example:** Emit records more frequently for long-lived flows (e.g. streaming)
 
   ```hcl
@@ -56,8 +59,10 @@ span {
 
   Inactivity timeout for protocols that have no dedicated timeout: GRE, ESP, AH, and other IP protocols. After this period with no packets, the flow is closed. Flows with at least one packet are exported; flows with zero packets are dropped.
 
-  **Type:** Duration  
-  **Default:** `30s`  
+  **Type:** Duration
+
+  **Default:** `30s`
+
   **Example:** Shorter timeout for non-TCP/UDP/ICMP protocols
 
   ```hcl
@@ -70,8 +75,10 @@ span {
 
   Inactivity timeout for ICMP (e.g. ping, traceroute).
 
-  **Type:** Duration  
-  **Default:** `10s`  
+  **Type:** Duration
+
+  **Default:** `10s`
+
   **Example:** Longer ICMP timeout for slow traceroutes
 
   ```hcl
@@ -84,8 +91,10 @@ span {
 
   Inactivity timeout for TCP when no FIN or RST has been seen (connection still open).
 
-  **Type:** Duration  
-  **Default:** `20s`  
+  **Type:** Duration
+
+  **Default:** `20s`
+
   **Example:** Shorter TCP inactivity timeout
 
   ```hcl
@@ -98,8 +107,10 @@ span {
 
   After a FIN is seen (graceful close), the flow is exported after this period so final ACKs can be included.
 
-  **Type:** Duration  
-  **Default:** `5s`  
+  **Type:** Duration
+
+  **Default:** `5s`
+
   **Example:** Shorter delay after FIN before exporting
 
   ```hcl
@@ -112,8 +123,10 @@ span {
 
   After an RST is seen (abrupt close), the flow is exported after this period.
 
-  **Type:** Duration  
-  **Default:** `5s`  
+  **Type:** Duration
+
+  **Default:** `5s`
+
   **Example:** Shorter delay after RST before exporting
 
   ```hcl
@@ -126,8 +139,10 @@ span {
 
   Inactivity timeout for UDP. UDP is connectionless; a longer value suits sporadic traffic.
 
-  **Type:** Duration  
-  **Default:** `60s`  
+  **Type:** Duration
+
+  **Default:** `60s`
+
   **Example:** Shorter UDP timeout when you only care about short-lived UDP flows
 
   ```hcl
@@ -138,14 +153,16 @@ span {
 
 For TCP, the effective timeout is chosen per flow: `tcp_timeout` for established connections with no FIN/RST, `tcp_fin_timeout` once a FIN is seen, and `tcp_rst_timeout` once an RST is seen.
 
-### Community ID and trace correlation
+#### Community ID and Trace Correlation
 
 - `community_id_seed` attribute
 
   Seed for [Community ID](https://github.com/corelight/community-id-spec) hashing of the flow five-tuple. Use the same seed everywhere for correlation across agents and tools. The result is exported as `flow.community_id` ([Attribute Reference](../getting-started/attribute-reference.md)).
 
-  **Type:** Integer (uint16)  
-  **Default:** `0`  
+  **Type:** Integer (uint16)
+
+  **Default:** `0`
+
   **Example:** Use a custom seed to align with another tool (e.g. Zeek) that uses a non-zero seed
 
   ```hcl
@@ -158,8 +175,10 @@ For TCP, the effective timeout is chosen per flow: `tcp_timeout` for established
 
   How long the same Community ID keeps the same trace ID. Bounds memory while still allowing correlation across flow records for the same logical flow.
 
-  **Type:** Duration  
-  **Default:** `24h`  
+  **Type:** Duration
+
+  **Default:** `24h`
+
   **Example:** Shorter trace correlation window to reduce memory
 
   ```hcl
@@ -168,14 +187,16 @@ For TCP, the effective timeout is chosen per flow: `tcp_timeout` for established
   }
   ```
 
-### Hostname resolution
+#### Hostname Resolution
 
 - `enable_hostname_resolution` attribute
 
   When true, `client.address` and `server.address` may be reverse-DNS hostnames instead of IPs ([Attribute Reference](../getting-started/attribute-reference.md)).
 
-  **Type:** Boolean  
-  **Default:** `true`  
+  **Type:** Boolean
+
+  **Default:** `true`
+
   **Example:** Disable hostname resolution to avoid DNS lookups and use IPs only
 
   ```hcl
@@ -188,8 +209,10 @@ For TCP, the effective timeout is chosen per flow: `tcp_timeout` for established
 
   Timeout for each reverse-DNS lookup. Results are cached.
 
-  **Type:** Duration  
-  **Default:** `100ms`  
+  **Type:** Duration
+
+  **Default:** `100ms`
+
   **Example:** Increase timeout for slow or high-latency DNS
 
   ```hcl
@@ -198,7 +221,7 @@ For TCP, the effective timeout is chosen per flow: `tcp_timeout` for established
   }
   ```
 
-## When a flow span is exported
+## When is a Flow Span Exported
 
 Understanding when spans are exported helps with tuning and capacity planning. A flow span is exported when any of these is true:
 
@@ -206,7 +229,9 @@ Understanding when spans are exported helps with tuning and capacity planning. A
 2. **Protocol timeout**: No packets for the protocol-specific timeout (generic, ICMP, TCP, or UDP). The flow is closed and removed from the flow table.
 3. **TCP close**: A FIN or RST was seen and the corresponding `tcp_fin_timeout` or `tcp_rst_timeout` has elapsed. The flow is closed and exported.
 
-Exported spans are sent to the targets configured in your export block ([OTLP export](export-otlp.md), [stdout export](export-stdout.md), etc.). Workers poll flow state on an interval defined in [pipeline](pipeline.md) (`flow_producer.flow_store_poll_interval`). The flow table is backed by the eBPF `FLOW_STATS` map and in-memory state; its capacity is set in [pipeline](pipeline.md) (`flow_capture.flow_stats_capacity`).
+Exported spans are sent to the targets configured in your export block ([OTLP export](export-otlp.md), [stdout export](export-stdout.md), etc.).
+Workers poll flow state on an interval defined in [pipeline](pipeline.md) (`flow_producer.flow_store_poll_interval`). The flow table is backed by the eBPF `FLOW_STATS` map and in-memory state;
+its capacity is set in [pipeline](pipeline.md) (`flow_capture.flow_stats_capacity`).
 
 ## Tuning
 
