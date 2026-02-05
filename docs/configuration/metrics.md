@@ -15,6 +15,8 @@ Mermin provides Prometheus metrics HTTP endpoints (default port `10250`). This p
 
 A full configuration example may be found in the [Default Configuration](./default/config.hcl).
 
+## Configuration Options
+
 ### `internal.metrics` block
 
 - `enabled` attribute
@@ -109,7 +111,7 @@ A full configuration example may be found in the [Default Configuration](./defau
   }
   ```
 
-### `histogram_buckets` block
+### `internal.metrics.histogram_buckets` block
 
 Optional subsection for histogram bucket overrides. Omit the block to use default buckets for all histograms. Each key is the full metric name.
 
