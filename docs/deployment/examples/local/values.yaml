@@ -1,11 +1,3 @@
 image:
   repository: mermin
   tag: latest
-
-resources:
-  limits:
-    cpu: 201m
-    memory: 220Mi
-  requests:
-    cpu: 201m
-    memory: 220Mi

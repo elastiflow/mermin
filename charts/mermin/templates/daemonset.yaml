@@ -96,7 +96,7 @@ spec:
                   containerName: {{ .Chart.Name }}
                   resource: requests.memory
             {{- end }}
-            {{- if (.Values.resources | dig "requests" "memory" false) }}
+            {{- if (.Values.resources | dig "limits" "memory" false) }}
             - name: POD_RESOURCES_LIMITS_MEM
               valueFrom:
                 resourceFieldRef:

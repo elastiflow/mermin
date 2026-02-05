@@ -21,7 +21,7 @@ define HELM_ARGS
 	--create-namespace \
 	--values ${HELM_VALUES}
 endef
-EXTRA_HELM_ARGS?=
+HELM_EXTRA_ARGS?=
 
 #######################
 # Deployment targets
@@ -31,20 +31,20 @@ helm-template:
 	rm -rf ${HELM_OUTPUT_DIR_PREFIX}
 	helm template ${APP} ${HELM_CHART} \
 		--output-dir ${HELM_OUTPUT_DIR_PREFIX} \
-		${HELM_ARGS} ${EXTRA_HELM_ARGS}
+		${HELM_ARGS} ${HELM_EXTRA_ARGS}
 
 .PHONY: helm-template-silent
 helm-template-silent:
 	@rm -rf ${HELM_OUTPUT_DIR_PREFIX} > /dev/null
 	@helm template ${APP} ${HELM_CHART} \
 		--output-dir ${HELM_OUTPUT_DIR_PREFIX} \
-		${HELM_ARGS} ${EXTRA_HELM_ARGS} > /dev/null
+		${HELM_ARGS} ${HELM_EXTRA_ARGS} > /dev/null
 
 .PHONY: helm-upgrade
 helm-upgrade:
 	helm upgrade \
 		--install --wait --timeout 10m \
-		${HELM_ARGS} ${EXTRA_HELM_ARGS} \
+		${HELM_ARGS} ${HELM_EXTRA_ARGS} \
 		${APP} ${HELM_CHART}
 
 .PHONY: k8s-diff

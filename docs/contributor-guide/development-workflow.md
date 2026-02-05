@@ -230,7 +230,7 @@ helm upgrade -i --wait --timeout 15m -n default --create-namespace \
 make helm-upgrade
 
 # With custom local config
-make helm-upgrade EXTRA_HELM_ARGS='--set-file config.content=local/config.hcl'
+make helm-upgrade HELM_EXTRA_ARGS='--set-file config.content=local/config.hcl'
 ```
 
 **Optionally install `metrics-server` to get metrics if it has not been installed yet**
