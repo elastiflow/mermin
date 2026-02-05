@@ -1,3 +1,16 @@
+## [v0.1.0] - 2026-02-05
+
+### Bug Fixes
+
+- **helm:** Remove default resources from Mermin Helm chart (#449)
+### Features
+
+- Release 0.1.0. update contributing guide to use the main branch (#456)
+
+[v0.0.1..v0.1.0](https://github.com/elastiflow/mermin/compare/v0.0.1...v0.1.0)
+
+
+
 ## [v0.1.0-beta.48] - 2026-02-03
 
 ### Bug Fixes
