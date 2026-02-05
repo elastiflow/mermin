@@ -33,9 +33,10 @@ export "traces" {
   - `"text_indent"`: Human-readable, indented text format (recommended)
   - `null`: Disable stdout export
 
-  **Examples:**
+  **Syntax Variations:** 
+  The exporter supports both a shorthand string and a structured object format to maintain compatibility across HCL and YAML.
 
-  - Enable stdout exporter
+  - HCL Shorthand (Recommended)
 
     ```hcl
     export "traces" {
@@ -43,11 +44,13 @@ export "traces" {
     }
     ```
 
-  - Disable stdout exporter
+  - Object Form (Required for YAML)
 
     ```hcl
     export "traces" {
-      # stdout export disabled
+      stdout = {
+        format = "text_indent"
+      }
     }
     ```
 
