@@ -4,8 +4,7 @@ Mermin is configured with HCL (HashiCorp Configuration Language) or YAML. This p
 
 ## File Format
 
-Mermin accepts HCL (recommended) or YAML. Supported file extensions: `.hcl`, `.yaml`, `.yml`. Use an `.hcl` file for clear syntax and good error messages.
-To use YAML, convert from HCL with the [fmtconvert](https://github.com/genelet/determined/tree/main/cmd/fmtconvert) tool (`go install github.com/genelet/determined/cmd/fmtconvert@latest`) and pass the result to `--config`:
+Mermin accepts HCL (recommended) or YAML. Supported file extensions: `.hcl`, `.yaml`, `.yml`. Use an `.hcl` file for clear syntax and good error messages. To use YAML, convert from HCL with the [fmtconvert](https://github.com/genelet/determined/tree/main/cmd/fmtconvert) tool (`go install github.com/genelet/determined/cmd/fmtconvert@latest`) and pass the result to `--config`:
 
 ```bash
 fmtconvert -from hcl -to yaml config.hcl > config.yaml
@@ -21,8 +20,7 @@ Configuration is merged in this order (later overrides earlier):
 3. Environment variables (global options only)
 4. Command-line flags (global options only)
 
-Only these global options can be set via environment variables or CLI: config path (`MERMIN_CONFIG_PATH`, `--config`), `log_level` (`MERMIN_LOG_LEVEL`, `--log-level`), and `auto_reload` (`MERMIN_CONFIG_AUTO_RELOAD`, `--auto-reload`).
-Options like `shutdown_timeout` and everything under `pipeline`, `api`, `export`, etc. are config-file only.
+Only these global options can be set via environment variables or CLI: config path (`MERMIN_CONFIG_PATH`, `--config`), `log_level` (`MERMIN_LOG_LEVEL`, `--log-level`), and `auto_reload` (`MERMIN_CONFIG_AUTO_RELOAD`, `--auto-reload`). Options like `shutdown_timeout` and everything under `pipeline`, `api`, `export`, etc. are config-file only.
 
 Example: with `log_level = "info"` in the file, `export MERMIN_LOG_LEVEL=debug` or `mermin --log-level=debug --config=config.hcl` yields `log_level` = `debug`.
 
@@ -30,16 +28,15 @@ Example: with `log_level = "info"` in the file, `export MERMIN_LOG_LEVEL=debug` 
 
 A config file is optional. Omit `--config` and `MERMIN_CONFIG_PATH` to use built-in defaults. To use a file:
 
-- **CLI:** `mermin --config /path/to/config.hcl`
-- **Env:** `MERMIN_CONFIG_PATH=/path/to/config.hcl`
-- **Kubernetes:** Create a ConfigMap from the file, mount it in the pod, and pass the path to `mermin --config`.
+* **CLI:** `mermin --config /path/to/config.hcl`
+* **Env:** `MERMIN_CONFIG_PATH=/path/to/config.hcl`
+* **Kubernetes:** Create a ConfigMap from the file, mount it in the pod, and pass the path to `mermin --config`.
 
 The file must exist and have a supported extension. Subcommands (e.g. `mermin diagnose bpf`) do not load the main config. Use `mermin --help` or `mermin diagnose --help` for usage.
 
 ## Auto-Reload
 
-When `auto_reload = true` (or `--auto-reload` / `MERMIN_CONFIG_AUTO_RELOAD=true`), Mermin watches the config file and reloads on change without restart.
-Flow capture may pause briefly during reload. Some changes (e.g. interface selection or RBAC) still require a full restart.
+When `auto_reload = true` (or `--auto-reload` / `MERMIN_CONFIG_AUTO_RELOAD=true`), Mermin watches the config file and reloads on change without restart. Flow capture may pause briefly during reload. Some changes (e.g. interface selection or RBAC) still require a full restart.
 
 ## Minimal configuration
 
@@ -60,7 +57,7 @@ Omit other blocks (discovery, pipeline, api, etc.) to use built-in defaults. Run
 
 ### Global options
 
-Top-level settings. See [Global Options](reference/README.md#configure-global-agent-options).
+Top-level settings. See [Global Options](reference/#configure-global-agent-options).
 
 ```hcl
 log_level       = "info"
@@ -88,7 +85,7 @@ pipeline {
 
 ### HTTP server and metrics
 
-Health HTTP server and internal Prometheus metrics. See Internal [Server](reference/internal-server.md) and [Metrics](metrics.md).
+Health HTTP server and internal Prometheus metrics. See Internal [Server](reference/internal-server.md) and [Metrics](reference/metrics.md).
 
 ```hcl
 internal "server" {
@@ -123,8 +120,7 @@ parser {
 
 ### Discovery
 
-Interfaces and Kubernetes discovery. See [Network Interface Discovery](reference/network-interface-discovery.md) and [Kubernetes Informers](reference/kubernetes-informer-discovery.md).
-If you omit `interfaces`, built-in defaults target CNI interfaces (e.g. `veth*`, `tunl*`, `vxlan*`, `cali*`, `cilium_*`). The example below overrides with physical interfaces:
+Interfaces and Kubernetes discovery. See [Network Interface Discovery](reference/network-interface-discovery.md) and [Kubernetes Informers](reference/kubernetes-informer-discovery.md). If you omit `interfaces`, built-in defaults target CNI interfaces (e.g. `veth*`, `tunl*`, `vxlan*`, `cali*`, `cilium_*`). The example below overrides with physical interfaces:
 
 ```hcl
 discovery "instrument" {
@@ -145,22 +141,22 @@ discovery "informer" "k8s" {
 
 ### Kubernetes relations
 
-Owner and selector relations for flow enrichment. See [Owner Relations](owner-relations.md) and [Selector Relations](selector-relations.md).
+Owner and selector relations for flow enrichment. See [Owner Relations](reference/owner-relations.md) and [Selector Relations](reference/selector-relations.md).
 
 ### Flow attributes
 
-Which Kubernetes metadata to extract and how to associate it with flows. See [Flow Attributes](attributes.md). If you omit the `attributes` block, default Kubernetes attribution is applied. An empty `attributes {}` block disables attribution.
+Which Kubernetes metadata to extract and how to associate it with flows. See [Flow Attributes](reference/attributes.md). If you omit the `attributes` block, default Kubernetes attribution is applied. An empty `attributes {}` block disables attribution.
 
 ### Filtering
 
-Filter flows by address, port, transport, type, interface, and other dimensions. See [Flow Filtering](filtering.md). Each filter block has a label (e.g. `"source"`); inside it you can set `match` and `not_match` for:
+Filter flows by address, port, transport, type, interface, and other dimensions. See [Flow Filtering](reference/filtering.md). Each filter block has a label (e.g. `"source"`); inside it you can set `match` and `not_match` for:
 
-- `address`, `port`, `transport`, `type`
-- `interface_name`, `interface_index`, `interface_mac`
-- `connection_state`
-- `ip_dscp_name`, `ip_ecn_name`, `ip_ttl`, `ip_flow_label`
-- `icmp_type_name`, `icmp_code_name`
-- `tcp_flags_tags`
+* `address`, `port`, `transport`, `type`
+* `interface_name`, `interface_index`, `interface_mac`
+* `connection_state`
+* `ip_dscp_name`, `ip_ecn_name`, `ip_ttl`, `ip_flow_label`
+* `icmp_type_name`, `icmp_code_name`
+* `tcp_flags_tags`
 
 Example:
 
@@ -174,7 +170,7 @@ filter "source" {
 
 ### Span options
 
-Flow span generation, timeouts, Community ID, trace correlation, and hostname resolution. See [Flow Span Options](span.md). All options are config-file only.
+Flow span generation, timeouts, Community ID, trace correlation, and hostname resolution. See [Flow Span Options](reference/span.md). All options are config-file only.
 
 ```hcl
 span {
@@ -194,7 +190,7 @@ span {
 
 ### Export
 
-Trace export to OTLP and/or stdout. See [OTLP Exporter](export-otlp.md) and [Stdout Exporter](export-stdout.md).
+Trace export to OTLP and/or stdout. See [OTLP Exporter](reference/export-otlp.md) and [Stdout Exporter](reference/export-stdout.md).
 
 ```hcl
 export "traces" {
@@ -225,7 +221,7 @@ export "traces" {
 
 ### Internal tracing
 
-Mermin’s own telemetry. See [Internal Tracing](internal-tracing.md).
+Mermin’s own telemetry. See [Internal Tracing](reference/internal-tracing.md).
 
 ```hcl
 internal "traces" {
@@ -237,21 +233,16 @@ internal "traces" {
 
 ## Validation
 
-Configuration is validated on startup. Invalid config (e.g. unknown field, invalid value, missing file, or unsupported extension) causes Mermin to exit with a non-zero exit code and print the error to stderr.
-Fix the file and restart (or rely on auto-reload after fixing). When running in Kubernetes, Mermin may log a memory warning if estimated pipeline usage exceeds 80% of the container limit; see [Pipeline](pipeline.md) and [Troubleshooting](../troubleshooting/troubleshooting.md).
+Configuration is validated on startup. Invalid config (e.g. unknown field, invalid value, missing file, or unsupported extension) causes Mermin to exit with a non-zero exit code and print the error to stderr. Fix the file and restart (or rely on auto-reload after fixing). When running in Kubernetes, Mermin may log a memory warning if estimated pipeline usage exceeds 80% of the container limit; see [Pipeline](reference/pipeline.md) and [Troubleshooting](../troubleshooting/troubleshooting.md).
 
 ## HCL functions
 
 HCL config files (not YAML) can call the `env` function to read environment variables. Useful for secrets or environment-specific values without hardcoding. The function is evaluated when the config is loaded and again on reload.
 
-- `env("VAR_NAME")`
-  Returns the value of the environment variable, or an empty string if unset. Mermin logs a warning when the variable is not set.
+* `env("VAR_NAME")` Returns the value of the environment variable, or an empty string if unset. Mermin logs a warning when the variable is not set.
+* `env("VAR_NAME", "default")` Returns the variable value if set, otherwise the second argument. Mermin logs a warning when the variable is not set and the default is used.
 
-- `env("VAR_NAME", "default")`
-  Returns the variable value if set, otherwise the second argument. Mermin logs a warning when the variable is not set and the default is used.
-
-You can use `env` anywhere a string is accepted (e.g. `log_level`, `api.listen_address`, `export "traces" { otlp = { endpoint = ... } }`, `auth.basic.pass`).
-You can use it in lists (e.g. `discovery "instrument" { interfaces = [env("IFACE")] }`) and in string interpolation (e.g. `"prefix-${env("VAR")}-suffix"`). Examples that match the behavior tested in the codebase:
+You can use `env` anywhere a string is accepted (e.g. `log_level`, `api.listen_address`, `export "traces" { otlp = { endpoint = ... } }`, `auth.basic.pass`). You can use it in lists (e.g. `discovery "instrument" { interfaces = [env("IFACE")] }`) and in string interpolation (e.g. `"prefix-${env("VAR")}-suffix"`). Examples that match the behavior tested in the codebase:
 
 ```hcl
 # Top-level with default
@@ -281,26 +272,26 @@ YAML configs do not support `env`; use HCL if you need it, or inject values befo
 
 ## Examples and reference
 
-- [Configuration Examples](examples.md): full example configs (production, development, CNI, high-throughput, security).
-- Section reference:
+* [Configuration Examples](examples.md): full example configs (production, development, CNI, high-throughput, security).
+* Section reference:
 
 | Section                                                                     | Description                                          |
-|-----------------------------------------------------------------------------|------------------------------------------------------|
-| [Global Options](reference/README.md#configure-global-agent-options)        | Configure Global Agent Options                       |
+| --------------------------------------------------------------------------- | ---------------------------------------------------- |
+| [Global Options](reference/#configure-global-agent-options)                 | Configure Global Agent Options                       |
 | [Internal Server](reference/internal-server.md)                             | Configure Internal Server                            |
-| [Internal Prometheus Metrics](metrics.md)                                   | Configure Internal Prometheus Metrics                |
+| [Internal Prometheus Metrics](reference/metrics.md)                         | Configure Internal Prometheus Metrics                |
 | [Network Packet Parser](reference/network-packet-parser.md)                 | Configure Parsing of Network Packets                 |
 | [Network Interface Discovery](reference/network-interface-discovery.md)     | Configure Discovery of Network Interfaces            |
 | [Kubernetes Informer Discovery](reference/kubernetes-informer-discovery.md) | Configure Discovery of Kubernetes Informer           |
-| [Kubernetes Owner Relations](owner-relations.md)                            | Configure Owner Relations of Kubernetes Resources    |
-| [Kubernetes Selector Relations](selector-relations.md)                      | Configure Selector Relations of Kubernetes Resources |
-| [Flow Span Kubernetes Attribution](attributes.md)                           | Configure Kubernetes Attribution of Flow Spans       |
-| [Flow Span Filters](filtering.md)                                           | Configure Filtering of Flow Spans                    |
-| [Flow Span Producer](span.md)                                               | Configure Producing of Flow Spans                    |
-| [OpenTelemetry OTLP Exporter](export-otlp.md)                               | Configure OpenTelemetry OTLP Exporter                |
-| [OpenTelemetry Console Exporter](export-stdout.md)                          | Configure OpenTelemetry Console Exporter             |
-| [Internal Tracing](internal-tracing.md)                                     | Configure Internal Tracing Exporter                  |
-| [Flow Processing Pipeline](pipeline.md)                                     | Configure Flow Processing Pipeline                   |
+| [Kubernetes Owner Relations](reference/owner-relations.md)                  | Configure Owner Relations of Kubernetes Resources    |
+| [Kubernetes Selector Relations](reference/selector-relations.md)            | Configure Selector Relations of Kubernetes Resources |
+| [Flow Span Kubernetes Attribution](reference/attributes.md)                 | Configure Kubernetes Attribution of Flow Spans       |
+| [Flow Span Filters](reference/filtering.md)                                 | Configure Filtering of Flow Spans                    |
+| [Flow Span Producer](reference/span.md)                                     | Configure Producing of Flow Spans                    |
+| [OpenTelemetry OTLP Exporter](reference/export-otlp.md)                     | Configure OpenTelemetry OTLP Exporter                |
+| [OpenTelemetry Console Exporter](reference/export-stdout.md)                | Configure OpenTelemetry Console Exporter             |
+| [Internal Tracing](reference/internal-tracing.md)                           | Configure Internal Tracing Exporter                  |
+| [Flow Processing Pipeline](reference/pipeline.md)                           | Configure Flow Processing Pipeline                   |
 
 ## Best practices
 
@@ -314,7 +305,7 @@ YAML configs do not support `env`; use HCL if you need it, or inject values befo
 
 ## Next steps
 
-- [Global Options](reference/README.md#configure-global-agent-options): top-level and CLI
-- [Network Interface Discovery](reference/network-interface-discovery.md): which interfaces to monitor
-- [OTLP Exporter](export-otlp.md): send flows to your backend
-- [Configuration Examples](examples.md): full sample configs
+* [Global Options](reference/#configure-global-agent-options): top-level and CLI
+* [Network Interface Discovery](reference/network-interface-discovery.md): which interfaces to monitor
+* [OTLP Exporter](reference/export-otlp.md): send flows to your backend
+* [Configuration Examples](examples.md): full sample configs

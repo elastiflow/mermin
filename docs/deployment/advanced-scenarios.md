@@ -23,10 +23,10 @@ discovery "instrument" {
 
 **Considerations:**
 
-- Cilium's eBPF datapath is separate from Mermin's monitoring
-- Monitor physical interfaces for inter-node traffic
-- Monitor `cilium_*` for intra-node pod-to-pod traffic
-- May see duplicate flows for traffic that crosses nodes
+* Cilium's eBPF datapath is separate from Mermin's monitoring
+* Monitor physical interfaces for inter-node traffic
+* Monitor `cilium_*` for intra-node pod-to-pod traffic
+* May see duplicate flows for traffic that crosses nodes
 
 **Cilium-specific configuration:**
 
@@ -63,10 +63,10 @@ discovery "instrument" {
 
 **Considerations:**
 
-- Calico interfaces are `califxxxxxxxx` format
-- Monitor physical interfaces for most traffic
-- Add `cali*` for intra-node pod-to-pod visibility
-- Be aware of potential flow duplication
+* Calico interfaces are `califxxxxxxxx` format
+* Monitor physical interfaces for most traffic
+* Add `cali*` for intra-node pod-to-pod visibility
+* Be aware of potential flow duplication
 
 ### Flannel
 
@@ -175,7 +175,7 @@ export "traces" {
 
 Regional collectors aggregate to central collector:
 
-```text
+```
 Cluster 1 (us-west-1) ──┐
                         ├──> Regional Collector (us-west) ──┐
 Cluster 2 (us-west-2) ──┘                                   │
@@ -230,10 +230,10 @@ export "traces" {
 
 Mermin agents are resilient by design:
 
-- **DaemonSet**: Automatically restarts failed pods
-- **Node-local**: Failure of one agent doesn't affect others
-- **Stateless**: No data loss on restart (flows are regenerated)
-- **Queue-based**: Buffers flows during temporary collector outages
+* **DaemonSet**: Automatically restarts failed pods
+* **Node-local**: Failure of one agent doesn't affect others
+* **Stateless**: No data loss on restart (flows are regenerated)
+* **Queue-based**: Buffers flows during temporary collector outages
 
 Configure aggressive restart policy:
 
@@ -410,14 +410,14 @@ discovery "instrument" {
 
 **Advantages:**
 
-- No flow duplication
-- Lower resource usage
-- Clearer network topology
+* No flow duplication
+* Lower resource usage
+* Clearer network topology
 
 **Limitations:**
 
-- Misses pod-to-pod traffic on same node
-- Misses loopback traffic
+* Misses pod-to-pod traffic on same node
+* Misses loopback traffic
 
 ### Complete Visibility (All Traffic)
 
@@ -432,14 +432,14 @@ discovery "instrument" {
 
 **Advantages:**
 
-- Complete network visibility
-- Captures all pod-to-pod traffic
+* Complete network visibility
+* Captures all pod-to-pod traffic
 
 **Limitations:**
 
-- Flow duplication for inter-node traffic
-- Higher resource usage
-- Requires deduplication in backend
+* Flow duplication for inter-node traffic
+* Higher resource usage
+* Requires deduplication in backend
 
 ### Selective Monitoring
 
@@ -480,11 +480,11 @@ See [Internal Metrics](../internal-monitoring/internal-metrics.md) for complete 
 
 Key metrics to monitor:
 
-- `mermin_flow_spans_created_total` - Total flow spans created
-- `mermin_packets_total` - Total packets processed
-- `mermin_flow_events_total{status="dropped_backpressure"}` - Events dropped due to overload
-- `mermin_export_flow_spans_total{exporter_type="otlp",status="error"}` - OTLP export failures
-- `mermin_flow_spans_active_total` - Current number of active flows
+* `mermin_flow_spans_created_total` - Total flow spans created
+* `mermin_packets_total` - Total packets processed
+* `mermin_flow_events_total{status="dropped_backpressure"}` - Events dropped due to overload
+* `mermin_export_flow_spans_total{exporter_type="otlp",status="error"}` - OTLP export failures
+* `mermin_flow_spans_active_total` - Current number of active flows
 
 ### Tuning Guidelines
 
@@ -493,21 +493,18 @@ Key metrics to monitor:
 The appropriate fix depends on where drops occur in the pipeline:
 
 1. **Worker queue drops** (eBPF events dropped before reaching workers):
-   - Increase `pipeline.flow_producer.worker_queue_capacity` (per-worker buffer)
-   - Increase `pipeline.flow_producer.workers` (more parallel processing)
-   - Add more CPU resources
-
+   * Increase `pipeline.flow_producer.worker_queue_capacity` (per-worker buffer)
+   * Increase `pipeline.flow_producer.workers` (more parallel processing)
+   * Add more CPU resources
 2. **Flow span channel drops** (drops between workers and K8s decorator):
-   - Increase `pipeline.flow_producer.flow_span_queue_capacity`
-   - Increase `pipeline.k8s_decorator.threads` (faster decoration)
-
+   * Increase `pipeline.flow_producer.flow_span_queue_capacity`
+   * Increase `pipeline.k8s_decorator.threads` (faster decoration)
 3. **Decorated span channel drops** (drops between decorator and exporter):
-   - Increase `pipeline.k8s_decorator.decorated_span_queue_capacity`
-   - Optimize exporter configuration (larger batches, more concurrent exports)
-
+   * Increase `pipeline.k8s_decorator.decorated_span_queue_capacity`
+   * Optimize exporter configuration (larger batches, more concurrent exports)
 4. **General recommendations:**
-   - Reduce monitored interfaces if drops persist
-   - Check metrics to identify the specific bottleneck stage
+   * Reduce monitored interfaces if drops persist
+   * Check metrics to identify the specific bottleneck stage
 
 **If you see high memory usage:**
 
@@ -635,7 +632,7 @@ export "traces" {
 
 ## Next Steps
 
-- [**Configuration Reference**](../configuration/overview.md): Deep dive into all configuration options
-- [**Filtering**](../configuration/filtering.md): Configure flow filters for security and performance
-- [**Observability Backends**](../observability/backend-integrations.md): Send Flow Traces to your observability backend
-- [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose and resolve performance issues
+* [**Configuration Reference**](../configuration/overview.md): Deep dive into all configuration options
+* [**Filtering**](../configuration/reference/filtering.md): Configure flow filters for security and performance
+* [**Observability Backends**](../getting-started/backend-integrations.md): Send Flow Traces to your observability backend
+* [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose and resolve performance issues

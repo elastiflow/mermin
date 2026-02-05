@@ -1,4 +1,4 @@
-# Troubleshoot Deployment Issues
+# Deployment Issues
 
 This guide will help you diagnose and resolve pod startup failures, eBPF loading errors, permission issues, and network interface configuration problems.
 
@@ -85,7 +85,7 @@ docker pull ghcr.io/elastiflow/mermin:${IMAGE_TAG}
 
 eBPF requires specific kernel features and permissions. If Mermin can't load its eBPF programs, you'll see errors like:
 
-```text
+```
 ERROR Failed to load eBPF program: Operation not permitted
 ```
 
@@ -135,18 +135,18 @@ mermin diagnose bpf --pattern "veth*" --skip "veth0"
 
 **What the test validates:**
 
-- Required Linux capabilities (BPF, NET_ADMIN, etc.)
-- eBPF program loading and verification
-- Attach/detach operations on network interfaces
-- BPF filesystem writeability (for TCX link pinning)
-- Kernel version and TCX vs netlink mode detection
+* Required Linux capabilities (BPF, NET\_ADMIN, etc.)
+* eBPF program loading and verification
+* Attach/detach operations on network interfaces
+* BPF filesystem writeability (for TCX link pinning)
+* Kernel version and TCX vs netlink mode detection
 
 **Interpreting results:**
 
-- **All tests pass**: Your environment is ready for Mermin
-- **Attach failures**: Check capabilities, kernel version, or interface availability
-- **BPF FS not writable**: Mount `/sys/fs/bpf` or configure volume mounts (see [eBPF File System Not Mounted](#4-ebpf-file-system-not-mounted))
-- **Capability errors**: Verify security context configuration (see [Missing Linux Capabilities](#1-missing-linux-capabilities))
+* **All tests pass**: Your environment is ready for Mermin
+* **Attach failures**: Check capabilities, kernel version, or interface availability
+* **BPF FS not writable**: Mount `/sys/fs/bpf` or configure volume mounts (see [eBPF File System Not Mounted](deployment-issues.md#4-ebpf-file-system-not-mounted))
+* **Capability errors**: Verify security context configuration (see [Missing Linux Capabilities](deployment-issues.md#1-missing-linux-capabilities))
 
 The subcommand provides structured logging with clear success/failure indicators, making it easy to identify specific issues.
 
@@ -200,7 +200,7 @@ securityContext:
   privileged: true    # Grants all required capabilities
 ```
 
-**If you can't use privileged mode** (due to security policies), you can grant specific capabilities instead. Refer to the [security considerations](../getting-started/security-considerations.md#privileges-required) documentation for more information.
+**If you can't use privileged mode** (due to security policies), you can grant specific capabilities instead. Refer to the [security considerations](../concepts/security-considerations.md#privileges-required) documentation for more information.
 
 ```yaml
 # In charts/mermin/values.yaml (capability-based approach)
@@ -263,7 +263,7 @@ mount -t bpf bpf /sys/fs/bpf
 
 To make this permanent across reboots, add it to `/etc/fstab`:
 
-```text
+```
 bpf /sys/fs/bpf bpf defaults 0 0
 ```
 
@@ -324,7 +324,7 @@ For more detailed guidance on verifier errors, see [Common eBPF Errors](common-e
 
 If Mermin can't access Kubernetes resources, you'll see RBAC permission errors like:
 
-```text
+```
 ERROR Failed to list pods: pods is forbidden: User "system:serviceaccount:mermin:mermin" cannot list resource "pods"
 ```
 
@@ -348,22 +348,21 @@ Not seeing the traffic you expect? This is often because Mermin isn't monitoring
 
 Each CNI plugin creates different interface types. Here's what to use:
 
-- **Calico**: `interfaces = ["veth*", "cali*", "tunl*"]`
-- **Cilium**: `interfaces = ["veth*", "cilium_*", "lxc*"]`
-- **Flannel**: `interfaces = ["veth*", "flannel*"]`
-- **GKE Dataplane V2**: `interfaces = ["gke*", "cilium_*", "lxc*"]`
+* **Calico**: `interfaces = ["veth*", "cali*", "tunl*"]`
+* **Cilium**: `interfaces = ["veth*", "cilium_*", "lxc*"]`
+* **Flannel**: `interfaces = ["veth*", "flannel*"]`
+* **GKE Dataplane V2**: `interfaces = ["gke*", "cilium_*", "lxc*"]`
 
 Different interface types show different traffic - veth interfaces capture pod-to-pod traffic, while tunnel interfaces capture encapsulated traffic.
 
 **Want to learn more?** Check out these guides:
 
-- [Interface Visibility and Traffic Decapsulation](interface-visibility-and-traffic-decapsulation.md) - Understand what traffic each interface type captures
-- [Advanced Scenarios: Custom CNI Configurations](../deployment/advanced-scenarios.md#custom-cni-configurations) - Complex CNI setups
+* [Interface Visibility and Traffic Decapsulation](interface-visibility-and-traffic-decapsulation.md) - Understand what traffic each interface type captures
+* [Advanced Scenarios: Custom CNI Configurations](../deployment/advanced-scenarios.md#custom-cni-configurations) - Complex CNI setups
 
 ## Understanding TC Priority
 
-TC (Traffic Control) priority determines the order in which eBPF programs execute in the networking stack. On older kernels (< 6.6), this is managed through netlink-based TC with numeric priorities.
-On newer kernels (>= 6.6), TCX mode uses explicit ordering.
+TC (Traffic Control) priority determines the order in which eBPF programs execute in the networking stack. On older kernels (< 6.6), this is managed through netlink-based TC with numeric priorities. On newer kernels (>= 6.6), TCX mode uses explicit ordering.
 
 ### Check What Priority Mermin is Using
 
@@ -377,7 +376,7 @@ kubectl exec -it ${MERMIN_POD} -- tc filter show dev gke0 ingress
 
 You should see output like this:
 
-```text
+```
 filter protocol all pref 1 bpf chain 0
 filter protocol all pref 1 bpf chain 0 handle 0x1 mermin_ingress direct-action not_in_hw id 123 tag abc123def456
 ```
@@ -386,8 +385,8 @@ filter protocol all pref 1 bpf chain 0 handle 0x1 mermin_ingress direct-action n
 
 Think of priority as a queue - lower numbers cut to the front of the line:
 
-- **Lower number = Higher priority = Runs earlier** in the TC chain
-- **Higher number = Lower priority = Runs later** in the TC chain
+* **Lower number = Higher priority = Runs earlier** in the TC chain
+* **Higher number = Lower priority = Runs later** in the TC chain
 
 **Mermin's default: Priority 1** - Mermin runs first to capture an unfiltered, unprocessed view of network packets.
 
@@ -405,14 +404,13 @@ Since Mermin uses `TC_ACT_UNSPEC` (pass-through), it observes packets without mo
 2. **Alternative**: Move Mermin to a higher priority if you prefer CNI to run first (loses unfiltered view)
 
 {% hint style="warning" %}
-**Test any priority changes thoroughly!** Adjusting either Mermin's or your CNI's priority can affect network behavior differently depending on your CNI plugin.
-Validate in a non-production environment that flows are captured correctly and network connectivity works as expected.
+**Test any priority changes thoroughly!** Adjusting either Mermin's or your CNI's priority can affect network behavior differently depending on your CNI plugin. Validate in a non-production environment that flows are captured correctly and network connectivity works as expected.
 {% endhint %}
 
 **Why priority 1 matters for Mermin**:
 
-- Prevents flow gaps from orphaned programs after restarts
-- Provides the most complete and accurate network observability
+* Prevents flow gaps from orphaned programs after restarts
+* Provides the most complete and accurate network observability
 
 ### Troubleshooting Priority Conflicts
 
@@ -452,8 +450,7 @@ discovery "instrument" {
 ```
 
 {% hint style="warning" %}
-**Important**: Changing from the default priority/order settings can cause issues with some CNI plugins, including missing flows or network connectivity problems.
-Test thoroughly in a non-production environment first and verify that flows are being captured correctly for your specific CNI.
+**Important**: Changing from the default priority/order settings can cause issues with some CNI plugins, including missing flows or network connectivity problems. Test thoroughly in a non-production environment first and verify that flows are being captured correctly for your specific CNI.
 {% endhint %}
 
 Not sure which kernel you're running?
@@ -466,16 +463,16 @@ If it's >= 6.6.0, you're using TCX mode (you'll also see this in the logs). In T
 
 **Quick reference:**
 
-- **TCX mode** (kernel >= 6.6): Programs are ordered explicitly using `tcx_order` (first/last)
-- **Netlink mode** (kernel < 6.6): Programs are ordered by numeric priority (lower = earlier)
-- Priority only affects execution order, not performance
-- Running first helps prevent flow gaps after restarts
+* **TCX mode** (kernel >= 6.6): Programs are ordered explicitly using `tcx_order` (first/last)
+* **Netlink mode** (kernel < 6.6): Programs are ordered by numeric priority (lower = earlier)
+* Priority only affects execution order, not performance
+* Running first helps prevent flow gaps after restarts
 
 ## Configuration Syntax Errors
 
 HCL syntax errors can be tricky to debug. If Mermin won't start and you see something like:
 
-```text
+```
 ERROR Failed to parse configuration: unexpected token at line 10
 ```
 
@@ -491,14 +488,14 @@ terraform fmt -check config.hcl
 
 ### Common Mistakes to Watch For
 
-- **Missing closing braces** - Every `{` needs a matching `}`
-- **Mismatched quotes** - Use `"quotes"` consistently
-- **Invalid key names** - Use underscores (`tcp_priority`), not hyphens (`tcp-priority`)
+* **Missing closing braces** - Every `{` needs a matching `}`
+* **Mismatched quotes** - Use `"quotes"` consistently
+* **Invalid key names** - Use underscores (`tcp_priority`), not hyphens (`tcp-priority`)
 
 ## Related Documentation
 
 Want to dive deeper? These guides provide additional context:
 
-- [**Common eBPF Errors**](common-ebpf-errors.md) - Detailed eBPF verifier error diagnosis and solutions
-- [**Interface Visibility**](interface-visibility-and-traffic-decapsulation.md) - Understanding network traffic visibility at different layers
-- [**Configuration Reference**](../configuration/overview.md) - Complete configuration options
+* [**Common eBPF Errors**](common-ebpf-errors.md) - Detailed eBPF verifier error diagnosis and solutions
+* [**Interface Visibility**](interface-visibility-and-traffic-decapsulation.md) - Understanding network traffic visibility at different layers
+* [**Configuration Reference**](../configuration/overview.md) - Complete configuration options

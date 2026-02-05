@@ -1,101 +1,95 @@
-# Configure Kubernetes Informer Discovery
+# Configure Discovery of Kubernetes Informer
 
 **Block:** `discovery.informer.k8s`
 
-This page documents how to configure Mermin's Kubernetes informers, which watch and cache Kubernetes resources for flow
-metadata enrichment.
+This page documents how to configure Mermin's Kubernetes informers, which watch and cache Kubernetes resources for flow metadata enrichment.
 
-Mermin uses Kubernetes informers to maintain an in-memory cache of cluster resources. This enables enriching network
-flows with Kubernetes metadata like pod names, labels, services, and owner references without querying the API server
-for every flow.
+Mermin uses Kubernetes informers to maintain an in-memory cache of cluster resources. This enables enriching network flows with Kubernetes metadata like pod names, labels, services, and owner references without querying the API server for every flow.
 
 ## Configuration
 
-A full configuration example can be found in the [Default Configuration](../default/config.hcl).
+A full configuration example can be found in the [Default Configuration](https://github.com/elastiflow/mermin/blob/beta/docs/configuration/default/config.hcl).
 
 ### `discovery.informer.k8s` block
 
-- `kubeconfig_path` attribute
+*   `kubeconfig_path` attribute
 
-  Path to kubeconfig file for API server connection. When empty, uses in-cluster config. Non-default value may be used for:
+    Path to kubeconfig file for API server connection. When empty, uses in-cluster config. Non-default value may be used for:
 
-  - Testing locally outside cluster
-  - Using specific service account
-  - Multi-cluster scenarios
+    * Testing locally outside cluster
+    * Using specific service account
+    * Multi-cluster scenarios
 
-  **Type:** String
+    **Type:** String
 
-  **Default:** `""` (uses in-cluster config)
+    **Default:** `""` (uses in-cluster config)
 
-  **Example:** Use specific kubeconfig
-
-  ```hcl
-  discovery "informer" "k8s" {
-    kubeconfig_path = "/etc/mermin/kubeconfig"
-  }
-  ```
-
-- `informers_sync_timeout` attribute
-
-  Timeout for initial informer synchronization. Why it matters:
-
-  - Maximum time to wait for informers to complete initial sync
-  - Mermin won't be ready until sync completes
-  - Large clusters may need longer timeout
-
-  **Type:** Duration
-
-  **Default:** `"30s"`
-
-  **Example:** For large clusters (10,000+ pods)
-
-  ```hcl
-  discovery "informer" "k8s" {
-    informers_sync_timeout = "120s"
-  }
-  ```
-
-- `selectors` attribute
-
-  Include/Exclude resources from the Kubernetes Informer using the resource labels and [label selectors](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/).
-
-  **Type:** List of [selectors](#selector)
-
-  **Default:**
-
-  ```hcl
-  [
-    { kind = "Service" }, { kind = "Endpoint" }, { kind = "EndpointSlice" }, { kind = "Gateway" }, { kind = "Ingress" },
-    { kind = "Pod" }, { kind = "ReplicaSet" }, { kind = "Deployment" }, { kind = "Daemonset" }, { kind = "StatefulSet" },
-    { kind = "Job" }, { kind = "CronJob" }, { kind = "NetworkPolicy" },
-  ]
-  ```
-
-  **Examples:**
-
-  - Exclude Gateways in the `loggers` namespace
+    **Example:** Use specific kubeconfig
 
     ```hcl
-    namespaces = ["loggers"]
-    kind       = "Gateway"
-    include    = false
-    ```
-
-  - Only include pods with label `operated-prometheus = "true"` AND label `env` in `["dev", "stage"]`
-
-    ```hcl
-    kind = "Pod"
-
-    match_labels = {
-      operated-prometheus = "true"
+    discovery "informer" "k8s" {
+      kubeconfig_path = "/etc/mermin/kubeconfig"
     }
-
-    match_expressions = [{
-      key      = "env"
-      operator = "In"
-      values   = ["dev", "stage"]
-    }]
     ```
+*   `informers_sync_timeout` attribute
+
+    Timeout for initial informer synchronization. Why it matters:
+
+    * Maximum time to wait for informers to complete initial sync
+    * Mermin won't be ready until sync completes
+    * Large clusters may need longer timeout
+
+    **Type:** Duration
+
+    **Default:** `"30s"`
+
+    **Example:** For large clusters (10,000+ pods)
+
+    ```hcl
+    discovery "informer" "k8s" {
+      informers_sync_timeout = "120s"
+    }
+    ```
+*   `selectors` attribute
+
+    Include/Exclude resources from the Kubernetes Informer using the resource labels and [label selectors](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/).
+
+    **Type:** List of [selectors](kubernetes-informer-discovery.md#selector)
+
+    **Default:**
+
+    ```hcl
+    [
+      { kind = "Service" }, { kind = "Endpoint" }, { kind = "EndpointSlice" }, { kind = "Gateway" }, { kind = "Ingress" },
+      { kind = "Pod" }, { kind = "ReplicaSet" }, { kind = "Deployment" }, { kind = "Daemonset" }, { kind = "StatefulSet" },
+      { kind = "Job" }, { kind = "CronJob" }, { kind = "NetworkPolicy" },
+    ]
+    ```
+
+    **Examples:**
+
+    *   Exclude Gateways in the `loggers` namespace
+
+        ```hcl
+        namespaces = ["loggers"]
+        kind       = "Gateway"
+        include    = false
+        ```
+    *   Only include pods with label `operated-prometheus = "true"` AND label `env` in `["dev", "stage"]`
+
+        ```hcl
+        kind = "Pod"
+
+        match_labels = {
+          operated-prometheus = "true"
+        }
+
+        match_expressions = [{
+          key      = "env"
+          operator = "In"
+          values   = ["dev", "stage"]
+        }]
+        ```
 
 ## Object Types
 
@@ -103,101 +97,94 @@ A full configuration example can be found in the [Default Configuration](../defa
 
 Selector is used to match a Kubernetes resource using labels and expressions.
 
-- `kind` attribute
+*   `kind` attribute
 
-  Defines a Kubernetes Kind to apply the selector to, such as `Pod`, `Service`, `Job`, etc. Case insensitive, `"Pod"`, `"pod"`, and `"POD"` are equivalent.
+    Defines a Kubernetes Kind to apply the selector to, such as `Pod`, `Service`, `Job`, etc. Case insensitive, `"Pod"`, `"pod"`, and `"POD"` are equivalent.
 
-  **Type:** String
+    **Type:** String
 
-  **Default:** `""`
+    **Default:** `""`
+*   `include` attribute
 
-- `include` attribute
+    Defines an action to perform, e.g. include or exclude matching resources.
 
-  Defines an action to perform, e.g. include or exclude matching resources.
+    **Type:** Boolean
 
-  **Type:** Boolean
+    **Default:** `true`
+*   `namespaces` attribute
 
-  **Default:** `true`
+    Defines a filter based on the Kubernetes namespace name.
 
-- `namespaces` attribute
+    **Type:** List of Strings
 
-  Defines a filter based on the Kubernetes namespace name.
+    **Default:** `[]` (empty list, match all namespaces)
+*   `match_labels` attribute
 
-  **Type:** List of Strings
+    Kubernetes label selector ([ref](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#equality-based-requirement)). Each key represents a label, each value represents a label value. If label and label value is equal to the ones in the Kubernetes resource, the resource is included.
 
-  **Default:** `[]` (empty list, match all namespaces)
+    **Type:** Map of Strings
 
-- `match_labels` attribute
+    **Default:** `{}` (empty map, do not apply label matching, e.g. match all)
 
-  Kubernetes label selector ([ref](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#equality-based-requirement)).
-  Each key represents a label, each value represents a label value. If label and label value is equal to the ones in the Kubernetes resource, the resource is included.
+    **Example:** Include resources that belong to production environment (label `env: prod` is present in the resource)
 
-  **Type:** Map of Strings
+    ```hcl
+    match_labels = {
+      operated-prometheus = "true"
+    }
+    ```
+*   `match_expressions` attribute
 
-  **Default:** `{}` (empty map, do not apply label matching, e.g. match all)
+    [Kubernetes set-based label selector](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#set-based-requirement).
 
-  **Example:** Include resources that belong to production environment (label `env: prod` is present in the resource)
+    **Type:** List of [match expressions](kubernetes-informer-discovery.md#match-expression)
 
-  ```hcl
-  match_labels = {
-    operated-prometheus = "true"
-  }
-  ```
+    **Default:** `[]` (empty list, do not apply label matching, e.g. match all)
 
-- `match_expressions` attribute
+    **Example:** Include resources that belong to development and production environment (label `env: prod` or `env: dev` is present in the resource)
 
-  [Kubernetes set-based label selector](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#set-based-requirement).
-
-  **Type:** List of [match expressions](#match-expression)
-
-  **Default:** `[]` (empty list, do not apply label matching, e.g. match all)
-
-  **Example:** Include resources that belong to development and production environment (label `env: prod` or `env: dev` is present in the resource)
-
-  ```hcl
-  match_expressions = [{
-    key      = "env"
-    operator = "In"
-    values   = ["dev", "stage"]
-  }]
-  ```
+    ```hcl
+    match_expressions = [{
+      key      = "env"
+      operator = "In"
+      values   = ["dev", "stage"]
+    }]
+    ```
 
 ### Match Expression
 
 [Kubernetes set-based label selector](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#set-based-requirement).
 
-- `key` attribute
+*   `key` attribute
 
-  Label key to match against.
+    Label key to match against.
 
-  **Type:** String
+    **Type:** String
 
-  **Default:** `""`
+    **Default:** `""`
+*   `operator` attribute
 
-- `operator` attribute
+    Operator to apply, case insensitive.
 
-  Operator to apply, case insensitive.
+    **Type:** String
 
-  **Type:** String
+    **Default:** `"In"`
 
-  **Default:** `"In"`
+    **Supported Values:** `In`, `NotIn`, `Exists`, `DoesNotExist`
+*   `values` attribute
 
-  **Supported Values:** `In`, `NotIn`, `Exists`, `DoesNotExist`
+    List of label values to apply the `operator` to.
 
-- `values` attribute
+    **Type:** List of Strings
 
-  List of label values to apply the `operator` to.
-
-  **Type:** List of Strings
-
-  **Default:** `[]`
+    **Default:** `[]`
 
 ## Supported Resource Kinds
 
 Mermin supports watching these Kubernetes resources:
 
 | Kind            | Purpose                             |
-|-----------------|-------------------------------------|
+| --------------- | ----------------------------------- |
 | `Pod`           | Primary source for flow attribution |
 | `Service`       | Service endpoints and selectors     |
 | `Endpoint`      | (Deprecated) Service endpoints      |
@@ -218,30 +205,30 @@ Mermin supports watching these Kubernetes resources:
 
 Memory usage scales with number of watched resources:
 
-- **Estimate:** ~1 KB per resource
-- **10,000 pods:** ~10 MB
-- **100,000 pods:** ~100 MB
+* **Estimate:** \~1 KB per resource
+* **10,000 pods:** \~10 MB
+* **100,000 pods:** \~100 MB
 
 ### API Server Load
 
 Informers use Kubernetes watch API:
 
-- Initial LIST operation per resource type
-- WATCH for ongoing updates
+* Initial LIST operation per resource type
+* WATCH for ongoing updates
 
 **Reduce load:**
 
-- Use namespace filtering
-- Use label selectors
+* Use namespace filtering
+* Use label selectors
 
 ### Sync Time
 
 Initial sync time depends on:
 
-- Cluster size
-- Number of resource types
-- API server performance
-- Network latency
+* Cluster size
+* Number of resource types
+* API server performance
+* Network latency
 
 You may need to tweak the `informers_sync_timeout` attribute.
 
@@ -290,7 +277,7 @@ You may need to tweak the `informers_sync_timeout` attribute.
 
 ## Next Steps
 
-- [**Owner Relations**](../owner-relations.md): Configure owner reference walking
-- [**Selector Relations**](../selector-relations.md): Configure selector-based matching
-- [**Flow Attributes**](../attributes.md): Configure metadata extraction
-- [**Troubleshooting**](../../troubleshooting/troubleshooting.md): Debug missing metadata
+* [**Owner Relations**](owner-relations.md): Configure owner reference walking
+* [**Selector Relations**](selector-relations.md): Configure selector-based matching
+* [**Flow Attributes**](attributes.md): Configure metadata extraction
+* [**Troubleshooting**](../../troubleshooting/troubleshooting.md): Debug missing metadata

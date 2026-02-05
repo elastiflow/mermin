@@ -11,11 +11,11 @@ This section provides comprehensive guidance for deploying Mermin in various env
 Mermin supports multiple deployment scenarios:
 
 | Deployment Type                                  | Use Case                  | Complexity | Production Ready |
-|--------------------------------------------------|---------------------------|------------|------------------|
+| ------------------------------------------------ | ------------------------- | ---------- | ---------------- |
 | [**Kubernetes with Helm**](kubernetes-helm.md)   | Standard K8s clusters     | Low        | ✅ Yes            |
 | [**Cloud Platforms**](cloud-platforms.md)        | GKE, EKS, AKS             | Low        | ✅ Yes            |
 | [**Advanced Scenarios**](advanced-scenarios.md)  | Custom CNI, multi-cluster | Medium     | ✅ Yes            |
-| [**Docker on Bare Metal**](docker-bare-metal.md) | Non-K8s Linux hosts       | Medium     | ⚠️ Limited        |
+| [**Docker on Bare Metal**](docker-bare-metal.md) | Non-K8s Linux hosts       | Medium     | ⚠️ Limited       |
 
 ## Architecture Considerations
 
@@ -263,16 +263,16 @@ spec:
 
 Before deploying Mermin to production:
 
-* [ ] Review [Architecture](../getting-started/agent-architecture.md) to understand how Mermin works
-* [ ] Choose appropriate [deployment method](#deployment-options)
-* [ ] Plan [resource allocation](#resource-requirements)
+* [ ] Review [Architecture](../concepts/agent-architecture.md) to understand how Mermin works
+* [ ] Choose appropriate [deployment method](overview.md#deployment-options)
+* [ ] Plan [resource allocation](overview.md#resource-requirements)
 * [ ] Configure [network interfaces](../configuration/reference/network-interface-discovery.md)
-* [ ] Set up [OTLP collector](../observability/backend-integrations.md) endpoint
-* [ ] Configure [authentication and TLS](../configuration/export-otlp.md) for OTLP
-* [ ] Define [flow filters](../configuration/filtering.md) if needed
+* [ ] Set up [OTLP collector](../getting-started/backend-integrations.md) endpoint
+* [ ] Configure [authentication and TLS](../configuration/reference/export-otlp.md) for OTLP
+* [ ] Define [flow filters](../configuration/reference/filtering.md) if needed
 * [ ] Set appropriate [resource limits](kubernetes-helm.md)
 * [ ] Test in non-production environment first
-* [ ] Monitor [metrics](../configuration/metrics.md) after deployment
+* [ ] Monitor [metrics](../configuration/reference/metrics.md) after deployment
 * [ ] Review [troubleshooting guide](../troubleshooting/troubleshooting.md)
 
 ## Upgrade Strategy
@@ -307,5 +307,5 @@ Choose your deployment path:
 After deploying, configure Mermin for your environment:
 
 * [Configuration Overview](../configuration/overview.md)
-* [OTLP Export Configuration](../configuration/export-otlp.md)
-* [Observability Backends](../observability/backend-integrations.md)
+* [OTLP Export Configuration](../configuration/reference/export-otlp.md)
+* [Observability Backends](../getting-started/backend-integrations.md)

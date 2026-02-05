@@ -1,0 +1,169 @@
+# Configure Owner Relations of Kubernetes Resources
+
+**Block:** `discovery.informer.k8s.owner_relations`
+
+Owner relations control how Mermin walks Kubernetes owner references to enrich flows with workload controller metadata (Deployment, StatefulSet, etc.). Mermin accepts HCL or YAML for the config file; the examples below use HCL (see [Configuration Overview](../overview.md#file-format) for format details).
+
+## Overview
+
+Kubernetes resources have owner references forming a chain: Pod → ReplicaSet → Deployment → ... Mermin can walk this chain and attach metadata from owners to network flows. Owner relations apply when Kubernetes discovery is enabled (`discovery "informer" "k8s"`).
+
+## Configuration
+
+A full configuration example may be found in the [Default Configuration](https://github.com/elastiflow/mermin/blob/beta/docs/configuration/default/config.hcl).
+
+### `discovery.informer.k8s` block
+
+*   `owner_relations` attribute
+
+    Configuration object for Kubernetes owner reference walking and filtering.
+
+    **Type:** Object
+
+    **Default:** `{ max_depth = 5, include_kinds = [], exclude_kinds = [] }`
+
+    **Example:** Basic owner relations configuration
+
+    ```hcl
+    discovery "informer" "k8s" {
+      owner_relations = {
+        max_depth = 5
+        include_kinds = []
+        exclude_kinds = []
+      }
+    }
+    ```
+
+### `owner_relations` block
+
+*   `max_depth` attribute
+
+    Maximum depth to walk owner reference chain. Set to `0` to disable owner walking entirely.
+
+    **Type:** Integer
+
+    **Default:** `5`
+
+    **Valid Range:** `0` to `100` (practical limit)
+
+    **Examples:**
+
+    *   Walk up to 5 levels (default):
+
+        ```hcl
+        owner_relations = {
+          max_depth = 5  # Pod → RS → Deploy → ... (up to 5 levels)
+        }
+        ```
+    *   Disable owner walking:
+
+        ```hcl
+        discovery "informer" "k8s" {
+          owner_relations = {
+            max_depth = 0
+          }
+        }
+        ```
+*   `include_kinds` attribute
+
+    Only include these owner kinds in flow metadata. Empty array means include all supported kinds. Kind names are case-insensitive (e.g., `Deployment` and `deployment` are equivalent).
+
+    **Type:** Array of strings
+
+    **Default:** `[]` (include all)
+
+    **Valid Kinds:** `Deployment`, `ReplicaSet`, `StatefulSet`, `DaemonSet`, `Job`, `CronJob`
+
+    **Examples:**
+
+    *   Include only Deployment and StatefulSet owners:
+
+        ```hcl
+        owner_relations = {
+          include_kinds = ["Deployment", "StatefulSet"]
+        }
+        ```
+    *   Include only Job and CronJob owners:
+
+        ```hcl
+        owner_relations = {
+          include_kinds = ["Job", "CronJob"]
+        }
+        ```
+*   `exclude_kinds` attribute
+
+    Exclude these owner kinds from flow metadata. Takes precedence over `include_kinds`. Kind names are case-insensitive.
+
+    **Type:** Array of strings
+
+    **Default:** `[]` (exclude none)
+
+    **Valid Kinds:** `Deployment`, `ReplicaSet`, `StatefulSet`, `DaemonSet`, `Job`, `CronJob`
+
+    **Examples:**
+
+    *   Exclude ReplicaSet (commonly used to skip intermediate owner):
+
+        ```hcl
+        owner_relations = {
+          exclude_kinds = ["ReplicaSet"]
+        }
+        ```
+    *   Exclude multiple kinds:
+
+        ```hcl
+        owner_relations = {
+          exclude_kinds = ["ReplicaSet", "Job"]
+        }
+        ```
+
+## Filter Priority
+
+When both `include_kinds` and `exclude_kinds` are specified:
+
+1. **Exclude takes precedence**: If a kind is in `exclude_kinds`, it is excluded regardless of `include_kinds`
+2. **Then include is applied**: If `include_kinds` is non-empty, only those kinds are included
+3. **Empty include means all**: If `include_kinds` is empty, all kinds (except excluded) are included
+
+**Example:** Include Deployment and Job, but exclude Deployment (result: only Job)
+
+```hcl
+owner_relations = {
+  include_kinds = ["Deployment", "Job"]
+  exclude_kinds = ["Deployment"]
+}
+```
+
+## How It Works
+
+**Example chain:** Pod `nginx-abc123` → ReplicaSet `nginx-xyz` → Deployment `nginx`
+
+**Without owner relations (or max\_depth = 0):**
+
+* Flow shows only: Pod name, namespace, labels
+
+**With owner relations (default or custom):**
+
+* Flow shows: Pod + ReplicaSet + Deployment metadata (up to `max_depth` levels, filtered by include/exclude)
+
+## Complete Example
+
+```hcl
+discovery "informer" "k8s" {
+  owner_relations = {
+    # Walk up to 5 levels
+    max_depth = 5
+
+    # Include all owner types (default)
+    include_kinds = []
+
+    # Optionally exclude specific types
+    exclude_kinds = []
+  }
+}
+```
+
+## Next Steps
+
+* [**Selector Relations**](selector-relations.md): Configure selector-based matching
+* [**Flow Attributes**](attributes.md): Configure metadata extraction

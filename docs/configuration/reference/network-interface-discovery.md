@@ -8,7 +8,7 @@ Mermin attaches eBPF programs to network interfaces to capture packets. The `dis
 
 ## Configuration
 
-You specify which interfaces to monitor with the `interfaces` option. Example (physical interfaces only; the [default](#default-configuration) uses veth and tunnel patterns):
+You specify which interfaces to monitor with the `interfaces` option. Example (physical interfaces only; the [default](network-interface-discovery.md#default-configuration) uses veth and tunnel patterns):
 
 ```hcl
 discovery "instrument" {
@@ -111,7 +111,7 @@ Mermin resolves patterns at startup and configuration reload:
 
 **Host interfaces:**
 
-```text
+```
 eth0, eth1, ens32, ens33, lo, docker0, cni0, cni123abc
 ```
 
@@ -125,7 +125,7 @@ discovery "instrument" {
 
 **Resolved interfaces:**
 
-```text
+```
 eth0, eth1, ens32, ens33, cni0, cni123abc
 ```
 
@@ -255,9 +255,7 @@ For most use cases, the default configuration (complete visibility with veth + t
 
 ## Dynamic Interface Discovery
 
-Mermin includes an **Interface Controller** that automatically discovers and manages network interfaces.
-The controller continuously watches for interface changes and synchronizes the configured patterns with active interfaces, attaching/detaching eBPF programs as interfaces are created and destroyed.
-This is particularly useful for ephemeral interfaces like veth pairs that come and go with pods.
+Mermin includes an **Interface Controller** that automatically discovers and manages network interfaces. The controller continuously watches for interface changes and synchronizes the configured patterns with active interfaces, attaching/detaching eBPF programs as interfaces are created and destroyed. This is particularly useful for ephemeral interfaces like veth pairs that come and go with pods.
 
 ### Discovery Configuration
 
@@ -352,7 +350,7 @@ When `auto_discover_interfaces` is disabled, the Interface Controller does not r
 
 When attaching eBPF programs to interfaces, Mermin supports two options that affect where its programs run in the TC chain relative to other programs (e.g., CNI or Cilium):
 
-* **`tc_priority`** (netlink only, kernel &lt; 6.6): TC priority for program attachment. Higher values = lower priority = runs later. Default: `1`. Range: 1–32767. Values below 30 may run before some CNI programs.
+* **`tc_priority`** (netlink only, kernel < 6.6): TC priority for program attachment. Higher values = lower priority = runs later. Default: `1`. Range: 1–32767. Values below 30 may run before some CNI programs.
 * **`tcx_order`** (TCX only, kernel ≥ 6.6): Order in the TCX program chain. Options: `"last"` (default; runs after other programs, recommended for observability) or `"first"` (runs before).
 
 Most deployments can leave these at their defaults. Tune them only if you need Mermin to see traffic before or after specific CNI or security programs.
@@ -499,28 +497,26 @@ discovery "instrument" {
 
 **Solutions:**
 
-1. **List available interfaces:**
+1.  **List available interfaces:**
 
-   ```bash
-   kubectl exec <pod> -- ip link show
-   # or on host
-   ip link show
-   ```
+    ```bash
+    kubectl exec <pod> -- ip link show
+    # or on host
+    ip link show
+    ```
+2.  **Test pattern matching:**
 
-2. **Test pattern matching:**
+    ```bash
+    # Check if pattern matches
+    ip link show | grep -E "^[0-9]+: eth"
+    ```
+3.  **Update configuration:**
 
-   ```bash
-   # Check if pattern matches
-   ip link show | grep -E "^[0-9]+: eth"
-   ```
-
-3. **Update configuration:**
-
-   ```hcl
-   discovery "instrument" {
-     interfaces = ["eth0"]  # Use exact name from ip link show
-   }
-   ```
+    ```hcl
+    discovery "instrument" {
+      interfaces = ["eth0"]  # Use exact name from ip link show
+    }
+    ```
 
 ### Interface Not Found
 
@@ -544,23 +540,21 @@ discovery "instrument" {
 
 **Solutions:**
 
-1. **Reduce monitored interfaces:**
+1.  **Reduce monitored interfaces:**
 
-   ```hcl
-   discovery "instrument" {
-     interfaces = ["eth0"]  # Monitor only primary interface
-   }
-   ```
+    ```hcl
+    discovery "instrument" {
+      interfaces = ["eth0"]  # Monitor only primary interface
+    }
+    ```
+2.  **Remove CNI interfaces:**
 
-2. **Remove CNI interfaces:**
-
-   ```hcl
-   discovery "instrument" {
-     interfaces = ["eth*", "ens*"]  # Remove cni*, cali*, etc.
-   }
-   ```
-
-3. **Add flow filters** (see [Filtering](../filtering.md))
+    ```hcl
+    discovery "instrument" {
+      interfaces = ["eth*", "ens*"]  # Remove cni*, cali*, etc.
+    }
+    ```
+3. **Add flow filters** (see [Filtering](filtering.md))
 
 ### Flow Duplication
 
@@ -573,14 +567,13 @@ discovery "instrument" {
 
 **Solutions:**
 
-1. **Monitor only physical interfaces:**
+1.  **Monitor only physical interfaces:**
 
-   ```hcl
-   discovery "instrument" {
-     interfaces = ["eth*", "ens*"]  # Don't include CNI interfaces
-   }
-   ```
-
+    ```hcl
+    discovery "instrument" {
+      interfaces = ["eth*", "ens*"]  # Don't include CNI interfaces
+    }
+    ```
 2. **Deduplicate in backend:**
    * Use flow fingerprinting (Community ID)
    * Deduplicate based on 5-tuple + timestamps
@@ -595,7 +588,7 @@ kubectl logs <pod> | grep -i interface
 
 Example log output:
 
-```text
+```
 INFO Resolved interfaces interfaces=["eth0","eth1","ens32"]
 INFO eBPF programs attached interfaces=["eth0","eth1","ens32"]
 ```
@@ -659,6 +652,6 @@ discovery "instrument" {
 ## Next Steps
 
 * [**Parser Configuration**](network-packet-parser.md): Configure tunnel protocol detection
-* [**Flow Filtering**](../filtering.md): Filter flows by interface name
+* [**Flow Filtering**](filtering.md): Filter flows by interface name
 * [**Troubleshooting**](../../troubleshooting/troubleshooting.md): Diagnose interface issues
 * [**Advanced Scenarios**](../../deployment/advanced-scenarios.md): CNI-specific configurations

@@ -205,7 +205,7 @@ kubectl get pods -l app.kubernetes.io/name=mermin
 
 You should see one pod per node:
 
-```text
+```
 NAME           READY   STATUS    RESTARTS   AGE
 mermin-abc123  1/1     Running   0          2m
 mermin-def456  1/1     Running   0          2m
@@ -527,7 +527,7 @@ Common issues:
 * No matching interfaces: Check `discovery.instrument.interfaces` configuration
 * eBPF load failure: Ensure kernel version >= 4.18 with eBPF support
 * OTLP connection failure: Verify collector endpoint and network policies
-* TCX pin warnings (kernel >= 6.6): See [TCX Mode and BPF Filesystem](../getting-started/security-considerations.md#tcx-mode-and-bpf-filesystem-kernel--66) for mounting `/sys/fs/bpf`
+* TCX pin warnings (kernel >= 6.6): See [TCX Mode and BPF Filesystem](../concepts/security-considerations.md#tcx-mode-and-bpf-filesystem-kernel--66) for mounting `/sys/fs/bpf`
 
 ### High Resource Usage
 
@@ -548,7 +548,7 @@ See [Troubleshooting Guide](../troubleshooting/troubleshooting.md) for more solu
 
 ## Next Steps
 
-* [**Configure OTLP Export**](../configuration/export-otlp.md): Set up authentication and TLS
-* [**Customize Filters**](../configuration/filtering.md): Filter flows before export
-* [**Observability Backends**](../observability/backend-integrations.md): Send Flow Traces to your backend
-* [**Monitor Mermin**](../configuration/metrics.md): Set up Prometheus scraping
+* [**Configure OTLP Export**](../configuration/reference/export-otlp.md): Set up authentication and TLS
+* [**Customize Filters**](../configuration/reference/filtering.md): Filter flows before export
+* [**Observability Backends**](../getting-started/backend-integrations.md): Send Flow Traces to your backend
+* [**Monitor Mermin**](../configuration/reference/metrics.md): Set up Prometheus scraping

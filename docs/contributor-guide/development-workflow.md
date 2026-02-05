@@ -1,4 +1,4 @@
-# Contributor Guide
+# Development Workflow
 
 Welcome to the Mermin contributor guide! This document will help you set up your development environment, build the project, run tests, and contribute effectively to Mermin.
 
@@ -8,33 +8,31 @@ Ensure you have the following installed:
 
 1. **Stable Rust Toolchain**: `rustup toolchain install stable`
 2. **Nightly Rust Toolchain**: `rustup toolchain install nightly --component rust-src`
-3. **bpf-linker**: `cargo install bpf-linker` (use `--no-default-features` on macOS — optionally specify your llvm version with `--features llvm-21`)
+3. **bpf-linker**: `cargo install bpf-linker` (use `--no-default-features` on macOS — optionally specify your llvm version with `--features llvm-21`)
 4. (if cross-compiling) **rustup target**: `rustup target add ${ARCH}-unknown-linux-musl`
 5. (if cross-compiling) **LLVM**: (e.g.) `brew install llvm` (on macOS)
 6. (if cross-compiling) **C toolchain**: (e.g.) [`brew install filosottile/musl-cross/musl-cross`](https://github.com/FiloSottile/homebrew-musl-cross) (on macOS)
 7. Required software to run Mermin locally:
-   - [**Docker**](https://docs.docker.com/get-docker/): Container runtime
-   - [**kind**](https://kind.sigs.k8s.io/docs/user/quick-start/#installation): Kubernetes in Docker
-   - [**kubectl**](https://kubernetes.io/docs/tasks/tools/): Kubernetes command-line tool
-   - [**Helm**](https://helm.sh/docs/intro/install/): Kubernetes package manager (version 3.x)
+   * [**Docker**](https://docs.docker.com/get-docker/): Container runtime
+   * [**kind**](https://kind.sigs.k8s.io/docs/user/quick-start/#installation): Kubernetes in Docker
+   * [**kubectl**](https://kubernetes.io/docs/tasks/tools/): Kubernetes command-line tool
+   * [**Helm**](https://helm.sh/docs/intro/install/): Kubernetes package manager (version 3.x)
 
 ## Build and Run Locally
 
 Mermin supports multiple local development workflows depending on your needs:
 
 | Workflow                | Setup Complexity | Iteration Speed  | Best For                                                                |
-|-------------------------|------------------|------------------|-------------------------------------------------------------------------|
+| ----------------------- | ---------------- | ---------------- | ----------------------------------------------------------------------- |
 | **Bare Metal (Native)** | Low              | Fast (seconds)   | Rapid eBPF/userspace development, packet parsing logic                  |
 | **Dockerized Build**    | Medium           | Medium (minutes) | Cross-platform development (macOS), CI/CD environment parity            |
 | **Kubernetes (kind)**   | High             | Slow (minutes)   | Testing K8s metadata enrichment, Helm charts, full deployment scenarios |
 
 **Choosing your workflow:**
 
-1. **Bare Metal (Native)**: Requires Linux, but provides instant feedback. Run `cargo build` and execute the binary directly with `sudo`. Ideal for iterating on eBPF programs, packet parsing, and core flow logic.
-   Cannot test Kubernetes metadata enrichment without a cluster.
+1. **Bare Metal (Native)**: Requires Linux, but provides instant feedback. Run `cargo build` and execute the binary directly with `sudo`. Ideal for iterating on eBPF programs, packet parsing, and core flow logic. Cannot test Kubernetes metadata enrichment without a cluster.
 2. **Dockerized Build**: Use a Docker container for building to match the CI/CD environment. Useful on macOS or when you need a consistent, reproducible build environment. Slightly slower than native builds but works anywhere Docker runs.
-3. **Kubernetes (kind)**: Full integration testing environment. Deploy to a local Kubernetes cluster for testing Kubernetes metadata enrichment, Helm chart configurations, and complete deployment scenarios.
-   Highest setup complexity and slowest iteration cycle, but essential for validating end-to-end functionality.
+3. **Kubernetes (kind)**: Full integration testing environment. Deploy to a local Kubernetes cluster for testing Kubernetes metadata enrichment, Helm chart configurations, and complete deployment scenarios. Highest setup complexity and slowest iteration cycle, but essential for validating end-to-end functionality.
 
 ### 1. Build the `mermin` agent
 
@@ -60,13 +58,13 @@ docker pull ghcr.io/elastiflow/mermin:v0.1.0-beta.40-debug
 
 Mermin supports configuration in both **HCL** and **YAML** formats. A comprehensive example configuration file is provided at `charts/mermin/config/examples/config.hcl`, which includes:
 
-- **Stdout exporter enabled**: Flow data printed to console for easy debugging
-- **OTLP exporter configured**: With placeholders for authentication and TLS settings
-- **Kubernetes metadata enrichment**: Default Pod, Service, Deployment associations and selectors
-- **Interface discovery**: Defaults for automatic detection and attachment to network interfaces
-- **Flow filtering**: Configurable filters for source, destination, network, and flow attributes
-- **Parser options**: Tunnel protocol detection (VXLAN, Geneve, WireGuard) and protocol parsing flags
-- **Logging**: Set to `info` level by default
+* **Stdout exporter enabled**: Flow data printed to console for easy debugging
+* **OTLP exporter configured**: With placeholders for authentication and TLS settings
+* **Kubernetes metadata enrichment**: Default Pod, Service, Deployment associations and selectors
+* **Interface discovery**: Defaults for automatic detection and attachment to network interfaces
+* **Flow filtering**: Configurable filters for source, destination, network, and flow attributes
+* **Parser options**: Tunnel protocol detection (VXLAN, Geneve, WireGuard) and protocol parsing flags
+* **Logging**: Set to `info` level by default
 
 For local development, create a minimal configuration in the `local/` directory. Here's a simple starter config that enables stdout output:
 
@@ -99,8 +97,7 @@ fmtconvert -from hcl -to yaml charts/mermin/config/examples/config.hcl > local/c
 
 Running the eBPF agent requires elevated privileges. Use the `--config` flag to specify your configuration file.
 
-> **Note**: You can run without a configuration file, but the default settings disable stdout and OTLP exporting, so you won't see any flow trace output.
-> For local development, it's recommended to use at least a configuration file with stdout exporting enabled (see the minimal config example above).
+> **Note**: You can run without a configuration file, but the default settings disable stdout and OTLP exporting, so you won't see any flow trace output. For local development, it's recommended to use at least a configuration file with stdout exporting enabled (see the minimal config example above).
 
 **Using HCL:**
 
@@ -117,8 +114,7 @@ If you prefer YAML format, you can convert your HCL config on-the-fly:
 cargo run --release --config 'target."cfg(all())".runner="sudo -E"' -- --config <(fmtconvert -from hcl -to yaml local/config.hcl)
 ```
 
-> The `sudo -E` command runs the program as root while preserving the user's environment variables, which is
-> necessary for `cargo` to find the correct binary.
+> The `sudo -E` command runs the program as root while preserving the user's environment variables, which is necessary for `cargo` to find the correct binary.
 
 ### 4. Generate Traffic
 
@@ -164,28 +160,26 @@ cargo clippy --all-features -- -D warnings
 
 ### "hack" hints
 
-- Generate metrics description for the [internal metrics docs](../internal-monitoring/internal-metrics.md) with `jq`
+*   Generate metrics description for the [internal metrics docs](../internal-monitoring/internal-metrics.md) with `jq`
 
-  ```bash
-  curl -s ${POD_IP}:10250/metrics:summary | jq --arg metric_prefix ${METRIC_PREFIX} -r -f hack/gen_metrics_doc.jq
-  # Example
-  curl -s localhost:10250/metrics:summary | jq --arg metric_prefix mermin_ebpf -r -f hack/gen_metrics_doc.jq
-  ```
+    ```bash
+    curl -s ${POD_IP}:10250/metrics:summary | jq --arg metric_prefix ${METRIC_PREFIX} -r -f hack/gen_metrics_doc.jq
+    # Example
+    curl -s localhost:10250/metrics:summary | jq --arg metric_prefix mermin_ebpf -r -f hack/gen_metrics_doc.jq
+    ```
+*   Download Grafana dashboard JSON from a local Grafana instance
 
-- Download Grafana dashboard JSON from a local Grafana instance
-
-  ```bash
-  # From a local Grafana
-  curl -s "localhost:3000/api/dashboards/uid/mermin_app" | jq '.dashboard' | jq -f hack/sanitize_grafana_dashboard.jq > docs/observability/grafana-mermin-app.json
-  # Or from a copy/pasted file
-  jq -f hack/sanitize_grafana_dashboard.jq docs/observability/grafana-mermin-app.json > docs/observability/grafana-mermin-app.json.tmp \
-    && mv docs/observability/grafana-mermin-app.json.tmp docs/observability/grafana-mermin-app.json
-  ```
+    ```bash
+    # From a local Grafana
+    curl -s "localhost:3000/api/dashboards/uid/mermin_app" | jq '.dashboard' | jq -f hack/sanitize_grafana_dashboard.jq > docs/observability/grafana-mermin-app.json
+    # Or from a copy/pasted file
+    jq -f hack/sanitize_grafana_dashboard.jq docs/observability/grafana-mermin-app.json > docs/observability/grafana-mermin-app.json.tmp \
+      && mv docs/observability/grafana-mermin-app.json.tmp docs/observability/grafana-mermin-app.json
+    ```
 
 ## Using a Dockerized Build Environment
 
-To ensure a consistent and reproducible build environment that matches the CI/CD pipeline, you can use Docker. This is
-especially helpful on platforms like macOS.
+To ensure a consistent and reproducible build environment that matches the CI/CD pipeline, you can use Docker. This is especially helpful on platforms like macOS.
 
 ### 1. Build the containerized environment
 
@@ -230,7 +224,7 @@ helm upgrade -i --wait --timeout 15m -n default --create-namespace \
 make helm-upgrade
 
 # With custom local config
-make helm-upgrade HELM_EXTRA_ARGS='--set-file config.content=local/config.hcl'
+make helm-upgrade EXTRA_HELM_ARGS='--set-file config.content=local/config.hcl'
 ```
 
 **Optionally install `metrics-server` to get metrics if it has not been installed yet**
@@ -241,8 +235,7 @@ kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/down
 kubectl -n kube-system patch deployment metrics-server --type='json' -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
 ```
 
-**Optionally install [Prometheus/Grafana](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack) to get Mermin metrics:**
-Not intended for a production usage, Grafana auth is disabled (insecure).
+**Optionally install** [**Prometheus/Grafana**](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack) **to get Mermin metrics:** Not intended for a production usage, Grafana auth is disabled (insecure).
 
 ```sh
 helm repo add prometheus https://prometheus-community.github.io/helm-charts
@@ -285,24 +278,22 @@ mermin:
     pullPolicy: Never
 ```
 
-> **Note**: The repository includes a `Makefile` with convenience targets (`make k8s-get`, `make k8s-diff`) for some of
-> these commands.
+> **Note**: The repository includes a `Makefile` with convenience targets (`make k8s-get`, `make k8s-diff`) for some of these commands.
 
 ### Verifying the Deployment
 
-- Check that the `mermin` pods are running on each node. You should see one pod per worker node.
+*   Check that the `mermin` pods are running on each node. You should see one pod per worker node.
 
-   ```shell
-   kubectl get pods -l app.kubernetes.io/name=mermin
-   ```
+    ```shell
+    kubectl get pods -l app.kubernetes.io/name=mermin
+    ```
+*   View the logs from any of the Mermin pods to see network flow data.
 
-- View the logs from any of the Mermin pods to see network flow data.
+    ```shell
+    kubectl logs -l app.kubernetes.io/name=mermin -f
+    ```
 
-   ```shell
-   kubectl logs -l app.kubernetes.io/name=mermin -f
-   ```
-
-   To generate some network traffic, try pinging between pods in your cluster.
+    To generate some network traffic, try pinging between pods in your cluster.
 
 ### Cleanup
 
@@ -318,8 +309,7 @@ kind delete cluster -n atlantis
 
 ## Cross-Compiling
 
-To build a Linux binary from a different OS (like macOS), you can cross-compile. The following command builds for a
-specified architecture (e.g., `aarch64` or `x86_64`).
+To build a Linux binary from a different OS (like macOS), you can cross-compile. The following command builds for a specified architecture (e.g., `aarch64` or `x86_64`).
 
 ```shell
 # Replace ${ARCH} with your target architecture, e.g., aarch64
@@ -329,8 +319,7 @@ CC=${ARCH}-linux-musl-gcc cargo build -p mermin --release \
   --config=target.${ARCH}-unknown-linux-musl.linker=\"${ARCH}-linux-musl-gcc\"
 ```
 
-The final binary will be located at `target/${ARCH}-unknown-linux-musl/release/mermin` and can be copied to a Linux
-server to be executed.
+The final binary will be located at `target/${ARCH}-unknown-linux-musl/release/mermin` and can be copied to a Linux server to be executed.
 
 ### Setting Up rust-analyzer on macOS
 
@@ -373,14 +362,14 @@ Create or update `.vscode/settings.json` in the project root with the following 
 
 Once you have your development environment set up, you may want to explore:
 
-- [Debugging Network Traffic](debugging-network.md) - Learn how to use Wireshark for live packet capture
-- [Debugging eBPF Programs](debugging-ebpf.md) - Deep dive into eBPF program inspection and optimization
-- [Deployment Documentation](../deployment/overview.md) - Understand production deployment scenarios
+* [Debugging Network Traffic](debugging-network.md) - Learn how to use Wireshark for live packet capture
+* [Debugging eBPF Programs](debugging-ebpf.md) - Deep dive into eBPF program inspection and optimization
+* [Deployment Documentation](../deployment/overview.md) - Understand production deployment scenarios
 
 ## Getting Help
 
 If you encounter issues during development:
 
-- Check the [Troubleshooting Guide](../troubleshooting/troubleshooting.md)
-- Ask questions in [GitHub Discussions](https://github.com/elastiflow/mermin/discussions)
-- Report bugs via [GitHub Issues](https://github.com/elastiflow/mermin/issues)
+* Check the [Troubleshooting Guide](../troubleshooting/troubleshooting.md)
+* Ask questions in [GitHub Discussions](https://github.com/elastiflow/mermin/discussions)
+* Report bugs via [GitHub Issues](https://github.com/elastiflow/mermin/issues)

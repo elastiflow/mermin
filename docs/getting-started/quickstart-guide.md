@@ -71,7 +71,7 @@ kubectl get pods -l app.kubernetes.io/name=mermin
 
 You should see one Mermin pod per worker node, all in the `Running` state:
 
-```text
+```
 NAME           READY   STATUS    RESTARTS   AGE
 mermin-abc123  1/1     Running   0          2m
 mermin-def456  1/1     Running   0          2m
@@ -107,7 +107,7 @@ Switch back to the logs terminal, and you'll see network flow records for the tr
 
 Example flow record (stdout format):
 
-```text
+```
 Span #1
         Instrumentation Scope
                 Name         : "mermin"
@@ -213,10 +213,10 @@ Congratulations! You've successfully deployed Mermin and captured network flows.
 
 To use Mermin in production:
 
-1. [**Review the Architecture**](agent-architecture.md) to understand how Mermin works
+1. [**Review the Architecture**](../concepts/agent-architecture.md) to understand how Mermin works
 2. [**Explore Deployment Options**](../deployment/overview.md) for production-ready configurations
-3. [**Configure OTLP Export**](../configuration/export-otlp.md) to send flows to your observability backend
-4. [**Set Up Integrations**](../observability/backend-integrations.md) with Grafana, Elastic, or other platforms
+3. [**Configure OTLP Export**](../configuration/reference/export-otlp.md) to send flows to your observability backend
+4. [**Set Up Integrations**](backend-integrations.md) with Grafana, Elastic, or other platforms
 5. [**Customize Configuration**](../configuration/overview.md) to match your environment and requirements
 
 ## Troubleshooting
