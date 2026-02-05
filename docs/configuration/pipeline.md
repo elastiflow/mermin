@@ -1,4 +1,4 @@
-# Flow Processing Pipeline
+# Configure Flow Processing Pipeline
 
 **Block:** `pipeline`
 
@@ -10,7 +10,7 @@ The configuration options become useful to take advantage of additional resource
 
 A full pipeline example is in the [default config](./default/config.hcl) in the repository.
 
-## Configuration Structure
+### Configuration Structure
 
 The pipeline configuration is organized into nested blocks that reflect the architecture:
 
