@@ -1,3 +1,19 @@
+## [v0.1.0-beta.49] - 2026-02-05
+
+### Bug Fixes
+
+- Ensure tcp stats and icmp stats metrics are tracked correctly (#425)
+- Independent src and dst association blocks (#423)
+- Remove standard globs for non-string filters (#411)
+### Features
+
+- **metrics:** Add read ops metric for flow events (#426)
+- **metrics:** Remove ebpf map_bytes_total, add flow_stats ops tracking (#428)
+
+[v0.1.0-beta.48..v0.1.0-beta.49](https://github.com/elastiflow/mermin/compare/v0.1.0-beta.48...v0.1.0-beta.49)
+
+
+
 ## [v0.1.0-beta.48] - 2026-02-03
 
 ### Bug Fixes
