@@ -2,9 +2,6 @@
 
 **Block:** `discovery.instrument`
 
-This page explains how Mermin discovers and monitors network interfaces on the host. Interface selection is critical for determining what network traffic Mermin captures.
-## Overview
-
 Mermin attaches eBPF programs to network interfaces to capture packets as they traverse the network stack. Interface selection is critical because different interfaces see different traffic—choosing the right interfaces ensures you capture pod-to-pod, inter-node, and external traffic without gaps or duplication. You specify interfaces using flexible patterns (literals, globs, or regex) that are resolved against available host interfaces at startup and during runtime.
 
 ## Configuration
