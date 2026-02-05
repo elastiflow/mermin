@@ -10,27 +10,9 @@ The configuration options become useful to take advantage of additional resource
 
 A full pipeline example is in the [default config](./default/config.hcl) in the repository.
 
-### Configuration Structure
-
-The pipeline configuration is organized into nested blocks that reflect the architecture:
-
-```hcl
-pipeline {
-  flow_capture {
-    # eBPF-level flow tracking configuration
-  }
-  flow_producer {
-    # Userspace flow processing configuration
-  }
-  k8s_decorator {
-    # Kubernetes metadata decoration configuration
-  }
-}
-```
-
-## Configuration Options
-
 ### `pipeline.flow_capture` block
+
+Attributes in this block configure eBPF-level flow tracking.
 
 - `flow_stats_capacity` attribute
 
@@ -88,6 +70,8 @@ pipeline {
   ```
 
 ### `pipeline.flow_producer` block
+
+Attributes in this block configure userspace flow processing.
 
 - `workers` attribute
 
@@ -255,6 +239,8 @@ pipeline {
   ```
 
 ### `pipeline.k8s_decorator` block
+
+Attributes in this block configure Kubernetes metadata decoration.
 
 - `threads` attribute
 
