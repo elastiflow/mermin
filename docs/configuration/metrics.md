@@ -261,7 +261,6 @@ For production environments:
 2. Use aggregation in queries
 3. Adjust Prometheus retention
 
-____
 
 ## Next Steps
 
