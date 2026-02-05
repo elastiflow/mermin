@@ -2,11 +2,7 @@
 
 **Block:** `export.traces.stdout`
 
-The stdout exporter outputs flow records directly to the console (standard output), making it ideal for development, debugging, and verifying flow capture without an external backend.
-
-## Overview
-
-The stdout exporter transforms flow spans into a readable format. While OTLP export is used for production observability, the stdout exporter provides immediate, human-readable visibility into the data Mermin is processing.
+The stdout exporter outputs flow records directly to the console (standard output), providing immediate, human-readable visibility into the data Mermin is processing. While OTLP export is the standard for production observability, the stdout exporter is ideal for development, debugging, and verifying flow capture without requiring an external backend.
 
 ## Configuration
 
