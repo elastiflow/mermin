@@ -1,4 +1,6 @@
-# Agent Processing Pipeline
+# Flow Processing Pipeline
+
+**Block:** `pipeline`
 
 The `pipeline` block provides advanced configuration for flow processing pipeline optimization, including channel capacity tuning, worker threading, Kubernetes decoration, backpressure management, and buffer multipliers.
 
@@ -28,257 +30,285 @@ pipeline {
 
 ## Configuration Options
 
-### Flow Capture (`flow_capture`)
+### `pipeline.flow_capture` block
 
-#### `flow_stats_capacity`
+- `flow_stats_capacity` attribute
 
-**Type:** Integer **Default:** `100000`
+  The capacity of the `FLOW_STATS` eBPF map. See [eBPF Programs](../getting-started/agent-architecture.md#ebpf-programs) in the architecture documentation for more information.
 
-The capacity of the `FLOW_STATS` eBPF map. See [eBPF Programs](../getting-started/agent-architecture.md#ebpf-programs) in the architecture documentation for more information.
+  **Type:** Integer
 
-**Example:**
+  **Default:** `100000`
 
-```hcl
-pipeline {
-  flow_capture {
-    flow_stats_capacity = 500000  # For high-traffic ingress
+  **Tuning Guidelines:**
+
+  | Traffic Volume             | Recommended Value |
+  |----------------------------|-------------------|
+  | Low (< 10K flows/s)        | 50000             |
+  | Medium (10K-50K flows/s)   | 100000 (default)  |
+  | High (50K-100K flows/s)    | 250000            |
+  | Very High (> 100K flows/s) | 500000+           |
+
+  **Example:** Increase capacity for high-traffic ingress
+
+  ```hcl
+  pipeline {
+    flow_capture {
+      flow_stats_capacity = 500000
+    }
   }
-}
-```
+  ```
 
-#### `flow_events_capacity`
+- `flow_events_capacity` attribute
 
-**Type:** Integer (entries) **Default:** `1024`
+  The capacity of the `FLOW_EVENTS` ring buffer as number of entries. Each entry is 234 bytes (FlowEvent size), so the default 1024 entries equals ~240 KB. This buffer is used to pass new flow events from eBPF to userspace.
+  Keep the buffer high enough to provide flow record burst tolerance.
 
-The capacity of the `FLOW_EVENTS` ring buffer as number of entries. Each entry is 234 bytes (FlowEvent size), so the default 1024 entries equals ~240 KB. This buffer is used to pass new flow events from eBPF to userspace.
-Keep the buffer high enough to provide flow record burst tolerance.
+  **Type:** Integer (entries)
 
-**Sizing Guide** (based on flows per second):
+  **Default:** `1024`
 
-- **General/Mixed** (50-500 FPS): `1024` entries (~240 KB)
-- **High Traffic** (500-2K FPS): `2048` entries (~480 KB)
-- **Very High Traffic** (2K-5K FPS): `4096` entries (~960 KB)
-- **Extreme Traffic** (>5K FPS): `8192+` entries (~1.9 MB+)
+  **Sizing Guide** (based on flows per second):
 
-**Example:**
+  | Traffic Pattern              | Recommended Value | Memory Usage |
+  |------------------------------|-------------------|--------------|
+  | General/Mixed (50-500 FPS)   | `1024` (default)  | ~240 KB      |
+  | High Traffic (500-2K FPS)    | `2048`            | ~480 KB      |
+  | Very High Traffic (2K-5K FPS)| `4096`            | ~960 KB      |
+  | Extreme Traffic (>5K FPS)    | `8192+`           | ~1.9 MB+     |
 
-```hcl
-pipeline {
-  flow_capture {
-    flow_events_capacity = 4096  # 4x default for very high traffic
+  **Example:** Increase buffer for very high traffic
+
+  ```hcl
+  pipeline {
+    flow_capture {
+      flow_events_capacity = 4096
+    }
   }
-}
-```
+  ```
 
-### Flow Producer (`flow_producer`)
+### `pipeline.flow_producer` block
 
-#### `workers`
+- `workers` attribute
 
-**Type:** Integer **Default:** `4`
+  Number of parallel worker threads processing packets and generating flow spans. Each worker processes eBPF events independently from a dedicated worker queue.
 
-Number of parallel worker threads processing packets and generating flow spans. Each worker processes eBPF events independently from a dedicated worker queue.
+  **Type:** Integer
 
-**Behavior:**
+  **Default:** `4`
 
-- Each worker processes packets independently
-- More workers = more parallelism = higher throughput
-- More workers = more CPU usage
-- Workers share the flow table (synchronized)
+  **Behavior:**
 
-**Tuning Guidelines:**
+  - Each worker processes packets independently
+  - More workers = more parallelism = higher throughput
+  - More workers = more CPU usage
+  - Workers share the flow table (synchronized)
 
-| Traffic Volume             | Recommended Workers | CPU Allocation |
-|----------------------------|---------------------|----------------|
-| Low (< 10K flows/s)        | 1-2                 | 0.5-1 cores    |
-| Medium (10K-50K flows/s)   | 2-4                 | 1-2 cores      |
-| High (50K-100K flows/s)    | 4 (default)         | 2-4 cores      |
-| Very High (> 100K flows/s) | 8-16                | 4-8 cores      |
+  **Tuning Guidelines:**
 
-**Optimal Worker Count:**
+  | Traffic Volume             | Recommended Workers | CPU Allocation |
+  |----------------------------|---------------------|----------------|
+  | Low (< 10K flows/s)        | 1-2                 | 0.5-1 cores    |
+  | Medium (10K-50K flows/s)   | 2-4                 | 1-2 cores      |
+  | High (50K-100K flows/s)    | 4 (default)         | 2-4 cores      |
+  | Very High (> 100K flows/s) | 8-16                | 4-8 cores      |
 
-- Start with CPU count / 2
-- Monitor CPU usage with metrics
-- Increase if CPU is underutilized and packet drops occur
-- Decrease if CPU is overutilized
+  **Optimal Worker Count:**
 
-**Relationship with CPU Resources:**
+  - Start with CPU count / 2
+  - Monitor CPU usage with metrics
+  - Increase if CPU is underutilized and packet drops occur
+  - Decrease if CPU is overutilized
 
-```yaml
-# Kubernetes resources should match worker count
-resources:
-  requests:
-    cpu: 2     # For flow_producer.workers = 4
-  limits:
-    cpu: 4     # For flow_producer.workers = 4
-```
+  **Relationship with CPU Resources:**
 
-**Example:**
+  ```yaml
+  # Kubernetes resources should match worker count
+  resources:
+    requests:
+      cpu: 2     # For flow_producer.workers = 4
+    limits:
+      cpu: 4     # For flow_producer.workers = 4
+  ```
 
-```hcl
-pipeline {
-  flow_producer {
-    workers = 8  # Use more workers for increased parallelism
+  **Example:** Use more workers for increased parallelism
+
+  ```hcl
+  pipeline {
+    flow_producer {
+      workers = 8
+    }
   }
-}
-```
+  ```
 
-#### `worker_queue_capacity`
+- `worker_queue_capacity` attribute
 
-**Type:** Integer **Default:** `2048`
+  Capacity for each worker thread's event queue. Determines how many raw eBPF events can be buffered per worker before drops occur.
 
-Capacity for each worker thread's event queue. Determines how many raw eBPF events can be buffered per worker before drops occur.
+  **Type:** Integer
 
-**Formula:** Total worker buffer memory ≈ `flow_producer.workers` × `flow_producer.worker_queue_capacity` × 256 bytes
+  **Default:** `2048`
 
-**Tuning Guidelines:**
+  **Formula:** Total worker buffer memory ≈ `flow_producer.workers` × `flow_producer.worker_queue_capacity` × 256 bytes
 
-| Traffic Volume             | Recommended Value |
-|----------------------------|-------------------|
-| Low (< 10K flows/s)        | 512-1024          |
-| Medium (10K-50K flows/s)   | 1024-2048         |
-| High (50K-100K flows/s)    | 2048 (default)    |
-| Very High (> 100K flows/s) | 4096+             |
+  **Tuning Guidelines:**
 
-**Signs You Need to Increase:**
+  | Traffic Volume             | Recommended Value |
+  |----------------------------|-------------------|
+  | Low (< 10K flows/s)        | 512-1024          |
+  | Medium (10K-50K flows/s)   | 1024-2048         |
+  | High (50K-100K flows/s)    | 2048 (default)    |
+  | Very High (> 100K flows/s) | 4096+             |
 
-- Metrics show `mermin_flow_events_total{status="dropped_backpressure"}` increasing
+  **Signs You Need to Increase:**
 
-**Example:**
+  - Metrics show `mermin_flow_events_total{status="dropped_backpressure"}` increasing
 
-```hcl
-pipeline {
-  flow_producer {
-    worker_queue_capacity = 4096
+  **Example:** Increase queue capacity for high traffic
+
+  ```hcl
+  pipeline {
+    flow_producer {
+      worker_queue_capacity = 4096
+    }
   }
-}
-```
+  ```
 
-#### `flow_store_poll_interval`
+- `flow_store_poll_interval` attribute
 
-**Type:** String (duration) **Default:** `"5s"`
+  Interval at which flow pollers check for flow records and timeouts. Pollers iterate through active flows to generate periodic flow records (based on `max_record_interval` in `span` config) and detect and remove idle flows (based on protocol-specific timeouts in `span` config).
 
-Interval at which flow pollers check for flow records and timeouts. Pollers iterate through active flows to:
+  See [eBPF Programs](../getting-started/agent-architecture.md#ebpf-programs) in the architecture documentation for more information.
 
-- Generate periodic flow records (based on `max_record_interval` in `span` config)
-- Detect and remove idle flows (based on protocol-specific timeouts in `span` config)
+  **Type:** String (duration)
 
-See [eBPF Programs](../getting-started/agent-architecture.md#ebpf-programs) in the architecture documentation for more information.
+  **Default:** `"5s"`
 
-**Behavior:**
+  **Behavior:**
 
-- Lower values = more responsive timeout detection and flow recording
-- Higher values = less CPU overhead
-- At typical enterprise scale (10K flows/sec with 100K active flows and 32 pollers): ~600 flow checks/sec per poller
-- Modern CPUs handle flow checking very efficiently (microseconds per check)
+  - Lower values = more responsive timeout detection and flow recording
+  - Higher values = less CPU overhead
+  - At typical enterprise scale (10K flows/sec with 100K active flows and 32 pollers): ~600 flow checks/sec per poller
+  - Modern CPUs handle flow checking very efficiently (microseconds per check)
 
-**Tuning Guidelines:**
+  **Tuning Guidelines:**
 
-| Traffic Pattern          | Recommended Interval | Rationale                           |
-|--------------------------|----------------------|-------------------------------------|
-| Short-lived flows (ICMP) | 3-5s                 | Fast timeout detection              |
-| Mixed traffic            | 5s (default)         | Balance responsiveness and overhead |
-| Long-lived flows (TCP)   | 10s                  | Lower overhead, slower timeouts     |
-| Memory constrained       | 3-5s                 | More frequent cleanup               |
+  | Traffic Pattern          | Recommended Interval | Rationale                           |
+  |--------------------------|----------------------|-------------------------------------|
+  | Short-lived flows (ICMP) | 3-5s                 | Fast timeout detection              |
+  | Mixed traffic            | 5s (default)         | Balance responsiveness and overhead |
+  | Long-lived flows (TCP)   | 10s                  | Lower overhead, slower timeouts     |
+  | Memory constrained       | 3-5s                 | More frequent cleanup               |
 
-**Trade-offs:**
+  **Trade-offs:**
 
-- **3s interval**: Most responsive, slightly higher CPU (~10K checks/sec per poller)
-- **5s interval** (default): Best balance for most workloads
-- **10s interval**: Lowest CPU, flows may linger longer before timeout
+  - **3s interval**: Most responsive, slightly higher CPU (~10K checks/sec per poller)
+  - **5s interval** (default): Best balance for most workloads
+  - **10s interval**: Lowest CPU, flows may linger longer before timeout
 
-**Signs You Should Decrease:**
+  **Signs You Should Decrease:**
 
-- Flows lingering past their intended timeout
-- Memory usage growing steadily
-- Short-lived flow protocols (ICMP with 10s timeout)
+  - Flows lingering past their intended timeout
+  - Memory usage growing steadily
+  - Short-lived flow protocols (ICMP with 10s timeout)
 
-**Signs You Can Increase:**
+  **Signs You Can Increase:**
 
-- CPU constrained
-- Primarily long-lived TCP flows
-- Flow timeout accuracy not critical
+  - CPU constrained
+  - Primarily long-lived TCP flows
+  - Flow timeout accuracy not critical
 
-**Example:**
+  **Example:** Poll more frequently for short-lived flows
 
-```hcl
-pipeline {
-  flow_producer {
-    flow_store_poll_interval = "2s"  # Poll more frequently
+  ```hcl
+  pipeline {
+    flow_producer {
+      flow_store_poll_interval = "2s"
+    }
   }
-}
-```
+  ```
 
-#### `flow_span_queue_capacity`
+- `flow_span_queue_capacity` attribute
 
-**Type:** Integer **Default:** `16384`
+  Explicit capacity for the flow span channel, acting as a buffer between workers and the K8s decorator. With default settings, this provides approximately 160ms of buffer at 100K flows/sec.
 
-Explicit capacity for the flow span channel, acting as a buffer between workers and the K8s decorator. With default settings, this provides approximately 160ms of buffer at 100K flows/sec.
+  **Type:** Integer
 
-**Recommendations:**
+  **Default:** `16384`
 
-- **Steady traffic**: `16384` (default)
-- **Bursty traffic**: `24576`-`32768`
-- **Low latency priority**: `12288`
+  **Recommendations:**
 
-**Example:**
+  | Use Case              | Recommended Value |
+  |-----------------------|-------------------|
+  | Steady traffic        | 16384 (default)   |
+  | Bursty traffic        | 24576-32768       |
+  | Low latency priority  | 12288             |
 
-```hcl
-pipeline {
-  flow_producer {
-    flow_span_queue_capacity = 24576  # Larger buffer for high-latency decoration
+  **Example:** Increase buffer for high-latency decoration
+
+  ```hcl
+  pipeline {
+    flow_producer {
+      flow_span_queue_capacity = 24576
+    }
   }
-}
-```
+  ```
 
-### Kubernetes Decorator (`k8s_decorator`)
+### `pipeline.k8s_decorator` block
 
-#### `threads`
+- `threads` attribute
 
-**Type:** Integer **Default:** `4`
+  Number of dedicated threads for Kubernetes metadata decoration. Running decoration on separate threads prevents K8s API lookups from blocking flow processing. Each thread handles ~8K flows/sec (~100-150μs per flow), so 4 threads provide 32K flows/sec capacity.
 
-Number of dedicated threads for Kubernetes metadata decoration. Running decoration on separate threads prevents K8s API lookups from blocking flow processing. Each thread handles ~8K flows/sec (~100-150μs per flow), so 4 threads provide 32K flows/sec capacity.
+  **Type:** Integer
 
-**Recommendations based on typical FPS (flows per second):**
+  **Default:** `4`
 
-| Cluster Type               | Typical FPS | Recommended Threads |
-|----------------------------|-------------|---------------------|
-| General/Mixed              | 50-200      | 2-4 (default: 4)    |
-| Service Mesh               | 100-300     | 4 (default)         |
-| Public Ingress             | 1K-5K       | 4-8                 |
-| High-Traffic Ingress       | 5K-25K      | 8-12                |
-| Extreme Scale (Edge/CDN)   | >25K        | 12-24               |
+  **Recommendations based on typical FPS (flows per second):**
 
-**Example:**
+  | Cluster Type               | Typical FPS | Recommended Threads |
+  |----------------------------|-------------|---------------------|
+  | General/Mixed              | 50-200      | 2-4 (default: 4)    |
+  | Service Mesh               | 100-300     | 4 (default)         |
+  | Public Ingress             | 1K-5K       | 4-8                 |
+  | High-Traffic Ingress       | 5K-25K      | 8-12                |
+  | Extreme Scale (Edge/CDN)   | >25K        | 12-24               |
 
-```hcl
-pipeline {
-  k8s_decorator {
-    threads = 8  # More threads for faster decoration
+  **Example:** Increase threads for faster decoration
+
+  ```hcl
+  pipeline {
+    k8s_decorator {
+      threads = 8
+    }
   }
-}
-```
+  ```
 
-#### `decorated_span_queue_capacity`
+- `decorated_span_queue_capacity` attribute
 
-**Type:** Integer **Default:** `32768`
+  Explicit capacity for the decorated span (export) channel, acting as a buffer between the K8s decorator and the OTLP exporter. This should be the largest buffer since network export is the slowest stage. With default settings, this provides approximately 320ms of buffer at 100K flows/sec.
 
-Explicit capacity for the decorated span (export) channel, acting as a buffer between the K8s decorator and the OTLP exporter. This should be the largest buffer since network export is the slowest stage. With default settings, this provides approximately 320ms of buffer at 100K flows/sec.
+  **Type:** Integer
 
-**Recommendations:**
+  **Default:** `32768`
 
-- **Reliable network**: `32768` (default)
-- **Unreliable network**: `49152`-`65536`
-- **Very high throughput**: `65536`-`98304`
+  **Recommendations:**
 
-**Example:**
+  | Network Condition      | Recommended Value |
+  |------------------------|-------------------|
+  | Reliable network       | 32768 (default)   |
+  | Unreliable network     | 49152-65536       |
+  | Very high throughput   | 65536-98304       |
 
-```hcl
-pipeline {
-  k8s_decorator {
-    decorated_span_queue_capacity = 65536  # Increase for slow exporters
+  **Example:** Increase buffer for slow exporters
+
+  ```hcl
+  pipeline {
+    k8s_decorator {
+      decorated_span_queue_capacity = 65536
+    }
   }
-}
-```
+  ```
 
 ## Monitoring Performance Configuration
 
