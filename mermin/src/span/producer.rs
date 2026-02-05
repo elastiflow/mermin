@@ -85,6 +85,7 @@ pub struct FlowSpanComponents {
     pub flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     pub tcp_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, TcpStats>>>,
     pub icmp_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, IcmpStats>>>,
+    pub listening_ports_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, ListeningPortKey, u8>>>,
     pub flow_span_tx: mpsc::Sender<FlowSpan>,
 }
 
@@ -162,7 +163,7 @@ impl FlowSpanProducer {
             None
         };
 
-        let direction_inferrer = Arc::new(DirectionInferrer::new(listening_ports_map));
+        let direction_inferrer = Arc::new(DirectionInferrer::new(Arc::clone(&listening_ports_map)));
 
         // Initialize hostname resolution cache
         // Cache capacity = flow_stats_capacity / 2 (each flow has 2 IPs, typical cardinality is ~10-30%)
@@ -177,6 +178,7 @@ impl FlowSpanProducer {
             flow_stats_map,
             tcp_stats_map,
             icmp_stats_map,
+            listening_ports_map,
             flow_span_tx,
         });
 
@@ -274,6 +276,7 @@ impl FlowSpanProducer {
             Arc::clone(&components.flow_stats_map),
             Arc::clone(&components.tcp_stats_map),
             Arc::clone(&components.icmp_stats_map),
+            Arc::clone(&components.listening_ports_map),
             Arc::clone(&components.flow_store),
             self.boot_time_offset_nanos,
             max_orphan_age,
@@ -2443,6 +2446,7 @@ pub async fn orphan_scanner_task(
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     tcp_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, TcpStats>>>,
     icmp_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, IcmpStats>>>,
+    listening_ports_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, ListeningPortKey, u8>>>,
     flow_store: FlowStore,
     boot_time_offset: u64,
     max_age: Duration,
@@ -2496,6 +2500,17 @@ pub async fn orphan_scanner_task(
                 metrics::registry::EBPF_MAP_SIZE
                     .with_label_values(&[EbpfMapName::IcmpStats.as_str(), MapUnit::Entries.as_str()])
                     .set(icmp_stats_count as i64);
+
+                let listening_ports_count = {
+                    let map = listening_ports_map.lock().await;
+                    map.keys().filter_map(|k| k.ok()).count()
+                };
+                metrics::registry::EBPF_MAP_SIZE
+                    .with_label_values(&[
+                        EbpfMapName::ListeningPorts.as_str(),
+                        MapUnit::Entries.as_str(),
+                    ])
+                    .set(listening_ports_count as i64);
 
                 for key in keys {
                     scanned += 1;
