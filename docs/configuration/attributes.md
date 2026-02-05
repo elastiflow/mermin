@@ -63,7 +63,10 @@ Defines which metadata to extract from the Kubernetes resources.
 ### `attributes.source.k8s.extract.label` block
 
 The label block configures how to extract Kubernetes labels to Otel attributes, can be defined multiple times to extract multiple labels.
-_Not implemented_
+
+{% hint style="warning" %}
+Currently, this features is not supported.
+{% endhint %}
 
 **Type:** [Metadata extraction object](#metadata-extraction-object)
 
@@ -84,7 +87,10 @@ label {
 ### `attributes.source.k8s.extract.annotation` block
 
 The label block configures how to extract Kubernetes annotations to Otel attributes, can be defined multiple times to extract multiple labels.
-_Not implemented_
+
+{% hint style="warning" %}
+Currently, this features is not supported.
+{% endhint %}
 
 **Type:** [Metadata extraction object](#metadata-extraction-object)
 
