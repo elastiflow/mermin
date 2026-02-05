@@ -17,7 +17,7 @@ A full configuration example may be found in the [Default Configuration](./defau
 
 ### `internal.metrics` block
 
-- `enabled` attribute
+* `enabled` attribute
 
   Enable or disable the metrics server.
 
@@ -33,7 +33,7 @@ A full configuration example may be found in the [Default Configuration](./defau
   }
   ```
 
-- `listen_address` attribute
+* `listen_address` attribute
 
   IP address the metrics server binds to.
 
@@ -49,7 +49,7 @@ A full configuration example may be found in the [Default Configuration](./defau
   }
   ```
 
-- `port` attribute
+* `port` attribute
 
   TCP port the metrics server listens on.
 
@@ -69,7 +69,7 @@ A full configuration example may be found in the [Default Configuration](./defau
   }
   ```
 
-- `debug_metrics_enabled` attribute
+* `debug_metrics_enabled` attribute
 
   Enable debug metrics.
 
@@ -89,7 +89,7 @@ A full configuration example may be found in the [Default Configuration](./defau
   }
   ```
 
-- `stale_metric_ttl` attribute
+* `stale_metric_ttl` attribute
 
   Time-to-live for stale metrics after resource deletion. `0s` applies immediate cleanup.
 
@@ -109,14 +109,14 @@ A full configuration example may be found in the [Default Configuration](./defau
   }
   ```
 
-### `histogram_buckets` block
+### `internal.metrics.histogram_buckets` block
 
 Optional subsection for histogram bucket overrides. Omit the block to use default buckets for all histograms. Each key is the full metric name.
 
 Mermin provides several histogram metrics that track distributions of values (durations, batch sizes, etc.). By default, these metrics use pre-configured bucket sizes optimized for typical workloads.
 You can customize these bucket sizes inside a `histogram_buckets` block.
 
-- `mermin_pipeline_duration_seconds` attribute
+* `mermin_pipeline_duration_seconds` attribute
 
   Custom buckets for the `mermin_pipeline_duration_seconds` histogram metric. This metric tracks processing duration by pipeline stage (eBPF ring buffer processing, Kubernetes decoration, export operations).
 
@@ -136,7 +136,7 @@ You can customize these bucket sizes inside a `histogram_buckets` block.
   }
   ```
 
-- `mermin_export_batch_size` attribute
+* `mermin_export_batch_size` attribute
 
   Custom buckets for the `mermin_export_batch_size` histogram metric. This metric tracks the number of spans per export batch.
 
@@ -156,7 +156,7 @@ You can customize these bucket sizes inside a `histogram_buckets` block.
   }
   ```
 
-- `mermin_k8s_watcher_ip_index_update_duration_seconds` attribute
+* `mermin_k8s_watcher_ip_index_update_duration_seconds` attribute
 
   Custom buckets for the `mermin_k8s_watcher_ip_index_update_duration_seconds` histogram metric. This metric tracks the duration of Kubernetes IP index updates.
 
@@ -176,7 +176,7 @@ You can customize these bucket sizes inside a `histogram_buckets` block.
   }
   ```
 
-- `mermin_taskmanager_shutdown_duration_seconds` attribute
+* `mermin_taskmanager_shutdown_duration_seconds` attribute
 
   Custom buckets for the `mermin_taskmanager_shutdown_duration_seconds` histogram metric. This metric tracks the duration of shutdown operations.
 
@@ -260,6 +260,8 @@ For production environments:
 1. Limit labels in metrics
 2. Use aggregation in queries
 3. Adjust Prometheus retention
+
+____
 
 ## Next Steps
 
