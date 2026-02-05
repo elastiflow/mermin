@@ -17,6 +17,8 @@ Flow semantics (how flows become OpenTelemetry spans and what attributes they ca
 
 A full configuration example can be found in the [Default Configuration](./default/config.hcl).
 
+## Object Types
+
 ### `span` block
 
 Place a `span { }` block alongside `pipeline`, `export`, and other blocks. Omit the block to use built-in defaults for all options. Durations use HCL duration strings (e.g. `"30s"`, `"5m"`, `"24h"`).

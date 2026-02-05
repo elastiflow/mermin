@@ -8,7 +8,7 @@ The resulting attributes (e.g. `source.k8s.networkpolicy.name`, `destination.k8s
 
 You can configure:
 
-- **Source-to-target mapping**: which resource kind contains the selector (`kind`) and which kind to match against (`to`; currently only Pod)
+- **Selector-to-target mapping**: which resource kind contains the selector (`kind`) and which kind to match against (`to`; currently only Pod)
 - **Selector field paths**: JSONPath-style paths to `matchLabels` and optional `matchExpressions` on the source resource
 
 The resource kinds you use in `selector_relations` (e.g. NetworkPolicy, Service, Deployment) must be watched by the Kubernetes informer;
@@ -40,13 +40,15 @@ discovery "informer" "k8s" {
 }
 ```
 
+## Object Types
+
 ### Selector Relation Object
 
 Each element in `selector_relations` is an object with these attributes:
 
 - `kind` attribute
 
-  Source Kubernetes resource kind that contains the selector. Case insensitive. Supported kinds: NetworkPolicy, Service, Deployment, ReplicaSet, StatefulSet, DaemonSet, Job, CronJob.
+  From Kubernetes resource kind that contains the selector. Case insensitive. Supported kinds: NetworkPolicy, Service, Deployment, ReplicaSet, StatefulSet, DaemonSet, Job, CronJob.
 
   **Type:** String
 
@@ -105,7 +107,7 @@ Each element in `selector_relations` is an object with these attributes:
 
 - `selector_match_expressions_field` attribute
 
-  JSONPath-style path to the `matchExpressions` field on the source resource. Omit for resources that only use a flat selector (e.g. Service).
+  JSONPath-style path to the `matchExpressions` field on the from resource. Omit for resources that only use a flat selector (e.g. Service).
 
   **Type:** String (optional)
 
@@ -122,7 +124,9 @@ Each element in `selector_relations` is an object with these attributes:
   }
   ```
 
-## Common Cnfigurations
+### Object Relations
+
+#### Common Configurations
 
 ### NetworkPolicy → Pod
 
