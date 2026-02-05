@@ -291,6 +291,13 @@ attributes "source" "k8s" {
     #   attribute       = "$1"
     #   attribute_value = "$1"
     # }
+
+    # Using direct key match example
+    # annotation {
+    #   from      = "service" # case insensitive
+    #   key       = "kubernetes.io/barbaz"
+    #   attribute = "barbaz"
+    # }
   }
 
   /*
@@ -444,12 +451,12 @@ attributes "destination" "k8s" {
     #   attribute_value = "$1"
     # }
 
-# Using direct key match example
-# annotation {
-#   from      = "service" # case insensitive
-#   key       = "kubernetes.io/barbaz"
-#   attribute = "barbaz"
-# }
+    # Using direct key match example
+    # annotation {
+    #   from      = "service" # case insensitive
+    #   key       = "kubernetes.io/barbaz"
+    #   attribute = "barbaz"
+    # }
 
   }
 
