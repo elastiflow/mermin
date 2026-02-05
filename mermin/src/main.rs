@@ -637,18 +637,6 @@ async fn run(cli: Cli) -> Result<()> {
         .await
         .map_err(|e| MerminError::internal(format!("failed to scan listening ports: {e}")))?;
 
-    // Set LISTENING_PORTS map metrics after initial scan
-    // Note: This only reflects the startup state; eBPF kprobes maintain the map
-    // in real-time after this, but those changes are not reflected in these metrics.
-    if metrics::registry::debug_enabled() {
-        metrics::registry::EBPF_MAP_SIZE
-            .with_label_values(&[
-                EbpfMapName::ListeningPorts.as_str(),
-                MapUnit::Entries.as_str(),
-            ])
-            .set(scanned_ports as i64);
-    }
-
     info!(
         event.name = "listening_ports.scan_complete",
         total_ports = scanned_ports,
