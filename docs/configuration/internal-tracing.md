@@ -59,47 +59,9 @@ A full configuration example may be found in the [Default Configuration](./defau
   }
   ```
 
-- `otlp` attribute
+### `internal.traces.otlp` block
 
-  OTLP exporter configuration for internal traces. Uses same configuration options as main OTLP exporter (see [OTLP Exporter](export-otlp.md)).
-
-  **Type:** Object
-
-  **Default:** `null` (disabled)
-
-  **Examples:**
-
-  - Basic OTLP export
-
-    ```hcl
-    internal "traces" {
-      otlp = {
-        endpoint = "http://otel-collector:4317"
-        protocol = "grpc"
-      }
-    }
-    ```
-
-  - OTLP export with authentication
-
-    ```hcl
-    internal "traces" {
-      otlp = {
-        endpoint = "http://otel-collector:4318"
-        protocol = "http_binary"
-        timeout = "10s"
-        max_batch_size = 512
-        max_batch_interval = "5s"
-
-        auth = {
-          basic = {
-            user = "mermin-internal"
-            pass = "password"
-          }
-        }
-      }
-    }
-    ```
+OTLP exporter configuration for internal traces. Uses same configuration options as main OTLP exporter (see [OTLP Exporter](export-otlp.md)).
 
 ## Use Cases
 
@@ -187,7 +149,6 @@ internal "traces" {
 - Separate production Flow Traces from debug data
 - Different retention policies
 - Isolate development traffic
-
 
 Safe to enable in production for troubleshooting.
 
