@@ -2,27 +2,19 @@
 
 **Block:** `export.traces.stdout`
 
-The stdout exporter outputs flow records directly to the console (standard output), making it ideal for development, debugging, and initial testing of Mermin.
+The stdout exporter outputs flow records directly to the console (standard output), making it ideal for development, debugging, and verifying flow capture without an external backend.
 
 ## Overview
 
-While OTLP export is used for production observability, the stdout exporter provides immediate, human-readable visibility into captured flows without requiring an external collector.
+The stdout exporter transforms flow spans into a readable format. While OTLP export is used for production observability, the stdout exporter provides immediate, human-readable visibility into the data Mermin is processing.
 
 ## Configuration
+
+A complete configuration example can be found in the [Default Configuration](./default/config.hcl).
 
 ```hcl
 export "traces" {
   stdout = "text_indent"
-}
-```
-
-Alternatively, use the object form (required in YAML):
-
-```hcl
-export "traces" {
-  stdout = {
-    format = "text_indent"
-  }
 }
 ```
 
@@ -104,113 +96,6 @@ Flow Record:
   Community ID: 1:LQU9qZlK+B5F3KDmev6m5PMibrg=
 ```
 
-## Use Cases
-
-### Development and Testing
-
-Use stdout during initial development:
-
-```hcl
-# Local development config
-log_level = "debug"
-
-discovery "instrument" {
-  interfaces = ["eth0"]
-}
-
-export "traces" {
-  stdout = "text_indent"  # See flows immediately
-}
-```
-
-**Benefits:**
-
-- No external dependencies
-- Immediate feedback
-- Easy debugging
-- Simple setup
-
-### Debugging Flow Issues
-
-Enable stdout temporarily to debug flow capture:
-
-```hcl
-export "traces" {
-  stdout = "text_indent"  # Add for debugging
-
-  otlp = {
-    endpoint = "http://otel-collector:4317"
-    protocol = "grpc"
-  }
-}
-```
-
-**Workflow:**
-
-1. Enable stdout exporter
-2. Deploy or reload configuration
-3. View logs: `kubectl logs -f <pod-name>`
-4. Inspect flow records
-5. Disable stdout when done
-
-### Quick Start and Demos
-
-Use stdout for quick demonstrations:
-
-```hcl
-# Demo configuration
-log_level = "info"
-
-export "traces" {
-  stdout = "text_indent"  # Show flows in real-time
-}
-
-# Minimal config for demo
-discovery "instrument" {
-  interfaces = ["eth*"]
-}
-```
-
-### Pipeline Validation
-
-Verify flow generation before setting up full OTLP pipeline:
-
-```hcl
-export "traces" {
-  stdout = "text_indent"  # Validate flows are captured
-
-  # Add OTLP after validation
-  # otlp = {
-  #   endpoint = "http://otel-collector:4317"
-  #   protocol = "grpc"
-  # }
-}
-```
-
-## Combined with OTLP
-
-You can enable both stdout and OTLP exporters simultaneously:
-
-```hcl
-export "traces" {
-  # Debug output to console
-  stdout = "text_indent"
-
-  # Production export to collector
-  otlp = {
-    endpoint = "http://otel-collector:4317"
-    protocol = "grpc"
-  }
-}
-```
-
-**When to use both:**
-
-- Debugging export issues
-- Comparing local vs. exported data
-- Validating flow enrichment
-- Troubleshooting transformations
-
 ## Troubleshooting
 
 ### No Output Visible
@@ -254,24 +139,30 @@ export "traces" {
 
 ## Configuration Examples
 
-### Development Only
+### Development and Quick Start
+Use this configuration to see flows immediately during initial setup or demos without external dependencies.
 
 ```hcl
 # Development configuration
 log_level = "debug"
 
+discovery "instrument" {
+  interfaces = ["eth0"]
+}
+
 export "traces" {
-  stdout = "text_indent"  # Console output only
+  stdout = "text_indent"  # Immediate human-readable feedback
 }
 ```
 
-### Debugging with OTLP
+### Dual Export
+Use this configuration to verify that flows are being captured correctly while simultaneously sending them to a production OTLP backend. This is useful for troubleshooting pipeline issues.
 
 ```hcl
-# Debugging configuration
+# Debugging / Pipeline Validation
 export "traces" {
-  stdout = "text_indent"  # Temporary debug output
-
+  stdout = "text_indent" 
+  
   otlp = {
     endpoint = "http://otel-collector:4317"
     protocol = "grpc"
