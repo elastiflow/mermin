@@ -5,44 +5,13 @@
 This page documents the OpenTelemetry Protocol (OTLP) exporter configuration, which controls how Mermin exports flow
 records to your observability backend.
 
-## Overview
-
 OTLP is the standard protocol for OpenTelemetry telemetry data. Mermin exports network flows as OTLP trace spans,
 enabling integration with any OTLP-compatible backend including OpenTelemetry Collector, Grafana Tempo, Jaeger, and
 more.
 
 ## Configuration
 
-A full configuration example:
-
-```hcl
-export "traces" {
-  otlp = {
-    endpoint               = "http://otel-collector:4317"
-    protocol               = "grpc"
-    timeout                = "10s"
-    max_batch_size         = 1024
-    max_batch_interval     = "2s"
-    max_queue_size         = 32768
-    max_concurrent_exports = 4
-    max_export_timeout     = "10s"
-
-    auth = {
-      basic = {
-        user = "username"
-        pass = "password"
-      }
-    }
-
-    tls = {
-      insecure_skip_verify = false
-      ca_cert              = "/etc/certs/ca.crt"
-      client_cert          = "/etc/certs/client.crt"
-      client_key           = "/etc/certs/client.key"
-    }
-  }
-}
-```
+A full configuration example can be found in the [Default Configuration](./default/config.hcl).
 
 ### `export.traces.otlp` block
 
@@ -151,13 +120,11 @@ export "traces" {
   }
   ```
 
-#### Batching Configuration
-
-Mermin uses batching for efficient exports of flow spans. The processor queues spans asynchronously and exports them in batches, providing natural backpressure when the queue fills up.
-
 - `max_batch_size` attribute
 
   Maximum number of spans (flow records) per batch.
+
+  Mermin uses batching for efficient exports of flow spans. The processor queues spans asynchronously and exports them in batches, providing natural backpressure when the queue fills up.
 
   **Type:** Integer
 
@@ -324,25 +291,47 @@ Mermin uses batching for efficient exports of flow spans. The processor queues s
 
 Configure authentication for the OTLP endpoint. Supports HTTP Basic authentication or Bearer token authentication.
 
-- `basic` block
+- `bearer` attribute
 
-  Configure HTTP Basic authentication for the OTLP endpoint.
+  Bearer token for authentication. Use instead of basic authentication when the backend expects a bearer token.
 
-  - `user` attribute
+  **Type:** String
 
-    Username for basic authentication.
+  **Default:** None (optional)
 
-    **Type:** String
+  **Example:** Bearer authentication
 
-    **Default:** None (required if basic auth is used)
+  ```hcl
+  export "traces" {
+    otlp = {
+      endpoint = "https://collector.example.com:4317"
 
-  - `pass` attribute
+      auth = {
+        bearer = "secret_password"
+      }
+    }
+  }
+  ```
 
-    Password for basic authentication. Supports environment variable interpolation via `env(VAR_NAME)`.
+### `export.traces.otlp.auth.basic` block
 
-    **Type:** String
+Configure HTTP Basic authentication for the OTLP endpoint.
 
-    **Default:** None (required if basic auth is used)
+- `user` attribute
+
+  Username for basic authentication.
+
+  **Type:** String
+
+  **Default:** None (required if basic auth is used)
+
+- `pass` attribute
+
+  Password for basic authentication. Supports environment variable interpolation via `env(VAR_NAME)`.
+
+  **Type:** String
+
+  **Default:** None (required if basic auth is used)
 
   **Examples:**
 
@@ -376,7 +365,7 @@ Configure authentication for the OTLP endpoint. Supports HTTP Basic authenticati
         auth = {
           basic = {
             user = "mermin"
-            pass = "env(OTLP_PASSWORD)"
+            pass = "${env(OTLP_PASSWORD)}"
           }
         }
       }
@@ -406,28 +395,6 @@ Configure authentication for the OTLP endpoint. Supports HTTP Basic authenticati
             name: mermin-otlp-auth
             key: password
     ```
-
-- `bearer` attribute
-
-  Bearer token for authentication. Use instead of basic authentication when the backend expects a bearer token.
-
-  **Type:** String
-
-  **Default:** None (optional)
-
-  **Example:** Bearer authentication
-
-  ```hcl
-  export "traces" {
-    otlp = {
-      endpoint = "https://collector.example.com:4317"
-
-      auth = {
-        bearer = "secret_password"
-      }
-    }
-  }
-  ```
 
 ### `export.traces.otlp.tls` block
 
@@ -627,7 +594,7 @@ export "traces" {
 }
 ```
 
-## Complete Configuration Examples
+## Configuration examples
 
 ### Minimal (Local Development)
 
@@ -670,7 +637,7 @@ export "traces" {
     auth = {
       basic = {
         user = "mermin"
-        pass = "env(OTLP_PASSWORD)"
+        pass = "${env(OTLP_PASSWORD)}"
       }
     }
 

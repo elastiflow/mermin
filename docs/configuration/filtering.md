@@ -20,7 +20,7 @@ The attribute's dot notation is converted to underscores (e.g., `flow.tcp.flags.
 
 A full configuration example can be found in the [Default Configuration](./default/config.hcl).
 
-### `filter.source` and `filter.destination` filters block
+### `filter.source` and `filter.destination` blocks
 
 The filters apply to the `source`/`destination` combination of the `address` and `port` in the flow span.
 Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/agent-architecture.md#components)), which can help reduce resource usage in subsequent stages.
@@ -135,7 +135,7 @@ The result of the `filter.source`/`filter.destination` inclusion/exclusion is co
   ]
   ```
 
-### `filter.network` filter block
+### `filter.network` block
 
 The filter applies to various network attributes in the flow span, such as transport protocol, interface, and others.
 Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/agent-architecture.md#components)), which can help reduce resource usage in subsequent stages.
@@ -276,7 +276,7 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
     }
     ```
 
-### `filter.flow` filter block
+### `filter.flow` block
 
 The filter applies to various flow attributes in the flow span, such as connection state, TCP flags and others.
 Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/agent-architecture.md#components)), which can help reduce resource usage in subsequent stages.

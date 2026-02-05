@@ -37,7 +37,7 @@ attributes "destination" "k8s" {
 
 A full configuration example can be found in the [Default Configuration](./default/config.hcl).
 
-### `extract` block
+### `attributes.source.k8s.extract` block
 
 Defines which metadata to extract from the Kubernetes resources.
 
@@ -60,49 +60,49 @@ Defines which metadata to extract from the Kubernetes resources.
   }
   ```
 
-- `label` block
+### `attributes.source.k8s.extract.label` block
 
-  The label block configures how to extract Kubernetes labels to Otel attributes, can be defined multiple times to extract multiple labels.
-  _Not implemented_
+The label block configures how to extract Kubernetes labels to Otel attributes, can be defined multiple times to extract multiple labels.
+_Not implemented_
 
-  **Type:** [Metadata extraction object](#metadata-extraction-object)
+**Type:** [Metadata extraction object](#metadata-extraction-object)
 
-  **Default:** `{}` (no labels are extracted by default)
+**Default:** `{}` (no labels are extracted by default)
 
-  **Example:** Extract all Service labels with `kubernetes.io/` prefix to Otel attribute named after label suffix without any value modifications
+**Example:** Extract all Service labels with `kubernetes.io/` prefix to Otel attribute named after label suffix without any value modifications
 
-  ```hcl
-  label {
-    from            = "service"
-    key_regex       = "kubernetes.io/(.*)"
-    value_regex     = "(.*)"
-    attribute       = "$1"
-    attribute_value = "$1"
-  }
-  ```
+```hcl
+label {
+  from            = "service"
+  key_regex       = "kubernetes.io/(.*)"
+  value_regex     = "(.*)"
+  attribute       = "$1"
+  attribute_value = "$1"
+}
+```
 
-- `annotation` block
+### `attributes.source.k8s.extract.annotation` block
 
-  The label block configures how to extract Kubernetes annotations to Otel attributes, can be defined multiple times to extract multiple labels.
-  _Not implemented_
+The label block configures how to extract Kubernetes annotations to Otel attributes, can be defined multiple times to extract multiple labels.
+_Not implemented_
 
-  **Type:** [Metadata extraction object](#metadata-extraction-object)
+**Type:** [Metadata extraction object](#metadata-extraction-object)
 
-  **Default** `{}` (no annotations are extracted by default)
+**Default** `{}` (no annotations are extracted by default)
 
-  **Example:** Extract all Pod annotations with `kubernetes.io/` prefix to Otel attribute named after annotation suffix without any value modifications
+**Example:** Extract all Pod annotations with `kubernetes.io/` prefix to Otel attribute named after annotation suffix without any value modifications
 
-  ```hcl
-  annotation {
-    from            = "pod"
-    key_regex       = "kubernetes.io/(.*)"
-    value_regex     = "(.*)"
-    attribute       = "$1"
-    attribute_value = "$1"
-  }
-  ```
+```hcl
+annotation {
+  from            = "pod"
+  key_regex       = "kubernetes.io/(.*)"
+  value_regex     = "(.*)"
+  attribute       = "$1"
+  attribute_value = "$1"
+}
+```
 
-### `association` block
+### `attributes.source.k8s.association` block
 
 Defines how to associate flow fields (e.g. `source.ip`, `source.port`) to Kubernetes object fields for matching. The `to` paths are JSONPath-style paths over the resource (Pod, Service, Node, etc.).
 
