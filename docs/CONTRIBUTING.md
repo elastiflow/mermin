@@ -39,10 +39,10 @@ Always create a new branch for your work:
 ```shell
 # Fetch latest changes from upstream
 git fetch upstream
-git checkout -b feature/my-new-feature upstream/beta
+git checkout -b feature/my-new-feature upstream/main
 
 # Or for bug fixes
-git checkout -b fix/issue-123 upstream/beta
+git checkout -b fix/issue-123 upstream/main
 ```
 
 **Branch naming conventions:**
@@ -91,7 +91,7 @@ See the [Development Workflow](contributor-guide/development-workflow.md) guide 
 git push origin feature/my-new-feature
 ```
 
-Then open a pull request on GitHub from your fork to the `beta` branch of the main repository.
+Then open a pull request on GitHub from your fork to the `main` branch of the main repository.
 
 ## Commit Message Guidelines
 
@@ -170,7 +170,7 @@ set log_level = "info" in their configuration.
 
 ### Before Submitting
 
-- [ ] Ensure your branch is up to date with `upstream/beta`.
+- [ ] Ensure your branch is up to date with `upstream/main`.
 - [ ] All tests pass locally.
 - [ ] Code is formatted with `cargo fmt`.
 - [ ] No clippy warnings.
@@ -204,8 +204,8 @@ When creating a PR, provide:
 - Update your local repository:
 
   ```shell
-  git checkout beta
-  git pull upstream beta
+  git checkout main
+  git pull upstream main
   ```
 
 ## CI Checks
