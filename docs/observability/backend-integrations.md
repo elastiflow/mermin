@@ -63,42 +63,6 @@ Open-source alternative to Elasticsearch with native OTLP support via OpenTeleme
 - [`docs/deployment/examples/netobserv_os_simple_svc/`](../deployment/examples/netobserv_os_simple_svc/README.md) - Basic OpenSearch setup
 - [`docs/deployment/examples/netobserv_os_simple_gke_gw/`](../deployment/examples/netobserv_os_simple_gke_gw/README.md) - GKE deployment with Gateway API
 
-### Grafana Tempo
-
-Distributed tracing backend with native OTLP support and TraceQL query language.
-
-**Use Case:** Scalable trace storage, cost-effective long-term retention
-
-**How to Connect:** Point Mermin directly to Tempo's OTLP endpoint (gRPC on port 4317)
-
-```hcl
-export "traces" {
-  otlp = {
-    endpoint = "http://tempo:4317"
-  }
-}
-```
-
-**Example:** Coming soon...
-
-### Jaeger
-
-Distributed tracing platform with native OTLP receiver.
-
-**Use Case:** Service maps, trace visualization, root cause analysis
-
-**How to Connect:** Point Mermin to Jaeger's OTLP collector endpoint
-
-```hcl
-export "traces" {
-  otlp = {
-    endpoint = "http://jaeger-collector:4317"
-  }
-}
-```
-
-**Example:** Coming soon...
-
 ### Greptime Ingestion
 
 Greptime is a database designed for high-cardinality time series data that supports OTLP ingestion.
