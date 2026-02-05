@@ -88,7 +88,7 @@ For a deeper dive into Mermin's architecture, see our [Architecture Overview](do
 
 ## Documentation
 
-Comprehensive documentation is available in the `docs/` directory:
+Comprehensive documentation is available in the `docs/` directory and via [docs.mermin.dev](https://docs.mermin.dev):
 
 ### Getting Started
 

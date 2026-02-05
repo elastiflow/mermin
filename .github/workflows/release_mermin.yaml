@@ -18,8 +18,8 @@ on:
 env:
   BRANCH_TAG_PREFIXES: |
     {
-        "alpha": "v0.1.0-alpha.",
-        "beta": "v0.1.0-beta.",
+        "alpha": "v0.2.0-alpha.",
+        "beta": "v0.2.0-beta.",
         "main": "v"
     }
 
