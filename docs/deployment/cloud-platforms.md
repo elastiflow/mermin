@@ -10,9 +10,9 @@ This guide provides specific instructions for deploying Mermin on major cloud Ku
 
 ### GKE Prerequisites
 
-* `gcloud` CLI installed and configured
-* GKE cluster created (Standard or Autopilot)
-* `kubectl` configured for your GKE cluster
+- `gcloud` CLI installed and configured
+- GKE cluster created (Standard or Autopilot)
+- `kubectl` configured for your GKE cluster
 
 ### GKE Standard Clusters
 
@@ -132,19 +132,19 @@ GKE Dataplane V2 uses Cilium for advanced networking features.
 
 **How it works:**
 
-* **Kernel >= 6.6**: Uses TCX (Traffic Control eXpress) with `tcx_order = "first"` (runs before other programs)
-* **Kernel < 6.6**: Uses netlink with `tc_priority = 1` (runs first in chain)
+- **Kernel >= 6.6**: Uses TCX (Traffic Control eXpress) with `tcx_order = "first"` (runs before other programs)
+- **Kernel < 6.6**: Uses netlink with `tc_priority = 1` (runs first in chain)
 
 **Observability characteristics:**
 
 Mermin runs **first** in the TC chain (default behavior), meaning:
 
-* ✅ All traffic flows are captured
-* ✅ State continuity: Flow statistics persist across mermin restarts via map pinning
-* ✅ No flow gaps: Existing pods generate flows immediately after mermin restart
-* ℹ️ First-execution prevents orphan program issues on restart
+- ✅ All traffic flows are captured
+- ✅ State continuity: Flow statistics persist across mermin restarts via map pinning
+- ✅ No flow gaps: Existing pods generate flows immediately after mermin restart
+- ℹ️ First-execution prevents orphan program issues on restart
 
-This provides accurate flow visibility for monitoring and troubleshooting while maintaining cluster stability. Mermin operates passively (TC\_ACT\_UNSPEC) so running first doesn't interfere with Cilium's networking.
+This provides accurate flow visibility for monitoring and troubleshooting while maintaining cluster stability. Mermin operates passively (TC_ACT_UNSPEC) so running first doesn't interfere with Cilium's networking.
 
 **Verification:**
 
@@ -182,9 +182,9 @@ discovery "instrument" {
 
 **Note:** The default first-execution strategy (`tcx_order = "first"`, `tc_priority = 1`):
 
-* Ensures immediate flow visibility after restart (prevents orphan issues)
-* Doesn't affect what IP addresses you see (Cilium's service LB happens at socket/cgroup layer, before TC)
-* Rarely causes conflicts because mermin is passive (TC\_ACT\_UNSPEC)
+- Ensures immediate flow visibility after restart (prevents orphan issues)
+- Doesn't affect what IP addresses you see (Cilium's service LB happens at socket/cgroup layer, before TC)
+- Rarely causes conflicts because mermin is passive (TC_ACT_UNSPEC)
 
 Only adjust if you experience specific integration issues with Cilium or other TC programs.
 {% endhint %}
@@ -193,10 +193,10 @@ Only adjust if you experience specific integration issues with Cilium or other T
 
 ### EKS Prerequisites
 
-* `aws` CLI installed and configured
-* `eksctl` installed (optional but recommended)
-* EKS cluster created
-* `kubectl` configured for your EKS cluster
+- `aws` CLI installed and configured
+- `eksctl` installed (optional but recommended)
+- EKS cluster created
+- `kubectl` configured for your EKS cluster
 
 ### Creating an EKS Cluster
 
@@ -276,9 +276,9 @@ eksctl create iamserviceaccount \
 
 ### AKS Prerequisites
 
-* `az` CLI installed and configured
-* AKS cluster created
-* `kubectl` configured for your AKS cluster
+- `az` CLI installed and configured
+- AKS cluster created
+- `kubectl` configured for your AKS cluster
 
 ### Creating an AKS Cluster
 
@@ -477,21 +477,21 @@ az role assignment create \
 
 ### GKE Cost Optimization
 
-* Use **Preemptible/Spot nodes** for non-critical Mermin pods (with PodDisruptionBudget)
-* Use **node autoscaling** to match traffic patterns
-* Consider **regional clusters** for high availability
+- Use **Preemptible/Spot nodes** for non-critical Mermin pods (with PodDisruptionBudget)
+- Use **node autoscaling** to match traffic patterns
+- Consider **regional clusters** for high availability
 
 ### EKS Cost Optimization
 
-* Use **Spot instances** for cost savings (with PodDisruptionBudget)
-* Use **Cluster Autoscaler** or **Karpenter** for dynamic scaling
-* Enable **Container Insights** for monitoring
+- Use **Spot instances** for cost savings (with PodDisruptionBudget)
+- Use **Cluster Autoscaler** or **Karpenter** for dynamic scaling
+- Enable **Container Insights** for monitoring
 
 ### AKS Cost Optimization
 
-* Use **Spot node pools** for cost savings
-* Use **Cluster Autoscaler** for dynamic scaling
-* Enable **Container Insights** for monitoring
+- Use **Spot node pools** for cost savings
+- Use **Cluster Autoscaler** for dynamic scaling
+- Enable **Container Insights** for monitoring
 
 ## Multi-Region Deployments
 
@@ -575,7 +575,7 @@ Ensure managed identity has necessary permissions and AAD Pod Identity is config
 
 ## Next Steps
 
-* [**Advanced Scenarios**](advanced-scenarios.md): Custom CNI, multi-cluster deployments
-* [**Configuration Reference**](../configuration/overview.md): Fine-tune Mermin for your environment
-* [**Observability Backends**](../getting-started/backend-integrations.md): Send Flow Traces to cloud-native observability platforms
-* [**Troubleshooting**](../troubleshooting/troubleshooting.md): Solve cloud-specific issues
+- [**Advanced Scenarios**](advanced-scenarios.md): Custom CNI, multi-cluster deployments
+- [**Configuration Reference**](../configuration/overview.md): Fine-tune Mermin for your environment
+- [**Observability Backends**](../observability/backend-integrations.md): Send Flow Traces to cloud-native observability platforms
+- [**Troubleshooting**](../troubleshooting/troubleshooting.md): Solve cloud-specific issues

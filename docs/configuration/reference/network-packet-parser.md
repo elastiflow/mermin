@@ -1,4 +1,4 @@
-# Configure Parsing of Network Packets
+# Configure Parsing of Network Packet
 
 The parser configuration controls how Mermin's eBPF programs detect and parse tunneled traffic by specifying UDP ports for VXLAN, Geneve, and WireGuard.
 
@@ -6,8 +6,8 @@ The parser configuration controls how Mermin's eBPF programs detect and parse tu
 
 Mermin's parser configuration allows you to:
 
-* Specify UDP ports for tunnel protocol detection (VXLAN, Geneve, WireGuard)
-* Match your CNI or overlay network's tunnel port settings so inner (pod) traffic is visible
+- Specify UDP ports for tunnel protocol detection (VXLAN, Geneve, WireGuard)
+- Match your CNI or overlay network's tunnel port settings so inner (pod) traffic is visible
 
 Correct port configuration ensures flows show inner source/destination (e.g., pod IPs) instead of only tunnel endpoints (node IPs). These settings do not add configurable parsing depth or IPv6 extension options; only tunnel ports are configurable.
 
@@ -34,15 +34,15 @@ UDP port number for Geneve tunnel detection.
 
 **Description:**
 
-* [Geneve](https://datatracker.ietf.org/doc/html/rfc8926) (Generic Network Virtualization Encapsulation) is a tunneling protocol
-* IANA assigned port: 6081
-* Used by various cloud networking solutions and SDN controllers
+- [Geneve](https://datatracker.ietf.org/doc/html/rfc8926) (Generic Network Virtualization Encapsulation) is a tunneling protocol
+- IANA assigned port: 6081
+- Used by various cloud networking solutions and SDN controllers
 
 **When to customize:**
 
-* Your environment uses non-standard Geneve port
-* Network policy requires specific port assignment
-* Conflict with other services on standard port
+- Your environment uses non-standard Geneve port
+- Network policy requires specific port assignment
+- Conflict with other services on standard port
 
 **Example:**
 
@@ -68,15 +68,15 @@ UDP port number for VXLAN tunnel detection.
 
 **Description:**
 
-* [VXLAN](https://datatracker.ietf.org/doc/html/rfc7348) (Virtual Extensible LAN) is a network virtualization technology
-* IANA assigned port: 4789
-* Commonly used in Kubernetes networking (Flannel, Calico, NSX-T)
+- [VXLAN](https://datatracker.ietf.org/doc/html/rfc7348) (Virtual Extensible LAN) is a network virtualization technology
+- IANA assigned port: 4789
+- Commonly used in Kubernetes networking (Flannel, Calico, NSX-T)
 
 **When to customize:**
 
-* Your CNI or network plugin uses non-standard VXLAN port
-* Legacy VXLAN deployments using older port assignments
-* Custom overlay network configuration
+- Your CNI or network plugin uses non-standard VXLAN port
+- Legacy VXLAN deployments using older port assignments
+- Custom overlay network configuration
 
 **Example:**
 
@@ -102,15 +102,15 @@ UDP port number for WireGuard tunnel detection.
 
 **Description:**
 
-* [WireGuard](https://www.wireguard.com/) is a modern VPN protocol
-* Default port: 51820 (not IANA assigned, but widely adopted)
-* Used for secure site-to-site or pod-to-pod encrypted connections
+- [WireGuard](https://www.wireguard.com/) is a modern VPN protocol
+- Default port: 51820 (not IANA assigned, but widely adopted)
+- Used for secure site-to-site or pod-to-pod encrypted connections
 
 **When to customize:**
 
-* WireGuard configured with custom listen port
-* Multiple WireGuard tunnels with different ports
-* Security requirements for non-default ports
+- WireGuard configured with custom listen port
+- Multiple WireGuard tunnels with different ports
+- Security requirements for non-default ports
 
 **Example:**
 
@@ -133,34 +133,34 @@ parser {
 ### Packet Processing Flow
 
 1. **Outer Header Parsing**:
-   * Mermin's eBPF program examines the outer IP header
-   * Checks UDP destination port against configured tunnel ports
+   - Mermin's eBPF program examines the outer IP header
+   - Checks UDP destination port against configured tunnel ports
 2. **Tunnel Type Detection**:
-   * If port matches `vxlan_port` → Parse as VXLAN
-   * If port matches `geneve_port` → Parse as Geneve
-   * If port matches `wireguard_port` → Parse as WireGuard
+   - If port matches `vxlan_port` → Parse as VXLAN
+   - If port matches `geneve_port` → Parse as Geneve
+   - If port matches `wireguard_port` → Parse as WireGuard
 3. **Inner Header Parsing**:
-   * Extract encapsulated packet
-   * Parse inner IP, TCP/UDP headers
-   * Generate flow records using inner headers
+   - Extract encapsulated packet
+   - Parse inner IP, TCP/UDP headers
+   - Generate flow records using inner headers
 4. **Flow Attributes**:
-   * Flow records contain both outer and inner header information
-   * Tunnel type is recorded in flow metadata
-   * Enables tracking of overlay network traffic
+   - Flow records contain both outer and inner header information
+   - Tunnel type is recorded in flow metadata
+   - Enables tracking of overlay network traffic
 
 ### Tunnel Detection Benefits
 
 **Without tunnel parsing:**
 
-* Flows show only tunnel endpoints (node IPs)
-* Cannot see actual source/destination of encapsulated traffic
-* Limited visibility into overlay network communication
+- Flows show only tunnel endpoints (node IPs)
+- Cannot see actual source/destination of encapsulated traffic
+- Limited visibility into overlay network communication
 
 **With tunnel parsing:**
 
-* Flows show inner source/destination (pod IPs)
-* Complete visibility into overlay traffic
-* Accurate flow accounting for containerized workloads
+- Flows show inner source/destination (pod IPs)
+- Complete visibility into overlay traffic
+- Accurate flow accounting for containerized workloads
 
 ## CNI-Specific Configurations
 
@@ -283,17 +283,17 @@ parser {
 
 ### Impact of Tunnel Parsing
 
-* **CPU Usage**: Minimal overhead for tunnel header parsing
-* **Memory**: No additional memory required
-* **Accuracy**: Significantly improves flow accuracy in overlay networks
+- **CPU Usage**: Minimal overhead for tunnel header parsing
+- **Memory**: No additional memory required
+- **Accuracy**: Significantly improves flow accuracy in overlay networks
 
 ### When to Disable
 
 Tunnel parsing cannot be disabled, but misconfigured ports may cause:
 
-* Incorrect tunnel detection
-* Flows attributed to wrong source/destination
-* Missing inner packet information
+- Incorrect tunnel detection
+- Flows attributed to wrong source/destination
+- Missing inner packet information
 
 ## Validation
 
@@ -313,15 +313,15 @@ kubectl logs -l app.kubernetes.io/name=mermin --tail=20
 
 **Without proper configuration:**
 
-* Flows show: Node IP A → Node IP B (outer headers only)
-* Protocol: UDP (tunnel protocol)
-* Ports: tunnel ports (4789, 6081, etc.)
+- Flows show: Node IP A → Node IP B (outer headers only)
+- Protocol: UDP (tunnel protocol)
+- Ports: tunnel ports (4789, 6081, etc.)
 
 **With proper configuration:**
 
-* Flows show: Pod IP X → Pod IP Y (inner headers)
-* Protocol: TCP/UDP/ICMP (actual application protocol)
-* Ports: application ports (80, 443, etc.)
+- Flows show: Pod IP X → Pod IP Y (inner headers)
+- Protocol: TCP/UDP/ICMP (actual application protocol)
+- Ports: application ports (80, 443, etc.)
 
 ## eBPF Verifier Considerations
 
@@ -331,7 +331,7 @@ The Linux eBPF verifier analyzes all possible execution paths in the program to 
 
 **Symptoms of verifier failure:**
 
-```
+```text
 BPF program is too large. Processed 1000001 insn
 verification time 3775231 usec
 ```
@@ -423,9 +423,9 @@ If your environment uses multiple ports for the same tunnel protocol (e.g., mult
 
 ## Next Steps
 
-* [**Configuration Overview**](../overview.md): Config file format and structure
-* [**Network Interface Discovery**](network-interface-discovery.md): Configure which interfaces to monitor
-* [**Flow Filtering**](filtering.md): Filter flows based on protocols and ports
-* [**Deployment Issues**](../../troubleshooting/deployment-issues.md): Troubleshoot eBPF verifier failures
-* [**Troubleshooting**](../../troubleshooting/troubleshooting.md): Diagnose flow capture issues
-* [**Advanced Scenarios**](../../deployment/advanced-scenarios.md): CNI-specific deployment guides
+- [**Configuration Overview**](../overview.md): Config file format and structure
+- [**Network Interface Discovery**](network-interface-discovery.md): Configure which interfaces to monitor
+- [**Flow Filtering**](../filtering.md): Filter flows based on protocols and ports
+- [**Deployment Issues**](../../troubleshooting/deployment-issues.md): Troubleshoot eBPF verifier failures
+- [**Troubleshooting**](../../troubleshooting/troubleshooting.md): Diagnose flow capture issues
+- [**Advanced Scenarios**](../../deployment/advanced-scenarios.md): CNI-specific deployment guides

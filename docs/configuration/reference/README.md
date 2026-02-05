@@ -15,6 +15,7 @@ layout:
     visible: true
 ---
 
+<!-- markdownlint-disable MD025 -->
 # Configuration Reference
 
 This section provides detailed reference documentation for all Mermin configuration options, from network interface discovery to export settings.
@@ -29,7 +30,7 @@ Mermin uses a layered configuration approach:
 
 Global options (documented below) are the only settings configurable via all three methods. All other configuration blocks require a configuration file.
 
-***
+---
 
 ## Configure Global Agent Options
 
@@ -110,17 +111,17 @@ export MERMIN_CONFIG_AUTO_RELOAD=true
 
 **Behavior:**
 
-* File is monitored for changes using filesystem watches
-* Configuration is reloaded atomically
-* Brief pause in flow capture during reload (\~100ms)
-* Invalid configuration prevents reload (old config remains active)
-* Logs indicate successful/failed reload attempts
+- File is monitored for changes using filesystem watches
+- Configuration is reloaded atomically
+- Brief pause in flow capture during reload (\~100ms)
+- Invalid configuration prevents reload (old config remains active)
+- Logs indicate successful/failed reload attempts
 
 **Use Cases:**
 
-* Development and testing: Iterate quickly without restarts
-* Production: Update configuration without downtime
-* Debugging: Temporarily change log levels or filters
+- Development and testing: Iterate quickly without restarts
+- Production: Update configuration without downtime
+- Debugging: Temporarily change log levels or filters
 
 {% hint style="warning" %}
 Some configuration changes may require a full restart, such as changing monitored network interfaces or modifying RBAC permissions.
@@ -134,11 +135,11 @@ Sets the logging verbosity level.
 
 **Valid Values:**
 
-* `trace`: Most verbose, includes all debug information
-* `debug`: Detailed debugging information
-* `info`: General informational messages (default)
-* `warn`: Warning messages only
-* `error`: Error messages only
+- `trace`: Most verbose, includes all debug information
+- `debug`: Detailed debugging information
+- `info`: General informational messages (default)
+- `warn`: Warning messages only
+- `error`: Error messages only
 
 **HCL:**
 
@@ -160,9 +161,9 @@ export MERMIN_LOG_LEVEL=warn
 
 **Recommendations:**
 
-* **Production:** `info` or `warn` to reduce log volume
-* **Debugging:** `debug` for detailed troubleshooting
-* **Development:** `trace` for comprehensive visibility
+- **Production:** `info` or `warn` to reduce log volume
+- **Debugging:** `debug` for detailed troubleshooting
+- **Development:** `trace` for comprehensive visibility
 
 #### `shutdown_timeout`
 
@@ -185,13 +186,13 @@ shutdown_timeout = "10s"
 
 **Recommendations:**
 
-* **Production:** `10s` to ensure flows are exported
-* **Development:** `5s` (default) is usually sufficient
-* **High-throughput:** Increase to `30s` or more
+- **Production:** `10s` to ensure flows are exported
+- **Development:** `5s` (default) is usually sufficient
+- **High-throughput:** Increase to `30s` or more
 
 **Related Settings:**
 
-* `export.otlp.max_export_timeout`: Should be less than `shutdown_timeout`
+- `export.otlp.max_export_timeout`: Should be less than `shutdown_timeout`
 
 ### Monitoring Shutdown Behavior
 
@@ -199,14 +200,14 @@ Mermin provides metrics to monitor shutdown behavior:
 
 #### Shutdown Metrics
 
-* `shutdown_duration_seconds`: Histogram of actual shutdown durations
-* `shutdown_timeouts_total`: Count of shutdowns that exceeded timeout
-* `shutdown_flows_total{status="preserved"}`: Flows successfully exported during shutdown
-* `shutdown_flows_total{status="lost"}`: Flows lost due to shutdown timeout
+- `shutdown_duration_seconds`: Histogram of actual shutdown durations
+- `shutdown_timeouts_total`: Count of shutdowns that exceeded timeout
+- `shutdown_flows_total{status="preserved"}`: Flows successfully exported during shutdown
+- `shutdown_flows_total{status="lost"}`: Flows lost due to shutdown timeout
 
 ### Next Steps
 
-* Internal [**Server**](internal-server.md) and [**Metrics**](metrics.md): Configure health checks and monitoring
-* [**Network Interface Discovery**](network-interface-discovery.md): Select which interfaces to monitor
-* [**Flow Span Options**](span.md): Configure flow generation and timeouts
-* [**Configuration Examples**](../examples.md): See complete configurations
+- Internal [**Server**](internal-server.md) and [**Metrics**](../metrics.md): Configure health checks and monitoring
+- [**Network Interface Discovery**](network-interface-discovery.md): Select which interfaces to monitor
+- [**Flow Span Options**](../span.md): Configure flow generation and timeouts
+- [**Configuration Examples**](../examples.md): See complete configurations
