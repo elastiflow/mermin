@@ -365,7 +365,7 @@ Configure HTTP Basic authentication for the OTLP endpoint.
         auth = {
           basic = {
             user = "mermin"
-            pass = "${env(OTLP_PASSWORD)}"
+            pass = env(OTLP_PASSWORD)
           }
         }
       }
@@ -637,7 +637,7 @@ export "traces" {
     auth = {
       basic = {
         user = "mermin"
-        pass = "${env(OTLP_PASSWORD)}"
+        pass = env(OTLP_PASSWORD)
       }
     }
 

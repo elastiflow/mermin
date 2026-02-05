@@ -626,7 +626,7 @@ export "traces" {
     auth = {
       basic = {
         user = "mermin"
-        pass = "${env(OTLP_PASSWORD)}"  # Load from environment
+        pass = env(OTLP_PASSWORD)  # Load from environment
       }
     }
   }
