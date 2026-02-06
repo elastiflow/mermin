@@ -190,7 +190,7 @@ kubectl exec -n mermin $POD -- env MERMIN_LOG_LEVEL=debug mermin diagnose bpf --
 
 #### 1. Missing Linux Capabilities
 
-`Operation not permitted` indicates missing Linux capabilities—the most common issue.
+`Operation not permitted` indicates missing Linux capabilities — the most common issue.
 
 **The Helm chart sets `privileged: true` by default**, which grants all necessary capabilities. This is the simplest and most reliable approach:
 
@@ -229,7 +229,7 @@ Without `hostPID: true`, Mermin can't attach eBPF programs to host network inter
 
 #### 2. Kernel Version Too Old
 
-`Invalid argument` or `Function not implemented` indicates a kernel too old for eBPF support.
+`Invalid argument` or `Function not implemented` indicates a kernel which is too old for eBPF support.
 
 **Check your kernel version**:
 

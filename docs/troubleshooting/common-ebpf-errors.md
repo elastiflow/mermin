@@ -23,11 +23,11 @@ For detailed explanations and solutions, see the sections below.
 
 ## What You Need to Know About the Verifier
 
-Verifier errors are rare on modern kernels. Most Mermin deployments work without issues.
+Verifier errors are rare on modern kernels. Most Mermin deployments work without issues. 
 
-Problems typically occur on older kernel versions (< 5.16) that lack sophisticated complexity analysis. These kernels are more conservative and may reject programs that newer kernels accept.
+Problems typically occur on older kernel versions (< 5.16) that lack sophisticated complexity analysis, and are more conservative.
 
-The eBPF verifier has evolved considerably over time. A program that loads perfectly on a newer kernel might fail on an older one:
+The eBPF verifier has evolved considerably over time. What newer kernels accept, older kernels may reject:
 
 - **Kernel 5.4-5.10**: The early days - stricter bounds checking, more conservative validation
 - **Kernel 5.11-5.15**: Getting smarter - improved range tracking and better loop handling
@@ -130,7 +130,7 @@ back-edge from insn X to Y
 infinite loop detected at insn X
 ```
 
-**Cause**: The verifier found a loop without a provable upper bound. Every eBPF loop must have a maximum iteration count determinable at verification time. The verifier rejects programs with loops that cannot be proven to exit—a fundamental safety requirement to prevent kernel freezes.
+**Cause**: The verifier found a loop without a provable upper bound. Every eBPF loop must have a maximum iteration count determinable at verification time. The verifier rejects programs with loops that cannot be proven to exit – a fundamental safety requirement to prevent kernel freezes.
 
 ### Stack Size Exceeded
 
@@ -206,7 +206,7 @@ ERROR mermin: ebpf - ring buffer full - dropping flow event for new flow
 
 ## Understanding TC Priority and TCX Order
 
-Beyond verifier errors, there's another important aspect of eBPF program loading: execution order. When multiple eBPF programs are attached to the same network interface, the order they run in matters—a lot.
+Beyond verifier errors, there's another important aspect of eBPF program loading: execution order. When multiple eBPF programs are attached to the same network interface, the order they run in matters — a lot.
 
 TC (Traffic Control) priority and TCX ordering control when your eBPF program runs relative to other programs (like your CNI). This affects which packets Mermin sees and in what state (before or after CNI modifications like NAT or encapsulation).
 

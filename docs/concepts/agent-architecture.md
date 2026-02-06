@@ -107,7 +107,7 @@ The userspace Mermin agent receives packets from eBPF and aggregates them into n
 - **State Tracking**: Maintains connection state for TCP (SYN, FIN, RST flags)
 - **Timeout Management**: Expires inactive flows based on [configurable timeouts](../configuration/reference/flow-span-producer.md)
 - **Protocol Parsing**: Deep packet inspection for tunneling protocols (VXLAN, Geneve, WireGuard)
-- **Community ID**: Generates standard [Community ID](https://github.com/corelight/community-id-spec) hashes—a deterministic identifier based on the flow's five-tuple that enables correlation across different monitoring points
+- **Community ID**: Generates standard [Community ID](https://github.com/corelight/community-id-spec) hashes — a deterministic identifier based on the flow's five-tuple that enables correlation across different monitoring points
 
 A [Flow Trace Span](semantic-conventions.md) includes:
 

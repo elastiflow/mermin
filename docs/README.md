@@ -1,6 +1,6 @@
 # Mermin Documentation
 
-Mermin is a Kubernetes-native network observability tool that uses eBPF to capture network traffic and export it as **Flow Traces** via the OpenTelemetry Protocol (OTLP). Deploy once per node and gain deep visibility into your cluster's network communications—no application changes required.
+Mermin is a Kubernetes-native network observability tool that uses eBPF to capture network traffic and export it as **Flow Traces** via the OpenTelemetry Protocol (OTLP). Deploy once per node and gain deep visibility into your cluster's network communications — no application changes required.
 
 ![Mermin Overview](.gitbook/assets/mermin-overview.png)
 
@@ -13,18 +13,18 @@ Mermin is a Kubernetes-native network observability tool that uses eBPF to captu
 Your APM traces show application behavior. Your network monitoring shows IP-level statistics. But a critical gap exists between these two worlds: when a trace shows a slow network span, you have no way to correlate that with actual network flow data.
 When network teams see congestion, they cannot map it back to specific services or pods.
 
-The MELT stack (Metrics, Events, Logs, Traces) is missing network flow data—connection-level information that bridges application performance with network reality.
+The MELT stack (Metrics, Events, Logs, Traces) is missing network flow data — connection-level information that bridges application performance with network reality.
 
 ### What Mermin Does
 
-Mermin captures network traffic using eBPF and exports it as **Flow Traces**—network flows represented as OpenTelemetry spans. This brings network visibility into the OTel ecosystem using a standard signal type.
+Mermin captures network traffic using eBPF and exports it as **Flow Traces** — network flows represented as OpenTelemetry spans. This brings network visibility into the OTel ecosystem using a standard signal type.
 
 **The "Sweet Spot": Why Flow Data?**
 
 Observability involves trade-offs between granularity and overhead. Flow data sits between two extremes:
 
-- **Not Raw PCAP**: Full packet capture is expensive to store and query. Mermin aggregates packets into flows—you get connection-level detail without payload overhead.
-- **Not Just Counters**: Metrics tell you bandwidth usage but miss connection context—timing, retransmissions, directionality.
+- **Not Raw PCAP**: Full packet capture is expensive to store and query. Mermin aggregates packets into flows — you get connection-level detail without payload overhead.
+- **Not Just Counters**: Metrics tell you bandwidth usage but miss connection context — timing, retransmissions, directionality.
 
 Flow data provides **granular, connection-level detail that's lightweight enough to run always-on in production.**
 
@@ -51,9 +51,9 @@ Once deployed, Mermin runs as a DaemonSet with one pod per node, automatically c
 ## Key Capabilities
 
 - **Auto-Instrumentation for Your Network Stack**: Just as eBPF-based APM tools auto-instrument application code, Mermin auto-instruments your network layer.
-  Deploy once per node, get visibility into all traffic—no per-service configuration required.
+  Deploy once per node, get visibility into all traffic — no per-service configuration required.
 - **Kubernetes-Native Enrichment**: Flows include Pod, Service, and Deployment metadata. You see `frontend-service` → `redis-cache`, not `10.42.0.5` → `10.42.0.8`.
-- **Zero Code Changes**: eBPF captures traffic transparently—no sidecars, no application modifications, no service mesh required.
+- **Zero Code Changes**: eBPF captures traffic transparently — no sidecars, no application modifications, no service mesh required.
 - **Standards-Based Export**: Native OTLP output integrates with your existing observability stack (Tempo, Jaeger, Elastic, etc.).
 - **Production-Ready**: Low-overhead kernel-level capture designed for always-on operation.
 - **Comprehensive Protocol Support**: Parses and tracks TCP, UDP, ICMP traffic, with support for common tunneling protocols (VXLAN, Geneve, WireGuard).

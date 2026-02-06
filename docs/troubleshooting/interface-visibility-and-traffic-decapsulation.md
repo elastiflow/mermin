@@ -102,7 +102,7 @@ Imagine Pod A on Node 1 wants to send an HTTP request to Pod B on Node 2. Here's
 └───────────────────────────────────────────────────────────────┘
 ```
 
-**The key insight**: Same-node traffic never gets encapsulated because it never needs to leave the host. It's like two people in the same building passing notes directly—no need for the postal system!
+**The key insight**: Same-node traffic never gets encapsulated because it never needs to leave the host. It's like two people in the same building passing notes directly — no need for the postal system!
 
 ## What You See on Different Interface Types
 

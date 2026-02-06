@@ -43,7 +43,7 @@ Flow capture may pause briefly during reload. Some changes (e.g. interface selec
 
 ## Minimal configuration
 
-Without a config file, Mermin uses built-in defaults and does not configure an exporter—flow data is not sent anywhere. To send flow traces to an OTLP endpoint with default settings, create a config file that sets only the export block:
+Without a config file, Mermin uses built-in defaults and does not configure an exporter — flow data is not sent anywhere. To send flow traces to an OTLP endpoint with default settings, create a config file that sets only the export block:
 
 ```hcl
 export "traces" {
@@ -243,7 +243,7 @@ Fix the file and restart (or rely on auto-reload after fixing). In Kubernetes, M
 
 ## HCL functions
 
-HCL config files (not YAML) support the `env` function to read environment variables—useful for secrets or environment-specific values without hardcoding. The function evaluates when the config loads and again on reload.
+HCL config files (not YAML) support the `env` function to read environment variables — useful for secrets or environment-specific values without hardcoding. The function evaluates when the config loads and again on reload.
 
 - `env("VAR_NAME")`
   Returns the value of the environment variable, or an empty string if unset. Mermin logs a warning when the variable is not set.

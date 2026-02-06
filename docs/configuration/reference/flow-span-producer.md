@@ -101,7 +101,7 @@ A full configuration example can be found in the [Default Configuration](../defa
 
 - `tcp_rst_timeout` attribute
 
-  When a TCP RST (reset) is observed—indicating an abrupt connection termination—the flow waits for the specified `tcp_rst_timeout` before being exported.
+  When a TCP RST (reset) is observed — indicating an abrupt connection termination — the flow waits for the specified `tcp_rst_timeout` before being exported.
   This timeout is evaluated for each flow individually after an RST is detected, ensuring even abruptly closed connections are accounted for with a brief post-RST delay before export.
 
   **Type:** Duration

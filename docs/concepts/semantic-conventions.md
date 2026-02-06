@@ -31,8 +31,8 @@ The values mirror [IPFIX biflow](https://datatracker.ietf.org/doc/html/rfc5103) 
 
 | Value     | Description                                                                                                                 |
 |-----------|-----------------------------------------------------------------------------------------------------------------------------|
-| `forward` | The flow record describes traffic in the forward direction—from the connection initiator to the responder (client → server) |
-| `reverse` | The flow record describes traffic in the reverse direction—from the responder back to the initiator (server → client)       |
+| `forward` | The flow record describes traffic in the forward direction — from the connection initiator to the responder (client → server) |
+| `reverse` | The flow record describes traffic in the reverse direction — from the responder back to the initiator (server → client)       |
 | `unknown` | The direction could not be reliably determined                                                                              |
 
 The `flow.direction` attribute MUST be consistent with the Span Kind when both are present:
@@ -62,7 +62,7 @@ To ensure clarity, this convention uses and defines specific attribute namespace
 - **`tunnel.*`**: Describes tunneling protocols and encapsulation metadata (e.g., tunnel.type, tunnel.id). This is always the outer-most tunnel or encapsulation.
 - **`process.*` / `container.*`**: Existing OTel namespaces used to identify the host process or container associated with the flow's socket.
 
-The `flow.*` namespace is critical for creating a clear semantic distinction. It separates attributes of a flow—a dynamic conversation between two endpoints over time—from attributes of a network entity, like a physical interface,
+The `flow.*` namespace is critical for creating a clear semantic distinction. It separates attributes of a flow — a dynamic conversation between two endpoints over time — from attributes of a network entity, like a physical interface,
 whose properties are generally static. Overloading the existing network.\* namespace with dynamic flow concepts would create ambiguity.
 
 ### Why `source.k8s.*` Instead of `k8s.source.*`?
@@ -77,8 +77,8 @@ There is no privileged "recording side." The `source`/`destination` prefixes est
 3. **Consistency with networking industry conventions.** Traditional flow protocols (NetFlow, IPFIX, sFlow) and eBPF-based tools universally structure directional metadata with the direction first.
    Using `source.k8s.*` aligns with these patterns, making the schema intuitive for network engineers.
 4. **Query ergonomics and grouping.** Placing the directional prefix first enables efficient queries like `source.k8s.*` to retrieve all Kubernetes context for one side of the flow. If the hierarchy were inverted (`k8s.source.*`),
-querying "all source endpoint attributes" would require combining `source.address`, `source.port`, and `k8s.source.*`—three separate prefix patterns instead of one.
-5. **Avoiding OTel resource attribute ambiguity.** Standard OTel `k8s.*` attributes (e.g., `k8s.pod.name`) describe the resource where telemetry originates—typically the observing agent's own pod. For flow data,
+querying "all source endpoint attributes" would require combining `source.address`, `source.port`, and `k8s.source.*` — three separate prefix patterns instead of one.
+5. **Avoiding OTel resource attribute ambiguity.** Standard OTel `k8s.*` attributes (e.g., `k8s.pod.name`) describe the resource where telemetry originates — typically the observing agent's own pod. For flow data,
 we need to describe _two_ remote endpoints, neither of which is necessarily the agent itself. Using `source.k8s.*` / `destination.k8s.*` clearly distinguishes flow endpoint metadata from resource-level attributes,
 preventing confusion about which entity is being described.
 

@@ -12,14 +12,14 @@ It is intended for those who want to understand the core concepts and motivation
 A **Flow Trace** is an OpenTelemetry trace that represents a network connection. It is composed of one or more **Flow Trace Spans**, where each span captures a measurement interval of the network conversation.
 
 Unlike traditional OpenTelemetry traces that focus on application-level requests (HTTP calls, database queries, etc.),
-a Flow Trace captures the network conversation itself—the bidirectional exchange of packets between two endpoints as observed by an independent monitoring point like an eBPF agent.
+a Flow Trace captures the network conversation itself — the bidirectional exchange of packets between two endpoints as observed by an independent monitoring point like an eBPF agent.
 
 ### Flow Trace vs. Flow Trace Span
 
-- **Flow Trace Span**: A single OpenTelemetry span representing one flow record—a snapshot of the network conversation during a specific observation window.
+- **Flow Trace Span**: A single OpenTelemetry span representing one flow record — a snapshot of the network conversation during a specific observation window.
 When a flow is active, the agent exports periodic spans (e.g., every 60 seconds) with delta metrics for that interval.
 
-- **Flow Trace**: The complete collection of related Flow Trace Spans that together represent the full lifecycle of a network connection—from the first packet to the last.
+- **Flow Trace**: The complete collection of related Flow Trace Spans that together represent the full lifecycle of a network connection — from the first packet to the last.
 
 Think of it like a long-running database connection: individual spans might represent periodic health checks or query batches, but the trace as a whole represents the connection's lifetime.
 
@@ -29,7 +29,7 @@ Think of it like a long-running database connection: individual spans might repr
 
 ### The Observability Gap
 
-The modern observability stack—Metrics, Events, Logs, and Traces (MELT)—excels at application-level visibility. APM traces show you request latency, error rates, and service dependencies.'
+The modern observability stack — Metrics, Events, Logs, and Traces (MELT) — excels at application-level visibility. APM traces show you request latency, error rates, and service dependencies.'
 Network monitoring gives you bandwidth utilization and interface statistics.
 
 But there's a gap between these two worlds:
@@ -42,7 +42,7 @@ But there's a gap between these two worlds:
 
 ### Why Traces?
 
-Representing network flows as OpenTelemetry traces—rather than logs, events, or metrics—is a deliberate choice that unlocks capabilities the other signal types cannot provide.
+Representing network flows as OpenTelemetry traces — rather than logs, events, or metrics — is a deliberate choice that unlocks capabilities the other signal types cannot provide.
 
 #### Traces Preserve Temporal Context
 
@@ -51,7 +51,7 @@ Unlike logs or flat events, traces have explicit start and end times that repres
 - **Connection lifecycle visibility**: See exactly when a connection started, how long it lasted, and when it ended.
 - **Smooth, continuous export**: Flow Trace Spans are exported based on timeouts (active/inactive), spreading data evenly rather than dumping all tracked flows in bursts.
 
-Treating flows as logs or events loses this timing precision—you get timestamps, but not duration or the natural parent-child relationships traces provide.
+Treating flows as logs or events loses this timing precision — you get timestamps, but not duration or the natural parent-child relationships traces provide.
 
 #### Traces Are Richer Than Metrics
 
@@ -64,7 +64,7 @@ Flow Traces preserve connection-level detail that metrics cannot:
 - **Per-connection timing**: Analyze handshake latency, round-trip time, and jitter for individual flows.
 - **Full five-tuple context**: Every flow is tied to specific source/destination addresses and ports.
 
-This is the kind of data network engineers are used to from traditional flow tools—but now it's available in your observability platform alongside your application traces.
+This is the kind of data network engineers are used to from traditional flow tools — but now it's available in your observability platform alongside your application traces.
 
 #### Native OTel Ecosystem Integration
 
@@ -76,13 +76,13 @@ By using OTLP traces as the export format, Flow Traces slot directly into the Op
 
 ### Why Not Just Use Existing Conventions?
 
-Existing OpenTelemetry network conventions are designed from the perspective of an instrumented application—capturing a client's outbound request or a server's inbound response. They model a single side of a single request.
+Existing OpenTelemetry network conventions are designed from the perspective of an instrumented application — capturing a client's outbound request or a server's inbound response. They model a single side of a single request.
 
 Network flow observability is fundamentally different:
 
 1. **Third-Party Observation**: The observer (an eBPF agent or network device) is independent of both endpoints. It sees the complete, bidirectional conversation without being a participant.
 
-2. **Bidirectional by Nature**: A network flow inherently includes both directions—packets from source to destination *and* packets from destination back to source. Both must be captured together.
+2. **Bidirectional by Nature**: A network flow inherently includes both directions — packets from source to destination *and* packets from destination back to source. Both must be captured together.
 
 3. **Continuous Measurement**: Unlike request/response traces that have clear start and end points, network connections can persist for hours or days. Flow Traces handle this through periodic span exports with delta metrics.
 
@@ -94,7 +94,7 @@ Observability involves trade-offs between granularity and overhead. Flow data oc
 
 - **Not Raw Packet Capture**: Full PCAP is expensive to store and query, capturing every byte of every packet. Flow Traces aggregate packets into connection-level summaries.
 
-- **Not Just Counters**: Metrics tell you bandwidth usage but lose connection context—timing, retransmissions, TCP flags, and directionality are all lost in aggregation.
+- **Not Just Counters**: Metrics tell you bandwidth usage but lose connection context — timing, retransmissions, TCP flags, and directionality are all lost in aggregation.
 
 Flow data provides **granular, connection-level detail that's lightweight enough to run always-on in production**.
 
@@ -108,7 +108,7 @@ Flow data provides **granular, connection-level detail that's lightweight enough
 
 - **Provide Full Context**: Capture not just the five-tuple, but also bidirectional metrics, performance data (latency/jitter), tunnel information, and rich Kubernetes metadata.
 
-- **Backend Flexibility**: Use standard OTLP export so Flow Traces work with any OpenTelemetry-compatible observability platform—no specialized NetFlow collectors required.
+- **Backend Flexibility**: Use standard OTLP export so Flow Traces work with any OpenTelemetry-compatible observability platform — no specialized NetFlow collectors required.
 
 ---
 
@@ -119,7 +119,7 @@ Flow data provides **granular, connection-level detail that's lightweight enough
 The fundamental mapping is straightforward: one flow record becomes one span.
 
 - The **span's start and end times** represent the observation window of the flow record.
-- The **span's attributes** contain all the details of the flow—endpoints, protocol, metrics, and metadata.
+- The **span's attributes** contain all the details of the flow — endpoints, protocol, metrics, and metadata.
 - The **span kind** (`CLIENT`, `SERVER`, or `INTERNAL`) indicates the observer's inferred direction of the connection.
 
 ### Bidirectional Metrics
@@ -137,7 +137,7 @@ Attributes are organized into logical groups to keep the convention clean and qu
 
 | Namespace                    | Purpose                                                                                       |
 |------------------------------|-----------------------------------------------------------------------------------------------|
-| `flow.*`                     | The conversation itself—metrics, state, and metadata that can change over the flow's lifetime |
+| `flow.*`                     | The conversation itself — metrics, state, and metadata that can change over the flow's lifetime |
 | `network.*`                  | Protocol-specific details that remain static for the flow (IP version, transport protocol)    |
 | `source.*` / `destination.*` | Information about the two endpoints, including addresses, ports, and Kubernetes metadata      |
 | `tunnel.*`                   | Encapsulation details when traffic is tunneled (VXLAN, Geneve, WireGuard, etc.)               |
