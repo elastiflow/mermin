@@ -176,10 +176,10 @@ cargo clippy --all-features -- -D warnings
 
   ```bash
   # From a local Grafana
-  curl -s "localhost:3000/api/dashboards/uid/mermin_app" | jq '.dashboard' | jq -f hack/sanitize_grafana_dashboard.jq > docs/observability/grafana-mermin-app.json
+  curl -s "localhost:3000/api/dashboards/uid/mermin_app" | jq '.dashboard' | jq -f hack/sanitize_grafana_dashboard.jq > docs/internal-monitoring/grafana-mermin-app.json
   # Or from a copy/pasted file
-  jq -f hack/sanitize_grafana_dashboard.jq docs/observability/grafana-mermin-app.json > docs/observability/grafana-mermin-app.json.tmp \
-    && mv docs/observability/grafana-mermin-app.json.tmp docs/observability/grafana-mermin-app.json
+  jq -f hack/sanitize_grafana_dashboard.jq docs/internal-monitoring/grafana-mermin-app.json > docs/internal-monitoring/grafana-mermin-app.json.tmp \
+    && mv docs/internal-monitoring/grafana-mermin-app.json.tmp docs/internal-monitoring/grafana-mermin-app.json
   ```
 
 ## Using a Dockerized Build Environment

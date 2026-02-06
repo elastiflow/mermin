@@ -190,7 +190,7 @@
         {
           "editorMode": "code",
           "exemplar": false,
-          "expr": "avg(rate(mermin_export_latency_seconds_sum[$__rate_interval]) / rate(mermin_export_latency_seconds_count[$__rate_interval]))",
+          "expr": "avg(rate(mermin_pipeline_duration_seconds_sum{stage=\"export_out\"}[$__rate_interval]) / rate(mermin_pipeline_duration_seconds_count{stage=\"export_out\"}[$__rate_interval]))",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -1481,7 +1481,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 37
+            "y": 46
           },
           "id": 51,
           "options": {
@@ -1578,7 +1578,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 41
+            "y": 50
           },
           "id": 52,
           "options": {
@@ -1666,7 +1666,7 @@
             "h": 7,
             "w": 8,
             "x": 0,
-            "y": 45
+            "y": 54
           },
           "id": 46,
           "interval": "60s",
@@ -1767,7 +1767,7 @@
             "h": 7,
             "w": 8,
             "x": 8,
-            "y": 45
+            "y": 54
           },
           "id": 47,
           "interval": "60s",
@@ -1868,7 +1868,7 @@
             "h": 7,
             "w": 8,
             "x": 16,
-            "y": 45
+            "y": 54
           },
           "id": 48,
           "interval": "60s",
@@ -2042,7 +2042,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 347
+            "y": 62
           },
           "id": 6,
           "options": {
@@ -2178,7 +2178,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 347
+            "y": 62
           },
           "id": 24,
           "interval": "60s",
@@ -2316,7 +2316,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 355
+            "y": 70
           },
           "id": 25,
           "interval": "60s",
@@ -2393,7 +2393,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 355
+            "y": 70
           },
           "id": 23,
           "interval": "60s",
@@ -2538,7 +2538,7 @@
             "h": 3,
             "w": 12,
             "x": 0,
-            "y": 1233
+            "y": 132
           },
           "id": 29,
           "options": {
@@ -2558,7 +2558,7 @@
             "textMode": "auto",
             "wideLayout": true
           },
-          "pluginVersion": "12.3.0",
+          "pluginVersion": "12.3.1",
           "targets": [
             {
               "datasource": {
@@ -2632,7 +2632,7 @@
             "h": 3,
             "w": 12,
             "x": 12,
-            "y": 1233
+            "y": 132
           },
           "id": 28,
           "options": {
@@ -2653,7 +2653,7 @@
             "textMode": "auto",
             "wideLayout": true
           },
-          "pluginVersion": "12.3.0",
+          "pluginVersion": "12.3.1",
           "targets": [
             {
               "datasource": {
@@ -2771,7 +2771,7 @@
             "h": 5,
             "w": 12,
             "x": 0,
-            "y": 1236
+            "y": 135
           },
           "id": 43,
           "options": {
@@ -2793,7 +2793,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.3.0",
+          "pluginVersion": "12.3.1",
           "targets": [
             {
               "datasource": {
@@ -2894,7 +2894,7 @@
             "h": 5,
             "w": 12,
             "x": 12,
-            "y": 1236
+            "y": 135
           },
           "id": 22,
           "options": {
@@ -2916,7 +2916,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.3.0",
+          "pluginVersion": "12.3.1",
           "targets": [
             {
               "datasource": {
@@ -3013,7 +3013,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 1241
+            "y": 140
           },
           "id": 26,
           "options": {
@@ -3033,7 +3033,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.3.0",
+          "pluginVersion": "12.3.1",
           "targets": [
             {
               "datasource": {
@@ -3119,7 +3119,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 1241
+            "y": 140
           },
           "id": 5,
           "options": {
@@ -3141,7 +3141,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.3.0",
+          "pluginVersion": "12.3.1",
           "targets": [
             {
               "datasource": {
@@ -3226,7 +3226,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 1250
+            "y": 149
           },
           "id": 27,
           "options": {
@@ -3248,7 +3248,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.3.0",
+          "pluginVersion": "12.3.1",
           "targets": [
             {
               "datasource": {
@@ -3364,7 +3364,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 1250
+            "y": 149
           },
           "id": 33,
           "options": {
@@ -3384,7 +3384,7 @@
               "sort": "desc"
             }
           },
-          "pluginVersion": "12.3.0",
+          "pluginVersion": "12.3.1",
           "targets": [
             {
               "datasource": {
@@ -3508,7 +3508,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 136
+            "y": 36
           },
           "id": 34,
           "options": {
@@ -3646,7 +3646,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 136
+            "y": 36
           },
           "id": 30,
           "options": {
@@ -3706,111 +3706,6 @@
             }
           ],
           "title": "eBPF map ops (top $query_top_N)",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${ds_prometheus}"
-          },
-          "description": "Rate of the eBPF map bytes processed (top $query_top_N by pod)",
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisBorderShow": false,
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "barWidthFactor": 0.6,
-                "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "insertNulls": false,
-                "lineInterpolation": "linear",
-                "lineWidth": 1,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "auto",
-                "showValues": false,
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": 0
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              },
-              "unit": "bytes"
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 9,
-            "w": 12,
-            "x": 12,
-            "y": 145
-          },
-          "id": 41,
-          "options": {
-            "legend": {
-              "calcs": [
-                "min",
-                "max",
-                "lastNotNull"
-              ],
-              "displayMode": "table",
-              "placement": "right",
-              "showLegend": true
-            },
-            "tooltip": {
-              "hideZeros": false,
-              "mode": "multi",
-              "sort": "desc"
-            }
-          },
-          "pluginVersion": "12.3.1",
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${ds_prometheus}"
-              },
-              "editorMode": "code",
-              "expr": "topk($query_top_N ,sum(rate(mermin_ebpf_map_bytes_total{map=\"$ebpf_map\"}[$__rate_interval])) by ($pod_label, map))",
-              "hide": false,
-              "legendFormat": "{{ $pod_label }}: {{ map }}",
-              "range": true,
-              "refId": "A"
-            }
-          ],
-          "title": "eBPF map bytes (top $query_top_N)",
           "type": "timeseries"
         }
       ],
