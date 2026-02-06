@@ -133,7 +133,7 @@ lazy_static! {
 
     // Standard metrics (always registered)
     pub static ref EBPF_MAP_SIZE: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("map_size", "Current size of eBPF maps. For hash maps (FLOW_STATS, LISTENING_PORTS) this is the entry count. For ring buffers (FLOW_EVENTS) this is pending bytes (producer_pos - consumer_pos).")
+        Opts::new("map_size", "Current size of eBPF maps. For hash maps (FLOW_STATS, TCP_STATS, ICMP_STATS, LISTENING_PORTS) this is the entry count. For ring buffers (FLOW_EVENTS) this is pending bytes (producer_pos - consumer_pos).")
             .namespace("mermin")
             .subsystem("ebpf"),
         &["map", "unit"]
@@ -160,7 +160,7 @@ lazy_static! {
     ).expect("failed to create ebpf_bpf_fs_writable metric");
 
     /// Total number of eBPF map operations.
-    /// Labels: map = "FLOW_STATS" | "FLOW_EVENTS" | "LISTENING_PORTS", operation = "read" | "write" | "delete", status = "ok" | "error" | "not_found"
+    /// Labels: map = "FLOW_STATS" | "TCP_STATS" | "ICMP_STATS" | "FLOW_EVENTS" | "LISTENING_PORTS", operation = "read" | "write" | "delete", status = "ok" | "error" | "not_found"
     pub static ref EBPF_MAP_OPS_TOTAL: IntCounterVec = IntCounterVec::new(
         Opts::new("map_ops_total", "Total number of eBPF map operations")
             .namespace("mermin")
