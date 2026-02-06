@@ -1,10 +1,10 @@
 # Troubleshooting Overview
 
-This guide will help you diagnose and resolve common issues when deploying and operating Mermin.
+Diagnose and resolve common issues when deploying and operating Mermin.
 
 ## Quick Diagnostic Checklist
 
-When something goes wrong, start with these quick checks to identify the issue:
+Start with these quick checks to identify issues:
 
 1. **Pod Status**: Check if pods are running with `kubectl get pods -n mermin`
 2. **Pod Logs**: Review logs using `kubectl logs -l app.kubernetes.io/name=mermin -n mermin`
@@ -15,15 +15,17 @@ When something goes wrong, start with these quick checks to identify the issue:
 
 ## Common Issue Categories
 
-We've organized troubleshooting guides into three main categories based on the type of issue you're experiencing:
+Troubleshooting guides are organized into three categories:
 
 ### [Deployment Issues](deployment-issues.md)
 
-If Mermin won't start or keeps crashing, this guide covers pod startup failures, permission errors, CNI conflicts, and TC/TCX priority configuration.
+Covers pod startup failures, permission errors, CNI conflicts, and TC/TCX priority configuration when Mermin fails to start or crashes.
 
-> **Note:** eBPF load failures are critical errors that prevent startup — verify your kernel version and eBPF capabilities are enabled.
+{% hint style="warning" %}
+eBPF load failures prevent startup. Verify your kernel version (5.14+) and confirm eBPF capabilities are enabled. For quick diagnosis, see the [Quick Reference Table](common-ebpf-errors.md#quick-reference) in Common eBPF Errors.
+{% endhint %}
 
-**You'll want this guide if you're seeing:**
+**Symptoms:**
 
 - Pods stuck in `Pending`, `CrashLoopBackOff`, or `Error` states
 - eBPF programs that fail to load
@@ -33,9 +35,9 @@ If Mermin won't start or keeps crashing, this guide covers pod startup failures,
 
 ### [Common eBPF Errors](common-ebpf-errors.md)
 
-This guide helps you diagnose verifier failures, program loading errors, and kernel compatibility issues.
+Diagnose verifier failures, program loading errors, and kernel compatibility issues.
 
-**Check this guide when you encounter:**
+**Symptoms:**
 
 - Verifier instruction limit exceeded errors
 - Invalid memory access errors
@@ -44,11 +46,11 @@ This guide helps you diagnose verifier failures, program loading errors, and ker
 
 ### [Interface Visibility and Traffic Decapsulation](interface-visibility-and-traffic-decapsulation.md)
 
-Not seeing the traffic you expect? This guide explains traffic visibility at different network layers and how to configure interface monitoring correctly.
+Explains traffic visibility at different network layers and correct interface monitoring configuration when expected traffic is missing.
 
 > **Note:** If a configured interface is missing, Mermin logs a warning but continues monitoring other valid interfaces.
 
-**This guide helps with:**
+**Symptoms:**
 
 - Missing or incomplete traffic capture
 - Partial flow visibility
@@ -57,7 +59,7 @@ Not seeing the traffic you expect? This guide explains traffic visibility at dif
 
 ## Diagnostic Commands
 
-These commands will help you gather information and diagnose issues:
+Use these commands to gather information and diagnose issues:
 
 ### View Pod Logs
 
@@ -76,7 +78,7 @@ kubectl logs mermin-xxxxx -n mermin --previous
 
 ### Enable Debug Logging
 
-If you need more detailed information, enable debug mode in your configuration:
+Enable debug mode in your configuration for detailed information:
 
 ```hcl
 log_level = "debug"
@@ -84,7 +86,7 @@ log_level = "debug"
 
 ### Health Check Endpoints
 
-If you have the API server enabled, you can check Mermin's health status:
+With the API server enabled, check Mermin's health status:
 
 ```bash
 kubectl port-forward daemonset/mermin 8080:8080 -n mermin
@@ -94,7 +96,7 @@ curl http://localhost:8080/readyz
 
 ### Metrics Monitoring
 
-Mermin exposes Prometheus metrics that can help identify performance issues and verify operations:
+Mermin exposes Prometheus metrics to identify performance issues and verify operations:
 
 ```bash
 kubectl port-forward daemonset/mermin 10250:10250 -n mermin
@@ -112,13 +114,13 @@ Key metrics to monitor include:
 
 #### Diagnosing Flow Span Drops
 
-If flow spans are being dropped, inspect the internal metrics to identify the specific bottleneck stage:
+When flow spans are dropped, inspect internal metrics to identify the bottleneck stage:
 
 - **Worker queue drops**: The kernel is producing events faster than userspace can consume them. Increase `pipeline.ebpf_ringbuf_worker_capacity` or `pipeline.worker_count`.
 - **Flow span channel drops**: The enrichment stage is lagging. Increase `pipeline.flow_producer_channel_capacity` or add concurrency via `pipeline.k8s_decorator_threads`.
 - **Decorated span channel drops**: There is backpressure from the export stage. Increase `pipeline.k8s_decorator_channel_capacity` or optimize your OTLP exporter settings.
 
-If tuning does not resolve the issue, consider reducing the number of monitored interfaces or increasing the CPU limits allocated to the agent.
+If tuning does not resolve the issue, reduce the number of monitored interfaces or increase the CPU limits allocated to the agent.
 
 ### Test eBPF Capabilities
 
@@ -144,7 +146,7 @@ For detailed usage, interpreting results, and troubleshooting failures, see [Dep
 
 ## Getting Help
 
-Still stuck? We're here to help!
+Additional support resources:
 
 ### Search Existing Issues
 
@@ -152,7 +154,7 @@ Check if someone else has encountered the same problem: [GitHub Issues](https://
 
 ### Open a New Issue
 
-If you've found a bug or need help, open an issue and include:
+When opening an issue, include:
 
 - Mermin version and Kubernetes version
 - Your CNI plugin (e.g., Calico, Cilium, Flannel)
@@ -164,4 +166,4 @@ If you've found a bug or need help, open an issue and include:
 
 ### Ask Questions
 
-Have a question or want to discuss best practices? Join the conversation in [GitHub Discussions](https://github.com/elastiflow/mermin/discussions).
+For questions and best practices, join [GitHub Discussions](https://github.com/elastiflow/mermin/discussions).

@@ -4,7 +4,7 @@ hidden: true
 
 # Deployment Overview
 
-This section provides comprehensive guidance for deploying Mermin in various environments, from local development to production Kubernetes clusters.
+Deploy Mermin in various environments, from local development to production Kubernetes clusters.
 
 ## Deployment Options
 
@@ -21,7 +21,7 @@ Mermin supports multiple deployment scenarios:
 
 ### DaemonSet Pattern
 
-Mermin is typically deployed as a Kubernetes DaemonSet, which ensures:
+Mermin deploys as a Kubernetes DaemonSet, which ensures:
 
 * **One Pod Per Node**: Each node runs its own Mermin agent
 * **Automatic Scaling**: New nodes automatically get Mermin pods
@@ -94,7 +94,7 @@ See [Network Interface Discovery](../configuration/reference/network-interface-d
 
 ### Network Namespace Switching
 
-Mermin uses an advanced technique to monitor host network interfaces without requiring `hostNetwork: true`. This provides better network isolation while maintaining full monitoring capabilities.
+Mermin monitors host network interfaces without requiring `hostNetwork: true`, providing better network isolation while maintaining full monitoring capabilities.
 
 **How it works:**
 
@@ -145,7 +145,7 @@ The DaemonSet automatically sets the appropriate DNS policy to enable Kubernetes
 
 ### All Environments
 
-* Linux kernel 4.18 or newer with eBPF support
+* Linux kernel 5.14 or newer with eBPF and BTF support (6.6+ recommended)
 * Privileged container support
 * Network access to OTLP collector endpoint
 
@@ -179,7 +179,7 @@ The DaemonSet automatically sets the appropriate DNS policy to enable Kubernetes
 
 ### Bare Metal / Virtual Machines
 
-* Linux distribution with kernel 4.18+
+* Linux distribution with kernel 5.14+ (6.6+ recommended)
 * Docker or containerd installed
 * Root/sudo access to run privileged containers
 * No Kubernetes metadata enrichment available

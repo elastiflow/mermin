@@ -1,10 +1,10 @@
 # Contributing to Mermin
 
-Thank you for your interest in contributing to Mermin! This guide will help you understand our contribution process and how to get your changes successfully merged.
+Thank you for your interest in contributing to Mermin! This guide explains the contribution process and how to get changes merged successfully.
 
 ## Getting Started
 
-Before you start contributing:
+Before contributing:
 
 1. **Read the [Development Workflow](contributor-guide/development-workflow.md)** guide to set up your environment.
 2. **Browse existing issues** on [GitHub Issues](https://github.com/elastiflow/mermin/issues) to find something to work on.
@@ -18,7 +18,7 @@ Before you start contributing:
 - **Feature Requests**: Check the discussions board for feature ideas.
 - **Bug Reports**: Any unassigned bug is fair game!
 
-If you want to work on something not yet tracked, please **open an issue first** to discuss your idea with the maintainers.
+To work on something not yet tracked, **open an issue first** to discuss the idea with maintainers.
 
 ## Contribution Workflow
 
@@ -64,7 +64,7 @@ git checkout -b fix/issue-123 upstream/main
 
 ### 4. Test Your Changes
 
-Before submitting, ensure all checks pass locally:
+Ensure all checks pass locally before submitting:
 
 ```shell
 # Format your code
@@ -83,7 +83,7 @@ cd network-types/tests
 make test-ci
 ```
 
-See the [Development Workflow](contributor-guide/development-workflow.md) guide for more testing details.
+See the [Development Workflow](contributor-guide/development-workflow.md) guide for testing details.
 
 ### 5. Push and Create Pull Request
 
@@ -95,7 +95,7 @@ Then open a pull request on GitHub from your fork to the `main` branch of the ma
 
 ## Commit Message Guidelines
 
-Mermin uses **Conventional Commits** for all commit messages. This enables automatic changelog generation and semantic versioning.
+Mermin uses **Conventional Commits** for all commit messages, enabling automatic changelog generation and semantic versioning.
 
 ### Commit Message Format
 
@@ -293,11 +293,11 @@ docker run --rm -i hadolint/hadolint < Dockerfile
 
 ## Code of Conduct
 
-All contributors must adhere to our [Code of Conduct](CODE-OF-CONDUCT.md). We are committed to providing a welcoming and inclusive environment for everyone.
+All contributors must adhere to the [Code of Conduct](CODE-OF-CONDUCT.md), which establishes a welcoming and inclusive environment.
 
 ## License
 
-By contributing to Mermin, you agree that your contributions will be licensed under the same licenses as the project:
+Contributions are licensed under the same licenses as the project:
 
 - **GPL-2.0** for eBPF code (`mermin-ebpf/`)
 - **Apache-2.0** for user space code
@@ -306,10 +306,10 @@ See [LICENSE-GPL2](../../LICENSE-GPL2) and [LICENSE-APACHE](../../LICENSE-APACHE
 
 ## Questions?
 
-If you have questions about contributing, feel free to:
+For questions about contributing:
 
 - Open a discussion on [GitHub Discussions](https://github.com/elastiflow/mermin/discussions).
 - Comment on the issue you're interested in working on.
 - Reach out to the maintainers.
 
-Thank you for contributing to Mermin! 🎉
+Thank you for contributing to Mermin!

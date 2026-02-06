@@ -1,6 +1,6 @@
 # Mermin Agent Architecture
 
-This page explains how Mermin works, its architecture, and the flow of data from network packets to Flow Traces in your observability backend.
+Understand how Mermin works, its architecture, and the data flow from network packets to Flow Traces in your observability backend.
 
 ## What are Flow Traces?
 
@@ -20,7 +20,7 @@ network packet → Mermin → flow span (network flow) → flow trace (network c
 
 ## High-Level Architecture
 
-Mermin is deployed as a DaemonSet in Kubernetes, with one agent instance running on each node in your cluster. Each agent independently captures and processes network traffic from its host node.
+Mermin deploys as a DaemonSet in Kubernetes, with one agent instance per node. Each agent independently captures and processes network traffic from its host node.
 
 ```text
 ┌─────────────────────────────────────────────┐
@@ -107,7 +107,7 @@ The userspace Mermin agent receives packets from eBPF and aggregates them into n
 - **State Tracking**: Maintains connection state for TCP (SYN, FIN, RST flags)
 - **Timeout Management**: Expires inactive flows based on [configurable timeouts](../configuration/reference/flow-span-producer.md)
 - **Protocol Parsing**: Deep packet inspection for tunneling protocols (VXLAN, Geneve, WireGuard)
-- **Community ID**: Generates standard Community ID hashes for flow correlation
+- **Community ID**: Generates standard [Community ID](https://github.com/corelight/community-id-spec) hashes—a deterministic identifier based on the flow's five-tuple that enables correlation across different monitoring points
 
 A [Flow Trace Span](semantic-conventions.md) includes:
 
@@ -139,7 +139,7 @@ This ensures:
 
 ### Kubernetes Integration
 
-Mermin deeply integrates with Kubernetes to decorate flows with contextual metadata:
+Mermin integrates with Kubernetes to decorate flows with contextual metadata:
 
 #### Informers
 
@@ -149,7 +149,7 @@ Mermin uses Kubernetes informers (watch APIs) to maintain an in-memory cache of 
 - Jobs, CronJobs, NetworkPolicies
 - Endpoints, EndpointSlices, Ingresses, Gateways
 
-This cache is continuously updated as resources change, ensuring metadata is always current.
+The cache updates continuously as resources change, keeping metadata current.
 
 #### Flow Attribution
 
@@ -161,7 +161,7 @@ For each network flow, Mermin:
 4. **Selector Matching**: Finds Services and NetworkPolicies that select the pod via its selectors.
 5. **Decorates Traces**: Attaches all relevant metadata to the Flow Trace Span
 
-This provides full context for each network flow, enabling powerful filtering and analysis.
+This process provides full context for each network flow, enabling powerful filtering and analysis.
 
 To learn more about attribution configuration options, see the [Kubernetes informer](../configuration/reference/kubernetes-informer-discovery.md) documentation.
 
@@ -185,7 +185,7 @@ To learn more about the exporter configuration options, see the [OTLP exporter](
 
 ### Resource Usage
 
-Mermin is designed to be efficient in production environments:
+Mermin operates efficiently in production environments:
 
 - **CPU**: Typically 0.1-0.5 cores (100-500 mCPUs) per agent, varies with traffic volume
 - **Memory**: Base usage ~100-200 MB, grows with flow table size

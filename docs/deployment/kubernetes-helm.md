@@ -525,7 +525,7 @@ kubectl logs <pod-name> | grep -i error
 Common issues:
 
 * No matching interfaces: Check `discovery.instrument.interfaces` configuration
-* eBPF load failure: Ensure kernel version >= 4.18 with eBPF support
+* eBPF load failure: Ensure kernel version >= 5.14 with eBPF and BTF support
 * OTLP connection failure: Verify collector endpoint and network policies
 * TCX pin warnings (kernel >= 6.6): See [TCX Mode and BPF Filesystem](../concepts/security-considerations.md#tcx-mode-and-bpf-filesystem-kernel--66) for mounting `/sys/fs/bpf`
 

@@ -1,19 +1,49 @@
 # Quickstart Guide
 
-This guide will help you deploy Mermin on a local Kubernetes cluster using `kind` (Kubernetes in Docker) in just a few minutes. By the end, you'll have Mermin capturing network flows and displaying them in your terminal.
+Deploy Mermin on a local Kubernetes cluster using `kind` (Kubernetes in Docker). By the end of this guide, Mermin will be capturing network flows and displaying them in your terminal.
+
+{% hint style="info" %}
+This quick start is designed for local testing and development. For production deployments, see the [Deployment Guide](../deployment/overview.md).
+{% endhint %}
+
+## System Requirements
+
+Before deploying Mermin, verify your environment meets these requirements:
+
+| Requirement           | Minimum | Recommended       | Notes                                   |
+|-----------------------|---------|-------------------|-----------------------------------------|
+| **Linux Kernel**      | 5.14+   | 6.6+              | Must have BTF (BPF Type Format) enabled |
+| **Kubernetes**        | 1.20+   | 1.28+             | Any conformant distribution             |
+| **Helm**              | 3.x     | 3.12+             | Kubernetes package manager              |
+| **Container Runtime** | Any     | Docker/containerd | Must support privileged containers      |
+
+{% hint style="warning" %}
+**eBPF Requirements**: Mermin requires a Linux kernel with eBPF and BTF support. Most modern distributions (Ubuntu 20.04+, RHEL 9.2+, Debian 11+) meet these requirements. Older kernels may produce verifier errors.
+{% endhint %}
+
+### Verify Your Environment
+
+Run these commands on your Kubernetes nodes (or inside kind) to verify eBPF support:
+
+```bash
+# Check kernel version (must be 5.14+)
+uname -r
+
+# Verify BTF support (file must exist)
+ls -la /sys/kernel/btf/vmlinux
+
+# Check eBPF filesystem (should be mounted)
+mount | grep bpf
+```
 
 ## Prerequisites
 
-Before starting, ensure you have the following tools installed:
+Install these tools before proceeding:
 
 * [**Docker**](https://docs.docker.com/get-docker/): Container runtime
 * [**kind**](https://kind.sigs.k8s.io/docs/user/quick-start/#installation): Kubernetes in Docker
 * [**kubectl**](https://kubernetes.io/docs/tasks/tools/): Kubernetes command-line tool
 * [**Helm**](https://helm.sh/docs/intro/install/): Kubernetes package manager (version 3.x)
-
-{% hint style="info" %}
-This quick start is designed for local testing and development. For production deployments, see the [Deployment Guide](../deployment/overview.md).
-{% endhint %}
 
 ## Step 1: Create a kind Cluster
 
@@ -50,16 +80,23 @@ You should see three nodes in the `Ready` state.
 Deploy Mermin using the Helm chart with a configuration that outputs flows to stdout (for easy viewing):
 
 ```bash
-# Add Mermin Helm registry
+# Add Mermin Helm repository
 helm repo add mermin https://elastiflow.github.io/mermin
 helm repo update
 
+# Download the example configuration for local testing
+curl -LO https://raw.githubusercontent.com/elastiflow/mermin/main/docs/deployment/examples/local/config.example.hcl
+
 # Deploy Mermin using Helm
 helm upgrade --install mermin mermin/mermin \
-  --set-file config.content=docs/deployment/examples/local/config.example.hcl \
+  --set-file config.content=config.example.hcl \
   --wait \
   --timeout 5m
 ```
+
+{% hint style="info" %}
+This configuration outputs Flow Traces to stdout for quick verification. For production, configure an [OTLP exporter](../configuration/reference/opentelemetry-otlp-exporter.md) to send data to your observability backend.
+{% endhint %}
 
 ## Step 3: Verify the Deployment
 
@@ -79,14 +116,14 @@ mermin-def456  1/1     Running   0          2m
 
 ## Step 4: View Network Flow Data
 
-Now let's view the network flows Mermin is capturing:
+View the network flows Mermin is capturing:
 
 ```bash
 # Stream logs from a Mermin pod
 kubectl logs -l app.kubernetes.io/name=mermin -f --tail=100
 ```
 
-You should see flow records in a human-readable format. Let's generate some traffic to see more flows:
+Flow records appear in a human-readable format. Generate some traffic to see more flows:
 
 ```bash
 # In a new terminal, create a test pod
@@ -98,7 +135,7 @@ curl https://www.google.com
 exit
 ```
 
-Switch back to the logs terminal, and you'll see network flow records for the traffic you just generated, including:
+The logs terminal displays network flow records for the generated traffic, including:
 
 * Source and destination IP addresses and ports
 * Protocol (TCP, UDP, ICMP)
@@ -296,7 +333,7 @@ Configures how Mermin exports network flow data. Flows can be sent to an OTLP re
 
 ## Cleanup
 
-When you're done experimenting, clean up the resources:
+Remove the resources when finished:
 
 ```bash
 # Remove the test deployment and service (if created)

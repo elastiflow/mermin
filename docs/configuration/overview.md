@@ -1,6 +1,6 @@
 # Configuration Overview
 
-Mermin is configured with HCL (HashiCorp Configuration Language) or YAML. This page describes the config file format, precedence, and structure. Section-specific options are documented in the linked pages.
+Configure Mermin with HCL (HashiCorp Configuration Language) or YAML. This page describes the config file format, precedence, and structure. Section-specific options are documented in the linked pages.
 
 ## File Format
 
@@ -43,7 +43,7 @@ Flow capture may pause briefly during reload. Some changes (e.g. interface selec
 
 ## Minimal configuration
 
-Without a config file, Mermin uses built-in defaults and does not configure an exporter, so flow data is not sent anywhere. To send flow traces to an OTLP endpoint with everything else at defaults, use a config file that only sets export:
+Without a config file, Mermin uses built-in defaults and does not configure an exporter—flow data is not sent anywhere. To send flow traces to an OTLP endpoint with default settings, create a config file that sets only the export block:
 
 ```hcl
 export "traces" {
@@ -238,12 +238,12 @@ internal "traces" {
 
 ## Validation
 
-Configuration is validated on startup. Invalid config (e.g. unknown field, invalid value, missing file, or unsupported extension) causes Mermin to exit with a non-zero exit code and print the error to stderr.
-Fix the file and restart (or rely on auto-reload after fixing). When running in Kubernetes, Mermin may log a memory warning if estimated pipeline usage exceeds 80% of the container limit; see [Pipeline](reference/flow-processing-pipeline.md) and [Troubleshooting](../troubleshooting/troubleshooting.md).
+Configuration is validated on startup. Invalid config (unknown field, invalid value, missing file, or unsupported extension) causes Mermin to exit with a non-zero exit code and print the error to stderr.
+Fix the file and restart (or rely on auto-reload after fixing). In Kubernetes, Mermin logs a memory warning if estimated pipeline usage exceeds 80% of the container limit; see [Pipeline](reference/flow-processing-pipeline.md) and [Troubleshooting](../troubleshooting/troubleshooting.md).
 
 ## HCL functions
 
-HCL config files (not YAML) can call the `env` function to read environment variables. Useful for secrets or environment-specific values without hardcoding. The function is evaluated when the config is loaded and again on reload.
+HCL config files (not YAML) support the `env` function to read environment variables—useful for secrets or environment-specific values without hardcoding. The function evaluates when the config loads and again on reload.
 
 - `env("VAR_NAME")`
   Returns the value of the environment variable, or an empty string if unset. Mermin logs a warning when the variable is not set.

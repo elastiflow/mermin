@@ -15,7 +15,7 @@ Kubernetes metadata enrichment is not available in bare metal deployments. Flows
 Before deploying on bare metal:
 
 * **Linux OS**: RHEL/CentOS 7+, Ubuntu 18.04+, Debian 10+, or similar
-* **Linux Kernel**: Version 4.18 or newer with eBPF support
+* **Linux Kernel**: Version 5.14 or newer with eBPF and BTF support (6.6+ recommended)
 * **Docker**: Version 19.03 or newer, or containerd/Podman as alternative
 * **Root Access**: Required to run privileged containers
 * **Network Access**: To OTLP collector endpoint

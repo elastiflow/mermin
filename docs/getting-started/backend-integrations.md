@@ -4,7 +4,7 @@ hidden: true
 
 # Export to Your Observability Backend
 
-Mermin exports Flow Traces via the **OpenTelemetry Protocol (OTLP)**, which means it works with any OTLP-enabled observability backend or collector.
+Mermin exports Flow Traces via the **OpenTelemetry Protocol (OTLP)**, compatible with any OTLP-enabled observability backend or collector.
 
 ## What You Need
 
@@ -15,7 +15,7 @@ To receive Flow Traces from Mermin, you need one of:
 
 ## OpenTelemetry Collector (Recommended)
 
-The OpenTelemetry Collector is the most flexible option:
+The OpenTelemetry Collector provides the most flexibility:
 
 - Receives OTLP from Mermin via gRPC or HTTP
 - Processes, batches, and transforms telemetry data
@@ -37,11 +37,11 @@ export "traces" {
 
 ## OTLP-Compatible Data Platforms
 
-Mermin Flow Traces work with any platform that supports OTLP trace ingestion:
+Flow Traces work with any platform supporting OTLP trace ingestion:
 
 ### Elastic Stack
 
-Elasticsearch with APM Server or OpenTelemetry Collector can ingest OTLP traces.
+Elasticsearch with APM Server or OpenTelemetry Collector ingests OTLP traces.
 
 **Use Case:** Full-text search, complex aggregations, APM integration, machine learning
 
@@ -85,7 +85,7 @@ export "traces" {
 
 ### Grafana Cloud, Datadog, New Relic, Honeycomb, etc
 
-Most commercial observability platforms now support OTLP ingestion.
+Most commercial observability platforms support OTLP ingestion.
 
 **How to Connect:**
 
@@ -116,7 +116,7 @@ Each Flow Trace is an OpenTelemetry span containing:
 - Bidirectional counters: bytes sent/received, packets sent/received
 - TCP state: flags (SYN, FIN, RST), connection state
 - Kubernetes metadata: pod, service, deployment, namespace, labels
-- Community ID for flow correlation
+- [Community ID](https://github.com/corelight/community-id-spec) for flow correlation across monitoring points
 
 **Resource Attributes:**
 
@@ -124,11 +124,11 @@ Each Flow Trace is an OpenTelemetry span containing:
 - Node name
 - Mermin version
 
-This standardized format allows querying Flow Traces using native backend query languages (TraceQL, KQL, Lucene, etc.).
+Query Flow Traces using native backend query languages (TraceQL, KQL, Lucene).
 
 ## Testing with Stdout
 
-For local development and testing, you can output Flow Traces to stdout instead of OTLP:
+For local development and testing, output Flow Traces to stdout instead of OTLP:
 
 ```hcl
 export "traces" {

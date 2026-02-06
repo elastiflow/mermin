@@ -4,11 +4,11 @@ This guide will help you diagnose and resolve pod startup failures, eBPF loading
 
 ## Pod Not Starting
 
-If your Mermin pods won't start, they're likely stuck in one of these states: `Pending`, `CrashLoopBackOff`, or `Error`. Let's figure out what's going on.
+Mermin pods that fail to start typically show one of these states: `Pending`, `CrashLoopBackOff`, or `Error`.
 
 ### Check Pod Status
 
-Start by gathering information about the pod:
+Gather information about the pod:
 
 ```bash
 kubectl get pods -l app.kubernetes.io/name=mermin -n ${MERMIN_NAMESPACE}
@@ -20,7 +20,7 @@ kubectl get events -n ${MERMIN_NAMESPACE} --field-selector involvedObject.name=m
 
 #### 1. Insufficient Node Resources
 
-If you see `Insufficient cpu` or `Insufficient memory` in the events, your nodes don't have enough resources available.
+`Insufficient cpu` or `Insufficient memory` in the events indicates nodes lack available resources.
 
 **Fix it by adjusting resource requests** in your Helm values:
 
@@ -39,9 +39,9 @@ resources:
 
 #### 2. Pod Security Policy Restrictions
 
-Seeing `Error: container has runAsNonRoot and image will run as root`? This happens because Mermin needs privileged access to load eBPF programs, but your cluster's security policies are blocking it.
+`Error: container has runAsNonRoot and image will run as root` indicates cluster security policies block the privileged access Mermin needs for eBPF programs.
 
-**The fix**: Configure your Pod Security Policy (PSP) or Pod Security Standards (PSS) to allow privileged containers in the Mermin namespace. This is safe because Mermin only uses these privileges for eBPF operations and network monitoring.
+**Solution**: Configure your Pod Security Policy (PSP) or Pod Security Standards (PSS) to allow privileged containers in the Mermin namespace. Mermin uses these privileges exclusively for eBPF operations and network monitoring.
 
 The default Helm chart includes the necessary security context settings:
 
@@ -66,9 +66,9 @@ kubectl label namespace ${MERMIN_NAMESPACE} pod-security.kubernetes.io/enforce=p
 
 #### 3. Image Pull Failures
 
-Can't pull the Mermin image? You'll see `ImagePullBackOff` or `ErrImagePull` in the pod status.
+`ImagePullBackOff` or `ErrImagePull` in the pod status indicates image pull failures.
 
-**Troubleshoot it with these commands**:
+**Troubleshoot with these commands**:
 
 ```bash
 # Check image pull status
@@ -190,7 +190,7 @@ kubectl exec -n mermin $POD -- env MERMIN_LOG_LEVEL=debug mermin diagnose bpf --
 
 #### 1. Missing Linux Capabilities
 
-The most common issue! If you see `Operation not permitted`, Mermin doesn't have the Linux capabilities it needs.
+`Operation not permitted` indicates missing Linux capabilities—the most common issue.
 
 **The Helm chart sets `privileged: true` by default**, which grants all necessary capabilities. This is the simplest and most reliable approach:
 
@@ -229,7 +229,7 @@ Without `hostPID: true`, Mermin can't attach eBPF programs to host network inter
 
 #### 2. Kernel Version Too Old
 
-Seeing `Invalid argument` or `Function not implemented`? Your kernel might be too old to support eBPF.
+`Invalid argument` or `Function not implemented` indicates a kernel too old for eBPF support.
 
 **Check your kernel version**:
 
@@ -237,11 +237,11 @@ Seeing `Invalid argument` or `Function not implemented`? Your kernel might be to
 kubectl debug node/worker-node -it --image=ubuntu -- uname -r
 ```
 
-**Requirements**: For Mermin, you need Linux kernel 5.14 or newer (we recommend 6.6+). If your kernel is older, you'll need to upgrade your nodes to a supported version.
+**Requirements**: Mermin requires Linux kernel 5.14 or newer (6.6+ recommended). Upgrade nodes running older kernels.
 
 #### 3. BTF (BPF Type Format) Not Available
 
-BTF provides type information for eBPF programs. If you see `BTF is not supported`, your kernel wasn't compiled with BTF enabled.
+BTF provides type information for eBPF programs. `BTF is not supported` indicates the kernel was compiled without BTF enabled.
 
 **Check if BTF is available**:
 
@@ -249,11 +249,11 @@ BTF provides type information for eBPF programs. If you see `BTF is not supporte
 kubectl debug node/worker-node -it --image=ubuntu -- ls /sys/kernel/btf/vmlinux
 ```
 
-If the file doesn't exist, you'll need to either enable BTF in your kernel configuration or switch to a kernel distribution that includes BTF support (most modern kernels do).
+If the file does not exist, enable BTF in your kernel configuration or switch to a distribution with BTF support (most modern kernels include it).
 
 #### 4. eBPF File System Not Mounted
 
-The BPF filesystem at `/sys/fs/bpf` is where Mermin pins its eBPF maps for state persistence. Without it, you'll see `No such file or directory: /sys/fs/bpf`.
+Mermin pins eBPF maps to `/sys/fs/bpf` for state persistence. `No such file or directory: /sys/fs/bpf` indicates the BPF filesystem is not mounted.
 
 **Quick fix on the host node**:
 
@@ -316,19 +316,19 @@ The subcommand will report whether `/sys/fs/bpf` is writable. On kernels >= 6.6.
 
 #### 5. eBPF Verifier Rejection (Program Too Large)
 
-The eBPF verifier has limits on program complexity. If your program exceeds these limits, you'll see `Verifier instruction limit exceeded`.
+The eBPF verifier enforces program complexity limits. `Verifier instruction limit exceeded` indicates the program exceeds these limits.
 
 For more detailed guidance on verifier errors, see [Common eBPF Errors](common-ebpf-errors.md).
 
 ## Permission Errors
 
-If Mermin can't access Kubernetes resources, you'll see RBAC permission errors like:
+RBAC permission errors appear when Mermin lacks access to Kubernetes resources:
 
 ```text
 ERROR Failed to list pods: pods is forbidden: User "system:serviceaccount:mermin:mermin" cannot list resource "pods"
 ```
 
-This means the service account doesn't have the necessary permissions.
+The service account lacks necessary permissions.
 
 ### Check Your RBAC Configuration
 
@@ -342,7 +342,7 @@ Make sure your ClusterRole has the required permissions, which can be found in t
 
 ## CNI and Interface Configuration
 
-Not seeing the traffic you expect? This is often because Mermin isn't monitoring the right network interfaces for your CNI plugin.
+Missing expected traffic often indicates Mermin is not monitoring the correct network interfaces for your CNI plugin.
 
 ### Configure Interfaces for Your CNI
 
