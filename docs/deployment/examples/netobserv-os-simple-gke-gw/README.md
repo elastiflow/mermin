@@ -51,7 +51,6 @@ Therefore, it is not possible to know the IP address of the NetObserv gRPC load 
       helm upgrade -i --wait --timeout 15m -n elastiflow --create-namespace \
         -f values.yaml \
         --set-file mermin.config.content=config.hcl \
-        --devel \
         mermin mermin/mermin-netobserv-os-stack
       ```
 
@@ -68,7 +67,6 @@ Therefore, it is not possible to know the IP address of the NetObserv gRPC load 
       helm upgrade -i --wait --timeout 15m -n elastiflow \
         -f values.yaml \
         --set-file mermin.config.content=config.hcl \
-        --devel \
         mermin mermin/mermin-netobserv-os-stack
       ```
 
@@ -90,7 +88,6 @@ To render and diff Helm templates to Kubernetes manifests, run:
 rm -rf helm_rendered; helm template -n elastiflow \
   -f values.yaml \
   --set-file mermin.config.content=config.hcl \
-  --devel \
   mermin mermin/mermin-netobserv-os-stack \
   --output-dir helm_rendered
 

@@ -51,7 +51,6 @@ Deploy Mermin configured to output directly to the GreptimeDB service using HTTP
     helm repo update
     helm upgrade -i --wait --timeout 15m -n elastiflow --create-namespace \
       --set-file config.content=config.hcl \
-      --devel \
       mermin mermin/mermin
     ```
 
@@ -75,7 +74,7 @@ You may ensure the data is reaching GreptimeDB by using a [GreptimeDB Dashboard 
 
 - Use `http://localhost:4000` as host and `public` as database.
 - Run following query to ensure data is reaching GreptimeDB
-  
+
   ```sql
   SELECT * FROM "opentelemetry_traces" WHERE "span_attributes.source.k8s.pod.name" IS NOT NULL ORDER BY "timestamp" DESC LIMIT 100
   ```
@@ -96,17 +95,16 @@ In order to render K8s manifests you may use following commands
   # Diff with existing K8s resources
   kubectl -n greptimedb diff -R -f helm_rendered/greptimedb-standalone/
   ```
-  
+
 - Mermin
 
     ```sh
     rm -rf helm_rendered; helm template \
       -n elastiflow \
       --set-file config.content=config.hcl \
-      --devel \
       mermin mermin/mermin \
       --output-dir helm_rendered
 
     # Diff with existing K8s resources
-    kubectl diff -R -f helm_rendered/mermin/    
+    kubectl diff -R -f helm_rendered/mermin/
     ```
