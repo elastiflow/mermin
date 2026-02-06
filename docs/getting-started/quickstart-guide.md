@@ -368,7 +368,7 @@ Congratulations! You've successfully deployed Mermin and captured network flows.
 {% endtab %}
 
 {% tab title="Learn the Fundamentals" %}
-1. [**Understand How Mermin Works**](../concepts/agent-architecture.md): Deep dive into the agent architecture
+1. [**Understand How Mermin Works**](../concepts/agent-architecture.md): Deep-dive into the agent architecture
 2. [**Explore Flow Trace Semantics**](../concepts/introduction-to-flow-traces.md): Learn what each attribute means
 {% endtab %}
 
