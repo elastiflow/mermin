@@ -13,7 +13,7 @@ Mermin provides Prometheus metrics HTTP endpoints (default port `10250`). This p
 
 ## Configuration
 
-A full configuration example may be found in the [Default Configuration](./default/config.hcl).
+A full configuration example may be found in the [Default Configuration](../default/config.hcl).
 
 ## Configuration Options
 
@@ -265,4 +265,4 @@ For production environments:
 
 ## Next Steps
 
-- [**Mermin Internal Metrics**](../internal-monitoring/internal-metrics.md): Mermin metrics documentation
+- [**Mermin Internal Metrics**](../../internal-monitoring/internal-metrics.md): Mermin metrics documentation

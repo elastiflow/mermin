@@ -200,7 +200,7 @@ securityContext:
   privileged: true    # Grants all required capabilities
 ```
 
-**If you can't use privileged mode** (due to security policies), you can grant specific capabilities instead. Refer to the [security considerations](../getting-started/security-considerations.md#privileges-required) documentation for more information.
+**If you can't use privileged mode** (due to security policies), you can grant specific capabilities instead. Refer to the [security considerations](../concepts/security-considerations.md#privileges-required) documentation for more information.
 
 ```yaml
 # In charts/mermin/values.yaml (capability-based approach)

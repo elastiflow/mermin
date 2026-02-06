@@ -105,11 +105,11 @@ The userspace Mermin agent receives packets from eBPF and aggregates them into n
 
 - **Bidirectional Flow Spans**: Groups packets by 5-tuple (source IP/port, dest IP/port, protocol)
 - **State Tracking**: Maintains connection state for TCP (SYN, FIN, RST flags)
-- **Timeout Management**: Expires inactive flows based on [configurable timeouts](../configuration/span.md)
+- **Timeout Management**: Expires inactive flows based on [configurable timeouts](../configuration/reference/flow-span-producer.md)
 - **Protocol Parsing**: Deep packet inspection for tunneling protocols (VXLAN, Geneve, WireGuard)
 - **Community ID**: Generates standard Community ID hashes for flow correlation
 
-A [Flow Trace Span](../spec/semantic-conventions.md) includes:
+A [Flow Trace Span](semantic-conventions.md) includes:
 
 - Source and destination IP addresses and ports
 - Network protocol (TCP, UDP, ICMP, etc.)
@@ -179,7 +179,7 @@ Mermin exports flows as **Flow Traces** using the OpenTelemetry Protocol (OTLP):
 
 Flow Traces are exported as OTLP trace spans, allowing them to be processed by any OTLP-compatible backend without requiring NetFlow collectors.
 
-To learn more about the exporter configuration options, see the [OTLP exporter](../configuration/export-otlp.md) documentation.
+To learn more about the exporter configuration options, see the [OTLP exporter](../configuration/reference/opentelemetry-otlp-exporter.md) documentation.
 
 ## Performance Characteristics
 
@@ -201,7 +201,7 @@ Mermin is designed to be efficient in production environments:
 
 ### Tunability
 
-Mermin provides extensive configuration for performance tuning under the `pipeline` block, please refer the [pipeline](../configuration/pipeline.md) documentation for the details.
+Mermin provides extensive configuration for performance tuning under the `pipeline` block, please refer the [pipeline](../configuration/reference/flow-processing-pipeline.md) documentation for the details.
 
 ## Failure Modes and Resilience
 
@@ -333,5 +333,5 @@ Now that you understand how Mermin generates Flow Traces, review the following g
    Includes in-depth recommendations for resource allocation, network architecture, and security best practices.
 2. [**Configure Mermin**](../configuration/overview.md): Customize Mermin for your environment by configuring network interface discovery, Kubernetes metadata enrichment, flow filtering, OTLP export, and other settings.
    Features support for auto-reload and flexible configuration precedence.
-3. [**Choose Your Backend**](../observability/backend-integrations.md): Send Flow Traces via OTLP to any compatible observability platform, including OpenTelemetry Collector, Elastic Stack, OpenSearch, Grafana Tempo, and Jaeger.
+3. [**Choose Your Backend**](../getting-started/backend-integrations.md): Send Flow Traces via OTLP to any compatible observability platform, including OpenTelemetry Collector, Elastic Stack, OpenSearch, Grafana Tempo, and Jaeger.
 4. [**Troubleshoot Issues**](../troubleshooting/troubleshooting.md): Diagnose deployment failures, eBPF errors, and traffic visibility issues using pod logs, health checks, metrics monitoring, and the `diagnose bpf` command.

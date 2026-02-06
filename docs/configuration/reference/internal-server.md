@@ -2,7 +2,7 @@
 
 **Block:** `internal.server`
 
-Mermin provides HTTP Server endpoints for health checks and Prometheus metrics. This page documents how to configure the HTTP server and health probes; for the Prometheus metrics server (port, endpoints, debug metrics), see [Metrics](../metrics.md).
+Mermin provides HTTP Server endpoints for health checks and Prometheus metrics. This page documents how to configure the HTTP server and health probes; for the Prometheus metrics server (port, endpoints, debug metrics), see [Metrics](internal-prometheus-metrics.md).
 
 ## Configuration
 
@@ -71,7 +71,7 @@ A full configuration example may be found in the [Default Configuration](../defa
 ## Metrics Server
 
 The metrics server (Prometheus scrape endpoint) is configured via the `internal "metrics"` block. Options include `enabled`, `listen_address`, `port` (default `10250`), and `debug_metrics_enabled`.
-See [Metrics](../metrics.md) for full configuration and available endpoints.
+See [Metrics](internal-prometheus-metrics.md) for full configuration and available endpoints.
 
 ### Health Check Endpoints
 
@@ -234,8 +234,8 @@ For production environments:
 
 ## Next Steps
 
-- [**Metrics**](../metrics.md): Configure Prometheus metrics server and endpoints
+- [**Metrics**](internal-prometheus-metrics.md): Configure Prometheus metrics server and endpoints
 - [**Global Options**](README.md#configure-global-agent-options): Configure logging and performance
-- [**Flow Span Options**](../span.md): Tune flow generation
-- [**OTLP Exporter**](../export-otlp.md): Configure flow export
+- [**Flow Span Options**](flow-span-producer.md): Tune flow generation
+- [**OTLP Exporter**](opentelemetry-otlp-exporter.md): Configure flow export
 - [**Troubleshooting**](../../troubleshooting/troubleshooting.md): Diagnose issues

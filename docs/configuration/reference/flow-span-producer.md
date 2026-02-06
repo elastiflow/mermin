@@ -3,7 +3,7 @@
 **Block:** `span`
 
 Mermin groups captured packets into bidirectional flows and exports each flow as an OpenTelemetry span. The `span` block controls when flows are closed and when they emit records,
-plus Community ID hashing, trace ID correlation, and hostname resolution. Add a top-level `span { }` block in your [configuration file](overview.md); there are no CLI or environment overrides for span options.
+plus Community ID hashing, trace ID correlation, and hostname resolution. Add a top-level `span { }` block in your [configuration file](../overview.md); there are no CLI or environment overrides for span options.
 
 The span block lets you configure:
 
@@ -11,11 +11,11 @@ The span block lets you configure:
 - **Community ID and trace correlation**: five-tuple hashing for correlation across agents and how long the same Community ID keeps the same trace ID
 - **Hostname resolution**: whether to resolve IPs to hostnames for `client.address` and `server.address` and the lookup timeout
 
-Flow semantics (how flows become OpenTelemetry spans and what attributes they carry) are in [Semantic Conventions](../spec/semantic-conventions.md) and [Attribute Reference](../getting-started/attribute-reference.md).
+Flow semantics (how flows become OpenTelemetry spans and what attributes they carry) are in [Semantic Conventions](../../concepts/semantic-conventions.md) and [Attribute Reference](../../getting-started/attribute-reference.md).
 
 ## Configuration
 
-A full configuration example can be found in the [Default Configuration](./default/config.hcl).
+A full configuration example can be found in the [Default Configuration](../default/config.hcl).
 
 - `max_record_interval` attribute
 
@@ -134,7 +134,7 @@ A full configuration example can be found in the [Default Configuration](./defau
 
 - `community_id_seed` attribute
 
-  Seed for [Community ID](https://github.com/corelight/community-id-spec) hashing of the flow five-tuple. Use the same seed everywhere for correlation across agents and tools. The result is exported as `flow.community_id` ([Attribute Reference](../getting-started/attribute-reference.md)).
+  Seed for [Community ID](https://github.com/corelight/community-id-spec) hashing of the flow five-tuple. Use the same seed everywhere for correlation across agents and tools. The result is exported as `flow.community_id` ([Attribute Reference](../../getting-started/attribute-reference.md)).
 
   **Type:** Integer (uint16)
 
@@ -166,7 +166,7 @@ A full configuration example can be found in the [Default Configuration](./defau
 
 - `enable_hostname_resolution` attribute
 
-  When true, `client.address` and `server.address` may be reverse-DNS hostnames instead of IPs ([Attribute Reference](../getting-started/attribute-reference.md)).
+  When true, `client.address` and `server.address` may be reverse-DNS hostnames instead of IPs ([Attribute Reference](../../getting-started/attribute-reference.md)).
 
   **Type:** Boolean
 
@@ -204,27 +204,27 @@ Understanding when spans are exported helps with tuning and capacity planning. A
 2. **Protocol timeout**: No packets for the protocol-specific timeout (generic, ICMP, TCP, or UDP). The flow is closed and removed from the flow table.
 3. **TCP close**: A FIN or RST was seen and the corresponding `tcp_fin_timeout` or `tcp_rst_timeout` has elapsed. The flow is closed and exported.
 
-Exported spans are sent to the targets configured in your export block ([OTLP export](export-otlp.md), [stdout export](export-stdout.md), etc.).
-Workers poll flow state on an interval defined in [pipeline](pipeline.md) (`flow_producer.flow_store_poll_interval`). The flow table is backed by the eBPF `FLOW_STATS` map and in-memory state;
-its capacity is set in [pipeline](pipeline.md) (`flow_capture.flow_stats_capacity`).
+Exported spans are sent to the targets configured in your export block ([OTLP export](opentelemetry-otlp-exporter.md), [stdout export](opentelemetry-console-exporter.md), etc.).
+Workers poll flow state on an interval defined in [pipeline](flow-processing-pipeline.md) (`flow_producer.flow_store_poll_interval`). The flow table is backed by the eBPF `FLOW_STATS` map and in-memory state;
+its capacity is set in [pipeline](flow-processing-pipeline.md) (`flow_capture.flow_stats_capacity`).
 
 ## Tuning
 
-Shorter intervals and timeouts mean more exports and higher storage and [OTLP export](export-otlp.md) load; longer values reduce volume and improve aggregation at the cost of slower visibility.
+Shorter intervals and timeouts mean more exports and higher storage and [OTLP export](opentelemetry-otlp-exporter.md) load; longer values reduce volume and improve aggregation at the cost of slower visibility.
 
-For high-throughput or memory-constrained nodes, use longer or shorter timeouts accordingly. To reduce the number of flows tracked, use [flow filters](filtering.md).
+For high-throughput or memory-constrained nodes, use longer or shorter timeouts accordingly. To reduce the number of flows tracked, use [flow filters](flow-span-filters.md).
 
-[Troubleshooting](../troubleshooting/troubleshooting.md) and [Pipeline](pipeline.md) cover backpressure, export tuning, and pipeline sizing.
+[Troubleshooting](../../troubleshooting/troubleshooting.md) and [Pipeline](flow-processing-pipeline.md) cover backpressure, export tuning, and pipeline sizing.
 
 ## Monitoring
 
-Flow and eBPF map metrics are in [Internal Metrics](../internal-monitoring/internal-metrics.md): `mermin_flow_spans_active_total`, `mermin_flow_spans_created_total`, and `mermin_ebpf_map_size` / `mermin_ebpf_map_capacity` with `map="FLOW_STATS"`.
+Flow and eBPF map metrics are in [Internal Metrics](../../internal-monitoring/internal-metrics.md): `mermin_flow_spans_active_total`, `mermin_flow_spans_created_total`, and `mermin_ebpf_map_size` / `mermin_ebpf_map_capacity` with `map="FLOW_STATS"`.
 
-If the flow table or memory grows without bound, lower timeouts or `max_record_interval`, or reduce tracked flows with [flow filters](filtering.md).
-If you need more headroom for legitimate load, increase `flow_capture.flow_stats_capacity` in [pipeline](pipeline.md).
+If the flow table or memory grows without bound, lower timeouts or `max_record_interval`, or reduce tracked flows with [flow filters](flow-span-filters.md).
+If you need more headroom for legitimate load, increase `flow_capture.flow_stats_capacity` in [pipeline](flow-processing-pipeline.md).
 
 ## Next Steps
 
-- [**Configuration Examples**](examples.md): See complete configurations
-- [**Flow Filtering**](filtering.md): Reduce flow volume with filters
-- [**OTLP Export**](export-otlp.md): Configure export options
+- [**Configuration Examples**](../examples.md): See complete configurations
+- [**Flow Filtering**](flow-span-filters.md): Reduce flow volume with filters
+- [**OTLP Export**](opentelemetry-otlp-exporter.md): Configure export options

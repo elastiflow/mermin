@@ -13,7 +13,7 @@ Mermin can export traces about its own operation for self-monitoring and debuggi
 
 ## Configuration
 
-A full configuration example may be found in the [Default Configuration](./default/config.hcl).
+A full configuration example may be found in the [Default Configuration](../default/config.hcl).
 
 ### `internal.traces` block
 
@@ -61,7 +61,7 @@ A full configuration example may be found in the [Default Configuration](./defau
 
 ### `internal.traces.otlp` block
 
-OTLP exporter configuration for internal traces. Uses same configuration options as main OTLP exporter (see [OTLP Exporter](export-otlp.md)).
+OTLP exporter configuration for internal traces. Uses same configuration options as main OTLP exporter (see [OTLP Exporter](opentelemetry-otlp-exporter.md)).
 
 ## Use Cases
 
@@ -248,7 +248,7 @@ internal "traces" {
 
 ## Next Steps
 
-- [**Global Options**](reference/README.md#configure-global-agent-options): Configure log levels
-- Internal [**Server**](reference/internal-server.md) and [**Metrics**](metrics.md): Monitor with Prometheus
-- [**Troubleshooting**](../troubleshooting/troubleshooting.md): Debug common issues
-- [**OTLP Exporter**](export-otlp.md): Configure trace export
+- [**Global Options**](README.md#configure-global-agent-options): Configure log levels
+- Internal [**Server**](internal-server.md) and [**Metrics**](internal-prometheus-metrics.md): Monitor with Prometheus
+- [**Troubleshooting**](../../troubleshooting/troubleshooting.md): Debug common issues
+- [**OTLP Exporter**](opentelemetry-otlp-exporter.md): Configure trace export

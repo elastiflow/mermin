@@ -3,14 +3,14 @@
 **Block:** `discovery.informer.k8s.owner_relations`
 
 Owner relations control how Mermin walks Kubernetes owner references to enrich flows with workload controller metadata (Deployment, StatefulSet, etc.).
-Mermin accepts HCL or YAML for the config file; the examples below use HCL (see [Configuration Overview](overview.md#file-format) for format details).
+Mermin accepts HCL or YAML for the config file; the examples below use HCL (see [Configuration Overview](../overview.md#file-format) for format details).
 
 Kubernetes resources have owner references forming a chain: Pod → ReplicaSet → Deployment → ... Mermin can walk this chain and attach metadata from owners to network flows.
 Owner relations apply when Kubernetes discovery is enabled (`discovery "informer" "k8s"`).
 
 ## Configuration
 
-A full configuration example may be found in the [Default Configuration](./default/config.hcl).
+A full configuration example may be found in the [Default Configuration](../default/config.hcl).
 
 ### `discovery.informer.k8s.owner_relations` block
 
@@ -133,5 +133,5 @@ owner_relations = {
 
 ## Next Steps
 
-- [**Selector Relations**](selector-relations.md): Configure selector-based matching
-- [**Flow Attributes**](attributes.md): Configure metadata extraction
+- [**Selector Relations**](kubernetes-selector-relations.md): Configure selector-based matching
+- [**Flow Attributes**](flow-span-kubernetes-attribution.md): Configure metadata extraction

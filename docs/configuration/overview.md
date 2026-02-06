@@ -88,7 +88,7 @@ pipeline {
 
 ### HTTP server and metrics
 
-Health HTTP server and internal Prometheus metrics. See Internal [Server](reference/internal-server.md) and [Metrics](metrics.md).
+Health HTTP server and internal Prometheus metrics. See Internal [Server](reference/internal-server.md) and [Metrics](reference/internal-prometheus-metrics.md).
 
 ```hcl
 internal "server" {
@@ -145,15 +145,16 @@ discovery "informer" "k8s" {
 
 ### Kubernetes relations
 
-Owner and selector relations for flow enrichment. See [Owner Relations](owner-relations.md) and [Selector Relations](selector-relations.md).
+Owner and selector relations for flow enrichment. See [Owner Relations](reference/kubernetes-owner-relations.md) and [Selector Relations](reference/kubernetes-selector-relations.md).
 
 ### Flow attributes
 
-Which Kubernetes metadata to extract and how to associate it with flows. See [Flow Attributes](attributes.md). If you omit the `attributes` block, default Kubernetes attribution is applied. An empty `attributes {}` block disables attribution.
+Which Kubernetes metadata to extract and how to associate it with flows. See [Flow Attributes](reference/flow-span-kubernetes-attribution.md). If you omit the `attributes` block, default Kubernetes attribution is applied.
+An empty `attributes {}` block disables attribution.
 
 ### Filtering
 
-Filter flows by address, port, transport, type, interface, and other dimensions. See [Flow Filtering](filtering.md). Each filter block has a label (e.g. `"source"`); inside it you can set `match` and `not_match` for:
+Filter flows by address, port, transport, type, interface, and other dimensions. See [Flow Filtering](reference/flow-span-filters.md). Each filter block has a label (e.g. `"source"`); inside it you can set `match` and `not_match` for:
 
 - `address`, `port`, `transport`, `type`
 - `interface_name`, `interface_index`, `interface_mac`
@@ -174,7 +175,7 @@ filter "source" {
 
 ### Span options
 
-Flow span generation, timeouts, Community ID, trace correlation, and hostname resolution. See [Flow Span Options](span.md). All options are config-file only.
+Flow span generation, timeouts, Community ID, trace correlation, and hostname resolution. See [Flow Span Options](reference/flow-span-producer.md). All options are config-file only.
 
 ```hcl
 span {
@@ -194,7 +195,7 @@ span {
 
 ### Export
 
-Trace export to OTLP and/or stdout. See [OTLP Exporter](export-otlp.md) and [Stdout Exporter](export-stdout.md).
+Trace export to OTLP and/or stdout. See [OTLP Exporter](reference/opentelemetry-otlp-exporter.md) and [Console Exporter](reference/opentelemetry-console-exporter.md).
 
 ```hcl
 export "traces" {
@@ -225,7 +226,7 @@ export "traces" {
 
 ### Internal tracing
 
-Mermin’s own telemetry. See [Internal Tracing](internal-tracing.md).
+Mermin's own telemetry. See [Internal Tracing](reference/internal-tracing.md).
 
 ```hcl
 internal "traces" {
@@ -238,7 +239,7 @@ internal "traces" {
 ## Validation
 
 Configuration is validated on startup. Invalid config (e.g. unknown field, invalid value, missing file, or unsupported extension) causes Mermin to exit with a non-zero exit code and print the error to stderr.
-Fix the file and restart (or rely on auto-reload after fixing). When running in Kubernetes, Mermin may log a memory warning if estimated pipeline usage exceeds 80% of the container limit; see [Pipeline](pipeline.md) and [Troubleshooting](../troubleshooting/troubleshooting.md).
+Fix the file and restart (or rely on auto-reload after fixing). When running in Kubernetes, Mermin may log a memory warning if estimated pipeline usage exceeds 80% of the container limit; see [Pipeline](reference/flow-processing-pipeline.md) and [Troubleshooting](../troubleshooting/troubleshooting.md).
 
 ## HCL functions
 
@@ -284,23 +285,23 @@ YAML configs do not support `env`; use HCL if you need it, or inject values befo
 - [Configuration Examples](examples.md): full example configs (production, development, CNI, high-throughput, security).
 - Section reference:
 
-| Section                                                                     | Description                                          |
-|-----------------------------------------------------------------------------|------------------------------------------------------|
-| [Global Options](reference/README.md#configure-global-agent-options)        | Configure Global Agent Options                       |
-| [Internal Server](reference/internal-server.md)                             | Configure Internal Server                            |
-| [Internal Prometheus Metrics](metrics.md)                                   | Configure Internal Prometheus Metrics                |
-| [Network Packet Parser](reference/network-packet-parser.md)                 | Configure Parsing of Network Packets                 |
-| [Network Interface Discovery](reference/network-interface-discovery.md)     | Configure Discovery of Network Interfaces            |
-| [Kubernetes Informer Discovery](reference/kubernetes-informer-discovery.md) | Configure Discovery of Kubernetes Informer           |
-| [Kubernetes Owner Relations](owner-relations.md)                            | Configure Owner Relations of Kubernetes Resources    |
-| [Kubernetes Selector Relations](selector-relations.md)                      | Configure Selector Relations of Kubernetes Resources |
-| [Flow Span Kubernetes Attribution](attributes.md)                           | Configure Kubernetes Attribution of Flow Spans       |
-| [Flow Span Filters](filtering.md)                                           | Configure Filtering of Flow Spans                    |
-| [Flow Span Producer](span.md)                                               | Configure Producing of Flow Spans                    |
-| [OpenTelemetry OTLP Exporter](export-otlp.md)                               | Configure OpenTelemetry OTLP Exporter                |
-| [OpenTelemetry Console Exporter](export-stdout.md)                          | Configure OpenTelemetry Console Exporter             |
-| [Internal Tracing](internal-tracing.md)                                     | Configure Internal Tracing Exporter                  |
-| [Flow Processing Pipeline](pipeline.md)                                     | Configure Flow Processing Pipeline                   |
+| Section                                                                           | Description                                          |
+|-----------------------------------------------------------------------------------|------------------------------------------------------|
+| [Global Options](reference/README.md#configure-global-agent-options)              | Configure Global Agent Options                       |
+| [Internal Server](reference/internal-server.md)                                   | Configure Internal Server                            |
+| [Internal Prometheus Metrics](reference/internal-prometheus-metrics.md)           | Configure Internal Prometheus Metrics                |
+| [Network Packet Parser](reference/network-packet-parser.md)                       | Configure Parsing of Network Packets                 |
+| [Network Interface Discovery](reference/network-interface-discovery.md)           | Configure Discovery of Network Interfaces            |
+| [Kubernetes Informer Discovery](reference/kubernetes-informer-discovery.md)       | Configure Discovery of Kubernetes Informer           |
+| [Kubernetes Owner Relations](reference/kubernetes-owner-relations.md)             | Configure Owner Relations of Kubernetes Resources    |
+| [Kubernetes Selector Relations](reference/kubernetes-selector-relations.md)       | Configure Selector Relations of Kubernetes Resources |
+| [Flow Span Kubernetes Attribution](reference/flow-span-kubernetes-attribution.md) | Configure Kubernetes Attribution of Flow Spans       |
+| [Flow Span Filters](reference/flow-span-filters.md)                               | Configure Filtering of Flow Spans                    |
+| [Flow Span Producer](reference/flow-span-producer.md)                             | Configure Producing of Flow Spans                    |
+| [OpenTelemetry OTLP Exporter](reference/opentelemetry-otlp-exporter.md)           | Configure OpenTelemetry OTLP Exporter                |
+| [OpenTelemetry Console Exporter](reference/opentelemetry-console-exporter.md)     | Configure OpenTelemetry Console Exporter             |
+| [Internal Tracing](reference/internal-tracing.md)                                 | Configure Internal Tracing Exporter                  |
+| [Flow Processing Pipeline](reference/flow-processing-pipeline.md)                 | Configure Flow Processing Pipeline                   |
 
 ## Best practices
 
@@ -316,5 +317,5 @@ YAML configs do not support `env`; use HCL if you need it, or inject values befo
 
 - [Global Options](reference/README.md#configure-global-agent-options): top-level and CLI
 - [Network Interface Discovery](reference/network-interface-discovery.md): which interfaces to monitor
-- [OTLP Exporter](export-otlp.md): send flows to your backend
+- [OTLP Exporter](reference/opentelemetry-otlp-exporter.md): send flows to your backend
 - [Configuration Examples](examples.md): full sample configs

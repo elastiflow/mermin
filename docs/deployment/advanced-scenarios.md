@@ -636,6 +636,6 @@ export "traces" {
 ## Next Steps
 
 - [**Configuration Reference**](../configuration/overview.md): Deep dive into all configuration options
-- [**Filtering**](../configuration/filtering.md): Configure flow filters for security and performance
-- [**Observability Backends**](../observability/backend-integrations.md): Send Flow Traces to your observability backend
+- [**Filtering**](../configuration/reference/flow-span-filters.md): Configure flow filters for security and performance
+- [**Observability Backends**](../getting-started/backend-integrations.md): Send Flow Traces to your observability backend
 - [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose and resolve performance issues

@@ -8,7 +8,7 @@ The configuration options become useful to take advantage of additional resource
 
 ## Configuration
 
-A full pipeline example is in the [default config](./default/config.hcl) in the repository.
+A full pipeline example is in the [default config](../default/config.hcl) in the repository.
 
 ### `pipeline.flow_capture` block
 
@@ -16,7 +16,7 @@ Attributes in this block configure eBPF-level flow tracking.
 
 - `flow_stats_capacity` attribute
 
-  The capacity of the `FLOW_STATS` eBPF map. See [eBPF Programs](../getting-started/agent-architecture.md#ebpf-programs) in the architecture documentation for more information.
+  The capacity of the `FLOW_STATS` eBPF map. See [eBPF Programs](../../concepts/agent-architecture.md#ebpf-programs) in the architecture documentation for more information.
 
   **Type:** Integer
 
@@ -162,7 +162,7 @@ Attributes in this block configure userspace flow processing.
 
   Interval at which flow pollers check for flow records and timeouts. Pollers iterate through active flows to generate periodic flow records (based on `max_record_interval` in `span` config) and detect and remove idle flows (based on protocol-specific timeouts in `span` config).
 
-  See [eBPF Programs](../getting-started/agent-architecture.md#ebpf-programs) in the architecture documentation for more information.
+  See [eBPF Programs](../../concepts/agent-architecture.md#ebpf-programs) in the architecture documentation for more information.
 
   **Type:** String (duration)
 
@@ -305,7 +305,7 @@ After tuning performance settings, monitor these key metrics:
 - `mermin_channel_size` / `mermin_channel_capacity` - Channel utilization
 - `mermin_pipeline_duration_seconds` - Pipeline duration histogram
 
-See the [Internal Metrics](../internal-monitoring/internal-metrics.md) guide for complete Prometheus query examples.
+See the [Internal Metrics](../../internal-monitoring/internal-metrics.md) guide for complete Prometheus query examples.
 
 **Healthy indicators:**
 
@@ -316,8 +316,8 @@ See the [Internal Metrics](../internal-monitoring/internal-metrics.md) guide for
 
 ## Next Steps
 
-- [**Configuration Overview**](overview.md): Config file format and structure
-- [**Architecture**](../getting-started/agent-architecture.md): Data flow and eBPF programs
-- [**Span Options**](span.md): Flow timeouts and span generation
-- [**OTLP Exporter**](export-otlp.md): Export tuning and backpressure
-- [**Configuration Examples**](examples.md): Full pipeline examples (production, high-throughput)
+- [**Configuration Overview**](../overview.md): Config file format and structure
+- [**Architecture**](../../concepts/agent-architecture.md): Data flow and eBPF programs
+- [**Span Options**](flow-span-producer.md): Flow timeouts and span generation
+- [**OTLP Exporter**](opentelemetry-otlp-exporter.md): Export tuning and backpressure
+- [**Configuration Examples**](../examples.md): Full pipeline examples (production, high-throughput)
