@@ -102,6 +102,12 @@ impl DirectionInferrer {
         }
     }
 
+    pub fn listening_ports_map(
+        &self,
+    ) -> Arc<Mutex<EbpfHashMap<aya::maps::MapData, ListeningPortKey, u8>>> {
+        Arc::clone(&self.listening_ports_map)
+    }
+
     /// Infer the direction of a flow (CLIENT, SERVER, or INTERNAL)
     ///
     /// Applies the inference rule hierarchy described in the [module-level documentation](self)

@@ -274,6 +274,7 @@ impl FlowSpanProducer {
             Arc::clone(&components.flow_stats_map),
             Arc::clone(&components.tcp_stats_map),
             Arc::clone(&components.icmp_stats_map),
+            self.direction_inferrer.listening_ports_map(),
             Arc::clone(&components.flow_store),
             self.boot_time_offset_nanos,
             max_orphan_age,
@@ -2434,6 +2435,7 @@ pub async fn timeout_and_remove_flow(
 /// - `flow_stats_map` - Shared eBPF map containing flow statistics
 /// - `tcp_stats_map` - Shared eBPF map containing TCP statistics
 /// - `icmp_stats_map` - Shared eBPF map containing ICMP statistics
+/// - `listening_ports_map` - Shared eBPF map containing listening ports
 /// - `flow_store` - Userspace flow tracking store
 /// - `boot_time_offset` - Offset to convert boot time to wall clock time
 /// - `max_age` - Maximum age for entries before they're considered orphans
@@ -2443,6 +2445,7 @@ pub async fn orphan_scanner_task(
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     tcp_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, TcpStats>>>,
     icmp_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, IcmpStats>>>,
+    listening_ports_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, ListeningPortKey, u8>>>,
     flow_store: FlowStore,
     boot_time_offset: u64,
     max_age: Duration,
@@ -2496,6 +2499,17 @@ pub async fn orphan_scanner_task(
                 metrics::registry::EBPF_MAP_SIZE
                     .with_label_values(&[EbpfMapName::IcmpStats.as_str(), MapUnit::Entries.as_str()])
                     .set(icmp_stats_count as i64);
+
+                let listening_ports_count = {
+                    let map = listening_ports_map.lock().await;
+                    map.keys().filter_map(|k| k.ok()).count()
+                };
+                metrics::registry::EBPF_MAP_SIZE
+                    .with_label_values(&[
+                        EbpfMapName::ListeningPorts.as_str(),
+                        MapUnit::Entries.as_str(),
+                    ])
+                    .set(listening_ports_count as i64);
 
                 for key in keys {
                     scanned += 1;
