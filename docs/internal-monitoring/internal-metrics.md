@@ -39,33 +39,7 @@ Prometheus can be configured in multiple ways (annotation-based discovery, Opera
 Prometheus-compatible engines such as [VictoriaMetrics](https://docs.victoriametrics.com/operator/integrations/prometheus/) use similar CRDs (`VMServiceScrape`, `VMPodScrape`).
 The following options work with Mermin's metrics endpoint.
 
-**Pod annotations** — add to your Helm values for annotation-based discovery:
-
-```yaml
-podAnnotations:
-  prometheus.io/scrape: "true"
-  prometheus.io/port: "10250"
-  prometheus.io/path: "/metrics"
-```
-
-**Prometheus Operator** — use a `ServiceMonitor` (targets pods via a Service) or a `PodMonitor` (targets pods directly; the latter selects pods by label, not via a Service). Example `ServiceMonitor`:
-
-```yaml
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: mermin
-  labels:
-    app.kubernetes.io/name: mermin
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: mermin
-  endpoints:
-    - port: metrics
-      path: /metrics
-      interval: 30s
-```
+**Pod annotations** — for annotation-based discovery, see [Expose Mermin metrics to Prometheus](../deployment/advanced-scenarios.md#metrics-to-monitor) in Advanced Scenarios.
 
 A **PodMonitor** example for Mermin is in [values_prom_stack.yaml](../deployment/examples/local/values_prom_stack.yaml)
 (see `prometheus.additionalPodMonitors`), used when [testing on a local Kind K8s cluster](../contributor-guide/development-workflow.md#testing-on-local-kind-k8s-cluster) with the kube-prometheus-stack.
