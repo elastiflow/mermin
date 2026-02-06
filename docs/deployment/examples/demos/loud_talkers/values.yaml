@@ -81,14 +81,14 @@ opensearch:
   fullnameOverride: "elastiflow-os"
   singleNode: true
   replicas: 1
-  opensearchJavaOpts: "-Xmx3700M -Xmx3700M"
+  opensearchJavaOpts: "-Xmx1500M -Xms1500M"
   resources:
     requests:
-      cpu: "2000m"
-      memory: 4000Mi
+      cpu: "1000m"
+      memory: 2048Mi
     limits:
-      cpu: "2000m"
-      memory: 4000Mi
+      cpu: "1000m"
+      memory: 2048Mi
   persistence:
     storageClass: standard
     size: 50Gi
@@ -104,11 +104,11 @@ opensearch-dashboards:
   opensearchHosts: https://opensearch-cluster-master.elastiflow.svc:9200
   resources:
     requests:
-      cpu: "1000m"
-      memory: "768Mi"
+      cpu: "500m"
+      memory: "512Mi"
     limits:
-      cpu: "1000m"
-      memory: "768Mi"
+      cpu: "500m"
+      memory: "512Mi"
   config:
     ssl:
       verificationMode: none

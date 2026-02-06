@@ -79,7 +79,6 @@ deploy_mermin_stack() {
     helm upgrade -i --wait --timeout 15m -n "$NAMESPACE" \
         -f "$SCRIPT_DIR/values.yaml" \
         --set-file mermin.config.content="$SCRIPT_DIR/config.hcl" \
-        --devel \
         mermin mermin/mermin-netobserv-os-stack
 }
 
