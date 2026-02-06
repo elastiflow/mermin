@@ -35,7 +35,11 @@ Mermin exposes Prometheus metrics in the standard Prometheus text format at mult
 
 ## Prometheus Scraping
 
-To configure Prometheus to scrape Mermin metrics, add the following pod annotations to your Helm values:
+Prometheus can be configured in multiple ways (annotation-based discovery, Operator CRDs, or engine-specific CRDs).
+Prometheus-compatible engines such as [VictoriaMetrics](https://docs.victoriametrics.com/operator/integrations/prometheus/) use similar CRDs (`VMServiceScrape`, `VMPodScrape`).
+The following options work with Mermin's metrics endpoint.
+
+**Pod annotations** — add to your Helm values for annotation-based discovery:
 
 ```yaml
 podAnnotations:
@@ -44,7 +48,7 @@ podAnnotations:
   prometheus.io/path: "/metrics"
 ```
 
-For Prometheus Operator users, you can create a `ServiceMonitor` resource:
+**Prometheus Operator** — use a `ServiceMonitor` (targets pods via a Service) or a `PodMonitor` (targets pods directly; the latter selects pods by label, not via a Service). Example `ServiceMonitor`:
 
 ```yaml
 apiVersion: monitoring.coreos.com/v1
@@ -63,7 +67,18 @@ spec:
       interval: 30s
 ```
 
-See the [Kubernetes Helm deployment guide](../deployment/kubernetes-helm.md) and [Advanced Scenarios](../deployment/advanced-scenarios.md#performance-monitoring-and-tuning) for more deployment examples.
+A **PodMonitor** example for Mermin is in [values_prom_stack.yaml](../deployment/examples/local/values_prom_stack.yaml)
+(see `prometheus.additionalPodMonitors`), used when [testing on a local Kind K8s cluster](../contributor-guide/development-workflow.md#testing-on-local-kind-k8s-cluster) with the kube-prometheus-stack.
+
+**Further reading:**
+
+- [Prometheus configuration](https://prometheus.io/docs/prometheus/latest/configuration/configuration/) — scrape config and discovery
+- [GKE Managed Service for Prometheus — PodMonitoring](https://docs.cloud.google.com/stackdriver/docs/managed-prometheus/setup-managed#gmp-pod-monitoring) —
+  Google Cloud's `PodMonitoring` CR for managed collection
+
+See also the [Kubernetes Helm deployment guide](../deployment/kubernetes-helm.md) and
+[Advanced Scenarios](../deployment/advanced-scenarios.md#performance-monitoring-and-tuning)
+for more deployment examples.
 
 ## Metrics Reference
 
