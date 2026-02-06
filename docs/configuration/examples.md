@@ -101,40 +101,123 @@ discovery "informer" "k8s" {
 }
 
 # Extract comprehensive source metadata
-attributes {
-  source {
-    extract {
-      pod_labels = []          # All labels
-      pod_annotations = []      # All annotations
-      namespace_labels = []
-    }
-
-    association {
-      pod = { enabled = true }
-      service = { enabled = true }
-      node = { enabled = true }
-      endpoint = { enabled = true }
-      endpointslice = { enabled = true }
-      ingress = { enabled = true }
-      networkpolicy = { enabled = true }
-    }
+attributes "source" "k8s" {
+  extract {
+    metadata = [
+      "[*].metadata.namespace",
+      "[*].metadata.name",
+      "[*].metadata.uid"
+    ]
   }
 
-  destination {
-    extract {
-      pod_labels = []
-      pod_annotations = []
-      namespace_labels = []
+  association {
+    pod = {
+      sources = [
+        { from = "source.ip", to = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"] },
+        { from = "source.port", to = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"] },
+        { from = "network.transport", to = ["spec.containers[*].ports[*].protocol"] }
+      ]
     }
+    service = {
+      sources = [
+        { from = "source.ip", to = ["spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"] },
+        { from = "source.port", to = ["spec.ports[*].port"] },
+        { from = "network.transport", to = ["spec.ports[*].protocol"] },
+        { from = "network.type", to = ["spec.ipFamilies[*]"] }
+      ]
+    }
+    node = {
+      sources = [
+        { from = "source.ip", to = ["status.addresses[*].address"] }
+      ]
+    }
+    endpoint = {
+      sources = [
+        { from = "source.ip", to = ["subsets[*].addresses[*].ip"] },
+        { from = "source.port", to = ["subsets[*].ports[*].port"] },
+        { from = "network.transport", to = ["subsets[*].ports[*].protocol"] }
+      ]
+    }
+    endpointslice = {
+      sources = [
+        { from = "source.ip", to = ["endpoints[*].addresses[*]"] },
+        { from = "source.port", to = ["ports[*].port"] },
+        { from = "network.transport", to = ["ports[*].protocol"] },
+        { from = "network.type", to = ["addressType"] }
+      ]
+    }
+    ingress = {
+      sources = [
+        { from = "source.ip", to = ["status.loadBalancer.ingress[*].ip", "status.loadBalancer.ingress[*].hostname"] },
+        { from = "source.port", to = ["spec.defaultBackend.service.port", "spec.rules[*].http.paths[*].backend.service.port.number"] }
+      ]
+    }
+    networkpolicy = {
+      sources = [
+        { from = "source.ip", to = ["spec.ingress[*].from[*].ipBlock.cidr", "spec.egress[*].to[*].ipBlock.cidr"] },
+        { from = "source.port", to = ["spec.ingress[*].ports[*].port", "spec.egress[*].ports[*].port"] },
+        { from = "network.transport", to = ["spec.ingress[*].ports[*].protocol", "spec.egress[*].ports[*].protocol"] }
+      ]
+    }
+  }
+}
 
-    association {
-      pod = { enabled = true }
-      service = { enabled = true }
-      node = { enabled = true }
-      endpoint = { enabled = true }
-      endpointslice = { enabled = true }
-      ingress = { enabled = true }
-      networkpolicy = { enabled = true }
+attributes "destination" "k8s" {
+  extract {
+    metadata = [
+      "[*].metadata.name",
+      "[*].metadata.namespace",
+      "pod.metadata.uid"
+    ]
+  }
+
+  association {
+    pod = {
+      sources = [
+        { from = "destination.ip", to = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"] },
+        { from = "destination.port", to = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"] },
+        { from = "network.transport", to = ["spec.containers[*].ports[*].protocol"] }
+      ]
+    }
+    service = {
+      sources = [
+        { from = "destination.ip", to = ["spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"] },
+        { from = "destination.port", to = ["spec.ports[*].port"] },
+        { from = "network.transport", to = ["spec.ports[*].protocol"] },
+        { from = "network.type", to = ["spec.ipFamilies[*]"] }
+      ]
+    }
+    node = {
+      sources = [
+        { from = "destination.ip", to = ["status.addresses[*].address"] }
+      ]
+    }
+    endpoint = {
+      sources = [
+        { from = "destination.ip", to = ["subsets[*].addresses[*].ip"] },
+        { from = "destination.port", to = ["subsets[*].ports[*].port"] },
+        { from = "network.transport", to = ["subsets[*].ports[*].protocol"] }
+      ]
+    }
+    endpointslice = {
+      sources = [
+        { from = "destination.ip", to = ["endpoints[*].addresses[*]"] },
+        { from = "destination.port", to = ["ports[*].port"] },
+        { from = "network.transport", to = ["ports[*].protocol"] }
+      ]
+    }
+    ingress = {
+      sources = [
+        { from = "destination.ip", to = ["status.loadBalancer.ingress[*].ip", "status.loadBalancer.ingress[*].hostname"] },
+        { from = "destination.port", to = ["spec.defaultBackend.service.port", "spec.rules[*].http.paths[*].backend.service.port.number"] }
+      ]
+    }
+    networkpolicy = {
+      sources = [
+        { from = "destination.ip", to = ["spec.ingress[*].from[*].ipBlock.cidr", "spec.egress[*].to[*].ipBlock.cidr"] },
+        { from = "destination.port", to = ["spec.ingress[*].ports[*].port", "spec.egress[*].ports[*].port"] },
+        { from = "network.transport", to = ["spec.ingress[*].ports[*].protocol", "spec.egress[*].ports[*].protocol"] }
+      ]
     }
   }
 }
@@ -215,18 +298,58 @@ discovery "informer" "k8s" {
   owner_relations = { max_depth = 5 }
 }
 
-# Minimal metadata extraction
-attributes {
-  source {
-    association {
-      pod = { enabled = true }
-      service = { enabled = true }
+attributes "source" "k8s" {
+  extract {
+    metadata = [
+      "[*].metadata.namespace",
+      "[*].metadata.name",
+      "[*].metadata.uid"
+    ]
+  }
+
+  association {
+    pod = {
+      sources = [
+        { from = "source.ip", to = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"] },
+        { from = "source.port", to = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"] },
+        { from = "network.transport", to = ["spec.containers[*].ports[*].protocol"] }
+      ]
+    }
+    service = {
+      sources = [
+        { from = "source.ip", to = ["spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"] },
+        { from = "source.port", to = ["spec.ports[*].port"] },
+        { from = "network.transport", to = ["spec.ports[*].protocol"] },
+        { from = "network.type", to = ["spec.ipFamilies[*]"] }
+      ]
     }
   }
-  destination {
-    association {
-      pod = { enabled = true }
-      service = { enabled = true }
+}
+
+attributes "destination" "k8s" {
+  extract {
+    metadata = [
+      "[*].metadata.name",
+      "[*].metadata.namespace",
+      "pod.metadata.uid"
+    ]
+  }
+
+  association {
+    pod = {
+      sources = [
+        { from = "destination.ip", to = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"] },
+        { from = "destination.port", to = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"] },
+        { from = "network.transport", to = ["spec.containers[*].ports[*].protocol"] }
+      ]
+    }
+    service = {
+      sources = [
+        { from = "destination.ip", to = ["spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"] },
+        { from = "destination.port", to = ["spec.ports[*].port"] },
+        { from = "network.transport", to = ["spec.ports[*].protocol"] },
+        { from = "network.type", to = ["spec.ipFamilies[*]"] }
+      ]
     }
   }
 }
@@ -293,21 +416,82 @@ discovery "informer" "k8s" {
   ]
 }
 
-attributes {
-  source {
-    association {
-      pod = { enabled = true }
-      service = { enabled = true }
-      node = { enabled = true }
-      networkpolicy = { enabled = true }  # Important for Cilium
+attributes "source" "k8s" {
+  extract {
+    metadata = [
+      "[*].metadata.namespace",
+      "[*].metadata.name",
+      "[*].metadata.uid"
+    ]
+  }
+
+  association {
+    pod = {
+      sources = [
+        { from = "source.ip", to = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"] },
+        { from = "source.port", to = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"] },
+        { from = "network.transport", to = ["spec.containers[*].ports[*].protocol"] }
+      ]
+    }
+    service = {
+      sources = [
+        { from = "source.ip", to = ["spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"] },
+        { from = "source.port", to = ["spec.ports[*].port"] },
+        { from = "network.transport", to = ["spec.ports[*].protocol"] },
+        { from = "network.type", to = ["spec.ipFamilies[*]"] }
+      ]
+    }
+    node = {
+      sources = [
+        { from = "source.ip", to = ["status.addresses[*].address"] }
+      ]
+    }
+    networkpolicy = {
+      sources = [
+        { from = "source.ip", to = ["spec.ingress[*].from[*].ipBlock.cidr", "spec.egress[*].to[*].ipBlock.cidr"] },
+        { from = "source.port", to = ["spec.ingress[*].ports[*].port", "spec.egress[*].ports[*].port"] },
+        { from = "network.transport", to = ["spec.ingress[*].ports[*].protocol", "spec.egress[*].ports[*].protocol"] }
+      ]
     }
   }
-  destination {
-    association {
-      pod = { enabled = true }
-      service = { enabled = true }
-      node = { enabled = true }
-      networkpolicy = { enabled = true }
+}
+
+attributes "destination" "k8s" {
+  extract {
+    metadata = [
+      "[*].metadata.name",
+      "[*].metadata.namespace",
+      "pod.metadata.uid"
+    ]
+  }
+
+  association {
+    pod = {
+      sources = [
+        { from = "destination.ip", to = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"] },
+        { from = "destination.port", to = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"] },
+        { from = "network.transport", to = ["spec.containers[*].ports[*].protocol"] }
+      ]
+    }
+    service = {
+      sources = [
+        { from = "destination.ip", to = ["spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"] },
+        { from = "destination.port", to = ["spec.ports[*].port"] },
+        { from = "network.transport", to = ["spec.ports[*].protocol"] },
+        { from = "network.type", to = ["spec.ipFamilies[*]"] }
+      ]
+    }
+    node = {
+      sources = [
+        { from = "destination.ip", to = ["status.addresses[*].address"] }
+      ]
+    }
+    networkpolicy = {
+      sources = [
+        { from = "destination.ip", to = ["spec.ingress[*].from[*].ipBlock.cidr", "spec.egress[*].to[*].ipBlock.cidr"] },
+        { from = "destination.port", to = ["spec.ingress[*].ports[*].port", "spec.egress[*].ports[*].port"] },
+        { from = "network.transport", to = ["spec.ingress[*].ports[*].protocol", "spec.egress[*].ports[*].protocol"] }
+      ]
     }
   }
 }
@@ -366,21 +550,82 @@ discovery "informer" "k8s" {
   ]
 }
 
-attributes {
-  source {
-    association {
-      pod = { enabled = true }
-      service = { enabled = true }
-      node = { enabled = true }
-      networkpolicy = { enabled = true }
+attributes "source" "k8s" {
+  extract {
+    metadata = [
+      "[*].metadata.namespace",
+      "[*].metadata.name",
+      "[*].metadata.uid"
+    ]
+  }
+
+  association {
+    pod = {
+      sources = [
+        { from = "source.ip", to = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"] },
+        { from = "source.port", to = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"] },
+        { from = "network.transport", to = ["spec.containers[*].ports[*].protocol"] }
+      ]
+    }
+    service = {
+      sources = [
+        { from = "source.ip", to = ["spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"] },
+        { from = "source.port", to = ["spec.ports[*].port"] },
+        { from = "network.transport", to = ["spec.ports[*].protocol"] },
+        { from = "network.type", to = ["spec.ipFamilies[*]"] }
+      ]
+    }
+    node = {
+      sources = [
+        { from = "source.ip", to = ["status.addresses[*].address"] }
+      ]
+    }
+    networkpolicy = {
+      sources = [
+        { from = "source.ip", to = ["spec.ingress[*].from[*].ipBlock.cidr", "spec.egress[*].to[*].ipBlock.cidr"] },
+        { from = "source.port", to = ["spec.ingress[*].ports[*].port", "spec.egress[*].ports[*].port"] },
+        { from = "network.transport", to = ["spec.ingress[*].ports[*].protocol", "spec.egress[*].ports[*].protocol"] }
+      ]
     }
   }
-  destination {
-    association {
-      pod = { enabled = true }
-      service = { enabled = true }
-      node = { enabled = true }
-      networkpolicy = { enabled = true }
+}
+
+attributes "destination" "k8s" {
+  extract {
+    metadata = [
+      "[*].metadata.name",
+      "[*].metadata.namespace",
+      "pod.metadata.uid"
+    ]
+  }
+
+  association {
+    pod = {
+      sources = [
+        { from = "destination.ip", to = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"] },
+        { from = "destination.port", to = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"] },
+        { from = "network.transport", to = ["spec.containers[*].ports[*].protocol"] }
+      ]
+    }
+    service = {
+      sources = [
+        { from = "destination.ip", to = ["spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"] },
+        { from = "destination.port", to = ["spec.ports[*].port"] },
+        { from = "network.transport", to = ["spec.ports[*].protocol"] },
+        { from = "network.type", to = ["spec.ipFamilies[*]"] }
+      ]
+    }
+    node = {
+      sources = [
+        { from = "destination.ip", to = ["status.addresses[*].address"] }
+      ]
+    }
+    networkpolicy = {
+      sources = [
+        { from = "destination.ip", to = ["spec.ingress[*].from[*].ipBlock.cidr", "spec.egress[*].to[*].ipBlock.cidr"] },
+        { from = "destination.port", to = ["spec.ingress[*].ports[*].port", "spec.egress[*].ports[*].port"] },
+        { from = "network.transport", to = ["spec.ingress[*].ports[*].protocol", "spec.egress[*].ports[*].protocol"] }
+      ]
     }
   }
 }
@@ -448,25 +693,58 @@ discovery "informer" "k8s" {
 }
 
 # Minimal metadata extraction
-attributes {
-  source {
-    extract {
-      pod_labels = ["app", "version"]  # Only critical labels
-      pod_annotations = []              # Skip annotations
+attributes "source" "k8s" {
+  extract {
+    metadata = [
+      "[*].metadata.namespace",
+      "[*].metadata.name",
+      "[*].metadata.uid"
+    ]
+  }
+
+  association {
+    pod = {
+      sources = [
+        { from = "source.ip", to = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"] },
+        { from = "source.port", to = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"] },
+        { from = "network.transport", to = ["spec.containers[*].ports[*].protocol"] }
+      ]
     }
-    association {
-      pod = { enabled = true }
-      service = { enabled = true }
+    service = {
+      sources = [
+        { from = "source.ip", to = ["spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"] },
+        { from = "source.port", to = ["spec.ports[*].port"] },
+        { from = "network.transport", to = ["spec.ports[*].protocol"] },
+        { from = "network.type", to = ["spec.ipFamilies[*]"] }
+      ]
     }
   }
-  destination {
-    extract {
-      pod_labels = ["app", "version"]
-      pod_annotations = []
+}
+
+attributes "destination" "k8s" {
+  extract {
+    metadata = [
+      "[*].metadata.name",
+      "[*].metadata.namespace",
+      "pod.metadata.uid"
+    ]
+  }
+
+  association {
+    pod = {
+      sources = [
+        { from = "destination.ip", to = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"] },
+        { from = "destination.port", to = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"] },
+        { from = "network.transport", to = ["spec.containers[*].ports[*].protocol"] }
+      ]
     }
-    association {
-      pod = { enabled = true }
-      service = { enabled = true }
+    service = {
+      sources = [
+        { from = "destination.ip", to = ["spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"] },
+        { from = "destination.port", to = ["spec.ports[*].port"] },
+        { from = "network.transport", to = ["spec.ports[*].protocol"] },
+        { from = "network.type", to = ["spec.ipFamilies[*]"] }
+      ]
     }
   }
 }
@@ -529,24 +807,58 @@ discovery "informer" "k8s" {
   owner_relations = { max_depth = 10 }
 }
 
-attributes {
-  source {
-    extract {
-      # Exclude sensitive annotations
-      pod_annotations = []
+attributes "source" "k8s" {
+  extract {
+    metadata = [
+      "[*].metadata.namespace",
+      "[*].metadata.name",
+      "[*].metadata.uid"
+    ]
+  }
+
+  association {
+    pod = {
+      sources = [
+        { from = "source.ip", to = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"] },
+        { from = "source.port", to = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"] },
+        { from = "network.transport", to = ["spec.containers[*].ports[*].protocol"] }
+      ]
     }
-    association {
-      pod = { enabled = true }
-      service = { enabled = true }
+    service = {
+      sources = [
+        { from = "source.ip", to = ["spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"] },
+        { from = "source.port", to = ["spec.ports[*].port"] },
+        { from = "network.transport", to = ["spec.ports[*].protocol"] },
+        { from = "network.type", to = ["spec.ipFamilies[*]"] }
+      ]
     }
   }
-  destination {
-    extract {
-      pod_annotations = []
+}
+
+attributes "destination" "k8s" {
+  extract {
+    metadata = [
+      "[*].metadata.name",
+      "[*].metadata.namespace",
+      "pod.metadata.uid"
+    ]
+  }
+
+  association {
+    pod = {
+      sources = [
+        { from = "destination.ip", to = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"] },
+        { from = "destination.port", to = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"] },
+        { from = "network.transport", to = ["spec.containers[*].ports[*].protocol"] }
+      ]
     }
-    association {
-      pod = { enabled = true }
-      service = { enabled = true }
+    service = {
+      sources = [
+        { from = "destination.ip", to = ["spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"] },
+        { from = "destination.port", to = ["spec.ports[*].port"] },
+        { from = "network.transport", to = ["spec.ports[*].protocol"] },
+        { from = "network.type", to = ["spec.ipFamilies[*]"] }
+      ]
     }
   }
 }
@@ -621,19 +933,68 @@ discovery "informer" "k8s" {
   owner_relations = { max_depth = 10 }
 }
 
-attributes {
-  source {
-    association {
-      pod = { enabled = true }
-      service = { enabled = true }
-      node = { enabled = true }
+attributes "source" "k8s" {
+  extract {
+    metadata = [
+      "[*].metadata.namespace",
+      "[*].metadata.name",
+      "[*].metadata.uid"
+    ]
+  }
+
+  association {
+    pod = {
+      sources = [
+        { from = "source.ip", to = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"] },
+        { from = "source.port", to = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"] },
+        { from = "network.transport", to = ["spec.containers[*].ports[*].protocol"] }
+      ]
+    }
+    service = {
+      sources = [
+        { from = "source.ip", to = ["spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"] },
+        { from = "source.port", to = ["spec.ports[*].port"] },
+        { from = "network.transport", to = ["spec.ports[*].protocol"] },
+        { from = "network.type", to = ["spec.ipFamilies[*]"] }
+      ]
+    }
+    node = {
+      sources = [
+        { from = "source.ip", to = ["status.addresses[*].address"] }
+      ]
     }
   }
-  destination {
-    association {
-      pod = { enabled = true }
-      service = { enabled = true }
-      node = { enabled = true }
+}
+
+attributes "destination" "k8s" {
+  extract {
+    metadata = [
+      "[*].metadata.name",
+      "[*].metadata.namespace",
+      "pod.metadata.uid"
+    ]
+  }
+
+  association {
+    pod = {
+      sources = [
+        { from = "destination.ip", to = ["status.podIP", "status.podIPs[*]", "status.hostIP", "status.hostIPs[*]"] },
+        { from = "destination.port", to = ["spec.containers[*].ports[*].containerPort", "spec.containers[*].ports[*].hostPort"] },
+        { from = "network.transport", to = ["spec.containers[*].ports[*].protocol"] }
+      ]
+    }
+    service = {
+      sources = [
+        { from = "destination.ip", to = ["spec.clusterIP", "spec.clusterIPs[*]", "spec.externalIPs[*]", "spec.loadBalancerIP", "spec.externalName"] },
+        { from = "destination.port", to = ["spec.ports[*].port"] },
+        { from = "network.transport", to = ["spec.ports[*].protocol"] },
+        { from = "network.type", to = ["spec.ipFamilies[*]"] }
+      ]
+    }
+    node = {
+      sources = [
+        { from = "destination.ip", to = ["status.addresses[*].address"] }
+      ]
     }
   }
 }
