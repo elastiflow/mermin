@@ -76,7 +76,7 @@ install_metrics_server() {
 deploy_mermin_stack() {
     log_info "Deploying mermin-netobserv-os-stack..."
     kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
-    helm upgrade -i --wait --timeout 15m -n "$NAMESPACE" \
+    helm upgrade -i --wait --timeout 5m -n "$NAMESPACE" \
         -f "$SCRIPT_DIR/values.yaml" \
         --set-file mermin.config.content="$SCRIPT_DIR/config.hcl" \
         mermin mermin/mermin-netobserv-os-stack

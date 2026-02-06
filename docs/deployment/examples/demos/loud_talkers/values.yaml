@@ -4,11 +4,24 @@ mermin:
 netobserv-flow:
   enabled: true
   fullnameOverride: netobserv-flow
+  image:
+    tag: "7.20.0"
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "2560Mi"
+    limits:
+      cpu: "1000m"
+      memory: "2560Mi"
   env:
     - name: EF_LICENSE_ACCEPTED
       value: "true"
     - name: EF_OUTPUT_OPENSEARCH_INDEX_TEMPLATE_REPLICAS
       value: "0"
+    - name: EF_OUTPUT_OPENSEARCH_BATCH_MAX_BYTES
+      value: "4194304"
+    - name: EF_OUTPUT_OPENSEARCH_BATCH_DEADLINE
+      value: "3000"
     - name: EF_INPUT_OTLP_TRACE_GRPC_ENABLE
       value: "true"
     - name: EF_INPUT_OTLP_TRACE_GRPC_SERVER_TLS_ENABLE
@@ -21,6 +34,12 @@ netobserv-flow:
       value: "true"
     - name: EF_INPUT_OTLP_HEALTH_GRPC_ADDR_PORT
       value: "4316"
+    - name: EF_INPUT_FLOW_BENCHMARK_ENABLE
+      value: "false"
+    - name: EF_OUTPUT_STDOUT_ENABLE
+      value: "false"
+    - name: EF_PROCESSOR_ENRICH_IPADDR_NETINTEL_ENABLE
+      value: "false"
   ports:
     - name: api
       protocol: TCP
@@ -81,22 +100,47 @@ opensearch:
   fullnameOverride: "elastiflow-os"
   singleNode: true
   replicas: 1
-  opensearchJavaOpts: "-Xmx1500M -Xms1500M"
+  opensearchJavaOpts: "-Xmx1536m -Xms1536m -XX:G1HeapRegionSize=4m -XX:InitiatingHeapOccupancyPercent=40 -XX:MaxGCPauseMillis=200"
   resources:
     requests:
       cpu: "1000m"
       memory: 2048Mi
     limits:
       cpu: "1000m"
-      memory: 2048Mi
+      memory: 2560Mi
   persistence:
     storageClass: standard
-    size: 50Gi
+    size: 32Gi
     labels:
       enabled: true
   extraEnvs:
     - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
       value: Elast1flow! # Insecure
+  config:
+    opensearch.yml: |
+      indices.breaker.total.limit: 80%
+      indices.breaker.fielddata.limit: 25%
+      indices.breaker.request.limit: 30%
+      indices.fielddata.cache.size: 10%
+      indices.memory.index_buffer_size: 8%
+      indices.queries.cache.size: 10%
+      indices.requests.cache.size: 3%
+      script.max_compilations_rate: "50/5m"
+      thread_pool:
+        write:
+          size: 2
+          queue_size: 200
+        search:
+          size: 2
+          queue_size: 500
+        get:
+          size: 2
+          queue_size: 500
+      cluster.routing.allocation.disk.threshold_enabled: true
+      cluster.routing.allocation.disk.watermark.low: 85%
+      cluster.routing.allocation.disk.watermark.high: 90%
+      action.auto_create_index: false
+      bootstrap.memory_lock: false
 
 opensearch-dashboards:
   enabled: true
@@ -104,11 +148,15 @@ opensearch-dashboards:
   opensearchHosts: https://opensearch-cluster-master.elastiflow.svc:9200
   resources:
     requests:
-      cpu: "500m"
+      cpu: "250m"
       memory: "512Mi"
     limits:
       cpu: "500m"
-      memory: "512Mi"
+      memory: "768Mi"
   config:
-    ssl:
-      verificationMode: none
+    opensearch_dashboards.yml: |
+      opensearch.ssl.verificationMode: none
+      opensearch.requestTimeout: 60000
+      opensearch.pingTimeout: 60000
+      opensearch.username: admin
+      opensearch.password: Elast1flow!
