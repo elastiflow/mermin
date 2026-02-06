@@ -35,7 +35,8 @@ Mermin exposes Prometheus metrics in the standard Prometheus text format at mult
 
 ## Prometheus Scraping
 
-Prometheus can be configured in multiple ways (annotation-based discovery, Operator CRDs, or engine-specific CRDs).
+Prometheus can be configured in multiple ways: [annotation-based discovery or Kubernetes service discovery](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#kubernetes_sd_config),
+[Prometheus Operator CRDs](https://github.com/prometheus-operator/prometheus-operator?tab=readme-ov-file#customresourcedefinitions) (e.g. ServiceMonitor, PodMonitor), or engine-specific CRDs.
 Prometheus-compatible engines such as [VictoriaMetrics](https://docs.victoriametrics.com/operator/integrations/prometheus/) use similar CRDs (`VMServiceScrape`, `VMPodScrape`).
 The following options work with Mermin's metrics endpoint.
 
