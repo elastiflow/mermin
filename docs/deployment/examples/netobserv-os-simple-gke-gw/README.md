@@ -13,7 +13,7 @@ since OpenSearch is deployed in a single-node mode.
 
 Notes on the example deployment:
 
-- [Location in the repository](https://github.com/elastiflow/mermin/tree/beta/docs/deployment/examples/netobserv_os_simple_gke_gw) - `docs/deployment/examples/netobserv_os_simple_gke_gw`
+- [Location in the repository](https://github.com/elastiflow/mermin/tree/beta/docs/deployment/examples/netobserv-os-simple-gke-gw) - `docs/deployment/examples/netobserv-os-simple-gke-gw`
 - This example assumes you can access internal GCP subnets via a VPN.
 - Namespace used in the example: `elastiflow`.
 - GKE [node auto-provisioning](https://cloud.google.com/kubernetes-engine/docs/how-to/node-auto-provisioning) must be enabled.

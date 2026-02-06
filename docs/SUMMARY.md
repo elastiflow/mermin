@@ -18,10 +18,10 @@
 * [Advanced Scenarios](deployment/advanced-scenarios.md)
 * [Docker on Bare Metal](deployment/docker-bare-metal.md)
 * [Examples](deployment/examples/README.md)
-  * [Mermin with OpenTelemetry Collector](deployment/examples/local_otel/README.md)
-  * [Mermin with NetObserv Flow and OpenSearch](deployment/examples/netobserv_os_simple_svc/README.md)
-  * [Mermin with NetObserv Flow and OpenSearch in GKE with Gateway](deployment/examples/netobserv_os_simple_gke_gw/README.md)
-  * [Mermin with GreptimeDB](deployment/examples/greptimedb_simple_svc/README.md)
+  * [Mermin with OpenTelemetry Collector](deployment/examples/local-otel/README.md)
+  * [Mermin with NetObserv Flow and OpenSearch](deployment/examples/netobserv-os-simple-svc/README.md)
+  * [Mermin with NetObserv Flow and OpenSearch in GKE with Gateway](deployment/examples/netobserv-os-simple-gke-gw/README.md)
+  * [Mermin with GreptimeDB](deployment/examples/greptimedb-simple-svc/README.md)
 
 ## Configuration
 

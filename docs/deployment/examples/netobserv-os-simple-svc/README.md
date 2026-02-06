@@ -14,7 +14,7 @@ This example is intended only for demonstration, testing, or proof-of-concept us
 
 Notes on the example deployment:
 
-- [Location in the repository](https://github.com/elastiflow/mermin/tree/beta/docs/deployment/examples/netobserv_os_simple_svc) - `docs/deployment/examples/netobserv_os_simple_svc`
+- [Location in the repository](https://github.com/elastiflow/mermin/tree/beta/docs/deployment/examples/netobserv-os-simple-svc) - `docs/deployment/examples/netobserv-os-simple-svc`
 - Namespace used in the example: `elastiflow`.
 - Allocatable resources needed (mCPU/MiB):
   - OpenSearch `2000m`/`4000Mi`
