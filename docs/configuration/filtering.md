@@ -20,14 +20,20 @@ The attribute's dot notation is converted to underscores (e.g., `flow.tcp.flags.
 
 A full configuration example can be found in the [Default Configuration](./default/config.hcl).
 
-### `filter.source` and `filter.destination` filters block
+### `filter.source` and `filter.destination` blocks
 
 The filters apply to the `source`/`destination` combination of the `address` and `port` in the flow span.
 Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/agent-architecture.md#components)), which can help reduce resource usage in subsequent stages.
 
-- `address` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.
+- `address` attribute
 
-  Filter by IP address. Supported values in patterns: IP or CIDR notation (`10.0.0.0/8`, `10.0.0.1`)
+  Filter by IP address.
+
+  **Type:** [Pattern matcher object](#pattern-matcher-object)
+
+  **Default:** `{}`
+
+  **Supported values:** IP or CIDR notation (`10.0.0.0/8`, `10.0.0.1`)
 
   **Example:** Include only [RFC1918](https://datatracker.ietf.org/doc/html/rfc1918), but exclude `10.0.0.0/24`, and `10.0.2.1`
 
@@ -40,9 +46,15 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
   }
   ```
 
-- `port` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.
+- `port` attribute
 
-  Filter by port. Supported values in patterns: Port or port range as a string (`443`, `8000-9000`)
+  Filter by port.
+
+  **Type:** [Pattern matcher object](#pattern-matcher-object)
+
+  **Default:** `{}`
+
+  **Supported values:** Port or port range as a string (`443`, `8000-9000`)
 
   **Examples:**
 
@@ -95,7 +107,7 @@ The result of the `filter.source`/`filter.destination` inclusion/exclusion is co
 
 - Matching the same port in the `source` and `destination` filters will filter out almost all flows.
   Although, theoretically, source and destination ports can be the same (e.g., old DNS servers), it is relatively uncommon to see the same source and destination port.
-    The configuration:
+  The configuration:
 
   ```hcl
   filter "source" {
@@ -123,15 +135,20 @@ The result of the `filter.source`/`filter.destination` inclusion/exclusion is co
   ]
   ```
 
-### `filter.network` filter block
+### `filter.network` block
 
 The filter applies to various network attributes in the flow span, such as transport protocol, interface, and others.
 Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/agent-architecture.md#components)), which can help reduce resource usage in subsequent stages.
 
-- `transport` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.
+- `transport` attribute
 
   Filter by transport protocol.
-  Supported values in patterns: `tcp`, `udp`, `icmp`, `icmpv6` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+
+  **Type:** [Pattern matcher object](#pattern-matcher-object)
+
+  **Default:** `{}`
+
+  **Supported values:** `tcp`, `udp`, `icmp`, `icmpv6` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
   **Examples:**
 
@@ -155,10 +172,15 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
     }
     ```
 
-- `type` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.
+- `type` attribute
 
   Filter by IP version.
-  Supported values in patterns: `ipv4`, `ipv6` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+
+  **Type:** [Pattern matcher object](#pattern-matcher-object)
+
+  **Default:** `{}`
+
+  **Supported values:** `ipv4`, `ipv6` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
   **Example:** Include only IPv4 traffic:
 
@@ -170,10 +192,15 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
   }
   ```
 
-- `interface_name` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.
+- `interface_name` attribute
 
   Filter by network interface name.
-  Supported values in patterns: Any valid interface name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+
+  **Type:** [Pattern matcher object](#pattern-matcher-object)
+
+  **Default:** `{}`
+
+  **Supported values:** Any valid interface name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
   **Examples:**
 
@@ -197,10 +224,15 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
     }
     ```
 
-- `interface_index` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.
+- `interface_index` attribute
 
   Filter by network interface index.
-  Supported values in patterns: Any valid interface index or interface index range as a string (`0`, `1-27`)
+
+  **Type:** [Pattern matcher object](#pattern-matcher-object)
+
+  **Default:** `{}`
+
+  **Supported values:** Any valid interface index or interface index range as a string (`0`, `1-27`)
 
   **Examples:**
 
@@ -224,10 +256,15 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
     }
     ```
 
-- `interface_mac` attribute - [pattern matcher object](#pattern-matcher-object), default `{}`.
+- `interface_mac` attribute
 
   Filter by network interface MAC address.
-  Supported values in patterns: Any valid MAC address (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+
+  **Type:** [Pattern matcher object](#pattern-matcher-object)
+
+  **Default:** `{}`
+
+  **Supported values:** Any valid MAC address (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
   **Example:** Exclude a specific MAC address:
 
@@ -239,15 +276,20 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
     }
     ```
 
-### `filter.flow` filter block
+### `filter.flow` block
 
 The filter applies to various flow attributes in the flow span, such as connection state, TCP flags and others.
 Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/agent-architecture.md#components)), which can help reduce resource usage in subsequent stages.
 
-- `connection_state` - [pattern matcher object](#pattern-matcher-object), default `{}`.
+- `connection_state` attribute
 
   Filter by TCP connection state.
-  Supported values in patterns: `established`, `syn_sent`, `syn_received`, `fin_wait`, `close_wait`, `closing`, `last_ack`, `time_wait`, `closed` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+
+  **Type:** [Pattern matcher object](#pattern-matcher-object)
+
+  **Default:** `{}`
+
+  **Supported values:** Any valid connection state, `established`, `syn_sent`, `syn_received`, `fin_wait`, `close_wait`, `closing`, `last_ack`, `time_wait`, `closed` (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
   **Example:** Include only established connections:
 
@@ -259,10 +301,15 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
     }
     ```
 
-- `tcp_flags_tags` - [pattern matcher object](#pattern-matcher-object), default `{}`.
+- `tcp_flags_tags` attribute
 
   Filter by TCP flags.
-  Supported values in patterns: `SYN`, `ACK`, `FIN`, `RST`, `PSH`, `URG` (supports [globs](https://docs.rs/globset/latest/globset/#syntax)), _case insensitive_.
+
+  **Type:** [Pattern matcher object](#pattern-matcher-object)
+
+  **Default:** `{}`
+
+  **Supported values:** `SYN`, `ACK`, `FIN`, `RST`, `PSH`, `URG` (supports [globs](https://docs.rs/globset/latest/globset/#syntax)), _case insensitive_.
 
   **Example:** Include only flows with SYN flag:
 
@@ -274,10 +321,15 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
     }
     ```
 
-- `ip_dscp_name` - [pattern matcher object](#pattern-matcher-object), default `{}`.
+- `ip_dscp_name` attribute
 
   Filter flows based on the DSCP ([Differentiated Services Code Point](https://en.wikipedia.org/wiki/Differentiated_services#Configuration_guidelines)) names.
-  Supported values in patterns: Any valid DSCP name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+
+  **Type:** [Pattern matcher object](#pattern-matcher-object)
+
+  **Default:** `{}`
+
+  **Supported values:** Any valid DSCP name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
   **Examples:**
 
@@ -297,10 +349,15 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
     }
     ```
 
-- `ip_ecn_name` - [pattern matcher object](#pattern-matcher-object), default `{}`.
+- `ip_ecn_name` attribute
 
   Filter flows based on ECN ([Explicit Congestion Notification](https://en.wikipedia.org/wiki/Explicit_congestion_notification)) values.
-  Supported values in patterns: Any valid ECN value (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+
+  **Type:** [Pattern matcher object](#pattern-matcher-object)
+
+  **Default:** `{}`
+
+  **Supported values:** Any valid ECN value (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
   **Examples:**
 
@@ -320,10 +377,15 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
     }
     ```
 
-- `ip_ttl` - [pattern matcher object](#pattern-matcher-object), default `{}`.
+- `ip_ttl` attribute
 
   Filter flows based on the IP TTL ([Time To Live](https://en.wikipedia.org/wiki/Time_to_live)) values.
-  Supported values in patterns: Any valid TTL or TTL range as a string (`1`, `64-184`)
+
+  **Type:** [Pattern matcher object](#pattern-matcher-object)
+
+  **Default:** `{}`
+
+  **Supported values:** Any valid TTL or TTL range as a string (`1`, `64-184`)
 
   **Examples:**
 
@@ -343,10 +405,15 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
     }
     ```
 
-- `ip_flow_label` - [pattern matcher object](#pattern-matcher-object), default `{}`.
+- `ip_flow_label` attribute
 
   Filter flows based on IPv6 [flow labels](https://www.rfc-editor.org/rfc/rfc6437.html).
-  Supported values in patterns: Any valid flow label or label range (`2145`, `12345-12545`)
+
+  **Type:** [Pattern matcher object](#pattern-matcher-object)
+
+  **Default:** `{}`
+
+  **Supported values:** Any valid flow label or label range (`2145`, `12345-12545`)
 
   **Examples:**
 
@@ -366,10 +433,15 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
     }
     ```
 
-- `icmp_type_name` - [pattern matcher object](#pattern-matcher-object), default `{}`.
+- `icmp_type_name` attribute
 
   Filter flows based on [ICMP type](https://www.iana.org/assignments/icmp-parameters/icmp-parameters.xhtml) names (converted to a [snake case](https://en.wikipedia.org/wiki/Snake_case)).
-  Supported values in patterns: Any valid ICMP type name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
+
+  **Type:** [Pattern matcher object](#pattern-matcher-object)
+
+  **Default:** `{}`
+
+  **Supported values:** Any valid ICMP type name (supports [globs](https://docs.rs/globset/latest/globset/#syntax))
 
   **Examples:**
 
@@ -389,10 +461,15 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
     }
     ```
 
-- `icmp_code_name` - [pattern matcher object](#pattern-matcher-object), default `{}`.
+- `icmp_code_name` attribute
 
   Filter flows based on [ICMP codes](https://www.iana.org/assignments/icmp-parameters/icmp-parameters.xhtml).
-  Supported values in patterns: Any valid ICMP code or code range as a string (`13`, `0-8`)
+
+  **Type:** [Pattern matcher object](#pattern-matcher-object)
+
+  **Default:** `{}`
+
+  **Supported values:** Any valid ICMP code or code range as a string (`13`, `0-8`)
 
   **Examples:**
 
@@ -416,12 +493,21 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
 
 ### Pattern Matcher Object
 
-- `match` attribute - list of strings, default `[]` (empty list, include all).
+- `match` attribute
 
   Include flows matching the pattern
-- `not_match` attribute - list of strings, default `[]` (empty list, exclude none).
+
+  **Type:** List of strings
+
+  **Default:** `[]` (empty list, include all)
+
+- `not_match` attribute
 
   Exclude flows matching the pattern
+
+  **Type:** List of strings
+
+  **Default:** `[]` (empty list, exclude none)
 
 #### Matcher value types
 

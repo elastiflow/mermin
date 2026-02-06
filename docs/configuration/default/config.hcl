@@ -263,6 +263,7 @@ attributes "source" "k8s" {
     /*
       Extract K8s label to Otel attribute extract example:
     */
+    # Using regex
     # label {
     #   from            = "service" # case insensitive
     #   key_regex       = "kubernetes.io/(.*)"
@@ -271,16 +272,31 @@ attributes "source" "k8s" {
     #   attribute_value = "$1"
     # }
 
+    # Using direct key match example
+    # label {
+    #   from      = "service" # case insensitive
+    #   key       = "kubernetes.io/barbaz"
+    #   attribute = "barbaz"
+    # }
+
 
     /*
       Extract K8s annotation to Otel attribute extract example:
     */
+    # Using regex
     # annotation {
-    #   from            = "pod" # case insensitive
+    #   from            = "service" # case insensitive
     #   key_regex       = "kubernetes.io/(.*)"
     #   value_regex     = "(.*)"
     #   attribute       = "$1"
     #   attribute_value = "$1"
+    # }
+
+    # Using direct key match example
+    # annotation {
+    #   from      = "service" # case insensitive
+    #   key       = "kubernetes.io/barbaz"
+    #   attribute = "barbaz"
     # }
   }
 
@@ -404,24 +420,44 @@ attributes "destination" "k8s" {
     ]
 
     /*
-      Otel label extract, full doc: https://grafana.com/docs/agent/latest/flow/reference/components/otelcol.processor.k8sattributes/#extract-label-block
-      All by default, example:
-      label {
-        from      = "service"
-        key_regex = "kubernetes.io/(.*)"
-        tag_name  = "$1"
-      }
+      Extract K8s label to Otel attribute extract example:
     */
+    # Using regex
+    # label {
+    #   from            = "service" # case insensitive
+    #   key_regex       = "kubernetes.io/(.*)"
+    #   value_regex     = "(.*)"
+    #   attribute       = "$1"
+    #   attribute_value = "$1"
+    # }
+
+    # Using direct key match example
+    # label {
+    #   from      = "service" # case insensitive
+    #   key       = "kubernetes.io/barbaz"
+    #   attribute = "barbaz"
+    # }
+
 
     /*
-      Otel annotation extract, full doc: https://grafana.com/docs/agent/latest/flow/reference/components/otelcol.processor.k8sattributes/#annotation-block
-      All by default, example:
-      annotation {
-        from      = "pod"
-        key_regex = "kubernetes.io/(.*)"
-        tag_name  = "$1"
-      }
+      Extract K8s annotation to Otel attribute extract example:
     */
+    # Using regex
+    # annotation {
+    #   from            = "service" # case insensitive
+    #   key_regex       = "kubernetes.io/(.*)"
+    #   value_regex     = "(.*)"
+    #   attribute       = "$1"
+    #   attribute_value = "$1"
+    # }
+
+    # Using direct key match example
+    # annotation {
+    #   from      = "service" # case insensitive
+    #   key       = "kubernetes.io/barbaz"
+    #   attribute = "barbaz"
+    # }
+
   }
 
   association {
