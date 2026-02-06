@@ -22,7 +22,7 @@ The OpenTelemetry Collector provides the most flexibility:
 - Exports to multiple backends simultaneously
 - Provides buffering and retry logic
 
-**Example Configuration:** See [Mermin with OpenTelemetry Collector](../deployment/examples/local_otel/README.md) for a complete setup with OpenTelemetry Collector, including Mermin configuration and collector pipeline.
+**Example Configuration:** See [Mermin with OpenTelemetry Collector](../deployment/examples/local-otel/README.md) for a complete setup with OpenTelemetry Collector, including Mermin configuration and collector pipeline.
 
 ### Basic Mermin Configuration
 
@@ -50,7 +50,7 @@ Elasticsearch with APM Server or OpenTelemetry Collector ingests OTLP traces.
 - Point Mermin → OpenTelemetry Collector → Elasticsearch exporter
 - Or point Mermin → Elastic APM Server (OTLP endpoint)
 
-**Example:** See [`docs/deployment/examples/netobserv_os_simple_svc/`](../deployment/examples/netobserv_os_simple_svc/README.md) for OpenSearch (Elastic-compatible) deployment
+**Example:** See [`docs/deployment/examples/netobserv-os-simple-svc/`](../deployment/examples/netobserv-os-simple-svc/README.md) for OpenSearch (Elastic-compatible) deployment
 
 ### OpenSearch
 
@@ -60,8 +60,8 @@ Open-source alternative to Elasticsearch with native OTLP support via OpenTeleme
 
 **Examples:**
 
-- [`docs/deployment/examples/netobserv_os_simple_svc/`](../deployment/examples/netobserv_os_simple_svc/README.md) - Basic OpenSearch setup
-- [`docs/deployment/examples/netobserv_os_simple_gke_gw/`](../deployment/examples/netobserv_os_simple_gke_gw/README.md) - GKE deployment with Gateway API
+- [`docs/deployment/examples/netobserv-os-simple-svc/`](../deployment/examples/netobserv-os-simple-svc/README.md) - Basic OpenSearch setup
+- [`docs/deployment/examples/netobserv-os-simple-gke-gw/`](../deployment/examples/netobserv-os-simple-gke-gw/README.md) - GKE deployment with Gateway API
 
 ### Greptime Ingestion
 
@@ -81,7 +81,7 @@ export "traces" {
 }
 ```
 
-**Example:** [`docs/deployment/examples/greptime_simple_svc`](../deployment/examples/greptimedb_simple_svc/README.md)
+**Example:** [`docs/deployment/examples/greptime_simple_svc`](../deployment/examples/greptimedb-simple-svc/README.md)
 
 ### Grafana Cloud, Datadog, New Relic, Honeycomb, etc
 
