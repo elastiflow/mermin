@@ -178,3 +178,23 @@ These metrics track the number and type of active background tasks managed by Me
 ## Grafana Dashboard
 
 Grafana dashboard can be imported from the [Dashboard JSON](./grafana-mermin-app.json)
+
+---
+
+## Next Steps
+
+{% tabs %}
+{% tab title="Configure Metrics" %}
+1. [**Configure Prometheus Endpoint**](../configuration/reference/internal-prometheus-metrics.md): Customize metrics exposure
+2. [**Set Up Alerting**](../configuration/reference/internal-server.md): Configure health checks
+{% endtab %}
+
+{% tab title="Troubleshoot" %}
+1. [**Diagnose Performance Issues**](../troubleshooting/troubleshooting.md): Use metrics to identify bottlenecks
+2. [**Tune the Pipeline**](../configuration/reference/flow-processing-pipeline.md): Optimize based on metrics
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Share dashboards and alerting configurations

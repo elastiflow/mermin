@@ -4,7 +4,7 @@ hidden: true
 
 # Deployment Overview
 
-This section provides comprehensive guidance for deploying Mermin in various environments, from local development to production Kubernetes clusters.
+Deploy Mermin in various environments, from local development to production Kubernetes clusters.
 
 ## Deployment Options
 
@@ -21,7 +21,7 @@ Mermin supports multiple deployment scenarios:
 
 ### DaemonSet Pattern
 
-Mermin is typically deployed as a Kubernetes DaemonSet, which ensures:
+Mermin deploys as a Kubernetes DaemonSet, which ensures:
 
 * **One Pod Per Node**: Each node runs its own Mermin agent
 * **Automatic Scaling**: New nodes automatically get Mermin pods
@@ -94,7 +94,7 @@ See [Network Interface Discovery](../configuration/reference/network-interface-d
 
 ### Network Namespace Switching
 
-Mermin uses an advanced technique to monitor host network interfaces without requiring `hostNetwork: true`. This provides better network isolation while maintaining full monitoring capabilities.
+Mermin monitors host network interfaces without requiring `hostNetwork: true`, providing better network isolation while maintaining full monitoring capabilities.
 
 **How it works:**
 
@@ -145,7 +145,7 @@ The DaemonSet automatically sets the appropriate DNS policy to enable Kubernetes
 
 ### All Environments
 
-* Linux kernel 4.18 or newer with eBPF support
+* Linux kernel 5.14 or newer with eBPF and BTF support (6.6+ recommended)
 * Privileged container support
 * Network access to OTLP collector endpoint
 
@@ -179,7 +179,7 @@ The DaemonSet automatically sets the appropriate DNS policy to enable Kubernetes
 
 ### Bare Metal / Virtual Machines
 
-* Linux distribution with kernel 4.18+
+* Linux distribution with kernel 5.14+ (6.6+ recommended)
 * Docker or containerd installed
 * Root/sudo access to run privileged containers
 * No Kubernetes metadata enrichment available
@@ -299,13 +299,29 @@ updateStrategy:
 
 Choose your deployment path:
 
-* **Standard Kubernetes**: [Kubernetes with Helm](kubernetes-helm.md)
-* **Cloud Platform**: [GKE, EKS, or AKS](cloud-platforms.md)
-* **Advanced Setup**: [Custom CNI, Multi-Cluster](advanced-scenarios.md)
-* **Non-Kubernetes**: [Docker on Bare Metal](docker-bare-metal.md)
+{% tabs %}
+{% tab title="Kubernetes" %}
+| Environment | Guide |
+|-------------|-------|
+| Standard Kubernetes | [**Deploy with Helm**](kubernetes-helm.md) |
+| GKE, EKS, or AKS | [**Deploy to Cloud Platforms**](cloud-platforms.md) |
+| Custom CNI, Multi-Cluster | [**Configure Advanced Scenarios**](advanced-scenarios.md) |
+{% endtab %}
 
-After deploying, configure Mermin for your environment:
+{% tab title="Bare Metal" %}
+[**Deploy with Docker**](docker-bare-metal.md)
 
-* [Configuration Overview](../configuration/overview.md)
-* [OTLP Export Configuration](../configuration/reference/opentelemetry-otlp-exporter.md)
-* [Observability Backends](../getting-started/backend-integrations.md)
+Run Mermin on Linux servers without Kubernetes.
+{% endtab %}
+{% endtabs %}
+
+### After Deployment
+
+1. [**Configure Secure OTLP Export**](../configuration/reference/opentelemetry-otlp-exporter.md): Set up TLS and authentication
+2. [**Connect to Your Observability Backend**](../getting-started/backend-integrations.md): Integrate with Grafana, Elastic, or Jaeger
+3. [**Fine-Tune Your Configuration**](../configuration/overview.md): Optimize filters, timeouts, and resources
+
+### Need Help?
+
+- [**Troubleshoot Deployment Issues**](../troubleshooting/deployment-issues.md): Resolve pod startup and eBPF errors
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions and share experiences

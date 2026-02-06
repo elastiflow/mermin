@@ -316,8 +316,19 @@ See the [Internal Metrics](../../internal-monitoring/internal-metrics.md) guide 
 
 ## Next Steps
 
-- [**Configuration Overview**](../overview.md): Config file format and structure
-- [**Architecture**](../../concepts/agent-architecture.md): Data flow and eBPF programs
-- [**Span Options**](flow-span-producer.md): Flow timeouts and span generation
-- [**OTLP Exporter**](opentelemetry-otlp-exporter.md): Export tuning and backpressure
-- [**Configuration Examples**](../examples.md): Full pipeline examples (production, high-throughput)
+{% tabs %}
+{% tab title="Tune Performance" %}
+1. [**Configure Flow Timeouts**](flow-span-producer.md): Balance latency vs. accuracy
+2. [**Tune Export Batching**](opentelemetry-otlp-exporter.md): Optimize for your backend
+{% endtab %}
+
+{% tab title="Learn More" %}
+1. [**Understand the Architecture**](../../concepts/agent-architecture.md): How data flows through the pipeline
+2. [**Review Production Examples**](../examples.md): High-throughput configurations
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**Troubleshoot Performance Issues**](../../troubleshooting/troubleshooting.md): Diagnose bottlenecks
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Share pipeline configurations

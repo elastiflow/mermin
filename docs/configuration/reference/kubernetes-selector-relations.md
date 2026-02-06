@@ -185,7 +185,18 @@ CronJob’s selector lives on the job template.
 
 ## Next Steps
 
-- [**Flow Attributes**](flow-span-kubernetes-attribution.md): Enable associations (e.g. `networkpolicy`, `service`) so selector-based metadata appears on flows
-- [**Kubernetes Informer Discovery**](kubernetes-informer-discovery.md): Configure resource watching and selectors so the kinds used in selector_relations are available
-- [**Owner Relations**](kubernetes-owner-relations.md): Configure owner reference walking
-- [**Configuration Examples**](../examples.md): See complete configurations
+{% tabs %}
+{% tab title="Configure Metadata" %}
+1. [**Enable Flow Attributes**](flow-span-kubernetes-attribution.md): Make selector-based metadata appear on flows
+2. [**Configure Resource Watching**](kubernetes-informer-discovery.md): Ensure required resources are watched
+3. [**Configure Owner Relations**](kubernetes-owner-relations.md): Walk owner references
+{% endtab %}
+
+{% tab title="Examples" %}
+1. [**Review Complete Configurations**](../examples.md): Production-ready examples
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask about selector matching

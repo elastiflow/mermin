@@ -614,6 +614,19 @@ filter "flow" {
 
 ## Next Steps
 
-- [**Configuration Examples**](../examples.md): See complete filter configurations
-- [**Flow Span Options**](flow-span-producer.md): Configure flow generation
-- [**OTLP Export**](opentelemetry-otlp-exporter.md): Configure export options
+{% tabs %}
+{% tab title="Configure More" %}
+1. [**Tune Flow Generation**](flow-span-producer.md): Configure timeouts and thresholds
+2. [**Set Up OTLP Export**](opentelemetry-otlp-exporter.md): Send filtered flows to your backend
+{% endtab %}
+
+{% tab title="Examples" %}
+1. [**Review Complete Configurations**](../examples.md): Production-ready filter examples
+2. [**Deployment Examples**](../../deployment/examples/README.md): End-to-end configurations
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**Troubleshoot Missing Flows**](../../troubleshooting/troubleshooting.md): Diagnose over-filtering
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Share filter configurations

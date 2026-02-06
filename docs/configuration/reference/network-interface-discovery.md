@@ -726,7 +726,19 @@ discovery "instrument" {
 
 ## Next Steps
 
-* [**Parser Configuration**](network-packet-parser.md): Configure tunnel protocol detection
-* [**Flow Filtering**](flow-span-filters.md): Filter flows by interface name
-* [**Troubleshooting**](../../troubleshooting/troubleshooting.md): Diagnose interface issues
-* [**Advanced Scenarios**](../../deployment/advanced-scenarios.md): CNI-specific configurations
+{% tabs %}
+{% tab title="Configure More" %}
+1. [**Configure Tunnel Protocol Detection**](network-packet-parser.md): Handle VXLAN, Geneve, and WireGuard
+2. [**Filter Flows by Interface**](flow-span-filters.md): Reduce noise from specific interfaces
+{% endtab %}
+
+{% tab title="Deploy" %}
+1. [**Configure for Your CNI**](../../deployment/advanced-scenarios.md): CNI-specific interface patterns
+2. [**Troubleshoot Missing Traffic**](../../troubleshooting/interface-visibility-and-traffic-decapsulation.md): Understand what each interface type captures
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**Troubleshoot Interface Issues**](../../troubleshooting/deployment-issues.md#cni-and-interface-configuration): Resolve missing flows
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask about your specific CNI setup

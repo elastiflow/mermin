@@ -1,7 +1,6 @@
 # Mermin Documentation
 
-Welcome to the Mermin documentation! Mermin is a powerful, Kubernetes-native network observability tool that uses eBPF to efficiently capture network traffic and export it as **Flow Traces** via the OpenTelemetry Protocol (OTLP).
-It provides deep visibility into your cluster's network communications with zero application changes required.
+Mermin is a Kubernetes-native network observability tool that uses eBPF to capture network traffic and export it as **Flow Traces** via the OpenTelemetry Protocol (OTLP). Deploy once per node and gain deep visibility into your cluster's network communications—no application changes required.
 
 ![Mermin Overview](.gitbook/assets/mermin-overview.png)
 
@@ -11,8 +10,8 @@ It provides deep visibility into your cluster's network communications with zero
 
 ### The Problem
 
-Your APM traces show application behavior. Your network monitoring shows IP-level statistics. But there's a gap: when a trace shows a slow network span, you have no way to correlate that with actual network flow data.
-When network teams see congestion, they can't map it back to specific services or pods.
+Your APM traces show application behavior. Your network monitoring shows IP-level statistics. But a critical gap exists between these two worlds: when a trace shows a slow network span, you have no way to correlate that with actual network flow data.
+When network teams see congestion, they cannot map it back to specific services or pods.
 
 The MELT stack (Metrics, Events, Logs, Traces) is missing network flow data—connection-level information that bridges application performance with network reality.
 
@@ -36,9 +35,9 @@ Unlike traditional NetFlow or IPFIX, Flow Traces leverage the OpenTelemetry stan
 
 ## Quick Start
 
-The fastest way to get started with Mermin is to deploy it to a local Kubernetes cluster using our quickstart guide:
+Deploy Mermin to a local Kubernetes cluster in minutes:
 
-[**📚 Follow the Complete Quickstart Guide**](getting-started/quickstart-guide.md)
+[**Follow the Complete Quickstart Guide**](getting-started/quickstart-guide.md)
 
 Or deploy directly with Helm:
 
@@ -82,7 +81,7 @@ Once deployed, Mermin runs as a DaemonSet with one pod per node, automatically c
 
 ## What You Can Expect
 
-This documentation is designed to help you successfully deploy, configure, and operate Mermin in your environment. You'll find:
+This documentation covers deployment, configuration, and operation:
 
 - [**Quick Start Guide**](getting-started/quickstart-guide.md): Get Mermin running in minutes on a local Kubernetes cluster.
 - [**Architecture Overview**](concepts/agent-architecture.md): Understand how Mermin works and its data flow.
@@ -94,7 +93,7 @@ This documentation is designed to help you successfully deploy, configure, and o
 
 ## Development & Contributing
 
-For developers who want to contribute to Mermin or build it locally:
+For contributors and local development:
 
 - [**Contributor Guide**](contributor-guide/development-workflow.md): Complete guide for setting up your development environment
 - [**Debugging eBPF Programs**](contributor-guide/debugging-ebpf.md): Advanced eBPF program inspection and optimization techniques
@@ -104,7 +103,7 @@ For developers who want to contribute to Mermin or build it locally:
 
 Mermin requires:
 
-- **Linux Kernel**: Version 5.14 or newer with eBPF support enabled
+- **Linux Kernel**: Version 5.14 or newer with eBPF and BTF support (6.6+ recommended)
 - **Kubernetes**: Version 1.20 or newer (for Kubernetes deployments)
 - **Container Runtime**: Docker, containerd, or CRI-O
 - **Privileges**: Requires privileged mode to load eBPF programs and access network interfaces
@@ -130,6 +129,28 @@ If you encounter issues or have questions:
 
 ## Next Steps
 
-Ready to get started? Follow our [**Quick Start Guide**](getting-started/quickstart-guide.md) to deploy Mermin on a local Kubernetes cluster in minutes.
+{% tabs %}
+{% tab title="First Time Here?" %}
+[**Deploy Mermin in 5 Minutes**](getting-started/quickstart-guide.md)
 
-For production deployments, review the [**Deployment Overview**](deployment/overview.md) to understand your deployment options and best practices.
+Capture your first Flow Traces on a local Kubernetes cluster.
+{% endtab %}
+
+{% tab title="Going to Production?" %}
+[**Plan Your Production Deployment**](deployment/overview.md)
+
+Review deployment options, resource requirements, and security best practices.
+{% endtab %}
+
+{% tab title="Already Running Mermin?" %}
+- [**Fine-Tune Your Configuration**](configuration/overview.md): Optimize for your environment
+- [**Troubleshoot Common Issues**](troubleshooting/troubleshooting.md): Resolve deployment and capture problems
+{% endtab %}
+{% endtabs %}
+
+### Join the Community
+
+Connect with other Mermin users and the maintainers:
+
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions, share experiences, request features
+- [**Report an Issue**](https://github.com/elastiflow/mermin/issues): Found a bug? Let us know

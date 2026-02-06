@@ -1,14 +1,31 @@
 # Troubleshoot Common eBPF Errors
 
-eBPF programs must pass the kernel's verifier before they can run. The verifier is like a strict security guard—it checks that your program is safe, won't crash the kernel, and will eventually terminate.
-Understanding verifier errors can be tricky, especially since verifier behavior changes significantly between kernel versions.
+eBPF programs must pass the kernel's verifier before running. The verifier checks that programs are safe, will not crash the kernel, and will terminate. Verifier behavior changes significantly between kernel versions, making error diagnosis challenging.
+
+## Quick Reference
+
+Use this table to quickly diagnose common eBPF errors:
+
+| Error Pattern                                      | Likely Cause                                | Quick Fix                                                   |
+|----------------------------------------------------|---------------------------------------------|-------------------------------------------------------------|
+| `R4 invalid zero-sized read`                       | Kernel < 5.16 with stricter bounds checking | Upgrade kernel to 5.16+                                     |
+| `invalid access to map value`                      | Map bounds check failure                    | Upgrade kernel to 5.16+                                     |
+| `program is too large` / `processed 1000001 insns` | eBPF instruction limit exceeded             | Reduce parser complexity or protocol layers                 |
+| `back-edge from insn` / `infinite loop detected`   | Unbounded loop in eBPF code                 | Ensure loops have provable bounds                           |
+| `combined stack size...Too large`                  | Stack overflow (>512 bytes)                 | Reduce nested function calls                                |
+| `ring buffer full - dropping flow event`           | High traffic burst overwhelming buffer      | Increase `flow_events_capacity` to 2048+                    |
+| `Operation not permitted`                          | Missing Linux capabilities                  | Verify `privileged: true` or add `CAP_BPF`, `CAP_NET_ADMIN` |
+| `BTF is not supported`                             | Kernel lacks BTF support                    | Use kernel with BTF enabled or upgrade                      |
+
+For detailed explanations and solutions, see the sections below.
+
+---
 
 ## What You Need to Know About the Verifier
 
-**Good news**: Verifier errors are rare, especially on modern kernels. Most Mermin deployments work out of the box without any issues.
+Verifier errors are rare on modern kernels. Most Mermin deployments work without issues.
 
-**When problems do occur**, they're typically on older kernel versions (< 5.16) that can't perform the sophisticated complexity analysis that newer kernels can.
-Older kernels are more conservative and may reject programs that newer kernels accept without issue.
+Problems typically occur on older kernel versions (< 5.16) that lack sophisticated complexity analysis. These kernels are more conservative and may reject programs that newer kernels accept.
 
 The eBPF verifier has evolved considerably over time. A program that loads perfectly on a newer kernel might fail on an older one:
 
@@ -25,7 +42,7 @@ Hit a verifier error we haven't covered? Reach out to the Mermin team! We're con
 
 ## How to Recognize Verifier Errors
 
-When the verifier rejects a program, your pods won't start. You'll see errors like this in the logs:
+When the verifier rejects a program, pods fail to start. The logs show errors like:
 
 ```shell
 ERROR Failed to load eBPF program
@@ -33,15 +50,15 @@ verification time XXXXX usec
 processed XXXX insns (limit 1000000)
 ```
 
-Your pods will be stuck in `CrashLoopBackOff` or `Error` state.
+Pods remain stuck in `CrashLoopBackOff` or `Error` state.
 
 ## Common Verifier Errors (And What They Mean)
 
-Let's break down the most common verifier errors you might encounter and what's actually going wrong.
+The following sections explain the most common verifier errors and their causes.
 
 ### Invalid Zero-Sized Read
 
-This one shows up when the verifier thinks you're trying to read zero bytes of memory.
+This error occurs when the verifier detects a potential zero-byte memory read.
 
 **What you'll see:**
 
@@ -51,7 +68,7 @@ verification time 38379 usec
 processed 8264 insns (limit 1000000)
 ```
 
-**What's happening**: The verifier detected a potential zero-byte memory read. This typically happens when your length calculations might result in zero, or when the verifier can't prove that the length is definitely non-zero.
+**Cause**: The verifier detected a potential zero-byte memory read. This typically occurs when length calculations might result in zero, or when the verifier cannot prove the length is non-zero.
 
 **Real-world example:**
 
@@ -65,7 +82,7 @@ The verifier sees that R4 (the length parameter) could be anywhere from 0 to 191
 
 ### Invalid Map Access
 
-This error means you're trying to access a map in a way the verifier can't verify is safe.
+This error indicates a map access the verifier cannot verify as safe.
 
 **What you'll see:**
 
@@ -75,9 +92,7 @@ R3 min value is outside of the allowed memory range
 verification time 27928 usec
 ```
 
-**What's happening**: The verifier can't prove your map access stays within bounds. Maybe your offset + size exceeds the map's value size, or the verifier's range tracking shows you could potentially access memory outside the allowed range.
-
-Think of it like this: if you have a 234-byte map value and try to access byte 235, that's out of bounds. The verifier catches these potential violations before they can crash anything.
+**Cause**: The verifier cannot prove the map access stays within bounds. The offset + size may exceed the map's value size, or range tracking indicates potential access outside the allowed memory range. For example, accessing byte 235 in a 234-byte map value triggers this error.
 
 **Real-world example:**
 
@@ -91,7 +106,7 @@ The verifier is concerned that after adding R3 to R4, the resulting offset (42) 
 
 ### Instruction Limit Exceeded
 
-Your program is doing too much! The kernel has a limit on how complex an eBPF program can be.
+The kernel limits eBPF program complexity.
 
 **What you'll see:**
 
@@ -100,13 +115,13 @@ BPF program is too large. processed 1000001 insns
 processed 1000001 insns (limit 1000000)
 ```
 
-**What's happening**: Your program exceeds the kernel's instruction limit (typically 1 million instructions). This usually happens when parsing deeply nested network headers or processing complex protocols.
+**Cause**: The program exceeds the kernel's instruction limit (typically 1 million instructions). This commonly occurs when parsing deeply nested network headers or processing complex protocols.
 
 **What to do**: See the [Deployment Issues guide](deployment-issues.md#5-ebpf-verifier-rejection-program-too-large) for solutions, including reducing parser complexity or limiting the number of protocol layers processed.
 
 ### Unbounded Loop Detection
 
-eBPF programs must always terminate—no infinite loops allowed!
+eBPF programs must always terminate. Infinite loops are prohibited.
 
 **What you'll see:**
 
@@ -115,14 +130,11 @@ back-edge from insn X to Y
 infinite loop detected at insn X
 ```
 
-**What's happening**: The verifier found a loop without a provable upper bound. In eBPF, every loop must have a maximum number of iterations that the verifier can determine at verification time.
-If the verifier can't prove your loop will eventually exit, it rejects the program.
-
-This is a fundamental eBPF safety requirement—infinite loops could freeze the kernel.
+**Cause**: The verifier found a loop without a provable upper bound. Every eBPF loop must have a maximum iteration count determinable at verification time. The verifier rejects programs with loops that cannot be proven to exit—a fundamental safety requirement to prevent kernel freezes.
 
 ### Stack Size Exceeded
 
-You've used too much stack space across your function calls.
+Combined stack usage across function calls exceeds the limit.
 
 **What you'll see:**
 
@@ -131,7 +143,7 @@ combined stack size of N calls is XXXX. Too large
 max stack depth exceeded
 ```
 
-**What's happening**: The combined stack usage across all your function calls exceeds the kernel's limit (typically 512 bytes). Each function call adds to the stack, and nested calls add up quickly.
+**Cause**: Combined stack usage across function calls exceeds the kernel's limit (typically 512 bytes). Each function call consumes stack space, and nested calls accumulate rapidly.
 
 ## Runtime eBPF Errors
 
@@ -139,7 +151,7 @@ While verifier errors prevent programs from loading, runtime errors occur after 
 
 ### Ring Buffer Full - Dropping Flow Events
 
-The eBPF ring buffer temporarily holds new flow events before userspace processes them. When this buffer fills up, new flow events are dropped to prevent the eBPF program from blocking.
+The eBPF ring buffer temporarily holds new flow events before userspace processes them. When the buffer fills, new flow events are dropped to prevent the eBPF program from blocking.
 
 **What you'll see:**
 
@@ -147,13 +159,13 @@ The eBPF ring buffer temporarily holds new flow events before userspace processe
 ERROR mermin: ebpf - ring buffer full - dropping flow event for new flow
 ```
 
-**What's happening**: Your network is creating new flows faster than the ring buffer can drain them. This typically occurs during:
+**Cause**: The network creates new flows faster than the ring buffer can drain. This typically occurs during:
 
 - **Traffic bursts**: Sudden spike in new connections (e.g., load balancer scaling, DDoS)
 - **High connection rate**: Sustained high rate of new flow creation (>1,000 FPS)
 - **Worker backpressure**: Downstream processing can't keep up (check worker channel metrics)
 
-**Important**: Flow tracking continues! The flow is still tracked in the FLOW_STATS map, but userspace won't receive the initial packet data for deep packet inspection on that specific flow.
+**Note**: Flow tracking continues. The flow remains tracked in the FLOW_STATS map, but userspace does not receive the initial packet data for deep packet inspection on that specific flow.
 
 **How to fix it:**
 
@@ -216,3 +228,24 @@ For the complete guide on TC priority, including troubleshooting conflicts with 
 - **Kernel >= 6.6**: Uses TCX mode with explicit ordering ("first" or "last")
 
 **Why this matters**: Mermin operates passively (observes without modifying packets), so running first is usually safe and provides the most accurate observability data.
+
+---
+
+## Next Steps
+
+{% tabs %}
+{% tab title="Still Stuck?" %}
+1. [**Review Full Deployment Troubleshooting**](deployment-issues.md): Complete guide to pod startup and permission issues
+2. [**Test eBPF Attach/Detach**](deployment-issues.md#test-ebpf-attachdetach-operations): Validate your kernel capabilities
+{% endtab %}
+
+{% tab title="Get Help" %}
+1. [**Search Existing Issues**](https://github.com/elastiflow/mermin/issues): Check if someone else encountered the same error
+2. [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask for help with your specific error
+{% endtab %}
+{% endtabs %}
+
+### Related Guides
+
+- [**Understand Interface Visibility**](interface-visibility-and-traffic-decapsulation.md): Why you might not see expected traffic
+- [**Configure Network Interfaces**](../configuration/reference/network-interface-discovery.md): Set up the correct patterns for your CNI

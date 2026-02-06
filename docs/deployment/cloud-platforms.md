@@ -575,7 +575,19 @@ Ensure managed identity has necessary permissions and AAD Pod Identity is config
 
 ## Next Steps
 
-- [**Advanced Scenarios**](advanced-scenarios.md): Custom CNI, multi-cluster deployments
-- [**Configuration Reference**](../configuration/overview.md): Fine-tune Mermin for your environment
-- [**Observability Backends**](../getting-started/backend-integrations.md): Send Flow Traces to cloud-native observability platforms
-- [**Troubleshooting**](../troubleshooting/troubleshooting.md): Solve cloud-specific issues
+{% tabs %}
+{% tab title="Configure" %}
+1. [**Secure Your OTLP Connection**](../configuration/reference/opentelemetry-otlp-exporter.md): Set up TLS and cloud-native authentication
+2. [**Connect to Cloud Observability**](../getting-started/backend-integrations.md): Send Flow Traces to your cloud platform
+{% endtab %}
+
+{% tab title="Advanced" %}
+1. [**Configure Multi-Cluster Deployments**](advanced-scenarios.md): Federated monitoring and custom CNI
+2. [**Fine-Tune Your Configuration**](../configuration/overview.md): Optimize for cloud environments
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**Troubleshoot Cloud Issues**](../troubleshooting/troubleshooting.md): Resolve cloud-specific deployment problems
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions and share experiences

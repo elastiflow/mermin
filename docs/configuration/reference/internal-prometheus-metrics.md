@@ -265,4 +265,18 @@ For production environments:
 
 ## Next Steps
 
-- [**Mermin Internal Metrics**](../../internal-monitoring/internal-metrics.md): Mermin metrics documentation
+{% tabs %}
+{% tab title="Monitor" %}
+1. [**Explore All Internal Metrics**](../../internal-monitoring/internal-metrics.md): Complete metrics reference
+2. [**Configure Internal Server**](internal-server.md): Health checks and endpoints
+{% endtab %}
+
+{% tab title="Troubleshoot" %}
+1. [**Diagnose Performance Issues**](../../troubleshooting/troubleshooting.md): Use metrics to identify bottlenecks
+2. [**Tune the Pipeline**](flow-processing-pipeline.md): Optimize based on metrics
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Share monitoring dashboards and alerting configurations

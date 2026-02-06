@@ -782,7 +782,20 @@ export "traces" {
 
 ## Next Steps
 
-* [**Global Options**](reference/README.md#configure-global-agent-options): Reference for all global configuration fields
-* [**Discovery Configuration**](reference/network-interface-discovery.md): Interface selection details
-* [**Export Configuration**](reference/opentelemetry-otlp-exporter.md): OTLP export options
-* [**Deployment Guide**](../deployment/overview.md): Deploy with your chosen configuration
+{% tabs %}
+{% tab title="Deploy" %}
+1. [**Deploy to Kubernetes**](../deployment/kubernetes-helm.md): Use these configurations in production
+2. [**Review Deployment Options**](../deployment/overview.md): Choose the right deployment method
+{% endtab %}
+
+{% tab title="Customize" %}
+1. [**Configure Network Interfaces**](reference/network-interface-discovery.md): Adjust for your CNI
+2. [**Configure OTLP Export**](reference/opentelemetry-otlp-exporter.md): Set up authentication and TLS
+3. [**Configure Global Options**](reference/README.md#configure-global-agent-options): Logging, timeouts, and more
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**Troubleshoot Configuration Issues**](../troubleshooting/troubleshooting.md): Resolve HCL syntax errors
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Share configurations and get advice

@@ -719,6 +719,18 @@ See the [Internal Metrics](../../internal-monitoring/internal-metrics.md) guide 
 
 ## Next Steps
 
-- [**Stdout Exporter**](opentelemetry-console-exporter.md): Configure console output for debugging
-- [**Observability Backends**](../../getting-started/backend-integrations.md): Set up collector and connect to backends
-- [**Troubleshooting**](../../troubleshooting/troubleshooting.md): Diagnose problems
+{% tabs %}
+{% tab title="Connect to Backend" %}
+1. [**Choose Your Backend**](../../getting-started/backend-integrations.md): Grafana, Elastic, Jaeger, and more
+2. [**Review Deployment Examples**](../../deployment/examples/README.md): Complete configurations with backends
+{% endtab %}
+
+{% tab title="Debug" %}
+1. [**Enable Console Output**](opentelemetry-console-exporter.md): Debug flows with stdout logging
+2. [**Troubleshoot Export Issues**](../../troubleshooting/troubleshooting.md): Diagnose connection problems
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask about your backend configuration

@@ -151,8 +151,18 @@ Span #1
 
 ## Next Steps
 
-- [**Configuration Overview**](../overview.md): Config file format and structure
-- [**OTLP Exporter**](opentelemetry-otlp-exporter.md): Configure production export
-- [**Flow Filtering**](flow-span-filters.md): Reduce log volume
-- [**Internal Tracing**](internal-tracing.md): Monitor Mermin itself
-- [**Observability Backends**](../../getting-started/backend-integrations.md): Set up observability backends
+{% tabs %}
+{% tab title="Go to Production" %}
+1. [**Configure OTLP Export**](opentelemetry-otlp-exporter.md): Send flows to your production backend
+2. [**Connect to Your Backend**](../../getting-started/backend-integrations.md): Grafana, Elastic, Jaeger, and more
+{% endtab %}
+
+{% tab title="Reduce Volume" %}
+1. [**Filter Flows Before Export**](flow-span-filters.md): Reduce console output volume
+2. [**Configure Log Levels**](../overview.md): Control verbosity
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**Troubleshoot Export Issues**](../../troubleshooting/troubleshooting.md): Diagnose export problems

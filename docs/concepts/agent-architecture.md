@@ -1,6 +1,6 @@
 # Mermin Agent Architecture
 
-This page explains how Mermin works, its architecture, and the flow of data from network packets to Flow Traces in your observability backend.
+Understand how Mermin works, its architecture, and the data flow from network packets to Flow Traces in your observability backend.
 
 ## What are Flow Traces?
 
@@ -20,7 +20,7 @@ network packet → Mermin → flow span (network flow) → flow trace (network c
 
 ## High-Level Architecture
 
-Mermin is deployed as a DaemonSet in Kubernetes, with one agent instance running on each node in your cluster. Each agent independently captures and processes network traffic from its host node.
+Mermin deploys as a DaemonSet in Kubernetes, with one agent instance per node. Each agent independently captures and processes network traffic from its host node.
 
 ```text
 ┌─────────────────────────────────────────────┐
@@ -107,7 +107,7 @@ The userspace Mermin agent receives packets from eBPF and aggregates them into n
 - **State Tracking**: Maintains connection state for TCP (SYN, FIN, RST flags)
 - **Timeout Management**: Expires inactive flows based on [configurable timeouts](../configuration/reference/flow-span-producer.md)
 - **Protocol Parsing**: Deep packet inspection for tunneling protocols (VXLAN, Geneve, WireGuard)
-- **Community ID**: Generates standard Community ID hashes for flow correlation
+- **Community ID**: Generates standard [Community ID](https://github.com/corelight/community-id-spec) hashes—a deterministic identifier based on the flow's five-tuple that enables correlation across different monitoring points
 
 A [Flow Trace Span](semantic-conventions.md) includes:
 
@@ -139,7 +139,7 @@ This ensures:
 
 ### Kubernetes Integration
 
-Mermin deeply integrates with Kubernetes to decorate flows with contextual metadata:
+Mermin integrates with Kubernetes to decorate flows with contextual metadata:
 
 #### Informers
 
@@ -149,7 +149,7 @@ Mermin uses Kubernetes informers (watch APIs) to maintain an in-memory cache of 
 - Jobs, CronJobs, NetworkPolicies
 - Endpoints, EndpointSlices, Ingresses, Gateways
 
-This cache is continuously updated as resources change, ensuring metadata is always current.
+The cache updates continuously as resources change, keeping metadata current.
 
 #### Flow Attribution
 
@@ -161,7 +161,7 @@ For each network flow, Mermin:
 4. **Selector Matching**: Finds Services and NetworkPolicies that select the pod via its selectors.
 5. **Decorates Traces**: Attaches all relevant metadata to the Flow Trace Span
 
-This provides full context for each network flow, enabling powerful filtering and analysis.
+This process provides full context for each network flow, enabling powerful filtering and analysis.
 
 To learn more about attribution configuration options, see the [Kubernetes informer](../configuration/reference/kubernetes-informer-discovery.md) documentation.
 
@@ -185,7 +185,7 @@ To learn more about the exporter configuration options, see the [OTLP exporter](
 
 ### Resource Usage
 
-Mermin is designed to be efficient in production environments:
+Mermin operates efficiently in production environments:
 
 - **CPU**: Typically 0.1-0.5 cores (100-500 mCPUs) per agent, varies with traffic volume
 - **Memory**: Base usage ~100-200 MB, grows with flow table size
@@ -327,11 +327,28 @@ CNI/backend flexibility and flow-level detail, enabling long-term storage and gr
 
 ## Next Steps
 
-Now that you understand how Mermin generates Flow Traces, review the following guides to learn more and get started:
+Now that you understand how Mermin generates Flow Traces, choose your path:
 
-1. [**Deploy to Production**](../deployment/overview.md): Select the deployment model that best suits your needs with detailed guidance covering Kubernetes, cloud platforms, and bare metal Docker environments.
-   Includes in-depth recommendations for resource allocation, network architecture, and security best practices.
-2. [**Configure Mermin**](../configuration/overview.md): Customize Mermin for your environment by configuring network interface discovery, Kubernetes metadata enrichment, flow filtering, OTLP export, and other settings.
-   Features support for auto-reload and flexible configuration precedence.
-3. [**Choose Your Backend**](../getting-started/backend-integrations.md): Send Flow Traces via OTLP to any compatible observability platform, including OpenTelemetry Collector, Elastic Stack, OpenSearch, Grafana Tempo, and Jaeger.
-4. [**Troubleshoot Issues**](../troubleshooting/troubleshooting.md): Diagnose deployment failures, eBPF errors, and traffic visibility issues using pod logs, health checks, metrics monitoring, and the `diagnose bpf` command.
+{% tabs %}
+{% tab title="Deploy" %}
+1. [**Plan Your Production Deployment**](../deployment/overview.md): Resource allocation, security, and best practices
+2. [**Review Security Considerations**](security-considerations.md): Understand required privileges and data privacy
+{% endtab %}
+
+{% tab title="Configure" %}
+1. [**Master Configuration Options**](../configuration/overview.md): Network interfaces, metadata enrichment, and export
+2. [**Connect to Your Backend**](../getting-started/backend-integrations.md): Send Flow Traces to Grafana, Elastic, or Jaeger
+{% endtab %}
+
+{% tab title="Troubleshoot" %}
+1. [**Diagnose Common Issues**](../troubleshooting/troubleshooting.md): Pod logs, health checks, and metrics
+2. [**Resolve eBPF Errors**](../troubleshooting/common-ebpf-errors.md): Quick reference for verifier failures
+{% endtab %}
+{% endtabs %}
+
+### Join the Community
+
+Have questions about the architecture or want to contribute?
+
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions and share experiences
+- [**Contribute to Mermin**](../CONTRIBUTING.md): Help improve the project

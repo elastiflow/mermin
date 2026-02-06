@@ -4,7 +4,7 @@ hidden: true
 
 # Export to Your Observability Backend
 
-Mermin exports Flow Traces via the **OpenTelemetry Protocol (OTLP)**, which means it works with any OTLP-enabled observability backend or collector.
+Mermin exports Flow Traces via the **OpenTelemetry Protocol (OTLP)**, compatible with any OTLP-enabled observability backend or collector.
 
 ## What You Need
 
@@ -15,7 +15,7 @@ To receive Flow Traces from Mermin, you need one of:
 
 ## OpenTelemetry Collector (Recommended)
 
-The OpenTelemetry Collector is the most flexible option:
+The OpenTelemetry Collector provides the most flexibility:
 
 - Receives OTLP from Mermin via gRPC or HTTP
 - Processes, batches, and transforms telemetry data
@@ -37,11 +37,11 @@ export "traces" {
 
 ## OTLP-Compatible Data Platforms
 
-Mermin Flow Traces work with any platform that supports OTLP trace ingestion:
+Flow Traces work with any platform supporting OTLP trace ingestion:
 
 ### Elastic Stack
 
-Elasticsearch with APM Server or OpenTelemetry Collector can ingest OTLP traces.
+Elasticsearch with APM Server or OpenTelemetry Collector ingests OTLP traces.
 
 **Use Case:** Full-text search, complex aggregations, APM integration, machine learning
 
@@ -85,7 +85,7 @@ export "traces" {
 
 ### Grafana Cloud, Datadog, New Relic, Honeycomb, etc
 
-Most commercial observability platforms now support OTLP ingestion.
+Most commercial observability platforms support OTLP ingestion.
 
 **How to Connect:**
 
@@ -116,7 +116,7 @@ Each Flow Trace is an OpenTelemetry span containing:
 - Bidirectional counters: bytes sent/received, packets sent/received
 - TCP state: flags (SYN, FIN, RST), connection state
 - Kubernetes metadata: pod, service, deployment, namespace, labels
-- Community ID for flow correlation
+- [Community ID](https://github.com/corelight/community-id-spec) for flow correlation across monitoring points
 
 **Resource Attributes:**
 
@@ -124,11 +124,11 @@ Each Flow Trace is an OpenTelemetry span containing:
 - Node name
 - Mermin version
 
-This standardized format allows querying Flow Traces using native backend query languages (TraceQL, KQL, Lucene, etc.).
+Query Flow Traces using native backend query languages (TraceQL, KQL, Lucene).
 
 ## Testing with Stdout
 
-For local development and testing, you can output Flow Traces to stdout instead of OTLP:
+For local development and testing, output Flow Traces to stdout instead of OTLP:
 
 ```hcl
 export "traces" {
@@ -146,8 +146,19 @@ kubectl logs -f -l app.kubernetes.io/name=mermin
 
 ## Next Steps
 
-1. **Choose your backend** from the options above
-2. **Review example configurations** in [`deployment/examples`](../deployment/examples/README.md)
-3. **Configure OTLP export** in your Mermin deployment – see [OTLP Exporter Configuration](../configuration/reference/opentelemetry-otlp-exporter.md)
-4. **Set up authentication and TLS** for production – see [OTLP Exporter Configuration](../configuration/reference/opentelemetry-otlp-exporter.md)
-5. **Create dashboards** to visualize Flow Traces in your chosen platform
+{% tabs %}
+{% tab title="Configure Export" %}
+1. [**Configure OTLP Export**](../configuration/reference/opentelemetry-otlp-exporter.md): Set up endpoints, authentication, and TLS
+2. [**Review Example Configurations**](../deployment/examples/README.md): Complete deployment examples with backends
+{% endtab %}
+
+{% tab title="Optimize" %}
+1. [**Filter Flows Before Export**](../configuration/reference/flow-span-filters.md): Reduce volume and focus on critical traffic
+2. [**Tune Export Batching**](../configuration/reference/opentelemetry-otlp-exporter.md#batching): Optimize for your backend's ingestion rate
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**Troubleshoot Export Issues**](../troubleshooting/troubleshooting.md): Diagnose connection and authentication problems
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Share your backend setup and get community advice

@@ -1,6 +1,6 @@
 # Configuration Overview
 
-Mermin is configured with HCL (HashiCorp Configuration Language) or YAML. This page describes the config file format, precedence, and structure. Section-specific options are documented in the linked pages.
+Configure Mermin with HCL (HashiCorp Configuration Language) or YAML. This page describes the config file format, precedence, and structure. Section-specific options are documented in the linked pages.
 
 ## File Format
 
@@ -43,7 +43,7 @@ Flow capture may pause briefly during reload. Some changes (e.g. interface selec
 
 ## Minimal configuration
 
-Without a config file, Mermin uses built-in defaults and does not configure an exporter, so flow data is not sent anywhere. To send flow traces to an OTLP endpoint with everything else at defaults, use a config file that only sets export:
+Without a config file, Mermin uses built-in defaults and does not configure an exporter—flow data is not sent anywhere. To send flow traces to an OTLP endpoint with default settings, create a config file that sets only the export block:
 
 ```hcl
 export "traces" {
@@ -238,12 +238,12 @@ internal "traces" {
 
 ## Validation
 
-Configuration is validated on startup. Invalid config (e.g. unknown field, invalid value, missing file, or unsupported extension) causes Mermin to exit with a non-zero exit code and print the error to stderr.
-Fix the file and restart (or rely on auto-reload after fixing). When running in Kubernetes, Mermin may log a memory warning if estimated pipeline usage exceeds 80% of the container limit; see [Pipeline](reference/flow-processing-pipeline.md) and [Troubleshooting](../troubleshooting/troubleshooting.md).
+Configuration is validated on startup. Invalid config (unknown field, invalid value, missing file, or unsupported extension) causes Mermin to exit with a non-zero exit code and print the error to stderr.
+Fix the file and restart (or rely on auto-reload after fixing). In Kubernetes, Mermin logs a memory warning if estimated pipeline usage exceeds 80% of the container limit; see [Pipeline](reference/flow-processing-pipeline.md) and [Troubleshooting](../troubleshooting/troubleshooting.md).
 
 ## HCL functions
 
-HCL config files (not YAML) can call the `env` function to read environment variables. Useful for secrets or environment-specific values without hardcoding. The function is evaluated when the config is loaded and again on reload.
+HCL config files (not YAML) support the `env` function to read environment variables—useful for secrets or environment-specific values without hardcoding. The function evaluates when the config loads and again on reload.
 
 - `env("VAR_NAME")`
   Returns the value of the environment variable, or an empty string if unset. Mermin logs a warning when the variable is not set.
@@ -313,9 +313,23 @@ YAML configs do not support `env`; use HCL if you need it, or inject values befo
 6. Prefer auto-reload for iterative tuning.
 7. Keep secrets in env vars or Kubernetes secrets, not in the config file.
 
-## Next steps
+## Next Steps
 
-- [Global Options](reference/README.md#configure-global-agent-options): top-level and CLI
-- [Network Interface Discovery](reference/network-interface-discovery.md): which interfaces to monitor
-- [OTLP Exporter](reference/opentelemetry-otlp-exporter.md): send flows to your backend
-- [Configuration Examples](examples.md): full sample configs
+{% tabs %}
+{% tab title="Essential Configuration" %}
+1. [**Configure Network Interfaces**](reference/network-interface-discovery.md): Select which interfaces to monitor
+2. [**Set Up OTLP Export**](reference/opentelemetry-otlp-exporter.md): Send flows to your backend with TLS
+3. [**Configure Global Options**](reference/README.md#configure-global-agent-options): Logging, timeouts, and CLI flags
+{% endtab %}
+
+{% tab title="Advanced Configuration" %}
+1. [**Filter Flows Before Export**](reference/flow-span-filters.md): Reduce noise and storage costs
+2. [**Tune the Processing Pipeline**](reference/flow-processing-pipeline.md): Optimize for high-throughput environments
+3. [**Review Complete Examples**](examples.md): Full production configurations
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**Troubleshoot Configuration Issues**](../troubleshooting/troubleshooting.md): Resolve HCL syntax and validation errors
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions and share configurations

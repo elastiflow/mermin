@@ -1,19 +1,49 @@
 # Quickstart Guide
 
-This guide will help you deploy Mermin on a local Kubernetes cluster using `kind` (Kubernetes in Docker) in just a few minutes. By the end, you'll have Mermin capturing network flows and displaying them in your terminal.
-
-## Prerequisites
-
-Before starting, ensure you have the following tools installed:
-
-* [**Docker**](https://docs.docker.com/get-docker/): Container runtime
-* [**kind**](https://kind.sigs.k8s.io/docs/user/quick-start/#installation): Kubernetes in Docker
-* [**kubectl**](https://kubernetes.io/docs/tasks/tools/): Kubernetes command-line tool
-* [**Helm**](https://helm.sh/docs/intro/install/): Kubernetes package manager (version 3.x)
+Deploy Mermin on a local Kubernetes cluster using `kind` (Kubernetes in Docker). By the end of this guide, Mermin will be capturing network flows and displaying them in your terminal.
 
 {% hint style="info" %}
 This quick start is designed for local testing and development. For production deployments, see the [Deployment Guide](../deployment/overview.md).
 {% endhint %}
+
+## System Requirements
+
+Before deploying Mermin, verify your environment meets these requirements:
+
+| Requirement           | Minimum | Recommended       | Notes                                   |
+|-----------------------|---------|-------------------|-----------------------------------------|
+| **Linux Kernel**      | 5.14+   | 6.6+              | Must have BTF (BPF Type Format) enabled |
+| **Kubernetes**        | 1.20+   | 1.28+             | Any conformant distribution             |
+| **Helm**              | 3.x     | 3.12+             | Kubernetes package manager              |
+| **Container Runtime** | Any     | Docker/containerd | Must support privileged containers      |
+
+{% hint style="warning" %}
+**eBPF Requirements**: Mermin requires a Linux kernel with eBPF and BTF support. Most modern distributions (Ubuntu 20.04+, RHEL 9.2+, Debian 11+) meet these requirements. Older kernels may produce verifier errors.
+{% endhint %}
+
+### Verify Your Environment
+
+Run these commands on your Kubernetes nodes (or inside kind) to verify eBPF support:
+
+```bash
+# Check kernel version (must be 5.14+)
+uname -r
+
+# Verify BTF support (file must exist)
+ls -la /sys/kernel/btf/vmlinux
+
+# Check eBPF filesystem (should be mounted)
+mount | grep bpf
+```
+
+## Prerequisites
+
+Install these tools before proceeding:
+
+- [**Docker**](https://docs.docker.com/get-docker/): Container runtime
+- [**kind**](https://kind.sigs.k8s.io/docs/user/quick-start/#installation): Kubernetes in Docker
+- [**kubectl**](https://kubernetes.io/docs/tasks/tools/): Kubernetes command-line tool
+- [**Helm**](https://helm.sh/docs/intro/install/): Kubernetes package manager (version 3.x)
 
 ## Step 1: Create a kind Cluster
 
@@ -50,16 +80,23 @@ You should see three nodes in the `Ready` state.
 Deploy Mermin using the Helm chart with a configuration that outputs flows to stdout (for easy viewing):
 
 ```bash
-# Add Mermin Helm registry
+# Add Mermin Helm repository
 helm repo add mermin https://elastiflow.github.io/mermin
 helm repo update
 
+# Download the example configuration for local testing
+curl -LO https://raw.githubusercontent.com/elastiflow/mermin/main/docs/deployment/examples/local/config.example.hcl
+
 # Deploy Mermin using Helm
 helm upgrade --install mermin mermin/mermin \
-  --set-file config.content=docs/deployment/examples/local/config.example.hcl \
+  --set-file config.content=config.example.hcl \
   --wait \
   --timeout 5m
 ```
+
+{% hint style="info" %}
+This configuration outputs Flow Traces to stdout for quick verification. For production, configure an [OTLP exporter](../configuration/reference/opentelemetry-otlp-exporter.md) to send data to your observability backend.
+{% endhint %}
 
 ## Step 3: Verify the Deployment
 
@@ -79,14 +116,14 @@ mermin-def456  1/1     Running   0          2m
 
 ## Step 4: View Network Flow Data
 
-Now let's view the network flows Mermin is capturing:
+View the network flows Mermin is capturing:
 
 ```bash
 # Stream logs from a Mermin pod
 kubectl logs -l app.kubernetes.io/name=mermin -f --tail=100
 ```
 
-You should see flow records in a human-readable format. Let's generate some traffic to see more flows:
+Flow records appear in a human-readable format. Generate some traffic to see more flows:
 
 ```bash
 # In a new terminal, create a test pod
@@ -98,12 +135,12 @@ curl https://www.google.com
 exit
 ```
 
-Switch back to the logs terminal, and you'll see network flow records for the traffic you just generated, including:
+The logs terminal displays network flow records for the generated traffic, including:
 
-* Source and destination IP addresses and ports
-* Protocol (TCP, UDP, ICMP)
-* Packet and byte counts
-* Kubernetes metadata (pod name, namespace, labels)
+- Source and destination IP addresses and ports
+- Protocol (TCP, UDP, ICMP)
+- Packet and byte counts
+- Kubernetes metadata (pod name, namespace, labels)
 
 Example flow record (stdout format):
 
@@ -296,7 +333,7 @@ Configures how Mermin exports network flow data. Flows can be sent to an OTLP re
 
 ## Cleanup
 
-When you're done experimenting, clean up the resources:
+Remove the resources when finished:
 
 ```bash
 # Remove the test deployment and service (if created)
@@ -310,23 +347,40 @@ helm uninstall mermin
 kind delete cluster --name atlantis
 ```
 
-## Next Steps
-
-Congratulations! You've successfully deployed Mermin and captured network flows.
-
-To use Mermin in production:
-
-1. [**Review the Architecture**](../concepts/agent-architecture.md) to understand how Mermin works
-2. [**Explore Deployment Options**](../deployment/overview.md) for production-ready configurations
-3. [**Configure OTLP Export**](../configuration/reference/opentelemetry-otlp-exporter.md) to send flows to your observability backend
-4. [**Set Up Integrations**](backend-integrations.md) with Grafana, Elastic, or other platforms
-5. [**Customize Configuration**](../configuration/overview.md) to match your environment and requirements
-
 ## Troubleshooting
 
 If you encounter issues:
 
-* **Pods not starting**: Check `kubectl describe pod <pod-name>` for errors
-* **No Flow Traces**: Verify network interfaces with `kubectl exec <pod-name> -- ip link show`
-* **Permission errors**: Ensure the SecurityContext allows privileged mode
-* See the [**Troubleshooting Guide**](../troubleshooting/troubleshooting.md) for more help
+- **Pods not starting**: Check `kubectl describe pod <pod-name>` for errors
+- **No Flow Traces**: Verify network interfaces with `kubectl exec <pod-name> -- ip link show`
+- **Permission errors**: Ensure the SecurityContext allows privileged mode
+- See the [**Troubleshooting Guide**](../troubleshooting/troubleshooting.md) for more help
+
+## Next Steps
+
+Congratulations! You've successfully deployed Mermin and captured network flows.
+
+{% tabs %}
+{% tab title="Go to Production" %}
+1. [**Plan Your Production Deployment**](../deployment/overview.md): Review resource requirements and security best practices
+2. [**Configure Secure OTLP Export**](../configuration/reference/opentelemetry-otlp-exporter.md): Set up TLS and authentication
+3. [**Connect to Your Observability Backend**](backend-integrations.md): Integrate with Grafana, Elastic, or Jaeger
+{% endtab %}
+
+{% tab title="Learn the Fundamentals" %}
+1. [**Understand How Mermin Works**](../concepts/agent-architecture.md): Deep dive into the agent architecture
+2. [**Explore Flow Trace Semantics**](../concepts/introduction-to-flow-traces.md): Learn what each attribute means
+{% endtab %}
+
+{% tab title="Customize Your Setup" %}
+1. [**Configure Network Interfaces**](../configuration/reference/network-interface-discovery.md): Target specific interfaces for your CNI
+2. [**Filter Flows Before Export**](../configuration/reference/flow-span-filters.md): Reduce noise and focus on relevant traffic
+{% endtab %}
+{% endtabs %}
+
+### Join the Community
+
+Have questions or want to share how you're using Mermin?
+
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions and engage with the community
+- [**Report an Issue**](https://github.com/elastiflow/mermin/issues): Found a bug? Help us improve

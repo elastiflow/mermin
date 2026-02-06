@@ -225,6 +225,19 @@ If you need more headroom for legitimate load, increase `flow_capture.flow_stats
 
 ## Next Steps
 
-- [**Configuration Examples**](../examples.md): See complete configurations
-- [**Flow Filtering**](flow-span-filters.md): Reduce flow volume with filters
-- [**OTLP Export**](opentelemetry-otlp-exporter.md): Configure export options
+{% tabs %}
+{% tab title="Configure More" %}
+1. [**Filter Flows Before Export**](flow-span-filters.md): Reduce volume and focus on relevant traffic
+2. [**Configure OTLP Export**](opentelemetry-otlp-exporter.md): Send flows to your backend
+{% endtab %}
+
+{% tab title="Examples" %}
+1. [**Review Complete Configurations**](../examples.md): Production-ready examples
+2. [**Tune the Pipeline**](flow-processing-pipeline.md): Optimize for high-throughput
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**Troubleshoot Flow Issues**](../../troubleshooting/troubleshooting.md): Diagnose flow generation problems
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask about timeout tuning

@@ -635,7 +635,19 @@ export "traces" {
 
 ## Next Steps
 
-- [**Configuration Reference**](../configuration/overview.md): Deep dive into all configuration options
-- [**Filtering**](../configuration/reference/flow-span-filters.md): Configure flow filters for security and performance
-- [**Observability Backends**](../getting-started/backend-integrations.md): Send Flow Traces to your observability backend
-- [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose and resolve performance issues
+{% tabs %}
+{% tab title="Configure" %}
+1. [**Master All Configuration Options**](../configuration/overview.md): Deep dive into every setting
+2. [**Secure Your OTLP Connection**](../configuration/reference/opentelemetry-otlp-exporter.md): Production TLS and authentication
+{% endtab %}
+
+{% tab title="Optimize" %}
+1. [**Filter Flows for Performance**](../configuration/reference/flow-span-filters.md): Reduce volume and focus on critical traffic
+2. [**Connect to Your Backend**](../getting-started/backend-integrations.md): Send Flow Traces to your observability platform
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**Troubleshoot Performance Issues**](../troubleshooting/troubleshooting.md): Diagnose and resolve advanced deployment problems
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Discuss complex scenarios with the community

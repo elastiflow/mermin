@@ -290,7 +290,19 @@ You may need to tweak the `informers_sync_timeout` attribute.
 
 ## Next Steps
 
-- [**Owner Relations**](kubernetes-owner-relations.md): Configure owner reference walking
-- [**Selector Relations**](kubernetes-selector-relations.md): Configure selector-based matching
-- [**Flow Attributes**](flow-span-kubernetes-attribution.md): Configure metadata extraction
-- [**Troubleshooting**](../../troubleshooting/troubleshooting.md): Debug missing metadata
+{% tabs %}
+{% tab title="Configure Metadata" %}
+1. [**Configure Owner Relations**](kubernetes-owner-relations.md): Walk owner references (Pod → Deployment)
+2. [**Configure Selector Matching**](kubernetes-selector-relations.md): Match Services and NetworkPolicies
+3. [**Extract Flow Attributes**](flow-span-kubernetes-attribution.md): Choose which metadata appears on flows
+{% endtab %}
+
+{% tab title="Troubleshoot" %}
+1. [**Debug Missing Metadata**](../../troubleshooting/troubleshooting.md): Diagnose enrichment issues
+2. [**Verify RBAC Permissions**](../../troubleshooting/deployment-issues.md#kubernetes-rbac-issues): Ensure Mermin can read resources
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask about metadata enrichment
