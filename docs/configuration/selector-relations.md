@@ -18,27 +18,29 @@ see [**Kubernetes Informer Discovery**](reference/kubernetes-informer-discovery.
 
 A full configuration example can be found in the [Default Configuration](./default/config.hcl).
 
-### `selector_relations` attribute
+### `discovery.informer.k8s` block
 
-`selector_relations` is optional and lives inside `discovery.informer.k8s`. If omitted or empty, no selector-based relations are used. When present, it is a list of relation rules; each rule is an object with the attributes described below.
+- `selector_relations` attribute
 
-```hcl
-discovery "informer" "k8s" {
-  selector_relations = [
-    {
-      kind = "NetworkPolicy"
-      to = "Pod"
-      selector_match_labels_field      = "spec.podSelector.matchLabels"
-      selector_match_expressions_field = "spec.podSelector.matchExpressions"
-    },
-    {
-      kind                        = "Service"
-      to                          = "Pod"
-      selector_match_labels_field = "spec.selector"
-    },
-  ]
-}
-```
+  `selector_relations` is optional and lives inside `discovery.informer.k8s`. If omitted or empty, no selector-based relations are used. When present, it is a list of relation rules; each rule is an object with the attributes described below.
+
+  ```hcl
+  discovery "informer" "k8s" {
+    selector_relations = [
+      {
+        kind = "NetworkPolicy"
+        to = "Pod"
+        selector_match_labels_field      = "spec.podSelector.matchLabels"
+        selector_match_expressions_field = "spec.podSelector.matchExpressions"
+      },
+      {
+        kind                        = "Service"
+        to                          = "Pod"
+        selector_match_labels_field = "spec.selector"
+      },
+    ]
+  }
+  ```
 
 ## Object Types
 
