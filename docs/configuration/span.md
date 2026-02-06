@@ -67,7 +67,8 @@ A full configuration example can be found in the [Default Configuration](./defau
 
 - `tcp_timeout` attribute
 
-  Inactivity timeout for TCP flows that remain open (no FIN or RST observed). When this timeout elapses without traffic, the flow is considered inactive and will be closed. For each TCP flow, `tcp_timeout` applies as long as no FIN or RST has been seen.
+  Inactivity timeout for TCP flows that remain open (no FIN or RST observed). When this timeout elapses without traffic, the flow is considered inactive and will be closed.
+  For each TCP flow, `tcp_timeout` applies as long as no FIN or RST has been seen.
 
   **Type:** Duration
 
@@ -83,7 +84,8 @@ A full configuration example can be found in the [Default Configuration](./defau
 
 - `tcp_fin_timeout` attribute
 
-  After a FIN (graceful close) is observed on a TCP flow, the exporter waits for this timeout before exporting the flow. This allows late-arriving final ACKs to be captured. For each TCP flow, once a FIN is seen, `tcp_fin_timeout` determines when the flow is closed and exported.
+  After a FIN (graceful close) is observed on a TCP flow, the exporter waits for this timeout before exporting the flow.
+  This allows late-arriving final ACKs to be captured. For each TCP flow, once a FIN is seen, `tcp_fin_timeout` determines when the flow is closed and exported.
 
   **Type:** Duration
 
@@ -99,7 +101,8 @@ A full configuration example can be found in the [Default Configuration](./defau
 
 - `tcp_rst_timeout` attribute
 
-  When a TCP RST (reset) is observed—indicating an abrupt connection termination—the flow waits for the specified `tcp_rst_timeout` before being exported. This timeout is evaluated for each flow individually after an RST is detected, ensuring even abruptly closed connections are accounted for with a brief post-RST delay before export.
+  When a TCP RST (reset) is observed—indicating an abrupt connection termination—the flow waits for the specified `tcp_rst_timeout` before being exported.
+  This timeout is evaluated for each flow individually after an RST is detected, ensuring even abruptly closed connections are accounted for with a brief post-RST delay before export.
 
   **Type:** Duration
 
@@ -209,19 +212,6 @@ its capacity is set in [pipeline](pipeline.md) (`flow_capture.flow_stats_capacit
 
 Shorter intervals and timeouts mean more exports and higher storage and [OTLP export](export-otlp.md) load; longer values reduce volume and improve aggregation at the cost of slower visibility.
 
-**Example:** Low-latency monitoring (only overrides shown; the rest use defaults)
-
-```hcl
-span {
-  max_record_interval = "10s"
-  generic_timeout     = "10s"
-  tcp_timeout         = "10s"
-  tcp_fin_timeout     = "2s"
-  tcp_rst_timeout     = "2s"
-  udp_timeout         = "20s"
-}
-```
-
 For high-throughput or memory-constrained nodes, use longer or shorter timeouts accordingly. To reduce the number of flows tracked, use [flow filters](filtering.md).
 
 [Troubleshooting](../troubleshooting/troubleshooting.md) and [Pipeline](pipeline.md) cover backpressure, export tuning, and pipeline sizing.
@@ -230,7 +220,8 @@ For high-throughput or memory-constrained nodes, use longer or shorter timeouts 
 
 Flow and eBPF map metrics are in [Internal Metrics](../internal-monitoring/internal-metrics.md): `mermin_flow_spans_active_total`, `mermin_flow_spans_created_total`, and `mermin_ebpf_map_size` / `mermin_ebpf_map_capacity` with `map="FLOW_STATS"`.
 
-If the flow table or memory grows without bound, lower timeouts or `max_record_interval`, or reduce tracked flows with [flow filters](filtering.md). If you need more headroom for legitimate load, increase `flow_capture.flow_stats_capacity` in [pipeline](pipeline.md).
+If the flow table or memory grows without bound, lower timeouts or `max_record_interval`, or reduce tracked flows with [flow filters](filtering.md).
+If you need more headroom for legitimate load, increase `flow_capture.flow_stats_capacity` in [pipeline](pipeline.md).
 
 ## Next Steps
 
