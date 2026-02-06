@@ -347,6 +347,8 @@ mod event_driven_tests {
             reverse_ip_flow_label: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 0,
+            pid: 0,
+            comm: [0u8; 16],
         };
         let tcp_stats = TcpStats {
             tcp_syn_ns: 0,
@@ -411,6 +413,8 @@ mod event_driven_tests {
             reverse_ip_flow_label: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 0,
+            pid: 0,
+            comm: [0u8; 16],
         };
         let tcp_stats = TcpStats {
             tcp_syn_ns: 0,
@@ -469,6 +473,8 @@ mod event_driven_tests {
             reverse_ip_flow_label: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 1,
+            pid: 0,
+            comm: [0u8; 16],
         };
         let tcp_stats = TcpStats {
             tcp_syn_ns: 0,
@@ -536,6 +542,8 @@ mod event_driven_tests {
             reverse_ip_flow_label: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 1,
+            pid: 0,
+            comm: [0u8; 16],
         };
         let tcp_stats_t1 = TcpStats {
             tcp_syn_ns: 0,
@@ -586,6 +594,8 @@ mod event_driven_tests {
             reverse_ip_flow_label: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 1,
+            pid: 0,
+            comm: [0u8; 16],
         };
         let tcp_stats_t2 = TcpStats {
             tcp_syn_ns: 0,
@@ -668,6 +678,8 @@ mod event_driven_tests {
                     reverse_ip_flow_label: 0,
                     forward_metadata_seen: 1,
                     reverse_metadata_seen: 0,
+                    pid: 0,
+                    comm: [0u8; 16],
                 };
                 let tcp_stats = TcpStats {
                     tcp_syn_ns: 0,
