@@ -423,9 +423,19 @@ If your environment uses multiple ports for the same tunnel protocol (e.g., mult
 
 ## Next Steps
 
-- [**Configuration Overview**](../overview.md): Config file format and structure
-- [**Network Interface Discovery**](network-interface-discovery.md): Configure which interfaces to monitor
-- [**Flow Filtering**](flow-span-filters.md): Filter flows based on protocols and ports
-- [**Deployment Issues**](../../troubleshooting/deployment-issues.md): Troubleshoot eBPF verifier failures
-- [**Troubleshooting**](../../troubleshooting/troubleshooting.md): Diagnose flow capture issues
-- [**Advanced Scenarios**](../../deployment/advanced-scenarios.md): CNI-specific deployment guides
+{% tabs %}
+{% tab title="Configure More" %}
+1. [**Configure Network Interfaces**](network-interface-discovery.md): Select which interfaces to monitor
+2. [**Filter Flows by Protocol**](flow-span-filters.md): Reduce noise from specific protocols
+{% endtab %}
+
+{% tab title="Deploy" %}
+1. [**Configure for Your CNI**](../../deployment/advanced-scenarios.md): CNI-specific deployment guides
+2. [**Understand Interface Visibility**](../../troubleshooting/interface-visibility-and-traffic-decapsulation.md): What each interface captures
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**Troubleshoot Parser Issues**](../../troubleshooting/deployment-issues.md): Resolve eBPF verifier failures
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask about tunnel protocol handling

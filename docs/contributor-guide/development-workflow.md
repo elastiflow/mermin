@@ -371,11 +371,22 @@ Create or update `.vscode/settings.json` in the project root with the following 
 
 ## Next Steps
 
-Once you have your development environment set up, you may want to explore:
+{% tabs %}
+{% tab title="Debug & Develop" %}
+1. [**Capture Packets with Wireshark**](debugging-network.md): Live network traffic debugging
+2. [**Inspect eBPF Programs with bpftool**](debugging-ebpf.md): Program inspection and optimization
+{% endtab %}
 
-- [Debugging Network Traffic](debugging-network.md) - Learn how to use Wireshark for live packet capture
-- [Debugging eBPF Programs](debugging-ebpf.md) - Deep dive into eBPF program inspection and optimization
-- [Deployment Documentation](../deployment/overview.md) - Understand production deployment scenarios
+{% tab title="Understand Production" %}
+1. [**Review Deployment Options**](../deployment/overview.md): Production deployment scenarios
+2. [**Explore the Architecture**](../concepts/agent-architecture.md): How Mermin processes flows
+{% endtab %}
+
+{% tab title="Contribute" %}
+1. [**Read the Contribution Guidelines**](../CONTRIBUTING.md): PR process and commit conventions
+2. [**Find an Issue to Work On**](https://github.com/elastiflow/mermin/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22): Good first issues for new contributors
+{% endtab %}
+{% endtabs %}
 
 ## Getting Help
 

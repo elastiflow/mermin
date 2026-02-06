@@ -361,6 +361,18 @@ This approach gives you both quick diagnostics and deep analysis capabilities fo
 
 ## Next Steps
 
-- [Contributor Guide](development-workflow.md) - Return to the main contributor guide
-- [Debugging Network Traffic](debugging-network.md) - Learn about Wireshark packet capture
-- [Troubleshooting Guide](../troubleshooting/troubleshooting.md) - Common issues and solutions
+{% tabs %}
+{% tab title="Continue Debugging" %}
+1. [**Capture Packets with Wireshark**](debugging-network.md): Complement eBPF inspection with packet analysis
+2. [**Diagnose eBPF Verifier Errors**](../troubleshooting/common-ebpf-errors.md): Solutions for common verifier failures
+{% endtab %}
+
+{% tab title="Contribute" %}
+1. [**Return to Contributor Guide**](development-workflow.md): Build, test, and contribute
+2. [**Read Contributing Guidelines**](../CONTRIBUTING.md): PR process and commit conventions
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions about eBPF development

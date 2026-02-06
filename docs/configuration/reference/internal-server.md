@@ -234,8 +234,19 @@ For production environments:
 
 ## Next Steps
 
-- [**Metrics**](internal-prometheus-metrics.md): Configure Prometheus metrics server and endpoints
-- [**Global Options**](README.md#configure-global-agent-options): Configure logging and performance
-- [**Flow Span Options**](flow-span-producer.md): Tune flow generation
-- [**OTLP Exporter**](opentelemetry-otlp-exporter.md): Configure flow export
-- [**Troubleshooting**](../../troubleshooting/troubleshooting.md): Diagnose issues
+{% tabs %}
+{% tab title="Monitor" %}
+1. [**Configure Prometheus Metrics**](internal-prometheus-metrics.md): Expose metrics for scraping
+2. [**Enable Internal Tracing**](internal-tracing.md): Debug Mermin itself
+{% endtab %}
+
+{% tab title="Configure" %}
+1. [**Tune Flow Generation**](flow-span-producer.md): Configure timeouts and thresholds
+2. [**Configure OTLP Export**](opentelemetry-otlp-exporter.md): Send flows to your backend
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**Troubleshoot Issues**](../../troubleshooting/troubleshooting.md): Diagnose health check failures
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask about server configuration

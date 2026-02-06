@@ -146,8 +146,19 @@ kubectl logs -f -l app.kubernetes.io/name=mermin
 
 ## Next Steps
 
-1. **Choose your backend** from the options above
-2. **Review example configurations** in [`deployment/examples`](../deployment/examples/README.md)
-3. **Configure OTLP export** in your Mermin deployment – see [OTLP Exporter Configuration](../configuration/reference/opentelemetry-otlp-exporter.md)
-4. **Set up authentication and TLS** for production – see [OTLP Exporter Configuration](../configuration/reference/opentelemetry-otlp-exporter.md)
-5. **Create dashboards** to visualize Flow Traces in your chosen platform
+{% tabs %}
+{% tab title="Configure Export" %}
+1. [**Configure OTLP Export**](../configuration/reference/opentelemetry-otlp-exporter.md): Set up endpoints, authentication, and TLS
+2. [**Review Example Configurations**](../deployment/examples/README.md): Complete deployment examples with backends
+{% endtab %}
+
+{% tab title="Optimize" %}
+1. [**Filter Flows Before Export**](../configuration/reference/flow-span-filters.md): Reduce volume and focus on critical traffic
+2. [**Tune Export Batching**](../configuration/reference/opentelemetry-otlp-exporter.md#batching): Optimize for your backend's ingestion rate
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**Troubleshoot Export Issues**](../troubleshooting/troubleshooting.md): Diagnose connection and authentication problems
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Share your backend setup and get community advice

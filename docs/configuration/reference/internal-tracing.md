@@ -248,7 +248,19 @@ internal "traces" {
 
 ## Next Steps
 
-- [**Global Options**](README.md#configure-global-agent-options): Configure log levels
-- Internal [**Server**](internal-server.md) and [**Metrics**](internal-prometheus-metrics.md): Monitor with Prometheus
-- [**Troubleshooting**](../../troubleshooting/troubleshooting.md): Debug common issues
-- [**OTLP Exporter**](opentelemetry-otlp-exporter.md): Configure trace export
+{% tabs %}
+{% tab title="Monitor Mermin" %}
+1. [**Configure Prometheus Metrics**](internal-prometheus-metrics.md): Expose metrics for scraping
+2. [**Set Up Health Checks**](internal-server.md): Configure readiness and liveness probes
+{% endtab %}
+
+{% tab title="Configure Export" %}
+1. [**Configure OTLP Export**](opentelemetry-otlp-exporter.md): Send Mermin's own traces to your backend
+2. [**Adjust Log Levels**](README.md#configure-global-agent-options): Control verbosity
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**Troubleshoot Issues**](../../troubleshooting/troubleshooting.md): Debug common problems
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask about internal tracing

@@ -412,3 +412,24 @@ For most Kubernetes observability use cases, this is exactly what you want: insi
 Your applications don't know about VXLAN or WireGuard, and for monitoring application behavior, you usually don't need to either.
 
 **When you do need infrastructure visibility** (troubleshooting CNI issues, debugging tunnel problems, capacity planning), add tunnel interfaces to your configuration to see both layers.
+
+---
+
+## Next Steps
+
+{% tabs %}
+{% tab title="Configure" %}
+1. [**Configure Network Interfaces for Your CNI**](../configuration/reference/network-interface-discovery.md): Set up the correct interface patterns
+2. [**Filter Flows by Interface**](../configuration/reference/flow-span-filters.md): Reduce noise by filtering specific interfaces
+{% endtab %}
+
+{% tab title="Troubleshoot" %}
+1. [**Troubleshoot Missing Flows**](deployment-issues.md#cni-and-interface-configuration): Resolve CNI-specific capture issues
+2. [**Diagnose Common eBPF Errors**](common-ebpf-errors.md): Verifier and loading failures
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions about your specific CNI setup
+- [**Report an Issue**](https://github.com/elastiflow/mermin/issues): Found a bug with interface detection?

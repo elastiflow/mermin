@@ -495,10 +495,26 @@ terraform fmt -check config.hcl
 - **Mismatched quotes** - Use `"quotes"` consistently
 - **Invalid key names** - Use underscores (`tcp_priority`), not hyphens (`tcp-priority`)
 
-## Related Documentation
+## Next Steps
 
-Want to dive deeper? These guides provide additional context:
+{% tabs %}
+{% tab title="Resolved? Configure Mermin" %}
+1. [**Configure Network Interfaces**](../configuration/reference/network-interface-discovery.md): Optimize for your CNI
+2. [**Set Up OTLP Export**](../configuration/reference/opentelemetry-otlp-exporter.md): Send flows to your backend
+{% endtab %}
 
-- [**Common eBPF Errors**](common-ebpf-errors.md) - Detailed eBPF verifier error diagnosis and solutions
-- [**Interface Visibility**](interface-visibility-and-traffic-decapsulation.md) - Understanding network traffic visibility at different layers
-- [**Configuration Reference**](../configuration/overview.md) - Complete configuration options
+{% tab title="Still Troubleshooting?" %}
+1. [**Diagnose eBPF Verifier Errors**](common-ebpf-errors.md): Detailed solutions for verifier failures
+2. [**Understand Interface Visibility**](interface-visibility-and-traffic-decapsulation.md): Why traffic might not appear
+{% endtab %}
+
+{% tab title="Get Help" %}
+- [**Search Existing Issues**](https://github.com/elastiflow/mermin/issues): Check if someone else had the same problem
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask for community help
+{% endtab %}
+{% endtabs %}
+
+### Related Documentation
+
+- [**Configuration Reference**](../configuration/overview.md): Complete configuration options
+- [**Security Considerations**](../concepts/security-considerations.md): Understand required privileges

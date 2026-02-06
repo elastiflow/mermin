@@ -327,11 +327,28 @@ CNI/backend flexibility and flow-level detail, enabling long-term storage and gr
 
 ## Next Steps
 
-Now that you understand how Mermin generates Flow Traces, review the following guides to learn more and get started:
+Now that you understand how Mermin generates Flow Traces, choose your path:
 
-1. [**Deploy to Production**](../deployment/overview.md): Select the deployment model that best suits your needs with detailed guidance covering Kubernetes, cloud platforms, and bare metal Docker environments.
-   Includes in-depth recommendations for resource allocation, network architecture, and security best practices.
-2. [**Configure Mermin**](../configuration/overview.md): Customize Mermin for your environment by configuring network interface discovery, Kubernetes metadata enrichment, flow filtering, OTLP export, and other settings.
-   Features support for auto-reload and flexible configuration precedence.
-3. [**Choose Your Backend**](../getting-started/backend-integrations.md): Send Flow Traces via OTLP to any compatible observability platform, including OpenTelemetry Collector, Elastic Stack, OpenSearch, Grafana Tempo, and Jaeger.
-4. [**Troubleshoot Issues**](../troubleshooting/troubleshooting.md): Diagnose deployment failures, eBPF errors, and traffic visibility issues using pod logs, health checks, metrics monitoring, and the `diagnose bpf` command.
+{% tabs %}
+{% tab title="Deploy" %}
+1. [**Plan Your Production Deployment**](../deployment/overview.md): Resource allocation, security, and best practices
+2. [**Review Security Considerations**](security-considerations.md): Understand required privileges and data privacy
+{% endtab %}
+
+{% tab title="Configure" %}
+1. [**Master Configuration Options**](../configuration/overview.md): Network interfaces, metadata enrichment, and export
+2. [**Connect to Your Backend**](../getting-started/backend-integrations.md): Send Flow Traces to Grafana, Elastic, or Jaeger
+{% endtab %}
+
+{% tab title="Troubleshoot" %}
+1. [**Diagnose Common Issues**](../troubleshooting/troubleshooting.md): Pod logs, health checks, and metrics
+2. [**Resolve eBPF Errors**](../troubleshooting/common-ebpf-errors.md): Quick reference for verifier failures
+{% endtab %}
+{% endtabs %}
+
+### Join the Community
+
+Have questions about the architecture or want to contribute?
+
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions and share experiences
+- [**Contribute to Mermin**](../CONTRIBUTING.md): Help improve the project

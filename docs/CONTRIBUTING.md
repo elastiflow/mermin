@@ -304,12 +304,24 @@ Contributions are licensed under the same licenses as the project:
 
 See [LICENSE-GPL2](../../LICENSE-GPL2) and [LICENSE-APACHE](../../LICENSE-APACHE) for full license text.
 
-## Questions?
+## Next Steps
 
-For questions about contributing:
+{% tabs %}
+{% tab title="Start Contributing" %}
+1. [**Find an Issue**](https://github.com/elastiflow/mermin/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22): Good first issues for new contributors
+2. [**Set Up Your Dev Environment**](contributor-guide/development-workflow.md): Build and test locally
+{% endtab %}
 
-- Open a discussion on [GitHub Discussions](https://github.com/elastiflow/mermin/discussions).
-- Comment on the issue you're interested in working on.
-- Reach out to the maintainers.
+{% tab title="Learn the Codebase" %}
+1. [**Understand the Architecture**](concepts/agent-architecture.md): How Mermin processes flows
+2. [**Debug eBPF Programs**](contributor-guide/debugging-ebpf.md): Inspect and optimize eBPF code
+{% endtab %}
+{% endtabs %}
+
+### Questions?
+
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions about contributing
+- Comment on the issue you're interested in working on
+- Reach out to the maintainers
 
 Thank you for contributing to Mermin!

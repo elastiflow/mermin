@@ -205,9 +205,21 @@ Mermin provides metrics to monitor shutdown behavior:
 - `shutdown_flows_total{status="preserved"}`: Flows successfully exported during shutdown
 - `shutdown_flows_total{status="lost"}`: Flows lost due to shutdown timeout
 
-### Next Steps
+## Next Steps
 
-- Internal [**Server**](internal-server.md) and [**Metrics**](internal-prometheus-metrics.md): Configure health checks and monitoring
-- [**Network Interface Discovery**](network-interface-discovery.md): Select which interfaces to monitor
-- [**Flow Span Options**](flow-span-producer.md): Configure flow generation and timeouts
-- [**Configuration Examples**](../examples.md): See complete configurations
+{% tabs %}
+{% tab title="Essential Configuration" %}
+1. [**Configure Network Interfaces**](network-interface-discovery.md): Select which interfaces to monitor
+2. [**Set Up OTLP Export**](opentelemetry-otlp-exporter.md): Send flows to your backend
+3. [**Tune Flow Generation**](flow-span-producer.md): Configure timeouts and thresholds
+{% endtab %}
+
+{% tab title="Monitoring" %}
+1. [**Configure Health Checks**](internal-server.md): Readiness and liveness probes
+2. [**Expose Prometheus Metrics**](internal-prometheus-metrics.md): Enable scraping
+{% endtab %}
+
+{% tab title="Examples" %}
+1. [**Review Complete Configurations**](../examples.md): Production-ready examples
+{% endtab %}
+{% endtabs %}

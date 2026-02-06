@@ -133,5 +133,18 @@ owner_relations = {
 
 ## Next Steps
 
-- [**Selector Relations**](kubernetes-selector-relations.md): Configure selector-based matching
-- [**Flow Attributes**](flow-span-kubernetes-attribution.md): Configure metadata extraction
+{% tabs %}
+{% tab title="Configure Metadata" %}
+1. [**Configure Selector Matching**](kubernetes-selector-relations.md): Match Services and NetworkPolicies
+2. [**Extract Flow Attributes**](flow-span-kubernetes-attribution.md): Choose which metadata appears on flows
+{% endtab %}
+
+{% tab title="Examples" %}
+1. [**Review Complete Configurations**](../examples.md): Production-ready examples
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**Troubleshoot Missing Metadata**](../../troubleshooting/troubleshooting.md): Diagnose enrichment issues
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask about owner relation configuration

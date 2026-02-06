@@ -40,10 +40,10 @@ mount | grep bpf
 
 Install these tools before proceeding:
 
-* [**Docker**](https://docs.docker.com/get-docker/): Container runtime
-* [**kind**](https://kind.sigs.k8s.io/docs/user/quick-start/#installation): Kubernetes in Docker
-* [**kubectl**](https://kubernetes.io/docs/tasks/tools/): Kubernetes command-line tool
-* [**Helm**](https://helm.sh/docs/intro/install/): Kubernetes package manager (version 3.x)
+- [**Docker**](https://docs.docker.com/get-docker/): Container runtime
+- [**kind**](https://kind.sigs.k8s.io/docs/user/quick-start/#installation): Kubernetes in Docker
+- [**kubectl**](https://kubernetes.io/docs/tasks/tools/): Kubernetes command-line tool
+- [**Helm**](https://helm.sh/docs/intro/install/): Kubernetes package manager (version 3.x)
 
 ## Step 1: Create a kind Cluster
 
@@ -137,10 +137,10 @@ exit
 
 The logs terminal displays network flow records for the generated traffic, including:
 
-* Source and destination IP addresses and ports
-* Protocol (TCP, UDP, ICMP)
-* Packet and byte counts
-* Kubernetes metadata (pod name, namespace, labels)
+- Source and destination IP addresses and ports
+- Protocol (TCP, UDP, ICMP)
+- Packet and byte counts
+- Kubernetes metadata (pod name, namespace, labels)
 
 Example flow record (stdout format):
 
@@ -347,23 +347,40 @@ helm uninstall mermin
 kind delete cluster --name atlantis
 ```
 
-## Next Steps
-
-Congratulations! You've successfully deployed Mermin and captured network flows.
-
-To use Mermin in production:
-
-1. [**Review the Architecture**](../concepts/agent-architecture.md) to understand how Mermin works
-2. [**Explore Deployment Options**](../deployment/overview.md) for production-ready configurations
-3. [**Configure OTLP Export**](../configuration/reference/opentelemetry-otlp-exporter.md) to send flows to your observability backend
-4. [**Set Up Integrations**](backend-integrations.md) with Grafana, Elastic, or other platforms
-5. [**Customize Configuration**](../configuration/overview.md) to match your environment and requirements
-
 ## Troubleshooting
 
 If you encounter issues:
 
-* **Pods not starting**: Check `kubectl describe pod <pod-name>` for errors
-* **No Flow Traces**: Verify network interfaces with `kubectl exec <pod-name> -- ip link show`
-* **Permission errors**: Ensure the SecurityContext allows privileged mode
-* See the [**Troubleshooting Guide**](../troubleshooting/troubleshooting.md) for more help
+- **Pods not starting**: Check `kubectl describe pod <pod-name>` for errors
+- **No Flow Traces**: Verify network interfaces with `kubectl exec <pod-name> -- ip link show`
+- **Permission errors**: Ensure the SecurityContext allows privileged mode
+- See the [**Troubleshooting Guide**](../troubleshooting/troubleshooting.md) for more help
+
+## Next Steps
+
+Congratulations! You've successfully deployed Mermin and captured network flows.
+
+{% tabs %}
+{% tab title="Go to Production" %}
+1. [**Plan Your Production Deployment**](../deployment/overview.md): Review resource requirements and security best practices
+2. [**Configure Secure OTLP Export**](../configuration/reference/opentelemetry-otlp-exporter.md): Set up TLS and authentication
+3. [**Connect to Your Observability Backend**](backend-integrations.md): Integrate with Grafana, Elastic, or Jaeger
+{% endtab %}
+
+{% tab title="Learn the Fundamentals" %}
+1. [**Understand How Mermin Works**](../concepts/agent-architecture.md): Deep dive into the agent architecture
+2. [**Explore Flow Trace Semantics**](../concepts/introduction-to-flow-traces.md): Learn what each attribute means
+{% endtab %}
+
+{% tab title="Customize Your Setup" %}
+1. [**Configure Network Interfaces**](../configuration/reference/network-interface-discovery.md): Target specific interfaces for your CNI
+2. [**Filter Flows Before Export**](../configuration/reference/flow-span-filters.md): Reduce noise and focus on relevant traffic
+{% endtab %}
+{% endtabs %}
+
+### Join the Community
+
+Have questions or want to share how you're using Mermin?
+
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions and engage with the community
+- [**Report an Issue**](https://github.com/elastiflow/mermin/issues): Found a bug? Help us improve

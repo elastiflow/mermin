@@ -194,6 +194,24 @@ Key observations:
 
 ---
 
-## Learn More
+## Next Steps
 
-For the complete specification including all attributes, requirement levels, and detailed semantics, see the [Semantic Conventions](semantic-conventions.md).
+Now that you understand Flow Traces, choose your path:
+
+{% tabs %}
+{% tab title="Get Started" %}
+1. [**Deploy Mermin in 5 Minutes**](../getting-started/quickstart-guide.md): Capture your first Flow Traces
+2. [**Send Flow Traces to Your Backend**](../getting-started/backend-integrations.md): Connect to Grafana, Elastic, or Jaeger
+{% endtab %}
+
+{% tab title="Go Deeper" %}
+1. [**Read the Semantic Conventions**](semantic-conventions.md): Complete attribute specification and requirement levels
+2. [**Understand the Agent Architecture**](agent-architecture.md): How Mermin generates Flow Traces
+{% endtab %}
+{% endtabs %}
+
+### Join the Community
+
+Have questions about Flow Traces or want to share how you're using them?
+
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions and engage with the community

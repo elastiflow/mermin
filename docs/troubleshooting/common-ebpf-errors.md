@@ -228,3 +228,24 @@ For the complete guide on TC priority, including troubleshooting conflicts with 
 - **Kernel >= 6.6**: Uses TCX mode with explicit ordering ("first" or "last")
 
 **Why this matters**: Mermin operates passively (observes without modifying packets), so running first is usually safe and provides the most accurate observability data.
+
+---
+
+## Next Steps
+
+{% tabs %}
+{% tab title="Still Stuck?" %}
+1. [**Review Full Deployment Troubleshooting**](deployment-issues.md): Complete guide to pod startup and permission issues
+2. [**Test eBPF Attach/Detach**](deployment-issues.md#test-ebpf-attachdetach-operations): Validate your kernel capabilities
+{% endtab %}
+
+{% tab title="Get Help" %}
+1. [**Search Existing Issues**](https://github.com/elastiflow/mermin/issues): Check if someone else encountered the same error
+2. [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask for help with your specific error
+{% endtab %}
+{% endtabs %}
+
+### Related Guides
+
+- [**Understand Interface Visibility**](interface-visibility-and-traffic-decapsulation.md): Why you might not see expected traffic
+- [**Configure Network Interfaces**](../configuration/reference/network-interface-discovery.md): Set up the correct patterns for your CNI

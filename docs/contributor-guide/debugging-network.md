@@ -124,5 +124,18 @@ Ensure Wireshark is installed and available in your PATH. On macOS, you may need
 
 ## Next Steps
 
-- [Debugging eBPF Programs](debugging-ebpf.md) - Learn how to inspect eBPF programs with bpftool
-- [Contributor Guide](development-workflow.md) - Return to the main contributor guide
+{% tabs %}
+{% tab title="Continue Debugging" %}
+1. [**Inspect eBPF Programs with bpftool**](debugging-ebpf.md): Program inspection and optimization
+2. [**Troubleshoot Common Issues**](../troubleshooting/troubleshooting.md): Resolve deployment and capture problems
+{% endtab %}
+
+{% tab title="Contribute" %}
+1. [**Return to Contributor Guide**](development-workflow.md): Build, test, and contribute
+2. [**Read Contributing Guidelines**](../CONTRIBUTING.md): PR process and commit conventions
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions about debugging techniques

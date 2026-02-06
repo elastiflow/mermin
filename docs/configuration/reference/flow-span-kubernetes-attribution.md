@@ -259,6 +259,19 @@ If you only configure one direction (e.g. only `attributes "source" "k8s"`), the
 
 ## Next Steps
 
-- [**Kubernetes Informers**](kubernetes-informer-discovery.md): Configure resource watching
-- [**Owner Relations**](kubernetes-owner-relations.md): Add owner metadata
-- [**Configuration Examples**](../examples.md): See complete configurations
+{% tabs %}
+{% tab title="Configure More" %}
+1. [**Configure Resource Watching**](kubernetes-informer-discovery.md): Control which resources are watched
+2. [**Configure Owner Relations**](kubernetes-owner-relations.md): Add deployment and replicaset metadata
+3. [**Configure Selector Matching**](kubernetes-selector-relations.md): Match Services and NetworkPolicies
+{% endtab %}
+
+{% tab title="Examples" %}
+1. [**Review Complete Configurations**](../examples.md): Production-ready examples
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**Troubleshoot Missing Metadata**](../../troubleshooting/troubleshooting.md): Diagnose enrichment issues
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask about Kubernetes attribution

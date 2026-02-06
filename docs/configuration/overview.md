@@ -313,9 +313,23 @@ YAML configs do not support `env`; use HCL if you need it, or inject values befo
 6. Prefer auto-reload for iterative tuning.
 7. Keep secrets in env vars or Kubernetes secrets, not in the config file.
 
-## Next steps
+## Next Steps
 
-- [Global Options](reference/README.md#configure-global-agent-options): top-level and CLI
-- [Network Interface Discovery](reference/network-interface-discovery.md): which interfaces to monitor
-- [OTLP Exporter](reference/opentelemetry-otlp-exporter.md): send flows to your backend
-- [Configuration Examples](examples.md): full sample configs
+{% tabs %}
+{% tab title="Essential Configuration" %}
+1. [**Configure Network Interfaces**](reference/network-interface-discovery.md): Select which interfaces to monitor
+2. [**Set Up OTLP Export**](reference/opentelemetry-otlp-exporter.md): Send flows to your backend with TLS
+3. [**Configure Global Options**](reference/README.md#configure-global-agent-options): Logging, timeouts, and CLI flags
+{% endtab %}
+
+{% tab title="Advanced Configuration" %}
+1. [**Filter Flows Before Export**](reference/flow-span-filters.md): Reduce noise and storage costs
+2. [**Tune the Processing Pipeline**](reference/flow-processing-pipeline.md): Optimize for high-throughput environments
+3. [**Review Complete Examples**](examples.md): Full production configurations
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**Troubleshoot Configuration Issues**](../troubleshooting/troubleshooting.md): Resolve HCL syntax and validation errors
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions and share configurations

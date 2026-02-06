@@ -146,24 +146,36 @@ For detailed usage, interpreting results, and troubleshooting failures, see [Dep
 
 ## Getting Help
 
-Additional support resources:
+{% tabs %}
+{% tab title="Community Support" %}
+- [**Search Existing Issues**](https://github.com/elastiflow/mermin/issues): Check if someone else encountered the same problem
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions and discuss best practices
+{% endtab %}
 
-### Search Existing Issues
-
-Check if someone else has encountered the same problem: [GitHub Issues](https://github.com/elastiflow/mermin/issues)
-
-### Open a New Issue
-
-When opening an issue, include:
+{% tab title="Report a Bug" %}
+When [creating an issue](https://github.com/elastiflow/mermin/issues/new), include:
 
 - Mermin version and Kubernetes version
 - Your CNI plugin (e.g., Calico, Cilium, Flannel)
 - Complete error logs from affected pods
 - Your configuration (with sensitive values removed)
 - Steps to reproduce the issue
+{% endtab %}
+{% endtabs %}
 
-[Create an Issue →](https://github.com/elastiflow/mermin/issues/new)
+---
 
-### Ask Questions
+## Next Steps
 
-For questions and best practices, join [GitHub Discussions](https://github.com/elastiflow/mermin/discussions).
+{% tabs %}
+{% tab title="Resolved? Configure Mermin" %}
+1. [**Fine-Tune Your Configuration**](../configuration/overview.md): Optimize for your environment
+2. [**Set Up Monitoring**](../configuration/reference/internal-prometheus-metrics.md): Track performance and health
+{% endtab %}
+
+{% tab title="Still Troubleshooting?" %}
+1. [**Diagnose eBPF Errors**](common-ebpf-errors.md): Detailed verifier error solutions
+2. [**Resolve Deployment Issues**](deployment-issues.md): Pod startup and permission problems
+3. [**Understand Interface Visibility**](interface-visibility-and-traffic-decapsulation.md): Why traffic might not appear
+{% endtab %}
+{% endtabs %}

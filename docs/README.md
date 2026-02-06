@@ -37,7 +37,7 @@ Unlike traditional NetFlow or IPFIX, Flow Traces leverage the OpenTelemetry stan
 
 Deploy Mermin to a local Kubernetes cluster in minutes:
 
-[**📚 Follow the Complete Quickstart Guide**](getting-started/quickstart-guide.md)
+[**Follow the Complete Quickstart Guide**](getting-started/quickstart-guide.md)
 
 Or deploy directly with Helm:
 
@@ -129,6 +129,28 @@ If you encounter issues or have questions:
 
 ## Next Steps
 
-Follow the [**Quick Start Guide**](getting-started/quickstart-guide.md) to deploy Mermin on a local Kubernetes cluster in minutes.
+{% tabs %}
+{% tab title="First Time Here?" %}
+[**Deploy Mermin in 5 Minutes**](getting-started/quickstart-guide.md)
 
-For production environments, review the [**Deployment Overview**](deployment/overview.md) for deployment options and best practices.
+Capture your first Flow Traces on a local Kubernetes cluster.
+{% endtab %}
+
+{% tab title="Going to Production?" %}
+[**Plan Your Production Deployment**](deployment/overview.md)
+
+Review deployment options, resource requirements, and security best practices.
+{% endtab %}
+
+{% tab title="Already Running Mermin?" %}
+- [**Fine-Tune Your Configuration**](configuration/overview.md): Optimize for your environment
+- [**Troubleshoot Common Issues**](troubleshooting/troubleshooting.md): Resolve deployment and capture problems
+{% endtab %}
+{% endtabs %}
+
+### Join the Community
+
+Connect with other Mermin users and the maintainers:
+
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions, share experiences, request features
+- [**Report an Issue**](https://github.com/elastiflow/mermin/issues): Found a bug? Let us know

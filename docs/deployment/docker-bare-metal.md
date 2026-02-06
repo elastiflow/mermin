@@ -524,9 +524,25 @@ sudo systemctl start mermin
 
 ## Next Steps
 
-* [**Configuration Reference**](../configuration/overview.md): Optimize for bare metal
-* [**OTLP Export**](../configuration/reference/opentelemetry-otlp-exporter.md): Configure secure export
-* [**Observability Backends**](../getting-started/backend-integrations.md): Send data to observability backends
-* [**Troubleshooting**](../troubleshooting/troubleshooting.md): Solve common issues
+{% tabs %}
+{% tab title="Configure Export" %}
+1. [**Secure Your OTLP Connection**](../configuration/reference/opentelemetry-otlp-exporter.md): Set up TLS and authentication
+2. [**Connect to Your Backend**](../getting-started/backend-integrations.md): Send Flow Traces to your observability platform
+{% endtab %}
 
-For Kubernetes deployments with full metadata enrichment, see [**Kubernetes with Helm**](kubernetes-helm.md).
+{% tab title="Optimize" %}
+1. [**Fine-Tune Configuration**](../configuration/overview.md): Optimize for bare metal environments
+2. [**Filter Flows Before Export**](../configuration/reference/flow-span-filters.md): Reduce noise and storage costs
+{% endtab %}
+
+{% tab title="Need Kubernetes Metadata?" %}
+[**Switch to Kubernetes Deployment**](kubernetes-helm.md)
+
+Get full pod, service, and deployment metadata enrichment by deploying to Kubernetes.
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**Troubleshoot Common Issues**](../troubleshooting/troubleshooting.md): Resolve deployment and eBPF errors
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions and share experiences

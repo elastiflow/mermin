@@ -548,7 +548,24 @@ See [Troubleshooting Guide](../troubleshooting/troubleshooting.md) for more solu
 
 ## Next Steps
 
-* [**Configure OTLP Export**](../configuration/reference/opentelemetry-otlp-exporter.md): Set up authentication and TLS
-* [**Customize Filters**](../configuration/reference/flow-span-filters.md): Filter flows before export
-* [**Observability Backends**](../getting-started/backend-integrations.md): Send Flow Traces to your backend
-* [**Monitor Mermin**](../configuration/reference/internal-prometheus-metrics.md): Set up Prometheus scraping
+{% tabs %}
+{% tab title="Configure Export" %}
+1. [**Secure Your OTLP Connection**](../configuration/reference/opentelemetry-otlp-exporter.md): Set up TLS certificates and authentication
+2. [**Connect to Your Backend**](../getting-started/backend-integrations.md): Send Flow Traces to Grafana, Elastic, or Jaeger
+{% endtab %}
+
+{% tab title="Optimize" %}
+1. [**Filter Flows Before Export**](../configuration/reference/flow-span-filters.md): Reduce noise and storage costs
+2. [**Monitor Mermin with Prometheus**](../configuration/reference/internal-prometheus-metrics.md): Track performance and health
+{% endtab %}
+
+{% tab title="Cloud Platforms" %}
+- [**Deploy to GKE, EKS, or AKS**](cloud-platforms.md): Cloud-specific configurations
+- [**Configure Advanced Scenarios**](advanced-scenarios.md): Multi-cluster and custom CNI setups
+{% endtab %}
+{% endtabs %}
+
+### Need Help?
+
+- [**Troubleshoot Deployment Issues**](../troubleshooting/deployment-issues.md): Resolve pod startup and permission errors
+- [**GitHub Discussions**](https://github.com/elastiflow/mermin/discussions): Ask questions and share experiences
