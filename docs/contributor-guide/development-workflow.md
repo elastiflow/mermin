@@ -219,7 +219,6 @@ kind load docker-image -n atlantis mermin:latest
 helm upgrade -i --wait --timeout 15m -n default --create-namespace \
   -f docs/deployment/examples/local/values.yaml \
   --set-file config.content=docs/deployment/examples/local/config.example.hcl \
-  --devel \
   mermin charts/mermin
 ```
 

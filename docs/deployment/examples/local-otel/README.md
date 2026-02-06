@@ -36,7 +36,6 @@ Notes on the example deployment:
     helm repo add mermin https://elastiflow.github.io/mermin/
     helm upgrade -i --wait --timeout 15m -n default \
       --set-file config.content=config.hcl \
-      --devel \
       mermin mermin/mermin
     ```
 
@@ -69,7 +68,6 @@ In order to render K8s manifests you may use following commands
     ```sh
     rm -rf helm_rendered; helm template \
       --set-file config.content=config.hcl \
-      --devel \
       mermin mermin/mermin \
       --output-dir helm_rendered
 
