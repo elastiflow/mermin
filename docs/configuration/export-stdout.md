@@ -1,20 +1,15 @@
 # Configure OpenTelemetry Console Exporter
 
-**Block:** `export.traces.stdout`
+**Block:** `export.traces`
 
-The stdout exporter outputs flow records directly to the console (standard output), providing immediate, human-readable visibility into the data Mermin is processing. While OTLP export is the standard for production observability, the stdout exporter is ideal for development, debugging, and verifying flow capture without requiring an external backend.
+The stdout exporter outputs flow records directly to the console (standard output), providing immediate, human-readable visibility into the data Mermin is processing. While OTLP export is the standard for production observability,
+the stdout exporter is ideal for development, debugging, and verifying flow capture without requiring an external backend.
 
 ## Configuration
 
 A complete configuration example can be found in the [Default Configuration](default/config.hcl).
 
-```hcl
-export "traces" {
-  stdout = "text_indent"
-}
-```
-
-### `export.traces.stdout` block
+### `export.traces` block
 
 - `stdout` attribute
 
@@ -26,29 +21,28 @@ export "traces" {
 
   **Valid Values:**
 
-    - `"text_indent"`: Human-readable, indented text format (recommended)
-    - `null`: Disable stdout export
+  - `"text_indent"`: Human-readable, indented text format (recommended)
+  - `null`: Disable stdout export
 
-  **Syntax Variations:**
-  The exporter supports both a shorthand string and a structured object format to maintain compatibility across HCL and YAML.
+  **Syntax Variations:** The exporter supports both a shorthand string and a structured object format to maintain compatibility across HCL and YAML.
 
-    - HCL Shorthand (Recommended)
+  - HCL Shorthand (Recommended)
 
-      ```hcl
-      export "traces" {
-        stdout = "text_indent"
+    ```hcl
+    export "traces" {
+      stdout = "text_indent"
+    }
+    ```
+
+  - Object Form (Required for YAML)
+
+    ```hcl
+    export "traces" {
+      stdout = {
+        format = "text_indent"
       }
-      ```
-
-    - Object Form (Required for YAML)
-
-      ```hcl
-      export "traces" {
-        stdout = {
-          format = "text_indent"
-        }
-      }
-      ```
+    }
+    ```
 
 ## Output Format
 
@@ -57,42 +51,61 @@ export "traces" {
 The `text_indent` format provides structured, readable output:
 
 ```text
-Flow Record:
-  Timestamp: 2025-10-27T15:30:45.123Z
-  Duration: 15.234s
-  Direction: bidirectional
+Span #1
+        Instrumentation Scope
+                Name         : "mermin"
 
-  Source:
-    IP: 10.244.1.5
-    Port: 45678
-    Pod: nginx-deployment-abc123
-    Namespace: default
-    Labels:
-      app: nginx
-      version: v1.0
-
-  Destination:
-    IP: 10.96.0.10
-    Port: 80
-    Service: nginx-service
-    Namespace: default
-
-  Network:
-    Protocol: TCP
-    Interface: eth0
-    Tunnel: none
-
-  Statistics:
-    Packets Sent: 245
-    Packets Received: 242
-    Bytes Sent: 125640
-    Bytes Received: 3468900
-
-  TCP:
-    Flags: SYN, ACK, FIN
-    State: ESTABLISHED
-
-  Community ID: 1:LQU9qZlK+B5F3KDmev6m5PMibrg=
+        Name         : flow_ipv4_icmp
+        TraceId      : 25532f1af4ef46087ab38fd181e8c409
+        SpanId       : 0e610e187627dfac
+        TraceFlags   : TraceFlags(1)
+        ParentSpanId : f5bc1abf5a703419
+        Kind         : Server
+        Start time   : 2026-02-04 18:57:36.295385
+        End time     : 2026-02-04 18:57:38.297897
+        Status       : Unset
+        Attributes:
+                 ->  flow.community_id: String(Owned("1:a962MiVftHsve9ogcQKeY0/p9bc="))
+                 ->  network.type: String(Static("ipv4"))
+                 ->  network.transport: String(Static("icmp"))
+                 ->  source.address: String(Owned("8.8.8.8"))
+                 ->  source.port: I64(0)
+                 ->  destination.address: String(Owned("10.244.2.4"))
+                 ->  destination.port: I64(0)
+                 ->  flow.bytes.delta: I64(98)
+                 ->  flow.bytes.total: I64(98)
+                 ->  flow.packets.delta: I64(1)
+                 ->  flow.packets.total: I64(1)
+                 ->  flow.reverse.bytes.delta: I64(0)
+                 ->  flow.reverse.bytes.total: I64(0)
+                 ->  flow.reverse.packets.delta: I64(0)
+                 ->  flow.reverse.packets.total: I64(0)
+                 ->  flow.end_reason: String(Static("idle timeout"))
+                 ->  network.interface.index: I64(14)
+                 ->  network.interface.name: String(Owned("veth8ef8af66"))
+                 ->  network.interface.mac: String(Owned("1a:b2:da:f1:5d:d3"))
+                 ->  flow.ip.dscp.id: I64(0)
+                 ->  flow.ip.dscp.name: String(Owned("df"))
+                 ->  flow.ip.ecn.id: I64(0)
+                 ->  flow.ip.ecn.name: String(Owned("non-ect"))
+                 ->  flow.ip.ttl: I64(62)
+                 ->  flow.reverse.ip.ttl: I64(0)
+                 ->  flow.reverse.ip.dscp.id: I64(0)
+                 ->  flow.reverse.ip.ecn.id: I64(0)
+                 ->  flow.icmp.type.id: I64(0)
+                 ->  flow.icmp.type.name: String(Owned("echo_reply"))
+                 ->  flow.icmp.code.id: I64(0)
+                 ->  flow.icmp.code.name: String(Owned(""))
+                 ->  flow.reverse.icmp.type.id: I64(0)
+                 ->  flow.reverse.icmp.type.name: String(Owned("echo_reply"))
+                 ->  flow.reverse.icmp.code.id: I64(0)
+                 ->  flow.reverse.icmp.code.name: String(Owned(""))
+                 ->  client.address: String(Owned("10.244.2.4"))
+                 ->  client.port: I64(0)
+                 ->  server.address: String(Owned("dns.google"))
+                 ->  server.port: I64(0)
+                 ->  destination.k8s.namespace.name: String(Owned("default"))
+                 ->  destination.k8s.pod.name: String(Owned("test-pod"))
 ```
 
 ## Troubleshooting
@@ -135,39 +148,6 @@ Flow Record:
 2. **Enable temporarily**: Turn on only when needed for debugging
 3. **Use with filters**: Combine with flow filters to reduce volume
 4. **Document usage**: Note when/why stdout is enabled
-
-## Configuration Examples
-
-### Development and Quick Start
-Use this configuration to see flows immediately during initial setup or demos without external dependencies.
-
-```hcl
-# Development configuration
-log_level = "debug"
-
-discovery "instrument" {
-  interfaces = ["eth0"]
-}
-
-export "traces" {
-  stdout = "text_indent"  # Immediate human-readable feedback
-}
-```
-
-### Dual Export
-Use this configuration to verify that flows are being captured correctly while simultaneously sending them to a production OTLP backend. This is useful for troubleshooting pipeline issues.
-
-```hcl
-# Debugging / Pipeline Validation
-export "traces" {
-  stdout = "text_indent" 
-  
-  otlp = {
-    endpoint = "http://otel-collector:4317"
-    protocol = "grpc"
-  }
-}
-```
 
 ## Next Steps
 
