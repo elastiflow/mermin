@@ -583,6 +583,15 @@ export "traces" {
 
 ## Multi-Backend OTLP Configuration
 
+{% hint style="info" %}
+Note: Mermin currently supports one OTLP endpoint per instance.
+For multi-backend export, use an OpenTelemetry Collector as an intermediary:
+
+  Mermin → OTel Collector → Multiple Backends
+
+See [Observability Backends](../getting-started/backend-integrations.md) for collector configuration.
+{% endhint %}
+
 Export to multiple observability backends simultaneously.
 
 ```hcl
@@ -633,13 +642,6 @@ span {
   max_record_interval = "1m"
   generic_timeout = "2m"
 }
-
-# Note: Mermin currently supports one OTLP endpoint per instance.
-# For multi-backend export, use an OpenTelemetry Collector as an intermediary:
-#
-#   Mermin → OTel Collector → Multiple Backends
-#
-# See [Observability Backends](../observability/backend-integrations.md) for collector configuration.
 
 export "traces" {
   otlp = {
@@ -782,5 +784,5 @@ export "traces" {
 
 * [**Global Options**](reference/README.md#configure-global-agent-options): Reference for all global configuration fields
 * [**Discovery Configuration**](reference/network-interface-discovery.md): Interface selection details
-* [**Export Configuration**](export-otlp.md): OTLP export options
+* [**Export Configuration**](reference/opentelemetry-otlp-exporter.md): OTLP export options
 * [**Deployment Guide**](../deployment/overview.md): Deploy with your chosen configuration

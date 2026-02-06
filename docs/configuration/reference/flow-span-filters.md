@@ -12,18 +12,18 @@ Mermin supports filtering flows by:
 - Connection states
 
 {% hint style="info" %}
-Filter option names are derived directly from FlowSpan attribute names defined in the semantic conventions and can be referenced easily in the [attributes reference](../getting-started/attribute-reference.md).
+Filter option names are derived directly from FlowSpan attribute names defined in the semantic conventions and can be referenced easily in the [attributes reference](../../getting-started/attribute-reference.md).
 The attribute's dot notation is converted to underscores (e.g., `flow.tcp.flags.tags` becomes `tcp_flags_tags`). This 1:1 mapping ensures consistency and makes it easy to identify which attribute each filter targets.
 {% endhint %}
 
 ## Configuration
 
-A full configuration example can be found in the [Default Configuration](./default/config.hcl).
+A full configuration example can be found in the [Default Configuration](../default/config.hcl).
 
 ### `filter.source` and `filter.destination` blocks
 
 The filters apply to the `source`/`destination` combination of the `address` and `port` in the flow span.
-Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/agent-architecture.md#components)), which can help reduce resource usage in subsequent stages.
+Filter is applied at the "Flow Producer" stage ([architecture](../../concepts/agent-architecture.md#components)), which can help reduce resource usage in subsequent stages.
 
 - `address` attribute
 
@@ -138,7 +138,7 @@ The result of the `filter.source`/`filter.destination` inclusion/exclusion is co
 ### `filter.network` block
 
 The filter applies to various network attributes in the flow span, such as transport protocol, interface, and others.
-Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/agent-architecture.md#components)), which can help reduce resource usage in subsequent stages.
+Filter is applied at the "Flow Producer" stage ([architecture](../../concepts/agent-architecture.md#components)), which can help reduce resource usage in subsequent stages.
 
 - `transport` attribute
 
@@ -279,7 +279,7 @@ Filter is applied at the "Flow Producer" stage ([architecture](../getting-starte
 ### `filter.flow` block
 
 The filter applies to various flow attributes in the flow span, such as connection state, TCP flags and others.
-Filter is applied at the "Flow Producer" stage ([architecture](../getting-started/agent-architecture.md#components)), which can help reduce resource usage in subsequent stages.
+Filter is applied at the "Flow Producer" stage ([architecture](../../concepts/agent-architecture.md#components)), which can help reduce resource usage in subsequent stages.
 
 - `connection_state` attribute
 
@@ -614,6 +614,6 @@ filter "flow" {
 
 ## Next Steps
 
-- [**Configuration Examples**](examples.md): See complete filter configurations
-- [**Flow Span Options**](span.md): Configure flow generation
-- [**OTLP Export**](export-otlp.md): Configure export options
+- [**Configuration Examples**](../examples.md): See complete filter configurations
+- [**Flow Span Options**](flow-span-producer.md): Configure flow generation
+- [**OTLP Export**](opentelemetry-otlp-exporter.md): Configure export options

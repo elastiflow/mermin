@@ -290,7 +290,7 @@ You may need to tweak the `informers_sync_timeout` attribute.
 
 ## Next Steps
 
-- [**Owner Relations**](../owner-relations.md): Configure owner reference walking
-- [**Selector Relations**](../selector-relations.md): Configure selector-based matching
-- [**Flow Attributes**](../attributes.md): Configure metadata extraction
+- [**Owner Relations**](kubernetes-owner-relations.md): Configure owner reference walking
+- [**Selector Relations**](kubernetes-selector-relations.md): Configure selector-based matching
+- [**Flow Attributes**](flow-span-kubernetes-attribution.md): Configure metadata extraction
 - [**Troubleshooting**](../../troubleshooting/troubleshooting.md): Debug missing metadata

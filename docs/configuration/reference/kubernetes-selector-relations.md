@@ -4,7 +4,7 @@
 
 Selector relations enable matching Kubernetes resources based on label selectors (e.g. NetworkPolicy → Pod or Service → Pod).
 Mermin extracts these selectors, finds matching resources, and uses the resulting relations to enrich flow metadata.
-The resulting attributes (e.g. `source.k8s.networkpolicy.name`, `destination.k8s.service.name`) appear on flow spans when the corresponding [Flow Attributes](attributes.md) associations are enabled (e.g. `networkpolicy`, `service`).
+The resulting attributes (e.g. `source.k8s.networkpolicy.name`, `destination.k8s.service.name`) appear on flow spans when the corresponding [Flow Attributes](flow-span-kubernetes-attribution.md) associations are enabled (e.g. `networkpolicy`, `service`).
 
 You can configure:
 
@@ -12,11 +12,11 @@ You can configure:
 - **Selector field paths**: JSONPath-style paths to `matchLabels` and optional `matchExpressions` on the source resource
 
 The resource kinds you use in `selector_relations` (e.g. NetworkPolicy, Service, Deployment) must be watched by the Kubernetes informer;
-see [**Kubernetes Informer Discovery**](reference/kubernetes-informer-discovery.md) for `selectors` and namespace filtering.
+see [**Kubernetes Informer Discovery**](kubernetes-informer-discovery.md) for `selectors` and namespace filtering.
 
 ## Configuration
 
-A full configuration example can be found in the [Default Configuration](./default/config.hcl).
+A full configuration example can be found in the [Default Configuration](../default/config.hcl).
 
 ### `discovery.informer.k8s` block
 
@@ -185,7 +185,7 @@ CronJob’s selector lives on the job template.
 
 ## Next Steps
 
-- [**Flow Attributes**](attributes.md): Enable associations (e.g. `networkpolicy`, `service`) so selector-based metadata appears on flows
-- [**Kubernetes Informer Discovery**](reference/kubernetes-informer-discovery.md): Configure resource watching and selectors so the kinds used in selector_relations are available
-- [**Owner Relations**](owner-relations.md): Configure owner reference walking
-- [**Configuration Examples**](examples.md): See complete configurations
+- [**Flow Attributes**](flow-span-kubernetes-attribution.md): Enable associations (e.g. `networkpolicy`, `service`) so selector-based metadata appears on flows
+- [**Kubernetes Informer Discovery**](kubernetes-informer-discovery.md): Configure resource watching and selectors so the kinds used in selector_relations are available
+- [**Owner Relations**](kubernetes-owner-relations.md): Configure owner reference walking
+- [**Configuration Examples**](../examples.md): See complete configurations

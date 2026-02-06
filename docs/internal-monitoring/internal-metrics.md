@@ -14,7 +14,7 @@
 - [Grafana Dashboard](#grafana-dashboard)
 
 This guide describes the Prometheus metrics endpoint exposed by Mermin and provides a comprehensive breakdown of all available metrics, their types, and descriptions.
-See the [metrics configuration document](../configuration/metrics.md) for more details on metrics configuration.
+See the [metrics configuration document](../configuration/reference/internal-prometheus-metrics.md) for more details on metrics configuration.
 
 ## Metrics Endpoint
 

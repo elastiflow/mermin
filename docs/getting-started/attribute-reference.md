@@ -1,6 +1,6 @@
 # Attribute Reference
 
-This document is a quick reference for all flow span attributes in Mermin. For design rationale and the full specification, see [Semantic Conventions](../spec/semantic-conventions.md).
+This document is a quick reference for all flow span attributes in Mermin. For design rationale and the full specification, see [Semantic Conventions](../concepts/semantic-conventions.md).
 
 ## Overview
 

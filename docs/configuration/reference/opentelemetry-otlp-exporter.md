@@ -11,7 +11,7 @@ more.
 
 ## Configuration
 
-A full configuration example can be found in the [Default Configuration](./default/config.hcl).
+A full configuration example can be found in the [Default Configuration](../default/config.hcl).
 
 ### `export.traces.otlp` block
 
@@ -661,7 +661,7 @@ export "traces" {
 - `mermin_pipeline_duration_seconds{stage="export_out"}` - Export-stage latency
 - `mermin_channel_sends_total{channel="decorator_output",status="error"}` - Channel send failures (indicates dropped spans)
 
-See the [Internal Metrics](../internal-monitoring/internal-metrics.md) guide for complete Prometheus query examples.
+See the [Internal Metrics](../../internal-monitoring/internal-metrics.md) guide for complete Prometheus query examples.
 
 ### Healthy Indicators
 
@@ -719,6 +719,6 @@ See the [Internal Metrics](../internal-monitoring/internal-metrics.md) guide for
 
 ## Next Steps
 
-- [**Stdout Exporter**](export-stdout.md): Configure console output for debugging
-- [**Observability Backends**](../observability/backends.md): Set up collector and connect to backends
-- [**Troubleshooting**](../troubleshooting/troubleshooting.md): Diagnose problems
+- [**Stdout Exporter**](opentelemetry-console-exporter.md): Configure console output for debugging
+- [**Observability Backends**](../../getting-started/backend-integrations.md): Set up collector and connect to backends
+- [**Troubleshooting**](../../troubleshooting/troubleshooting.md): Diagnose problems

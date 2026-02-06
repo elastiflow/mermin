@@ -35,7 +35,7 @@ attributes "destination" "k8s" {
 
 ## Configuration
 
-A full configuration example can be found in the [Default Configuration](./default/config.hcl).
+A full configuration example can be found in the [Default Configuration](../default/config.hcl).
 
 ### `attributes.source.k8s.extract` block
 
@@ -116,7 +116,7 @@ Each key in the map identifies the Kubernetes kind (`pod`, `service`, `node`, et
 
 **Type:** Map
 
-**Default:** Please see the [default configuration](./default/config.hcl) for the default for each Kubernetes kind.
+**Default:** Please see the [default configuration](../default/config.hcl) for the default for each Kubernetes kind.
 
 **Example:** Simplify flow `source.ip` matching to the pod
 
@@ -141,7 +141,7 @@ attributes "source" "k8s" {
 
   **Type:** List of [association objects](#association-object)
 
-  **Default:** Please see the [default configuration](./default/config.hcl) for the default for each Kubernetes kind.
+  **Default:** Please see the [default configuration](../default/config.hcl) for the default for each Kubernetes kind.
 
   **Example:** Map `source.ip` from the flow record to the Pod IP
 
@@ -230,7 +230,7 @@ Defines how to associate flow fields (e.g. `source.ip`, `source.port`) to Kubern
 
   **Type:** String
 
-  **Default:** Please see the [default configuration](./default/config.hcl) for the default for each Kubernetes kind.
+  **Default:** Please see the [default configuration](../default/config.hcl) for the default for each Kubernetes kind.
 
 - `to` attribute
 
@@ -238,7 +238,7 @@ Defines how to associate flow fields (e.g. `source.ip`, `source.port`) to Kubern
 
   **Type:** List of strings
 
-  **Default:** Please see the [default configuration](./default/config.hcl) for the default for each Kubernetes kind.
+  **Default:** Please see the [default configuration](../default/config.hcl) for the default for each Kubernetes kind.
 
 ## Troubleshooting
 
@@ -259,6 +259,6 @@ If you only configure one direction (e.g. only `attributes "source" "k8s"`), the
 
 ## Next Steps
 
-- [**Kubernetes Informers**](reference/kubernetes-informer-discovery.md): Configure resource watching
-- [**Owner Relations**](owner-relations.md): Add owner metadata
-- [**Configuration Examples**](examples.md): See complete configurations
+- [**Kubernetes Informers**](kubernetes-informer-discovery.md): Configure resource watching
+- [**Owner Relations**](kubernetes-owner-relations.md): Add owner metadata
+- [**Configuration Examples**](../examples.md): See complete configurations

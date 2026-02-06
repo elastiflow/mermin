@@ -207,7 +207,7 @@ Mermin provides metrics to monitor shutdown behavior:
 
 ### Next Steps
 
-- Internal [**Server**](internal-server.md) and [**Metrics**](../metrics.md): Configure health checks and monitoring
+- Internal [**Server**](internal-server.md) and [**Metrics**](internal-prometheus-metrics.md): Configure health checks and monitoring
 - [**Network Interface Discovery**](network-interface-discovery.md): Select which interfaces to monitor
-- [**Flow Span Options**](../span.md): Configure flow generation and timeouts
+- [**Flow Span Options**](flow-span-producer.md): Configure flow generation and timeouts
 - [**Configuration Examples**](../examples.md): See complete configurations

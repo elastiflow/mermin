@@ -7,7 +7,7 @@ the stdout exporter is ideal for development, debugging, and verifying flow capt
 
 ## Configuration
 
-A complete configuration example can be found in the [Default Configuration](default/config.hcl).
+A complete configuration example can be found in the [Default Configuration](../default/config.hcl).
 
 ### `export.traces` block
 
@@ -127,7 +127,7 @@ Span #1
 
 **Solutions:**
 
-1. Add flow filters (see [Filtering](filtering.md))
+1. Add flow filters (see [Filtering](flow-span-filters.md))
 2. Reduce monitored interfaces
 3. Use grep to filter relevant flows
 4. Disable stdout after debugging
@@ -151,8 +151,8 @@ Span #1
 
 ## Next Steps
 
-- [**Configuration Overview**](overview.md): Config file format and structure
-- [**OTLP Exporter**](export-otlp.md): Configure production export
-- [**Flow Filtering**](filtering.md): Reduce log volume
+- [**Configuration Overview**](../overview.md): Config file format and structure
+- [**OTLP Exporter**](opentelemetry-otlp-exporter.md): Configure production export
+- [**Flow Filtering**](flow-span-filters.md): Reduce log volume
 - [**Internal Tracing**](internal-tracing.md): Monitor Mermin itself
-- [**Observability Backends**](../observability/backend-integrations.md): Set up observability backends
+- [**Observability Backends**](../../getting-started/backend-integrations.md): Set up observability backends

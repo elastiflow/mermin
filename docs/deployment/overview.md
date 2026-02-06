@@ -263,16 +263,16 @@ spec:
 
 Before deploying Mermin to production:
 
-* [ ] Review [Architecture](../getting-started/agent-architecture.md) to understand how Mermin works
+* [ ] Review [Architecture](../concepts/agent-architecture.md) to understand how Mermin works
 * [ ] Choose appropriate [deployment method](#deployment-options)
 * [ ] Plan [resource allocation](#resource-requirements)
 * [ ] Configure [network interfaces](../configuration/reference/network-interface-discovery.md)
-* [ ] Set up [OTLP collector](../observability/backend-integrations.md) endpoint
-* [ ] Configure [authentication and TLS](../configuration/export-otlp.md) for OTLP
-* [ ] Define [flow filters](../configuration/filtering.md) if needed
+* [ ] Set up [OTLP collector](../getting-started/backend-integrations.md) endpoint
+* [ ] Configure [authentication and TLS](../configuration/reference/opentelemetry-otlp-exporter.md) for OTLP
+* [ ] Define [flow filters](../configuration/reference/flow-span-filters.md) if needed
 * [ ] Set appropriate [resource limits](kubernetes-helm.md)
 * [ ] Test in non-production environment first
-* [ ] Monitor [metrics](../configuration/metrics.md) after deployment
+* [ ] Monitor [metrics](../configuration/reference/internal-prometheus-metrics.md) after deployment
 * [ ] Review [troubleshooting guide](../troubleshooting/troubleshooting.md)
 
 ## Upgrade Strategy
@@ -307,5 +307,5 @@ Choose your deployment path:
 After deploying, configure Mermin for your environment:
 
 * [Configuration Overview](../configuration/overview.md)
-* [OTLP Export Configuration](../configuration/export-otlp.md)
-* [Observability Backends](../observability/backend-integrations.md)
+* [OTLP Export Configuration](../configuration/reference/opentelemetry-otlp-exporter.md)
+* [Observability Backends](../getting-started/backend-integrations.md)

@@ -2,7 +2,7 @@
 hidden: true
 ---
 
-# Integrate into Observability Backends
+# Export to Your Observability Backend
 
 Mermin exports Flow Traces via the **OpenTelemetry Protocol (OTLP)**, which means it works with any OTLP-enabled observability backend or collector.
 
@@ -148,6 +148,6 @@ kubectl logs -f -l app.kubernetes.io/name=mermin
 
 1. **Choose your backend** from the options above
 2. **Review example configurations** in [`deployment/examples`](../deployment/examples/README.md)
-3. **Configure OTLP export** in your Mermin deployment – see [OTLP Exporter Configuration](../configuration/export-otlp.md)
-4. **Set up authentication and TLS** for production – see [OTLP Exporter Configuration](../configuration/export-otlp.md)
+3. **Configure OTLP export** in your Mermin deployment – see [OTLP Exporter Configuration](../configuration/reference/opentelemetry-otlp-exporter.md)
+4. **Set up authentication and TLS** for production – see [OTLP Exporter Configuration](../configuration/reference/opentelemetry-otlp-exporter.md)
 5. **Create dashboards** to visualize Flow Traces in your chosen platform

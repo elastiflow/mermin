@@ -260,7 +260,7 @@ discovery "instrument" {
 **Trade-offs**: Lower overhead (fewer interfaces), incomplete visibility, may cause flow duplication if combined with veth monitoring\
 **Use cases**: Infrastructure-focused monitoring, cost-sensitive deployments, clusters with minimal same-node communication
 
-> **For more information, please reference**: [Network Interface Discovery](../configuration/discovery-interfaces.md)
+> **For more information, please reference**: [Network Interface Discovery](../configuration/reference/network-interface-discovery.md)
 
 </details>
 
@@ -270,7 +270,7 @@ discovery "instrument" {
 
 Configures which Kubernetes resources Mermin watches to enrich network flows with metadata. This enables Mermin to associate IP addresses and ports with pod names, services, deployments, and other Kubernetes contexts.
 
-**For more information, please reference:** [Owner Relations](../configuration/owner-relations.md) **&** [Selector Relations](../configuration/selector-relations.md)
+**For more information, please reference:** [Owner Relations](../configuration/reference/kubernetes-owner-relations.md) **&** [Selector Relations](../configuration/reference/kubernetes-selector-relations.md)
 
 </details>
 
@@ -280,7 +280,7 @@ Configures which Kubernetes resources Mermin watches to enrich network flows wit
 
 Configures how Mermin matches network flow data (source/destination IPs and ports) to Kubernetes resources. This mapping defines which Kubernetes object fields to extract and how to associate them with captured flows.
 
-> **For more information, please reference:** [Flow Attributes](../configuration/attributes.md)
+> **For more information, please reference:** [Flow Attributes](../configuration/reference/flow-span-kubernetes-attribution.md)
 
 </details>
 
@@ -290,7 +290,7 @@ Configures how Mermin matches network flow data (source/destination IPs and port
 
 Configures how Mermin exports network flow data. Flows can be sent to an OTLP receiver (OpenTelemetry Protocol) for storage and analysis, or output to stdout for debugging.
 
-> **For more information, please reference:** [OTLP Exporter](../configuration/export-otlp.md)
+> **For more information, please reference:** [OTLP Exporter](../configuration/reference/opentelemetry-otlp-exporter.md)
 
 </details>
 
@@ -316,10 +316,10 @@ Congratulations! You've successfully deployed Mermin and captured network flows.
 
 To use Mermin in production:
 
-1. [**Review the Architecture**](agent-architecture.md) to understand how Mermin works
+1. [**Review the Architecture**](../concepts/agent-architecture.md) to understand how Mermin works
 2. [**Explore Deployment Options**](../deployment/overview.md) for production-ready configurations
-3. [**Configure OTLP Export**](../configuration/export-otlp.md) to send flows to your observability backend
-4. [**Set Up Integrations**](../observability/backend-integrations.md) with Grafana, Elastic, or other platforms
+3. [**Configure OTLP Export**](../configuration/reference/opentelemetry-otlp-exporter.md) to send flows to your observability backend
+4. [**Set Up Integrations**](backend-integrations.md) with Grafana, Elastic, or other platforms
 5. [**Customize Configuration**](../configuration/overview.md) to match your environment and requirements
 
 ## Troubleshooting
