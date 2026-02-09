@@ -10,17 +10,15 @@ netobserv-flow:
       value: "true"
     - name: EF_OUTPUT_OPENSEARCH_INDEX_TEMPLATE_REPLICAS
       value: "0"
-    - name: EF_INPUT_OTLP_TRACE_GRPC_ENABLE
+    - name: EF_INPUT_OTLP_TRACE_SERVER_ENABLE
       value: "true"
-    - name: EF_INPUT_OTLP_TRACE_GRPC_SERVER_TLS_ENABLE
+    - name: EF_INPUT_OTLP_TRACE_SERVER_TLS_ENABLE
       value: "true"
-    - name: EF_INPUT_OTLP_TRACE_GRPC_SERVER_TLS_CERT_FILE
+    - name: EF_INPUT_OTLP_TRACE_SERVER_TLS_CERT_FILE
       value: "/etc/ssl/netobserv/tls.crt"
-    - name: EF_INPUT_OTLP_TRACE_GRPC_SERVER_TLS_KEY_FILE
+    - name: EF_INPUT_OTLP_TRACE_SERVER_TLS_KEY_FILE
       value: "/etc/ssl/netobserv/tls.key"
-    - name: EF_INPUT_OTLP_HEALTH_GRPC_ENABLE
-      value: "true"
-    - name: EF_INPUT_OTLP_HEALTH_GRPC_ADDR_PORT
+    - name: EF_INPUT_OTLP_HEALTH_SERVER_ADDR_PORT
       value: "4316"
     - name: EF_INPUT_FLOW_BENCHMARK_ENABLE
       value: "false" # `false` is the default, keeping for ease of updating for testing
