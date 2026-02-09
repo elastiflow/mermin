@@ -30,7 +30,7 @@ use crate::{
     ip::{Error, flow_key_to_ip_addrs},
     metrics::{
         self,
-        ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus, is_not_found_error},
+        ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus, map_entry_not_found},
         flow::{FlowEventResult, FlowSpanProducerStatus},
         processing::ProcessingStage,
         userspace::{ChannelName, ChannelSendStatus},
@@ -789,7 +789,7 @@ impl FlowWorker {
                     .inc();
             }
             Err(e) => {
-                let is_not_found = is_not_found_error(&e);
+                let is_not_found = map_entry_not_found(&e);
                 let status = if is_not_found {
                     EbpfMapStatus::NotFound
                 } else {
@@ -2351,7 +2351,7 @@ pub async fn timeout_and_remove_flow(
                         ]).inc();
                     }
                     Err(e) => {
-                        let is_not_found = is_not_found_error(&e);
+                        let is_not_found = map_entry_not_found(&e);
 
                         let status = if is_not_found {
                             EbpfMapStatus::NotFound
@@ -2443,6 +2443,7 @@ pub async fn timeout_and_remove_flow(
 /// - `boot_time_offset` - Offset to convert boot time to wall clock time
 /// - `max_age` - Maximum age for entries before they're considered orphans
 /// - `community_id_generator` - For generating community IDs from flow keys
+/// - `flow_stats_capacity` - Max entries per eBPF map, used for utilization warnings
 #[allow(clippy::too_many_arguments)]
 pub async fn orphan_scanner_task(
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
@@ -2585,7 +2586,7 @@ pub async fn orphan_scanner_task(
                                     }
                                 }
                                 Err(e) => {
-                                    let status = if is_not_found_error(&e) {
+                                    let status = if map_entry_not_found(&e) {
                                         EbpfMapStatus::NotFound
                                     } else {
                                         EbpfMapStatus::Error

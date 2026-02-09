@@ -6,6 +6,7 @@ use std::{
     sync::OnceLock,
 };
 
+use aya::maps::MapError;
 use mermin_common::MapUnit;
 use tracing::warn;
 
@@ -217,17 +218,15 @@ impl EbpfMapStatus {
 
 /// Check whether an eBPF map error represents a "not found" condition.
 ///
-/// aya's `HashMap::remove()` wraps ENOENT as a `SyscallError` rather than
-/// returning `KeyNotFound`/`ElementNotFound`
-pub fn is_not_found_error(e: &aya::maps::MapError) -> bool {
-    matches!(
-        e,
-        aya::maps::MapError::KeyNotFound | aya::maps::MapError::ElementNotFound
-    ) || matches!(
-        e,
-        aya::maps::MapError::SyscallError(syscall_err)
-            if syscall_err.io_error.raw_os_error() == Some(libc::ENOENT)
-    )
+/// Aya's `HashMap::remove()` wraps ENOENT as a [`MapError::SyscallError`] rather than
+/// returning [`MapError::KeyNotFound`] or [`MapError::ElementNotFound`], so we check both.
+pub fn map_entry_not_found(e: &MapError) -> bool {
+    matches!(e, MapError::KeyNotFound | MapError::ElementNotFound)
+        || matches!(
+            e,
+            MapError::SyscallError(syscall_err)
+                if syscall_err.io_error.raw_os_error() == Some(libc::ENOENT)
+        )
 }
 
 /// TC program operation types.
@@ -533,5 +532,46 @@ mod tests {
         // The global RINGBUF_METRICS will be None, so this is a no-op
         // Note: This test may interact with other tests if they initialize the global
         update_ringbuf_size_metric();
+    }
+
+    // ============================================================================
+    // map_entry_not_found Tests
+    // ============================================================================
+
+    #[test]
+    fn test_key_not_found_is_detected() {
+        assert!(map_entry_not_found(&MapError::KeyNotFound));
+    }
+
+    #[test]
+    fn test_element_not_found_is_detected() {
+        assert!(map_entry_not_found(&MapError::ElementNotFound));
+    }
+
+    #[test]
+    fn test_syscall_enoent_is_detected() {
+        let err = MapError::SyscallError(aya::sys::SyscallError {
+            call: "bpf_map_delete_elem",
+            io_error: std::io::Error::from_raw_os_error(libc::ENOENT),
+        });
+        assert!(map_entry_not_found(&err));
+    }
+
+    #[test]
+    fn test_syscall_non_enoent_is_not_detected() {
+        let err = MapError::SyscallError(aya::sys::SyscallError {
+            call: "bpf_map_delete_elem",
+            io_error: std::io::Error::from_raw_os_error(libc::EACCES),
+        });
+        assert!(!map_entry_not_found(&err));
+    }
+
+    #[test]
+    fn test_unrelated_map_error_is_not_detected() {
+        let err = MapError::InvalidKeySize {
+            size: 4,
+            expected: 8,
+        };
+        assert!(!map_entry_not_found(&err));
     }
 }

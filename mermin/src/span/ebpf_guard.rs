@@ -49,7 +49,7 @@ use network_types::ip::IpProto;
 use tokio::sync::Mutex;
 use tracing::warn;
 
-use crate::metrics::ebpf::is_not_found_error;
+use crate::metrics::ebpf::map_entry_not_found;
 
 /// RAII guard for eBPF flow map entries.
 ///
@@ -125,7 +125,7 @@ impl Drop for EbpfFlowGuard {
                                 );
                             }
                             Err(e) => {
-                                if !is_not_found_error(&e) {
+                                if !map_entry_not_found(&e) {
                                     warn!(
                                         event.name = "ebpf_guard.cleanup_failed",
                                         flow.key = ?key,
