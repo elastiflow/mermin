@@ -215,6 +215,21 @@ impl EbpfMapStatus {
     }
 }
 
+/// Check whether an eBPF map error represents a "not found" condition.
+///
+/// aya's `HashMap::remove()` wraps ENOENT as a `SyscallError` rather than
+/// returning `KeyNotFound`/`ElementNotFound`
+pub fn is_not_found_error(e: &aya::maps::MapError) -> bool {
+    matches!(
+        e,
+        aya::maps::MapError::KeyNotFound | aya::maps::MapError::ElementNotFound
+    ) || matches!(
+        e,
+        aya::maps::MapError::SyscallError(syscall_err)
+            if syscall_err.io_error.raw_os_error() == Some(libc::ENOENT)
+    )
+}
+
 /// TC program operation types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TcOperation {

@@ -45,8 +45,11 @@ use std::sync::{
 
 use aya::maps::HashMap as EbpfHashMap;
 use mermin_common::FlowKey;
+use network_types::ip::IpProto;
 use tokio::sync::Mutex;
 use tracing::warn;
+
+use crate::metrics::ebpf::is_not_found_error;
 
 /// RAII guard for eBPF flow map entries.
 ///
@@ -107,6 +110,8 @@ impl Drop for EbpfFlowGuard {
             let tcp_map = Arc::clone(&self.tcp_map);
             let icmp_map = Arc::clone(&self.icmp_map);
 
+            let protocol = key.protocol;
+
             tokio::spawn(async move {
                 macro_rules! cleanup_map {
                     ($map_mutex:expr) => {
@@ -120,7 +125,7 @@ impl Drop for EbpfFlowGuard {
                                 );
                             }
                             Err(e) => {
-                                if !matches!(e, aya::maps::MapError::KeyNotFound | aya::maps::MapError::ElementNotFound) {
+                                if !is_not_found_error(&e) {
                                     warn!(
                                         event.name = "ebpf_guard.cleanup_failed",
                                         flow.key = ?key,
@@ -135,8 +140,12 @@ impl Drop for EbpfFlowGuard {
                 }
 
                 cleanup_map!(stats_map);
-                cleanup_map!(tcp_map);
-                cleanup_map!(icmp_map);
+                if protocol == IpProto::Tcp {
+                    cleanup_map!(tcp_map);
+                }
+                if matches!(protocol, IpProto::Icmp | IpProto::Ipv6Icmp) {
+                    cleanup_map!(icmp_map);
+                }
             });
         }
     }
