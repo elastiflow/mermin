@@ -1,21 +1,5 @@
 # Internal Metrics
 
-- [Metrics Endpoint](#metrics-endpoint)
-- [Prometheus Scraping](#prometheus-scraping)
-- [Metrics Reference](#metrics-reference)
-  - [eBPF Metrics (`mermin_ebpf_*`)](#ebpf-metrics-mermin_ebpf_)
-  - [Network Interface Metrics (`mermin_interface_*`)](#network-interface-metrics-mermin_interface_)
-  - [Flow Metrics (`mermin_flow_*`)](#flow-metrics-mermin_flow_)
-  - [Kubernetes Watcher Metrics (`mermin_k8s_watcher_*`)](#kubernetes-watcher-metrics-mermin_k8s_watcher_)
-  - [Kubernetes Decorator Metrics (`mermin_k8s_decorator_*`)](#kubernetes-decorator-metrics-mermin_k8s_decorator_)
-  - [Flow Span Export Metrics (`mermin_export_*`)](#flow-span-export-metrics-mermin_export_)
-  - [Channel Metrics (`mermin_channel_*`)](#channel-metrics-mermin_channel_)
-  - [Pipeline Metrics (`mermin_pipeline_*`)](#pipeline-metrics-mermin_pipeline_)
-  - [TaskManager Metrics (`mermin_taskmanager_*`)](#taskmanager-metrics-mermin_taskmanager_)
-- [Label Values Reference](#label-values-reference)
-- [Histogram Buckets](#histogram-buckets)
-- [Grafana Dashboard](#grafana-dashboard)
-
 This guide describes the Prometheus metrics endpoint exposed by Mermin and provides a comprehensive breakdown of all available metrics, their types, and descriptions.
 See the [metrics configuration document](../configuration/metrics.md) for more details on metrics configuration.
 
@@ -43,7 +27,7 @@ The following options work with Mermin's metrics endpoint.
 **Pod annotations** — for annotation-based discovery, see [Expose Mermin metrics to Prometheus](../deployment/advanced-scenarios.md#metrics-to-monitor) in Advanced Scenarios.
 
 A **PodMonitor** example for Mermin is in [values_prom_stack.yaml](../deployment/examples/local/values_prom_stack.yaml)
-(see `prometheus.additionalPodMonitors`), used when [testing on a local Kind K8s cluster](../contributor-guide/development-workflow.md#testing-on-local-kind-k8s-cluster) with the kube-prometheus-stack.
+(see `prometheus.additionalPodMonitors`), used when [Prometheus Operator](https://github.com/prometheus-operator/prometheus-operator) or other compatible controller is deployed
 
 **Further reading:**
 
@@ -51,7 +35,7 @@ A **PodMonitor** example for Mermin is in [values_prom_stack.yaml](../deployment
 - [GKE Managed Service for Prometheus — PodMonitoring](https://docs.cloud.google.com/stackdriver/docs/managed-prometheus/setup-managed#gmp-pod-monitoring) —
   Google Cloud's `PodMonitoring` CR for managed collection
 
-See also the [Kubernetes Helm deployment guide](../deployment/kubernetes-helm.md) and
+See also the [Kubernetes Helm deployment guide](../deployment/kubernetes-helm.md), [Helm deployment examples](../deployment/examples/README.md) and
 [Advanced Scenarios](../deployment/advanced-scenarios.md#performance-monitoring-and-tuning)
 for more deployment examples.
 
