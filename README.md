@@ -43,7 +43,7 @@ Flow data provides **granular, connection-level detail that's lightweight enough
 
 The fastest way to get started with Mermin is to deploy it to a local Kubernetes cluster using our quickstart guide:
 
-**[Follow the Complete Quickstart Guide](https://docs.mermin.dev/getting-started/quickstart)**
+**[Follow the Complete Quickstart Guide](https://docs.mermin.dev/getting-started/quickstart-guide)**
 
 Or deploy directly with Helm:
 
@@ -84,7 +84,7 @@ Mermin operates as a DaemonSet in Kubernetes (or as a privileged container on ba
 4. **Flow Traces Export**: Flows are converted to OpenTelemetry trace spans and exported via OTLP
 5. **Observability Backend**: Flow Traces are stored, analyzed, and visualized in your platform (Elastic, Grafana Tempo, Jaeger, etc.)
 
-For a deeper dive into Mermin's architecture, see our [Architecture Overview](docs/getting-started/architecture.md).
+For a deeper dive into Mermin's architecture, see our [Architecture Overview](docs/concepts/agent-architecture.md).
 
 ## Documentation
 
@@ -92,26 +92,26 @@ Comprehensive documentation is available in the `docs/` directory and via [docs.
 
 ### Getting Started
 
-- [Quickstart Guide](docs/getting-started/quickstart.md) - Get up and running in minutes
-- [Architecture Overview](docs/getting-started/architecture.md) - Understand how Mermin works
+- [Quickstart Guide](docs/getting-started/quickstart-guide.md) - Get up and running in minutes
+- [Architecture Overview](docs/concepts/agent-architecture.md) - Understand how Mermin works
 
 ### Deployment
 
-- [Deployment Guide](docs/deployment/deployment.md) - Deployment strategies and best practices
+- [Deployment Guide](docs/deployment/overview.md) - Deployment strategies and best practices
 - [Kubernetes with Helm](docs/deployment/kubernetes-helm.md) - Kubernetes deployment details
 - [Cloud Platforms](docs/deployment/cloud-platforms.md) - AWS, GCP, Azure specifics
 - [Docker & Bare Metal](docs/deployment/docker-bare-metal.md) - Non-Kubernetes deployments
 
 ### Configuration
 
-- [Configuration Reference](docs/configuration/configuration.md) - Complete configuration options
-- [OTLP Export](docs/configuration/export-otlp.md) - Configure OpenTelemetry export
-- [Filtering](docs/configuration/filtering.md) - Control which flows are captured
-- [Kubernetes Metadata](docs/configuration/kubernetes-informers.md) - Kubernetes integration options
+- [Configuration Reference](docs/configuration/overview.md) - Complete configuration options
+- [OTLP Export](docs/configuration/reference/opentelemetry-otlp-exporter.md) - Configure OpenTelemetry export
+- [Filtering](docs/configuration/reference/flow-span-filters.md) - Control which flows are captured
+- [Kubernetes Metadata](docs/configuration/reference/kubernetes-informer-discovery.md) - Kubernetes integration options
 
 ### Observability Backends
 
-- [Supported Backends](docs/observability/backends.md) - Elastic, Grafana, Tempo, Jaeger, and more
+- [Supported Backends](docs/getting-started/backend-integrations.md) - Elastic, Grafana, Tempo, Jaeger, and more
 
 ### Troubleshooting
 
@@ -122,7 +122,7 @@ Comprehensive documentation is available in the `docs/` directory and via [docs.
 
 ### Development & Contributing
 
-- [Contributing Guide](docs/contributor-guide/contributing.md) - How to contribute to Mermin
+- [Contributing Guide](docs/CONTRIBUTING.md) - How to contribute to Mermin
 - [Development Workflow](docs/contributor-guide/development-workflow.md) - Build, test, and contribute
 - [Debugging eBPF Programs](docs/contributor-guide/debugging-ebpf.md) - eBPF debugging techniques
 - [Debugging Network Traffic](docs/contributor-guide/debugging-network.md) - Wireshark and packet analysis
@@ -151,7 +151,7 @@ All contributors are expected to follow our code of conduct and maintain a welco
 
 **Get Help:**
 
-- 💬 [Slack Channel](https://join.slack.com/t/elastiflowcommunity/shared_invite/zt-23jpnlw9g-Q4nKOwKKOE1N2MjfA2mXpg) - Live chat with maintainers and community.
+- Slack Channel: https://join.slack.com/t/elastiflowcommunity/shared_invite/zt-23jpnlw9g-Q4nKOwKKOE1N2MjfA2mXpg - Live chat with maintainers and community.
 - 💭 [GitHub Discussions](https://github.com/elastiflow/mermin/discussions) - Ask questions and share knowledge.
 - 🐛 [GitHub Issues](https://github.com/elastiflow/mermin/issues) - Report bugs and track feature requests.
 - 📖 [Documentation](docs/README.md) - Comprehensive guides and references.
