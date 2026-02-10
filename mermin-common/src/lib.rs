@@ -352,8 +352,8 @@ pub struct FlowStats {
     pub comm: [u8; 16],
 }
 
-/// TCP-specific state and performance metrics
-/// Only allocated for TCP flows
+/// TCP-specific state and performance metrics.
+/// Embedded in [`FlowStats`] for all flows; fields are only meaningful when protocol == TCP.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TcpStats {

@@ -1176,49 +1176,27 @@ impl FlowWorker {
                     None
                 },
                 flow_icmp_code_id: (is_icmp || is_icmpv6).then_some(stats.icmp.icmp_code),
-                flow_icmp_code_name: if is_icmp {
-                    network_types::icmp::get_icmpv4_code_name(
-                        stats.icmp.icmp_type,
-                        stats.icmp.icmp_code,
-                    )
-                    .map(String::from)
-                } else if is_icmpv6 {
-                    network_types::icmp::get_icmpv6_code_name(
-                        stats.icmp.icmp_type,
-                        stats.icmp.icmp_code,
-                    )
-                    .map(String::from)
-                } else {
-                    None
-                },
+                flow_icmp_code_name: icmp_code_name(
+                    is_icmp,
+                    is_icmpv6,
+                    stats.icmp.icmp_type,
+                    stats.icmp.icmp_code,
+                ),
                 flow_reverse_icmp_type_id: (is_icmp || is_icmpv6)
                     .then_some(stats.icmp.reverse_icmp_type),
-                flow_reverse_icmp_type_name: if is_icmp {
-                    network_types::icmp::get_icmpv4_type_name(stats.icmp.reverse_icmp_type)
-                        .map(String::from)
-                } else if is_icmpv6 {
-                    network_types::icmp::get_icmpv6_type_name(stats.icmp.reverse_icmp_type)
-                        .map(String::from)
-                } else {
-                    None
-                },
+                flow_reverse_icmp_type_name: icmp_type_name(
+                    is_icmp,
+                    is_icmpv6,
+                    stats.icmp.reverse_icmp_type,
+                ),
                 flow_reverse_icmp_code_id: (is_icmp || is_icmpv6)
                     .then_some(stats.icmp.reverse_icmp_code),
-                flow_reverse_icmp_code_name: if is_icmp {
-                    network_types::icmp::get_icmpv4_code_name(
-                        stats.icmp.reverse_icmp_type,
-                        stats.icmp.reverse_icmp_code,
-                    )
-                    .map(String::from)
-                } else if is_icmpv6 {
-                    network_types::icmp::get_icmpv6_code_name(
-                        stats.icmp.reverse_icmp_type,
-                        stats.icmp.reverse_icmp_code,
-                    )
-                    .map(String::from)
-                } else {
-                    None
-                },
+                flow_reverse_icmp_code_name: icmp_code_name(
+                    is_icmp,
+                    is_icmpv6,
+                    stats.icmp.reverse_icmp_type,
+                    stats.icmp.reverse_icmp_code,
+                ),
 
                 // Initialize counters (will be updated from eBPF map on record intervals)
                 flow_bytes_delta: stats.bytes as i64,
@@ -1693,6 +1671,32 @@ impl std::error::Error for BootTimeError {
             BootTimeError::ReadProcUptime(e) => Some(e),
             BootTimeError::ParseUptime(_) => None,
         }
+    }
+}
+
+/// Resolve an ICMP type value to its human-readable name for the given IP version.
+///
+/// Returns `None` for non-ICMP protocols or unknown type values.
+fn icmp_type_name(is_icmp: bool, is_icmpv6: bool, icmp_type: u8) -> Option<String> {
+    if is_icmp {
+        network_types::icmp::get_icmpv4_type_name(icmp_type).map(String::from)
+    } else if is_icmpv6 {
+        network_types::icmp::get_icmpv6_type_name(icmp_type).map(String::from)
+    } else {
+        None
+    }
+}
+
+/// Resolve an ICMP type+code pair to the human-readable code name for the given IP version.
+///
+/// Returns `None` for non-ICMP protocols or unknown type/code combinations.
+fn icmp_code_name(is_icmp: bool, is_icmpv6: bool, icmp_type: u8, icmp_code: u8) -> Option<String> {
+    if is_icmp {
+        network_types::icmp::get_icmpv4_code_name(icmp_type, icmp_code).map(String::from)
+    } else if is_icmpv6 {
+        network_types::icmp::get_icmpv6_code_name(icmp_type, icmp_code).map(String::from)
+    } else {
+        None
     }
 }
 
