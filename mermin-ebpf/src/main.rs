@@ -281,34 +281,39 @@ pub fn mermin_flow_egress(ctx: TcContext) -> i32 {
 // ============================================================================
 // LSM and fentry/fexit hooks for process tracking
 // ============================================================================
-//
-// TODO(CAN-134): Add tcp_v6_connect_exit fexit hook for IPv6 outbound connection tracking
-// TODO(CAN-135): Add UDP process tracking (e.g., udp_sendmsg hooks)
 
-/// Address family constants
 #[cfg(not(feature = "test"))]
 const AF_INET: i32 = 2;
 #[cfg(not(feature = "test"))]
 const AF_INET6: i32 = 10;
 
-/// fexit hook for tcp_v4_connect - captures process info for outbound TCP connections.
-/// This fires AFTER tcp_v4_connect() completes, when the source port is assigned.
+/// An fexit hook for `tcp_v4_connect` that captures process info for outbound TCP connections.
+/// This fires after `tcp_v4_connect()` completes, when the source port has been assigned.
+///
+/// On success, it records the PID and process name (comm) associated with the socket so that
+/// downstream packet-level hooks can correlate flows back to the originating process.
 #[cfg(not(feature = "test"))]
 #[fexit(function = "tcp_v4_connect")]
 pub fn tcp_v4_connect_exit(ctx: FExitContext) -> i32 {
-    // SAFETY: try_tcp_v4_connect_exit only accesses arguments via the provided context
-    // and reads kernel sock structure through BTF-validated offsets
     try_tcp_v4_connect_exit(&ctx).unwrap_or_default()
 }
 
+/// Extracts process info from a completed `tcp_v4_connect` call via its fexit context.
+///
+/// The underlying kernel signature is:
+/// `int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)`
+///
+/// On fexit, the context exposes the original arguments followed by the return value.
+/// Arguments are accessed positionally through the context pointer (return value is at
+/// index 3, after the three original arguments).
+///
+/// NOTE: There is a timing edge case where the TC hook may create a `FLOW_STATS` entry
+/// before this hook runs, causing the process info to be lost. A `pid` of 0 in flow
+/// stats indicates an unknown process. See CAN-137.
 #[cfg(not(feature = "test"))]
 #[inline(always)]
 #[allow(static_mut_refs)]
 fn try_tcp_v4_connect_exit(ctx: &FExitContext) -> Result<i32, i64> {
-    // tcp_v4_connect signature: int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
-    // On fexit, we can access the return value and the original arguments
-    // Access arguments through ctx pointer - for fexit, return value is after all args
-
     let args_ptr = ctx.as_ptr() as *const usize;
     let ret: i32 = unsafe { *(args_ptr.add(3) as *const i32) }; // Return value is arg 3 in fexit
 
@@ -322,7 +327,6 @@ fn try_tcp_v4_connect_exit(ctx: &FExitContext) -> Result<i32, i64> {
     let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
 
     // arg(0) is struct sock *sk
-    // TODO(CAN-136): Use aya_ebpf_bindings::bindings::{sock, socket} for type-safe access
     let sk: *const core::ffi::c_void = unsafe { *(args_ptr as *const *const core::ffi::c_void) };
     if sk.is_null() {
         return Ok(0);
@@ -343,10 +347,6 @@ fn try_tcp_v4_connect_exit(ctx: &FExitContext) -> Result<i32, i64> {
             stats.comm = comm;
         }
     }
-    // Note: If FLOW_STATS entry doesn't exist yet, the TC hook will create it
-    // and this process info will be lost. This is the expected "timing edge case"
-    // mentioned in the plan - pid=0 indicates unknown process.
-    // TODO(CAN-137): Investigate approaches to reduce pid=0 rate (e.g., separate map, fentry)
 
     Ok(0)
 }
