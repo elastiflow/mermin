@@ -16,7 +16,7 @@ Attributes in this block configure eBPF-level flow tracking.
 
 - `flow_stats_capacity` attribute
 
-  The capacity of the `FLOW_STATS` eBPF map. See [eBPF Programs](../../concepts/agent-architecture.md#ebpf-programs) in the architecture documentation for more information.
+  Max capacity (upper bound) for the `FLOW_STATS` eBPF map. The map is created with this fixed `max_entries` at program load time and does not grow or shrink at runtime; once full, new kernel-side inserts silently fail. See [eBPF Programs](../../concepts/agent-architecture.md#ebpf-programs) in the architecture documentation for more information.
 
   **Type:** Integer
 
@@ -43,7 +43,7 @@ Attributes in this block configure eBPF-level flow tracking.
 
 - `flow_events_capacity` attribute
 
-  The capacity of the `FLOW_EVENTS` ring buffer as number of entries. Each entry is 234 bytes (FlowEvent size), so the default 1024 entries equals ~240 KB. This buffer is used to pass new flow events from eBPF to userspace.
+  Max capacity (fixed size in entries) of the `FLOW_EVENTS` ring buffer. The ring buffer is allocated at this fixed size during eBPF program load and does not resize at runtime. Each entry is 234 bytes (FlowEvent size), so the default 1024 entries equals ~240 KB. This buffer is used to pass new flow events from eBPF to userspace.
   Keep the buffer high enough to provide flow record burst tolerance.
 
   **Type:** Integer (entries)

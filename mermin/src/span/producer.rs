@@ -2443,7 +2443,7 @@ pub async fn timeout_and_remove_flow(
 /// - `boot_time_offset` - Offset to convert boot time to wall clock time
 /// - `max_age` - Maximum age for entries before they're considered orphans
 /// - `community_id_generator` - For generating community IDs from flow keys
-/// - `flow_stats_capacity` - Max entries per eBPF map, used for utilization warnings
+/// - `flow_stats_capacity` - Max capacity (upper bound) for each flow-stats eBPF map, used for utilization warnings
 #[allow(clippy::too_many_arguments)]
 pub async fn orphan_scanner_task(
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
@@ -2521,7 +2521,7 @@ pub async fn orphan_scanner_task(
                                 map.capacity = capacity,
                                 map.utilization_pct = utilization_pct,
                                 "eBPF map utilization is high, new flow insertions may silently fail in the kernel. \
-                                 Consider increasing flow_stats_capacity in config."
+                                 Consider increasing the flow_stats max capacity (flow_stats_capacity) in config."
                             );
                         }
                     }

@@ -117,8 +117,9 @@ const FLOW_EVENT_PACKET_DATA_SIZE: usize = 192;
 /// Maximum number of flows to track in the eBPF map.
 ///
 /// This is an upper bound that can be overridden at runtime by the userspace
-/// loader using aya's `set_max_entries()` API. The actual size is configured
-/// via the `pipeline.flow_capture.flow_stats_capacity` config field (see runtime/conf.rs).
+/// loader using aya's `set_max_entries()` API. The runtime value from config
+/// (`pipeline.flow_capture.flow_stats_capacity`) sets the max capacity (fixed
+/// ceiling) for the map.
 ///
 /// Default at runtime: 100,000 flows (~23 MB)
 /// Configurable in config.hcl:
