@@ -351,8 +351,6 @@ impl ShutdownManager {
     async fn preserve_active_flows(&self, timeout: Duration) -> Result<usize, usize> {
         let flow_store = Arc::clone(&self.flow_span_components.flow_store);
         let flow_stats_map = Arc::clone(&self.flow_span_components.flow_stats_map);
-        let tcp_stats_map = Arc::clone(&self.flow_span_components.tcp_stats_map);
-        let icmp_stats_map = Arc::clone(&self.flow_span_components.icmp_stats_map);
         let flow_span_tx = self.flow_span_components.flow_span_tx.clone();
         let trace_id_cache = &self.trace_id_cache;
 
@@ -376,8 +374,6 @@ impl ShutdownManager {
                     id,
                     &flow_store,
                     &flow_stats_map,
-                    &tcp_stats_map,
-                    &icmp_stats_map,
                     &flow_span_tx,
                     trace_id_cache,
                 )
@@ -408,7 +404,7 @@ mod tests {
 
     use aya::maps::HashMap;
     use crossbeam::channel;
-    use mermin_common::{FlowKey, FlowStats, IcmpStats, TcpStats};
+    use mermin_common::{FlowKey, FlowStats};
     use tokio::{
         sync::{Mutex, mpsc},
         time::{self, Duration},
@@ -459,24 +455,14 @@ mod tests {
         let flow_stats_map = Arc::new(Mutex::new(unsafe {
             std::mem::zeroed::<HashMap<aya::maps::MapData, FlowKey, FlowStats>>()
         }));
-        let tcp_stats_map = Arc::new(Mutex::new(unsafe {
-            std::mem::zeroed::<HashMap<aya::maps::MapData, FlowKey, TcpStats>>()
-        }));
-        let icmp_stats_map = Arc::new(Mutex::new(unsafe {
-            std::mem::zeroed::<HashMap<aya::maps::MapData, FlowKey, IcmpStats>>()
-        }));
 
         std::mem::forget(Arc::clone(&flow_stats_map));
-        std::mem::forget(Arc::clone(&tcp_stats_map));
-        std::mem::forget(Arc::clone(&icmp_stats_map));
 
         let cache = TraceIdCache::new(Duration::from_secs(3600), 100);
 
         let mock_components = Arc::new(FlowSpanComponents {
             flow_store: Default::default(),
             flow_stats_map, // Safe because it's never dereferenced.
-            tcp_stats_map,
-            icmp_stats_map,
             flow_span_tx,
         });
 

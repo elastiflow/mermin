@@ -475,10 +475,6 @@ pub struct IcmpStats {
 
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for FlowStats {}
-#[cfg(feature = "user")]
-unsafe impl aya::Pod for TcpStats {}
-#[cfg(feature = "user")]
-unsafe impl aya::Pod for IcmpStats {}
 
 /// TCP connection state based on RFC 9293 section 3.3.2:
 /// https://datatracker.ietf.org/doc/html/rfc9293#section-3.3.2

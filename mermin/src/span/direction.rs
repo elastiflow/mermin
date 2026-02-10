@@ -112,8 +112,6 @@ impl DirectionInferrer {
         &self,
         flow_key: &FlowKey,
         stats: &FlowStats,
-        tcp_stats: Option<&TcpStats>,
-        icmp_stats: Option<&IcmpStats>,
     ) -> (SpanKind, Option<ClientServer>) {
         let (src_ip, dst_ip) = match flow_key_to_ip_addrs(flow_key) {
             Ok((src, dst)) => (src, dst),
@@ -128,8 +126,7 @@ impl DirectionInferrer {
         }
 
         if stats.protocol == IpProto::Tcp
-            && let Some(ts) = tcp_stats
-            && let Some((kind, cs)) = Self::check_tcp_handshake(stats, ts, &src_ip, &dst_ip)
+            && let Some((kind, cs)) = Self::check_tcp_handshake(stats, &stats.tcp, &src_ip, &dst_ip)
         {
             return (kind, Some(cs));
         }
@@ -141,8 +138,7 @@ impl DirectionInferrer {
         }
 
         if matches!(stats.protocol, IpProto::Icmp | IpProto::Ipv6Icmp)
-            && let Some(is) = icmp_stats
-            && let Some((kind, cs)) = Self::check_icmp_type(stats, is, &src_ip, &dst_ip)
+            && let Some((kind, cs)) = Self::check_icmp_type(stats, &stats.icmp, &src_ip, &dst_ip)
         {
             return (kind, Some(cs));
         }

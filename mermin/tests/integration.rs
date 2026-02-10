@@ -192,8 +192,6 @@ mod event_driven_tests {
     struct MockFlowEventHandler {
         events: Arc<Mutex<Vec<FlowKey>>>,
         stats: Arc<Mutex<Vec<(FlowKey, FlowStats)>>>,
-        tcp_stats: Arc<Mutex<Vec<(FlowKey, TcpStats)>>>,
-        icmp_stats: Arc<Mutex<Vec<(FlowKey, IcmpStats)>>>,
     }
 
     impl MockFlowEventHandler {
@@ -201,18 +199,10 @@ mod event_driven_tests {
             Self {
                 events: Arc::new(Mutex::new(Vec::new())),
                 stats: Arc::new(Mutex::new(Vec::new())),
-                tcp_stats: Arc::new(Mutex::new(Vec::new())),
-                icmp_stats: Arc::new(Mutex::new(Vec::new())),
             }
         }
 
-        async fn handle_flow_event(
-            &self,
-            flow_key: FlowKey,
-            stats: FlowStats,
-            tcp_stats: Option<TcpStats>,
-            icmp_stats: Option<IcmpStats>,
-        ) {
+        async fn handle_flow_event(&self, flow_key: FlowKey, stats: FlowStats) {
             let mut stats_map = self.stats.lock().await;
 
             // Check if flow already exists
@@ -226,25 +216,6 @@ mod event_driven_tests {
                 drop(events); // Release lock before pushing to stats
 
                 stats_map.push((flow_key, stats));
-            }
-
-            if let Some(t) = tcp_stats {
-                let mut tcp_map = self.tcp_stats.lock().await;
-                if let Some(pos) = tcp_map.iter().position(|(k, _)| k == &flow_key) {
-                    tcp_map[pos].1 = t;
-                } else {
-                    tcp_map.push((flow_key, t));
-                }
-            }
-
-            // Handle ICMP Extension
-            if let Some(i) = icmp_stats {
-                let mut icmp_map = self.icmp_stats.lock().await;
-                if let Some(pos) = icmp_map.iter().position(|(k, _)| k == &flow_key) {
-                    icmp_map[pos].1 = i;
-                } else {
-                    icmp_map.push((flow_key, i));
-                }
             }
         }
 
@@ -364,9 +335,7 @@ mod event_driven_tests {
             reverse_tcp_flags: 0x00,
         };
 
-        handler
-            .handle_flow_event(flow_key, stats, Some(tcp_stats), None)
-            .await;
+        handler.handle_flow_event(flow_key, stats).await;
 
         let events = handler.get_events().await;
         assert_eq!(events.len(), 1, "should have one flow event");
@@ -431,7 +400,7 @@ mod event_driven_tests {
         };
 
         handler
-            .handle_flow_event(normalized_key, forward_stats, Some(tcp_stats), None)
+            .handle_flow_event(normalized_key, forward_stats)
             .await;
 
         // Reverse direction (should aggregate with forward)
@@ -492,7 +461,7 @@ mod event_driven_tests {
 
         // Update stats (simulating eBPF map update)
         handler
-            .handle_flow_event(normalized_key, updated_stats, Some(tcp_stats), None)
+            .handle_flow_event(normalized_key, updated_stats)
             .await;
 
         let final_stats = handler.get_stats(&normalized_key).await.unwrap();
@@ -559,9 +528,7 @@ mod event_driven_tests {
             reverse_tcp_flags: 0x00,
         };
 
-        handler
-            .handle_flow_event(flow_key, stats_t1, Some(tcp_stats_t1), None)
-            .await;
+        handler.handle_flow_event(flow_key, stats_t1).await;
 
         // Simulate passage of time and more traffic
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -611,9 +578,7 @@ mod event_driven_tests {
             reverse_tcp_flags: 0x00,
         };
 
-        handler
-            .handle_flow_event(flow_key, stats_t2, Some(tcp_stats_t2), None)
-            .await;
+        handler.handle_flow_event(flow_key, stats_t2).await;
 
         // Calculate deltas
         let delta_packets = stats_t2.packets - stats_t1.packets;
@@ -695,13 +660,10 @@ mod event_driven_tests {
                     } else {
                         ConnectionState::Closed
                     },
-                    forward_tcp_flags: 0x02,
-                    reverse_tcp_flags: 0x00,
+                    icmp: IcmpStats::default(),
                 };
 
-                handler_clone
-                    .handle_flow_event(key, stats, Some(tcp_stats), None)
-                    .await;
+                handler_clone.handle_flow_event(key, stats).await;
             });
 
             tasks.push(task);

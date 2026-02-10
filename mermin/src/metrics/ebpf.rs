@@ -163,9 +163,7 @@ pub fn update_ringbuf_size_metric() {
 pub enum EbpfMapName {
     FlowStats,
     FlowEvents,
-    IcmpStats,
     ListeningPorts,
-    TcpStats,
 }
 
 impl EbpfMapName {
@@ -173,9 +171,7 @@ impl EbpfMapName {
         match self {
             EbpfMapName::FlowStats => "FLOW_STATS",
             EbpfMapName::FlowEvents => "FLOW_EVENTS",
-            EbpfMapName::IcmpStats => "ICMP_STATS",
             EbpfMapName::ListeningPorts => "LISTENING_PORTS",
-            EbpfMapName::TcpStats => "TCP_STATS",
         }
     }
 }
@@ -497,9 +493,7 @@ mod tests {
     fn test_ebpf_map_name_as_str() {
         assert_eq!(EbpfMapName::FlowStats.as_str(), "FLOW_STATS");
         assert_eq!(EbpfMapName::FlowEvents.as_str(), "FLOW_EVENTS");
-        assert_eq!(EbpfMapName::IcmpStats.as_str(), "ICMP_STATS");
         assert_eq!(EbpfMapName::ListeningPorts.as_str(), "LISTENING_PORTS");
-        assert_eq!(EbpfMapName::TcpStats.as_str(), "TCP_STATS");
     }
 
     #[test]
