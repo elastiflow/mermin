@@ -351,39 +351,40 @@ fn try_tcp_v4_connect_exit(ctx: &FExitContext) -> Result<i32, i64> {
     Ok(0)
 }
 
-/// LSM hook for socket_accept - captures process info for inbound TCP connections.
+/// An LSM hook for `socket_accept` that captures process info for inbound TCP connections.
 /// This fires when a server accepts an incoming connection.
+///
+/// Returns 0 (allowing the operation) regardless of whether process info capture succeeds,
+/// so it never blocks legitimate traffic.
 #[cfg(not(feature = "test"))]
 #[lsm(hook = "socket_accept")]
 pub fn socket_accept(ctx: LsmContext) -> i32 {
-    // SAFETY: try_socket_accept only accesses arguments via the provided context
-    // and reads kernel socket/sock structures through BTF-validated offsets
-    try_socket_accept(&ctx).unwrap_or_default() // 0 allows the operation
+    try_socket_accept(&ctx).unwrap_or_default()
 }
 
+/// Extracts process info from an accepted socket connection via its LSM context.
+///
+/// The underlying kernel signature is:
+/// `int socket_accept(struct socket *sock, struct socket *newsock)`
+///
+/// `sock` is the listening socket and `newsock` is the newly accepted connection.
+/// The `newsock` (arg 1) is used to read the underlying `struct sock` and extract
+/// the flow key. Future work includes type-safe access via `aya_ebpf_bindings`.
 #[cfg(not(feature = "test"))]
 #[inline(always)]
 #[allow(static_mut_refs)]
 fn try_socket_accept(ctx: &LsmContext) -> Result<i32, i64> {
-    // socket_accept signature: int socket_accept(struct socket *sock, struct socket *newsock)
-    // sock is the listening socket, newsock is the newly accepted connection
-
     let pid_tgid = bpf_get_current_pid_tgid();
     let pid = (pid_tgid >> 32) as u32;
     let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
 
     let args_ptr = ctx.as_ptr() as *const usize;
-    // Get the new socket (arg 1) - struct socket *newsock
     let newsock: *const core::ffi::c_void =
         unsafe { *(args_ptr.add(1) as *const *const core::ffi::c_void) };
     if newsock.is_null() {
         return Ok(0);
     }
 
-    // Get sk from socket struct: struct socket { ...; struct sock *sk; ... }
-    // Offset of sk in struct socket varies by kernel version, typically at offset 24-32
-    // We use bpf_probe_read_kernel to safely read from kernel memory
-    // TODO(CAN-136): Use aya_ebpf_bindings::bindings::socket for type-safe access
     let sk: *const core::ffi::c_void = match read_socket_sk(newsock) {
         Ok(sk) => sk,
         Err(_) => return Ok(0),
@@ -392,8 +393,6 @@ fn try_socket_accept(ctx: &LsmContext) -> Result<i32, i64> {
         return Ok(0);
     }
 
-    // Check if this is a TCP socket (AF_INET or AF_INET6)
-    // Read skc_family from __sk_common (offset 16 from start of sock)
     let family: u16 = match read_sock_family(sk) {
         Ok(f) => f,
         Err(_) => return Ok(0),
@@ -456,7 +455,6 @@ const SK_COMMON_SKC_V6_DADDR_OFFSET: usize = 40; // skc_v6_daddr (IPv6 remote ad
 #[cfg(not(feature = "test"))]
 const SK_COMMON_SKC_V6_RCV_SADDR_OFFSET: usize = 56; // skc_v6_rcv_saddr (IPv6 local addr)
 
-/// TODO(CAN-136): Use aya_ebpf_bindings::bindings::socket for type-safe access, the goal is to replace the above hardcoded offsets
 #[cfg(not(feature = "test"))]
 #[inline(always)]
 fn read_socket_sk(socket: *const core::ffi::c_void) -> Result<*const core::ffi::c_void, i64> {
