@@ -206,7 +206,7 @@ Understanding when spans are exported helps with tuning and capacity planning. A
 
 Exported spans are sent to the targets configured in your export block ([OTLP export](opentelemetry-otlp-exporter.md), [stdout export](opentelemetry-console-exporter.md), etc.).
 Workers poll flow state on an interval defined in [pipeline](flow-processing-pipeline.md) (`flow_producer.flow_store_poll_interval`). The flow table is backed by the eBPF `FLOW_STATS` map and in-memory state;
-its capacity is set in [pipeline](flow-processing-pipeline.md) (`flow_capture.flow_stats_capacity`).
+its max capacity is set in [pipeline](flow-processing-pipeline.md) (`flow_capture.flow_stats_capacity`).
 
 ## Tuning
 
@@ -221,7 +221,7 @@ For high-throughput or memory-constrained nodes, use longer or shorter timeouts 
 Flow and eBPF map metrics are in [Internal Metrics](../../internal-monitoring/internal-metrics.md): `mermin_flow_spans_active_total`, `mermin_flow_spans_created_total`, and `mermin_ebpf_map_size` / `mermin_ebpf_map_capacity` with `map="FLOW_STATS"`.
 
 If the flow table or memory grows without bound, lower timeouts or `max_record_interval`, or reduce tracked flows with [flow filters](flow-span-filters.md).
-If you need more headroom for legitimate load, increase `flow_capture.flow_stats_capacity` in [pipeline](flow-processing-pipeline.md).
+If you need more headroom, increase the max capacity via `flow_capture.flow_stats_capacity` in [pipeline](flow-processing-pipeline.md).
 
 ## Next Steps
 

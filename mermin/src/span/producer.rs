@@ -30,7 +30,7 @@ use crate::{
     ip::{Error, flow_key_to_ip_addrs},
     metrics::{
         self,
-        ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus},
+        ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus, map_entry_not_found},
         flow::{FlowEventResult, FlowSpanProducerStatus},
         processing::ProcessingStage,
         userspace::{ChannelName, ChannelSendStatus},
@@ -107,6 +107,7 @@ pub struct FlowSpanProducer {
     hostname_cache: Cache<IpAddr, String>,
     hostname_resolve_timeout: Duration,
     enable_hostname_resolution: bool,
+    flow_stats_capacity: u32,
 }
 
 impl FlowSpanProducer {
@@ -199,6 +200,7 @@ impl FlowSpanProducer {
             hostname_cache,
             hostname_resolve_timeout: span_opts.hostname_resolve_timeout,
             enable_hostname_resolution: span_opts.enable_hostname_resolution,
+            flow_stats_capacity: conf.pipeline.flow_capture.flow_stats_capacity,
         })
     }
 
@@ -278,6 +280,7 @@ impl FlowSpanProducer {
             self.boot_time_offset_nanos,
             max_orphan_age,
             community_id_gen,
+            self.flow_stats_capacity,
             orphan_scanner_shutdown_rx,
         ));
         worker_handles.push(orphan_scanner_handle);
@@ -786,10 +789,7 @@ impl FlowWorker {
                     .inc();
             }
             Err(e) => {
-                let is_not_found = matches!(
-                    e,
-                    aya::maps::MapError::KeyNotFound | aya::maps::MapError::ElementNotFound
-                );
+                let is_not_found = map_entry_not_found(&e);
                 let status = if is_not_found {
                     EbpfMapStatus::NotFound
                 } else {
@@ -900,14 +900,22 @@ impl FlowWorker {
                 EbpfMapName::FlowStats,
             )
             .await;
-            self.remove_ebpf_map_entry(&self.tcp_stats_map, &event.flow_key, EbpfMapName::TcpStats)
+            if event.flow_key.protocol == IpProto::Tcp {
+                self.remove_ebpf_map_entry(
+                    &self.tcp_stats_map,
+                    &event.flow_key,
+                    EbpfMapName::TcpStats,
+                )
                 .await;
-            self.remove_ebpf_map_entry(
-                &self.icmp_stats_map,
-                &event.flow_key,
-                EbpfMapName::IcmpStats,
-            )
-            .await;
+            }
+            if matches!(event.flow_key.protocol, IpProto::Icmp | IpProto::Ipv6Icmp) {
+                self.remove_ebpf_map_entry(
+                    &self.icmp_stats_map,
+                    &event.flow_key,
+                    EbpfMapName::IcmpStats,
+                )
+                .await;
+            }
 
             guard.keep();
 
@@ -2343,10 +2351,7 @@ pub async fn timeout_and_remove_flow(
                         ]).inc();
                     }
                     Err(e) => {
-                        let is_not_found = matches!(
-                            e,
-                            aya::maps::MapError::KeyNotFound | aya::maps::MapError::ElementNotFound
-                        );
+                        let is_not_found = map_entry_not_found(&e);
 
                         let status = if is_not_found {
                             EbpfMapStatus::NotFound
@@ -2438,6 +2443,7 @@ pub async fn timeout_and_remove_flow(
 /// - `boot_time_offset` - Offset to convert boot time to wall clock time
 /// - `max_age` - Maximum age for entries before they're considered orphans
 /// - `community_id_generator` - For generating community IDs from flow keys
+/// - `flow_stats_capacity` - Max capacity (upper bound) for each flow-stats eBPF map, used for utilization warnings
 #[allow(clippy::too_many_arguments)]
 pub async fn orphan_scanner_task(
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
@@ -2447,6 +2453,7 @@ pub async fn orphan_scanner_task(
     boot_time_offset: u64,
     max_age: Duration,
     community_id_generator: Arc<CommunityIdGenerator>,
+    flow_stats_capacity: u32,
     mut shutdown_rx: broadcast::Receiver<()>,
 ) {
     let scan_interval = Duration::from_secs(300);
@@ -2496,6 +2503,29 @@ pub async fn orphan_scanner_task(
                 metrics::registry::EBPF_MAP_SIZE
                     .with_label_values(&[EbpfMapName::IcmpStats.as_str(), MapUnit::Entries.as_str()])
                     .set(icmp_stats_count as i64);
+
+                // Check map utilization and warn if approaching capacity
+                let capacity = flow_stats_capacity as u64;
+                if capacity > 0 {
+                    for (map_name, map_size) in [
+                        (EbpfMapName::FlowStats, ebpf_map_size),
+                        (EbpfMapName::TcpStats, tcp_stats_count as u64),
+                        (EbpfMapName::IcmpStats, icmp_stats_count as u64),
+                    ] {
+                        let utilization_pct = (map_size * 100) / capacity;
+                        if utilization_pct >= 80 {
+                            warn!(
+                                event.name = "ebpf_map.high_utilization",
+                                map = map_name.as_str(),
+                                map.size = map_size,
+                                map.capacity = capacity,
+                                map.utilization_pct = utilization_pct,
+                                "eBPF map utilization is high, new flow insertions may silently fail in the kernel. \
+                                 Consider increasing the flow_stats max capacity (flow_stats_capacity) in config."
+                            );
+                        }
+                    }
+                }
 
                 for key in keys {
                     scanned += 1;
@@ -2556,8 +2586,15 @@ pub async fn orphan_scanner_task(
                                     }
                                 }
                                 Err(e) => {
-                                    metrics::registry::EBPF_MAP_OPS_TOTAL.with_label_values(&[$map_enum.as_str(), EbpfMapOperation::Delete.as_str(), EbpfMapStatus::Error.as_str()]).inc();
-                                    debug!(event.name = "orphan_scanner.entry_removal_failed", flow.key = ?$key, map = $map_enum.as_str(), error.message = %e, "failed to remove orphaned entry");
+                                    let status = if map_entry_not_found(&e) {
+                                        EbpfMapStatus::NotFound
+                                    } else {
+                                        EbpfMapStatus::Error
+                                    };
+                                    metrics::registry::EBPF_MAP_OPS_TOTAL.with_label_values(&[$map_enum.as_str(), EbpfMapOperation::Delete.as_str(), status.as_str()]).inc();
+                                    if status == EbpfMapStatus::Error {
+                                        debug!(event.name = "orphan_scanner.entry_removal_failed", flow.key = ?$key, map = $map_enum.as_str(), error.message = %e, "failed to remove orphaned entry");
+                                    }
                                 }
                             }
                             drop(map);
@@ -2566,9 +2603,13 @@ pub async fn orphan_scanner_task(
 
                     // Remove from FlowStats first (Primary)
                     remove_orphan_from!(flow_stats_map, EbpfMapName::FlowStats, true, &key);
-                    // Then remove from protocol maps (Secondary)
-                    remove_orphan_from!(tcp_stats_map, EbpfMapName::TcpStats, false, &key);
-                    remove_orphan_from!(icmp_stats_map, EbpfMapName::IcmpStats, false, &key);
+                    // Then remove from protocol-specific map (Secondary)
+                    if key.protocol == IpProto::Tcp {
+                        remove_orphan_from!(tcp_stats_map, EbpfMapName::TcpStats, false, &key);
+                    }
+                    if matches!(key.protocol, IpProto::Icmp | IpProto::Ipv6Icmp) {
+                        remove_orphan_from!(icmp_stats_map, EbpfMapName::IcmpStats, false, &key);
+                    }
                 }
 
                 if removed > 0 {

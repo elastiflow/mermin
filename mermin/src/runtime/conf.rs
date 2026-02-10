@@ -793,7 +793,11 @@ pub mod conf_serde {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct FlowCapture {
-    /// Maximum concurrent flows in eBPF map (default: 100,000)
+    /// Max capacity (upper bound) for the FLOW_STATS, TCP_STATS, and ICMP_STATS eBPF maps
+    /// (default: 100,000)
+    ///
+    /// Each eBPF map is created with this fixed `max_entries` at load time and does not
+    /// resize at runtime. Once a map is full, new entry inserts attempts are dropped.
     ///
     /// Controls memory usage of the eBPF FLOW_STATS.
     /// Memory: flows × 232 bytes
@@ -811,7 +815,10 @@ pub struct FlowCapture {
     ///          → 100K default provides 10x headroom (adequate, consider 200K-500K for 3K+ FPS)
     pub flow_stats_capacity: u32,
 
-    /// FLOW_EVENTS ring buffer capacity as entries (default: 1024)
+    /// Max capacity (fixed size) of the FLOW_EVENTS ring buffer in entries (default: 1024)
+    ///
+    /// The ring buffer is created at this fixed size during eBPF program load and does not
+    /// resize at runtime.
     ///
     /// Controls the capacity of the FLOW_EVENTS ring buffer used to pass new flow events
     /// from eBPF to userspace. The ring buffer provides burst tolerance while worker
@@ -917,7 +924,7 @@ impl Default for K8sDecorator {
 /// Pipeline tuning configuration for flow processing optimization
 ///
 /// Defaults are tuned for typical enterprise deployments (1K-5K flows/sec):
-/// - `flow_capture.flow_stats_capacity = 100000` (supports ~10K flows/sec with 10x headroom)
+/// - `flow_capture.flow_stats_capacity = 100000` (max capacity / upper bound, supports ~10K flows/sec with 10x headroom)
 /// - `flow_producer.worker_queue_capacity = 2048` (buffer per worker)
 /// - `flow_producer.workers = 4` (parallel flow processing across cores)
 /// - `k8s_decorator.threads = 4` (handles typical K8s clusters efficiently)
