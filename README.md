@@ -43,7 +43,7 @@ Flow data provides **granular, connection-level detail that's lightweight enough
 
 The fastest way to get started with Mermin is to deploy it to a local Kubernetes cluster using our quickstart guide:
 
-**[Follow the Complete Quickstart Guide](https://docs.mermin.dev/getting-started/quickstart)**
+**[Follow the Complete Quickstart Guide](https://docs.mermin.dev/getting-started/quickstart-guide)**
 
 Or deploy directly with Helm:
 
