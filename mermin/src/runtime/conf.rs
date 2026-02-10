@@ -797,7 +797,7 @@ pub struct FlowCapture {
     /// (default: 100,000)
     ///
     /// Each eBPF map is created with this fixed `max_entries` at load time and does not
-    /// resize at runtime. Once a map is full, new kernel-side inserts silently fail.
+    /// resize at runtime. Once a map is full, new entry inserts attempts are dropped.
     ///
     /// Controls memory usage of the eBPF FLOW_STATS.
     /// Memory: flows × 232 bytes
