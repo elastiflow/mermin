@@ -43,6 +43,7 @@ log = { workspace = true }
 mermin-common = { path = "../mermin-common", features = ["user"] }
 moka = { version = "0.12", features = ["future"] }
 network-types = { path = "../network-types" }
+notify = "6.1"
 netlink-packet-core = "0.8.1"
 netlink-packet-route = "0.25.1"
 netlink-sys = "0.8.7"

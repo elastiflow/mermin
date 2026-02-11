@@ -178,9 +178,9 @@ You can customize these bucket sizes inside a `histogram_buckets` block.
   }
   ```
 
-- `mermin_taskmanager_shutdown_duration_seconds` attribute
+- `mermin_shutdown_duration_seconds` attribute
 
-  Custom buckets for the `mermin_taskmanager_shutdown_duration_seconds` histogram metric. This metric tracks the duration of shutdown operations.
+  Custom buckets for the `mermin_shutdown_duration_seconds` histogram metric. This metric tracks the duration of shutdown operations.
 
   **Type:** Array of numbers
 
@@ -200,7 +200,7 @@ You can customize these bucket sizes inside a `histogram_buckets` block.
     internal "metrics" {
       debug_metrics_enabled = true
       histogram_buckets {
-        mermin_taskmanager_shutdown_duration_seconds = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
+        mermin_shutdown_duration_seconds = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
       }
     }
     ```
@@ -214,7 +214,7 @@ You can customize these bucket sizes inside a `histogram_buckets` block.
         mermin_pipeline_duration_seconds                        = [0.0001, 0.001, 0.01, 0.1, 1.0, 5.0, 10.0]
         mermin_export_batch_size                                = [10, 50, 100, 500, 1000]
         mermin_k8s_watcher_ip_index_update_duration_seconds     = [0.001, 0.01, 0.1, 0.5, 1.0]
-        mermin_taskmanager_shutdown_duration_seconds            = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
+        mermin_shutdown_duration_seconds                        = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
       }
     }
     ```
