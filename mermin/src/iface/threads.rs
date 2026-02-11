@@ -10,8 +10,8 @@ use std::{mem, os::fd::RawFd, sync::Arc, thread, time};
 
 use crossbeam::channel::{Receiver, Sender};
 use libc::{
-    AF_NETLINK, EFD_NONBLOCK, NETLINK_ADD_MEMBERSHIP, POLLERR, POLLHUP, POLLIN, POLLNVAL, SOCK_RAW,
-    SOL_NETLINK, bind, c_void, eventfd, poll, pollfd, recv, setsockopt, sockaddr_nl, socket,
+    AF_NETLINK, NETLINK_ADD_MEMBERSHIP, POLLERR, POLLHUP, POLLIN, POLLNVAL, SOCK_RAW,
+    SOL_NETLINK, bind, c_void, poll, pollfd, recv, setsockopt, sockaddr_nl, socket,
 };
 use netlink_packet_core::{NetlinkBuffer, NetlinkMessage, NetlinkPayload};
 use netlink_packet_route::{
@@ -27,6 +27,7 @@ use super::{
     types::{ControllerCommand, ControllerEvent, NetlinkEvent},
 };
 use crate::error::MerminError;
+use crate::runtime::component::ShutdownEventFd;
 
 /// Default timeout for waiting for controller thread to become ready (in seconds)
 pub const CONTROLLER_READY_TIMEOUT_SECS: u64 = 30;
@@ -55,56 +56,6 @@ impl Drop for NetlinkSocket {
             event.name = "interface_controller.netlink.socket_closed",
             socket_fd = self.0,
             "netlink socket closed via RAII cleanup"
-        );
-    }
-}
-
-/// RAII wrapper for eventfd used to signal shutdown to netlink thread.
-/// Automatically closes the eventfd when dropped.
-pub struct ShutdownEventFd(RawFd);
-
-impl ShutdownEventFd {
-    pub fn new() -> Result<Self, std::io::Error> {
-        // SAFETY: eventfd() is safe to call, we check for errors
-        let fd = unsafe { eventfd(0, EFD_NONBLOCK) };
-        if fd < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(Self(fd))
-    }
-
-    fn as_raw_fd(&self) -> RawFd {
-        self.0
-    }
-
-    /// Signal shutdown by writing to the eventfd
-    pub fn signal(&self) -> Result<(), std::io::Error> {
-        let val: u64 = 1;
-        // SAFETY: self.0 is valid, val is properly initialized
-        let ret = unsafe {
-            libc::write(
-                self.0,
-                &val as *const u64 as *const c_void,
-                mem::size_of::<u64>(),
-            )
-        };
-        if ret < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(())
-    }
-}
-
-impl Drop for ShutdownEventFd {
-    fn drop(&mut self) {
-        // SAFETY: self.0 is a valid file descriptor that we own
-        unsafe {
-            libc::close(self.0);
-        }
-        trace!(
-            event.name = "interface_controller.netlink.shutdown_fd_closed",
-            fd = self.0,
-            "shutdown eventfd closed via RAII cleanup"
         );
     }
 }

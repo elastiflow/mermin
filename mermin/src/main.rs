@@ -29,7 +29,7 @@ use mermin_common::MapUnit;
 use tokio::signal::unix::{SignalKind, signal as unix_signal};
 use tokio::{
     signal,
-    sync::{broadcast, mpsc},
+    sync::{mpsc, oneshot},
 };
 use tracing::{debug, error, info, trace, warn};
 
@@ -48,6 +48,7 @@ use crate::{
         ebpf::{EbpfMapName, init_ringbuf_metrics},
         k8s::K8sDecoratorStatus,
         processing::ProcessingStage,
+        registry::SHUTDOWN_FLOWS_TOTAL,
         server::start_metrics_server,
         userspace::{ChannelName, ChannelSendStatus},
     },
@@ -58,9 +59,10 @@ use crate::{
     runtime::{
         capabilities,
         cli::Cli,
+        component::{ComponentManager, Handle, ShutdownResult},
         context::Context,
-        shutdown::{ShutdownConfig, ShutdownManager},
-        task_manager::{ShutdownResult, TaskManager},
+        reload::{ConfigWatcher, ReloadTrigger},
+        shutdown::ShutdownConfig,
     },
     span::producer::FlowSpanProducer,
 };
@@ -134,8 +136,6 @@ const EXPORT_TIMEOUT_SECS: u64 = 10;
 const LISTENING_PORTS_CAPACITY: u64 = 65536;
 
 async fn run(cli: Cli) -> Result<()> {
-    // TODO: listen for SIGUP `kill -HUP $(pidof mermin)` to reload the eBPF program and all configuration
-    // TODO: do not reload global configuration found in CLI
     let reload_handles = init_bootstrap_logger(&cli);
     let runtime = Context::new(cli)?;
     let Context { conf, .. } = runtime;
@@ -179,30 +179,39 @@ async fn run(cli: Cli) -> Result<()> {
         None
     };
 
-    let (mut task_manager, _) = TaskManager::new();
-    let (os_shutdown_tx, _) = broadcast::channel::<()>(1);
-    let mut os_thread_handles = Vec::new();
+    let mut components = ComponentManager::new(conf.clone());
 
     // Spawn metric cleanup background task if debug metrics are enabled
     if let Some(tracker) = cleanup_tracker.clone() {
-        let shutdown_rx = os_shutdown_tx.subscribe();
-        task_manager.spawn("metrics-cleanup", async move {
+        let shutdown_rx = components.subscribe();
+        let join = tokio::spawn(async move {
             tracker.run_cleanup_loop(shutdown_rx).await;
         });
+        components.register(Handle::async_task("metrics-cleanup", join));
     }
 
     if conf.internal.metrics.enabled {
         let metrics_conf = conf.internal.metrics.clone();
-        let mut shutdown_rx = os_shutdown_tx.subscribe();
+        let mut shutdown_rx = components.subscribe();
+        let (ready_tx, ready_rx) = oneshot::channel::<std::result::Result<(), MerminError>>();
 
         // Start metrics server on a dedicated runtime thread to prevent starvation
         // This ensures /metrics endpoint always responds even when main runtime is under heavy load
         let metrics_handle = std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
+            let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .thread_name("mermin-metrics")
                 .build()
-                .expect("failed to create metrics server runtime");
+            {
+                Ok(rt) => {
+                    let _ = ready_tx.send(Ok(()));
+                    rt
+                }
+                Err(e) => {
+                    let _ = ready_tx.send(Err(MerminError::internal(format!("{e}"))));
+                    return;
+                }
+            };
 
             rt.block_on(async move {
                 tokio::select! {
@@ -222,8 +231,30 @@ async fn run(cli: Cli) -> Result<()> {
                 info!(event.name = "metrics.server_exited", "metrics server has shut down");
             });
         });
-        os_thread_handles.push(("metrics-server".to_string(), metrics_handle));
-        info!(event.name = "metrics.started", "metrics server started");
+
+        // Wait for the thread to confirm its runtime started successfully
+        match ready_rx.await {
+            Ok(Ok(())) => {
+                components.register(Handle::thread("metrics-server", metrics_handle));
+                info!(event.name = "metrics.started", "metrics server started");
+            }
+            Ok(Err(e)) => {
+                error!(
+                    event.name = "metrics.runtime_failed",
+                    error.message = %e,
+                    "failed to create metrics server runtime; continuing without metrics"
+                );
+                // Thread has already returned; join it to clean up
+                let _ = metrics_handle.join();
+            }
+            Err(_) => {
+                error!(
+                    event.name = "metrics.runtime_failed",
+                    "metrics server thread exited before reporting readiness; continuing without metrics"
+                );
+                let _ = metrics_handle.join();
+            }
+        }
     }
 
     let health_state = HealthState::default();
@@ -231,7 +262,7 @@ async fn run(cli: Cli) -> Result<()> {
     if conf.internal.server.enabled {
         let health_state_clone = health_state.clone();
         let server_conf = conf.internal.server.clone();
-        let mut shutdown_rx = os_shutdown_tx.subscribe();
+        let mut shutdown_rx = components.subscribe();
 
         // Start API server on a dedicated runtime thread to prevent starvation
         // This ensures health checks always respond even when main runtime is under heavy load
@@ -260,7 +291,7 @@ async fn run(cli: Cli) -> Result<()> {
                 debug!(event.name = "api.server_exited", "api server has shut down");
             });
         });
-        os_thread_handles.push(("api-server".to_string(), api_handle));
+        components.register(Handle::thread("api-server", api_handle));
         info!(
             event.name = "api.started",
             "api server started, health checks will report not ready until initialization completes"
@@ -556,10 +587,11 @@ async fn run(cli: Cli) -> Result<()> {
         "ebpf maps ready for flow producer"
     );
 
-    let log_shutdown_rx = os_shutdown_tx.subscribe();
-    task_manager.spawn("ebpf-log-consumer", async move {
+    let log_shutdown_rx = components.subscribe();
+    let log_join = tokio::spawn(async move {
         runtime::ebpf_log::run_log_consumer(log_events_ringbuf, log_shutdown_rx).await;
     });
+    components.register(Handle::async_task("ebpf-log-consumer", log_join));
     debug!(
         event.name = "ebpf.log_consumer_started",
         "ebpf log consumer started"
@@ -638,7 +670,7 @@ async fn run(cli: Cli) -> Result<()> {
 
     let event_handler_handle = spawn_controller_event_handler(event_rx)
         .map_err(|e| MerminError::internal(format!("failed to spawn event handler: {e}")))?;
-    os_thread_handles.push(("iface-event-handler".to_string(), event_handler_handle));
+    components.register(Handle::thread("iface-event-handler", event_handler_handle));
 
     info!(
         event.name = "ebpf.ready",
@@ -759,19 +791,12 @@ async fn run(cli: Cli) -> Result<()> {
 
     // K8s decorator runs on dedicated thread pool to prevent K8s API lookups from blocking main runtime
     let decorator_threads = conf.pipeline.k8s_decorator.threads;
-    let get_extract_rules = |direction: &str| -> Vec<String> {
-        conf.attributes
-            .as_ref()
-            .and_then(|directions_map| directions_map.get(direction))
-            .and_then(|providers_map| providers_map.get("k8s"))
-            .map(|options| options.extract.metadata.clone())
-            .unwrap_or_default()
-    };
 
-    let source_extract_rules = get_extract_rules("source");
-    let dest_extract_rules = get_extract_rules("destination");
+    let source_extract_rules = conf.k8s_extract_metadata("source");
+    let dest_extract_rules = conf.k8s_extract_metadata("destination");
 
-    let mut decorator_shutdown_rx = os_shutdown_tx.subscribe();
+    let mut decorator_shutdown_rx = components.subscribe();
+    let mut decorator_config_rx = components.config_receiver();
     let decorator_handle = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(decorator_threads)
@@ -792,15 +817,21 @@ async fn run(cli: Cli) -> Result<()> {
             // Matching on the attributor early is a performance optimization to avoid having to check to see if the attributor is None per flow_span_rx receive.
             match k8s_attributor.as_ref() {
                 Some(attributor) => {
-                    let decorator = Decorator::new(attributor, source_extract_rules, dest_extract_rules);
+                    let mut decorator = Decorator::new(attributor, source_extract_rules, dest_extract_rules);
                     loop {
                         tokio::select! {
                             _ = decorator_shutdown_rx.recv() => {
-                            info!(
-                                event.name = "k8s.decorator.shutdown_signal_received",
-                                "k8s decorator received shutdown signal"
-                            );
-                            break;
+                                break;
+                            },
+                            Ok(_) = decorator_config_rx.changed() => {
+                                let new_conf = decorator_config_rx.borrow_and_update();
+                                let source = new_conf.k8s_extract_metadata("source");
+                                let dest = new_conf.k8s_extract_metadata("destination");
+                                decorator.update_extract_rules(source, dest);
+                                debug!(
+                                    event.name = "k8s.decorator.config_reloaded",
+                                    "k8s decorator extract rules updated from reloaded config"
+                                );
                             },
                             maybe_span = flow_span_rx.recv() => {
                                 let Some(flow_span) = maybe_span else { break };
@@ -903,25 +934,27 @@ async fn run(cli: Cli) -> Result<()> {
             );
         });
     });
-    let decorator_join_handle = decorator_handle;
+
+    // Register decorator thread -- will be shut down after exporter (reverse order)
+    components.register(Handle::thread("k8s-decorator", decorator_handle));
 
     health_state
         .k8s_caches_synced
         .store(true, Ordering::Relaxed);
 
-    task_manager.spawn_with_shutdown("span-producer", |shutdown_rx| {
-        Box::pin(async move {
-            flow_span_producer.run(shutdown_rx).await;
-            info!(
-                event.name = "task.exited",
-                task.name = "span.producer",
-                "flow span producer task exited"
-            );
-        })
+    let producer_shutdown_rx = components.subscribe();
+    let producer_join = tokio::spawn(async move {
+        flow_span_producer.run(producer_shutdown_rx).await;
+        info!(
+            event.name = "task.exited",
+            task.name = "span.producer",
+            "flow span producer task exited"
+        );
     });
+    components.register(Handle::async_task("span-producer", producer_join));
     health_state.ready_to_process.store(true, Ordering::Relaxed);
 
-    task_manager.spawn("exporter", async move {
+    let exporter_join = tokio::spawn(async move {
         while let Some(flow_span) = k8s_decorated_flow_span_rx.recv().await {
             let flow_span_clone = flow_span.clone();
             let queue_size = k8s_decorated_flow_span_rx.len();
@@ -938,7 +971,11 @@ async fn run(cli: Cli) -> Result<()> {
 
             // Track export blocking time and timeouts
             let export_start = std::time::Instant::now();
-            let export_result = tokio::time::timeout(Duration::from_secs(EXPORT_TIMEOUT_SECS), exporter.export(traceable)).await;
+            let export_result = tokio::time::timeout(
+                Duration::from_secs(EXPORT_TIMEOUT_SECS),
+                exporter.export(traceable),
+            )
+            .await;
             let export_duration = export_start.elapsed();
             metrics::registry::processing_duration_seconds()
                 .with_label_values(&[ProcessingStage::ExportOut.as_str()])
@@ -946,7 +983,10 @@ async fn run(cli: Cli) -> Result<()> {
 
             if export_result.is_err() {
                 metrics::registry::EXPORT_TIMEOUTS_TOTAL.inc();
-                warn!(event.name = "flow.export_timeout", "export call timed out, span may be lost");
+                warn!(
+                    event.name = "flow.export_timeout",
+                    "export call timed out, span may be lost"
+                );
             } else {
                 trace!(event.name = "exporter.export_successful", flow.community_id = %community_id);
             }
@@ -959,14 +999,16 @@ async fn run(cli: Cli) -> Result<()> {
         );
 
         match shutdown_exporter_gracefully(Arc::clone(&exporter), Duration::from_secs(5)).await {
-            Ok(()) => {
-                info!(event.name = "exporter.otlp_shutdown_success", "opentelemetry provider shut down cleanly");
-            }
+            Ok(()) => {}
             Err(e) => {
                 let event_name = match &e {
                     MerminError::Otlp(_) => "exporter.otlp_shutdown_error",
-                    MerminError::Internal(msg) if msg.contains("timed out") => "exporter.otlp_shutdown_timeout",
-                    MerminError::Internal(msg) if msg.contains("panicked") => "exporter.otlp_shutdown_panic",
+                    MerminError::Internal(msg) if msg.contains("timed out") => {
+                        "exporter.otlp_shutdown_timeout"
+                    }
+                    MerminError::Internal(msg) if msg.contains("panicked") => {
+                        "exporter.otlp_shutdown_panic"
+                    }
                     _ => "exporter.otlp_shutdown_error",
                 };
                 warn!(event.name = event_name, error.message = %e, "opentelemetry provider shutdown failed");
@@ -979,6 +1021,16 @@ async fn run(cli: Cli) -> Result<()> {
             "exporter task exited"
         );
     });
+    components.register(Handle::async_task("exporter", exporter_join));
+
+    // Register controller and netlink last so they are joined first (reverse order)
+    // This ensures data-plane components finish before control-plane threads exit
+    components.register(Handle::thread("controller", controller_handle));
+    components.register(Handle::thread_with_shutdown(
+        "netlink",
+        netlink_handle,
+        netlink_shutdown_fd,
+    ));
 
     info!(
         event.name = "application.startup_finished",
@@ -1002,62 +1054,163 @@ async fn run(cli: Cli) -> Result<()> {
         );
     }
 
-    info!("waiting for shutdown signal (ctrl+c or SIGTERM)");
+    if conf.auto_reload {
+        info!("waiting for shutdown signal or config reload trigger (sighup / file change)");
 
-    let shutdown_signal = wait_for_shutdown_signal().await?;
+        let mut config_watcher = ConfigWatcher::new(conf.config_path.as_deref())
+            .map_err(|e| MerminError::internal(format!("failed to create config watcher: {e}")))?;
 
-    info!(
-        event.name = "application.shutdown_signal_received",
-        signal.kind = %shutdown_signal,
-        "received shutdown signal, starting graceful cleanup"
-    );
+        loop {
+            tokio::select! {
+                shutdown = wait_for_shutdown_signal() => {
+                    let shutdown_signal = shutdown?;
+                    info!(
+                        event.name = "application.shutdown_signal_received",
+                        signal.kind = %shutdown_signal,
+                        "received shutdown signal, starting graceful cleanup"
+                    );
+                    break;
+                }
+                trigger = config_watcher.next() => {
+                    let Some(trigger) = trigger else {
+                        warn!(
+                            event.name = "application.reload_channel_closed",
+                            "reload channel closed unexpectedly, shutting down"
+                        );
+                        break;
+                    };
+                    match &trigger {
+                        ReloadTrigger::Sighup => {
+                            info!(
+                                event.name = "application.config_reload_triggered",
+                                trigger = "sighup",
+                                "config reload triggered"
+                            );
+                        }
+                        ReloadTrigger::FileChanged(path) => {
+                            info!(
+                                event.name = "application.config_reload_triggered",
+                                trigger = "file_changed",
+                                path = %path.display(),
+                                "config reload triggered"
+                            );
+                        }
+                    }
+                    // `conf` is intentionally kept as the original startup config.
+                    // `reload()` uses it as the base (preserving CLI/env precedence)
+                    // and layers the current file on top -- subsequent reloads always
+                    // produce "original CLI/env + latest file" which is the desired
+                    // precedence order.
+                    match conf.reload() {
+                        Ok(new_conf) => {
+                            info!(
+                                event.name = "application.config_reloaded",
+                                "configuration reloaded successfully"
+                            );
+                            components.reload_config(new_conf);
+                        }
+                        Err(e) => {
+                            warn!(
+                                event.name = "application.config_reload_failed",
+                                error.message = %e,
+                                "failed to reload configuration, keeping current config"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        info!("waiting for shutdown signal (ctrl+c or SIGTERM)");
 
-    let shutdown_config = ShutdownConfig {
+        let shutdown_signal = wait_for_shutdown_signal().await?;
+        info!(
+            event.name = "application.shutdown_signal_received",
+            signal.kind = %shutdown_signal,
+            "received shutdown signal, starting graceful cleanup"
+        );
+    }
+
+    let mut shutdown_config = ShutdownConfig {
         timeout: conf.shutdown_timeout,
         preserve_flows: true,
         //TODO: Review if this value should be a global config
         flow_preservation_timeout: Duration::from_secs(10),
     };
 
-    let shutdown_manager = ShutdownManager::builder()
-        .with_shutdown_config(shutdown_config)
-        .with_os_shutdown_tx(os_shutdown_tx)
-        .with_cmd_tx(cmd_tx)
-        .with_netlink_shutdown_fd(netlink_shutdown_fd)
-        .with_task_manager(task_manager)
-        .with_decorator_join_handle(decorator_join_handle)
-        .with_os_thread_handles(os_thread_handles)
-        .with_controller_handle(controller_handle)
-        .with_netlink_handle(netlink_handle)
-        .with_flow_span_components(flow_span_components)
-        .with_trace_id_cache(trace_id_cache)
-        .build();
+    // Preserve active flows before signaling shutdown.
+    // The time spent here is subtracted from the component shutdown timeout
+    // so the total shutdown duration stays within the configured budget.
+    let pre_shutdown_start = std::time::Instant::now();
+    if shutdown_config.preserve_flows {
+        info!(
+            event.name = "application.shutdown.preserving_flows",
+            timeout_seconds = shutdown_config.flow_preservation_timeout.as_secs(),
+            "attempting to preserve active flows"
+        );
+        match flow_span_components
+            .preserve_active_flows(&trace_id_cache, shutdown_config.flow_preservation_timeout)
+            .await
+        {
+            Ok(preserved_count) => {
+                SHUTDOWN_FLOWS_TOTAL
+                    .with_label_values(&["preserved"])
+                    .inc_by(preserved_count as u64);
+                info!(
+                    event.name = "application.shutdown.flows_preserved",
+                    count = preserved_count,
+                    "successfully preserved active flows"
+                );
+            }
+            Err(lost_count) => {
+                SHUTDOWN_FLOWS_TOTAL
+                    .with_label_values(&["lost"])
+                    .inc_by(lost_count as u64);
+                warn!(
+                    event.name = "application.shutdown.flows_lost",
+                    count = lost_count,
+                    "some flows were lost during preservation"
+                );
+            }
+        }
+    }
 
-    let shutdown_result = shutdown_manager.shutdown().await;
+    // Deduct flow-preservation time from the component shutdown budget so
+    // the total shutdown duration stays within `conf.shutdown_timeout`.
+    shutdown_config.timeout = shutdown_config
+        .timeout
+        .saturating_sub(pre_shutdown_start.elapsed());
+
+    // Signal controller thread to shut down before component manager broadcasts
+    let _ = cmd_tx.send(ControllerCommand::Shutdown);
+
+    let shutdown_result = components.shutdown(shutdown_config).await;
 
     match shutdown_result {
         ShutdownResult::Graceful {
             duration,
-            tasks_completed,
+            components_completed,
         } => {
             info!(
                 event.name = "application.cleanup_complete",
                 duration_ms = duration.as_millis(),
-                tasks_completed = tasks_completed,
+                components_completed = components_completed,
                 "graceful cleanup completed successfully"
             );
         }
-        ShutdownResult::ForcedCancellation {
+        ShutdownResult::ForcedTermination {
             duration,
-            tasks_cancelled,
-            tasks_completed,
+            components_completed,
+            components_failed,
+            ref failed_names,
         } => {
             warn!(
-                event.name = "application.cleanup_complete_with_cancellation",
+                event.name = "application.cleanup_complete_with_failures",
                 duration_ms = duration.as_millis(),
-                tasks_completed = tasks_completed,
-                tasks_cancelled = tasks_cancelled,
-                "cleanup completed but some tasks were forcefully cancelled"
+                components_completed = components_completed,
+                components_failed = components_failed,
+                failed = ?failed_names,
+                "cleanup completed but some components failed or timed out"
             );
         }
     }
