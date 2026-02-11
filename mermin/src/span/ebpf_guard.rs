@@ -48,6 +48,8 @@ use mermin_common::FlowKey;
 use tokio::sync::Mutex;
 use tracing::warn;
 
+use crate::metrics::ebpf::map_entry_not_found;
+
 /// RAII guard for eBPF flow map entries.
 ///
 /// Automatically removes entries from `FLOW_STATS` when dropped,
@@ -110,10 +112,7 @@ impl Drop for EbpfFlowGuard {
                         );
                     }
                     Err(e) => {
-                        if !matches!(
-                            e,
-                            aya::maps::MapError::KeyNotFound | aya::maps::MapError::ElementNotFound
-                        ) {
+                        if !map_entry_not_found(&e) {
                             warn!(
                                 event.name = "ebpf_guard.cleanup_failed",
                                 flow.key = ?key,

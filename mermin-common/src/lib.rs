@@ -421,6 +421,34 @@ impl FlowStats {
 
     /// Returns whether the SYN (synchronize) TCP flag is set.
     /// Used in the TCP handshake to establish connections.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use mermin_common::{FlowStats, ConnectionState, Direction, IpVersion};
+    /// # use network_types::eth::EtherType;
+    /// # use network_types::ip::IpProto;
+    /// # let mut stats = FlowStats {
+    /// #     first_seen_ns: 0, last_seen_ns: 0, packets: 0, bytes: 0,
+    /// #     reverse_packets: 0, reverse_bytes: 0, tcp_syn_ns: 0, tcp_syn_ack_ns: 0,
+    /// #     tcp_last_payload_fwd_ns: 0, tcp_last_payload_rev_ns: 0, tcp_txn_sum_ns: 0,
+    /// #     src_ip: [0; 16], dst_ip: [0; 16], ifindex: 0, ip_flow_label: 0,
+    /// #     reverse_ip_flow_label: 0, tcp_txn_count: 0, tcp_jitter_avg_ns: 0,
+    /// #     ether_type: EtherType::default(), src_port: 0, dst_port: 0, src_mac: [0; 6],
+    /// #     direction: Direction::default(), ip_version: IpVersion::default(),
+    /// #     protocol: IpProto::default(), ip_dscp: 0, ip_ecn: 0, ip_ttl: 0,
+    /// #     reverse_ip_dscp: 0, reverse_ip_ecn: 0, reverse_ip_ttl: 0,
+    /// #     forward_metadata_seen: 0, reverse_metadata_seen: 0, tcp_flags: 0,
+    /// #     tcp_state: ConnectionState::default(), forward_tcp_flags: 0,
+    /// #     reverse_tcp_flags: 0, icmp_type: 0, icmp_code: 0,
+    /// #     reverse_icmp_type: 0, reverse_icmp_code: 0,
+    /// # };
+    /// stats.tcp_flags = FlowStats::TCP_FLAG_SYN | FlowStats::TCP_FLAG_ACK;
+    ///
+    /// assert!(stats.syn());
+    /// assert!(stats.ack());
+    /// assert!(!stats.fin());
+    /// ```
     #[inline]
     pub fn syn(&self) -> bool {
         Self::get_tcp_flag(self.tcp_flags, Self::TCP_FLAG_SYN)

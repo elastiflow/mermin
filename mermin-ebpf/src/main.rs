@@ -132,7 +132,7 @@ const FLOW_EVENT_PACKET_DATA_SIZE: usize = 192;
 ///     }
 ///   }
 ///
-/// Memory calculation: flows × ~300 bytes (FlowStats: 184 + FlowKey: 58 + BPF overhead: ~58)
+/// Memory calculation: flows × ~300 bytes (FlowStats: 176 + FlowKey: 58 + BPF overhead: ~58)
 #[cfg(not(feature = "test"))]
 const MAX_FLOWS: u32 = 10_000_000; // Upper bound, overridden at runtime
 #[cfg(not(feature = "test"))]
@@ -170,7 +170,7 @@ const LOG_BUF_SIZE_BYTES: u32 = 4 * 1024;
 static mut LOG_EVENTS: RingBuf = RingBuf::with_byte_size(LOG_BUF_SIZE_BYTES, 0);
 
 // Per-CPU scratch space for FlowStats initialization
-// Used to avoid stack overflow (FlowStats is 184 bytes, eBPF stack limit is 512 bytes)
+// Used to avoid stack overflow (FlowStats is 176 bytes, eBPF stack limit is 512 bytes)
 #[cfg(not(feature = "test"))]
 #[map]
 static mut FLOW_STATS_SCRATCH: PerCpuArray<FlowStats> = PerCpuArray::with_max_entries(1, 0);

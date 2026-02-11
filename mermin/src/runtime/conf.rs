@@ -793,14 +793,13 @@ pub mod conf_serde {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct FlowCapture {
-    /// Max capacity (upper bound) for the FLOW_STATS, TCP_STATS, and ICMP_STATS eBPF maps
-    /// (default: 100,000)
+    /// Max capacity (upper bound) for the FLOW_STATS eBPF map (default: 100,000).
     ///
-    /// Each eBPF map is created with this fixed `max_entries` at load time and does not
-    /// resize at runtime. Once a map is full, new entry inserts attempts are dropped.
+    /// The eBPF map is created with this fixed `max_entries` at load time and does not
+    /// resize at runtime. Once the map is full, new entry insert attempts are dropped.
     ///
     /// Controls memory usage of the eBPF FLOW_STATS.
-    /// Memory: flows × 232 bytes
+    /// Memory: flows × ~300 bytes (FlowStats: 176 + FlowKey: 58 + BPF overhead: ~58)
     ///
     /// Sizing guide based on typical cluster FPS (flows per second) per node:
     /// - General/Mixed (50-200 FPS):         50,000 (~12 MB) - dev/testing, 2.5-50x headroom
@@ -986,7 +985,7 @@ impl PipelineOptions {
         let span_decorated_size = size_of::<FlowSpan>() as u64 + 2048;
 
         let capture_bytes = {
-            // Consolidated FLOW_STATS map: FlowStats (184 bytes, includes TCP/ICMP) + FlowKey (58) + BPF overhead (~58) ≈ 300
+            // Consolidated FLOW_STATS map: FlowStats (176 bytes, includes TCP/ICMP) + FlowKey (58) + BPF overhead (~58) ≈ 300
             let stats_map = self.flow_capture.flow_stats_capacity as u64 * 300;
             let ring_buf = self.flow_capture.flow_events_capacity as u64 * flow_event_size;
             stats_map + ring_buf
