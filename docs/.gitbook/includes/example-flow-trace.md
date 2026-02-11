@@ -4,6 +4,7 @@ title: Flow Trace Example - OTLP JSON Format
 
 Below is an example of what a flow span might look like in OTLP JSON format.
 
+{% code fullWidth="false" %}
 ```json
 {
   "name": "flow_ipv4_tcp",
@@ -46,3 +47,4 @@ Below is an example of what a flow span might look like in OTLP JSON format.
   ]
 }
 ```
+{% endcode %}
