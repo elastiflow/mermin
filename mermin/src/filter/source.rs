@@ -390,15 +390,15 @@ impl PacketFilter {
 
         if matches!(flow_key.protocol, IpProto::Icmp | IpProto::Ipv6Icmp) {
             // Use numeric ICMP type/code for filtering since the types don't implement Display
-            let icmp_type_str = stats.icmp.icmp_type.to_string();
-            let icmp_code_str = stats.icmp.icmp_code.to_string();
+            let icmp_type_str = stats.icmp_type.to_string();
+            let icmp_code_str = stats.icmp_code.to_string();
             check_filter!(&self.flow.icmp_type_name, icmp_type_str.as_str());
             check_filter!(&self.flow.icmp_code_name, icmp_code_str.as_str());
         }
 
         if flow_key.protocol == IpProto::Tcp {
             if let Some(rules) = &self.flow.tcp_flags_tags {
-                let flags_vec = TcpFlags::flags_from_bits(stats.tcp.tcp_flags);
+                let flags_vec = TcpFlags::flags_from_bits(stats.tcp_flags);
                 // Check each flag individually against the patterns
                 // This allows patterns like "syn,ack" to match flows with any of those flags
                 for flag in &flags_vec {
@@ -419,7 +419,7 @@ impl PacketFilter {
                 }
             }
 
-            check_filter!(&self.flow.connection_state, stats.tcp.tcp_state.as_str());
+            check_filter!(&self.flow.connection_state, stats.tcp_state.as_str());
         }
 
         // Source/Destination filters (requires IP parsing)
@@ -458,7 +458,7 @@ mod tests {
         sync::Arc,
     };
 
-    use mermin_common::{Direction, FlowKey, FlowStats, IcmpStats, IpVersion, TcpStats};
+    use mermin_common::{ConnectionState, Direction, FlowKey, FlowStats, IpVersion};
     use network_types::{
         eth::EtherType,
         ip::IpProto,
@@ -500,14 +500,22 @@ mod tests {
             bytes: 0,
             reverse_packets: 0,
             reverse_bytes: 0,
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
             src_ip: [0; 16],
             dst_ip: [0; 16],
-            src_mac: [0; 6],
             ifindex,
             ip_flow_label: 0,
+            reverse_ip_flow_label: 0,
+            tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
             ether_type: EtherType::Ipv4,
             src_port: 0,
             dst_port: 0,
+            src_mac: [0; 6],
             direction: Direction::Egress,
             ip_version: IpVersion::V4,
             protocol: IpProto::Tcp,
@@ -517,7 +525,6 @@ mod tests {
             reverse_ip_dscp: 0,
             reverse_ip_ecn: 0,
             reverse_ip_ttl: 0,
-            reverse_ip_flow_label: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 0,
             pid: 0,
@@ -825,7 +832,7 @@ mod tests {
         );
         let mut flow_stats_ok = mock_flow_stats(1);
         flow_stats_ok.protocol = IpProto::Icmp;
-        flow_stats_ok.icmp.icmp_type = 8; // Echo Request
+        flow_stats_ok.icmp_type = 8; // Echo Request
 
         assert!(
             filter
@@ -842,7 +849,7 @@ mod tests {
         );
         let mut flow_stats_bad = mock_flow_stats(1);
         flow_stats_bad.protocol = IpProto::Icmp;
-        flow_stats_bad.icmp.icmp_type = 3; // Destination Unreachable
+        flow_stats_bad.icmp_type = 3; // Destination Unreachable
 
         assert!(
             !filter
@@ -888,7 +895,7 @@ mod tests {
         );
 
         let mut flow_stats_syn_ack = mock_flow_stats(1);
-        flow_stats_syn_ack.tcp.tcp_flags = TCP_FLAG_SYN | TCP_FLAG_ACK;
+        flow_stats_syn_ack.tcp_flags = TCP_FLAG_SYN | TCP_FLAG_ACK;
 
         assert!(
             filter
@@ -897,7 +904,7 @@ mod tests {
         ); // Has ACK, no RST
 
         let mut flow_stats_ack = mock_flow_stats(1);
-        flow_stats_ack.tcp.tcp_flags = TCP_FLAG_ACK;
+        flow_stats_ack.tcp_flags = TCP_FLAG_ACK;
 
         assert!(
             filter
@@ -906,7 +913,7 @@ mod tests {
         ); // Has ACK, no RST
 
         let mut flow_stats_rst = mock_flow_stats(1);
-        flow_stats_rst.tcp.tcp_flags = TCP_FLAG_RST;
+        flow_stats_rst.tcp_flags = TCP_FLAG_RST;
 
         assert!(
             !filter
@@ -915,7 +922,7 @@ mod tests {
         ); // Has RST
 
         let mut flow_stats_syn_rst = mock_flow_stats(1);
-        flow_stats_syn_rst.tcp.tcp_flags = TCP_FLAG_SYN | TCP_FLAG_RST;
+        flow_stats_syn_rst.tcp_flags = TCP_FLAG_SYN | TCP_FLAG_RST;
 
         assert!(
             !filter

@@ -1024,7 +1024,7 @@ impl FlowWorker {
             attributes: SpanAttributes {
                 // General flow attributes
                 flow_community_id: community_id.to_string(),
-                flow_connection_state: is_tcp.then_some(stats.tcp.tcp_state),
+                flow_connection_state: is_tcp.then_some(stats.tcp_state),
                 flow_end_reason: None,
 
                 // Network endpoints
@@ -1077,39 +1077,38 @@ impl FlowWorker {
                 flow_reverse_ip_flow_label: is_ipv6.then_some(stats.reverse_ip_flow_label),
 
                 // TCP metadata (only populated for TCP flows)
-                flow_tcp_flags_bits: is_tcp.then_some(stats.tcp.tcp_flags),
-                flow_tcp_flags_tags: is_tcp.then(|| TcpFlags::flags_from_bits(stats.tcp.tcp_flags)),
-                flow_reverse_tcp_flags_bits: is_tcp.then_some(stats.tcp.reverse_tcp_flags),
+                flow_tcp_flags_bits: is_tcp.then_some(stats.tcp_flags),
+                flow_tcp_flags_tags: is_tcp.then(|| TcpFlags::flags_from_bits(stats.tcp_flags)),
+                flow_reverse_tcp_flags_bits: is_tcp.then_some(stats.reverse_tcp_flags),
                 flow_reverse_tcp_flags_tags: is_tcp
-                    .then(|| TcpFlags::flags_from_bits(stats.tcp.reverse_tcp_flags)),
+                    .then(|| TcpFlags::flags_from_bits(stats.reverse_tcp_flags)),
                 flow_tcp_handshake_latency: (is_tcp
-                    && stats.tcp.tcp_syn_ns != 0
-                    && stats.tcp.tcp_syn_ack_ns != 0)
+                    && stats.tcp_syn_ns != 0
+                    && stats.tcp_syn_ack_ns != 0)
                     .then(|| {
                         TcpFlags::handshake_latency_from_stats(
-                            stats.tcp.tcp_syn_ns,
-                            stats.tcp.tcp_syn_ack_ns,
+                            stats.tcp_syn_ns,
+                            stats.tcp_syn_ack_ns,
                         )
                     }),
-                flow_tcp_svc_latency: (is_tcp && is_server && stats.tcp.tcp_txn_count > 0).then(
+                flow_tcp_svc_latency: (is_tcp && is_server && stats.tcp_txn_count > 0).then(|| {
+                    TcpFlags::transaction_latency_from_stats(
+                        stats.tcp_txn_sum_ns,
+                        stats.tcp_txn_count,
+                    )
+                }),
+                flow_tcp_svc_jitter: (is_tcp && is_server && stats.tcp_txn_count > 0)
+                    .then_some(stats.tcp_jitter_avg_ns as i64),
+                flow_tcp_rndtrip_latency: (is_tcp && is_client && stats.tcp_txn_count > 0).then(
                     || {
                         TcpFlags::transaction_latency_from_stats(
-                            stats.tcp.tcp_txn_sum_ns,
-                            stats.tcp.tcp_txn_count,
+                            stats.tcp_txn_sum_ns,
+                            stats.tcp_txn_count,
                         )
                     },
                 ),
-                flow_tcp_svc_jitter: (is_tcp && is_server && stats.tcp.tcp_txn_count > 0)
-                    .then_some(stats.tcp.tcp_jitter_avg_ns as i64),
-                flow_tcp_rndtrip_latency: (is_tcp && is_client && stats.tcp.tcp_txn_count > 0)
-                    .then(|| {
-                        TcpFlags::transaction_latency_from_stats(
-                            stats.tcp.tcp_txn_sum_ns,
-                            stats.tcp.tcp_txn_count,
-                        )
-                    }),
-                flow_tcp_rndtrip_jitter: (is_tcp && is_client && stats.tcp.tcp_txn_count > 0)
-                    .then_some(stats.tcp.tcp_jitter_avg_ns as i64),
+                flow_tcp_rndtrip_jitter: (is_tcp && is_client && stats.tcp_txn_count > 0)
+                    .then_some(stats.tcp_jitter_avg_ns as i64),
 
                 // Client/Server attributes (from direction inference)
                 client_address,
@@ -1179,23 +1178,23 @@ impl FlowWorker {
                 flow_icmp_code_name: icmp_code_name(
                     is_icmp,
                     is_icmpv6,
-                    stats.icmp.icmp_type,
-                    stats.icmp.icmp_code,
+                    stats.icmp_type,
+                    stats.icmp_code,
                 ),
                 flow_reverse_icmp_type_id: (is_icmp || is_icmpv6)
-                    .then_some(stats.icmp.reverse_icmp_type),
+                    .then_some(stats.reverse_icmp_type),
                 flow_reverse_icmp_type_name: icmp_type_name(
                     is_icmp,
                     is_icmpv6,
-                    stats.icmp.reverse_icmp_type,
+                    stats.reverse_icmp_type,
                 ),
                 flow_reverse_icmp_code_id: (is_icmp || is_icmpv6)
-                    .then_some(stats.icmp.reverse_icmp_code),
+                    .then_some(stats.reverse_icmp_code),
                 flow_reverse_icmp_code_name: icmp_code_name(
                     is_icmp,
                     is_icmpv6,
-                    stats.icmp.reverse_icmp_type,
-                    stats.icmp.reverse_icmp_code,
+                    stats.reverse_icmp_type,
+                    stats.reverse_icmp_code,
                 ),
 
                 // Initialize counters (will be updated from eBPF map on record intervals)
@@ -1315,9 +1314,9 @@ impl FlowWorker {
         match stats.protocol {
             IpProto::Icmp | IpProto::Ipv6Icmp => self.icmp_timeout,
             IpProto::Tcp => {
-                if stats.tcp.tcp_flags & TCP_FLAG_FIN != 0 {
+                if stats.tcp_flags & TCP_FLAG_FIN != 0 {
                     self.tcp_fin_timeout
-                } else if stats.tcp.tcp_flags & TCP_FLAG_RST != 0 {
+                } else if stats.tcp_flags & TCP_FLAG_RST != 0 {
                     self.tcp_rst_timeout
                 } else {
                     self.tcp_timeout
@@ -1899,7 +1898,7 @@ async fn record_flow(
 
     let flow_span = &mut entry_ref.flow_span;
     let is_tcp = stats.protocol == IpProto::Tcp;
-    flow_span.attributes.flow_connection_state = is_tcp.then_some(stats.tcp.tcp_state);
+    flow_span.attributes.flow_connection_state = is_tcp.then_some(stats.tcp_state);
     flow_span.attributes.flow_bytes_delta = delta_bytes as i64;
     flow_span.attributes.flow_packets_delta = delta_packets as i64;
     flow_span.attributes.flow_reverse_bytes_delta = delta_reverse_bytes as i64;
@@ -1939,22 +1938,20 @@ async fn record_flow(
 
     if is_tcp {
         if flow_span.attributes.flow_tcp_handshake_latency.is_none()
-            && stats.tcp.tcp_syn_ns != 0
-            && stats.tcp.tcp_syn_ack_ns != 0
+            && stats.tcp_syn_ns != 0
+            && stats.tcp_syn_ack_ns != 0
         {
-            flow_span.attributes.flow_tcp_handshake_latency =
-                Some(TcpFlags::handshake_latency_from_stats(
-                    stats.tcp.tcp_syn_ns,
-                    stats.tcp.tcp_syn_ack_ns,
-                ));
+            flow_span.attributes.flow_tcp_handshake_latency = Some(
+                TcpFlags::handshake_latency_from_stats(stats.tcp_syn_ns, stats.tcp_syn_ack_ns),
+            );
         }
 
-        if stats.tcp.tcp_txn_count > 0 {
+        if stats.tcp_txn_count > 0 {
             let current_latency = Some(TcpFlags::transaction_latency_from_stats(
-                stats.tcp.tcp_txn_sum_ns,
-                stats.tcp.tcp_txn_count,
+                stats.tcp_txn_sum_ns,
+                stats.tcp_txn_count,
             ));
-            let current_jitter = Some(stats.tcp.tcp_jitter_avg_ns as i64);
+            let current_jitter = Some(stats.tcp_jitter_avg_ns as i64);
 
             if is_server {
                 flow_span.attributes.flow_tcp_svc_latency = current_latency;
@@ -1967,10 +1964,10 @@ async fn record_flow(
     }
 
     if stats.protocol == IpProto::Icmp || stats.protocol == IpProto::Ipv6Icmp {
-        flow_span.attributes.flow_icmp_type_id = Some(stats.icmp.icmp_type);
-        flow_span.attributes.flow_icmp_code_id = Some(stats.icmp.icmp_code);
-        flow_span.attributes.flow_reverse_icmp_type_id = Some(stats.icmp.reverse_icmp_type);
-        flow_span.attributes.flow_reverse_icmp_code_id = Some(stats.icmp.reverse_icmp_code);
+        flow_span.attributes.flow_icmp_type_id = Some(stats.icmp_type);
+        flow_span.attributes.flow_icmp_code_id = Some(stats.icmp_code);
+        flow_span.attributes.flow_reverse_icmp_type_id = Some(stats.reverse_icmp_type);
+        flow_span.attributes.flow_reverse_icmp_code_id = Some(stats.reverse_icmp_code);
     }
 
     // Update IP metadata from eBPF stats
@@ -2583,7 +2580,7 @@ fn determine_flow_end_reason(
 mod tests {
     use std::time::SystemTime;
 
-    use mermin_common::{ConnectionState, IpVersion, TcpStats};
+    use mermin_common::{ConnectionState, IpVersion};
     use opentelemetry::trace::SpanKind;
 
     use super::*;
@@ -2591,24 +2588,31 @@ mod tests {
     /// Helper to create test FlowStats
     fn create_test_stats(proto: IpProto) -> FlowStats {
         FlowStats {
-            direction: mermin_common::Direction::Egress,
-            ether_type: EtherType::Ipv4,
-            ip_version: IpVersion::V4,
-            protocol: proto,
-            src_ip: [192, 168, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            dst_ip: [192, 168, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            src_port: 12345,
-            dst_port: 80,
+            first_seen_ns: 1_000_000_000,
+            last_seen_ns: 1_000_000_000,
             packets: 1,
             bytes: 100,
             reverse_packets: 0,
             reverse_bytes: 0,
-            src_mac: [0; 6],
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
+            src_ip: [192, 168, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            dst_ip: [192, 168, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             ifindex: 1,
             ip_flow_label: 0,
             reverse_ip_flow_label: 0,
-            first_seen_ns: 1_000_000_000,
-            last_seen_ns: 1_000_000_000,
+            tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
+            ether_type: EtherType::Ipv4,
+            src_port: 12345,
+            dst_port: 80,
+            src_mac: [0; 6],
+            direction: mermin_common::Direction::Egress,
+            ip_version: IpVersion::V4,
+            protocol: proto,
             ip_dscp: 0,
             ip_ecn: 0,
             ip_ttl: 64,
@@ -2622,21 +2626,12 @@ mod tests {
         }
     }
 
-    /// Helper to create test TcpStats with specific flags
-    fn create_test_tcp_stats(tcp_flags: u8) -> TcpStats {
-        TcpStats {
-            tcp_syn_ns: 0,
-            tcp_syn_ack_ns: 0,
-            tcp_last_payload_fwd_ns: 0,
-            tcp_last_payload_rev_ns: 0,
-            tcp_txn_sum_ns: 0,
-            tcp_txn_count: 0,
-            tcp_jitter_avg_ns: 0,
-            tcp_flags,
-            tcp_state: ConnectionState::Closed,
-            forward_tcp_flags: tcp_flags,
-            reverse_tcp_flags: 0,
-        }
+    /// Helper to create test FlowStats with specific TCP flags
+    fn create_test_tcp_stats(tcp_flags: u8) -> FlowStats {
+        let mut stats = create_test_stats(IpProto::Tcp);
+        stats.tcp_flags = tcp_flags;
+        stats.forward_tcp_flags = tcp_flags;
+        stats
     }
 
     /// Helper to create a test FlowWorker for timeout calculations
@@ -2739,7 +2734,8 @@ mod tests {
     fn test_calculate_timeout_tcp_normal() {
         let worker = create_test_worker_for_timeout();
         let mut stats = create_test_stats(IpProto::Tcp);
-        stats.tcp = create_test_tcp_stats(0x10); // ACK only
+        stats.tcp_flags = 0x10; // ACK only
+        stats.forward_tcp_flags = 0x10;
 
         let timeout = worker.calculate_timeout(&stats);
         assert_eq!(timeout, worker.tcp_timeout);
@@ -2752,7 +2748,8 @@ mod tests {
     fn test_calculate_timeout_tcp_with_fin() {
         let worker = create_test_worker_for_timeout();
         let mut stats = create_test_stats(IpProto::Tcp);
-        stats.tcp = create_test_tcp_stats(TCP_FLAG_FIN);
+        stats.tcp_flags = TCP_FLAG_FIN;
+        stats.forward_tcp_flags = TCP_FLAG_FIN;
 
         let timeout = worker.calculate_timeout(&stats);
         assert_eq!(timeout, worker.tcp_fin_timeout);
@@ -2765,7 +2762,8 @@ mod tests {
     fn test_calculate_timeout_tcp_with_rst() {
         let worker = create_test_worker_for_timeout();
         let mut stats = create_test_stats(IpProto::Tcp);
-        stats.tcp = create_test_tcp_stats(TCP_FLAG_RST);
+        stats.tcp_flags = TCP_FLAG_RST;
+        stats.forward_tcp_flags = TCP_FLAG_RST;
 
         let timeout = worker.calculate_timeout(&stats);
         assert_eq!(timeout, worker.tcp_rst_timeout);
@@ -2994,7 +2992,7 @@ mod tests {
 
     #[test]
     fn test_tcp_perf_mapping_client() {
-        let mut tcp_stats = TcpStats::default();
+        let mut tcp_stats = create_test_tcp_stats(0);
         tcp_stats.tcp_syn_ns = 100;
         tcp_stats.tcp_syn_ack_ns = 150;
         tcp_stats.tcp_txn_sum_ns = 1000;
@@ -3039,7 +3037,7 @@ mod tests {
 
     #[test]
     fn test_tcp_perf_mapping_server() {
-        let mut tcp_stats = TcpStats::default();
+        let mut tcp_stats = create_test_tcp_stats(0);
         tcp_stats.tcp_txn_sum_ns = 2000;
         tcp_stats.tcp_txn_count = 2;
 

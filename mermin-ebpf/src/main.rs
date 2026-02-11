@@ -101,7 +101,7 @@ use aya_ebpf::{
 use mermin_common::FlowEvent;
 #[cfg(not(feature = "test"))]
 use mermin_common::LogEntry;
-use mermin_common::{ConnectionState, Direction, FlowKey, FlowStats, IpVersion, TcpStats};
+use mermin_common::{ConnectionState, Direction, FlowKey, FlowStats, IpVersion};
 use network_types::{
     eth,
     eth::EtherType,
@@ -564,14 +564,14 @@ fn run_flow_stats(ctx: &TcContext, direction: Direction) -> i32 {
 /// Helper for calculating/applying tcp timing stats
 #[inline(always)]
 fn update_tcp_timing(
-    stats: &mut TcpStats,
+    stats: &mut FlowStats,
     is_forward: bool,
     has_payload: bool,
     current_flags: u8,
     timestamp: u64,
 ) {
-    let is_syn = (current_flags & TcpStats::TCP_FLAG_SYN) != 0;
-    let is_ack = (current_flags & TcpStats::TCP_FLAG_ACK) != 0;
+    let is_syn = (current_flags & FlowStats::TCP_FLAG_SYN) != 0;
+    let is_ack = (current_flags & FlowStats::TCP_FLAG_ACK) != 0;
 
     if is_syn && !is_ack {
         stats.tcp_syn_ns = timestamp;
@@ -764,9 +764,8 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             let current_flags: tcp::Flags = ctx
                 .load(l4_offset + tcp::TCP_FLAGS_OFFSET)
                 .map_err(|_| Error::OutOfBounds)?;
-            stats.tcp.tcp_flags |= current_flags;
-            stats.tcp.tcp_state =
-                determine_tcp_state(stats.tcp.tcp_state, current_flags, direction);
+            stats.tcp_flags |= current_flags;
+            stats.tcp_state = determine_tcp_state(stats.tcp_state, current_flags, direction);
 
             let data_offset: tcp::OffRes = ctx
                 .load(l4_offset + tcp::TCP_OFF_RES_OFFSET)
@@ -774,20 +773,14 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
             let tcp_hdr_len = tcp::hdr_len(data_offset);
             let tcp_payload_offset = (l4_offset + tcp_hdr_len) as u32;
 
-            if is_forward && stats.tcp.forward_tcp_flags == 0 {
-                stats.tcp.forward_tcp_flags = current_flags;
-            } else if !is_forward && stats.tcp.reverse_tcp_flags == 0 {
-                stats.tcp.reverse_tcp_flags = current_flags;
+            if is_forward && stats.forward_tcp_flags == 0 {
+                stats.forward_tcp_flags = current_flags;
+            } else if !is_forward && stats.reverse_tcp_flags == 0 {
+                stats.reverse_tcp_flags = current_flags;
             }
 
             let has_payload = ctx.len() > tcp_payload_offset;
-            update_tcp_timing(
-                &mut stats.tcp,
-                is_forward,
-                has_payload,
-                current_flags,
-                timestamp,
-            );
+            update_tcp_timing(stats, is_forward, has_payload, current_flags, timestamp);
         }
     }
 
@@ -985,11 +978,11 @@ fn capture_direction_metadata(
             .map_err(|_| Error::OutOfBounds)?;
 
         if is_forward {
-            stats.icmp.icmp_type = icmp_type;
-            stats.icmp.icmp_code = icmp_code;
+            stats.icmp_type = icmp_type;
+            stats.icmp_code = icmp_code;
         } else {
-            stats.icmp.reverse_icmp_type = icmp_type;
-            stats.icmp.reverse_icmp_code = icmp_code;
+            stats.reverse_icmp_type = icmp_type;
+            stats.reverse_icmp_code = icmp_code;
         }
     }
 
@@ -1411,7 +1404,7 @@ use host_test_shim::TcContext;
 
 #[cfg(test)]
 mod tests {
-    use mermin_common::{Direction, IcmpStats, IpVersion};
+    use mermin_common::{Direction, IpVersion};
     use network_types::{eth::EtherType, ip::IpProto};
 
     use super::*;
@@ -1421,28 +1414,35 @@ mod tests {
         FlowStats {
             first_seen_ns: 0,
             last_seen_ns: 0,
-            ifindex: 0,
-            direction: Direction::Ingress,
-            ether_type,
-            ip_version: IpVersion::Unknown,
-            protocol,
-            src_ip: [0; 16],
-            dst_ip: [0; 16],
-            src_port: 0,
-            dst_port: 0,
             packets: 0,
             bytes: 0,
             reverse_packets: 0,
             reverse_bytes: 0,
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
+            src_ip: [0; 16],
+            dst_ip: [0; 16],
+            ifindex: 0,
+            ip_flow_label: 0,
+            reverse_ip_flow_label: 0,
+            tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
+            ether_type,
+            src_port: 0,
+            dst_port: 0,
             src_mac: [0; 6],
+            direction: Direction::Ingress,
+            ip_version: IpVersion::Unknown,
+            protocol,
             ip_dscp: 0,
             ip_ecn: 0,
             ip_ttl: 0,
             reverse_ip_dscp: 0,
             reverse_ip_ecn: 0,
             reverse_ip_ttl: 0,
-            ip_flow_label: 0,
-            reverse_ip_flow_label: 0,
             forward_metadata_seen: 0,
             reverse_metadata_seen: 0,
             pid: 0,
@@ -1463,6 +1463,10 @@ mod tests {
             tcp_state: ConnectionState::Closed,
             forward_tcp_flags: 0,
             reverse_tcp_flags: 0,
+            icmp_type: 0,
+            icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
         }
     }
 
@@ -1828,8 +1832,8 @@ mod tests {
         capture_direction_metadata(&ctx, &mut stats, ether_type, l4_offset, true).unwrap();
 
         assert!(result.is_ok());
-        assert_eq!(stats.icmp.icmp_type, 8);
-        assert_eq!(stats.icmp.icmp_code, 0);
+        assert_eq!(stats.icmp_type, 8);
+        assert_eq!(stats.icmp_code, 0);
         assert_eq!(parsed_offset, 42);
     }
 
@@ -1951,10 +1955,10 @@ mod tests {
         let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv4, 34, true);
 
         assert!(result.is_ok());
-        assert_eq!(stats.icmp.icmp_type, 8); // Echo Request
-        assert_eq!(stats.icmp.icmp_code, 0);
-        assert_eq!(stats.icmp.reverse_icmp_type, 0);
-        assert_eq!(stats.icmp.reverse_icmp_code, 0);
+        assert_eq!(stats.icmp_type, 8); // Echo Request
+        assert_eq!(stats.icmp_code, 0);
+        assert_eq!(stats.reverse_icmp_type, 0);
+        assert_eq!(stats.reverse_icmp_code, 0);
     }
 
     #[test]
@@ -1965,10 +1969,10 @@ mod tests {
         let result = capture_direction_metadata(&ctx, &mut stats, EtherType::Ipv4, 34, false);
 
         assert!(result.is_ok());
-        assert_eq!(stats.icmp.icmp_type, 0);
-        assert_eq!(stats.icmp.icmp_code, 0);
-        assert_eq!(stats.icmp.reverse_icmp_type, 8);
-        assert_eq!(stats.icmp.reverse_icmp_code, 0);
+        assert_eq!(stats.icmp_type, 0);
+        assert_eq!(stats.icmp_code, 0);
+        assert_eq!(stats.reverse_icmp_type, 8);
+        assert_eq!(stats.reverse_icmp_code, 0);
     }
 
     #[test]
@@ -2002,16 +2006,16 @@ mod tests {
 
     #[test]
     fn test_tcp_timing_logic() {
-        let mut stats = create_test_tcp_stats();
+        let mut stats = create_test_flow_stats(EtherType::Ipv4, IpProto::Tcp);
 
-        stats.tcp_flags = TcpStats::TCP_FLAG_SYN;
-        update_tcp_timing(&mut stats, true, false, TcpStats::TCP_FLAG_SYN, 1_000);
+        stats.tcp_flags = FlowStats::TCP_FLAG_SYN;
+        update_tcp_timing(&mut stats, true, false, FlowStats::TCP_FLAG_SYN, 1_000);
         assert_eq!(stats.tcp_syn_ns, 1_000);
         assert_eq!(stats.tcp_syn_ack_ns, 0);
 
         // Once ACK is also present, SYN timestamp should NOT be overwritten, but SYN/ACK should be set.
-        let syn_ack_flags = TcpStats::TCP_FLAG_SYN | TcpStats::TCP_FLAG_ACK;
-        stats.tcp_flags |= TcpStats::TCP_FLAG_ACK;
+        let syn_ack_flags = FlowStats::TCP_FLAG_SYN | FlowStats::TCP_FLAG_ACK;
+        stats.tcp_flags |= FlowStats::TCP_FLAG_ACK;
         update_tcp_timing(&mut stats, false, false, syn_ack_flags, 1_200);
         assert_eq!(stats.tcp_syn_ns, 1_000);
         assert_eq!(stats.tcp_syn_ack_ns, 1_200);
@@ -2024,7 +2028,7 @@ mod tests {
         //   resets tcp_last_payload_fwd_ns to 0, and updates jitter avg.
         // --------------------------------------------------------------------
 
-        update_tcp_timing(&mut stats, true, true, TcpStats::TCP_FLAG_ACK, 2_000);
+        update_tcp_timing(&mut stats, true, true, FlowStats::TCP_FLAG_ACK, 2_000);
         assert_eq!(stats.tcp_last_payload_fwd_ns, 2_000);
         assert_eq!(stats.tcp_last_payload_rev_ns, 0);
         assert_eq!(stats.tcp_txn_sum_ns, 0);
@@ -2032,7 +2036,7 @@ mod tests {
         assert_eq!(stats.tcp_jitter_avg_ns, 0);
 
         // Reverse payload closes the "transaction": delta=100, sum+=100, count+=1, fwd_ts reset to 0.
-        update_tcp_timing(&mut stats, false, true, TcpStats::TCP_FLAG_ACK, 2_100);
+        update_tcp_timing(&mut stats, false, true, FlowStats::TCP_FLAG_ACK, 2_100);
         assert_eq!(stats.tcp_last_payload_rev_ns, 2_100);
         assert_eq!(stats.tcp_txn_sum_ns, 100);
         assert_eq!(stats.tcp_txn_count, 1);
@@ -2040,11 +2044,11 @@ mod tests {
         assert_eq!(stats.tcp_jitter_avg_ns, 6);
 
         // Another forward payload starts a new pair.
-        update_tcp_timing(&mut stats, true, true, TcpStats::TCP_FLAG_ACK, 3_000);
+        update_tcp_timing(&mut stats, true, true, FlowStats::TCP_FLAG_ACK, 3_000);
         assert_eq!(stats.tcp_last_payload_fwd_ns, 3_000);
 
         // Reverse payload delta=116 -> sum=1116, count=3, jitter: J=61 + |116-61|/16 = 61 + 3 = 64
-        update_tcp_timing(&mut stats, false, true, TcpStats::TCP_FLAG_ACK, 3_116);
+        update_tcp_timing(&mut stats, false, true, FlowStats::TCP_FLAG_ACK, 3_116);
         assert_eq!(stats.tcp_txn_sum_ns, 1116);
         assert_eq!(stats.tcp_txn_count, 3);
         assert_eq!(stats.tcp_last_payload_fwd_ns, 0);
@@ -2058,8 +2062,8 @@ mod tests {
         let snap_fwd = stats.tcp_last_payload_fwd_ns;
         let snap_rev = stats.tcp_last_payload_rev_ns;
 
-        update_tcp_timing(&mut stats, true, false, TcpStats::TCP_FLAG_ACK, 9_999);
-        update_tcp_timing(&mut stats, false, false, TcpStats::TCP_FLAG_ACK, 9_999);
+        update_tcp_timing(&mut stats, true, false, FlowStats::TCP_FLAG_ACK, 9_999);
+        update_tcp_timing(&mut stats, false, false, FlowStats::TCP_FLAG_ACK, 9_999);
 
         assert_eq!(stats.tcp_txn_sum_ns, snap_sum);
         assert_eq!(stats.tcp_txn_count, snap_cnt);

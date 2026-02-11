@@ -114,19 +114,13 @@ impl TcpFlags {
 
 #[cfg(test)]
 mod tests {
-    use mermin_common::{ConnectionState, TcpStats};
-
     use super::*;
 
     #[test]
     fn test_tcp_flags_from_struct() {
-        let stats = TcpStats {
-            tcp_flags: TCP_FLAG_SYN | TCP_FLAG_ACK,
-            tcp_state: ConnectionState::Established,
-            ..Default::default()
-        };
+        let tcp_flags = TCP_FLAG_SYN | TCP_FLAG_ACK;
 
-        let flags = TcpFlags::flags_from_bits(stats.tcp_flags);
+        let flags = TcpFlags::flags_from_bits(tcp_flags);
         assert_eq!(flags, vec![TcpFlag::Syn, TcpFlag::Ack]);
     }
 
