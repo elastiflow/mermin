@@ -7,7 +7,10 @@ use std::os::fd::AsRawFd;
 
 use aya::maps::RingBuf;
 use mermin_common::{LogEntry, LogErrorCode, LogLevel};
-use tokio::{io::unix::AsyncFd, sync::broadcast};
+use tokio::{
+    io::unix::AsyncFd,
+    sync::{broadcast, oneshot},
+};
 use tracing::{error, trace, warn};
 
 /// Consumes log entries from the eBPF LOG_EVENTS ring buffer.
@@ -18,6 +21,7 @@ use tracing::{error, trace, warn};
 pub async fn run_log_consumer(
     mut log_events: RingBuf<aya::maps::MapData>,
     mut shutdown_rx: broadcast::Receiver<()>,
+    log_events_return: oneshot::Sender<RingBuf<aya::maps::MapData>>,
 ) {
     let async_fd = match AsyncFd::new(log_events.as_raw_fd()) {
         Ok(fd) => fd,
@@ -68,6 +72,12 @@ pub async fn run_log_consumer(
             }
         }
     }
+
+    // Return the ring buffer for reuse across pipeline restarts.
+    // async_fd borrows the ring buffer's raw fd; drop it first so epoll
+    // deregistration happens before the receiver takes ownership.
+    drop(async_fd);
+    let _ = log_events_return.send(log_events);
 }
 
 /// Convert a LogEntry to a tracing event at the appropriate log level.

@@ -59,7 +59,7 @@ pub struct HistogramBuckets {
     /// If not specified, uses default buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0].
     pub mermin_k8s_watcher_ip_index_update_duration_seconds: Option<Vec<f64>>,
 
-    /// Custom buckets for `mermin_taskmanager_shutdown_duration_seconds` histogram.
+    /// Custom buckets for `mermin_shutdown_duration_seconds` histogram.
     /// If not specified, uses default buckets: [0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0].
-    pub mermin_taskmanager_shutdown_duration_seconds: Option<Vec<f64>>,
+    pub mermin_shutdown_duration_seconds: Option<Vec<f64>>,
 }
