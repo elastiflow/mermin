@@ -45,11 +45,8 @@ use std::sync::{
 
 use aya::maps::HashMap as EbpfHashMap;
 use mermin_common::FlowKey;
-use network_types::ip::IpProto;
 use tokio::sync::Mutex;
 use tracing::warn;
-
-use crate::metrics::ebpf::map_entry_not_found;
 
 /// RAII guard for eBPF flow map entries.
 ///
@@ -101,8 +98,6 @@ impl Drop for EbpfFlowGuard {
             // Spawn a background task to avoid blocking the drop (async not allowed in Drop)
             let key = self.key;
             let stats_map = Arc::clone(&self.stats_map);
-
-            let protocol = key.protocol;
 
             tokio::spawn(async move {
                 let mut map = stats_map.lock().await;

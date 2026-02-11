@@ -2396,42 +2396,20 @@ pub async fn orphan_scanner_task(
                     .with_label_values(&[EbpfMapName::FlowStats.as_str(), MapUnit::Entries.as_str()])
                     .set(ebpf_map_size as i64);
 
-                let tcp_stats_count = {
-                    let map = tcp_stats_map.lock().await;
-                    map.keys().filter_map(|k| k.ok()).count()
-                };
-                metrics::registry::EBPF_MAP_SIZE
-                    .with_label_values(&[EbpfMapName::TcpStats.as_str(), MapUnit::Entries.as_str()])
-                    .set(tcp_stats_count as i64);
-
-                let icmp_stats_count = {
-                    let map = icmp_stats_map.lock().await;
-                    map.keys().filter_map(|k| k.ok()).count()
-                };
-                metrics::registry::EBPF_MAP_SIZE
-                    .with_label_values(&[EbpfMapName::IcmpStats.as_str(), MapUnit::Entries.as_str()])
-                    .set(icmp_stats_count as i64);
-
                 // Check map utilization and warn if approaching capacity
                 let capacity = flow_stats_capacity as u64;
                 if capacity > 0 {
-                    for (map_name, map_size) in [
-                        (EbpfMapName::FlowStats, ebpf_map_size),
-                        (EbpfMapName::TcpStats, tcp_stats_count as u64),
-                        (EbpfMapName::IcmpStats, icmp_stats_count as u64),
-                    ] {
-                        let utilization_pct = (map_size * 100) / capacity;
-                        if utilization_pct >= 80 {
-                            warn!(
-                                event.name = "ebpf_map.high_utilization",
-                                map = map_name.as_str(),
-                                map.size = map_size,
-                                map.capacity = capacity,
-                                map.utilization_pct = utilization_pct,
-                                "eBPF map utilization is high, new flow insertions may silently fail in the kernel. \
-                                 Consider increasing the flow_stats max capacity (flow_stats_capacity) in config."
-                            );
-                        }
+                    let utilization_pct = (ebpf_map_size * 100) / capacity;
+                    if utilization_pct >= 80 {
+                        warn!(
+                            event.name = "ebpf_map.high_utilization",
+                            map = EbpfMapName::FlowStats.as_str(),
+                            map.size = ebpf_map_size,
+                            map.capacity = capacity,
+                            map.utilization_pct = utilization_pct,
+                            "eBPF map utilization is high, new flow insertions may silently fail in the kernel. \
+                             Consider increasing the flow_stats max capacity (flow_stats_capacity) in config."
+                        );
                     }
                 }
 
