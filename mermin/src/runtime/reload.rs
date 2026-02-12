@@ -21,7 +21,7 @@ use tokio::{
     signal::unix::{SignalKind, signal},
     sync::mpsc,
 };
-use tracing::{error, info, trace, warn};
+use tracing::{error, info, warn};
 
 /// Minimum interval between file-change reload triggers (milliseconds).
 ///

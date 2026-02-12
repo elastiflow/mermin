@@ -17,6 +17,7 @@ use crate::{
     },
     otlp::opts::ExportOptions,
     runtime::{
+        cli::Cli,
         conf::conf_serde::{duration, level},
         opts::InternalOptions,
     },
@@ -196,9 +197,7 @@ impl Conf {
     ///    the existing `Figment` configuration.
     /// 4. Extracts the final configuration into a `Conf` struct, storing the path to the
     ///    configuration file (if any).
-    pub fn new(
-        cli: crate::runtime::cli::Cli,
-    ) -> Result<(Self, crate::runtime::cli::Cli), ConfError> {
+    pub fn new(cli: Cli) -> Result<Self, ConfError> {
         use figment::{Figment, providers::Serialized};
 
         let mut figment = Figment::new().merge(Serialized::defaults(Conf::default()));
@@ -234,7 +233,7 @@ impl Conf {
             .validate()
             .map_err(|e| ConfError::InvalidConfiguration(format!("discovery.instrument: {e}")))?;
 
-        Ok((conf, cli))
+        Ok(conf)
     }
 
     /// Reloads the configuration from the config file and returns a new instance

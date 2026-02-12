@@ -2,7 +2,7 @@ use std::{mem, os::fd::RawFd, sync::Arc, thread};
 
 use libc::{EFD_CLOEXEC, EFD_NONBLOCK, c_void, eventfd};
 use tokio::task::JoinHandle;
-use tracing::{error, trace};
+use tracing::error;
 
 /// RAII wrapper for eventfd used to signal shutdown to OS threads.
 /// Automatically closes the eventfd when dropped.

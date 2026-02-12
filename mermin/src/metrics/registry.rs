@@ -530,13 +530,10 @@ pub fn init_registry(
     })?;
 
     let shutdown_duration = Histogram::with_opts(
-        HistogramOpts::new(
-            "duration_seconds",
-            "Duration of shutdown operations",
-        )
-        .namespace("mermin")
-        .subsystem("shutdown")
-        .buckets(bucket_config.shutdown_duration),
+        HistogramOpts::new("duration_seconds", "Duration of shutdown operations")
+            .namespace("mermin")
+            .subsystem("shutdown")
+            .buckets(bucket_config.shutdown_duration),
     )
     .map_err(|e| {
         prometheus::Error::Msg(format!("failed to create shutdown_duration metric: {e}"))
@@ -708,7 +705,6 @@ pub fn remove_k8s_resource_metrics(resource: &str) {
     let _ = K8S_WATCHER_EVENTS_TOTAL.remove_label_values(&[resource, "delete"]);
     let _ = K8S_WATCHER_EVENTS_TOTAL.remove_label_values(&[resource, "error"]);
 }
-
 
 #[cfg(test)]
 mod tests {

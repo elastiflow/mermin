@@ -60,7 +60,7 @@ use crate::{
         capabilities,
         cli::Cli,
         component::{ComponentManager, Handle, ShutdownResult},
-        context::Context,
+        conf::Conf,
         reload::{ConfigWatcher, ReloadTrigger},
         shutdown::ShutdownConfig,
     },
@@ -137,8 +137,7 @@ const LISTENING_PORTS_CAPACITY: u64 = 65536;
 
 async fn run(cli: Cli) -> Result<()> {
     let reload_handles = init_bootstrap_logger(&cli);
-    let runtime = Context::new(cli)?;
-    let Context { conf, .. } = runtime;
+    let conf = Conf::new(cli)?;
 
     // Initialize Prometheus metrics registry early, before any subsystems that might record metrics
     // This also initializes the global debug_enabled flag
@@ -1227,7 +1226,7 @@ fn display_error(error: &MerminError) {
     eprintln!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
     match error {
-        MerminError::Context(ctx_err) => {
+        MerminError::Conf(ctx_err) => {
             eprintln!("Configuration Error");
             eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
             eprintln!("{ctx_err}\n");

@@ -10,8 +10,8 @@ use std::{mem, os::fd::RawFd, sync::Arc, thread, time};
 
 use crossbeam::channel::{Receiver, Sender};
 use libc::{
-    AF_NETLINK, NETLINK_ADD_MEMBERSHIP, POLLERR, POLLHUP, POLLIN, POLLNVAL, SOCK_RAW,
-    SOL_NETLINK, bind, c_void, poll, pollfd, recv, setsockopt, sockaddr_nl, socket,
+    AF_NETLINK, NETLINK_ADD_MEMBERSHIP, POLLERR, POLLHUP, POLLIN, POLLNVAL, SOCK_RAW, SOL_NETLINK,
+    bind, c_void, poll, pollfd, recv, setsockopt, sockaddr_nl, socket,
 };
 use netlink_packet_core::{NetlinkBuffer, NetlinkMessage, NetlinkPayload};
 use netlink_packet_route::{
@@ -26,8 +26,7 @@ use super::{
     controller::IfaceController,
     types::{ControllerCommand, ControllerEvent, NetlinkEvent},
 };
-use crate::error::MerminError;
-use crate::runtime::component::ShutdownEventFd;
+use crate::{error::MerminError, runtime::component::ShutdownEventFd};
 
 /// Default timeout for waiting for controller thread to become ready (in seconds)
 pub const CONTROLLER_READY_TIMEOUT_SECS: u64 = 30;
