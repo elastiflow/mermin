@@ -3,7 +3,6 @@ pub mod cli;
 pub mod commands;
 pub mod component;
 pub mod conf;
-pub mod context;
 pub mod ebpf_log;
 pub mod memory;
 pub mod opts;

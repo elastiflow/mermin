@@ -2,13 +2,14 @@ use std::{mem, os::fd::RawFd, sync::Arc, thread};
 
 use libc::{EFD_CLOEXEC, EFD_NONBLOCK, c_void, eventfd};
 use tokio::task::JoinHandle;
-use tracing::{error, trace};
+use tracing::error;
 
 /// RAII wrapper for eventfd used to signal shutdown to OS threads.
 /// Automatically closes the eventfd when dropped.
 pub struct ShutdownEventFd(RawFd);
 
 impl ShutdownEventFd {
+    #[must_use]
     pub fn new() -> Result<Self, std::io::Error> {
         // SAFETY: eventfd() is safe to call, we check for errors
         let fd = unsafe { eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC) };

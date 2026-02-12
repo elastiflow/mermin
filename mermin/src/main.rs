@@ -27,10 +27,7 @@ use error::{MerminError, Result};
 use mermin_common::MapUnit;
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal as unix_signal};
-use tokio::{
-    signal,
-    sync::{mpsc, oneshot},
-};
+use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
@@ -60,7 +57,7 @@ use crate::{
         capabilities,
         cli::Cli,
         component::{ComponentManager, Handle, ShutdownResult},
-        context::Context,
+        conf::Conf,
         reload::{ConfigWatcher, ReloadTrigger},
         shutdown::ShutdownConfig,
     },
@@ -110,6 +107,13 @@ async fn main() {
         display_error(&e);
         std::process::exit(1);
     }
+
+    // opentelemetry-sdk 0.31 registers a global SdkTracerProvider whose
+    // BatchSpanProcessor runs a background thread. That thread keeps the tokio
+    // runtime alive after run() returns, causing the process to hang. Calling
+    // process::exit(0) here is safe: all components have already been gracefully
+    // shut down inside run(), so no data is lost.
+    std::process::exit(0);
 }
 
 /// eBPF map schema version - MUST be incremented when FlowKey or FlowStats struct layout changes
@@ -135,10 +139,13 @@ const EXPORT_TIMEOUT_SECS: u64 = 10;
 // Constants for eBPF map capacities
 const LISTENING_PORTS_CAPACITY: u64 = 65536;
 
+// Label values for the SHUTDOWN_FLOWS_TOTAL metric.
+const SHUTDOWN_FLOW_STATUS_PRESERVED: &str = "preserved";
+const SHUTDOWN_FLOW_STATUS_LOST: &str = "lost";
+
 async fn run(cli: Cli) -> Result<()> {
     let reload_handles = init_bootstrap_logger(&cli);
-    let runtime = Context::new(cli)?;
-    let Context { conf, .. } = runtime;
+    let conf = Conf::new(cli)?;
 
     // Initialize Prometheus metrics registry early, before any subsystems that might record metrics
     // This also initializes the global debug_enabled flag
@@ -244,7 +251,7 @@ async fn run(cli: Cli) -> Result<()> {
                     error.message = %e,
                     "failed to create metrics server runtime; continuing without metrics"
                 );
-                // Thread has already returned; join it to clean up
+                // Thread returns immediately after sending on ready_tx; join to clean up.
                 let _ = metrics_handle.join();
             }
             Err(_) => {
@@ -252,6 +259,7 @@ async fn run(cli: Cli) -> Result<()> {
                     event.name = "metrics.runtime_failed",
                     "metrics server thread exited before reporting readiness; continuing without metrics"
                 );
+                // Thread may have panicked before sending; join to clean up (returns quickly).
                 let _ = metrics_handle.join();
             }
         }
@@ -895,31 +903,39 @@ async fn run(cli: Cli) -> Result<()> {
                         "kubernetes decorator unavailable, all spans will be sent undecorated"
                     );
 
-                    while let Some(flow_span) = flow_span_rx.recv().await {
-                        let channel_size = flow_span_rx.len();
-                        metrics::registry::CHANNEL_ENTRIES
-                            .with_label_values(&[ChannelName::ProducerOutput.as_str()])
-                            .set(channel_size as i64);
-                        trace!(event.name = "decorator.sending_to_exporter", flow.community_id = %flow_span.attributes.flow_community_id);
+                    loop {
+                        tokio::select! {
+                            _ = decorator_shutdown_rx.recv() => {
+                                break;
+                            },
+                            maybe_span = flow_span_rx.recv() => {
+                                let Some(flow_span) = maybe_span else { break };
+                                let channel_size = flow_span_rx.len();
+                                metrics::registry::CHANNEL_ENTRIES
+                                    .with_label_values(&[ChannelName::ProducerOutput.as_str()])
+                                    .set(channel_size as i64);
+                                trace!(event.name = "decorator.sending_to_exporter", flow.community_id = %flow_span.attributes.flow_community_id);
 
-                        match k8s_decorated_flow_span_tx.send(flow_span).await {
-                            Ok(_) => {
-                                metrics::registry::CHANNEL_SENDS_TOTAL
-                                    .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Success.as_str()])
-                                    .inc();
-                                metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Undecorated);
-                            }
-                            Err(e) => {
-                                metrics::registry::CHANNEL_SENDS_TOTAL
-                                    .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Error.as_str()])
-                                    .inc();
-                                metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Dropped);
-                                error!(
-                                    event.name = "channel.send_failed",
-                                    channel.name = "k8s_decorated_flow_span",
-                                    error.message = %e,
-                                    "failed to send flow span to export channel"
-                                );
+                                match k8s_decorated_flow_span_tx.send(flow_span).await {
+                                    Ok(_) => {
+                                        metrics::registry::CHANNEL_SENDS_TOTAL
+                                            .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Success.as_str()])
+                                            .inc();
+                                        metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Undecorated);
+                                    }
+                                    Err(e) => {
+                                        metrics::registry::CHANNEL_SENDS_TOTAL
+                                            .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Error.as_str()])
+                                            .inc();
+                                        metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Dropped);
+                                        error!(
+                                            event.name = "channel.send_failed",
+                                            channel.name = "k8s_decorated_flow_span",
+                                            error.message = %e,
+                                            "failed to send flow span to export channel"
+                                        );
+                                    }
+                                }
                             }
                         }
                     }
@@ -935,9 +951,6 @@ async fn run(cli: Cli) -> Result<()> {
         });
     });
 
-    // Register decorator thread -- will be shut down after exporter (reverse order)
-    components.register(Handle::thread("k8s-decorator", decorator_handle));
-
     health_state
         .k8s_caches_synced
         .store(true, Ordering::Relaxed);
@@ -951,7 +964,10 @@ async fn run(cli: Cli) -> Result<()> {
             "flow span producer task exited"
         );
     });
-    components.register(Handle::async_task("span-producer", producer_join));
+    // Defer registration until after the exporter is also spawned so we can
+    // register them in the correct order (exporter first, producer second).
+    // Reverse shutdown then joins producer first (stops new spans), closes the
+    // channel, and the exporter drains cleanly before being joined.
     health_state.ready_to_process.store(true, Ordering::Relaxed);
 
     let exporter_join = tokio::spawn(async move {
@@ -1021,10 +1037,17 @@ async fn run(cli: Cli) -> Result<()> {
             "exporter task exited"
         );
     });
+    // Shutdown join order (reverse of registration): span-producer → k8s-decorator → exporter
+    //   1. span-producer stops, closing the flow_span channel
+    //   2. k8s-decorator sees its input channel close (or reacts to the shutdown
+    //      signal directly), exits, and drops k8s_decorated_flow_span_tx
+    //   3. exporter sees its input channel close, calls OTLP flush, and exits
     components.register(Handle::async_task("exporter", exporter_join));
+    components.register(Handle::thread("k8s-decorator", decorator_handle));
+    components.register(Handle::async_task("span-producer", producer_join));
 
-    // Register controller and netlink last so they are joined first (reverse order)
-    // This ensures data-plane components finish before control-plane threads exit
+    // Register controller and netlink last so they are joined first (reverse order),
+    // stopping the data source before the processing pipeline drains.
     components.register(Handle::thread("controller", controller_handle));
     components.register(Handle::thread_with_shutdown(
         "netlink",
@@ -1054,16 +1077,36 @@ async fn run(cli: Cli) -> Result<()> {
         );
     }
 
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        match wait_for_shutdown_signal().await {
+            Ok(sig) => {
+                let _ = shutdown_tx.send(sig);
+            }
+            Err(e) => {
+                error!(
+                    event.name = "shutdown.signal_handler_failed",
+                    error.message = %e,
+                    "failed to install shutdown signal handlers; shutdown via signal will not work"
+                );
+                // Dropping shutdown_tx causes shutdown_rx to return Err, which the
+                // main loop maps to MerminError::internal and exits.
+            }
+        }
+    });
+
     if conf.auto_reload {
-        info!("waiting for shutdown signal or config reload trigger (sighup / file change)");
+        info!("waiting for shutdown signal");
 
         let mut config_watcher = ConfigWatcher::new(conf.config_path.as_deref())
             .map_err(|e| MerminError::internal(format!("failed to create config watcher: {e}")))?;
 
         loop {
             tokio::select! {
-                shutdown = wait_for_shutdown_signal() => {
-                    let shutdown_signal = shutdown?;
+                result = &mut shutdown_rx => {
+                    let shutdown_signal = result.map_err(|_| {
+                        MerminError::internal("shutdown listener channel closed unexpectedly")
+                    })?;
                     info!(
                         event.name = "application.shutdown_signal_received",
                         signal.kind = %shutdown_signal,
@@ -1121,9 +1164,30 @@ async fn run(cli: Cli) -> Result<()> {
             }
         }
     } else {
-        info!("waiting for shutdown signal (ctrl+c or SIGTERM)");
+        // Without auto-reload, SIGHUP would otherwise use the OS default
+        // disposition (terminate). Install a no-op handler so a mistyped
+        // `kill -HUP` does not kill the process.
+        #[cfg(unix)]
+        tokio::spawn(async {
+            let Ok(mut sighup) = unix_signal(SignalKind::hangup()) else {
+                return;
+            };
+            loop {
+                if sighup.recv().await.is_none() {
+                    break;
+                }
+                warn!(
+                    event.name = "reload.sighup_ignored",
+                    "received SIGHUP but auto_reload is disabled; ignoring"
+                );
+            }
+        });
 
-        let shutdown_signal = wait_for_shutdown_signal().await?;
+        info!("waiting for shutdown signal");
+
+        let shutdown_signal = shutdown_rx
+            .await
+            .map_err(|_| MerminError::internal("shutdown listener channel closed unexpectedly"))?;
         info!(
             event.name = "application.shutdown_signal_received",
             signal.kind = %shutdown_signal,
@@ -1154,7 +1218,7 @@ async fn run(cli: Cli) -> Result<()> {
         {
             Ok(preserved_count) => {
                 SHUTDOWN_FLOWS_TOTAL
-                    .with_label_values(&["preserved"])
+                    .with_label_values(&[SHUTDOWN_FLOW_STATUS_PRESERVED])
                     .inc_by(preserved_count as u64);
                 info!(
                     event.name = "application.shutdown.flows_preserved",
@@ -1164,7 +1228,7 @@ async fn run(cli: Cli) -> Result<()> {
             }
             Err(lost_count) => {
                 SHUTDOWN_FLOWS_TOTAL
-                    .with_label_values(&["lost"])
+                    .with_label_values(&[SHUTDOWN_FLOW_STATUS_LOST])
                     .inc_by(lost_count as u64);
                 warn!(
                     event.name = "application.shutdown.flows_lost",
@@ -1238,14 +1302,13 @@ impl std::fmt::Display for ShutdownSignal {
 async fn wait_for_shutdown_signal() -> Result<ShutdownSignal> {
     #[cfg(unix)]
     {
+        let mut sigint = unix_signal(SignalKind::interrupt())
+            .map_err(|e| MerminError::internal(format!("failed to install SIGINT handler: {e}")))?;
         let mut sigterm = unix_signal(SignalKind::terminate()).map_err(|e| {
             MerminError::internal(format!("failed to install SIGTERM handler: {e}"))
         })?;
         tokio::select! {
-            result = signal::ctrl_c() => {
-                result?;
-                Ok(ShutdownSignal::CtrlC)
-            },
+            _ = sigint.recv() => Ok(ShutdownSignal::CtrlC),
             _ = sigterm.recv() => Ok(ShutdownSignal::SigTerm),
         }
     }
@@ -1261,12 +1324,12 @@ fn display_error(error: &MerminError) {
     eprintln!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
     match error {
-        MerminError::Context(ctx_err) => {
+        MerminError::Conf(conf_err) => {
             eprintln!("Configuration Error");
             eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-            eprintln!("{ctx_err}\n");
+            eprintln!("{conf_err}\n");
 
-            let err_msg = ctx_err.to_string();
+            let err_msg = conf_err.to_string();
             if err_msg.contains("no config file provided") {
                 eprintln!("Solution:");
                 eprintln!("   1. Create the config file at the specified path, or");

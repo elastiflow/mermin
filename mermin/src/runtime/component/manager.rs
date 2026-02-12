@@ -23,19 +23,17 @@ pub struct ComponentManager {
     handles: Vec<Handle>,
     shutdown_tx: broadcast::Sender<()>,
     config_tx: watch::Sender<Arc<Conf>>,
-    config_rx: watch::Receiver<Arc<Conf>>,
 }
 
 impl ComponentManager {
     /// Create a new `ComponentManager` seeded with the initial configuration.
     pub fn new(initial_config: Conf) -> Self {
         let (shutdown_tx, _) = broadcast::channel(16);
-        let (config_tx, config_rx) = watch::channel(Arc::new(initial_config));
+        let (config_tx, _) = watch::channel(Arc::new(initial_config));
         Self {
             handles: Vec::new(),
             shutdown_tx,
             config_tx,
-            config_rx,
         }
     }
 
@@ -48,7 +46,7 @@ impl ComponentManager {
     /// Get a config watch receiver. Hot-reloadable components use this to
     /// receive updated configuration without a restart.
     pub fn config_receiver(&self) -> watch::Receiver<Arc<Conf>> {
-        self.config_rx.clone()
+        self.config_tx.subscribe()
     }
 
     /// Broadcast a new configuration to all components watching for changes.
@@ -162,13 +160,16 @@ async fn join_handle_with_timeout(
             Err(_) => Err(JoinError::Timeout(timeout)),
         },
         Handle::Thread { join, .. } => {
-            match tokio::time::timeout(timeout, tokio::task::spawn_blocking(move || join.join()))
-                .await
-            {
+            let timed_out = tokio::time::timeout(
+                timeout,
+                tokio::task::spawn_blocking(move || join.join()),
+            )
+            .await;
+            match timed_out {
+                Err(_elapsed) => Err(JoinError::Timeout(timeout)),
+                Ok(Err(_spawn_err)) => Err(JoinError::SpawnBlockingFailed),
+                Ok(Ok(Err(_panic))) => Err(JoinError::ThreadPanic),
                 Ok(Ok(Ok(()))) => Ok(()),
-                Ok(Ok(Err(_))) => Err(JoinError::ThreadPanic),
-                Ok(Err(_)) => Err(JoinError::SpawnBlockingFailed),
-                Err(_) => Err(JoinError::Timeout(timeout)),
             }
         }
     }

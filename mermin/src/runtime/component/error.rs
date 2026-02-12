@@ -1,6 +1,8 @@
 use std::time::Duration;
 
 /// Errors that can occur when joining a component handle.
+///
+/// Used internally by [`super::manager::ComponentManager`]; not part of the public API.
 #[derive(Debug)]
 pub enum JoinError {
     /// The async task was cancelled.

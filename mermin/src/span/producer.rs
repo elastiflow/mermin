@@ -98,8 +98,6 @@ impl FlowSpanComponents {
     ) -> Result<usize, usize> {
         let flow_store = Arc::clone(&self.flow_store);
         let flow_stats_map = Arc::clone(&self.flow_stats_map);
-        let tcp_stats_map = Arc::clone(&self.tcp_stats_map);
-        let icmp_stats_map = Arc::clone(&self.icmp_stats_map);
         let flow_span_tx = self.flow_span_tx.clone();
 
         let flush_future = async {
@@ -122,8 +120,6 @@ impl FlowSpanComponents {
                     id,
                     &flow_store,
                     &flow_stats_map,
-                    &tcp_stats_map,
-                    &icmp_stats_map,
                     &flow_span_tx,
                     trace_id_cache,
                 )
@@ -460,7 +456,7 @@ impl FlowSpanProducer {
             event.name = "flow_pollers.started",
             poller.count = num_pollers,
             poll.interval_secs = poll_interval.as_secs(),
-            "flow pollers started (replaces per-flow record/timeout tasks)"
+            "flow pollers started"
         );
 
         let async_fd = match AsyncFd::new(flow_events.as_raw_fd()) {

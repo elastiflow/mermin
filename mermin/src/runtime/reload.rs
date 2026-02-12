@@ -49,6 +49,9 @@ pub struct ConfigWatcher {
 impl ConfigWatcher {
     /// Create a new `ConfigWatcher`.
     ///
+    /// Must be called from within an active Tokio runtime (e.g. inside an async
+    /// context that runs on the main runtime), since it spawns a task for SIGHUP.
+    ///
     /// - Always listens for SIGHUP on Unix.
     /// - If `config_path` is `Some`, also watches the config file for changes
     ///   via the `notify` crate (watches the parent directory for reliability).
@@ -75,7 +78,10 @@ impl ConfigWatcher {
                     }
                 };
                 loop {
-                    sighup.recv().await;
+                    if sighup.recv().await.is_none() {
+                        // Runtime is shutting down; stop the listener.
+                        break;
+                    }
                     info!(
                         event.name = "reload.sighup_received",
                         "received sighup, triggering config reload"
@@ -136,8 +142,8 @@ impl ConfigWatcher {
         // Shared with the watcher callback for debouncing.
         let last_trigger_ms = Arc::new(AtomicU64::new(0));
 
-        let mut watcher: notify::RecommendedWatcher =
-            notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+        let mut watcher: notify::RecommendedWatcher = notify::recommended_watcher(
+            move |res: Result<notify::Event, notify::Error>| {
                 match res {
                     Ok(event) => {
                         // Only react to data modifications and file creations
@@ -177,14 +183,20 @@ impl ConfigWatcher {
                             "config file changed, triggering reload"
                         );
 
-                        if tx
-                            .blocking_send(ReloadTrigger::FileChanged(config_path.clone()))
-                            .is_err()
-                        {
-                            warn!(
-                                event.name = "reload.channel_closed",
-                                "reload channel closed, file watcher stopping"
-                            );
+                        match tx.try_send(ReloadTrigger::FileChanged(config_path.clone())) {
+                            Ok(()) => {}
+                            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                                warn!(
+                                    event.name = "reload.channel_closed",
+                                    "reload channel closed, file watcher stopping"
+                                );
+                            }
+                            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                                trace!(
+                                    event.name = "reload.channel_full",
+                                    "reload channel full, dropping file-change trigger; next change will retry"
+                                );
+                            }
                         }
                     }
                     Err(e) => {
@@ -195,7 +207,8 @@ impl ConfigWatcher {
                         );
                     }
                 }
-            })?;
+            },
+        )?;
 
         watcher.watch(&parent_dir, RecursiveMode::NonRecursive)?;
 
@@ -245,8 +258,9 @@ mod tests {
             }
             Ok(None) => panic!("watcher channel closed unexpectedly"),
             Err(_) => {
-                // Timeout -- some CI environments / filesystems don't emit events reliably
-                // This is acceptable; the test mainly verifies construction doesn't panic
+                // Timeout: some CI environments or filesystems don't emit inotify/fsevents
+                // reliably. The test still verifies ConfigWatcher construction and that
+                // the watcher runs; a skipped file-change trigger is acceptable here.
             }
         }
     }
