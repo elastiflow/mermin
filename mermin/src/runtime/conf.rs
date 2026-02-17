@@ -799,7 +799,7 @@ pub struct FlowCapture {
     /// resize at runtime. Once the map is full, new entry insert attempts are dropped.
     ///
     /// Controls memory usage of the eBPF FLOW_STATS.
-    /// Memory: flows × ~300 bytes (FlowStats: 176 + FlowKey: 58 + BPF overhead: ~58)
+    /// Memory: flows × ~310 bytes (FlowStats: 192 + FlowKey: 58 + BPF overhead: ~58)
     ///
     /// Sizing guide based on typical cluster FPS (flows per second) per node:
     /// - General/Mixed (50-200 FPS):         50,000 (~12 MB) - dev/testing, 2.5-50x headroom
