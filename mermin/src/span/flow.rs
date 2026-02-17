@@ -167,6 +167,12 @@ pub struct SpanAttributes {
     pub server_address: Option<String>,
     pub server_port: Option<u16>,
 
+    // Process Attributes (from eBPF LSM hooks)
+    /// PID of the process that created/owns this flow (None if unknown)
+    pub process_pid: Option<u32>,
+    /// Executable name of the process (TASK_COMM_LEN, None if unknown)
+    pub process_executable_name: Option<String>,
+
     // Flow Metrics
     pub flow_bytes_delta: i64,
     pub flow_bytes_total: i64,
@@ -273,7 +279,6 @@ pub struct SpanAttributes {
     pub destination_k8s_service_uid: Option<String>,
     pub network_policies_ingress: Option<Vec<String>>,
     pub network_policies_egress: Option<Vec<String>>,
-    pub process_executable_name: Option<String>,
     /// Container runtime name for source (e.g., from Docker/containerd).
     /// Distinct from source_k8s_container_name which comes from Pod spec.
     pub source_container_name: Option<String>,
@@ -331,6 +336,8 @@ impl Default for SpanAttributes {
             client_port: None,
             server_address: None,
             server_port: None,
+            process_pid: None,
+            process_executable_name: None,
             flow_bytes_delta: 0,
             flow_bytes_total: 0,
             flow_packets_delta: 0,
@@ -422,7 +429,6 @@ impl Default for SpanAttributes {
             destination_k8s_service_uid: None,
             network_policies_ingress: None,
             network_policies_egress: None,
-            process_executable_name: None,
             source_container_name: None,
             source_container_image_name: None,
             destination_container_name: None,
@@ -991,6 +997,10 @@ impl Traceable for FlowSpan {
         }
         if let Some(ref value) = self.attributes.network_policies_egress {
             kvs.push(KeyValue::new("network.policies.egress", value.join(",")));
+        }
+        // Process attributes (from eBPF LSM hooks)
+        if let Some(value) = self.attributes.process_pid {
+            kvs.push(KeyValue::new("process.pid", value as i64));
         }
         if let Some(ref value) = self.attributes.process_executable_name {
             kvs.push(KeyValue::new("process.executable.name", value.to_owned()));
