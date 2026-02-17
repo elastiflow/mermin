@@ -276,8 +276,8 @@ unsafe impl aya::Pod for FlowKey {}
 /// Flow statistics maintained in eBPF maps, aggregated per normalized FlowKey.
 /// Tracks bidirectional counters, timestamps, metadata, and process information.
 /// Only contains data that eBPF can parse (3-layer: Eth + IP + L4).
-/// Memory layout: 144 bytes (includes process metadata: pid, comm)
-/// Breakdown: 48 (u64) + 32 (IP arrays) + 6 (MAC) + 12 (u32) + 6 (u16) + 11 (u8) + 4 (pid) + 16 (comm) + 9 (padding)
+/// Memory layout: includes TCP/ICMP fields (flattened) and process metadata (pid, comm).
+/// Breakdown: 88 (u64) + 32 (IP arrays) + 6 (MAC) + 20 (u32) + 6 (u16) + 19 (u8) + 4 (pid) + 16 (comm) + padding
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct FlowStats {
@@ -335,7 +335,7 @@ pub struct FlowStats {
     /// Source MAC address
     pub src_mac: [u8; 6],
 
-    // === 1-byte aligned (u8) - 19 bytes ===
+    // === 1-byte aligned (u8) - 19 bytes (11 base + 4 TCP + 4 ICMP) ===
     /// Direction: 0=egress, 1=ingress (TC hook attachment point)
     pub direction: Direction,
     /// IP version
@@ -358,26 +358,7 @@ pub struct FlowStats {
     pub forward_metadata_seen: u8,
     /// Flag indicating reverse direction metadata has been captured for current interval (1=captured, 0=not yet)
     pub reverse_metadata_seen: u8,
-
-    // === Process metadata - 20 bytes ===
-    /// Process ID that created/connected this flow (0 if unknown)
-    pub pid: u32,
-    /// Process command name (TASK_COMM_LEN = 16 bytes)
-    pub comm: [u8; 16],
-}
-
-/// TCP-specific state and performance metrics.
-/// Embedded in [`FlowStats`] for all flows; fields are only meaningful when protocol == TCP.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct TcpStats {
-    pub tcp_syn_ns: u64,
-    pub tcp_syn_ack_ns: u64,
-    pub tcp_last_payload_fwd_ns: u64,
-    pub tcp_last_payload_rev_ns: u64,
-    pub tcp_txn_sum_ns: u64,
-    pub tcp_txn_count: u32,
-    pub tcp_jitter_avg_ns: u32,
+    /// TCP flags bit field (union of all observed flags, only meaningful when protocol == TCP)
     pub tcp_flags: u8,
     /// TCP connection state (only meaningful when protocol == TCP)
     pub tcp_state: ConnectionState,
@@ -393,6 +374,12 @@ pub struct TcpStats {
     pub reverse_icmp_type: u8,
     /// ICMP message code for reverse direction (only meaningful when protocol == ICMP or ICMPv6)
     pub reverse_icmp_code: u8,
+
+    // === Process metadata - 20 bytes ===
+    /// Process ID that created/connected this flow (0 if unknown)
+    pub pid: u32,
+    /// Process command name (TASK_COMM_LEN = 16 bytes)
+    pub comm: [u8; 16],
 }
 
 impl FlowStats {
@@ -442,6 +429,7 @@ impl FlowStats {
     /// #     tcp_state: ConnectionState::default(), forward_tcp_flags: 0,
     /// #     reverse_tcp_flags: 0, icmp_type: 0, icmp_code: 0,
     /// #     reverse_icmp_type: 0, reverse_icmp_code: 0,
+    /// #     pid: 0, comm: [0; 16],
     /// # };
     /// stats.tcp_flags = FlowStats::TCP_FLAG_SYN | FlowStats::TCP_FLAG_ACK;
     ///
@@ -768,6 +756,8 @@ mod tests {
             icmp_code: 0,
             reverse_icmp_type: 0,
             reverse_icmp_code: 0,
+            pid: 0,
+            comm: [0; 16],
         }
     }
 
@@ -1089,14 +1079,13 @@ mod tests {
     /// 2. Alignment is consistent
     #[test]
     fn test_flow_stats_memory_layout() {
-        // Verify optimized memory layout (144 bytes)
-        // Previous: 120 bytes
-        // Added: 4 (pid) + 16 (comm) = 20 bytes + padding
-        // Total: 144 bytes (aligned to 8-byte boundary)
+        // Verify optimized memory layout (192 bytes)
+        // 88 (11 u64) + 32 (2 IP arrays) + 20 (5 u32) + 6 (3 u16) + 6 (MAC)
+        // + 19 (u8: 11 base + 4 TCP + 4 ICMP) + 1 (pad) + 4 (pid) + 16 (comm) = 192
         assert_eq!(
             size_of::<FlowStats>(),
-            144,
-            "FlowStats size MUST be 144 bytes for eBPF/userspace compatibility"
+            192,
+            "FlowStats size MUST be 192 bytes for eBPF/userspace compatibility"
         );
 
         // Verify alignment (critical for correct memory access in eBPF)

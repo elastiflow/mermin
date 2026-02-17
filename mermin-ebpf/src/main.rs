@@ -1450,26 +1450,6 @@ mod tests {
         }
     }
 
-    fn create_test_tcp_stats() -> TcpStats {
-        TcpStats {
-            tcp_syn_ns: 0,
-            tcp_syn_ack_ns: 0,
-            tcp_last_payload_fwd_ns: 0,
-            tcp_last_payload_rev_ns: 0,
-            tcp_txn_sum_ns: 0,
-            tcp_txn_count: 0,
-            tcp_jitter_avg_ns: 0,
-            tcp_flags: 0,
-            tcp_state: ConnectionState::Closed,
-            forward_tcp_flags: 0,
-            reverse_tcp_flags: 0,
-            icmp_type: 0,
-            icmp_code: 0,
-            reverse_icmp_type: 0,
-            reverse_icmp_code: 0,
-        }
-    }
-
     // Helper to build Ethernet + IPv4 + TCP packet
     fn build_ipv4_tcp_packet() -> Vec<u8> {
         let mut pkt = Vec::new();

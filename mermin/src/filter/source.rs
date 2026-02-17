@@ -527,35 +527,16 @@ mod tests {
             reverse_ip_ttl: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 0,
-            pid: 0,
-            comm: [0u8; 16],
-        }
-    }
-
-    /// Helper to create TcpStats for testing
-    fn mock_tcp_stats() -> TcpStats {
-        TcpStats {
-            tcp_syn_ns: 0,
-            tcp_syn_ack_ns: 0,
-            tcp_last_payload_fwd_ns: 0,
-            tcp_last_payload_rev_ns: 0,
-            tcp_txn_sum_ns: 0,
-            tcp_txn_count: 0,
-            tcp_jitter_avg_ns: 0,
             tcp_flags: 0,
             tcp_state: ConnectionState::Closed,
             forward_tcp_flags: 0,
             reverse_tcp_flags: 0,
-        }
-    }
-
-    /// Helper to create IcmpStats for testing
-    fn mock_icmp_stats() -> IcmpStats {
-        IcmpStats {
             icmp_type: 0,
             icmp_code: 0,
             reverse_icmp_type: 0,
             reverse_icmp_code: 0,
+            pid: 0,
+            comm: [0u8; 16],
         }
     }
 

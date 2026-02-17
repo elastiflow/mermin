@@ -1125,56 +1125,10 @@ impl FlowWorker {
                         .to_string()
                 }),
 
-                // ICMP metadata
-                flow_icmp_type_id: icmp_stats.map(|is| is.icmp_type),
-                flow_icmp_type_name: icmp_stats.and_then(|is| {
-                    if is_icmp {
-                        network_types::icmp::get_icmpv4_type_name(is.icmp_type).map(String::from)
-                    } else if is_icmpv6 {
-                        network_types::icmp::get_icmpv6_type_name(is.icmp_type).map(String::from)
-                    } else {
-                        None
-                    }
-                }),
-                flow_icmp_code_id: icmp_stats.map(|is| is.icmp_code),
-                flow_icmp_code_name: icmp_stats.and_then(|is| {
-                    if is_icmp {
-                        network_types::icmp::get_icmpv4_code_name(is.icmp_type, is.icmp_code)
-                            .map(String::from)
-                    } else if is_icmpv6 {
-                        network_types::icmp::get_icmpv6_code_name(is.icmp_type, is.icmp_code)
-                            .map(String::from)
-                    } else {
-                        None
-                    }
-                }),
-                flow_reverse_icmp_type_id: icmp_stats.map(|is| is.reverse_icmp_type),
-                flow_reverse_icmp_type_name: icmp_stats.and_then(|is| {
-                    if is_icmp {
-                        network_types::icmp::get_icmpv4_type_name(is.reverse_icmp_type)
-                            .map(String::from)
-                    } else if is_icmpv6 {
-                        network_types::icmp::get_icmpv6_type_name(is.reverse_icmp_type)
-                            .map(String::from)
-                    } else {
-                        None
-                    }
-                }),
-                flow_reverse_icmp_code_id: icmp_stats.map(|is| is.reverse_icmp_code),
-                flow_reverse_icmp_code_name: icmp_stats.and_then(|is| {
-                    if is_icmp {
-                        network_types::icmp::get_icmpv4_code_name(
-                            is.reverse_icmp_type,
-                            is.reverse_icmp_code,
-                        )
-                        .map(String::from)
-                } else if is_icmpv6 {
-                    network_types::icmp::get_icmpv6_type_name(stats.icmp.icmp_type)
-                        .map(String::from)
-                } else {
-                    None
-                },
-                flow_icmp_code_id: (is_icmp || is_icmpv6).then_some(stats.icmp.icmp_code),
+                // ICMP metadata (only populated for ICMP/ICMPv6 flows)
+                flow_icmp_type_id: (is_icmp || is_icmpv6).then_some(stats.icmp_type),
+                flow_icmp_type_name: icmp_type_name(is_icmp, is_icmpv6, stats.icmp_type),
+                flow_icmp_code_id: (is_icmp || is_icmpv6).then_some(stats.icmp_code),
                 flow_icmp_code_name: icmp_code_name(
                     is_icmp,
                     is_icmpv6,
@@ -2621,6 +2575,14 @@ mod tests {
             reverse_ip_ttl: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 0,
+            tcp_flags: 0,
+            tcp_state: ConnectionState::default(),
+            forward_tcp_flags: 0,
+            reverse_tcp_flags: 0,
+            icmp_type: 0,
+            icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
             pid: 0,
             comm: [0u8; 16],
         }

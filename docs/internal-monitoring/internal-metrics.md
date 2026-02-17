@@ -65,36 +65,36 @@ Monitoring these is crucial for ensuring that Mermin's foundational data collect
 
 - `mermin_ebpf_map_capacity`
 
-  Maximum capacity of eBPF maps. For hash maps (FLOW_STATS, TCP_STATS, ICMP_STATS, LISTENING_PORTS) this is max entries. For ring buffers (FLOW_EVENTS) this is size in bytes.
+  Maximum capacity of eBPF maps. For hash maps (FLOW_STATS, LISTENING_PORTS) this is max entries. For ring buffers (FLOW_EVENTS) this is size in bytes.
 
   **Type:** `gauge`
 
   **Labels:**
-  - `map`: `FLOW_STATS`, `FLOW_EVENTS`, `TCP_STATS`, `ICMP_STATS`, `LISTENING_PORTS`
+  - `map`: `FLOW_STATS`, `FLOW_EVENTS`, `LISTENING_PORTS`
   - `unit`: `entries` (for hash maps), `bytes` (for ring buffers)
 
 - `mermin_ebpf_map_ops_total`
 
   Total number of eBPF map operations. Not all maps track all operation types:
   - `FLOW_EVENTS`: `read` only (ring buffer consumed by userspace)
-  - `FLOW_STATS`, `TCP_STATS`, `ICMP_STATS`: `read` and `delete` (hash maps read during flow processing, deleted on eviction)
+  - `FLOW_STATS`: `read` and `delete` (hash map read during flow processing, deleted on eviction)
   - `LISTENING_PORTS`: `write` only (populated at startup from `/proc`)
 
   **Type:** `counter`
 
   **Labels:**
-  - `map`: `FLOW_STATS`, `FLOW_EVENTS`, `TCP_STATS`, `ICMP_STATS`, `LISTENING_PORTS`
+  - `map`: `FLOW_STATS`, `FLOW_EVENTS`, `LISTENING_PORTS`
   - `operation`: `read`, `write`, `delete`
   - `status`: `ok`, `error`, `not_found`
 
 - `mermin_ebpf_map_size`
 
-  Current size of eBPF maps. For hash maps (FLOW_STATS, TCP_STATS, ICMP_STATS, LISTENING_PORTS) this is the entry count. For ring buffers (FLOW_EVENTS) this is pending bytes (producer_pos - consumer_pos).
+  Current size of eBPF maps. For hash maps (FLOW_STATS, LISTENING_PORTS) this is the entry count. For ring buffers (FLOW_EVENTS) this is pending bytes (producer_pos - consumer_pos).
 
   **Type:** `gauge`
 
   **Labels:**
-  - `map`: `FLOW_STATS`, `FLOW_EVENTS`, `TCP_STATS`, `ICMP_STATS`, `LISTENING_PORTS`
+  - `map`: `FLOW_STATS`, `FLOW_EVENTS`, `LISTENING_PORTS`
   - `unit`: `entries` (for hash maps), `bytes` (for ring buffers)
 
 - `mermin_ebpf_method`
@@ -294,7 +294,7 @@ This section provides a quick reference for all label values used across metrics
 
 | Label                  | Valid Values                                                                                            |
 |------------------------|---------------------------------------------------------------------------------------------------------|
-| `map`                  | `FLOW_STATS`, `FLOW_EVENTS`, `TCP_STATS`, `ICMP_STATS`, `LISTENING_PORTS`                               |
+| `map`                  | `FLOW_STATS`, `FLOW_EVENTS`, `LISTENING_PORTS`                                                          |
 | `unit`                 | `entries`, `bytes`                                                                                      |
 | `operation`            | `read`, `write`, `delete`                                                                               |
 | `status` (eBPF)        | `ok`, `error`, `not_found`                                                                              |
