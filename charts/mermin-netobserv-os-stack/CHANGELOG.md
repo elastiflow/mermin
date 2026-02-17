@@ -1,3 +1,13 @@
+## [mermin-netobserv-os-stack-0.1.1] - 2026-02-10
+
+### Bug Fixes
+
+- Update flow collector to latest patch release (#474)
+
+[mermin-netobserv-os-stack-0.1.0..mermin-netobserv-os-stack-0.1.1](https://github.com/elastiflow/mermin/compare/mermin-netobserv-os-stack-0.1.0...mermin-netobserv-os-stack-0.1.1)
+
+
+
 ## [mermin-netobserv-os-stack-0.1.0] - 2026-02-06
 
 ### Features
