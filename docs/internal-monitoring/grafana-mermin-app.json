@@ -454,7 +454,7 @@
             },
             "showPoints": "never",
             "showValues": false,
-            "spanNulls": false,
+            "spanNulls": true,
             "stacking": {
               "group": "A",
               "mode": "none"
@@ -588,7 +588,7 @@
             },
             "showPoints": "never",
             "showValues": false,
-            "spanNulls": false,
+            "spanNulls": true,
             "stacking": {
               "group": "A",
               "mode": "none"
@@ -723,7 +723,7 @@
             },
             "showPoints": "never",
             "showValues": false,
-            "spanNulls": false,
+            "spanNulls": true,
             "stacking": {
               "group": "A",
               "mode": "none"
@@ -942,7 +942,7 @@
             },
             "showPoints": "never",
             "showValues": false,
-            "spanNulls": false,
+            "spanNulls": true,
             "stacking": {
               "group": "A",
               "mode": "none"
@@ -1285,7 +1285,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 33
+            "y": 343
           },
           "id": 49,
           "options": {
@@ -1383,7 +1383,7 @@
                 },
                 "showPoints": "never",
                 "showValues": false,
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -1414,7 +1414,7 @@
             "h": 12,
             "w": 17,
             "x": 4,
-            "y": 33
+            "y": 343
           },
           "id": 50,
           "options": {
@@ -1481,7 +1481,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 46
+            "y": 434
           },
           "id": 51,
           "options": {
@@ -1578,7 +1578,7 @@
             "h": 4,
             "w": 4,
             "x": 0,
-            "y": 50
+            "y": 438
           },
           "id": 52,
           "options": {
@@ -1666,7 +1666,7 @@
             "h": 7,
             "w": 8,
             "x": 0,
-            "y": 54
+            "y": 442
           },
           "id": 46,
           "interval": "60s",
@@ -1767,7 +1767,7 @@
             "h": 7,
             "w": 8,
             "x": 8,
-            "y": 54
+            "y": 442
           },
           "id": 47,
           "interval": "60s",
@@ -1868,7 +1868,7 @@
             "h": 7,
             "w": 8,
             "x": 16,
-            "y": 54
+            "y": 442
           },
           "id": 48,
           "interval": "60s",
@@ -1994,7 +1994,7 @@
                 },
                 "showPoints": "never",
                 "showValues": false,
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -2042,7 +2042,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 62
+            "y": 344
           },
           "id": 6,
           "options": {
@@ -2129,7 +2129,7 @@
                 },
                 "showPoints": "never",
                 "showValues": false,
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -2178,7 +2178,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 62
+            "y": 344
           },
           "id": 24,
           "interval": "60s",
@@ -2267,7 +2267,7 @@
                 },
                 "showPoints": "never",
                 "showValues": false,
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -2316,7 +2316,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 70
+            "y": 423
           },
           "id": 25,
           "interval": "60s",
@@ -2393,7 +2393,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 70
+            "y": 423
           },
           "id": 23,
           "interval": "60s",
@@ -2538,7 +2538,7 @@
             "h": 3,
             "w": 12,
             "x": 0,
-            "y": 132
+            "y": 106
           },
           "id": 29,
           "options": {
@@ -2632,7 +2632,7 @@
             "h": 3,
             "w": 12,
             "x": 12,
-            "y": 132
+            "y": 106
           },
           "id": 28,
           "options": {
@@ -2771,7 +2771,7 @@
             "h": 5,
             "w": 12,
             "x": 0,
-            "y": 135
+            "y": 109
           },
           "id": 43,
           "options": {
@@ -2894,7 +2894,7 @@
             "h": 5,
             "w": 12,
             "x": 12,
-            "y": 135
+            "y": 109
           },
           "id": 22,
           "options": {
@@ -2969,7 +2969,7 @@
                 },
                 "showPoints": "auto",
                 "showValues": false,
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -3013,7 +3013,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 140
+            "y": 114
           },
           "id": 26,
           "options": {
@@ -3088,7 +3088,7 @@
                 },
                 "showPoints": "never",
                 "showValues": false,
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -3119,7 +3119,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 140
+            "y": 114
           },
           "id": 5,
           "options": {
@@ -3195,7 +3195,7 @@
                 },
                 "showPoints": "never",
                 "showValues": false,
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -3226,7 +3226,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 149
+            "y": 123
           },
           "id": 27,
           "options": {
@@ -3301,7 +3301,7 @@
                 },
                 "showPoints": "auto",
                 "showValues": false,
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -3364,7 +3364,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 149
+            "y": 123
           },
           "id": 33,
           "options": {
@@ -3477,7 +3477,7 @@
                 },
                 "showPoints": "never",
                 "showValues": false,
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -3508,7 +3508,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 36
+            "y": 346
           },
           "id": 34,
           "options": {
@@ -3583,7 +3583,7 @@
                 },
                 "showPoints": "auto",
                 "showValues": false,
-                "spanNulls": false,
+                "spanNulls": true,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
@@ -3646,7 +3646,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 36
+            "y": 346
           },
           "id": 30,
           "options": {
@@ -3723,7 +3723,7 @@
       {
         "current": {
           "text": "Prometheus",
-          "value": "prometheus"
+          "value": "PBFA97CFB590B2093"
         },
         "includeAll": false,
         "label": "Datasource",
@@ -3837,6 +3837,5 @@
   "timezone": "browser",
   "title": "Mermin Application",
   "uid": "mermin_app",
-  "version": 1,
-  "weekStart": ""
+  "version": 1
 }
