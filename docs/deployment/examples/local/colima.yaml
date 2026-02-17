@@ -1,0 +1,4 @@
+provision:
+  - mode: system
+    script: |
+      echo "GRUB_CMDLINE_LINUX_DEFAULT=\"console=tty1 console=ttyAMA0 lsm=lockdown,capability,landlock,yama,apparmor,bpf\"" | tee /etc/default/grub.d/99-bpf-lsm.cfg && update-grub

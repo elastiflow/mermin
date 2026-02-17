@@ -226,7 +226,7 @@ GRUB, allowing BPF LSM to be enabled persistently.
 brew install colima docker
 ```
 
-### 2. Start Colima with QEMU
+### 2. Start Colima
 
 ```shell
 # Stop Docker Desktop if running (they conflict)
@@ -234,8 +234,16 @@ brew install colima docker
 colima stop 2>/dev/null || true
 colima delete 2>/dev/null || true
 
-# Start with QEMU (required for kernel parameter changes via GRUB)
-colima start --vm-type=qemu --cpu 4 --memory 8 --disk 60
+# Start with GRUB changes (you may lower the CPU/Mem if don't plan to run heavy services)
+colima start --cpu 8 --memory 16 --disk 60 --edit
+```
+
+Add GRUB overrides to enable BPF LSM, simply replace/add following to the `provision` block in the config.
+
+```yaml
+  - mode: system
+    script: |
+      echo "GRUB_CMDLINE_LINUX_DEFAULT=\"console=tty1 console=ttyAMA0 lsm=lockdown,capability,landlock,yama,apparmor,bpf\"" | tee /etc/default/grub.d/99-bpf-lsm.cfg && update-grub
 ```
 
 ### 3. Enable BPF LSM in the Kernel
@@ -282,12 +290,14 @@ sudo ./target/release/mermin --config local/config.hcl
 **BPF LSM still not enabled after restart:**
 
 This usually means you're using VZ instead of QEMU. Check with:
+
 ```shell
 colima list
 # Look for "VMTYPE" column - should show "qemu", not "vz"
 ```
 
 If it shows "vz", delete and recreate with QEMU:
+
 ```shell
 colima delete
 colima start --vm-type=qemu --cpu 4 --memory 8 --disk 60
@@ -306,6 +316,10 @@ docker context use colima
 ## Testing on local Kind K8s cluster
 
 You can create a local cluster, build the Mermin image, and deploy it with a single command sequence:
+
+{% hint style="info" %}
+It is recommended to use [colima](#why-colima-with-qemu) as a VM for docker on MacOS
+{% endhint %}
 
 ```shell
 # 1. Create the kind cluster
@@ -329,7 +343,7 @@ helm upgrade -i --wait --timeout 15m -n default --create-namespace \
 make helm-upgrade
 
 # With custom local config
-make helm-upgrade HELM_EXTRA_ARGS='--set-file config.content=local/config.hcl'
+make helm-upgrade HELM_EXTRA_ARGS='--set-file config.content=docs/deployment/examples/local/config.example.hcl'
 ```
 
 **Optionally install `metrics-server` to get metrics if it has not been installed yet**
