@@ -284,7 +284,7 @@ colima --profile atlantis start
 colima --profile atlantis stop
 ```
 
-### 3. Build and Run Mermin
+### Build and Run Mermin
 
 ```shell
 # Build Mermin using the Docker container
