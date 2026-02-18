@@ -44,7 +44,7 @@ RUN useradd --create-home --shell /bin/bash poseidon \
 # Install LLVM
 # Workaround she LLVM signing issue, https://github.com/llvm/llvm-project/issues/153385#issuecomment-3239875987
 # hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
-RUN sed -i 's/sha1.second_preimage_resistance = 2026-02-01/sha1.second_preimage_resistance = 2026-03-01/' /usr/share/apt/default-sequoia.config
+RUN sed -i 's/sha1.second_preimage_resistance = 2026-02-01/sha1.second_preimage_resistance = 2026-04-01/' /usr/share/apt/default-sequoia.config
 # hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
 RUN wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh && chmod +x /tmp/llvm.sh \
     && /tmp/llvm.sh 20 all
