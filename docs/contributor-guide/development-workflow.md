@@ -240,7 +240,8 @@ You may set `COLIMA_PROFILE='atlantis'` env. var. instead of passing `--profile 
 ### Configure Colima profile
 
 Configuring Colima profile (the VM config) is a one-time task unless you delete the profile via `colima --profile atlantis delete`
-The step is needed to configure LSM BPF.
+
+The step is needed to configure LSM BPF in the Colima VM.
 
 1. Optionally delete any existing Colima instance to start fresh
 
