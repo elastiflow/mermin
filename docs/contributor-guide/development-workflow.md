@@ -216,6 +216,17 @@ VM has these compiled in, but **BPF LSM must be enabled via kernel boot paramete
 
 ### Install Colima
 
+Please refer the official [Colima installation guides](https://github.com/abiosoft/colima?tab=readme-ov-file#getting-started)
+
+<details>
+<summary>Install on MacOS with brew</summary>
+
+```shell
+brew install colima
+```
+
+</details>
+
 {% hint style="warning" %}
 Stop Docker Desktop if running, conflict with Colima
 {% endhint %}
@@ -225,10 +236,6 @@ Stop Docker Desktop if running, conflict with Colima
 
 You may set `COLIMA_PROFILE='atlantis'` env. var. instead of passing `--profile atlantis` Colima flag to use `atlantis` profile by default.
 {% endhint %}
-
-```shell
-brew install colima docker
-```
 
 ### Configure Colima profile
 
