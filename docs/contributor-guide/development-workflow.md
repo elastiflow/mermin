@@ -228,14 +228,21 @@ brew install colima docker
 
 ### 2. Start Colima
 
-```shell
-# Stop Docker Desktop if running (they conflict)
-# Delete any existing Colima instance to start fresh
-colima stop 2>/dev/null || true
-colima delete 2>/dev/null || true
+{% hint style="warning" %}
+Stop Docker Desktop if running, conflict with Colima
+{% endhint %}
 
-# Start with GRUB changes (you may lower the CPU/Mem if don't plan to run heavy services)
-colima start --cpu 8 --memory 16 --disk 60 --edit
+#### Configure Colima profile
+
+One-time task (if you don't delete profile via `colima --profile atlantis delete`). Needed to configure LSM
+
+```shell
+# Delete any existing Colima instance to start fresh
+colima --profile atlantis stop 2>/dev/null || true
+colima --profile atlantis delete 2>/dev/null || true
+
+# Enable BPF LSM in GRUB (you may lower the CPU/Mem if don't plan to run heavy services in Colima)
+colima --profile atlantis start --vm-type=vz --cpu 8 --memory 16 --disk 60 --edit
 ```
 
 Add GRUB overrides to enable BPF LSM, simply replace/add following to the `provision` block in the config.
@@ -246,32 +253,27 @@ Add GRUB overrides to enable BPF LSM, simply replace/add following to the `provi
       echo "GRUB_CMDLINE_LINUX_DEFAULT=\"console=tty1 console=ttyAMA0 lsm=lockdown,capability,landlock,yama,apparmor,bpf\"" | tee /etc/default/grub.d/99-bpf-lsm.cfg && update-grub
 ```
 
-### 3. Enable BPF LSM in the Kernel
-
-The Ubuntu cloud image used by Colima has GRUB configuration files in `/etc/default/grub.d/` that override
-`/etc/default/grub`. To ensure your LSM settings persist, create a new file with a higher number (99) that
-gets sourced last:
+Restart Colima VM for GRUB settings to take an effect
 
 ```shell
-# Run this single command to enable BPF LSM (creates a grub.d override file)
-colima ssh -- bash -c 'echo "GRUB_CMDLINE_LINUX_DEFAULT=\"console=tty1 console=ttyAMA0 lsm=lockdown,capability,landlock,yama,apparmor,bpf\"" | sudo tee /etc/default/grub.d/99-bpf-lsm.cfg && sudo update-grub'
+colima --profile atlantis restart
+
+# Check if BPF LSM module is loaded
+colima --profile atlantis ssh -- cat /sys/kernel/security/lsm; echo
+# Expected output
+# lockdown,capability,landlock,yama,apparmor,bpf
 ```
 
-### 4. Restart Colima
+#### Start Colima
+
+If you already have your [Colima profile configured](#configure-colima-profile), you may simply start/stop Colima VM when needed
 
 ```shell
-colima stop
-colima start
+colima --profile atlantis start
+colima --profile atlantis stop
 ```
 
-### 5. Verify BPF LSM is Enabled
-
-```shell
-colima ssh -- cat /sys/kernel/security/lsm
-# Should now show: lockdown,capability,landlock,yama,apparmor,bpf
-```
-
-### 6. Build and Run Mermin
+### 3. Build and Run Mermin
 
 ```shell
 # Build Mermin using the Docker container
@@ -280,7 +282,7 @@ docker run --rm --privileged --mount type=bind,source=$(pwd),target=/app mermin-
   /bin/bash -c "cargo build --release"
 
 # SSH into Colima and run Mermin
-colima ssh
+colima --profile atlantis ssh
 cd /Users/$(whoami)/Documents/Code/mermin  # Adjust path as needed
 sudo ./target/release/mermin --config local/config.hcl
 ```
@@ -307,7 +309,7 @@ colima start --vm-type=qemu --cpu 4 --memory 8 --disk 60
 
 ```shell
 # Ensure Colima is running
-colima status
+colima --profile atlantis status
 
 # If Docker context isn't set
 docker context use colima
