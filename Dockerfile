@@ -42,7 +42,7 @@ RUN useradd --create-home --shell /bin/bash poseidon \
     && echo "poseidon ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/poseidon
 
 # Install LLVM
-# Workaround she LLVM signing issue, https://github.com/llvm/llvm-project/issues/153385#issuecomment-3239875987
+# Workaround for LLVM signing issue, https://github.com/llvm/llvm-project/issues/153385#issuecomment-3239875987
 # hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
 RUN sed -i 's/sha1.second_preimage_resistance = 2026-02-01/sha1.second_preimage_resistance = 2026-04-01/' /usr/share/apt/default-sequoia.config
 # hadolint ignore=DL3059 # multi-stage build, more RUN -> better caching
