@@ -1473,6 +1473,10 @@ async fn index_resource_by_ip<K>(
 
     for source in ip_sources {
         for resource in store.store().state() {
+            if resource.meta().deletion_timestamp.is_some() {
+                continue;
+            }
+
             let is_pod = std::any::TypeId::of::<K>() == std::any::TypeId::of::<Pod>();
             let is_host_network = if is_pod {
                 is_host_network_resource(resource.as_ref())
@@ -1516,6 +1520,10 @@ async fn index_resource_by_ip<K>(
 
 /// Extracts IP addresses from a Pod resource
 fn extract_pod_ips(pod: &Pod) -> HashSet<String> {
+    if pod.metadata.deletion_timestamp.is_some() {
+        return HashSet::new();
+    }
+
     let mut ips = HashSet::new();
     let is_host_network = is_host_network_resource(pod);
 
