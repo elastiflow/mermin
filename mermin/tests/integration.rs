@@ -182,9 +182,7 @@ fn run_cmd(cmd: &str) {
 mod event_driven_tests {
     use std::{sync::Arc, time::Duration};
 
-    use mermin_common::{
-        ConnectionState, Direction, FlowKey, FlowStats, IcmpStats, IpVersion, TcpStats,
-    };
+    use mermin_common::{ConnectionState, Direction, FlowKey, FlowStats, IpVersion};
     use network_types::{eth::EtherType, ip::IpProto};
     use tokio::sync::Mutex;
 
@@ -192,8 +190,6 @@ mod event_driven_tests {
     struct MockFlowEventHandler {
         events: Arc<Mutex<Vec<FlowKey>>>,
         stats: Arc<Mutex<Vec<(FlowKey, FlowStats)>>>,
-        tcp_stats: Arc<Mutex<Vec<(FlowKey, TcpStats)>>>,
-        icmp_stats: Arc<Mutex<Vec<(FlowKey, IcmpStats)>>>,
     }
 
     impl MockFlowEventHandler {
@@ -201,18 +197,10 @@ mod event_driven_tests {
             Self {
                 events: Arc::new(Mutex::new(Vec::new())),
                 stats: Arc::new(Mutex::new(Vec::new())),
-                tcp_stats: Arc::new(Mutex::new(Vec::new())),
-                icmp_stats: Arc::new(Mutex::new(Vec::new())),
             }
         }
 
-        async fn handle_flow_event(
-            &self,
-            flow_key: FlowKey,
-            stats: FlowStats,
-            tcp_stats: Option<TcpStats>,
-            icmp_stats: Option<IcmpStats>,
-        ) {
+        async fn handle_flow_event(&self, flow_key: FlowKey, stats: FlowStats) {
             let mut stats_map = self.stats.lock().await;
 
             // Check if flow already exists
@@ -226,25 +214,6 @@ mod event_driven_tests {
                 drop(events); // Release lock before pushing to stats
 
                 stats_map.push((flow_key, stats));
-            }
-
-            if let Some(t) = tcp_stats {
-                let mut tcp_map = self.tcp_stats.lock().await;
-                if let Some(pos) = tcp_map.iter().position(|(k, _)| k == &flow_key) {
-                    tcp_map[pos].1 = t;
-                } else {
-                    tcp_map.push((flow_key, t));
-                }
-            }
-
-            // Handle ICMP Extension
-            if let Some(i) = icmp_stats {
-                let mut icmp_map = self.icmp_stats.lock().await;
-                if let Some(pos) = icmp_map.iter().position(|(k, _)| k == &flow_key) {
-                    icmp_map[pos].1 = i;
-                } else {
-                    icmp_map.push((flow_key, i));
-                }
             }
         }
 
@@ -327,14 +296,22 @@ mod event_driven_tests {
             bytes: 64,
             reverse_packets: 0,
             reverse_bytes: 0,
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
             src_ip: flow_key.src_ip,
             dst_ip: flow_key.dst_ip,
-            src_mac: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
             ifindex: 1,
             ip_flow_label: 0,
+            reverse_ip_flow_label: 0,
+            tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
             ether_type: EtherType::Ipv4,
             src_port: flow_key.src_port,
             dst_port: flow_key.dst_port,
+            src_mac: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
             direction: Direction::Ingress,
             ip_version: IpVersion::V4,
             protocol: IpProto::Tcp,
@@ -344,29 +321,21 @@ mod event_driven_tests {
             reverse_ip_dscp: 0,
             reverse_ip_ecn: 0,
             reverse_ip_ttl: 0,
-            reverse_ip_flow_label: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 0,
-            pid: 0,
-            comm: [0u8; 16],
-        };
-        let tcp_stats = TcpStats {
-            tcp_syn_ns: 0,
-            tcp_syn_ack_ns: 0,
-            tcp_last_payload_fwd_ns: 0,
-            tcp_last_payload_rev_ns: 0,
-            tcp_txn_sum_ns: 0,
-            tcp_txn_count: 0,
-            tcp_jitter_avg_ns: 0,
             tcp_flags: 0x02, // SYN
             tcp_state: ConnectionState::SynSent,
             forward_tcp_flags: 0x02,
             reverse_tcp_flags: 0x00,
+            icmp_type: 0,
+            icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
+            pid: 0,
+            comm: [0u8; 16],
         };
 
-        handler
-            .handle_flow_event(flow_key, stats, Some(tcp_stats), None)
-            .await;
+        handler.handle_flow_event(flow_key, stats).await;
 
         let events = handler.get_events().await;
         assert_eq!(events.len(), 1, "should have one flow event");
@@ -393,14 +362,22 @@ mod event_driven_tests {
             bytes: 640,
             reverse_packets: 0,
             reverse_bytes: 0,
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
             src_ip: forward_key.src_ip,
             dst_ip: forward_key.dst_ip,
-            src_mac: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
             ifindex: 1,
             ip_flow_label: 0,
+            reverse_ip_flow_label: 0,
+            tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
             ether_type: EtherType::Ipv4,
             src_port: forward_key.src_port,
             dst_port: forward_key.dst_port,
+            src_mac: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
             direction: Direction::Ingress,
             ip_version: IpVersion::V4,
             protocol: IpProto::Tcp,
@@ -410,28 +387,22 @@ mod event_driven_tests {
             reverse_ip_dscp: 0,
             reverse_ip_ecn: 0,
             reverse_ip_ttl: 0,
-            reverse_ip_flow_label: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 0,
-            pid: 0,
-            comm: [0u8; 16],
-        };
-        let tcp_stats = TcpStats {
-            tcp_syn_ns: 0,
-            tcp_syn_ack_ns: 0,
-            tcp_last_payload_fwd_ns: 0,
-            tcp_last_payload_rev_ns: 0,
-            tcp_txn_sum_ns: 0,
-            tcp_txn_count: 0,
-            tcp_jitter_avg_ns: 0,
             tcp_flags: 0x12, // SYN+ACK
             tcp_state: ConnectionState::SynReceived,
             forward_tcp_flags: 0x12,
             reverse_tcp_flags: 0x00,
+            icmp_type: 0,
+            icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
+            pid: 0,
+            comm: [0u8; 16],
         };
 
         handler
-            .handle_flow_event(normalized_key, forward_stats, Some(tcp_stats), None)
+            .handle_flow_event(normalized_key, forward_stats)
             .await;
 
         // Reverse direction (should aggregate with forward)
@@ -453,14 +424,22 @@ mod event_driven_tests {
             bytes: 640,
             reverse_packets: 8,
             reverse_bytes: 512,
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
             src_ip: forward_key.src_ip,
             dst_ip: forward_key.dst_ip,
-            src_mac: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
             ifindex: 1,
             ip_flow_label: 0,
+            reverse_ip_flow_label: 0,
+            tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
             ether_type: EtherType::Ipv4,
             src_port: forward_key.src_port,
             dst_port: forward_key.dst_port,
+            src_mac: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
             direction: Direction::Ingress,
             ip_version: IpVersion::V4,
             protocol: IpProto::Tcp,
@@ -470,29 +449,23 @@ mod event_driven_tests {
             reverse_ip_dscp: 0,
             reverse_ip_ecn: 0,
             reverse_ip_ttl: 0,
-            reverse_ip_flow_label: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 1,
-            pid: 0,
-            comm: [0u8; 16],
-        };
-        let tcp_stats = TcpStats {
-            tcp_syn_ns: 0,
-            tcp_syn_ack_ns: 0,
-            tcp_last_payload_fwd_ns: 0,
-            tcp_last_payload_rev_ns: 0,
-            tcp_txn_sum_ns: 0,
-            tcp_txn_count: 0,
-            tcp_jitter_avg_ns: 0,
             tcp_flags: 0x1A, // SYN+ACK+PSH
             tcp_state: ConnectionState::Established,
             forward_tcp_flags: 0x1A,
             reverse_tcp_flags: 0x00,
+            icmp_type: 0,
+            icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
+            pid: 0,
+            comm: [0u8; 16],
         };
 
         // Update stats (simulating eBPF map update)
         handler
-            .handle_flow_event(normalized_key, updated_stats, Some(tcp_stats), None)
+            .handle_flow_event(normalized_key, updated_stats)
             .await;
 
         let final_stats = handler.get_stats(&normalized_key).await.unwrap();
@@ -522,14 +495,22 @@ mod event_driven_tests {
             bytes: 640,
             reverse_packets: 8,
             reverse_bytes: 512,
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
             src_ip: flow_key.src_ip,
             dst_ip: flow_key.dst_ip,
-            src_mac: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
             ifindex: 1,
             ip_flow_label: 0,
+            reverse_ip_flow_label: 0,
+            tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
             ether_type: EtherType::Ipv4,
             src_port: flow_key.src_port,
             dst_port: flow_key.dst_port,
+            src_mac: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
             direction: Direction::Ingress,
             ip_version: IpVersion::V4,
             protocol: IpProto::Tcp,
@@ -539,29 +520,21 @@ mod event_driven_tests {
             reverse_ip_dscp: 0,
             reverse_ip_ecn: 0,
             reverse_ip_ttl: 0,
-            reverse_ip_flow_label: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 1,
-            pid: 0,
-            comm: [0u8; 16],
-        };
-        let tcp_stats_t1 = TcpStats {
-            tcp_syn_ns: 0,
-            tcp_syn_ack_ns: 0,
-            tcp_last_payload_fwd_ns: 0,
-            tcp_last_payload_rev_ns: 0,
-            tcp_txn_sum_ns: 0,
-            tcp_txn_count: 0,
-            tcp_jitter_avg_ns: 0,
             tcp_flags: 0x12,
             tcp_state: ConnectionState::Established,
             forward_tcp_flags: 0x12,
             reverse_tcp_flags: 0x00,
+            icmp_type: 0,
+            icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
+            pid: 0,
+            comm: [0u8; 16],
         };
 
-        handler
-            .handle_flow_event(flow_key, stats_t1, Some(tcp_stats_t1), None)
-            .await;
+        handler.handle_flow_event(flow_key, stats_t1).await;
 
         // Simulate passage of time and more traffic
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -574,14 +547,22 @@ mod event_driven_tests {
             bytes: 1600,         // +960 bytes
             reverse_packets: 20, // +12 packets
             reverse_bytes: 1280, // +768 bytes
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
             src_ip: flow_key.src_ip,
             dst_ip: flow_key.dst_ip,
-            src_mac: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
             ifindex: 1,
             ip_flow_label: 0,
+            reverse_ip_flow_label: 0,
+            tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
             ether_type: EtherType::Ipv4,
             src_port: flow_key.src_port,
             dst_port: flow_key.dst_port,
+            src_mac: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
             direction: Direction::Ingress,
             ip_version: IpVersion::V4,
             protocol: IpProto::Tcp,
@@ -591,29 +572,21 @@ mod event_driven_tests {
             reverse_ip_dscp: 0,
             reverse_ip_ecn: 0,
             reverse_ip_ttl: 0,
-            reverse_ip_flow_label: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 1,
-            pid: 0,
-            comm: [0u8; 16],
-        };
-        let tcp_stats_t2 = TcpStats {
-            tcp_syn_ns: 0,
-            tcp_syn_ack_ns: 0,
-            tcp_last_payload_fwd_ns: 0,
-            tcp_last_payload_rev_ns: 0,
-            tcp_txn_sum_ns: 0,
-            tcp_txn_count: 0,
-            tcp_jitter_avg_ns: 0,
             tcp_flags: 0x1A,
             tcp_state: ConnectionState::Established,
             forward_tcp_flags: 0x1A,
             reverse_tcp_flags: 0x00,
+            icmp_type: 0,
+            icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
+            pid: 0,
+            comm: [0u8; 16],
         };
 
-        handler
-            .handle_flow_event(flow_key, stats_t2, Some(tcp_stats_t2), None)
-            .await;
+        handler.handle_flow_event(flow_key, stats_t2).await;
 
         // Calculate deltas
         let delta_packets = stats_t2.packets - stats_t1.packets;
@@ -658,14 +631,22 @@ mod event_driven_tests {
                     bytes: (idx + 1) as u64 * 640,
                     reverse_packets: 0,
                     reverse_bytes: 0,
+                    tcp_syn_ns: 0,
+                    tcp_syn_ack_ns: 0,
+                    tcp_last_payload_fwd_ns: 0,
+                    tcp_last_payload_rev_ns: 0,
+                    tcp_txn_sum_ns: 0,
                     src_ip: key.src_ip,
                     dst_ip: key.dst_ip,
-                    src_mac: [0x00, 0x11, 0x22, 0x33, 0x44, idx as u8],
                     ifindex: 1,
                     ip_flow_label: 0,
+                    reverse_ip_flow_label: 0,
+                    tcp_txn_count: 0,
+                    tcp_jitter_avg_ns: 0,
                     ether_type: EtherType::Ipv4,
                     src_port: key.src_port,
                     dst_port: key.dst_port,
+                    src_mac: [0x00, 0x11, 0x22, 0x33, 0x44, idx as u8],
                     direction: Direction::Ingress,
                     ip_version: IpVersion::V4,
                     protocol: key.protocol,
@@ -675,20 +656,8 @@ mod event_driven_tests {
                     reverse_ip_dscp: 0,
                     reverse_ip_ecn: 0,
                     reverse_ip_ttl: 0,
-                    reverse_ip_flow_label: 0,
                     forward_metadata_seen: 1,
                     reverse_metadata_seen: 0,
-                    pid: 0,
-                    comm: [0u8; 16],
-                };
-                let tcp_stats = TcpStats {
-                    tcp_syn_ns: 0,
-                    tcp_syn_ack_ns: 0,
-                    tcp_last_payload_fwd_ns: 0,
-                    tcp_last_payload_rev_ns: 0,
-                    tcp_txn_sum_ns: 0,
-                    tcp_txn_count: 0,
-                    tcp_jitter_avg_ns: 0,
                     tcp_flags: 0x02,
                     tcp_state: if key.protocol == IpProto::Tcp {
                         ConnectionState::SynSent
@@ -697,11 +666,15 @@ mod event_driven_tests {
                     },
                     forward_tcp_flags: 0x02,
                     reverse_tcp_flags: 0x00,
+                    icmp_type: 0,
+                    icmp_code: 0,
+                    reverse_icmp_type: 0,
+                    reverse_icmp_code: 0,
+                    pid: 0,
+                    comm: [0u8; 16],
                 };
 
-                handler_clone
-                    .handle_flow_event(key, stats, Some(tcp_stats), None)
-                    .await;
+                handler_clone.handle_flow_event(key, stats).await;
             });
 
             tasks.push(task);

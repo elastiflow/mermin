@@ -41,7 +41,7 @@
 use std::{net::IpAddr, sync::Arc};
 
 use aya::maps::HashMap as EbpfHashMap;
-use mermin_common::{Direction, FlowKey, FlowStats, IcmpStats, ListeningPortKey, TcpStats};
+use mermin_common::{Direction, FlowKey, FlowStats, ListeningPortKey};
 use network_types::{
     ip::IpProto,
     tcp::{TCP_FLAG_ACK, TCP_FLAG_SYN},
@@ -112,8 +112,6 @@ impl DirectionInferrer {
         &self,
         flow_key: &FlowKey,
         stats: &FlowStats,
-        tcp_stats: Option<&TcpStats>,
-        icmp_stats: Option<&IcmpStats>,
     ) -> (SpanKind, Option<ClientServer>) {
         let (src_ip, dst_ip) = match flow_key_to_ip_addrs(flow_key) {
             Ok((src, dst)) => (src, dst),
@@ -128,8 +126,7 @@ impl DirectionInferrer {
         }
 
         if stats.protocol == IpProto::Tcp
-            && let Some(ts) = tcp_stats
-            && let Some((kind, cs)) = Self::check_tcp_handshake(stats, ts, &src_ip, &dst_ip)
+            && let Some((kind, cs)) = Self::check_tcp_handshake(stats, &src_ip, &dst_ip)
         {
             return (kind, Some(cs));
         }
@@ -141,8 +138,7 @@ impl DirectionInferrer {
         }
 
         if matches!(stats.protocol, IpProto::Icmp | IpProto::Ipv6Icmp)
-            && let Some(is) = icmp_stats
-            && let Some((kind, cs)) = Self::check_icmp_type(stats, is, &src_ip, &dst_ip)
+            && let Some((kind, cs)) = Self::check_icmp_type(stats, &src_ip, &dst_ip)
         {
             return (kind, Some(cs));
         }
@@ -247,13 +243,12 @@ impl DirectionInferrer {
     /// ephemeral port heuristics.
     fn check_tcp_handshake(
         stats: &FlowStats,
-        tcp_stats: &TcpStats,
         src_ip: &IpAddr,
         dst_ip: &IpAddr,
     ) -> Option<(SpanKind, ClientServer)> {
         const SYN_ACK: u8 = TCP_FLAG_SYN | TCP_FLAG_ACK;
 
-        let flags = tcp_stats.forward_tcp_flags;
+        let flags = stats.forward_tcp_flags;
 
         // Distinguish between SYN, SYN-ACK, and pure ACK (third handshake packet)
         let is_syn_only = (flags & TCP_FLAG_SYN) != 0 && (flags & TCP_FLAG_ACK) == 0;
@@ -430,11 +425,10 @@ impl DirectionInferrer {
     /// (request vs reply) with packet direction (egress vs ingress).
     fn check_icmp_type(
         stats: &FlowStats,
-        icmp_stats: &IcmpStats,
         src_ip: &IpAddr,
         dst_ip: &IpAddr,
     ) -> Option<(SpanKind, ClientServer)> {
-        let icmp_type = icmp_stats.icmp_type;
+        let icmp_type = stats.icmp_type;
         let is_icmpv6 = stats.protocol == IpProto::Ipv6Icmp;
 
         let is_request = if is_icmpv6 {
@@ -512,7 +506,7 @@ impl DirectionInferrer {
 
 #[cfg(test)]
 mod tests {
-    use mermin_common::{Direction, IpVersion};
+    use mermin_common::{ConnectionState, Direction, IpVersion};
     use network_types::eth::EtherType;
 
     use super::*;
@@ -525,15 +519,22 @@ mod tests {
             bytes: 100,
             reverse_packets: 0,
             reverse_bytes: 0,
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
             src_ip: [192, 168, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             dst_ip: [192, 168, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            src_mac: [0; 6],
             ifindex: 1,
             ip_flow_label: 0,
             reverse_ip_flow_label: 0,
+            tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
             ether_type: EtherType::Ipv4,
             src_port: 50000,
             dst_port: 80,
+            src_mac: [0; 6],
             direction: Direction::Egress,
             ip_version: IpVersion::V4,
             protocol,
@@ -545,6 +546,14 @@ mod tests {
             reverse_ip_ttl: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 0,
+            tcp_flags: 0,
+            tcp_state: ConnectionState::default(),
+            forward_tcp_flags: 0,
+            reverse_tcp_flags: 0,
+            icmp_type: 0,
+            icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
             pid: 0,
             comm: [0u8; 16],
         }
@@ -554,14 +563,13 @@ mod tests {
     fn test_tcp_handshake_client_egress_syn() {
         // Client sends SYN (packet 1)
         let mut stats = create_test_stats(IpProto::Tcp);
-        let mut tcp_stats = TcpStats::default();
         stats.direction = Direction::Egress;
-        tcp_stats.forward_tcp_flags = 0x02; // SYN only
+        stats.forward_tcp_flags = 0x02; // SYN only
 
         let src_ip = "192.168.1.1".parse().unwrap();
         let dst_ip = "192.168.1.2".parse().unwrap();
 
-        let result = DirectionInferrer::check_tcp_handshake(&stats, &tcp_stats, &src_ip, &dst_ip);
+        let result = DirectionInferrer::check_tcp_handshake(&stats, &src_ip, &dst_ip);
         assert!(result.is_some());
 
         let (kind, cs) = result.unwrap();
@@ -576,14 +584,13 @@ mod tests {
     fn test_tcp_handshake_client_ingress_syn_ack() {
         // Client receives SYN-ACK (packet 2, late start)
         let mut stats = create_test_stats(IpProto::Tcp);
-        let mut tcp_stats = TcpStats::default();
         stats.direction = Direction::Ingress;
-        tcp_stats.forward_tcp_flags = 0x12; // SYN+ACK
+        stats.forward_tcp_flags = 0x12; // SYN+ACK
 
         let src_ip = "192.168.1.2".parse().unwrap(); // Server
         let dst_ip = "192.168.1.1".parse().unwrap(); // Client (us)
 
-        let result = DirectionInferrer::check_tcp_handshake(&stats, &tcp_stats, &src_ip, &dst_ip);
+        let result = DirectionInferrer::check_tcp_handshake(&stats, &src_ip, &dst_ip);
         assert!(result.is_some());
 
         let (kind, cs) = result.unwrap();
@@ -596,14 +603,13 @@ mod tests {
     fn test_tcp_handshake_client_egress_ack() {
         // Client sends final ACK (packet 3, very late start)
         let mut stats = create_test_stats(IpProto::Tcp);
-        let mut tcp_stats = TcpStats::default();
         stats.direction = Direction::Egress;
-        tcp_stats.forward_tcp_flags = 0x10; // ACK only
+        stats.forward_tcp_flags = 0x10; // ACK only
 
         let src_ip = "192.168.1.1".parse().unwrap();
         let dst_ip = "192.168.1.2".parse().unwrap();
 
-        let result = DirectionInferrer::check_tcp_handshake(&stats, &tcp_stats, &src_ip, &dst_ip);
+        let result = DirectionInferrer::check_tcp_handshake(&stats, &src_ip, &dst_ip);
         assert!(result.is_some());
 
         let (kind, cs) = result.unwrap();
@@ -616,14 +622,13 @@ mod tests {
     fn test_tcp_handshake_server_ingress_syn() {
         // Server receives SYN (packet 1)
         let mut stats = create_test_stats(IpProto::Tcp);
-        let mut tcp_stats = TcpStats::default();
         stats.direction = Direction::Ingress;
-        tcp_stats.forward_tcp_flags = 0x02; // SYN only
+        stats.forward_tcp_flags = 0x02; // SYN only
 
         let src_ip = "192.168.1.1".parse().unwrap(); // Client
         let dst_ip = "192.168.1.2".parse().unwrap(); // Server (us)
 
-        let result = DirectionInferrer::check_tcp_handshake(&stats, &tcp_stats, &src_ip, &dst_ip);
+        let result = DirectionInferrer::check_tcp_handshake(&stats, &src_ip, &dst_ip);
         assert!(result.is_some());
 
         let (kind, cs) = result.unwrap();
@@ -636,14 +641,13 @@ mod tests {
     fn test_tcp_handshake_server_egress_syn_ack() {
         // Server sends SYN-ACK (packet 2, late start)
         let mut stats = create_test_stats(IpProto::Tcp);
-        let mut tcp_stats = TcpStats::default();
         stats.direction = Direction::Egress;
-        tcp_stats.forward_tcp_flags = 0x12; // SYN+ACK
+        stats.forward_tcp_flags = 0x12; // SYN+ACK
 
         let src_ip = "192.168.1.2".parse().unwrap(); // Server (us)
         let dst_ip = "192.168.1.1".parse().unwrap(); // Client
 
-        let result = DirectionInferrer::check_tcp_handshake(&stats, &tcp_stats, &src_ip, &dst_ip);
+        let result = DirectionInferrer::check_tcp_handshake(&stats, &src_ip, &dst_ip);
         assert!(result.is_some());
 
         let (kind, cs) = result.unwrap();
@@ -656,14 +660,13 @@ mod tests {
     fn test_tcp_handshake_server_ingress_ack() {
         // Server receives final ACK (packet 3, very late start)
         let mut stats = create_test_stats(IpProto::Tcp);
-        let mut tcp_stats = TcpStats::default();
         stats.direction = Direction::Ingress;
-        tcp_stats.forward_tcp_flags = 0x10; // ACK only
+        stats.forward_tcp_flags = 0x10; // ACK only
 
         let src_ip = "192.168.1.1".parse().unwrap(); // Client
         let dst_ip = "192.168.1.2".parse().unwrap(); // Server (us)
 
-        let result = DirectionInferrer::check_tcp_handshake(&stats, &tcp_stats, &src_ip, &dst_ip);
+        let result = DirectionInferrer::check_tcp_handshake(&stats, &src_ip, &dst_ip);
         assert!(result.is_some());
 
         let (kind, cs) = result.unwrap();
@@ -696,14 +699,13 @@ mod tests {
     fn test_icmp_client_egress_request() {
         // Client sends Echo Request (normal)
         let mut stats = create_test_stats(IpProto::Icmp);
-        let mut icmp_stats = IcmpStats::default();
         stats.direction = Direction::Egress;
-        icmp_stats.icmp_type = ICMP_ECHO_REQUEST;
+        stats.icmp_type = ICMP_ECHO_REQUEST;
 
         let src_ip = "192.168.1.1".parse().unwrap();
         let dst_ip = "8.8.8.8".parse().unwrap();
 
-        let result = DirectionInferrer::check_icmp_type(&stats, &icmp_stats, &src_ip, &dst_ip);
+        let result = DirectionInferrer::check_icmp_type(&stats, &src_ip, &dst_ip);
         assert!(result.is_some());
 
         let (kind, cs) = result.unwrap();
@@ -716,14 +718,13 @@ mod tests {
     fn test_icmp_client_ingress_reply() {
         // Client receives Echo Reply (late start or response)
         let mut stats = create_test_stats(IpProto::Icmp);
-        let mut icmp_stats = IcmpStats::default();
         stats.direction = Direction::Ingress;
-        icmp_stats.icmp_type = ICMP_ECHO_REPLY;
+        stats.icmp_type = ICMP_ECHO_REPLY;
 
         let src_ip = "8.8.8.8".parse().unwrap(); // Server
         let dst_ip = "192.168.1.1".parse().unwrap(); // Client (us)
 
-        let result = DirectionInferrer::check_icmp_type(&stats, &icmp_stats, &src_ip, &dst_ip);
+        let result = DirectionInferrer::check_icmp_type(&stats, &src_ip, &dst_ip);
         assert!(result.is_some());
 
         let (kind, cs) = result.unwrap();
@@ -736,14 +737,13 @@ mod tests {
     fn test_icmp_server_ingress_request() {
         // Server receives Echo Request (normal)
         let mut stats = create_test_stats(IpProto::Icmp);
-        let mut icmp_stats = IcmpStats::default();
         stats.direction = Direction::Ingress;
-        icmp_stats.icmp_type = ICMP_ECHO_REQUEST;
+        stats.icmp_type = ICMP_ECHO_REQUEST;
 
         let src_ip = "192.168.1.1".parse().unwrap(); // Client
         let dst_ip = "8.8.8.8".parse().unwrap(); // Server (us)
 
-        let result = DirectionInferrer::check_icmp_type(&stats, &icmp_stats, &src_ip, &dst_ip);
+        let result = DirectionInferrer::check_icmp_type(&stats, &src_ip, &dst_ip);
         assert!(result.is_some());
 
         let (kind, cs) = result.unwrap();
@@ -756,14 +756,13 @@ mod tests {
     fn test_icmp_server_egress_reply() {
         // Server sends Echo Reply (late start or response)
         let mut stats = create_test_stats(IpProto::Icmp);
-        let mut icmp_stats = IcmpStats::default();
         stats.direction = Direction::Egress;
-        icmp_stats.icmp_type = ICMP_ECHO_REPLY;
+        stats.icmp_type = ICMP_ECHO_REPLY;
 
         let src_ip = "8.8.8.8".parse().unwrap(); // Server (us)
         let dst_ip = "192.168.1.1".parse().unwrap(); // Client
 
-        let result = DirectionInferrer::check_icmp_type(&stats, &icmp_stats, &src_ip, &dst_ip);
+        let result = DirectionInferrer::check_icmp_type(&stats, &src_ip, &dst_ip);
         assert!(result.is_some());
 
         let (kind, cs) = result.unwrap();
@@ -776,14 +775,13 @@ mod tests {
     fn test_icmp_ambiguous_type() {
         // Ambiguous ICMP type (error message) - cannot determine client/server roles
         let mut stats = create_test_stats(IpProto::Icmp);
-        let mut icmp_stats = IcmpStats::default();
         stats.direction = Direction::Egress;
-        icmp_stats.icmp_type = 3; // Destination Unreachable
+        stats.icmp_type = 3; // Destination Unreachable
 
         let src_ip = "192.168.1.1".parse().unwrap();
         let dst_ip = "8.8.8.8".parse().unwrap();
 
-        let result = DirectionInferrer::check_icmp_type(&stats, &icmp_stats, &src_ip, &dst_ip);
+        let result = DirectionInferrer::check_icmp_type(&stats, &src_ip, &dst_ip);
         // Returns None - will fall through to final INTERNAL fallback with no client/server attrs
         assert!(result.is_none());
     }
@@ -886,14 +884,13 @@ mod tests {
     fn test_icmpv6_client_egress_request() {
         // Client sends Echo Request (normal)
         let mut stats = create_test_stats(IpProto::Ipv6Icmp);
-        let mut icmp_stats = IcmpStats::default();
         stats.direction = Direction::Egress;
-        icmp_stats.icmp_type = ICMPV6_ECHO_REQUEST;
+        stats.icmp_type = ICMPV6_ECHO_REQUEST;
 
         let src_ip = "2001:db8::1".parse().unwrap();
         let dst_ip = "2001:db8::2".parse().unwrap();
 
-        let result = DirectionInferrer::check_icmp_type(&stats, &icmp_stats, &src_ip, &dst_ip);
+        let result = DirectionInferrer::check_icmp_type(&stats, &src_ip, &dst_ip);
         assert!(result.is_some());
 
         let (kind, cs) = result.unwrap();
@@ -906,14 +903,13 @@ mod tests {
     fn test_icmpv6_mld_query_egress() {
         // Send MLD Query (client role)
         let mut stats = create_test_stats(IpProto::Ipv6Icmp);
-        let mut icmp_stats = IcmpStats::default();
         stats.direction = Direction::Egress;
-        icmp_stats.icmp_type = ICMPV6_MLD_QUERY;
+        stats.icmp_type = ICMPV6_MLD_QUERY;
 
         let src_ip = "fe80::1".parse().unwrap();
         let dst_ip = "ff02::1".parse().unwrap();
 
-        let result = DirectionInferrer::check_icmp_type(&stats, &icmp_stats, &src_ip, &dst_ip);
+        let result = DirectionInferrer::check_icmp_type(&stats, &src_ip, &dst_ip);
         assert!(result.is_some());
 
         let (kind, cs) = result.unwrap();
@@ -925,14 +921,13 @@ mod tests {
     fn test_icmpv6_server_egress_reply() {
         // Server sends Echo Reply (response)
         let mut stats = create_test_stats(IpProto::Ipv6Icmp);
-        let mut icmp_stats = IcmpStats::default();
         stats.direction = Direction::Egress;
-        icmp_stats.icmp_type = ICMPV6_ECHO_REPLY;
+        stats.icmp_type = ICMPV6_ECHO_REPLY;
 
         let src_ip = "2001:db8::1".parse().unwrap(); // Server (us)
         let dst_ip = "2001:db8::2".parse().unwrap(); // Client
 
-        let result = DirectionInferrer::check_icmp_type(&stats, &icmp_stats, &src_ip, &dst_ip);
+        let result = DirectionInferrer::check_icmp_type(&stats, &src_ip, &dst_ip);
         assert!(result.is_some());
 
         let (kind, cs) = result.unwrap();
@@ -945,14 +940,13 @@ mod tests {
     fn test_tcp_handshake_non_handshake_packet() {
         // Mid-connection packet with multiple flags (not a handshake packet)
         let mut stats = create_test_stats(IpProto::Tcp);
-        let mut tcp_stats = TcpStats::default();
         stats.direction = Direction::Egress;
-        tcp_stats.forward_tcp_flags = 0x18; // PSH+ACK (not a handshake pattern)
+        stats.forward_tcp_flags = 0x18; // PSH+ACK (not a handshake pattern)
 
         let src_ip = "192.168.1.1".parse().unwrap();
         let dst_ip = "192.168.1.2".parse().unwrap();
 
-        let result = DirectionInferrer::check_tcp_handshake(&stats, &tcp_stats, &src_ip, &dst_ip);
+        let result = DirectionInferrer::check_tcp_handshake(&stats, &src_ip, &dst_ip);
         // Should return None since this isn't a handshake packet
         assert!(result.is_none());
     }

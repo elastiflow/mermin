@@ -276,12 +276,12 @@ unsafe impl aya::Pod for FlowKey {}
 /// Flow statistics maintained in eBPF maps, aggregated per normalized FlowKey.
 /// Tracks bidirectional counters, timestamps, metadata, and process information.
 /// Only contains data that eBPF can parse (3-layer: Eth + IP + L4).
-/// Memory layout: 144 bytes (includes process metadata: pid, comm)
-/// Breakdown: 48 (u64) + 32 (IP arrays) + 6 (MAC) + 12 (u32) + 6 (u16) + 11 (u8) + 4 (pid) + 16 (comm) + 9 (padding)
+/// Memory layout: includes TCP/ICMP fields (flattened) and process metadata (pid, comm).
+/// Breakdown: 88 (u64) + 32 (IP arrays) + 6 (MAC) + 20 (u32) + 6 (u16) + 19 (u8) + 4 (pid) + 16 (comm) + padding
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct FlowStats {
-    // === 8-byte aligned (u64) - 48 bytes ===
+    // === 8-byte aligned (u64) - 88 bytes ===
     /// Timestamp when flow was first observed (nanoseconds since boot)
     pub first_seen_ns: u64,
     /// Timestamp when flow was last observed (nanoseconds since boot)
@@ -294,6 +294,16 @@ pub struct FlowStats {
     pub reverse_packets: u64,
     /// Byte count in reverse direction
     pub reverse_bytes: u64,
+    /// Timestamp of initial SYN packet (only meaningful when protocol == TCP)
+    pub tcp_syn_ns: u64,
+    /// Timestamp of SYN-ACK response (only meaningful when protocol == TCP)
+    pub tcp_syn_ack_ns: u64,
+    /// Timestamp of last forward-direction payload (only meaningful when protocol == TCP)
+    pub tcp_last_payload_fwd_ns: u64,
+    /// Timestamp of last reverse-direction payload (only meaningful when protocol == TCP)
+    pub tcp_last_payload_rev_ns: u64,
+    /// Cumulative transaction time in nanoseconds (only meaningful when protocol == TCP)
+    pub tcp_txn_sum_ns: u64,
 
     // === 16-byte arrays - 32 bytes ===
     /// Original source IP
@@ -301,19 +311,19 @@ pub struct FlowStats {
     /// Original destination IP
     pub dst_ip: [u8; 16],
 
-    // === 6-byte array (MAC address) - 6 bytes ===
-    /// Source MAC address
-    pub src_mac: [u8; 6],
-
-    // === 4-byte aligned (u32) - 12 bytes ===
+    // === 4-byte aligned (u32) - 20 bytes ===
     /// Network interface index where flow was observed
     pub ifindex: u32,
     /// IPv6 Flow Label (forward direction, first seen per interval)
     pub ip_flow_label: u32,
     /// IPv6 Flow Label (reverse direction, first seen per interval)
     pub reverse_ip_flow_label: u32,
+    /// Number of completed transactions (only meaningful when protocol == TCP)
+    pub tcp_txn_count: u32,
+    /// Average jitter in nanoseconds (only meaningful when protocol == TCP)
+    pub tcp_jitter_avg_ns: u32,
 
-    // === 2-byte aligned (u16) - 4 bytes ===
+    // === 2-byte aligned (u16) - 6 bytes ===
     /// EtherType
     pub ether_type: EtherType,
     /// Original source port
@@ -321,7 +331,11 @@ pub struct FlowStats {
     /// Original destination port
     pub dst_port: u16,
 
-    // === 1-byte aligned (u8) - 11 bytes ===
+    // === 6-byte array (MAC address) - 6 bytes ===
+    /// Source MAC address
+    pub src_mac: [u8; 6],
+
+    // === 1-byte aligned (u8) - 19 bytes (11 base + 4 TCP + 4 ICMP) ===
     /// Direction: 0=egress, 1=ingress (TC hook attachment point)
     pub direction: Direction,
     /// IP version
@@ -344,6 +358,22 @@ pub struct FlowStats {
     pub forward_metadata_seen: u8,
     /// Flag indicating reverse direction metadata has been captured for current interval (1=captured, 0=not yet)
     pub reverse_metadata_seen: u8,
+    /// TCP flags bit field (union of all observed flags, only meaningful when protocol == TCP)
+    pub tcp_flags: u8,
+    /// TCP connection state (only meaningful when protocol == TCP)
+    pub tcp_state: ConnectionState,
+    /// TCP flags from first forward-direction packet (only meaningful when protocol == TCP)
+    pub forward_tcp_flags: u8,
+    /// TCP flags from first reverse-direction packet (only meaningful when protocol == TCP)
+    pub reverse_tcp_flags: u8,
+    /// ICMP message type (only meaningful when protocol == ICMP or ICMPv6)
+    pub icmp_type: u8,
+    /// ICMP message code (only meaningful when protocol == ICMP or ICMPv6)
+    pub icmp_code: u8,
+    /// ICMP message type for reverse direction (only meaningful when protocol == ICMP or ICMPv6)
+    pub reverse_icmp_type: u8,
+    /// ICMP message code for reverse direction (only meaningful when protocol == ICMP or ICMPv6)
+    pub reverse_icmp_code: u8,
 
     // === Process metadata - 20 bytes ===
     /// Process ID that created/connected this flow (0 if unknown)
@@ -352,26 +382,8 @@ pub struct FlowStats {
     pub comm: [u8; 16],
 }
 
-/// TCP-specific state and performance metrics
-/// Only allocated for TCP flows
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct TcpStats {
-    pub tcp_syn_ns: u64,
-    pub tcp_syn_ack_ns: u64,
-    pub tcp_last_payload_fwd_ns: u64,
-    pub tcp_last_payload_rev_ns: u64,
-    pub tcp_txn_sum_ns: u64,
-    pub tcp_txn_count: u32,
-    pub tcp_jitter_avg_ns: u32,
-    pub tcp_flags: u8,
-    pub tcp_state: ConnectionState,
-    pub forward_tcp_flags: u8,
-    pub reverse_tcp_flags: u8,
-}
-
-impl TcpStats {
-    // TCP flag constants duplicated here for no_std compatibility.
+impl FlowStats {
+    // TCP flag constants for no_std compatibility.
     pub const TCP_FLAG_FIN: u8 = 0x01;
     pub const TCP_FLAG_SYN: u8 = 0x02;
     pub const TCP_FLAG_RST: u8 = 0x04;
@@ -400,16 +412,26 @@ impl TcpStats {
     /// # Examples
     ///
     /// ```
-    /// use mermin_common::{TcpStats, ConnectionState};
+    /// # use mermin_common::{FlowStats, ConnectionState, Direction, IpVersion};
     /// # use network_types::eth::EtherType;
     /// # use network_types::ip::IpProto;
-    /// # use mermin_common::{IpVersion, Direction};
-    /// let stats = TcpStats {
-    /// #     tcp_flags: TcpStats::TCP_FLAG_SYN | TcpStats::TCP_FLAG_ACK,
-    /// #     tcp_jitter_avg_ns: 0, tcp_last_payload_fwd_ns: 0, tcp_last_payload_rev_ns: 0,
-    /// #     tcp_syn_ns: 0, tcp_syn_ack_ns: 0, tcp_txn_count: 0, tcp_txn_sum_ns: 0,
-    /// #     forward_tcp_flags: 0, reverse_tcp_flags: 0, tcp_state: ConnectionState::Closed
-    /// };
+    /// # let mut stats = FlowStats {
+    /// #     first_seen_ns: 0, last_seen_ns: 0, packets: 0, bytes: 0,
+    /// #     reverse_packets: 0, reverse_bytes: 0, tcp_syn_ns: 0, tcp_syn_ack_ns: 0,
+    /// #     tcp_last_payload_fwd_ns: 0, tcp_last_payload_rev_ns: 0, tcp_txn_sum_ns: 0,
+    /// #     src_ip: [0; 16], dst_ip: [0; 16], ifindex: 0, ip_flow_label: 0,
+    /// #     reverse_ip_flow_label: 0, tcp_txn_count: 0, tcp_jitter_avg_ns: 0,
+    /// #     ether_type: EtherType::default(), src_port: 0, dst_port: 0, src_mac: [0; 6],
+    /// #     direction: Direction::default(), ip_version: IpVersion::default(),
+    /// #     protocol: IpProto::default(), ip_dscp: 0, ip_ecn: 0, ip_ttl: 0,
+    /// #     reverse_ip_dscp: 0, reverse_ip_ecn: 0, reverse_ip_ttl: 0,
+    /// #     forward_metadata_seen: 0, reverse_metadata_seen: 0, tcp_flags: 0,
+    /// #     tcp_state: ConnectionState::default(), forward_tcp_flags: 0,
+    /// #     reverse_tcp_flags: 0, icmp_type: 0, icmp_code: 0,
+    /// #     reverse_icmp_type: 0, reverse_icmp_code: 0,
+    /// #     pid: 0, comm: [0; 16],
+    /// # };
+    /// stats.tcp_flags = FlowStats::TCP_FLAG_SYN | FlowStats::TCP_FLAG_ACK;
     ///
     /// assert!(stats.syn());
     /// assert!(stats.ack());
@@ -463,22 +485,8 @@ impl TcpStats {
     }
 }
 
-/// ICMP-specific metadata
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct IcmpStats {
-    pub icmp_type: u8,
-    pub icmp_code: u8,
-    pub reverse_icmp_type: u8,
-    pub reverse_icmp_code: u8,
-}
-
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for FlowStats {}
-#[cfg(feature = "user")]
-unsafe impl aya::Pod for TcpStats {}
-#[cfg(feature = "user")]
-unsafe impl aya::Pod for IcmpStats {}
 
 /// TCP connection state based on RFC 9293 section 3.3.2:
 /// https://datatracker.ietf.org/doc/html/rfc9293#section-3.3.2
@@ -705,25 +713,57 @@ mod tests {
 
     use super::*;
 
-    fn create_tcp_stats() -> TcpStats {
-        TcpStats {
+    fn create_flow_stats_zeroed() -> FlowStats {
+        FlowStats {
+            first_seen_ns: 0,
+            last_seen_ns: 0,
+            packets: 0,
+            bytes: 0,
+            reverse_packets: 0,
+            reverse_bytes: 0,
             tcp_syn_ns: 0,
             tcp_syn_ack_ns: 0,
             tcp_last_payload_fwd_ns: 0,
             tcp_last_payload_rev_ns: 0,
             tcp_txn_sum_ns: 0,
+            src_ip: [0; 16],
+            dst_ip: [0; 16],
+            ifindex: 0,
+            ip_flow_label: 0,
+            reverse_ip_flow_label: 0,
             tcp_txn_count: 0,
             tcp_jitter_avg_ns: 0,
+            ether_type: EtherType::default(),
+            src_port: 0,
+            dst_port: 0,
+            src_mac: [0; 6],
+            direction: Direction::default(),
+            ip_version: IpVersion::default(),
+            protocol: IpProto::default(),
+            ip_dscp: 0,
+            ip_ecn: 0,
+            ip_ttl: 0,
+            reverse_ip_dscp: 0,
+            reverse_ip_ecn: 0,
+            reverse_ip_ttl: 0,
+            forward_metadata_seen: 0,
+            reverse_metadata_seen: 0,
             tcp_flags: 0,
-            tcp_state: ConnectionState::Closed,
+            tcp_state: ConnectionState::default(),
             forward_tcp_flags: 0,
             reverse_tcp_flags: 0,
+            icmp_type: 0,
+            icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
+            pid: 0,
+            comm: [0; 16],
         }
     }
 
     #[test]
     fn test_flow_stats_tcp_flags() {
-        let mut stats = create_tcp_stats();
+        let mut stats = create_flow_stats_zeroed();
 
         // Verify all flags clear
         stats.tcp_flags = 0x00;
@@ -737,34 +777,34 @@ mod tests {
         assert_eq!(stats.cwr(), false);
 
         // Test individual flags
-        stats.tcp_flags = TcpStats::TCP_FLAG_FIN;
+        stats.tcp_flags = FlowStats::TCP_FLAG_FIN;
         assert_eq!(stats.fin(), true);
         assert_eq!(stats.syn(), false);
 
-        stats.tcp_flags = TcpStats::TCP_FLAG_SYN;
+        stats.tcp_flags = FlowStats::TCP_FLAG_SYN;
         assert_eq!(stats.fin(), false);
         assert_eq!(stats.syn(), true);
 
-        stats.tcp_flags = TcpStats::TCP_FLAG_RST;
+        stats.tcp_flags = FlowStats::TCP_FLAG_RST;
         assert_eq!(stats.rst(), true);
 
-        stats.tcp_flags = TcpStats::TCP_FLAG_PSH;
+        stats.tcp_flags = FlowStats::TCP_FLAG_PSH;
         assert_eq!(stats.psh(), true);
 
-        stats.tcp_flags = TcpStats::TCP_FLAG_ACK;
+        stats.tcp_flags = FlowStats::TCP_FLAG_ACK;
         assert_eq!(stats.ack(), true);
 
-        stats.tcp_flags = TcpStats::TCP_FLAG_URG;
+        stats.tcp_flags = FlowStats::TCP_FLAG_URG;
         assert_eq!(stats.urg(), true);
 
-        stats.tcp_flags = TcpStats::TCP_FLAG_ECE;
+        stats.tcp_flags = FlowStats::TCP_FLAG_ECE;
         assert_eq!(stats.ece(), true);
 
-        stats.tcp_flags = TcpStats::TCP_FLAG_CWR;
+        stats.tcp_flags = FlowStats::TCP_FLAG_CWR;
         assert_eq!(stats.cwr(), true);
 
         // Test multiple flags (common SYN-ACK combination)
-        stats.tcp_flags = TcpStats::TCP_FLAG_SYN | TcpStats::TCP_FLAG_ACK;
+        stats.tcp_flags = FlowStats::TCP_FLAG_SYN | FlowStats::TCP_FLAG_ACK;
         assert_eq!(stats.syn(), true);
         assert_eq!(stats.ack(), true);
         assert_eq!(stats.fin(), false);
@@ -1039,14 +1079,13 @@ mod tests {
     /// 2. Alignment is consistent
     #[test]
     fn test_flow_stats_memory_layout() {
-        // Verify optimized memory layout (144 bytes)
-        // Previous: 120 bytes
-        // Added: 4 (pid) + 16 (comm) = 20 bytes + padding
-        // Total: 144 bytes (aligned to 8-byte boundary)
+        // Verify optimized memory layout (192 bytes)
+        // 88 (11 u64) + 32 (2 IP arrays) + 20 (5 u32) + 6 (3 u16) + 6 (MAC)
+        // + 19 (u8: 11 base + 4 TCP + 4 ICMP) + 1 (pad) + 4 (pid) + 16 (comm) = 192
         assert_eq!(
             size_of::<FlowStats>(),
-            144,
-            "FlowStats size MUST be 144 bytes for eBPF/userspace compatibility"
+            192,
+            "FlowStats size MUST be 192 bytes for eBPF/userspace compatibility"
         );
 
         // Verify alignment (critical for correct memory access in eBPF)
@@ -1054,44 +1093,6 @@ mod tests {
             align_of::<FlowStats>(),
             8,
             "FlowStats alignment MUST be 8 bytes (u64 fields) for eBPF/userspace compatibility"
-        );
-    }
-
-    #[test]
-    fn test_tcp_stats_memory_layout() {
-        // Verify optimized memory layout (56 bytes)
-        // 40 (u64) + 8 (u32) + 4 (u8) = 52 bytes
-        // Compiler adds 4 bytes of trailing padding to align to 8-byte boundary = 56 bytes
-        assert_eq!(
-            size_of::<TcpStats>(),
-            56,
-            "TcpStats size MUST be 56 bytes for eBPF/userspace compatibility"
-        );
-
-        // Verify alignment (critical for u64 timestamp access)
-        assert_eq!(
-            align_of::<TcpStats>(),
-            8,
-            "TcpStats alignment MUST be 8 bytes for eBPF/userspace compatibility"
-        );
-    }
-
-    #[test]
-    fn test_icmp_stats_memory_layout() {
-        // Verify optimized memory layout (4 bytes)
-        // 4 (u8) = 4 bytes
-        // No trailing padding required for 1-byte alignment
-        assert_eq!(
-            size_of::<IcmpStats>(),
-            4,
-            "IcmpStats size MUST be 4 bytes for eBPF/userspace compatibility"
-        );
-
-        // Verify alignment (all fields are u8)
-        assert_eq!(
-            align_of::<IcmpStats>(),
-            1,
-            "IcmpStats alignment MUST be 1 byte for eBPF/userspace compatibility"
         );
     }
 

@@ -45,7 +45,6 @@ use std::sync::{
 
 use aya::maps::HashMap as EbpfHashMap;
 use mermin_common::FlowKey;
-use network_types::ip::IpProto;
 use tokio::sync::Mutex;
 use tracing::warn;
 
@@ -60,8 +59,6 @@ use crate::metrics::ebpf::map_entry_not_found;
 pub struct EbpfFlowGuard {
     key: FlowKey,
     stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, mermin_common::FlowStats>>>,
-    tcp_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, mermin_common::TcpStats>>>,
-    icmp_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, mermin_common::IcmpStats>>>,
     should_keep: Arc<AtomicBool>,
 }
 
@@ -74,18 +71,14 @@ impl EbpfFlowGuard {
     /// ### Arguments
     ///
     /// - `key` - Flow key identifying the entry in the eBPF map
-    /// - `map` - Shared reference to the eBPF `FLOW_STATS`
+    /// - `stats_map` - Shared reference to the eBPF `FLOW_STATS`
     pub fn new(
         key: FlowKey,
         stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, mermin_common::FlowStats>>>,
-        tcp_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, mermin_common::TcpStats>>>,
-        icmp_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, mermin_common::IcmpStats>>>,
     ) -> Self {
         Self {
             key,
             stats_map,
-            tcp_map,
-            icmp_map,
             should_keep: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -107,45 +100,29 @@ impl Drop for EbpfFlowGuard {
             // Spawn a background task to avoid blocking the drop (async not allowed in Drop)
             let key = self.key;
             let stats_map = Arc::clone(&self.stats_map);
-            let tcp_map = Arc::clone(&self.tcp_map);
-            let icmp_map = Arc::clone(&self.icmp_map);
-
-            let protocol = key.protocol;
 
             tokio::spawn(async move {
-                macro_rules! cleanup_map {
-                    ($map_mutex:expr) => {
-                        let mut map = $map_mutex.lock().await;
-                        match map.remove(&key) {
-                            Ok(_) => {
-                                warn!(
-                                    event.name = "ebpf_guard.cleanup_success",
-                                    flow.key = ?key,
-                                    "removed orphaned eBPF entry via guard cleanup (error occurred during flow creation)"
-                                );
-                            }
-                            Err(e) => {
-                                if !map_entry_not_found(&e) {
-                                    warn!(
-                                        event.name = "ebpf_guard.cleanup_failed",
-                                        flow.key = ?key,
-                                        error.message = %e,
-                                        "failed to remove orphaned eBPF entry via guard cleanup"
-                                    );
-                                }
-                            }
+                let mut map = stats_map.lock().await;
+                match map.remove(&key) {
+                    Ok(_) => {
+                        warn!(
+                            event.name = "ebpf_guard.cleanup_success",
+                            flow.key = ?key,
+                            "removed orphaned eBPF entry via guard cleanup (error occurred during flow creation)"
+                        );
+                    }
+                    Err(e) => {
+                        if !map_entry_not_found(&e) {
+                            warn!(
+                                event.name = "ebpf_guard.cleanup_failed",
+                                flow.key = ?key,
+                                error.message = %e,
+                                "failed to remove orphaned eBPF entry via guard cleanup"
+                            );
                         }
-                        drop(map);
-                    };
+                    }
                 }
-
-                cleanup_map!(stats_map);
-                if protocol == IpProto::Tcp {
-                    cleanup_map!(tcp_map);
-                }
-                if matches!(protocol, IpProto::Icmp | IpProto::Ipv6Icmp) {
-                    cleanup_map!(icmp_map);
-                }
+                drop(map);
             });
         }
     }

@@ -8,9 +8,7 @@ use std::{
 use aya::maps::{HashMap as EbpfHashMap, RingBuf};
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
-use mermin_common::{
-    Direction, FlowEvent, FlowKey, FlowStats, IcmpStats, ListeningPortKey, MapUnit, TcpStats,
-};
+use mermin_common::{Direction, FlowEvent, FlowKey, FlowStats, ListeningPortKey, MapUnit};
 use moka::future::Cache;
 use network_types::{
     eth::EtherType,
@@ -83,8 +81,6 @@ pub struct FlowEntry {
 pub struct FlowSpanComponents {
     pub flow_store: FlowStore,
     pub flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
-    pub tcp_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, TcpStats>>>,
-    pub icmp_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, IcmpStats>>>,
     pub flow_span_tx: mpsc::Sender<FlowSpan>,
 }
 
@@ -118,8 +114,6 @@ impl FlowSpanProducer {
         workers: usize,
         iface_map: Arc<DashMap<u32, String>>,
         flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
-        tcp_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, TcpStats>>>,
-        icmp_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, IcmpStats>>>,
         flow_events_ringbuf: RingBuf<aya::maps::MapData>,
         flow_span_tx: mpsc::Sender<FlowSpan>,
         listening_ports_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, ListeningPortKey, u8>>>,
@@ -176,8 +170,6 @@ impl FlowSpanProducer {
         let components = Arc::new(FlowSpanComponents {
             flow_store,
             flow_stats_map,
-            tcp_stats_map,
-            icmp_stats_map,
             flow_span_tx,
         });
 
@@ -243,8 +235,6 @@ impl FlowSpanProducer {
                 Arc::clone(&self.iface_map),
                 Arc::clone(&components.flow_store),
                 Arc::clone(&components.flow_stats_map),
-                Arc::clone(&components.tcp_stats_map),
-                Arc::clone(&components.icmp_stats_map),
                 worker_rx,
                 self.filter.clone(),
                 self.vxlan_port,
@@ -274,8 +264,6 @@ impl FlowSpanProducer {
         let orphan_scanner_shutdown_rx = shutdown_rx.resubscribe();
         let orphan_scanner_handle = tokio::spawn(orphan_scanner_task(
             Arc::clone(&components.flow_stats_map),
-            Arc::clone(&components.tcp_stats_map),
-            Arc::clone(&components.icmp_stats_map),
             Arc::clone(&components.flow_store),
             self.boot_time_offset_nanos,
             max_orphan_age,
@@ -383,8 +371,6 @@ impl FlowSpanProducer {
         for poller_id in 0..num_pollers {
             let poller_flow_store = Arc::clone(&components.flow_store);
             let poller_stats_map = Arc::clone(&components.flow_stats_map);
-            let poller_tcp_stats_map = Arc::clone(&components.tcp_stats_map);
-            let poller_icmp_stats_map = Arc::clone(&components.icmp_stats_map);
             let poller_span_tx = components.flow_span_tx.clone();
             let poller_trace_id_cache = self.trace_id_cache.clone();
             let poller_shutdown_rx = shutdown_rx.resubscribe();
@@ -394,8 +380,6 @@ impl FlowSpanProducer {
                 num_pollers,
                 flow_store: poller_flow_store,
                 flow_stats_map: poller_stats_map,
-                tcp_stats_map: poller_tcp_stats_map,
-                icmp_stats_map: poller_icmp_stats_map,
                 flow_span_tx: poller_span_tx,
                 max_record_interval,
                 poll_interval,
@@ -593,8 +577,6 @@ pub struct FlowWorker {
     iface_map: Arc<DashMap<u32, String>>,
     flow_store: FlowStore,
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
-    tcp_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, TcpStats>>>,
-    icmp_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, IcmpStats>>>,
     flow_event_rx: mpsc::Receiver<FlowEvent>,
     filter: Option<Arc<PacketFilter>>,
     vxlan_port: u16,
@@ -617,8 +599,6 @@ impl FlowWorker {
         iface_map: Arc<DashMap<u32, String>>,
         flow_store: FlowStore,
         flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
-        tcp_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, TcpStats>>>,
-        icmp_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, IcmpStats>>>,
         flow_event_rx: mpsc::Receiver<FlowEvent>,
         filter: Option<Arc<PacketFilter>>,
         vxlan_port: u16,
@@ -643,8 +623,6 @@ impl FlowWorker {
             iface_map,
             flow_store,
             flow_stats_map,
-            tcp_stats_map,
-            icmp_stats_map,
             flow_event_rx,
             filter,
             vxlan_port,
@@ -755,18 +733,6 @@ impl FlowWorker {
             EbpfMapName::FlowStats,
         )
         .await;
-        if event.flow_key.protocol == IpProto::Tcp {
-            self.remove_ebpf_map_entry(&self.tcp_stats_map, &event.flow_key, EbpfMapName::TcpStats)
-                .await;
-        }
-        if matches!(event.flow_key.protocol, IpProto::Icmp | IpProto::Ipv6Icmp) {
-            self.remove_ebpf_map_entry(
-                &self.icmp_stats_map,
-                &event.flow_key,
-                EbpfMapName::IcmpStats,
-            )
-            .await;
-        }
 
         Ok(())
     }
@@ -828,12 +794,7 @@ impl FlowWorker {
         // CRITICAL: Create guard to ensure eBPF cleanup on ANY error path
         // The guard will automatically clean up the eBPF entry if this function exits
         // early (via error return) or panics, preventing orphaned entries.
-        let guard = EbpfFlowGuard::new(
-            event.flow_key,
-            Arc::clone(&self.flow_stats_map),
-            Arc::clone(&self.tcp_stats_map),
-            Arc::clone(&self.icmp_stats_map),
-        );
+        let guard = EbpfFlowGuard::new(event.flow_key, Arc::clone(&self.flow_stats_map));
 
         // Read stats from eBPF map and immediately release lock to minimize contention.
         // The scoped block ensures the lock is dropped before expensive filtering logic.
@@ -846,34 +807,9 @@ impl FlowWorker {
             .await
             .map_err(|_| Error::FlowNotFound)?;
 
-        let mut tcp_stats = None;
-        if stats.protocol == IpProto::Tcp {
-            tcp_stats = self
-                .get_ebpf_map_entry(&self.tcp_stats_map, &event.flow_key, EbpfMapName::TcpStats)
-                .await
-                .ok();
-        }
-
-        let mut icmp_stats = None;
-        if matches!(stats.protocol, IpProto::Icmp | IpProto::Ipv6Icmp) {
-            icmp_stats = self
-                .get_ebpf_map_entry(
-                    &self.icmp_stats_map,
-                    &event.flow_key,
-                    EbpfMapName::IcmpStats,
-                )
-                .await
-                .ok();
-        }
-
         // Early flow filtering: Check if this flow should be tracked
         // If filtered out, immediately remove from eBPF map to prevent memory leaks
-        if !self.should_process_flow(
-            &event.flow_key,
-            &stats,
-            tcp_stats.as_ref(),
-            icmp_stats.as_ref(),
-        ) {
+        if !self.should_process_flow(&event.flow_key, &stats) {
             if metrics::registry::debug_enabled() {
                 metrics::registry::FLOW_EVENTS_TOTAL
                     .with_label_values(&[FlowEventResult::Filtered.as_str()])
@@ -900,22 +836,6 @@ impl FlowWorker {
                 EbpfMapName::FlowStats,
             )
             .await;
-            if event.flow_key.protocol == IpProto::Tcp {
-                self.remove_ebpf_map_entry(
-                    &self.tcp_stats_map,
-                    &event.flow_key,
-                    EbpfMapName::TcpStats,
-                )
-                .await;
-            }
-            if matches!(event.flow_key.protocol, IpProto::Icmp | IpProto::Ipv6Icmp) {
-                self.remove_ebpf_map_entry(
-                    &self.icmp_stats_map,
-                    &event.flow_key,
-                    EbpfMapName::IcmpStats,
-                )
-                .await;
-            }
 
             guard.keep();
 
@@ -941,14 +861,8 @@ impl FlowWorker {
             event.flow_key.protocol,
         );
 
-        self.create_flow_span(
-            &community_id,
-            &event.flow_key,
-            &stats,
-            tcp_stats,
-            icmp_stats,
-        )
-        .await?;
+        self.create_flow_span(&community_id, &event.flow_key, &stats)
+            .await?;
 
         // Flow successfully created and stored - disable guard cleanup
         // The entry is now managed by flow_store and will be cleaned up by timeout task
@@ -1043,16 +957,10 @@ impl FlowWorker {
     ///
     /// Filtering is configuration-driven through the `PacketFilter` loaded from config.
     /// If no filter is configured, all flows are accepted.
-    fn should_process_flow(
-        &self,
-        flow_key: &FlowKey,
-        stats: &FlowStats,
-        tcp_stats: Option<&TcpStats>,
-        icmp_stats: Option<&IcmpStats>,
-    ) -> bool {
+    fn should_process_flow(&self, flow_key: &FlowKey, stats: &FlowStats) -> bool {
         // If filter is configured, use it
         if let Some(filter) = &self.filter {
-            match filter.should_track_flow(flow_key, stats, tcp_stats, icmp_stats) {
+            match filter.should_track_flow(flow_key, stats) {
                 Ok(should_track) => should_track,
                 Err(e) => {
                     warn!(
@@ -1076,11 +984,10 @@ impl FlowWorker {
         community_id: &str,
         flow_key: &FlowKey,
         stats: &FlowStats,
-        tcp_stats: Option<TcpStats>,
-        icmp_stats: Option<IcmpStats>,
     ) -> Result<(), Error> {
         let is_ip_flow = stats.ether_type == EtherType::Ipv4 || stats.ether_type == EtherType::Ipv6;
         let is_ipv6 = stats.ether_type == EtherType::Ipv6;
+        let is_tcp = stats.protocol == IpProto::Tcp;
         let is_icmp = stats.protocol == IpProto::Icmp;
         let is_icmpv6 = stats.protocol == IpProto::Ipv6Icmp;
         let start_time_nanos = stats.first_seen_ns + self.boot_time_offset_nanos;
@@ -1090,10 +997,10 @@ impl FlowWorker {
             .get(&stats.ifindex)
             .map(|r| r.value().clone());
         let (src_addr, dst_addr) = flow_key_to_ip_addrs(flow_key)?;
-        let timeout = self.calculate_timeout(flow_key.protocol, tcp_stats.as_ref());
+        let timeout = self.calculate_timeout(stats);
         let (span_kind, client_server) = self
             .direction_inferrer
-            .infer_from_stats(flow_key, stats, tcp_stats.as_ref(), icmp_stats.as_ref())
+            .infer_from_stats(flow_key, stats)
             .await;
         let (client_address, client_port, server_address, server_port) =
             if let Some(ref cs) = client_server {
@@ -1117,7 +1024,7 @@ impl FlowWorker {
             attributes: SpanAttributes {
                 // General flow attributes
                 flow_community_id: community_id.to_string(),
-                flow_connection_state: tcp_stats.map(|ts| ts.tcp_state),
+                flow_connection_state: is_tcp.then_some(stats.tcp_state),
                 flow_end_reason: None,
 
                 // Network endpoints
@@ -1169,39 +1076,39 @@ impl FlowWorker {
                 flow_reverse_ip_ttl: is_ip_flow.then_some(stats.reverse_ip_ttl),
                 flow_reverse_ip_flow_label: is_ipv6.then_some(stats.reverse_ip_flow_label),
 
-                // TCP metadata
-                flow_tcp_flags_bits: tcp_stats.map(|ts| ts.tcp_flags),
-                flow_tcp_flags_tags: tcp_stats.map(|ts| TcpFlags::flags_from_bits(ts.tcp_flags)),
-                flow_reverse_tcp_flags_bits: tcp_stats.map(|ts| ts.reverse_tcp_flags),
-                flow_reverse_tcp_flags_tags: tcp_stats
-                    .map(|ts| TcpFlags::flags_from_bits(ts.reverse_tcp_flags)),
-                flow_tcp_handshake_latency: tcp_stats.and_then(|ts| {
-                    (ts.tcp_syn_ns != 0 && ts.tcp_syn_ack_ns != 0).then(|| {
-                        TcpFlags::handshake_latency_from_stats(ts.tcp_syn_ns, ts.tcp_syn_ack_ns)
-                    })
-                }),
-                flow_tcp_svc_latency: tcp_stats.and_then(|ts| {
-                    (is_server && ts.tcp_txn_count > 0).then(|| {
-                        TcpFlags::transaction_latency_from_stats(
-                            ts.tcp_txn_sum_ns,
-                            ts.tcp_txn_count,
+                // TCP metadata (only populated for TCP flows)
+                flow_tcp_flags_bits: is_tcp.then_some(stats.tcp_flags),
+                flow_tcp_flags_tags: is_tcp.then(|| TcpFlags::flags_from_bits(stats.tcp_flags)),
+                flow_reverse_tcp_flags_bits: is_tcp.then_some(stats.reverse_tcp_flags),
+                flow_reverse_tcp_flags_tags: is_tcp
+                    .then(|| TcpFlags::flags_from_bits(stats.reverse_tcp_flags)),
+                flow_tcp_handshake_latency: (is_tcp
+                    && stats.tcp_syn_ns != 0
+                    && stats.tcp_syn_ack_ns != 0)
+                    .then(|| {
+                        TcpFlags::handshake_latency_from_stats(
+                            stats.tcp_syn_ns,
+                            stats.tcp_syn_ack_ns,
                         )
-                    })
+                    }),
+                flow_tcp_svc_latency: (is_tcp && is_server && stats.tcp_txn_count > 0).then(|| {
+                    TcpFlags::transaction_latency_from_stats(
+                        stats.tcp_txn_sum_ns,
+                        stats.tcp_txn_count,
+                    )
                 }),
-                flow_tcp_svc_jitter: tcp_stats.and_then(|ts| {
-                    (is_server && ts.tcp_txn_count > 0).then_some(ts.tcp_jitter_avg_ns as i64)
-                }),
-                flow_tcp_rndtrip_latency: tcp_stats.and_then(|ts| {
-                    (is_client && ts.tcp_txn_count > 0).then(|| {
+                flow_tcp_svc_jitter: (is_tcp && is_server && stats.tcp_txn_count > 0)
+                    .then_some(stats.tcp_jitter_avg_ns as i64),
+                flow_tcp_rndtrip_latency: (is_tcp && is_client && stats.tcp_txn_count > 0).then(
+                    || {
                         TcpFlags::transaction_latency_from_stats(
-                            ts.tcp_txn_sum_ns,
-                            ts.tcp_txn_count,
+                            stats.tcp_txn_sum_ns,
+                            stats.tcp_txn_count,
                         )
-                    })
-                }),
-                flow_tcp_rndtrip_jitter: tcp_stats.and_then(|ts| {
-                    (is_client && ts.tcp_txn_count > 0).then_some(ts.tcp_jitter_avg_ns as i64)
-                }),
+                    },
+                ),
+                flow_tcp_rndtrip_jitter: (is_tcp && is_client && stats.tcp_txn_count > 0)
+                    .then_some(stats.tcp_jitter_avg_ns as i64),
 
                 // Client/Server attributes (from direction inference)
                 client_address,
@@ -1218,59 +1125,31 @@ impl FlowWorker {
                         .to_string()
                 }),
 
-                // ICMP metadata
-                flow_icmp_type_id: icmp_stats.map(|is| is.icmp_type),
-                flow_icmp_type_name: icmp_stats.and_then(|is| {
-                    if is_icmp {
-                        network_types::icmp::get_icmpv4_type_name(is.icmp_type).map(String::from)
-                    } else if is_icmpv6 {
-                        network_types::icmp::get_icmpv6_type_name(is.icmp_type).map(String::from)
-                    } else {
-                        None
-                    }
-                }),
-                flow_icmp_code_id: icmp_stats.map(|is| is.icmp_code),
-                flow_icmp_code_name: icmp_stats.and_then(|is| {
-                    if is_icmp {
-                        network_types::icmp::get_icmpv4_code_name(is.icmp_type, is.icmp_code)
-                            .map(String::from)
-                    } else if is_icmpv6 {
-                        network_types::icmp::get_icmpv6_code_name(is.icmp_type, is.icmp_code)
-                            .map(String::from)
-                    } else {
-                        None
-                    }
-                }),
-                flow_reverse_icmp_type_id: icmp_stats.map(|is| is.reverse_icmp_type),
-                flow_reverse_icmp_type_name: icmp_stats.and_then(|is| {
-                    if is_icmp {
-                        network_types::icmp::get_icmpv4_type_name(is.reverse_icmp_type)
-                            .map(String::from)
-                    } else if is_icmpv6 {
-                        network_types::icmp::get_icmpv6_type_name(is.reverse_icmp_type)
-                            .map(String::from)
-                    } else {
-                        None
-                    }
-                }),
-                flow_reverse_icmp_code_id: icmp_stats.map(|is| is.reverse_icmp_code),
-                flow_reverse_icmp_code_name: icmp_stats.and_then(|is| {
-                    if is_icmp {
-                        network_types::icmp::get_icmpv4_code_name(
-                            is.reverse_icmp_type,
-                            is.reverse_icmp_code,
-                        )
-                        .map(String::from)
-                    } else if is_icmpv6 {
-                        network_types::icmp::get_icmpv6_code_name(
-                            is.reverse_icmp_type,
-                            is.reverse_icmp_code,
-                        )
-                        .map(String::from)
-                    } else {
-                        None
-                    }
-                }),
+                // ICMP metadata (only populated for ICMP/ICMPv6 flows)
+                flow_icmp_type_id: (is_icmp || is_icmpv6).then_some(stats.icmp_type),
+                flow_icmp_type_name: icmp_type_name(is_icmp, is_icmpv6, stats.icmp_type),
+                flow_icmp_code_id: (is_icmp || is_icmpv6).then_some(stats.icmp_code),
+                flow_icmp_code_name: icmp_code_name(
+                    is_icmp,
+                    is_icmpv6,
+                    stats.icmp_type,
+                    stats.icmp_code,
+                ),
+                flow_reverse_icmp_type_id: (is_icmp || is_icmpv6)
+                    .then_some(stats.reverse_icmp_type),
+                flow_reverse_icmp_type_name: icmp_type_name(
+                    is_icmp,
+                    is_icmpv6,
+                    stats.reverse_icmp_type,
+                ),
+                flow_reverse_icmp_code_id: (is_icmp || is_icmpv6)
+                    .then_some(stats.reverse_icmp_code),
+                flow_reverse_icmp_code_name: icmp_code_name(
+                    is_icmp,
+                    is_icmpv6,
+                    stats.reverse_icmp_type,
+                    stats.reverse_icmp_code,
+                ),
 
                 // Initialize counters (will be updated from eBPF map on record intervals)
                 flow_bytes_delta: stats.bytes as i64,
@@ -1385,19 +1264,14 @@ impl FlowWorker {
     }
 
     /// Calculate timeout duration based on protocol and flow stats
-    fn calculate_timeout(&self, protocol: IpProto, tcp_stats: Option<&TcpStats>) -> Duration {
-        match protocol {
+    fn calculate_timeout(&self, stats: &FlowStats) -> Duration {
+        match stats.protocol {
             IpProto::Icmp | IpProto::Ipv6Icmp => self.icmp_timeout,
             IpProto::Tcp => {
-                if let Some(ts) = tcp_stats {
-                    // TCP - check for FIN or RST flags
-                    if ts.tcp_flags & TCP_FLAG_FIN != 0 {
-                        self.tcp_fin_timeout
-                    } else if ts.tcp_flags & TCP_FLAG_RST != 0 {
-                        self.tcp_rst_timeout
-                    } else {
-                        self.tcp_timeout
-                    }
+                if stats.tcp_flags & TCP_FLAG_FIN != 0 {
+                    self.tcp_fin_timeout
+                } else if stats.tcp_flags & TCP_FLAG_RST != 0 {
+                    self.tcp_rst_timeout
                 } else {
                     self.tcp_timeout
                 }
@@ -1478,8 +1352,6 @@ struct FlowPoller {
     num_pollers: usize,
     flow_store: FlowStore,
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
-    tcp_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, TcpStats>>>,
-    icmp_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, IcmpStats>>>,
     flow_span_tx: mpsc::Sender<FlowSpan>,
     trace_id_cache: TraceIdCache,
     max_record_interval: Duration,
@@ -1529,8 +1401,6 @@ impl FlowPoller {
                             community_id,
                             &self.flow_store,
                             &self.flow_stats_map,
-                            &self.tcp_stats_map,
-                            &self.icmp_stats_map,
                             &self.flow_span_tx,
                             &self.trace_id_cache,
                         )
@@ -1627,7 +1497,7 @@ impl FlowPoller {
                         flow.community_id = %community_id,
                         "calling record_flow"
                     );
-                    if !record_flow(community_id, &self.flow_store, &self.flow_stats_map, &self.tcp_stats_map, &self.icmp_stats_map, &self.flow_span_tx).await {
+                    if !record_flow(community_id, &self.flow_store, &self.flow_stats_map, &self.flow_span_tx).await {
                         // Export channel closed, stop poller
                         warn!(
                             event.name = "flow_poller.stopped",
@@ -1663,8 +1533,6 @@ impl FlowPoller {
                         community_id.clone(),
                         &self.flow_store,
                         &self.flow_stats_map,
-                        &self.tcp_stats_map,
-                        &self.icmp_stats_map,
                         &self.flow_span_tx,
                         &self.trace_id_cache,
                     )
@@ -1759,6 +1627,32 @@ impl std::error::Error for BootTimeError {
     }
 }
 
+/// Resolve an ICMP type value to its human-readable name for the given IP version.
+///
+/// Returns `None` for non-ICMP protocols or unknown type values.
+fn icmp_type_name(is_icmp: bool, is_icmpv6: bool, icmp_type: u8) -> Option<String> {
+    if is_icmp {
+        network_types::icmp::get_icmpv4_type_name(icmp_type).map(String::from)
+    } else if is_icmpv6 {
+        network_types::icmp::get_icmpv6_type_name(icmp_type).map(String::from)
+    } else {
+        None
+    }
+}
+
+/// Resolve an ICMP type+code pair to the human-readable code name for the given IP version.
+///
+/// Returns `None` for non-ICMP protocols or unknown type/code combinations.
+fn icmp_code_name(is_icmp: bool, is_icmpv6: bool, icmp_type: u8, icmp_code: u8) -> Option<String> {
+    if is_icmp {
+        network_types::icmp::get_icmpv4_code_name(icmp_type, icmp_code).map(String::from)
+    } else if is_icmpv6 {
+        network_types::icmp::get_icmpv6_code_name(icmp_type, icmp_code).map(String::from)
+    } else {
+        None
+    }
+}
+
 /// Hash a string for flow partitioning across pollers
 fn hash_string(s: &str) -> usize {
     use std::hash::{Hash, Hasher};
@@ -1773,8 +1667,6 @@ async fn record_flow(
     community_id: &str,
     flow_store: &FlowStore,
     flow_stats_map: &Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
-    tcp_stats_map: &Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, TcpStats>>>,
-    icmp_stats_map: &Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, IcmpStats>>>,
     flow_span_tx: &mpsc::Sender<FlowSpan>,
 ) -> bool {
     // Extract flow_key and boot_time_offset WITHOUT holding DashMap reference
@@ -1871,36 +1763,6 @@ async fn record_flow(
     };
     drop(map);
 
-    let mut tcp_stats = None;
-    if stats.protocol == IpProto::Tcp {
-        let map = tcp_stats_map.lock().await;
-        if let Ok(ts) = map.get(&flow_key, 0) {
-            metrics::registry::EBPF_MAP_OPS_TOTAL
-                .with_label_values(&[
-                    EbpfMapName::TcpStats.as_str(),
-                    EbpfMapOperation::Read.as_str(),
-                    EbpfMapStatus::Ok.as_str(),
-                ])
-                .inc();
-            tcp_stats = Some(ts);
-        }
-    }
-
-    let mut icmp_stats = None;
-    if stats.protocol == IpProto::Icmp || stats.protocol == IpProto::Ipv6Icmp {
-        let map = icmp_stats_map.lock().await;
-        if let Ok(is) = map.get(&flow_key, 0) {
-            metrics::registry::EBPF_MAP_OPS_TOTAL
-                .with_label_values(&[
-                    EbpfMapName::IcmpStats.as_str(),
-                    EbpfMapOperation::Read.as_str(),
-                    EbpfMapStatus::Ok.as_str(),
-                ])
-                .inc();
-            icmp_stats = Some(is);
-        }
-    }
-
     // Calculate deltas using extracted values
     let delta_packets = stats.packets.saturating_sub(last_recorded_packets);
     let delta_bytes = stats.bytes.saturating_sub(last_recorded_bytes);
@@ -1989,7 +1851,8 @@ async fn record_flow(
     };
 
     let flow_span = &mut entry_ref.flow_span;
-    flow_span.attributes.flow_connection_state = tcp_stats.map(|ts| ts.tcp_state);
+    let is_tcp = stats.protocol == IpProto::Tcp;
+    flow_span.attributes.flow_connection_state = is_tcp.then_some(stats.tcp_state);
     flow_span.attributes.flow_bytes_delta = delta_bytes as i64;
     flow_span.attributes.flow_packets_delta = delta_packets as i64;
     flow_span.attributes.flow_reverse_bytes_delta = delta_reverse_bytes as i64;
@@ -2027,22 +1890,22 @@ async fn record_flow(
     let is_server = flow_span.span_kind == SpanKind::Server;
     let is_client = flow_span.span_kind == SpanKind::Client;
 
-    if let Some(ts) = tcp_stats {
+    if is_tcp {
         if flow_span.attributes.flow_tcp_handshake_latency.is_none()
-            && ts.tcp_syn_ns != 0
-            && ts.tcp_syn_ack_ns != 0
+            && stats.tcp_syn_ns != 0
+            && stats.tcp_syn_ack_ns != 0
         {
             flow_span.attributes.flow_tcp_handshake_latency = Some(
-                TcpFlags::handshake_latency_from_stats(ts.tcp_syn_ns, ts.tcp_syn_ack_ns),
+                TcpFlags::handshake_latency_from_stats(stats.tcp_syn_ns, stats.tcp_syn_ack_ns),
             );
         }
 
-        if ts.tcp_txn_count > 0 {
+        if stats.tcp_txn_count > 0 {
             let current_latency = Some(TcpFlags::transaction_latency_from_stats(
-                ts.tcp_txn_sum_ns,
-                ts.tcp_txn_count,
+                stats.tcp_txn_sum_ns,
+                stats.tcp_txn_count,
             ));
-            let current_jitter = Some(ts.tcp_jitter_avg_ns as i64);
+            let current_jitter = Some(stats.tcp_jitter_avg_ns as i64);
 
             if is_server {
                 flow_span.attributes.flow_tcp_svc_latency = current_latency;
@@ -2054,11 +1917,11 @@ async fn record_flow(
         }
     }
 
-    if let Some(is) = icmp_stats {
-        flow_span.attributes.flow_icmp_type_id = Some(is.icmp_type);
-        flow_span.attributes.flow_icmp_code_id = Some(is.icmp_code);
-        flow_span.attributes.flow_reverse_icmp_type_id = Some(is.reverse_icmp_type);
-        flow_span.attributes.flow_reverse_icmp_code_id = Some(is.reverse_icmp_code);
+    if stats.protocol == IpProto::Icmp || stats.protocol == IpProto::Ipv6Icmp {
+        flow_span.attributes.flow_icmp_type_id = Some(stats.icmp_type);
+        flow_span.attributes.flow_icmp_code_id = Some(stats.icmp_code);
+        flow_span.attributes.flow_reverse_icmp_type_id = Some(stats.reverse_icmp_type);
+        flow_span.attributes.flow_reverse_icmp_code_id = Some(stats.reverse_icmp_code);
     }
 
     // Update IP metadata from eBPF stats
@@ -2228,8 +2091,6 @@ pub async fn timeout_and_remove_flow(
     community_id: String,
     flow_store: &FlowStore,
     flow_stats_map: &Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
-    tcp_stats_map: &Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, TcpStats>>>,
-    icmp_stats_map: &Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, IcmpStats>>>,
     flow_span_tx: &mpsc::Sender<FlowSpan>,
     trace_id_cache: &TraceIdCache,
 ) {
@@ -2396,14 +2257,7 @@ pub async fn timeout_and_remove_flow(
             };
         }
 
-        // Execute cleanup for all three maps
         cleanup_ebpf_map!(flow_stats_map, EbpfMapName::FlowStats);
-        if key.protocol == IpProto::Tcp {
-            cleanup_ebpf_map!(tcp_stats_map, EbpfMapName::TcpStats);
-        }
-        if matches!(key.protocol, IpProto::Icmp | IpProto::Ipv6Icmp) {
-            cleanup_ebpf_map!(icmp_stats_map, EbpfMapName::IcmpStats);
-        }
     }
 
     trace_id_cache.remove(&community_id);
@@ -2446,8 +2300,6 @@ pub async fn timeout_and_remove_flow(
 /// ### Arguments
 ///
 /// - `flow_stats_map` - Shared eBPF map containing flow statistics
-/// - `tcp_stats_map` - Shared eBPF map containing TCP statistics
-/// - `icmp_stats_map` - Shared eBPF map containing ICMP statistics
 /// - `flow_store` - Userspace flow tracking store
 /// - `boot_time_offset` - Offset to convert boot time to wall clock time
 /// - `max_age` - Maximum age for entries before they're considered orphans
@@ -2456,8 +2308,6 @@ pub async fn timeout_and_remove_flow(
 #[allow(clippy::too_many_arguments)]
 pub async fn orphan_scanner_task(
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
-    tcp_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, TcpStats>>>,
-    icmp_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, IcmpStats>>>,
     flow_store: FlowStore,
     boot_time_offset: u64,
     max_age: Duration,
@@ -2497,42 +2347,20 @@ pub async fn orphan_scanner_task(
                     .with_label_values(&[EbpfMapName::FlowStats.as_str(), MapUnit::Entries.as_str()])
                     .set(ebpf_map_size as i64);
 
-                let tcp_stats_count = {
-                    let map = tcp_stats_map.lock().await;
-                    map.keys().filter_map(|k| k.ok()).count()
-                };
-                metrics::registry::EBPF_MAP_SIZE
-                    .with_label_values(&[EbpfMapName::TcpStats.as_str(), MapUnit::Entries.as_str()])
-                    .set(tcp_stats_count as i64);
-
-                let icmp_stats_count = {
-                    let map = icmp_stats_map.lock().await;
-                    map.keys().filter_map(|k| k.ok()).count()
-                };
-                metrics::registry::EBPF_MAP_SIZE
-                    .with_label_values(&[EbpfMapName::IcmpStats.as_str(), MapUnit::Entries.as_str()])
-                    .set(icmp_stats_count as i64);
-
                 // Check map utilization and warn if approaching capacity
                 let capacity = flow_stats_capacity as u64;
                 if capacity > 0 {
-                    for (map_name, map_size) in [
-                        (EbpfMapName::FlowStats, ebpf_map_size),
-                        (EbpfMapName::TcpStats, tcp_stats_count as u64),
-                        (EbpfMapName::IcmpStats, icmp_stats_count as u64),
-                    ] {
-                        let utilization_pct = (map_size * 100) / capacity;
-                        if utilization_pct >= 80 {
-                            warn!(
-                                event.name = "ebpf_map.high_utilization",
-                                map = map_name.as_str(),
-                                map.size = map_size,
-                                map.capacity = capacity,
-                                map.utilization_pct = utilization_pct,
-                                "eBPF map utilization is high, new flow insertions may silently fail in the kernel. \
-                                 Consider increasing the flow_stats max capacity (flow_stats_capacity) in config."
-                            );
-                        }
+                    let utilization_pct = (ebpf_map_size * 100) / capacity;
+                    if utilization_pct >= 80 {
+                        warn!(
+                            event.name = "ebpf_map.high_utilization",
+                            map = EbpfMapName::FlowStats.as_str(),
+                            map.size = ebpf_map_size,
+                            map.capacity = capacity,
+                            map.utilization_pct = utilization_pct,
+                            "eBPF map utilization is high, new flow insertions may silently fail in the kernel. \
+                             Consider increasing the flow_stats max capacity (flow_stats_capacity) in config."
+                        );
                     }
                 }
 
@@ -2610,15 +2438,7 @@ pub async fn orphan_scanner_task(
                         };
                     }
 
-                    // Remove from FlowStats first (Primary)
                     remove_orphan_from!(flow_stats_map, EbpfMapName::FlowStats, true, &key);
-                    // Then remove from protocol-specific map (Secondary)
-                    if key.protocol == IpProto::Tcp {
-                        remove_orphan_from!(tcp_stats_map, EbpfMapName::TcpStats, false, &key);
-                    }
-                    if matches!(key.protocol, IpProto::Icmp | IpProto::Ipv6Icmp) {
-                        remove_orphan_from!(icmp_stats_map, EbpfMapName::IcmpStats, false, &key);
-                    }
                 }
 
                 if removed > 0 {
@@ -2722,24 +2542,31 @@ mod tests {
     /// Helper to create test FlowStats
     fn create_test_stats(proto: IpProto) -> FlowStats {
         FlowStats {
-            direction: mermin_common::Direction::Egress,
-            ether_type: EtherType::Ipv4,
-            ip_version: IpVersion::V4,
-            protocol: proto,
-            src_ip: [192, 168, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            dst_ip: [192, 168, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            src_port: 12345,
-            dst_port: 80,
+            first_seen_ns: 1_000_000_000,
+            last_seen_ns: 1_000_000_000,
             packets: 1,
             bytes: 100,
             reverse_packets: 0,
             reverse_bytes: 0,
-            src_mac: [0; 6],
+            tcp_syn_ns: 0,
+            tcp_syn_ack_ns: 0,
+            tcp_last_payload_fwd_ns: 0,
+            tcp_last_payload_rev_ns: 0,
+            tcp_txn_sum_ns: 0,
+            src_ip: [192, 168, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            dst_ip: [192, 168, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             ifindex: 1,
             ip_flow_label: 0,
             reverse_ip_flow_label: 0,
-            first_seen_ns: 1_000_000_000,
-            last_seen_ns: 1_000_000_000,
+            tcp_txn_count: 0,
+            tcp_jitter_avg_ns: 0,
+            ether_type: EtherType::Ipv4,
+            src_port: 12345,
+            dst_port: 80,
+            src_mac: [0; 6],
+            direction: mermin_common::Direction::Egress,
+            ip_version: IpVersion::V4,
+            protocol: proto,
             ip_dscp: 0,
             ip_ecn: 0,
             ip_ttl: 64,
@@ -2748,26 +2575,25 @@ mod tests {
             reverse_ip_ttl: 0,
             forward_metadata_seen: 1,
             reverse_metadata_seen: 0,
+            tcp_flags: 0,
+            tcp_state: ConnectionState::default(),
+            forward_tcp_flags: 0,
+            reverse_tcp_flags: 0,
+            icmp_type: 0,
+            icmp_code: 0,
+            reverse_icmp_type: 0,
+            reverse_icmp_code: 0,
             pid: 0,
             comm: [0u8; 16],
         }
     }
 
-    /// Helper to create test TcpStats with specific flags
-    fn create_test_tcp_stats(tcp_flags: u8) -> TcpStats {
-        TcpStats {
-            tcp_syn_ns: 0,
-            tcp_syn_ack_ns: 0,
-            tcp_last_payload_fwd_ns: 0,
-            tcp_last_payload_rev_ns: 0,
-            tcp_txn_sum_ns: 0,
-            tcp_txn_count: 0,
-            tcp_jitter_avg_ns: 0,
-            tcp_flags,
-            tcp_state: ConnectionState::Closed,
-            forward_tcp_flags: tcp_flags,
-            reverse_tcp_flags: 0,
-        }
+    /// Helper to create test FlowStats with specific TCP flags
+    fn create_test_tcp_stats(tcp_flags: u8) -> FlowStats {
+        let mut stats = create_test_stats(IpProto::Tcp);
+        stats.tcp_flags = tcp_flags;
+        stats.forward_tcp_flags = tcp_flags;
+        stats
     }
 
     /// Helper to create a test FlowWorker for timeout calculations
@@ -2783,18 +2609,12 @@ mod tests {
         let iface_map = Arc::new(DashMap::new());
         // Create a dummy eBPF map - won't be used in unit tests
         let flow_stats_map_data = unsafe { std::mem::zeroed() };
-        let tcp_stats_map_data = unsafe { std::mem::zeroed() };
-        let icmp_stats_map_data = unsafe { std::mem::zeroed() };
         let listening_ports_map_data = unsafe { std::mem::zeroed() };
 
         let flow_stats_map = Arc::new(Mutex::new(flow_stats_map_data));
-        let tcp_stats_map = Arc::new(Mutex::new(tcp_stats_map_data));
-        let icmp_stats_map = Arc::new(Mutex::new(icmp_stats_map_data));
         let listening_ports_map = Arc::new(Mutex::new(listening_ports_map_data));
 
         std::mem::forget(Arc::clone(&flow_stats_map));
-        std::mem::forget(Arc::clone(&tcp_stats_map));
-        std::mem::forget(Arc::clone(&icmp_stats_map));
         std::mem::forget(Arc::clone(&listening_ports_map));
 
         let direction_inferrer = Arc::new(DirectionInferrer::new(listening_ports_map));
@@ -2814,8 +2634,6 @@ mod tests {
             iface_map,
             flow_store,
             flow_stats_map,
-            tcp_stats_map,
-            icmp_stats_map,
             flow_event_rx,
             filter: None,
             vxlan_port: 4789,
@@ -2853,8 +2671,9 @@ mod tests {
     #[test]
     fn test_calculate_timeout_icmp() {
         let worker = create_test_worker_for_timeout();
+        let stats = create_test_stats(IpProto::Icmp);
 
-        let timeout = worker.calculate_timeout(IpProto::Icmp, None);
+        let timeout = worker.calculate_timeout(&stats);
         assert_eq!(timeout, worker.icmp_timeout);
 
         // Prevent drop to avoid IO Safety violation from zeroed eBPF map
@@ -2864,8 +2683,9 @@ mod tests {
     #[test]
     fn test_calculate_timeout_icmpv6() {
         let worker = create_test_worker_for_timeout();
+        let stats = create_test_stats(IpProto::Ipv6Icmp);
 
-        let timeout = worker.calculate_timeout(IpProto::Ipv6Icmp, None);
+        let timeout = worker.calculate_timeout(&stats);
         assert_eq!(timeout, worker.icmp_timeout);
 
         // Prevent drop to avoid IO Safety violation from zeroed eBPF map
@@ -2875,9 +2695,11 @@ mod tests {
     #[test]
     fn test_calculate_timeout_tcp_normal() {
         let worker = create_test_worker_for_timeout();
-        let tcp_stats = create_test_tcp_stats(0x10); // ACK only
+        let mut stats = create_test_stats(IpProto::Tcp);
+        stats.tcp_flags = 0x10; // ACK only
+        stats.forward_tcp_flags = 0x10;
 
-        let timeout = worker.calculate_timeout(IpProto::Tcp, Some(&tcp_stats));
+        let timeout = worker.calculate_timeout(&stats);
         assert_eq!(timeout, worker.tcp_timeout);
 
         // Prevent drop to avoid IO Safety violation from zeroed eBPF map
@@ -2887,9 +2709,11 @@ mod tests {
     #[test]
     fn test_calculate_timeout_tcp_with_fin() {
         let worker = create_test_worker_for_timeout();
-        let tcp_stats = create_test_tcp_stats(TCP_FLAG_FIN);
+        let mut stats = create_test_stats(IpProto::Tcp);
+        stats.tcp_flags = TCP_FLAG_FIN;
+        stats.forward_tcp_flags = TCP_FLAG_FIN;
 
-        let timeout = worker.calculate_timeout(IpProto::Tcp, Some(&tcp_stats));
+        let timeout = worker.calculate_timeout(&stats);
         assert_eq!(timeout, worker.tcp_fin_timeout);
 
         // Prevent drop to avoid IO Safety violation from zeroed eBPF map
@@ -2899,9 +2723,11 @@ mod tests {
     #[test]
     fn test_calculate_timeout_tcp_with_rst() {
         let worker = create_test_worker_for_timeout();
-        let tcp_stats = create_test_tcp_stats(TCP_FLAG_RST);
+        let mut stats = create_test_stats(IpProto::Tcp);
+        stats.tcp_flags = TCP_FLAG_RST;
+        stats.forward_tcp_flags = TCP_FLAG_RST;
 
-        let timeout = worker.calculate_timeout(IpProto::Tcp, Some(&tcp_stats));
+        let timeout = worker.calculate_timeout(&stats);
         assert_eq!(timeout, worker.tcp_rst_timeout);
 
         // Prevent drop to avoid IO Safety violation from zeroed eBPF map
@@ -2911,7 +2737,8 @@ mod tests {
     #[test]
     fn test_calculate_timeout_udp() {
         let worker = create_test_worker_for_timeout();
-        let timeout = worker.calculate_timeout(IpProto::Udp, None);
+        let stats = create_test_stats(IpProto::Udp);
+        let timeout = worker.calculate_timeout(&stats);
         assert_eq!(timeout, worker.udp_timeout);
 
         // Prevent drop to avoid IO Safety violation from zeroed eBPF map
@@ -2921,7 +2748,8 @@ mod tests {
     #[test]
     fn test_calculate_timeout_generic() {
         let worker = create_test_worker_for_timeout();
-        let timeout = worker.calculate_timeout(IpProto::Gre, None);
+        let stats = create_test_stats(IpProto::Gre);
+        let timeout = worker.calculate_timeout(&stats);
         assert_eq!(timeout, worker.generic_timeout);
 
         // Prevent drop to avoid IO Safety violation from zeroed eBPF map
@@ -3126,7 +2954,7 @@ mod tests {
 
     #[test]
     fn test_tcp_perf_mapping_client() {
-        let mut tcp_stats = TcpStats::default();
+        let mut tcp_stats = create_test_tcp_stats(0);
         tcp_stats.tcp_syn_ns = 100;
         tcp_stats.tcp_syn_ack_ns = 150;
         tcp_stats.tcp_txn_sum_ns = 1000;
@@ -3171,7 +2999,7 @@ mod tests {
 
     #[test]
     fn test_tcp_perf_mapping_server() {
-        let mut tcp_stats = TcpStats::default();
+        let mut tcp_stats = create_test_tcp_stats(0);
         tcp_stats.tcp_txn_sum_ns = 2000;
         tcp_stats.tcp_txn_count = 2;
 
