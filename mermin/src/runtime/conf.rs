@@ -985,7 +985,6 @@ impl PipelineOptions {
         let span_decorated_size = size_of::<FlowSpan>() as u64 + 2048;
 
         let capture_bytes = {
-            // Consolidated FLOW_STATS map: FlowStats (176 bytes, includes TCP/ICMP) + FlowKey (58) + BPF overhead (~58) ≈ 300
             let stats_map = self.flow_capture.flow_stats_capacity as u64 * 300;
             let ring_buf = self.flow_capture.flow_events_capacity as u64 * flow_event_size;
             stats_map + ring_buf
