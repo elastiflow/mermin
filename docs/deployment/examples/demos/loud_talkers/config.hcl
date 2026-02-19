@@ -1,11 +1,13 @@
 export "traces" {
   otlp = {
-    endpoint = "https://netobserv-flow.elastiflow.svc:4317"
-    tls = {
-      insecure_skip_verify = true
-    }
+    endpoint = "http://collector.elastiflow.svc:4317"
   }
 }
+
+internal "metrics" {
+  enabled = false
+}
+
 attributes "source" "k8s" {
   extract {
     metadata = [

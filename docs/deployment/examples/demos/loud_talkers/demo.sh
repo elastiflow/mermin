@@ -60,8 +60,8 @@ setup_helm_repos() {
     log_info "Setting up Helm repositories..."
     helm repo add mermin https://elastiflow.github.io/mermin/ || true
     helm repo add netobserv https://elastiflow.github.io/helm-chart-netobserv/ || true
-    helm repo add opensearch https://opensearch-project.github.io/helm-charts/ || true
-    helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/ || true
+    # helm repo add opensearch https://opensearch-project.github.io/helm-charts/ || true
+    # helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/ || true
     helm repo update
 }
 
@@ -80,6 +80,94 @@ deploy_mermin_stack() {
         -f "$SCRIPT_DIR/values.yaml" \
         --set-file mermin.config.content="$SCRIPT_DIR/config.hcl" \
         mermin mermin/mermin-netobserv-os-stack
+}
+
+deploy_collector() {
+    log_info "Deploying otel-collector service..."
+
+    kubectl apply -n "$NAMESPACE" -f - <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: collector-config
+  labels:
+    app: collector
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    exporters:
+      debug:
+        verbosity: detailed
+
+    service:
+      telemetry:
+        metrics:
+          level: none
+      pipelines:
+        traces:
+          receivers: [otlp]
+          exporters: [debug]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: collector
+  labels:
+    app: collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: collector
+  template:
+    metadata:
+      labels:
+        app: collector
+    spec:
+      containers:
+      - name: collector
+        image: otel/opentelemetry-collector:latest
+        args:
+          - --config=/etc/otel-collector/config.yaml
+        ports:
+        - containerPort: 4317
+          name: grpc
+        - containerPort: 4318
+          name: http
+        volumeMounts:
+        - name: collector-config
+          mountPath: /etc/otel-collector
+      volumes:
+      - name: collector-config
+        configMap:
+          name: collector-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: collector
+  labels:
+    app: collector
+spec:
+  selector:
+    app: collector
+  ports:
+  - port: 4317
+    targetPort: 4317
+    protocol: TCP
+    name: grpc
+  - port: 4318
+    targetPort: 4318
+    protocol: TCP
+    name: http
+EOF
 }
 
 deploy_httpbin() {
@@ -200,15 +288,18 @@ main() {
     check_prerequisites
     create_cluster
     setup_helm_repos
-    install_metrics_server
+    # install_metrics_server
     deploy_mermin_stack
+    deploy_collector
     deploy_httpbin
     deploy_traffic_generator
-    setup_port_forward
+    # setup_port_forward
 }
 
 if [ "$CLEANUP" = "true" ]; then
     cleanup && exit 0
 fi
 
-main
+deploy_collector
+deploy_mermin_stack
+# main
