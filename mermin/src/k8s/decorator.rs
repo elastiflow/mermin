@@ -49,15 +49,20 @@ impl<'a> Decorator<'a> {
         }
     }
 
+    /// Replace the extract rules with new values (for hot-reload).
+    pub fn update_extract_rules(
+        &mut self,
+        source_extract_rules: Vec<String>,
+        dest_extract_rules: Vec<String>,
+    ) {
+        self.source_extract_rules = source_extract_rules;
+        self.dest_extract_rules = dest_extract_rules;
+    }
+
     /// Decorate a flow span with K8s metadata, with automatic fallback to undecorated span on error.
     ///
     /// This is the primary method for the K8s decorator pipeline. It ensures that spans are
     /// NEVER dropped - if decoration fails for any reason, the original undecorated span is returned.
-    ///
-    /// # Returns
-    /// A tuple of (FlowSpan, Option<K8sError>) where:
-    /// - FlowSpan is either decorated (on success) or the original undecorated span (on error)
-    /// - Option<K8sError> is Some(error) if decoration failed, None if successful
     pub async fn decorate_or_fallback(&self, flow_span: FlowSpan) -> (FlowSpan, Option<K8sError>) {
         match self.decorate(&flow_span).await {
             Ok(decorated_span) => (decorated_span, None),

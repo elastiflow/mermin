@@ -17,6 +17,7 @@ use crate::{
     },
     otlp::opts::ExportOptions,
     runtime::{
+        cli::Cli,
         conf::conf_serde::{duration, level},
         opts::InternalOptions,
     },
@@ -181,13 +182,6 @@ impl Conf {
     /// and configuration file. The configuration is determined using the following priority order:
     /// Defaults < Configuration File < Environment Variables < CLI Arguments.
     ///
-    /// # Arguments
-    /// - `cli` - An instance of `Cli` containing parsed CLI arguments.
-    ///
-    /// # Returns
-    /// - `Result<(Self, Cli), ConfigError>` - Returns an `Ok((Conf, Cli))` if successful, or a `ConfigError`
-    ///   if there are issues during configuration extraction.
-    ///
     /// # Errors
     /// - `ConfigError::NoConfigFile` - Returned if no configuration file is specified or found.
     /// - `ConfigError::InvalidConfigPath` - Returned if the `config_path` from the environment
@@ -203,9 +197,7 @@ impl Conf {
     ///    the existing `Figment` configuration.
     /// 4. Extracts the final configuration into a `Conf` struct, storing the path to the
     ///    configuration file (if any).
-    pub fn new(
-        cli: crate::runtime::cli::Cli,
-    ) -> Result<(Self, crate::runtime::cli::Cli), ConfError> {
+    pub fn new(cli: Cli) -> Result<Self, ConfError> {
         use figment::{Figment, providers::Serialized};
 
         let mut figment = Figment::new().merge(Serialized::defaults(Conf::default()));
@@ -241,7 +233,7 @@ impl Conf {
             .validate()
             .map_err(|e| ConfError::InvalidConfiguration(format!("discovery.instrument: {e}")))?;
 
-        Ok((conf, cli))
+        Ok(conf)
     }
 
     /// Reloads the configuration from the config file and returns a new instance
@@ -253,24 +245,20 @@ impl Conf {
     /// file's content.
     ///
     /// Note:
-    /// - Command-line arguments (CLI) and environment variables (ENV VARS) will
-    ///   not be reloaded since it is assumed that the shell environment remains
-    ///   the same. The reload operation will use the current configuration as the
-    ///   base and layer the updated configuration file on top of it.
+    /// - The current resolved configuration (`self`) is serialized as the
+    ///   Figment base, which preserves all CLI arguments and environment
+    ///   variables from the original load. The configuration file is then
+    ///   layered on top, so file values override defaults but CLI/env values
+    ///   that were baked into `self` remain as the base layer.
+    /// - Callers that invoke `reload()` multiple times should keep calling
+    ///   it on the **original** `Conf` (not the reloaded one) to maintain
+    ///   consistent "original CLI/env + latest file" precedence.
     /// - If no configuration file path has been specified, an error will be returned.
     ///
-    /// # Returns
-    /// - `Ok(Self)` containing the reloaded configuration object if the reload
-    ///   operation succeeds.
-    /// - `Err(ConfigError::NoConfigFile)` if no configuration file path is set.
-    /// - Returns other variants of `ConfigError` if the configuration fails to
-    ///   load or extract properly.
-    ///
     /// # Errors
-    /// This function returns a `ConfigError` in the following scenarios:
-    /// - If there is no configuration file path specified (`ConfigError::NoConfigFile`).
+    /// This function returns a [`ConfError`] in the following scenarios:
+    /// - If there is no configuration file path specified (`ConfError::NoConfigFile`).
     /// - If the configuration fails to load or parse from the file.
-    #[allow(dead_code)]
     pub fn reload(&self) -> Result<Self, ConfError> {
         use figment::{Figment, providers::Serialized};
 
@@ -296,6 +284,20 @@ impl Conf {
             .map_err(|e| ConfError::InvalidConfiguration(format!("discovery.instrument: {e}")))?;
 
         Ok(conf)
+    }
+
+    /// Returns the K8s metadata extract rules for the given direction.
+    ///
+    /// Looks up `attributes.<direction>.k8s.extract.metadata` and returns the
+    /// list of metadata field names.  Returns an empty `Vec` when the path is
+    /// absent or not configured.
+    pub fn k8s_extract_metadata(&self, direction: &str) -> Vec<String> {
+        self.attributes
+            .as_ref()
+            .and_then(|directions_map| directions_map.get(direction))
+            .and_then(|providers_map| providers_map.get("k8s"))
+            .map(|options| options.extract.metadata.clone())
+            .unwrap_or_default()
     }
 
     /// Merges a configuration file into a Figment instance, automatically
