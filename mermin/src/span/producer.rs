@@ -2162,23 +2162,24 @@ pub async fn timeout_and_remove_flow(
                 .reverse_bytes
                 .saturating_sub(flow_span.last_recorded_reverse_bytes);
 
-            flow_span.attributes.flow_packets_delta = delta_packets as i64;
-            flow_span.attributes.flow_bytes_delta = delta_bytes as i64;
-            flow_span.attributes.flow_reverse_packets_delta = delta_reverse_packets as i64;
-            flow_span.attributes.flow_reverse_bytes_delta = delta_reverse_bytes as i64;
-            flow_span.attributes.flow_packets_total = stats.packets as i64;
-            flow_span.attributes.flow_bytes_total = stats.bytes as i64;
-            flow_span.attributes.flow_reverse_packets_total = stats.reverse_packets as i64;
-            flow_span.attributes.flow_reverse_bytes_total = stats.reverse_bytes as i64;
+            if delta_packets > 0 || delta_reverse_packets > 0 {
+                flow_span.attributes.flow_packets_delta = delta_packets as i64;
+                flow_span.attributes.flow_bytes_delta = delta_bytes as i64;
+                flow_span.attributes.flow_reverse_packets_delta = delta_reverse_packets as i64;
+                flow_span.attributes.flow_reverse_bytes_delta = delta_reverse_bytes as i64;
+                flow_span.attributes.flow_packets_total = stats.packets as i64;
+                flow_span.attributes.flow_bytes_total = stats.bytes as i64;
+                flow_span.attributes.flow_reverse_packets_total = stats.reverse_packets as i64;
+                flow_span.attributes.flow_reverse_bytes_total = stats.reverse_bytes as i64;
+            }
         }
         drop(map);
     }
 
-    // Record final span if it has packets
-    let has_packets = flow_span.attributes.flow_packets_total > 0
-        || flow_span.attributes.flow_reverse_packets_total > 0;
+    let has_new_packets = flow_span.attributes.flow_packets_delta > 0
+        || flow_span.attributes.flow_reverse_packets_delta > 0;
 
-    if has_packets {
+    if has_new_packets {
         let mut recorded_span = flow_span.clone();
         recorded_span.attributes.flow_end_reason = Some(determine_flow_end_reason(
             flow_span.attributes.flow_tcp_flags_bits,
