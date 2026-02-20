@@ -1,3 +1,19 @@
+## [v0.2.0] - 2026-02-20
+
+### Bug Fixes
+
+- Workaround the LLVM SHA1 apt repo (trixie) issue (#484)
+- Avoid attribution to closing pods (#487)
+- **ebpf:** Correct packet/byte counter race and zero-delta flow export (#488)
+### Features
+
+- **metrics:** Improve ebpf map operations and utilization metrics (#472)
+- **span:** Add pid and process command name to exported flow spans (#415)
+
+[v0.1.0..v0.2.0](https://github.com/elastiflow/mermin/compare/v0.1.0...v0.2.0)
+
+
+
 ## [v0.1.0] - 2026-02-05
 
 ### Bug Fixes
