@@ -1151,25 +1151,29 @@ impl FlowWorker {
                     stats.reverse_icmp_code,
                 ),
 
-                // Initialize counters (will be updated from eBPF map on record intervals)
-                flow_bytes_delta: stats.bytes as i64,
-                flow_bytes_total: stats.bytes as i64,
-                flow_packets_delta: stats.packets as i64,
-                flow_packets_total: stats.packets as i64,
-                flow_reverse_bytes_delta: stats.reverse_bytes as i64,
-                flow_reverse_bytes_total: stats.reverse_bytes as i64,
-                flow_reverse_packets_delta: stats.reverse_packets as i64,
-                flow_reverse_packets_total: stats.reverse_packets as i64,
+                // Counters initialized to 0; the first record_flow or
+                // timeout_and_remove_flow call will read the eBPF map and
+                // compute accurate deltas and totals before exporting.
+                flow_bytes_delta: 0,
+                flow_bytes_total: 0,
+                flow_packets_delta: 0,
+                flow_packets_total: 0,
+                flow_reverse_bytes_delta: 0,
+                flow_reverse_bytes_total: 0,
+                flow_reverse_packets_delta: 0,
+                flow_reverse_packets_total: 0,
 
                 // All other attributes default to None
                 ..Default::default()
             },
             // Fields for eBPF map integration
             flow_key: Some(*flow_key),
-            last_recorded_packets: stats.packets,
-            last_recorded_bytes: stats.bytes,
-            last_recorded_reverse_packets: stats.reverse_packets,
-            last_recorded_reverse_bytes: stats.reverse_bytes,
+            // Watermarks start at 0 so the first record_flow captures all
+            // accumulated packets/bytes as the initial delta.
+            last_recorded_packets: 0,
+            last_recorded_bytes: 0,
+            last_recorded_reverse_packets: 0,
+            last_recorded_reverse_bytes: 0,
             boot_time_offset: self.boot_time_offset_nanos,
 
             // Timing fields for polling architecture (initialized by insert_flow)
@@ -2134,6 +2138,29 @@ pub async fn timeout_and_remove_flow(
                 .inc();
             let end_time_nanos = stats.last_seen_ns + boot_time_offset;
             flow_span.end_time = UNIX_EPOCH + Duration::from_nanos(end_time_nanos);
+
+            // Refresh counters and compute final deltas from the eBPF map so
+            // that flows timing out before any record_flow ran still export
+            // accurate packet/byte counts.
+            let delta_packets = stats
+                .packets
+                .saturating_sub(flow_span.last_recorded_packets);
+            let delta_bytes = stats.bytes.saturating_sub(flow_span.last_recorded_bytes);
+            let delta_reverse_packets = stats
+                .reverse_packets
+                .saturating_sub(flow_span.last_recorded_reverse_packets);
+            let delta_reverse_bytes = stats
+                .reverse_bytes
+                .saturating_sub(flow_span.last_recorded_reverse_bytes);
+
+            flow_span.attributes.flow_packets_delta = delta_packets as i64;
+            flow_span.attributes.flow_bytes_delta = delta_bytes as i64;
+            flow_span.attributes.flow_reverse_packets_delta = delta_reverse_packets as i64;
+            flow_span.attributes.flow_reverse_bytes_delta = delta_reverse_bytes as i64;
+            flow_span.attributes.flow_packets_total = stats.packets as i64;
+            flow_span.attributes.flow_bytes_total = stats.bytes as i64;
+            flow_span.attributes.flow_reverse_packets_total = stats.reverse_packets as i64;
+            flow_span.attributes.flow_reverse_bytes_total = stats.reverse_bytes as i64;
         }
         drop(map);
     }

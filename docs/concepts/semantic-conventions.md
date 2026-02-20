@@ -103,7 +103,7 @@ whereas `flow.bytes.total` clearly refers to the byte count for a specific five-
 
 {% include "../.gitbook/includes/example-flow-trace.md" %}
 
----
+***
 
 ## Next Steps
 
