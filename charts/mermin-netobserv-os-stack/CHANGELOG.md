@@ -1,3 +1,13 @@
+## [mermin-netobserv-os-stack-0.2.0] - 2026-02-20
+
+### Features
+
+- **stack:** Update mermin to 0.2.0 for stack chart (#489)
+
+[mermin-netobserv-os-stack-0.1.1..mermin-netobserv-os-stack-0.2.0](https://github.com/elastiflow/mermin/compare/mermin-netobserv-os-stack-0.1.1...mermin-netobserv-os-stack-0.2.0)
+
+
+
 ## [mermin-netobserv-os-stack-0.1.1] - 2026-02-10
 
 ### Bug Fixes
