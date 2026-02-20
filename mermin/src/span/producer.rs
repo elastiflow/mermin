@@ -1777,6 +1777,15 @@ async fn record_flow(
         .reverse_bytes
         .saturating_sub(last_recorded_reverse_bytes);
 
+    // No new traffic since last recording - skip export to avoid redundant
+    // zero-delta active timeout records for idle-but-not-yet-expired flows.
+    if delta_packets == 0 && delta_reverse_packets == 0 {
+        if let Some(mut entry_ref) = flow_store.get_mut(community_id) {
+            entry_ref.flow_span.last_recorded_time = std::time::SystemTime::now();
+        }
+        return true;
+    }
+
     if delta_packets > 0 || delta_reverse_packets > 0 {
         let interface_name_for_metrics = flow_store
             .get(community_id)
