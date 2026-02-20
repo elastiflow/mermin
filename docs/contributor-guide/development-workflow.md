@@ -243,6 +243,11 @@ Configuring Colima profile (the VM config) is a one-time task unless you delete 
 
 The step is needed to configure LSM BPF in the Colima VM.
 
+{% hint style="hint" %}
+Colima stores the profiles (configs) in `~/.colima/${COLIMA_PROFILE}/colima.yaml`, so after the profile is set up you may edit settings in the profile instead of using  `--edit` flag
+{% endhint %}
+
+
 1. Optionally delete any existing Colima instance to start fresh
 
     ```shell
