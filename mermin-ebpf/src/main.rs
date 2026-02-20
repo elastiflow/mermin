@@ -644,6 +644,11 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
     #[allow(static_mut_refs)]
     let mut stats_ptr = unsafe { FLOW_STATS.get_ptr_mut(&normalized_key) };
 
+    // Track whether this is a new flow so we can send the ring buffer event
+    // AFTER the packet counters have been incremented (avoids a race where
+    // userspace reads 0 packets/bytes from the map).
+    let mut new_flow_parsed_offset: Option<usize> = None;
+
     if stats_ptr.is_none() {
         let ifindex = unsafe { (*ctx.skb.skb).ifindex };
 
@@ -686,42 +691,8 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
                 .map_err(|_| Error::OutOfBounds)?;
         }
 
-        #[allow(static_mut_refs)]
-        if let Some(mut event) = unsafe { FLOW_EVENTS.reserve::<FlowEvent>(0) } {
-            // Use per-CPU scratch space to build FlowEvent (avoids stack overflow)
-            #[allow(static_mut_refs)]
-            let flow_event_ptr = unsafe { FLOW_EVENT_SCRATCH.get_ptr_mut(0) };
-            let Some(flow_event_ptr) = flow_event_ptr else {
-                // Must discard the ring buffer reservation before returning error
-                event.discard(0);
-                return Err(Error::OutOfBounds);
-            };
-            unsafe { core::ptr::write_bytes(flow_event_ptr, 0, 1) };
-            let flow_event = unsafe { &mut *flow_event_ptr };
-
-            flow_event.flow_key = normalized_key;
-            flow_event.snaplen = ctx.len() as u16;
-            flow_event.parsed_offset = parsed_offset as u16;
-
-            // Copy unparsed data (if any) for userspace deep parsing.
-            // Load bytes one at a time until we hit the end of the packet or reach 192 bytes.
-            // The verifier can track this bounded loop easily.
-            for i in 0..FLOW_EVENT_PACKET_DATA_SIZE {
-                let offset = parsed_offset + i;
-                if let Ok(byte) = ctx.load::<u8>(offset) {
-                    flow_event.packet_data[i] = byte;
-                } else {
-                    break;
-                }
-            }
-
-            event.write(*flow_event);
-            event.submit(0);
-        } else {
-            // The flow is still tracked in FLOW_STATS, but userspace won't get
-            // initial packet data for deep inspection.
-            log_error(ctx, Error::FlowEventDropped, direction);
-        }
+        // Defer ring buffer event until after counters are incremented below
+        new_flow_parsed_offset = Some(parsed_offset);
 
         stats_ptr = unsafe { FLOW_STATS.get_ptr_mut(&normalized_key) };
     }
@@ -781,6 +752,47 @@ fn try_flow_stats(ctx: &TcContext, direction: Direction) -> Result<i32, Error> {
 
             let has_payload = ctx.len() > tcp_payload_offset;
             update_tcp_timing(stats, is_forward, has_payload, current_flags, timestamp);
+        }
+    }
+
+    // Send ring buffer event for new flows AFTER counters have been incremented.
+    // This guarantees userspace always sees packets >= 1 when it reads FLOW_STATS.
+    if let Some(parsed_offset) = new_flow_parsed_offset {
+        #[allow(static_mut_refs)]
+        if let Some(mut event) = unsafe { FLOW_EVENTS.reserve::<FlowEvent>(0) } {
+            // Use per-CPU scratch space to build FlowEvent (avoids stack overflow)
+            #[allow(static_mut_refs)]
+            let flow_event_ptr = unsafe { FLOW_EVENT_SCRATCH.get_ptr_mut(0) };
+            let Some(flow_event_ptr) = flow_event_ptr else {
+                // Must discard the ring buffer reservation before returning error
+                event.discard(0);
+                return Err(Error::OutOfBounds);
+            };
+            unsafe { core::ptr::write_bytes(flow_event_ptr, 0, 1) };
+            let flow_event = unsafe { &mut *flow_event_ptr };
+
+            flow_event.flow_key = normalized_key;
+            flow_event.snaplen = ctx.len() as u16;
+            flow_event.parsed_offset = parsed_offset as u16;
+
+            // Copy unparsed data (if any) for userspace deep parsing.
+            // Load bytes one at a time until we hit the end of the packet or reach 192 bytes.
+            // The verifier can track this bounded loop easily.
+            for i in 0..FLOW_EVENT_PACKET_DATA_SIZE {
+                let offset = parsed_offset + i;
+                if let Ok(byte) = ctx.load::<u8>(offset) {
+                    flow_event.packet_data[i] = byte;
+                } else {
+                    break;
+                }
+            }
+
+            event.write(*flow_event);
+            event.submit(0);
+        } else {
+            // The flow is still tracked in FLOW_STATS, but userspace won't get
+            // initial packet data for deep inspection.
+            log_error(ctx, Error::FlowEventDropped, direction);
         }
     }
 

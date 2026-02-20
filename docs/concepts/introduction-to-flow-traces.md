@@ -135,12 +135,12 @@ This bidirectional model eliminates the need to correlate separate spans for eac
 
 Attributes are organized into logical groups to keep the convention clean and queryable:
 
-| Namespace                    | Purpose                                                                                       |
-|------------------------------|-----------------------------------------------------------------------------------------------|
+| Namespace                    | Purpose                                                                                         |
+|------------------------------|-------------------------------------------------------------------------------------------------|
 | `flow.*`                     | The conversation itself — metrics, state, and metadata that can change over the flow's lifetime |
-| `network.*`                  | Protocol-specific details that remain static for the flow (IP version, transport protocol)    |
-| `source.*` / `destination.*` | Information about the two endpoints, including addresses, ports, and Kubernetes metadata      |
-| `tunnel.*`                   | Encapsulation details when traffic is tunneled (VXLAN, Geneve, WireGuard, etc.)               |
+| `network.*`                  | Protocol-specific details that remain static for the flow (IP version, transport protocol)      |
+| `source.*` / `destination.*` | Information about the two endpoints, including addresses, ports, and Kubernetes metadata        |
+| `tunnel.*`                   | Encapsulation details when traffic is tunneled (VXLAN, Geneve, WireGuard, etc.)                 |
 
 ### Kubernetes Enrichment
 
