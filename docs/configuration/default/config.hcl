@@ -8,7 +8,7 @@ log_level = "info"
 auto_reload = false
 
 # Shutdown timeout
-shutdown_timeout = "5s"
+shutdown_timeout = "28s"
 
 # Pipeline performance and channel configuration options
 pipeline {
