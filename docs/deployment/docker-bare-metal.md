@@ -55,7 +55,7 @@ Create a Mermin configuration file optimized for bare metal:
 log_level = "info"
 
 # Shutdown timeout
-shutdown_timeout = "10s"
+shutdown_timeout = "28s"
 
 # Pipeline configuration
 pipeline {

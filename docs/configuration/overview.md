@@ -66,7 +66,7 @@ Top-level settings. See [Global Options](reference/README.md#configure-global-ag
 log_level       = "info"
 log_color       = false
 auto_reload     = false
-shutdown_timeout = "5s"
+shutdown_timeout = "28s"
 
 pipeline {
   flow_capture {
