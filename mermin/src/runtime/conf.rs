@@ -1984,7 +1984,7 @@ discovery:
             // Default values should be preserved
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.auto_reload, false);
-            assert_eq!(cfg.shutdown_timeout, Duration::from_secs(5));
+            assert_eq!(cfg.shutdown_timeout, Duration::from_secs(28));
             assert_eq!(cfg.pipeline.flow_producer.worker_queue_capacity, 2048);
             assert_eq!(cfg.pipeline.flow_producer.flow_span_queue_capacity, 16384);
             assert_eq!(
