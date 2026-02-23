@@ -35,6 +35,10 @@ Mermin requires elevated privileges to operate:
   * `CAP_SYS_PTRACE` - Access other processes' namespace files (`/proc/1/ns/net`)
   * `CAP_SYS_RESOURCE` - Increase memlock limits for eBPF maps
 
+{% hint style="info" %}
+By default Mermin us running with [`privileged: true`](https://kubernetes.io/docs/tasks/configure-pod-container/security-context/) to bypass system restrictions enforced by AppArmor, SELinux or SecComp.
+{% endhint %}
+
 ## Network Namespace Switching
 
 Mermin uses a sophisticated approach to monitor host network interfaces without requiring `hostNetwork: true`:

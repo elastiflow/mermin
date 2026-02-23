@@ -1,12 +1,13 @@
 # mermin Helm Chart
 
-- [Overview](#overview)
-- [Installation](#installation)
-- [Configuration](#configuration)
+- [mermin Helm Chart](#mermin-helm-chart)
+  - [Overview](#overview)
+  - [Installation](#installation)
+  - [Configuration](#configuration)
 
 ## Overview
 
-Mermin is a suite of Kubernetes native network traffic observability tools. It includes mermin, an eBPF agent for generating flows, and mercoll, an Open Telemetry collector.
+Mermin is a Kubernetes-native network observability tool that uses eBPF to capture network traffic and export it as Flow Traces via the OpenTelemetry Protocol (OTLP).
 
 ## Installation
 
