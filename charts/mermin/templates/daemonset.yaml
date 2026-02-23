@@ -42,6 +42,7 @@ spec:
       hostPID: {{ .Values.hostPID }}
       hostNetwork: {{ .Values.hostNetwork }}
       dnsPolicy: {{ .Values.dnsPolicy }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       {{- if .Values.serviceAccount.create }}
       serviceAccountName: {{ include "mermin.serviceAccountName" . }}
       {{- end }}

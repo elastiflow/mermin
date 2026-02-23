@@ -567,7 +567,7 @@ pub mod defaults {
     use std::time::Duration;
 
     pub fn shutdown_timeout() -> Duration {
-        Duration::from_secs(5)
+        Duration::from_secs(28)
     }
 }
 
