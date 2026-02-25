@@ -81,7 +81,7 @@ verify_agent_logs() {
       local counter=0
       while [ $counter -lt 60 ]; do
         # examples: https://regex101.com/r/rYbX7m/1
-        if kubectl logs -n "${NAMESPACE}" "$pod" --tail=1000 2>/dev/null | grep --color=never -E '(source\.k8s\.pod\.name.*String\(Owned\("(pinger|ping-receiver)"\)|destination\.k8s\.pod\.name.*String\(Owned\("(pinger|ping-receiver)"\))' >/dev/null; then
+        if kubectl logs -n "${NAMESPACE}" "$pod" --tail=10000 2>/dev/null | grep --color=never -E '(source\.k8s\.pod\.name.*String\(Owned\("(pinger|ping-receiver)"\)|destination\.k8s\.pod\.name.*String\(Owned\("(pinger|ping-receiver)"\))' >/dev/null; then
           exit 0
         fi
         counter=$((counter + 1))
@@ -113,7 +113,7 @@ dump_debug_info() {
   kubectl get events -n "${NAMESPACE}" --sort-by='.lastTimestamp' | tail -20
   for pod in $(kubectl get pods -n "${NAMESPACE}" -l "app.kubernetes.io/name=${RELEASE_NAME}" -o name 2>/dev/null | cut -d/ -f2); do
     echo "--- $pod logs ---"
-    kubectl logs -n "${NAMESPACE}" "$pod" --tail=100 2>/dev/null || true
+    kubectl logs -n "${NAMESPACE}" "$pod" --tail=10000 2>/dev/null || true
   done
 }
 

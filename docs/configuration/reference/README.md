@@ -167,7 +167,7 @@ export MERMIN_LOG_LEVEL=warn
 
 #### `shutdown_timeout`
 
-**Type:** Duration **Default:** `5s` **CLI Flag:** Not available **Environment:** Not available
+**Type:** Duration **Default:** `28s` **CLI Flag:** Not available **Environment:** Not available
 
 Maximum time to wait for graceful shutdown before forcing termination.
 

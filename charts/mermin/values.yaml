@@ -65,6 +65,7 @@ podLabels: {}
 hostNetwork: false
 dnsPolicy: ClusterFirst
 hostPID: true
+terminationGracePeriodSeconds: 30
 
 podSecurityContext:
   runAsNonRoot: true
