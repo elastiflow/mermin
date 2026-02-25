@@ -1,15 +1,8 @@
 use std::{any::Any, sync::Arc, time::SystemTime};
 
 use async_trait::async_trait;
-use opentelemetry::trace::{
-    SpanContext, SpanId, SpanKind, TraceContextExt, TraceFlags, TraceId, TraceState, Tracer,
-    TracerProvider,
-};
-use opentelemetry_sdk::{
-    error::OTelSdkResult,
-    trace::{IdGenerator, SdkTracerProvider},
-};
-use tracing::trace;
+use opentelemetry::trace::{SpanKind, TraceId, Tracer, TracerProvider};
+use opentelemetry_sdk::{error::OTelSdkResult, trace::SdkTracerProvider};
 
 use crate::metrics::{
     self,
@@ -75,14 +68,6 @@ pub trait Traceable {
     /// This is the core method where the implementing type is responsible for mapping
     /// its internal fields to the key-value attributes of an OpenTelemetry `Span`.
     ///
-    /// ### Arguments
-    /// - `span` - An `opentelemetry_sdk::trace::Span` instance that has already been
-    ///   configured with its start time, end time, and name based on the other
-    ///   methods in this trait.
-    ///
-    /// ### Returns
-    /// The same `Span` instance, now enriched with the record's specific attributes.
-    ///
     /// ### Important
     /// For performance reasons within the export pipeline, this method is designed to
     /// be called **only once** per record. The implementation should be efficient and
@@ -94,7 +79,6 @@ pub trait Traceable {
 pub trait TraceableExporter: Send + Sync {
     async fn export(&self, traceable_record: TraceableRecord);
 
-    /// Allow downcasting to concrete types for shutdown operations
     fn as_any(&self) -> &dyn Any;
 }
 
@@ -108,43 +92,22 @@ impl TraceableExporter for TraceExporterAdapter {
             "flow".to_string()
         };
 
-        let mut span = if let Some(custom_trace_id) = traceable.trace_id() {
-            let span_id_bytes: [u8; 8] = opentelemetry_sdk::trace::RandomIdGenerator::default()
-                .new_span_id()
-                .to_bytes();
-            let span_id = SpanId::from_bytes(span_id_bytes);
-
-            let parent_span_context = SpanContext::new(
-                custom_trace_id,
-                span_id,
-                TraceFlags::SAMPLED,
-                true,
-                TraceState::default(),
-            );
-
-            let parent_cx =
-                opentelemetry::Context::current().with_remote_span_context(parent_span_context);
-
+        let mut span = if let Some(trace_id) = traceable.trace_id() {
             tracer
                 .span_builder(name.clone())
                 .with_kind(traceable.span_kind())
                 .with_start_time(traceable.start_time())
-                .start_with_context(&tracer, &parent_cx)
+                .with_trace_id(trace_id)
+                .start_with_context(&tracer, &opentelemetry::Context::new())
         } else {
             tracer
                 .span_builder(name.clone())
                 .with_kind(traceable.span_kind())
                 .with_start_time(traceable.start_time())
-                .start(&tracer)
+                .start_with_context(&tracer, &opentelemetry::Context::new())
         };
         span = traceable.record(span);
         opentelemetry::trace::Span::end_with_timestamp(&mut span, traceable.end_time());
-
-        trace!(
-            event.name = "span.exported",
-            span.name = %name,
-            "exported traceable record as span"
-        );
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -158,15 +121,9 @@ pub struct NoOpExporterAdapter {}
 #[async_trait]
 impl TraceableExporter for NoOpExporterAdapter {
     async fn export(&self, _traceable: TraceableRecord) {
-        // Track as "noop" - span was processed but not exported (no exporter configured)
         metrics::registry::EXPORT_FLOW_SPANS_TOTAL
             .with_label_values(&[ExporterName::Noop.as_str(), ExportStatus::NoOp.as_str()])
             .inc();
-        trace!(
-            event.name = "span.export_skipped",
-            reason = "no_op_exporter_configured",
-            "skipping span export"
-        );
     }
 
     fn as_any(&self) -> &dyn Any {
