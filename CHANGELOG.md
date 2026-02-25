@@ -1,3 +1,14 @@
+## [v0.2.1] - 2026-02-25
+
+### Bug Fixes
+
+- Add  to Helm chart (#494)
+- Prevent spurious parent_span_id on exported spans (#496)
+
+[v0.2.0..v0.2.1](https://github.com/elastiflow/mermin/compare/v0.2.0...v0.2.1)
+
+
+
 ## [v0.2.0] - 2026-02-20
 
 ### Bug Fixes
