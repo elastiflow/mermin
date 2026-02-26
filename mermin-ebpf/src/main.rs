@@ -16,7 +16,7 @@
 //! ## Supported Protocols
 //!
 //! ### Layer 2
-//! - Ethernet II (DIX)
+//! - Ethernet II
 //!
 //! ### Layer 3
 //! - IPv4 (with variable-length options via IHL)

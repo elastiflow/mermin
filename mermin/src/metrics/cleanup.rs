@@ -1,11 +1,11 @@
 //! Metric cleanup tracker for managing stale metrics with configurable TTL.
 //!
 //! This module provides infrastructure to automatically clean up metrics for deleted resources
-//! (interfaces, K8s objects, tasks) after a configurable time-to-live period.
+//! (interfaces, K8s objects) after a configurable time-to-live period.
 //!
 //! ## Problem
 //!
-//! High-cardinality debug metrics (with per-interface, per-task labels) can cause unbounded
+//! High-cardinality debug metrics (with per-interface labels) can cause unbounded
 //! memory growth in production environments when resources are frequently created and destroyed.
 //! Prometheus doesn't automatically remove metric series even when resources no longer exist.
 //!
@@ -31,7 +31,7 @@ use crate::metrics;
 
 /// Tracks resources and schedules cleanup of their associated metrics after TTL expires.
 ///
-/// When a resource is deleted (interface removed, K8s object deleted, task completed),
+/// When a resource is deleted (interface removed, K8s object deleted),
 /// this tracker schedules cleanup of the metrics. If TTL > 0, metrics persist for the TTL
 /// duration to handle brief resource downtimes. If TTL = 0, cleanup is immediate.
 ///
@@ -53,8 +53,6 @@ pub struct MetricCleanupTracker {
     interface_metrics: Arc<DashMap<String, Instant>>,
     /// Tracks when each K8s resource was scheduled for cleanup
     k8s_resource_metrics: Arc<DashMap<String, Instant>>,
-    /// Tracks when each task was scheduled for cleanup
-    task_metrics: Arc<DashMap<String, Instant>>,
     /// Time-to-live for metrics after resource deletion
     ttl: Duration,
     /// Whether debug metrics are enabled (cleanup only needed when debug metrics are registered)
@@ -67,7 +65,6 @@ impl MetricCleanupTracker {
         Self {
             interface_metrics: Arc::new(DashMap::new()),
             k8s_resource_metrics: Arc::new(DashMap::new()),
-            task_metrics: Arc::new(DashMap::new()),
             ttl,
             debug_enabled,
         }
@@ -131,29 +128,6 @@ impl MetricCleanupTracker {
         }
     }
 
-    /// Mark a task as active (removes from cleanup schedule if present).
-    #[allow(dead_code)]
-    pub fn mark_task_active(&self, task_name: &str) {
-        if self.debug_enabled {
-            self.task_metrics.remove(task_name);
-        }
-    }
-
-    /// Schedule cleanup for a task's metrics.
-    #[allow(dead_code)]
-    pub fn schedule_task_cleanup(&self, task_name: String) {
-        if !self.debug_enabled {
-            return;
-        }
-
-        if self.ttl.is_zero() {
-            metrics::registry::remove_task_metrics(&task_name);
-        } else {
-            let cleanup_time = Instant::now() + self.ttl;
-            self.task_metrics.insert(task_name, cleanup_time);
-        }
-    }
-
     /// Run the background cleanup loop.
     ///
     /// Periodically scans for expired metrics and removes them.
@@ -189,7 +163,6 @@ impl MetricCleanupTracker {
                     let now = Instant::now();
                     let mut cleaned_interfaces = 0;
                     let mut cleaned_k8s = 0;
-                    let mut cleaned_tasks = 0;
 
                     self.interface_metrics.retain(|iface, &mut cleanup_time| {
                         if now >= cleanup_time {
@@ -222,30 +195,13 @@ impl MetricCleanupTracker {
                             }
                         });
 
-                    self.task_metrics.retain(|task_name, &mut cleanup_time| {
-                        if now >= cleanup_time {
-                            metrics::registry::remove_task_metrics(task_name);
-                            trace!(
-                                event.name = "metrics.cleanup.task_expired",
-                                task_name = %task_name,
-                                "cleaned up expired task metrics"
-                            );
-                            cleaned_tasks += 1;
-                            false
-                        } else {
-                            true
-                        }
-                    });
-
-                    if cleaned_interfaces > 0 || cleaned_k8s > 0 || cleaned_tasks > 0 {
+                    if cleaned_interfaces > 0 || cleaned_k8s > 0 {
                         trace!(
                             event.name = "metrics.cleanup.sweep_completed",
                             cleaned_interfaces,
                             cleaned_k8s_resources = cleaned_k8s,
-                            cleaned_tasks,
                             pending_interfaces = self.interface_metrics.len(),
                             pending_k8s_resources = self.k8s_resource_metrics.len(),
-                            pending_tasks = self.task_metrics.len(),
                             "metric cleanup sweep completed"
                         );
                     }
@@ -255,7 +211,6 @@ impl MetricCleanupTracker {
                         event.name = "metrics.cleanup.shutdown",
                         pending_interfaces = self.interface_metrics.len(),
                         pending_k8s_resources = self.k8s_resource_metrics.len(),
-                        pending_tasks = self.task_metrics.len(),
                         "metric cleanup loop shutting down"
                     );
                     break;
@@ -280,7 +235,6 @@ mod tests {
         // Verify tracker starts with empty state
         assert_eq!(tracker.interface_metrics.len(), 0);
         assert_eq!(tracker.k8s_resource_metrics.len(), 0);
-        assert_eq!(tracker.task_metrics.len(), 0);
         assert_eq!(tracker.ttl, Duration::from_secs(300));
         assert!(tracker.debug_enabled);
     }
@@ -292,12 +246,10 @@ mod tests {
         // Schedule cleanups - should be no-ops when debug is disabled
         tracker.schedule_interface_cleanup("eth0".to_string());
         tracker.schedule_k8s_cleanup("Pod".to_string());
-        tracker.schedule_task_cleanup("test-task".to_string());
 
         // Verify nothing was scheduled (no-op behavior)
         assert_eq!(tracker.interface_metrics.len(), 0);
         assert_eq!(tracker.k8s_resource_metrics.len(), 0);
-        assert_eq!(tracker.task_metrics.len(), 0);
     }
 
     #[tokio::test]
@@ -332,12 +284,10 @@ mod tests {
         // Schedule cleanup - should happen immediately (not scheduled for later)
         tracker.schedule_interface_cleanup("immediate-cleanup-iface".to_string());
         tracker.schedule_k8s_cleanup("immediate-cleanup-resource".to_string());
-        tracker.schedule_task_cleanup("immediate-cleanup-task".to_string());
 
         // Verify nothing was scheduled (cleanup happened immediately)
         assert_eq!(tracker.interface_metrics.len(), 0);
         assert_eq!(tracker.k8s_resource_metrics.len(), 0);
-        assert_eq!(tracker.task_metrics.len(), 0);
     }
 
     #[tokio::test]

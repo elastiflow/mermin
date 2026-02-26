@@ -84,6 +84,66 @@ pub struct FlowSpanComponents {
     pub flow_span_tx: mpsc::Sender<FlowSpan>,
 }
 
+impl FlowSpanComponents {
+    /// Triggers a final flush of all active flows from the flow_store.
+    ///
+    /// Each flow is evicted via [`timeout_and_remove_flow`] so that a final
+    /// span is emitted before the pipeline shuts down.  Returns `Ok(count)`
+    /// with the number of preserved flows, or `Err(lost)` with the number of
+    /// flows still in the store when the timeout expires.
+    pub async fn preserve_active_flows(
+        &self,
+        trace_id_cache: &TraceIdCache,
+        timeout: Duration,
+    ) -> Result<usize, usize> {
+        let flow_store = Arc::clone(&self.flow_store);
+        let flow_stats_map = Arc::clone(&self.flow_stats_map);
+        let flow_span_tx = self.flow_span_tx.clone();
+
+        let flush_future = async {
+            let flow_keys: Vec<String> =
+                flow_store.iter().map(|entry| entry.key().clone()).collect();
+            let total_flows = flow_keys.len();
+
+            if total_flows == 0 {
+                return Ok::<usize, usize>(0);
+            }
+
+            info!(
+                event.name = "shutdown.flow_preservation.flushing",
+                count = total_flows,
+                "triggering final export for all active flows."
+            );
+
+            let flush_futures = flow_keys.into_iter().map(|id| {
+                timeout_and_remove_flow(
+                    id,
+                    &flow_store,
+                    &flow_stats_map,
+                    &flow_span_tx,
+                    trace_id_cache,
+                )
+            });
+
+            futures::future::join_all(flush_futures).await;
+
+            Ok(total_flows)
+        };
+
+        match tokio::time::timeout(timeout, flush_future).await {
+            Ok(Ok(preserved_count)) => Ok(preserved_count),
+            Err(_) | Ok(Err(_)) => {
+                let lost_count = self.flow_store.len();
+                warn!(
+                    event.name = "shutdown.flow_preservation.timeout",
+                    "flow preservation timed out. some flows may be lost."
+                );
+                Err(lost_count)
+            }
+        }
+    }
+}
+
 pub struct FlowSpanProducer {
     span_opts: SpanOptions,
     worker_queue_capacity: usize,
@@ -396,7 +456,7 @@ impl FlowSpanProducer {
             event.name = "flow_pollers.started",
             poller.count = num_pollers,
             poll.interval_secs = poll_interval.as_secs(),
-            "flow pollers started (replaces per-flow record/timeout tasks)"
+            "flow pollers started"
         );
 
         let async_fd = match AsyncFd::new(flow_events.as_raw_fd()) {

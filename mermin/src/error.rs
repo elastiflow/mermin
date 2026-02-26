@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use crate::{
-    health::HealthError, k8s::K8sError, otlp::OtlpError, runtime::context::ContextError,
+    health::HealthError, k8s::K8sError, otlp::OtlpError, runtime::conf::ConfError,
     span::producer::BootTimeError,
 };
 
@@ -20,9 +20,9 @@ pub enum MerminError {
     #[error("health check error: {0}")]
     Health(#[from] HealthError),
 
-    /// Runtime context initialization errors
-    #[error("context error: {0}")]
-    Context(#[from] ContextError),
+    /// Runtime initialization errors
+    #[error("configuration error: {0}")]
+    Conf(#[from] ConfError),
 
     /// Boot time calculation errors
     #[error("boot time error: {0}")]
