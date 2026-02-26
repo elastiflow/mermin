@@ -44,6 +44,8 @@ cargo build --release
 
 The build script automatically compiles the eBPF program and embeds it into the final binary.
 
+> **Tip**: If you experience unexpected build results, run `cargo clean` before rebuilding to avoid stale artifacts.
+
 #### Pull Pre-built Images
 
 You may optionally pull the existing image for testing purposes instead of building locally. Check the [latest releases](https://github.com/elastiflow/mermin/pkgs/container/mermin) to find the most recent version tag.
@@ -128,7 +130,7 @@ Once the program is running, open a new terminal and generate some network activ
 ping -c 4 localhost
 ```
 
-> If you experience unexpected results, try to run `cargo clean` before each build to avoid stale artifacts.
+> **Note**: This applies to native/bare-metal runs where the process is running directly on your Linux host. For the Dockerized workflow, see [Generate Traffic in the Dockerized Build section](#3-generate-traffic-1).
 
 ## Testing and Linting
 
@@ -162,7 +164,7 @@ cargo clippy -p mermin-ebpf -- -D warnings
 cargo clippy --all-features -- -D warnings
 ```
 
-### "hack" hints
+### Developer Utilities
 
 - Generate metrics description for the [internal metrics docs](../internal-monitoring/internal-metrics.md) with `jq`
 
@@ -201,7 +203,45 @@ This mounts your local repository into the container at `/app`.
 docker run -it --privileged -v `pwd`:/app mermin-builder:latest /bin/bash
 ```
 
-Inside the container's shell, you can now run any of the `cargo` build or test commands mentioned above.
+Inside the container's shell, you can run `cargo` build and test commands, or generate traffic to trigger flow exports.
+
+### 3. Generate Traffic
+
+Traffic must be generated from **inside** the container. Docker Desktop on macOS routes container traffic through a hidden Linux VM, so container IPs (e.g. `172.17.0.x`) are not directly reachable from your Mac host.
+
+If you already have a shell open in the container (from step 2), run traffic generation commands there directly:
+
+```shell
+curl https://example.com
+ping 8.8.8.8
+```
+
+Alternatively, open a second shell in the running container:
+
+```shell
+docker exec -it <container-name> bash
+# then from inside:
+curl https://example.com
+ping 8.8.8.8
+```
+
+> **Tip**: Use `docker ps` to find your container name or ID.
+
+If you want to reach Mermin's health or metrics endpoints from your Mac host, restart the container with port mappings:
+
+```shell
+docker run -it --privileged \
+  -p 8080:8080 \
+  -p 10250:10250 \
+  -v `pwd`:/app mermin-builder:latest /bin/bash
+```
+
+Then from your host:
+
+```shell
+curl http://localhost:8080/readyz
+curl http://localhost:10250/metrics
+```
 
 > **Note**: Docker Desktop for Mac does not support BPF LSM (Linux Security Modules). If you need to develop or test
 > LSM-based features (like process tracking via `lsm` hooks), use [Colima with QEMU](#using-colima-for-lsm-development) instead.
