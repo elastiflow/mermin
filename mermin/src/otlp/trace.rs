@@ -1,7 +1,10 @@
 use std::{any::Any, sync::Arc, time::SystemTime};
 
 use async_trait::async_trait;
-use opentelemetry::trace::{SpanKind, TraceId, Tracer, TracerProvider};
+use opentelemetry::{
+    InstrumentationScope,
+    trace::{SpanKind, TraceId, Tracer, TracerProvider},
+};
 use opentelemetry_sdk::{error::OTelSdkResult, trace::SdkTracerProvider};
 
 use crate::metrics::{
@@ -11,11 +14,16 @@ use crate::metrics::{
 
 pub struct TraceExporterAdapter {
     provider: SdkTracerProvider,
+    tracer: opentelemetry_sdk::trace::SdkTracer,
 }
 
 impl TraceExporterAdapter {
     pub fn new(provider: SdkTracerProvider) -> Self {
-        Self { provider }
+        let scope = InstrumentationScope::builder("mermin")
+            .with_version(env!("CARGO_PKG_VERSION"))
+            .build();
+        let tracer = provider.tracer_with_scope(scope);
+        Self { provider, tracer }
     }
 
     /// Explicitly shutdown the OpenTelemetry provider with a timeout
@@ -85,12 +93,8 @@ pub trait TraceableExporter: Send + Sync {
 #[async_trait]
 impl TraceableExporter for TraceExporterAdapter {
     async fn export(&self, traceable: TraceableRecord) {
-        let tracer = self.provider.tracer("mermin");
-        let name = if let Some(name) = traceable.name() {
-            name
-        } else {
-            "flow".to_string()
-        };
+        let tracer = &self.tracer;
+        let name = traceable.name().unwrap_or_else(|| "flow".to_string());
 
         let mut span = if let Some(trace_id) = traceable.trace_id() {
             tracer
@@ -98,13 +102,13 @@ impl TraceableExporter for TraceExporterAdapter {
                 .with_kind(traceable.span_kind())
                 .with_start_time(traceable.start_time())
                 .with_trace_id(trace_id)
-                .start_with_context(&tracer, &opentelemetry::Context::new())
+                .start_with_context(tracer, &opentelemetry::Context::new())
         } else {
             tracer
                 .span_builder(name.clone())
                 .with_kind(traceable.span_kind())
                 .with_start_time(traceable.start_time())
-                .start_with_context(&tracer, &opentelemetry::Context::new())
+                .start_with_context(tracer, &opentelemetry::Context::new())
         };
         span = traceable.record(span);
         opentelemetry::trace::Span::end_with_timestamp(&mut span, traceable.end_time());

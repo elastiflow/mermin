@@ -66,6 +66,10 @@ jobs:
           bump_version_yaml: true
           bump_version_yaml_path: charts/mermin/Chart.yaml
           bump_version_yaml_key: '.version,.appVersion'
+      - name: Bump Cargo.toml version
+        if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
+        run: |
+          sed -i "s/^version = \".*\"/version = \"${{ steps.prepare_release.outputs.new_release_version }}\"/" mermin/Cargo.toml
       - name: Create Pull Request
         if: ${{ fromJson(steps.prepare_release.outputs.new_release_published) }}
         uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e # v7.0.8
