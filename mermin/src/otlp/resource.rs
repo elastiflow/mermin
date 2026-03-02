@@ -1,13 +1,14 @@
 use std::{
     ffi::{CStr, CString},
+    net::IpAddr,
     ptr,
     time::Duration,
 };
 
 use k8s_openapi::api::core::v1::{Namespace, Node};
 use kube::{Api, Client};
-use nix::unistd;
-use opentelemetry::KeyValue;
+use nix::{ifaddrs, net::if_::InterfaceFlags, unistd};
+use opentelemetry::{Array, KeyValue, Value};
 use opentelemetry_sdk::Resource;
 use tracing::{debug, warn};
 
@@ -95,7 +96,7 @@ pub async fn detect_resource() -> Resource {
     // 2. getaddrinfo AI_CANONNAME (DNS-resolved FQDN for the OS hostname)
     // 3. K8s Hostname (may be a short name without a domain component)
     // 4. gethostname() (OS short hostname, last resort)
-    let k8s_host = node_result.as_ref().and_then(|(_, h)| h.clone());
+    let k8s_host = node_result.as_ref().and_then(|(_, h, _)| h.clone());
     let host_name = k8s_host
         .as_deref()
         .filter(|h| h.contains('.'))
@@ -103,6 +104,14 @@ pub async fn detect_resource() -> Resource {
         .or(dns_fqdn)
         .or(k8s_host)
         .unwrap_or(short_hostname);
+
+    // host.ip: prefer InternalIP addresses from the K8s node API; fall back to
+    // non-loopback, non-link-local addresses from the host's network interfaces.
+    let host_ips: Vec<String> = if let Some((_, _, ref k8s_ips)) = node_result {
+        k8s_ips.clone()
+    } else {
+        host_interface_ips()
+    };
 
     let mut builder = Resource::builder_empty()
         .with_attribute(KeyValue::new("telemetry.distro.name", "mermin"))
@@ -115,13 +124,19 @@ pub async fn detect_resource() -> Resource {
     if !host_id.is_empty() {
         builder = builder.with_attribute(KeyValue::new("host.id", host_id.clone()));
     }
+    if !host_ips.is_empty() {
+        let ip_array = Value::Array(Array::String(
+            host_ips.iter().cloned().map(Into::into).collect(),
+        ));
+        builder = builder.with_attribute(KeyValue::new("host.ip", ip_array));
+    }
     if let Some(name) = &k8s_node_name {
         builder = builder.with_attribute(KeyValue::new("k8s.node.name", name.clone()));
     }
     if let Some(ns) = &k8s_namespace {
         builder = builder.with_attribute(KeyValue::new("k8s.namespace.name", ns.clone()));
     }
-    if let Some((uid, _)) = &node_result {
+    if let Some((uid, _, _)) = &node_result {
         builder = builder.with_attribute(KeyValue::new("k8s.node.uid", uid.clone()));
     }
     if let Some(uid) = &cluster_uid {
@@ -132,14 +147,53 @@ pub async fn detect_resource() -> Resource {
         event.name = "resource.detection_complete",
         "host.name" = %host_name,
         "host.id" = %host_id,
+        "host.ip" = ?host_ips,
         "k8s.node.name" = ?k8s_node_name,
         "k8s.namespace.name" = ?k8s_namespace,
-        "k8s.node.uid" = ?node_result.as_ref().map(|(uid, _)| uid),
+        "k8s.node.uid" = ?node_result.as_ref().map(|(uid, _, _)| uid),
         "k8s.cluster.uid" = ?cluster_uid,
         "resource detection complete"
     );
 
     builder.build()
+}
+
+/// Returns non-loopback, non-link-local IP addresses from the host's network interfaces.
+/// Used as a fallback when K8s node API is unavailable.
+fn host_interface_ips() -> Vec<String> {
+    let Ok(addrs) = ifaddrs::getifaddrs() else {
+        return Vec::new();
+    };
+
+    addrs
+        .filter_map(|iface| {
+            // Skip loopback interfaces and interfaces that are not up.
+            if iface
+                .flags
+                .intersects(InterfaceFlags::IFF_LOOPBACK | InterfaceFlags::IFF_POINTOPOINT)
+                || !iface.flags.contains(InterfaceFlags::IFF_UP)
+            {
+                return None;
+            }
+            let sock_addr = iface.address?;
+            let addr: IpAddr = sock_addr
+                .as_sockaddr_in()
+                .map(|s| IpAddr::V4(s.ip()))
+                .or_else(|| sock_addr.as_sockaddr_in6().map(|s| IpAddr::V6(s.ip())))?;
+            // Exclude loopback and link-local addresses.
+            if addr.is_loopback() || is_link_local(addr) {
+                return None;
+            }
+            Some(addr.to_string())
+        })
+        .collect()
+}
+
+fn is_link_local(addr: IpAddr) -> bool {
+    match addr {
+        IpAddr::V4(v4) => v4.is_link_local(),
+        IpAddr::V6(v6) => (v6.segments()[0] & 0xffc0) == 0xfe80,
+    }
 }
 
 /// Resolves `hostname` to a fully qualified domain name using `getaddrinfo(3)` with
@@ -176,34 +230,44 @@ fn resolve_fqdn(hostname: &str) -> Option<String> {
     fqdn.filter(|s| s.contains('.') && s != hostname)
 }
 
-/// Fetches node UID and hostname from the K8s API for the given node name.
+/// Fetches node UID, hostname, and IP addresses from the K8s API for the given node name.
 ///
-/// Returns `Some((uid, host))` where `host` is the `InternalDNS` address (preferred, an FQDN)
-/// or the `Hostname` address from `node.status.addresses`. Returns `None` if the node name is
-/// not provided or the API call fails.
+/// Returns `Some((uid, host, ips))` where:
+/// - `host` is the `InternalDNS` address (preferred, an FQDN) or the `Hostname` address
+/// - `ips` is the list of `InternalIP` addresses from `node.status.addresses`
+///
+/// Returns `None` if the node name is not provided or the API call fails.
 async fn get_k8s_node(
     client: Client,
     node_name: Option<String>,
-) -> Option<(String, Option<String>)> {
+) -> Option<(String, Option<String>, Vec<String>)> {
     let node_name = node_name?;
     let api: Api<Node> = Api::all(client);
 
     match api.get(&node_name).await {
         Ok(node) => {
             let uid = node.metadata.uid.clone()?;
-            let host = node
-                .status
-                .as_ref()
-                .and_then(|s| s.addresses.as_ref())
-                .and_then(|addrs| {
+            let addresses = node.status.as_ref().and_then(|s| s.addresses.as_ref());
+
+            let host = addresses.and_then(|addrs| {
+                addrs
+                    .iter()
+                    .find(|a| a.type_ == "InternalDNS")
+                    .or_else(|| addrs.iter().find(|a| a.type_ == "Hostname"))
+                    .map(|a| a.address.clone())
+            });
+
+            let ips = addresses
+                .map(|addrs| {
                     addrs
                         .iter()
-                        .find(|a| a.type_ == "InternalDNS")
-                        .or_else(|| addrs.iter().find(|a| a.type_ == "Hostname"))
+                        .filter(|a| a.type_ == "InternalIP")
                         .map(|a| a.address.clone())
-                });
+                        .collect()
+                })
+                .unwrap_or_default();
 
-            Some((uid, host))
+            Some((uid, host, ips))
         }
         Err(e) => {
             warn!(
