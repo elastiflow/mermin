@@ -1,3 +1,13 @@
+## [v0.3.0] - 2026-03-02
+
+### Features
+
+- Add otel resource and instrumentation scope attributes to traces (#498)
+
+[v0.2.1..v0.3.0](https://github.com/elastiflow/mermin/compare/v0.2.1...v0.3.0)
+
+
+
 ## [v0.2.1] - 2026-02-25
 
 ### Bug Fixes
