@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use crate::{
-    health::HealthError, k8s::K8sError, otlp::OtlpError, runtime::context::ContextError,
+    health::HealthError, k8s::K8sError, otlp::error::OtlpError, runtime::context::ContextError,
     span::producer::BootTimeError,
 };
 

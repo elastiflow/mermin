@@ -7,7 +7,7 @@ use figment::{
 use http::{HeaderMap, HeaderName, HeaderValue, Uri};
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::client::legacy::connect::HttpConnector;
-use opentelemetry::{KeyValue, global};
+use opentelemetry::global;
 use opentelemetry_otlp::{Protocol, WithExportConfig, WithHttpConfig, WithTonicConfig};
 use opentelemetry_sdk::{
     Resource,
@@ -40,7 +40,8 @@ use tracing_subscriber::{
 use crate::{
     metrics::export::ExporterName,
     otlp::{
-        MetricsSpanExporter, OtlpError,
+        error::OtlpError,
+        metrics_exporter::MetricsSpanExporter,
         opts::{ExporterProtocol, OtlpExportOptions, StdoutExportOptions, TlsOptions, defaults},
     },
     runtime::{
@@ -143,13 +144,8 @@ impl ServerCertVerifier for NoCertVerifier {
 }
 
 impl ProviderBuilder {
-    pub fn new() -> Self {
-        let builder = SdkTracerProvider::builder().with_resource(
-            Resource::builder()
-                .with_attribute(KeyValue::new("service.name", "mermin"))
-                .with_attribute(KeyValue::new("service.version", env!("CARGO_PKG_VERSION")))
-                .build(),
-        );
+    pub fn new(resource: Resource) -> Self {
+        let builder = SdkTracerProvider::builder().with_resource(resource);
         Self {
             sdk_builder: builder,
         }
@@ -570,8 +566,9 @@ impl ProviderBuilder {
 pub async fn init_provider(
     stdout: Option<StdoutExportOptions>,
     otlp: Option<OtlpExportOptions>,
+    resource: Resource,
 ) -> Result<SdkTracerProvider, OtlpError> {
-    let mut provider = ProviderBuilder::new();
+    let mut provider = ProviderBuilder::new(resource);
 
     if stdout.is_none() && otlp.is_none() {
         warn!(
@@ -625,8 +622,9 @@ pub async fn init_internal_tracing(
     log_color: bool,
     stdout: Option<StdoutExportOptions>,
     otlp: Option<OtlpExportOptions>,
+    resource: Resource,
 ) -> Result<(), OtlpError> {
-    let provider = init_provider(stdout, otlp).await?;
+    let provider = init_provider(stdout, otlp, resource).await?;
     let mut fmt_layer = Layer::new()
         .with_span_events(FmtSpan::from(span_fmt))
         .with_ansi(log_color);
@@ -817,7 +815,7 @@ rstuvwxyz
     async fn test_grpc_http_endpoint_no_tls() {
         let options = default_opts();
 
-        let provider = ProviderBuilder::new();
+        let provider = ProviderBuilder::new(Resource::builder_empty().build());
         let result = provider.with_otlp_exporter(options).await;
 
         // Should succeed without TLS configuration for http:// endpoint
@@ -829,7 +827,7 @@ rstuvwxyz
         let mut options = default_opts();
         options.endpoint = "https://localhost:4317".to_string();
 
-        let provider = ProviderBuilder::new();
+        let provider = ProviderBuilder::new(Resource::builder_empty().build());
         let result = provider.with_otlp_exporter(options).await;
 
         // Should succeed with automatic TLS for https:// endpoint
@@ -851,7 +849,7 @@ rstuvwxyz
             client_key: None,
         });
 
-        let provider = ProviderBuilder::new();
+        let provider = ProviderBuilder::new(Resource::builder_empty().build());
         let result = provider.with_otlp_exporter(options).await;
 
         // With lazy connection, the channel creation should succeed
@@ -869,7 +867,7 @@ rstuvwxyz
         options.endpoint = "http://localhost:4318".to_string();
         options.protocol = ExporterProtocol::HttpBinary;
 
-        let provider = ProviderBuilder::new();
+        let provider = ProviderBuilder::new(Resource::builder_empty().build());
         let result = provider.with_otlp_exporter(options).await;
         assert!(
             result.is_ok(),
@@ -883,7 +881,7 @@ rstuvwxyz
         options.endpoint = "https://localhost:4318".to_string();
         options.protocol = ExporterProtocol::HttpBinary;
 
-        let provider = ProviderBuilder::new();
+        let provider = ProviderBuilder::new(Resource::builder_empty().build());
         let result = provider.with_otlp_exporter(options).await;
         // This fails if the system cannot load native certs (e.g. no ca-certificates installed)
         assert!(
@@ -907,7 +905,7 @@ rstuvwxyz
             client_key: None,
         });
 
-        let provider = ProviderBuilder::new();
+        let provider = ProviderBuilder::new(Resource::builder_empty().build());
         let result = provider.with_otlp_exporter(options).await;
 
         // The test certificates may not be valid, so we just verify
@@ -943,7 +941,7 @@ rstuvwxyz
             client_key: Some(key_path),
         });
 
-        let provider = ProviderBuilder::new();
+        let provider = ProviderBuilder::new(Resource::builder_empty().build());
         let result = provider.with_otlp_exporter(options).await;
 
         // The test certificates may not be valid PEM format, so we just verify
@@ -972,7 +970,7 @@ rstuvwxyz
             client_key: None,
         });
 
-        let provider = ProviderBuilder::new();
+        let provider = ProviderBuilder::new(Resource::builder_empty().build());
         let result = provider.with_otlp_exporter(options).await;
         assert!(
             result.is_ok(),
@@ -996,7 +994,7 @@ rstuvwxyz
             client_key: Some(key_path),
         });
 
-        let provider = ProviderBuilder::new();
+        let provider = ProviderBuilder::new(Resource::builder_empty().build());
         let result = provider.with_otlp_exporter(options).await;
 
         assert!(result.is_err());
@@ -1019,7 +1017,7 @@ rstuvwxyz
             client_key: None,
         });
 
-        let provider = ProviderBuilder::new();
+        let provider = ProviderBuilder::new(Resource::builder_empty().build());
         let result = provider.with_otlp_exporter(options).await;
 
         assert!(result.is_err());
@@ -1042,7 +1040,7 @@ rstuvwxyz
             client_key: Some(key_path),
         });
 
-        let provider = ProviderBuilder::new();
+        let provider = ProviderBuilder::new(Resource::builder_empty().build());
         let result = provider.with_otlp_exporter(options).await;
 
         assert!(result.is_err());
@@ -1065,7 +1063,7 @@ rstuvwxyz
             client_key: None,
         });
 
-        let provider = ProviderBuilder::new();
+        let provider = ProviderBuilder::new(Resource::builder_empty().build());
         let result = provider.with_otlp_exporter(options).await;
 
         // Should fail when only cert is provided without key
@@ -1089,7 +1087,7 @@ rstuvwxyz
             client_key: None,
         });
 
-        let provider = ProviderBuilder::new();
+        let provider = ProviderBuilder::new(Resource::builder_empty().build());
         let result = provider.with_otlp_exporter(options).await;
 
         // http:// endpoint with explicit TLS config should still work
@@ -1122,7 +1120,7 @@ rstuvwxyz
             client_key: Some(key_path),
         });
 
-        let provider = ProviderBuilder::new();
+        let provider = ProviderBuilder::new(Resource::builder_empty().build());
         let result = provider.with_otlp_exporter(options).await;
 
         // Should fail with clear error about missing cert file
@@ -1149,7 +1147,7 @@ rstuvwxyz
             client_key: Some("/nonexistent/key.key".to_string()),
         });
 
-        let provider = ProviderBuilder::new();
+        let provider = ProviderBuilder::new(Resource::builder_empty().build());
         let result = provider.with_otlp_exporter(options).await;
 
         // Should fail with clear error about missing key file

@@ -53,6 +53,7 @@ use crate::{
     },
     otlp::{
         provider::{init_bootstrap_logger, init_internal_tracing, init_provider},
+        resource::detect_resource,
         trace::{NoOpExporterAdapter, TraceExporterAdapter, TraceableExporter, TraceableRecord},
     },
     runtime::{
@@ -273,6 +274,8 @@ async fn run(cli: Cli) -> Result<()> {
     capabilities::check_required_capabilities()?;
 
     let exporter: Arc<dyn TraceableExporter> = {
+        let resource = detect_resource().await;
+
         init_internal_tracing(
             reload_handles,
             conf.log_level,
@@ -280,6 +283,7 @@ async fn run(cli: Cli) -> Result<()> {
             conf.log_color,
             conf.internal.traces.stdout.clone(),
             conf.internal.traces.otlp.clone(),
+            resource.clone(),
         )
         .await?;
 
@@ -290,6 +294,7 @@ async fn run(cli: Cli) -> Result<()> {
             let app_tracer_provider = init_provider(
                 conf.export.traces.stdout.clone(),
                 conf.export.traces.otlp.clone(),
+                resource,
             )
             .await?;
             info!(

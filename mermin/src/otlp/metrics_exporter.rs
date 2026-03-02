@@ -1,8 +1,8 @@
 //! Wrapper SpanExporter that observes batch sizes and tracks export success/error metrics.
 
-use futures::future::BoxFuture;
 use opentelemetry_sdk::{
     error::{OTelSdkError, OTelSdkResult},
+    resource::Resource,
     trace::{SpanData, SpanExporter},
 };
 
@@ -31,8 +31,7 @@ where
     E: SpanExporter,
 {
     #[allow(refining_impl_trait)]
-    fn export(&self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
-        // Observe batch size before delegating to inner exporter
+    async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
         let batch_size = batch.len();
         if batch_size > 0 {
             metrics::registry::EXPORT_BATCH_SIZE
@@ -41,40 +40,27 @@ where
                 .observe(batch_size as f64);
         }
 
+        let result = self.inner.export(batch).await;
+
         let exporter_name = self.exporter_name;
-
-        // Delegate to inner exporter - the trait guarantees 'static but compiler can't prove it
-        // due to associated type. We use unsafe to assert the lifetime per trait contract.
-        let inner_export = self.inner.export(batch);
-        let pinned: BoxFuture<'_, OTelSdkResult> = Box::pin(inner_export);
-        // SAFETY: SpanExporter::export() guarantees BoxFuture<'static, ...> per trait contract.
-        // The batch is moved, so no borrows remain. We're only asserting 'static lifetime.
-        let inner_export_static = unsafe {
-            std::mem::transmute::<BoxFuture<'_, OTelSdkResult>, BoxFuture<'static, OTelSdkResult>>(
-                pinned,
-            )
-        };
-
-        Box::pin(async move {
-            let result = inner_export_static.await;
-
-            match &result {
-                Ok(()) => {
-                    // Track successful export - increment by batch size since each span succeeded
-                    metrics::registry::EXPORT_FLOW_SPANS_TOTAL
-                        .with_label_values(&[exporter_name.as_str(), ExportStatus::Ok.as_str()])
-                        .inc_by(batch_size as u64);
-                }
-                Err(_) => {
-                    // Track export error - increment by batch size since each span in the batch failed
-                    metrics::registry::EXPORT_FLOW_SPANS_TOTAL
-                        .with_label_values(&[exporter_name.as_str(), ExportStatus::Error.as_str()])
-                        .inc_by(batch_size as u64);
-                }
+        match &result {
+            Ok(()) => {
+                metrics::registry::EXPORT_FLOW_SPANS_TOTAL
+                    .with_label_values(&[exporter_name.as_str(), ExportStatus::Ok.as_str()])
+                    .inc_by(batch_size as u64);
             }
+            Err(_) => {
+                metrics::registry::EXPORT_FLOW_SPANS_TOTAL
+                    .with_label_values(&[exporter_name.as_str(), ExportStatus::Error.as_str()])
+                    .inc_by(batch_size as u64);
+            }
+        }
 
-            result
-        })
+        result
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        self.inner.set_resource(resource);
     }
 
     fn shutdown(&mut self) -> Result<(), OTelSdkError> {
