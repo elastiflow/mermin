@@ -10,7 +10,7 @@ sources:
 dependencies:
   - name: mermin
     repository: https://elastiflow.github.io/mermin/
-    version: ">= 0.2.0"
+    version: ">= 0.3.0"
     condition: mermin.enabled
   - name: netobserv-flow
     repository: https://elastiflow.github.io/helm-chart-netobserv/
@@ -18,11 +18,11 @@ dependencies:
     condition: netobserv-flow.enabled
   - name: opensearch
     repository: https://opensearch-project.github.io/helm-charts/
-    version: ">= 3.4.0"
+    version: ">= 3.5.0"
     condition: opensearch.enabled
   - name: opensearch-dashboards
     repository: https://opensearch-project.github.io/helm-charts/
-    version: ">= 3.4.0"
+    version: ">= 3.5.0"
     condition: opensearch-dashboards.enabled
 maintainers:
   - name: ElastiFlow Engineering Team
