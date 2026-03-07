@@ -187,11 +187,12 @@ static mut FLOW_KEY_SCRATCH: PerCpuArray<FlowKey> = PerCpuArray::with_max_entrie
 
 /// Map to track listening ports for client/server direction inference.
 /// Key: ListeningPortKey (port + protocol), Value: 1 (presence marker)
-/// Max entries: 65536 (all possible ports, though typically < 1000 in practice)
+/// Max entries: 1024 — covers dense nodes (~500 pods × 2 listening ports each).
+/// Pre-allocated (flags=0) for predictable kernel memory usage.
 #[cfg(not(feature = "test"))]
 #[map]
 static mut LISTENING_PORTS: HashMap<mermin_common::ListeningPortKey, u8> =
-    HashMap::with_max_entries(65536, 0);
+    HashMap::with_max_entries(1024, 0);
 
 /// Error types that can occur during packet parsing.
 ///

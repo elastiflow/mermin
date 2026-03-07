@@ -2,123 +2,79 @@
 
 **Block:** `pipeline`
 
-The `pipeline` block provides advanced configuration for flow processing pipeline optimization, including channel capacity tuning, worker threading, Kubernetes decoration, backpressure management, and buffer multipliers.
+The `pipeline` block configures the flow processing pipeline: eBPF map sizing, worker threading, Kubernetes decoration, and inter-stage buffer capacities.
 
-The configuration options become useful to take advantage of additional resources allocated for Mermin or to generally optimize the performance for your specific use-case.
+**Default baseline:** All defaults are tuned for deployments with ≤16,384 concurrent flows (~3,200 flow records/s at the default 5s poll interval). Memory is pre-allocated at the configured sizes.
+Scale values proportionally for higher-traffic nodes.
 
 ## Configuration
 
-A full pipeline example is in the [default config](../default/config.hcl) in the repository.
+A full example is in the [default config](../default/config.hcl).
 
 ### `pipeline.flow_capture` block
 
-Attributes in this block configure eBPF-level flow tracking.
+Configures eBPF-level flow tracking.
 
 - `flow_stats_capacity` attribute
 
-  The max amount of entries within `FLOW_STATS` eBPF map. The map is created with this fixed capacity at program load time
-  and does not grow or shrink at runtime; once full, new entry inserts attempts are dropped.
-  See [eBPF Programs](../../concepts/agent-architecture.md#ebpf-programs) in the architecture documentation for more information.
+  Max entries in the `FLOW_STATS` eBPF map. The map is created at this fixed size at program load time and does not resize at runtime. Uses `BPF_F_NO_PREALLOC`:
+  memory grows on demand as flows are tracked, up to this limit — so actual kernel memory equals the number of active concurrent flows × ~270 bytes (FlowStats: 192B + FlowKey: 40B aligned + htab_elem overhead: ~38B).
+  Once full, new flows are dropped.
 
   **Type:** Integer
 
-  **Default:** `100000`
+  **Default:** `16384`
 
-  **Tuning Guidelines:**
-
-  | Traffic Volume             | Recommended Value |
-  |----------------------------|-------------------|
-  | Low (< 10K flows/s)        | 50000             |
-  | Medium (10K-50K flows/s)   | 100000 (default)  |
-  | High (50K-100K flows/s)    | 250000            |
-  | Very High (> 100K flows/s) | 500000+           |
-
-  **Example:** Increase capacity for high-traffic ingress
+  **Example:**
 
   ```hcl
   pipeline {
     flow_capture {
-      flow_stats_capacity = 500000
+      flow_stats_capacity = 65536
     }
   }
   ```
 
 - `flow_events_capacity` attribute
 
-  The max amount of entries within the `FLOW_EVENTS` ring buffer. This buffer is used to pass new flow events from eBPF to userspace.
-  Each entry is 234 bytes, so the default 1024 entries equals ~240 KB. The ring buffer is created with this fixed size during eBPF program load and does not resize at runtime.
-  Keep the buffer high enough to provide flow record burst tolerance.
+  Max entries in the `FLOW_EVENTS` ring buffer. This buffer carries new-flow notifications from eBPF to userspace — one event per unique flow, not per flow record. The ring buffer is created at this fixed size during eBPF program load.
+  Each entry is 234 bytes; default 1,024 entries = ~240 KB.
 
   **Type:** Integer (entries)
 
   **Default:** `1024`
 
-  **Sizing Guide** (based on flows per second):
+  If you see `"ring buffer full - dropping flow event"` log entries, increase this value. The aya loader automatically aligns to page size.
 
-  | Traffic Pattern              | Recommended Value | Memory Usage |
-  |------------------------------|-------------------|--------------|
-  | General/Mixed (50-500 FPS)   | `1024` (default)  | ~240 KB      |
-  | High Traffic (500-2K FPS)    | `2048`            | ~480 KB      |
-  | Very High Traffic (2K-5K FPS)| `4096`            | ~960 KB      |
-  | Extreme Traffic (>5K FPS)    | `8192+`           | ~1.9 MB+     |
-
-  **Example:** Increase buffer for very high traffic
+  **Example:**
 
   ```hcl
   pipeline {
     flow_capture {
-      flow_events_capacity = 4096
+      flow_events_capacity = 2048
     }
   }
   ```
 
 ### `pipeline.flow_producer` block
 
-Attributes in this block configure userspace flow processing.
+Configures userspace flow processing.
 
 - `workers` attribute
 
-  Number of parallel worker threads processing packets and generating flow spans. Each worker processes eBPF events independently from a dedicated worker queue.
+  Number of parallel worker threads for flow processing. Each worker processes eBPF events from its own queue independently.
 
   **Type:** Integer
 
   **Default:** `4`
 
-  **Behavior:**
+  | Traffic level       | Recommended workers |
+  |---------------------|---------------------|
+  | Low / default       | 2–4 (default: 4)    |
+  | High (>50K flows/s) | 6–8                 |
+  | Extreme (>100K/s)   | 8–16                |
 
-  - Each worker processes packets independently
-  - More workers = more parallelism = higher throughput
-  - More workers = more CPU usage
-  - Workers share the flow table (synchronized)
-
-  **Tuning Guidelines:**
-
-  | Traffic Volume             | Recommended Workers | CPU Allocation |
-  |----------------------------|---------------------|----------------|
-  | Low (< 10K flows/s)        | 1-2                 | 0.5-1 cores    |
-  | Medium (10K-50K flows/s)   | 2-4                 | 1-2 cores      |
-  | High (50K-100K flows/s)    | 4 (default)         | 2-4 cores      |
-  | Very High (> 100K flows/s) | 8-16                | 4-8 cores      |
-
-  **Optimal Worker Count:**
-
-  - Start with CPU count / 2
-  - Monitor CPU usage with metrics
-  - Increase if CPU is underutilized and packet drops occur
-  - Decrease if CPU is overutilized
-
-  **Relationship with CPU Resources:**
-
-  ```yaml
-  # Kubernetes resources should match worker count
-  resources:
-    requests:
-      cpu: 2     # For flow_producer.workers = 4
-    limits:
-      cpu: 4     # For flow_producer.workers = 4
-  ```
-
-  **Example:** Use more workers for increased parallelism
+  **Example:**
 
   ```hcl
   pipeline {
@@ -130,140 +86,71 @@ Attributes in this block configure userspace flow processing.
 
 - `worker_queue_capacity` attribute
 
-  Capacity for each worker thread's event queue. Determines how many raw eBPF events can be buffered per worker before drops occur.
+  Per-worker event queue depth. Total worker buffer memory ≈ `workers × worker_queue_capacity × 234 bytes`. Scale up if metrics show `mermin_flow_events_total{status="dropped_backpressure"}` increasing.
 
   **Type:** Integer
 
-  **Default:** `2048`
+  **Default:** `1024`
 
-  **Formula:** Total worker buffer memory ≈ `flow_producer.workers` × `flow_producer.worker_queue_capacity` × 256 bytes
-
-  **Tuning Guidelines:**
-
-  | Traffic Volume             | Recommended Value |
-  |----------------------------|-------------------|
-  | Low (< 10K flows/s)        | 512-1024          |
-  | Medium (10K-50K flows/s)   | 1024-2048         |
-  | High (50K-100K flows/s)    | 2048 (default)    |
-  | Very High (> 100K flows/s) | 4096+             |
-
-  **Signs You Need to Increase:**
-
-  - Metrics show `mermin_flow_events_total{status="dropped_backpressure"}` increasing
-
-  **Example:** Increase queue capacity for high traffic
+  **Example:**
 
   ```hcl
   pipeline {
     flow_producer {
-      worker_queue_capacity = 4096
+      worker_queue_capacity = 2048
     }
   }
   ```
 
 - `flow_store_poll_interval` attribute
 
-  Interval at which flow pollers check for flow records and timeouts. Pollers iterate through active flows to generate periodic flow records (based on `max_record_interval` in `span` config) and detect and remove idle flows (based on protocol-specific timeouts in `span` config).
-
-  See [eBPF Programs](../../concepts/agent-architecture.md#ebpf-programs) in the architecture documentation for more information.
+  How often workers scan the flow table to emit periodic flow records and expire idle flows. Lower values give more responsive timeout detection at slightly higher CPU cost.
 
   **Type:** String (duration)
 
   **Default:** `"5s"`
 
-  **Behavior:**
-
-  - Lower values = more responsive timeout detection and flow recording
-  - Higher values = less CPU overhead
-  - At typical enterprise scale (10K flows/sec with 100K active flows and 32 pollers): ~600 flow checks/sec per poller
-  - Modern CPUs handle flow checking very efficiently (microseconds per check)
-
-  **Tuning Guidelines:**
-
-  | Traffic Pattern          | Recommended Interval | Rationale                           |
-  |--------------------------|----------------------|-------------------------------------|
-  | Short-lived flows (ICMP) | 3-5s                 | Fast timeout detection              |
-  | Mixed traffic            | 5s (default)         | Balance responsiveness and overhead |
-  | Long-lived flows (TCP)   | 10s                  | Lower overhead, slower timeouts     |
-  | Memory constrained       | 3-5s                 | More frequent cleanup               |
-
-  **Trade-offs:**
-
-  - **3s interval**: Most responsive, slightly higher CPU (~10K checks/sec per poller)
-  - **5s interval** (default): Best balance for most workloads
-  - **10s interval**: Lowest CPU, flows may linger longer before timeout
-
-  **Signs You Should Decrease:**
-
-  - Flows lingering past their intended timeout
-  - Memory usage growing steadily
-  - Short-lived flow protocols (ICMP with 10s timeout)
-
-  **Signs You Can Increase:**
-
-  - CPU constrained
-  - Primarily long-lived TCP flows
-  - Flow timeout accuracy not critical
-
-  **Example:** Poll more frequently for short-lived flows
+  **Example:**
 
   ```hcl
   pipeline {
     flow_producer {
-      flow_store_poll_interval = "2s"
+      flow_store_poll_interval = "3s"
     }
   }
   ```
 
 - `flow_span_queue_capacity` attribute
 
-  Explicit capacity for the flow span channel, acting as a buffer between workers and the K8s decorator. With default settings, this provides approximately 160ms of buffer at 100K flows/sec.
+  Buffer between flow workers and the K8s decorator. Default provides ~1.3s of buffering at the 3,200 spans/s baseline. Scale proportionally with `flow_stats_capacity`.
 
   **Type:** Integer
 
-  **Default:** `16384`
+  **Default:** `4096`
 
-  **Recommendations:**
-
-  | Use Case              | Recommended Value |
-  |-----------------------|-------------------|
-  | Steady traffic        | 16384 (default)   |
-  | Bursty traffic        | 24576-32768       |
-  | Low latency priority  | 12288             |
-
-  **Example:** Increase buffer for high-latency decoration
+  **Example:**
 
   ```hcl
   pipeline {
     flow_producer {
-      flow_span_queue_capacity = 24576
+      flow_span_queue_capacity = 8192
     }
   }
   ```
 
 ### `pipeline.k8s_decorator` block
 
-Attributes in this block configure Kubernetes metadata decoration.
+Configures Kubernetes metadata decoration.
 
-- `threads` attribute
+- `threads`
 
-  Number of dedicated threads for Kubernetes metadata decoration. Running decoration on separate threads prevents K8s API lookups from blocking flow processing. Each thread handles ~8K flows/sec (~100-150μs per flow), so 4 threads provide 32K flows/sec capacity.
+  Number of dedicated threads for Kubernetes metadata lookup. Each thread handles ~8K flows/sec; the default 4 threads provides ~32K flows/sec capacity (~10x headroom at default scale).
 
   **Type:** Integer
 
   **Default:** `4`
 
-  **Recommendations based on typical FPS (flows per second):**
-
-  | Cluster Type               | Typical FPS | Recommended Threads |
-  |----------------------------|-------------|---------------------|
-  | General/Mixed              | 50-200      | 2-4 (default: 4)    |
-  | Service Mesh               | 100-300     | 4 (default)         |
-  | Public Ingress             | 1K-5K       | 4-8                 |
-  | High-Traffic Ingress       | 5K-25K      | 8-12                |
-  | Extreme Scale (Edge/CDN)   | >25K        | 12-24               |
-
-  **Example:** Increase threads for faster decoration
+  **Example:**
 
   ```hcl
   pipeline {
@@ -275,47 +162,34 @@ Attributes in this block configure Kubernetes metadata decoration.
 
 - `decorated_span_queue_capacity` attribute
 
-  Explicit capacity for the decorated span (export) channel, acting as a buffer between the K8s decorator and the OTLP exporter. This should be the largest buffer since network export is the slowest stage. With default settings, this provides approximately 320ms of buffer at 100K flows/sec.
+  Buffer between the K8s decorator and the OTLP exporter — the final stage before network export. Default provides ~2.5s of buffering at the 3,200 spans/s baseline. Scale proportionally with `flow_stats_capacity`.
 
   **Type:** Integer
 
-  **Default:** `32768`
+  **Default:** `8192`
 
-  **Recommendations:**
-
-  | Network Condition      | Recommended Value |
-  |------------------------|-------------------|
-  | Reliable network       | 32768 (default)   |
-  | Unreliable network     | 49152-65536       |
-  | Very high throughput   | 65536-98304       |
-
-  **Example:** Increase buffer for slow exporters
+  **Example:**
 
   ```hcl
   pipeline {
     k8s_decorator {
-      decorated_span_queue_capacity = 65536
+      decorated_span_queue_capacity = 16384
     }
   }
   ```
 
 ## Monitoring Performance Configuration
 
-After tuning performance settings, monitor these key metrics:
+After tuning, monitor these metrics:
 
-- `mermin_flow_events_total{status="dropped_backpressure"}` - Backpressure events
-- `mermin_flow_events_total{status="dropped_error"}` - Error drops
-- `mermin_channel_size` / `mermin_channel_capacity` - Channel utilization
-- `mermin_pipeline_duration_seconds` - Pipeline duration histogram
+- `mermin_flow_events_total{status="dropped_backpressure"}` — backpressure drops
+- `mermin_flow_events_total{status="dropped_error"}` — error drops
+- `mermin_channel_size` / `mermin_channel_capacity` — channel utilization
+- `mermin_pipeline_duration_seconds` — pipeline stage latency
 
-See the [Internal Metrics](../../internal-monitoring/internal-metrics.md) guide for complete Prometheus query examples.
+**Healthy indicators:** no backpressure drops, channel utilization < 80%, p95 latency < 10ms.
 
-**Healthy indicators:**
-
-- Sampling rate = 0 (no backpressure)
-- Channel utilization < 80%
-- p95 processing latency < 10ms
-- IP index updates < 100ms
+See [Internal Metrics](../../internal-monitoring/internal-metrics.md) for Prometheus query examples.
 
 ## Next Steps
 

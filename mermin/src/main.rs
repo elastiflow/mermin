@@ -139,7 +139,7 @@ const EBPF_MAP_SCHEMA_VERSION: u8 = 1;
 const EXPORT_TIMEOUT_SECS: u64 = 10;
 
 // Constants for eBPF map capacities
-const LISTENING_PORTS_CAPACITY: u64 = 65536;
+const LISTENING_PORTS_CAPACITY: u64 = 1024;
 
 async fn run(cli: Cli) -> Result<()> {
     let reload_handles = init_bootstrap_logger(&cli);
@@ -868,9 +868,9 @@ async fn start_pipeline(
     let use_tcx = kernel_version >= KernelVersion::new(6, 6, 0);
     let bpf_fs_writable = crate::metrics::registry::BPF_FS_WRITABLE.get() == 1;
 
-    let (cmd_tx, cmd_rx) = crossbeam::channel::unbounded();
-    let (netlink_tx, netlink_rx) = crossbeam::channel::unbounded();
-    let (event_tx, event_rx) = crossbeam::channel::unbounded();
+    let (cmd_tx, cmd_rx) = crossbeam::channel::bounded(64);
+    let (netlink_tx, netlink_rx) = crossbeam::channel::bounded(256);
+    let (event_tx, event_rx) = crossbeam::channel::bounded(128);
     let controller = IfaceController::new(
         patterns,
         Arc::clone(&iface_map),

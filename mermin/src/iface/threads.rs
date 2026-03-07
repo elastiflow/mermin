@@ -139,8 +139,12 @@ pub fn spawn_controller_thread(
                 "controller ready to receive commands"
             );
 
-            // Buffer for netlink events received before initialization completes
-            let mut netlink_event_buffer: Vec<NetlinkEvent> = Vec::new();
+            // Buffer for netlink events received before initialization completes.
+            // Pre-allocated at a fixed capacity to bound memory usage; events beyond
+            // the cap are dropped with a warning (network link changes during the ~30s
+            // init window are rare and self-correcting).
+            const NETLINK_BUFFER_CAP: usize = 256;
+            let mut netlink_event_buffer: Vec<NetlinkEvent> = Vec::with_capacity(NETLINK_BUFFER_CAP);
             let mut initialized = false;
 
             loop {
@@ -225,12 +229,6 @@ pub fn spawn_controller_thread(
                         match result {
                             Ok(event) => {
                                 if initialized {
-                                    debug!(
-                                        event.name = "interface_controller.netlink_event_received",
-                                        netlink_event = %event,
-                                        "received netlink event from monitoring thread"
-                                    );
-
                                     if let Err(e) = controller.handle_netlink_event(event) {
                                         warn!(
                                             event.name = "interface_controller.netlink_event_failed",
@@ -238,13 +236,15 @@ pub fn spawn_controller_thread(
                                             "failed to handle netlink event"
                                         );
                                     }
-                                } else {
-                                    debug!(
-                                        event.name = "interface_controller.netlink_event_buffered",
-                                        netlink_event = %event,
-                                        "buffering netlink event until initialization completes"
-                                    );
+                                } else if netlink_event_buffer.len() < NETLINK_BUFFER_CAP {
                                     netlink_event_buffer.push(event);
+                                } else {
+                                    warn!(
+                                        event.name = "interface_controller.netlink_buffer_full",
+                                        netlink_event = %event,
+                                        capacity = NETLINK_BUFFER_CAP,
+                                        "netlink event buffer full during initialization, dropping event"
+                                    );
                                 }
                             }
                             Err(_) => {
