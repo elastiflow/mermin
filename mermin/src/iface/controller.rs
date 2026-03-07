@@ -499,6 +499,15 @@ impl IfaceController {
         Ok(())
     }
 
+    /// Consume the controller and return the `Ebpf` object.
+    ///
+    /// Called after [`shutdown()`] to recover the `Ebpf` object for reuse across
+    /// pipeline restarts.  Dropping the controller first ensures all other fields
+    /// (tc_links, active_ifaces, …) are cleaned up before the `Ebpf` is handed off.
+    pub fn into_ebpf(self) -> Ebpf {
+        self.ebpf
+    }
+
     /// Get shared iface_map for flow decoration. DashMap allows lock-free reads
     /// while controller updates it dynamically.
     #[must_use]

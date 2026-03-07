@@ -50,7 +50,7 @@ Metrics are categorized into logical subsystems that correspond to different com
 - `flow`: Metrics on the Flow Spans
 - `interface`: Network interface-related metrics
 - `k8s`: For Kubernetes watcher metrics
-- `taskmanager`: Internal Mermin tasks metrics
+- `shutdown`: Shutdown lifecycle metrics
 
 ### eBPF Metrics (`mermin_ebpf_*`)
 
@@ -273,20 +273,34 @@ These metrics offer insight into the internal pipelines used for data mutation (
 
   **Default buckets:** `[0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0]` (10μs to 60s)
 
-### TaskManager Metrics (`mermin_taskmanager_*`)
+### Shutdown Metrics (`mermin_shutdown_*`)
 
-These metrics track the number and type of active background tasks managed by Mermin.
+These metrics track the shutdown lifecycle of Mermin components.
 
-- `mermin_taskmanager_tasks_active`
+- `mermin_shutdown_duration_seconds`
 
-  Current number of active tasks across all task types.
+  Duration of shutdown operations.
 
-  **Type:** `gauge`
+  **Type:** `histogram`
 
-  **Unit:** tasks (count)
+  **Unit:** seconds
+
+  **Default buckets:** `[0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0]` (100ms to 120s)
+
+- `mermin_shutdown_timeouts_total`
+
+  Total number of shutdown operations that timed out.
+
+  **Type:** `counter`
+
+- `mermin_shutdown_flows_total`
+
+  Total flow spans processed during shutdown.
+
+  **Type:** `counter`
 
   **Labels:**
-  - `task`: Task names are dynamic and correspond to spawned background tasks (e.g., watcher tasks, producer tasks)
+  - `status`: `preserved`, `lost`
 
 ## Label Values Reference
 
@@ -307,6 +321,7 @@ This section provides a quick reference for all label values used across metrics
 | `event`                | `apply`, `delete`, `init`, `init_done`, `error`                                                         |
 | `kind`                 | `Pod`, `Service`, `Node`, `Deployment`, `ReplicaSet`, `DaemonSet`, `StatefulSet`, `EndpointSlice`, etc. |
 | `stage`                | `flow_producer_out`, `k8s_decorator_out`, `export_out`                                                  |
+| `status` (shutdown)    | `preserved`, `lost`                                                                                     |
 
 ## Histogram Buckets
 
@@ -317,7 +332,7 @@ Histogram metrics use configurable bucket boundaries. The default buckets are op
 | `mermin_pipeline_duration_seconds`                       | `[0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0]`  | 10μs to 60s     |
 | `mermin_export_batch_size`                               | `[1, 10, 50, 100, 250, 500, 1000]`                                                                    | 1 to 1000 spans |
 | `mermin_k8s_watcher_ip_index_update_duration_seconds`    | `[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0]`                                                           | 1ms to 1s       |
-| `mermin_taskmanager_shutdown_duration_seconds` (debug)   | `[0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0]`                                                       | 100ms to 120s   |
+| `mermin_shutdown_duration_seconds` (debug)               | `[0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0]`                                                       | 100ms to 120s   |
 
 ## Grafana Dashboard
 

@@ -74,9 +74,9 @@ impl HistogramBucketConfig {
                 "mermin_k8s_watcher_ip_index_update_duration_seconds",
             ),
             shutdown_duration: Self::validate_buckets(
-                buckets.and_then(|b| b.mermin_taskmanager_shutdown_duration_seconds.clone()),
+                buckets.and_then(|b| b.mermin_shutdown_duration_seconds.clone()),
                 DEFAULT_SHUTDOWN_DURATION_BUCKETS,
-                "mermin_taskmanager_shutdown_duration_seconds",
+                "mermin_shutdown_duration_seconds",
             ),
         }
     }
@@ -358,44 +358,26 @@ lazy_static! {
 
 
     // ============================================================================
-    // Taskmanager Subsystem
+    // Shutdown Subsystem
     // ============================================================================
-
-    // Standard metrics (always registered)
-    /// Labels: task
-    pub static ref TASKMANAGER_TASKS_ACTIVE: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("tasks_active", "Current number of active tasks across all task types")
-            .namespace("mermin")
-            .subsystem("taskmanager"),
-        &["task"]
-    ).expect("failed to create taskmanager_tasks_active metric");
 
     // Debug metrics (only registered if debug_metrics_enabled)
 
     /// Total number of shutdown operations that timed out.
     pub static ref SHUTDOWN_TIMEOUTS_TOTAL: IntCounter = IntCounter::with_opts(
-        Opts::new("shutdown_timeouts_total", "Total number of shutdown operations that timed out")
+        Opts::new("timeouts_total", "Total number of shutdown operations that timed out")
             .namespace("mermin")
-            .subsystem("taskmanager")
+            .subsystem("shutdown")
     ).expect("failed to create shutdown_timeouts metric");
 
     /// Flow spans processed during shutdown.
     /// Labels: status = "preserved" | "lost"
     pub static ref SHUTDOWN_FLOWS_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("shutdown_flows_total", "Total flow spans processed during shutdown")
+        Opts::new("flows_total", "Total flow spans processed during shutdown")
             .namespace("mermin")
-            .subsystem("taskmanager"),
+            .subsystem("shutdown"),
         &["status"]  // preserved, lost
     ).expect("failed to create shutdown_flows_total metric");
-
-    /// Task lifecycle events counter by task.
-    /// Labels: task, status = "spawned" | "completed" | "cancelled" | "panicked"
-    pub static ref TASKMANAGER_TASKS_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("tasks_total", "Total task lifecycle events by task")
-            .namespace("mermin")
-            .subsystem("taskmanager"),
-        &["task", "status"]  // spawned, completed, cancelled, panicked
-    ).expect("failed to create tasks_total metric");
 
     // ============================================================================
     // Interface Subsystem
@@ -548,13 +530,10 @@ pub fn init_registry(
     })?;
 
     let shutdown_duration = Histogram::with_opts(
-        HistogramOpts::new(
-            "shutdown_duration_seconds",
-            "Duration of shutdown operations",
-        )
-        .namespace("mermin")
-        .subsystem("taskmanager")
-        .buckets(bucket_config.shutdown_duration),
+        HistogramOpts::new("duration_seconds", "Duration of shutdown operations")
+            .namespace("mermin")
+            .subsystem("shutdown")
+            .buckets(bucket_config.shutdown_duration),
     )
     .map_err(|e| {
         prometheus::Error::Msg(format!("failed to create shutdown_duration metric: {e}"))
@@ -639,15 +618,11 @@ pub fn init_registry(
     register_standard!(K8S_WATCHER_EVENTS_TOTAL);
 
     // ============================================================================
-    // Taskmanager metrics
+    // Shutdown metrics
     // ============================================================================
-    register_standard!(TASKMANAGER_TASKS_ACTIVE);
-
-    // Debug taskmanager metrics
     register_debug!(SHUTDOWN_DURATION_SECONDS.get().unwrap(), debug_enabled);
     register_debug!(SHUTDOWN_TIMEOUTS_TOTAL, debug_enabled);
     register_debug!(SHUTDOWN_FLOWS_TOTAL, debug_enabled);
-    register_debug!(TASKMANAGER_TASKS_TOTAL, debug_enabled);
 
     // ============================================================================
     // Per-interface statistics
@@ -731,17 +706,6 @@ pub fn remove_k8s_resource_metrics(resource: &str) {
     let _ = K8S_WATCHER_EVENTS_TOTAL.remove_label_values(&[resource, "error"]);
 }
 
-/// Remove all metrics for a task (only works if debug metrics are enabled).
-///
-/// Cleans up task lifecycle metrics for the specified task name.
-pub fn remove_task_metrics(task_name: &str) {
-    // Remove all status variants for this task
-    let _ = TASKMANAGER_TASKS_TOTAL.remove_label_values(&[task_name, "spawned"]);
-    let _ = TASKMANAGER_TASKS_TOTAL.remove_label_values(&[task_name, "completed"]);
-    let _ = TASKMANAGER_TASKS_TOTAL.remove_label_values(&[task_name, "cancelled"]);
-    let _ = TASKMANAGER_TASKS_TOTAL.remove_label_values(&[task_name, "panicked"]);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -755,12 +719,6 @@ mod tests {
     #[test]
     fn test_remove_k8s_resource_metrics_does_not_panic() {
         remove_k8s_resource_metrics("Pod");
-        assert!(true);
-    }
-
-    #[test]
-    fn test_remove_task_metrics_does_not_panic() {
-        remove_task_metrics("test-task");
         assert!(true);
     }
 
@@ -926,7 +884,7 @@ mod tests {
                 mermin_pipeline_duration_seconds: Some(custom_pipeline.clone()),
                 mermin_export_batch_size: Some(custom_export.clone()),
                 mermin_k8s_watcher_ip_index_update_duration_seconds: Some(custom_k8s.clone()),
-                mermin_taskmanager_shutdown_duration_seconds: Some(custom_shutdown.clone()),
+                mermin_shutdown_duration_seconds: Some(custom_shutdown.clone()),
                 ..Default::default()
             }),
             ..Default::default()

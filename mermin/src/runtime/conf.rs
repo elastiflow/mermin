@@ -17,6 +17,7 @@ use crate::{
     },
     otlp::opts::ExportOptions,
     runtime::{
+        cli::Cli,
         conf::conf_serde::{duration, level},
         opts::InternalOptions,
     },
@@ -181,13 +182,6 @@ impl Conf {
     /// and configuration file. The configuration is determined using the following priority order:
     /// Defaults < Configuration File < Environment Variables < CLI Arguments.
     ///
-    /// # Arguments
-    /// - `cli` - An instance of `Cli` containing parsed CLI arguments.
-    ///
-    /// # Returns
-    /// - `Result<(Self, Cli), ConfigError>` - Returns an `Ok((Conf, Cli))` if successful, or a `ConfigError`
-    ///   if there are issues during configuration extraction.
-    ///
     /// # Errors
     /// - `ConfigError::NoConfigFile` - Returned if no configuration file is specified or found.
     /// - `ConfigError::InvalidConfigPath` - Returned if the `config_path` from the environment
@@ -203,9 +197,7 @@ impl Conf {
     ///    the existing `Figment` configuration.
     /// 4. Extracts the final configuration into a `Conf` struct, storing the path to the
     ///    configuration file (if any).
-    pub fn new(
-        cli: crate::runtime::cli::Cli,
-    ) -> Result<(Self, crate::runtime::cli::Cli), ConfError> {
+    pub fn new(cli: Cli) -> Result<Self, ConfError> {
         use figment::{Figment, providers::Serialized};
 
         let mut figment = Figment::new().merge(Serialized::defaults(Conf::default()));
@@ -241,7 +233,7 @@ impl Conf {
             .validate()
             .map_err(|e| ConfError::InvalidConfiguration(format!("discovery.instrument: {e}")))?;
 
-        Ok((conf, cli))
+        Ok(conf)
     }
 
     /// Reloads the configuration from the config file and returns a new instance
@@ -253,24 +245,20 @@ impl Conf {
     /// file's content.
     ///
     /// Note:
-    /// - Command-line arguments (CLI) and environment variables (ENV VARS) will
-    ///   not be reloaded since it is assumed that the shell environment remains
-    ///   the same. The reload operation will use the current configuration as the
-    ///   base and layer the updated configuration file on top of it.
+    /// - The current resolved configuration (`self`) is serialized as the
+    ///   Figment base, which preserves all CLI arguments and environment
+    ///   variables from the original load. The configuration file is then
+    ///   layered on top, so file values override defaults but CLI/env values
+    ///   that were baked into `self` remain as the base layer.
+    /// - Callers that invoke `reload()` multiple times should keep calling
+    ///   it on the **original** `Conf` (not the reloaded one) to maintain
+    ///   consistent "original CLI/env + latest file" precedence.
     /// - If no configuration file path has been specified, an error will be returned.
     ///
-    /// # Returns
-    /// - `Ok(Self)` containing the reloaded configuration object if the reload
-    ///   operation succeeds.
-    /// - `Err(ConfigError::NoConfigFile)` if no configuration file path is set.
-    /// - Returns other variants of `ConfigError` if the configuration fails to
-    ///   load or extract properly.
-    ///
     /// # Errors
-    /// This function returns a `ConfigError` in the following scenarios:
-    /// - If there is no configuration file path specified (`ConfigError::NoConfigFile`).
+    /// This function returns a [`ConfError`] in the following scenarios:
+    /// - If there is no configuration file path specified (`ConfError::NoConfigFile`).
     /// - If the configuration fails to load or parse from the file.
-    #[allow(dead_code)]
     pub fn reload(&self) -> Result<Self, ConfError> {
         use figment::{Figment, providers::Serialized};
 
@@ -296,6 +284,20 @@ impl Conf {
             .map_err(|e| ConfError::InvalidConfiguration(format!("discovery.instrument: {e}")))?;
 
         Ok(conf)
+    }
+
+    /// Returns the K8s metadata extract rules for the given direction.
+    ///
+    /// Looks up `attributes.<direction>.k8s.extract.metadata` and returns the
+    /// list of metadata field names.  Returns an empty `Vec` when the path is
+    /// absent or not configured.
+    pub fn k8s_extract_metadata(&self, direction: &str) -> Vec<String> {
+        self.attributes
+            .as_ref()
+            .and_then(|directions_map| directions_map.get(direction))
+            .and_then(|providers_map| providers_map.get("k8s"))
+            .map(|options| options.extract.metadata.clone())
+            .unwrap_or_default()
     }
 
     /// Merges a configuration file into a Figment instance, automatically
@@ -1265,7 +1267,7 @@ mod tests {
     fn new_succeeds_without_config_path() {
         Jail::expect_with(|_| {
             let cli = Cli::parse_from(["mermin"]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load without path");
+            let cfg = Conf::new(cli).expect("config should load without path");
             assert_eq!(cfg.config_path, None);
 
             Ok(())
@@ -1350,7 +1352,7 @@ log_level: warn
                 "--log-level",
                 "debug",
             ]);
-            let (cfg, _cli) = Conf::new(cli).expect("config loads from cli file");
+            let cfg = Conf::new(cli).expect("config loads from cli file");
             assert_eq!(
                 cfg.discovery.instrument.interfaces,
                 Vec::from(["eth1".to_string()])
@@ -1379,7 +1381,7 @@ log_level: debug
             jail.set_env("MERMIN_CONFIG_PATH", path);
 
             let cli = Cli::parse_from(["mermin"]);
-            let (cfg, _cli) = Conf::new(cli).expect("config loads from env file");
+            let cfg = Conf::new(cli).expect("config loads from env file");
             assert_eq!(
                 cfg.discovery.instrument.interfaces,
                 Vec::from(["eth1".to_string()])
@@ -1405,7 +1407,7 @@ discovery:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config loads from cli file");
+            let cfg = Conf::new(cli).expect("config loads from cli file");
             assert_eq!(
                 cfg.discovery.instrument.interfaces,
                 Vec::from(["eth1".to_string()])
@@ -1473,7 +1475,7 @@ internal:
 
             // The rest of the test logic remains the same
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load from yaml file");
+            let cfg = Conf::new(cli).expect("config should load from yaml file");
 
             // Assert that all the custom values from the file were loaded correctly
             assert_eq!(
@@ -1517,7 +1519,7 @@ internal {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
+            let cfg = Conf::new(cli).expect("config should load from HCL file");
 
             assert_eq!(cfg.discovery.instrument.interfaces, vec!["eth0"]);
             assert_eq!(cfg.log_level, Level::INFO);
@@ -1558,7 +1560,7 @@ log_level = "info"
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config loads from HCL file");
+            let cfg = Conf::new(cli).expect("config loads from HCL file");
             assert_eq!(
                 cfg.discovery.instrument.interfaces,
                 Vec::from(["eth1".to_string()])
@@ -1649,7 +1651,7 @@ internal {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
+            let cfg = Conf::new(cli).expect("config should load from HCL file");
 
             // Assert that all the custom values from the file were loaded correctly
             assert_eq!(
@@ -1688,7 +1690,7 @@ discovery:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert_eq!(cfg.log_level, Level::ERROR);
             assert_eq!(cfg.auto_reload, true);
@@ -1729,7 +1731,7 @@ discovery "instrument" {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert_eq!(cfg.log_level, Level::ERROR);
             assert_eq!(cfg.auto_reload, true);
@@ -1763,7 +1765,7 @@ internal:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert_eq!(cfg.internal.server.enabled, false);
             assert_eq!(cfg.internal.server.listen_address, "127.0.0.1");
@@ -1789,7 +1791,7 @@ internal "server" {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert_eq!(cfg.internal.server.enabled, false);
             assert_eq!(cfg.internal.server.listen_address, "127.0.0.1");
@@ -1815,7 +1817,7 @@ internal:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert_eq!(cfg.internal.metrics.enabled, false);
             assert_eq!(cfg.internal.metrics.listen_address, "192.168.1.1");
@@ -1843,7 +1845,7 @@ internal {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert_eq!(cfg.internal.metrics.enabled, false);
             assert_eq!(cfg.internal.metrics.listen_address, "192.168.1.1");
@@ -1869,7 +1871,7 @@ internal "metrics" {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert_eq!(cfg.internal.metrics.enabled, false);
             assert_eq!(cfg.internal.metrics.listen_address, "192.168.1.1");
@@ -1894,7 +1896,7 @@ parser:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert_eq!(cfg.parser.geneve_port, 7000);
             assert_eq!(cfg.parser.vxlan_port, 8000);
@@ -1920,7 +1922,7 @@ parser {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert_eq!(cfg.parser.geneve_port, 7000);
             assert_eq!(cfg.parser.vxlan_port, 8000);
@@ -1950,7 +1952,7 @@ auto_reload: false
                 "warn",
                 "--auto-reload",
             ]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             // CLI args should override file config
             assert_eq!(cfg.log_level, Level::WARN);
@@ -1976,7 +1978,7 @@ discovery:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             // Overridden value
             assert_eq!(cfg.discovery.instrument.interfaces, vec!["custom0"]);
@@ -2029,7 +2031,7 @@ shutdown_timeout: 2min
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(120));
 
@@ -2051,7 +2053,7 @@ shutdown_timeout: 2min
                 jail.create_file(path, &format!("log_level: {}", level_str))?;
 
                 let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-                let (cfg, _cli) = Conf::new(cli).expect("config should load");
+                let cfg = Conf::new(cli).expect("config should load");
 
                 assert_eq!(cfg.log_level, expected, "failed for level: {}", level_str);
 
@@ -2182,7 +2184,7 @@ discovery:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             // Verify that defaults are applied for unspecified fields
             // Note: export.traces.otlp is None by default (not configured unless explicitly set)
@@ -2236,7 +2238,7 @@ export:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert!(cfg.export.traces.stdout.is_some());
             assert!(cfg.export.traces.otlp.is_some());
@@ -2262,7 +2264,7 @@ export:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             // Empty export block should result in no exporters configured
             assert!(cfg.export.traces.otlp.is_none());
@@ -2314,7 +2316,7 @@ span:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert_eq!(cfg.span.max_record_interval, Duration::from_secs(120));
             assert_eq!(cfg.span.generic_timeout, Duration::from_secs(45));
@@ -2350,7 +2352,7 @@ span {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert_eq!(cfg.span.max_record_interval, Duration::from_secs(120));
             assert_eq!(cfg.span.generic_timeout, Duration::from_secs(45));
@@ -2382,7 +2384,7 @@ export:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert!(cfg.export.traces.otlp.is_some());
             if let Some(otlp) = &cfg.export.traces.otlp {
@@ -2415,7 +2417,7 @@ export {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert!(cfg.export.traces.otlp.is_some());
             if let Some(otlp) = &cfg.export.traces.otlp {
@@ -2443,7 +2445,7 @@ export:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert!(cfg.export.traces.stdout.is_some());
             if let Some(stdout) = &cfg.export.traces.stdout {
@@ -2502,7 +2504,7 @@ export {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert!(cfg.export.traces.stdout.is_some());
             if let Some(stdout) = &cfg.export.traces.stdout {
@@ -2561,7 +2563,7 @@ internal:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert!(matches!(
                 cfg.internal.traces.span_fmt,
@@ -2595,7 +2597,7 @@ internal {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert!(matches!(
                 cfg.internal.traces.span_fmt,
@@ -2628,7 +2630,7 @@ discovery "informer" "k8s" {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
+            let cfg = Conf::new(cli).expect("config should load from HCL file");
 
             assert!(
                 cfg.discovery.informer.is_some(),
@@ -2685,7 +2687,7 @@ discovery:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load from YAML file");
+            let cfg = Conf::new(cli).expect("config should load from YAML file");
 
             assert!(
                 cfg.discovery.informer.is_some(),
@@ -2736,7 +2738,7 @@ discovery:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load with default values");
+            let cfg = Conf::new(cli).expect("config should load with default values");
 
             let k8s_conf = cfg
                 .discovery
@@ -2778,7 +2780,7 @@ discovery:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load without owner_relations");
+            let cfg = Conf::new(cli).expect("config should load without owner_relations");
 
             let k8s_conf = cfg
                 .discovery
@@ -2837,7 +2839,7 @@ discovery "informer" "k8s" {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load from HCL file");
+            let cfg = Conf::new(cli).expect("config should load from HCL file");
 
             assert!(
                 cfg.discovery.informer.is_some(),
@@ -2912,7 +2914,7 @@ discovery:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load from YAML file");
+            let cfg = Conf::new(cli).expect("config should load from YAML file");
 
             assert!(
                 cfg.discovery.informer.is_some(),
@@ -2965,8 +2967,7 @@ discovery:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) =
-                Conf::new(cli).expect("config should load without selector_relations");
+            let cfg = Conf::new(cli).expect("config should load without selector_relations");
 
             let k8s_conf = cfg
                 .discovery
@@ -2998,7 +2999,7 @@ discovery:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load with empty list");
+            let cfg = Conf::new(cli).expect("config should load with empty list");
 
             let k8s_conf = cfg
                 .discovery
@@ -3138,7 +3139,7 @@ span:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
             assert_eq!(cfg.span.trace_id_timeout, Duration::from_secs(7200)); // 2 hours
 
             Ok(())
@@ -3155,7 +3156,7 @@ span:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
             assert_eq!(cfg.span.trace_id_timeout, Duration::from_secs(1800)); // 30 minutes
 
             Ok(())
@@ -3173,7 +3174,7 @@ span {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
             assert_eq!(cfg.span.trace_id_timeout, Duration::from_secs(604800)); // 7 days
 
             Ok(())
@@ -3194,7 +3195,7 @@ span:
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             // Should use default 24h even though not specified
             assert_eq!(cfg.span.trace_id_timeout, Duration::from_secs(86400));
@@ -3242,7 +3243,7 @@ internal {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load with env function");
+            let cfg = Conf::new(cli).expect("config should load with env function");
 
             // Verify env function results
             assert_eq!(cfg.discovery.instrument.interfaces, vec!["test_value"]);
@@ -3277,7 +3278,7 @@ internal {
             )?;
 
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
-            let (cfg, _cli) = Conf::new(cli).expect("config should load");
+            let cfg = Conf::new(cli).expect("config should load");
 
             assert_eq!(cfg.pipeline.flow_producer.flow_span_queue_capacity, 1024);
             assert_eq!(
