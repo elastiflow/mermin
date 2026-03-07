@@ -41,7 +41,7 @@ impl ShrinkPolicy {
     /// Default shrinking policy for userspace flow tracking maps.
     ///
     /// - Threshold: 2.875x (23/8 - shrink after ~20% entry removal post-resize)
-    /// - Minimum: 10,000 entries (don't shrink small maps)
+    /// - Minimum: 16,384 entries — matches the default `flow_stats_capacity` pre-allocation
     ///
     /// Why 2.875x specifically?
     /// - DashMap resizes at 0.875 load factor (7/8 full)
@@ -49,9 +49,13 @@ impl ShrinkPolicy {
     /// - 2.875x = 23/8 keeps the 0.875 semantic consistency
     /// - Shrinks after ~20% of entries removed post-resize (meaningful decline signal)
     /// - Safe margin above 2x prevents thrashing from natural growth
+    ///
+    /// Why min_capacity = 16,384?
+    /// - Matches the default `flow_stats_capacity` so the map always returns to —
+    ///   but never shrinks below — its intentionally pre-allocated baseline after a burst.
     pub const fn userspace_flows() -> Self {
         Self {
-            min_capacity: 10_000,
+            min_capacity: 16_384,
             waste_ratio_numerator: 23,
             waste_ratio_denominator: 8,
         }

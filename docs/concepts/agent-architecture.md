@@ -77,6 +77,8 @@ Flow Stats (hashmap)   Flow Events (ring buffer)   Listening Ports (hashmap)
             OTLP Export
 ```
 
+See [Configure Flow Processing Pipeline](../configuration/reference/flow-processing-pipeline.md) for tuning options at each stage.
+
 ### eBPF Programs
 
 Mermin uses [eBPF](https://ebpf.io/what-is-ebpf/) (extended Berkeley Packet Filter) programs loaded into the Linux kernel to capture network packets with minimal overhead. These programs:
@@ -188,20 +190,14 @@ To learn more about the exporter configuration options, see the [OTLP exporter](
 Mermin operates efficiently in production environments:
 
 - **CPU**: Typically 0.1-0.5 cores (100-500 mCPUs) per agent, varies with traffic volume
-- **Memory**: Base usage ~100-200 MB, grows with flow table size
+- **Memory**: ~50–100 MB at default settings (pre-allocated for 16,384 concurrent flows)
 - **Network**: Outbound OTLP traffic depends on flow rate and batching settings
 - **Kernel**: eBPF programs have minimal impact (< 1% CPU overhead)
 
-### Scalability
-
-- **Flow Rate**: Can handle 10,000+ flows/second per agent on modern hardware
-- **Packet Rate**: Processes 100,000+ packets/second with minimal packet loss
-- **Cluster Size**: Scales linearly – each node runs its own independent agent
-- **Flow Table Size**: Configurable, defaults support ~100,000 concurrent flows
-
 ### Tunability
 
-Mermin provides extensive configuration for performance tuning under the `pipeline` block, please refer the [pipeline](../configuration/reference/flow-processing-pipeline.md) documentation for the details.
+Memory is pre-allocated at startup based on the configured capacity values and does not grow unexpectedly at runtime. The default `flow_stats_capacity` of 16,384 concurrent flows uses ~5 MB of kernel memory;
+scale this value for higher-traffic nodes. See [Configure Flow Processing Pipeline](../configuration/reference/flow-processing-pipeline.md) for tuning guidance.
 
 ## Failure Modes and Resilience
 

@@ -13,18 +13,18 @@ shutdown_timeout = "28s"
 # Pipeline performance and channel configuration options
 pipeline {
   flow_capture {
-    flow_stats_capacity  = 100000
+    flow_stats_capacity  = 16384
     flow_events_capacity = 1024
   }
   flow_producer {
     workers                  = 4
-    worker_queue_capacity    = 2048
+    worker_queue_capacity    = 1024
     flow_store_poll_interval = "5s"
-    flow_span_queue_capacity = 16384
+    flow_span_queue_capacity = 4096
   }
   k8s_decorator {
     threads                       = 4
-    decorated_span_queue_capacity = 32768
+    decorated_span_queue_capacity = 8192
   }
 }
 

@@ -436,7 +436,7 @@ impl ResourceStore {
         );
         update_ip_index(&store, &ip_index, conf).await;
 
-        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(256);
 
         let store_clone = store.clone();
         let ip_index_clone = ip_index.clone();
@@ -1657,7 +1657,7 @@ fn extract_endpointslice_ips(endpoint_slice: &EndpointSlice) -> HashSet<String> 
 /// - EndpointSlice (endpoint IPs)
 fn spawn_ip_resource_watcher<K, F>(
     client: Client,
-    event_tx: tokio::sync::mpsc::UnboundedSender<()>,
+    event_tx: tokio::sync::mpsc::Sender<()>,
     extract_ips: F,
     cleanup_tracker: Option<MetricCleanupTracker>,
 ) where
@@ -1725,14 +1725,19 @@ fn spawn_ip_resource_watcher<K, F>(
                                 "resource ips changed, adding uid to ip cache"
                             );
 
-                            // Trigger IP index rebuild
-                            if event_tx.send(()).is_err() {
-                                warn!(
-                                    event.name = "k8s.watcher.channel_closed",
-                                    k8s.resource.name = %resource_name,
-                                    "IP index update channel closed, stopping watcher"
-                                );
-                                return;
+                            // Trigger IP index rebuild. try_send is intentional: if the channel
+                            // is full, a signal is already pending (debounce handles it). If
+                            // closed, the consumer is gone and we stop the watcher.
+                            match event_tx.try_send(()) {
+                                Ok(()) | Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {}
+                                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                                    warn!(
+                                        event.name = "k8s.watcher.channel_closed",
+                                        k8s.resource.name = %resource_name,
+                                        "IP index update channel closed, stopping watcher"
+                                    );
+                                    return;
+                                }
                             }
                             trace!(
                                 event.name = "k8s.watcher.ip_changed",
@@ -1777,13 +1782,16 @@ fn spawn_ip_resource_watcher<K, F>(
                             ip_cache.shrink_to_fit();
                         }
 
-                        if event_tx.send(()).is_err() {
-                            warn!(
-                                event.name = "k8s.watcher.channel_closed",
-                                k8s.resource.name = %resource_name,
-                                "IP index update channel closed, stopping watcher"
-                            );
-                            return;
+                        match event_tx.try_send(()) {
+                            Ok(()) | Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {}
+                            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                                warn!(
+                                    event.name = "k8s.watcher.channel_closed",
+                                    k8s.resource.name = %resource_name,
+                                    "IP index update channel closed, stopping watcher"
+                                );
+                                return;
+                            }
                         }
                         trace!(
                             event.name = "k8s.watcher.event",
@@ -1823,7 +1831,9 @@ fn spawn_ip_resource_watcher<K, F>(
                             ])
                             .inc();
 
-                        if event_tx.send(()).is_err() {
+                        if let Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) =
+                            event_tx.try_send(())
+                        {
                             return;
                         }
                         debug!(

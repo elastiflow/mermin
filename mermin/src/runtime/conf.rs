@@ -795,25 +795,25 @@ pub mod conf_serde {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct FlowCapture {
-    /// Max capacity (upper bound) for the FLOW_STATS eBPF map (default: 100,000).
+    /// Max entries in the FLOW_STATS eBPF map (default: 16,384).
     ///
-    /// The eBPF map is created with this fixed `max_entries` at load time and does not
-    /// resize at runtime. Once the map is full, new entry insert attempts are dropped.
+    /// The map is created with this fixed `max_entries` at load time and does not resize.
+    /// Uses `BPF_F_NO_PREALLOC`: memory grows on demand as flows are tracked, up to this
+    /// limit. Once full, new flow insert attempts are dropped.
     ///
-    /// Controls memory usage of the eBPF FLOW_STATS.
-    /// Memory: flows × ~310 bytes (FlowStats: 192 + FlowKey: 58 + BPF overhead: ~58)
+    /// Per-entry cost: ~270 bytes (FlowStats: 192 + FlowKey: 40 aligned + htab_elem: ~38).
+    /// Maximum kernel memory when fully populated: capacity × ~270 bytes.
     ///
-    /// Sizing guide based on typical cluster FPS (flows per second) per node:
-    /// - General/Mixed (50-200 FPS):         50,000 (~12 MB) - dev/testing, 2.5-50x headroom
-    /// - Service Mesh (100-300 FPS):        100,000 (~23 MB) - default ✓, 33-100x headroom
-    /// - Public Ingress (1K-5K FPS):        100,000-500,000 (~23-116 MB) - scale based on traffic
-    /// - Extreme Ingress (>5K FPS):         500,000-1,000,000 (~116-232 MB) - edge/CDN scale
+    /// Default (16,384) targets typical deployments: ~4.4 MB maximum kernel memory.
+    /// This covers ~3,200 flow records/s at the default 5s poll interval.
     ///
     /// Formula: concurrent_flows = flows_per_sec × avg_flow_lifetime_seconds
-    /// Example: 200 FPS (service mesh) × 10s timeout = 2,000 concurrent flows
-    ///          → 100K default provides 50x headroom for bursts
-    ///          1,000 FPS (low-end public ingress) × 10s = 10,000 concurrent flows
-    ///          → 100K default provides 10x headroom (adequate, consider 200K-500K for 3K+ FPS)
+    /// Example: 100 FPS × 30s timeout = 3,000 concurrent flows → default has ~5x headroom
+    ///
+    /// Scale up proportionally for higher traffic:
+    /// - 32,768 (~8.8 MB max) for moderate ingress
+    /// - 65,536 (~17.7 MB max) for high-traffic nodes
+    /// - 131,072+ (~35 MB+ max) for extreme/CDN-scale ingress
     pub flow_stats_capacity: u32,
 
     /// Max capacity (fixed size) of the FLOW_EVENTS ring buffer in entries (default: 1024)
@@ -845,7 +845,7 @@ pub struct FlowCapture {
 impl Default for FlowCapture {
     fn default() -> Self {
         Self {
-            flow_stats_capacity: 100_000,
+            flow_stats_capacity: 16_384,
             flow_events_capacity: 1024,
         }
     }
@@ -867,22 +867,25 @@ pub struct FlowProducer {
     /// Each worker processes events from its own queue with capacity `worker_queue_capacity`.
     pub workers: usize,
 
-    /// Capacity for each worker thread's queue (default: 2048)
+    /// Capacity for each worker thread's queue (default: 1024)
     ///
-    /// Determines how many raw eBPF events can be buffered per worker.
-    /// Total worker buffer memory = workers * worker_queue_capacity * event_size.
+    /// Determines how many raw eBPF events can be buffered per worker before drops occur.
+    /// Total worker buffer memory = workers × worker_queue_capacity × ~234 bytes.
+    /// Default (1,024) provides 4,096 total buffered events across 4 workers.
+    /// Scale up if metrics show dropped events under sustained burst traffic.
     pub worker_queue_capacity: usize,
 
     /// Worker polling interval (default: 5s)
     /// Pollers check for record intervals and timeouts at this frequency.
     /// Lower values = more responsive but higher CPU. Higher values = less overhead.
-    /// At 10K flows/sec with 100K active flows and 32 pollers: ~600 checks/sec per poller.
+    /// At default scale (~16K active flows, 4 workers): ~800 checks/sec per worker.
     #[serde(with = "duration")]
     pub flow_store_poll_interval: Duration,
 
-    /// Explicit capacity for the flow span channel (default: 16384)
-    /// Buffer between workers and K8s decorator.
-    /// With defaults: 16,384 slots (~1.6s buffer at 10K/s, handles export delays).
+    /// Capacity for the flow span channel (default: 4096)
+    /// Buffer between flow workers and the K8s decorator.
+    /// Default provides ~1.3s of buffer at the 3,200 spans/s baseline.
+    /// Scale proportionally with flow_stats_capacity if increasing traffic targets.
     pub flow_span_queue_capacity: usize,
 }
 
@@ -890,9 +893,9 @@ impl Default for FlowProducer {
     fn default() -> Self {
         Self {
             workers: 4,
-            worker_queue_capacity: 2048,
+            worker_queue_capacity: 1024,
             flow_store_poll_interval: Duration::from_secs(5),
-            flow_span_queue_capacity: 16384,
+            flow_span_queue_capacity: 4096,
         }
     }
 }
@@ -903,13 +906,14 @@ impl Default for FlowProducer {
 pub struct K8sDecorator {
     /// Number of dedicated threads for K8s decorator (default: 4)
     /// Creates a dedicated multi-threaded Tokio runtime for Kubernetes metadata decoration.
-    /// Each thread handles ~8K flows/sec, so 4 threads = 32K flows/sec capacity (3x headroom for 10K target).
+    /// Each thread handles ~8K flows/sec; 4 threads = 32K flows/sec capacity (10x headroom at default scale).
     /// Increase for large clusters: 8 threads for 50K flows/sec, 12 threads for 100K flows/sec.
     pub threads: usize,
 
-    /// Capacity for the decorated span channel (default: 32768)
+    /// Capacity for the decorated span channel (default: 8192)
     /// Buffer between K8s decorator and OTLP exporter.
-    /// With defaults: 32,768 slots (~3.2s buffer at 10K/s, prevents backpressure).
+    /// Default provides ~2.5s of buffer at the 3,200 spans/s baseline.
+    /// Scale proportionally with flow_stats_capacity if increasing traffic targets.
     pub decorated_span_queue_capacity: usize,
 }
 
@@ -917,7 +921,7 @@ impl Default for K8sDecorator {
     fn default() -> Self {
         Self {
             threads: 4,
-            decorated_span_queue_capacity: 32768,
+            decorated_span_queue_capacity: 8192,
         }
     }
 }
@@ -1092,16 +1096,16 @@ mod tests {
             "shutdown_timeout should be 28s"
         );
         assert_eq!(
-            cfg.pipeline.flow_producer.worker_queue_capacity, 2048,
-            "worker_queue_capacity should be 2048"
+            cfg.pipeline.flow_producer.worker_queue_capacity, 1024,
+            "worker_queue_capacity should be 1024"
         );
         assert_eq!(
-            cfg.pipeline.flow_producer.flow_span_queue_capacity, 16384,
-            "default flow_span_queue_capacity should be 16384"
+            cfg.pipeline.flow_producer.flow_span_queue_capacity, 4096,
+            "default flow_span_queue_capacity should be 4096"
         );
         assert_eq!(
-            cfg.pipeline.k8s_decorator.decorated_span_queue_capacity, 32768,
-            "default decorated_span_queue_capacity should be 32768"
+            cfg.pipeline.k8s_decorator.decorated_span_queue_capacity, 8192,
+            "default decorated_span_queue_capacity should be 8192"
         );
 
         assert_eq!(
@@ -1696,10 +1700,10 @@ discovery:
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
             assert_eq!(cfg.pipeline.flow_producer.worker_queue_capacity, 512);
-            assert_eq!(cfg.pipeline.flow_producer.flow_span_queue_capacity, 16384);
+            assert_eq!(cfg.pipeline.flow_producer.flow_span_queue_capacity, 4096);
             assert_eq!(
                 cfg.pipeline.k8s_decorator.decorated_span_queue_capacity,
-                32768
+                8192
             );
             assert_eq!(cfg.pipeline.flow_producer.workers, 8);
             assert_eq!(cfg.discovery.instrument.interfaces, vec!["eth1", "eth2"]);
@@ -1737,10 +1741,10 @@ discovery "instrument" {
             assert_eq!(cfg.auto_reload, true);
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
             assert_eq!(cfg.pipeline.flow_producer.worker_queue_capacity, 512);
-            assert_eq!(cfg.pipeline.flow_producer.flow_span_queue_capacity, 16384);
+            assert_eq!(cfg.pipeline.flow_producer.flow_span_queue_capacity, 4096);
             assert_eq!(
                 cfg.pipeline.k8s_decorator.decorated_span_queue_capacity,
-                32768
+                8192
             );
             assert_eq!(cfg.pipeline.flow_producer.workers, 8);
             assert_eq!(cfg.discovery.instrument.interfaces, vec!["eth1", "eth2"]);
@@ -1987,11 +1991,11 @@ discovery:
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.auto_reload, false);
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(28));
-            assert_eq!(cfg.pipeline.flow_producer.worker_queue_capacity, 2048);
-            assert_eq!(cfg.pipeline.flow_producer.flow_span_queue_capacity, 16384);
+            assert_eq!(cfg.pipeline.flow_producer.worker_queue_capacity, 1024);
+            assert_eq!(cfg.pipeline.flow_producer.flow_span_queue_capacity, 4096);
             assert_eq!(
                 cfg.pipeline.k8s_decorator.decorated_span_queue_capacity,
-                32768
+                8192
             );
             assert_eq!(cfg.pipeline.flow_producer.workers, 4);
             assert_eq!(cfg.internal.server.port, 8080);
@@ -2199,11 +2203,11 @@ discovery:
 
             // Other defaults should be applied
             assert_eq!(cfg.log_level, Level::INFO);
-            assert_eq!(cfg.pipeline.flow_producer.worker_queue_capacity, 2048);
-            assert_eq!(cfg.pipeline.flow_producer.flow_span_queue_capacity, 16384);
+            assert_eq!(cfg.pipeline.flow_producer.worker_queue_capacity, 1024);
+            assert_eq!(cfg.pipeline.flow_producer.flow_span_queue_capacity, 4096);
             assert_eq!(
                 cfg.pipeline.k8s_decorator.decorated_span_queue_capacity,
-                32768
+                8192
             );
 
             // Verify all span defaults
@@ -3292,7 +3296,9 @@ internal {
 
     #[test]
     fn test_memory_usage_validation_logic() {
-        //  Estimated memory usage: 312.6 MB with defaults
+        // With the predictable-memory-footprint defaults (flow_stats_capacity=16384,
+        // worker_queue_capacity=1024, flow_span_queue_capacity=4096,
+        // decorated_span_queue_capacity=8192), estimated memory usage is ~40-70MB.
         let opts = PipelineOptions::default();
 
         assert!(
@@ -3300,9 +3306,10 @@ internal {
             "Should be safe with 1GB memory"
         );
 
+        // 80% of 32MB = 25.6MB; minimum estimated usage exceeds this regardless of FlowSpan size
         assert!(
-            !opts.validate_memory_usage_against_limit(268_435_456),
-            "Should warn with 256MB memory (estimated usage exceeds 80% threshold)"
+            !opts.validate_memory_usage_against_limit(33_554_432),
+            "Should warn with 32MB memory (estimated usage exceeds 80% threshold)"
         );
 
         assert!(

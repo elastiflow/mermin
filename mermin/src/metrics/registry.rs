@@ -477,20 +477,22 @@ pub fn init_registry(
     debug_enabled: bool,
     bucket_config: HistogramBucketConfig,
 ) -> Result<(), prometheus::Error> {
-    // Check if already initialized with different value
-    if let Some(&existing) = DEBUG_METRICS_ENABLED.get() {
-        if existing != debug_enabled {
-            return Err(prometheus::Error::Msg(format!(
-                "Registry already initialized with debug_enabled={existing}, cannot reinitialize with {debug_enabled}",
-            )));
+    // Atomically claim first-initialization rights. OnceLock::set succeeds exactly once;
+    // if another thread (or a prior call) already set it, we get back the value they used.
+    match DEBUG_METRICS_ENABLED.set(debug_enabled) {
+        Err(existing) => {
+            if existing != debug_enabled {
+                return Err(prometheus::Error::Msg(format!(
+                    "Registry already initialized with debug_enabled={existing}, cannot reinitialize with {debug_enabled}",
+                )));
+            }
+            // Same value — already initialized correctly, nothing more to do.
+            return Ok(());
         }
-        return Ok(());
+        Ok(()) => {
+            // We won the initialization race — proceed with full setup below.
+        }
     }
-
-    // Initialize the global debug flag (first time only)
-    DEBUG_METRICS_ENABLED
-        .set(debug_enabled)
-        .expect("DEBUG_METRICS_ENABLED should not be set yet");
 
     // Initialize histogram metrics with configurable buckets
     let processing_duration = HistogramVec::new(
