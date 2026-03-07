@@ -1,3 +1,13 @@
+## [v0.3.1] - 2026-03-07
+
+### Bug Fixes
+
+- Replace task managers with component manager and add hot-reload (#480)
+
+[v0.3.0..v0.3.1](https://github.com/elastiflow/mermin/compare/v0.3.0...v0.3.1)
+
+
+
 ## [v0.3.0] - 2026-03-02
 
 ### Features
