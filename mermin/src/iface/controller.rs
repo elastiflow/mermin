@@ -140,8 +140,8 @@ use aya::{
         tc::{self, NlOptions, SchedClassifierLinkId, TcAttachOptions, qdisc_detach_program},
     },
 };
+use arc_swap::ArcSwap;
 use crossbeam::channel::Sender;
-use dashmap::DashMap;
 use globset::Glob;
 use pnet::datalink;
 use tracing::{debug, error, info, trace, warn};
@@ -207,7 +207,7 @@ pub struct IfaceController {
     /// Shared map for packet decoration (iface_index → iface_name).
     /// Separate from controller state because it uses different key type (u32 vs String),
     /// requires concurrent access from packet processing hot path, and is shared via Arc.
-    iface_map: Arc<DashMap<u32, String>>,
+    iface_map: Arc<ArcSwap<HashMap<u32, String>>>,
     /// eBPF program object (direct ownership, programs only - maps extracted beforehand)
     ebpf: Ebpf,
     /// TCX (kernel >= 6.6) vs netlink-based attachment
@@ -260,7 +260,7 @@ impl IfaceController {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         patterns: Vec<String>,
-        iface_map: Arc<DashMap<u32, String>>,
+        iface_map: Arc<ArcSwap<HashMap<u32, String>>>,
         ebpf: Ebpf,
         use_tcx: bool,
         bpf_fs_writable: bool,
@@ -508,29 +508,30 @@ impl IfaceController {
         self.ebpf
     }
 
-    /// Get shared iface_map for flow decoration. DashMap allows lock-free reads
+    /// Get shared iface_map for flow decoration. ArcSwap allows lock-free reads
     /// while controller updates it dynamically.
     #[must_use]
-    pub fn iface_map(&self) -> Arc<DashMap<u32, String>> {
+    pub fn iface_map(&self) -> Arc<ArcSwap<HashMap<u32, String>>> {
         Arc::clone(&self.iface_map)
     }
 
     /// Build interface index → name mapping from host namespace.
     fn build_iface_map(&mut self) -> Result<(), MerminError> {
-        self.iface_map.clear();
+        let mut new_map = HashMap::new();
 
         for iface in datalink::interfaces() {
             if self.active_ifaces.contains(&iface.name) {
-                self.iface_map.insert(iface.index, iface.name.clone());
+                new_map.insert(iface.index, iface.name.clone());
             }
         }
 
         debug!(
             event.name = "interface_controller.interface_map_built",
-            entry_count = self.iface_map.len(),
+            entry_count = new_map.len(),
             "built interface index → name mapping"
         );
 
+        self.iface_map.store(Arc::new(new_map));
         Ok(())
     }
 
@@ -538,7 +539,9 @@ impl IfaceController {
     fn iface_map_add(&mut self, iface_name: &str) -> Result<(), MerminError> {
         for iface in datalink::interfaces() {
             if iface.name == iface_name {
-                self.iface_map.insert(iface.index, iface.name.clone());
+                let mut map = (**self.iface_map.load()).clone();
+                map.insert(iface.index, iface.name.clone());
+                self.iface_map.store(Arc::new(map));
                 debug!(
                     event.name = "interface_controller.interface_map_updated",
                     iface = %iface_name,
@@ -554,31 +557,21 @@ impl IfaceController {
     }
 
     /// Remove interface from iface_map.
-    /// Collects all indices for the interface name first to prevent issues
-    /// with kernel index reuse (where a new interface gets the same index).
     fn iface_map_remove(&mut self, iface_name: &str) {
-        let removed_indices: Vec<u32> = self
-            .iface_map
-            .iter()
-            .filter_map(|entry| {
-                if entry.value() == iface_name {
-                    Some(*entry.key())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        for idx in removed_indices {
-            if let Some((_, name)) = self.iface_map.remove(&idx) {
+        let mut map = (**self.iface_map.load()).clone();
+        map.retain(|_, name| {
+            if name.as_str() == iface_name {
                 debug!(
                     event.name = "interface_controller.interface_map_updated",
-                    iface = %name,
-                    index = idx,
+                    iface = %iface_name,
                     "removed interface from interface_map"
                 );
+                false
+            } else {
+                true
             }
-        }
+        });
+        self.iface_map.store(Arc::new(map));
     }
 
     /// Handle netlink event by reconciling interface state.

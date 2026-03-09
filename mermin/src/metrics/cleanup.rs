@@ -21,9 +21,12 @@
 //! - TTL > 0s: Cleanup after grace period expires
 //! - Cleanup runs in background task spawned by main
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
-use dashmap::DashMap;
 use tokio::time::Instant;
 use tracing::{debug, trace};
 
@@ -50,9 +53,9 @@ use crate::metrics;
 #[derive(Clone)]
 pub struct MetricCleanupTracker {
     /// Tracks when each interface was scheduled for cleanup
-    interface_metrics: Arc<DashMap<String, Instant>>,
+    interface_metrics: Arc<Mutex<HashMap<String, Instant>>>,
     /// Tracks when each K8s resource was scheduled for cleanup
-    k8s_resource_metrics: Arc<DashMap<String, Instant>>,
+    k8s_resource_metrics: Arc<Mutex<HashMap<String, Instant>>>,
     /// Time-to-live for metrics after resource deletion
     ttl: Duration,
     /// Whether debug metrics are enabled (cleanup only needed when debug metrics are registered)
@@ -63,8 +66,8 @@ impl MetricCleanupTracker {
     /// Create a new cleanup tracker.
     pub fn new(ttl: Duration, debug_enabled: bool) -> Self {
         Self {
-            interface_metrics: Arc::new(DashMap::new()),
-            k8s_resource_metrics: Arc::new(DashMap::new()),
+            interface_metrics: Arc::new(Mutex::new(HashMap::new())),
+            k8s_resource_metrics: Arc::new(Mutex::new(HashMap::new())),
             ttl,
             debug_enabled,
         }
@@ -80,7 +83,7 @@ impl MetricCleanupTracker {
     /// mistakenly call this when debug metrics are disabled, it's a safe no-op.
     pub fn mark_interface_active(&self, iface: &str) {
         if self.debug_enabled {
-            self.interface_metrics.remove(iface);
+            self.interface_metrics.lock().unwrap().remove(iface);
         }
     }
 
@@ -102,7 +105,7 @@ impl MetricCleanupTracker {
             metrics::registry::remove_interface_metrics(&iface);
         } else {
             let cleanup_time = Instant::now() + self.ttl;
-            self.interface_metrics.insert(iface, cleanup_time);
+            self.interface_metrics.lock().unwrap().insert(iface, cleanup_time);
         }
     }
 
@@ -110,7 +113,7 @@ impl MetricCleanupTracker {
     #[allow(dead_code)]
     pub fn mark_k8s_resource_active(&self, resource: &str) {
         if self.debug_enabled {
-            self.k8s_resource_metrics.remove(resource);
+            self.k8s_resource_metrics.lock().unwrap().remove(resource);
         }
     }
 
@@ -124,7 +127,7 @@ impl MetricCleanupTracker {
             metrics::registry::remove_k8s_resource_metrics(&resource);
         } else {
             let cleanup_time = Instant::now() + self.ttl;
-            self.k8s_resource_metrics.insert(resource, cleanup_time);
+            self.k8s_resource_metrics.lock().unwrap().insert(resource, cleanup_time);
         }
     }
 
@@ -164,23 +167,27 @@ impl MetricCleanupTracker {
                     let mut cleaned_interfaces = 0;
                     let mut cleaned_k8s = 0;
 
-                    self.interface_metrics.retain(|iface, &mut cleanup_time| {
-                        if now >= cleanup_time {
-                            metrics::registry::remove_interface_metrics(iface);
-                            trace!(
-                                event.name = "metrics.cleanup.interface_expired",
-                                interface = %iface,
-                                "cleaned up expired interface metrics"
-                            );
-                            cleaned_interfaces += 1;
-                            false
-                        } else {
-                            true
-                        }
-                    });
+                    {
+                        let mut iface_map = self.interface_metrics.lock().unwrap();
+                        iface_map.retain(|iface, &mut cleanup_time| {
+                            if now >= cleanup_time {
+                                metrics::registry::remove_interface_metrics(iface);
+                                trace!(
+                                    event.name = "metrics.cleanup.interface_expired",
+                                    interface = %iface,
+                                    "cleaned up expired interface metrics"
+                                );
+                                cleaned_interfaces += 1;
+                                false
+                            } else {
+                                true
+                            }
+                        });
+                    }
 
-                    self.k8s_resource_metrics
-                        .retain(|resource, &mut cleanup_time| {
+                    {
+                        let mut k8s_map = self.k8s_resource_metrics.lock().unwrap();
+                        k8s_map.retain(|resource, &mut cleanup_time| {
                             if now >= cleanup_time {
                                 metrics::registry::remove_k8s_resource_metrics(resource);
                                 trace!(
@@ -194,14 +201,15 @@ impl MetricCleanupTracker {
                                 true
                             }
                         });
+                    }
 
                     if cleaned_interfaces > 0 || cleaned_k8s > 0 {
                         trace!(
                             event.name = "metrics.cleanup.sweep_completed",
                             cleaned_interfaces,
                             cleaned_k8s_resources = cleaned_k8s,
-                            pending_interfaces = self.interface_metrics.len(),
-                            pending_k8s_resources = self.k8s_resource_metrics.len(),
+                            pending_interfaces = self.interface_metrics.lock().unwrap().len(),
+                            pending_k8s_resources = self.k8s_resource_metrics.lock().unwrap().len(),
                             "metric cleanup sweep completed"
                         );
                     }
@@ -209,8 +217,8 @@ impl MetricCleanupTracker {
                 _ = shutdown_rx.recv() => {
                     debug!(
                         event.name = "metrics.cleanup.shutdown",
-                        pending_interfaces = self.interface_metrics.len(),
-                        pending_k8s_resources = self.k8s_resource_metrics.len(),
+                        pending_interfaces = self.interface_metrics.lock().unwrap().len(),
+                        pending_k8s_resources = self.k8s_resource_metrics.lock().unwrap().len(),
                         "metric cleanup loop shutting down"
                     );
                     break;
@@ -233,8 +241,8 @@ mod tests {
         let tracker = MetricCleanupTracker::new(Duration::from_secs(300), true);
 
         // Verify tracker starts with empty state
-        assert_eq!(tracker.interface_metrics.len(), 0);
-        assert_eq!(tracker.k8s_resource_metrics.len(), 0);
+        assert_eq!(tracker.interface_metrics.lock().unwrap().len(), 0);
+        assert_eq!(tracker.k8s_resource_metrics.lock().unwrap().len(), 0);
         assert_eq!(tracker.ttl, Duration::from_secs(300));
         assert!(tracker.debug_enabled);
     }
@@ -248,8 +256,8 @@ mod tests {
         tracker.schedule_k8s_cleanup("Pod".to_string());
 
         // Verify nothing was scheduled (no-op behavior)
-        assert_eq!(tracker.interface_metrics.len(), 0);
-        assert_eq!(tracker.k8s_resource_metrics.len(), 0);
+        assert_eq!(tracker.interface_metrics.lock().unwrap().len(), 0);
+        assert_eq!(tracker.k8s_resource_metrics.lock().unwrap().len(), 0);
     }
 
     #[tokio::test]
@@ -259,16 +267,16 @@ mod tests {
 
         // Schedule cleanup for an interface
         tracker.schedule_interface_cleanup("test-iface".to_string());
-        assert_eq!(tracker.interface_metrics.len(), 1);
-        assert!(tracker.interface_metrics.contains_key("test-iface"));
+        assert_eq!(tracker.interface_metrics.lock().unwrap().len(), 1);
+        assert!(tracker.interface_metrics.lock().unwrap().contains_key("test-iface"));
 
         // Mark the same interface as active (should remove from cleanup schedule)
         tracker.mark_interface_active("test-iface");
-        assert_eq!(tracker.interface_metrics.len(), 0);
+        assert_eq!(tracker.interface_metrics.lock().unwrap().len(), 0);
 
         // Schedule again
         tracker.schedule_interface_cleanup("test-iface".to_string());
-        assert_eq!(tracker.interface_metrics.len(), 1);
+        assert_eq!(tracker.interface_metrics.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -286,8 +294,8 @@ mod tests {
         tracker.schedule_k8s_cleanup("immediate-cleanup-resource".to_string());
 
         // Verify nothing was scheduled (cleanup happened immediately)
-        assert_eq!(tracker.interface_metrics.len(), 0);
-        assert_eq!(tracker.k8s_resource_metrics.len(), 0);
+        assert_eq!(tracker.interface_metrics.lock().unwrap().len(), 0);
+        assert_eq!(tracker.k8s_resource_metrics.lock().unwrap().len(), 0);
     }
 
     #[tokio::test]

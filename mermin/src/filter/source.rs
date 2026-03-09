@@ -5,7 +5,7 @@
 
 use std::{collections::HashSet, net::IpAddr, str::FromStr, sync::Arc};
 
-use dashmap::DashMap;
+use arc_swap::ArcSwap;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use ip_network::IpNetwork;
 use ip_network_table::IpNetworkTable;
@@ -302,12 +302,12 @@ pub struct PacketFilter {
     destination: CompiledRules,
     network: CompiledRules,
     flow: CompiledRules,
-    iface_map: Arc<DashMap<u32, String>>,
+    iface_map: Arc<ArcSwap<std::collections::HashMap<u32, String>>>,
 }
 
 impl PacketFilter {
     /// Creates a new `PacketFilter` from configuration.
-    pub fn new(conf: &Conf, iface_map: Arc<DashMap<u32, String>>) -> Self {
+    pub fn new(conf: &Conf, iface_map: Arc<ArcSwap<std::collections::HashMap<u32, String>>>) -> Self {
         let get_filter = |name: &str| -> Option<&FilteringOptions> {
             conf.filter.as_ref().and_then(|map| map.get(name))
         };
@@ -353,8 +353,9 @@ impl PacketFilter {
         check_filter!(&self.network.interface_index, &stats.ifindex);
 
         if let Some(rules) = &self.network.interface_name {
-            if let Some(iface_name_ref) = self.iface_map.get(&stats.ifindex) {
-                if !rules.is_allowed(iface_name_ref.value().as_str()) {
+            let guard = self.iface_map.load();
+            if let Some(iface_name) = guard.get(&stats.ifindex) {
+                if !rules.is_allowed(iface_name.as_str()) {
                     return Ok(false);
                 }
             } else {
@@ -543,11 +544,13 @@ mod tests {
     fn build_filter(filters: HashMap<String, FilteringOptions>) -> PacketFilter {
         let mut conf = Conf::default();
         conf.filter = Some(filters);
-        let iface_map = Arc::new(DashMap::from_iter([
-            (1, "eth0".to_string()),
-            (2, "lo".to_string()),
-            (3, "docker0".to_string()),
-        ]));
+        let iface_map = Arc::new(ArcSwap::new(Arc::new(
+            std::collections::HashMap::from([
+                (1u32, "eth0".to_string()),
+                (2u32, "lo".to_string()),
+                (3u32, "docker0".to_string()),
+            ]),
+        )));
         PacketFilter::new(&conf, iface_map)
     }
 

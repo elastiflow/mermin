@@ -171,7 +171,7 @@ pub fn spawn_controller_thread(
 
                                                 if let Some(ref tx) = event_tx {
                                                     let _ = tx.send(ControllerEvent::Initialized {
-                                                        interface_count: controller.iface_map().len(),
+                                                        interface_count: controller.iface_map().load().len(),
                                                     });
                                                 }
 
