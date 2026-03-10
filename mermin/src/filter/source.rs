@@ -3,9 +3,14 @@
 //! Provides IP tables, port sets, and glob matching for flow filtering.
 //! Rules are organized by source, destination, network, and flow dimensions.
 
-use std::{collections::HashSet, net::IpAddr, str::FromStr, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    net::IpAddr,
+    str::FromStr,
+    sync::Arc,
+};
 
-use dashmap::DashMap;
+use arc_swap::ArcSwap;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use ip_network::IpNetwork;
 use ip_network_table::IpNetworkTable;
@@ -296,18 +301,29 @@ impl RuleCollection<str> for GlobSet {
 /// - IP lookups: O(log n) via trie-based `IpNetworkTable`
 /// - Port/numeric lookups: O(1) via `HashSet`
 /// - Pattern matching: Optimized via compiled `GlobSet`
-#[derive(Default)]
 pub struct PacketFilter {
     source: CompiledRules,
     destination: CompiledRules,
     network: CompiledRules,
     flow: CompiledRules,
-    iface_map: Arc<DashMap<u32, String>>,
+    iface_map: Arc<ArcSwap<HashMap<u32, String>>>,
+}
+
+impl Default for PacketFilter {
+    fn default() -> Self {
+        Self {
+            source: CompiledRules::default(),
+            destination: CompiledRules::default(),
+            network: CompiledRules::default(),
+            flow: CompiledRules::default(),
+            iface_map: Arc::new(ArcSwap::new(Arc::new(HashMap::new()))),
+        }
+    }
 }
 
 impl PacketFilter {
     /// Creates a new `PacketFilter` from configuration.
-    pub fn new(conf: &Conf, iface_map: Arc<DashMap<u32, String>>) -> Self {
+    pub fn new(conf: &Conf, iface_map: Arc<ArcSwap<HashMap<u32, String>>>) -> Self {
         let get_filter = |name: &str| -> Option<&FilteringOptions> {
             conf.filter.as_ref().and_then(|map| map.get(name))
         };
@@ -353,8 +369,9 @@ impl PacketFilter {
         check_filter!(&self.network.interface_index, &stats.ifindex);
 
         if let Some(rules) = &self.network.interface_name {
-            if let Some(iface_name_ref) = self.iface_map.get(&stats.ifindex) {
-                if !rules.is_allowed(iface_name_ref.value().as_str()) {
+            let guard = self.iface_map.load();
+            if let Some(iface_name) = guard.get(&stats.ifindex) {
+                if !rules.is_allowed(iface_name.as_str()) {
                     return Ok(false);
                 }
             } else {
@@ -543,11 +560,11 @@ mod tests {
     fn build_filter(filters: HashMap<String, FilteringOptions>) -> PacketFilter {
         let mut conf = Conf::default();
         conf.filter = Some(filters);
-        let iface_map = Arc::new(DashMap::from_iter([
-            (1, "eth0".to_string()),
-            (2, "lo".to_string()),
-            (3, "docker0".to_string()),
-        ]));
+        let iface_map = Arc::new(ArcSwap::new(Arc::new(HashMap::from_iter([
+            (1u32, "eth0".to_string()),
+            (2u32, "lo".to_string()),
+            (3u32, "docker0".to_string()),
+        ]))));
         PacketFilter::new(&conf, iface_map)
     }
 

@@ -5,4 +5,3 @@ pub mod flow;
 pub mod opts;
 pub mod producer;
 pub mod tcp;
-pub mod trace_id;

@@ -7,7 +7,3 @@
 pub mod error;
 pub mod handle;
 pub mod manager;
-
-pub use error::ShutdownResult;
-pub use handle::{Handle, ShutdownEventFd};
-pub use manager::ComponentManager;

@@ -14,7 +14,7 @@ use std::{
     sync::{Arc, atomic::Ordering},
 };
 
-use dashmap::DashMap;
+use arc_swap::ArcSwap;
 use futures::{StreamExt, TryStreamExt};
 use ip_network::IpNetwork;
 use jsonpath_rust::JsonPath;
@@ -338,7 +338,7 @@ impl ResourceStore {
         client: Client,
         health_state: HealthState,
         required_kinds: &HashSet<String>,
-        ip_index: Arc<DashMap<String, Vec<K8sObjectMeta>>>,
+        ip_index: Arc<ArcSwap<HashMap<String, Vec<K8sObjectMeta>>>>,
         conf: &Conf,
         cleanup_tracker: Option<MetricCleanupTracker>,
     ) -> Result<Self, K8sError> {
@@ -436,7 +436,7 @@ impl ResourceStore {
         );
         update_ip_index(&store, &ip_index, conf).await;
 
-        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(256);
 
         let store_clone = store.clone();
         let ip_index_clone = ip_index.clone();
@@ -668,7 +668,7 @@ pub struct Attributor {
     pub owner_relations_manager: OwnerRelationsManager,
     pub selector_relations_manager: Option<SelectorRelationsManager>,
     pub filter: ResourceFilter,
-    ip_index: Arc<DashMap<String, Vec<K8sObjectMeta>>>,
+    ip_index: Arc<ArcSwap<HashMap<String, Vec<K8sObjectMeta>>>>,
 }
 
 impl Attributor {
@@ -725,9 +725,9 @@ impl Attributor {
         required_kinds.insert("job".to_string());
         required_kinds.insert("cronjob".to_string());
 
-        let ip_index = Arc::new(DashMap::with_capacity(
+        let ip_index = Arc::new(ArcSwap::new(Arc::new(HashMap::with_capacity(
             runtime::memory::initial_capacity::K8S_IP_INDEX,
-        ));
+        ))));
         let resource_store = ResourceStore::new(
             client.clone(),
             health_state,
@@ -790,11 +790,11 @@ impl Attributor {
         ResourceStore: HasStore<K>,
     {
         let ip_str = ip.to_string();
-        let Some(entry) = self.ip_index.get(&ip_str) else {
+        let guard = self.ip_index.load();
+        let Some(candidates) = guard.get(&ip_str) else {
             return Vec::new();
         };
 
-        let candidates = entry.value();
         // Group candidates by resource type for conflict resolution
         let mut pods = Vec::new();
         let mut nodes = Vec::new();
@@ -1657,7 +1657,7 @@ fn extract_endpointslice_ips(endpoint_slice: &EndpointSlice) -> HashSet<String> 
 /// - EndpointSlice (endpoint IPs)
 fn spawn_ip_resource_watcher<K, F>(
     client: Client,
-    event_tx: tokio::sync::mpsc::UnboundedSender<()>,
+    event_tx: tokio::sync::mpsc::Sender<()>,
     extract_ips: F,
     cleanup_tracker: Option<MetricCleanupTracker>,
 ) where
@@ -1669,9 +1669,11 @@ fn spawn_ip_resource_watcher<K, F>(
         let resource_name = K::kind(&K::DynamicType::default()).to_string();
         let api = Api::<K>::all(client);
 
-        // Cache of resource UID -> IP addresses for smart change detection
-        let ip_cache: DashMap<String, HashSet<String>> =
-            DashMap::with_capacity(runtime::memory::initial_capacity::K8S_WATCHER_CACHE);
+        // Cache of resource UID -> IP addresses for smart change detection.
+        // Plain HashMap is correct here — this closure is the sole owner and
+        // the async stream processes one event at a time (no concurrent access).
+        let mut ip_cache: HashMap<String, HashSet<String>> =
+            HashMap::with_capacity(runtime::memory::initial_capacity::K8S_WATCHER_CACHE);
         let k8s_shrink_policy = ShrinkPolicy::k8s_cache();
 
         loop {
@@ -1701,8 +1703,7 @@ fn spawn_ip_resource_watcher<K, F>(
                         let uid = obj.meta().uid.clone().unwrap_or_default();
 
                         // Compare with cached IPs to detect if IPs actually changed
-                        let ips_changed = if let Some(cached_entry) = ip_cache.get(&uid) {
-                            let cached_ips = cached_entry.value();
+                        let ips_changed = if let Some(cached_ips) = ip_cache.get(&uid) {
                             cached_ips != &current_ips
                         } else {
                             // New resource, IPs definitely changed (from none to some)
@@ -1725,14 +1726,19 @@ fn spawn_ip_resource_watcher<K, F>(
                                 "resource ips changed, adding uid to ip cache"
                             );
 
-                            // Trigger IP index rebuild
-                            if event_tx.send(()).is_err() {
-                                warn!(
-                                    event.name = "k8s.watcher.channel_closed",
-                                    k8s.resource.name = %resource_name,
-                                    "IP index update channel closed, stopping watcher"
-                                );
-                                return;
+                            // Trigger IP index rebuild. try_send is intentional: if the channel
+                            // is full, a signal is already pending (debounce handles it). If
+                            // closed, the consumer is gone and we stop the watcher.
+                            match event_tx.try_send(()) {
+                                Ok(()) | Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {}
+                                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                                    warn!(
+                                        event.name = "k8s.watcher.channel_closed",
+                                        k8s.resource.name = %resource_name,
+                                        "IP index update channel closed, stopping watcher"
+                                    );
+                                    return;
+                                }
                             }
                             trace!(
                                 event.name = "k8s.watcher.ip_changed",
@@ -1777,13 +1783,16 @@ fn spawn_ip_resource_watcher<K, F>(
                             ip_cache.shrink_to_fit();
                         }
 
-                        if event_tx.send(()).is_err() {
-                            warn!(
-                                event.name = "k8s.watcher.channel_closed",
-                                k8s.resource.name = %resource_name,
-                                "IP index update channel closed, stopping watcher"
-                            );
-                            return;
+                        match event_tx.try_send(()) {
+                            Ok(()) | Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {}
+                            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                                warn!(
+                                    event.name = "k8s.watcher.channel_closed",
+                                    k8s.resource.name = %resource_name,
+                                    "IP index update channel closed, stopping watcher"
+                                );
+                                return;
+                            }
                         }
                         trace!(
                             event.name = "k8s.watcher.event",
@@ -1823,7 +1832,9 @@ fn spawn_ip_resource_watcher<K, F>(
                             ])
                             .inc();
 
-                        if event_tx.send(()).is_err() {
+                        if let Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) =
+                            event_tx.try_send(())
+                        {
                             return;
                         }
                         debug!(
@@ -1865,7 +1876,7 @@ fn spawn_ip_resource_watcher<K, F>(
 /// This is triggered by resource changes for real-time accuracy.
 async fn update_ip_index(
     store: &ResourceStore,
-    index: &Arc<DashMap<String, Vec<K8sObjectMeta>>>,
+    index: &Arc<ArcSwap<HashMap<String, Vec<K8sObjectMeta>>>>,
     conf: &Conf,
 ) {
     debug!(
@@ -1900,19 +1911,15 @@ async fn update_ip_index(
         }
     }
 
-    index.clear();
-    for (ip, metas) in new_index {
-        index.insert(ip, metas);
-    }
-
-    // Shrink capacity after rebuild to release excess memory.
-    // The clear() above removes entries but retains capacity, which can
-    // cause memory bloat in large clusters where the IP index size fluctuates.
-    index.shrink_to_fit();
+    let index_size = new_index.len();
+    // Atomic pointer swap: readers always see either the old complete map or the
+    // new complete map — the brief "empty during rebuild" window that existed with
+    // the previous clear()+insert() loop approach is eliminated.
+    index.store(Arc::new(new_index));
 
     trace!(
         event.name = "k8s.ip_index.updated",
-        index.size = index.len(),
+        index.size = index_size,
         "ip to object index was updated"
     );
 }
@@ -2545,14 +2552,15 @@ mod tests {
                 ..mock_empty_store()
             };
 
-            let ip_index = Arc::new(DashMap::new());
+            let ip_index = Arc::new(ArcSwap::new(Arc::new(HashMap::new())));
             update_ip_index(&store, &ip_index, &conf).await;
+            let guard = ip_index.load();
 
             assert!(
-                ip_index.contains_key("10.0.0.5"),
+                guard.contains_key("10.0.0.5"),
                 "IP index should contain the pod IP"
             );
-            let meta = &ip_index.get("10.0.0.5").unwrap()[0];
+            let meta = &guard.get("10.0.0.5").unwrap()[0];
             assert_eq!(meta.name, "test-pod");
         });
     }

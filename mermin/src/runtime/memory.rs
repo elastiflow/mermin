@@ -1,14 +1,15 @@
 //! Memory management utilities for Mermin
 //!
 //! This module provides utilities for managing memory usage, particularly
-//! for handling DashMap capacity retention issues where maps allocate
+//! for handling hash map capacity retention issues where maps allocate
 //! capacity but never shrink it when entries are removed.
 
-/// Configuration for DashMap capacity shrinking behavior.
+/// Configuration for hash map capacity shrinking behavior.
 ///
-/// DashMap allocates capacity that is never automatically released, even when
-/// entries are removed. This can cause unbounded memory growth. The shrinking
-/// policy determines when to call `shrink_to_fit()` to release excess capacity.
+/// Hash maps (e.g. `DashMap` used by [`FlowStore`]) allocate capacity that is
+/// never automatically released, even when entries are removed. This can cause
+/// unbounded memory growth. The shrinking policy determines when to call
+/// `shrink_to_fit()` to release excess capacity.
 ///
 /// Capacity waste ratio threshold (as a numerator over denominator).
 /// Shrink when: capacity > entries * (numerator / denominator)
@@ -41,17 +42,21 @@ impl ShrinkPolicy {
     /// Default shrinking policy for userspace flow tracking maps.
     ///
     /// - Threshold: 2.875x (23/8 - shrink after ~20% entry removal post-resize)
-    /// - Minimum: 10,000 entries (don't shrink small maps)
+    /// - Minimum: 16,384 entries — matches the default `flow_stats_capacity` pre-allocation
     ///
     /// Why 2.875x specifically?
-    /// - DashMap resizes at 0.875 load factor (7/8 full)
+    /// - `DashMap` resizes at 0.875 load factor (7/8 full)
     /// - After resize: capacity = 2x entries (since it was 0.875 full)
     /// - 2.875x = 23/8 keeps the 0.875 semantic consistency
     /// - Shrinks after ~20% of entries removed post-resize (meaningful decline signal)
     /// - Safe margin above 2x prevents thrashing from natural growth
+    ///
+    /// Why min_capacity = 16,384?
+    /// - Matches the default `flow_stats_capacity` so the map always returns to —
+    ///   but never shrinks below — its intentionally pre-allocated baseline after a burst.
     pub const fn userspace_flows() -> Self {
         Self {
-            min_capacity: 10_000,
+            min_capacity: 16_384,
             waste_ratio_numerator: 23,
             waste_ratio_denominator: 8,
         }
@@ -63,7 +68,7 @@ impl ShrinkPolicy {
     /// - Minimum: 100 entries (lower than flows since K8s caches are smaller)
     ///
     /// K8s caches use the same 2.875x threshold for consistency.
-    /// This prevents thrashing after natural DashMap resizes while still
+    /// This prevents thrashing after natural map resizes while still
     /// recovering memory after ~20% of entries are removed post-growth.
     pub const fn k8s_cache() -> Self {
         Self {
@@ -73,7 +78,7 @@ impl ShrinkPolicy {
         }
     }
 
-    /// Check if a DashMap should be shrunk based on this policy.
+    /// Check if a map should be shrunk based on this policy.
     ///
     /// # Examples
     ///
@@ -106,7 +111,7 @@ impl Default for ShrinkPolicy {
     }
 }
 
-/// Recommended initial capacities for DashMap instances.
+/// Recommended initial capacities for hash map instances.
 ///
 /// These values balance memory efficiency with performance, assuming:
 /// - Most deployments see 1K-10K flows/sec (not 100K)
@@ -173,7 +178,7 @@ mod tests {
         // 1.1x - very efficient, don't shrink
         assert!(!policy.should_shrink(110_000, 100_000));
 
-        // 2.0x - after DashMap resize, don't shrink (avoids thrashing)
+        // 2.0x - after map resize, don't shrink (avoids thrashing)
         assert!(!policy.should_shrink(200_000, 100_000));
 
         // 2.5x - under 2.875x threshold, don't shrink
@@ -205,7 +210,7 @@ mod tests {
     fn test_shrink_after_20_percent_removal() {
         let policy = ShrinkPolicy::userspace_flows();
 
-        // Simulate DashMap resize scenario
+        // Simulate map resize scenario
         // Map at 8_750/10_000 (87.5% full) → resizes to 20_000
         let capacity_after_resize = 20_000;
         let entries_after_resize = 8_750;
