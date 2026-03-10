@@ -10,14 +10,14 @@
 //!   resource-return semantics for restart support.
 //! - [`EbpfRecoveryError`] — typed errors for the resource-handback path.
 
-use std::{fs::File, sync::Arc};
+use std::{collections::HashMap, fs::File, sync::Arc};
 
+use arc_swap::ArcSwap;
 use aya::{
     Ebpf,
     maps::{HashMap as EbpfHashMap, RingBuf},
 };
 use crossbeam::channel::Sender;
-use dashmap::DashMap;
 use mermin_common::{FlowKey, FlowStats, ListeningPortKey};
 use tokio::sync::{Mutex, oneshot};
 use tracing::{error, info, warn};
@@ -26,10 +26,10 @@ use crate::{
     iface::types::ControllerCommand,
     metrics::registry::SHUTDOWN_FLOWS_TOTAL,
     runtime::{
-        component::{ComponentManager, ShutdownResult},
+        component::{error::ShutdownResult, manager::ComponentManager},
         shutdown::ShutdownConfig,
     },
-    span::{producer::FlowSpanComponents, trace_id::TraceIdCache},
+    span::producer::FlowSpanComponents,
 };
 
 /// Errors that can occur when recovering eBPF resources after a pipeline shutdown.
@@ -85,7 +85,7 @@ pub struct EbpfResources {
     pub listening_ports_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, ListeningPortKey, u8>>>,
     /// Shared between controller and producer; reusing across reloads avoids a
     /// window where the restarted producer sees no interface names.
-    pub iface_map: Arc<DashMap<u32, String>>,
+    pub iface_map: Arc<ArcSwap<HashMap<u32, String>>>,
     pub host_netns: Arc<File>,
 }
 
@@ -100,7 +100,6 @@ pub struct EbpfResources {
 pub struct Pipeline {
     pub manager: ComponentManager,
     pub flow_span_components: Arc<FlowSpanComponents>,
-    pub trace_id_cache: TraceIdCache,
     /// Sends `ControllerCommand::Shutdown` to the controller thread before the
     /// manager broadcasts the general shutdown signal. The controller needs this
     /// to detach eBPF programs in an orderly fashion before the thread exits.
@@ -120,7 +119,7 @@ pub struct Pipeline {
     // Arc-wrapped shared maps — carried through directly without handoff overhead.
     pub flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     pub listening_ports_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, ListeningPortKey, u8>>>,
-    pub iface_map: Arc<DashMap<u32, String>>,
+    pub iface_map: Arc<ArcSwap<HashMap<u32, String>>>,
     pub host_netns: Arc<File>,
 }
 
@@ -158,7 +157,7 @@ impl Pipeline {
             );
             match self
                 .flow_span_components
-                .preserve_active_flows(&self.trace_id_cache, config.flow_preservation_timeout)
+                .preserve_active_flows(config.flow_preservation_timeout)
                 .await
             {
                 Ok(preserved_count) => {

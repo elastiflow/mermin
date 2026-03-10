@@ -8,7 +8,7 @@
 //! # Key Types
 //!
 //! - [`FlowKey`]: Normalized 5-tuple for bidirectional flow aggregation (Community ID compatible)
-//! - [`FlowStats`]: Per-flow counters and metadata stored in eBPF maps (128 bytes)
+//! - [`FlowStats`]: Per-flow counters and metadata stored in eBPF maps (192 bytes)
 //! - [`FlowEvent`]: New flow notifications sent from eBPF to userspace (234 bytes)
 //!
 //! # Memory Layout Requirements

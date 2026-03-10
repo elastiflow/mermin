@@ -33,7 +33,7 @@ use super::{
     controller::IfaceController,
     types::{ControllerCommand, ControllerEvent, NetlinkEvent},
 };
-use crate::{error::MerminError, runtime::component::ShutdownEventFd};
+use crate::{error::MerminError, runtime::component::handle::ShutdownEventFd};
 
 /// Default timeout for waiting for controller thread to become ready (in seconds)
 pub const CONTROLLER_READY_TIMEOUT_SECS: u64 = 30;
@@ -171,7 +171,7 @@ pub fn spawn_controller_thread(
 
                                                 if let Some(ref tx) = event_tx {
                                                     let _ = tx.send(ControllerEvent::Initialized {
-                                                        interface_count: controller.iface_map().len(),
+                                                        interface_count: controller.iface_map().load().len(),
                                                     });
                                                 }
 

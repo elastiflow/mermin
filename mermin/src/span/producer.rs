@@ -1,10 +1,12 @@
 use std::{
+    collections::HashMap,
     net::IpAddr,
     os::fd::AsRawFd,
     sync::Arc,
     time::{Duration, UNIX_EPOCH},
 };
 
+use arc_swap::ArcSwap;
 use aya::maps::{HashMap as EbpfHashMap, RingBuf};
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
@@ -16,6 +18,7 @@ use network_types::{
     tcp::{TCP_FLAG_FIN, TCP_FLAG_RST},
 };
 use opentelemetry::trace::SpanKind;
+use opentelemetry_sdk::trace::{IdGenerator, RandomIdGenerator};
 use pnet::datalink::MacAddr;
 use tokio::{
     io::unix::AsyncFd,
@@ -45,7 +48,6 @@ use crate::{
         flow::{FlowEndReason, FlowSpan, SpanAttributes},
         opts::SpanOptions,
         tcp::TcpFlags,
-        trace_id::TraceIdCache,
     },
 };
 
@@ -59,16 +61,16 @@ use crate::{
 ///
 /// #### Synchronization
 ///
-/// - `DashMap` provides per-shard locking for concurrent access
-/// - Updates to flow attributes are performed under write lock
-/// - Record task clones flow state while holding read lock
-/// - Timeout task removes flow atomically
+/// - `DashMap` provides per-shard locking for concurrent access to `FlowStore`
+/// - Updates to flow attributes are performed under the shard write lock
+/// - The poller clones flow state while holding the shard read lock
+/// - Timeout removal is atomic at the shard level
 ///
 /// #### Potential Race Conditions
 ///
-/// - Packet update vs. Record: Safe - record clones current state
-/// - Packet update vs. Timeout removal: Safe - packet finds flow missing, no-op
-/// - Record vs. Timeout: Safe - timeout waits for record to complete removal
+/// - Worker update vs. Poller record: Safe — poller clones current state
+/// - Worker update vs. Timeout removal: Safe — worker finds entry missing, no-op
+/// - Poller record vs. Timeout: Safe — both operate on the same shard lock
 pub type FlowStore = Arc<DashMap<String, FlowEntry, FxBuildHasher>>;
 
 /// Entry in the flow map containing the flow span.
@@ -91,11 +93,7 @@ impl FlowSpanComponents {
     /// span is emitted before the pipeline shuts down.  Returns `Ok(count)`
     /// with the number of preserved flows, or `Err(lost)` with the number of
     /// flows still in the store when the timeout expires.
-    pub async fn preserve_active_flows(
-        &self,
-        trace_id_cache: &TraceIdCache,
-        timeout: Duration,
-    ) -> Result<usize, usize> {
+    pub async fn preserve_active_flows(&self, timeout: Duration) -> Result<usize, usize> {
         let flow_store = Arc::clone(&self.flow_store);
         let flow_stats_map = Arc::clone(&self.flow_stats_map);
         let flow_span_tx = self.flow_span_tx.clone();
@@ -115,15 +113,9 @@ impl FlowSpanComponents {
                 "triggering final export for all active flows."
             );
 
-            let flush_futures = flow_keys.into_iter().map(|id| {
-                timeout_and_remove_flow(
-                    id,
-                    &flow_store,
-                    &flow_stats_map,
-                    &flow_span_tx,
-                    trace_id_cache,
-                )
-            });
+            let flush_futures = flow_keys
+                .into_iter()
+                .map(|id| timeout_and_remove_flow(id, &flow_store, &flow_stats_map, &flow_span_tx));
 
             futures::future::join_all(flush_futures).await;
 
@@ -150,9 +142,9 @@ pub struct FlowSpanProducer {
     workers: usize,
     flow_store_poll_interval: Duration,
     boot_time_offset_nanos: u64,
-    iface_map: Arc<DashMap<u32, String>>,
+    iface_map: Arc<ArcSwap<HashMap<u32, String>>>,
     community_id_generator: CommunityIdGenerator,
-    trace_id_cache: TraceIdCache,
+    id_generator: Arc<dyn IdGenerator + Send + Sync>,
     flow_events_ringbuf: RingBuf<aya::maps::MapData>,
     filter: Option<Arc<PacketFilter>>,
     vxlan_port: u16,
@@ -172,7 +164,7 @@ impl FlowSpanProducer {
         span_opts: SpanOptions,
         worker_queue_capacity: usize,
         workers: usize,
-        iface_map: Arc<DashMap<u32, String>>,
+        iface_map: Arc<ArcSwap<HashMap<u32, String>>>,
         flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
         flow_events_ringbuf: RingBuf<aya::maps::MapData>,
         flow_span_tx: mpsc::Sender<FlowSpan>,
@@ -181,7 +173,7 @@ impl FlowSpanProducer {
     ) -> Result<Self, BootTimeError> {
         // Derive producer_store_capacity from flow_capture.flow_stats_capacity
         //
-        // The userspace flow store (DashMap) tracks the same flows as FLOW_STATS (eBPF).
+        // The userspace flow store tracks the same flows as FLOW_STATS (eBPF).
         // We derive the initial capacity as flow_stats_capacity / 3 to balance memory usage and performance.
         let producer_store_capacity = (conf.pipeline.flow_capture.flow_stats_capacity / 3) as usize;
 
@@ -195,9 +187,8 @@ impl FlowSpanProducer {
             FxBuildHasher::default(),
         ));
         let community_id_generator = CommunityIdGenerator::new(span_opts.community_id_seed);
-
-        // Initialize trace ID cache with configured timeout
-        let trace_id_cache = TraceIdCache::new(span_opts.trace_id_timeout, producer_store_capacity);
+        let id_generator: Arc<dyn IdGenerator + Send + Sync> =
+            Arc::new(RandomIdGenerator::default());
 
         // Calculate boot time offset to convert kernel boot-relative timestamps to wall clock
         // This is critical - if we can't determine boot time, timestamps will be wrong
@@ -240,7 +231,7 @@ impl FlowSpanProducer {
             flow_store_poll_interval: conf.pipeline.flow_producer.flow_store_poll_interval,
             boot_time_offset_nanos,
             community_id_generator,
-            trace_id_cache,
+            id_generator,
             iface_map,
             flow_events_ringbuf,
             filter,
@@ -295,7 +286,7 @@ impl FlowSpanProducer {
                 self.span_opts.clone(),
                 self.boot_time_offset_nanos,
                 self.community_id_generator.clone(),
-                self.trace_id_cache.clone(),
+                Arc::clone(&self.id_generator),
                 Arc::clone(&self.iface_map),
                 Arc::clone(&components.flow_store),
                 Arc::clone(&components.flow_stats_map),
@@ -343,45 +334,13 @@ impl FlowSpanProducer {
             "orphan scanner task started (safety net for stale eBPF entries)"
         );
 
-        // Spawn trace ID cache cleanup task
-        let trace_id_cache_clone = self.trace_id_cache.clone();
-        let mut cleanup_shutdown_rx = shutdown_rx.resubscribe();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(5 * 60));
-            loop {
-                tokio::select! {
-                    _ = cleanup_shutdown_rx.recv() => {
-                        break;
-                    }
-                    _ = interval.tick() => {
-                        let (scanned, removed) = trace_id_cache_clone.cleanup_expired();
-                        if removed > 0 {
-                            trace!(
-                                event.name = "trace_id_cache.cleanup",
-                                entries.scanned = scanned,
-                                entries.removed = removed,
-                                "trace ID cache cleanup completed"
-                            );
-                        }
-                    }
-                }
-            }
-        });
-        trace!(
-            event.name = "trace_id_cache.cleanup_task.started",
-            cleanup.interval_secs = 300,
-            "trace ID cache cleanup task started"
-        );
-
-        // Spawn capacity shrinking task to prevent memory bloat from DashMap capacity retention.
-        // DashMap allocates capacity but never shrinks it when entries are removed, causing
-        // unbounded memory growth even though cleanup logic is working correctly.
+        // Spawn capacity shrinking task to prevent memory bloat from flow_store capacity retention.
+        // DashMap allocates capacity but never automatically releases it when entries are removed,
+        // which can cause unbounded memory growth even though cleanup logic is working correctly.
         // This task periodically checks for excess capacity and shrinks when needed.
         const SHRINK_INTERVAL_SECS: u64 = 180;
         let shrink_policy = ShrinkPolicy::userspace_flows();
         let flow_store_shrink = Arc::clone(&self.components.flow_store);
-        let trace_id_cache_shrink = self.trace_id_cache.clone();
-        let iface_map_shrink = Arc::clone(&self.iface_map);
         let mut shrink_shutdown_rx = shutdown_rx.resubscribe();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(SHRINK_INTERVAL_SECS));
@@ -397,17 +356,8 @@ impl FlowSpanProducer {
                             flow_store_shrink.shrink_to_fit();
                         }
 
-                        let trace_capacity = trace_id_cache_shrink.capacity();
-                        let trace_len = trace_id_cache_shrink.len();
-                        if shrink_policy.should_shrink(trace_capacity, trace_len) {
-                            trace_id_cache_shrink.shrink_to_fit();
-                        }
 
-                        let iface_capacity = iface_map_shrink.capacity();
-                        let iface_len = iface_map_shrink.len();
-                        if shrink_policy.should_shrink(iface_capacity, iface_len) {
-                            iface_map_shrink.shrink_to_fit();
-                        }
+
                     }
                 }
             }
@@ -436,7 +386,6 @@ impl FlowSpanProducer {
             let poller_flow_store = Arc::clone(&components.flow_store);
             let poller_stats_map = Arc::clone(&components.flow_stats_map);
             let poller_span_tx = components.flow_span_tx.clone();
-            let poller_trace_id_cache = self.trace_id_cache.clone();
             let poller_shutdown_rx = shutdown_rx.resubscribe();
 
             let poller = FlowPoller {
@@ -447,7 +396,6 @@ impl FlowSpanProducer {
                 flow_span_tx: poller_span_tx,
                 max_record_interval,
                 poll_interval,
-                trace_id_cache: poller_trace_id_cache,
                 shutdown_rx: poller_shutdown_rx,
             };
 
@@ -624,11 +572,6 @@ impl FlowSpanProducer {
     pub fn components(&self) -> Arc<FlowSpanComponents> {
         Arc::clone(&self.components)
     }
-
-    /// Returns a clone of the producer's trace ID cache.
-    pub fn trace_id_cache(&self) -> TraceIdCache {
-        self.trace_id_cache.clone()
-    }
 }
 
 /// Flow worker that processes new flow events from the eBPF ring buffer.
@@ -643,8 +586,8 @@ pub struct FlowWorker {
     udp_timeout: Duration,
     boot_time_offset_nanos: u64,
     community_id_generator: CommunityIdGenerator,
-    trace_id_cache: TraceIdCache,
-    iface_map: Arc<DashMap<u32, String>>,
+    id_generator: Arc<dyn IdGenerator + Send + Sync>,
+    iface_map: Arc<ArcSwap<HashMap<u32, String>>>,
     flow_store: FlowStore,
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     flow_event_rx: mpsc::Receiver<FlowEvent>,
@@ -665,8 +608,8 @@ impl FlowWorker {
         span_opts: SpanOptions,
         boot_time_offset_nanos: u64,
         community_id_generator: CommunityIdGenerator,
-        trace_id_cache: TraceIdCache,
-        iface_map: Arc<DashMap<u32, String>>,
+        id_generator: Arc<dyn IdGenerator + Send + Sync>,
+        iface_map: Arc<ArcSwap<HashMap<u32, String>>>,
         flow_store: FlowStore,
         flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
         flow_event_rx: mpsc::Receiver<FlowEvent>,
@@ -689,7 +632,7 @@ impl FlowWorker {
             udp_timeout: span_opts.udp_timeout,
             boot_time_offset_nanos,
             community_id_generator,
-            trace_id_cache,
+            id_generator,
             iface_map,
             flow_store,
             flow_stats_map,
@@ -886,11 +829,12 @@ impl FlowWorker {
                     .inc();
             }
 
-            let iface_name = if let Some(entry) = self.iface_map.get(&stats.ifindex) {
-                entry.value().clone()
-            } else {
-                "unknown".to_string()
-            };
+            let iface_name = self
+                .iface_map
+                .load()
+                .get(&stats.ifindex)
+                .cloned()
+                .unwrap_or_else(|| "unknown".to_string());
             metrics::registry::PROCESSING_TOTAL
                 .with_label_values(&[FlowSpanProducerStatus::Dropped.as_str()])
                 .inc();
@@ -1062,10 +1006,7 @@ impl FlowWorker {
         let is_icmpv6 = stats.protocol == IpProto::Ipv6Icmp;
         let start_time_nanos = stats.first_seen_ns + self.boot_time_offset_nanos;
         let end_time_nanos = stats.last_seen_ns + self.boot_time_offset_nanos;
-        let iface_name = self
-            .iface_map
-            .get(&stats.ifindex)
-            .map(|r| r.value().clone());
+        let iface_name = self.iface_map.load().get(&stats.ifindex).cloned();
         let (src_addr, dst_addr) = flow_key_to_ip_addrs(flow_key)?;
         let timeout = self.calculate_timeout(stats);
         let (span_kind, client_server) = self
@@ -1087,7 +1028,7 @@ impl FlowWorker {
         let is_client = span_kind == SpanKind::Client;
 
         let span = FlowSpan {
-            trace_id: Some(self.trace_id_cache.get_or_create(community_id)),
+            trace_id: Some(self.id_generator.new_trace_id()),
             start_time: UNIX_EPOCH + Duration::from_nanos(start_time_nanos),
             end_time: UNIX_EPOCH + Duration::from_nanos(end_time_nanos),
             span_kind,
@@ -1427,7 +1368,6 @@ struct FlowPoller {
     flow_store: FlowStore,
     flow_stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     flow_span_tx: mpsc::Sender<FlowSpan>,
-    trace_id_cache: TraceIdCache,
     max_record_interval: Duration,
     poll_interval: Duration,
     shutdown_rx: broadcast::Receiver<()>,
@@ -1476,7 +1416,6 @@ impl FlowPoller {
                             &self.flow_store,
                             &self.flow_stats_map,
                             &self.flow_span_tx,
-                            &self.trace_id_cache,
                         )
                         .await;
                     }
@@ -1535,7 +1474,7 @@ impl FlowPoller {
                     {
                         flows_to_remove.push(community_id.clone());
                     }
-                } // Iterator dropped here - no longer holding DashMap locks
+                } // Iterator dropped here - no longer holding flow_store shard locks
                 let collection_duration = collection_start.elapsed();
 
                 trace!(
@@ -1608,7 +1547,6 @@ impl FlowPoller {
                         &self.flow_store,
                         &self.flow_stats_map,
                         &self.flow_span_tx,
-                        &self.trace_id_cache,
                     )
                     .await;
                 }
@@ -1743,7 +1681,7 @@ async fn record_flow(
     flow_stats_map: &Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     flow_span_tx: &mpsc::Sender<FlowSpan>,
 ) -> bool {
-    // Extract flow_key and boot_time_offset WITHOUT holding DashMap reference
+    // Extract flow_key and boot_time_offset WITHOUT holding flow_store reference
     let (
         flow_key,
         boot_time_offset,
@@ -1780,7 +1718,7 @@ async fn record_flow(
         )
     }; // entry_ref dropped here
 
-    // Now acquire mutex WITHOUT holding DashMap reference
+    // Now acquire mutex WITHOUT holding flow_store reference
     let lock_start = std::time::Instant::now();
     let map = flow_stats_map.lock().await;
     let lock_duration = lock_start.elapsed();
@@ -2109,7 +2047,7 @@ async fn record_flow(
     }
 
     // Reset metadata flags AND values in eBPF map for next interval
-    // Extract ebpf_key first, then drop DashMap reference before acquiring mutex
+    // Extract ebpf_key first, then drop flow_store reference before acquiring mutex
     let ebpf_key = flow_store
         .get(community_id)
         .and_then(|entry| entry.flow_span.flow_key);
@@ -2175,7 +2113,6 @@ pub async fn timeout_and_remove_flow(
     flow_store: &FlowStore,
     flow_stats_map: &Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     flow_span_tx: &mpsc::Sender<FlowSpan>,
-    trace_id_cache: &TraceIdCache,
 ) {
     // Remove from flow store (get ebpf_key before removing)
     let (ebpf_key, boot_time_offset) = if let Some(entry) = flow_store.get(&community_id) {
@@ -2184,7 +2121,7 @@ pub async fn timeout_and_remove_flow(
         return; // Flow already removed
     };
 
-    // Drop DashMap reference before acquiring mutex
+    // Drop flow_store reference before acquiring mutex
     let entry = match flow_store.remove(&community_id) {
         Some((_, entry)) => entry,
         None => return, // Race condition, already removed
@@ -2366,8 +2303,6 @@ pub async fn timeout_and_remove_flow(
 
         cleanup_ebpf_map!(flow_stats_map, EbpfMapName::FlowStats);
     }
-
-    trace_id_cache.remove(&community_id);
 
     // Metrics
     let iface_name = flow_span
@@ -2712,8 +2647,9 @@ mod tests {
             FxBuildHasher::default(),
         ));
         let community_id_generator = CommunityIdGenerator::new(span_opts.community_id_seed);
-        let trace_id_cache = TraceIdCache::new(span_opts.trace_id_timeout, 100);
-        let iface_map = Arc::new(DashMap::new());
+        let id_generator: Arc<dyn IdGenerator + Send + Sync> =
+            Arc::new(RandomIdGenerator::default());
+        let iface_map = Arc::new(ArcSwap::new(Arc::new(HashMap::new())));
         // Create a dummy eBPF map - won't be used in unit tests
         let flow_stats_map_data = unsafe { std::mem::zeroed() };
         let listening_ports_map_data = unsafe { std::mem::zeroed() };
@@ -2737,7 +2673,7 @@ mod tests {
             udp_timeout: span_opts.udp_timeout,
             boot_time_offset_nanos: 0,
             community_id_generator,
-            trace_id_cache,
+            id_generator,
             iface_map,
             flow_store,
             flow_stats_map,

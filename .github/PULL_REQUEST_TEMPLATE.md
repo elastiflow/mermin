@@ -1,13 +1,13 @@
-Changes:
+## Changes
 
 <!-- Briefly describe the changes this PR introduces and why -->
 
 Fixes #(issue)
 
-Testing:
+## Testing
 
 <!-- How did you test this? What environment? -->
 
-Proof it works:
+## Proof it works
 
 <!-- Logs, screenshots, or test output -->

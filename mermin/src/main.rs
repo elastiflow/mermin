@@ -12,17 +12,18 @@ mod runtime;
 mod span;
 
 use std::{
+    collections::HashMap,
     sync::{Arc, atomic::Ordering},
     time::Duration,
 };
 
+use arc_swap::ArcSwap;
 use aya::{
     Btf, EbpfLoader,
     programs::{FExit, Lsm, SchedClassifier, TcAttachType},
     util::KernelVersion,
 };
 use clap::Parser;
-use dashmap::DashMap;
 use error::{MerminError, Result};
 use mermin_common::MapUnit;
 #[cfg(unix)]
@@ -57,7 +58,7 @@ use crate::{
     runtime::{
         capabilities,
         cli::Cli,
-        component::{ComponentManager, Handle, ShutdownResult},
+        component::{error::ShutdownResult, handle::Handle, manager::ComponentManager},
         conf::Conf,
         pipeline::{EbpfRecoveryError, EbpfResources, Pipeline},
         reload::{ConfigWatcher, ReloadTrigger},
@@ -781,9 +782,9 @@ fn load_ebpf_resources(conf: &Conf) -> Result<EbpfResources> {
         "ebpf maps ready for flow producer"
     );
 
-    let iface_map = Arc::new(DashMap::with_capacity(
+    let iface_map = Arc::new(ArcSwap::new(Arc::new(HashMap::with_capacity(
         runtime::memory::initial_capacity::INTERFACE_MAP,
-    ));
+    ))));
     let host_netns = Arc::new(std::fs::File::open("/proc/1/ns/net").map_err(|e| {
         MerminError::internal(format!(
             "failed to open host network namespace: {e} - requires hostPID: true in pod spec"
@@ -978,7 +979,6 @@ async fn start_pipeline(
         conf,
     )?;
     let flow_span_components = flow_span_producer.components();
-    let trace_id_cache = flow_span_producer.trace_id_cache();
 
     info!(
         event.name = "task.started",
@@ -1310,7 +1310,6 @@ async fn start_pipeline(
     Ok(Pipeline {
         manager: pipeline_components,
         flow_span_components,
-        trace_id_cache,
         cmd_tx,
         flow_events_return,
         log_events_return,
