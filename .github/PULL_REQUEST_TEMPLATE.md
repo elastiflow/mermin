@@ -1,6 +1,8 @@
+<!-- Briefly describe the change this PR introduces and why -->
+
 ## Changes
 
-<!-- Briefly describe the changes this PR introduces and why -->
+<!-- List the sum of your commit message bodies here -->
 
 Fixes #(issue)
 

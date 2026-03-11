@@ -28,6 +28,17 @@ pub struct Cli {
     #[serde(with = "level::option", skip_serializing_if = "Option::is_none")]
     pub log_level: Option<Level>,
 
+    /// Override the number of worker threads for the async runtime.
+    ///
+    /// When unset, Tokio sizes the thread pool via `std::thread::available_parallelism`,
+    /// which on Linux already accounts for cgroup CPU quotas and CPU affinity. In most
+    /// Kubernetes deployments this is the correct behavior and no override is needed.
+    ///
+    /// Set this only when you need an explicit count, e.g. on bare metal with pinned cores.
+    #[arg(long, value_name = "N", env = "MERMIN_WORKER_THREADS")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worker_threads: Option<usize>,
+
     #[command(subcommand)]
     pub subcommand: Option<CliSubcommand>,
 }

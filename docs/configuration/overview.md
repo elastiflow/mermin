@@ -21,8 +21,35 @@ Configuration is merged in this order (later overrides earlier):
 3. Environment variables (global options only)
 4. Command-line flags (global options only)
 
-Only these global options can be set via environment variables or CLI: config path (`MERMIN_CONFIG_PATH`, `--config`), `log_level` (`MERMIN_LOG_LEVEL`, `--log-level`), and `auto_reload` (`MERMIN_CONFIG_AUTO_RELOAD`, `--auto-reload`).
-Options like `shutdown_timeout` and everything under `pipeline`, `api`, `export`, etc. are config-file only.
+These global options can be set via environment variables or CLI:
+
+| Option         | CLI flag            | Env var                     |
+|----------------|---------------------|-----------------------------|
+| Config path    | `--config`          | `MERMIN_CONFIG_PATH`        |
+| Log level      | `--log-level`       | `MERMIN_LOG_LEVEL`          |
+| Auto reload    | `--auto-reload`     | `MERMIN_CONFIG_AUTO_RELOAD` |
+| Worker threads | `--worker-threads`  | `MERMIN_WORKER_THREADS`     |
+
+Options like `shutdown_timeout` and everything under `pipeline`, `export`, etc. are config-file only.
+
+### Worker threads
+
+By default Mermin automatically detects how many CPU cores are available to the process.
+In Kubernetes this respects the pod's CPU limit, so the thread pool stays within the
+container's budget and avoids throttling. On bare metal it uses the number of logical CPUs.
+No configuration is needed for this to work correctly.
+
+Use `--worker-threads` (or `MERMIN_WORKER_THREADS`) only when you need to fix the count
+explicitly, for example when cores are pinned or you want to limit concurrency:
+
+```bash
+# Fixed count — bypasses auto-detection
+mermin --worker-threads 4
+MERMIN_WORKER_THREADS=4 mermin
+```
+
+Leave the flag unset in Kubernetes; the runtime will automatically stay within the pod's
+CPU limit.
 
 Example: with `log_level = "info"` in the file, `export MERMIN_LOG_LEVEL=debug` or `mermin --log-level=debug --config=config.hcl` yields `log_level` = `debug`.
 
@@ -80,7 +107,6 @@ pipeline {
     flow_span_queue_capacity  = 16384
   }
   k8s_decorator {
-    threads                        = 4
     decorated_span_queue_capacity  = 32768
   }
 }

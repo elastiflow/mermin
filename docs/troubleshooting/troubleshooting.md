@@ -117,7 +117,7 @@ Key metrics to monitor include:
 When flow spans are dropped, inspect internal metrics to identify the bottleneck stage:
 
 - **Worker queue drops**: The kernel is producing events faster than userspace can consume them. Increase `pipeline.ebpf_ringbuf_worker_capacity` or `pipeline.worker_count`.
-- **Flow span channel drops**: The enrichment stage is lagging. Increase `pipeline.flow_producer_channel_capacity` or add concurrency via `pipeline.k8s_decorator_threads`.
+- **Flow span channel drops**: The enrichment stage is lagging. Increase `pipeline.flow_producer.flow_span_queue_capacity` or add CPU resources (the decorator runs as a cooperative task on the main runtime; see [Worker threads](../configuration/overview.md#worker-threads)).
 - **Decorated span channel drops**: There is backpressure from the export stage. Increase `pipeline.k8s_decorator_channel_capacity` or optimize your OTLP exporter settings.
 
 If tuning does not resolve the issue, reduce the number of monitored interfaces or increase the CPU limits allocated to the agent.

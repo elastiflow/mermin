@@ -8,6 +8,7 @@
 
 # src
 !/common-build/
+!/cpu-quota/
 !/mermin/
 !/mermin-common/
 !/mermin-ebpf/

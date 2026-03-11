@@ -23,7 +23,6 @@ pipeline {
     flow_span_queue_capacity = 4096
   }
   k8s_decorator {
-    threads                       = 4
     decorated_span_queue_capacity = 8192
   }
 }
