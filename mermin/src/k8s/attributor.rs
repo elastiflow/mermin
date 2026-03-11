@@ -37,7 +37,7 @@ use kube::{
     runtime::{reflector, reflector::ObjectRef},
 };
 use kube_runtime::watcher;
-use network_types::ip::IpProto;
+use mermin_common::ip::IpProto;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::{

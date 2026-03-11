@@ -14,7 +14,7 @@ use arc_swap::ArcSwap;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use ip_network::IpNetwork;
 use ip_network_table::IpNetworkTable;
-use network_types::ip::IpProto;
+use mermin_common::ip::IpProto;
 use num_iter::range_inclusive;
 use num_traits::PrimInt;
 use pnet::datalink::MacAddr;
@@ -475,8 +475,8 @@ mod tests {
         sync::Arc,
     };
 
-    use mermin_common::{ConnectionState, Direction, FlowKey, FlowStats, IpVersion};
-    use network_types::{
+    use mermin_common::{
+        ConnectionState, Direction, FlowKey, FlowStats, IpVersion,
         eth::EtherType,
         ip::IpProto,
         tcp::{TCP_FLAG_ACK, TCP_FLAG_RST, TCP_FLAG_SYN},

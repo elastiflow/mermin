@@ -10,13 +10,13 @@ use arc_swap::ArcSwap;
 use aya::maps::{HashMap as EbpfHashMap, RingBuf};
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
-use mermin_common::{Direction, FlowEvent, FlowKey, FlowStats, ListeningPortKey, MapUnit};
-use moka::future::Cache;
-use network_types::{
+use mermin_common::{
+    Direction, FlowEvent, FlowKey, FlowStats, ListeningPortKey, MapUnit,
     eth::EtherType,
     ip::{IpDscp, IpEcn, IpProto},
     tcp::{TCP_FLAG_FIN, TCP_FLAG_RST},
 };
+use moka::future::Cache;
 use opentelemetry::trace::SpanKind;
 use opentelemetry_sdk::trace::{IdGenerator, RandomIdGenerator};
 use pnet::datalink::MacAddr;
@@ -1644,9 +1644,9 @@ impl std::error::Error for BootTimeError {
 /// Returns `None` for non-ICMP protocols or unknown type values.
 fn icmp_type_name(is_icmp: bool, is_icmpv6: bool, icmp_type: u8) -> Option<String> {
     if is_icmp {
-        network_types::icmp::get_icmpv4_type_name(icmp_type).map(String::from)
+        mermin_common::icmp::get_icmpv4_type_name(icmp_type).map(String::from)
     } else if is_icmpv6 {
-        network_types::icmp::get_icmpv6_type_name(icmp_type).map(String::from)
+        mermin_common::icmp::get_icmpv6_type_name(icmp_type).map(String::from)
     } else {
         None
     }
@@ -1657,9 +1657,9 @@ fn icmp_type_name(is_icmp: bool, is_icmpv6: bool, icmp_type: u8) -> Option<Strin
 /// Returns `None` for non-ICMP protocols or unknown type/code combinations.
 fn icmp_code_name(is_icmp: bool, is_icmpv6: bool, icmp_type: u8, icmp_code: u8) -> Option<String> {
     if is_icmp {
-        network_types::icmp::get_icmpv4_code_name(icmp_type, icmp_code).map(String::from)
+        mermin_common::icmp::get_icmpv4_code_name(icmp_type, icmp_code).map(String::from)
     } else if is_icmpv6 {
-        network_types::icmp::get_icmpv6_code_name(icmp_type, icmp_code).map(String::from)
+        mermin_common::icmp::get_icmpv6_code_name(icmp_type, icmp_code).map(String::from)
     } else {
         None
     }

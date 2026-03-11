@@ -13,8 +13,7 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-use mermin_common::{FlowKey, TunnelType};
-use network_types::{eth::EtherType, ip::IpProto};
+use mermin_common::{FlowKey, TunnelType, eth::EtherType, ip::IpProto};
 
 use crate::packet::types::{
     FiveTuple, InnerHeaders, IpMetadata, L2Metadata, OuterHeaders, ParseError, ParsedPacket,

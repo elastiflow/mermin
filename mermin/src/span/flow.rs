@@ -4,8 +4,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use mermin_common::{ConnectionState, TunnelType};
-use network_types::{eth::EtherType, ip::IpProto};
+use mermin_common::{ConnectionState, TunnelType, eth::EtherType, ip::IpProto};
 use opentelemetry::{
     KeyValue, StringValue, Value,
     trace::{Span, SpanKind},
