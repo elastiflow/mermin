@@ -14,7 +14,6 @@ test = []
 
 aya-ebpf = { workspace = true }
 mermin-common = { path = "../mermin-common" }
-network-types = { path = "../network-types" }
 
 [build-dependencies]
 which = { workspace = true }

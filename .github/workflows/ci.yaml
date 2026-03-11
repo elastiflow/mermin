@@ -6,7 +6,7 @@ concurrency:
 on:
   pull_request:
   push:
-    branches: [ main, alpha, beta, rc, next ]
+    branches: [main, alpha, beta, rc, next]
 
 jobs:
   pr_checks:
@@ -102,18 +102,13 @@ jobs:
           curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
 
       - name: Run default tests
-        run: cargo nextest run -r --workspace --exclude mermin-ebpf --exclude integration --exclude integration-common --exclude integration-ebpf --no-fail-fast
+        run: cargo nextest run -r --workspace --exclude mermin-ebpf --no-fail-fast
 
       - name: Run doc tests
         run: cargo test --doc
 
       - name: Run eBPF tests
         run: cargo test -r -p mermin-ebpf --features test
-
-      - name: Run integration tests
-        run: |
-          cd network-types/tests
-          make test-ci
 
   helm_checks:
     name: Run Helm sanity checks
@@ -169,8 +164,8 @@ jobs:
       id-token: write
     strategy:
       matrix:
-        runner: [ ubuntu-latest, ubuntu-latest-arm ]
-        target: [ runner, runner-debug ]
+        runner: [ubuntu-latest, ubuntu-latest-arm]
+        target: [runner, runner-debug]
     env:
       RUNNER_PLATFORM: |
         {

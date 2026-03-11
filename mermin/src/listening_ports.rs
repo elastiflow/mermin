@@ -11,8 +11,7 @@ use std::{
 };
 
 use aya::maps::HashMap as EbpfHashMap;
-use mermin_common::ListeningPortKey;
-use network_types::ip::IpProto;
+use mermin_common::{ListeningPortKey, ip::IpProto};
 use tokio::sync::Mutex;
 use tracing::{debug, trace, warn};
 

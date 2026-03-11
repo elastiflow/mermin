@@ -41,8 +41,8 @@
 use std::{net::IpAddr, sync::Arc};
 
 use aya::maps::HashMap as EbpfHashMap;
-use mermin_common::{Direction, FlowKey, FlowStats, ListeningPortKey};
-use network_types::{
+use mermin_common::{
+    Direction, FlowKey, FlowStats, ListeningPortKey,
     ip::IpProto,
     tcp::{TCP_FLAG_ACK, TCP_FLAG_SYN},
 };
@@ -506,8 +506,7 @@ impl DirectionInferrer {
 
 #[cfg(test)]
 mod tests {
-    use mermin_common::{ConnectionState, Direction, IpVersion};
-    use network_types::eth::EtherType;
+    use mermin_common::{ConnectionState, Direction, IpVersion, eth::EtherType};
 
     use super::*;
 

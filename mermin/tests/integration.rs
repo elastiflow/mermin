@@ -182,8 +182,9 @@ fn run_cmd(cmd: &str) {
 mod event_driven_tests {
     use std::{sync::Arc, time::Duration};
 
-    use mermin_common::{ConnectionState, Direction, FlowKey, FlowStats, IpVersion};
-    use network_types::{eth::EtherType, ip::IpProto};
+    use mermin_common::{
+        ConnectionState, Direction, FlowKey, FlowStats, IpVersion, eth::EtherType, ip::IpProto,
+    };
     use tokio::sync::Mutex;
 
     /// Mock eBPF flow event handler

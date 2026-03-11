@@ -50,10 +50,8 @@ pub enum EtherType {
     Reserved = 0xFFFF_u16.to_be(),
 }
 
-// This allows converting a u16 value into an EtherType enum variant.
-// This is useful when parsing headers.
 impl TryFrom<u16> for EtherType {
-    type Error = u16; // Return the unknown value itself as the error
+    type Error = u16;
 
     fn try_from(value: u16) -> Result<Self, Self::Error> {
         match value.to_be() {
@@ -79,8 +77,6 @@ impl TryFrom<u16> for EtherType {
     }
 }
 
-// This allows converting an EtherType enum variant back to its u16 representation.
-// This is useful when constructing headers.
 impl From<EtherType> for u16 {
     fn from(ether_type: EtherType) -> Self {
         ether_type as u16
@@ -90,12 +86,9 @@ impl From<EtherType> for u16 {
 impl EtherType {
     /// Returns a human-readable string representation of the EtherType.
     ///
-    /// # Returns
-    /// A static string slice representing the protocol name
-    ///
     /// # Examples
     /// ```
-    /// # use network_types::eth::EtherType;
+    /// # use mermin_common::eth::EtherType;
     /// assert_eq!(EtherType::Ipv4.as_str(), "ipv4");
     /// assert_eq!(EtherType::Arp.as_str(), "arp");
     /// assert_eq!(EtherType::Ieee8021q.as_str(), "vlan");

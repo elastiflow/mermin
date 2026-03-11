@@ -888,25 +888,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "env_filter"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1bf3c259d255ca70051b30e2e95b5446cdb8949ac4cd22c0d7fd634d89f568e2"
-dependencies = [
- "log",
-]
-
-[[package]]
-name = "env_logger"
-version = "0.11.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13c863f0904021b108aa8b2f55046443e6b1ebde8fd4a15c399893aae4fa069f"
-dependencies = [
- "env_filter",
- "log",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1657,42 +1638,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "integration"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "aya",
- "aya-build",
- "bytes",
- "common-build",
- "env_logger",
- "integration-common",
- "log",
- "network-types",
- "thiserror 2.0.17",
- "tokio",
-]
-
-[[package]]
-name = "integration-common"
-version = "0.1.0"
-dependencies = [
- "aya",
- "network-types",
-]
-
-[[package]]
-name = "integration-ebpf"
-version = "0.1.0"
-dependencies = [
- "aya-build",
- "aya-ebpf",
- "integration-common",
- "network-types",
- "which",
-]
-
-[[package]]
 name = "ip_network"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2131,7 +2076,6 @@ dependencies = [
  "netlink-packet-core",
  "netlink-packet-route",
  "netlink-sys",
- "network-types",
  "nix",
  "notify",
  "num-iter",
@@ -2165,7 +2109,6 @@ name = "mermin-common"
 version = "0.1.0"
 dependencies = [
  "aya",
- "network-types",
 ]
 
 [[package]]
@@ -2174,7 +2117,6 @@ version = "0.1.0"
 dependencies = [
  "aya-ebpf",
  "mermin-common",
- "network-types",
  "which",
 ]
 
@@ -2282,10 +2224,6 @@ dependencies = [
  "libc",
  "log",
 ]
-
-[[package]]
-name = "network-types"
-version = "0.1.0"
 
 [[package]]
 name = "nix"

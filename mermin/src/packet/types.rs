@@ -5,8 +5,7 @@
 
 use std::net::IpAddr;
 
-use mermin_common::TunnelType;
-use network_types::{eth::EtherType, ip::IpProto};
+use mermin_common::{TunnelType, eth::EtherType, ip::IpProto};
 
 /// Result of deep packet parsing
 #[derive(Debug, Clone)]

@@ -1,7 +1,7 @@
 use std::net::IpAddr;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use network_types::ip::IpProto;
+use mermin_common::ip::IpProto;
 use sha1::{Digest, Sha1};
 
 /// Community ID generator with configurable seed

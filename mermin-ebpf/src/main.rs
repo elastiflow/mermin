@@ -101,9 +101,8 @@ use aya_ebpf::{
 use mermin_common::FlowEvent;
 #[cfg(not(feature = "test"))]
 use mermin_common::LogEntry;
-use mermin_common::{ConnectionState, Direction, FlowKey, FlowStats, IpVersion};
-use network_types::{
-    eth,
+use mermin_common::{
+    ConnectionState, Direction, FlowKey, FlowStats, IpVersion, eth,
     eth::EtherType,
     icmp,
     ip::{IpProto, ipv4, ipv6},
@@ -496,7 +495,7 @@ fn extract_flow_key_from_sock_v4(sk: *const core::ffi::c_void) -> Result<FlowKey
         src_port,
         dst_port,
         ip_version: IpVersion::V4,
-        protocol: network_types::ip::IpProto::Tcp,
+        protocol: mermin_common::ip::IpProto::Tcp,
     };
 
     key.src_ip[0..4].copy_from_slice(&src_addr.to_ne_bytes());
@@ -543,7 +542,7 @@ fn extract_flow_key_from_sock_v6(sk: *const core::ffi::c_void) -> Result<FlowKey
         src_port,
         dst_port,
         ip_version: IpVersion::V6,
-        protocol: network_types::ip::IpProto::Tcp,
+        protocol: mermin_common::ip::IpProto::Tcp,
     };
 
     Ok(key)
@@ -1417,8 +1416,7 @@ use host_test_shim::TcContext;
 
 #[cfg(test)]
 mod tests {
-    use mermin_common::{Direction, IpVersion};
-    use network_types::{eth::EtherType, ip::IpProto};
+    use mermin_common::{Direction, IpVersion, eth::EtherType, ip::IpProto};
 
     use super::*;
 

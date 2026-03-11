@@ -1,22 +1,67 @@
 #![no_std]
-//! Shared data structures for network flow tracking between eBPF kernel code and userspace.
+//! Shared types for network protocol parsing and flow tracking, used across both eBPF kernel
+//! code and userspace.
 //!
-//! This crate defines the core types used to aggregate bidirectional network flows in eBPF maps
-//! and communicate flow events from kernel to userspace via ring buffers. All structures use
-//! `#[repr(C)]` to ensure identical memory layout across eBPF and userspace.
+//! This crate is split into two logical areas:
 //!
-//! # Key Types
+//! ## Protocol Types
+//!
+//! Low-level byte-offset constants and field accessors for parsing network protocol headers.
+//! These are `no_std`-compatible and used by both `mermin-ebpf` (packet parsing) and `mermin`
+//! (deep packet inspection in userspace).
+//!
+//! | Module | Protocol |
+//! |--------|----------|
+//! | [`eth`] | Ethernet (IEEE 802.3) — [`EtherType`](eth::EtherType), MAC offsets |
+//! | [`ip`] | IPv4 / IPv6 — [`IpProto`](ip::IpProto), [`IpDscp`](ip::IpDscp), [`IpEcn`](ip::IpEcn), field accessors |
+//! | [`tcp`] | TCP — flag constants, port and header-length accessors |
+//! | [`udp`] | UDP — length constant, port accessors |
+//! | [`icmp`] | ICMPv4 / ICMPv6 — type/code enums and human-readable name helpers |
+//! | [`gre`] | Generic Routing Encapsulation (RFC 2784) |
+//! | [`vxlan`] | VXLAN (RFC 7348) |
+//! | [`geneve`] | Geneve (RFC 8926) |
+//! | [`esp`] | IPsec ESP (RFC 4303) |
+//! | [`ah`] | IPsec AH (RFC 4302) |
+//! | [`wireguard`] | WireGuard handshake/data message types |
+//! | [`fragment`] | IPv6 Fragment extension header |
+//! | [`hop`] | IPv6 Hop-by-Hop Options extension header |
+//! | [`destopts`] | IPv6 Destination Options extension header |
+//! | [`route`] | IPv6 Routing extension header |
+//! | [`shim6`] | Shim6 (RFC 5533) |
+//! | [`hip`] | Host Identity Protocol (RFC 7401) |
+//! | [`mobility`] | IPv6 Mobility extension header (RFC 6275) |
+//!
+//! ## Flow Tracking Types
+//!
+//! `#[repr(C)]` structures shared via eBPF maps and ring buffers between the kernel program and
+//! userspace. All sizes and alignments are fixed — modifying field order or types will break
+//! eBPF/userspace compatibility.
 //!
 //! - [`FlowKey`]: Normalized 5-tuple for bidirectional flow aggregation (Community ID compatible)
 //! - [`FlowStats`]: Per-flow counters and metadata stored in eBPF maps (192 bytes)
-//! - [`FlowEvent`]: New flow notifications sent from eBPF to userspace (234 bytes)
-//!
-//! # Memory Layout Requirements
-//!
-//! All structures are carefully sized and aligned for efficient eBPF map access.
-//! Modifying field order or types will break eBPF/userspace compatibility.
+//! - [`FlowEvent`]: New-flow ring buffer event carrying the outermost key plus unparsed packet bytes (234 bytes)
 
-use network_types::{eth::EtherType, ip::IpProto};
+pub mod ah;
+pub mod destopts;
+pub mod esp;
+pub mod eth;
+pub mod fragment;
+pub mod geneve;
+pub mod gre;
+pub mod hip;
+pub mod hop;
+pub mod icmp;
+pub mod ip;
+pub mod mobility;
+pub mod route;
+pub mod shim6;
+pub mod tcp;
+pub mod udp;
+pub mod vxlan;
+pub mod wireguard;
+
+use eth::EtherType;
+use ip::IpProto;
 
 /// Log level for eBPF log entries.
 /// Uses primitive u8 values to avoid BTF issues with complex enum types.
@@ -207,7 +252,7 @@ impl FlowKey {
     ///
     /// ```
     /// use mermin_common::{FlowKey, IpVersion};
-    /// use network_types::ip::IpProto;
+    /// use mermin_common::ip::IpProto;
     ///
     /// let forward = FlowKey {
     ///     src_ip: [10, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -413,8 +458,8 @@ impl FlowStats {
     ///
     /// ```
     /// # use mermin_common::{FlowStats, ConnectionState, Direction, IpVersion};
-    /// # use network_types::eth::EtherType;
-    /// # use network_types::ip::IpProto;
+    /// # use mermin_common::eth::EtherType;
+    /// # use mermin_common::ip::IpProto;
     /// # let mut stats = FlowStats {
     /// #     first_seen_ns: 0, last_seen_ns: 0, packets: 0, bytes: 0,
     /// #     reverse_packets: 0, reverse_bytes: 0, tcp_syn_ns: 0, tcp_syn_ack_ns: 0,
