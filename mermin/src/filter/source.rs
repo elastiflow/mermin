@@ -4,6 +4,7 @@
 //! Rules are organized by source, destination, network, and flow dimensions.
 
 use std::{
+    borrow::Cow,
     collections::{HashMap, HashSet},
     net::IpAddr,
     str::FromStr,
@@ -14,7 +15,12 @@ use arc_swap::ArcSwap;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use ip_network::IpNetwork;
 use ip_network_table::IpNetworkTable;
-use mermin_common::ip::IpProto;
+use mermin_common::{
+    icmp::{
+        get_icmpv4_code_name, get_icmpv4_type_name, get_icmpv6_code_name, get_icmpv6_type_name,
+    },
+    ip::{IpDscp, IpEcn, IpProto},
+};
 use num_iter::range_inclusive;
 use num_traits::PrimInt;
 use pnet::datalink::MacAddr;
@@ -74,43 +80,6 @@ impl CompiledRules {
             return Self::default();
         };
 
-        let build_glob_set = |pair: &FilteringPair| -> CompiledRuleSet<GlobSet> {
-            let build = |list: &[String]| -> GlobSet {
-                let mut builder = GlobSetBuilder::new();
-                for part in list {
-                    let normalized_part = part.trim().to_lowercase();
-                    match Glob::new(&normalized_part) {
-                        Ok(glob) => {
-                            builder.add(glob);
-                        }
-                        Err(e) => warn!(
-                            event_name = "filter.glob_parse_failed",
-                            pattern = %part,
-                            error.message = %e,
-                            "invalid glob pattern in filter config, skipping."
-                        ),
-                    }
-                }
-                // GlobSetBuilder::build only fails if the builder is misconfigured,
-                // which cannot happen with the simple add() calls above
-                builder.build().unwrap_or_else(|e| {
-                    error!(
-                        event_name = "filter.globset_build_failed",
-                        error.message = %e,
-                        "failed to build globset, using empty set as fallback"
-                    );
-                    GlobSetBuilder::new()
-                        .build()
-                        .expect("empty globset build should never fail")
-                })
-            };
-
-            CompiledRuleSet {
-                match_rules: build(&pair.match_list),
-                not_match_rules: build(&pair.not_match_list),
-            }
-        };
-
         fn build_numeric_pair<T>(pair: &FilteringPair) -> CompiledRuleSet<HashSet<T>>
         where
             T: PrimInt + FromStr + std::hash::Hash + Eq,
@@ -128,27 +97,64 @@ impl CompiledRules {
                 not_match_rules: build_ip_network_table(&pair.not_match_list),
             }),
             port: opts.port.as_ref().map(build_numeric_pair::<u16>),
-            transport: opts.transport.as_ref().map(build_glob_set),
-            type_: opts.type_.as_ref().map(build_glob_set),
-            interface_name: opts.interface_name.as_ref().map(build_glob_set),
+            transport: opts.transport.as_ref().map(build_glob_rule_set),
+            type_: opts.type_.as_ref().map(build_glob_rule_set),
+            interface_name: opts.interface_name.as_ref().map(build_glob_rule_set),
             interface_index: opts.interface_index.as_ref().map(build_numeric_pair::<u32>),
-            interface_mac: opts.interface_mac.as_ref().map(build_glob_set),
-            connection_state: opts.connection_state.as_ref().map(build_glob_set),
-            ip_dscp_name: opts.ip_dscp_name.as_ref().map(build_glob_set),
-            ip_ecn_name: opts.ip_ecn_name.as_ref().map(build_glob_set),
+            interface_mac: opts.interface_mac.as_ref().map(build_glob_rule_set),
+            connection_state: opts.connection_state.as_ref().map(build_glob_rule_set),
+            ip_dscp_name: opts.ip_dscp_name.as_ref().map(build_glob_rule_set),
+            ip_ecn_name: opts.ip_ecn_name.as_ref().map(build_glob_rule_set),
             ip_ttl: opts.ip_ttl.as_ref().map(build_numeric_pair::<u8>),
             ip_flow_label: opts.ip_flow_label.as_ref().map(build_numeric_pair::<u32>),
-            icmp_type_name: opts.icmp_type_name.as_ref().map(build_glob_set),
-            icmp_code_name: opts.icmp_code_name.as_ref().map(build_glob_set),
-            tcp_flags_tags: opts.tcp_flags_tags.as_ref().map(build_glob_set),
+            icmp_type_name: opts.icmp_type_name.as_ref().map(build_glob_rule_set),
+            icmp_code_name: opts.icmp_code_name.as_ref().map(build_glob_rule_set),
+            tcp_flags_tags: opts.tcp_flags_tags.as_ref().map(build_glob_rule_set),
         }
     }
 }
 
-/// Parses a comma-separated string of CIDRs or IPs into an IpNetworkTable.
-/// Supports:
-/// - CIDR: "192.168.1.0/24"
-/// - IP: "192.168.1.1" (implies /32)
+fn build_glob_rule_set(pair: &FilteringPair) -> CompiledRuleSet<GlobSet> {
+    CompiledRuleSet {
+        match_rules: build_glob_set(&pair.match_list),
+        not_match_rules: build_glob_set(&pair.not_match_list),
+    }
+}
+
+/// Compiles a list of glob pattern strings into a [`GlobSet`], normalizing each
+/// pattern to lowercase. Invalid patterns are skipped with a warning.
+fn build_glob_set(list: &[String]) -> GlobSet {
+    let mut builder = GlobSetBuilder::new();
+    for part in list {
+        let normalized_part = part.trim().to_lowercase();
+        match Glob::new(&normalized_part) {
+            Ok(glob) => {
+                builder.add(glob);
+            }
+            Err(e) => warn!(
+                event_name = "filter.config_invalid",
+                value = %part,
+                error.message = %e,
+                "invalid glob pattern in filter config, skipping"
+            ),
+        }
+    }
+    // GlobSetBuilder::build only fails if the builder is misconfigured,
+    // which cannot happen with the simple add() calls above.
+    builder.build().unwrap_or_else(|e| {
+        error!(
+            event_name = "filter.config_invalid",
+            error.message = %e,
+            "failed to build globset, using empty set as fallback"
+        );
+        GlobSetBuilder::new()
+            .build()
+            .expect("empty globset build should never fail")
+    })
+}
+
+/// Builds an [`IpNetworkTable`] from a list of CIDR or IP strings.
+/// Bare IP addresses are treated as host routes (`/32` for IPv4, `/128` for IPv6).
 fn build_ip_network_table(list: &[String]) -> IpNetworkTable<()> {
     let mut table = IpNetworkTable::new();
     for item in list {
@@ -167,9 +173,9 @@ fn build_ip_network_table(list: &[String]) -> IpNetworkTable<()> {
             }
             None => {
                 warn!(
-                    event_name = "filter.cidr_parse_failed",
-                    input = %item,
-                    "invalid cidr or ip pattern in filter config, skipping."
+                    event_name = "filter.config_invalid",
+                    value = %item,
+                    "invalid cidr or ip pattern in filter config, skipping"
                 );
             }
         }
@@ -177,8 +183,8 @@ fn build_ip_network_table(list: &[String]) -> IpNetworkTable<()> {
     table
 }
 
-/// Parses a comma-separated string of numbers into a HashSet.
-/// e.g., "80, 443, 8000" -> {80, 443, 8000}
+/// Builds a [`HashSet`] from a list of numeric strings, supporting inclusive ranges
+/// with `-` (e.g. `"8000-8002"` expands to `{8000, 8001, 8002}`).
 fn build_numeric_set<T>(list: &[String]) -> HashSet<T>
 where
     T: PrimInt + FromStr + std::hash::Hash + Eq,
@@ -187,33 +193,40 @@ where
     let mut set = HashSet::new();
     for item in list {
         let item = item.trim();
-        if let Some((start_str, end_str)) = item.split_once('-') {
-            if let (Ok(start), Ok(end)) = (start_str.parse::<T>(), end_str.parse::<T>()) {
-                if start > end {
+        // Only treat as a range if the item starts with a digit and contains '-',
+        // to avoid misinterpreting non-numeric strings that happen to contain hyphens
+        // (e.g. "abc-123") as intended ranges.
+        let is_potential_range =
+            item.bytes().next().is_some_and(|b| b.is_ascii_digit()) && item.contains('-');
+        if is_potential_range {
+            if let Some((start_str, end_str)) = item.split_once('-') {
+                if let (Ok(start), Ok(end)) = (start_str.parse::<T>(), end_str.parse::<T>()) {
+                    if start > end {
+                        warn!(
+                            event_name = "filter.config_invalid",
+                            value = %item,
+                            "invalid numeric range (start > end) in filter config, skipping"
+                        );
+                        continue;
+                    }
+                    for i in range_inclusive(start, end) {
+                        set.insert(i);
+                    }
+                } else {
                     warn!(
-                        event_name = "filter.range_invalid",
-                        range = %item,
-                        "invalid numeric range (start > end) in filter config, skipping."
+                        event_name = "filter.config_invalid",
+                        value = %item,
+                        "invalid numeric range in filter config, skipping"
                     );
-                    continue;
                 }
-                for i in range_inclusive(start, end) {
-                    set.insert(i);
-                }
-            } else {
-                warn!(
-                    event_name = "filter.range_parse_failed",
-                    range = %item,
-                    "invalid numeric range in filter config, skipping."
-                );
             }
         } else if let Ok(val) = item.parse::<T>() {
             set.insert(val);
         } else {
             warn!(
-                event_name = "filter.value_parse_failed",
+                event_name = "filter.config_invalid",
                 value = %item,
-                "invalid numeric value in filter config (wildcards not supported), skipping."
+                "invalid numeric value in filter config (wildcards not supported), skipping"
             );
         }
     }
@@ -231,13 +244,8 @@ where
     C: RuleCollection<T>,
 {
     fn is_allowed(&self, value: &T) -> bool {
-        if self.not_match_rules.matches(value) {
-            return false;
-        }
-        if !self.match_rules.is_empty() && !self.match_rules.matches(value) {
-            return false;
-        }
-        true
+        !self.not_match_rules.matches(value)
+            && (self.match_rules.is_empty() || self.match_rules.matches(value))
     }
 }
 
@@ -266,17 +274,8 @@ impl<T: std::hash::Hash + Eq> RuleCollection<T> for HashSet<T> {
 }
 
 impl RuleCollection<str> for GlobSet {
-    /// Performs case-insensitive glob pattern matching.
-    ///
-    /// # Case Sensitivity
-    ///
-    /// This implementation normalizes the input value to lowercase before matching.
-    /// This is appropriate for protocol names (e.g., "TCP", "UDP"), connection states,
-    /// and other string-based filters where case-insensitive matching is desired.
-    ///
-    /// Examples that match:
-    /// - Pattern "tcp" matches: "TCP", "tcp", "Tcp"
-    /// - Pattern "syn" matches: "SYN", "syn", "Syn"
+    /// Lowercases `value` before matching; patterns are pre-normalized to lowercase
+    /// in [`build_glob_set`] so matching is effectively case-insensitive.
     fn matches(&self, value: &str) -> bool {
         self.is_match(value.to_lowercase())
     }
@@ -339,25 +338,21 @@ impl PacketFilter {
 
     /// Determines if a flow should be tracked based on configured filter rules.
     ///
-    /// This is an adapter method that evaluates flow-level filtering using `FlowKey` and `FlowStats`
-    /// from the eBPF layer, rather than requiring full packet metadata.
+    /// Evaluates flow-level filtering using [`mermin_common::FlowKey`] and
+    /// [`mermin_common::FlowStats`] from the eBPF layer. Returns `Ok(true)` when the
+    /// flow passes all applicable filters and should be tracked, `Ok(false)` when it is
+    /// filtered out, or an error if IP addresses cannot be resolved from the flow key.
     ///
-    /// # Arguments
+    /// # Errors
     ///
-    /// - `flow_key` - The normalized flow key from eBPF
-    /// - `stats` - The flow statistics from eBPF (contains MACs, DSCP, TTL, etc.)
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(true)` - Flow matches all applicable filters and should be tracked
-    /// - `Ok(false)` - Flow does not match filter criteria and should be filtered out
-    /// - `Err(IpError)` - Failed to parse IP addresses from flow key
+    /// Returns [`IpError`] if the raw IP bytes in `flow_key` cannot be resolved into
+    /// valid [`std::net::IpAddr`] values.
+    #[must_use = "filtering decision must not be discarded"]
     pub fn should_track_flow(
         &self,
         flow_key: &mermin_common::FlowKey,
         stats: &mermin_common::FlowStats,
     ) -> Result<bool, IpError> {
-        // Network-level filters
         check_filter!(&self.network.transport, &flow_key.protocol.to_string());
 
         let ip_version_str = match flow_key.ip_version {
@@ -380,6 +375,8 @@ impl PacketFilter {
         }
 
         if let Some(rules) = &self.network.interface_mac {
+            // Matches against the source MAC, which corresponds to the sending interface
+            // in the forward direction of the flow.
             let mac = MacAddr::new(
                 stats.src_mac[0],
                 stats.src_mac[1],
@@ -393,12 +390,17 @@ impl PacketFilter {
             }
         }
 
-        // Flow-level filters
-        // Use numeric DSCP/ECN values for filtering
-        let dscp_str = stats.ip_dscp.to_string();
-        let ecn_str = stats.ip_ecn.to_string();
-        check_filter!(&self.flow.ip_dscp_name, dscp_str.as_str());
-        check_filter!(&self.flow.ip_ecn_name, ecn_str.as_str());
+        // Flow-level filters — resolve numeric DSCP/ECN values to their standard names
+        // (e.g. 46 → "ef", 0 → "df") so filter patterns match what operators expect.
+        // Falls back to the raw decimal string for values not in the standard registry.
+        let dscp_str: Cow<'static, str> = IpDscp::try_from_u8(stats.ip_dscp)
+            .map(|d| Cow::Borrowed(d.as_str()))
+            .unwrap_or_else(|| Cow::Owned(stats.ip_dscp.to_string()));
+        let ecn_str: Cow<'static, str> = IpEcn::try_from_u8(stats.ip_ecn)
+            .map(|e| Cow::Borrowed(e.as_str()))
+            .unwrap_or_else(|| Cow::Owned(stats.ip_ecn.to_string()));
+        check_filter!(&self.flow.ip_dscp_name, dscp_str.as_ref());
+        check_filter!(&self.flow.ip_ecn_name, ecn_str.as_ref());
         check_filter!(&self.flow.ip_ttl, &stats.ip_ttl);
 
         if flow_key.ip_version == mermin_common::IpVersion::V6 {
@@ -406,30 +408,36 @@ impl PacketFilter {
         }
 
         if matches!(flow_key.protocol, IpProto::Icmp | IpProto::Ipv6Icmp) {
-            // Use numeric ICMP type/code for filtering since the types don't implement Display
-            let icmp_type_str = stats.icmp_type.to_string();
-            let icmp_code_str = stats.icmp_code.to_string();
-            check_filter!(&self.flow.icmp_type_name, icmp_type_str.as_str());
-            check_filter!(&self.flow.icmp_code_name, icmp_code_str.as_str());
+            type GetTypeName = fn(u8) -> Option<&'static str>;
+            type GetCodeName = fn(u8, u8) -> Option<&'static str>;
+            let (get_type, get_code): (GetTypeName, GetCodeName) =
+                if flow_key.protocol == IpProto::Icmp {
+                    (get_icmpv4_type_name, get_icmpv4_code_name)
+                } else {
+                    (get_icmpv6_type_name, get_icmpv6_code_name)
+                };
+            let icmp_type_str: Cow<'static, str> = get_type(stats.icmp_type)
+                .map(Cow::Borrowed)
+                .unwrap_or_else(|| Cow::Owned(stats.icmp_type.to_string()));
+            let icmp_code_str: Cow<'static, str> = get_code(stats.icmp_type, stats.icmp_code)
+                .map(Cow::Borrowed)
+                .unwrap_or_else(|| Cow::Owned(stats.icmp_code.to_string()));
+            check_filter!(&self.flow.icmp_type_name, icmp_type_str.as_ref());
+            check_filter!(&self.flow.icmp_code_name, icmp_code_str.as_ref());
         }
 
         if flow_key.protocol == IpProto::Tcp {
             if let Some(rules) = &self.flow.tcp_flags_tags {
                 let flags_vec = TcpFlags::flags_from_bits(stats.tcp_flags);
-                // Check each flag individually against the patterns
-                // This allows patterns like "syn,ack" to match flows with any of those flags
                 for flag in &flags_vec {
-                    let flag_str = flag.as_str();
-                    // If any flag matches the not_match rules, reject the flow
-                    if RuleCollection::<str>::matches(&rules.not_match_rules, flag_str) {
+                    if RuleCollection::<str>::matches(&rules.not_match_rules, flag.as_str()) {
                         return Ok(false);
                     }
                 }
-                // If match_rules is non-empty, at least one flag must match
                 if !RuleCollection::<str>::is_empty(&rules.match_rules) {
-                    let has_match = flags_vec.iter().any(|flag| {
-                        RuleCollection::<str>::matches(&rules.match_rules, flag.as_str())
-                    });
+                    let has_match = flags_vec
+                        .iter()
+                        .any(|f| RuleCollection::<str>::matches(&rules.match_rules, f.as_str()));
                     if !has_match {
                         return Ok(false);
                     }
@@ -485,7 +493,6 @@ mod tests {
     use super::*;
     use crate::runtime::conf::Conf;
 
-    /// Helper to create a FlowKey for testing
     fn mock_flow_key(
         src_ip: Ipv4Addr,
         src_port: u16,
@@ -508,7 +515,6 @@ mod tests {
         }
     }
 
-    /// Helper to create FlowStats for testing
     fn mock_flow_stats(ifindex: u32) -> FlowStats {
         FlowStats {
             first_seen_ns: 0,
@@ -560,7 +566,7 @@ mod tests {
     fn build_filter(filters: HashMap<String, FilteringOptions>) -> PacketFilter {
         let mut conf = Conf::default();
         conf.filter = Some(filters);
-        let iface_map = Arc::new(ArcSwap::new(Arc::new(HashMap::from_iter([
+        let iface_map = Arc::new(ArcSwap::new(Arc::new(HashMap::from([
             (1u32, "eth0".to_string()),
             (2u32, "lo".to_string()),
             (3u32, "docker0".to_string()),
@@ -744,7 +750,7 @@ mod tests {
             "flow".to_string(),
             FilteringOptions {
                 ip_dscp_name: Some(FilteringPair {
-                    match_list: vec!["46".to_string()], // EF (Expedited Forwarding)
+                    match_list: vec!["ef".to_string()], // EF (Expedited Forwarding) = DSCP 46
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -814,7 +820,7 @@ mod tests {
             "flow".to_string(),
             FilteringOptions {
                 icmp_type_name: Some(FilteringPair {
-                    match_list: vec!["8".to_string()], // Echo Request
+                    match_list: vec!["echo_request".to_string()], // ICMPv4 type 8
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -855,6 +861,7 @@ mod tests {
                 .unwrap()
         );
 
+        // ICMP type filters only apply to ICMP flows; non-ICMP flows should always pass.
         let flow_key_irrelevant = mock_flow_key(
             "1.1.1.1".parse().unwrap(),
             1,
@@ -899,7 +906,7 @@ mod tests {
             filter
                 .should_track_flow(&flow_key, &flow_stats_syn_ack)
                 .unwrap()
-        ); // Has ACK, no RST
+        );
 
         let mut flow_stats_ack = mock_flow_stats(1);
         flow_stats_ack.tcp_flags = TCP_FLAG_ACK;
@@ -908,7 +915,7 @@ mod tests {
             filter
                 .should_track_flow(&flow_key, &flow_stats_ack)
                 .unwrap()
-        ); // Has ACK, no RST
+        );
 
         let mut flow_stats_rst = mock_flow_stats(1);
         flow_stats_rst.tcp_flags = TCP_FLAG_RST;
@@ -917,7 +924,7 @@ mod tests {
             !filter
                 .should_track_flow(&flow_key, &flow_stats_rst)
                 .unwrap()
-        ); // Has RST
+        );
 
         let mut flow_stats_syn_rst = mock_flow_stats(1);
         flow_stats_syn_rst.tcp_flags = TCP_FLAG_SYN | TCP_FLAG_RST;
@@ -926,13 +933,12 @@ mod tests {
             !filter
                 .should_track_flow(&flow_key, &flow_stats_syn_rst)
                 .unwrap()
-        ); // Has RST
+        );
     }
 
     #[test]
     fn test_invalid_cidr_handling() {
-        // Test that invalid CIDRs are gracefully skipped with warnings
-        // Wildcards like "10.*" are no longer supported for IPs and should be ignored
+        // Wildcards like "10.*" are not supported for IPs and should be silently skipped.
         let filter = build_filter(HashMap::from([(
             "source".to_string(),
             FilteringOptions {
@@ -946,7 +952,6 @@ mod tests {
 
         let flow_stats = mock_flow_stats(1);
 
-        // Valid CIDR still matches
         let flow_key_ok = mock_flow_key(
             "192.168.1.50".parse().unwrap(),
             1,
@@ -973,7 +978,6 @@ mod tests {
 
     #[test]
     fn test_empty_filter_configuration() {
-        // Test that empty/missing filter configuration allows all flows
         let filter = build_filter(HashMap::new());
 
         let flow_key = mock_flow_key(
@@ -990,7 +994,6 @@ mod tests {
 
     #[test]
     fn test_malformed_numeric_values() {
-        // Test handling of non-numeric values in numeric fields
         let filter = build_filter(HashMap::from([(
             "destination".to_string(),
             FilteringOptions {
@@ -1007,7 +1010,6 @@ mod tests {
             },
         )]));
 
-        // Valid numeric ports should still work
         let flow_key = mock_flow_key(
             "10.1.1.1".parse().unwrap(),
             1234,
@@ -1021,7 +1023,6 @@ mod tests {
 
     #[test]
     fn test_invalid_glob_patterns() {
-        // Test that invalid glob patterns are gracefully skipped
         let filter = build_filter(HashMap::from([(
             "network".to_string(),
             FilteringOptions {
@@ -1037,7 +1038,6 @@ mod tests {
             },
         )]));
 
-        // Valid patterns should still work
         let flow_key_tcp = mock_flow_key(
             "10.1.1.1".parse().unwrap(),
             1234,
@@ -1090,22 +1090,25 @@ mod tests {
             80,
             IpProto::Tcp,
         );
-        let stats_eth0 = mock_flow_stats(1);
+        let stats_eth0 = mock_flow_stats(1); // ifindex 1 → "eth0"
 
         assert!(
             filter.should_track_flow(&flow_tcp, &stats_eth0).unwrap(),
-            "t[bc]p should match 'tcp'"
+            "t[bc]p should match 'tcp' and eth[0-9] should match 'eth0'"
         );
 
+        // Independently verify interface_name matching: docker0 (ifindex 3) does NOT
+        // match eth[0-9], so the flow is rejected even though transport passes.
+        let stats_docker0 = mock_flow_stats(3); // ifindex 3 → "docker0"
         assert!(
-            filter.should_track_flow(&flow_tcp, &stats_eth0).unwrap(),
-            "eth0 should match eth[0-9]"
+            !filter.should_track_flow(&flow_tcp, &stats_docker0).unwrap(),
+            "docker0 should NOT match eth[0-9]"
         );
 
-        let stats_lo = mock_flow_stats(2);
+        let stats_lo = mock_flow_stats(2); // ifindex 2 → "lo"
         assert!(
             filter.should_track_flow(&flow_tcp, &stats_lo).unwrap(),
-            "Multiple list items should act like brace expansion"
+            "lo should match the literal 'lo' pattern in the interface_name list"
         );
 
         let flow_udp = mock_flow_key(
@@ -1127,7 +1130,7 @@ mod tests {
             "network".to_string(),
             FilteringOptions {
                 transport: Some(FilteringPair {
-                    match_list: vec!["TCP".to_string()], // Uppercase in config
+                    match_list: vec!["TCP".to_string()],
                     ..Default::default()
                 }),
                 ..Default::default()
