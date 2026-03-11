@@ -249,7 +249,7 @@ impl FlowSpanProducer {
 
     pub async fn run(
         self,
-        mut shutdown_rx: broadcast::Receiver<()>,
+        shutdown_rx: broadcast::Receiver<()>,
         flow_events_return: tokio::sync::oneshot::Sender<RingBuf<aya::maps::MapData>>,
     ) {
         info!(
@@ -260,7 +260,7 @@ impl FlowSpanProducer {
         );
 
         let components = Arc::clone(&self.components);
-        let mut flow_events = self.flow_events_ringbuf;
+        let flow_events = self.flow_events_ringbuf;
 
         info!(
             event.name = "ebpf.maps_ready",
@@ -411,6 +411,36 @@ impl FlowSpanProducer {
             "flow pollers started"
         );
 
+        let worker_count = self.workers.max(1);
+
+        Self::run_ring_buf_async_fd(
+            flow_events,
+            worker_channels,
+            worker_handles,
+            worker_count,
+            shutdown_rx,
+            flow_events_return,
+        )
+        .await;
+    }
+
+    /// Ring buffer ingestion via Tokio `AsyncFd` (default mode).
+    ///
+    /// The ring buffer's file descriptor is registered with the Tokio reactor via
+    /// epoll. When the kernel signals readiness the task wakes, drains all
+    /// available events in a tight loop, then yields back to the executor.
+    /// This is efficient for moderate event rates and has the lowest operational
+    /// complexity.
+    async fn run_ring_buf_async_fd(
+        flow_events: RingBuf<aya::maps::MapData>,
+        worker_channels: Vec<mpsc::Sender<FlowEvent>>,
+        worker_handles: Vec<tokio::task::JoinHandle<()>>,
+        worker_count: usize,
+        shutdown_rx: broadcast::Receiver<()>,
+        flow_events_return: tokio::sync::oneshot::Sender<RingBuf<aya::maps::MapData>>,
+    ) {
+        let mut flow_events = flow_events;
+        let mut shutdown_rx = shutdown_rx;
         let async_fd = match AsyncFd::new(flow_events.as_raw_fd()) {
             Ok(fd) => fd,
             Err(e) => {
@@ -424,7 +454,6 @@ impl FlowSpanProducer {
         };
 
         let mut worker_index = 0;
-        let worker_count = self.workers.max(1);
 
         loop {
             tokio::select! {
@@ -455,88 +484,14 @@ impl FlowSpanProducer {
                     };
 
                     while let Some(item) = flow_events.next() {
-                        let _timer = metrics::registry::processing_duration_seconds()
-                            .with_label_values(&[ProcessingStage::FlowProducerOut.as_str()])
-                            .start_timer();
-
                         let flow_event: FlowEvent =
                             unsafe { std::ptr::read_unaligned(item.as_ptr() as *const FlowEvent) };
-
-                        metrics::registry::EBPF_MAP_OPS_TOTAL
-                            .with_label_values(&[
-                                EbpfMapName::FlowEvents.as_str(),
-                                EbpfMapOperation::Read.as_str(),
-                                EbpfMapStatus::Ok.as_str(),
-                            ])
-                            .inc();
-                        if metrics::registry::debug_enabled() {
-                            metrics::registry::FLOW_EVENTS_TOTAL
-                                .with_label_values(&[FlowEventResult::Received.as_str()])
-                                .inc();
-                        }
-
-                        let mut sent = false;
-                        for attempt in 0..worker_count {
-                            let current_worker = (worker_index + attempt) % worker_count;
-                            let worker_tx = &worker_channels[current_worker];
-
-                            match worker_tx.try_send(flow_event) {
-                                Ok(_) => {
-                                    metrics::registry::CHANNEL_SENDS_TOTAL
-                                        .with_label_values(&[ChannelName::PacketWorker.as_str(), ChannelSendStatus::Success.as_str()])
-                                        .inc();
-                                    worker_index = (current_worker + 1) % worker_count;
-                                    sent = true;
-                                    break;
-                                }
-                                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                                    // This worker is full, try next one
-                                    continue;
-                                }
-                                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                                    // Worker is gone, try next one
-                                    metrics::registry::CHANNEL_SENDS_TOTAL
-                                        .with_label_values(&[ChannelName::PacketWorker.as_str(), ChannelSendStatus::Error.as_str()])
-                                        .inc();
-                                    continue;
-                                }
-                            }
-                        }
-
-                        if !sent {
-                            // All workers are full - drop event to prevent ring buffer backup
-                            // CRITICAL: Blocking here prevents draining ring buffer, causing eBPF to drop MORE events
-                            // This is a fail-safe to maintain pipeline throughput under extreme load.
-                            if metrics::registry::debug_enabled() {
-                                metrics::registry::FLOW_EVENTS_TOTAL
-                                    .with_label_values(&[FlowEventResult::DroppedBackpressure.as_str()])
-                                    .inc();
-                            }
-
-                            // Log detailed backpressure info every 1000 drops (avoid log spam)
-                            static BACKPRESSURE_DROP_COUNT: std::sync::atomic::AtomicU64 =
-                                std::sync::atomic::AtomicU64::new(0);
-                            let drop_count =
-                                BACKPRESSURE_DROP_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-                            if drop_count % 1000 == 0 {
-                                warn!(
-                                    event.name = "flow.worker_backpressure",
-                                    worker_count = worker_count,
-                                    total_drops = drop_count + 1,
-                                    protocol = ?flow_event.flow_key.protocol,
-                                    "worker backpressure detected - dropping flow events to prevent deadlock"
-                                );
-                            }
-
-                            // Continue draining ring buffer - better to drop here with visibility
-                            // than block and cause eBPF to drop events silently
-                            //
-                            // TODO: Implement adaptive sampling strategy:
-                            // 1. Priority-based dropping (keep long-lived flows, drop short ones)
-                            // 2. Sampling (keep 1 in N flows during overload)
-                            // 3. Protocol-based priority (TCP > UDP > ICMP)
-                        }
+                        dispatch_flow_event(
+                            flow_event,
+                            &worker_channels,
+                            &mut worker_index,
+                            worker_count,
+                        );
                     }
 
                     guard.clear_ready();
@@ -551,8 +506,6 @@ impl FlowSpanProducer {
         );
 
         drop(worker_channels);
-
-        // Wait for all spawned background tasks (workers, pollers, scanner) to finish concurrently.
         futures::future::join_all(worker_handles).await;
 
         info!(
@@ -561,9 +514,7 @@ impl FlowSpanProducer {
             "all child tasks have been joined"
         );
 
-        // Return the ring buffer for reuse across pipeline restarts.
-        // async_fd borrows the ring buffer's raw fd; it must be dropped first so
-        // epoll deregistration happens before the receiver owns the ring buffer.
+        // Drop async_fd first to deregister from epoll before returning ring buffer.
         drop(async_fd);
         let _ = flow_events_return.send(flow_events);
     }
@@ -571,6 +522,101 @@ impl FlowSpanProducer {
     /// Returns a shared handle to the producer's thread-safe components.
     pub fn components(&self) -> Arc<FlowSpanComponents> {
         Arc::clone(&self.components)
+    }
+}
+
+/// Dispatch a single [`FlowEvent`] to an available worker channel using
+/// round-robin selection with overflow drop.
+///
+/// If all worker channels are full the event is dropped and a backpressure
+/// counter is incremented.  Blocking here would prevent the ring buffer from
+/// being drained, causing the eBPF kernel program to drop events silently —
+/// an explicit userspace drop with a metric is preferable.
+#[inline]
+fn dispatch_flow_event(
+    flow_event: FlowEvent,
+    worker_channels: &[mpsc::Sender<FlowEvent>],
+    worker_index: &mut usize,
+    worker_count: usize,
+) {
+    metrics::registry::EBPF_MAP_OPS_TOTAL
+        .with_label_values(&[
+            EbpfMapName::FlowEvents.as_str(),
+            EbpfMapOperation::Read.as_str(),
+            EbpfMapStatus::Ok.as_str(),
+        ])
+        .inc();
+    if metrics::registry::debug_enabled() {
+        metrics::registry::FLOW_EVENTS_TOTAL
+            .with_label_values(&[FlowEventResult::Received.as_str()])
+            .inc();
+    }
+
+    let _timer = metrics::registry::processing_duration_seconds()
+        .with_label_values(&[ProcessingStage::FlowProducerOut.as_str()])
+        .start_timer();
+
+    let mut sent = false;
+    for attempt in 0..worker_count {
+        let current_worker = (*worker_index + attempt) % worker_count;
+        let worker_tx = &worker_channels[current_worker];
+
+        match worker_tx.try_send(flow_event) {
+            Ok(_) => {
+                metrics::registry::CHANNEL_SENDS_TOTAL
+                    .with_label_values(&[
+                        ChannelName::PacketWorker.as_str(),
+                        ChannelSendStatus::Success.as_str(),
+                    ])
+                    .inc();
+                *worker_index = (current_worker + 1) % worker_count;
+                sent = true;
+                break;
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                continue;
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                metrics::registry::CHANNEL_SENDS_TOTAL
+                    .with_label_values(&[
+                        ChannelName::PacketWorker.as_str(),
+                        ChannelSendStatus::Error.as_str(),
+                    ])
+                    .inc();
+                continue;
+            }
+        }
+    }
+
+    if !sent {
+        // All workers are full — drop the event to keep the ring buffer draining.
+        // CRITICAL: Blocking here prevents draining the ring buffer, which causes
+        // the eBPF program to drop events silently.  An explicit userspace drop
+        // with metrics is strictly preferable.
+        if metrics::registry::debug_enabled() {
+            metrics::registry::FLOW_EVENTS_TOTAL
+                .with_label_values(&[FlowEventResult::DroppedBackpressure.as_str()])
+                .inc();
+        }
+
+        static BACKPRESSURE_DROP_COUNT: std::sync::atomic::AtomicU64 =
+            std::sync::atomic::AtomicU64::new(0);
+        let drop_count = BACKPRESSURE_DROP_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        if drop_count % 1000 == 0 {
+            warn!(
+                event.name = "flow.worker_backpressure",
+                worker_count = worker_count,
+                total_drops = drop_count + 1,
+                protocol = ?flow_event.flow_key.protocol,
+                "worker backpressure detected - dropping flow events to prevent deadlock"
+            );
+        }
+
+        // TODO: Implement adaptive sampling strategy:
+        // 1. Priority-based dropping (keep long-lived flows, drop short ones)
+        // 2. Sampling (keep 1 in N flows during overload)
+        // 3. Protocol-based priority (TCP > UDP > ICMP)
     }
 }
 

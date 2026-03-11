@@ -29,7 +29,7 @@ use mermin_common::MapUnit;
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal as unix_signal};
 use tokio::sync::{mpsc, oneshot};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     health::{HealthState, start_api_server},
@@ -92,12 +92,16 @@ async fn shutdown_exporter_gracefully(
     Ok(())
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let cli = Cli::parse();
 
     if let Some(subcommand) = &cli.subcommand {
-        match runtime::commands::execute(subcommand).await {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("failed to create mermin runtime");
+        let result = rt.block_on(runtime::commands::execute(subcommand));
+        match result {
             Ok(()) => std::process::exit(0),
             Err(e) => {
                 display_error(&e);
@@ -106,7 +110,14 @@ async fn main() {
         }
     }
 
-    if let Err(e) = run(cli).await {
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    builder.thread_name("mermin-main").enable_all();
+    if let Some(n) = cli.worker_threads {
+        builder.worker_threads(n.max(1));
+    }
+    let rt = builder.build().expect("failed to create mermin runtime");
+
+    if let Err(e) = rt.block_on(run(cli)) {
         display_error(&e);
         std::process::exit(1);
     }
@@ -139,12 +150,17 @@ const EBPF_MAP_SCHEMA_VERSION: u8 = 1;
 /// If an export takes longer than this, it's considered timed out and the span may be lost.
 const EXPORT_TIMEOUT_SECS: u64 = 10;
 
-// Constants for eBPF map capacities
 const LISTENING_PORTS_CAPACITY: u64 = 1024;
 
 async fn run(cli: Cli) -> Result<()> {
     let reload_handles = init_bootstrap_logger(&cli);
     let conf = Conf::new(cli)?;
+
+    let worker_threads = tokio::runtime::Handle::current().metrics().num_workers();
+    info!(
+        event.name = "runtime.threads",
+        worker_threads, "runtime worker threads: {worker_threads}",
+    );
 
     // Initialize Prometheus metrics registry early, before any subsystems that might record metrics
     // This also initializes the global debug_enabled flag
@@ -165,7 +181,6 @@ async fn run(cli: Cli) -> Result<()> {
         );
     }
 
-    // Warn if debug metrics are enabled - they cause significant memory growth
     if conf.internal.metrics.debug_metrics_enabled {
         warn!(
             event.name = "metrics.debug_metrics_enabled",
@@ -175,7 +190,6 @@ async fn run(cli: Cli) -> Result<()> {
         );
     }
 
-    // Create metric cleanup tracker if debug metrics are enabled
     let cleanup_tracker = if conf.internal.metrics.debug_metrics_enabled {
         Some(MetricCleanupTracker::new(
             conf.internal.metrics.stale_metric_ttl,
@@ -187,7 +201,6 @@ async fn run(cli: Cli) -> Result<()> {
 
     let mut components = ComponentManager::new();
 
-    // Spawn metric cleanup background task if debug metrics are enabled
     if let Some(tracker) = cleanup_tracker.clone() {
         let shutdown_rx = components.subscribe();
         let join = tokio::spawn(async move {
@@ -324,7 +337,6 @@ async fn run(cli: Cli) -> Result<()> {
         )
         .await?;
 
-        // Display all configuration at debug level
         conf.display_conf();
 
         if conf.export.traces.stdout.is_some() || conf.export.traces.otlp.is_some() {
@@ -441,7 +453,6 @@ async fn run(cli: Cli) -> Result<()> {
 
         info!("waiting for shutdown signal");
 
-        // Wait for either a shutdown signal or (if auto_reload) a reload trigger.
         let shutdown_config = ShutdownConfig {
             timeout: current_conf.shutdown_timeout,
             preserve_flows: true,
@@ -541,12 +552,9 @@ async fn run(cli: Cli) -> Result<()> {
                 ebpf_resources = recovered
                     .map_err(|e: EbpfRecoveryError| MerminError::internal(e.to_string()))?;
                 current_conf = *new_conf;
-                // Loop continues → start_pipeline() is called again with new conf.
             }
         }
     }
-
-    info!("exiting");
 
     Ok(())
 }
@@ -578,13 +586,6 @@ fn load_ebpf_resources(conf: &Conf) -> Result<EbpfResources> {
             env!("OUT_DIR"),
             "/mermin"
         )))?;
-    debug!(
-        event.name = "ebpf.loaded",
-        map.pin_path = %map_pin_path,
-        map.schema_version = EBPF_MAP_SCHEMA_VERSION,
-        "ebpf program loaded, maps will persist with versioned pinning"
-    );
-
     let programs = [TcAttachType::Ingress, TcAttachType::Egress];
     programs.iter().try_for_each(|attach_type| -> Result<()> {
         let program: &mut SchedClassifier = ebpf
@@ -720,8 +721,6 @@ fn load_ebpf_resources(conf: &Conf) -> Result<EbpfResources> {
         );
     }
 
-    // Extract eBPF maps - they're already pinned/reused automatically by EbpfLoader.
-    // Maps are pinned to /sys/fs/bpf/mermin_v{version}/<map_name> and reused across restarts.
     let log_events_ringbuf = aya::maps::RingBuf::try_from(
         ebpf.take_map("LOG_EVENTS")
             .ok_or_else(|| MerminError::internal("LOG_EVENTS not found in eBPF object"))?,
@@ -743,12 +742,7 @@ fn load_ebpf_resources(conf: &Conf) -> Result<EbpfResources> {
     })?;
 
     // Initialize ring buffer metrics before producer takes ownership (need fd access for mmap).
-    if init_ringbuf_metrics(&flow_events_ringbuf) {
-        debug!(
-            event.name = "ringbuf_metrics.initialized",
-            "ring buffer metrics initialized for FLOW_EVENTS"
-        );
-    } else {
+    if !init_ringbuf_metrics(&flow_events_ringbuf) {
         warn!(
             event.name = "ringbuf_metrics.init_failed",
             "failed to initialize ring buffer metrics - FLOW_EVENTS size will not be reported"
@@ -825,19 +819,6 @@ async fn start_pipeline(
 
     let mut pipeline_components = ComponentManager::new();
 
-    let attach_method = {
-        let kernel_version = KernelVersion::current().unwrap_or(KernelVersion::new(0, 0, 0));
-        let use_tcx = kernel_version >= KernelVersion::new(6, 6, 0);
-        if use_tcx { "TCX" } else { "netlink" }
-    };
-    debug!(
-        event.name = "ebpf.attach_method_determined",
-        ebpf.attach.method = attach_method,
-        ebpf.attach.priority = conf.discovery.instrument.tc_priority,
-        ebpf.attach.tcx_order = %conf.discovery.instrument.tcx_order,
-        "determined tc attachment method"
-    );
-
     // Spawn eBPF log consumer with return channel for ring buffer recovery.
     let (log_events_return_tx, log_events_return) = oneshot::channel();
     let log_shutdown_rx = pipeline_components.subscribe();
@@ -850,10 +831,6 @@ async fn start_pipeline(
         .await;
     });
     pipeline_components.register(Handle::async_task("ebpf-log-consumer", log_join));
-    debug!(
-        event.name = "ebpf.log_consumer_started",
-        "ebpf log consumer started"
-    );
 
     let patterns = if conf.discovery.instrument.interfaces.is_empty() {
         info!(
@@ -901,10 +878,6 @@ async fn start_pipeline(
 
     wait_for_controller_ready(&event_rx, &cmd_tx)?;
 
-    info!(
-        event.name = "interface_controller.sending_initialize",
-        "sending initialize command to controller thread"
-    );
     cmd_tx
         .send(ControllerCommand::Initialize)
         .map_err(|e| MerminError::internal(format!("failed to send initialize command: {e}")))?;
@@ -980,12 +953,6 @@ async fn start_pipeline(
     )?;
     let flow_span_components = flow_span_producer.components();
 
-    info!(
-        event.name = "task.started",
-        task.name = "k8s.decorator",
-        task.description = "decorating flow attributes with kubernetes metadata",
-        "userspace task started"
-    );
     let owner_relations_opts = conf
         .discovery
         .informer
@@ -1032,148 +999,135 @@ async fn start_pipeline(
         }
     };
 
-    // K8s decorator runs on dedicated thread pool to prevent K8s API lookups from blocking main runtime.
-    let decorator_threads = conf.pipeline.k8s_decorator.threads;
-
+    // The decorator does fast in-memory K8s cache lookups (hash map reads) and
+    // forwards each span to the exporter channel. The exporter calls
+    // exporter.export() which enqueues the span for async OTLP batch flush over
+    // HTTP/gRPC. Both are cooperative async tasks that park at every .await point
+    // and run on the main runtime via tokio::spawn. The bounded channels between
+    // stages provide backpressure. No separate runtime or OS thread is needed.
     let source_extract_rules = conf.k8s_extract_metadata("source");
     let dest_extract_rules = conf.k8s_extract_metadata("destination");
 
     let mut decorator_shutdown_rx = pipeline_components.subscribe();
-    let decorator_handle = std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(decorator_threads)
-            .thread_name("mermin-k8s-decorator")
-            .enable_all()
-            .build()
-            .expect("failed to create k8s decorator runtime");
+    let decorator_join = tokio::spawn(async move {
+        info!(
+            event.name = "task.started",
+            task.name = "k8s.decorator",
+            task.description = "decorating flow attributes with kubernetes metadata",
+            "k8s decorator started"
+        );
 
-        rt.block_on(async move {
-            info!(
-                event.name = "task.started",
-                task.name = "k8s.decorator",
-                task.description = "decorating flow attributes with kubernetes metadata",
-                decorator.threads = decorator_threads,
-                "k8s decorator started on dedicated thread pool"
-            );
+        // Matching on the attributor early is a performance optimization to avoid having to
+        // check to see if the attributor is None per flow_span_rx receive.
+        match k8s_attributor.as_ref() {
+            Some(attributor) => {
+                let decorator =
+                    Decorator::new(attributor, source_extract_rules, dest_extract_rules);
+                loop {
+                    tokio::select! {
+                        _ = decorator_shutdown_rx.recv() => {
+                            break;
+                        },
+                        maybe_span = flow_span_rx.recv() => {
+                            let Some(flow_span) = maybe_span else { break };
 
-            // Matching on the attributor early is a performance optimization to avoid having to
-            // check to see if the attributor is None per flow_span_rx receive.
-            match k8s_attributor.as_ref() {
-                Some(attributor) => {
-                    let decorator = Decorator::new(attributor, source_extract_rules, dest_extract_rules);
-                    loop {
-                        tokio::select! {
-                            _ = decorator_shutdown_rx.recv() => {
-                                break;
-                            },
-                            maybe_span = flow_span_rx.recv() => {
-                                let Some(flow_span) = maybe_span else { break };
+                            let channel_size = flow_span_rx.len();
+                            metrics::registry::CHANNEL_ENTRIES
+                                .with_label_values(&[ChannelName::ProducerOutput.as_str()])
+                                .set(channel_size as i64);
 
-                                let channel_size = flow_span_rx.len();
-                                metrics::registry::CHANNEL_ENTRIES
-                                    .with_label_values(&[ChannelName::ProducerOutput.as_str()])
-                                    .set(channel_size as i64);
+                            let _timer = metrics::registry::processing_duration_seconds()
+                                .with_label_values(&[ProcessingStage::K8sDecoratorOut.as_str()])
+                                .start_timer();
+                            let (span, err) = decorator.decorate_or_fallback(flow_span).await;
 
-                                let _timer = metrics::registry::processing_duration_seconds()
-                                    .with_label_values(&[ProcessingStage::K8sDecoratorOut.as_str()])
-                                    .start_timer();
-                                let (span, err) = decorator.decorate_or_fallback(flow_span).await;
-
-                                match err {
-                                    Some(e) => {
-                                        metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Error);
-                                        debug!(
-                                            event.name = "k8s.decorator.failed",
-                                            flow.community_id = %span.attributes.flow_community_id,
-                                            error.message = %e,
-                                            "failed to decorate flow attributes with kubernetes metadata, sending undecorated span"
-                                        );
-                                    }
-                                    None => {
-                                        metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Ok);
-                                        trace!(
-                                            event.name = "k8s.decorator.decorated",
-                                            flow.community_id = %span.attributes.flow_community_id,
-                                            "successfully decorated flow attributes with kubernetes metadata"
-                                        );
-                                    }
+                            match err {
+                                Some(e) => {
+                                    metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Error);
+                                    debug!(
+                                        event.name = "k8s.decorator.failed",
+                                        flow.community_id = %span.attributes.flow_community_id,
+                                        error.message = %e,
+                                        "failed to decorate flow attributes with kubernetes metadata, sending undecorated span"
+                                    );
                                 }
-
-                                match k8s_decorated_flow_span_tx.send(span).await {
-                                    Ok(_) => {
-                                        metrics::registry::CHANNEL_SENDS_TOTAL
-                                            .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Success.as_str()])
-                                            .inc();
-                                    }
-                                    Err(e) => {
-                                        metrics::registry::CHANNEL_SENDS_TOTAL
-                                            .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Error.as_str()])
-                                            .inc();
-                                        error!(
-                                            event.name = "channel.send_failed",
-                                            channel.name = "k8s_decorated_flow_span",
-                                            error.message = %e,
-                                            "failed to send flow span to export channel"
-                                        );
-                                    }
+                                None => {
+                                    metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Ok);
                                 }
                             }
-                        }
-                    }
-                }
-                None => {
-                    warn!(
-                        event.name = "k8s.decorator.unavailable",
-                        reason = "kubernetes_client_unavailable",
-                        "kubernetes decorator unavailable, all spans will be sent undecorated"
-                    );
 
-                    loop {
-                        tokio::select! {
-                            _ = decorator_shutdown_rx.recv() => {
-                                break;
-                            },
-                            maybe_span = flow_span_rx.recv() => {
-                                let Some(flow_span) = maybe_span else { break };
-                                let channel_size = flow_span_rx.len();
-                                metrics::registry::CHANNEL_ENTRIES
-                                    .with_label_values(&[ChannelName::ProducerOutput.as_str()])
-                                    .set(channel_size as i64);
-                                trace!(event.name = "decorator.sending_to_exporter", flow.community_id = %flow_span.attributes.flow_community_id);
-
-                                match k8s_decorated_flow_span_tx.send(flow_span).await {
-                                    Ok(_) => {
-                                        metrics::registry::CHANNEL_SENDS_TOTAL
-                                            .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Success.as_str()])
-                                            .inc();
-                                        metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Undecorated);
-                                    }
-                                    Err(e) => {
-                                        metrics::registry::CHANNEL_SENDS_TOTAL
-                                            .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Error.as_str()])
-                                            .inc();
-                                        metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Dropped);
-                                        error!(
-                                            event.name = "channel.send_failed",
-                                            channel.name = "k8s_decorated_flow_span",
-                                            error.message = %e,
-                                            "failed to send flow span to export channel"
-                                        );
-                                    }
+                            match k8s_decorated_flow_span_tx.send(span).await {
+                                Ok(_) => {
+                                    metrics::registry::CHANNEL_SENDS_TOTAL
+                                        .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Success.as_str()])
+                                        .inc();
+                                }
+                                Err(e) => {
+                                    metrics::registry::CHANNEL_SENDS_TOTAL
+                                        .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Error.as_str()])
+                                        .inc();
+                                    error!(
+                                        event.name = "channel.send_failed",
+                                        channel.name = "k8s_decorated_flow_span",
+                                        error.message = %e,
+                                        "failed to send flow span to export channel"
+                                    );
                                 }
                             }
                         }
                     }
                 }
             }
-            drop(k8s_decorated_flow_span_tx);
-            flow_span_rx.close();
-            info!(
-                event.name = "task.exited",
-                task.name = "k8s.decorator",
-                "k8s decorator task exited"
-            );
-        });
+            None => {
+                warn!(
+                    event.name = "k8s.decorator.unavailable",
+                    reason = "kubernetes_client_unavailable",
+                    "kubernetes decorator unavailable, all spans will be sent undecorated"
+                );
+
+                loop {
+                    tokio::select! {
+                        _ = decorator_shutdown_rx.recv() => {
+                            break;
+                        },
+                        maybe_span = flow_span_rx.recv() => {
+                            let Some(flow_span) = maybe_span else { break };
+                            let channel_size = flow_span_rx.len();
+                            metrics::registry::CHANNEL_ENTRIES
+                                .with_label_values(&[ChannelName::ProducerOutput.as_str()])
+                                .set(channel_size as i64);
+                            match k8s_decorated_flow_span_tx.send(flow_span).await {
+                                Ok(_) => {
+                                    metrics::registry::CHANNEL_SENDS_TOTAL
+                                        .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Success.as_str()])
+                                        .inc();
+                                    metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Undecorated);
+                                }
+                                Err(e) => {
+                                    metrics::registry::CHANNEL_SENDS_TOTAL
+                                        .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Error.as_str()])
+                                        .inc();
+                                    metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Dropped);
+                                    error!(
+                                        event.name = "channel.send_failed",
+                                        channel.name = "k8s_decorated_flow_span",
+                                        error.message = %e,
+                                        "failed to send flow span to export channel"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        drop(k8s_decorated_flow_span_tx);
+        flow_span_rx.close();
+        info!(
+            event.name = "task.exited",
+            task.name = "k8s.decorator",
+            "k8s decorator task exited"
+        );
     });
 
     health_state
@@ -1184,6 +1138,11 @@ async fn start_pipeline(
     let (flow_events_return_tx, flow_events_return) = oneshot::channel();
     let producer_shutdown_rx = pipeline_components.subscribe();
     let producer_join = tokio::spawn(async move {
+        info!(
+            event.name = "task.started",
+            task.name = "span.producer",
+            "flow span producer task started"
+        );
         flow_span_producer
             .run(producer_shutdown_rx, flow_events_return_tx)
             .await;
@@ -1201,20 +1160,11 @@ async fn start_pipeline(
 
     let exporter_join = tokio::spawn(async move {
         while let Some(flow_span) = k8s_decorated_flow_span_rx.recv().await {
-            let flow_span_clone = flow_span.clone();
             let queue_size = k8s_decorated_flow_span_rx.len();
             metrics::registry::CHANNEL_ENTRIES
                 .with_label_values(&[ChannelName::DecoratorOutput.as_str()])
                 .set(queue_size as i64);
-            // Note: EXPORT_QUEUED is tracked when span is sent from decorator, not when received here
             let traceable: TraceableRecord = Arc::new(flow_span);
-            trace!(event.name = "flow.exporting", "exporting flow span");
-
-            let community_id = flow_span_clone.attributes.flow_community_id;
-
-            trace!(event.name = "exporter.received_from_decorator", flow.community_id = %community_id);
-
-            // Track export blocking time and timeouts
             let export_start = std::time::Instant::now();
             let export_result = tokio::time::timeout(
                 Duration::from_secs(EXPORT_TIMEOUT_SECS),
@@ -1232,16 +1182,8 @@ async fn start_pipeline(
                     event.name = "flow.export_timeout",
                     "export call timed out, span may be lost"
                 );
-            } else {
-                trace!(event.name = "exporter.export_successful", flow.community_id = %community_id);
             }
         }
-
-        trace!(
-            event.name = "task.exited",
-            task.name = "exporter",
-            "exporter task exited because its channel was closed, flushing remaining spans via provider shutdown."
-        );
 
         match shutdown_exporter_gracefully(Arc::clone(&exporter), Duration::from_secs(5)).await {
             Ok(()) => {}
@@ -1273,7 +1215,7 @@ async fn start_pipeline(
     //      signal directly), exits, and drops k8s_decorated_flow_span_tx
     //   3. exporter sees its input channel close, calls OTLP flush, and exits
     pipeline_components.register(Handle::async_task("exporter", exporter_join));
-    pipeline_components.register(Handle::thread("k8s-decorator", decorator_handle));
+    pipeline_components.register(Handle::async_task("k8s-decorator", decorator_join));
     pipeline_components.register(Handle::async_task("span-producer", producer_join));
 
     // Register controller and netlink last so they are joined first (reverse order),

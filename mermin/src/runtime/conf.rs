@@ -904,12 +904,6 @@ impl Default for FlowProducer {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct K8sDecorator {
-    /// Number of dedicated threads for K8s decorator (default: 4)
-    /// Creates a dedicated multi-threaded Tokio runtime for Kubernetes metadata decoration.
-    /// Each thread handles ~8K flows/sec; 4 threads = 32K flows/sec capacity (10x headroom at default scale).
-    /// Increase for large clusters: 8 threads for 50K flows/sec, 12 threads for 100K flows/sec.
-    pub threads: usize,
-
     /// Capacity for the decorated span channel (default: 8192)
     /// Buffer between K8s decorator and OTLP exporter.
     /// Default provides ~2.5s of buffer at the 3,200 spans/s baseline.
@@ -920,7 +914,6 @@ pub struct K8sDecorator {
 impl Default for K8sDecorator {
     fn default() -> Self {
         Self {
-            threads: 4,
             decorated_span_queue_capacity: 8192,
         }
     }

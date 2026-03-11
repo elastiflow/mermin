@@ -142,24 +142,6 @@ Configures userspace flow processing.
 
 Configures Kubernetes metadata decoration.
 
-- `threads`
-
-  Number of dedicated threads for Kubernetes metadata lookup. Each thread handles ~8K flows/sec; the default 4 threads provides ~32K flows/sec capacity (~10x headroom at default scale).
-
-  **Type:** Integer
-
-  **Default:** `4`
-
-  **Example:**
-
-  ```hcl
-  pipeline {
-    k8s_decorator {
-      threads = 8
-    }
-  }
-  ```
-
 - `decorated_span_queue_capacity` attribute
 
   Buffer between the K8s decorator and the OTLP exporter — the final stage before network export. Default provides ~2.5s of buffering at the 3,200 spans/s baseline. Scale proportionally with `flow_stats_capacity`.
@@ -179,6 +161,10 @@ Configures Kubernetes metadata decoration.
   ```
 
 ## Monitoring Performance Configuration
+
+For Kubernetes deployments, ensure the Tokio worker thread count matches your pod's CPU
+limit to avoid CFS throttling. See [Worker threads](../overview.md#worker-threads) in the
+Configuration Overview.
 
 After tuning, monitor these metrics:
 

@@ -279,7 +279,6 @@ pipeline {
     flow_span_queue_capacity = 32768     # Larger buffer to K8s decorator
   }
   k8s_decorator {
-    threads = 12                         # For very large clusters
     decorated_span_queue_capacity = 65536  # Larger buffer to exporter
   }
 }
@@ -361,7 +360,6 @@ pipeline {
     flow_span_queue_capacity = 2048
   }
   k8s_decorator {
-    threads = 2
     decorated_span_queue_capacity = 4096
   }
 }
@@ -499,7 +497,7 @@ The appropriate fix depends on where drops occur in the pipeline:
 
 2. **Flow span channel drops** (drops between workers and K8s decorator):
    - Increase `pipeline.flow_producer.flow_span_queue_capacity`
-   - Increase `pipeline.k8s_decorator.threads` (faster decoration)
+   - Add more CPU resources or increase the pod CPU limit (the decorator runs on the main runtime)
 
 3. **Decorated span channel drops** (drops between decorator and exporter):
    - Increase `pipeline.k8s_decorator.decorated_span_queue_capacity`
