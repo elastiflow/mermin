@@ -27,7 +27,7 @@ use netlink_packet_route::{
 use netlink_sys::protocols::NETLINK_ROUTE;
 use nix::sched::{CloneFlags, setns};
 use tokio::sync::oneshot;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, warn};
 
 use super::{
     controller::IfaceController,
@@ -58,11 +58,6 @@ impl Drop for NetlinkSocket {
         unsafe {
             libc::close(self.0);
         }
-        trace!(
-            event.name = "interface_controller.netlink.socket_closed",
-            socket_fd = self.0,
-            "netlink socket closed via RAII cleanup"
-        );
     }
 }
 
@@ -74,29 +69,12 @@ const NETLINK_RECV_BUFFER_SIZE: usize = 8192;
 
 /// Spawn controller thread that permanently stays in host network namespace.
 ///
-/// This thread:
-/// - Enters host namespace once at startup via `setns()`
-/// - Stays in host namespace permanently (never switches back)
-/// - Handles commands from main thread via `cmd_rx` channel
-/// - Handles netlink events from netlink thread via `netlink_rx` channel
-/// - Sends status events back to main thread via `event_tx` channel (if provided)
-/// - Performs all eBPF attach/detach operations
+/// Enters host namespace once via `setns()`, then processes commands from `cmd_rx`
+/// and netlink events from `netlink_rx` in a single-threaded loop.
 ///
-/// ## Arguments
+/// # Panics
 ///
-/// - `host_netns` - Arc-wrapped File handle for `/proc/1/ns/net` (host namespace)
-/// - `controller` - Initialized controller (will be moved to thread)
-/// - `cmd_rx` - Receiver for commands from main thread
-/// - `netlink_rx` - Receiver for netlink events from netlink thread
-/// - `event_tx` - Optional sender for status events back to main thread
-///
-/// ## Errors
-///
-/// Returns an error if the thread cannot be spawned due to system resource limitations.
-///
-/// ## Panics
-///
-/// The spawned thread panics if unable to enter host network namespace (requires CAP_SYS_ADMIN).
+/// Panics if unable to enter host network namespace (requires CAP_SYS_ADMIN).
 pub fn spawn_controller_thread(
     host_netns: Arc<std::fs::File>,
     mut controller: IfaceController,
@@ -152,12 +130,6 @@ pub fn spawn_controller_thread(
                     recv(cmd_rx) -> result => {
                         match result {
                             Ok(cmd) => {
-                                debug!(
-                                    event.name = "interface_controller.command_received",
-                                    command = %cmd,
-                                    "received command from main thread"
-                                );
-
                                 match cmd {
                                     ControllerCommand::Initialize => {
                                         info!(
@@ -175,7 +147,6 @@ pub fn spawn_controller_thread(
                                                     });
                                                 }
 
-                                                // Process buffered netlink events that arrived during initialization
                                                 if !netlink_event_buffer.is_empty() {
                                                     debug!(
                                                         event.name = "interface_controller.processing_buffered_events",
@@ -252,7 +223,6 @@ pub fn spawn_controller_thread(
                                     event.name = "interface_controller.netlink_channel_closed",
                                     "netlink channel closed, continuing to process commands"
                                 );
-                                // Continue processing commands even if netlink monitoring fails
                             }
                         }
                     }
@@ -275,48 +245,20 @@ pub fn spawn_controller_thread(
 
 /// Spawn netlink monitoring thread that permanently stays in host network namespace.
 ///
-/// This thread:
-/// - Enters host namespace once at startup via `setns()`
-/// - Stays in host namespace permanently (never switches back)
-/// - Creates a raw netlink socket (AF_NETLINK, SOCK_RAW, NETLINK_ROUTE)
-/// - Subscribes to RTNLGRP_LINK multicast group for interface events
-/// - Blocks on `recv()` with 1-second timeout waiting for kernel netlink messages
-/// - Parses RTM_NEWLINK/RTM_SETLINK/RTM_DELLINK messages
-/// - Extracts interface name and UP flag from link attributes
-/// - Sends `NetlinkEvent::InterfaceUp` or `InterfaceDown` to controller thread
-/// - Handles message boundaries correctly using NLMSG_ALIGN
-/// - Exits gracefully when channel is disconnected (detected during recv timeout)
+/// Subscribes to RTNLGRP_LINK, parses RTM_NEWLINK/RTM_SETLINK/RTM_DELLINK messages,
+/// and sends `NetlinkEvent` to the controller thread. Uses `poll()` on both the netlink
+/// socket and a shutdown eventfd for instant, zero-CPU shutdown response.
 ///
-/// ## Graceful Shutdown
+/// Uses raw libc socket APIs rather than `netlink-sys` due to buffering issues
+/// with that crate's blocking `recv()`.
 ///
-/// Uses `poll()` to wait on both the netlink socket and a shutdown eventfd. When shutdown
-/// is requested, the main thread signals the eventfd, causing `poll()` to wake immediately.
-/// This avoids busy loops and provides instant shutdown response with zero CPU overhead.
+/// # Panics
 ///
-/// ## Arguments
-///
-/// - `host_netns` - Arc-wrapped File handle for `/proc/1/ns/net` (host namespace)
-/// - `event_tx` - Sender to send netlink events to controller thread
-///
-/// ## Errors
-///
-/// Returns an error if the thread cannot be spawned due to system resource limitations.
-///
-/// ## Panics
-///
-/// The spawned thread panics if unable to enter host network namespace (requires CAP_SYS_ADMIN).
-/// Errors during netlink socket setup or recv are logged and cause thread to exit gracefully.
-///
-/// ## Implementation Notes
-///
-/// Uses raw libc socket APIs instead of netlink-sys crate due to buffering
-/// issues with blocking recv(). All unsafe operations are documented with
-/// SAFETY comments explaining invariants.
+/// Panics if unable to enter host network namespace (requires CAP_SYS_ADMIN).
 pub fn spawn_netlink_thread(
     host_netns: Arc<std::fs::File>,
     event_tx: Sender<NetlinkEvent>,
 ) -> Result<(thread::JoinHandle<()>, Arc<ShutdownEventFd>), std::io::Error> {
-    // Create shutdown eventfd before spawning thread
     let shutdown_fd = Arc::new(ShutdownEventFd::new()?);
     let shutdown_fd_clone = Arc::clone(&shutdown_fd);
     thread::Builder::new()
@@ -355,7 +297,6 @@ pub fn spawn_netlink_thread(
                 return;
             }
 
-            // Wrap socket in RAII guard to ensure cleanup on all exit paths
             let sock = NetlinkSocket(sock_fd);
 
             info!(
@@ -391,11 +332,6 @@ pub fn spawn_netlink_thread(
                 return;
             }
 
-            debug!(
-                event.name = "interface_controller.netlink.socket_bound",
-                "netlink socket bound successfully"
-            );
-
             // Add multicast group membership (RTNLGRP_LINK for interface events)
             // SAFETY: sock is a valid socket, RTNLGRP_LINK is a valid i32 constant,
             // and we're passing the correct size for the option value.
@@ -430,7 +366,6 @@ pub fn spawn_netlink_thread(
             let mut total_messages_received = 0u64;
             let mut total_messages_skipped = 0u64;
 
-            // Setup poll fds: watch both netlink socket and shutdown eventfd
             let mut fds = [
                 pollfd {
                     fd: sock.as_raw_fd(),
@@ -445,7 +380,6 @@ pub fn spawn_netlink_thread(
             ];
 
             loop {
-                // Wait for events on either socket or shutdown signal
                 // SAFETY: fds array is properly initialized, timeout -1 means wait indefinitely
                 let poll_ret = unsafe { poll(fds.as_mut_ptr(), fds.len() as u64, -1) };
 
@@ -459,7 +393,6 @@ pub fn spawn_netlink_thread(
                     break;
                 }
 
-                // Check for errors on either FD first
                 if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0 {
                     error!(
                         event.name = "interface_controller.netlink.socket_error",
@@ -477,7 +410,6 @@ pub fn spawn_netlink_thread(
                     break;
                 }
 
-                // Check if shutdown was signaled
                 if (fds[1].revents & POLLIN) != 0 {
                     info!(
                         event.name = "interface_controller.netlink.shutdown_signaled",
@@ -488,9 +420,7 @@ pub fn spawn_netlink_thread(
                     break;
                 }
 
-                // Check if socket has data ready
                 if (fds[0].revents & POLLIN) == 0 {
-                    // No data on socket, loop again
                     continue;
                 }
 
@@ -521,13 +451,6 @@ pub fn spawn_netlink_thread(
                     break;
                 }
 
-                trace!(
-                    event.name = "interface_controller.netlink.data_received",
-                    bytes = n,
-                    "received netlink data"
-                );
-
-                // Parse all messages in buffer (may contain multiple netlink messages)
                 let mut offset = 0;
                 let mut messages_in_batch = 0;
                 let mut skipped_in_batch = 0;
@@ -572,7 +495,7 @@ pub fn spawn_netlink_thread(
                                                         link_msg.header.flags.contains(LinkFlags::Up);
 
                                                     if is_up {
-                                                        trace!(
+                                                        debug!(
                                                             event.name = "interface_controller.netlink.interface_up",
                                                             network.interface.name = %if_name,
                                                             "interface came up, sending event to controller"
@@ -590,7 +513,7 @@ pub fn spawn_netlink_thread(
                                                             return;
                                                         }
                                                     } else {
-                                                        trace!(
+                                                        debug!(
                                                             event.name = "interface_controller.netlink.interface_down_newlink",
                                                             network.interface.name = %if_name,
                                                             "interface reported without UP flag"
@@ -609,7 +532,7 @@ pub fn spawn_netlink_thread(
                                                         }
                                                     })
                                                 {
-                                                    trace!(
+                                                    debug!(
                                                         event.name = "interface_controller.netlink.interface_down",
                                                         network.interface.name = %if_name,
                                                         "interface went down, sending event to controller"
@@ -643,20 +566,12 @@ pub fn spawn_netlink_thread(
                                 }
                             }
                         }
-                        Err(e) => {
-                            trace!(
-                                event.name = "interface_controller.netlink.buffer_check_failed",
-                                error = ?e,
-                                offset = offset,
-                                remaining = n - offset,
-                                "not enough bytes for complete message, ending parse loop"
-                            );
+                        Err(_) => {
                             break;
                         }
                     }
                 }
 
-                // Update counters
                 total_messages_received += messages_in_batch;
                 total_messages_skipped += skipped_in_batch;
 
@@ -679,23 +594,8 @@ pub fn spawn_netlink_thread(
         .map(|handle| (handle, shutdown_fd))
 }
 
-/// Wait for controller thread to enter host namespace and become ready.
-///
-/// This function blocks until the controller thread sends the `Ready` event,
-/// indicating it has successfully entered the host network namespace and is
-/// ready to receive commands.
-///
-/// Timeout is controlled by `CONTROLLER_READY_TIMEOUT_SECS` constant.
-///
-/// ## Arguments
-///
-/// - `event_rx` - Receiver for controller events
-/// - `cmd_tx` - Sender for commands (used to send shutdown on timeout)
-///
-/// ## Returns
-///
-/// - `Ok(())` if controller becomes ready within timeout
-/// - `Err(MerminError)` if timeout occurs or unexpected event received
+/// Block until the controller thread sends `Ready`, indicating it has entered
+/// the host network namespace. Sends `Shutdown` and returns an error on timeout.
 pub fn wait_for_controller_ready(
     event_rx: &Receiver<ControllerEvent>,
     cmd_tx: &Sender<ControllerCommand>,
@@ -730,23 +630,9 @@ pub fn wait_for_controller_ready(
     }
 }
 
-/// Wait for controller initialization to complete.
-///
-/// This function blocks until the controller thread sends the `Initialized` event,
-/// draining intermediate events like `InterfaceAttached` and `AttachmentFailed` that
-/// may arrive during the initialization process.
-///
-/// Timeout is controlled by `CONTROLLER_INIT_TIMEOUT_SECS` constant.
-///
-/// ## Arguments
-///
-/// - `event_rx` - Receiver for controller events
-/// - `cmd_tx` - Sender for commands (used to send shutdown on timeout)
-///
-/// ## Returns
-///
-/// - `Ok(interface_count)` if initialization completes successfully
-/// - `Err(MerminError)` if timeout occurs or unexpected event received
+/// Block until the controller thread sends `Initialized`, draining intermediate
+/// `InterfaceAttached`/`AttachmentFailed` events. Sends `Shutdown` and returns
+/// an error on timeout.
 pub fn wait_for_controller_initialized(
     event_rx: &Receiver<ControllerEvent>,
     cmd_tx: &Sender<ControllerCommand>,
@@ -757,9 +643,6 @@ pub fn wait_for_controller_initialized(
         "waiting for initialization to complete"
     );
 
-    // Loop to drain intermediate events (InterfaceAttached, AttachmentFailed) until we receive
-    // the final Initialized event. During initialization, the controller sends an event for each
-    // interface attachment (success or failure), which may arrive before the Initialized event.
     let init_deadline =
         time::Instant::now() + time::Duration::from_secs(CONTROLLER_INIT_TIMEOUT_SECS);
 
@@ -816,18 +699,7 @@ pub fn wait_for_controller_initialized(
     }
 }
 
-/// Spawn background task to handle controller events for observability.
-///
-/// This creates a blocking thread that continuously receives and logs controller events.
-/// The task will exit when the controller sends `ShutdownComplete` or the channel closes.
-///
-/// ## Arguments
-///
-/// - `event_rx` - Receiver for controller events
-///
-/// ## Returns
-///
-/// - `JoinHandle` for the spawned thread
+/// Spawn background thread that logs controller events until `ShutdownComplete`.
 pub fn spawn_controller_event_handler(
     event_rx: Receiver<ControllerEvent>,
 ) -> Result<thread::JoinHandle<()>, std::io::Error> {
@@ -858,36 +730,15 @@ pub fn spawn_controller_event_handler(
                             "interface attachment failed"
                         );
                     }
-                    ControllerEvent::Ready => {
-                        // Ready event is waited for synchronously before this task spawns,
-                        // but log it if we somehow receive it here
-                        debug!(
-                            event.name = "interface_controller.unexpected_ready",
-                            "received ready event in background handler"
-                        );
-                    }
-                    ControllerEvent::Initialized { interface_count } => {
-                        // Initialization is waited for synchronously before this task spawns,
-                        // but log it if we somehow receive it here
-                        debug!(
-                            event.name = "interface_controller.unexpected_initialization",
-                            interface_count = interface_count,
-                            "received initialization event in background handler"
-                        );
-                    }
                     ControllerEvent::ShutdownComplete => {
                         info!(
                             event.name = "interface_controller.shutdown_complete",
                             "controller thread shutdown successfully"
                         );
-                        // Exit the event loop since controller is shutting down
                         break;
                     }
+                    _ => {}
                 }
             }
-            debug!(
-                event.name = "interface_controller.event_handler_stopped",
-                "controller event handler stopped"
-            );
         })
 }
