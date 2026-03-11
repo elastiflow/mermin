@@ -14,7 +14,7 @@ use axum::{
 use serde_json::json;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use crate::{health::HealthError, runtime::opts::ServerConf};
 
@@ -38,8 +38,6 @@ impl Default for HealthState {
 }
 
 pub async fn liveness_handler(State(state): State<HealthState>) -> impl IntoResponse {
-    let start = std::time::Instant::now();
-
     let ebpf_loaded = state.ebpf_loaded.load(Ordering::Relaxed);
     let startup_complete = state.startup_complete.load(Ordering::Relaxed);
 
@@ -58,16 +56,6 @@ pub async fn liveness_handler(State(state): State<HealthState>) -> impl IntoResp
         );
         StatusCode::SERVICE_UNAVAILABLE
     };
-
-    let duration = start.elapsed();
-    debug!(
-        event.name = "health.liveness.checked",
-        http.response.status_code = status_code.as_u16(),
-        duration_us = duration.as_micros(),
-        ebpf_loaded = ebpf_loaded,
-        startup_complete = startup_complete,
-        "liveness check completed"
-    );
 
     let body = Json(json!({
         "status": if is_alive { "ok" } else { "unavailable" },
@@ -117,11 +105,7 @@ pub async fn startup_handler(State(state): State<HealthState>) -> impl IntoRespo
     let status_code = if startup_complete {
         StatusCode::OK
     } else {
-        warn!(
-            event.name = "health.startup.failed",
-            startup_complete = %startup_complete,
-            "startup check failed"
-        );
+        warn!(event.name = "health.startup.failed", "startup check failed");
         StatusCode::SERVICE_UNAVAILABLE
     };
 
