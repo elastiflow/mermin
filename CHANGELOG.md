@@ -1,3 +1,14 @@
+## [v0.3.1] - 2026-03-11
+
+### Bug Fixes
+
+- Replace task managers with component manager and add hot-reload (#480)
+- **filter:** Use human-readable names for dscp, ecn, and icmp filters (#508)
+
+[v0.3.0..v0.3.1](https://github.com/elastiflow/mermin/compare/v0.3.0...v0.3.1)
+
+
+
 ## [v0.3.0] - 2026-03-02
 
 ### Features
