@@ -167,7 +167,6 @@ fn host_interface_ips() -> Vec<String> {
 
     addrs
         .filter_map(|iface| {
-            // Skip loopback interfaces and interfaces that are not up.
             if iface
                 .flags
                 .intersects(InterfaceFlags::IFF_LOOPBACK | InterfaceFlags::IFF_POINTOPOINT)
@@ -180,7 +179,6 @@ fn host_interface_ips() -> Vec<String> {
                 .as_sockaddr_in()
                 .map(|s| IpAddr::V4(s.ip()))
                 .or_else(|| sock_addr.as_sockaddr_in6().map(|s| IpAddr::V6(s.ip())))?;
-            // Exclude loopback and link-local addresses.
             if addr.is_loopback() || is_link_local(addr) {
                 return None;
             }

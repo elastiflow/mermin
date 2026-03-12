@@ -8,17 +8,6 @@ use crate::runtime::conf::conf_serde::{duration, exporter_protocol, stdout_fmt};
 
 /// Configuration options for the Mermin traces exporter.
 ///
-/// This struct defines the top-level exporter configuration, allowing the user to specify
-/// multiple exporter backends (such as OTLP and stdout) and their individual settings.
-/// Each exporter type (e.g., OTLP, stdout) is represented as an optional map, where the key
-/// is a unique exporter name (as referenced in the agent configuration), and the value is
-/// the configuration for that specific exporter instance.
-///
-/// Exporters are responsible for sending telemetry data (such as traces and metrics)
-/// to external systems. The configuration enables flexible selection and customization
-/// of exporters, supporting scenarios where multiple exporters of the same type may be
-/// defined and enabled independently.
-///
 /// # Example (YAML)
 /// ```yaml
 /// export:
@@ -28,26 +17,14 @@ use crate::runtime::conf::conf_serde::{duration, exporter_protocol, stdout_fmt};
 ///       protocol: grpc
 ///     stdout: text_indent
 /// ```
-///
-/// # Fields
-/// - `traces`: Trace exporter configuration options.
 #[derive(Debug, Default, Deserialize, Serialize, Clone)]
 pub struct ExportOptions {
-    /// Trace exporter configuration options.
     pub traces: TracesExportOptions,
 }
 
-/// Configuration options for trace exporters.
-///
-/// # Fields
-/// - `otlp`: Optional OTLP exporter configuration.
-/// - `stdout`: Optional stdout exporter format.
 #[derive(Debug, Default, Deserialize, Serialize, Clone)]
 pub struct TracesExportOptions {
-    /// Stdout exporter configuration options.
     pub stdout: Option<StdoutExportOptions>,
-
-    /// OTLP (OpenTelemetry Protocol) exporter configurations.
     pub otlp: Option<OtlpExportOptions>,
 }
 
@@ -65,13 +42,6 @@ impl Default for StdoutExportOptions {
     }
 }
 
-/// StdoutFmt enum defines the format for a stdout exporter,
-/// which outputs telemetry data (such as traces or metrics) directly to
-/// the standard output (stdout) of the running process. This is useful
-/// for debugging, development, or environments where logs are collected
-/// from container or process output.
-///
-/// Note: Only "text_indent" is supported.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StdoutFmt {
@@ -99,7 +69,7 @@ impl From<String> for StdoutFmt {
             "text_indent" => StdoutFmt::TextIndent,
             // "json" => StdoutFmt::Json,
             // "json_indent" => StdoutFmt::JsonIndent,
-            _ => StdoutFmt::TextIndent, // Default to Text
+            _ => StdoutFmt::TextIndent,
         }
     }
 }
@@ -112,16 +82,7 @@ impl std::str::FromStr for StdoutFmt {
     }
 }
 
-/// Configuration options for an individual OTLP (OpenTelemetry Protocol) exporter instance.
-///
-/// This struct defines all the necessary parameters to configure an OTLP exporter,
-/// which is responsible for sending telemetry data (such as traces and metrics)
-/// to a remote OTLP-compatible backend (e.g., OpenTelemetry Collector, observability platforms).
-///
-/// Each OTLP exporter is uniquely identified by a name in the configuration file,
-/// and its settings are provided via this struct. The fields allow for specifying
-/// the network address and port of the OTLP endpoint, as well as optional authentication
-/// and TLS (Transport Layer Security) settings.
+/// Configuration options for an individual OTLP exporter instance.
 ///
 /// # Example (HCL)
 /// ```hcl
@@ -150,19 +111,6 @@ impl std::str::FromStr for StdoutFmt {
 ///   }
 /// }
 /// ```
-///
-/// # Fields
-/// - `endpoint`: The full OTLP endpoint URL (e.g., "http://localhost:4317")
-/// - `protocol`: The OTLP protocol to use (grpc or http_binary)
-/// - `timeout`: Request timeout duration
-/// - `auth`: Optional authentication configuration (e.g., basic auth)
-/// - `headers`: Optional additional headers to be sent with each request
-/// - `tls`: Optional TLS configuration for secure communication
-/// - `max_batch_size`: Maximum number of spans to batch before export (default: 512)
-/// - `max_batch_interval`: Maximum time to wait before exporting a batch (default: 5s)
-/// - `max_queue_size`: Maximum queue size to buffer spans for delayed processing (default: 2048)
-/// - `max_concurrent_exports`: Maximum number of concurrent exports (default: 1, experimental)
-/// - `max_export_timeout`: Maximum duration to export a batch of data (default: 30s, experimental)
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct OtlpExportOptions {
     #[serde(default = "defaults::endpoint")]
@@ -187,35 +135,12 @@ pub struct OtlpExportOptions {
     pub tls: Option<TlsOptions>,
 }
 
-/// Authentication configuration for exporters.
-///
-/// This struct encapsulates the authentication options that can be used when connecting
-/// to telemetry backends (such as OTLP collectors). It is designed to be extensible for
-/// supporting multiple authentication mechanisms. Currently, it supports basic authentication
-/// via the `basic` field, which allows specifying a username and password (with support for
-/// environment variable substitution).
-///
-/// # Fields
-/// - `basic`: Optional basic authentication configuration. If present, the exporter will use
-///   HTTP Basic Auth with the provided credentials.
-///
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AuthOptions {
     pub basic: Option<BasicAuthOptions>,
     pub bearer: Option<String>, // TODO: Add support for api_key, oauth2, mtls, etc. - ENG-120
 }
 
-/// Configuration for HTTP Basic Authentication credentials.
-///
-/// This struct defines the username and password used for HTTP Basic Auth
-/// when connecting to telemetry backends (such as OTLP exporters).
-/// The fields support direct string values or, optionally, environment variable
-/// substitution (e.g., `env("MY_PASSWORD_ENV_VAR")`) for secure secret management.
-///
-/// # Fields
-/// - `user`: The username for authentication. Can be a plain string or an environment variable reference.
-/// - `pass`: The password for authentication. Can be a plain string or an environment variable reference.
-///
 /// # Example (YAML)
 /// ```yaml
 /// auth:
@@ -226,98 +151,53 @@ pub struct AuthOptions {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct BasicAuthOptions {
     pub user: String,
-    pub pass: String, // TODO: Support environment variable substitution like env("USER_SPECIFIED_ENV_VAR_TRITON_PASS") - ENG-120
+    pub pass: String, // TODO: Support environment variable substitution - ENG-120
 }
 
-/// TLS (Transport Layer Security) configuration for secure exporter connections.
+/// TLS configuration for secure exporter connections.
 ///
-/// This struct defines the options for enabling and customizing TLS when connecting
-/// to telemetry backends (such as OTLP collectors).
+/// ## Automatic TLS behavior
 ///
-/// # Automatic TLS Behavior
+/// - **https:// endpoints**: TLS is automatically enabled using system root certificates.
+/// - **http:// endpoints**: No TLS unless explicitly configured via this struct.
 ///
-/// - **https:// endpoints**: TLS is automatically enabled using system root certificates
-///   when an endpoint uses the `https://` scheme, even without an explicit `tls` configuration.
-/// - **http:// endpoints**: No TLS is used unless explicitly configured via this struct.
+/// ## Certificate verification
 ///
-/// # Certificate Verification
+/// - **Custom CA**: Provide `ca_cert` to use a custom CA instead of system roots (for private CAs or self-signed certs).
+/// - **Mutual TLS**: Provide both `client_cert` and `client_key` for mTLS authentication.
+/// - **Skip verification**: Set `insecure_skip_verify: true` to disable certificate verification entirely.
 ///
-/// By default, TLS connections validate server certificates against system root certificates.
-/// You can customize this behavior:
-///
-/// - **Custom CA**: Provide a `ca_cert` path to use a custom certificate authority
-///   instead of system root certificates (useful for private CAs and self-signed certificates).
-/// - **Mutual TLS**: Provide both `client_cert` and `client_key` for mutual TLS authentication.
-/// - **Skip Verification**: Set `insecure_skip_verify: true` to disable certificate verification entirely.
-///
-/// # Self-Signed Certificates
-///
-/// For self-signed certificates in production, use the `ca_cert` option to specify the self-signed
-/// certificate or the CA that signed it. This is the recommended secure approach.
-///
-/// For development/testing environments where you want to skip verification entirely,
-/// you can use `insecure_skip_verify: true`, but be aware this makes your connection vulnerable to
-/// man-in-the-middle attacks.
-///
-/// # Insecure Skip Verify Mode
-///
-/// WARNING: Setting `insecure_skip_verify: true` disables all certificate verification and should ONLY
-/// be used for development and testing purposes. In production, use the `ca_cert` option instead.
-///
-/// When insecure skip verify mode is enabled:
-/// - TLS is still used for encryption
-/// - Server certificates are not validated
-/// - Hostname verification is skipped
-/// - Any certificate will be accepted (including invalid, expired, or self-signed certificates)
-/// - The connection is vulnerable to man-in-the-middle attacks
-/// - Cannot be combined with client certificates (mutual TLS)
-/// - A warning will be logged each time a connection is established
-///
-/// # Fields
-/// - `insecure_skip_verify`: Skip certificate and hostname verification while maintaining TLS encryption. WARNING: Only use for development/testing!
-/// - `ca_cert`: Optional path to a custom CA certificate file (overrides system root certificates).
-/// - `client_cert`: Optional path to a client certificate file for mutual TLS.
-/// - `client_key`: Optional path to a client private key file for mutual TLS.
+/// WARNING: `insecure_skip_verify: true` disables all certificate verification and should ONLY be used
+/// for development and testing. It cannot be combined with client certificates.
 ///
 /// # Examples
 ///
-/// ## Example 1: Custom CA for self-signed certificates (RECOMMENDED)
+/// ## Custom CA (recommended for self-signed certs)
 /// ```yaml
 /// tls:
-///   insecure_skip_verify: false
-///   ca_cert: /etc/certs/self-signed-ca.crt  # Add your self-signed cert here
-///   client_cert: /etc/certs/client.crt      # Optional: for mutual TLS
-///   client_key: /etc/certs/client.key       # Optional: for mutual TLS
+///   ca_cert: /etc/certs/self-signed-ca.crt
+///   client_cert: /etc/certs/client.crt  # optional, for mTLS
+///   client_key: /etc/certs/client.key   # optional, for mTLS
 /// ```
 ///
-/// ## Example 2: Skip verification for development/testing (NOT for production!)
+/// ## Skip verification (development only)
 /// ```yaml
 /// tls:
-///   insecure_skip_verify: true  # Skip all certificate verification
+///   insecure_skip_verify: true
 /// ```
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct TlsOptions {
-    /// Skip certificate and hostname verification while maintaining TLS encryption.
-    /// WARNING: Only use for development/testing! Makes connections vulnerable to MITM attacks.
-    /// Cannot be combined with client certificates.
+    /// Skip certificate and hostname verification. WARNING: development/testing only; vulnerable to MITM.
     pub insecure_skip_verify: Option<bool>,
-    /// Path to the CA certificate file for server verification.
-    /// When provided, this overrides system root certificates.
-    /// Use this for self-signed certificates by specifying your self-signed cert or CA.
+    /// Path to a CA certificate file. Overrides system root certificates.
     pub ca_cert: Option<String>,
-    /// Path to the client certificate file for mutual TLS.
-    /// Must be provided together with client_key.
-    /// Cannot be used with insecure_skip_verify mode.
+    /// Path to a client certificate file for mutual TLS. Must be paired with `client_key`.
     pub client_cert: Option<String>,
-    /// Path to the client private key file for mutual TLS.
-    /// Must be provided together with client_cert.
-    /// Cannot be used with insecure_skip_verify mode.
+    /// Path to a client private key file for mutual TLS. Must be paired with `client_cert`.
     pub client_key: Option<String>,
 }
 
 impl AuthOptions {
-    // TODO: Implement authentication header generation for OTLP exporters - ENG-120
-    // This should create appropriate headers based on the auth configuration
     pub fn generate_auth_headers(&self) -> Result<HashMap<String, String>, String> {
         let mut headers = HashMap::new();
 
@@ -433,12 +313,10 @@ mod tests {
 
     #[test]
     fn test_exporter_protocol_serialization() {
-        // Test Grpc variant
         let grpc = ExporterProtocol::Grpc;
         let serialized = serde_json::to_string(&grpc).unwrap();
         assert_eq!(serialized, "\"grpc\"");
 
-        // Test HttpBinary variant
         let http_binary = ExporterProtocol::HttpBinary;
         let serialized = serde_json::to_string(&http_binary).unwrap();
         assert_eq!(serialized, "\"http_binary\"");
@@ -446,19 +324,15 @@ mod tests {
 
     #[test]
     fn test_exporter_protocol_deserialization() {
-        // Test grpc string
         let deserialized: ExporterProtocol = serde_json::from_str("\"grpc\"").unwrap();
         assert!(matches!(deserialized, ExporterProtocol::Grpc));
 
-        // Test http_binary string
         let deserialized: ExporterProtocol = serde_json::from_str("\"http_binary\"").unwrap();
         assert!(matches!(deserialized, ExporterProtocol::HttpBinary));
 
-        // Test case insensitive
         let deserialized: ExporterProtocol = serde_json::from_str("\"GRPC\"").unwrap();
         assert!(matches!(deserialized, ExporterProtocol::Grpc));
 
-        // Test invalid value defaults to Grpc
         let deserialized: ExporterProtocol = serde_json::from_str("\"invalid\"").unwrap();
         assert!(matches!(deserialized, ExporterProtocol::Grpc));
     }
