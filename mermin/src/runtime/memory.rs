@@ -94,12 +94,10 @@ impl ShrinkPolicy {
     /// assert_eq!(policy.should_shrink(100_000, 90_000), false);
     /// ```
     pub const fn should_shrink(&self, capacity: usize, entries: usize) -> bool {
-        // Check minimum capacity threshold
         if capacity <= self.min_capacity {
             return false;
         }
 
-        // Check waste ratio: capacity > entries * (numerator / denominator)
         // Use integer math to avoid float: capacity * denominator > entries * numerator
         capacity * self.waste_ratio_denominator >= entries * self.waste_ratio_numerator
     }

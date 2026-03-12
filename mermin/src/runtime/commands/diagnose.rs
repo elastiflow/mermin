@@ -8,7 +8,6 @@ use crate::{
     runtime::{cli::DiagnoseCommand, commands},
 };
 
-/// Execute a diagnose subcommand
 pub async fn execute(command: &DiagnoseCommand) -> Result<()> {
     match command {
         DiagnoseCommand::Bpf {

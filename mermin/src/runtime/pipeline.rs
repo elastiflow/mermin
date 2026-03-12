@@ -194,7 +194,6 @@ impl Pipeline {
         // signal because it listens on a crossbeam channel, not the broadcast.
         let _ = self.cmd_tx.send(ControllerCommand::Shutdown);
 
-        // Shut down all components (broadcast + reverse-order join).
         let shutdown_result = self.manager.shutdown(component_config).await;
 
         // Collect eBPF resources. The sends happen inside each component body as

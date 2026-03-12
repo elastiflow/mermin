@@ -10,7 +10,7 @@
 
 use std::fs;
 
-use tracing::{debug, warn};
+use tracing::warn;
 
 use crate::error::{MerminError, Result};
 
@@ -58,7 +58,6 @@ fn has_capability(cap: Capability) -> Result<bool> {
 
     for line in status.lines() {
         if let Some(caps_hex) = line.strip_prefix("CapEff:").map(str::trim) {
-            // Parse the hex string as u64 (capabilities bitmask)
             let caps = u64::from_str_radix(caps_hex, 16).map_err(|e| {
                 MerminError::internal(format!("failed to parse capability mask '{caps_hex}': {e}"))
             })?;
@@ -88,23 +87,10 @@ pub fn check_required_capabilities() -> Result<()> {
     let mut missing_caps = Vec::new();
 
     for cap in &required_caps {
-        debug!(
-            event.name = "capabilities.checking",
-            capability = cap.name(),
-            "checking for required capability"
-        );
-
         match has_capability(*cap) {
-            Ok(true) => {
-                debug!(
-                    event.name = "capabilities.present",
-                    capability = cap.name(),
-                    "capability is present"
-                );
-            }
+            Ok(true) => {}
             Ok(false) => {
-                // CAP_PERFMON and CAP_BPF were added in kernel 5.8
-                // On older kernels, CAP_SYS_ADMIN provides similar functionality
+                // CAP_PERFMON and CAP_BPF were added in kernel 5.8; CAP_SYS_ADMIN covers them on older kernels.
                 if matches!(cap, Capability::Perfmon | Capability::Bpf) {
                     warn!(
                         event.name = "capabilities.missing_fallback",
@@ -157,10 +143,7 @@ mod tests {
     #[test]
     #[ignore] // Only works when running with appropriate capabilities
     fn test_check_capabilities() {
-        // This test will fail if not running with required capabilities
-        let result = check_required_capabilities();
-        // Just verify it doesn't panic - actual result depends on execution environment
-        let _ = result;
+        let _ = check_required_capabilities();
     }
 
     #[test]

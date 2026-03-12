@@ -38,14 +38,7 @@ impl Default for ServerConf {
 
 #[derive(Default, Debug, Deserialize, Serialize, Clone)]
 pub struct InternalTraceOptions {
-    /// The level of span events to record. The current default is `FmtSpan::FULL`,
-    /// which records all events (enter, exit, close) for all spans. The level can also be
-    /// one of the following:
-    /// - `SpanFmt::Full`: Records all span events (enter, exit, close).
-    /// - `FmtSpan::ENTER`: Only span enter events are recorded.
-    /// - `FmtSpan::EXIT`: Only span exit events are recorded.
-    /// - `FmtSpan::CLOSE`: Only span close events are recorded.
-    /// - `FmtSpan::ACTIVE`: Only span events for spans that are active (i.e., not closed) are recorded.
+    /// The level of span events to record.
     pub span_fmt: SpanFmt,
 
     /// Stdout exporter configuration options.
@@ -71,10 +64,7 @@ impl From<SpanFmt> for tracing_subscriber::fmt::format::FmtSpan {
 }
 
 impl From<String> for SpanFmt {
-    fn from(s: String) -> Self {
-        match s.to_lowercase().as_str() {
-            "plain" => SpanFmt::Full,
-            _ => SpanFmt::Full,
-        }
+    fn from(_: String) -> Self {
+        SpanFmt::Full
     }
 }

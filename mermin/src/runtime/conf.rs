@@ -69,28 +69,14 @@ fn env_func(args: FuncArgs) -> Result<Value, String> {
     };
 
     match std::env::var(var_name) {
-        Ok(value) => {
-            debug!(event.name = "hcl.func.env.call", variable.name = %var_name);
-            Ok(Value::String(value))
-        }
+        Ok(value) => Ok(Value::String(value)),
         Err(_) => {
-            if args.len() == 2 {
-                warn!(
-                    event.name = "hcl.func.env.fallback",
-                    variable.name = %var_name,
-                    fallback.reason = "environment_variable_not_set",
-                    fallback.value = %default_value,
-                    "environment variable not found, using provided default value"
-                );
-            } else {
-                warn!(
-                    event.name = "hcl.func.env.fallback",
-                    variable.name = %var_name,
-                    fallback.reason = "environment_variable_not_set",
-                    fallback.value = "",
-                    "environment variable not found, using empty string as default"
-                );
-            }
+            warn!(
+                event.name = "hcl.func.env.fallback",
+                variable.name = %var_name,
+                fallback.value = %default_value,
+                "environment variable not set"
+            );
             Ok(Value::String(default_value))
         }
     }
@@ -99,7 +85,6 @@ fn env_func(args: FuncArgs) -> Result<Value, String> {
 impl Format for Hcl {
     type Error = hcl::Error;
 
-    // Constant to name the format in error messages.
     const NAME: &'static str = "HCL";
 
     fn from_str<T: serde::de::DeserializeOwned>(string: &str) -> Result<T, Self::Error> {
@@ -227,7 +212,6 @@ impl Conf {
         };
         conf.config_path = config_path_to_store;
 
-        // Validate discovery.instrument configuration
         conf.discovery
             .instrument
             .validate()
@@ -277,7 +261,6 @@ impl Conf {
         };
         conf.config_path = self.config_path.clone();
 
-        // Validate discovery.instrument configuration
         conf.discovery
             .instrument
             .validate()
@@ -326,7 +309,6 @@ impl Conf {
             "configuration loaded"
         );
 
-        // Filter configuration
         if let Some(ref filters) = self.filter {
             for (filter_name, filter_opts) in filters {
                 debug!(
@@ -403,7 +385,6 @@ impl Conf {
             );
         }
 
-        // Discovery configuration
         debug!(
             event.name = "config.discovery",
             interfaces = ?self.discovery.instrument.interfaces,
@@ -413,7 +394,6 @@ impl Conf {
             "discovery configuration"
         );
 
-        // Parser configuration
         debug!(
             event.name = "config.parser",
             geneve.port = self.parser.geneve_port,
@@ -422,7 +402,6 @@ impl Conf {
             "parser configuration"
         );
 
-        // Attributes configuration
         if let Some(ref attributes) = self.attributes {
             debug!(
                 event.name = "config.attributes",
@@ -585,28 +564,19 @@ pub mod defaults {
 /// - `ConfigError::InvalidConfigPath` - If the path points to a directory.
 /// - `ConfigError::InvalidExtension` - If the file extension is not `yaml`, `yml`, or `hcl`.
 pub fn validate_config_path(path: &Path) -> Result<(), ConfError> {
-    // 1. First, check that the path points to a file. The `is_file()` method
-    // conveniently returns false if the path doesn't exist or if it's not a file.
     if !path.is_file() {
-        // If it's not a file, distinguish between "doesn't exist" and "is a directory".
         if path.exists() {
-            // Path exists but is not a file (it's a directory).
             return Err(ConfError::InvalidConfigPath(
                 path.to_string_lossy().into_owned(),
             ));
         } else {
-            // Path does not exist at all.
             return Err(ConfError::NoConfigFile);
         }
     }
 
-    // 2. If it's a file, check the extension.
     match path.extension().and_then(|s| s.to_str()) {
-        // Allowed extensions
         Some("yaml") | Some("yml") | Some("hcl") => Ok(()),
-        // An unsupported extension was found
         Some(ext) => Err(ConfError::InvalidExtension(ext.to_string())),
-        // No extension was found
         None => Err(ConfError::InvalidExtension("none".to_string())),
     }
 }
@@ -977,10 +947,7 @@ impl PipelineOptions {
         let flow_event_size = size_of::<FlowEvent>() as u64;
         let flow_stats_size = size_of::<FlowStats>() as u64;
 
-        // FlowSpan with baseline info
         let span_undecorated_size = size_of::<FlowSpan>() as u64 + 256;
-
-        // Flow span with k8s metadata
         let span_decorated_size = size_of::<FlowSpan>() as u64 + 2048;
 
         let capture_bytes = {
@@ -1411,7 +1378,6 @@ discovery:
             );
             assert_eq!(cfg.config_path, Some(path.parse().unwrap()));
 
-            // Update the config file
             jail.create_file(
                 path,
                 r#"
@@ -1470,11 +1436,9 @@ internal:
                 "#,
             )?;
 
-            // The rest of the test logic remains the same
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let cfg = Conf::new(cli).expect("config should load from yaml file");
 
-            // Assert that all the custom values from the file were loaded correctly
             assert_eq!(
                 cfg.discovery.instrument.interfaces,
                 Vec::from(["eth1".to_string()])
@@ -1588,7 +1552,6 @@ log_level = "debug"
         })
     }
 
-    // MODIFICATION: Corrected the assertion to match the actual error flow.
     #[test]
     fn hcl_parse_error_handling() {
         Jail::expect_with(|jail| {
@@ -1650,7 +1613,6 @@ internal {
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let cfg = Conf::new(cli).expect("config should load from HCL file");
 
-            // Assert that all the custom values from the file were loaded correctly
             assert_eq!(
                 cfg.discovery.instrument.interfaces,
                 Vec::from(["eth1".to_string()])
@@ -1951,7 +1913,6 @@ auto_reload: false
             ]);
             let cfg = Conf::new(cli).expect("config should load");
 
-            // CLI args should override file config
             assert_eq!(cfg.log_level, Level::WARN);
             assert_eq!(cfg.auto_reload, true);
 
@@ -1977,10 +1938,8 @@ discovery:
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let cfg = Conf::new(cli).expect("config should load");
 
-            // Overridden value
             assert_eq!(cfg.discovery.instrument.interfaces, vec!["custom0"]);
 
-            // Default values should be preserved
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.auto_reload, false);
             assert_eq!(cfg.shutdown_timeout, Duration::from_secs(28));
@@ -2009,7 +1968,6 @@ discovery:
             assert_eq!(cfg.span.udp_timeout, Duration::from_secs(60));
             assert_eq!(cfg.span.trace_id_timeout, Duration::from_secs(86400));
             assert!(cfg.export.traces.stdout.is_none());
-            // OTLP should not be configured unless explicitly set
             assert!(cfg.export.traces.otlp.is_none());
 
             Ok(())
@@ -2165,8 +2123,6 @@ shutdown_timeout: 2min
 
     #[test]
     fn minimal_config_uses_defaults() {
-        // Test that when loading from a minimal config file,
-        // unspecified fields get their default values
         Jail::expect_with(|jail| {
             let path = "minimal_config.yaml";
             jail.create_file(
@@ -2183,8 +2139,6 @@ discovery:
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let cfg = Conf::new(cli).expect("config should load");
 
-            // Verify that defaults are applied for unspecified fields
-            // Note: export.traces.otlp is None by default (not configured unless explicitly set)
             assert!(
                 cfg.export.traces.otlp.is_none(),
                 "export OTLP should not be configured unless explicitly set in config"
@@ -2194,7 +2148,6 @@ discovery:
                 "export stdout should not be enabled unless explicitly set"
             );
 
-            // Other defaults should be applied
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.pipeline.flow_producer.worker_queue_capacity, 1024);
             assert_eq!(cfg.pipeline.flow_producer.flow_span_queue_capacity, 4096);
@@ -2203,7 +2156,6 @@ discovery:
                 8192
             );
 
-            // Verify all span defaults
             assert_eq!(cfg.span.max_record_interval, Duration::from_secs(60));
             assert_eq!(cfg.span.generic_timeout, Duration::from_secs(30));
             assert_eq!(cfg.span.icmp_timeout, Duration::from_secs(10));
@@ -2219,7 +2171,6 @@ discovery:
 
     #[test]
     fn export_both_stdout_and_otlp_can_be_set() {
-        // Both exporters can be configured simultaneously if desired
         Jail::expect_with(|jail| {
             let path = "export_both.yaml";
             jail.create_file(
@@ -2249,7 +2200,6 @@ export:
 
     #[test]
     fn export_empty_block_has_no_exporters() {
-        // Empty export.traces block means no exporters configured
         Jail::expect_with(|jail| {
             let path = "export_empty.yaml";
             jail.create_file(
@@ -2263,7 +2213,6 @@ export:
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let cfg = Conf::new(cli).expect("config should load");
 
-            // Empty export block should result in no exporters configured
             assert!(cfg.export.traces.otlp.is_none());
             assert!(cfg.export.traces.stdout.is_none());
 
@@ -2275,7 +2224,6 @@ export:
     fn default_internal_options_has_expected_values() {
         let internal = InternalOptions::default();
 
-        // Check default trace options
         assert!(
             matches!(
                 internal.traces.span_fmt,
@@ -2455,7 +2403,6 @@ export:
 
     #[test]
     fn export_stdout_empty_format_rejected() {
-        // Empty string for stdout format should be rejected
         Jail::expect_with(|jail| {
             let path = "export_stdout_empty.yaml";
             jail.create_file(
@@ -3067,7 +3014,6 @@ discovery:
 
     #[test]
     fn test_tc_priority_validation_safe_range() {
-        // Test that values in safe range don't error
         for priority in [30, 50, 100, 1000, 32767] {
             let conf = InstrumentOptions {
                 tc_priority: priority,
@@ -3093,7 +3039,6 @@ discovery:
 
     #[test]
     fn test_tc_priority_boundary_values() {
-        // Test edge cases around the boundaries
         let valid_priorities = [1, 2, 29, 30, 31, 49, 50, 51, 32766, 32767];
         for priority in valid_priorities {
             let conf = InstrumentOptions {
@@ -3107,7 +3052,6 @@ discovery:
             );
         }
 
-        // Test invalid values
         let invalid_priorities = [0u16, 32768u16, 65535u16];
         for priority in invalid_priorities {
             let conf = InstrumentOptions {
@@ -3124,7 +3068,6 @@ discovery:
 
     #[test]
     fn test_trace_id_timeout_duration_formats() {
-        // Test various duration formats for trace_id_timeout
         Jail::expect_with(|jail| {
             let path = "trace_timeout.yaml";
             jail.create_file(
@@ -3180,7 +3123,6 @@ span {
 
     #[test]
     fn test_trace_id_timeout_defaults_when_not_specified() {
-        // Verify trace_id_timeout gets default value when not in config
         Jail::expect_with(|jail| {
             let path = "minimal_span.yaml";
             jail.create_file(
@@ -3194,9 +3136,7 @@ span:
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let cfg = Conf::new(cli).expect("config should load");
 
-            // Should use default 24h even though not specified
             assert_eq!(cfg.span.trace_id_timeout, Duration::from_secs(86400));
-            // But custom tcp_timeout should be applied
             assert_eq!(cfg.span.tcp_timeout, Duration::from_secs(25));
 
             Ok(())
@@ -3242,7 +3182,6 @@ internal {
             let cli = Cli::parse_from(["mermin", "--config", path.into()]);
             let cfg = Conf::new(cli).expect("config should load with env function");
 
-            // Verify env function results
             assert_eq!(cfg.discovery.instrument.interfaces, vec!["test_value"]);
             assert_eq!(cfg.log_level, Level::INFO);
             assert_eq!(cfg.auto_reload, true);

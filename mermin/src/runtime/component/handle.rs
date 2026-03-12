@@ -10,7 +10,6 @@ use tokio::task::JoinHandle;
 use tracing::error;
 
 /// RAII wrapper for eventfd used to signal shutdown to OS threads.
-/// Automatically closes the eventfd when dropped.
 pub struct ShutdownEventFd(RawFd);
 
 impl ShutdownEventFd {
@@ -74,7 +73,6 @@ pub enum Handle {
 }
 
 impl Handle {
-    /// Create a handle for an async tokio task.
     pub fn async_task(name: impl Into<String>, join: JoinHandle<()>) -> Self {
         Handle::Async {
             name: name.into(),
@@ -82,7 +80,6 @@ impl Handle {
         }
     }
 
-    /// Create a handle for an OS thread without a dedicated shutdown signal.
     pub fn thread(name: impl Into<String>, join: thread::JoinHandle<()>) -> Self {
         Handle::Thread {
             name: name.into(),
@@ -91,7 +88,6 @@ impl Handle {
         }
     }
 
-    /// Create a handle for an OS thread with an eventfd-based shutdown signal.
     pub fn thread_with_shutdown(
         name: impl Into<String>,
         join: thread::JoinHandle<()>,
@@ -104,7 +100,6 @@ impl Handle {
         }
     }
 
-    /// Returns the name of this component.
     pub fn name(&self) -> &str {
         match self {
             Handle::Async { name, .. } => name,

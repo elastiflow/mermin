@@ -38,11 +38,6 @@ pub async fn run_log_consumer(
     loop {
         tokio::select! {
             _ = shutdown_rx.recv() => {
-                trace!(
-                    event.name = "task.stopped",
-                    task.name = "ebpf_log_consumer",
-                    "ebpf log consumer stopping gracefully"
-                );
                 break;
             }
             result = async_fd.readable() => {
@@ -80,13 +75,11 @@ pub async fn run_log_consumer(
     let _ = log_events_return.send(log_events);
 }
 
-/// Convert a LogEntry to a tracing event at the appropriate log level.
 fn emit_log_entry(entry: &LogEntry) {
     let error_str = LogErrorCode::try_from(entry.error_code)
         .map(|e| e.as_str())
         .unwrap_or("unknown");
 
-    // Direction: 0=Egress, 1=Ingress (matches Direction enum discriminants)
     let direction_str = if entry.direction == 0 {
         "egress"
     } else {

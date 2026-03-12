@@ -30,16 +30,12 @@ use tracing::{error, info, trace, warn};
 /// those bursts into a single reload.
 const FILE_CHANGE_DEBOUNCE_MS: u64 = 1000;
 
-/// The source that triggered a configuration reload.
 #[derive(Debug, Clone)]
 pub enum ReloadTrigger {
-    /// A SIGHUP signal was received.
     Sighup,
-    /// The config file at the given path was modified.
     FileChanged(PathBuf),
 }
 
-/// Watches for configuration reload triggers (SIGHUP and/or file changes).
 pub struct ConfigWatcher {
     rx: mpsc::Receiver<ReloadTrigger>,
     // Hold the watcher so it isn't dropped (which would stop watching)
@@ -47,19 +43,7 @@ pub struct ConfigWatcher {
 }
 
 impl ConfigWatcher {
-    /// Create a new `ConfigWatcher`.
-    ///
-    /// Must be called from within an active Tokio runtime (e.g. inside an async
-    /// context that runs on the main runtime), since it spawns a task for SIGHUP.
-    ///
-    /// - Always listens for SIGHUP on Unix.
-    /// - If `config_path` is `Some`, also watches the config file for changes
-    ///   via the `notify` crate (watches the parent directory for reliability).
-    ///
-    /// On non-Unix platforms only file watching is available (no SIGHUP).
     pub fn new(config_path: Option<&Path>) -> Result<Self, Box<dyn std::error::Error>> {
-        // Capacity is small, we only need to buffer a few triggers before
-        // the main loop processes them.
         let (tx, rx) = mpsc::channel::<ReloadTrigger>(4);
 
         #[cfg(unix)]
@@ -79,7 +63,6 @@ impl ConfigWatcher {
                 };
                 loop {
                     if sighup.recv().await.is_none() {
-                        // Runtime is shutting down; stop the listener.
                         break;
                     }
                     info!(
@@ -87,7 +70,6 @@ impl ConfigWatcher {
                         "received sighup, triggering config reload"
                     );
                     if sighup_tx.send(ReloadTrigger::Sighup).await.is_err() {
-                        // Receiver dropped, stop listening
                         break;
                     }
                 }
@@ -113,18 +95,10 @@ impl ConfigWatcher {
         })
     }
 
-    /// Wait for the next reload trigger.
     pub async fn next(&mut self) -> Option<ReloadTrigger> {
         self.rx.recv().await
     }
 
-    /// Start a file watcher on the parent directory of the config file.
-    ///
-    /// The `notify` crate works more reliably when watching directories
-    /// rather than individual files (editors often delete + recreate files).
-    ///
-    /// A debounce window of [`FILE_CHANGE_DEBOUNCE_MS`] prevents duplicate
-    /// triggers from editor save sequences (write temp + rename).
     fn start_file_watcher(
         config_path: &Path,
         tx: mpsc::Sender<ReloadTrigger>,
@@ -139,73 +113,65 @@ impl ConfigWatcher {
             .ok_or("config path has no parent directory")?
             .to_path_buf();
 
-        // Shared with the watcher callback for debouncing.
         let last_trigger_ms = Arc::new(AtomicU64::new(0));
 
         let mut watcher: notify::RecommendedWatcher = notify::recommended_watcher(
-            move |res: Result<notify::Event, notify::Error>| {
-                match res {
-                    Ok(event) => {
-                        // Only react to data modifications and file creations
-                        // (editors may delete + recreate instead of modifying in place)
-                        let is_write_event = matches!(
-                            event.kind,
-                            EventKind::Modify(ModifyKind::Data(
-                                DataChange::Any | DataChange::Content
-                            )) | EventKind::Create(_)
-                        );
-                        if !is_write_event {
-                            return;
+            move |res: Result<notify::Event, notify::Error>| match res {
+                Ok(event) => {
+                    let is_write_event = matches!(
+                        event.kind,
+                        EventKind::Modify(ModifyKind::Data(DataChange::Any | DataChange::Content))
+                            | EventKind::Create(_)
+                    );
+                    if !is_write_event {
+                        return;
+                    }
+
+                    let is_our_file = event
+                        .paths
+                        .iter()
+                        .any(|p| p.file_name().map(|f| f == config_filename).unwrap_or(false));
+                    if !is_our_file {
+                        return;
+                    }
+
+                    let now_ms = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    let prev_ms = last_trigger_ms.swap(now_ms, Ordering::Relaxed);
+                    if now_ms.saturating_sub(prev_ms) < FILE_CHANGE_DEBOUNCE_MS {
+                        return;
+                    }
+
+                    info!(
+                        event.name = "reload.file_changed",
+                        path = %config_path.display(),
+                        "config file changed, triggering reload"
+                    );
+
+                    match tx.try_send(ReloadTrigger::FileChanged(config_path.clone())) {
+                        Ok(()) => {}
+                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                            warn!(
+                                event.name = "reload.channel_closed",
+                                "reload channel closed, file watcher stopping"
+                            );
                         }
-
-                        let is_our_file = event
-                            .paths
-                            .iter()
-                            .any(|p| p.file_name().map(|f| f == config_filename).unwrap_or(false));
-                        if !is_our_file {
-                            return;
-                        }
-
-                        // Editors emit multiple rapid events per save (write temp + rename);
-                        // coalesce them so we only reload once per actual user action.
-                        let now_ms = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as u64;
-                        let prev_ms = last_trigger_ms.swap(now_ms, Ordering::Relaxed);
-                        if now_ms.saturating_sub(prev_ms) < FILE_CHANGE_DEBOUNCE_MS {
-                            return;
-                        }
-
-                        info!(
-                            event.name = "reload.file_changed",
-                            path = %config_path.display(),
-                            "config file changed, triggering reload"
-                        );
-
-                        match tx.try_send(ReloadTrigger::FileChanged(config_path.clone())) {
-                            Ok(()) => {}
-                            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                                warn!(
-                                    event.name = "reload.channel_closed",
-                                    "reload channel closed, file watcher stopping"
-                                );
-                            }
-                            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                                trace!(
-                                    event.name = "reload.channel_full",
-                                    "reload channel full, dropping file-change trigger; next change will retry"
-                                );
-                            }
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                            trace!(
+                                event.name = "reload.channel_full",
+                                "reload channel full, dropping file-change trigger; next change will retry"
+                            );
                         }
                     }
-                    Err(e) => {
-                        warn!(
-                            event.name = "reload.watcher_error",
-                            error.message = %e,
-                            "file watcher error"
-                        );
-                    }
+                }
+                Err(e) => {
+                    warn!(
+                        event.name = "reload.watcher_error",
+                        error.message = %e,
+                        "file watcher error"
+                    );
                 }
             },
         )?;
