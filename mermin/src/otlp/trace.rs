@@ -9,7 +9,7 @@ use opentelemetry_sdk::{error::OTelSdkResult, trace::SdkTracerProvider};
 
 use crate::metrics::{
     self,
-    export::{ExportStatus, ExporterName},
+    labels::{ExportStatus, ExporterName},
 };
 
 pub struct TraceExporterAdapter {

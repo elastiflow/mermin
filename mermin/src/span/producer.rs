@@ -30,9 +30,10 @@ use crate::{
     metrics::{
         self,
         ebpf::{EbpfMapName, EbpfMapOperation, EbpfMapStatus, map_entry_not_found},
-        flow::{FlowEventResult, FlowSpanProducerStatus},
-        processing::ProcessingStage,
-        userspace::{ChannelName, ChannelSendStatus},
+        labels::{
+            ChannelName, ChannelSendStatus, FlowEventResult, FlowSpanProducerStatus,
+            ProcessingStage,
+        },
     },
     packet::{
         parser::{is_tunnel, parse_packet_from_offset},
@@ -429,7 +430,9 @@ fn dispatch_flow_event(
             .inc();
     }
 
-    let _timer = metrics::registry::processing_duration_seconds()
+    let _timer = metrics::registry::PROCESSING_DURATION_SECONDS
+        .get()
+        .unwrap()
         .with_label_values(&[ProcessingStage::FlowProducerOut.as_str()])
         .start_timer();
 

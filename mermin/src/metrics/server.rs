@@ -25,6 +25,8 @@
 //! metrics::registry::FLOWS_CREATED.with_label_values(&["eth0"]).inc();
 //! ```
 
+use std::io;
+
 use axum::{
     Router,
     http::{HeaderMap, HeaderValue, StatusCode},
@@ -32,17 +34,38 @@ use axum::{
     routing::get,
 };
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
-use tracing::info;
+use tracing::{error, info};
 
-use crate::metrics::{
-    self, ebpf::update_ringbuf_size_metric, error::MetricsError, opts::MetricsOptions,
-};
+use crate::metrics::{self, ebpf::update_ringbuf_size_metric, opts::MetricsOptions};
 
-/// Handler for the `/metrics` endpoint.
-///
-/// Returns Prometheus text format metrics for all registered collectors.
+#[derive(Debug, Error)]
+pub enum MetricsError {
+    #[error("failed to bind metrics server to {address}: {source}")]
+    BindAddress {
+        address: String,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("metrics server error: {0}")]
+    ServeError(#[from] io::Error),
+
+    #[error("prometheus registry error: {0}")]
+    PrometheusError(#[from] prometheus::Error),
+}
+
+impl MetricsError {
+    pub fn bind_address(address: impl Into<String>, source: io::Error) -> Self {
+        Self::BindAddress {
+            address: address.into(),
+            source,
+        }
+    }
+}
+
 async fn metrics_handler() -> impl IntoResponse {
     match tokio::task::spawn_blocking(|| {
         update_ringbuf_size_metric();
@@ -55,8 +78,8 @@ async fn metrics_handler() -> impl IntoResponse {
     {
         Ok(Ok(body)) => (StatusCode::OK, body),
         Ok(Err(e)) => {
-            tracing::error!(
-                event.name = "metrics.encode_failed",
+            error!(
+                event.name = "metrics.server.encode_failed",
                 error.message = %e,
                 "failed to encode metrics"
             );
@@ -66,8 +89,8 @@ async fn metrics_handler() -> impl IntoResponse {
             )
         }
         Err(e) => {
-            tracing::error!(
-                event.name = "metrics.gather_failed",
+            error!(
+                event.name = "metrics.server.gather_failed",
                 error.message = %e,
                 "metrics gathering task panicked"
             );
@@ -79,10 +102,6 @@ async fn metrics_handler() -> impl IntoResponse {
     }
 }
 
-/// Handler for the `/metrics/standard` endpoint.
-///
-/// Returns Prometheus text format metrics for standard collectors only (no high-cardinality labels).
-/// Always returns 200 OK because standard metrics are always enabled.
 async fn standard_metrics_handler() -> impl IntoResponse {
     match tokio::task::spawn_blocking(|| {
         update_ringbuf_size_metric();
@@ -95,8 +114,8 @@ async fn standard_metrics_handler() -> impl IntoResponse {
     {
         Ok(Ok(body)) => (StatusCode::OK, body),
         Ok(Err(e)) => {
-            tracing::error!(
-                event.name = "metrics.standard.encode_failed",
+            error!(
+                event.name = "metrics.server.standard.encode_failed",
                 error.message = %e,
                 "failed to encode standard metrics"
             );
@@ -106,8 +125,8 @@ async fn standard_metrics_handler() -> impl IntoResponse {
             )
         }
         Err(e) => {
-            tracing::error!(
-                event.name = "metrics.standard.gather_failed",
+            error!(
+                event.name = "metrics.server.standard.gather_failed",
                 error.message = %e,
                 "standard metrics gathering task panicked"
             );
@@ -119,10 +138,6 @@ async fn standard_metrics_handler() -> impl IntoResponse {
     }
 }
 
-/// Handler for the `/metrics/debug` endpoint.
-///
-/// Returns Prometheus text format metrics for debug collectors only (high-cardinality labels).
-/// Returns 200 OK if debug metrics are enabled, 404 Not Found if disabled.
 async fn debug_metrics_handler(debug_enabled: bool) -> impl IntoResponse {
     if !debug_enabled {
         return (
@@ -141,8 +156,8 @@ async fn debug_metrics_handler(debug_enabled: bool) -> impl IntoResponse {
     {
         Ok(Ok(body)) => (StatusCode::OK, body),
         Ok(Err(e)) => {
-            tracing::error!(
-                event.name = "metrics.debug.encode_failed",
+            error!(
+                event.name = "metrics.server.debug.encode_failed",
                 error.message = %e,
                 "failed to encode debug metrics"
             );
@@ -152,8 +167,8 @@ async fn debug_metrics_handler(debug_enabled: bool) -> impl IntoResponse {
             )
         }
         Err(e) => {
-            tracing::error!(
-                event.name = "metrics.debug.gather_failed",
+            error!(
+                event.name = "metrics.server.debug.gather_failed",
                 error.message = %e,
                 "debug metrics gathering task panicked"
             );
@@ -184,9 +199,6 @@ struct MetricsSummaryResponse {
     metrics: Vec<MetricSummary>,
 }
 
-/// Handler for the `/metrics:summary` endpoint.
-///
-/// Returns a JSON summary of all available metrics with their metadata.
 async fn metrics_summary_handler(debug_enabled: bool) -> impl IntoResponse {
     match tokio::task::spawn_blocking(move || {
         let mut standard_metrics = Vec::new();
@@ -293,8 +305,8 @@ async fn metrics_summary_handler(debug_enabled: bool) -> impl IntoResponse {
                 (StatusCode::OK, headers, json)
             }
             Err(e) => {
-                tracing::error!(
-                    event.name = "metrics.summary.serialize_failed",
+                error!(
+                    event.name = "metrics.server.summary.serialize_failed",
                     error.message = %e,
                     "failed to serialize metrics summary"
                 );
@@ -306,8 +318,8 @@ async fn metrics_summary_handler(debug_enabled: bool) -> impl IntoResponse {
             }
         },
         Err(e) => {
-            tracing::error!(
-                event.name = "metrics.summary.gather_failed",
+            error!(
+                event.name = "metrics.server.summary.gather_failed",
                 error.message = %e,
                 "metrics summary gathering task panicked"
             );
@@ -320,7 +332,6 @@ async fn metrics_summary_handler(debug_enabled: bool) -> impl IntoResponse {
     }
 }
 
-/// Create the metrics HTTP router.
 fn create_metrics_router(debug_enabled: bool) -> Router {
     Router::new()
         .route("/metrics", get(metrics_handler))
@@ -360,7 +371,7 @@ fn create_metrics_router(debug_enabled: bool) -> Router {
 pub async fn start_metrics_server(opts: MetricsOptions) -> Result<(), MetricsError> {
     if !opts.enabled {
         info!(
-            event.name = "metrics.disabled",
+            event.name = "metrics.server.disabled",
             "metrics server is disabled in configuration"
         );
         return Ok(());
@@ -374,7 +385,7 @@ pub async fn start_metrics_server(opts: MetricsOptions) -> Result<(), MetricsErr
         .map_err(|e| MetricsError::bind_address(&bind_address, e))?;
 
     info!(
-        event.name = "metrics.started",
+        event.name = "metrics.server.started",
         net.listen.address = %bind_address,
         debug_metrics_enabled = opts.debug_metrics_enabled,
         "metrics server started"

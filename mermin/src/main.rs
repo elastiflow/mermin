@@ -43,12 +43,10 @@ use crate::{
     },
     k8s::{attributor::Attributor, decorator::Decorator},
     metrics::{
-        cleanup::MetricCleanupTracker,
         ebpf::{EbpfMapName, init_ringbuf_metrics},
-        k8s::K8sDecoratorStatus,
-        processing::ProcessingStage,
+        evictor::MetricsEvictor,
+        labels::{ChannelName, ChannelSendStatus, K8sDecoratorStatus, ProcessingStage},
         server::start_metrics_server,
-        userspace::{ChannelName, ChannelSendStatus},
     },
     otlp::{
         provider::{init_bootstrap_logger, init_internal_tracing, init_provider},
@@ -190,24 +188,20 @@ async fn run(cli: Cli) -> Result<()> {
         );
     }
 
-    let cleanup_tracker = if conf.internal.metrics.debug_metrics_enabled {
-        Some(MetricCleanupTracker::new(
-            conf.internal.metrics.stale_metric_ttl,
-            conf.internal.metrics.debug_metrics_enabled,
-        ))
+    let mut components = ComponentManager::new();
+
+    let metrics_evictor: Option<MetricsEvictor> = if conf.internal.metrics.debug_metrics_enabled {
+        let evictor = MetricsEvictor::new(conf.internal.metrics.stale_metric_ttl);
+        let shutdown_rx = components.subscribe();
+        let join = tokio::spawn({
+            let evictor = evictor.clone();
+            async move { evictor.run(shutdown_rx).await }
+        });
+        components.register(Handle::async_task("metrics-cleanup", join));
+        Some(evictor)
     } else {
         None
     };
-
-    let mut components = ComponentManager::new();
-
-    if let Some(tracker) = cleanup_tracker.clone() {
-        let shutdown_rx = components.subscribe();
-        let join = tokio::spawn(async move {
-            tracker.run_cleanup_loop(shutdown_rx).await;
-        });
-        components.register(Handle::async_task("metrics-cleanup", join));
-    }
 
     if conf.internal.metrics.enabled {
         let metrics_conf = conf.internal.metrics.clone();
@@ -446,7 +440,7 @@ async fn run(cli: Cli) -> Result<()> {
             &current_conf,
             ebpf_resources,
             health_state.clone(),
-            cleanup_tracker.clone(),
+            metrics_evictor.clone(),
             Arc::clone(&exporter),
         )
         .await?;
@@ -804,7 +798,7 @@ async fn start_pipeline(
     conf: &Conf,
     ebpf_resources: EbpfResources,
     health_state: HealthState,
-    cleanup_tracker: Option<MetricCleanupTracker>,
+    metrics_evictor: Option<MetricsEvictor>,
     exporter: Arc<dyn TraceableExporter>,
 ) -> Result<Pipeline> {
     let EbpfResources {
@@ -858,7 +852,7 @@ async fn start_pipeline(
         conf.discovery.instrument.tc_priority,
         conf.discovery.instrument.tcx_order.clone(),
         Some(event_tx.clone()),
-        cleanup_tracker.clone(),
+        metrics_evictor.clone(),
     )?;
     let (netlink_handle, netlink_shutdown_fd) =
         spawn_netlink_thread(Arc::clone(&host_netns), netlink_tx).map_err(|e| {
@@ -976,7 +970,7 @@ async fn start_pipeline(
         owner_relations_opts,
         selector_relations_opts,
         conf,
-        cleanup_tracker.clone(),
+        metrics_evictor.clone(),
     )
     .await
     {
@@ -1037,14 +1031,16 @@ async fn start_pipeline(
                                 .with_label_values(&[ChannelName::ProducerOutput.as_str()])
                                 .set(channel_size as i64);
 
-                            let _timer = metrics::registry::processing_duration_seconds()
+                            let _timer = metrics::registry::PROCESSING_DURATION_SECONDS
+                                .get()
+                                .unwrap()
                                 .with_label_values(&[ProcessingStage::K8sDecoratorOut.as_str()])
                                 .start_timer();
                             let (span, err) = decorator.decorate_or_fallback(flow_span).await;
 
                             match err {
                                 Some(e) => {
-                                    metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Error);
+                                    metrics::labels::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Error);
                                     debug!(
                                         event.name = "k8s.decorator.failed",
                                         flow.community_id = %span.attributes.flow_community_id,
@@ -1053,7 +1049,7 @@ async fn start_pipeline(
                                     );
                                 }
                                 None => {
-                                    metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Ok);
+                                    metrics::labels::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Ok);
                                 }
                             }
 
@@ -1102,13 +1098,13 @@ async fn start_pipeline(
                                     metrics::registry::CHANNEL_SENDS_TOTAL
                                         .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Success.as_str()])
                                         .inc();
-                                    metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Undecorated);
+                                    metrics::labels::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Undecorated);
                                 }
                                 Err(e) => {
                                     metrics::registry::CHANNEL_SENDS_TOTAL
                                         .with_label_values(&[ChannelName::DecoratorOutput.as_str(), ChannelSendStatus::Error.as_str()])
                                         .inc();
-                                    metrics::k8s::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Dropped);
+                                    metrics::labels::inc_k8s_decorator_flow_spans(K8sDecoratorStatus::Dropped);
                                     error!(
                                         event.name = "channel.send_failed",
                                         channel.name = "k8s_decorated_flow_span",
@@ -1173,7 +1169,9 @@ async fn start_pipeline(
             )
             .await;
             let export_duration = export_start.elapsed();
-            metrics::registry::processing_duration_seconds()
+            metrics::registry::PROCESSING_DURATION_SECONDS
+                .get()
+                .unwrap()
                 .with_label_values(&[ProcessingStage::ExportOut.as_str()])
                 .observe(export_duration.as_secs_f64());
 

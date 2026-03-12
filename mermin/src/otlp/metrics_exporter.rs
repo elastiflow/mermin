@@ -8,7 +8,7 @@ use opentelemetry_sdk::{
 
 use crate::metrics::{
     self,
-    export::{ExportStatus, ExporterName},
+    labels::{ExportStatus, ExporterName},
 };
 
 #[derive(Debug)]
