@@ -16,7 +16,7 @@ use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing::{error, info, warn};
 
-use crate::{health::HealthError, runtime::opts::ServerConf};
+use crate::{health::error::HealthError, runtime::opts::ServerConf};
 
 #[derive(Clone)]
 pub struct HealthState {
