@@ -730,6 +730,24 @@ pub enum Direction {
     Ingress = 1,
 }
 
+impl Direction {
+    /// Returns the lowercase string representation of this direction.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Direction::Egress => "egress",
+            Direction::Ingress => "ingress",
+        }
+    }
+
+    /// Returns the opposite direction.
+    pub fn reversed(self) -> Self {
+        match self {
+            Direction::Egress => Direction::Ingress,
+            Direction::Ingress => Direction::Egress,
+        }
+    }
+}
+
 /// Key for tracking listening ports in eBPF map.
 /// Used to identify which ports have local processes listening (for client/server inference).
 /// Memory layout: 4 bytes (2 for port + 1 for protocol + 1 padding for alignment)

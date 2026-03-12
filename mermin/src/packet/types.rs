@@ -7,7 +7,6 @@ use std::net::IpAddr;
 
 use mermin_common::{TunnelType, eth::EtherType, ip::IpProto};
 
-/// Result of deep packet parsing
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum ParsedPacket {
@@ -25,7 +24,6 @@ pub enum ParsedPacket {
     },
 }
 
-/// Five-tuple identifier for a flow
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FiveTuple {
     pub src_ip: IpAddr,
@@ -36,7 +34,6 @@ pub struct FiveTuple {
     pub ip_version: u8,
 }
 
-/// Tunnel-specific metadata
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
 pub struct TunnelInfo {
@@ -44,7 +41,6 @@ pub struct TunnelInfo {
     pub vni: u32, // VNI for VXLAN/Geneve, Key for GRE
 }
 
-/// Outer headers (tunnel transport)
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
 pub struct OuterHeaders {
@@ -53,7 +49,6 @@ pub struct OuterHeaders {
     pub dst_mac: [u8; 6],
 }
 
-/// Inner headers (actual traffic)
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
 pub struct InnerHeaders {
@@ -66,7 +61,6 @@ pub struct InnerHeaders {
     pub dst_mac: [u8; 6],
 }
 
-/// Layer 2 metadata
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
 pub struct L2Metadata {
@@ -75,7 +69,6 @@ pub struct L2Metadata {
     pub ether_type: EtherType,
 }
 
-/// IP layer metadata
 #[derive(Debug, Clone, Copy, Default)]
 #[allow(dead_code)]
 pub struct IpMetadata {
@@ -87,7 +80,6 @@ pub struct IpMetadata {
     pub ipsec_esp_spi: Option<u32>,
 }
 
-/// Parsing errors
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum ParseError {

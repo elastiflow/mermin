@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    net::IpAddr,
     os::fd::AsRawFd,
     sync::Arc,
     time::{Duration, UNIX_EPOCH},
@@ -11,12 +10,11 @@ use aya::maps::{HashMap as EbpfHashMap, RingBuf};
 use dashmap::DashMap;
 use fxhash::FxBuildHasher;
 use mermin_common::{
-    Direction, FlowEvent, FlowKey, FlowStats, ListeningPortKey, MapUnit,
+    FlowEvent, FlowKey, FlowStats, ListeningPortKey, MapUnit,
     eth::EtherType,
     ip::{IpDscp, IpEcn, IpProto},
     tcp::{TCP_FLAG_FIN, TCP_FLAG_RST},
 };
-use moka::future::Cache;
 use opentelemetry::trace::SpanKind;
 use opentelemetry_sdk::trace::{IdGenerator, RandomIdGenerator};
 use pnet::datalink::MacAddr;
@@ -24,7 +22,7 @@ use tokio::{
     io::unix::AsyncFd,
     sync::{Mutex, broadcast, mpsc},
 };
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     filter::source::PacketFilter,
@@ -43,7 +41,7 @@ use crate::{
     runtime::{conf::Conf, memory::ShrinkPolicy},
     span::{
         community_id::CommunityIdGenerator,
-        direction::DirectionInferrer,
+        direction::{DirectionInferrer, FlowDirection},
         ebpf_guard::EbpfFlowGuard,
         flow::{FlowEndReason, FlowSpan, SpanAttributes},
         opts::SpanOptions,
@@ -51,7 +49,7 @@ use crate::{
     },
 };
 
-/// ### Concurrency Model
+/// ## Concurrency Model
 ///
 /// Multiple components access the flow map concurrently:
 ///
@@ -59,14 +57,14 @@ use crate::{
 /// 2. **Record Task** (per flow): Periodically reads and records flow state
 /// 3. **Timeout Task** (per flow): Removes flows on timeout
 ///
-/// #### Synchronization
+/// ### Synchronization
 ///
 /// - `DashMap` provides per-shard locking for concurrent access to `FlowStore`
 /// - Updates to flow attributes are performed under the shard write lock
 /// - The poller clones flow state while holding the shard read lock
 /// - Timeout removal is atomic at the shard level
 ///
-/// #### Potential Race Conditions
+/// ### Potential Race Conditions
 ///
 /// - Worker update vs. Poller record: Safe — poller clones current state
 /// - Worker update vs. Timeout removal: Safe — worker finds entry missing, no-op
@@ -74,7 +72,6 @@ use crate::{
 pub type FlowStore = Arc<DashMap<String, FlowEntry, FxBuildHasher>>;
 
 /// Entry in the flow map containing the flow span.
-/// Polling tasks will handle record intervals and timeouts.
 pub struct FlowEntry {
     pub flow_span: FlowSpan,
 }
@@ -88,11 +85,6 @@ pub struct FlowSpanComponents {
 
 impl FlowSpanComponents {
     /// Triggers a final flush of all active flows from the flow_store.
-    ///
-    /// Each flow is evicted via [`timeout_and_remove_flow`] so that a final
-    /// span is emitted before the pipeline shuts down.  Returns `Ok(count)`
-    /// with the number of preserved flows, or `Err(lost)` with the number of
-    /// flows still in the store when the timeout expires.
     pub async fn preserve_active_flows(&self, timeout: Duration) -> Result<usize, usize> {
         let flow_store = Arc::clone(&self.flow_store);
         let flow_stats_map = Arc::clone(&self.flow_stats_map);
@@ -107,12 +99,6 @@ impl FlowSpanComponents {
                 return Ok::<usize, usize>(0);
             }
 
-            info!(
-                event.name = "shutdown.flow_preservation.flushing",
-                count = total_flows,
-                "triggering final export for all active flows."
-            );
-
             let flush_futures = flow_keys
                 .into_iter()
                 .map(|id| timeout_and_remove_flow(id, &flow_store, &flow_stats_map, &flow_span_tx));
@@ -124,38 +110,28 @@ impl FlowSpanComponents {
 
         match tokio::time::timeout(timeout, flush_future).await {
             Ok(Ok(preserved_count)) => Ok(preserved_count),
-            Err(_) | Ok(Err(_)) => {
-                let lost_count = self.flow_store.len();
-                warn!(
-                    event.name = "shutdown.flow_preservation.timeout",
-                    "flow preservation timed out. some flows may be lost."
-                );
-                Err(lost_count)
-            }
+            Err(_) | Ok(Err(_)) => Err(self.flow_store.len()),
         }
     }
 }
 
 pub struct FlowSpanProducer {
     span_opts: SpanOptions,
+    boot_time_offset_nanos: u64,
+    flow_stats_capacity: u32,
     worker_queue_capacity: usize,
     workers: usize,
     flow_store_poll_interval: Duration,
-    boot_time_offset_nanos: u64,
-    iface_map: Arc<ArcSwap<HashMap<u32, String>>>,
-    community_id_generator: CommunityIdGenerator,
-    id_generator: Arc<dyn IdGenerator + Send + Sync>,
-    flow_events_ringbuf: RingBuf<aya::maps::MapData>,
     filter: Option<Arc<PacketFilter>>,
     vxlan_port: u16,
     geneve_port: u16,
     wireguard_port: u16,
+    flow_events_ringbuf: RingBuf<aya::maps::MapData>,
     components: Arc<FlowSpanComponents>,
+    community_id_generator: CommunityIdGenerator,
+    id_generator: Arc<dyn IdGenerator + Send + Sync>,
     direction_inferrer: Arc<DirectionInferrer>,
-    hostname_cache: Cache<IpAddr, String>,
-    hostname_resolve_timeout: Duration,
-    enable_hostname_resolution: bool,
-    flow_stats_capacity: u32,
+    iface_map: Arc<ArcSwap<HashMap<u32, String>>>,
 }
 
 impl FlowSpanProducer {
@@ -176,12 +152,6 @@ impl FlowSpanProducer {
         // The userspace flow store tracks the same flows as FLOW_STATS (eBPF).
         // We derive the initial capacity as flow_stats_capacity / 3 to balance memory usage and performance.
         let producer_store_capacity = (conf.pipeline.flow_capture.flow_stats_capacity / 3) as usize;
-
-        info!(
-            event.name = "flow_store.initialized",
-            capacity = producer_store_capacity,
-            "flow store initialized"
-        );
         let flow_store = Arc::new(DashMap::with_capacity_and_hasher(
             producer_store_capacity,
             FxBuildHasher::default(),
@@ -195,29 +165,11 @@ impl FlowSpanProducer {
         let boot_time_offset_nanos = calculate_boot_time_offset_nanos()?;
 
         let filter = if conf.filter.is_some() {
-            info!(
-                event.name = "filter.initializing",
-                "flow filtering enabled, loading configuration"
-            );
             Some(Arc::new(PacketFilter::new(conf, iface_map.clone())))
         } else {
-            info!(
-                event.name = "filter.disabled",
-                "flow filtering disabled, all flows will be tracked"
-            );
             None
         };
-
         let direction_inferrer = Arc::new(DirectionInferrer::new(listening_ports_map));
-
-        // Initialize hostname resolution cache
-        // Cache capacity = flow_stats_capacity / 2 (each flow has 2 IPs, typical cardinality is ~10-30%)
-        // Example: 100K flows → 50K cache entries → ~5MB memory
-        let hostname_cache_capacity = (conf.pipeline.flow_capture.flow_stats_capacity / 2) as u64;
-        let hostname_cache = Cache::builder()
-            .max_capacity(hostname_cache_capacity)
-            .build();
-
         let components = Arc::new(FlowSpanComponents {
             flow_store,
             flow_stats_map,
@@ -226,24 +178,21 @@ impl FlowSpanProducer {
 
         Ok(Self {
             span_opts: span_opts.clone(),
+            boot_time_offset_nanos,
+            flow_stats_capacity: conf.pipeline.flow_capture.flow_stats_capacity,
             worker_queue_capacity,
             workers,
             flow_store_poll_interval: conf.pipeline.flow_producer.flow_store_poll_interval,
-            boot_time_offset_nanos,
-            community_id_generator,
-            id_generator,
-            iface_map,
-            flow_events_ringbuf,
             filter,
             vxlan_port: conf.parser.vxlan_port,
             geneve_port: conf.parser.geneve_port,
             wireguard_port: conf.parser.wireguard_port,
+            flow_events_ringbuf,
             components,
+            community_id_generator,
+            id_generator,
             direction_inferrer,
-            hostname_cache,
-            hostname_resolve_timeout: span_opts.hostname_resolve_timeout,
-            enable_hostname_resolution: span_opts.enable_hostname_resolution,
-            flow_stats_capacity: conf.pipeline.flow_capture.flow_stats_capacity,
+            iface_map,
         })
     }
 
@@ -252,21 +201,8 @@ impl FlowSpanProducer {
         shutdown_rx: broadcast::Receiver<()>,
         flow_events_return: tokio::sync::oneshot::Sender<RingBuf<aya::maps::MapData>>,
     ) {
-        info!(
-            event.name = "task.started",
-            task.name = "span.producer",
-            task.description = "producing flow spans from eBPF flow events",
-            "userspace task started"
-        );
-
         let components = Arc::clone(&self.components);
         let flow_events = self.flow_events_ringbuf;
-
-        info!(
-            event.name = "ebpf.maps_ready",
-            "eBPF maps ready, starting event-driven flow processing"
-        );
-
         let mut worker_handles = Vec::new();
         let mut worker_channels = Vec::new();
 
@@ -296,9 +232,6 @@ impl FlowSpanProducer {
                 self.geneve_port,
                 self.wireguard_port,
                 Arc::clone(&self.direction_inferrer),
-                self.hostname_cache.clone(),
-                self.hostname_resolve_timeout,
-                self.enable_hostname_resolution,
             );
 
             let worker_handle = tokio::spawn(async move {
@@ -306,11 +239,6 @@ impl FlowSpanProducer {
             });
             worker_handles.push(worker_handle);
         }
-        info!(
-            event.name = "workers.started",
-            worker.count = self.workers.max(1),
-            "flow workers spawned, starting event loop"
-        );
 
         // Orphan threshold: 4x max_record_interval provides safety margin for processing delays
         // while catching truly orphaned entries much faster than a fixed long timeout.
@@ -327,12 +255,6 @@ impl FlowSpanProducer {
             orphan_scanner_shutdown_rx,
         ));
         worker_handles.push(orphan_scanner_handle);
-        info!(
-            event.name = "orphan_scanner.started",
-            scan.interval_secs = 300,
-            max_age_secs = max_orphan_age.as_secs(),
-            "orphan scanner task started (safety net for stale eBPF entries)"
-        );
 
         // Spawn capacity shrinking task to prevent memory bloat from flow_store capacity retention.
         // DashMap allocates capacity but never automatically releases it when entries are removed,
@@ -355,30 +277,11 @@ impl FlowSpanProducer {
                         if shrink_policy.should_shrink(flow_capacity, flow_len) {
                             flow_store_shrink.shrink_to_fit();
                         }
-
-
-
                     }
                 }
             }
         });
-        trace!(
-            event.name = "capacity.shrink_task.started",
-            shrink.interval_secs = SHRINK_INTERVAL_SECS,
-            shrink.policy.threshold = format!(
-                "{}/{}x ({}x)",
-                shrink_policy.waste_ratio_numerator,
-                shrink_policy.waste_ratio_denominator,
-                shrink_policy.waste_ratio_numerator as f64
-                    / shrink_policy.waste_ratio_denominator as f64
-            ),
-            shrink.policy.min_capacity = shrink_policy.min_capacity,
-            "capacity shrinking task started (each map checked independently, shrinks after ~20% entry removal post-resize)"
-        );
 
-        // Spawn flow pollers (sharded by community_id hash) to replace per-flow tasks
-        // Scale with worker count but cap at 32 for scalability
-        // Each poller can handle ~100K active flows efficiently (typical: 3-10K per poller)
         let num_pollers = self.workers.clamp(1, 32);
         let max_record_interval = self.span_opts.max_record_interval;
         let poll_interval = self.flow_store_poll_interval;
@@ -404,12 +307,6 @@ impl FlowSpanProducer {
             });
             worker_handles.push(poller_handle);
         }
-        info!(
-            event.name = "flow_pollers.started",
-            poller.count = num_pollers,
-            poll.interval_secs = poll_interval.as_secs(),
-            "flow pollers started"
-        );
 
         let worker_count = self.workers.max(1);
 
@@ -424,7 +321,7 @@ impl FlowSpanProducer {
         .await;
     }
 
-    /// Ring buffer ingestion via Tokio `AsyncFd` (default mode).
+    /// Ring buffer ingestion via Tokio `AsyncFd`.
     ///
     /// The ring buffer's file descriptor is registered with the Tokio reactor via
     /// epoll. When the kernel signals readiness the task wakes, drains all
@@ -454,15 +351,9 @@ impl FlowSpanProducer {
         };
 
         let mut worker_index = 0;
-
         loop {
             tokio::select! {
             _ = shutdown_rx.recv() => {
-                trace!(
-                    event.name = "task.stopped",
-                    task.name = "span.producer",
-                    "userspace task stopping gracefully"
-                );
                 break;
             },
             result = async_fd.readable() => {
@@ -499,21 +390,8 @@ impl FlowSpanProducer {
             }
         }
 
-        trace!(
-            event.name = "shutdown.cleanup",
-            task.name = "span.producer",
-            "shutting down workers and pollers"
-        );
-
         drop(worker_channels);
         futures::future::join_all(worker_handles).await;
-
-        info!(
-            event.name = "shutdown.cleanup.all_joined",
-            task.name = "span.producer",
-            "all child tasks have been joined"
-        );
-
         // Drop async_fd first to deregister from epoll before returning ring buffer.
         drop(async_fd);
         let _ = flow_events_return.send(flow_events);
@@ -532,7 +410,6 @@ impl FlowSpanProducer {
 /// counter is incremented.  Blocking here would prevent the ring buffer from
 /// being drained, causing the eBPF kernel program to drop events silently —
 /// an explicit userspace drop with a metric is preferable.
-#[inline]
 fn dispatch_flow_event(
     flow_event: FlowEvent,
     worker_channels: &[mpsc::Sender<FlowEvent>],
@@ -602,21 +479,16 @@ fn dispatch_flow_event(
         static BACKPRESSURE_DROP_COUNT: std::sync::atomic::AtomicU64 =
             std::sync::atomic::AtomicU64::new(0);
         let drop_count = BACKPRESSURE_DROP_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
         if drop_count % 1000 == 0 {
             warn!(
-                event.name = "flow.worker_backpressure",
+                event.name = "span.producer.worker.backpressure",
                 worker_count = worker_count,
                 total_drops = drop_count + 1,
                 protocol = ?flow_event.flow_key.protocol,
                 "worker backpressure detected - dropping flow events to prevent deadlock"
+
             );
         }
-
-        // TODO: Implement adaptive sampling strategy:
-        // 1. Priority-based dropping (keep long-lived flows, drop short ones)
-        // 2. Sampling (keep 1 in N flows during overload)
-        // 3. Protocol-based priority (TCP > UDP > ICMP)
     }
 }
 
@@ -642,9 +514,6 @@ pub struct FlowWorker {
     geneve_port: u16,
     wireguard_port: u16,
     direction_inferrer: Arc<DirectionInferrer>,
-    hostname_cache: Cache<IpAddr, String>,
-    hostname_resolve_timeout: Duration,
-    enable_hostname_resolution: bool,
 }
 
 impl FlowWorker {
@@ -664,9 +533,6 @@ impl FlowWorker {
         geneve_port: u16,
         wireguard_port: u16,
         direction_inferrer: Arc<DirectionInferrer>,
-        hostname_cache: Cache<IpAddr, String>,
-        hostname_resolve_timeout: Duration,
-        enable_hostname_resolution: bool,
     ) -> Self {
         Self {
             worker_id,
@@ -688,19 +554,10 @@ impl FlowWorker {
             geneve_port,
             wireguard_port,
             direction_inferrer,
-            hostname_cache,
-            hostname_resolve_timeout,
-            enable_hostname_resolution,
         }
     }
 
     pub async fn run(mut self) {
-        debug!(
-            event.name = "flow_worker.started",
-            worker.id = self.worker_id,
-            "flow worker started"
-        );
-
         while let Some(flow_event) = self.flow_event_rx.recv().await {
             metrics::registry::CHANNEL_ENTRIES
                 .with_label_values(&[ChannelName::PacketWorker.as_str()])
@@ -708,7 +565,7 @@ impl FlowWorker {
 
             if let Err(e) = self.process_new_flow(flow_event).await {
                 warn!(
-                    event.name = "flow.processing_failed",
+                    event.name = "span.producer.worker.failed",
                     worker.id = self.worker_id,
                     error.message = %e,
                     error.type = ?e,
@@ -719,47 +576,9 @@ impl FlowWorker {
                 );
             }
         }
-
-        debug!(
-            event.name = "flow_worker.stopped",
-            worker.id = self.worker_id,
-            "flow worker stopped"
-        );
     }
 
-    /// Resolve an IP address to a hostname with caching and timeout.
-    ///
-    /// Uses an LRU cache to avoid redundant DNS lookups. The cache automatically
-    /// evicts least-recently-used entries when capacity is reached.
-    ///
-    /// Returns the hostname if resolution succeeds, otherwise returns the IP as a string.
-    async fn resolve_hostname(&self, ip: IpAddr) -> String {
-        if !self.enable_hostname_resolution {
-            return ip.to_string();
-        }
-
-        // Check cache first (fast path)
-        if let Some(cached) = self.hostname_cache.get(&ip).await {
-            return cached;
-        }
-
-        // Perform DNS resolution
-        let result = tokio::time::timeout(
-            self.hostname_resolve_timeout,
-            tokio::task::spawn_blocking(move || dns_lookup::lookup_addr(&ip)),
-        )
-        .await;
-
-        let resolved = result
-            .ok()
-            .and_then(|r| r.ok())
-            .and_then(|r| r.ok())
-            .unwrap_or_else(|| ip.to_string());
-
-        // Insert into cache (LRU eviction happens automatically at max_capacity)
-        self.hostname_cache.insert(ip, resolved.clone()).await;
-        resolved
-    }
+    // TODO: Review starting here
 
     /// Process a new flow event from eBPF.
     /// This is the core of the event-driven architecture:
@@ -828,15 +647,8 @@ impl FlowWorker {
                         status.as_str(),
                     ])
                     .inc();
-                if is_not_found {
-                    trace!(
-                        event.name = "ebpf.map_removal_failed",
-                        map = map_name.as_str(),
-                        error.message = %e,
-                        "eBPF entry already gone (evicted or protocol mismatch)"
-                    );
-                } else {
-                    trace!(
+                if !is_not_found {
+                    debug!(
                         event.name = "ebpf.map_removal_failed",
                         map = map_name.as_str(),
                         error.message = %e,
@@ -847,16 +659,10 @@ impl FlowWorker {
         }
     }
 
-    /// Fast path for plain (non-tunneled) traffic.
-    /// Uses FlowStats from eBPF directly
     async fn create_direct_flow(&self, event: FlowEvent) -> Result<(), Error> {
-        // CRITICAL: Create guard to ensure eBPF cleanup on ANY error path
-        // The guard will automatically clean up the eBPF entry if this function exits
-        // early (via error return) or panics, preventing orphaned entries.
+        // Guard ensures eBPF map cleanup on any error path (early return, panic, etc.)
         let guard = EbpfFlowGuard::new(event.flow_key, Arc::clone(&self.flow_stats_map));
 
-        // Read stats from eBPF map and immediately release lock to minimize contention.
-        // The scoped block ensures the lock is dropped before expensive filtering logic.
         let stats = self
             .get_ebpf_map_entry(
                 &self.flow_stats_map,
@@ -866,8 +672,6 @@ impl FlowWorker {
             .await
             .map_err(|_| Error::FlowNotFound)?;
 
-        // Early flow filtering: Check if this flow should be tracked
-        // If filtered out, immediately remove from eBPF map to prevent memory leaks
         if !self.should_process_flow(&event.flow_key, &stats) {
             if metrics::registry::debug_enabled() {
                 metrics::registry::FLOW_EVENTS_TOTAL
@@ -898,20 +702,9 @@ impl FlowWorker {
             .await;
 
             guard.keep();
-
-            trace!(
-                event.name = "flow.filtered",
-                worker.id = self.worker_id,
-                protocol = ?event.flow_key.protocol,
-                src_port = event.flow_key.src_port,
-                dst_port = event.flow_key.dst_port,
-                "flow filtered out, removed from tracking"
-            );
             return Ok(());
         }
 
-        // Convert eBPF FlowKey to Community ID
-        // For plain traffic, outermost = innermost, so we use flow_key directly
         let (src_addr, dst_addr) = flow_key_to_ip_addrs(&event.flow_key)?;
         let community_id = self.community_id_generator.generate(
             src_addr,
@@ -924,8 +717,6 @@ impl FlowWorker {
         self.create_flow_span(&community_id, &event.flow_key, &stats)
             .await?;
 
-        // Flow successfully created and stored - disable guard cleanup
-        // The entry is now managed by flow_store and will be cleaned up by timeout task
         guard.keep();
 
         if metrics::registry::debug_enabled() {
@@ -1009,16 +800,7 @@ impl FlowWorker {
     }
 
     /// Determine if a flow should be processed based on filtering rules.
-    ///
-    /// This method provides early flow filtering to:
-    /// - Reduce memory usage in eBPF maps
-    /// - Avoid unnecessary FlowSpan creation and tracking
-    /// - Prevent wasted CPU on unwanted flows
-    ///
-    /// Filtering is configuration-driven through the `PacketFilter` loaded from config.
-    /// If no filter is configured, all flows are accepted.
     fn should_process_flow(&self, flow_key: &FlowKey, stats: &FlowStats) -> bool {
-        // If filter is configured, use it
         if let Some(filter) = &self.filter {
             match filter.should_track_flow(flow_key, stats) {
                 Ok(should_track) => should_track,
@@ -1029,11 +811,10 @@ impl FlowWorker {
                         error.message = %e,
                         "error evaluating flow filter, accepting flow by default"
                     );
-                    true // On error, accept the flow (fail open)
+                    true
                 }
             }
         } else {
-            // No filter configured, accept all flows
             true
         }
     }
@@ -1055,23 +836,14 @@ impl FlowWorker {
         let iface_name = self.iface_map.load().get(&stats.ifindex).cloned();
         let (src_addr, dst_addr) = flow_key_to_ip_addrs(flow_key)?;
         let timeout = self.calculate_timeout(stats);
-        let (span_kind, client_server) = self
+        let span_kind = self
             .direction_inferrer
             .infer_from_stats(flow_key, stats)
             .await;
-        let (client_address, client_port, server_address, server_port) =
-            if let Some(ref cs) = client_server {
-                (
-                    Some(self.resolve_hostname(cs.client_ip).await),
-                    Some(cs.client_port),
-                    Some(self.resolve_hostname(cs.server_ip).await),
-                    Some(cs.server_port),
-                )
-            } else {
-                (None, None, None, None)
-            };
         let is_server = span_kind == SpanKind::Server;
         let is_client = span_kind == SpanKind::Client;
+
+        let flow_direction = FlowDirection::from(span_kind.clone());
 
         let span = FlowSpan {
             trace_id: Some(self.id_generator.new_trace_id()),
@@ -1079,25 +851,22 @@ impl FlowWorker {
             end_time: UNIX_EPOCH + Duration::from_nanos(end_time_nanos),
             span_kind,
             attributes: SpanAttributes {
-                // General flow attributes
                 flow_community_id: community_id.to_string(),
+                flow_direction,
                 flow_connection_state: is_tcp.then_some(stats.tcp_state),
                 flow_end_reason: None,
 
-                // Network endpoints
                 source_address: src_addr,
                 source_port: flow_key.src_port,
                 destination_address: dst_addr,
                 destination_port: flow_key.dst_port,
 
-                // Network layer info
                 network_transport: flow_key.protocol,
                 network_type: stats.ether_type,
                 network_interface_index: Some(stats.ifindex),
                 network_interface_name: iface_name.clone(),
                 network_interface_mac: Some(MacAddr::from(stats.src_mac)),
 
-                // IP metadata
                 flow_ip_dscp_id: is_ip_flow.then_some(stats.ip_dscp),
                 flow_ip_dscp_name: is_ip_flow.then_some(
                     IpDscp::try_from_u8(stats.ip_dscp)
@@ -1115,7 +884,6 @@ impl FlowWorker {
                 flow_ip_ttl: is_ip_flow.then_some(stats.ip_ttl),
                 flow_ip_flow_label: is_ipv6.then_some(stats.ip_flow_label),
 
-                // Reverse direction IP metadata (first seen per interval)
                 flow_reverse_ip_dscp_id: is_ip_flow.then_some(stats.reverse_ip_dscp),
                 flow_reverse_ip_dscp_name: is_ip_flow.then_some(
                     IpDscp::try_from_u8(stats.reverse_ip_dscp)
@@ -1133,7 +901,6 @@ impl FlowWorker {
                 flow_reverse_ip_ttl: is_ip_flow.then_some(stats.reverse_ip_ttl),
                 flow_reverse_ip_flow_label: is_ipv6.then_some(stats.reverse_ip_flow_label),
 
-                // TCP metadata (only populated for TCP flows)
                 flow_tcp_flags_bits: is_tcp.then_some(stats.tcp_flags),
                 flow_tcp_flags_tags: is_tcp.then(|| TcpFlags::flags_from_bits(stats.tcp_flags)),
                 flow_reverse_tcp_flags_bits: is_tcp.then_some(stats.reverse_tcp_flags),
@@ -1167,22 +934,13 @@ impl FlowWorker {
                 flow_tcp_rndtrip_jitter: (is_tcp && is_client && stats.tcp_txn_count > 0)
                     .then_some(stats.tcp_jitter_avg_ns as i64),
 
-                // Client/Server attributes (from direction inference)
-                client_address,
-                client_port,
-                server_address,
-                server_port,
-
-                // Process metadata from eBPF LSM hooks
                 process_pid: (stats.pid != 0).then_some(stats.pid),
                 process_executable_name: (stats.pid != 0).then(|| {
-                    // comm is null-terminated, convert to String
                     String::from_utf8_lossy(&stats.comm)
                         .trim_end_matches('\0')
                         .to_string()
                 }),
 
-                // ICMP metadata (only populated for ICMP/ICMPv6 flows)
                 flow_icmp_type_id: (is_icmp || is_icmpv6).then_some(stats.icmp_type),
                 flow_icmp_type_name: icmp_type_name(is_icmp, is_icmpv6, stats.icmp_type),
                 flow_icmp_code_id: (is_icmp || is_icmpv6).then_some(stats.icmp_code),
@@ -1208,9 +966,6 @@ impl FlowWorker {
                     stats.reverse_icmp_code,
                 ),
 
-                // Counters initialized to 0; the first record_flow or
-                // timeout_and_remove_flow call will read the eBPF map and
-                // compute accurate deltas and totals before exporting.
                 flow_bytes_delta: 0,
                 flow_bytes_total: 0,
                 flow_packets_delta: 0,
@@ -1220,20 +975,14 @@ impl FlowWorker {
                 flow_reverse_packets_delta: 0,
                 flow_reverse_packets_total: 0,
 
-                // All other attributes default to None
                 ..Default::default()
             },
-            // Fields for eBPF map integration
             flow_key: Some(*flow_key),
-            // Watermarks start at 0 so the first record_flow captures all
-            // accumulated packets/bytes as the initial delta.
             last_recorded_packets: 0,
             last_recorded_bytes: 0,
             last_recorded_reverse_packets: 0,
             last_recorded_reverse_bytes: 0,
             boot_time_offset: self.boot_time_offset_nanos,
-
-            // Timing fields for polling architecture (initialized by insert_flow)
             last_recorded_time: UNIX_EPOCH,
             last_activity_time: UNIX_EPOCH,
             timeout_duration: Duration::from_secs(0),
@@ -1254,72 +1003,37 @@ impl FlowWorker {
         if stats.packets > 0 {
             metrics::registry::PACKETS_TOTAL.inc_by(stats.packets);
             if metrics::registry::debug_enabled() {
-                let direction_str = match stats.direction {
-                    Direction::Ingress => "ingress",
-                    Direction::Egress => "egress",
-                };
                 metrics::registry::PACKETS_BY_INTERFACE_TOTAL
-                    .with_label_values(&[interface_name, direction_str])
+                    .with_label_values(&[interface_name, stats.direction.as_str()])
                     .inc_by(stats.packets);
             }
         }
         if stats.bytes > 0 {
             metrics::registry::BYTES_TOTAL.inc_by(stats.bytes);
             if metrics::registry::debug_enabled() {
-                let direction_str = match stats.direction {
-                    Direction::Ingress => "ingress",
-                    Direction::Egress => "egress",
-                };
                 metrics::registry::BYTES_BY_INTERFACE_TOTAL
-                    .with_label_values(&[interface_name, direction_str])
+                    .with_label_values(&[interface_name, stats.direction.as_str()])
                     .inc_by(stats.bytes);
             }
         }
         if stats.reverse_packets > 0 {
-            let reverse_direction = match stats.direction {
-                Direction::Ingress => Direction::Egress,
-                Direction::Egress => Direction::Ingress,
-            };
+            let reverse_direction = stats.direction.reversed();
             metrics::registry::PACKETS_TOTAL.inc_by(stats.reverse_packets);
             if metrics::registry::debug_enabled() {
-                let direction_str = match reverse_direction {
-                    Direction::Ingress => "ingress",
-                    Direction::Egress => "egress",
-                };
                 metrics::registry::PACKETS_BY_INTERFACE_TOTAL
-                    .with_label_values(&[interface_name, direction_str])
+                    .with_label_values(&[interface_name, reverse_direction.as_str()])
                     .inc_by(stats.reverse_packets);
             }
         }
         if stats.reverse_bytes > 0 {
-            let reverse_direction = match stats.direction {
-                Direction::Ingress => Direction::Egress,
-                Direction::Egress => Direction::Ingress,
-            };
+            let reverse_direction = stats.direction.reversed();
             metrics::registry::BYTES_TOTAL.inc_by(stats.reverse_bytes);
             if metrics::registry::debug_enabled() {
-                let direction_str = match reverse_direction {
-                    Direction::Ingress => "ingress",
-                    Direction::Egress => "egress",
-                };
                 metrics::registry::BYTES_BY_INTERFACE_TOTAL
-                    .with_label_values(&[interface_name, direction_str])
+                    .with_label_values(&[interface_name, reverse_direction.as_str()])
                     .inc_by(stats.reverse_bytes);
             }
         }
-
-        trace!(
-            event.name = "span.producer.created_flow",
-            flow.community_id = %community_id,
-            network.interface.name = iface_name.as_deref().unwrap_or(""),
-            source.address = %src_addr,
-            source.port = flow_key.src_port,
-            destination.address = %dst_addr,
-            destination.port = flow_key.dst_port,
-            network.transport = ?flow_key.protocol,
-            flow.bytes = stats.bytes,
-            "created flow span from eBPF stats"
-        );
 
         Ok(())
     }
@@ -1342,8 +1056,6 @@ impl FlowWorker {
         }
     }
 
-    /// Insert flow into tracking map with initialized timing fields.
-    /// Polling tasks will handle record intervals and timeouts.
     fn insert_flow(&self, community_id: String, mut flow_span: FlowSpan, timeout: Duration) {
         let now = std::time::SystemTime::now();
         flow_span.last_recorded_time = now;
@@ -1369,7 +1081,6 @@ impl FlowWorker {
 
         match old_entry {
             None => {
-                // New flow: increment active gauge
                 metrics::registry::FLOW_SPANS_ACTIVE_TOTAL.inc();
                 if metrics::registry::debug_enabled() {
                     metrics::registry::FLOWS_ACTIVE_BY_INTERFACE_TOTAL
@@ -1378,7 +1089,6 @@ impl FlowWorker {
                 }
             }
             Some(old) => {
-                // Replaced existing flow: check if interface changed (handles interface migration edge cases)
                 let old_iface = old
                     .flow_span
                     .attributes
@@ -1437,8 +1147,6 @@ impl FlowPoller {
         loop {
             tokio::select! {
                 _ = self.shutdown_rx.recv() => {
-                    trace!(event.name = "task.shutdown", task.name = "flow_poller", poller.id = self.id, "shutdown signal received");
-
                     debug!(event.name = "flow_poller.final_flush", poller.id = self.id, "performing final flush of remaining flows");
 
                     let mut flows_to_flush = Vec::new();
@@ -1448,13 +1156,6 @@ impl FlowPoller {
                             flows_to_flush.push(community_id.clone());
                         }
                     }
-
-                    trace!(
-                        event.name = "flow_poller.final_flush.start",
-                        poller.id = self.id,
-                        flow.count = flows_to_flush.len(),
-                        "flushing all remaining flows for this poller."
-                    );
 
                     for community_id in flows_to_flush {
                         timeout_and_remove_flow(
@@ -1466,8 +1167,6 @@ impl FlowPoller {
                         .await;
                     }
 
-                    trace!(event.name = "flow_poller.final_flush.complete", poller.id = self.id, "final flush completed.");
-
                     break;
                 },
                 _ = interval.tick() => {
@@ -1478,15 +1177,8 @@ impl FlowPoller {
                 let mut flows_recorded = 0usize;
                 let mut flows_skipped_partition = 0usize;
 
-                trace!(
-                    event.name = "flow_poller.tick_start",
-                    poller.id = self.id,
-                    iteration.count = iteration_count + 1,
-                    "poller tick started"
-                );
-
-                // Collect flows to process - CRITICAL: Must collect IDs first, then drop iterator
-                // before calling record_flow/timeout_and_remove_flow to avoid iterator deadlock
+                // Must collect IDs first, then drop iterator before calling
+                // record_flow/timeout_and_remove_flow to avoid iterator deadlock
                 let mut flows_to_record = Vec::new();
 
                 let collection_start = std::time::Instant::now();
@@ -1520,18 +1212,8 @@ impl FlowPoller {
                     {
                         flows_to_remove.push(community_id.clone());
                     }
-                } // Iterator dropped here - no longer holding flow_store shard locks
+                }
                 let collection_duration = collection_start.elapsed();
-
-                trace!(
-                    event.name = "flow_poller.collection_phase",
-                    poller.id = self.id,
-                    flows.total_checked = flows_checked,
-                    flows.to_record = flows_to_record.len(),
-                    flows.to_timeout = flows_to_remove.len(),
-                    collection.duration_ms = collection_duration.as_millis(),
-                    "collection phase completed"
-                );
 
                 let poller_id_str = self.id.to_string();
                 if metrics::registry::debug_enabled() {
@@ -1546,16 +1228,9 @@ impl FlowPoller {
                         .set(queue_size as i64);
                 }
 
-                // Now process flows WITHOUT holding iterator locks
                 let record_start = std::time::Instant::now();
                 for community_id in &flows_to_record {
                     flows_recorded += 1;
-                    trace!(
-                        event.name = "flow_poller.recording",
-                        poller.id = self.id,
-                        flow.community_id = %community_id,
-                        "calling record_flow"
-                    );
                     if !record_flow(community_id, &self.flow_store, &self.flow_stats_map, &self.flow_span_tx).await {
                         // Export channel closed, stop poller
                         warn!(
@@ -1569,25 +1244,8 @@ impl FlowPoller {
                 }
                 let record_duration = record_start.elapsed();
 
-                if !flows_to_record.is_empty() {
-                    trace!(
-                        event.name = "flow_poller.record_phase",
-                        poller.id = self.id,
-                        flows.recorded = flows_to_record.len(),
-                        record.duration_ms = record_duration.as_millis(),
-                        "record phase completed"
-                    );
-                }
-
-                // Remove timed out flows
                 let timeout_start = std::time::Instant::now();
                 for community_id in flows_to_remove.iter() {
-                    trace!(
-                        event.name = "flow_poller.timing_out",
-                        poller.id = self.id,
-                        flow.community_id = %community_id,
-                        "calling timeout_and_remove_flow"
-                    );
                     timeout_and_remove_flow(
                         community_id.clone(),
                         &self.flow_store,
@@ -1597,16 +1255,6 @@ impl FlowPoller {
                     .await;
                 }
                 let timeout_duration_elapsed = timeout_start.elapsed();
-
-                if !flows_to_remove.is_empty() {
-                    trace!(
-                        event.name = "flow_poller.timeout_phase",
-                        poller.id = self.id,
-                        flows.timed_out = flows_to_remove.len(),
-                        timeout.duration_ms = timeout_duration_elapsed.as_millis(),
-                        "timeout phase completed"
-                    );
-                }
 
                 let tick_duration = tick_start.elapsed();
                 iteration_count += 1;
@@ -1764,7 +1412,6 @@ async fn record_flow(
         )
     }; // entry_ref dropped here
 
-    // Now acquire mutex WITHOUT holding flow_store reference
     let lock_start = std::time::Instant::now();
     let map = flow_stats_map.lock().await;
     let lock_duration = lock_start.elapsed();
@@ -1775,13 +1422,6 @@ async fn record_flow(
             flow.community_id = %community_id,
             lock.duration_ms = lock_duration.as_millis(),
             "mutex acquisition took longer than expected"
-        );
-    } else {
-        trace!(
-            event.name = "record_flow.lock_acquired",
-            flow.community_id = %community_id,
-            lock.duration_ms = lock_duration.as_millis(),
-            "acquired flow_stats_map mutex"
         );
     }
     let stats = match map.get(&flow_key, 0) {
@@ -1821,7 +1461,6 @@ async fn record_flow(
     };
     drop(map);
 
-    // Calculate deltas using extracted values
     let delta_packets = stats.packets.saturating_sub(last_recorded_packets);
     let delta_bytes = stats.bytes.saturating_sub(last_recorded_bytes);
     let delta_reverse_packets = stats
@@ -1856,62 +1495,39 @@ async fn record_flow(
         if delta_packets > 0 {
             metrics::registry::PACKETS_TOTAL.inc_by(delta_packets);
             if metrics::registry::debug_enabled() {
-                let direction_str = match stats.direction {
-                    Direction::Ingress => "ingress",
-                    Direction::Egress => "egress",
-                };
                 metrics::registry::PACKETS_BY_INTERFACE_TOTAL
-                    .with_label_values(&[&interface_name_for_metrics, direction_str])
+                    .with_label_values(&[&interface_name_for_metrics, stats.direction.as_str()])
                     .inc_by(delta_packets);
             }
         }
         if delta_bytes > 0 {
             metrics::registry::BYTES_TOTAL.inc_by(delta_bytes);
             if metrics::registry::debug_enabled() {
-                let direction_str = match stats.direction {
-                    Direction::Ingress => "ingress",
-                    Direction::Egress => "egress",
-                };
                 metrics::registry::BYTES_BY_INTERFACE_TOTAL
-                    .with_label_values(&[&interface_name_for_metrics, direction_str])
+                    .with_label_values(&[&interface_name_for_metrics, stats.direction.as_str()])
                     .inc_by(delta_bytes);
             }
         }
         if delta_reverse_packets > 0 {
-            let reverse_direction = match stats.direction {
-                Direction::Ingress => Direction::Egress,
-                Direction::Egress => Direction::Ingress,
-            };
+            let reverse_direction = stats.direction.reversed();
             metrics::registry::PACKETS_TOTAL.inc_by(delta_reverse_packets);
             if metrics::registry::debug_enabled() {
-                let direction_str = match reverse_direction {
-                    Direction::Ingress => "ingress",
-                    Direction::Egress => "egress",
-                };
                 metrics::registry::PACKETS_BY_INTERFACE_TOTAL
-                    .with_label_values(&[&interface_name_for_metrics, direction_str])
+                    .with_label_values(&[&interface_name_for_metrics, reverse_direction.as_str()])
                     .inc_by(delta_reverse_packets);
             }
         }
         if delta_reverse_bytes > 0 {
-            let reverse_direction = match stats.direction {
-                Direction::Ingress => Direction::Egress,
-                Direction::Egress => Direction::Ingress,
-            };
+            let reverse_direction = stats.direction.reversed();
             metrics::registry::BYTES_TOTAL.inc_by(delta_reverse_bytes);
             if metrics::registry::debug_enabled() {
-                let direction_str = match reverse_direction {
-                    Direction::Ingress => "ingress",
-                    Direction::Egress => "egress",
-                };
                 metrics::registry::BYTES_BY_INTERFACE_TOTAL
-                    .with_label_values(&[&interface_name_for_metrics, direction_str])
+                    .with_label_values(&[&interface_name_for_metrics, reverse_direction.as_str()])
                     .inc_by(delta_reverse_bytes);
             }
         }
     }
 
-    // Now get mutable reference to update flow span attributes
     let mut entry_ref = match flow_store.get_mut(community_id) {
         Some(entry) => entry,
         None => return true, // Flow removed during processing
@@ -1991,7 +1607,6 @@ async fn record_flow(
         flow_span.attributes.flow_reverse_icmp_code_id = Some(stats.reverse_icmp_code);
     }
 
-    // Update IP metadata from eBPF stats
     let is_ip_flow = stats.ether_type == EtherType::Ipv4 || stats.ether_type == EtherType::Ipv6;
     let is_ipv6 = stats.ether_type == EtherType::Ipv6;
 
@@ -2042,14 +1657,12 @@ async fn record_flow(
         FlowEndReason::ActiveTimeout,
     ));
 
-    // Ensure end_time is never before start_time (OTLP requirement)
     if recorded_span.end_time < recorded_span.start_time {
         std::mem::swap(&mut recorded_span.start_time, &mut recorded_span.end_time);
     }
 
     drop(entry_ref);
 
-    // Send to exporter
     match flow_span_tx.try_send(recorded_span) {
         Ok(_) => {
             metrics::registry::CHANNEL_SENDS_TOTAL
@@ -2092,8 +1705,6 @@ async fn record_flow(
         }
     }
 
-    // Reset metadata flags AND values in eBPF map for next interval
-    // Extract ebpf_key first, then drop flow_store reference before acquiring mutex
     let ebpf_key = flow_store
         .get(community_id)
         .and_then(|entry| entry.flow_span.flow_key);
@@ -2160,22 +1771,19 @@ pub async fn timeout_and_remove_flow(
     flow_stats_map: &Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, FlowStats>>>,
     flow_span_tx: &mpsc::Sender<FlowSpan>,
 ) {
-    // Remove from flow store (get ebpf_key before removing)
     let (ebpf_key, boot_time_offset) = if let Some(entry) = flow_store.get(&community_id) {
         (entry.flow_span.flow_key, entry.flow_span.boot_time_offset)
     } else {
-        return; // Flow already removed
+        return;
     };
 
-    // Drop flow_store reference before acquiring mutex
     let entry = match flow_store.remove(&community_id) {
         Some((_, entry)) => entry,
-        None => return, // Race condition, already removed
+        None => return,
     };
 
     let mut flow_span = entry.flow_span;
 
-    // Update end_time from eBPF map one last time
     if let Some(key) = ebpf_key {
         let lock_start = std::time::Instant::now();
         let map = flow_stats_map.lock().await;
@@ -2239,7 +1847,6 @@ pub async fn timeout_and_remove_flow(
             FlowEndReason::IdleTimeout,
         ));
 
-        // Ensure end_time is never before start_time (OTLP requirement)
         if recorded_span.end_time < recorded_span.start_time {
             std::mem::swap(&mut recorded_span.start_time, &mut recorded_span.end_time);
         }
@@ -2286,7 +1893,6 @@ pub async fn timeout_and_remove_flow(
         }
     }
 
-    // Clean up eBPF map entry
     if let Some(key) = ebpf_key {
         macro_rules! cleanup_ebpf_map {
             ($map_mutex:expr, $map_enum:expr) => {
@@ -2350,7 +1956,6 @@ pub async fn timeout_and_remove_flow(
         cleanup_ebpf_map!(flow_stats_map, EbpfMapName::FlowStats);
     }
 
-    // Metrics
     let iface_name = flow_span
         .attributes
         .network_interface_name
@@ -2549,30 +2154,20 @@ pub async fn orphan_scanner_task(
     }
 }
 
-/// Calculate the offset needed to convert boot-relative timestamps (from bpf_ktime_get_boot_ns)
-/// to wall clock timestamps.
+/// Calculate the offset to convert `bpf_ktime_get_boot_ns` timestamps to wall-clock time.
 ///
-/// bpf_ktime_get_boot_ns() returns time in nanoseconds since boot using CLOCK_BOOTTIME,
-/// which includes suspend time. This matches /proc/uptime in userspace.
-///
-/// This function calculates: wall_clock_time_ns - boot_time_ns = offset
-///
-/// Returns an error if the boot time cannot be determined, as this would make all
-/// timestamps incorrect and render the program's output useless.
-/// Convert a normalized FlowKey to a Community ID (v1) hash
-/// The FlowKey must already be normalized (src < dst)
+/// Reads `/proc/uptime` (CLOCK_BOOTTIME) and subtracts from the current wall-clock time.
+/// Returns an error if the boot time cannot be determined.
 fn calculate_boot_time_offset_nanos() -> Result<u64, BootTimeError> {
     use std::time::SystemTime;
 
-    // Get current wall clock time since UNIX epoch
     let now = SystemTime::now();
-    let now_since_epoch = now
+    let wall_clock_nanos = now
         .duration_since(UNIX_EPOCH)
-        .map_err(BootTimeError::SystemClockBeforeEpoch)?;
-    let wall_clock_nanos = now_since_epoch.as_nanos() as u64;
+        .map_err(BootTimeError::SystemClockBeforeEpoch)?
+        .as_nanos() as u64;
 
-    // Read boot time from /proc/uptime (uses CLOCK_BOOTTIME, matching bpf_ktime_get_boot_ns)
-    // Format: "uptime_seconds idle_seconds"
+    // /proc/uptime uses CLOCK_BOOTTIME, matching bpf_ktime_get_boot_ns
     let uptime_content =
         std::fs::read_to_string("/proc/uptime").map_err(BootTimeError::ReadProcUptime)?;
 
@@ -2582,10 +2177,7 @@ fn calculate_boot_time_offset_nanos() -> Result<u64, BootTimeError> {
         .and_then(|s| s.parse::<f64>().ok())
         .ok_or_else(|| BootTimeError::ParseUptime(uptime_content.clone()))?;
 
-    // Convert uptime to nanoseconds
     let uptime_nanos = (uptime_secs * 1_000_000_000.0) as u64;
-
-    // Calculate offset: current_time - uptime = boot_time
     let offset = wall_clock_nanos.saturating_sub(uptime_nanos);
 
     debug!(
@@ -2627,7 +2219,6 @@ mod tests {
 
     use super::*;
 
-    /// Helper to create test FlowStats
     fn create_test_stats(proto: IpProto) -> FlowStats {
         FlowStats {
             first_seen_ns: 1_000_000_000,
@@ -2676,7 +2267,6 @@ mod tests {
         }
     }
 
-    /// Helper to create test FlowStats with specific TCP flags
     fn create_test_tcp_stats(tcp_flags: u8) -> FlowStats {
         let mut stats = create_test_stats(IpProto::Tcp);
         stats.tcp_flags = tcp_flags;
@@ -2684,7 +2274,6 @@ mod tests {
         stats
     }
 
-    /// Helper to create a test FlowWorker for timeout calculations
     fn create_test_worker_for_timeout() -> FlowWorker {
         let span_opts = SpanOptions::default();
         let (_flow_event_tx, flow_event_rx) = mpsc::channel::<FlowEvent>(100);
@@ -2696,7 +2285,6 @@ mod tests {
         let id_generator: Arc<dyn IdGenerator + Send + Sync> =
             Arc::new(RandomIdGenerator::default());
         let iface_map = Arc::new(ArcSwap::new(Arc::new(HashMap::new())));
-        // Create a dummy eBPF map - won't be used in unit tests
         let flow_stats_map_data = unsafe { std::mem::zeroed() };
         let listening_ports_map_data = unsafe { std::mem::zeroed() };
 
@@ -2707,7 +2295,6 @@ mod tests {
         std::mem::forget(Arc::clone(&listening_ports_map));
 
         let direction_inferrer = Arc::new(DirectionInferrer::new(listening_ports_map));
-        let hostname_cache = Cache::builder().max_capacity(1000).build();
 
         FlowWorker {
             worker_id: 0,
@@ -2729,9 +2316,6 @@ mod tests {
             geneve_port: 6081,
             wireguard_port: 51820,
             direction_inferrer,
-            hostname_cache,
-            hostname_resolve_timeout: span_opts.hostname_resolve_timeout,
-            enable_hostname_resolution: span_opts.enable_hostname_resolution,
         }
     }
 
@@ -2742,7 +2326,7 @@ mod tests {
             end_time: SystemTime::now(),
             span_kind: SpanKind::Internal,
             attributes: SpanAttributes {
-                flow_packets_total: 10, // A non-zero value for tests that need it
+                flow_packets_total: 10,
                 ..Default::default()
             },
             flow_key: Some(key),
@@ -2777,7 +2361,6 @@ mod tests {
         let timeout = worker.calculate_timeout(&stats);
         assert_eq!(timeout, worker.icmp_timeout);
 
-        // Prevent drop to avoid IO Safety violation from zeroed eBPF map
         std::mem::forget(worker);
     }
 
@@ -2791,7 +2374,6 @@ mod tests {
         let timeout = worker.calculate_timeout(&stats);
         assert_eq!(timeout, worker.tcp_timeout);
 
-        // Prevent drop to avoid IO Safety violation from zeroed eBPF map
         std::mem::forget(worker);
     }
 
@@ -2805,7 +2387,6 @@ mod tests {
         let timeout = worker.calculate_timeout(&stats);
         assert_eq!(timeout, worker.tcp_fin_timeout);
 
-        // Prevent drop to avoid IO Safety violation from zeroed eBPF map
         std::mem::forget(worker);
     }
 
@@ -2819,7 +2400,6 @@ mod tests {
         let timeout = worker.calculate_timeout(&stats);
         assert_eq!(timeout, worker.tcp_rst_timeout);
 
-        // Prevent drop to avoid IO Safety violation from zeroed eBPF map
         std::mem::forget(worker);
     }
 
@@ -2830,7 +2410,6 @@ mod tests {
         let timeout = worker.calculate_timeout(&stats);
         assert_eq!(timeout, worker.udp_timeout);
 
-        // Prevent drop to avoid IO Safety violation from zeroed eBPF map
         std::mem::forget(worker);
     }
 
@@ -2841,7 +2420,6 @@ mod tests {
         let timeout = worker.calculate_timeout(&stats);
         assert_eq!(timeout, worker.generic_timeout);
 
-        // Prevent drop to avoid IO Safety violation from zeroed eBPF map
         std::mem::forget(worker);
     }
 
@@ -2937,7 +2515,7 @@ mod tests {
         tcp_stats.tcp_syn_ns = 1;
         tcp_stats.tcp_syn_ack_ns = 2;
         tcp_stats.tcp_txn_sum_ns = 16;
-        tcp_stats.tcp_txn_count = 0; // Late start case: no payload transactions captured
+        tcp_stats.tcp_txn_count = 0;
         tcp_stats.tcp_jitter_avg_ns = 1;
 
         let is_tcp = stats.protocol == IpProto::Tcp;
@@ -2962,12 +2540,6 @@ mod tests {
         assert_eq!(flow_tcp_svc_latency, None);
         assert_eq!(flow_tcp_rndtrip_latency, None);
     }
-
-    // NOTE: Most integration tests removed - the architecture has changed to an event-driven model
-    // where FlowWorker receives FlowEvent from eBPF ring buffer instead of PacketMeta.
-    // Tests would need to mock the entire eBPF infrastructure to work properly.
-    // Simple unit tests for individual functions (like calculate_timeout, determine_flow_end_reason)
-    // are retained above and below.
 
     #[test]
     fn test_determine_flow_end_reason_with_fin() {
@@ -3004,7 +2576,6 @@ mod tests {
 
     #[tokio::test]
     async fn timeout_and_remove_flow_sends_span_and_cleans_store() {
-        // Arrange
         let flow_store = Arc::new(DashMap::with_hasher(FxBuildHasher::default()));
         let (flow_span_tx, mut flow_span_rx) = mpsc::channel(100);
         let community_id = "test_flow_1".to_string();
@@ -3018,20 +2589,10 @@ mod tests {
         );
         assert_eq!(flow_store.len(), 1);
 
-        // This test CANNOT verify the eBPF map cleanup. We pass a null pointer for the map.
-        // The function will still try to lock and access it, which will panic.
-        // Therefore, we can only unit test the parts of the function that don't touch the map.
-        // A full integration test is needed to test the eBPF map interaction.
-        //
-        // Let's test the logic *before* the eBPF interaction.
-
         let mut entry = flow_store.remove(&community_id).unwrap().1;
         entry.flow_span.attributes.flow_end_reason = Some(FlowEndReason::IdleTimeout);
-
-        // Act
         let _ = flow_span_tx.send(entry.flow_span).await;
 
-        // Assert
         assert!(flow_store.is_empty(), "FlowStore should be empty");
         let result_span = flow_span_rx.recv().await;
         assert!(result_span.is_some(), "A final span should have been sent");

@@ -613,8 +613,6 @@ span {
   udp_timeout                = "60s"
   community_id_seed          = 0
   trace_id_timeout           = "24h"
-  enable_hostname_resolution = true
-  hostname_resolve_timeout   = "100ms"
 }
 
 # OTLP exporter configuration

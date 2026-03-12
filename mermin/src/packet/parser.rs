@@ -1,10 +1,6 @@
 //! Deep packet parser for extracting innermost 5-tuples and tunnel metadata.
 //!
-//! This parser handles:
-//! - VXLAN (UDP port 4789)
-//! - Geneve (UDP port 6081)
-//! - GRE (IP protocol 47)
-//! - Plain (non-tunneled) packets
+//! Handles VXLAN (port 4789), Geneve (port 6081), GRE (proto 47), and plain packets.
 //!
 //! The parser extracts:
 //! 1. Innermost 5-tuple (for correct Community ID calculation)
@@ -20,8 +16,7 @@ use crate::packet::types::{
     TunnelInfo,
 };
 
-/// Check if a flow is likely tunneled based on protocol and ports.
-/// This is a fast check to avoid unnecessary deep parsing for plain traffic.
+/// Returns true if the flow is likely tunneled. Fast check to avoid deep parsing for plain traffic.
 pub fn is_tunnel(
     flow_key: &FlowKey,
     vxlan_port: u16,
@@ -39,25 +34,17 @@ pub fn is_tunnel(
                 || src == wireguard_port
                 || dst == wireguard_port
         }
-        IpProto::Gre => true, // GRE is always a tunnel
+        IpProto::Gre => true,
         _ => false,
     }
 }
 
-/// Parse packet data starting from a specific offset (skipping already-parsed headers).
-/// This is used when eBPF has already parsed outer headers into FlowStats.
-///
-/// Arguments:
-/// - `data`: Raw packet bytes (only the UNPARSED portion from FlowEvent.packet_data)
-/// - `parsed_offset`: How many bytes were already parsed by eBPF (not in data)
-///
-/// Returns: ParsedPacket starting from the given offset
+/// Parse packet data where eBPF has already consumed the outer headers.
+/// For tunnels, `data` starts at the inner Ethernet header.
 pub fn parse_packet_from_offset(
     data: &[u8],
     _parsed_offset: u16,
 ) -> Result<ParsedPacket, ParseError> {
-    // For tunnels, data starts at inner Ethernet header (outer already parsed by eBPF)
-    // For plain traffic, this shouldn't be called (fast path skips parsing)
     parse_packet_deep(data)
 }
 
@@ -65,7 +52,6 @@ pub fn parse_packet_from_offset(
 pub fn parse_packet_deep(data: &[u8]) -> Result<ParsedPacket, ParseError> {
     let mut offset = 0;
 
-    // Parse Ethernet header
     let (src_mac, dst_mac, ether_type) = parse_ethernet(data, &mut offset)?;
 
     let l2_meta = L2Metadata {
@@ -74,20 +60,16 @@ pub fn parse_packet_deep(data: &[u8]) -> Result<ParsedPacket, ParseError> {
         ether_type,
     };
 
-    // Parse outer IP layer
     let (outer_src_ip, outer_dst_ip, outer_protocol, ip_meta) = match ether_type {
         EtherType::Ipv4 => parse_ipv4(data, &mut offset)?,
         EtherType::Ipv6 => parse_ipv6(data, &mut offset)?,
         _ => return Err(ParseError::UnsupportedEtherType),
     };
 
-    // Check if this is a tunnel based on protocol and ports
     match outer_protocol {
         IpProto::Udp => {
-            // Parse UDP ports to check for VXLAN/Geneve
-            let (outer_src_port, outer_dst_port) = parse_udp_ports(data, offset)?;
+            let (outer_src_port, outer_dst_port) = parse_l4_ports(data, offset)?;
 
-            // VXLAN (port 4789) or Geneve (port 6081)
             if outer_dst_port == 4789 || outer_src_port == 4789 {
                 return parse_vxlan(
                     data,
@@ -112,7 +94,6 @@ pub fn parse_packet_deep(data: &[u8]) -> Result<ParsedPacket, ParseError> {
                 );
             }
 
-            // Regular UDP (not a tunnel)
             Ok(ParsedPacket::Direct {
                 five_tuple: FiveTuple {
                     src_ip: outer_src_ip,
@@ -127,7 +108,7 @@ pub fn parse_packet_deep(data: &[u8]) -> Result<ParsedPacket, ParseError> {
             })
         }
         IpProto::Tcp => {
-            let (src_port, dst_port) = parse_tcp_ports(data, offset)?;
+            let (src_port, dst_port) = parse_l4_ports(data, offset)?;
             Ok(ParsedPacket::Direct {
                 five_tuple: FiveTuple {
                     src_ip: outer_src_ip,
@@ -157,28 +138,23 @@ pub fn parse_packet_deep(data: &[u8]) -> Result<ParsedPacket, ParseError> {
             })
         }
         IpProto::Gre => {
-            // TODO: Implement GRE parsing
+            // TODO: GRE parsing
             Err(ParseError::UnsupportedProtocol)
         }
-        _ => {
-            // Other protocols (no ports)
-            Ok(ParsedPacket::Direct {
-                five_tuple: FiveTuple {
-                    src_ip: outer_src_ip,
-                    dst_ip: outer_dst_ip,
-                    src_port: 0,
-                    dst_port: 0,
-                    protocol: outer_protocol,
-                    ip_version: if outer_src_ip.is_ipv4() { 4 } else { 6 },
-                },
-                l2_metadata: l2_meta,
-                ip_metadata: ip_meta,
-            })
-        }
+        _ => Ok(ParsedPacket::Direct {
+            five_tuple: FiveTuple {
+                src_ip: outer_src_ip,
+                dst_ip: outer_dst_ip,
+                src_port: 0,
+                dst_port: 0,
+                protocol: outer_protocol,
+                ip_version: if outer_src_ip.is_ipv4() { 4 } else { 6 },
+            },
+            l2_metadata: l2_meta,
+            ip_metadata: ip_meta,
+        }),
     }
 }
-
-// Helper functions
 
 fn parse_ethernet(
     data: &[u8],
@@ -276,7 +252,7 @@ fn parse_ipv6(
 
     let dscp = (data[*offset] & 0x0F) << 2 | (data[*offset + 1] >> 6);
     let ecn = (data[*offset + 1] >> 4) & 0x03;
-    let ttl = data[*offset + 7]; // Hop limit
+    let ttl = data[*offset + 7];
     let flow_label = u32::from_be_bytes([
         0,
         data[*offset + 1] & 0x0F,
@@ -300,16 +276,7 @@ fn parse_ipv6(
     ))
 }
 
-fn parse_udp_ports(data: &[u8], offset: usize) -> Result<(u16, u16), ParseError> {
-    if data.len() < offset + 4 {
-        return Err(ParseError::TooShort);
-    }
-    let src_port = u16::from_be_bytes([data[offset], data[offset + 1]]);
-    let dst_port = u16::from_be_bytes([data[offset + 2], data[offset + 3]]);
-    Ok((src_port, dst_port))
-}
-
-fn parse_tcp_ports(data: &[u8], offset: usize) -> Result<(u16, u16), ParseError> {
+fn parse_l4_ports(data: &[u8], offset: usize) -> Result<(u16, u16), ParseError> {
     if data.len() < offset + 4 {
         return Err(ParseError::TooShort);
     }
@@ -340,8 +307,7 @@ fn parse_vxlan(
     outer_src_mac: [u8; 6],
     outer_dst_mac: [u8; 6],
 ) -> Result<ParsedPacket, ParseError> {
-    // Skip UDP header (8 bytes)
-    *offset += 8;
+    *offset += 8; // skip UDP header
 
     // VXLAN header (8 bytes): flags(1) + reserved(3) + VNI(3) + reserved(1)
     if data.len() < *offset + 8 {
@@ -351,19 +317,16 @@ fn parse_vxlan(
     let vni = u32::from_be_bytes([0, data[*offset + 4], data[*offset + 5], data[*offset + 6]]);
     *offset += 8;
 
-    // Parse inner Ethernet
     let (inner_src_mac, inner_dst_mac, inner_ether_type) = parse_ethernet(data, offset)?;
 
-    // Parse inner IP
     let (inner_src_ip, inner_dst_ip, inner_protocol, _) = match inner_ether_type {
         EtherType::Ipv4 => parse_ipv4(data, offset)?,
         EtherType::Ipv6 => parse_ipv6(data, offset)?,
         _ => return Err(ParseError::UnsupportedEtherType),
     };
 
-    // Parse inner L4 ports
     let (inner_src_port, inner_dst_port) = match inner_protocol {
-        IpProto::Tcp | IpProto::Udp => parse_tcp_ports(data, *offset)?,
+        IpProto::Tcp | IpProto::Udp => parse_l4_ports(data, *offset)?,
         IpProto::Icmp => parse_icmp_type_code(data, *offset)?,
         _ => (0, 0),
     };
@@ -408,31 +371,27 @@ fn parse_geneve(
     outer_src_mac: [u8; 6],
     outer_dst_mac: [u8; 6],
 ) -> Result<ParsedPacket, ParseError> {
-    // Skip UDP header (8 bytes)
-    *offset += 8;
+    *offset += 8; // skip UDP header
 
     // Geneve header (8+ bytes): ver/opt_len(1) + flags(1) + protocol(2) + VNI(3) + reserved(1)
     if data.len() < *offset + 8 {
         return Err(ParseError::TooShort);
     }
 
-    let opt_len = (data[*offset] & 0x3F) as usize * 4; // Options length in bytes
+    let opt_len = (data[*offset] & 0x3F) as usize * 4; // options length in bytes
     let vni = u32::from_be_bytes([0, data[*offset + 4], data[*offset + 5], data[*offset + 6]]);
-    *offset += 8 + opt_len; // Skip base header + options
+    *offset += 8 + opt_len;
 
-    // Parse inner Ethernet
     let (inner_src_mac, inner_dst_mac, inner_ether_type) = parse_ethernet(data, offset)?;
 
-    // Parse inner IP
     let (inner_src_ip, inner_dst_ip, inner_protocol, _) = match inner_ether_type {
         EtherType::Ipv4 => parse_ipv4(data, offset)?,
         EtherType::Ipv6 => parse_ipv6(data, offset)?,
         _ => return Err(ParseError::UnsupportedEtherType),
     };
 
-    // Parse inner L4 ports
     let (inner_src_port, inner_dst_port) = match inner_protocol {
-        IpProto::Tcp | IpProto::Udp => parse_tcp_ports(data, *offset)?,
+        IpProto::Tcp | IpProto::Udp => parse_l4_ports(data, *offset)?,
         IpProto::Icmp => parse_icmp_type_code(data, *offset)?,
         _ => (0, 0),
     };

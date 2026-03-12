@@ -23,7 +23,6 @@ bytesize = "1.3"
 clap = { workspace = true, features = ["derive", "env", "help", "suggestions", "usage"] }
 crossbeam = "0.8"
 dashmap = "6.0"
-dns-lookup = "2.0"
 figment = { version = "0.10", features = ["env", "test", "yaml"] }
 futures = "0.3"
 fxhash = "0.2"
@@ -42,7 +41,6 @@ lazy_static = "1.4"
 libc = { workspace = true }
 log = { workspace = true }
 mermin-common = { path = "../mermin-common", features = ["user"] }
-moka = { version = "0.12", features = ["future"] }
 notify = "6.1"
 netlink-packet-core = "0.8.1"
 netlink-packet-route = "0.25.1"

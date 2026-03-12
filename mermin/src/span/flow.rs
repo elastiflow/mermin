@@ -11,11 +11,13 @@ use opentelemetry::{
 };
 use serde::{Serialize, Serializer};
 
-use crate::{otlp::trace::Traceable, span::tcp::TcpFlag};
+use crate::{
+    otlp::trace::Traceable,
+    span::{direction::FlowDirection, tcp::TcpFlag},
+};
 
 /// Flow End Reason based on RFC 5102 IPFIX Information Model
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[allow(dead_code)]
 pub enum FlowEndReason {
     /// 0x00: Reserved for future use
     #[default]
@@ -27,14 +29,14 @@ pub enum FlowEndReason {
     /// 0x03: The Flow was terminated because signals indicating the end of the Flow were detected (e.g., TCP FIN flag)
     EndOfFlowDetected,
     /// 0x04: The Flow was terminated because of some external event (e.g., shutdown of the Metering Process)
+    #[allow(dead_code)]
     ForcedEnd,
     /// 0x05: The Flow was terminated because of lack of resources available to the Metering Process and/or the Exporting Process
+    #[allow(dead_code)]
     LackOfResources,
 }
 
-#[allow(dead_code)]
 impl FlowEndReason {
-    /// Convert the enum variant to its string representation
     pub fn as_str(&self) -> &'static str {
         match self {
             FlowEndReason::Reserved => "reserved",
@@ -46,7 +48,7 @@ impl FlowEndReason {
         }
     }
 
-    /// Convert the enum variant to its numeric value as specified in RFC 5102
+    #[allow(dead_code)]
     pub fn to_u8(self) -> u8 {
         match self {
             FlowEndReason::Reserved => 0x00,
@@ -58,7 +60,7 @@ impl FlowEndReason {
         }
     }
 
-    /// Create FlowEndReason from a numeric value
+    #[allow(dead_code)]
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
             0x00 => Some(FlowEndReason::Reserved),
@@ -95,7 +97,6 @@ pub struct FlowSpan {
     #[serde(skip)]
     pub last_recorded_reverse_bytes: u64,
     #[serde(skip)]
-    #[allow(dead_code)]
     pub boot_time_offset: u64,
 
     // Timing metadata for polling architecture
@@ -111,6 +112,8 @@ pub struct FlowSpan {
 pub struct SpanAttributes {
     // General Flow Attribute
     pub flow_community_id: String,
+    #[serde(serialize_with = "serialize_flow_direction")]
+    pub flow_direction: FlowDirection,
     #[serde(serialize_with = "serialize_connection_state")]
     pub flow_connection_state: Option<ConnectionState>,
     #[serde(serialize_with = "serialize_flow_end_reason")]
@@ -159,12 +162,6 @@ pub struct SpanAttributes {
     pub flow_ipsec_esp_spi: Option<u32>,
     pub flow_ipsec_sender_index: Option<u32>,
     pub flow_ipsec_receiver_index: Option<u32>,
-
-    // Client/Server Attributes (populated when direction is known)
-    pub client_address: Option<String>,
-    pub client_port: Option<u16>,
-    pub server_address: Option<String>,
-    pub server_port: Option<u16>,
 
     // Process Attributes (from eBPF LSM hooks)
     /// PID of the process that created/owns this flow (None if unknown)
@@ -292,6 +289,7 @@ impl Default for SpanAttributes {
     fn default() -> Self {
         Self {
             flow_community_id: String::new(),
+            flow_direction: FlowDirection::Unknown,
             flow_connection_state: None,
             flow_end_reason: None,
             source_address: IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
@@ -331,10 +329,6 @@ impl Default for SpanAttributes {
             flow_ipsec_esp_spi: None,
             flow_ipsec_sender_index: None,
             flow_ipsec_receiver_index: None,
-            client_address: None,
-            client_port: None,
-            server_address: None,
-            server_port: None,
             process_pid: None,
             process_executable_name: None,
             flow_bytes_delta: 0,
@@ -480,6 +474,10 @@ impl Traceable for FlowSpan {
             self.attributes.flow_community_id.to_string(),
         ));
         kvs.push(KeyValue::new(
+            "flow.direction",
+            self.attributes.flow_direction.as_str(),
+        ));
+        kvs.push(KeyValue::new(
             "network.type",
             self.attributes.network_type.to_owned().as_str(),
         ));
@@ -535,7 +533,6 @@ impl Traceable for FlowSpan {
             "flow.reverse.packets.total",
             self.attributes.flow_reverse_packets_total,
         ));
-        // Record optional fields only if they have values
         if let Some(ref value) = self.attributes.flow_connection_state {
             kvs.push(KeyValue::new("flow.connection.state", value.as_str()));
         }
@@ -636,18 +633,6 @@ impl Traceable for FlowSpan {
                 "flow.reverse.tcp.flags.tags",
                 Value::Array(flag_values.into()),
             ));
-        }
-        if let Some(ref value) = self.attributes.client_address {
-            kvs.push(KeyValue::new("client.address", value.to_owned()));
-        }
-        if let Some(value) = self.attributes.client_port {
-            kvs.push(KeyValue::new("client.port", value as i64));
-        }
-        if let Some(ref value) = self.attributes.server_address {
-            kvs.push(KeyValue::new("server.address", value.to_owned()));
-        }
-        if let Some(value) = self.attributes.server_port {
-            kvs.push(KeyValue::new("server.port", value as i64));
         }
         if let Some(value) = self.attributes.flow_ipsec_ah_spi {
             kvs.push(KeyValue::new("flow.ipsec.ah.spi", value as i64));
@@ -997,7 +982,6 @@ impl Traceable for FlowSpan {
         if let Some(ref value) = self.attributes.network_policies_egress {
             kvs.push(KeyValue::new("network.policies.egress", value.join(",")));
         }
-        // Process attributes (from eBPF LSM hooks)
         if let Some(value) = self.attributes.process_pid {
             kvs.push(KeyValue::new("process.pid", value as i64));
         }
@@ -1030,7 +1014,6 @@ impl Traceable for FlowSpan {
     }
 }
 
-// Helpers to serialize the IP protocol and EtherType which do not natively implement Serialize
 fn serialize_ip_proto<S>(proto: &IpProto, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
@@ -1079,6 +1062,13 @@ where
         Some(et) => serializer.serialize_some(et.as_str()),
         None => serializer.serialize_none(),
     }
+}
+
+fn serialize_flow_direction<S>(direction: &FlowDirection, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(direction.as_str())
 }
 
 fn serialize_span_kind<S>(span_kind: &SpanKind, serializer: S) -> Result<S::Ok, S::Error>
@@ -1627,7 +1617,6 @@ mod tests {
 
     #[test]
     fn test_flow_end_reason_all_values() {
-        // Ensure all enum variants are covered
         let all_reasons = vec![
             FlowEndReason::IdleTimeout,
             FlowEndReason::ActiveTimeout,
@@ -1705,10 +1694,6 @@ mod tests {
         };
 
         adapter.export(Arc::new(flow_span)).await;
-
-        // Force flush/shutdown to ensure spans are processed (though SimpleSpanProcessor handles it synchronously usually, but adapter is async)
-        // The adapter just calls start/end on span.
-        // SimpleSpanProcessor processes on end.
 
         let spans = captured_spans.lock().unwrap();
         assert_eq!(spans.len(), 1);

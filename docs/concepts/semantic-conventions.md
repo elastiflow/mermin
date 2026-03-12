@@ -18,8 +18,9 @@ Each network flow record is represented as a single OpenTelemetry **Span**. This
   - `CLIENT`: Represents the perspective of the connection initiator. An agent infers this when observing an outbound connection that originates from an ephemeral (non-listening) port or through protocol-specific logic.
     - **Example (TCP)**: A host sends a packet from an ephemeral source port (e.g., 54211) to a destination service port (e.g., 443).
     - **Example (ICMP)**: A host sends an ICMP "Echo Request" packet.
-  - `SERVER`: Represents the perspective of the connection receiver. An agent infers this when observing an inbound connection directed to a port that a local process is actively listening on.
-    - **Example (TCP)**: A host sends a packet from a source port that is also a listening port (e.g., 443) to an ephemeral destination port (e.g., 54211).
+    - **Example (loopback)**: A host sends a packet *to* one of its own listening ports (egress direction) — the sender is the client even though a local listening port is involved.
+  - `SERVER`: Represents the perspective of the connection receiver. An agent infers this when a local process is actively listening on the matched port **and** the flow direction confirms the agent is on the receiving side of the connection.
+    - **Example (TCP)**: An inbound packet arrives at a listening port (e.g., 443); or an outbound packet departs *from* a listening port as a server response.
     - **Example (ICMP)**: A host sends an ICMP "Echo Reply" packet.
   - `INTERNAL`: Used as a fallback when the client/server relationship cannot be determined.
 
@@ -61,6 +62,8 @@ To ensure clarity, this convention uses and defines specific attribute namespace
 - **`network.*`**: The existing OTel namespace for protocol-specific attributes that are static for the duration of the flow (e.g., network.transport, network.type).
 - **`tunnel.*`**: Describes tunneling protocols and encapsulation metadata (e.g., tunnel.type, tunnel.id). This is always the outer-most tunnel or encapsulation.
 - **`process.*` / `container.*`**: Existing OTel namespaces used to identify the host process or container associated with the flow's socket.
+
+> **Note on `client.*` / `server.*`**: This convention intentionally omits the standard OTel `client.*` / `server.*` attributes. Flow telemetry is symmetric and observed by a third party — the source and destination of a packet are well-defined by `source.*` and `destination.*`, and the observer's role is captured by Span Kind. Attempting to resolve which endpoint is the "client" or "server" is opportunistic at best and counter-intuitive to how network flow data (NetFlow, IPFIX, eBPF) is typically consumed. Users should treat `source.*` / `destination.*` as the canonical endpoint identifiers.
 
 The `flow.*` namespace is critical for creating a clear semantic distinction. It separates attributes of a flow — a dynamic conversation between two endpoints over time — from attributes of a network entity, like a physical interface,
 whose properties are generally static. Overloading the existing network.\* namespace with dynamic flow concepts would create ambiguity.

@@ -67,11 +67,6 @@ impl EbpfFlowGuard {
     ///
     /// The entry will be automatically removed from the map when the guard
     /// is dropped, unless [`keep()`](Self::keep) is called first.
-    ///
-    /// ### Arguments
-    ///
-    /// - `key` - Flow key identifying the entry in the eBPF map
-    /// - `stats_map` - Shared reference to the eBPF `FLOW_STATS`
     pub fn new(
         key: FlowKey,
         stats_map: Arc<Mutex<EbpfHashMap<aya::maps::MapData, FlowKey, mermin_common::FlowStats>>>,
@@ -96,14 +91,14 @@ impl EbpfFlowGuard {
 impl Drop for EbpfFlowGuard {
     fn drop(&mut self) {
         if !self.should_keep.load(Ordering::Acquire) {
-            // Entry was not marked as "kept", so clean it up
-            // Spawn a background task to avoid blocking the drop (async not allowed in Drop)
             let key = self.key;
             let stats_map = Arc::clone(&self.stats_map);
 
             tokio::spawn(async move {
                 let mut map = stats_map.lock().await;
-                match map.remove(&key) {
+                let result = map.remove(&key);
+                drop(map);
+                match result {
                     Ok(_) => {
                         warn!(
                             event.name = "ebpf_guard.cleanup_success",
@@ -122,7 +117,6 @@ impl Drop for EbpfFlowGuard {
                         }
                     }
                 }
-                drop(map);
             });
         }
     }
@@ -132,19 +126,14 @@ impl Drop for EbpfFlowGuard {
 mod tests {
     use super::*;
 
-    // Note: Full integration tests require eBPF maps, which can't be instantiated in unit tests.
-    // The guard behavior is tested via integration tests in the parent module.
-
     #[test]
     fn test_should_keep_default_false() {
-        // Verify the default state is "don't keep" (will cleanup)
         let should_keep = Arc::new(AtomicBool::new(false));
         assert!(!should_keep.load(Ordering::Acquire));
     }
 
     #[test]
     fn test_keep_sets_flag() {
-        // Verify keep() sets the flag correctly
         let should_keep = Arc::new(AtomicBool::new(false));
         should_keep.store(true, Ordering::Release);
         assert!(should_keep.load(Ordering::Acquire));

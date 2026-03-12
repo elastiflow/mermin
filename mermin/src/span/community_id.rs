@@ -5,7 +5,7 @@ use mermin_common::ip::IpProto;
 use sha1::{Digest, Sha1};
 
 /// Community ID generator with configurable seed
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct CommunityIdGenerator {
     seed: u16,
 }
@@ -16,14 +16,7 @@ impl CommunityIdGenerator {
         Self { seed }
     }
 
-    /// Create a new Community ID generator with default seed (0)
-    #[allow(dead_code)]
-    pub fn default() -> Self {
-        Self { seed: 0 }
-    }
-
-    /// Generate Community ID for any flow based on protocol type
-    /// This is the main entry point that handles all protocol types
+    /// Generate a Community ID v1 hash for a flow, dispatching on protocol type.
     pub fn generate(
         &self,
         src_addr: IpAddr,
@@ -36,24 +29,14 @@ impl CommunityIdGenerator {
             IpProto::Tcp | IpProto::Udp | IpProto::Sctp => {
                 self.community_id_v1(src_addr, dst_addr, src_port, dst_port, proto as u8)
             }
-            IpProto::Icmp => {
-                // For ICMP, map type/code to port-like values
+            IpProto::Icmp | IpProto::Ipv6Icmp => {
                 let (sport, dport) = map_icmp_to_ports(src_port, dst_port);
                 self.community_id_v1(src_addr, dst_addr, sport, dport, proto as u8)
             }
-            IpProto::Ipv6Icmp => {
-                // For ICMPv6, map type/code to port-like values
-                let (sport, dport) = map_icmp_to_ports(src_port, dst_port);
-                self.community_id_v1(src_addr, dst_addr, sport, dport, proto as u8)
-            }
-            _ => {
-                // For other protocols without ports
-                self.community_id_v1(src_addr, dst_addr, 0, 0, proto as u8)
-            }
+            _ => self.community_id_v1(src_addr, dst_addr, 0, 0, proto as u8),
         }
     }
 
-    /// Core Community ID v1 implementation
     fn community_id_v1(
         &self,
         src_addr: IpAddr,
@@ -62,41 +45,28 @@ impl CommunityIdGenerator {
         dst_port: u16,
         proto: u8,
     ) -> String {
-        // Convert addresses to network byte order
         let src_addr_bytes = self.ip_addr_to_bytes(src_addr);
         let dst_addr_bytes = self.ip_addr_to_bytes(dst_addr);
-
-        // Convert ports to network byte order
         let src_port_bytes = src_port.to_be_bytes();
         let dst_port_bytes = dst_port.to_be_bytes();
-
-        // Convert seed to network byte order
         let seed_bytes = self.seed.to_be_bytes();
-
-        // Order endpoints so smaller IP:port comes first
         let (first_addr, second_addr, first_port, second_port) = self.order_endpoints(
             src_addr_bytes,
             dst_addr_bytes,
             src_port_bytes,
             dst_port_bytes,
         );
-
-        // Build hash input: seed + first_addr + second_addr + proto + 0 + first_port + second_port
         let mut hasher = Sha1::new();
         hasher.update(seed_bytes);
         hasher.update(&first_addr);
         hasher.update(&second_addr);
-        hasher.update([proto, 0]); // proto + padding byte
+        hasher.update([proto, 0]);
         hasher.update(first_port);
         hasher.update(second_port);
 
-        let digest = hasher.finalize();
-
-        // Return version + base64 encoded digest
-        format!("1:{}", BASE64.encode(digest))
+        format!("1:{}", BASE64.encode(hasher.finalize()))
     }
 
-    /// Convert IP address to network byte order bytes
     fn ip_addr_to_bytes(&self, addr: IpAddr) -> Vec<u8> {
         match addr {
             IpAddr::V4(ipv4) => ipv4.octets().to_vec(),
@@ -104,8 +74,6 @@ impl CommunityIdGenerator {
         }
     }
 
-    /// Order endpoints so the smaller IP:port tuple comes first
-    /// This implements lexicographic comparison of the entire IP:port tuple
     fn order_endpoints(
         &self,
         src_addr: Vec<u8>,
@@ -125,15 +93,11 @@ impl CommunityIdGenerator {
     }
 }
 
-/// Map ICMP type and code to port-like values for Community ID calculation
-/// This mapping is based on Zeek's implementation as referenced in the spec
-/// See: https://github.com/corelight/pycommunityid/blob/master/communityid/icmp.py
+/// Map ICMP type to its counter-type for bidirectional flow identification.
 ///
-/// For ICMP flows, the src_port parameter should contain the ICMP type,
-/// and the dst_port parameter should contain the ICMP code.
+/// Maps request/reply pairs (e.g. echo/echo_reply) to the same community ID.
+/// Based on the community-id spec: <https://github.com/corelight/pycommunityid>
 fn map_icmp_to_ports(_type: u16, counter_type: u16) -> (u16, u16) {
-    // Map ICMP types to their corresponding reply types for proper flow identification
-    // This ensures that echo/echo_reply, timestamp/timestamp_reply, etc. are treated as the same flow
     let counter_type = match _type {
         // IPv4 ICMP types
         0 => 8,   // ECHO_REPLY -> ECHO
