@@ -48,7 +48,7 @@ use tokio::{
 use tracing::{debug, error, trace, warn};
 
 use crate::{
-    health::HealthState,
+    health::handlers::HealthState,
     k8s::{
         K8sError,
         owner_relations::{OwnerRelationsManager, OwnerRelationsRules},

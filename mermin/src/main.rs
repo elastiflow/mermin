@@ -32,7 +32,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    health::{HealthState, start_api_server},
+    health::handlers::{HealthState, start_api_server},
     iface::{
         controller::IfaceController,
         threads::{
