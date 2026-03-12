@@ -26,10 +26,7 @@ impl TraceExporterAdapter {
         Self { provider, tracer }
     }
 
-    /// Explicitly shutdown the OpenTelemetry provider with a timeout
     pub fn shutdown(&self) -> OTelSdkResult {
-        // The OpenTelemetry SDK provider has a shutdown method that should be called
-        // to gracefully flush remaining spans and close connections
         self.provider.shutdown()
     }
 }
@@ -96,20 +93,14 @@ impl TraceableExporter for TraceExporterAdapter {
         let tracer = &self.tracer;
         let name = traceable.name().unwrap_or_else(|| "flow".to_string());
 
-        let mut span = if let Some(trace_id) = traceable.trace_id() {
-            tracer
-                .span_builder(name.clone())
-                .with_kind(traceable.span_kind())
-                .with_start_time(traceable.start_time())
-                .with_trace_id(trace_id)
-                .start_with_context(tracer, &opentelemetry::Context::new())
-        } else {
-            tracer
-                .span_builder(name.clone())
-                .with_kind(traceable.span_kind())
-                .with_start_time(traceable.start_time())
-                .start_with_context(tracer, &opentelemetry::Context::new())
-        };
+        let mut builder = tracer
+            .span_builder(name)
+            .with_kind(traceable.span_kind())
+            .with_start_time(traceable.start_time());
+        if let Some(trace_id) = traceable.trace_id() {
+            builder = builder.with_trace_id(trace_id);
+        }
+        let mut span = builder.start_with_context(tracer, &opentelemetry::Context::new());
         span = traceable.record(span);
         opentelemetry::trace::Span::end_with_timestamp(&mut span, traceable.end_time());
     }

@@ -27,7 +27,7 @@ use rustls::{
 use rustls_pemfile::{certs, private_key};
 use serde::{Deserialize, Serialize};
 use tonic::{metadata::MetadataMap, transport::Channel};
-use tracing::{Level, debug, info, warn};
+use tracing::{Level, info, warn};
 use tracing_subscriber::{
     EnvFilter, Registry,
     fmt::{Layer, format::FmtSpan},
@@ -101,7 +101,6 @@ impl ServerCertVerifier for NoCertVerifier {
         _ocsp_response: &[u8],
         _now: UnixTime,
     ) -> Result<ServerCertVerified, RustlsError> {
-        // Accept any certificate without verification
         Ok(ServerCertVerified::assertion())
     }
 
@@ -111,7 +110,6 @@ impl ServerCertVerifier for NoCertVerifier {
         _cert: &CertificateDer<'_>,
         _dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, RustlsError> {
-        // Accept any signature without verification
         Ok(HandshakeSignatureValid::assertion())
     }
 
@@ -121,12 +119,10 @@ impl ServerCertVerifier for NoCertVerifier {
         _cert: &CertificateDer<'_>,
         _dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, RustlsError> {
-        // Accept any signature without verification
         Ok(HandshakeSignatureValid::assertion())
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        // Support modern signature schemes (excluding deprecated SHA1-based schemes)
         vec![
             SignatureScheme::RSA_PKCS1_SHA256,
             SignatureScheme::ECDSA_NISTP256_SHA256,
@@ -155,17 +151,9 @@ impl ProviderBuilder {
         self.sdk_builder.build()
     }
 
-    /// Build OTLP exporter from options. It will prepare the headers, build the TLS configuration, and build the appropriate exporter based on the protocol.
     pub async fn with_otlp_exporter(self, options: OtlpExportOptions) -> Result<Self, OtlpError> {
-        debug!(
-            event.name = "exporter.otlp.started",
-            "starting otlp exporter"
-        );
-
-        // Prepare headers (merge user + auth headers)
         let (options, headers) = Self::prepare_headers(options)?;
 
-        // Parse endpoint and determine TLS requirements
         let endpoint = options.endpoint.clone();
         let uri: Uri = endpoint.parse().map_err(|e| {
             OtlpError::invalid_endpoint(&endpoint, format!("failed to parse as uri: {e}"))
@@ -194,11 +182,6 @@ impl ProviderBuilder {
             )?,
         };
 
-        debug!(
-            event.name = "exporter.otlp.build_success",
-            "otlp exporter built successfully"
-        );
-
         let batch_config = BatchConfigBuilder::default()
             .with_max_export_batch_size(options.max_batch_size)
             .with_scheduled_delay(options.max_batch_interval)
@@ -225,7 +208,6 @@ impl ProviderBuilder {
         })
     }
 
-    /// Build stdout exporter from batch configuration. It will wrap the exporter in a metrics exporter and configure the batch processor.
     pub fn with_stdout_exporter(
         self,
         max_batch_size: usize,
@@ -235,7 +217,6 @@ impl ProviderBuilder {
         max_export_timeout: std::time::Duration,
     ) -> ProviderBuilder {
         let exporter = opentelemetry_stdout::SpanExporter::default();
-        // Wrap exporter to observe batch sizes
         let wrapped_exporter = MetricsSpanExporter::new(exporter, ExporterName::Stdout);
 
         let batch_config = BatchConfigBuilder::default()
@@ -254,7 +235,6 @@ impl ProviderBuilder {
         }
     }
 
-    // Build TLS configuration from TLS options.
     fn build_tls_config(
         is_https: bool,
         tls_opts: Option<&TlsOptions>,
@@ -265,7 +245,6 @@ impl ProviderBuilder {
             .and_then(|t| t.insecure_skip_verify)
             .unwrap_or(false);
 
-        // No TLS needed for plain HTTP without explicit TLS options
         if !is_https && tls_opts.is_none() {
             return Ok(None);
         }
@@ -301,11 +280,6 @@ impl ProviderBuilder {
             && let (Some(client_cert_path), Some(client_key_path)) =
                 (&tls_opts.client_cert, &tls_opts.client_key)
         {
-            debug!(
-                "loading client certificate for mutual tls from: {}",
-                client_cert_path
-            );
-
             let client_certs = load_certs_from_pem(client_cert_path).map_err(|e| {
                 let error_msg = e.to_string();
                 if error_msg.contains("failed to open certificate file") {
@@ -338,17 +312,13 @@ impl ProviderBuilder {
         Ok(Some(config_builder.with_no_client_auth()))
     }
 
-    // Build gRPC exporter from URI, TLS configuration, and headers.
     fn build_grpc_exporter(
         uri: Uri,
         tls_config: Option<&ClientConfig>,
         headers: Option<&HashMap<String, String>>,
     ) -> Result<opentelemetry_otlp::SpanExporter, OtlpError> {
         let channel = match tls_config {
-            None => {
-                debug!("using plain http connection");
-                Channel::builder(uri).connect_lazy()
-            }
+            None => Channel::builder(uri).connect_lazy(),
             Some(tls_config) => {
                 let mut http = HttpConnector::new();
                 http.enforce_http(false);
@@ -378,7 +348,6 @@ impl ProviderBuilder {
         })
     }
 
-    // Build HTTP exporter from endpoint, TLS configuration, headers, and timeout.
     fn build_http_exporter(
         endpoint: String,
         tls_config: Option<&ClientConfig>,
@@ -413,7 +382,6 @@ impl ProviderBuilder {
         })
     }
 
-    // Build root certificate store from TLS options.
     fn build_root_cert_store(
         is_https: bool,
         tls_opts: Option<&TlsOptions>,
@@ -421,7 +389,6 @@ impl ProviderBuilder {
         let mut root_store = RootCertStore::empty();
 
         if is_https {
-            debug!("detected https:// endpoint, loading system root certificates");
             let native_certs = rustls_native_certs::load_native_certs();
 
             if let Some(err) = native_certs.errors.first() {
@@ -438,7 +405,6 @@ impl ProviderBuilder {
         if let Some(tls_opts) = tls_opts
             && let Some(ca_cert_path) = &tls_opts.ca_cert
         {
-            debug!("loading custom ca certificate from: {}", ca_cert_path);
             let ca_certs = load_certs_from_pem(ca_cert_path)?;
 
             if ca_certs.is_empty() {
@@ -467,7 +433,6 @@ impl ProviderBuilder {
         Ok(root_store)
     }
 
-    // Validate TLS options, returning an error if the options are invalid.
     fn validate_tls_options(tls_opts: Option<&TlsOptions>) -> Result<(), OtlpError> {
         let Some(tls_opts) = tls_opts else {
             return Ok(());
@@ -492,7 +457,6 @@ impl ProviderBuilder {
         Ok(())
     }
 
-    // Convert headers to gRPC metadata.
     fn headers_to_grpc_metadata(
         headers: &HashMap<String, String>,
     ) -> Result<MetadataMap, OtlpError> {
@@ -515,7 +479,6 @@ impl ProviderBuilder {
         Ok(MetadataMap::from_headers(header_map))
     }
 
-    // Prepare headers by merging user and auth headers, returning an error if there is a collision.
     fn prepare_headers(
         mut options: OtlpExportOptions,
     ) -> Result<(OtlpExportOptions, Option<HashMap<String, String>>), OtlpError> {
@@ -540,7 +503,6 @@ impl ProviderBuilder {
         Ok((options, headers))
     }
 
-    // Merge user and auth headers, returning an error if there is a collision.
     fn merge_headers(
         mut user: HashMap<String, String>,
         auth: HashMap<String, String>,
