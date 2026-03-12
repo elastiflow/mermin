@@ -1,3 +1,13 @@
+## [v0.3.2] - 2026-03-12
+
+### Bug Fixes
+
+- Remove client/server attributes and simplify direction inference (#510)
+
+[v0.3.1..v0.3.2](https://github.com/elastiflow/mermin/compare/v0.3.1...v0.3.2)
+
+
+
 ## [v0.3.1] - 2026-03-11
 
 ### Bug Fixes
