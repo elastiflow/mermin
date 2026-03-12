@@ -55,7 +55,7 @@ use crate::{
         selector::ResourceFilter,
         selector_relations::{SelectorRelationRule, SelectorRelationsManager},
     },
-    metrics::{self, cleanup::MetricCleanupTracker, k8s::K8sWatcherEventType},
+    metrics::{self, evictor::MetricsEvictor, labels::K8sWatcherEventType},
     runtime::{self, conf::Conf, memory::ShrinkPolicy},
     span::flow::FlowSpan,
 };
@@ -340,7 +340,7 @@ impl ResourceStore {
         required_kinds: &HashSet<String>,
         ip_index: Arc<ArcSwap<HashMap<String, Vec<K8sObjectMeta>>>>,
         conf: &Conf,
-        cleanup_tracker: Option<MetricCleanupTracker>,
+        cleanup_tracker: Option<MetricsEvictor>,
     ) -> Result<Self, K8sError> {
         let mut readiness_handles = Vec::new();
 
@@ -455,7 +455,10 @@ impl ResourceStore {
                     }
                     _ = debounce_timer.tick() => {
                         if pending_update {
-                            let timer = metrics::registry::k8s_ip_index_update_duration_seconds().start_timer();
+                            let timer = metrics::registry::K8S_IP_INDEX_UPDATE_DURATION_SECONDS
+                                .get()
+                                .unwrap()
+                                .start_timer();
                             update_ip_index(&store_clone, &ip_index_clone, &conf_clone).await;
                             timer.observe_duration();
                             pending_update = false;
@@ -678,7 +681,7 @@ impl Attributor {
         owner_relations_opts: Option<OwnerRelationsRules>,
         selector_relations_opts: Option<Vec<SelectorRelationRule>>,
         conf: &Conf,
-        cleanup_tracker: Option<MetricCleanupTracker>,
+        cleanup_tracker: Option<MetricsEvictor>,
     ) -> Result<Self, K8sError> {
         let client = Client::try_default()
             .await
@@ -939,7 +942,7 @@ impl Attributor {
     /// # Arguments
     /// * `ip` - The IP address being resolved
     /// * `pods` - Pod resources found for this IP
-    /// * `nodes` - Node resources found for this IP  
+    /// * `nodes` - Node resources found for this IP
     /// * `services` - Service resources found for this IP
     /// * `other_resources` - Other resource types found for this IP
     ///
@@ -1659,7 +1662,7 @@ fn spawn_ip_resource_watcher<K, F>(
     client: Client,
     event_tx: tokio::sync::mpsc::Sender<()>,
     extract_ips: F,
-    cleanup_tracker: Option<MetricCleanupTracker>,
+    cleanup_tracker: Option<MetricsEvictor>,
 ) where
     K: Resource + Clone + Debug + Send + 'static + for<'de> serde::Deserialize<'de>,
     K::DynamicType: Default,

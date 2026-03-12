@@ -41,9 +41,6 @@ impl Default for MetricsOptions {
     }
 }
 
-/// Optional histogram bucket overrides keyed by metric name.
-///
-/// All fields are optional; omit the block or individual keys to use default buckets.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct HistogramBuckets {

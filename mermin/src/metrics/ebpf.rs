@@ -8,12 +8,10 @@ use std::{
 
 use aya::maps::MapError;
 use mermin_common::MapUnit;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::metrics::registry::EBPF_MAP_SIZE;
 
-/// Global ring buffer metrics accessor.
-/// Initialized once at startup and used by the metrics server to read ring buffer size.
 static RINGBUF_METRICS: OnceLock<RingBufMetrics> = OnceLock::new();
 
 /// Ring buffer metrics reader.
@@ -48,17 +46,8 @@ unsafe impl Send for RingBufMetrics {}
 unsafe impl Sync for RingBufMetrics {}
 
 impl RingBufMetrics {
-    /// Create a new ring buffer metrics reader from a raw file descriptor.
-    ///
-    /// The fd must be a valid ring buffer map file descriptor. The mmap will fail
-    /// if the fd is invalid or not a ring buffer.
-    ///
-    /// Returns [`None`] if mmap fails (e.g., invalid fd or not a ring buffer map).
     pub fn new(fd: RawFd) -> Option<Self> {
         let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
-
-        // mmap both consumer and producer pages (2 pages total)
-        // Consumer page is at offset 0, producer page is at offset page_size
         let mmap_len = 2 * page_size;
 
         let mmap_ptr = unsafe {
@@ -74,7 +63,7 @@ impl RingBufMetrics {
 
         if mmap_ptr == libc::MAP_FAILED {
             warn!(
-                event.name = "ringbuf_metrics.mmap_failed",
+                event.name = "metrics.ringbuf.mmap_failed",
                 error.code = std::io::Error::last_os_error().raw_os_error(),
                 "failed to mmap ring buffer for metrics"
             );
@@ -85,10 +74,8 @@ impl RingBufMetrics {
         let mmap_nonnull =
             NonNull::new(mmap_ptr).expect("mmap returned null (should be impossible)");
 
-        // Consumer position is at the start of the consumer page (offset 0)
         let consumer_pos_ptr = mmap_ptr as *const u64;
 
-        // Producer position is at the start of the producer page (offset page_size)
         // SAFETY: page_size is from sysconf, mmap succeeded with 2*page_size length
         let producer_pos_ptr = unsafe { (mmap_ptr as *const u8).add(page_size) as *const u64 };
 
@@ -100,10 +87,6 @@ impl RingBufMetrics {
         })
     }
 
-    /// Read the current ring buffer size in bytes.
-    ///
-    /// This is the difference between producer and consumer positions,
-    /// representing the number of bytes currently pending in the ring buffer.
     #[must_use]
     pub fn current_size(&self) -> u64 {
         // SAFETY: These pointers were set up in new() from a valid mmap
@@ -126,17 +109,14 @@ impl Drop for RingBufMetrics {
 }
 
 /// Initialize the global ring buffer metrics from a ring buffer's file descriptor.
-///
-/// This should be called once at startup before the ring buffer is moved to the producer.
-/// Returns true if initialization succeeded, false if it failed or was already initialized.
 pub fn init_ringbuf_metrics<T: AsRawFd>(ringbuf: &T) -> bool {
     let Some(metrics) = RingBufMetrics::new(ringbuf.as_raw_fd()) else {
         return false;
     };
 
     if RINGBUF_METRICS.set(metrics).is_err() {
-        warn!(
-            event.name = "ringbuf_metrics.already_initialized",
+        debug!(
+            event.name = "metrics.ringbuf.already_initialized",
             "ring buffer metrics already initialized"
         );
         return false;
@@ -145,10 +125,6 @@ pub fn init_ringbuf_metrics<T: AsRawFd>(ringbuf: &T) -> bool {
     true
 }
 
-/// Update the EBPF_MAP_SIZE metric for FLOW_EVENTS ring buffer.
-///
-/// Reads the current ring buffer size and updates the prometheus gauge.
-/// This is called when the metrics endpoint is scraped.
 pub fn update_ringbuf_size_metric() {
     if let Some(metrics) = RINGBUF_METRICS.get() {
         let size = metrics.current_size();
@@ -158,7 +134,6 @@ pub fn update_ringbuf_size_metric() {
     }
 }
 
-/// eBPF map names for metrics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EbpfMapName {
     FlowStats,
@@ -176,7 +151,6 @@ impl EbpfMapName {
     }
 }
 
-/// eBPF map operation types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EbpfMapOperation {
     Read,
@@ -194,7 +168,6 @@ impl EbpfMapOperation {
     }
 }
 
-/// eBPF map operation status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EbpfMapStatus {
     Ok,
@@ -225,7 +198,6 @@ pub fn map_entry_not_found(e: &MapError) -> bool {
         )
 }
 
-/// TC program operation types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TcOperation {
     Attached,
@@ -275,7 +247,6 @@ mod tests {
         let consumer_pos_ptr = mmap_ptr as *mut u64;
         let producer_pos_ptr = unsafe { (mmap_ptr as *mut u8).add(page_size) as *mut u64 };
 
-        // Initialize positions to 0
         unsafe {
             *consumer_pos_ptr = 0;
             *producer_pos_ptr = 0;

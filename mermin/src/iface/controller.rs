@@ -149,7 +149,7 @@ use tracing::{debug, error, info, warn};
 use crate::{
     error::MerminError,
     iface::types::{ControllerEvent, NetlinkEvent},
-    metrics::{self, cleanup::MetricCleanupTracker, ebpf::TcOperation},
+    metrics::{self, ebpf::TcOperation, evictor::MetricsEvictor},
     runtime::conf::TcxOrderStrategy,
 };
 
@@ -223,19 +223,14 @@ pub struct IfaceController {
     bpf_fs_writable: bool,
     /// Optional channel for sending controller events to main thread for observability
     event_tx: Option<Sender<ControllerEvent>>,
-    /// Optional cleanup tracker for removing stale metrics
-    cleanup_tracker: Option<MetricCleanupTracker>,
+    /// Optional metrics evictor for removing stale metrics
+    metrics_evictor: Option<MetricsEvictor>,
 }
 
-/// Direction string constants
 const DIRECTION_INGRESS: &str = "ingress";
 const DIRECTION_EGRESS: &str = "egress";
-
-/// Program name constants
 const PROGRAM_NAME_INGRESS: &str = "mermin_flow_ingress";
 const PROGRAM_NAME_EGRESS: &str = "mermin_flow_egress";
-
-/// TC attachment directions used for iterating over all attach types
 const DIRECTIONS: &[&str] = &[DIRECTION_INGRESS, DIRECTION_EGRESS];
 
 impl IfaceController {
@@ -251,7 +246,7 @@ impl IfaceController {
         tc_priority: u16,
         tcx_order: TcxOrderStrategy,
         event_tx: Option<Sender<ControllerEvent>>,
-        cleanup_tracker: Option<MetricCleanupTracker>,
+        metrics_evictor: Option<MetricsEvictor>,
     ) -> Result<Self, MerminError> {
         info!(
             event.name = "interface_controller.created",
@@ -272,7 +267,7 @@ impl IfaceController {
             tcx_order,
             bpf_fs_writable,
             event_tx,
-            cleanup_tracker,
+            metrics_evictor,
         })
     }
 
@@ -597,7 +592,7 @@ impl IfaceController {
                     self.active_ifaces.insert(name.clone());
 
                     // Mark interface as active to prevent metric cleanup
-                    if let Some(ref cleanup_tracker) = self.cleanup_tracker {
+                    if let Some(ref cleanup_tracker) = self.metrics_evictor {
                         cleanup_tracker.mark_interface_active(&name);
                     }
 
@@ -631,7 +626,7 @@ impl IfaceController {
                     }
 
                     // Schedule cleanup of metrics for this interface
-                    if let Some(ref cleanup_tracker) = self.cleanup_tracker {
+                    if let Some(ref cleanup_tracker) = self.metrics_evictor {
                         cleanup_tracker.schedule_interface_cleanup(name.clone());
                     }
 

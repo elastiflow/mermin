@@ -103,7 +103,10 @@ impl ComponentManager {
         }
 
         let duration = shutdown_start.elapsed();
-        metrics::registry::shutdown_duration_seconds().observe(duration.as_secs_f64());
+        metrics::registry::SHUTDOWN_DURATION_SECONDS
+            .get()
+            .expect("metrics registry not initialized")
+            .observe(duration.as_secs_f64());
 
         if failed_names.is_empty() {
             ShutdownResult::Graceful {

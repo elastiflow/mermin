@@ -38,7 +38,7 @@ use tracing_subscriber::{
 };
 
 use crate::{
-    metrics::export::ExporterName,
+    metrics::labels::ExporterName,
     otlp::{
         error::OtlpError,
         metrics_exporter::MetricsSpanExporter,
