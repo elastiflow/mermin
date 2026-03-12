@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use tokio::{sync::broadcast, time::Instant};
-use tracing::{trace, warn};
+use tracing::warn;
 
 use super::{
     error::{JoinError, ShutdownResult},
@@ -19,7 +19,6 @@ pub struct ComponentManager {
 }
 
 impl ComponentManager {
-    /// Create a new `ComponentManager`.
     pub fn new() -> Self {
         Self::default()
     }
@@ -46,11 +45,6 @@ impl ComponentManager {
     /// Register a component handle. Components are shut down in reverse
     /// registration order.
     pub fn register(&mut self, handle: Handle) {
-        trace!(
-            event.name = "component.registered",
-            component.name = %handle.name(),
-            "registered component"
-        );
         self.handles.push(handle);
     }
 
@@ -62,21 +56,10 @@ impl ComponentManager {
     ///    each component gets whatever time remains in the budget.
     pub async fn shutdown(self, config: ShutdownConfig) -> ShutdownResult {
         let shutdown_start = Instant::now();
-        let component_count = self.handles.len();
 
-        trace!(
-            event.name = "component_manager.shutdown.started",
-            timeout_seconds = config.timeout.as_secs(),
-            component_count = component_count,
-            "starting component shutdown sequence"
-        );
-
-        // Broadcast shutdown signal to all subscribers
         let _ = self.shutdown_tx.send(());
         let mut components_completed: usize = 0;
         let mut failed_names: Vec<String> = Vec::new();
-
-        // Shut down in reverse registration order
         let handles: Vec<Handle> = self.handles.into_iter().rev().collect();
 
         for handle in handles {
@@ -228,7 +211,6 @@ mod tests {
             let join = tokio::spawn(async move {
                 let _ = shutdown_rx.recv().await;
                 count.fetch_add(1, Ordering::SeqCst);
-                let _ = i;
             });
             mgr.register(Handle::async_task(format!("task-{i}"), join));
         }
@@ -294,7 +276,6 @@ mod tests {
         let completed_clone = completed.clone();
 
         let handle = std::thread::spawn(move || {
-            // Simulate some work
             std::thread::sleep(Duration::from_millis(10));
             completed_clone.store(true, Ordering::SeqCst);
         });

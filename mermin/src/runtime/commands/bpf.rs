@@ -42,15 +42,6 @@ impl InterfaceTestResult {
     }
 }
 
-/// Filter interfaces based on patterns and skip patterns
-fn matches_pattern(name: &str, patterns: &[String]) -> bool {
-    if patterns.is_empty() {
-        return true; // No patterns means match all
-    }
-    IfaceController::matches_pattern(name, patterns)
-}
-
-/// Check if interface matches any skip pattern
 fn matches_skip_pattern(name: &str, skip_patterns: &[String]) -> bool {
     skip_patterns
         .iter()
@@ -59,7 +50,6 @@ fn matches_skip_pattern(name: &str, skip_patterns: &[String]) -> bool {
 
 /// Execute the BPF diagnostic command
 pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String]) -> Result<()> {
-    // Initialize minimal tracing FIRST so all logs are captured
     let log_level = std::env::var("MERMIN_LOG_LEVEL")
         .unwrap_or_else(|_| "info".to_string())
         .parse::<tracing::Level>()
@@ -89,31 +79,15 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
         .init();
 
     let interfaces_to_test: Vec<String> = if let Some(iface) = interface {
-        // Single interface mode - explicit interface specified
         vec![iface.to_string()]
     } else {
-        // Multi-interface mode (default) - discover and filter all interfaces
         let all_interfaces: Vec<_> = datalink::interfaces()
             .into_iter()
             .filter(|iface| {
-                // Skip loopback interfaces
                 if iface.is_loopback() {
-                    debug!(
-                        event.name = "diagnose.bpf.interface_skipped",
-                        network.interface.name = %iface.name,
-                        reason = "loopback",
-                        "skipping loopback interface"
-                    );
                     return false;
                 }
-                // Skip DOWN interfaces
                 if !iface.is_up() {
-                    debug!(
-                        event.name = "diagnose.bpf.interface_skipped",
-                        network.interface.name = %iface.name,
-                        reason = "down",
-                        "skipping DOWN interface"
-                    );
                     return false;
                 }
                 true
@@ -133,17 +107,9 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
         } else {
             all_interfaces
                 .into_iter()
-                .filter(|iface| matches_pattern(iface, pattern))
+                .filter(|iface| IfaceController::matches_pattern(iface, pattern))
                 .collect()
         };
-
-        info!(
-            event.name = "diagnose.bpf.pattern_filter_applied",
-            pattern_count = pattern.len(),
-            patterns = ?pattern,
-            filtered_count = pattern_filtered.len(),
-            "applied pattern filter"
-        );
 
         let final_interfaces: Vec<String> = if skip.is_empty() {
             pattern_filtered
@@ -153,15 +119,6 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
                 .filter(|iface| !matches_skip_pattern(iface, skip))
                 .collect()
         };
-
-        info!(
-            event.name = "diagnose.bpf.skip_filter_applied",
-            skip_count = skip.len(),
-            skip_patterns = ?skip,
-            final_count = final_interfaces.len(),
-            interfaces = ?final_interfaces,
-            "applied skip filter"
-        );
 
         if final_interfaces.is_empty() {
             return Err(MerminError::internal(
@@ -179,17 +136,8 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
         "starting BPF filesystem and attach/detach tests"
     );
 
-    info!(
-        event.name = "diagnose.bpf.checking_capabilities",
-        "checking required capabilities"
-    );
     capabilities::check_required_capabilities()?;
-    info!(
-        event.name = "diagnose.bpf.capabilities_ok",
-        "all required capabilities present"
-    );
 
-    // Bump memlock rlimit
     let rlim = libc::rlimit {
         rlim_cur: libc::RLIM_INFINITY,
         rlim_max: libc::RLIM_INFINITY,
@@ -202,17 +150,8 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
             error.code = ret,
             "failed to remove limit on locked memory"
         );
-    } else {
-        info!(
-            event.name = "diagnose.bpf.rlimit_set",
-            "memlock rlimit set successfully"
-        );
     }
 
-    info!(
-        event.name = "diagnose.bpf.loading_ebpf",
-        "loading eBPF program"
-    );
     let mut ebpf = aya::EbpfLoader::new()
         .set_max_entries("FLOW_STATS_MAP", 1000)
         .load(aya::include_bytes_aligned!(concat!(
@@ -229,42 +168,24 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
         "kernel version determined"
     );
 
-    info!(
-        event.name = "diagnose.bpf.testing_bpf_fs",
-        "testing /sys/fs/bpf writeability"
-    );
     let bpf_fs_writable = use_tcx && {
         let test_pin_path = "/sys/fs/bpf/mermin_test_map";
         let test_result = ebpf
             .maps()
             .next()
             .and_then(|(_, map)| match map.pin(test_pin_path) {
-                Ok(_) => {
-                    info!(
-                        event.name = "diagnose.bpf.bpf_fs_pin_success",
-                        test_path = %test_pin_path,
-                        "successfully pinned test map to BPF filesystem"
-                    );
-                    match std::fs::remove_file(test_pin_path) {
-                        Ok(_) => {
-                            info!(
-                                event.name = "diagnose.bpf.bpf_fs_cleanup_success",
-                                test_path = %test_pin_path,
-                                "successfully cleaned up test pin"
-                            );
-                            Some(())
-                        }
-                        Err(e) => {
-                            warn!(
-                                event.name = "diagnose.bpf.bpf_fs_cleanup_failed",
-                                error = %e,
-                                test_path = %test_pin_path,
-                                "failed to cleanup test pin, but /sys/fs/bpf is writable"
-                            );
-                            Some(())
-                        }
+                Ok(_) => match std::fs::remove_file(test_pin_path) {
+                    Ok(_) => Some(()),
+                    Err(e) => {
+                        warn!(
+                            event.name = "diagnose.bpf.bpf_fs_cleanup_failed",
+                            error = %e,
+                            test_path = %test_pin_path,
+                            "failed to cleanup test pin, but /sys/fs/bpf is writable"
+                        );
+                        Some(())
                     }
-                }
+                },
                 Err(e) => {
                     warn!(
                         event.name = "diagnose.bpf.bpf_fs_pin_failed",
@@ -289,26 +210,6 @@ pub async fn execute(interface: Option<&str>, pattern: &[String], skip: &[String
         event.name = "diagnose.bpf.program_loaded",
         "eBPF program loaded successfully"
     );
-
-    if use_tcx {
-        if bpf_fs_writable {
-            info!(
-                event.name = "diagnose.bpf.bpf_fs_writable",
-                "✓ /sys/fs/bpf is writable - TCX link pinning will work"
-            );
-        } else {
-            warn!(
-                event.name = "diagnose.bpf.bpf_fs_not_writable",
-                "✗ /sys/fs/bpf is not writable - TCX link pinning will fail, mount as hostPath for orphan cleanup"
-            );
-        }
-    } else {
-        info!(
-            event.name = "diagnose.bpf.bpf_fs_check_skipped",
-            reason = "netlink_mode",
-            "BPF filesystem check skipped (not using TCX mode)"
-        );
-    }
 
     let mut results: Vec<InterfaceTestResult> = Vec::new();
 
@@ -341,20 +242,7 @@ fn test_single_interface(
     let mut pin_success: Option<bool> = None;
     let mut link_id: Option<SchedClassifierLinkId> = None;
 
-    info!(
-        event.name = "diagnose.bpf.attach_starting",
-        network.interface.name = %interface,
-        "starting attach test"
-    );
-
-    // TCX mode: kernel >= 6.6, attach with ordering
     if use_tcx {
-        info!(
-            event.name = "diagnose.bpf.attaching_tcx",
-            network.interface.name = %interface,
-            "attaching eBPF program with TCX (order=last)"
-        );
-
         let options = TcAttachOptions::TcxOrder(LinkOrder::last());
         match ingress_program.attach_with_options(interface, TcAttachType::Ingress, options) {
             Ok(attached_id) => {
@@ -367,12 +255,6 @@ fn test_single_interface(
 
                 if bpf_fs_writable {
                     let pin_path = format!("/sys/fs/bpf/mermin_tcx_{interface}_ingress");
-                    info!(
-                        event.name = "diagnose.bpf.pinning_link",
-                        pin_path = %pin_path,
-                        "attempting to pin TCX link"
-                    );
-
                     match ingress_program.take_link(attached_id) {
                         Ok(link) => {
                             match TryInto::<aya::programs::links::FdLink>::try_into(link) {
@@ -420,7 +302,6 @@ fn test_single_interface(
                         }
                     }
                 } else {
-                    // Store link_id for standard detach test
                     link_id = Some(attached_id);
                 }
             }
@@ -434,13 +315,6 @@ fn test_single_interface(
             }
         }
     } else {
-        // Netlink mode: kernel < 6.6, use priority
-        info!(
-            event.name = "diagnose.bpf.attaching_netlink",
-            network.interface.name = %interface,
-            "attaching eBPF program with netlink (priority=50)"
-        );
-
         if let Err(e) = aya::programs::tc::qdisc_add_clsact(interface) {
             debug!(
                 event.name = "diagnose.bpf.qdisc_add_skipped",
@@ -479,50 +353,34 @@ fn test_single_interface(
     let mut detach_success = false;
 
     if attach_success {
-        info!(
-            event.name = "diagnose.bpf.detach_starting",
-            network.interface.name = %interface,
-            "starting detach test"
-        );
-
         if use_tcx {
-            // Try to unpin link first
             let pin_path = format!("/sys/fs/bpf/mermin_tcx_{interface}_ingress");
             match PinnedLink::from_pin(&pin_path) {
-                Ok(pinned_link) => {
-                    info!(
-                        event.name = "diagnose.bpf.unpinning_link",
-                        pin_path = %pin_path,
-                        "attempting to unpin TCX link"
-                    );
-                    match pinned_link.unpin() {
-                        Ok(_fd_link) => {
-                            detach_success = true;
-                            info!(
-                                event.name = "diagnose.bpf.detach_success",
-                                network.interface.name = %interface,
-                                pin_path = %pin_path,
-                                "✓ successfully detached program via unpinned link"
-                            );
-                        }
-                        Err(e) => {
-                            warn!(
-                                event.name = "diagnose.bpf.unpin_failed",
-                                pin_path = %pin_path,
-                                error = %e,
-                                "✗ failed to unpin link, trying standard detach"
-                            );
-                            // Fall through to standard detach
-                        }
+                Ok(pinned_link) => match pinned_link.unpin() {
+                    Ok(_fd_link) => {
+                        detach_success = true;
+                        info!(
+                            event.name = "diagnose.bpf.detach_success",
+                            network.interface.name = %interface,
+                            pin_path = %pin_path,
+                            "✓ successfully detached program via unpinned link"
+                        );
                     }
-                }
+                    Err(e) => {
+                        warn!(
+                            event.name = "diagnose.bpf.unpin_failed",
+                            pin_path = %pin_path,
+                            error = %e,
+                            "✗ failed to unpin link, trying standard detach"
+                        );
+                    }
+                },
                 Err(_e) => {
                     debug!(
                         event.name = "diagnose.bpf.pin_not_found",
                         pin_path = %pin_path,
                         "pinned link not found, using standard detach"
                     );
-                    // Fall through to standard detach
                 }
             }
 
@@ -555,35 +413,32 @@ fn test_single_interface(
                     );
                 }
             }
-        } else {
-            // Netlink mode: standard detach
-            if let Some(id) = link_id {
-                match ingress_program.detach(id) {
-                    Ok(_) => {
-                        detach_success = true;
-                        info!(
-                            event.name = "diagnose.bpf.detach_success",
-                            network.interface.name = %interface,
-                            "✓ successfully detached program (netlink mode)"
-                        );
-                    }
-                    Err(e) => {
-                        error!(
-                            event.name = "diagnose.bpf.detach_failed",
-                            network.interface.name = %interface,
-                            error = %e,
-                            "✗ failed to detach program"
-                        );
-                    }
+        } else if let Some(id) = link_id {
+            match ingress_program.detach(id) {
+                Ok(_) => {
+                    detach_success = true;
+                    info!(
+                        event.name = "diagnose.bpf.detach_success",
+                        network.interface.name = %interface,
+                        "✓ successfully detached program (netlink mode)"
+                    );
                 }
-            } else {
-                warn!(
-                    event.name = "diagnose.bpf.detach_skipped",
-                    network.interface.name = %interface,
-                    reason = "no_link_id",
-                    "skipping detach test - no link ID available"
-                );
+                Err(e) => {
+                    error!(
+                        event.name = "diagnose.bpf.detach_failed",
+                        network.interface.name = %interface,
+                        error = %e,
+                        "✗ failed to detach program"
+                    );
+                }
             }
+        } else {
+            warn!(
+                event.name = "diagnose.bpf.detach_skipped",
+                network.interface.name = %interface,
+                reason = "no_link_id",
+                "skipping detach test - no link ID available"
+            );
         }
     } else {
         warn!(
@@ -668,7 +523,6 @@ fn print_test_results(
             println!("       Mount /sys/fs/bpf as hostPath for orphan cleanup on pod restart.");
         }
     } else {
-        // Single interface mode - use original format
         let result = &results[0];
         println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         println!("BPF Test Results Summary");
